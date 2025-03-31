@@ -71,7 +71,6 @@ impl MambaBlockConfig {
                 .with_bias(false)
                 .init(device),
             conv1d: Conv1dConfig::new(d_inner, d_inner, self.d_conv)
-                // .with_padding(PaddingConfig1d::Valid)
                 .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1))
                 .with_groups(d_inner)
                 .with_bias(true)
@@ -129,17 +128,11 @@ impl<B: Backend> MambaBlock<B> {
 
             // padding for causal conv (avoid future tokens interfering with past ones)
             assert!(d_conv > 0);
-            let xs = xs.pad((d_conv - 1, 0, 0, 0), 0.);
-            assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
-            // assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
 
             let xs = self.conv1d.forward(xs);
-            // let mut conv1d = self.conv1d.clone();
-            // conv1d.bias = None;
-            // let xs = conv1d.forward(xs);
-            assert_eq!([batch, d_inner, sequence + 2 * (d_conv - 1)], xs.dims());
+            assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
 
-            let xs = xs.narrow(2, d_conv - 1, sequence);
+            let xs = xs.narrow(2, 0, sequence);
             assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
