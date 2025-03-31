@@ -66,25 +66,88 @@ impl MambaBlockConfig {
         assert!(self.d_model + self.d_state > 0);
         let dt_rank = self.dt_rank();
 
+        // Helper function for PyTorch-style uniform initialization
+        let uniform_init = |d_input: usize| {
+            let bound = 1.0 / (d_input as f64).sqrt();
+            Initializer::Uniform {
+                min: -bound,
+                max: bound,
+            }
+        };
+
+        let dt_proj = {
+            use burn::tensor::Distribution;
+            let weight: Tensor<B, 2> = {
+                let dt_scale = 1.0;
+                let dt_init_std = (dt_rank as f64).powf(-0.5) * dt_scale;
+                Tensor::random(
+                    [dt_rank, d_inner],
+                    Distribution::Uniform(-dt_init_std, dt_init_std),
+                    device,
+                )
+            };
+            assert_eq!([dt_rank, d_inner], weight.dims());
+            let bias: Tensor<B, 1> = {
+                let dt_min = 0.001;
+                let dt_max = 0.1;
+                let dt_init_floor = 1e-4;
+                // note: this placeholder impl may lose precision for very small values,
+                // and a Taylor series could approximate it: e^x - 1 = x + x^2/2! + x^3/3! + ⋯
+                // but with the clamp at dt_init_floor, this isn't necessary
+                let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
+                let dt = Tensor::random([d_inner], Distribution::Uniform(0.0, 1.0), device)
+                    * (f32::ln(dt_max) - f32::ln(dt_min))
+                    + f32::ln(dt_min);
+                let dt = dt.exp().clamp_min(dt_init_floor);
+                // Inverse of softplus
+                let inv_dt = dt.clone() + (-expm1(-dt)).log();
+                inv_dt
+            };
+            assert_eq!([d_inner], bias.dims());
+            Linear {
+                weight: Param::from_tensor(weight),
+                bias: Some(Param::from_tensor(bias)),
+            }
+        };
+
+        let a_log = {
+            let a_row: Tensor<B, 1> =
+                Tensor::<B, 1, Int>::arange(1..self.d_state as i64 + 1, device).float();
+            assert_eq!([self.d_state], a_row.dims());
+            let a_row = a_row.unsqueeze();
+            assert_eq!([1, self.d_state], a_row.dims());
+            let a = a_row.repeat(&[d_inner, 1]);
+            assert_eq!([d_inner, self.d_state], a.dims());
+            let a_log = a.log();
+            Param::from_tensor(a_log)
+        };
+
         MambaBlock {
             in_proj: LinearConfig::new(self.d_model, 2 * d_inner)
                 .with_bias(false)
+                // follows PyTorch's default initializer
+                .with_initializer(uniform_init(self.d_model))
                 .init(device),
             conv1d: Conv1dConfig::new(d_inner, d_inner, self.d_conv)
                 .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1))
                 .with_groups(d_inner)
                 .with_bias(true)
+                // follows PyTorch's default initializer
+                // fan_in = in_channels / groups * kernel_size
+                .with_initializer(uniform_init(self.d_conv))
                 .init(device),
             x_proj: LinearConfig::new(d_inner, dt_rank + 2 * self.d_state)
                 .with_bias(false)
+                // follows PyTorch's default initializer
+                .with_initializer(uniform_init(d_inner))
                 .init(device),
-            dt_proj: LinearConfig::new(dt_rank, d_inner)
-                .with_bias(true)
-                .init(device),
-            a_log: Initializer::Zeros.init([d_inner, self.d_state], device),
-            d: Initializer::Zeros.init([d_inner], device),
+            dt_proj,
+            a_log,
+            d: Initializer::Ones.init([d_inner], device),
             out_proj: LinearConfig::new(d_inner, self.d_model)
                 .with_bias(false)
+                // follows PyTorch's default initializer
+                .with_initializer(uniform_init(d_inner))
                 .init(device),
         }
     }
@@ -126,9 +189,7 @@ impl<B: Backend> MambaBlock<B> {
             let xs = xs.movedim(1, 2);
             assert_eq!([batch, d_inner, sequence], xs.dims());
 
-            // padding for causal conv (avoid future tokens interfering with past ones)
             assert!(d_conv > 0);
-
             let xs = self.conv1d.forward(xs);
             assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
 
@@ -154,7 +215,6 @@ impl<B: Backend> MambaBlock<B> {
         let ys = ss * Silu::new().forward(res);
         assert_eq!([batch, sequence, d_inner], ys.dims());
 
-        // let y = ys.matmul(self.out_proj.weight.val().unsqueeze());
         let y = self.out_proj.forward(ys);
         assert_eq!([batch, sequence, d_model], y.dims());
 
@@ -321,10 +381,7 @@ impl<B: Backend> MambaBlock<B> {
         assert_eq!([1, 1, d_inner], d.dims());
         let d = d.expand([batch, sequence, d_inner]);
 
-        let du = d * u;
-        assert_eq!([batch, sequence, d_inner], du.dims());
-
-        let ys = ys + du;
+        let ys = ys + (d * u);
         assert_eq!([batch, sequence, d_inner], ys.dims());
 
         ys
@@ -436,7 +493,6 @@ pub mod step {
             let ys = ss * Silu::new().forward(res);
             assert_eq!([batch, d_inner], ys.dims());
 
-            // let y = ys.matmul(self.out_proj.weight.val());
             let y = self.out_proj.forward(ys);
             assert_eq!([batch, d_model], y.dims());
 
@@ -563,10 +619,10 @@ pub mod step {
 
             let d = d.unsqueeze();
             assert_eq!([1, d_inner], d.dims());
-            let du = d * u;
-            assert_eq!([batch, d_inner], du.dims());
+            let d = d.expand([batch, d_inner]);
+            assert_eq!([batch, d_inner], d.dims());
 
-            let y = y + du;
+            let y = y + (d * u);
             assert_eq!([batch, d_inner], y.dims());
 
             (y, cache)
