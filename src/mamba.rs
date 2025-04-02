@@ -70,7 +70,7 @@ impl<B: Backend> Mamba<B> {
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
         let mut x = self.embedding.forward(x);
-        assert_eq!([batch, sequence, d_model], x.dims());
+        debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         for layer in self.layers.iter() {
             x = layer.forward(x);
@@ -81,12 +81,12 @@ impl<B: Backend> Mamba<B> {
             x = lm_head.forward(x);
         } else {
             let weight = self.embedding.weight.clone().map(|w| w.movedim(0, 1));
-            assert_eq!([d_model, padded_vocab], weight.dims());
+            debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
             let linear = Linear { weight, bias: None };
             x = linear.forward(x);
         };
-        assert_eq!([batch, sequence, padded_vocab], x.dims());
+        debug_assert_eq!([batch, sequence, padded_vocab], x.dims());
 
         x
     }
@@ -131,7 +131,7 @@ impl<B: Backend> MambaLayer<B> {
         let x = self.norm.forward(x);
 
         let x = self.mamba_block.forward(x);
-        assert_eq!([batch, sequence, d_model], x.dims());
+        debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         x + res
     }
@@ -156,12 +156,12 @@ mod step {
             let [padded_vocab, d_model] = self.embedding.weight.dims();
 
             let x = x.unsqueeze_dim(1);
-            assert_eq!([batch, 1], x.dims());
+            debug_assert_eq!([batch, 1], x.dims());
 
             let x = self.embedding.forward(x);
-            assert_eq!([batch, 1, d_model], x.dims());
+            debug_assert_eq!([batch, 1, d_model], x.dims());
             let mut x = x.squeeze(1);
-            assert_eq!([batch, d_model], x.dims());
+            debug_assert_eq!([batch, d_model], x.dims());
 
             for (i, layer) in self.layers.iter().enumerate() {
                 let (x_, cache) = layer.step(x, caches[i].clone());
@@ -174,12 +174,12 @@ mod step {
                 x = lm_head.forward(x);
             } else {
                 let weight = self.embedding.weight.clone().map(|w| w.movedim(0, 1));
-                assert_eq!([d_model, padded_vocab], weight.dims());
+                debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
                 let linear = Linear { weight, bias: None };
                 x = linear.forward(x);
             };
-            assert_eq!([batch, padded_vocab], x.dims());
+            debug_assert_eq!([batch, padded_vocab], x.dims());
 
             (x, caches)
         }
@@ -201,7 +201,7 @@ mod step {
             let res = x.clone();
             let x = self.norm.forward(x);
             let (x, cache) = self.mamba_block.step(x, cache);
-            assert_eq!([batch, d_model], x.dims());
+            debug_assert_eq!([batch, d_model], x.dims());
 
             (x + res, cache)
         }

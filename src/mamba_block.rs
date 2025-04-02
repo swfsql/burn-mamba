@@ -62,8 +62,8 @@ impl MambaBlockConfig {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> MambaBlock<B> {
         let d_inner = self.d_inner();
-        assert_ne!(self.d_state, 0);
-        assert!(self.d_model + self.d_state > 0);
+        debug_assert_ne!(self.d_state, 0);
+        debug_assert!(self.d_model + self.d_state > 0);
         let dt_rank = self.dt_rank();
 
         // Helper function for PyTorch-style uniform initialization
@@ -86,7 +86,7 @@ impl MambaBlockConfig {
                     device,
                 )
             };
-            assert_eq!([dt_rank, d_inner], weight.dims());
+            debug_assert_eq!([dt_rank, d_inner], weight.dims());
             let bias: Tensor<B, 1> = {
                 let dt_min = 0.001;
                 let dt_max = 0.1;
@@ -103,7 +103,7 @@ impl MambaBlockConfig {
                 let inv_dt = dt.clone() + (-expm1(-dt)).log();
                 inv_dt
             };
-            assert_eq!([d_inner], bias.dims());
+            debug_assert_eq!([d_inner], bias.dims());
             Linear {
                 weight: Param::from_tensor(weight),
                 bias: Some(Param::from_tensor(bias)),
@@ -113,11 +113,11 @@ impl MambaBlockConfig {
         let a_log = {
             let a_row: Tensor<B, 1> =
                 Tensor::<B, 1, Int>::arange(1..self.d_state as i64 + 1, device).float();
-            assert_eq!([self.d_state], a_row.dims());
+            debug_assert_eq!([self.d_state], a_row.dims());
             let a_row = a_row.unsqueeze();
-            assert_eq!([1, self.d_state], a_row.dims());
+            debug_assert_eq!([1, self.d_state], a_row.dims());
             let a = a_row.repeat(&[d_inner, 1]);
-            assert_eq!([d_inner, self.d_state], a.dims());
+            debug_assert_eq!([d_inner, self.d_state], a.dims());
             let a_log = a.log();
             Param::from_tensor(a_log)
         };
@@ -175,48 +175,48 @@ impl<B: Backend> MambaBlock<B> {
         let (xs, res) = {
             // projects the input d_model into 2 * d_inner
             let xs_and_res = self.in_proj.forward(x);
-            assert_eq!([batch, sequence, 2 * d_inner], xs_and_res.dims());
+            debug_assert_eq!([batch, sequence, 2 * d_inner], xs_and_res.dims());
 
             let split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 2);
-            assert_eq!(split.len(), 2);
+            debug_assert_eq!(split.len(), 2);
             (split[0].clone(), split[1].clone())
         };
-        assert_eq!([batch, sequence, d_inner], xs.dims());
-        assert_eq!([batch, sequence, d_inner], res.dims());
+        debug_assert_eq!([batch, sequence, d_inner], xs.dims());
+        debug_assert_eq!([batch, sequence, d_inner], res.dims());
 
         // layer 2 (conv1d)
         let xs = {
             let xs = xs.movedim(1, 2);
-            assert_eq!([batch, d_inner, sequence], xs.dims());
+            debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
-            assert!(d_conv > 0);
+            debug_assert!(d_conv > 0);
             let xs = self.conv1d.forward(xs);
-            assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
+            debug_assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
 
             let xs = xs.narrow(2, 0, sequence);
-            assert_eq!([batch, d_inner, sequence], xs.dims());
+            debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
             let xs = xs.movedim(1, 2);
-            assert_eq!([batch, sequence, d_inner], xs.dims());
+            debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
             // activation
             let xs = Silu::new().forward(xs);
-            assert_eq!([batch, sequence, d_inner], xs.dims());
+            debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
             xs
         };
-        assert_eq!([batch, sequence, d_inner], xs.dims());
+        debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
         let ss = self.ss(xs);
-        assert_eq!([batch, sequence, d_inner], ss.dims());
+        debug_assert_eq!([batch, sequence, d_inner], ss.dims());
 
         // activation
         let ys = ss * Silu::new().forward(res);
-        assert_eq!([batch, sequence, d_inner], ys.dims());
+        debug_assert_eq!([batch, sequence, d_inner], ys.dims());
 
         let y = self.out_proj.forward(ys);
-        assert_eq!([batch, sequence, d_model], y.dims());
+        debug_assert_eq!([batch, sequence, d_model], y.dims());
 
         y
     }
@@ -234,10 +234,10 @@ impl<B: Backend> MambaBlock<B> {
         // A
         // this is input independent (see Section 3.5.2 "Interpretation of A" form the Mamba paper for why A isn't selective)
         let a = self.a_log.val().exp().neg();
-        assert_eq!([d_inner, d_state], a.dims());
+        debug_assert_eq!([d_inner, d_state], a.dims());
 
         let x_dbl = self.x_proj.forward(u.clone());
-        assert_eq!([batch, sequence, dt_rank + 2 * d_state], x_dbl.dims());
+        debug_assert_eq!([batch, sequence, dt_rank + 2 * d_state], x_dbl.dims());
 
         // ∆ (part 1/2)
         // ∆ is input-dependent
@@ -246,22 +246,22 @@ impl<B: Backend> MambaBlock<B> {
         let delta = split[0].clone();
         let b = split[1].clone();
         let c = split[2].clone();
-        assert_eq!([batch, sequence, dt_rank], delta.dims());
-        assert_eq!([batch, sequence, d_state], b.dims());
-        assert_eq!([batch, sequence, d_state], c.dims());
+        debug_assert_eq!([batch, sequence, dt_rank], delta.dims());
+        debug_assert_eq!([batch, sequence, d_state], b.dims());
+        debug_assert_eq!([batch, sequence, d_state], c.dims());
 
         // ∆ (part 2/2)
         // ∆ is input-dependent
         let delta = self.dt_proj.forward(delta);
-        assert_eq!([batch, sequence, d_inner], delta.dims());
+        debug_assert_eq!([batch, sequence, d_inner], delta.dims());
 
         let delta = burn::tensor::activation::softplus(delta, 1.);
 
         let delta = delta.movedim(0, 1);
-        assert_eq!([sequence, batch, d_inner], delta.dims());
+        debug_assert_eq!([sequence, batch, d_inner], delta.dims());
 
         let c = c.movedim(0, 1);
-        assert_eq!([sequence, batch, d_state], c.dims());
+        debug_assert_eq!([sequence, batch, d_state], c.dims());
 
         Self::selective_scan(delta, a, b, c, self.d.val(), u)
     }
@@ -300,39 +300,39 @@ impl<B: Backend> MambaBlock<B> {
         //    "A is the more important term and the performance doesn't change much with the simplification on B"
         let (delta_a, delta_bu) = {
             let delta = delta.unsqueeze_dim(3);
-            assert_eq!([sequence, batch, d_inner, 1], delta.dims());
+            debug_assert_eq!([sequence, batch, d_inner, 1], delta.dims());
             let delta = delta.expand(outer_shape);
-            assert_eq!(outer_shape, delta.dims());
+            debug_assert_eq!(outer_shape, delta.dims());
 
             let a = a.unsqueeze_dims(&[0, 1]);
-            assert_eq!([1, 1, d_inner, d_state], a.dims());
+            debug_assert_eq!([1, 1, d_inner, d_state], a.dims());
             let a = a.expand(outer_shape);
-            assert_eq!(outer_shape, a.dims());
+            debug_assert_eq!(outer_shape, a.dims());
             let delta_a = (delta.clone() * a).exp();
-            assert_eq!(outer_shape, delta_a.dims());
+            debug_assert_eq!(outer_shape, delta_a.dims());
 
             let b = b.movedim(1, 0);
-            assert_eq!([sequence, batch, d_state], b.dims());
+            debug_assert_eq!([sequence, batch, d_state], b.dims());
             let b = b.unsqueeze_dim(2);
-            assert_eq!([sequence, batch, 1, d_state], b.dims());
+            debug_assert_eq!([sequence, batch, 1, d_state], b.dims());
             let b = b.expand(outer_shape);
-            assert_eq!(outer_shape, b.dims());
+            debug_assert_eq!(outer_shape, b.dims());
             let delta_b = delta * b;
-            assert_eq!(outer_shape, delta_b.dims());
+            debug_assert_eq!(outer_shape, delta_b.dims());
 
             let u = u.clone().movedim(0, 1);
-            assert_eq!([sequence, batch, d_inner], u.dims());
+            debug_assert_eq!([sequence, batch, d_inner], u.dims());
             let u = u.unsqueeze_dim(3);
-            assert_eq!([sequence, batch, d_inner, 1], u.dims());
+            debug_assert_eq!([sequence, batch, d_inner, 1], u.dims());
             let u = u.expand(outer_shape);
-            assert_eq!(outer_shape, u.dims());
+            debug_assert_eq!(outer_shape, u.dims());
             let delta_bu = delta_b * u;
-            assert_eq!(outer_shape, delta_bu.dims());
+            debug_assert_eq!(outer_shape, delta_bu.dims());
 
             (delta_a, delta_bu)
         };
-        assert_eq!(outer_shape, delta_a.dims());
-        assert_eq!(outer_shape, delta_bu.dims());
+        debug_assert_eq!(outer_shape, delta_a.dims());
+        debug_assert_eq!(outer_shape, delta_bu.dims());
 
         // Perform selective scan (see scan_SSM() from The Annotated S4)
         // Note that the below is sequential, while the official implementation does a much faster parallel scan that
@@ -341,15 +341,15 @@ impl<B: Backend> MambaBlock<B> {
         // unstack the Sequence axis
 
         let delta_a = delta_a.split(1, 0);
-        assert_eq!(delta_a.len(), sequence);
+        debug_assert_eq!(delta_a.len(), sequence);
 
         let delta_bu = delta_bu.split(1, 0);
-        assert_eq!(delta_bu.len(), sequence);
+        debug_assert_eq!(delta_bu.len(), sequence);
 
         let c = c.unsqueeze_dim(3);
-        assert_eq!([sequence, batch, d_state, 1], c.dims());
+        debug_assert_eq!([sequence, batch, d_state, 1], c.dims());
         let c = c.split(1, 0);
-        assert_eq!(c.len(), sequence);
+        debug_assert_eq!(c.len(), sequence);
 
         let inner_shape = [batch, d_inner, d_state];
         let mut xs: Tensor<B, 3> = Tensor::zeros(inner_shape, device);
@@ -360,29 +360,29 @@ impl<B: Backend> MambaBlock<B> {
             .zip(c.into_iter())
         {
             let delta_a = delta_a.squeeze(0);
-            assert_eq!(inner_shape, delta_a.dims());
+            debug_assert_eq!(inner_shape, delta_a.dims());
             let delta_bu = delta_bu.squeeze(0);
-            assert_eq!(inner_shape, delta_bu.dims());
+            debug_assert_eq!(inner_shape, delta_bu.dims());
             let c = c.squeeze(0);
-            assert_eq!([batch, d_state, 1], c.dims());
+            debug_assert_eq!([batch, d_state, 1], c.dims());
 
             xs = (xs.clone() * delta_a) + delta_bu;
             let y = xs.clone().matmul(c);
-            assert_eq!([batch, d_inner, 1], y.dims());
+            debug_assert_eq!([batch, d_inner, 1], y.dims());
             let y = y.squeeze(2);
-            assert_eq!([batch, d_inner], y.dims());
+            debug_assert_eq!([batch, d_inner], y.dims());
             ys.push(y);
         }
 
         let ys = Tensor::stack(ys, 1);
-        assert_eq!([batch, sequence, d_inner], ys.dims());
+        debug_assert_eq!([batch, sequence, d_inner], ys.dims());
 
         let d = d.unsqueeze_dims(&[0, 1]);
-        assert_eq!([1, 1, d_inner], d.dims());
+        debug_assert_eq!([1, 1, d_inner], d.dims());
         let d = d.expand([batch, sequence, d_inner]);
 
         let ys = ys + (d * u);
-        assert_eq!([batch, sequence, d_inner], ys.dims());
+        debug_assert_eq!([batch, sequence, d_inner], ys.dims());
 
         ys
     }
@@ -435,66 +435,66 @@ pub mod step {
             let (xs, res) = {
                 // projects the input d_model into 2 * d_inner
                 let xs_and_res = self.in_proj.forward(x);
-                assert_eq!([batch, 2 * d_inner], xs_and_res.dims());
+                debug_assert_eq!([batch, 2 * d_inner], xs_and_res.dims());
 
                 let split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 1);
                 (split[0].clone(), split[1].clone())
             };
-            assert_eq!([batch, d_inner], xs.dims());
-            assert_eq!([batch, d_inner], res.dims());
+            debug_assert_eq!([batch, d_inner], xs.dims());
+            debug_assert_eq!([batch, d_inner], res.dims());
 
             // layer 2 (conv1d)
             cache.conv = cache.conv.map(|conv| {
                 // split-off oldest/first column (i.e. rolling leftwards)
                 let t0 = conv.narrow(2, 1, d_conv - 1);
-                assert_eq!([batch, d_inner, d_conv - 1], t0.dims());
+                debug_assert_eq!([batch, d_inner, d_conv - 1], t0.dims());
 
                 // insert xs as a the newest/last column
                 let conv = Tensor::cat([t0, xs.unsqueeze_dim(2)].to_vec(), 2);
-                assert_eq!([batch, d_inner, d_conv], conv.dims());
+                debug_assert_eq!([batch, d_inner, d_conv], conv.dims());
 
                 conv
             });
             let xs = {
                 let conv1d = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
-                assert_eq!([d_inner, 1, d_conv], conv1d.dims());
+                debug_assert_eq!([d_inner, 1, d_conv], conv1d.dims());
                 let conv1d = conv1d.movedim(1, 0);
-                assert_eq!([1, d_inner, d_conv], conv1d.dims());
+                debug_assert_eq!([1, d_inner, d_conv], conv1d.dims());
                 let conv1d = conv1d.expand([batch, d_inner, d_conv]);
-                assert_eq!([batch, d_inner, d_conv], conv1d.dims());
+                debug_assert_eq!([batch, d_inner, d_conv], conv1d.dims());
 
                 let xs = cache.conv.val() * conv1d;
                 let xs = xs.sum_dim(2);
-                assert_eq!([batch, d_inner, 1], xs.dims());
+                debug_assert_eq!([batch, d_inner, 1], xs.dims());
                 let xs = xs.squeeze(2);
-                assert_eq!([batch, d_inner], xs.dims());
+                debug_assert_eq!([batch, d_inner], xs.dims());
 
                 // conv1d bias
                 let conv1d_bias = self.conv1d.bias.as_ref().unwrap().val();
                 // [channels_out]
-                assert_eq!([d_inner], conv1d_bias.dims());
+                debug_assert_eq!([d_inner], conv1d_bias.dims());
                 let conv1d_bias = conv1d_bias.unsqueeze();
-                assert_eq!([1, d_inner], conv1d_bias.dims());
+                debug_assert_eq!([1, d_inner], conv1d_bias.dims());
                 let xs = xs + conv1d_bias;
 
                 // activation
                 let xs = Silu::new().forward(xs);
-                assert_eq!([batch, d_inner], xs.dims());
+                debug_assert_eq!([batch, d_inner], xs.dims());
 
                 xs
             };
-            assert_eq!([batch, d_inner], xs.dims());
+            debug_assert_eq!([batch, d_inner], xs.dims());
 
             let (ss, cache) = self.ss_step(xs, cache);
-            assert_eq!([batch, d_inner], ss.dims());
+            debug_assert_eq!([batch, d_inner], ss.dims());
 
             // activation
             let ys = ss * Silu::new().forward(res);
-            assert_eq!([batch, d_inner], ys.dims());
+            debug_assert_eq!([batch, d_inner], ys.dims());
 
             let y = self.out_proj.forward(ys);
-            assert_eq!([batch, d_model], y.dims());
+            debug_assert_eq!([batch, d_model], y.dims());
 
             (y, cache)
         }
@@ -519,10 +519,10 @@ pub mod step {
             // A
             // this is input independent (see Section 3.5.2 "Interpretation of A" form the Mamba paper for why A isn't selective)
             let a = self.a_log.val().exp().neg();
-            assert_eq!([d_inner, d_state], a.dims());
+            debug_assert_eq!([d_inner, d_state], a.dims());
 
             let x_dbl = self.x_proj.forward(u.clone());
-            assert_eq!([batch, dt_rank + 2 * d_state], x_dbl.dims());
+            debug_assert_eq!([batch, dt_rank + 2 * d_state], x_dbl.dims());
 
             // ∆ (part 1/2)
             // ∆ is input-dependent
@@ -531,14 +531,14 @@ pub mod step {
             let delta = split[0].clone();
             let b = split[1].clone();
             let c = split[2].clone();
-            assert_eq!([batch, dt_rank], delta.dims());
-            assert_eq!([batch, d_state], b.dims());
-            assert_eq!([batch, d_state], c.dims());
+            debug_assert_eq!([batch, dt_rank], delta.dims());
+            debug_assert_eq!([batch, d_state], b.dims());
+            debug_assert_eq!([batch, d_state], c.dims());
 
             // ∆ (part 2/2)
             // ∆ is input-dependent
             let delta = self.dt_proj.forward(delta);
-            assert_eq!([batch, d_inner], delta.dims());
+            debug_assert_eq!([batch, d_inner], delta.dims());
             let delta = burn::tensor::activation::softplus(delta, 1.);
 
             Self::selective_scan_step(delta, a, b, c, self.d.val(), u, cache)
@@ -577,53 +577,53 @@ pub mod step {
             //    "A is the more important term and the performance doesn't change much with the simplification on B"
             let (delta_a, delta_bu) = {
                 let delta = delta.unsqueeze_dim(2);
-                assert_eq!([batch, d_inner, 1], delta.dims());
+                debug_assert_eq!([batch, d_inner, 1], delta.dims());
                 let delta = delta.expand(outer_shape);
-                assert_eq!(outer_shape, delta.dims());
+                debug_assert_eq!(outer_shape, delta.dims());
 
                 let a = a.unsqueeze();
-                assert_eq!([1, d_inner, d_state], a.dims());
+                debug_assert_eq!([1, d_inner, d_state], a.dims());
                 let a = a.expand(outer_shape);
-                assert_eq!(outer_shape, a.dims());
+                debug_assert_eq!(outer_shape, a.dims());
                 let delta_a = (delta.clone() * a).exp();
-                assert_eq!(outer_shape, delta_a.dims());
+                debug_assert_eq!(outer_shape, delta_a.dims());
 
                 let b = b.unsqueeze_dim(1);
-                assert_eq!([batch, 1, d_state], b.dims());
+                debug_assert_eq!([batch, 1, d_state], b.dims());
                 let b = b.expand(outer_shape);
-                assert_eq!(outer_shape, b.dims());
+                debug_assert_eq!(outer_shape, b.dims());
                 let delta_b = delta * b;
-                assert_eq!(outer_shape, delta_b.dims());
+                debug_assert_eq!(outer_shape, delta_b.dims());
 
                 let u = u.clone().unsqueeze_dim(2);
-                assert_eq!([batch, d_inner, 1], u.dims());
+                debug_assert_eq!([batch, d_inner, 1], u.dims());
                 let u = u.expand(outer_shape);
-                assert_eq!(outer_shape, u.dims());
+                debug_assert_eq!(outer_shape, u.dims());
                 let delta_bu = delta_b * u;
-                assert_eq!(outer_shape, delta_bu.dims());
+                debug_assert_eq!(outer_shape, delta_bu.dims());
 
                 (delta_a, delta_bu)
             };
-            assert_eq!(outer_shape, delta_a.dims());
-            assert_eq!(outer_shape, delta_bu.dims());
+            debug_assert_eq!(outer_shape, delta_a.dims());
+            debug_assert_eq!(outer_shape, delta_bu.dims());
 
             cache.ssm = cache.ssm.map(|ssm| (ssm * delta_a) + delta_bu);
 
             let c = c.unsqueeze_dim(2);
-            assert_eq!([batch, d_state, 1], c.dims());
+            debug_assert_eq!([batch, d_state, 1], c.dims());
 
             let y = cache.ssm.val().matmul(c);
-            assert_eq!([batch, d_inner, 1], y.dims());
+            debug_assert_eq!([batch, d_inner, 1], y.dims());
             let y = y.squeeze(2);
-            assert_eq!([batch, d_inner], y.dims());
+            debug_assert_eq!([batch, d_inner], y.dims());
 
             let d = d.unsqueeze();
-            assert_eq!([1, d_inner], d.dims());
+            debug_assert_eq!([1, d_inner], d.dims());
             let d = d.expand([batch, d_inner]);
-            assert_eq!([batch, d_inner], d.dims());
+            debug_assert_eq!([batch, d_inner], d.dims());
 
             let y = y + (d * u);
-            assert_eq!([batch, d_inner], y.dims());
+            debug_assert_eq!([batch, d_inner], y.dims());
 
             (y, cache)
         }
