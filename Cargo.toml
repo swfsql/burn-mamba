@@ -1,13 +1,19 @@
 [package]
 name = "burn-mamba"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+
+[features]
+default = ["mamba1", "mamba2"]
+mamba1 = []
+mamba2 = []
 
 [dependencies]
 num-traits = "0.2.19"
 
 [dependencies.burn]
-#version = "0.16.0"
+#version = "0.17.0"
 git = "https://github.com/tracel-ai/burn.git"
-# 2025-03-28 main
-rev = "3bc9c7a4e43365a80a36c38a04dfa40bb21c529d"
+# 2025-05-05 main
+rev = "644acbb352dab9d665cbfd390c0035b241cd7db4"
+default-features = false

@@ -1,7 +1,12 @@
-pub mod layer_rms_norm_1d;
-pub mod mamba;
-pub mod mamba_block;
-pub mod silu;
+#![feature(f16)]
 
-pub use mamba::*;
-pub use mamba_block::*;
+#[cfg(feature = "mamba1")]
+pub mod mamba1;
+#[cfg(feature = "mamba1")]
+pub mod mamba1_block;
+#[cfg(feature = "mamba2")]
+pub mod mamba2;
+#[cfg(feature = "mamba2")]
+pub mod mamba2_block;
+pub mod rms_norm_gated;
+pub mod silu;

@@ -1,56 +1,71 @@
-//! Utilizes MambaBlock and other Modules to build a Mamba model capable of utilizing the state-spaces/mamba-130m text prediction models.
-//!
-//! References:
-//! - https://github.com/huggingface/candle/blob/fd7c8565646039e35925b8730d27ddad195d7e73/candle-examples/examples/mamba-minimal/
-//! - https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/
+//! Utilizes Mamba2Block and other Modules to build a Mamba2 model capable of utilizing the state-spaces/mamba2-130m text prediction models.
+// TODO: merge with Mamba1 by having an enum?
 
-use crate::{layer_rms_norm_1d::*, *};
+use crate::mamba2_block::{Mamba2Block, Mamba2BlockConfig};
 use burn::{
-    nn::{Embedding, EmbeddingConfig, Linear, LinearConfig},
+    nn::{Embedding, EmbeddingConfig, Linear, LinearConfig, RmsNorm, RmsNormConfig},
     prelude::*,
 };
 
 #[derive(Module, Debug)]
-pub struct Mamba<B: Backend> {
+pub struct Mamba2<B: Backend> {
     pub embedding: Embedding<B>,
-    pub layers: Vec<MambaLayer<B>>,
-    pub norm_f: LayerRmsNorm1D<B>,
+    pub layers: Vec<Mamba2Layer<B>>,
+    pub norm_f: RmsNorm<B>,
     /// If missing, re-utilizes a transposed `embedding` weight.
     pub lm_head: Option<Linear<B>>,
 }
 
 #[derive(Config, Debug)]
-pub struct MambaConfig {
+pub struct Mamba2Config {
     pub n_layer: usize,
 
-    /// If no pad is required, this should be considered the unpadded vocab size.
-    /// If pad is required, this should be the result of `((unpadded_vocab_size + pad - 1) / pad) * pad`.
-    pub padded_vocab_size: usize,
+    /// If vocab_size is divisible by pad_vocab_size_multiple, this should be considered the unpadded vocab size.
+    /// Otherwise, this is padded into `((self.vocab_size / self.pad_vocab_size_multiple) + 1) * self.pad_vocab_size_multiple`.
+    pub vocab_size: usize,
 
-    pub mamba_block: MambaBlockConfig,
+    /// If no pad is required, vocab_size must be divisible by pad_vocab_size_multiple.
+    /// If pad is required, vocab_size increases until it's divisible by pad_vocab_size_multiple.
+    ///
+    /// To disable vocab padding, you can set this to `1`.
+    pub pad_vocab_size_multiple: usize,
+
+    pub mamba_block: Mamba2BlockConfig,
 
     /// If set to true, `lm_head` is set to `None` and it re-utilizes the transposed `embedding` weights.
     pub missing_lm_head: bool,
 }
 
-impl MambaConfig {
+impl Mamba2Config {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2<B> {
         let mut layers = Vec::with_capacity(self.n_layer);
         for _ in 0..self.n_layer {
-            let layer = MambaLayerConfig::new(self.mamba_block.clone()).init(device);
+            let block_config = self.mamba_block.clone();
+            // println!("mamba2 config layer headdim: {}", block_config.headdim);
+            let layer = Mamba2LayerConfig::new(block_config).init(device);
             layers.push(layer);
         }
-        Mamba {
-            embedding: EmbeddingConfig::new(self.padded_vocab_size, self.mamba_block.d_model)
+
+        let padded_vocab_size = {
+            if self.vocab_size % self.pad_vocab_size_multiple == 0 {
+                self.vocab_size
+            } else {
+                ((self.vocab_size / self.pad_vocab_size_multiple) + 1)
+                    * self.pad_vocab_size_multiple
+            }
+        };
+
+        Mamba2 {
+            embedding: EmbeddingConfig::new(padded_vocab_size, self.mamba_block.d_model)
                 .init(device),
             layers,
-            norm_f: LayerRmsNorm1DConfig::new(self.mamba_block.d_model).init(device),
+            norm_f: RmsNormConfig::new(self.mamba_block.d_model).init(device),
             lm_head: if self.missing_lm_head {
                 None
             } else {
                 Some(
-                    LinearConfig::new(self.mamba_block.d_model, self.padded_vocab_size)
+                    LinearConfig::new(self.mamba_block.d_model, padded_vocab_size)
                         .with_bias(false)
                         .init(device),
                 )
@@ -59,7 +74,7 @@ impl MambaConfig {
     }
 }
 
-impl<B: Backend> Mamba<B> {
+impl<B: Backend> Mamba2<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
@@ -80,7 +95,7 @@ impl<B: Backend> Mamba<B> {
         if let Some(lm_head) = &self.lm_head {
             x = lm_head.forward(x);
         } else {
-            let weight = self.embedding.weight.clone().map(|w| w.movedim(0, 1));
+            let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
             debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
             let linear = Linear { weight, bias: None };
@@ -93,32 +108,27 @@ impl<B: Backend> Mamba<B> {
 }
 
 #[derive(Module, Debug)]
-pub struct MambaLayer<B: Backend> {
-    pub norm: LayerRmsNorm1D<B>,
-    pub mamba_block: MambaBlock<B>,
+pub struct Mamba2Layer<B: Backend> {
+    pub norm: RmsNorm<B>,
+    pub mamba_block: Mamba2Block<B>,
 }
 
 #[derive(Config, Debug)]
-pub struct MambaLayerConfig {
-    pub mamba_block: MambaBlockConfig,
+pub struct Mamba2LayerConfig {
+    pub mamba_block: Mamba2BlockConfig,
 }
 
-impl MambaLayerConfig {
+impl Mamba2LayerConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> MambaLayer<B> {
-        MambaLayer {
-            norm: LayerRmsNorm1DConfig::new(self.mamba_block.d_model).init(device),
-            mamba_block: MambaBlockConfig::new(self.mamba_block.d_model)
-                .with_d_state(self.mamba_block.d_state)
-                .with_dt_rank(self.mamba_block.dt_rank)
-                .with_d_conv(self.mamba_block.d_conv)
-                .with_d_inner(self.mamba_block.d_inner)
-                .init(device),
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Layer<B> {
+        Mamba2Layer {
+            norm: RmsNormConfig::new(self.mamba_block.d_model).init(device),
+            mamba_block: self.mamba_block.init(device),
         }
     }
 }
 
-impl<B: Backend> MambaLayer<B> {
+impl<B: Backend> Mamba2Layer<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
@@ -139,9 +149,9 @@ impl<B: Backend> MambaLayer<B> {
 
 mod step {
     use super::*;
-    use crate::mamba_block::step::MambaBlockCache;
+    use crate::mamba2_block::step::Mamba2BlockCache;
 
-    impl<B: Backend> Mamba<B> {
+    impl<B: Backend> Mamba2<B> {
         /// See also [`Self::forward`].
         ///
         /// # Shapes
@@ -150,8 +160,8 @@ mod step {
         pub fn step(
             &self,
             x: Tensor<B, 1, Int>,
-            mut caches: Vec<MambaBlockCache<B>>,
-        ) -> (Tensor<B, 2>, Vec<MambaBlockCache<B>>) {
+            mut caches: Vec<Mamba2BlockCache<B>>,
+        ) -> (Tensor<B, 2>, Vec<Mamba2BlockCache<B>>) {
             let [batch] = x.dims();
             let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -173,7 +183,7 @@ mod step {
             if let Some(lm_head) = &self.lm_head {
                 x = lm_head.forward(x);
             } else {
-                let weight = self.embedding.weight.clone().map(|w| w.movedim(0, 1));
+                let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
                 debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
                 let linear = Linear { weight, bias: None };
@@ -185,7 +195,7 @@ mod step {
         }
     }
 
-    impl<B: Backend> MambaLayer<B> {
+    impl<B: Backend> Mamba2Layer<B> {
         /// See also [`Self::forward`].
         ///
         /// # Shapes
@@ -194,8 +204,8 @@ mod step {
         pub fn step(
             &self,
             x: Tensor<B, 2>,
-            cache: MambaBlockCache<B>,
-        ) -> (Tensor<B, 2>, MambaBlockCache<B>) {
+            cache: Mamba2BlockCache<B>,
+        ) -> (Tensor<B, 2>, Mamba2BlockCache<B>) {
             let [batch, d_model] = x.dims();
 
             let res = x.clone();

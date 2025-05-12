@@ -1,8 +1,8 @@
 # burn-mamba
 
-Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752).
+Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752) and [Mamba2](https://arxiv.org/abs/2405.21060) (WIP).
 
-In short and simple terms, Mamba is an alternative, with trade-offs, to the attention mechanism. Mamba can be used in RNNs that steps over a single sequence point at a time (instead of requiring to observe multiple sequence points at the same time) but it needs to carry over the previous state so it's memory and time requirements are fixed for each sequence point.
+Mamba is a fast, efficient model for handling long data sequences such as in language and time-series tasks, competitive with traditional Transformers. It uses a smart selection process to focus on key information, scaling linearly with strong performance.
 
 ##### Cargo.toml
 
@@ -14,9 +14,12 @@ branch = "main"
 # rev = ""
 ```
 
+##### Features
+- `mamba1`, `mamba2` to select the mamba version.
+
 ##### Example
 
-You can check an example using this mamba block for inference in [here](https://github.com/swfsql/burn-mamba-example) (WIP/placeholder - you can also check it in the browser in WebAssembly).
+You can check an example using this mamba block for inference in [here](https://github.com/swfsql/burn-mamba-example).
 
 ##### Implementation References
 

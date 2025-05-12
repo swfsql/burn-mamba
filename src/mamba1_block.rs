@@ -6,7 +6,7 @@ use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 
 #[derive(Module, Debug)]
-pub struct MambaBlock<B: Backend> {
+pub struct Mamba1Block<B: Backend> {
     /// Input channel: d_model.
     /// Output channel: 2 * d_inner.
     pub in_proj: Linear<B>,
@@ -35,7 +35,7 @@ pub struct MambaBlock<B: Backend> {
 }
 
 #[derive(Config, Debug)]
-pub struct MambaBlockConfig {
+pub struct Mamba1BlockConfig {
     /// Hidden dimension.
     pub d_model: usize,
 
@@ -43,24 +43,51 @@ pub struct MambaBlockConfig {
     #[config(default = 16)]
     pub d_state: usize,
 
+    #[config(default = 4)]
+    pub d_conv: usize,
+
+    #[config(default = 2)]
+    pub expand: usize,
+
+    /// Minimum dt value.
+    #[config(default = 1e-3)]
+    pub dt_min: f64,
+
+    /// Maximum dt value.
+    #[config(default = 1e-1)]
+    pub dt_max: f64,
+
+    /// Scale for dt initialization.
+    #[config(default = 1.)]
+    pub dt_scale: f64,
+
+    /// Floor for dt initialization.
+    #[config(default = 1e-4)]
+    pub dt_init_floor: f64,
+
+    /// Whether conv1d should have a bias.
+    #[config(default = true)]
+    pub conv_bias: bool,
+
+    /// Whether in_proj and out_proj should have a bias.
+    #[config(default = false)]
+    pub bias: bool,
+
     /// Rank of Δ (See Section 3.6 "Parameterization of ∆" from the Mamba paper).
     /// Δ or delta: input-dependent step size.
     ///
     /// By default, set to (d_model + d_state - 1) / d_state.
     pub dt_rank: Option<usize>,
 
-    #[config(default = 4)]
-    pub d_conv: usize,
-
     /// DModel * expand (`D` in Algorithm 2 from the Mamba paper).
     ///
-    /// By default, set to 2 * d_model.
+    /// By default, set to expand * d_model.
     pub d_inner: Option<usize>,
 }
 
-impl MambaBlockConfig {
+impl Mamba1BlockConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> MambaBlock<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1Block<B> {
         let d_inner = self.d_inner();
         debug_assert_ne!(self.d_state, 0);
         debug_assert!(self.d_model + self.d_state > 0);
@@ -78,8 +105,7 @@ impl MambaBlockConfig {
         let dt_proj = {
             use burn::tensor::Distribution;
             let weight: Tensor<B, 2> = {
-                let dt_scale = 1.0;
-                let dt_init_std = (dt_rank as f64).powf(-0.5) * dt_scale;
+                let dt_init_std = (dt_rank as f64).powf(-0.5) * self.dt_scale;
                 Tensor::random(
                     [dt_rank, d_inner],
                     Distribution::Uniform(-dt_init_std, dt_init_std),
@@ -88,17 +114,14 @@ impl MambaBlockConfig {
             };
             debug_assert_eq!([dt_rank, d_inner], weight.dims());
             let bias: Tensor<B, 1> = {
-                let dt_min = 0.001;
-                let dt_max = 0.1;
-                let dt_init_floor = 1e-4;
                 // note: this placeholder impl may lose precision for very small values,
                 // and a Taylor series could approximate it: e^x - 1 = x + x^2/2! + x^3/3! + ⋯
                 // but with the clamp at dt_init_floor, this isn't necessary
                 let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
                 let dt = Tensor::random([d_inner], Distribution::Uniform(0.0, 1.0), device)
-                    * (f32::ln(dt_max) - f32::ln(dt_min))
-                    + f32::ln(dt_min);
-                let dt = dt.exp().clamp_min(dt_init_floor);
+                    * (f64::ln(self.dt_max) - f64::ln(self.dt_min))
+                    + f64::ln(self.dt_min);
+                let dt = dt.exp().clamp_min(self.dt_init_floor);
                 // Inverse of softplus
                 let inv_dt = dt.clone() + (-expm1(-dt)).log();
                 inv_dt
@@ -122,16 +145,16 @@ impl MambaBlockConfig {
             Param::from_tensor(a_log)
         };
 
-        MambaBlock {
+        Mamba1Block {
             in_proj: LinearConfig::new(self.d_model, 2 * d_inner)
-                .with_bias(false)
+                .with_bias(self.bias)
                 // follows PyTorch's default initializer
                 .with_initializer(uniform_init(self.d_model))
                 .init(device),
             conv1d: Conv1dConfig::new(d_inner, d_inner, self.d_conv)
                 .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1))
                 .with_groups(d_inner)
-                .with_bias(true)
+                .with_bias(self.conv_bias)
                 // follows PyTorch's default initializer
                 // fan_in = in_channels / groups * kernel_size
                 .with_initializer(uniform_init(self.d_conv))
@@ -145,14 +168,14 @@ impl MambaBlockConfig {
             a_log,
             d: Initializer::Ones.init([d_inner], device),
             out_proj: LinearConfig::new(d_inner, self.d_model)
-                .with_bias(false)
+                .with_bias(self.bias)
                 // follows PyTorch's default initializer
                 .with_initializer(uniform_init(d_inner))
                 .init(device),
         }
     }
     pub fn d_inner(&self) -> usize {
-        self.d_inner.unwrap_or(2 * self.d_model)
+        self.d_inner.unwrap_or(self.expand * self.d_model)
     }
     pub fn dt_rank(&self) -> usize {
         self.dt_rank
@@ -160,7 +183,7 @@ impl MambaBlockConfig {
     }
 }
 
-impl<B: Backend> MambaBlock<B> {
+impl<B: Backend> Mamba1Block<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
@@ -186,7 +209,7 @@ impl<B: Backend> MambaBlock<B> {
 
         // layer 2 (conv1d)
         let xs = {
-            let xs = xs.movedim(1, 2);
+            let xs = xs.swap_dims(1, 2);
             debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             debug_assert!(d_conv > 0);
@@ -197,7 +220,7 @@ impl<B: Backend> MambaBlock<B> {
             debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
-            let xs = xs.movedim(1, 2);
+            let xs = xs.swap_dims(1, 2);
             debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
             // activation
@@ -257,10 +280,10 @@ impl<B: Backend> MambaBlock<B> {
 
         let delta = burn::tensor::activation::softplus(delta, 1.);
 
-        let delta = delta.movedim(0, 1);
+        let delta = delta.swap_dims(0, 1);
         debug_assert_eq!([sequence, batch, d_inner], delta.dims());
 
-        let c = c.movedim(0, 1);
+        let c = c.swap_dims(0, 1);
         debug_assert_eq!([sequence, batch, d_state], c.dims());
 
         Self::selective_scan(delta, a, b, c, self.d.val(), u)
@@ -311,7 +334,7 @@ impl<B: Backend> MambaBlock<B> {
             let delta_a = (delta.clone() * a).exp();
             debug_assert_eq!(outer_shape, delta_a.dims());
 
-            let b = b.movedim(1, 0);
+            let b = b.swap_dims(0, 1);
             debug_assert_eq!([sequence, batch, d_state], b.dims());
             let b = b.unsqueeze_dim(2);
             debug_assert_eq!([sequence, batch, 1, d_state], b.dims());
@@ -320,7 +343,7 @@ impl<B: Backend> MambaBlock<B> {
             let delta_b = delta * b;
             debug_assert_eq!(outer_shape, delta_b.dims());
 
-            let u = u.clone().movedim(0, 1);
+            let u = u.clone().swap_dims(0, 1);
             debug_assert_eq!([sequence, batch, d_inner], u.dims());
             let u = u.unsqueeze_dim(3);
             debug_assert_eq!([sequence, batch, d_inner, 1], u.dims());
@@ -392,7 +415,7 @@ pub mod step {
     use super::*;
 
     #[derive(Module, Debug)]
-    pub struct MambaBlockCache<B: Backend> {
+    pub struct Mamba1BlockCache<B: Backend> {
         /// # Shape
         /// [batch, d_inner, d_conv]
         pub conv: Param<Tensor<B, 3>>,
@@ -402,32 +425,32 @@ pub mod step {
     }
 
     #[derive(Config, Debug)]
-    pub struct MambaBlockCacheConfig {
+    pub struct Mamba1BlockCacheConfig {
         pub batch: usize,
-        pub mamba_block: MambaBlockConfig,
+        pub mamba_block: Mamba1BlockConfig,
     }
 
-    impl MambaBlockCacheConfig {
+    impl Mamba1BlockCacheConfig {
         /// Returns the initialized model.
-        pub fn init<B: Backend>(&self, device: &B::Device) -> MambaBlockCache<B> {
+        pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1BlockCache<B> {
             let d_inner = self.mamba_block.d_inner();
             let conv =
                 Initializer::Zeros.init([self.batch, d_inner, self.mamba_block.d_conv], device);
             let ssm =
                 Initializer::Zeros.init([self.batch, d_inner, self.mamba_block.d_state], device);
-            MambaBlockCache { conv, ssm }
+            Mamba1BlockCache { conv, ssm }
         }
     }
 
-    impl<B: Backend> MambaBlock<B> {
+    impl<B: Backend> Mamba1Block<B> {
         /// # Shapes
         ///   - Input [batch, d_model]
         ///   - Output [batch, d_model]
         pub fn step(
             &self,
             x: Tensor<B, 2>,
-            mut cache: MambaBlockCache<B>,
-        ) -> (Tensor<B, 2>, MambaBlockCache<B>) {
+            mut cache: Mamba1BlockCache<B>,
+        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
             let [batch, d_inner, d_conv] = cache.conv.dims();
             let [_batch, d_model] = x.dims();
 
@@ -459,7 +482,7 @@ pub mod step {
                 let conv1d = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
                 debug_assert_eq!([d_inner, 1, d_conv], conv1d.dims());
-                let conv1d = conv1d.movedim(1, 0);
+                let conv1d = conv1d.swap_dims(1, 0);
                 debug_assert_eq!([1, d_inner, d_conv], conv1d.dims());
                 let conv1d = conv1d.expand([batch, d_inner, d_conv]);
                 debug_assert_eq!([batch, d_inner, d_conv], conv1d.dims());
@@ -509,8 +532,8 @@ pub mod step {
         pub fn ss_step(
             &self,
             u: Tensor<B, 2>,
-            cache: MambaBlockCache<B>,
-        ) -> (Tensor<B, 2>, MambaBlockCache<B>) {
+            cache: Mamba1BlockCache<B>,
+        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
             let [batch, d_inner, d_state] = cache.ssm.dims();
             let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
 
@@ -566,8 +589,8 @@ pub mod step {
             c: Tensor<B, 2>,
             d: Tensor<B, 1>,
             u: Tensor<B, 2>,
-            mut cache: MambaBlockCache<B>,
-        ) -> (Tensor<B, 2>, MambaBlockCache<B>) {
+            mut cache: Mamba1BlockCache<B>,
+        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
             let [batch, d_inner, d_state] = cache.ssm.dims();
             let outer_shape = [batch, d_inner, d_state];
 
