@@ -353,8 +353,10 @@ impl<B: Backend> Mamba2Block<B> {
         let headdim = self.headdim();
         let ngroups = self.ngroups;
         let d_state = self.d_state;
-        let num_chunks = sequence / chunk_size;
-        assert_eq!(sequence, num_chunks * chunk_size);
+        let num_full_chunks = sequence / chunk_size;
+        let remainder_chunk_size = sequence % chunk_size;
+        let sequence_full_chunks = num_full_chunks * chunk_size;
+        assert_eq!(sequence, sequence_full_chunks + remainder_chunk_size);
         assert_eq!(d_inner, nheads * headdim);
 
         // reshapes
@@ -373,40 +375,37 @@ impl<B: Backend> Mamba2Block<B> {
             .expand([batch, sequence, ngroups, heads_per_group, d_state])
             .reshape([batch, sequence, nheads, d_state]);
 
-        // reshape into chunks
-        let x_chunks = x
-            .reshape([batch, num_chunks, chunk_size, nheads, headdim])
-            .split(1, 1);
-        let dt_chunks = dt
-            .reshape([batch, num_chunks, chunk_size, nheads])
-            .split(1, 1);
-        let b_chunks = b
-            .reshape([batch, num_chunks, chunk_size, nheads, d_state])
-            .split(1, 1);
-        let c_chunks = c
-            .reshape([batch, num_chunks, chunk_size, nheads, d_state])
-            .split(1, 1);
-
         let state: Tensor<B, 4> = Tensor::zeros([batch, nheads, headdim, d_state], device); // cache.ssm shape
-        let mut y_chunks = Vec::with_capacity(num_chunks);
+        let mut y_chunks =
+            Vec::with_capacity(num_full_chunks + if remainder_chunk_size == 0 { 0 } else { 1 });
         let mut current_state = state;
-        for (((x, dt), b), c) in x_chunks
-            .into_iter()
-            .zip(dt_chunks)
-            .zip(b_chunks)
-            .zip(c_chunks)
-        {
-            let x = x.squeeze(1);
-            let dt = dt.squeeze(1);
-            let b = b.squeeze(1);
-            let c = c.squeeze(1);
-            assert_eq!([batch, chunk_size, nheads, headdim], x.dims());
-            assert_eq!([batch, chunk_size, nheads], dt.dims());
-            assert_eq!([batch, chunk_size, nheads, d_state], b.dims());
-            assert_eq!([batch, chunk_size, nheads, d_state], c.dims());
+        for chunk in 0..num_full_chunks {
+            let x_chunk = x
+                .clone()
+                .narrow(1, chunk * chunk_size, chunk_size)
+                .reshape([batch, chunk_size, nheads, headdim]);
+            let dt_chunk = dt
+                .clone()
+                .narrow(1, chunk * chunk_size, chunk_size)
+                .reshape([batch, chunk_size, nheads]);
+            let b_chunk = b
+                .clone()
+                .narrow(1, chunk * chunk_size, chunk_size)
+                .reshape([batch, chunk_size, nheads, d_state]);
+            let c_chunk = c
+                .clone()
+                .narrow(1, chunk * chunk_size, chunk_size)
+                .reshape([batch, chunk_size, nheads, d_state]);
 
-            let (y_chunk, new_state) =
-                scan_chunk(x, dt, a.clone(), b, c, self.d.val(), current_state);
+            let (y_chunk, new_state) = scan_chunk(
+                x_chunk,
+                dt_chunk,
+                a.clone(),
+                b_chunk,
+                c_chunk,
+                self.d.val(),
+                current_state,
+            );
             assert_eq!([batch, chunk_size, nheads, headdim], y_chunk.dims());
             assert_eq!([batch, nheads, headdim, d_state], new_state.dims());
 
@@ -414,10 +413,58 @@ impl<B: Backend> Mamba2Block<B> {
             current_state = new_state;
         }
 
-        let y = Tensor::cat(y_chunks, 1);
-        assert_eq!([batch, num_chunks * chunk_size, nheads, headdim], y.dims());
+        if remainder_chunk_size != 0 {
+            let x_chunk = x
+                .clone()
+                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
+                .reshape([batch, remainder_chunk_size, nheads, headdim]);
+            let dt_chunk = dt
+                .clone()
+                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
+                .reshape([batch, remainder_chunk_size, nheads]);
+            let b_chunk = b
+                .clone()
+                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
+                .reshape([batch, remainder_chunk_size, nheads, d_state]);
+            let c_chunk = c
+                .clone()
+                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
+                .reshape([batch, remainder_chunk_size, nheads, d_state]);
 
-        let y = y.reshape([batch, num_chunks * chunk_size, nheads * headdim]);
+            let (y_chunk, _new_state) = scan_chunk(
+                x_chunk,
+                dt_chunk,
+                a.clone(),
+                b_chunk,
+                c_chunk,
+                self.d.val(),
+                current_state,
+            );
+            assert_eq!(
+                [batch, remainder_chunk_size, nheads, headdim],
+                y_chunk.dims()
+            );
+            assert_eq!([batch, nheads, headdim, d_state], _new_state.dims());
+
+            y_chunks.push(y_chunk);
+        }
+
+        let y = Tensor::cat(y_chunks, 1);
+        assert_eq!(
+            [
+                batch,
+                num_full_chunks * chunk_size + remainder_chunk_size,
+                nheads,
+                headdim
+            ],
+            y.dims()
+        );
+
+        let y = y.reshape([
+            batch,
+            num_full_chunks * chunk_size + remainder_chunk_size,
+            nheads * headdim,
+        ]);
         assert_eq!([batch, sequence, d_inner], y.dims());
         y
     }
@@ -426,57 +473,53 @@ impl<B: Backend> Mamba2Block<B> {
 /// Performs a selective scan over a single chunk for Mamba2.
 ///
 /// # Shapes
-/// - Input `x`: [batch, chunk_size, nheads, headdim]
-/// - Input `dt`: [batch, chunk_size, nheads]
+/// - Input `x_chunk`: [batch, chunk_size, nheads, headdim]
+/// - Input `dt_chunk`: [batch, chunk_size, nheads]
 /// - Input `a`: [nheads]
-/// - Input `b`: [batch, chunk_size, nheads, d_state]
-/// - Input `c`: [batch, chunk_size, nheads, d_state]
+/// - Input `b_chunk`: [batch, chunk_size, nheads, d_state]
+/// - Input `c_chunk`: [batch, chunk_size, nheads, d_state]
 /// - Input `d`: [nheads]
 /// - Input `initial_state`: [batch, nheads, headdim, d_state]
 /// - Output.0 `y`: [batch, chunk_size, nheads, headdim]
 /// - Output.1 `final_state`: [batch, nheads, headdim, d_state]
 fn scan_chunk<B: Backend>(
-    x: Tensor<B, 4>,
-    dt: Tensor<B, 3>,
+    x_chunk: Tensor<B, 4>,
+    dt_chunk: Tensor<B, 3>,
     a: Tensor<B, 1>,
-    b: Tensor<B, 4>,
-    c: Tensor<B, 4>,
+    b_chunk: Tensor<B, 4>,
+    c_chunk: Tensor<B, 4>,
     d: Tensor<B, 1>,
     initial_state: Tensor<B, 4>,
 ) -> (Tensor<B, 4>, Tensor<B, 4>) {
-    let [batch, chunk_size, nheads, headdim] = x.dims();
-    let [_batch, _chunk_size, _nheads, d_state] = b.dims();
-
-    let x_t = x.split(1, 1);
-    let dt_t = dt.split(1, 1);
-    let b_t = b.split(1, 1);
-    let c_t = c.split(1, 1);
+    let [batch, chunk_size, nheads, headdim] = x_chunk.dims();
+    let [_batch, _chunk_size, _nheads, d_state] = b_chunk.dims();
 
     let mut state = initial_state;
     let mut y_list = Vec::with_capacity(chunk_size);
-    for (((x, dt), b), c) in x_t.into_iter().zip(dt_t).zip(b_t).zip(c_t) {
-        let x = x.squeeze(1);
-        let dt = dt.squeeze(1);
-        let b = b.squeeze(1);
-        let c = c.squeeze(1);
-        assert_eq!([batch, nheads, headdim], x.dims());
-        assert_eq!([batch, nheads], dt.dims());
-        assert_eq!([batch, nheads, d_state], b.dims());
-        assert_eq!([batch, nheads, d_state], c.dims());
+    for t in 0..chunk_size {
+        let x_t = x_chunk.clone().narrow(1, t, 1).squeeze(1);
+        let dt_t = dt_chunk.clone().narrow(1, t, 1).squeeze(1);
+        let b_t = b_chunk.clone().narrow(1, t, 1).squeeze(1);
+        let c_t = c_chunk.clone().narrow(1, t, 1).squeeze(1);
+        assert_eq!([batch, nheads, headdim], x_t.dims());
+        assert_eq!([batch, nheads], dt_t.dims());
+        assert_eq!([batch, nheads, d_state], b_t.dims());
+        assert_eq!([batch, nheads, d_state], c_t.dims());
 
-        let delta_a = (dt.clone() * a.clone().unsqueeze())
+        let delta_a = (dt_t.clone() * a.clone().unsqueeze())
             .exp()
             .unsqueeze_dims(&[2, 3]);
-        let delta_bu = (dt.unsqueeze_dim(2) * b).unsqueeze_dim(2) * x.clone().unsqueeze_dim(3);
+        let delta_bu =
+            (dt_t.unsqueeze_dim(2) * b_t).unsqueeze_dim(2) * x_t.clone().unsqueeze_dim(3);
         assert_eq!([batch, nheads, 1, 1], delta_a.dims());
         assert_eq!([batch, nheads, headdim, d_state], delta_bu.dims());
 
         state = state * delta_a + delta_bu;
         assert_eq!([batch, nheads, headdim, d_state], state.dims());
 
-        let y_t = (state.clone() * c.unsqueeze_dim(2)).sum_dim(3).squeeze(3);
+        let y_t = (state.clone() * c_t.unsqueeze_dim(2)).sum_dim(3).squeeze(3);
         assert_eq!([batch, nheads, headdim], y_t.dims());
-        let y_t = y_t + d.clone().unsqueeze_dims(&[0, 2]) * x;
+        let y_t = y_t + d.clone().unsqueeze_dims(&[0, 2]) * x_t;
         assert_eq!([batch, nheads, headdim], y_t.dims());
         y_list.push(y_t);
     }
