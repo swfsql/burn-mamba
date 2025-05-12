@@ -77,18 +77,21 @@ impl Mamba2Config {
 impl<B: Backend> Mamba2<B> {
     /// See also [`Self::step`].
     ///
+    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
+    ///
     /// # Shapes
     ///   - Input [batch, sequence]
     ///   - Output [batch, sequence, d_model]
-    pub fn forward(&self, x: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<B, 2, Int>, chunk_size: Option<usize>) -> Tensor<B, 3> {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
         let mut x = self.embedding.forward(x);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
+        let chunk_size = chunk_size.unwrap_or(256);
         for layer in self.layers.iter() {
-            x = layer.forward(x);
+            x = layer.forward(x, chunk_size);
         }
 
         x = self.norm_f.forward(x);
@@ -134,13 +137,13 @@ impl<B: Backend> Mamba2Layer<B> {
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output [batch, sequence, d_model]
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(&self, x: Tensor<B, 3>, chunk_size: usize) -> Tensor<B, 3> {
         let [batch, sequence, d_model] = x.dims();
 
         let res = x.clone();
         let x = self.norm.forward(x);
 
-        let x = self.mamba_block.forward(x);
+        let x = self.mamba_block.forward(x, chunk_size);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         x + res
