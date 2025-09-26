@@ -44,6 +44,7 @@ You can check an example using those mamba blocks for inference in [here](https:
 - [Samuel Albanie - Mamba - a replacement for Transformers?](https://www.youtube.com/watch?v=ouF-H35atOY).
 - [Umar Jamil - Mamba and S4 Explained: Architecture, Parallel Scan, Kernel Fusion, Recurrent, Convolution, Math](https://www.youtube.com/watch?v=8Q_tqwpTpVU).
 - [Algorithmic Simplicity - Mamba from scratch: Neural nets better and faster than transformers](https://www.youtube.com/watch?v=N6Piou4oYx8).
+- [State Space Duality (Mamba-2)](https://tridao.me/blog/2024/mamba2-part1-model/).
 
 ###### Implementation References
 

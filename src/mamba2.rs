@@ -1,7 +1,7 @@
 //! Utilizes Mamba2Block and other Modules to build a Mamba2 model capable of utilizing the state-spaces/mamba2-130m text prediction models.
 // TODO: merge with Mamba1 by having an enum?
 
-use crate::mamba2_block::{Mamba2Block, Mamba2BlockConfig};
+use crate::mamba2_block::{Mamba2Block, Mamba2BlockCache, Mamba2BlockConfig};
 use burn::{
     nn::{Embedding, EmbeddingConfig, Linear, LinearConfig, RmsNorm, RmsNormConfig},
     prelude::*,
@@ -91,7 +91,8 @@ impl<B: Backend> Mamba2<B> {
 
         let chunk_size = chunk_size.unwrap_or(256);
         for layer in self.layers.iter() {
-            x = layer.forward(x, chunk_size);
+            let (x_, _cache) = layer.forward(x, chunk_size);
+            x = x_;
         }
 
         x = self.norm_f.forward(x);
@@ -136,23 +137,26 @@ impl<B: Backend> Mamba2Layer<B> {
     ///
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
-    ///   - Output [batch, sequence, d_model]
-    pub fn forward(&self, x: Tensor<B, 3>, chunk_size: usize) -> Tensor<B, 3> {
+    ///   - Output.0 [batch, sequence, d_model]
+    pub fn forward(
+        &self,
+        x: Tensor<B, 3>,
+        chunk_size: usize,
+    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
         let res = x.clone();
         let x = self.norm.forward(x);
 
-        let x = self.mamba_block.forward(x, chunk_size);
+        let (x, cache) = self.mamba_block.forward(x, chunk_size);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
-        x + res
+        (x + res, cache)
     }
 }
 
 mod step {
     use super::*;
-    use crate::mamba2_block::step::Mamba2BlockCache;
 
     impl<B: Backend> Mamba2<B> {
         /// See also [`Self::forward`].

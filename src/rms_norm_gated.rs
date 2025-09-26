@@ -5,9 +5,9 @@ use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::DType;
 
-/// Configuration to create a [RMSNormGated](RMSNormGated) layer.
-#[derive(Config)]
-pub struct RMSNormGatedConfig {
+/// Configuration to create a [RmsNormGated](RmsNormGated) layer.
+#[derive(Config, Debug)]
+pub struct RmsNormGatedConfig {
     /// The size of the input features.
     pub d_model: usize,
     /// A value required for numerical stability. Default: 1e-5
@@ -18,14 +18,14 @@ pub struct RMSNormGatedConfig {
     pub norm_before_gate: bool,
 }
 
-impl RMSNormGatedConfig {
-    /// Initialize a new [RMSNormGated](RMSNormGated) module.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> RMSNormGated<B> {
+impl RmsNormGatedConfig {
+    /// Initialize a new [RmsNormGated](RmsNormGated) module.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNormGated<B> {
         assert!(self.epsilon > 0.0, "epsilon must be positive.");
 
         let gamma = Initializer::Ones.init([self.d_model], device);
 
-        RMSNormGated {
+        RmsNormGated {
             gamma,
             epsilon: self.epsilon,
             norm_before_gate: self.norm_before_gate,
@@ -33,7 +33,7 @@ impl RMSNormGatedConfig {
     }
 }
 
-/// Applies Gated RMS Normalization over an input tensor along the last dimension.
+/// Applies Gated Rms Normalization over an input tensor along the last dimension.
 ///
 /// - If `norm_before_gate=true`: `Y = (X / sqrt(mean(X^2) + eps) * gamma) * SiLU(z)`
 /// - If `norm_before_gate=false`: `Y = (X * SiLU(z)) / sqrt(mean((X * SiLU(z))^2) + eps) * gamma`
@@ -46,10 +46,10 @@ impl RMSNormGatedConfig {
 /// - `mean` is the mean operation
 /// - `eps` is a small value to avoid division by zero.
 ///
-/// Should be created using the [RMSNormGatedConfig](RMSNormGatedConfig) configuration.
+/// Should be created using the [RmsNormGatedConfig](RmsNormGatedConfig) configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
-pub struct RMSNormGated<B: Backend> {
+pub struct RmsNormGated<B: Backend> {
     /// The learnable parameter to scale the normalized tensor.
     pub gamma: Param<Tensor<B, 1>>,
     /// A value required for numerical stability.
@@ -58,7 +58,7 @@ pub struct RMSNormGated<B: Backend> {
     pub norm_before_gate: bool,
 }
 
-impl<B: Backend> RMSNormGated<B> {
+impl<B: Backend> RmsNormGated<B> {
     /// Applies the forward pass on the input tensor with gating.
     ///
     /// # Shapes
@@ -91,7 +91,7 @@ impl<B: Backend> RMSNormGated<B> {
     }
 }
 
-impl<B: Backend> ModuleDisplay for RMSNormGated<B> {
+impl<B: Backend> ModuleDisplay for RmsNormGated<B> {
     fn custom_settings(&self) -> Option<DisplaySettings> {
         DisplaySettings::new()
             .with_new_line_after_attribute(false)

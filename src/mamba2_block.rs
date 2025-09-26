@@ -1,4 +1,4 @@
-use crate::rms_norm_gated::{RMSNormGated, RMSNormGatedConfig};
+use crate::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
 use crate::silu::Silu;
 use burn::module::{Module, Param};
 use burn::nn::Initializer;
@@ -33,7 +33,7 @@ pub struct Mamba2Block<B: Backend> {
     pub d: Param<Tensor<B, 1>>,
 
     /// Dims: [`Self::d_inner`].
-    pub norm: RMSNormGated<B>,
+    pub norm: RmsNormGated<B>,
 
     /// Input channel: [`Self::d_inner`].
     /// Output channel: [`Mamba2BlockConfig::d_model`].
@@ -162,7 +162,8 @@ impl Mamba2BlockConfig {
 
         // Convolution
         let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.d_conv)
-            .with_padding(burn::nn::PaddingConfig1d::Explicit(self.d_conv - 1))
+            // the conv's inputs are padded manually for causality, by self.d_conv - 1
+            .with_padding(burn::nn::PaddingConfig1d::Valid)
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
             // follows PyTorch's default initializer
@@ -199,7 +200,7 @@ impl Mamba2BlockConfig {
         let d = Initializer::Ones.init::<B, 1, _>([nheads], device);
 
         // Normalization and output projection
-        let norm = RMSNormGatedConfig::new(d_inner)
+        let norm = RmsNormGatedConfig::new(d_inner)
             .with_epsilon(1e-5)
             .with_norm_before_gate(self.is_norm_before_gate)
             .init(device);
@@ -247,6 +248,35 @@ impl Mamba2BlockConfig {
     }
 }
 
+#[derive(Module, Debug)]
+pub struct Mamba2BlockCache<B: Backend> {
+    /// # Shape
+    /// [batch, conv_dim, d_conv]
+    pub conv: Param<Tensor<B, 3>>,
+    /// # Shape
+    /// [batch, nheads, headdim, d_state]
+    pub ssm: Param<Tensor<B, 4>>,
+}
+
+#[derive(Config, Debug)]
+pub struct Mamba2BlockCacheConfig {
+    pub batch: usize,
+    pub mamba2_block: Mamba2BlockConfig,
+}
+
+impl Mamba2BlockCacheConfig {
+    /// Returns the initialized model.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCache<B> {
+        let config = &self.mamba2_block;
+        let conv = Initializer::Zeros.init([self.batch, config.conv_dim(), config.d_conv], device);
+        let ssm = Initializer::Zeros.init(
+            [self.batch, config.nheads(), config.headdim, config.d_state],
+            device,
+        );
+        Mamba2BlockCache { conv, ssm }
+    }
+}
+
 impl<B: Backend> Mamba2Block<B> {
     /// See also [`Self::step`].
     ///
@@ -254,8 +284,34 @@ impl<B: Backend> Mamba2Block<B> {
     ///
     /// # Shapes
     /// - Input [batch, sequence, d_model]
-    /// - Output [batch, sequence, d_model]
-    pub fn forward(&self, input: Tensor<B, 3>, chunk_size: usize) -> Tensor<B, 3> {
+    /// - Output.0 value [batch, sequence, d_model]
+    pub fn forward(
+        &self,
+        input: Tensor<B, 3>,
+        chunk_size: usize,
+    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
+        let device = &input.device();
+        let [batch, _sequence, _d_model] = input.dims();
+        let [conv_dim, _, d_conv] = self.conv1d.weight.dims();
+        let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
+        let ssm =
+            Initializer::Zeros.init([batch, self.nheads(), self.headdim(), self.d_state], device);
+        self.forward_with_cache(input, Mamba2BlockCache { conv, ssm }, chunk_size)
+    }
+
+    /// See also [`Self::step`].
+    ///
+    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
+    ///
+    /// # Shapes
+    /// - Input [batch, sequence, d_model]
+    /// - Output.0 output [batch, sequence, d_model]
+    pub fn forward_with_cache(
+        &self,
+        input: Tensor<B, 3>,
+        mut cache: Mamba2BlockCache<B>,
+        chunk_size: usize,
+    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
         let [batch, sequence, _d_model] = input.dims();
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
@@ -288,6 +344,15 @@ impl<B: Backend> Mamba2Block<B> {
         // convolution and activation
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
+        // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
+        let t0 = cache.conv.val().narrow(2, 1, d_conv - 1);
+        debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
+        // add the causal pad
+        let xbc = Tensor::cat(vec![t0, xbc], 2);
+        debug_assert_eq!([batch, conv_dim, (d_conv - 1) + sequence], xbc.dims());
+        // get the final state for the causal pad (right-side of pre-xbc)
+        cache.conv = Param::from_tensor(xbc.clone().narrow(2, sequence - 1, d_conv));
+        debug_assert_eq!([batch, conv_dim, d_conv], cache.conv.dims());
         let xbc = self.conv1d.forward(xbc);
         debug_assert_eq!([batch, conv_dim, sequence + d_conv - 1], xbc.dims());
         let xbc = xbc.narrow(2, 0, sequence); // trim padding
@@ -316,8 +381,10 @@ impl<B: Backend> Mamba2Block<B> {
         debug_assert_eq!([nheads], a.dims());
 
         // Perform chunked selective scan
-        let y = self.chunked_selective_scan(x, dt, a, b, c, chunk_size);
+        let (y, final_state) =
+            self.chunked_selective_scan(x, dt, a, b, c, cache.ssm.val(), chunk_size);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
+        cache.ssm = Param::from_tensor(final_state);
 
         // Normalization
         let y = self.norm.forward(y, z);
@@ -326,7 +393,7 @@ impl<B: Backend> Mamba2Block<B> {
         // Output projection
         let out = self.out_proj.forward(y);
         debug_assert_eq!([batch, sequence, _d_model], out.dims());
-        out
+        (out, cache)
     }
 
     /// Performs a chunked selective scan for Mamba2.
@@ -337,7 +404,9 @@ impl<B: Backend> Mamba2Block<B> {
     /// - Input a [nheads]
     /// - Input b [batch, sequence, ngroups * d_state]
     /// - Input c [batch, sequence, ngroups * d_state]
-    /// - Output [batch, sequence, d_inner]
+    /// - Input ssm_initial_state [batch, nheads, headdim, d_state]
+    /// - Output.0 y [batch, sequence, d_inner]
+    /// - Output.1 ssm_final_state [batch, nheads, headdim, d_state]
     pub fn chunked_selective_scan(
         &self,
         x: Tensor<B, 3>,
@@ -345,9 +414,9 @@ impl<B: Backend> Mamba2Block<B> {
         a: Tensor<B, 1>,
         b: Tensor<B, 3>,
         c: Tensor<B, 3>,
+        ssm_initial_state: Tensor<B, 4>,
         chunk_size: usize,
-    ) -> Tensor<B, 3> {
-        let device = &x.device();
+    ) -> (Tensor<B, 3>, Tensor<B, 4>) {
         let [batch, sequence, d_inner] = x.dims();
         let nheads = self.nheads();
         let headdim = self.headdim();
@@ -375,7 +444,8 @@ impl<B: Backend> Mamba2Block<B> {
             .expand([batch, sequence, ngroups, heads_per_group, d_state])
             .reshape([batch, sequence, nheads, d_state]);
 
-        let state: Tensor<B, 4> = Tensor::zeros([batch, nheads, headdim, d_state], device); // cache.ssm shape
+        let state: Tensor<B, 4> = ssm_initial_state; // cache.ssm shape
+        debug_assert_eq!([batch, nheads, headdim, d_state], state.dims());
         let mut y_chunks =
             Vec::with_capacity(num_full_chunks + if remainder_chunk_size == 0 { 0 } else { 1 });
         let mut current_state = state;
@@ -431,7 +501,7 @@ impl<B: Backend> Mamba2Block<B> {
                 .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
                 .reshape([batch, remainder_chunk_size, nheads, d_state]);
 
-            let (y_chunk, _new_state) = scan_chunk(
+            let (y_chunk, new_state) = scan_chunk(
                 x_chunk,
                 dt_chunk,
                 a.clone(),
@@ -444,9 +514,10 @@ impl<B: Backend> Mamba2Block<B> {
                 [batch, remainder_chunk_size, nheads, headdim],
                 y_chunk.dims()
             );
-            debug_assert_eq!([batch, nheads, headdim, d_state], _new_state.dims());
+            debug_assert_eq!([batch, nheads, headdim, d_state], new_state.dims());
 
             y_chunks.push(y_chunk);
+            current_state = new_state;
         }
 
         let y = Tensor::cat(y_chunks, 1);
@@ -466,7 +537,7 @@ impl<B: Backend> Mamba2Block<B> {
             nheads * headdim,
         ]);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
-        y
+        (y, current_state)
     }
 }
 
@@ -533,36 +604,6 @@ fn scan_chunk<B: Backend>(
 
 pub mod step {
     use super::*;
-
-    #[derive(Module, Debug)]
-    pub struct Mamba2BlockCache<B: Backend> {
-        /// # Shape
-        /// [batch, conv_dim, d_conv]
-        pub conv: Param<Tensor<B, 3>>,
-        /// # Shape
-        /// [batch, nheads, headdim, d_state]
-        pub ssm: Param<Tensor<B, 4>>,
-    }
-
-    #[derive(Config, Debug)]
-    pub struct Mamba2BlockCacheConfig {
-        pub batch: usize,
-        pub mamba2_block: Mamba2BlockConfig,
-    }
-
-    impl Mamba2BlockCacheConfig {
-        /// Returns the initialized model.
-        pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCache<B> {
-            let config = &self.mamba2_block;
-            let conv =
-                Initializer::Zeros.init([self.batch, config.conv_dim(), config.d_conv], device);
-            let ssm = Initializer::Zeros.init(
-                [self.batch, config.nheads(), config.headdim, config.d_state],
-                device,
-            );
-            Mamba2BlockCache { conv, ssm }
-        }
-    }
 
     impl<B: Backend> Mamba2Block<B> {
         /// # Shapes
