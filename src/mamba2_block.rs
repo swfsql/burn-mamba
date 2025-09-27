@@ -347,15 +347,13 @@ impl<B: Backend> Mamba2Block<B> {
         // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
         let t0 = cache.conv.val().narrow(2, 1, d_conv - 1);
         debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
-        // add the causal pad
+        // add the causal pad (only left-pad is necessary)
         let xbc = Tensor::cat(vec![t0, xbc], 2);
         debug_assert_eq!([batch, conv_dim, (d_conv - 1) + sequence], xbc.dims());
         // get the final state for the causal pad (right-side of pre-xbc)
-        cache.conv = Param::from_tensor(xbc.clone().narrow(2, sequence - 1, d_conv));
+        cache.conv = cache.conv.map(|_conv| xbc.clone().narrow(2, sequence - 1, d_conv));
         debug_assert_eq!([batch, conv_dim, d_conv], cache.conv.dims());
         let xbc = self.conv1d.forward(xbc);
-        debug_assert_eq!([batch, conv_dim, sequence + d_conv - 1], xbc.dims());
-        let xbc = xbc.narrow(2, 0, sequence); // trim padding
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
@@ -384,7 +382,7 @@ impl<B: Backend> Mamba2Block<B> {
         let (y, final_state) =
             self.chunked_selective_scan(x, dt, a, b, c, cache.ssm.val(), chunk_size);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
-        cache.ssm = Param::from_tensor(final_state);
+        cache.ssm = cache.ssm.map(|_ssm| final_state);
 
         // Normalization
         let y = self.norm.forward(y, z);

@@ -82,7 +82,47 @@ impl<B: Backend> Mamba2<B> {
     /// # Shapes
     ///   - Input [batch, sequence]
     ///   - Output [batch, sequence, d_model]
-    pub fn forward(&self, x: Tensor<B, 2, Int>, chunk_size: Option<usize>) -> Tensor<B, 3> {
+    pub fn forward(
+        &self,
+        x: Tensor<B, 2, Int>,
+        chunk_size: Option<usize>,
+    ) -> (Tensor<B, 3>, Vec<Mamba2BlockCache<B>>) {
+        use burn::nn::Initializer;
+        let device = &x.device();
+        let [batch, _sequence] = x.dims();
+        let layer0_block = &self.layers[0].mamba_block;
+        let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+        let mut caches = Vec::with_capacity(self.layers.len());
+        for _ in 0..self.layers.len() {
+            let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
+            let ssm = Initializer::Zeros.init(
+                [
+                    batch,
+                    layer0_block.nheads(),
+                    layer0_block.headdim(),
+                    layer0_block.d_state,
+                ],
+                device,
+            );
+            let cache = Mamba2BlockCache { conv, ssm };
+            caches.push(cache);
+        }
+        self.forward_with_caches(x, caches, chunk_size)
+    }
+
+    /// See also [`Self::step`].
+    ///
+    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
+    ///
+    /// # Shapes
+    ///   - Input [batch, sequence]
+    ///   - Output [batch, sequence, d_model]
+    pub fn forward_with_caches(
+        &self,
+        x: Tensor<B, 2, Int>,
+        mut caches: Vec<Mamba2BlockCache<B>>,
+        chunk_size: Option<usize>,
+    ) -> (Tensor<B, 3>, Vec<Mamba2BlockCache<B>>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -90,9 +130,10 @@ impl<B: Backend> Mamba2<B> {
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         let chunk_size = chunk_size.unwrap_or(256);
-        for layer in self.layers.iter() {
-            let (x_, _cache) = layer.forward(x, chunk_size);
+        for (i, layer) in self.layers.iter().enumerate() {
+            let (x_, cache_) = layer.forward_with_cache(x, caches[i].clone(), chunk_size);
             x = x_;
+            caches[i] = cache_;
         }
 
         x = self.norm_f.forward(x);
@@ -107,7 +148,7 @@ impl<B: Backend> Mamba2<B> {
         };
         debug_assert_eq!([batch, sequence, padded_vocab], x.dims());
 
-        x
+        (x, caches)
     }
 }
 
@@ -143,12 +184,40 @@ impl<B: Backend> Mamba2Layer<B> {
         x: Tensor<B, 3>,
         chunk_size: usize,
     ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
+        use burn::nn::Initializer;
+        let device = &x.device();
+        let [batch, _sequence, _d_model] = x.dims();
+        let [conv_dim, _, d_conv] = self.mamba_block.conv1d.weight.dims();
+        let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
+        let ssm = Initializer::Zeros.init(
+            [
+                batch,
+                self.mamba_block.nheads(),
+                self.mamba_block.headdim(),
+                self.mamba_block.d_state,
+            ],
+            device,
+        );
+        self.forward_with_cache(x, Mamba2BlockCache { conv, ssm }, chunk_size)
+    }
+
+    /// See also [`Self::step`].
+    ///
+    /// # Shapes
+    ///   - Input [batch, sequence, d_model]
+    ///   - Output.0 [batch, sequence, d_model]
+    pub fn forward_with_cache(
+        &self,
+        x: Tensor<B, 3>,
+        cache: Mamba2BlockCache<B>,
+        chunk_size: usize,
+    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
         let res = x.clone();
         let x = self.norm.forward(x);
 
-        let (x, cache) = self.mamba_block.forward(x, chunk_size);
+        let (x, cache) = self.mamba_block.forward_with_cache(x, cache, chunk_size);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         (x + res, cache)
