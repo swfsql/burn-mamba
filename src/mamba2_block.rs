@@ -252,10 +252,10 @@ impl Mamba2BlockConfig {
 pub struct Mamba2BlockCache<B: Backend> {
     /// # Shape
     /// [batch, conv_dim, d_conv]
-    pub conv: Param<Tensor<B, 3>>,
+    pub conv: Tensor<B, 3>,
     /// # Shape
     /// [batch, nheads, headdim, d_state]
-    pub ssm: Param<Tensor<B, 4>>,
+    pub ssm: Tensor<B, 4>,
 }
 
 #[derive(Config, Debug)]
@@ -268,9 +268,12 @@ impl Mamba2BlockCacheConfig {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCache<B> {
         let config = &self.mamba2_block;
-        let conv = Initializer::Zeros.init([self.batch, config.conv_dim(), config.d_conv], device);
-        let ssm = Initializer::Zeros.init(
-            [self.batch, config.nheads(), config.headdim, config.d_state],
+        let conv = Tensor::zeros(
+            Shape::new([self.batch, config.conv_dim(), config.d_conv]),
+            device,
+        );
+        let ssm = Tensor::zeros(
+            Shape::new([self.batch, config.nheads(), config.headdim, config.d_state]),
             device,
         );
         Mamba2BlockCache { conv, ssm }
@@ -293,9 +296,11 @@ impl<B: Backend> Mamba2Block<B> {
         let device = &input.device();
         let [batch, _sequence, _d_model] = input.dims();
         let [conv_dim, _, d_conv] = self.conv1d.weight.dims();
-        let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
-        let ssm =
-            Initializer::Zeros.init([batch, self.nheads(), self.headdim(), self.d_state], device);
+        let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
+        let ssm = Tensor::zeros(
+            Shape::new([batch, self.nheads(), self.headdim(), self.d_state]),
+            device,
+        );
         self.forward_with_cache(input, Mamba2BlockCache { conv, ssm }, chunk_size)
     }
 
@@ -345,13 +350,13 @@ impl<B: Backend> Mamba2Block<B> {
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
         // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
-        let t0 = cache.conv.val().narrow(2, 1, d_conv - 1);
+        let t0 = cache.conv.narrow(2, 1, d_conv - 1);
         debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
         // add the causal pad (only left-pad is necessary)
         let xbc = Tensor::cat(vec![t0, xbc], 2);
         debug_assert_eq!([batch, conv_dim, (d_conv - 1) + sequence], xbc.dims());
         // get the final state for the causal pad (right-side of pre-xbc)
-        cache.conv = cache.conv.map(|_conv| xbc.clone().narrow(2, sequence - 1, d_conv));
+        cache.conv = xbc.clone().narrow(2, sequence - 1, d_conv);
         debug_assert_eq!([batch, conv_dim, d_conv], cache.conv.dims());
         let xbc = self.conv1d.forward(xbc);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
@@ -379,10 +384,9 @@ impl<B: Backend> Mamba2Block<B> {
         debug_assert_eq!([nheads], a.dims());
 
         // Perform chunked selective scan
-        let (y, final_state) =
-            self.chunked_selective_scan(x, dt, a, b, c, cache.ssm.val(), chunk_size);
+        let (y, final_state) = self.chunked_selective_scan(x, dt, a, b, c, cache.ssm, chunk_size);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
-        cache.ssm = cache.ssm.map(|_ssm| final_state);
+        cache.ssm = final_state;
 
         // Normalization
         let y = self.norm.forward(y, z);
@@ -641,7 +645,8 @@ pub mod step {
             debug_assert_eq!([batch, nheads], dt.dims());
 
             // Convolution step
-            cache.conv = cache.conv.map(|conv| {
+            cache.conv = {
+                let conv = cache.conv;
                 debug_assert_eq!([batch, conv_dim, d_conv], conv.dims());
 
                 // split-off oldest/first column (i.e. rolling leftwards)
@@ -653,7 +658,7 @@ pub mod step {
                 debug_assert_eq!([batch, conv_dim, d_conv], conv.dims());
 
                 conv
-            });
+            };
 
             let xbc = {
                 let conv1d = self.conv1d.weight.val();
@@ -664,7 +669,7 @@ pub mod step {
                 let conv1d = conv1d.expand([batch, conv_dim, d_conv]);
                 debug_assert_eq!([batch, conv_dim, d_conv], conv1d.dims());
 
-                let xbc = cache.conv.val() * conv1d;
+                let xbc = cache.conv.clone() * conv1d;
                 debug_assert_eq!([batch, conv_dim, d_conv], xbc.dims());
                 let mut xbc = xbc.sum_dim(2).squeeze(2);
                 debug_assert_eq!([batch, conv_dim], xbc.dims());
@@ -743,12 +748,12 @@ pub mod step {
             debug_assert_eq!(ssm_shape, c.dims());
 
             // Compute state update: state = state * exp(dt * A) + dt * B * x
-            cache.ssm = cache.ssm.map(|ssm| ssm * dta + dtbx);
+            cache.ssm = cache.ssm * dta + dtbx;
             debug_assert_eq!(ssm_shape, cache.ssm.dims());
 
             // Compute output: y = C * state + D * x
             let y = {
-                let y = cache.ssm.val() * c;
+                let y = cache.ssm.clone() * c;
                 let y = y.sum_dim(3).squeeze(3);
                 debug_assert_eq!([batch, nheads, headdim], y.dims());
 

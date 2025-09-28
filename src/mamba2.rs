@@ -87,21 +87,20 @@ impl<B: Backend> Mamba2<B> {
         x: Tensor<B, 2, Int>,
         chunk_size: Option<usize>,
     ) -> (Tensor<B, 3>, Vec<Mamba2BlockCache<B>>) {
-        use burn::nn::Initializer;
         let device = &x.device();
         let [batch, _sequence] = x.dims();
         let layer0_block = &self.layers[0].mamba_block;
         let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
         let mut caches = Vec::with_capacity(self.layers.len());
         for _ in 0..self.layers.len() {
-            let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
-            let ssm = Initializer::Zeros.init(
-                [
+            let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
+            let ssm = Tensor::zeros(
+                Shape::new([
                     batch,
                     layer0_block.nheads(),
                     layer0_block.headdim(),
                     layer0_block.d_state,
-                ],
+                ]),
                 device,
             );
             let cache = Mamba2BlockCache { conv, ssm };
@@ -184,18 +183,17 @@ impl<B: Backend> Mamba2Layer<B> {
         x: Tensor<B, 3>,
         chunk_size: usize,
     ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
-        use burn::nn::Initializer;
         let device = &x.device();
         let [batch, _sequence, _d_model] = x.dims();
         let [conv_dim, _, d_conv] = self.mamba_block.conv1d.weight.dims();
-        let conv = Initializer::Zeros.init([batch, conv_dim, d_conv], device);
-        let ssm = Initializer::Zeros.init(
-            [
+        let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
+        let ssm = Tensor::zeros(
+            Shape::new([
                 batch,
                 self.mamba_block.nheads(),
                 self.mamba_block.headdim(),
                 self.mamba_block.d_state,
-            ],
+            ]),
             device,
         );
         self.forward_with_cache(x, Mamba2BlockCache { conv, ssm }, chunk_size)
