@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 #![feature(f16)]
 
 #[cfg(feature = "mamba1")]

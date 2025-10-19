@@ -291,6 +291,28 @@ impl Mamba2BlockCacheConfig {
     }
 }
 
+/// Stable segment sum computation for creating the 1-semi-separable mask L = exp(segsum(A_input)).
+///
+/// - x: [..., T] (e.g., A_input per chunk)
+/// - Returns: [..., T, T] where out[..., i, j] = sum_{k=j+1 to i} x[..., k] for i >= j, -inf otherwise.
+///
+/// This avoids numerical instability by using masked differences of cumsums.
+fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
+    let x_cumsum = x.cumsum(D - 1);
+
+    let x_cumsum_u = x_cumsum.clone().unsqueeze_dim(D);
+    let x_cumsum_v = x_cumsum.unsqueeze_dim(D - 1);
+
+    let diff = x_cumsum_u - x_cumsum_v;
+
+    let neg_inf = Tensor::full_like(&diff, f32::NEG_INFINITY);
+    let upper_mask = neg_inf.triu(1);
+
+    let x_segsum = diff + upper_mask;
+
+    x_segsum
+}
+
 impl<B: Backend> Mamba2Block<B> {
     /// See also [`Self::step`].
     ///
@@ -332,6 +354,7 @@ impl<B: Backend> Mamba2Block<B> {
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
         let nheads = self.nheads();
+        let headdim = self.headdim();
         let conv_dim = self.conv_dim();
         let d_state = self.d_state;
         let [_conv_dim, _, d_conv] = self.conv1d.weight.dims();
@@ -394,10 +417,28 @@ impl<B: Backend> Mamba2Block<B> {
         let a = -self.a_log.val().exp(); // (scalar per head for Ā = exp(Δ A))
         debug_assert_eq!([nheads], a.dims());
 
+        // reshapes
+        let x = x.reshape([batch, sequence, nheads, headdim]);
+        let b = b.reshape([batch, sequence, ngroups, d_state]);
+        let c = c.reshape([batch, sequence, ngroups, d_state]);
+
         // Perform chunked selective scan
-        let (y, final_state) = self.chunked_selective_scan(x, dt, a, b, c, cache.ssm, chunk_size);
-        debug_assert_eq!([batch, sequence, d_inner], y.dims());
+        let (y, final_state) =
+            self.chunked_selective_scan(x.clone(), dt, a, b, c, cache.ssm, chunk_size);
+        debug_assert_eq!([batch, sequence, nheads, headdim], y.dims());
+        // debug_assert_eq!([batch, sequence, d_inner], y.dims());
         cache.ssm = final_state; // update cache.ssm with final state h_L
+
+        // Add D skip
+        let d = self
+            .d
+            .val()
+            .unsqueeze_dims::<4>(&[0, 0, 3])
+            .expand([batch, sequence, nheads, 1]);
+        let x_reshaped = x.reshape([batch, sequence, nheads, headdim]);
+        let y = y + d * x_reshaped;
+        let y = y.reshape([batch, sequence, d_inner]);
+        debug_assert_eq!([batch, sequence, d_inner], y.dims());
 
         // Normalization
         let y = self.norm.forward(y, z);
@@ -409,219 +450,315 @@ impl<B: Backend> Mamba2Block<B> {
         (out, cache)
     }
 
-    /// Performs a chunked selective scan for Mamba2.
+    /// Performs a chunked selective scan for Mamba2 using semi-separable decomposition.
     ///
     /// # Shapes
-    /// - Input x [batch, sequence, d_inner]
+    /// - Input x [batch, sequence, nheads, headdim]
     /// - Input dt Δ [batch, sequence, nheads]
     /// - Input A [nheads]
-    /// - Input B [batch, sequence, ngroups * d_state]
-    /// - Input C [batch, sequence, ngroups * d_state]
+    /// - Input B [batch, sequence, ngroups, d_state]
+    /// - Input C [batch, sequence, ngroups, d_state]
     /// - Input ssm_initial_state h₀ [batch, nheads, headdim, d_state]
-    /// - Output.0 y [batch, sequence, d_inner]
+    /// - Output.0 y [batch, sequence, nheads, headdim]
     /// - Output.1 ssm_final_state h_L [batch, nheads, headdim, d_state]
     pub fn chunked_selective_scan(
         &self,
-        x: Tensor<B, 3>,
+        x: Tensor<B, 4>,
         dt: Tensor<B, 3>,
         a: Tensor<B, 1>,
-        b: Tensor<B, 3>,
-        c: Tensor<B, 3>,
+        b: Tensor<B, 4>,
+        c: Tensor<B, 4>,
         ssm_initial_state: Tensor<B, 4>,
         chunk_size: usize,
-    ) -> (Tensor<B, 3>, Tensor<B, 4>) {
-        let [batch, sequence, d_inner] = x.dims();
-        let nheads = self.nheads();
-        let headdim = self.headdim();
+    ) -> (Tensor<B, 4>, Tensor<B, 4>) {
+        let [batch, sequence, nheads, headdim] = x.dims();
         let ngroups = self.ngroups;
         let d_state = self.d_state;
+        let d_inner = nheads * headdim;
+        let device = x.device();
+
+        assert!(sequence >= 1);
+
         let num_full_chunks = sequence / chunk_size;
         let remainder_chunk_size = sequence % chunk_size;
         let sequence_full_chunks = num_full_chunks * chunk_size;
         debug_assert_eq!(sequence, sequence_full_chunks + remainder_chunk_size);
         debug_assert_eq!(d_inner, nheads * headdim);
 
-        // reshapes
-        let x = x.reshape([batch, sequence, nheads, headdim]);
-        let b = b.reshape([batch, sequence, ngroups, d_state]);
-        let c = c.reshape([batch, sequence, ngroups, d_state]);
-
         // expand B and C to per-head
         let heads_per_group = nheads / ngroups;
-        let b = b
+        let b_per_head = b
+            .clone()
             .unsqueeze_dim::<5>(3)
             .expand([batch, sequence, ngroups, heads_per_group, d_state])
             .reshape([batch, sequence, nheads, d_state]);
-        let c = c
+        let c_per_head = c
+            .clone()
             .unsqueeze_dim::<5>(3)
             .expand([batch, sequence, ngroups, heads_per_group, d_state])
             .reshape([batch, sequence, nheads, d_state]);
 
-        let state: Tensor<B, 4> = ssm_initial_state; // cache.ssm shape
-        debug_assert_eq!([batch, nheads, headdim, d_state], state.dims());
-        let mut y_chunks =
-            Vec::with_capacity(num_full_chunks + if remainder_chunk_size == 0 { 0 } else { 1 });
-        let mut current_state = state;
-        for chunk in 0..num_full_chunks {
-            let x_chunk = x
-                .clone()
-                .narrow(1, chunk * chunk_size, chunk_size)
-                .reshape([batch, chunk_size, nheads, headdim]);
-            let dt_chunk = dt
-                .clone()
-                .narrow(1, chunk * chunk_size, chunk_size)
-                .reshape([batch, chunk_size, nheads]);
-            let b_chunk = b
-                .clone()
-                .narrow(1, chunk * chunk_size, chunk_size)
-                .reshape([batch, chunk_size, nheads, d_state]);
-            let c_chunk = c
-                .clone()
-                .narrow(1, chunk * chunk_size, chunk_size)
-                .reshape([batch, chunk_size, nheads, d_state]);
+        // B̄ = Δ B
+        let delta_b = dt.clone().unsqueeze_dim(3) * b_per_head.clone();
+        debug_assert_eq!([batch, sequence, nheads, d_state], delta_b.dims());
 
-            let (y_chunk, new_state) = scan_chunk(
-                x_chunk,
-                dt_chunk,
-                a.clone(),
-                b_chunk,
-                c_chunk,
-                self.d.val(),
-                current_state,
+        // A_input = Δ A
+        let a_input = a
+            .clone()
+            .unsqueeze_dims::<3>(&[0, 1])
+            .expand([batch, sequence, nheads]);
+        let a_input = dt.clone() * a_input;
+
+        let (y, final_state) = if num_full_chunks > 0 {
+            let x_full = x.clone().narrow(1, 0, sequence_full_chunks);
+            let a_input_full = a_input.narrow(1, 0, sequence_full_chunks);
+            let b_full = delta_b.narrow(1, 0, sequence_full_chunks);
+            let c_full = c_per_head.clone().narrow(1, 0, sequence_full_chunks);
+
+            // Rearrange into chunks
+            let x_chunk = x_full.reshape([batch, num_full_chunks, chunk_size, nheads, headdim]);
+            let a_chunk = a_input_full.reshape([batch, num_full_chunks, chunk_size, nheads]);
+            let b_chunk = b_full.reshape([batch, num_full_chunks, chunk_size, nheads, d_state]);
+            let c_chunk = c_full.reshape([batch, num_full_chunks, chunk_size, nheads, d_state]);
+
+            let a_chunk = a_chunk.permute([0, 3, 1, 2]);
+            assert_eq!([batch, nheads, num_full_chunks, chunk_size], a_chunk.dims());
+            let a_cumsum = a_chunk.clone().cumsum(3);
+
+            let batch_chunk_head = batch * num_full_chunks * nheads;
+
+            // reference annotations are usually as:
+            // - b == batch
+            // - c == num_full_chunks
+            // - h == nheads
+            // - l == chunk_size
+            // - n == d_state
+            // - p == headdim
+            // - z == 1 + num_full_chunks
+
+            // Step 1: Intra-chunk outputs (Y_diag)
+            let y_diag = {
+                let l = segsum(a_chunk.clone()).exp();
+                assert_eq!(
+                    [batch, nheads, num_full_chunks, chunk_size, chunk_size],
+                    l.dims()
+                );
+                let b_chunk = b_chunk.clone().swap_dims(2, 3);
+                let c_chunk = c_chunk.clone().swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, d_state],
+                    b_chunk.dims()
+                );
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, d_state],
+                    c_chunk.dims()
+                );
+                let b_re = b_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
+                let c_re = c_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
+                let cb = c_re.matmul(b_re.transpose());
+                assert_eq!([batch_chunk_head, chunk_size, chunk_size], cb.dims());
+                let l_re = l
+                    .permute([0, 2, 1, 3, 4]) // [batch, num_full_chunks, nheads, chunk_size, chunk_size]
+                    .reshape([batch_chunk_head, chunk_size, chunk_size]);
+                let m = l_re * cb;
+                let x_re = x_chunk.clone().swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, headdim],
+                    x_re.dims()
+                );
+                let x_re = x_re.reshape([batch_chunk_head, chunk_size, headdim]);
+                let y_diag = m.matmul(x_re);
+                assert_eq!([batch_chunk_head, chunk_size, headdim], y_diag.dims());
+                let y_diag = y_diag.reshape([batch, num_full_chunks, nheads, chunk_size, headdim]);
+                let y_diag = y_diag.swap_dims(2, 3);
+                y_diag
+            };
+            assert_eq!(
+                [batch, num_full_chunks, chunk_size, nheads, headdim],
+                y_diag.dims()
             );
-            debug_assert_eq!([batch, chunk_size, nheads, headdim], y_chunk.dims());
-            debug_assert_eq!([batch, nheads, headdim, d_state], new_state.dims());
 
-            y_chunks.push(y_chunk);
-            current_state = new_state;
-        }
-
-        if remainder_chunk_size != 0 {
-            let x_chunk = x
-                .clone()
-                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
-                .reshape([batch, remainder_chunk_size, nheads, headdim]);
-            let dt_chunk = dt
-                .clone()
-                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
-                .reshape([batch, remainder_chunk_size, nheads]);
-            let b_chunk = b
-                .clone()
-                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
-                .reshape([batch, remainder_chunk_size, nheads, d_state]);
-            let c_chunk = c
-                .clone()
-                .narrow(1, num_full_chunks * chunk_size, remainder_chunk_size)
-                .reshape([batch, remainder_chunk_size, nheads, d_state]);
-
-            let (y_chunk, new_state) = scan_chunk(
-                x_chunk,
-                dt_chunk,
-                a.clone(),
-                b_chunk,
-                c_chunk,
-                self.d.val(),
-                current_state,
+            // Step 2: Intra-chunk states
+            let states = {
+                let last_a_cumsum_index =
+                    Tensor::<B, 1, Int>::from_data([chunk_size as i32 - 1], &device);
+                let decay_states =
+                    (a_cumsum.clone().select(3, last_a_cumsum_index) - a_cumsum.clone()).exp();
+                assert_eq!(
+                    [batch, nheads, num_full_chunks, chunk_size],
+                    decay_states.dims()
+                );
+                let decay_states = decay_states.swap_dims(1, 2);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size],
+                    decay_states.dims()
+                );
+                let decay_re = decay_states
+                    .reshape([batch_chunk_head, chunk_size])
+                    .unsqueeze_dim(2);
+                assert_eq!([batch_chunk_head, chunk_size, 1], decay_re.dims());
+                let b_chunk = b_chunk.swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, d_state],
+                    b_chunk.dims()
+                );
+                let b_re = b_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
+                let temp = decay_re * b_re;
+                let x_re = x_chunk.swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, headdim],
+                    x_re.dims()
+                );
+                let x_re = x_re.reshape([batch_chunk_head, chunk_size, headdim]);
+                let states = x_re.transpose().matmul(temp);
+                assert_eq!([batch_chunk_head, headdim, d_state], states.dims());
+                let states = states.reshape([batch, num_full_chunks, nheads, headdim, d_state]);
+                states
+            };
+            assert_eq!(
+                [batch, num_full_chunks, nheads, headdim, d_state],
+                states.dims()
             );
-            debug_assert_eq!(
-                [batch, remainder_chunk_size, nheads, headdim],
-                y_chunk.dims()
+
+            // Step 3: Inter-chunk state passing
+            let (states, final_state) = {
+                // [batch, nheads, headdim, d_state]
+                let initial_states = ssm_initial_state.unsqueeze_dim(1);
+                assert_eq!([batch, 1, nheads, headdim, d_state], initial_states.dims());
+                let states = Tensor::cat(vec![initial_states, states], 1);
+                assert_eq!(
+                    [batch, 1 + num_full_chunks, nheads, headdim, d_state],
+                    states.dims()
+                );
+                let a_chunk_ends_index =
+                    Tensor::<B, 1, Int>::from_data([chunk_size as i32 - 1], &device);
+                let a_chunk_ends = a_cumsum
+                    .clone()
+                    .select(3, a_chunk_ends_index)
+                    .squeeze_dim(3);
+                assert_eq!([batch, nheads, num_full_chunks], a_chunk_ends.dims());
+                let a_chunk_pad = Tensor::cat(
+                    vec![
+                        Tensor::zeros(Shape::new([batch, nheads, 1]), &device),
+                        a_chunk_ends,
+                    ],
+                    2,
+                );
+                assert_eq!([batch, nheads, 1 + num_full_chunks], a_chunk_pad.dims());
+                let decay_chunk = segsum(a_chunk_pad).exp();
+                assert_eq!(
+                    [batch, nheads, 1 + num_full_chunks, 1 + num_full_chunks],
+                    decay_chunk.dims()
+                );
+                let decay_re =
+                    decay_chunk.reshape([batch * nheads, 1 + num_full_chunks, 1 + num_full_chunks]);
+                let states = states.swap_dims(1, 2);
+                assert_eq!(
+                    [batch, nheads, 1 + num_full_chunks, headdim, d_state],
+                    states.dims()
+                );
+                let states_re =
+                    states.reshape([batch * nheads, 1 + num_full_chunks, headdim * d_state]);
+                let temp = decay_re.matmul(states_re);
+                assert_eq!(
+                    [batch * nheads, 1 + num_full_chunks, headdim * d_state],
+                    temp.dims()
+                );
+                let temp = temp.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]);
+                let new_states = temp.swap_dims(1, 2);
+                assert_eq!(
+                    [batch, 1 + num_full_chunks, nheads, headdim, d_state],
+                    new_states.dims()
+                );
+                let new_states =
+                    new_states.reshape([batch, num_full_chunks + 1, nheads, headdim, d_state]);
+                let split = new_states.split_with_sizes(vec![num_full_chunks, 1], 1);
+                let states = split[0].clone();
+                let final_state = split[1].clone();
+                (states, final_state.squeeze_dim(1))
+            };
+            assert_eq!(
+                [batch, num_full_chunks, nheads, headdim, d_state],
+                states.dims()
             );
-            debug_assert_eq!([batch, nheads, headdim, d_state], new_state.dims());
+            assert_eq!([batch, nheads, headdim, d_state], final_state.dims());
 
-            y_chunks.push(y_chunk);
-            current_state = new_state;
-        }
+            // Step 4: Inter-chunk outputs (Y_off)
+            let y_off = {
+                let state_decay_out = a_cumsum.exp();
+                assert_eq!(
+                    [batch, nheads, num_full_chunks, chunk_size],
+                    state_decay_out.dims()
+                );
+                let c_chunk = c_chunk.swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, d_state],
+                    c_chunk.dims()
+                );
+                let c_re = c_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
+                let states_re = states.reshape([batch_chunk_head, headdim, d_state]);
+                let temp = c_re.matmul(states_re.transpose());
+                assert_eq!([batch_chunk_head, chunk_size, headdim], temp.dims());
+                let state_decay_out = state_decay_out.swap_dims(1, 2);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size],
+                    state_decay_out.dims()
+                );
+                let state_decay_re = state_decay_out
+                    .reshape([batch_chunk_head, chunk_size])
+                    .unsqueeze_dim(2);
+                assert_eq!([batch_chunk_head, chunk_size, 1], state_decay_re.dims());
+                let y_off = state_decay_re * temp;
+                let y_off = y_off.reshape([batch, num_full_chunks, nheads, chunk_size, headdim]);
+                let y_off = y_off.swap_dims(2, 3);
+                y_off
+            };
+            assert_eq!(
+                [batch, num_full_chunks, chunk_size, nheads, headdim],
+                y_off.dims()
+            );
 
-        let y = Tensor::cat(y_chunks, 1);
-        debug_assert_eq!(
-            [
-                batch,
-                num_full_chunks * chunk_size + remainder_chunk_size,
-                nheads,
-                headdim
-            ],
-            y.dims()
-        );
+            // Combine intra and inter-chunk
+            let y_full_combined = y_diag + y_off;
+            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);
 
-        let y = y.reshape([
-            batch,
-            num_full_chunks * chunk_size + remainder_chunk_size,
-            nheads * headdim,
-        ]);
-        debug_assert_eq!([batch, sequence, d_inner], y.dims());
-        (y, current_state)
+            if remainder_chunk_size > 0 {
+                // some full chunks + remainder
+                let x_rem = x.narrow(1, sequence_full_chunks, remainder_chunk_size);
+                let dt_rem = dt.narrow(1, sequence_full_chunks, remainder_chunk_size);
+                let b_rem = b.narrow(1, sequence_full_chunks, remainder_chunk_size);
+                let c_rem = c.narrow(1, sequence_full_chunks, remainder_chunk_size);
+                // recursively calls chunked_selective_scan with a single chunk_size == remainder
+                let (y_rem, final_state) = self.chunked_selective_scan(
+                    x_rem,
+                    dt_rem,
+                    a,
+                    b_rem,
+                    c_rem,
+                    final_state,
+                    remainder_chunk_size,
+                );
+                (Tensor::cat(vec![y_full, y_rem], 1), final_state)
+            } else {
+                // some full chunks and no remainer
+                (y_full, final_state)
+            }
+        } else {
+            // no full chunks and implied remainder
+            // recursively calls chunked_selective_scan with a single chunk_size == remainder
+            let (y_rem, final_state) = self.chunked_selective_scan(
+                x,
+                dt,
+                a,
+                b,
+                c,
+                ssm_initial_state,
+                remainder_chunk_size,
+            );
+            (y_rem, final_state)
+        };
+        (y, final_state)
     }
-}
-
-/// Performs a selective scan over a single chunk for Mamba2.
-///
-/// Computes hₜ and yₜ for each t in chunk.
-///
-/// # Shapes
-/// - Input `x_chunk`: x [batch, chunk_size, nheads, headdim]
-/// - Input `dt_chunk`: Δ [batch, chunk_size, nheads]
-/// - Input `a`: A [nheads]
-/// - Input `b_chunk`: B [batch, chunk_size, nheads, d_state]
-/// - Input `c_chunk`: C [batch, chunk_size, nheads, d_state]
-/// - Input `d`: D [nheads]
-/// - Input `current_state`: hₜ₋₁ [batch, nheads, headdim, d_state]
-/// - Output.0 `y`: y [batch, chunk_size, nheads, headdim]
-/// - Output.1 `final_state`: h_L [batch, nheads, headdim, d_state]
-fn scan_chunk<B: Backend>(
-    x_chunk: Tensor<B, 4>,
-    dt_chunk: Tensor<B, 3>,
-    a: Tensor<B, 1>,
-    b_chunk: Tensor<B, 4>,
-    c_chunk: Tensor<B, 4>,
-    d: Tensor<B, 1>,
-    current_state: Tensor<B, 4>,
-) -> (Tensor<B, 4>, Tensor<B, 4>) {
-    let [batch, chunk_size, nheads, headdim] = x_chunk.dims();
-    let [_batch, _chunk_size, _nheads, d_state] = b_chunk.dims();
-
-    let mut state = current_state;
-    let mut y_list = Vec::with_capacity(chunk_size);
-    for t in 0..chunk_size {
-        let x_t = x_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // xₜ
-        let dt_t = dt_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Δₜ
-        let b_t = b_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Bₜ
-        let c_t = c_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Cₜ
-        debug_assert_eq!([batch, nheads, headdim], x_t.dims());
-        debug_assert_eq!([batch, nheads], dt_t.dims());
-        debug_assert_eq!([batch, nheads, d_state], b_t.dims());
-        debug_assert_eq!([batch, nheads, d_state], c_t.dims());
-
-        // Āₜ = exp(Δₜ A)
-        let delta_a = (dt_t.clone() * a.clone().unsqueeze())
-            .exp()
-            .unsqueeze_dims(&[2, 3]);
-        // B̄ₜ xₜ = Δₜ Bₜ xₜ
-        let delta_bu =
-            (dt_t.unsqueeze_dim(2) * b_t).unsqueeze_dim(2) * x_t.clone().unsqueeze_dim(3);
-        debug_assert_eq!([batch, nheads, 1, 1], delta_a.dims());
-        debug_assert_eq!([batch, nheads, headdim, d_state], delta_bu.dims());
-
-        // hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ
-        state = state * delta_a + delta_bu;
-        debug_assert_eq!([batch, nheads, headdim, d_state], state.dims());
-
-        // yₜ = Cₜ hₜ (matrix-vector product over d_state, without the skip)
-        let y_t = (state.clone() * c_t.unsqueeze_dim(2))
-            .sum_dim(3)
-            .squeeze_dim(3);
-        debug_assert_eq!([batch, nheads, headdim], y_t.dims());
-        // yₜ += D xₜ
-        let y_t = y_t + d.clone().unsqueeze_dims(&[0, 2]) * x_t;
-        debug_assert_eq!([batch, nheads, headdim], y_t.dims());
-        y_list.push(y_t);
-    }
-    debug_assert_eq!([batch, nheads, headdim, d_state], state.dims());
-
-    let y_chunk = Tensor::stack(y_list, 1);
-    debug_assert_eq!([batch, chunk_size, nheads, headdim], y_chunk.dims());
-
-    (y_chunk, state)
 }
 
 pub mod step {
