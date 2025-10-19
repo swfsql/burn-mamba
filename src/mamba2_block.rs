@@ -121,7 +121,7 @@ pub struct Mamba2BlockConfig {
     pub dt_min: f64,
 
     /// Maximum dt value.
-    #[config(default = 1e-1)]
+    #[config(default = 0.1)]
     pub dt_max: f64,
 
     /// Floor for dt initialization.
@@ -583,10 +583,10 @@ fn scan_chunk<B: Backend>(
     let mut state = current_state;
     let mut y_list = Vec::with_capacity(chunk_size);
     for t in 0..chunk_size {
-        let x_t = x_chunk.clone().narrow(1, t, 1).squeeze(1); // xₜ
-        let dt_t = dt_chunk.clone().narrow(1, t, 1).squeeze(1); // Δₜ
-        let b_t = b_chunk.clone().narrow(1, t, 1).squeeze(1); // Bₜ
-        let c_t = c_chunk.clone().narrow(1, t, 1).squeeze(1); // Cₜ
+        let x_t = x_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // xₜ
+        let dt_t = dt_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Δₜ
+        let b_t = b_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Bₜ
+        let c_t = c_chunk.clone().narrow(1, t, 1).squeeze_dim(1); // Cₜ
         debug_assert_eq!([batch, nheads, headdim], x_t.dims());
         debug_assert_eq!([batch, nheads], dt_t.dims());
         debug_assert_eq!([batch, nheads, d_state], b_t.dims());
@@ -607,7 +607,9 @@ fn scan_chunk<B: Backend>(
         debug_assert_eq!([batch, nheads, headdim, d_state], state.dims());
 
         // yₜ = Cₜ hₜ (matrix-vector product over d_state, without the skip)
-        let y_t = (state.clone() * c_t.unsqueeze_dim(2)).sum_dim(3).squeeze(3);
+        let y_t = (state.clone() * c_t.unsqueeze_dim(2))
+            .sum_dim(3)
+            .squeeze_dim(3);
         debug_assert_eq!([batch, nheads, headdim], y_t.dims());
         // yₜ += D xₜ
         let y_t = y_t + d.clone().unsqueeze_dims(&[0, 2]) * x_t;
@@ -689,7 +691,7 @@ pub mod step {
 
                 let xbc = cache.conv.clone() * conv1d;
                 debug_assert_eq!([batch, conv_dim, d_conv], xbc.dims());
-                let mut xbc = xbc.sum_dim(2).squeeze(2);
+                let mut xbc = xbc.sum_dim(2).squeeze_dim(2);
                 debug_assert_eq!([batch, conv_dim], xbc.dims());
                 if let Some(bias) = &self.conv1d.bias {
                     debug_assert_eq!([conv_dim], bias.dims());
@@ -776,7 +778,7 @@ pub mod step {
             let y = {
                 // yₜ = Cₜ hₜ (matrix-vector product, without the skip)
                 let y = cache.ssm.clone() * c;
-                let y = y.sum_dim(3).squeeze(3);
+                let y = y.sum_dim(3).squeeze_dim(3);
                 debug_assert_eq!([batch, nheads, headdim], y.dims());
 
                 // yₜ += D xₜ

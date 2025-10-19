@@ -382,17 +382,17 @@ impl<B: Backend> Mamba1Block<B> {
             .zip(delta_bu.into_iter())
             .zip(c.into_iter())
         {
-            let delta_a = delta_a.squeeze(0);
+            let delta_a = delta_a.squeeze_dim(0);
             debug_assert_eq!(inner_shape, delta_a.dims());
-            let delta_bu = delta_bu.squeeze(0);
+            let delta_bu = delta_bu.squeeze_dim(0);
             debug_assert_eq!(inner_shape, delta_bu.dims());
-            let c = c.squeeze(0);
+            let c = c.squeeze_dim(0);
             debug_assert_eq!([batch, d_state, 1], c.dims());
 
             xs = (xs.clone() * delta_a) + delta_bu;
             let y = xs.clone().matmul(c);
             debug_assert_eq!([batch, d_inner, 1], y.dims());
-            let y = y.squeeze(2);
+            let y = y.squeeze_dim(2);
             debug_assert_eq!([batch, d_inner], y.dims());
             ys.push(y);
         }
@@ -490,7 +490,7 @@ pub mod step {
                 let xs = cache.conv.val() * conv1d;
                 let xs = xs.sum_dim(2);
                 debug_assert_eq!([batch, d_inner, 1], xs.dims());
-                let xs = xs.squeeze(2);
+                let xs = xs.squeeze_dim(2);
                 debug_assert_eq!([batch, d_inner], xs.dims());
 
                 // conv1d bias
@@ -637,7 +637,7 @@ pub mod step {
 
             let y = cache.ssm.val().matmul(c);
             debug_assert_eq!([batch, d_inner, 1], y.dims());
-            let y = y.squeeze(2);
+            let y = y.squeeze_dim(2);
             debug_assert_eq!([batch, d_inner], y.dims());
 
             let d = d.unsqueeze();

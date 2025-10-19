@@ -244,7 +244,7 @@ mod step {
 
             let x = self.embedding.forward(x);
             debug_assert_eq!([batch, 1, d_model], x.dims());
-            let mut x = x.squeeze(1);
+            let mut x = x.squeeze_dim(1);
             debug_assert_eq!([batch, d_model], x.dims());
 
             for (i, layer) in self.layers.iter().enumerate() {
