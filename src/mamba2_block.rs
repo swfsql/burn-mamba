@@ -291,20 +291,6 @@ impl Mamba2BlockCacheConfig {
     }
 }
 
-fn naive_cumsum<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize) -> Tensor<B, D> {
-    let last_dim: usize = D - 1;
-    let x = x.swap_dims(dim, last_dim);
-    let mut acc = x.zeros_like().narrow(last_dim, 0, 1);
-    let dim_len = x.shape().num_elements() / acc.shape().num_elements();
-    let mut res = Vec::with_capacity(dim_len);
-    let split = x.split(1, last_dim);
-    for current in split {
-        acc = acc + current;
-        res.push(acc.clone());
-    }
-    Tensor::cat(res, last_dim).swap_dims(dim, last_dim)
-}
-
 /// Stable segment sum computation for creating the 1-semi-separable mask L = exp(segsum(A_input)).
 ///
 /// - x: [..., T] (e.g., A_input per chunk)
@@ -312,8 +298,7 @@ fn naive_cumsum<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize) -> Tens
 ///
 /// This avoids numerical instability by using masked differences of cumsums.
 fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
-    let x_cumsum = naive_cumsum::<B, D>(x, D - 1);
-    // let x_cumsum = x.cumsum(D - 1);
+    let x_cumsum = x.cumsum(D - 1);
 
     let x_cumsum_u = x_cumsum.clone().unsqueeze_dim(D);
     let x_cumsum_v = x_cumsum.unsqueeze_dim(D - 1);
@@ -537,8 +522,7 @@ impl<B: Backend> Mamba2Block<B> {
 
             let a_chunk = a_chunk.permute([0, 3, 1, 2]);
             assert_eq!([batch, nheads, num_full_chunks, chunk_size], a_chunk.dims());
-            // let a_cumsum = a_chunk.clone().cumsum(3);
-            let a_cumsum = naive_cumsum::<B, 4>(a_chunk.clone(), 3);
+            let a_cumsum = a_chunk.clone().cumsum(3);
 
             // reference annotations are usually as:
             // - b == batch
