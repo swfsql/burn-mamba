@@ -291,6 +291,20 @@ impl Mamba2BlockCacheConfig {
     }
 }
 
+fn naive_cumsum<B: Backend, const D: usize>(x: Tensor<B, D>, dim: usize) -> Tensor<B, D> {
+    let last_dim: usize = D - 1;
+    let x = x.swap_dims(dim, last_dim);
+    let mut acc = x.zeros_like().narrow(last_dim, 0, 1);
+    let dim_len = x.shape().num_elements() / acc.shape().num_elements();
+    let mut res = Vec::with_capacity(dim_len);
+    let split = x.split(1, last_dim);
+    for current in split {
+        acc = acc + current;
+        res.push(acc.clone());
+    }
+    Tensor::cat(res, last_dim).swap_dims(dim, last_dim)
+}
+
 /// Stable segment sum computation for creating the 1-semi-separable mask L = exp(segsum(A_input)).
 ///
 /// - x: [..., T] (e.g., A_input per chunk)
@@ -298,11 +312,11 @@ impl Mamba2BlockCacheConfig {
 ///
 /// This avoids numerical instability by using masked differences of cumsums.
 fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
-    let x_cumsum = x.cumsum(D - 1);
+    let x_cumsum = naive_cumsum::<B, D>(x, D - 1);
+    // let x_cumsum = x.cumsum(D - 1);
 
     let x_cumsum_u = x_cumsum.clone().unsqueeze_dim(D);
     let x_cumsum_v = x_cumsum.unsqueeze_dim(D - 1);
-
     let diff = x_cumsum_u - x_cumsum_v;
 
     let neg_inf = Tensor::full_like(&diff, f32::NEG_INFINITY);
@@ -523,26 +537,21 @@ impl<B: Backend> Mamba2Block<B> {
 
             let a_chunk = a_chunk.permute([0, 3, 1, 2]);
             assert_eq!([batch, nheads, num_full_chunks, chunk_size], a_chunk.dims());
-            let a_cumsum = a_chunk.clone().cumsum(3);
-
-            let batch_chunk_head = batch * num_full_chunks * nheads;
+            // let a_cumsum = a_chunk.clone().cumsum(3);
+            let a_cumsum = naive_cumsum::<B, 4>(a_chunk.clone(), 3);
 
             // reference annotations are usually as:
             // - b == batch
             // - c == num_full_chunks
             // - h == nheads
-            // - l == chunk_size
+            // - l/s == chunk_size
             // - n == d_state
             // - p == headdim
             // - z == 1 + num_full_chunks
 
-            // Step 1: Intra-chunk outputs (Y_diag)
+            // Step 1: Intra-chunk outputs: Y_diag = ∑_d_state ∑_chunk_size C B L X
             let y_diag = {
-                let l = segsum(a_chunk.clone()).exp();
-                assert_eq!(
-                    [batch, nheads, num_full_chunks, chunk_size, chunk_size],
-                    l.dims()
-                );
+                // contract C and B over d_state
                 let b_chunk = b_chunk.clone().swap_dims(2, 3);
                 let c_chunk = c_chunk.clone().swap_dims(2, 3);
                 assert_eq!(
@@ -553,66 +562,82 @@ impl<B: Backend> Mamba2Block<B> {
                     [batch, num_full_chunks, nheads, chunk_size, d_state],
                     c_chunk.dims()
                 );
-                let b_re = b_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
-                let c_re = c_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
-                let cb = c_re.matmul(b_re.transpose());
-                assert_eq!([batch_chunk_head, chunk_size, chunk_size], cb.dims());
-                let l_re = l
-                    .permute([0, 2, 1, 3, 4]) // [batch, num_full_chunks, nheads, chunk_size, chunk_size]
-                    .reshape([batch_chunk_head, chunk_size, chunk_size]);
-                let m = l_re * cb;
-                let x_re = x_chunk.clone().swap_dims(2, 3);
+                let temp1 = c_chunk.matmul(b_chunk.transpose());
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, chunk_size],
+                    temp1.dims()
+                );
+                let temp1 = temp1.swap_dims(2, 3);
+                assert_eq!(
+                    [batch, num_full_chunks, chunk_size, nheads, chunk_size],
+                    temp1.dims()
+                );
+                // element-wise multiplication with permuted L
+                let l = segsum(a_chunk.clone()).exp();
+                assert_eq!(
+                    [batch, nheads, num_full_chunks, chunk_size, chunk_size],
+                    l.dims()
+                );
+                let l = l.permute([0, 2, 3, 1, 4]);
+                let temp2 = temp1 * l;
+                assert_eq!(
+                    [batch, num_full_chunks, chunk_size, nheads, chunk_size],
+                    temp2.dims()
+                );
+                // final contraction over last chunk_size via batched matmul with X
+                let temp2 = temp2.permute([0, 1, 3, 2, 4]);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, chunk_size],
+                    temp2.dims()
+                );
+                let x_chunk = x_chunk.clone().swap_dims(2, 3);
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, headdim],
-                    x_re.dims()
+                    x_chunk.dims()
                 );
-                let x_re = x_re.reshape([batch_chunk_head, chunk_size, headdim]);
-                let y_diag = m.matmul(x_re);
-                assert_eq!([batch_chunk_head, chunk_size, headdim], y_diag.dims());
-                let y_diag = y_diag.reshape([batch, num_full_chunks, nheads, chunk_size, headdim]);
-                let y_diag = y_diag.swap_dims(2, 3);
-                y_diag
+                let y_diag = temp2.matmul(x_chunk);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, headdim],
+                    y_diag.dims()
+                );
+                y_diag.swap_dims(2, 3)
             };
             assert_eq!(
                 [batch, num_full_chunks, chunk_size, nheads, headdim],
                 y_diag.dims()
             );
 
-            // Step 2: Intra-chunk states
+            // Step 2: Intra-chunk states: states = ∑_chunk_size B decay_states X
             let states = {
-                let last_a_cumsum_index =
-                    Tensor::<B, 1, Int>::from_data([chunk_size as i32 - 1], &device);
+                // element-wise multiply decay_states and X
                 let decay_states =
-                    (a_cumsum.clone().select(3, last_a_cumsum_index) - a_cumsum.clone()).exp();
+                    (a_cumsum.clone().narrow(3, chunk_size - 1, 1) - a_cumsum.clone()).exp();
                 assert_eq!(
                     [batch, nheads, num_full_chunks, chunk_size],
                     decay_states.dims()
                 );
-                let decay_states = decay_states.swap_dims(1, 2);
+                let decay_states = decay_states.permute([0, 2, 3, 1]).unsqueeze_dim(4);
                 assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size],
+                    [batch, num_full_chunks, chunk_size, nheads, 1],
                     decay_states.dims()
                 );
-                let decay_re = decay_states
-                    .reshape([batch_chunk_head, chunk_size])
-                    .unsqueeze_dim(2);
-                assert_eq!([batch_chunk_head, chunk_size, 1], decay_re.dims());
-                let b_chunk = b_chunk.swap_dims(2, 3);
+                let temp = decay_states * x_chunk.clone();
+                assert_eq!(
+                    [batch, num_full_chunks, chunk_size, nheads, headdim],
+                    temp.dims()
+                );
+                // contraction over chunk_size via batched matmul with B
+                let temp = temp.permute([0, 1, 3, 4, 2]);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, headdim, chunk_size],
+                    temp.dims()
+                );
+                let b_chunk = b_chunk.clone().permute([0, 1, 3, 2, 4]);
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, d_state],
                     b_chunk.dims()
                 );
-                let b_re = b_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
-                let temp = decay_re * b_re;
-                let x_re = x_chunk.swap_dims(2, 3);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, headdim],
-                    x_re.dims()
-                );
-                let x_re = x_re.reshape([batch_chunk_head, chunk_size, headdim]);
-                let states = x_re.transpose().matmul(temp);
-                assert_eq!([batch_chunk_head, headdim, d_state], states.dims());
-                let states = states.reshape([batch, num_full_chunks, nheads, headdim, d_state]);
+                let states = temp.matmul(b_chunk);
                 states
             };
             assert_eq!(
@@ -620,22 +645,24 @@ impl<B: Backend> Mamba2Block<B> {
                 states.dims()
             );
 
-            // Step 3: Inter-chunk state passing
+            // Step 3: Inter-chunk state passing: new_states = ∑_num_full_chunks decay_chunks states
             let (states, final_state) = {
-                // [batch, nheads, headdim, d_state]
+                // cat states
                 let initial_states = ssm_initial_state.unsqueeze_dim(1);
                 assert_eq!([batch, 1, nheads, headdim, d_state], initial_states.dims());
                 let states = Tensor::cat(vec![initial_states, states], 1);
                 assert_eq!(
-                    [batch, 1 + num_full_chunks, nheads, headdim, d_state],
+                    [
+                        batch,
+                        1 + num_full_chunks, // 1 + c
+                        nheads,
+                        headdim,
+                        d_state
+                    ],
                     states.dims()
                 );
-                let a_chunk_ends_index =
-                    Tensor::<B, 1, Int>::from_data([chunk_size as i32 - 1], &device);
-                let a_chunk_ends = a_cumsum
-                    .clone()
-                    .select(3, a_chunk_ends_index)
-                    .squeeze_dim(3);
+                // decay_chunk
+                let a_chunk_ends = a_cumsum.clone().narrow(3, chunk_size - 1, 1).squeeze_dim(3);
                 assert_eq!([batch, nheads, num_full_chunks], a_chunk_ends.dims());
                 let a_chunk_pad = Tensor::cat(
                     vec![
@@ -647,74 +674,90 @@ impl<B: Backend> Mamba2Block<B> {
                 assert_eq!([batch, nheads, 1 + num_full_chunks], a_chunk_pad.dims());
                 let decay_chunk = segsum(a_chunk_pad).exp();
                 assert_eq!(
-                    [batch, nheads, 1 + num_full_chunks, 1 + num_full_chunks],
+                    [
+                        batch,
+                        nheads,
+                        1 + num_full_chunks, // z
+                        1 + num_full_chunks  // 1+c
+                    ], // bhz(1+c)
                     decay_chunk.dims()
                 );
-                let decay_re =
-                    decay_chunk.reshape([batch * nheads, 1 + num_full_chunks, 1 + num_full_chunks]);
-                let states = states.swap_dims(1, 2);
+                // align for batched matmul
+                let states = states.clone().permute([0, 2, 1, 3, 4]); // b(1+c)hpn -> bh(1+c)pn
                 assert_eq!(
-                    [batch, nheads, 1 + num_full_chunks, headdim, d_state],
+                    [
+                        batch,
+                        nheads,
+                        1 + num_full_chunks, // 1+c
+                        headdim,
+                        d_state
+                    ],
                     states.dims()
                 );
-                let states_re =
-                    states.reshape([batch * nheads, 1 + num_full_chunks, headdim * d_state]);
-                let temp = decay_re.matmul(states_re);
+                let states =
+                    states.reshape([batch, nheads, 1 + num_full_chunks, headdim * d_state]); // bh(1+c)pn -> bh(1+c)(pn)
                 assert_eq!(
-                    [batch * nheads, 1 + num_full_chunks, headdim * d_state],
-                    temp.dims()
+                    [batch, nheads, 1 + num_full_chunks, headdim * d_state],
+                    states.dims()
                 );
-                let temp = temp.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]);
-                let new_states = temp.swap_dims(1, 2);
+                // contraction over (1+c): bhz(1+c) @ bh(1+c)(pn) -> bhz(pn)
+                let new_states = decay_chunk.matmul(states);
                 assert_eq!(
-                    [batch, 1 + num_full_chunks, nheads, headdim, d_state],
+                    [batch, nheads, 1 + num_full_chunks, headdim * d_state], // bhz(pn)
                     new_states.dims()
                 );
                 let new_states =
-                    new_states.reshape([batch, num_full_chunks + 1, nheads, headdim, d_state]);
-                let split = new_states.split_with_sizes(vec![num_full_chunks, 1], 1);
-                let states = split[0].clone();
-                let final_state = split[1].clone();
-                (states, final_state.squeeze_dim(1))
+                    new_states.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]); // bhzpn
+                //
+                let split = new_states.split_with_sizes(vec![num_full_chunks, 1], 2);
+                let states = split[0].clone(); // bhcpn
+                let final_state = split[1].clone(); // bh1pn
+                (states.swap_dims(1, 2), final_state.squeeze_dim(2))
             };
             assert_eq!(
-                [batch, num_full_chunks, nheads, headdim, d_state],
+                [batch, num_full_chunks, nheads, headdim, d_state], // bchpn
                 states.dims()
             );
-            assert_eq!([batch, nheads, headdim, d_state], final_state.dims());
+            assert_eq!([batch, nheads, headdim, d_state], final_state.dims()); // bhpn
 
-            // Step 4: Inter-chunk outputs (Y_off)
+            // Step 4: Inter-chunk outputs: Y_off = state_decay_out ∑_d_state C state
             let y_off = {
                 let state_decay_out = a_cumsum.exp();
                 assert_eq!(
-                    [batch, nheads, num_full_chunks, chunk_size],
+                    [batch, nheads, num_full_chunks, chunk_size], // bhcl
                     state_decay_out.dims()
                 );
-                let c_chunk = c_chunk.swap_dims(2, 3);
+                // contract C and states over d_state
+                let c_chunk = c_chunk.swap_dims(2, 3); // bclhn -> bchln
                 assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, d_state],
+                    [batch, num_full_chunks, nheads, chunk_size, d_state], // bchln
                     c_chunk.dims()
                 );
-                let c_re = c_chunk.reshape([batch_chunk_head, chunk_size, d_state]);
-                let states_re = states.reshape([batch_chunk_head, headdim, d_state]);
-                let temp = c_re.matmul(states_re.transpose());
-                assert_eq!([batch_chunk_head, chunk_size, headdim], temp.dims());
-                let state_decay_out = state_decay_out.swap_dims(1, 2);
+                let states = states.transpose(); // bchpn -> bchnp
                 assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size],
+                    [batch, num_full_chunks, nheads, d_state, headdim], // bchnp
+                    states.dims()
+                );
+                let temp = c_chunk.matmul(states);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, headdim], // bchlp
+                    temp.dims()
+                );
+                // element mul
+                let state_decay_out = state_decay_out.permute([0, 2, 1, 3]).unsqueeze_dim(4);
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, 1], // bchl1
                     state_decay_out.dims()
                 );
-                let state_decay_re = state_decay_out
-                    .reshape([batch_chunk_head, chunk_size])
-                    .unsqueeze_dim(2);
-                assert_eq!([batch_chunk_head, chunk_size, 1], state_decay_re.dims());
-                let y_off = state_decay_re * temp;
-                let y_off = y_off.reshape([batch, num_full_chunks, nheads, chunk_size, headdim]);
-                let y_off = y_off.swap_dims(2, 3);
-                y_off
+                let temp = temp * state_decay_out; // bchlp
+                assert_eq!(
+                    [batch, num_full_chunks, nheads, chunk_size, headdim], // bchlp
+                    temp.dims()
+                );
+                temp.swap_dims(2, 3) // bclhp
             };
             assert_eq!(
-                [batch, num_full_chunks, chunk_size, nheads, headdim],
+                [batch, num_full_chunks, chunk_size, nheads, headdim], // bclhp
                 y_off.dims()
             );
 
