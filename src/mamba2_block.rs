@@ -368,11 +368,11 @@ impl<B: Backend> Mamba2Block<B> {
                 z_xbc_dt.dims()
             );
 
-            let z_xbc_dt = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 2);
+            let mut z_xbc_dt = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 2).into_iter();
             (
-                z_xbc_dt[0].clone(),
-                z_xbc_dt[1].clone(),
-                z_xbc_dt[2].clone(),
+                z_xbc_dt.next().unwrap(),
+                z_xbc_dt.next().unwrap(),
+                z_xbc_dt.next().unwrap(),
             )
         };
         debug_assert_eq!([batch, sequence, d_inner], z.dims());
@@ -401,8 +401,8 @@ impl<B: Backend> Mamba2Block<B> {
         // split xbc into x, B, C.
         // note: the attention Q,K,V values correspond to c,b,x from ssm/attention duality.
         let (x, b, c) = {
-            let xbc = xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 2);
-            (xbc[0].clone(), xbc[1].clone(), xbc[2].clone())
+            let mut xbc = xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 2).into_iter();
+            (xbc.next().unwrap(), xbc.next().unwrap(), xbc.next().unwrap())
         };
         debug_assert_eq!([batch, sequence, d_inner], x.dims());
         debug_assert_eq!([batch, sequence, ngroups * d_state], b.dims());
@@ -693,9 +693,9 @@ impl<B: Backend> Mamba2Block<B> {
                 let new_states =
                     new_states.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]); // bhzpn
                 //
-                let split = new_states.split_with_sizes(vec![num_full_chunks, 1], 2);
-                let states = split[0].clone(); // bhcpn
-                let final_state = split[1].clone(); // bh1pn
+                let mut split = new_states.split_with_sizes(vec![num_full_chunks, 1], 2).into_iter();
+                let states = split.next().unwrap(); // bhcpn
+                let final_state = split.next().unwrap(); // bh1pn
                 (states.swap_dims(1, 2), final_state.squeeze_dim(2))
             };
             assert_eq!(
@@ -821,8 +821,8 @@ pub mod step {
             let z_xbc_dt = z_xbc_dt;
 
             let (z, xbc, dt) = {
-                let split = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 1);
-                (split[0].clone(), split[1].clone(), split[2].clone())
+                let mut split = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 1).into_iter();
+                (split.next().unwrap(), split.next().unwrap(), split.next().unwrap())
             };
             debug_assert_eq!([batch, d_inner], z.dims());
             debug_assert_eq!([batch, conv_dim], xbc.dims());
@@ -867,9 +867,9 @@ pub mod step {
 
             // Split xbc
             let (x, b, c) = {
-                let split =
-                    xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 1);
-                (split[0].clone(), split[1].clone(), split[2].clone())
+                let mut split =
+                    xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 1).into_iter();
+                (split.next().unwrap(), split.next().unwrap(), split.next().unwrap())
             };
             debug_assert_eq!([batch, d_inner], x.dims());
             debug_assert_eq!([batch, ngroups * d_state], b.dims());

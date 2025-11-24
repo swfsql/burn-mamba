@@ -200,9 +200,9 @@ impl<B: Backend> Mamba1Block<B> {
             let xs_and_res = self.in_proj.forward(x);
             debug_assert_eq!([batch, sequence, 2 * d_inner], xs_and_res.dims());
 
-            let split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 2);
+            let mut split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 2).into_iter();
             debug_assert_eq!(split.len(), 2);
-            (split[0].clone(), split[1].clone())
+            (split.next().unwrap(), split.next().unwrap())
         };
         debug_assert_eq!([batch, sequence, d_inner], xs.dims());
         debug_assert_eq!([batch, sequence, d_inner], res.dims());
@@ -265,10 +265,10 @@ impl<B: Backend> Mamba1Block<B> {
         // ∆ (part 1/2)
         // ∆ is input-dependent
         // B and C are input-dependent
-        let split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 2);
-        let delta = split[0].clone();
-        let b = split[1].clone();
-        let c = split[2].clone();
+        let mut split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 2).into_iter();
+        let delta = split.next().unwrap();
+        let b = split.next().unwrap();
+        let c = split.next().unwrap();
         debug_assert_eq!([batch, sequence, dt_rank], delta.dims());
         debug_assert_eq!([batch, sequence, d_state], b.dims());
         debug_assert_eq!([batch, sequence, d_state], c.dims());
@@ -460,8 +460,8 @@ pub mod step {
                 let xs_and_res = self.in_proj.forward(x);
                 debug_assert_eq!([batch, 2 * d_inner], xs_and_res.dims());
 
-                let split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 1);
-                (split[0].clone(), split[1].clone())
+                let mut split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 1).into_iter();
+                (split.next().unwrap(), split.next().unwrap())
             };
             debug_assert_eq!([batch, d_inner], xs.dims());
             debug_assert_eq!([batch, d_inner], res.dims());
@@ -550,10 +550,10 @@ pub mod step {
             // ∆ (part 1/2)
             // ∆ is input-dependent
             // B and C are input-dependent
-            let split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 1);
-            let delta = split[0].clone();
-            let b = split[1].clone();
-            let c = split[2].clone();
+            let mut split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 1).into_iter();
+            let delta = split.next().unwrap();
+            let b = split.next().unwrap();
+            let c = split.next().unwrap();
             debug_assert_eq!([batch, dt_rank], delta.dims());
             debug_assert_eq!([batch, d_state], b.dims());
             debug_assert_eq!([batch, d_state], c.dims());
