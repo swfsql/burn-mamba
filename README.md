@@ -1,17 +1,15 @@
 # burn-mamba
 
-Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752) and [Mamba2](https://arxiv.org/abs/2405.21060).
+Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752) and [Mamba2](https://arxiv.org/abs/2405.21060). The official reference implementation is at [state-spaces/mamba](https://github.com/state-spaces/mamba).
 
 Mamba is a fast, efficient model for handling long data sequences such as in language and time-series tasks, competitive with traditional Transformers. It uses a smart selection process to focus on key information, scaling linearly with strong performance.
 
 ##### Cargo.toml
 
 ```toml
-[dependencies.burn-mamba]
-git = 'https://github.com/swfsql/burn-mamba.git'
-branch = "main"
-## instead of using a branch, you can pin to a specific commit:
-# rev = ""
+[dependencies]
+burn = "0.20.0-pre.6"
+burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc" } # add frozen rev
 ```
 
 ##### Features

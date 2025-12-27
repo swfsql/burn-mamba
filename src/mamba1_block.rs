@@ -200,7 +200,9 @@ impl<B: Backend> Mamba1Block<B> {
             let xs_and_res = self.in_proj.forward(x);
             debug_assert_eq!([batch, sequence, 2 * d_inner], xs_and_res.dims());
 
-            let mut split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 2).into_iter();
+            let mut split = xs_and_res
+                .split_with_sizes(vec![d_inner, d_inner], 2)
+                .into_iter();
             debug_assert_eq!(split.len(), 2);
             (split.next().unwrap(), split.next().unwrap())
         };
@@ -265,7 +267,9 @@ impl<B: Backend> Mamba1Block<B> {
         // ∆ (part 1/2)
         // ∆ is input-dependent
         // B and C are input-dependent
-        let mut split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 2).into_iter();
+        let mut split = x_dbl
+            .split_with_sizes(vec![dt_rank, d_state, d_state], 2)
+            .into_iter();
         let delta = split.next().unwrap();
         let b = split.next().unwrap();
         let c = split.next().unwrap();
@@ -411,33 +415,47 @@ impl<B: Backend> Mamba1Block<B> {
     }
 }
 
-pub mod step {
+#[derive(Module, Debug)]
+pub struct Mamba1BlockCache<B: Backend> {
+    /// # Shape
+    /// [batch, d_inner, d_conv]
+    pub conv: Param<Tensor<B, 3>>,
+    /// # Shape
+    /// [batch, d_inner, d_state]
+    pub ssm: Param<Tensor<B, 3>>,
+}
+
+#[derive(Config, Debug)]
+pub struct Mamba1BlockCacheConfig {
+    pub batch: usize,
+
+    /// latent state dimension (`N` in Algorithm 2 from the Mamba paper).
+    #[config(default = 16)]
+    pub d_state: usize,
+
+    #[config(default = 4)]
+    pub d_conv: usize,
+
+    pub d_inner: usize,
+}
+
+mod step {
     use super::*;
 
-    #[derive(Module, Debug)]
-    pub struct Mamba1BlockCache<B: Backend> {
-        /// # Shape
-        /// [batch, d_inner, d_conv]
-        pub conv: Param<Tensor<B, 3>>,
-        /// # Shape
-        /// [batch, d_inner, d_state]
-        pub ssm: Param<Tensor<B, 3>>,
-    }
-
-    #[derive(Config, Debug)]
-    pub struct Mamba1BlockCacheConfig {
-        pub batch: usize,
-        pub mamba_block: Mamba1BlockConfig,
-    }
-
     impl Mamba1BlockCacheConfig {
+        pub fn new_from_block_config(batch: usize, block_config: Mamba1BlockConfig) -> Self {
+            Self {
+                batch,
+                d_state: block_config.d_state,
+                d_conv: block_config.d_conv,
+                d_inner: block_config.d_inner(),
+            }
+        }
+
         /// Returns the initialized model.
         pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1BlockCache<B> {
-            let d_inner = self.mamba_block.d_inner();
-            let conv =
-                Initializer::Zeros.init([self.batch, d_inner, self.mamba_block.d_conv], device);
-            let ssm =
-                Initializer::Zeros.init([self.batch, d_inner, self.mamba_block.d_state], device);
+            let conv = Initializer::Zeros.init([self.batch, self.d_inner, self.d_conv], device);
+            let ssm = Initializer::Zeros.init([self.batch, self.d_inner, self.d_state], device);
             Mamba1BlockCache { conv, ssm }
         }
     }
@@ -460,7 +478,9 @@ pub mod step {
                 let xs_and_res = self.in_proj.forward(x);
                 debug_assert_eq!([batch, 2 * d_inner], xs_and_res.dims());
 
-                let mut split = xs_and_res.split_with_sizes(vec![d_inner, d_inner], 1).into_iter();
+                let mut split = xs_and_res
+                    .split_with_sizes(vec![d_inner, d_inner], 1)
+                    .into_iter();
                 (split.next().unwrap(), split.next().unwrap())
             };
             debug_assert_eq!([batch, d_inner], xs.dims());
@@ -550,7 +570,9 @@ pub mod step {
             // ∆ (part 1/2)
             // ∆ is input-dependent
             // B and C are input-dependent
-            let mut split = x_dbl.split_with_sizes(vec![dt_rank, d_state, d_state], 1).into_iter();
+            let mut split = x_dbl
+                .split_with_sizes(vec![dt_rank, d_state, d_state], 1)
+                .into_iter();
             let delta = split.next().unwrap();
             let b = split.next().unwrap();
             let c = split.next().unwrap();

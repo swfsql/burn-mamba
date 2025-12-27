@@ -1,6 +1,5 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
-#![feature(f16)]
 
 #[cfg(feature = "mamba1")]
 pub mod mamba1;
@@ -10,5 +9,28 @@ pub mod mamba1_block;
 pub mod mamba2;
 #[cfg(feature = "mamba2")]
 pub mod mamba2_block;
+
+pub mod prelude {
+    #[cfg(feature = "mamba1")]
+    mod mamba1_export {
+        pub use crate::mamba1::*;
+        pub use crate::mamba1_block::*;
+    }
+    #[cfg(feature = "mamba1")]
+    pub use mamba1_export::*;
+
+    #[cfg(feature = "mamba2")]
+    mod mamba2_export {
+        pub use crate::mamba2::*;
+        pub use crate::mamba2_block::*;
+    }
+    #[cfg(feature = "mamba2")]
+    pub use mamba2_export::*;
+}
+
+pub mod mse;
+pub mod rms_norm;
 pub mod rms_norm_gated;
 pub mod silu;
+pub mod softplus;
+pub mod utils;

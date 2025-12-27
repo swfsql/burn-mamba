@@ -1,5 +1,7 @@
 use crate::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
 use crate::silu::Silu;
+use crate::softplus::softplus;
+use crate::utils::stable_max;
 use burn::module::{Module, Param};
 use burn::nn::Initializer;
 use burn::nn::conv::{Conv1d, Conv1dConfig};
@@ -37,6 +39,8 @@ pub struct Mamba2Block<B: Backend> {
     /// Dims: [`Self::nheads`].
     pub dt_bias: Param<Tensor<B, 1>>,
 
+    pub dt_limit: (f64, f64),
+
     /// Dims: [`Self::nheads`].
     pub a_log: Param<Tensor<B, 1>>,
 
@@ -73,7 +77,7 @@ impl<B: Backend> Mamba2Block<B> {
         nheads
     }
 
-    /// headdim = d_inner / n_heads.
+    /// headdim = d_inner / nheads.
     pub fn headdim(&self) -> usize {
         self.d_inner() / self.nheads()
     }
@@ -129,7 +133,7 @@ pub struct Mamba2BlockConfig {
     pub dt_init_floor: f64,
 
     /// Range limits for dt.
-    #[config(default = "(0., f64::INFINITY)")]
+    #[config(default = "(0., f64::MAX)")]
     pub dt_limit: (f64, f64),
 
     #[config(default = false)]
@@ -150,7 +154,6 @@ impl Mamba2BlockConfig {
         let d_inner = self.d_inner();
         assert!(self.headdim > 0);
         let nheads = self.nheads();
-        // panic!("{nheads}");
         debug_assert_eq!(nheads * self.headdim, d_inner);
 
         // Helper function for PyTorch-style uniform initialization
@@ -193,7 +196,7 @@ impl Mamba2BlockConfig {
             device,
         )
         .exp();
-        let dt = dt.clamp(self.dt_init_floor, f64::MAX);
+        let dt = dt.clamp(self.dt_init_floor, stable_max::<B>().to_f64());
         let inv_dt = dt.clone() + (-expm1(-dt)).log(); // Inverse softplus
         let dt_bias = Param::from_tensor(inv_dt);
 
@@ -212,7 +215,7 @@ impl Mamba2BlockConfig {
 
         // Normalization and output projection
         let norm = RmsNormGatedConfig::new(d_inner)
-            .with_epsilon(1e-5)
+            // .with_epsilon(div_eps::<B>().to_f64())
             .with_norm_before_gate(self.is_norm_before_gate)
             .init(device);
         let out_proj = LinearConfig::new(d_inner, self.d_model)
@@ -232,6 +235,7 @@ impl Mamba2BlockConfig {
             in_proj,
             conv1d,
             dt_bias,
+            dt_limit: self.dt_limit,
             a_log,
             d,
             norm,
@@ -249,7 +253,6 @@ impl Mamba2BlockConfig {
 
     /// nheads = d_inner / headdim.
     pub fn nheads(&self) -> usize {
-        // panic!("d_inner: {}, headdim: {}", self.d_inner(), self.headdim);
         self.d_inner() / self.headdim
     }
 
@@ -272,19 +275,41 @@ pub struct Mamba2BlockCache<B: Backend> {
 #[derive(Config, Debug)]
 pub struct Mamba2BlockCacheConfig {
     pub batch: usize,
-    pub mamba2_block: Mamba2BlockConfig,
+
+    #[config(default = 128)]
+    pub d_state: usize,
+
+    /// Convolution kernel size.
+    #[config(default = 4)]
+    pub d_conv: usize,
+
+    pub conv_dim: usize,
+
+    /// Head dimension.
+    #[config(default = 64)]
+    pub headdim: usize,
+
+    /// Number of heads.
+    pub nheads: usize,
 }
 
 impl Mamba2BlockCacheConfig {
+    pub fn new_from_block_config(batch: usize, block_config: Mamba2BlockConfig) -> Self {
+        Self {
+            batch,
+            d_state: block_config.d_state,
+            d_conv: block_config.d_conv,
+            conv_dim: block_config.conv_dim(),
+            headdim: block_config.headdim,
+            nheads: block_config.nheads(),
+        }
+    }
+
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCache<B> {
-        let config = &self.mamba2_block;
-        let conv = Tensor::zeros(
-            Shape::new([self.batch, config.conv_dim(), config.d_conv]),
-            device,
-        );
+        let conv = Tensor::zeros(Shape::new([self.batch, self.conv_dim, self.d_conv]), device);
         let ssm = Tensor::zeros(
-            Shape::new([self.batch, config.nheads(), config.headdim, config.d_state]),
+            Shape::new([self.batch, self.nheads, self.headdim, self.d_state]),
             device,
         );
         Mamba2BlockCache { conv, ssm }
@@ -368,7 +393,9 @@ impl<B: Backend> Mamba2Block<B> {
                 z_xbc_dt.dims()
             );
 
-            let mut z_xbc_dt = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 2).into_iter();
+            let mut z_xbc_dt = z_xbc_dt
+                .split_with_sizes(vec![d_inner, conv_dim, nheads], 2)
+                .into_iter();
             (
                 z_xbc_dt.next().unwrap(),
                 z_xbc_dt.next().unwrap(),
@@ -383,10 +410,15 @@ impl<B: Backend> Mamba2Block<B> {
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
         // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
-        let t0 = cache.conv.narrow(2, 1, d_conv - 1);
-        debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
-        // add the causal pad (only left-pad is necessary)
-        let xbc = Tensor::cat(vec![t0, xbc], 2);
+        assert!(d_conv >= 1);
+        let xbc = if d_conv >= 2 {
+            let t0 = cache.conv.narrow(2, 1, d_conv - 1);
+            debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
+            // add the causal pad (only left-pad is necessary)
+            Tensor::cat(vec![t0, xbc], 2)
+        } else {
+            xbc
+        };
         debug_assert_eq!([batch, conv_dim, (d_conv - 1) + sequence], xbc.dims());
         // get the final state for the causal pad (right-side of pre-xbc)
         cache.conv = xbc.clone().narrow(2, sequence - 1, d_conv);
@@ -401,8 +433,14 @@ impl<B: Backend> Mamba2Block<B> {
         // split xbc into x, B, C.
         // note: the attention Q,K,V values correspond to c,b,x from ssm/attention duality.
         let (x, b, c) = {
-            let mut xbc = xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 2).into_iter();
-            (xbc.next().unwrap(), xbc.next().unwrap(), xbc.next().unwrap())
+            let mut xbc = xbc
+                .split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 2)
+                .into_iter();
+            (
+                xbc.next().unwrap(),
+                xbc.next().unwrap(),
+                xbc.next().unwrap(),
+            )
         };
         debug_assert_eq!([batch, sequence, d_inner], x.dims());
         debug_assert_eq!([batch, sequence, ngroups * d_state], b.dims());
@@ -411,7 +449,8 @@ impl<B: Backend> Mamba2Block<B> {
         // prepare state space parameters
         let dt_bias = self.dt_bias.val().unsqueeze_dims(&[0, 1]);
         debug_assert_eq!([1, 1, nheads], dt_bias.dims());
-        let dt = burn::tensor::activation::softplus(dt + dt_bias, 1.); // Δ
+        let dt = softplus(dt + dt_bias); // Δ
+        let dt = dt.clamp(self.dt_limit.0, self.dt_limit.1);
         debug_assert_eq!([batch, sequence, nheads], dt.dims());
         let a = -self.a_log.val().exp(); // (scalar per head for Ā = exp(Δ A))
         debug_assert_eq!([nheads], a.dims());
@@ -434,8 +473,7 @@ impl<B: Backend> Mamba2Block<B> {
             .val()
             .unsqueeze_dims::<4>(&[0, 0, 3])
             .expand([batch, sequence, nheads, 1]);
-        let x_reshaped = x.reshape([batch, sequence, nheads, headdim]);
-        let y = y + d * x_reshaped;
+        let y = y + d * x;
         let y = y.reshape([batch, sequence, d_inner]);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
 
@@ -693,7 +731,9 @@ impl<B: Backend> Mamba2Block<B> {
                 let new_states =
                     new_states.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]); // bhzpn
                 //
-                let mut split = new_states.split_with_sizes(vec![num_full_chunks, 1], 2).into_iter();
+                let mut split = new_states
+                    .split_with_sizes(vec![num_full_chunks, 1], 2)
+                    .into_iter();
                 let states = split.next().unwrap(); // bhcpn
                 let final_state = split.next().unwrap(); // bh1pn
                 (states.swap_dims(1, 2), final_state.squeeze_dim(2))
@@ -788,7 +828,7 @@ impl<B: Backend> Mamba2Block<B> {
     }
 }
 
-pub mod step {
+mod step {
     use super::*;
 
     impl<B: Backend> Mamba2Block<B> {
@@ -821,8 +861,14 @@ pub mod step {
             let z_xbc_dt = z_xbc_dt;
 
             let (z, xbc, dt) = {
-                let mut split = z_xbc_dt.split_with_sizes(vec![d_inner, conv_dim, nheads], 1).into_iter();
-                (split.next().unwrap(), split.next().unwrap(), split.next().unwrap())
+                let mut split = z_xbc_dt
+                    .split_with_sizes(vec![d_inner, conv_dim, nheads], 1)
+                    .into_iter();
+                (
+                    split.next().unwrap(),
+                    split.next().unwrap(),
+                    split.next().unwrap(),
+                )
             };
             debug_assert_eq!([batch, d_inner], z.dims());
             debug_assert_eq!([batch, conv_dim], xbc.dims());
@@ -867,9 +913,14 @@ pub mod step {
 
             // Split xbc
             let (x, b, c) = {
-                let mut split =
-                    xbc.split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 1).into_iter();
-                (split.next().unwrap(), split.next().unwrap(), split.next().unwrap())
+                let mut split = xbc
+                    .split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 1)
+                    .into_iter();
+                (
+                    split.next().unwrap(),
+                    split.next().unwrap(),
+                    split.next().unwrap(),
+                )
             };
             debug_assert_eq!([batch, d_inner], x.dims());
             debug_assert_eq!([batch, ngroups * d_state], b.dims());
@@ -878,13 +929,14 @@ pub mod step {
             // SSM step
             let ssm_shape = [batch, nheads, headdim, d_state]; // cache.ssm shape
             // Δₜ = softplus(dt + dt_bias)
-            let dt =
-                burn::tensor::activation::softplus(dt + self.dt_bias.val().unsqueeze_dim(0), 1.);
+            let dt = softplus(dt + self.dt_bias.val().unsqueeze_dim(0));
+            let dt = dt.clamp(self.dt_limit.0, self.dt_limit.1);
             debug_assert_eq!([batch, nheads], dt.dims());
             let a = -self.a_log.val().exp(); // A
             debug_assert_eq!([nheads], a.dims());
 
-            let x = x.reshape([batch, nheads, headdim]); // xₜ: d_inner = nheads * headdim
+            debug_assert_eq!(d_inner, nheads * headdim);
+            let x = x.reshape([batch, nheads, headdim]); // xₜ
             let b = b.reshape([batch, ngroups, d_state]); // Bₜ
             let c = c.reshape([batch, ngroups, d_state]); // Cₜ
 

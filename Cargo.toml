@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 
 [features]
@@ -9,14 +9,11 @@ mamba1 = []
 mamba2 = []
 
 [dependencies]
-num-traits = "0.2.19"
-proc-macro2 = "1.0.101"
-# conflicts
-portable-atomic = "1.11.1"
 
-[dependencies.burn]
-#version = "0.19.0"
-git = "https://github.com/tracel-ai/burn.git"
-# 2025-10-20 main
-rev = "d7e1b08cab5bcfad76923bed0262a76a96341aeb"
-default-features = false
+### For the main branch. ###
+burn = { version = "0.20.0-pre.6", default-features = false }
+
+### For local development. ###
+# burn = { path = "../burn/crates/burn", default-features = false } # local burn with ndarray-f16 + graph-sweep
+# [patch.crates-io]
+# ndarray = { path = "../ndarray" } # local ndarray with f16 support

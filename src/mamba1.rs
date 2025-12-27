@@ -4,11 +4,50 @@
 //! - https://github.com/huggingface/candle/blob/fd7c8565646039e35925b8730d27ddad195d7e73/candle-examples/examples/mamba-minimal/
 //! - https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/
 
-use crate::mamba1_block::{Mamba1Block, Mamba1BlockConfig};
+use crate::mamba1_block::{
+    Mamba1Block, Mamba1BlockCache, Mamba1BlockCacheConfig, Mamba1BlockConfig,
+};
+use crate::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::{
-    nn::{Embedding, EmbeddingConfig, Linear, LinearConfig, RmsNorm, RmsNormConfig},
+    nn::{Embedding, EmbeddingConfig, Linear, LinearConfig},
     prelude::*,
 };
+
+#[derive(Module, Debug)]
+pub struct Mamba1BlockCaches<B: Backend> {
+    /// # Shape
+    /// [n_layers]
+    pub caches: Vec<Mamba1BlockCache<B>>,
+}
+
+#[derive(Config, Debug)]
+pub struct Mamba1BlockCachesConfig {
+    pub n_layers: usize,
+    pub cache: Mamba1BlockCacheConfig,
+}
+
+impl Mamba1BlockCachesConfig {
+    pub fn new_from_block_config(
+        n_layers: usize,
+        batch: usize,
+        block_config: Mamba1BlockConfig,
+    ) -> Self {
+        Self {
+            n_layers,
+            cache: Mamba1BlockCacheConfig::new_from_block_config(batch, block_config),
+        }
+    }
+
+    /// Returns the initialized model.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1BlockCaches<B> {
+        let mut caches: Vec<Mamba1BlockCache<B>> = Vec::with_capacity(self.n_layers);
+        for _ in 0..self.n_layers {
+            let cache: Mamba1BlockCache<B> = self.cache.clone().init(device);
+            caches.push(cache);
+        }
+        Mamba1BlockCaches { caches }
+    }
+}
 
 #[derive(Module, Debug)]
 pub struct Mamba1<B: Backend> {
@@ -155,7 +194,7 @@ impl<B: Backend> Mamba1Layer<B> {
 
 mod step {
     use super::*;
-    use crate::mamba1_block::step::Mamba1BlockCache;
+    use crate::mamba1_block::Mamba1BlockCache;
 
     impl<B: Backend> Mamba1<B> {
         /// See also [`Self::forward`].
@@ -166,8 +205,8 @@ mod step {
         pub fn step(
             &self,
             x: Tensor<B, 1, Int>,
-            mut caches: Vec<Mamba1BlockCache<B>>,
-        ) -> (Tensor<B, 2>, Vec<Mamba1BlockCache<B>>) {
+            mut caches: Mamba1BlockCaches<B>,
+        ) -> (Tensor<B, 2>, Mamba1BlockCaches<B>) {
             let [batch] = x.dims();
             let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -180,9 +219,9 @@ mod step {
             debug_assert_eq!([batch, d_model], x.dims());
 
             for (i, layer) in self.layers.iter().enumerate() {
-                let (x_, cache) = layer.step(x, caches[i].clone());
+                let (x_, cache) = layer.step(x, caches.caches[i].clone());
                 x = x_;
-                caches[i] = cache;
+                caches.caches[i] = cache;
             }
 
             x = self.norm_f.forward(x);
