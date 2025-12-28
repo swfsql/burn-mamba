@@ -9,7 +9,7 @@ Mamba is a fast, efficient model for handling long data sequences such as in lan
 ```toml
 [dependencies]
 burn = "0.20.0-pre.6"
-burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc" } # add frozen rev
+burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc..." } # add frozen rev
 ```
 
 ##### Features
@@ -23,14 +23,13 @@ You can select the Mamba version, both enabled by default:
 
 Both models can be used with two methods:
 
-- `forward`: preferred for training, this is a cacheless mode that generates an output for each timestep in an autoregressive manner.
-- `step`: preferred for inference, this is a cached mode that generates a single output in constant time and memory.
+- `forward`: preferred for training, this is a parallel mode that generates a causal-autoregressive output for each timestep.
+- `step`: preferred for inference, this is a mode that generates a single causal output in constant time and memory.
 
-Although both methods are able to autodiff and be used for training, this hasn't been tested.
+###### Examples
 
-###### Example
-
-You can check an example using those mamba blocks for inference in [here](https://github.com/swfsql/burn-mamba-example).
+- `examples/` directory contains some small-model examples on synthetic or canonical data (e.g. mnist).
+- [`swfsql/burn-mamba-example`](https://github.com/swfsql/burn-mamba-example) shows inference for the smallest models from `huggingface.co/state-spaces`, which can also be tested in the browser via wasm.
 
 ##### Learn More
 ###### S4
