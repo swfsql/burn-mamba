@@ -7,7 +7,7 @@
 use crate::mamba1_block::{
     Mamba1Block, Mamba1BlockCache, Mamba1BlockCacheConfig, Mamba1BlockConfig,
 };
-use crate::rms_norm::{RmsNorm, RmsNormConfig};
+use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::{
     nn::{Embedding, EmbeddingConfig, Linear, LinearConfig},
     prelude::*,

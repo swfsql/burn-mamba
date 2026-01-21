@@ -1,4 +1,4 @@
-use crate::silu::Silu;
+use crate::utils::silu::Silu;
 use burn::module::{Module, Param};
 use burn::nn::conv::{Conv1d, Conv1dConfig};
 use burn::nn::{Initializer, PaddingConfig1d};

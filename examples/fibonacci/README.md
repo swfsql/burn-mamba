@@ -6,15 +6,15 @@ The dataset is generated based on two initial numbers between `0.0` and `1.0`, a
 
 ## Usage
 
-The model is first trained, saved, then loaded and then used to run inference.
+##### Usage Example
 
-The trained model is saved to `/tmp/burn-mamba/fibonacci/`, which is later loaded for inference usage.  
-WARNING: All files under `/tmp/burn-mamba/fibonacci/**` are removed at the start of the training.
+```bash
+# debug check in ndarray (fp32)
+cargo check --example fibonacci --features "dev-ndarray"
 
-#### NdArray backend (f32)
-
-```sh
-cargo run --example fibonacci --features "dev-ndarray"
+# training and running inference in ndarray (fp32)
+cargo run --release --example fibonacci --features "dev-ndarray" -- --training --inference
 ```
 
-See `burn-mamba/Cargo.toml` for other features or backend information.
+- See `burn-mamba/Cargo.toml` for other features or backend information.  
+- See `burn-mamba/examples/README.md` for the CLI usage overview.

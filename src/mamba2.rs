@@ -3,7 +3,8 @@
 use crate::mamba2_block::{
     Mamba2Block, Mamba2BlockCache, Mamba2BlockCacheConfig, Mamba2BlockConfig,
 };
-use crate::rms_norm::{RmsNorm, RmsNormConfig};
+use crate::schedule::Schedule;
+use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::{
     nn::{Embedding, EmbeddingConfig, Linear, LinearConfig},
     prelude::*,
@@ -11,37 +12,47 @@ use burn::{
 
 #[derive(Module, Debug)]
 pub struct Mamba2BlockCaches<B: Backend> {
+    pub n_real_caches: usize,
+    pub n_virtual_caches: Option<(usize, Schedule)>,
     /// # Shape
-    /// [n_layers]
+    /// [n_real_caches]
     pub caches: Vec<Mamba2BlockCache<B>>,
 }
 
 #[derive(Config, Debug)]
 pub struct Mamba2BlockCachesConfig {
-    pub n_layers: usize,
+    pub n_real_caches: usize,
+    #[config(default = "None")]
+    pub n_virtual_caches: Option<(usize, Schedule)>,
     pub cache: Mamba2BlockCacheConfig,
 }
 
 impl Mamba2BlockCachesConfig {
     pub fn new_from_block_config(
-        n_layers: usize,
+        n_real_caches: usize,
+        n_virtual_caches: Option<(usize, Schedule)>,
         batch: usize,
         block_config: Mamba2BlockConfig,
     ) -> Self {
         Self {
-            n_layers,
+            n_real_caches,
+            n_virtual_caches,
             cache: Mamba2BlockCacheConfig::new_from_block_config(batch, block_config),
         }
     }
 
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCaches<B> {
-        let mut caches: Vec<Mamba2BlockCache<B>> = Vec::with_capacity(self.n_layers);
-        for _ in 0..self.n_layers {
+        let mut caches: Vec<Mamba2BlockCache<B>> = Vec::with_capacity(self.n_real_caches);
+        for _ in 0..self.n_real_caches {
             let cache: Mamba2BlockCache<B> = self.cache.clone().init(device);
             caches.push(cache);
         }
-        Mamba2BlockCaches { caches }
+        Mamba2BlockCaches {
+            n_real_caches: self.n_real_caches,
+            n_virtual_caches: self.n_virtual_caches.clone(),
+            caches,
+        }
     }
 }
 
@@ -56,7 +67,13 @@ pub struct Mamba2<B: Backend> {
 
 #[derive(Config, Debug)]
 pub struct Mamba2Config {
-    pub n_layer: usize,
+    pub n_real_layers: usize,
+    #[config(default = "None")]
+    pub n_virtual_layers: Option<(usize, Schedule)>,
+    #[config(default = "None")]
+    pub n_real_caches: Option<usize>,
+    #[config(default = "None")]
+    pub n_virtual_caches: Option<(usize, Schedule)>,
 
     /// If vocab_size is divisible by pad_vocab_size_multiple, this should be considered the unpadded vocab size.
     /// Otherwise, this is padded into `((self.vocab_size / self.pad_vocab_size_multiple) + 1) * self.pad_vocab_size_multiple`.
@@ -77,7 +94,8 @@ pub struct Mamba2Config {
 impl Mamba2Config {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2<B> {
-        let layers = Mamba2LayersConfig::new(self.n_layer, self.mamba_block.clone()).init(device);
+        let layers =
+            Mamba2LayersConfig::new(self.n_real_layers, self.mamba_block.clone()).init(device);
         let padded_vocab_size = {
             if self.vocab_size % self.pad_vocab_size_multiple == 0 {
                 self.vocab_size
@@ -116,40 +134,7 @@ impl<B: Backend> Mamba2<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 2, Int>,
-        chunk_size: Option<usize>,
-    ) -> (Tensor<B, 3>, Mamba2BlockCaches<B>) {
-        let device = &x.device();
-        let [batch, _sequence] = x.dims();
-        let layer0_block = &self.layers.layers[0].mamba_block;
-        let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
-
-        let caches = Mamba2BlockCachesConfig::new(
-            self.layers.layers.len(),
-            Mamba2BlockCacheConfig {
-                batch,
-                d_state: layer0_block.d_state,
-                d_conv,
-                conv_dim,
-                headdim: layer0_block.headdim(),
-                nheads: layer0_block.nheads(),
-            },
-        )
-        .init(device);
-
-        self.forward_with_caches(x, caches, chunk_size)
-    }
-
-    /// See also [`Self::step`].
-    ///
-    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
-    ///
-    /// # Shapes
-    ///   - Input [batch, sequence]
-    ///   - Output [batch, sequence, d_model]
-    pub fn forward_with_caches(
-        &self,
-        x: Tensor<B, 2, Int>,
-        caches: Mamba2BlockCaches<B>,
+        caches: Option<Mamba2BlockCaches<B>>,
         chunk_size: Option<usize>,
     ) -> (Tensor<B, 3>, Mamba2BlockCaches<B>) {
         let [batch, sequence] = x.dims();
@@ -158,7 +143,7 @@ impl<B: Backend> Mamba2<B> {
         let x = self.embedding.forward(x);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
-        let (mut x, caches) = self.layers.forward_with_caches(x, caches, chunk_size);
+        let (mut x, caches) = self.layers.forward(x, caches, chunk_size);
 
         x = self.norm_f.forward(x);
         if let Some(lm_head) = &self.lm_head {
@@ -178,25 +163,43 @@ impl<B: Backend> Mamba2<B> {
 
 #[derive(Module, Debug)]
 pub struct Mamba2Layers<B: Backend> {
-    pub layers: Vec<Mamba2Layer<B>>,
+    pub n_real_layers: usize,
+    pub n_virtual_layers: Option<(usize, Schedule)>,
+    pub n_real_caches: Option<usize>,
+    pub n_virtual_caches: Option<(usize, Schedule)>,
+    /// # Shape
+    /// [n_real_layers]
+    pub real_layers: Vec<Mamba2Layer<B>>,
 }
 
 #[derive(Config, Debug)]
 pub struct Mamba2LayersConfig {
-    pub n_layer: usize,
+    pub n_real_layers: usize,
+    #[config(default = "None")]
+    pub n_virtual_layers: Option<(usize, Schedule)>,
+    #[config(default = "None")]
+    pub n_real_caches: Option<usize>,
+    #[config(default = "None")]
+    pub n_virtual_caches: Option<(usize, Schedule)>,
     pub mamba_block: Mamba2BlockConfig,
 }
 
 impl Mamba2LayersConfig {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Layers<B> {
-        let mut layers = Vec::with_capacity(self.n_layer);
-        for _ in 0..self.n_layer {
+        let mut real_layers = Vec::with_capacity(self.n_real_layers);
+        for _ in 0..self.n_real_layers {
             let block_config = self.mamba_block.clone();
             let layer = Mamba2LayerConfig::new(block_config).init(device);
-            layers.push(layer);
+            real_layers.push(layer);
         }
-        Mamba2Layers { layers }
+        Mamba2Layers {
+            n_real_layers: self.n_real_layers,
+            n_virtual_layers: self.n_virtual_layers.clone(),
+            n_real_caches: self.n_real_caches.clone(),
+            n_virtual_caches: self.n_virtual_caches.clone(),
+            real_layers,
+        }
     }
 }
 
@@ -210,49 +213,96 @@ impl<B: Backend> Mamba2Layers<B> {
     ///   - Output [batch, sequence, d_model]
     pub fn forward(
         &self,
-        x: Tensor<B, 3>,
-        chunk_size: Option<usize>,
-    ) -> (Tensor<B, 3>, Mamba2BlockCaches<B>) {
-        let device = &x.device();
-        let [batch, _sequence, _d_model] = x.dims();
-        let layer0_block = &self.layers[0].mamba_block;
-        let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
-
-        let caches = Mamba2BlockCachesConfig::new(
-            self.layers.len(),
-            Mamba2BlockCacheConfig {
-                batch,
-                d_state: layer0_block.d_state,
-                d_conv,
-                conv_dim,
-                headdim: layer0_block.headdim(),
-                nheads: layer0_block.nheads(),
-            },
-        )
-        .init(device);
-
-        self.forward_with_caches(x, caches, chunk_size)
-    }
-
-    /// See also [`Self::step`].
-    ///
-    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
-    ///
-    /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output [batch, sequence, d_model]
-    pub fn forward_with_caches(
-        &self,
         mut x: Tensor<B, 3>,
-        mut caches: Mamba2BlockCaches<B>,
+        caches: Option<Mamba2BlockCaches<B>>,
         chunk_size: Option<usize>,
     ) -> (Tensor<B, 3>, Mamba2BlockCaches<B>) {
         let chunk_size = chunk_size.unwrap_or(256);
-        for (i, layer) in self.layers.iter().enumerate() {
-            let (x_, cache_) = layer.forward_with_cache(x, caches.caches[i].clone(), chunk_size);
-            x = x_;
-            caches.caches[i] = cache_;
+
+        let n_virtual_layers = self
+            .n_virtual_layers
+            .as_ref()
+            .map(|(l, _schedule)| *l)
+            .unwrap_or(
+                // virtual layers fallback to the real layers
+                self.n_real_layers,
+            );
+
+        let caches = caches.unwrap_or_else(|| {
+            let device = &x.device();
+            let [batch, _sequence, _d_model] = x.dims();
+            let layer0_block = &self.real_layers[0].mamba_block;
+            let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+
+            Mamba2BlockCachesConfig::new(
+                self.n_real_caches // there may be cache sharing
+                    .unwrap_or(
+                        // or each virtual layer has its own cache
+                        n_virtual_layers,
+                    ),
+                Mamba2BlockCacheConfig {
+                    batch,
+                    d_state: layer0_block.d_state,
+                    d_conv,
+                    conv_dim,
+                    headdim: layer0_block.headdim(),
+                    nheads: layer0_block.nheads(),
+                },
+            )
+            .with_n_virtual_caches(self.n_virtual_caches.clone())
+            .init(device)
+        });
+
+        // assertions
+        // resulting virtual caches must match to resulting virtual layers
+        match &caches.n_virtual_caches {
+            None => {
+                assert_eq!(caches.n_real_caches, n_virtual_layers);
+                assert_eq!(caches.n_real_caches, caches.caches.len());
+            }
+            Some((n_virtual_caches, _schedule)) => {
+                assert_eq!(*n_virtual_caches, n_virtual_layers);
+            }
         }
+
+        let n_real_caches = caches.n_real_caches;
+        let n_virtual_caches = caches.n_virtual_caches;
+        let mut caches: Vec<Option<Mamba2BlockCache<B>>> =
+            caches.caches.into_iter().map(|c| Some(c)).collect();
+
+        for i in 0..n_virtual_layers {
+            // use real layers by reference (clone)
+            let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+                schedule.real_idx(i, *n_virtual_layers, self.n_real_layers)
+            } else {
+                i
+            };
+            let layer = self.real_layers.get(layer_idx).unwrap();
+
+            // re-use real caches by value (replacement)
+            let cache_idx = if let Some((n_virtual_caches, schedule)) = &n_virtual_caches {
+                schedule.real_idx(
+                    i,
+                    *n_virtual_caches,
+                    // n_real_caches may constrain the amount of actual caches,
+                    // otherwise it's uncontrained
+                    self.n_real_caches.unwrap_or(*n_virtual_caches),
+                )
+            } else {
+                i
+            };
+            let cache = core::mem::take(caches.get_mut(cache_idx).unwrap()).unwrap();
+
+            let (x_, cache_) = layer.forward(x, Some(cache), chunk_size);
+            x = x_;
+            caches[cache_idx] = Some(cache_);
+        }
+
+        let caches = Mamba2BlockCaches {
+            n_real_caches,
+            n_virtual_caches,
+            caches: caches.into_iter().map(|c| c.unwrap()).collect(),
+        };
 
         (x, caches)
     }
@@ -288,34 +338,7 @@ impl<B: Backend> Mamba2Layer<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 3>,
-        chunk_size: usize,
-    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
-        let device = &x.device();
-        let [batch, _sequence, _d_model] = x.dims();
-        let [conv_dim, _, d_conv] = self.mamba_block.conv1d.weight.dims();
-
-        let cache = Mamba2BlockCacheConfig {
-            batch,
-            d_state: self.mamba_block.d_state,
-            d_conv,
-            conv_dim,
-            headdim: self.mamba_block.headdim(),
-            nheads: self.mamba_block.nheads(),
-        }
-        .init(device);
-
-        self.forward_with_cache(x, cache, chunk_size)
-    }
-
-    /// See also [`Self::step`].
-    ///
-    /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output.0 [batch, sequence, d_model]
-    pub fn forward_with_cache(
-        &self,
-        x: Tensor<B, 3>,
-        cache: Mamba2BlockCache<B>,
+        cache: Option<Mamba2BlockCache<B>>,
         chunk_size: usize,
     ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
         let [batch, sequence, d_model] = x.dims();
@@ -323,7 +346,7 @@ impl<B: Backend> Mamba2Layer<B> {
         let res = x.clone();
         let x = self.norm.forward(x);
 
-        let (x, cache) = self.mamba_block.forward_with_cache(x, cache, chunk_size);
+        let (x, cache) = self.mamba_block.forward(x, cache, chunk_size);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         (x + res, cache)
@@ -342,7 +365,7 @@ mod step {
         pub fn step(
             &self,
             x: Tensor<B, 1, Int>,
-            caches: Mamba2BlockCaches<B>,
+            caches: Option<Mamba2BlockCaches<B>>,
         ) -> (Tensor<B, 2>, Mamba2BlockCaches<B>) {
             let [batch] = x.dims();
             let [padded_vocab, d_model] = self.embedding.weight.dims();
@@ -382,13 +405,92 @@ mod step {
         pub fn step(
             &self,
             mut x: Tensor<B, 2>,
-            mut caches: Mamba2BlockCaches<B>,
+            caches: Option<Mamba2BlockCaches<B>>,
         ) -> (Tensor<B, 2>, Mamba2BlockCaches<B>) {
-            for (i, layer) in self.layers.iter().enumerate() {
-                let (x_, cache) = layer.step(x, caches.caches[i].clone());
-                x = x_;
-                caches.caches[i] = cache;
+            let n_virtual_layers = self
+                .n_virtual_layers
+                .as_ref()
+                .map(|(l, _schedule)| *l)
+                .unwrap_or(
+                    // virtual layers fallback to the real layers
+                    self.n_real_layers,
+                );
+
+            let caches = caches.unwrap_or_else(|| {
+                let device = &x.device();
+                let [batch, _d_model] = x.dims();
+                let layer0_block = &self.real_layers[0].mamba_block;
+                let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+
+                Mamba2BlockCachesConfig::new(
+                    self.n_real_caches // there may be cache sharing
+                        .unwrap_or(
+                            // or each virtual layer has its own cache
+                            n_virtual_layers,
+                        ),
+                    Mamba2BlockCacheConfig {
+                        batch,
+                        d_state: layer0_block.d_state,
+                        d_conv,
+                        conv_dim,
+                        headdim: layer0_block.headdim(),
+                        nheads: layer0_block.nheads(),
+                    },
+                )
+                .with_n_virtual_caches(self.n_virtual_caches.clone())
+                .init(device)
+            });
+
+            // assertions
+            // resulting virtual caches must match to resulting virtual layers
+            match &caches.n_virtual_caches {
+                None => {
+                    assert_eq!(caches.n_real_caches, n_virtual_layers);
+                    assert_eq!(caches.n_real_caches, caches.caches.len());
+                }
+                Some((n_virtual_caches, _schedule)) => {
+                    assert_eq!(*n_virtual_caches, n_virtual_layers);
+                }
             }
+
+            let n_real_caches = caches.n_real_caches;
+            let n_virtual_caches = caches.n_virtual_caches;
+            let mut caches: Vec<Option<Mamba2BlockCache<B>>> =
+                caches.caches.into_iter().map(|c| Some(c)).collect();
+
+            for i in 0..n_virtual_layers {
+                // use real layers by reference (clone)
+                let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+                    schedule.real_idx(i, *n_virtual_layers, self.n_real_layers)
+                } else {
+                    i
+                };
+                let layer = self.real_layers.get(layer_idx).unwrap();
+
+                // re-use real caches by value (replacement)
+                let cache_idx = if let Some((n_virtual_caches, schedule)) = &n_virtual_caches {
+                    schedule.real_idx(
+                        i,
+                        *n_virtual_caches,
+                        // n_real_caches may constrain the amount of actual caches,
+                        // otherwise it's uncontrained
+                        self.n_real_caches.unwrap_or(*n_virtual_caches),
+                    )
+                } else {
+                    i
+                };
+                let cache = core::mem::take(caches.get_mut(cache_idx).unwrap()).unwrap();
+
+                let (x_, cache_) = layer.step(x, Some(cache));
+                x = x_;
+                caches[cache_idx] = Some(cache_);
+            }
+
+            let caches = Mamba2BlockCaches {
+                n_real_caches,
+                n_virtual_caches,
+                caches: caches.into_iter().map(|c| c.unwrap()).collect(),
+            };
 
             (x, caches)
         }
@@ -403,7 +505,7 @@ mod step {
         pub fn step(
             &self,
             x: Tensor<B, 2>,
-            cache: Mamba2BlockCache<B>,
+            cache: Option<Mamba2BlockCache<B>>,
         ) -> (Tensor<B, 2>, Mamba2BlockCache<B>) {
             let [batch, d_model] = x.dims();
 

@@ -1,4 +1,4 @@
-use crate::common::model::{Mamba2NetworkConfig, mamba2_block_config};
+pub use crate::common::model::{Mamba2NetworkConfig, mamba2_block_config};
 
 /// The Fibonacci-like sequence xₜ = xₜ₋₁ + xₜ₋₂ can be modeled as:
 ///
@@ -14,7 +14,7 @@ use crate::common::model::{Mamba2NetworkConfig, mamba2_block_config};
 /// yₜ = Cₜ hₜ + D xₜ
 /// ```
 ///
-/// By default, this is a small model (~1.4 KB when stored) that shows a good convergence.
+/// By default, this is a small model (~1.5 KB when stored) that shows a good convergence.
 ///
 /// Counting the io projections, conv and norm layers -- none of which
 /// are needed for the simplest case -- this results in 35 params.
@@ -22,9 +22,10 @@ use crate::common::model::{Mamba2NetworkConfig, mamba2_block_config};
 pub fn model_config() -> Mamba2NetworkConfig {
     Mamba2NetworkConfig::new()
         // the input is a sequence of a single-dimensioned values
+        // the input shape is [batch_size, sequence_len = SEQ_LENGTH, input_size = 1]
         .with_input_size(1)
         // a single layer is sufficient
-        .with_n_layer(1)
+        .with_n_real_layers(1)
         // a very small configuration
         .with_mamba_block(mamba2_block_config(
             //
@@ -35,5 +36,7 @@ pub fn model_config() -> Mamba2NetworkConfig {
             1, // expand: expansion is not necessary
         ))
         // the output is a single-dimensioned value
+        // the output shape is [batch_size, sequence_len = SEQ_LENGTH, output_size = 1]
+        // which is later narrowed to the last timestep [batch_size, sequence_len = 1, output_size = 1]
         .with_output_size(1)
 }

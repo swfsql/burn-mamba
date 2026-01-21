@@ -11,14 +11,16 @@ The dataset is first downloaded and stored in `$HOME/.cache/burn-dataset/mnist/t
 - tk10-images-idx3-ubyte (1.57 MB)
 - tk10-labels-idx1-ubyte (4.44 KB)
 
-Then the model is trained and saved to `/tmp/burn-mamba/mnist-class/`.  
-WARNING: All files under `/tmp/burn-mamba/mnist-class/**` are removed at the start of the training.
+##### Usage Example
 
-#### Cuda backend (fp16)
+```bash
+# debug check in ndarray (fp32)
+cargo check --example mnist-class --features "dev-ndarray"
 
-```sh
-cargo run --release --example mnist-class --features "dev-cuda,dev-f16"
+# training and running inference in wgpu (fp32)
+# note: the following requires ~7GB vram during training by default
+cargo run --release --example mnist-class --features "dev-wgpu" -- --training --inference
 ```
 
-See `burn-mamba/Cargo.toml` for other features or backend information.  
-See `model.rs` file for vram system requirements.
+- See `burn-mamba/Cargo.toml` for other features or backend information.  
+- See `burn-mamba/examples/README.md` for the CLI usage overview.

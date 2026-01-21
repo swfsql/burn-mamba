@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 
 [features]
@@ -13,6 +13,7 @@ dev-ndarray-simd = ["dev-ndarray", "burn/simd"]
 dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/accelerate"]
 dev-ndarray-blas-netlib = ["dev-ndarray", "burn/blas-netlib"]
 dev-ndarray-blas-openblas = ["dev-ndarray", "burn/openblas"]
+dev-cpu = ["burn/cpu", "_dev-has-backend"]
 dev-tch-cpu = ["burn/tch", "_dev-has-backend"]
 dev-tch-gpu = ["burn/tch", "_dev-has-backend"]
 dev-wgpu = ["burn/wgpu", "burn/default", "_dev-has-backend"]
@@ -28,9 +29,10 @@ dev-fusion = ["burn/fusion"]
 _dev-has-backend = [] # signal if any backend was selected
 
 [dependencies]
+serde = { version = "1.0.0", features = ["derive"] }
 
 ### For the main branch. ###
-burn = { version = "0.20.0-pre.6", default-features = false }
+burn = { version = "0.20.0", default-features = false }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false } # local burn with ndarray-f16 + graph-sweep
 # [patch.crates-io]
@@ -40,13 +42,14 @@ burn = { version = "0.20.0-pre.6", default-features = false }
 num-traits = "0.2.19"
 rand = "0.9.2"
 rand_distr = "0.5.1"
-serde = { version = "1.0.0", features = ["derive"] }
 flate2 = "1.1.4"
 dirs = "6.0.0"
+pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
+temp-dir = "0.1.16"
 
 ### For the main branch. ###
-burn = { version = "0.20.0-pre.6", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
-burn-dataset = { version = "0.20.0-pre.6", default-features = false, features = ["network"] }
+burn = { version = "0.20.0", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
+burn-dataset = { version = "0.20.0", default-features = false, features = ["network"] }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

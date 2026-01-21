@@ -1,11 +1,9 @@
-use crate::common::backend::Element;
-use burn::{
-    data::{
-        dataloader::batcher::Batcher,
-        dataset::{Dataset, InMemDataset},
-    },
-    prelude::*,
+pub use crate::common::backend::FloatElement;
+use burn::data::{
+    dataloader::batcher::Batcher,
+    dataset::{Dataset, InMemDataset},
 };
+use burn::prelude::*;
 use num_traits::AsPrimitive;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
@@ -19,8 +17,8 @@ pub const NOISE_LEVEL: f32 = 0.1;
 // Generate a sequence where each number is the sum of previous two numbers plus noise
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequenceDatasetItem {
-    pub sequence: Vec<Element>,
-    pub target: Element,
+    pub sequence: Vec<FloatElement>,
+    pub target: FloatElement,
 }
 
 impl SequenceDatasetItem {
@@ -32,7 +30,7 @@ impl SequenceDatasetItem {
         for _i in 0..seq_length {
             // Next number is sum of previous two plus noise
             let normal = Normal::new(0.0, noise_level).unwrap();
-            let normal: Element = normal.sample(&mut rand::rng()).as_();
+            let normal: FloatElement = normal.sample(&mut rand::rng()).as_();
             let next_val = seq[seq.len() - 2] + seq[seq.len() - 1] + normal;
             seq.push(next_val);
         }

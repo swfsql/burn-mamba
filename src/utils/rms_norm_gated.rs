@@ -1,5 +1,5 @@
-use crate::silu::Silu;
 use crate::utils::div_eps;
+use crate::utils::silu::Silu;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;

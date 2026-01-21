@@ -1,5 +1,7 @@
 # burn-mamba
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/swfsql/burn-mamba)
+
 Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752) and [Mamba2](https://arxiv.org/abs/2405.21060). The official reference implementation is at [state-spaces/mamba](https://github.com/state-spaces/mamba).
 
 Mamba is a fast, efficient model for handling long data sequences such as in language and time-series tasks, competitive with traditional Transformers. It uses a smart selection process to focus on key information, scaling linearly with strong performance.

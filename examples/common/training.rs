@@ -1,9 +1,19 @@
-use crate::common::model::Mamba2NetworkConfig;
-use burn::{optim::AdamWConfig, prelude::*, tensor::backend::AutodiffBackend};
+use crate::common::{
+    model::{Mamba2NetworkConfig, ModelConfigExt},
+    optim::OptimConfigExt,
+};
+use burn::{
+    module::AutodiffModule, optim::AdamWConfig, prelude::*, tensor::backend::AutodiffBackend,
+};
+
+pub trait TrainingConfigExt<AutoB: AutodiffBackend, AutoM: AutodiffModule<AutoB>>: Config {
+    type ModelConfig: ModelConfigExt<AutoB>;
+    type OptimConfig: OptimConfigExt<AutoB, AutoM>;
+    fn optim(&self) -> &Self::OptimConfig;
+}
 
 #[derive(Config, Debug)]
 pub struct TrainingConfig {
-    pub model: Mamba2NetworkConfig,
     pub optimizer: AdamWConfig,
     #[config(default = 1)]
     pub num_epochs: usize,
@@ -13,13 +23,18 @@ pub struct TrainingConfig {
     pub num_workers: usize,
     #[config(default = 1e-4)]
     pub lr: f64,
+    #[config(default = 0)]
+    pub seed: u64,
 }
 
-// Create the directory to save the model and model config
-pub fn create_artifact_dir(artifact_dir: &str) {
-    // Remove existing artifacts
-    std::fs::remove_dir_all(artifact_dir).ok();
-    std::fs::create_dir_all(artifact_dir).ok();
+impl<AutoB: AutodiffBackend, AutoM: AutodiffModule<AutoB>> TrainingConfigExt<AutoB, AutoM>
+    for TrainingConfig
+{
+    type ModelConfig = Mamba2NetworkConfig;
+    type OptimConfig = AdamWConfig;
+    fn optim(&self) -> &Self::OptimConfig {
+        &self.optimizer
+    }
 }
 
 pub fn optimizer_config<AutoB: AutodiffBackend>() -> AdamWConfig {

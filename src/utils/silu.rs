@@ -1,3 +1,4 @@
+use crate::utils::contains_nan_or_inf;
 use burn::prelude::*;
 
 // silu activation for x is x * sigmoid(x)
@@ -16,6 +17,21 @@ impl Silu {
     /// - input: `[..., any]`
     /// - output: `[..., any]`
     pub fn forward<B: Backend, const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
-        input.clone() * nn::Sigmoid::new().forward(input)
+        if contains_nan_or_inf(&input) {
+            panic!();
+        }
+
+        let sigmoid = nn::Sigmoid::new().forward(input.clone());
+        if contains_nan_or_inf(&sigmoid) {
+            panic!();
+        }
+
+        let res = input * sigmoid;
+
+        if contains_nan_or_inf(&res) {
+            panic!();
+        }
+
+        res
     }
 }

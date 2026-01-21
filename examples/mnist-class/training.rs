@@ -1,153 +1,171 @@
-use crate::common::model::{Mamba2Network, Mamba2NetworkConfig};
-use crate::common::training::{TrainingConfig, create_artifact_dir};
-use crate::dataset::{MnistBatch, MnistBatcher, MnistDataset};
+pub use crate::common::{
+    cli::AppArgs,
+    mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
+    model::{Mamba2Network, Mamba2NetworkConfig},
+    training::TrainingConfig,
+};
 use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder},
     module::AutodiffModule,
     optim::{AdamW, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
-    record::CompactRecorder,
     tensor::backend::AutodiffBackend,
     train::ClassificationOutput,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
 };
-use burn_mamba::prelude::*;
 
-pub const RANDOM_SEED: u64 = 5;
+pub fn train<AutoB: AutodiffBackend>(
+    training_config: TrainingConfig,
+    model_config: Mamba2NetworkConfig,
+    training_device: AutoB::Device,
+    app_args: &AppArgs,
+) {
+    AutoB::seed(&training_device, training_config.seed);
 
-pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, device: B::Device) {
-    create_artifact_dir(artifact_dir);
+    // load (or init and save) model and optim
+    let model: Mamba2Network<AutoB> = app_args.load_or_save_model(&model_config, &training_device);
+    let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &training_device);
 
-    // Save training config
-    config
-        .save(format!("{artifact_dir}/config.json"))
-        .expect("Config should be saved successfully");
-    B::seed(&device, RANDOM_SEED);
-
-    // Create the model and optimizer
-    let mut model = Wrap(config.model.init::<B>(&device), config.model.clone());
-    let mut optim = config.optimizer.init::<B, Mamba2Network<B>>();
+    let mut model = Wrap(model, model_config.clone());
 
     // Create the batcher
     let batcher = MnistBatcher::default();
 
     // Create the dataloaders
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
-        .batch_size(config.batch_size)
-        .shuffle(RANDOM_SEED)
-        .num_workers(config.num_workers)
+        .batch_size(training_config.batch_size)
+        .shuffle(training_config.seed)
+        .num_workers(training_config.num_workers)
         .build(MnistDataset::train());
     let dataloader_valid = DataLoaderBuilder::new(batcher)
-        .batch_size(config.batch_size)
-        .num_workers(config.num_workers)
+        .batch_size(training_config.batch_size)
+        .num_workers(training_config.num_workers)
         .build(MnistDataset::test());
 
-    let train_num_items = dataloader_train.num_items();
+    let training_num_items = dataloader_train.num_items();
 
     let mut metric_meta = burn::train::metric::MetricMetadata {
-        progress: burn::data::dataloader::Progress::new(0, train_num_items),
+        progress: burn::data::dataloader::Progress::new(0, training_num_items),
         epoch: 1,
-        epoch_total: config.num_epochs,
+        epoch_total: training_config.num_epochs,
         iteration: 0,
-        lr: Some(config.lr),
+        lr: Some(training_config.lr),
     };
+
+    println!("running small initial validation...");
+    epoch_valid::<AutoB::InnerBackend>(
+        std::sync::Arc::clone(&dataloader_valid),
+        model.0.valid(),
+        &training_config,
+        &model_config,
+        metric_meta.epoch,
+        Some(10),
+    );
 
     println!("Starting training...");
     // Iterate over our training for X epochs
-    for epoch in 1..config.num_epochs + 1 {
+    for epoch in 1..training_config.num_epochs + 1 {
         metric_meta.epoch = epoch;
 
-        model.0 = epoch_train::<B>(
-            artifact_dir,
+        model.0 = epoch_train::<AutoB>(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
             model.0,
-            &config,
+            &training_config,
+            &model_config,
             &mut optim,
             &mut metric_meta,
             None,
             Some(10),
+            app_args,
+        );
+
+        // save assets
+        app_args.save_model(&model.0);
+        app_args.save_optim(&optim);
+
+        println!("running full validation...");
+        epoch_valid::<AutoB::InnerBackend>(
+            std::sync::Arc::clone(&dataloader_valid),
+            model.0.valid(),
+            &training_config,
+            &model_config,
+            metric_meta.epoch,
+            None,
         );
     }
     println!("Training finished.");
-
-    println!("Saving model and running full validation...");
-    // Save the trained model
-    model
-        .0
-        .clone()
-        .save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
-        .expect("Trained model should be saved successfully");
-    println!("Model saved");
-
-    // run validation
-    epoch_valid::<B::InnerBackend>(
-        std::sync::Arc::clone(&dataloader_valid),
-        model.0.valid(),
-        &config,
-        config.num_epochs,
-        None,
-    );
 }
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, MnistBatch<B>> + 'static>;
 
-pub fn epoch_train<B: AutodiffBackend>(
-    artifact_dir: &str,
-    dataloader_train: Dataloader<B>,
-    dataloader_valid: Dataloader<B::InnerBackend>,
-    train_model: Mamba2Network<B>,
-    config: &TrainingConfig,
-    optim: &mut OptimizerAdaptor<AdamW, Mamba2Network<B>, B>,
+pub fn epoch_train<AutoB: AutodiffBackend>(
+    dataloader_train: Dataloader<AutoB>,
+    dataloader_valid: Dataloader<AutoB::InnerBackend>,
+    training_model: Mamba2Network<AutoB>,
+    training_config: &TrainingConfig,
+    model_config: &Mamba2NetworkConfig,
+    optim: &mut OptimizerAdaptor<AdamW, Mamba2Network<AutoB>, AutoB>,
     metric_meta: &mut MetricMetadata,
-    train_loop_limit: Option<usize>,
+    training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
-) -> Mamba2Network<B> {
-    let train_loop_limit = train_loop_limit.unwrap_or(usize::MAX);
-    let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
-    let mut acc_metric = burn::train::metric::AccuracyMetric::<B>::new();
+    app_args: &AppArgs,
+) -> Mamba2Network<AutoB> {
+    let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
+    let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
+    let mut acc_metric = burn::train::metric::AccuracyMetric::<AutoB>::new();
 
-    let mut train_model = Wrap(train_model, config.model.clone());
+    let mut training_model = Wrap(training_model, model_config.clone());
 
     // training loop
-    for (mut b, batch) in dataloader_train.iter().enumerate().take(train_loop_limit) {
+    for (mut b, batch) in dataloader_train
+        .iter()
+        .enumerate()
+        .take(training_loop_limit)
+    {
         b += 1;
-        let input = batch.images;
+        let input = batch.images_z_score(); // values mean=0, stddev=1
+        let [batch_size, HEIGHT, WIDTH, 1] = input.dims() else {
+            panic!()
+        };
+        let input = input.reshape([batch_size, HEIGHT * WIDTH, 1]);
+        let [_batch_size, sequence_size, input_size] = input.dims();
+        assert_eq!(sequence_size, HEIGHT * WIDTH);
+        assert_eq!(input_size, 1);
         let targets = batch.targets;
-        let [batch_size, _sequence_size, _input_size] = input.dims();
 
         metric_meta.iteration += 1;
         metric_meta.progress.items_processed += batch_size;
 
-        let pre_metrics = train_model.forward_classification(input, targets);
+        let pre_metrics = training_model.forward_classification(input, targets);
         acc_metric.update(&pre_metrics.adapt(), &metric_meta);
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
 
         let loss = pre_metrics.loss.clone();
         let grads = loss.backward();
-        let grads = GradientsParams::from_grads(grads, &train_model.0);
-        train_model.0 = optim.step(config.lr, train_model.0, grads);
+        let grads = GradientsParams::from_grads(grads, &training_model.0);
+        training_model.0 = optim.step(training_config.lr, training_model.0, grads);
 
         println!(
             "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, Acc {:0>6.2}",
             metric_meta.epoch,
             metric_meta.epoch_total,
-            dataloader_train.num_items() / config.batch_size + 1,
+            dataloader_train.num_items() / training_config.batch_size + 1,
             loss_metric.value().current(),
             acc_metric.value().current(),
         );
 
         if b % 100 == 0 {
-            println!("Saving model and running validation (batch limit: {valid_loop_limit:?})");
-            train_model
-                .0
-                .clone()
-                .save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
-                .expect("Trained model should be saved successfully");
-            epoch_valid::<B::InnerBackend>(
+            // save assets
+            app_args.save_model(&training_model.0);
+            app_args.save_optim(optim);
+
+            println!("running validation (batch iteration limit: {valid_loop_limit:?})");
+            epoch_valid::<AutoB::InnerBackend>(
                 std::sync::Arc::clone(&dataloader_valid),
-                train_model.0.valid(),
-                &config,
+                training_model.0.valid(),
+                &training_config,
+                &model_config,
                 metric_meta.epoch,
                 valid_loop_limit,
             );
@@ -163,13 +181,14 @@ pub fn epoch_train<B: AutodiffBackend>(
         acc_metric.running_value().current(),
     );
 
-    train_model.0
+    training_model.0
 }
 
 pub fn epoch_valid<B: Backend>(
     dataloader_valid: Dataloader<B>,
     valid_model: Mamba2Network<B>,
-    config: &TrainingConfig,
+    training_config: &TrainingConfig,
+    model_config: &Mamba2NetworkConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
 ) {
@@ -178,21 +197,27 @@ pub fn epoch_valid<B: Backend>(
     let mut metric_meta = burn::train::metric::MetricMetadata {
         progress: burn::data::dataloader::Progress::new(0, valid_num_items),
         epoch,
-        epoch_total: config.num_epochs,
+        epoch_total: training_config.num_epochs,
         iteration: 0,
-        lr: Some(config.lr),
+        lr: Some(training_config.lr),
     };
 
     let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::<B>::new();
 
-    let valid_model = Wrap(valid_model, config.model.clone());
+    let valid_model = Wrap(valid_model, model_config.clone());
 
     // validation loop
     for (_b, batch) in dataloader_valid.iter().enumerate().take(valid_loop_limit) {
-        let input = batch.images;
+        let input = batch.images_z_score(); // values mean=0, stddev=1
+        let [batch_size, HEIGHT, WIDTH, 1] = input.dims() else {
+            panic!()
+        };
+        let input = input.reshape([batch_size, HEIGHT * WIDTH, 1]);
+        let [_batch_size, sequence_size, input_size] = input.dims();
+        assert_eq!(sequence_size, HEIGHT * WIDTH);
+        assert_eq!(input_size, 1);
         let targets = batch.targets;
-        let [batch_size, _sequence_size, _input_size] = input.dims();
 
         metric_meta.iteration += 1;
         metric_meta.progress.items_processed += batch_size;
@@ -222,22 +247,13 @@ impl<B: Backend> Wrap<B> {
         targets: Tensor<B, 1, Int>,
     ) -> ClassificationOutput<B> {
         let model = &self.0;
-        let config = &self.1;
-        let [batch_size, sequence_size, _input_size] = input.dims();
+        let _config = &self.1;
+        let [batch_size, sequence_size, input_size] = input.dims();
+        assert_eq!(sequence_size, HEIGHT * WIDTH);
+        assert_eq!(input_size, 1);
         assert_eq!([batch_size], targets.dims());
-        assert!(sequence_size >= 1);
 
-        let device = model.in_proj.weight.device();
-
-        // prepare caches (once per batch)
-        let caches = Mamba2BlockCachesConfig::new_from_block_config(
-            config.n_layer,
-            batch_size,
-            config.mamba_block.clone(),
-        )
-        .init(&device);
-
-        let (output, _caches) = model.forward(input.clone(), caches, Some(128));
+        let (output, _caches) = model.forward(input.clone(), None, Some(128));
         assert_eq!([batch_size, sequence_size, 10], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 10], last_output.dims());

@@ -2,22 +2,35 @@ use burn::prelude::*;
 use burn::tensor::backend::AutodiffBackend;
 
 #[cfg(feature = "dev-f16")]
-pub type Element = burn::tensor::f16;
+mod ty {
+    use burn::record::{HalfPrecisionSettings, NamedMpkFileRecorder};
+    pub type FloatElement = burn::tensor::f16;
+    pub type IntElement = i32; // used mostly for indexing
+    pub type RecorderTy = NamedMpkFileRecorder<HalfPrecisionSettings>;
+}
 #[cfg(not(feature = "dev-f16"))]
-pub type Element = f32;
+mod ty {
+    use burn::record::{FullPrecisionSettings, NamedMpkFileRecorder};
+    pub type FloatElement = f32;
+    pub type IntElement = i32;
+    pub type RecorderTy = NamedMpkFileRecorder<FullPrecisionSettings>;
+}
+pub use ty::*;
 
 #[cfg(feature = "dev-ndarray")]
-pub type MainBackend = burn::backend::NdArray<Element, i32>;
+pub type MainBackend = burn::backend::NdArray<FloatElement, IntElement>;
+#[cfg(feature = "dev-cpu")]
+pub type MainBackend = burn::backend::Cpu<FloatElement, IntElement>;
 #[cfg(any(feature = "dev-tch-cpu", feature = "dev-tch-gpu"))]
-pub type MainBackend = burn::backend::libtorch::LibTorch<Element, i32>;
+pub type MainBackend = burn::backend::libtorch::LibTorch<FloatElement, IntElement>;
 #[cfg(any(feature = "dev-wgpu", feature = "dev-metal", feature = "dev-vulkan"))]
-pub type MainBackend = burn::backend::wgpu::Wgpu<Element, i32>;
+pub type MainBackend = burn::backend::wgpu::Wgpu<FloatElement, IntElement>;
 #[cfg(feature = "dev-cuda")]
-pub type MainBackend = burn::backend::Cuda<Element, i32>;
+pub type MainBackend = burn::backend::Cuda<FloatElement, IntElement>;
 #[cfg(feature = "dev-rocm")]
-pub type MainBackend = burn::backend::Rocm<Element, i32>;
+pub type MainBackend = burn::backend::Rocm<FloatElement, IntElement>;
 #[cfg(feature = "dev-remote")]
-pub type MainBackend = burn::backend::RemoteBackend<Element, i32>;
+pub type MainBackend = burn::backend::RemoteBackend<FloatElement, IntElement>;
 
 pub trait MainDevice: Backend {
     fn main_device() -> <Self as Backend>::Device {
@@ -27,6 +40,7 @@ pub trait MainDevice: Backend {
 
 #[cfg(any(
     feature = "dev-ndarray",
+    feature = "dev-cpu",
     feature = "dev-tch-cpu",
     feature = "dev-wgpu",
     feature = "dev-metal",
@@ -64,7 +78,7 @@ mod err {
     );
 
     // pretend to fallback to ndarray (to avoid too many other unrelated errors)
-    pub type MainBackend = burn::backend::NdArray<Element, i32>;
+    pub type MainBackend = burn::backend::NdArray<FloatElement, IntElement>;
     impl MainDevice for MainBackend {}
 }
 #[cfg(not(feature = "_dev-has-backend"))]

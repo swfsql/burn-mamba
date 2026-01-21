@@ -9,6 +9,7 @@ pub mod mamba1_block;
 pub mod mamba2;
 #[cfg(feature = "mamba2")]
 pub mod mamba2_block;
+pub mod schedule;
 
 pub mod prelude {
     #[cfg(feature = "mamba1")]
@@ -28,9 +29,4 @@ pub mod prelude {
     pub use mamba2_export::*;
 }
 
-pub mod mse;
-pub mod rms_norm;
-pub mod rms_norm_gated;
-pub mod silu;
-pub mod softplus;
 pub mod utils;

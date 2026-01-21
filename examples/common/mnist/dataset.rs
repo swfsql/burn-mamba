@@ -1,17 +1,19 @@
-use crate::common::backend::Element;
+use crate::common::backend::FloatElement;
 use burn::data::dataloader::batcher::Batcher;
 use burn::prelude::*;
-use burn_dataset::network::downloader::download_file_as_bytes;
 use burn_dataset::{
     Dataset, InMemDataset,
+    network::downloader::download_file_as_bytes,
     transform::{Mapper, MapperDataset},
 };
 use flate2::read::GzDecoder;
 use num_traits::AsPrimitive;
 use serde::{Deserialize, Serialize};
-use std::fs::{File, create_dir_all};
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, create_dir_all},
+    io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+};
 
 // from the vision source
 // https://github.com/tracel-ai/burn/blob/fa4f9845a6b2279cd8de68bf7ca5a7eb76dec96d/crates/burn-dataset/src/vision/mnist.rs
@@ -21,8 +23,8 @@ use std::path::{Path, PathBuf};
 
 // CVDF mirror of http://yann.lecun.com/exdb/mnist/
 const URL: &str = "https://storage.googleapis.com/cvdf-datasets/mnist/";
-const TRAIN_IMAGES: &str = "train-images-idx3-ubyte";
-const TRAIN_LABELS: &str = "train-labels-idx1-ubyte";
+const TRAINING_IMAGES: &str = "train-images-idx3-ubyte";
+const TRAINING_LABELS: &str = "train-labels-idx1-ubyte";
 const TEST_IMAGES: &str = "t10k-images-idx3-ubyte";
 const TEST_LABELS: &str = "t10k-labels-idx1-ubyte";
 
@@ -37,7 +39,7 @@ pub struct MnistFlatItem {
     ///
     /// # Shape
     /// [WIDTH * HEIGHT]
-    pub image: Vec<Element>,
+    pub image: Vec<FloatElement>,
 
     /// Label of the image.  
     /// Each value is in between 0 and 9.
@@ -59,12 +61,12 @@ impl Mapper<MnistFlatItemRaw, MnistFlatItem> for BytesToFlatImage {
         debug_assert_eq!(item.image_bytes.len(), WIDTH * HEIGHT);
 
         // Convert the image to a flat array of floats.
-        let image: Vec<Element> = item
+        let image: Vec<FloatElement> = item
             .image_bytes
             .iter()
             .map(|brightness| {
-                let element: Element = (*brightness).as_();
-                element
+                let float_element: FloatElement = (*brightness).as_();
+                float_element
             })
             .collect();
 
@@ -147,8 +149,8 @@ impl MnistDataset {
         // Download split files
         match split {
             "train" => {
-                MnistDataset::download_file(TRAIN_IMAGES, &split_dir);
-                MnistDataset::download_file(TRAIN_LABELS, &split_dir);
+                MnistDataset::download_file(TRAINING_IMAGES, &split_dir);
+                MnistDataset::download_file(TRAINING_LABELS, &split_dir);
             }
             "test" => {
                 MnistDataset::download_file(TEST_IMAGES, &split_dir);
@@ -185,7 +187,7 @@ impl MnistDataset {
     /// Each image is a vector of bytes.
     fn read_images<P: AsRef<Path>>(root: &P, split: &str) -> Vec<Vec<u8>> {
         let file_name = if split == "train" {
-            TRAIN_IMAGES
+            TRAINING_IMAGES
         } else {
             TEST_IMAGES
         };
@@ -213,7 +215,7 @@ impl MnistDataset {
     /// Read labels at the provided path for the specified split.
     fn read_labels<P: AsRef<Path>>(root: &P, split: &str) -> Vec<u8> {
         let file_name = if split == "train" {
-            TRAIN_LABELS
+            TRAINING_LABELS
         } else {
             TEST_LABELS
         };
@@ -244,17 +246,13 @@ pub struct MnistBatcher {}
 
 #[derive(Clone, Debug)]
 pub struct MnistBatch<B: Backend> {
-    /// The input feature is the brightness, z-score normalized (mean=0.0, stddev=1.0).  
-    /// The original dataset had mean=0.1307, stddev=0.3081.  
+    /// The input feature is the brightness, with values in between 0.0 and 255.0.
     ///
-    /// The mappings are:
-    ///
-    /// * `z = (value / 255 - mean) / stddev`,  
-    /// * `value = (z * stddev + mean) * 255`.
+    /// See also [`Self::images_norm`] and [`Self::images_z_score`].
     ///
     /// # Shape
-    /// [batch_size, WIDTH * HEIGHT, 1]
-    pub images: Tensor<B, 3>,
+    /// [batch_size, HEIGHT, WIDTH, 1]
+    pub images: Tensor<B, 4>,
     /// # Shape
     /// [batch_size]
     pub targets: Tensor<B, 1, Int>,
@@ -268,15 +266,12 @@ impl<B: Backend> Batcher<B, MnistFlatItem, MnistBatch<B>> for MnistBatcher {
             .unzip();
         let images = items_image
             .into_iter()
-            .map(|image: Vec<Element>| {
-                TensorData::new(image, [1, WIDTH * HEIGHT]).convert::<B::FloatElem>()
+            .map(|image: Vec<FloatElement>| {
+                TensorData::new(image, [1, HEIGHT, WIDTH, 1]).convert::<B::FloatElem>()
             })
-            .map(|data| Tensor::<B, 2>::from_data(data, device))
-            .map(|tensor: Tensor<B, 2>| tensor.reshape([1, WIDTH * HEIGHT, 1]))
-            // Normalize: scale between [0,1] and make the mean=0 and std=1
-            // values mean=0.1307,std=0.3081 are from the PyTorch MNIST example
-            // https://github.com/pytorch/examples/blob/54f4572509891883a947411fd7239237dd2a39c3/mnist/main.py#L122
-            .map(|tensor| ((tensor / 255) - 0.1307) / 0.3081)
+            .map(|data| Tensor::<B, 4>::from_data(data, device))
+            // .map(|tensor: Tensor<B, 2>| tensor.reshape([1, HEIGHT, WIDTH, 1]))
+            // .map(|tensor| ((tensor / 255) - mean) / stddev)
             .collect();
 
         let targets = items_label
@@ -290,5 +285,28 @@ impl<B: Backend> Batcher<B, MnistFlatItem, MnistBatch<B>> for MnistBatcher {
         let targets = Tensor::cat(targets, 0);
 
         MnistBatch { images, targets }
+    }
+}
+
+impl<B: Backend> MnistBatch<B> {
+    // values mean=0.1307,std=0.3081 are from the PyTorch MNIST example
+    // https://github.com/pytorch/examples/blob/54f4572509891883a947411fd7239237dd2a39c3/mnist/main.py#L122
+    pub const MEAN: f32 = 0.1307;
+    pub const STDDEV: f32 = 0.3081;
+
+    /// Return image values normalized to be in between `0.0` and `1.0`.
+    ///
+    /// # Shape
+    /// [batch_size, HEIGHT, WIDTH, 1]
+    pub fn images_norm(&self) -> Tensor<B, 4> {
+        self.images.clone() / 255
+    }
+
+    /// Return image values normalized to be z-score normalized (mean=0, stddev=1).
+    ///
+    /// # Shape
+    /// [batch_size, HEIGHT, WIDTH, 1]
+    pub fn images_z_score(&self) -> Tensor<B, 4> {
+        ((self.images.clone() / 255) - Self::MEAN) / Self::STDDEV
     }
 }
