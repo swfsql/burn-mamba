@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 
 [features]
@@ -9,19 +9,19 @@ mamba1 = []
 mamba2 = []
 # backend selection for tests or examples
 dev-ndarray = ["burn/ndarray", "_dev-has-backend"]
-dev-ndarray-simd = ["dev-ndarray", "burn/simd"]
-dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/accelerate"]
-dev-ndarray-blas-netlib = ["dev-ndarray", "burn/blas-netlib"]
-dev-ndarray-blas-openblas = ["dev-ndarray", "burn/openblas"]
-dev-cpu = ["burn/cpu", "_dev-has-backend"]
-dev-tch-cpu = ["burn/tch", "_dev-has-backend"]
-dev-tch-gpu = ["burn/tch", "_dev-has-backend"]
-dev-wgpu = ["burn/wgpu", "burn/default", "_dev-has-backend"]
-dev-metal = ["burn/metal", "burn/default", "_dev-has-backend"]
-dev-vulkan = ["burn/vulkan", "burn/default", "_dev-has-backend"]
-dev-cuda = ["burn/cuda", "burn/default", "_dev-has-backend"]
-dev-rocm = ["burn/rocm", "burn/default", "_dev-has-backend"]
-dev-remote = ["burn/remote", "_dev-has-backend"]
+dev-ndarray-simd = ["dev-ndarray", "burn/simd", "burn/std",]
+dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/std", "burn/accelerate"]
+dev-ndarray-blas-netlib = ["dev-ndarray", "burn/std", "burn/blas-netlib"]
+dev-ndarray-blas-openblas = ["dev-ndarray", "burn/std", "burn/openblas"]
+dev-cpu = ["burn/cpu", "burn/std", "_dev-has-backend"]
+dev-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
+dev-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
+dev-wgpu = ["burn/wgpu", "burn/std", "_dev-has-backend"]
+dev-metal = ["burn/metal", "burn/std", "_dev-has-backend"]
+dev-vulkan = ["burn/vulkan", "burn/std", "_dev-has-backend"]
+dev-cuda = ["burn/cuda", "burn/std", "_dev-has-backend"]
+dev-rocm = ["burn/rocm", "burn/std", "_dev-has-backend"]
+dev-remote = ["burn/remote", "burn/std", "_dev-has-backend"]
 # misc features for tests or examples
 dev-f16 = []
 dev-autotune = ["burn/autotune"]
