@@ -393,16 +393,6 @@ impl<B: Backend> Mamba2Block<B> {
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
         debug_assert_eq!([batch, sequence, nheads], dt.dims());
 
-        if contains_nan_or_inf(&z) {
-            panic!();
-        }
-        if contains_nan_or_inf(&xbc) {
-            panic!();
-        }
-        if contains_nan_or_inf(&dt) {
-            panic!();
-        }
-
         // convolution and activation
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
@@ -423,18 +413,10 @@ impl<B: Backend> Mamba2Block<B> {
         let xbc = self.conv1d.forward(xbc);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
 
-        if contains_nan_or_inf(&xbc) {
-            panic!();
-        }
-
         let xbc = xbc.swap_dims(1, 2);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
         let xbc = Silu::new().forward(xbc);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
-
-        if contains_nan_or_inf(&xbc) {
-            panic!();
-        }
 
         // split xbc into x, B, C.
         // note: the attention Q,K,V values correspond to c,b,x from ssm/attention duality.
@@ -457,17 +439,10 @@ impl<B: Backend> Mamba2Block<B> {
         debug_assert_eq!([1, 1, nheads], dt_bias.dims());
         let dt = softplus(dt + dt_bias); // Δ
 
-        if contains_nan_or_inf(&dt) {
-            panic!();
-        }
-
         let dt = dt.clamp(self.dt_limit.0, self.dt_limit.1);
         debug_assert_eq!([batch, sequence, nheads], dt.dims());
         let a = -self.a_log.val().exp(); // (scalar per head for Ā = exp(Δ A))
         debug_assert_eq!([nheads], a.dims());
-        if contains_nan_or_inf(&a) {
-            panic!();
-        }
 
         // reshapes
         let x = x.reshape([batch, sequence, nheads, headdim]);
@@ -479,16 +454,8 @@ impl<B: Backend> Mamba2Block<B> {
             self.chunked_selective_scan(x.clone(), dt, a, b, c, cache.ssm, chunk_size);
         debug_assert_eq!([batch, sequence, nheads, headdim], y.dims());
 
-        if contains_nan_or_inf(&final_state) {
-            panic!();
-        }
-
         // debug_assert_eq!([batch, sequence, d_inner], y.dims());
         cache.ssm = final_state; // update cache.ssm with final state h_L
-
-        if contains_nan_or_inf(&y) {
-            panic!();
-        }
 
         // Add D skip
         let d = self
@@ -500,25 +467,13 @@ impl<B: Backend> Mamba2Block<B> {
         let y = y.reshape([batch, sequence, d_inner]);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
 
-        if contains_nan_or_inf(&y) {
-            panic!();
-        }
-
         // Normalization
         let y = self.norm.forward(y, z);
         debug_assert_eq!([batch, sequence, d_inner], y.dims());
 
-        if contains_nan_or_inf(&y) {
-            panic!();
-        }
-
         // Output projection
         let out = self.out_proj.forward(y);
         debug_assert_eq!([batch, sequence, _d_model], out.dims());
-
-        if contains_nan_or_inf(&out) {
-            panic!();
-        }
 
         (out, cache)
     }
@@ -582,10 +537,6 @@ impl<B: Backend> Mamba2Block<B> {
             .expand([batch, sequence, nheads]);
         let a_input = dt.clone() * a_input;
 
-        if contains_nan_or_inf(&a_input) {
-            panic!();
-        }
-
         let (y, final_state) = if num_full_chunks > 0 {
             let x_full = x.clone().narrow(1, 0, sequence_full_chunks);
             let a_input_full = a_input.narrow(1, 0, sequence_full_chunks);
@@ -601,10 +552,6 @@ impl<B: Backend> Mamba2Block<B> {
             let a_chunk = a_chunk.permute([0, 3, 1, 2]);
             assert_eq!([batch, nheads, num_full_chunks, chunk_size], a_chunk.dims());
             let a_cumsum = a_chunk.clone().cumsum(3);
-
-            if contains_nan_or_inf(&a_cumsum) {
-                panic!();
-            }
 
             // reference annotations are usually as:
             // - b == batch
@@ -673,10 +620,6 @@ impl<B: Backend> Mamba2Block<B> {
                 y_diag.dims()
             );
 
-            if contains_nan_or_inf(&y_diag) {
-                panic!();
-            }
-
             // Step 2: Intra-chunk states: states = ∑_chunk_size B decay_states X
             let states = {
                 // element-wise multiply decay_states and X
@@ -714,10 +657,6 @@ impl<B: Backend> Mamba2Block<B> {
                 [batch, num_full_chunks, nheads, headdim, d_state],
                 states.dims()
             );
-
-            if contains_nan_or_inf(&states) {
-                panic!();
-            }
 
             // Step 3: Inter-chunk state passing: new_states = ∑_num_full_chunks decay_chunks states
             let (states, final_state) = {
@@ -796,10 +735,6 @@ impl<B: Backend> Mamba2Block<B> {
             );
             assert_eq!([batch, nheads, headdim, d_state], final_state.dims()); // bhpn
 
-            if contains_nan_or_inf(&final_state) {
-                panic!();
-            }
-
             // Step 4: Inter-chunk outputs: Y_off = state_decay_out ∑_d_state C state
             let y_off = {
                 let state_decay_out = a_cumsum.exp();
@@ -841,17 +776,9 @@ impl<B: Backend> Mamba2Block<B> {
                 y_off.dims()
             );
 
-            if contains_nan_or_inf(&y_off) {
-                panic!();
-            }
-
             // Combine intra and inter-chunk
             let y_full_combined = y_diag + y_off;
-            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);
-
-            if contains_nan_or_inf(&y_full) {
-                panic!();
-            }
+            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);s
 
             if remainder_chunk_size > 0 {
                 // some full chunks + remainder
