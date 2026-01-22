@@ -1,4 +1,3 @@
-use crate::utils::contains_nan_or_inf;
 use burn::prelude::*;
 
 // silu activation for x is x * sigmoid(x)

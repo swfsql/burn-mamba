@@ -1,4 +1,3 @@
-use crate::utils::contains_nan_or_inf;
 use crate::utils::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
 use crate::utils::silu::Silu;
 use crate::utils::softplus::softplus;
@@ -778,7 +777,7 @@ impl<B: Backend> Mamba2Block<B> {
 
             // Combine intra and inter-chunk
             let y_full_combined = y_diag + y_off;
-            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);s
+            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);
 
             if remainder_chunk_size > 0 {
                 // some full chunks + remainder
