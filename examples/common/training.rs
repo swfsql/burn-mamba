@@ -1,13 +1,15 @@
-use crate::common::{
-    model::{Mamba2NetworkConfig, ModelConfigExt},
-    optim::OptimConfigExt,
-};
+use crate::common::{model::ModelConfigExt, optim::OptimConfigExt};
 use burn::{
     module::AutodiffModule, optim::AdamWConfig, prelude::*, tensor::backend::AutodiffBackend,
 };
 
-pub trait TrainingConfigExt<AutoB: AutodiffBackend, AutoM: AutodiffModule<AutoB>>: Config {
-    type ModelConfig: ModelConfigExt<AutoB>;
+pub trait TrainingConfigExt<AutoB, AutoM, ModelConfig>
+where
+    Self: Config,
+    AutoB: AutodiffBackend,
+    AutoM: AutodiffModule<AutoB>,
+    ModelConfig: ModelConfigExt<AutoB, Model = AutoM>,
+{
     type OptimConfig: OptimConfigExt<AutoB, AutoM>;
     fn optim(&self) -> &Self::OptimConfig;
 }
@@ -27,10 +29,12 @@ pub struct TrainingConfig {
     pub seed: u64,
 }
 
-impl<AutoB: AutodiffBackend, AutoM: AutodiffModule<AutoB>> TrainingConfigExt<AutoB, AutoM>
-    for TrainingConfig
+impl<AutoB, AutoM, ModelConfig> TrainingConfigExt<AutoB, AutoM, ModelConfig> for TrainingConfig
+where
+    AutoB: AutodiffBackend,
+    AutoM: AutodiffModule<AutoB>,
+    ModelConfig: ModelConfigExt<AutoB, Model = AutoM>,
 {
-    type ModelConfig = Mamba2NetworkConfig;
     type OptimConfig = AdamWConfig;
     fn optim(&self) -> &Self::OptimConfig {
         &self.optimizer

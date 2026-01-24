@@ -1,12 +1,16 @@
-use crate::utils::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
-use crate::utils::silu::Silu;
-use crate::utils::softplus::softplus;
-use crate::utils::stable_max;
-use burn::module::{Module, Param};
-use burn::nn::Initializer;
-use burn::nn::conv::{Conv1d, Conv1dConfig};
-use burn::nn::{Linear, LinearConfig};
+use crate::mamba2::*;
+use crate::utils::{
+    rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
+    silu::Silu,
+    softplus::softplus,
+    stable_max,
+};
 use burn::prelude::*;
+use burn::{
+    module::{Module, Param},
+    nn::conv::{Conv1d, Conv1dConfig},
+    nn::{Initializer, Linear, LinearConfig},
+};
 
 /// Mamba-2 SSM recurrence:
 /// - hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ
@@ -20,8 +24,8 @@ use burn::prelude::*;
 /// - Bₜ, Cₜ  (time-varying per step)
 /// - D  (skip parameter, per head)
 #[derive(Module, Debug)]
-pub struct Mamba2Block<B: Backend> {
-    /// Input channel: [`Mamba2BlockConfig::d_model`].
+pub struct Mamba2<B: Backend> {
+    /// Input channel: [`Mamba2Config::d_model`].
     /// Output channel: z + xbc + dt.
     ///
     /// z: [`Self::d_inner`].
@@ -31,8 +35,8 @@ pub struct Mamba2Block<B: Backend> {
 
     /// Input channel: conv_dim.
     /// Output channel: conv_dim.
-    /// Kernel: [`Mamba2BlockConfig::d_conv`].
-    /// Padding: [`Mamba2BlockConfig::d_conv`] - 1.
+    /// Kernel: [`Mamba2Config::d_conv`].
+    /// Padding: [`Mamba2Config::d_conv`] - 1.
     /// Groups: conv_dim.
     pub conv1d: Conv1d<B>,
 
@@ -51,20 +55,20 @@ pub struct Mamba2Block<B: Backend> {
     pub norm: RmsNormGated<B>,
 
     /// Input channel: [`Self::d_inner`].
-    /// Output channel: [`Mamba2BlockConfig::d_model`].
+    /// Output channel: [`Mamba2Config::d_model`].
     pub out_proj: Linear<B>,
 
-    /// Dims: [[`Self::nheads`], [`Self::headdim`], [`Mamba2BlockConfig::d_state`]].
+    /// Dims: [[`Self::nheads`], [`Self::headdim`], [`Mamba2Config::d_state`]].
     pub init_states: Option<Param<Tensor<B, 3>>>,
 
-    /// [`Mamba2BlockConfig::d_state`].
+    /// [`Mamba2Config::d_state`].
     pub d_state: usize,
 
-    /// [`Mamba2BlockConfig::ngroups`].
+    /// [`Mamba2Config::ngroups`].
     pub ngroups: usize,
 }
 
-impl<B: Backend> Mamba2Block<B> {
+impl<B: Backend> Mamba2<B> {
     /// d_inner = expand * d_model = nheads * headdim.
     pub fn d_inner(&self) -> usize {
         let [d_inner] = self.norm.gamma.dims();
@@ -89,7 +93,7 @@ impl<B: Backend> Mamba2Block<B> {
 }
 
 #[derive(Config, Debug)]
-pub struct Mamba2BlockConfig {
+pub struct Mamba2Config {
     /// Hidden dimension.
     pub d_model: usize,
 
@@ -148,9 +152,9 @@ pub struct Mamba2BlockConfig {
 }
 
 //
-impl Mamba2BlockConfig {
+impl Mamba2Config {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Block<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2<B> {
         let d_inner = self.d_inner();
         assert!(self.headdim > 0);
         let nheads = self.nheads();
@@ -231,7 +235,7 @@ impl Mamba2BlockConfig {
             None
         };
 
-        Mamba2Block {
+        Mamba2 {
             in_proj,
             conv1d,
             dt_bias,
@@ -262,83 +266,7 @@ impl Mamba2BlockConfig {
     }
 }
 
-#[derive(Module, Debug)]
-pub struct Mamba2BlockCache<B: Backend> {
-    /// # Shape
-    /// [batch, conv_dim, d_conv]
-    pub conv: Tensor<B, 3>,
-    /// # Shape
-    /// [batch, nheads, headdim, d_state]
-    pub ssm: Tensor<B, 4>,
-}
-
-#[derive(Config, Debug)]
-pub struct Mamba2BlockCacheConfig {
-    pub batch: usize,
-
-    #[config(default = 128)]
-    pub d_state: usize,
-
-    /// Convolution kernel size.
-    #[config(default = 4)]
-    pub d_conv: usize,
-
-    pub conv_dim: usize,
-
-    /// Head dimension.
-    #[config(default = 64)]
-    pub headdim: usize,
-
-    /// Number of heads.
-    pub nheads: usize,
-}
-
-impl Mamba2BlockCacheConfig {
-    pub fn new_from_block_config(batch: usize, block_config: Mamba2BlockConfig) -> Self {
-        Self {
-            batch,
-            d_state: block_config.d_state,
-            d_conv: block_config.d_conv,
-            conv_dim: block_config.conv_dim(),
-            headdim: block_config.headdim,
-            nheads: block_config.nheads(),
-        }
-    }
-
-    /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BlockCache<B> {
-        let conv = Tensor::zeros(Shape::new([self.batch, self.conv_dim, self.d_conv]), device);
-        let ssm = Tensor::zeros(
-            Shape::new([self.batch, self.nheads, self.headdim, self.d_state]),
-            device,
-        );
-        Mamba2BlockCache { conv, ssm }
-    }
-}
-
-/// Stable segment sum computation for creating the 1-semi-separable mask L = exp(segsum(A_input)).
-///
-/// - x: [..., T] (e.g., A_input per chunk)
-/// - Returns: [..., T, T] where out[..., i, j] = sum_{k=j+1 to i} x[..., k] for i >= j, -inf otherwise.
-///
-/// This avoids numerical instability by using masked differences of cumsums.
-fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
-    let x_cumsum = x.cumsum(D - 1);
-
-    let x_cumsum_u = x_cumsum.clone().unsqueeze_dim(D);
-    let x_cumsum_v = x_cumsum.unsqueeze_dim(D - 1);
-    let diff = x_cumsum_u - x_cumsum_v;
-
-    let x_segsum = {
-        let neg_inf = Tensor::full_like(&diff, f32::NEG_INFINITY);
-        let upper_mask = neg_inf.triu(1);
-        diff + upper_mask
-    };
-
-    x_segsum
-}
-
-impl<B: Backend> Mamba2Block<B> {
+impl<B: Backend> Mamba2<B> {
     /// See also [`Self::step`].
     ///
     /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
@@ -349,9 +277,9 @@ impl<B: Backend> Mamba2Block<B> {
     pub fn forward(
         &self,
         input: Tensor<B, 3>,
-        cache: Option<Mamba2BlockCache<B>>,
+        cache: Option<Mamba2Cache<B>>,
         chunk_size: usize,
-    ) -> (Tensor<B, 3>, Mamba2BlockCache<B>) {
+    ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, _d_model] = input.dims();
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
@@ -367,7 +295,7 @@ impl<B: Backend> Mamba2Block<B> {
             let device = &input.device();
             let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
             let ssm = Tensor::zeros(Shape::new([batch, nheads, headdim, d_state]), device);
-            Mamba2BlockCache { conv, ssm }
+            Mamba2Cache { conv, ssm }
         });
 
         // input projection
@@ -821,7 +749,7 @@ impl<B: Backend> Mamba2Block<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba2Block<B> {
+    impl<B: Backend> Mamba2<B> {
         /// # Shapes
         ///   - Input [batch, d_model]
         ///   - Output [batch, d_model]
@@ -834,8 +762,8 @@ mod step {
         pub fn step(
             &self,
             input: Tensor<B, 2>,
-            cache: Option<Mamba2BlockCache<B>>,
-        ) -> (Tensor<B, 2>, Mamba2BlockCache<B>) {
+            cache: Option<Mamba2Cache<B>>,
+        ) -> (Tensor<B, 2>, Mamba2Cache<B>) {
             let [batch, d_model] = input.dims();
             let d_inner = self.d_inner();
             let ngroups = self.ngroups;
@@ -850,7 +778,7 @@ mod step {
                 let device = &input.device();
                 let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
                 let ssm = Tensor::zeros(Shape::new([batch, nheads, headdim, d_state]), device);
-                Mamba2BlockCache { conv, ssm }
+                Mamba2Cache { conv, ssm }
             });
 
             // Input projection
@@ -1014,4 +942,26 @@ mod step {
             (out, cache)
         }
     }
+}
+
+/// Stable segment sum computation for creating the 1-semi-separable mask L = exp(segsum(A_input)).
+///
+/// - x: [..., T] (e.g., A_input per chunk)
+/// - Returns: [..., T, T] where out[..., i, j] = sum_{k=j+1 to i} x[..., k] for i >= j, -inf otherwise.
+///
+/// This avoids numerical instability by using masked differences of cumsums.
+fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
+    let x_cumsum = x.cumsum(D - 1);
+
+    let x_cumsum_u = x_cumsum.clone().unsqueeze_dim(D);
+    let x_cumsum_v = x_cumsum.unsqueeze_dim(D - 1);
+    let diff = x_cumsum_u - x_cumsum_v;
+
+    let x_segsum = {
+        let neg_inf = Tensor::full_like(&diff, f32::NEG_INFINITY);
+        let upper_mask = neg_inf.triu(1);
+        diff + upper_mask
+    };
+
+    x_segsum
 }

@@ -1,7 +1,7 @@
 use crate::AppArgs;
 pub use crate::common::{
     backend::FloatElement,
-    model::{Mamba2Network, Mamba2NetworkConfig},
+    model::{MyMamba2Network, MyMamba2NetworkConfig},
 };
 use crate::dataset::{
     NOISE_LEVEL, SEQ_LENGTH, SequenceBatcher, SequenceDataset, SequenceDatasetItem,
@@ -12,13 +12,13 @@ use burn::{
 };
 
 pub fn infer<B: Backend>(
-    model_config: Mamba2NetworkConfig,
+    model_config: MyMamba2NetworkConfig,
     batch_size: usize,
     infer_device: B::Device,
     app_args: &AppArgs,
 ) {
     // load model
-    let model: Mamba2Network<B> = app_args
+    let model: MyMamba2Network<B> = app_args
         .load_model(&model_config, &infer_device)
         .expect("failed to load model");
 

@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 
 [features]
@@ -9,7 +9,7 @@ mamba1 = []
 mamba2 = []
 # backend selection for tests or examples
 dev-ndarray = ["burn/ndarray", "_dev-has-backend"]
-dev-ndarray-simd = ["dev-ndarray", "burn/simd", "burn/std",]
+dev-ndarray-simd = ["dev-ndarray", "burn/simd", "burn/std"]
 dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/std", "burn/accelerate"]
 dev-ndarray-blas-netlib = ["dev-ndarray", "burn/std", "burn/blas-netlib"]
 dev-ndarray-blas-openblas = ["dev-ndarray", "burn/std", "burn/openblas"]

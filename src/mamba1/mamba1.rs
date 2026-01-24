@@ -1,12 +1,14 @@
+use crate::mamba1::*;
 use crate::utils::silu::Silu;
-use burn::module::{Module, Param};
-use burn::nn::conv::{Conv1d, Conv1dConfig};
-use burn::nn::{Initializer, PaddingConfig1d};
-use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
+use burn::{
+    module::{Module, Param},
+    nn::conv::{Conv1d, Conv1dConfig},
+    nn::{Initializer, Linear, LinearConfig, PaddingConfig1d},
+};
 
 #[derive(Module, Debug)]
-pub struct Mamba1Block<B: Backend> {
+pub struct Mamba1<B: Backend> {
     /// Input channel: d_model.
     /// Output channel: 2 * d_inner.
     pub in_proj: Linear<B>,
@@ -35,7 +37,7 @@ pub struct Mamba1Block<B: Backend> {
 }
 
 #[derive(Config, Debug)]
-pub struct Mamba1BlockConfig {
+pub struct Mamba1Config {
     /// Hidden dimension.
     pub d_model: usize,
 
@@ -85,9 +87,9 @@ pub struct Mamba1BlockConfig {
     pub d_inner: Option<usize>,
 }
 
-impl Mamba1BlockConfig {
+impl Mamba1Config {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1Block<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1<B> {
         let d_inner = self.d_inner();
         debug_assert_ne!(self.d_state, 0);
         debug_assert!(self.d_model + self.d_state > 0);
@@ -145,7 +147,7 @@ impl Mamba1BlockConfig {
             Param::from_tensor(a_log)
         };
 
-        Mamba1Block {
+        Mamba1 {
             in_proj: LinearConfig::new(self.d_model, 2 * d_inner)
                 .with_bias(self.bias)
                 // follows PyTorch's default initializer
@@ -183,7 +185,7 @@ impl Mamba1BlockConfig {
     }
 }
 
-impl<B: Backend> Mamba1Block<B> {
+impl<B: Backend> Mamba1<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
@@ -415,60 +417,18 @@ impl<B: Backend> Mamba1Block<B> {
     }
 }
 
-#[derive(Module, Debug)]
-pub struct Mamba1BlockCache<B: Backend> {
-    /// # Shape
-    /// [batch, d_inner, d_conv]
-    pub conv: Param<Tensor<B, 3>>,
-    /// # Shape
-    /// [batch, d_inner, d_state]
-    pub ssm: Param<Tensor<B, 3>>,
-}
-
-#[derive(Config, Debug)]
-pub struct Mamba1BlockCacheConfig {
-    pub batch: usize,
-
-    /// latent state dimension (`N` in Algorithm 2 from the Mamba paper).
-    #[config(default = 16)]
-    pub d_state: usize,
-
-    #[config(default = 4)]
-    pub d_conv: usize,
-
-    pub d_inner: usize,
-}
-
 mod step {
     use super::*;
 
-    impl Mamba1BlockCacheConfig {
-        pub fn new_from_block_config(batch: usize, block_config: Mamba1BlockConfig) -> Self {
-            Self {
-                batch,
-                d_state: block_config.d_state,
-                d_conv: block_config.d_conv,
-                d_inner: block_config.d_inner(),
-            }
-        }
-
-        /// Returns the initialized model.
-        pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1BlockCache<B> {
-            let conv = Initializer::Zeros.init([self.batch, self.d_inner, self.d_conv], device);
-            let ssm = Initializer::Zeros.init([self.batch, self.d_inner, self.d_state], device);
-            Mamba1BlockCache { conv, ssm }
-        }
-    }
-
-    impl<B: Backend> Mamba1Block<B> {
+    impl<B: Backend> Mamba1<B> {
         /// # Shapes
         ///   - Input [batch, d_model]
         ///   - Output [batch, d_model]
         pub fn step(
             &self,
             x: Tensor<B, 2>,
-            mut cache: Mamba1BlockCache<B>,
-        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
+            mut cache: Mamba1Cache<B>,
+        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
             let [batch, d_inner, d_conv] = cache.conv.dims();
             let [_batch, d_model] = x.dims();
 
@@ -552,8 +512,8 @@ mod step {
         pub fn ss_step(
             &self,
             u: Tensor<B, 2>,
-            cache: Mamba1BlockCache<B>,
-        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
+            cache: Mamba1Cache<B>,
+        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
             let [batch, d_inner, d_state] = cache.ssm.dims();
             let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
 
@@ -611,8 +571,8 @@ mod step {
             c: Tensor<B, 2>,
             d: Tensor<B, 1>,
             u: Tensor<B, 2>,
-            mut cache: Mamba1BlockCache<B>,
-        ) -> (Tensor<B, 2>, Mamba1BlockCache<B>) {
+            mut cache: Mamba1Cache<B>,
+        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
             let [batch, d_inner, d_state] = cache.ssm.dims();
             let outer_shape = [batch, d_inner, d_state];
 

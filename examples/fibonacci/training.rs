@@ -1,6 +1,6 @@
 pub use crate::common::{
     cli::AppArgs,
-    model::{Mamba2Network, Mamba2NetworkConfig},
+    model::{MyMamba2Network, MyMamba2NetworkConfig},
     training::TrainingConfig,
 };
 use crate::dataset::{
@@ -19,14 +19,15 @@ use burn::{
 
 pub fn train<AutoB: AutodiffBackend>(
     training_config: TrainingConfig,
-    model_config: Mamba2NetworkConfig,
+    model_config: MyMamba2NetworkConfig,
     training_device: AutoB::Device,
     app_args: &AppArgs,
 ) {
     AutoB::seed(&training_device, training_config.seed);
 
     // load (or init and save) model and optim
-    let model: Mamba2Network<AutoB> = app_args.load_or_save_model(&model_config, &training_device);
+    let model: MyMamba2Network<AutoB> =
+        app_args.load_or_save_model(&model_config, &training_device);
     let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &training_device);
 
     let mut model = Wrap(model, model_config.clone());
@@ -112,15 +113,15 @@ type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'stati
 pub fn epoch_train<B: AutodiffBackend>(
     dataloader_train: Dataloader<B>,
     dataloader_valid: Dataloader<B::InnerBackend>,
-    training_model: Mamba2Network<B>,
+    training_model: MyMamba2Network<B>,
     training_config: &TrainingConfig,
-    model_config: &Mamba2NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, Mamba2Network<B>, B>,
+    model_config: &MyMamba2NetworkConfig,
+    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network<B>, B>,
     metric_meta: &mut MetricMetadata,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> Mamba2Network<B> {
+) -> MyMamba2Network<B> {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
 
@@ -188,9 +189,9 @@ pub fn epoch_train<B: AutodiffBackend>(
 
 pub fn epoch_valid<B: Backend>(
     dataloader_valid: Dataloader<B>,
-    valid_model: Mamba2Network<B>,
+    valid_model: MyMamba2Network<B>,
     training_config: &TrainingConfig,
-    model_config: &Mamba2NetworkConfig,
+    model_config: &MyMamba2NetworkConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
 ) {
@@ -233,7 +234,7 @@ pub fn epoch_valid<B: Backend>(
 }
 
 /// Wrapper over [`Mamba2Network`] for custom implementations.
-pub struct Wrap<B: Backend>(pub Mamba2Network<B>, pub Mamba2NetworkConfig);
+pub struct Wrap<B: Backend>(pub MyMamba2Network<B>, pub MyMamba2NetworkConfig);
 
 impl<B: Backend> Wrap<B> {
     pub fn forward_regression(

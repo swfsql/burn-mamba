@@ -33,17 +33,17 @@ All examples use a CLI defined in `common/cli.rs`.
 cargo run --example fibonacci --features "dev-ndarray" -- --training --inference
 
 # assume /tmp/fibonacci-abcd-0 got created:
-ASSETS="/tmp/fibonacci-abcd-0"
+ARTIFACTS="/tmp/fibonacci-abcd-0"
 
 # running only the inference from the trained model:
-cargo run --example fibonacci --features "dev-ndarray" -- --inference --artifacts-path "$ASSETS"
+cargo run --example fibonacci --features "dev-ndarray" -- --inference --artifacts-path "$ARTIFACTS"
 
 # assume /some/path/ contains a different training config file, e.g. with a different seed:
 TCONFIG="/some/path/training_config.json"
 
 # continue training from another training config
-# warning: "$ASSETS/training_config.json" gets overwritten by "$TCONFIG"
-cargo run --example fibonacci --features "dev-ndarray" -- --training --artifacts-path "$ASSETS" --training-config "$TCONFIG"
+# warning: "$ARTIFACTS/training_config.json" gets overwritten by "$TCONFIG"
+cargo run --example fibonacci --features "dev-ndarray" -- --training --artifacts-path "$ARTIFACTS" --training-config "$TCONFIG"
 ```
 
 ##### CLI Help Message

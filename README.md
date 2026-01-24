@@ -10,7 +10,7 @@ Mamba is a fast, efficient model for handling long data sequences such as in lan
 
 ```toml
 [dependencies]
-burn = "0.20.0-pre.6"
+burn = "0.20.0"
 burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc..." } # add frozen rev
 ```
 
@@ -20,6 +20,8 @@ You can select the Mamba version, both enabled by default:
 
 - `mamba1`
 - `mamba2`
+
+For running examples, there are more `dev-` features that can be used for backend selection and configuration. Please check `Cargo.toml` for more information.
 
 ##### Usage
 
