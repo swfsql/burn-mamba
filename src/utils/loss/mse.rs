@@ -25,17 +25,19 @@ impl MseLoss {
     ///
     /// - logits: [batch_size, num_targets]
     /// - targets: [batch_size, num_targets]
-    pub fn forward<const D: usize, B: Backend>(
+    pub fn forward<B: Backend>(
         &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>,
+        logits: Tensor<B, 2>,
+        targets: Tensor<B, 2>,
         reduction: Reduction,
     ) -> Tensor<B, 1> {
+        let [batch_size, _num_targets] = logits.dims();
         match <B::FloatElem as Element>::dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
                 let tensor = self.forward_no_reduction(logits, targets);
                 match reduction {
                     Reduction::Mean | Reduction::Auto => tensor.mean(),
+                    Reduction::BatchMean => tensor.mean() / batch_size as f32,
                     Reduction::Sum => tensor.sum(),
                 }
             }
@@ -49,6 +51,7 @@ impl MseLoss {
                 let partial = sub * sub_; // sub² = partial * max
                 let reduced_partial = match reduction {
                     Reduction::Mean | Reduction::Auto => partial.mean(),
+                    Reduction::BatchMean => partial.mean() / batch_size as f32,
                     Reduction::Sum => partial.sum(),
                 };
                 reduced_partial * max

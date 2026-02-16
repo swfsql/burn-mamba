@@ -154,7 +154,9 @@ impl Mamba1Config {
                 .with_initializer(uniform_init(self.d_model))
                 .init(device),
             conv1d: Conv1dConfig::new(d_inner, d_inner, self.d_conv)
-                .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1))
+                // TODO: only left-padding is necessary,
+                // and possibly a narrowing will no longer be necessary
+                .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1, self.d_conv - 1))
                 .with_groups(d_inner)
                 .with_bias(self.conv_bias)
                 // follows PyTorch's default initializer
@@ -213,7 +215,8 @@ impl<B: Backend> Mamba1<B> {
 
         // layer 2 (conv1d)
         let xs = {
-            let xs = xs.swap_dims(1, 2);
+            // let xs = xs.swap_dims(1, 2);
+            let xs = xs.permute([0, 2, 1]);
             debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             debug_assert!(d_conv > 0);
@@ -224,7 +227,8 @@ impl<B: Backend> Mamba1<B> {
             debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
-            let xs = xs.swap_dims(1, 2);
+            // let xs = xs.swap_dims(1, 2);
+            let xs = xs.permute([0, 2, 1]);
             debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
             // activation
@@ -286,10 +290,12 @@ impl<B: Backend> Mamba1<B> {
 
         let delta = burn::tensor::activation::softplus(delta, 1.);
 
-        let delta = delta.swap_dims(0, 1);
+        // let delta = delta.swap_dims(0, 1);
+        let delta = delta.permute([1, 0, 2]);
         debug_assert_eq!([sequence, batch, d_inner], delta.dims());
 
-        let c = c.swap_dims(0, 1);
+        // let c = c.swap_dims(0, 1);
+        let c = c.permute([1, 0, 2]);
         debug_assert_eq!([sequence, batch, d_state], c.dims());
 
         Self::selective_scan(delta, a, b, c, self.d.val(), u)
@@ -340,7 +346,8 @@ impl<B: Backend> Mamba1<B> {
             let delta_a = (delta.clone() * a).exp();
             debug_assert_eq!(outer_shape, delta_a.dims());
 
-            let b = b.swap_dims(0, 1);
+            // let b = b.swap_dims(0, 1);
+            let b = b.permute([1, 0, 2]);
             debug_assert_eq!([sequence, batch, d_state], b.dims());
             let b = b.unsqueeze_dim(2);
             debug_assert_eq!([sequence, batch, 1, d_state], b.dims());
@@ -349,7 +356,8 @@ impl<B: Backend> Mamba1<B> {
             let delta_b = delta * b;
             debug_assert_eq!(outer_shape, delta_b.dims());
 
-            let u = u.clone().swap_dims(0, 1);
+            // let u = u.clone().swap_dims(0, 1);
+            let u = u.clone().permute([1, 0, 2]);
             debug_assert_eq!([sequence, batch, d_inner], u.dims());
             let u = u.unsqueeze_dim(3);
             debug_assert_eq!([sequence, batch, d_inner, 1], u.dims());
@@ -462,7 +470,8 @@ mod step {
                 let conv1d = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
                 debug_assert_eq!([d_inner, 1, d_conv], conv1d.dims());
-                let conv1d = conv1d.swap_dims(1, 0);
+                // let conv1d = conv1d.swap_dims(1, 0);
+                let conv1d = conv1d.permute([1, 0, 2]);
                 debug_assert_eq!([1, d_inner, d_conv], conv1d.dims());
                 let conv1d = conv1d.expand([batch, d_inner, d_conv]);
                 debug_assert_eq!([batch, d_inner, d_conv], conv1d.dims());

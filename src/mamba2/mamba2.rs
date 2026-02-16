@@ -181,6 +181,7 @@ impl Mamba2Config {
         // Convolution
         let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.d_conv)
             // the conv's inputs are padded manually for causality, by self.d_conv - 1
+            // TODO: only left-padding is necessary. Add explicit left-side padding.
             .with_padding(burn::nn::PaddingConfig1d::Valid)
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
@@ -321,7 +322,8 @@ impl<B: Backend> Mamba2<B> {
         debug_assert_eq!([batch, sequence, nheads], dt.dims());
 
         // convolution and activation
-        let xbc = xbc.swap_dims(1, 2);
+        // let xbc = xbc.swap_dims(1, 2);
+        let xbc = xbc.permute([0, 2, 1]);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
         // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
         assert!(d_conv >= 1);
@@ -340,7 +342,8 @@ impl<B: Backend> Mamba2<B> {
         let xbc = self.conv1d.forward(xbc);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
 
-        let xbc = xbc.swap_dims(1, 2);
+        // let xbc = xbc.swap_dims(1, 2);
+        let xbc = xbc.permute([0, 2, 1]);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
         let xbc = Silu::new().forward(xbc);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
@@ -430,7 +433,7 @@ impl<B: Backend> Mamba2<B> {
         let ngroups = self.ngroups;
         let d_state = self.d_state;
         let d_inner = nheads * headdim;
-        let device = x.device();
+        let device = &x.device();
 
         assert!(sequence >= 1);
 
@@ -492,8 +495,10 @@ impl<B: Backend> Mamba2<B> {
             // Step 1: Intra-chunk outputs: Y_diag = ∑_d_state ∑_chunk_size C B L X
             let y_diag = {
                 // contract C and B over d_state
-                let b_chunk = b_chunk.clone().swap_dims(2, 3);
-                let c_chunk = c_chunk.clone().swap_dims(2, 3);
+                // let b_chunk = b_chunk.clone().swap_dims(2, 3);
+                let b_chunk = b_chunk.clone().permute([0, 1, 3, 2, 4]);
+                // let c_chunk = c_chunk.clone().swap_dims(2, 3);
+                let c_chunk = c_chunk.clone().permute([0, 1, 3, 2, 4]);
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, d_state],
                     b_chunk.dims()
@@ -502,12 +507,15 @@ impl<B: Backend> Mamba2<B> {
                     [batch, num_full_chunks, nheads, chunk_size, d_state],
                     c_chunk.dims()
                 );
-                let temp1 = c_chunk.matmul(b_chunk.transpose());
+                // let b_chunk = b_chunk.transpose();
+                let b_chunk = b_chunk.permute([0, 1, 2, 4, 3]);
+                let temp1 = c_chunk.matmul(b_chunk);
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, chunk_size],
                     temp1.dims()
                 );
-                let temp1 = temp1.swap_dims(2, 3);
+                // let temp1 = temp1.swap_dims(2, 3);
+                let temp1 = temp1.permute([0, 1, 3, 2, 4]);
                 assert_eq!(
                     [batch, num_full_chunks, chunk_size, nheads, chunk_size],
                     temp1.dims()
@@ -530,7 +538,8 @@ impl<B: Backend> Mamba2<B> {
                     [batch, num_full_chunks, nheads, chunk_size, chunk_size],
                     temp2.dims()
                 );
-                let x_chunk = x_chunk.clone().swap_dims(2, 3);
+                // let x_chunk = x_chunk.clone().swap_dims(2, 3);
+                let x_chunk = x_chunk.clone().permute([0, 1, 3, 2, 4]);
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, headdim],
                     x_chunk.dims()
@@ -540,7 +549,8 @@ impl<B: Backend> Mamba2<B> {
                     [batch, num_full_chunks, nheads, chunk_size, headdim],
                     y_diag.dims()
                 );
-                y_diag.swap_dims(2, 3)
+                // y_diag.swap_dims(2, 3)
+                y_diag.permute([0, 1, 3, 2, 4])
             };
             assert_eq!(
                 [batch, num_full_chunks, chunk_size, nheads, headdim],
@@ -606,7 +616,7 @@ impl<B: Backend> Mamba2<B> {
                 assert_eq!([batch, nheads, num_full_chunks], a_chunk_ends.dims());
                 let a_chunk_pad = Tensor::cat(
                     vec![
-                        Tensor::zeros(Shape::new([batch, nheads, 1]), &device),
+                        Tensor::zeros(Shape::new([batch, nheads, 1]), device),
                         a_chunk_ends,
                     ],
                     2,
@@ -654,7 +664,8 @@ impl<B: Backend> Mamba2<B> {
                     .into_iter();
                 let states = split.next().unwrap(); // bhcpn
                 let final_state = split.next().unwrap(); // bh1pn
-                (states.swap_dims(1, 2), final_state.squeeze_dim(2))
+                // (states.swap_dims(1, 2), final_state.squeeze_dim(2))
+                (states.permute([0, 2, 1, 3, 4]), final_state.squeeze_dim(2))
             };
             assert_eq!(
                 [batch, num_full_chunks, nheads, headdim, d_state], // bchpn
@@ -670,12 +681,14 @@ impl<B: Backend> Mamba2<B> {
                     state_decay_out.dims()
                 );
                 // contract C and states over d_state
-                let c_chunk = c_chunk.swap_dims(2, 3); // bclhn -> bchln
+                // let c_chunk = c_chunk.swap_dims(2, 3); // bclhn -> bchln
+                let c_chunk = c_chunk.permute([0, 1, 3, 2, 4]); // bclhn -> bchln
                 assert_eq!(
                     [batch, num_full_chunks, nheads, chunk_size, d_state], // bchln
                     c_chunk.dims()
                 );
-                let states = states.transpose(); // bchpn -> bchnp
+                // let states = states.transpose(); // bchpn -> bchnp
+                let states = states.permute([0, 1, 2, 4, 3]); // bchpn -> bchnp
                 assert_eq!(
                     [batch, num_full_chunks, nheads, d_state, headdim], // bchnp
                     states.dims()
@@ -696,7 +709,8 @@ impl<B: Backend> Mamba2<B> {
                     [batch, num_full_chunks, nheads, chunk_size, headdim], // bchlp
                     temp.dims()
                 );
-                temp.swap_dims(2, 3) // bclhp
+                // temp.swap_dims(2, 3) // bclhp
+                temp.permute([0, 1, 3, 2, 4]) // bclhp
             };
             assert_eq!(
                 [batch, num_full_chunks, chunk_size, nheads, headdim], // bclhp
@@ -820,7 +834,8 @@ mod step {
                 let conv1d = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
                 debug_assert_eq!([conv_dim, 1, d_conv], conv1d.dims());
-                let conv1d = conv1d.swap_dims(0, 1);
+                // let conv1d = conv1d.swap_dims(0, 1);
+                let conv1d = conv1d.permute([1, 0, 2]);
                 debug_assert_eq!([1, conv_dim, d_conv], conv1d.dims());
                 let conv1d = conv1d.expand([batch, conv_dim, d_conv]);
                 debug_assert_eq!([batch, conv_dim, d_conv], conv1d.dims());
@@ -887,7 +902,8 @@ mod step {
                 let b = b
                     .expand([batch, heads_per_group, ngroups, d_state, 1])
                     .reshape([batch, nheads, d_state, 1])
-                    .swap_dims(2, 3)
+                    // .swap_dims(2, 3)
+                    .permute([0, 1, 3, 2])
                     .expand(ssm_shape);
 
                 let dt = dt.unsqueeze_dims(&[2, 3]);
@@ -903,7 +919,8 @@ mod step {
             let c = c
                 .expand([batch, heads_per_group, ngroups, d_state, 1])
                 .reshape([batch, nheads, d_state, 1])
-                .swap_dims(2, 3)
+                // .swap_dims(2, 3)
+                .permute([0, 1, 3, 2])
                 .expand(ssm_shape);
             let d = self.d.val().unsqueeze_dims(&[0, 2]);
             debug_assert_eq!([1, nheads, 1], d.dims());

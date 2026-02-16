@@ -1,64 +1,46 @@
-use burn::{
-    nn::{Linear, LinearConfig},
-    prelude::*,
+use crate::common::model::{ModelConfigExt, mamba2_block_config};
+use burn::nn::{Linear, LinearConfig};
+use burn::prelude::*;
+use burn_mamba::mamba2::bidi::naive::{
+    Mamba2BidiLayers, Mamba2BidiLayersConfig, OutputMergeConfig,
 };
 use burn_mamba::prelude::*;
-use burn_mamba::schedule::Schedule;
-
-pub trait ModelConfigExt<B: Backend>: Config {
-    type Model: Module<B>;
-    fn init(&self, device: &B::Device) -> Self::Model;
-}
+use burn_mamba::schedule::BidiSchedule;
 
 /// Basic Mamba network containing input and output heads, with Mamba2Layers in between.
 #[derive(Config, Debug)]
-pub struct MyMamba2NetworkConfig {
+pub struct MyMamba2BidiNetworkConfig {
     #[config(default = 1)]
     pub input_size: usize,
 
-    #[config(default = "mamba2_layers_config(1, None, mamba2_block_config(1, 1, 1, 1, 1))")]
-    pub layers: Mamba2LayersConfig,
+    #[config(
+        default = "mamba2_bidi_layers_config(1, None, mamba2_block_config(1, 1, 1, 1, 1), OutputMergeConfig::mean(1))"
+    )]
+    pub layers: Mamba2BidiLayersConfig,
 
     #[config(default = 1)]
     pub output_size: usize,
 }
 
-pub fn mamba2_block_config(
-    d_model: usize,
-    d_state: usize,
-    d_conv: usize,
-    n_heads: usize,
-    expand: usize,
-) -> Mamba2Config {
-    let d_inner = expand * d_model;
-    let headdim = d_inner / n_heads;
-    assert_eq!(d_inner, headdim * n_heads);
-    Mamba2Config::new(d_model)
-        .with_d_state(d_state)
-        .with_d_conv(d_conv)
-        .with_expand(expand)
-        .with_headdim(headdim)
-        .with_ngroups(1)
-        .with_has_proj_bias(true)
-}
-
-pub fn mamba2_layers_config(
+pub fn mamba2_bidi_layers_config(
     n_real_layers: usize,
-    n_virtual_layers: Option<(usize, Schedule)>,
+    n_virtual_layers: Option<(usize, BidiSchedule)>,
     mamba_block: Mamba2Config,
-) -> Mamba2LayersConfig {
-    Mamba2LayersConfig::new(n_real_layers, mamba_block).with_n_virtual_layers(n_virtual_layers)
+    outputs_merge: Vec<OutputMergeConfig>,
+) -> Mamba2BidiLayersConfig {
+    Mamba2BidiLayersConfig::new(n_real_layers, mamba_block, outputs_merge)
+        .with_n_virtual_layers(n_virtual_layers)
 }
 
 #[derive(Module, Debug)]
-pub struct MyMamba2Network<B: Backend> {
+pub struct MyMamba2BidiNetwork<B: Backend> {
     pub in_proj: Linear<B>,
-    pub layers: Mamba2Layers<B>,
+    pub layers: Mamba2BidiLayers<B>,
     pub out_proj: Linear<B>,
 }
 
-impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
-    type Model = MyMamba2Network<B>;
+impl<B: Backend> ModelConfigExt<B> for MyMamba2BidiNetworkConfig {
+    type Model = MyMamba2BidiNetwork<B>;
 
     /// Returns the initialized model.
     fn init(&self, device: &B::Device) -> Self::Model {
@@ -70,7 +52,7 @@ impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
         let out_proj = LinearConfig::new(d_model, self.output_size)
             .with_bias(true)
             .init(device);
-        MyMamba2Network {
+        MyMamba2BidiNetwork {
             in_proj,
             layers,
             out_proj,
@@ -78,7 +60,7 @@ impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
     }
 }
 
-impl<B: Backend> MyMamba2Network<B> {
+impl<B: Backend> MyMamba2BidiNetwork<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 3>,
@@ -95,6 +77,7 @@ impl<B: Backend> MyMamba2Network<B> {
 
         // layers
         let (x, caches) = self.layers.forward(x, caches, chunk_size);
+        assert_eq!([batch_size, sequence_len, d_model], x.dims());
 
         // output projection
         let x = self.out_proj.forward(x);

@@ -4,7 +4,7 @@ pub use common::{
     backend::{MainAutoBackend, MainBackend, MainDevice},
     cli::AppArgs,
     mnist::dataset,
-    training::TrainingConfig,
+    training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
 pub mod model;
@@ -21,16 +21,26 @@ where
     app_args.create_artifact_dir();
 
     // setup training and model configs
+    let batch_size = 16;
+    let training_items = 60_000;
+    let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
+        println!("Initializing new training config");
         TrainingConfig::new(common::training::optimizer_config::<AutoB>())
             .with_num_epochs(5)
-            .with_batch_size(16)
+            .with_batch_size(batch_size)
             .with_num_workers(2)
-            .with_lr(1e-4)
+            .with_lr(Lr::CosineAnnealing(
+                CosineAnnealingLr::new(4 * iterations_per_epoch) // 4 epochs
+                    .with_max_lr(1e-4)
+                    .with_min_lr(1e-5)
+                    .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
+            ))
     });
-    let model_config = app_args
-        .load_model_config::<AutoB, _>()
-        .unwrap_or_else(|| model::model_config());
+    let model_config = app_args.load_model_config::<AutoB, _>().unwrap_or_else(|| {
+        println!("Initializing new model config");
+        model::model_config()
+    });
     // save configs
     app_args.save_training_config(&training_config);
     app_args.save_model_config(&model_config);

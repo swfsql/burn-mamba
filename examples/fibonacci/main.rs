@@ -3,7 +3,7 @@ use burn::tensor::backend::AutodiffBackend;
 pub use common::{
     backend::{MainAutoBackend, MainBackend, MainDevice},
     cli::AppArgs,
-    training::TrainingConfig,
+    training::{ConstantLr, Lr, TrainingConfig},
 };
 
 pub mod dataset;
@@ -22,7 +22,9 @@ where
     app_args.create_artifact_dir();
 
     // setup training and model configs
+    let batch_size = 32;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
+        println!("Initializing new training config");
         TrainingConfig::new(
             common::training::optimizer_config::<AutoB>()
                 // fast training, where momentum isn't really required
@@ -30,15 +32,16 @@ where
                 .with_beta_2(0.95),
         )
         .with_num_epochs(2)
-        .with_batch_size(32)
+        .with_batch_size(batch_size)
         .with_num_workers(2)
         // fast training
         // note: Sgd works well with lr=1e-4
-        .with_lr(3e-2)
+        .with_lr(Lr::Constant(ConstantLr::new().with_lr(3e-2)))
     });
-    let model_config = app_args
-        .load_model_config::<AutoB, _>()
-        .unwrap_or_else(|| model::model_config());
+    let model_config = app_args.load_model_config::<AutoB, _>().unwrap_or_else(|| {
+        println!("Initializing new model config");
+        model::model_config()
+    });
     // save configs
     app_args.save_training_config(&training_config);
     app_args.save_model_config(&model_config);

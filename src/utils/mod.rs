@@ -6,6 +6,7 @@ pub mod log_sigmoid;
 pub mod loss;
 pub mod rms_norm;
 pub mod rms_norm_gated;
+pub mod scheduler;
 pub mod silu;
 pub mod softplus;
 

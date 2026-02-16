@@ -95,7 +95,8 @@ impl<B: Backend> Mamba1Network<B> {
         if let Some(lm_head) = &self.lm_head {
             x = lm_head.forward(x);
         } else {
-            let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
+            // let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
+            let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
             debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
             let linear = Linear { weight, bias: None };
@@ -137,7 +138,8 @@ impl<B: Backend> Mamba1Network<B> {
         if let Some(lm_head) = &self.lm_head {
             x = lm_head.forward(x);
         } else {
-            let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
+            // let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
+            let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
             debug_assert_eq!([d_model, padded_vocab], weight.dims());
 
             let linear = Linear { weight, bias: None };

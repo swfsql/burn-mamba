@@ -1,15 +1,18 @@
 use crate::mamba2::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
+use burn::module::Ignored;
 use burn::prelude::*;
 
 #[derive(Module, Debug)]
 pub struct Mamba2Layers<B: Backend> {
     pub n_real_layers: usize,
-    pub n_virtual_layers: Option<(usize, Schedule)>,
+    pub n_virtual_layers: Ignored<Option<(usize, Schedule)>>,
     /// # Shape
     /// [n_real_layers]
     pub real_layers: Vec<Mamba2Layer<B>>,
+    pub ignore_first_residual: bool,
+    pub ignore_last_residual: bool,
 }
 
 #[derive(Config, Debug)]
@@ -18,6 +21,10 @@ pub struct Mamba2LayersConfig {
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, Schedule)>,
     pub mamba_block: Mamba2Config,
+    #[config(default = false)]
+    pub ignore_first_residual: bool,
+    #[config(default = false)]
+    pub ignore_last_residual: bool,
 }
 
 impl Mamba2LayersConfig {
@@ -31,8 +38,10 @@ impl Mamba2LayersConfig {
         }
         Mamba2Layers {
             n_real_layers: self.n_real_layers,
-            n_virtual_layers: self.n_virtual_layers.clone(),
+            n_virtual_layers: Ignored(self.n_virtual_layers.clone()),
             real_layers,
+            ignore_first_residual: self.ignore_first_residual,
+            ignore_last_residual: self.ignore_last_residual,
         }
     }
 }
@@ -94,7 +103,7 @@ impl<B: Backend> Mamba2Layers<B> {
 
         for i in 0..n_virtual_layers {
             // use real layers by reference (clone)
-            let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+            let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers.0 {
                 schedule.real_idx(i, *n_virtual_layers, self.n_real_layers)
             } else {
                 i
@@ -104,7 +113,15 @@ impl<B: Backend> Mamba2Layers<B> {
             let cache_idx = i;
             let cache = core::mem::take(caches.get_mut(cache_idx).unwrap()).unwrap();
 
-            let (x_, cache_) = layer.forward(x, Some(cache), chunk_size);
+            let residual_scale = if (self.ignore_first_residual && i == 0)
+                || (self.ignore_last_residual && i + 1 == n_virtual_layers)
+            {
+                0.0
+            } else {
+                1.0
+            };
+
+            let (x_, cache_) = layer.forward(x, Some(cache), chunk_size, residual_scale);
             x = x_;
             caches[cache_idx] = Some(cache_);
         }
@@ -167,7 +184,7 @@ impl<B: Backend> Mamba2Layers<B> {
 
         for i in 0..n_virtual_layers {
             // use real layers by reference (clone)
-            let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+            let layer_idx = if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers.0 {
                 schedule.real_idx(i, *n_virtual_layers, self.n_real_layers)
             } else {
                 i
@@ -177,7 +194,15 @@ impl<B: Backend> Mamba2Layers<B> {
             let cache_idx = i;
             let cache = core::mem::take(caches.get_mut(cache_idx).unwrap()).unwrap();
 
-            let (x_, cache_) = layer.step(x, Some(cache));
+            let residual_scale = if (self.ignore_first_residual && i == 0)
+                || (self.ignore_last_residual && i + 1 == n_virtual_layers)
+            {
+                0.0
+            } else {
+                1.0
+            };
+
+            let (x_, cache_) = layer.step(x, Some(cache), residual_scale);
             x = x_;
             caches[cache_idx] = Some(cache_);
         }
@@ -222,10 +247,11 @@ impl<B: Backend> Mamba2Layer<B> {
         x: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
         chunk_size: usize,
+        residual_scale: f32,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
-        let res = x.clone();
+        let res = x.clone() * residual_scale;
         let x = self.norm.forward(x);
 
         let (x, cache) = self.mamba_block.forward(x, cache, chunk_size);
@@ -243,10 +269,11 @@ impl<B: Backend> Mamba2Layer<B> {
         &self,
         x: Tensor<B, 2>,
         cache: Option<Mamba2Cache<B>>,
+        residual_scale: f32,
     ) -> (Tensor<B, 2>, Mamba2Cache<B>) {
         let [batch, d_model] = x.dims();
 
-        let res = x.clone();
+        let res = x.clone() * residual_scale;
         let x = self.norm.forward(x);
         let (x, cache) = self.mamba_block.step(x, cache);
         debug_assert_eq!([batch, d_model], x.dims());

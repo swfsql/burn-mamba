@@ -2,6 +2,7 @@ use crate::common::{model::ModelConfigExt, optim::OptimConfigExt};
 use burn::{
     module::AutodiffModule, optim::AdamWConfig, prelude::*, tensor::backend::AutodiffBackend,
 };
+pub use burn_mamba::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 
 pub trait TrainingConfigExt<AutoB, AutoM, ModelConfig>
 where
@@ -23,8 +24,8 @@ pub struct TrainingConfig {
     pub batch_size: usize,
     #[config(default = 2)]
     pub num_workers: usize,
-    #[config(default = 1e-4)]
-    pub lr: f64,
+    #[config(default = "Lr::Constant(ConstantLr::new())")]
+    pub lr: Lr,
     #[config(default = 0)]
     pub seed: u64,
 }

@@ -4,12 +4,14 @@ The dataset is mostly based on [burn-dataset/vision/mnist](https://github.com/tr
 
 ## Usage
 
-The dataset is first downloaded and stored in `$HOME/.cache/burn-dataset/mnist/train/`. The files are the following:
+The dataset is first downloaded and stored in `${CACHEDIR}/burn-dataset/mnist/train/`. The files are the following:
 
 - train-images-idx3-ubyte (9.45 MB)
 - train-labels-idx1-ubyte (28.20 KB)
 - tk10-images-idx3-ubyte (1.57 MB)
 - tk10-labels-idx1-ubyte (4.44 KB)
+
+Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cache_dir.html).
 
 ##### Usage Example
 
