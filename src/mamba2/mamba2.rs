@@ -3,7 +3,6 @@ use crate::utils::{
     rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
     silu::Silu,
     softplus::softplus,
-    stable_max,
 };
 use burn::prelude::*;
 use burn::{
@@ -137,7 +136,7 @@ pub struct Mamba2Config {
     pub dt_init_floor: f64,
 
     /// Range limits for dt.
-    #[config(default = "(0., f64::MAX)")]
+    #[config(default = "(0., f64::INFINITY)")]
     pub dt_limit: (f64, f64),
 
     #[config(default = false)]
@@ -201,7 +200,7 @@ impl Mamba2Config {
             device,
         )
         .exp();
-        let dt = dt.clamp(self.dt_init_floor, stable_max::<B>().to_f64());
+        let dt = dt.clamp(self.dt_init_floor, f64::INFINITY);
         let inv_dt = dt.clone() + (-expm1(-dt)).log(); // Inverse softplus
         let dt_bias = Param::from_tensor(inv_dt);
 

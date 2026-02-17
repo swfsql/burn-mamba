@@ -10,7 +10,7 @@ Mamba is a fast, efficient model for handling long data sequences such as in lan
 
 ```toml
 [dependencies]
-burn = "0.20.0"
+burn = "0.21.0-pre.1"
 burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc..." } # add frozen rev
 ```
 
