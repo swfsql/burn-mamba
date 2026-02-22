@@ -341,8 +341,8 @@ impl<B: Backend> Mamba2<B> {
         let xbc = self.conv1d.forward(xbc);
         debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
 
-        // let xbc = xbc.swap_dims(1, 2);
-        let xbc = xbc.permute([0, 2, 1]);
+        let xbc = xbc.swap_dims(1, 2);
+        // let xbc = xbc.permute([0, 2, 1]);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
         let xbc = Silu::new().forward(xbc);
         debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
