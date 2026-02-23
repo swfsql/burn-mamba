@@ -36,8 +36,8 @@ jobs:
             
             - name: Prepare Doc deploy
               run: |
-                mkdir -p publish/doc/
-                cp -r ./target/doc/ publish/doc/
+                mkdir -p publish/
+                cp -r ./target/doc/ publish/
                 
             - name: Doc deploy
               uses: peaceiris/actions-gh-pages@v3
