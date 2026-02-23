@@ -1,0 +1,48 @@
+name: Deploy
+on:
+    push:
+        branches:
+            - main
+    # tags:
+    # pull_request:
+env:
+    CARGO_TERM_COLOR: always
+
+    # if a test fails, shows the backtrace
+    RUST_BACKTRACE: 1
+
+    # if depending on a ssh crate, use the git cli.
+    CARGO_NET_GIT_FETCH_WITH_CLI: true
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        permissions:
+          contents: write
+        steps:
+            - uses: actions/checkout@v4
+
+            # rust compiler for creating assets
+            - name: Install latest nightly
+              uses: dtolnay/rust-toolchain@nightly
+
+            # Runs some Rust-related caching
+            - uses: Swatinem/rust-cache@v2
+            
+            - name: Doc build
+              uses: actions-rs/cargo@v1
+              with:
+                command: doc
+                args: --all --no-deps
+            
+            - name: Prepare Doc deploy
+              run: |
+                mkdir -p publish/doc/
+                cp -r ./target/doc/ publish/doc/
+                
+            - name: Doc deploy
+              uses: peaceiris/actions-gh-pages@v3
+              with:
+                personal_token: ${{ secrets.GITHUB_TOKEN }}
+                publish_branch: gh-pages
+                publish_dir: ./publish
+                keep_files: false

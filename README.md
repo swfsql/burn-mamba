@@ -1,6 +1,9 @@
-# burn-mamba
+# burn-mamba &emsp; [![deepwiki]][deepwikiurl] [![docs]][docsurl]
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/swfsql/burn-mamba)
+[deepwiki]: https://deepwiki.com/badge.svg
+[deepwikiurl]: https://deepwiki.com/swfsql/burn-mamba
+[docs]: https://img.shields.io/badge/-docs-brightgreen
+[docsurl]: https://swfsql.github.io/burn-mamba/doc/burn_mamba/index.html
 
 Ports a minimal (non-optimized) implementation of [Mamba](https://arxiv.org/abs/2312.00752) and [Mamba2](https://arxiv.org/abs/2405.21060). The official reference implementation is at [state-spaces/mamba](https://github.com/state-spaces/mamba).
 
