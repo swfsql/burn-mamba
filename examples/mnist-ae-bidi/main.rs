@@ -1,0 +1,74 @@
+use burn::prelude::*;
+use burn::tensor::backend::AutodiffBackend;
+pub use common::{
+    backend::{MainAutoBackend, MainBackend, MainDevice},
+    cli::AppArgs,
+    mnist::dataset,
+    training::{CosineAnnealingLr, Lr, TrainingConfig},
+};
+
+pub mod model;
+pub mod training;
+
+#[path = "../common/mod.rs"]
+pub mod common;
+
+pub fn launch<B, AutoB>(app_args: &AppArgs)
+where
+    B: Backend + MainDevice,
+    AutoB: AutodiffBackend + MainDevice,
+{
+    app_args.create_artifact_dir();
+
+    // setup training and model configs
+    let batch_size = 16;
+    let training_items = 60_000;
+    let iterations_per_epoch = training_items / batch_size;
+    let training_config = app_args.load_training_config().unwrap_or_else(|| {
+        println!("Initializing new training config");
+        TrainingConfig::new(
+            common::training::optimizer_config::<AutoB>()
+                // .with_beta_1(0.8)
+                // .with_beta_2(0.8),
+        )
+        .with_num_epochs(20)
+        .with_batch_size(batch_size)
+        .with_num_workers(2)
+        .with_lr(Lr::CosineAnnealing(
+            CosineAnnealingLr::new(4 * iterations_per_epoch) // 4 epochs
+                .with_max_lr(1e-4)
+                .with_min_lr(3e-6)
+                .with_warmup_steps(iterations_per_epoch * 1 / 100), // 1% of an epoch
+        ))
+    });
+    let model_config = app_args.load_model_config::<AutoB, _>().unwrap_or_else(|| {
+        println!("Initializing new model config");
+        model::model_config(
+            32, // d_latent
+            Some(14), // decoder_scratchpadding
+        )
+    });
+    // save configs
+    app_args.save_training_config(&training_config);
+    app_args.save_model_config(&model_config);
+
+    if app_args.training {
+        let training_device = AutoB::main_device();
+        training::train::<AutoB>(training_config, model_config, training_device, app_args);
+    }
+
+    if app_args.inference {
+        let _infer_device = B::main_device();
+        println!("inference is not yet implemented");
+    }
+
+    if !app_args.inference && !app_args.training {
+        println!("neither training nor inference were enabled");
+        println!("{}", common::cli::HELP);
+    }
+}
+
+fn main() {
+    let app_args = AppArgs::parse().unwrap();
+    launch::<MainBackend, MainAutoBackend>(&app_args);
+}
