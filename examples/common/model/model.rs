@@ -19,19 +19,19 @@ pub struct MyMamba2NetworkConfig {
 
 pub fn mamba2_block_config(
     d_model: usize,
-    d_state: usize,
-    d_conv: usize,
+    state_rank: usize,
+    conv_kernel: usize,
     n_heads: usize,
     expand: usize,
 ) -> Mamba2Config {
     let d_inner = expand * d_model;
-    let headdim = d_inner / n_heads;
-    assert_eq!(d_inner, headdim * n_heads);
+    let per_head_dim = d_inner / n_heads;
+    assert_eq!(d_inner, per_head_dim * n_heads);
     Mamba2Config::new(d_model)
-        .with_d_state(d_state)
-        .with_d_conv(d_conv)
+        .with_state_rank(state_rank)
+        .with_conv_kernel(conv_kernel)
         .with_expand(expand)
-        .with_headdim(headdim)
+        .with_per_head_dim(per_head_dim)
         .with_ngroups(1)
         .with_has_proj_bias(true)
 }

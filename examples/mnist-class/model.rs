@@ -9,6 +9,8 @@ pub fn model_config() -> MyMamba2NetworkConfig {
         // the input is a sequence of a single-dimensioned values
         // the input shape is [batch_size, sequence_len = HEIGHT * WIDTH, 1]
         .with_input_size(1)
+        // to keep it simple, don't use any class token
+        .with_class_tokens(Vec::new())
         .with_layers(mamba2_layers_config(
             2, // two layers backed by unique weights is sufficient
             Some((
@@ -18,8 +20,8 @@ pub fn model_config() -> MyMamba2NetworkConfig {
             mamba2_block_config(
                 //
                 32, // d_model (intra- and inter-layer expressivity, high impact on disk size)
-                64, // d_state (intra-layer and time-wise expressivity, average impact on disk size)
-                4,  // d_conv (input convolution, possibly not needed)
+                64, // state_rank (intra-layer and time-wise expressivity, average impact on disk size)
+                4,  // conv_kernel (input convolution, possibly not needed)
                 4, // n_heads (intra-layer expressivity, no impact on disk size, high impact on vram)
                 4, // expand (intra-layer expressivity, small impact on disk size)
             ),

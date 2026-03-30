@@ -75,16 +75,16 @@ impl<B: Backend> Mamba2Layers<B> {
             let device = &x.device();
             let [batch, _sequence, _d_model] = x.dims();
             let layer0_block = &self.real_layers[0].mamba_block;
-            let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+            let [conv_dim, _, conv_kernel] = layer0_block.conv1d.weight.dims();
 
             Mamba2CachesConfig::new(
                 n_virtual_layers,
                 Mamba2CacheConfig {
                     batch,
-                    d_state: layer0_block.d_state,
-                    d_conv,
+                    state_rank: layer0_block.state_rank,
+                    conv_kernel,
                     conv_dim,
-                    headdim: layer0_block.headdim(),
+                    per_head_dim: layer0_block.per_head_dim(),
                     nheads: layer0_block.nheads(),
                 },
             )
@@ -156,16 +156,16 @@ impl<B: Backend> Mamba2Layers<B> {
             let device = &x.device();
             let [batch, _d_model] = x.dims();
             let layer0_block = &self.real_layers[0].mamba_block;
-            let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+            let [conv_dim, _, conv_kernel] = layer0_block.conv1d.weight.dims();
 
             Mamba2CachesConfig::new(
                 n_virtual_layers,
                 Mamba2CacheConfig {
                     batch,
-                    d_state: layer0_block.d_state,
-                    d_conv,
+                    state_rank: layer0_block.state_rank,
+                    conv_kernel,
                     conv_dim,
-                    headdim: layer0_block.headdim(),
+                    per_head_dim: layer0_block.per_head_dim(),
                     nheads: layer0_block.nheads(),
                 },
             )

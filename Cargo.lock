@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "burn",
  "burn-dataset",

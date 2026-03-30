@@ -34,21 +34,21 @@ pub struct Mamba2<B: Backend> {
 
     /// Input channel: conv_dim.
     /// Output channel: conv_dim.
-    /// Kernel: [`Mamba2Config::d_conv`].
-    /// Padding: [`Mamba2Config::d_conv`] - 1.
+    /// Kernel: [`Mamba2Config::conv_kernel`].
+    /// Padding: [`Mamba2Config::conv_kernel`] - 1.
     /// Groups: conv_dim.
     pub conv1d: Conv1d<B>,
 
     /// Dims: [`Self::nheads`].
-    pub dt_bias: Param<Tensor<B, 1>>,
+    pub dt_bias_h: Param<Tensor<B, 1>>,
 
     pub dt_limit: (f64, f64),
 
     /// Dims: [`Self::nheads`].
-    pub a_log: Param<Tensor<B, 1>>,
+    pub a_log_h: Param<Tensor<B, 1>>,
 
     /// Dims: [`Self::nheads`].
-    pub d: Param<Tensor<B, 1>>,
+    pub d_h: Param<Tensor<B, 1>>,
 
     /// Dims: [`Self::d_inner`].
     pub norm: RmsNormGated<B>,
@@ -57,37 +57,37 @@ pub struct Mamba2<B: Backend> {
     /// Output channel: [`Mamba2Config::d_model`].
     pub out_proj: Linear<B>,
 
-    /// Dims: [[`Self::nheads`], [`Self::headdim`], [`Mamba2Config::d_state`]].
-    pub init_states: Option<Param<Tensor<B, 3>>>,
+    /// Dims: [[`Self::nheads`], [`Self::per_head_dim`], [`Mamba2Config::state_rank`]].
+    pub init_states_hpr: Option<Param<Tensor<B, 3>>>,
 
-    /// [`Mamba2Config::d_state`].
-    pub d_state: usize,
+    /// [`Mamba2Config::state_rank`].
+    pub state_rank: usize,
 
     /// [`Mamba2Config::ngroups`].
     pub ngroups: usize,
 }
 
 impl<B: Backend> Mamba2<B> {
-    /// d_inner = expand * d_model = nheads * headdim.
+    /// d_inner = expand * d_model = nheads * per_head_dim.
     pub fn d_inner(&self) -> usize {
         let [d_inner] = self.norm.gamma.dims();
         d_inner
     }
 
-    /// nheads = d_inner / headdim.
+    /// nheads = d_inner / per_head_dim.
     pub fn nheads(&self) -> usize {
-        let [nheads] = self.a_log.dims();
+        let [nheads] = self.a_log_h.dims();
         nheads
     }
 
-    /// headdim = d_inner / nheads.
-    pub fn headdim(&self) -> usize {
+    /// per_head_dim = d_inner / nheads.
+    pub fn per_head_dim(&self) -> usize {
         self.d_inner() / self.nheads()
     }
 
-    /// conv_dim = d_inner + 2 * ngroups * d_state.
+    /// conv_dim = d_inner + 2 * ngroups * state_rank.
     pub fn conv_dim(&self) -> usize {
-        self.d_inner() + 2 * self.ngroups * self.d_state
+        self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 }
 
@@ -98,11 +98,11 @@ pub struct Mamba2Config {
 
     /// latent state dimension.
     #[config(default = 128)]
-    pub d_state: usize,
+    pub state_rank: usize,
 
     /// Convolution kernel size.
     #[config(default = 4)]
-    pub d_conv: usize,
+    pub conv_kernel: usize,
 
     /// Expansion factor for `d_inner`.
     #[config(default = 2)]
@@ -110,7 +110,7 @@ pub struct Mamba2Config {
 
     /// Head dimension.
     #[config(default = 64)]
-    pub headdim: usize,
+    pub per_head_dim: usize,
 
     /// Number of groups.
     #[config(default = 1)]
@@ -136,7 +136,9 @@ pub struct Mamba2Config {
     pub dt_init_floor: f64,
 
     /// Range limits for dt.
-    #[config(default = "(0., f64::INFINITY)")]
+    ///
+    /// Defaults to (0, f16::MAX).
+    #[config(default = "(0., 6.5504e+4)")]
     pub dt_limit: (f64, f64),
 
     #[config(default = false)]
@@ -155,9 +157,10 @@ impl Mamba2Config {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2<B> {
         let d_inner = self.d_inner();
-        assert!(self.headdim > 0);
+        assert!(self.per_head_dim > 0);
         let nheads = self.nheads();
-        debug_assert_eq!(nheads * self.headdim, d_inner);
+        debug_assert_eq!(nheads * self.per_head_dim, d_inner);
+        assert_eq!(nheads % self.ngroups, 0);
 
         // Helper function for PyTorch-style uniform initialization
         let uniform_init = |d_input: usize| {
@@ -178,15 +181,15 @@ impl Mamba2Config {
             .init::<B>(device);
 
         // Convolution
-        let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.d_conv)
-            // the conv's inputs are padded manually for causality, by self.d_conv - 1
+        let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
+            // the conv's inputs are padded manually for causality, by self.conv_kernel - 1
             // TODO: only left-padding is necessary. Add explicit left-side padding.
             .with_padding(burn::nn::PaddingConfig1d::Valid)
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
             // follows PyTorch's default initializer
             // fan_in = in_channels / groups * kernel_size
-            .with_initializer(uniform_init(self.d_conv))
+            .with_initializer(uniform_init(self.conv_kernel))
             .init::<B>(device);
 
         // dt_bias initialization
@@ -194,28 +197,28 @@ impl Mamba2Config {
         // and a Taylor series could approximate it: e^x - 1 = x + x^2/2! + x^3/3! + ⋯
         // but with the clamp at dt_init_floor, this isn't necessary
         let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
-        let dt = Tensor::random(
+        let dt_h = Tensor::random(
             [nheads],
             burn::tensor::Distribution::Uniform(self.dt_min.ln(), self.dt_max.ln()),
             device,
         )
         .exp();
-        let dt = dt.clamp(self.dt_init_floor, f64::INFINITY);
-        let inv_dt = dt.clone() + (-expm1(-dt)).log(); // Inverse softplus
-        let dt_bias = Param::from_tensor(inv_dt);
+        let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
+        let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log(); // Inverse softplus
+        let dt_bias_h = Param::from_tensor(inv_dt_h);
 
         // A_log initialization for Āₜ = exp(Δₜ A)
         assert!(self.a_init_range.0 > 0.);
         assert!(self.a_init_range.0 < self.a_init_range.1);
-        let a = Tensor::random(
+        let a_h = Tensor::random(
             [nheads],
             burn::tensor::Distribution::Uniform(self.a_init_range.0, self.a_init_range.1),
             device,
         );
-        let a_log = Param::from_tensor(a.log());
+        let a_log_h = Param::from_tensor(a_h.log());
 
         // D initialization
-        let d = Initializer::Ones.init::<B, 1, _>([nheads], device);
+        let d_h = Initializer::Ones.init::<B, 1, _>([nheads], device);
 
         // Normalization and output projection
         let norm = RmsNormGatedConfig::new(d_inner)
@@ -229,8 +232,11 @@ impl Mamba2Config {
             .init(device);
 
         // Optional learnable initial states
-        let init_states = if self.has_learnable_init_states {
-            Some(Initializer::Zeros.init::<B, 3, _>([nheads, self.headdim, self.d_state], device))
+        let init_states_hpr = if self.has_learnable_init_states {
+            Some(
+                Initializer::Zeros
+                    .init::<B, 3, _>([nheads, self.per_head_dim, self.state_rank], device),
+            )
         } else {
             None
         };
@@ -238,14 +244,14 @@ impl Mamba2Config {
         Mamba2 {
             in_proj,
             conv1d,
-            dt_bias,
+            dt_bias_h,
             dt_limit: self.dt_limit,
-            a_log,
-            d,
+            a_log_h,
+            d_h,
             norm,
             out_proj,
-            init_states,
-            d_state: self.d_state,
+            init_states_hpr,
+            state_rank: self.state_rank,
             ngroups: self.ngroups,
         }
     }
@@ -255,52 +261,58 @@ impl Mamba2Config {
         self.expand * self.d_model
     }
 
-    /// nheads = d_inner / headdim.
+    /// nheads = d_inner / per_head_dim.
     pub fn nheads(&self) -> usize {
-        self.d_inner() / self.headdim
+        self.d_inner() / self.per_head_dim
     }
 
-    /// conv_dim = d_inner + 2 * ngroups * d_state.
+    /// conv_dim = d_inner + 2 * ngroups * state_rank.
     pub fn conv_dim(&self) -> usize {
-        self.d_inner() + 2 * self.ngroups * self.d_state
+        self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 }
 
 impl<B: Backend> Mamba2<B> {
     /// See also [`Self::step`].
     ///
-    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
+    /// `chunk_len`: Chunk size for selective scan. Defaults to 256.
     ///
     /// # Shapes
     /// - Input [batch, sequence, d_model]
     /// - Output.0 output [batch, sequence, d_model]
+    #[allow(non_snake_case)]
     pub fn forward(
         &self,
-        input: Tensor<B, 3>,
+        input_bsm: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        chunk_size: usize,
+        chunk_len: usize,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
-        let [batch, sequence, _d_model] = input.dims();
+        let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
         let nheads = self.nheads();
-        let headdim = self.headdim();
+        let per_head_dim = self.per_head_dim();
         let conv_dim = self.conv_dim();
-        let d_state = self.d_state;
-        let [_conv_dim, _, d_conv] = self.conv1d.weight.dims();
+        let state_rank = self.state_rank;
+        let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
         let [_d_model, d_in_proj_output] = self.in_proj.weight.dims();
         assert_eq!(conv_dim, _conv_dim);
+        assert_eq!(nheads % ngroups, 0);
+        assert!(sequence > 0);
 
         let mut cache = cache.unwrap_or_else(|| {
-            let device = &input.device();
-            let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
-            let ssm = Tensor::zeros(Shape::new([batch, nheads, headdim, d_state]), device);
-            Mamba2Cache { conv, ssm }
+            let device = &input_bsm.device();
+            let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
+            let ssm_bhpr = Tensor::zeros(
+                Shape::new([batch, nheads, per_head_dim, state_rank]),
+                device,
+            );
+            Mamba2Cache { conv_bvk, ssm_bhpr }
         });
 
         // input projection
-        let (z, xbc, dt) = {
-            let z_xbc_dt = self.in_proj.forward(input);
+        let (z_gate_bsi, xbc_bsv, dt_raw_bsh) = {
+            let z_xbc_dt = self.in_proj.forward(input_bsm);
             debug_assert_eq!([batch, sequence, d_in_proj_output], z_xbc_dt.dims());
             debug_assert_eq!(
                 [batch, sequence, d_inner + conv_dim + nheads],
@@ -316,446 +328,457 @@ impl<B: Backend> Mamba2<B> {
                 z_xbc_dt.next().unwrap(),
             )
         };
-        debug_assert_eq!([batch, sequence, d_inner], z.dims());
-        debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
-        debug_assert_eq!([batch, sequence, nheads], dt.dims());
+        debug_assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
+        debug_assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
+        debug_assert_eq!([batch, sequence, nheads], dt_raw_bsh.dims());
 
         // convolution and activation
-        // let xbc = xbc.swap_dims(1, 2);
-        let xbc = xbc.permute([0, 2, 1]);
-        debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
+        let xbc_bvs = xbc_bsv.permute([0, 2, 1]); // xbc_bsv.swap_dims(1, 2)
+        debug_assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
         // split-off oldest/first column (i.e. rolling leftwards) for the causal pad
-        assert!(d_conv >= 1);
-        let xbc = if d_conv >= 2 {
-            let t0 = cache.conv.narrow(2, 1, d_conv - 1);
-            debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
+        assert!(conv_kernel >= 1);
+        let xbc_bvS = if conv_kernel >= 2 {
+            let t0_bvK = cache.conv_bvk.slice(s![.., .., 1..]);
+            debug_assert_eq!([batch, conv_dim, conv_kernel - 1], t0_bvK.dims());
             // add the causal pad (only left-pad is necessary)
-            Tensor::cat(vec![t0, xbc], 2)
+            Tensor::cat(vec![t0_bvK, xbc_bvs], 2)
         } else {
-            xbc
+            xbc_bvs
         };
-        debug_assert_eq!([batch, conv_dim, (d_conv - 1) + sequence], xbc.dims());
+        debug_assert_eq!(
+            [batch, conv_dim, (conv_kernel - 1) + sequence],
+            xbc_bvS.dims()
+        );
         // get the final state for the causal pad (right-side of pre-xbc)
-        cache.conv = xbc.clone().narrow(2, sequence - 1, d_conv);
-        debug_assert_eq!([batch, conv_dim, d_conv], cache.conv.dims());
-        let xbc = self.conv1d.forward(xbc);
-        debug_assert_eq!([batch, conv_dim, sequence], xbc.dims());
-
-        // let xbc = xbc.swap_dims(1, 2);
-        let xbc = xbc.permute([0, 2, 1]);
-        debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
-        let xbc = Silu::new().forward(xbc);
-        debug_assert_eq!([batch, sequence, conv_dim], xbc.dims());
+        cache.conv_bvk = xbc_bvS.clone().slice(s![.., .., (sequence - 1)..]);
+        debug_assert_eq!([batch, conv_dim, conv_kernel], cache.conv_bvk.dims());
+        let xbc_bvs = self.conv1d.forward(xbc_bvS);
+        debug_assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
+        //
+        let xbc_bsv = xbc_bvs.permute([0, 2, 1]); // xbc_bvs.swap_dims(1, 2)
+        debug_assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
+        let xbc_bsv = Silu::new().forward(xbc_bsv);
+        debug_assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
 
         // split xbc into x, B, C.
         // note: the attention Q,K,V values correspond to c,b,x from ssm/attention duality.
-        let (x, b, c) = {
-            let mut xbc = xbc
-                .split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 2)
+        let (x_bshp, b_bsgr, c_bsgr) = {
+            let mut xbc = xbc_bsv
+                .split_with_sizes(vec![d_inner, ngroups * state_rank, ngroups * state_rank], 2)
                 .into_iter();
             (
-                xbc.next().unwrap(),
-                xbc.next().unwrap(),
-                xbc.next().unwrap(),
+                xbc.next()
+                    .unwrap() // [batch, sequence, d_inner]
+                    .reshape([batch, sequence, nheads, per_head_dim]),
+                xbc.next()
+                    .unwrap() // [batch, sequence, ngroups * state_rank]
+                    .reshape([batch, sequence, ngroups, state_rank]),
+                xbc.next()
+                    .unwrap() // [batch, sequence, ngroups * state_rank]
+                    .reshape([batch, sequence, ngroups, state_rank]),
             )
         };
-        debug_assert_eq!([batch, sequence, d_inner], x.dims());
-        debug_assert_eq!([batch, sequence, ngroups * d_state], b.dims());
-        debug_assert_eq!([batch, sequence, ngroups * d_state], c.dims());
 
         // prepare state space parameters
-        let dt_bias = self.dt_bias.val().unsqueeze_dims(&[0, 1]);
-        debug_assert_eq!([1, 1, nheads], dt_bias.dims());
-        let dt = softplus(dt + dt_bias); // Δ
-
-        let dt = dt.clamp(self.dt_limit.0, self.dt_limit.1);
-        debug_assert_eq!([batch, sequence, nheads], dt.dims());
-        let a = -self.a_log.val().exp(); // (scalar per head for Ā = exp(Δ A))
-        debug_assert_eq!([nheads], a.dims());
-
-        // reshapes
-        let x = x.reshape([batch, sequence, nheads, headdim]);
-        let b = b.reshape([batch, sequence, ngroups, d_state]);
-        let c = c.reshape([batch, sequence, ngroups, d_state]);
+        let dt_bias_11h = self.dt_bias_h.val().unsqueeze_dims(&[0, 1]);
+        debug_assert_eq!([1, 1, nheads], dt_bias_11h.dims());
+        let dt_bsh = softplus(dt_raw_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1); // Δ
+        debug_assert_eq!([batch, sequence, nheads], dt_bsh.dims());
+        let a_head_decay_h = -self.a_log_h.val().exp(); // (scalar per head for Ā = exp(Δ A))
+        debug_assert_eq!([nheads], a_head_decay_h.dims());
 
         // Perform chunked selective scan
-        let (y, final_state) =
-            self.chunked_selective_scan(x.clone(), dt, a, b, c, cache.ssm, chunk_size);
-        debug_assert_eq!([batch, sequence, nheads, headdim], y.dims());
+        let (y_bshp, final_state_bhpr) = self.chunked_selective_scan(
+            x_bshp.clone(),
+            dt_bsh,
+            a_head_decay_h,
+            b_bsgr,
+            c_bsgr,
+            cache.ssm_bhpr,
+            chunk_len,
+        );
+        debug_assert_eq!([batch, sequence, nheads, per_head_dim], y_bshp.dims());
 
         // debug_assert_eq!([batch, sequence, d_inner], y.dims());
-        cache.ssm = final_state; // update cache.ssm with final state h_L
+        cache.ssm_bhpr = final_state_bhpr; // update cache with final state
 
         // Add D skip
-        let d = self
-            .d
+        let d_bsh1 = self
+            .d_h
             .val()
             .unsqueeze_dims::<4>(&[0, 0, 3])
             .expand([batch, sequence, nheads, 1]);
-        let y = y + d * x;
-        let y = y.reshape([batch, sequence, d_inner]);
-        debug_assert_eq!([batch, sequence, d_inner], y.dims());
+        let y_bshp = y_bshp + d_bsh1 * x_bshp;
+        let y_bsi = y_bshp.reshape([batch, sequence, d_inner]);
+        debug_assert_eq!([batch, sequence, d_inner], y_bsi.dims());
 
         // Normalization
-        let y = self.norm.forward(y, z);
-        debug_assert_eq!([batch, sequence, d_inner], y.dims());
+        let y_bsi = self.norm.forward(y_bsi, z_gate_bsi);
+        debug_assert_eq!([batch, sequence, d_inner], y_bsi.dims());
 
         // Output projection
-        let out = self.out_proj.forward(y);
-        debug_assert_eq!([batch, sequence, _d_model], out.dims());
+        let out_bsm = self.out_proj.forward(y_bsi);
+        debug_assert_eq!([batch, sequence, _d_model], out_bsm.dims());
 
-        (out, cache)
+        (out_bsm, cache)
     }
 
     /// Performs a chunked selective scan for Mamba2 using semi-separable decomposition.
     ///
     /// # Shapes
-    /// - Input x [batch, sequence, nheads, headdim]
-    /// - Input dt Δ [batch, sequence, nheads]
-    /// - Input A [nheads]
-    /// - Input B [batch, sequence, ngroups, d_state]
-    /// - Input C [batch, sequence, ngroups, d_state]
-    /// - Input ssm_initial_state h₀ [batch, nheads, headdim, d_state]
-    /// - Output.0 y [batch, sequence, nheads, headdim]
-    /// - Output.1 ssm_final_state h_L [batch, nheads, headdim, d_state]
+    /// - Input x_bshp x [batch, sequence, nheads, per_head_dim]
+    /// - Input dt_bsh Δ [batch, sequence, nheads]
+    /// - Input a_head_decay_h A [nheads]
+    /// - Input b_bsgr B [batch, sequence, ngroups, state_rank]
+    /// - Input c_bsgr C [batch, sequence, ngroups, state_rank]
+    /// - Input ssm_initial_state_bhpr h₀ [batch, nheads, per_head_dim, state_rank]
+    /// - Output.0 y_bshp [batch, sequence, nheads, per_head_dim]
+    /// - Output.1 ssm_final_state_bhpr h [batch, nheads, per_head_dim, state_rank]
+    #[allow(non_snake_case)]
     pub fn chunked_selective_scan(
         &self,
-        x: Tensor<B, 4>,
-        dt: Tensor<B, 3>,
-        a: Tensor<B, 1>,
-        b: Tensor<B, 4>,
-        c: Tensor<B, 4>,
-        ssm_initial_state: Tensor<B, 4>,
-        chunk_size: usize,
+        x_bshp: Tensor<B, 4>,
+        dt_bsh: Tensor<B, 3>,
+        a_head_decay_h: Tensor<B, 1>,
+        b_bsgr: Tensor<B, 4>,
+        c_bsgr: Tensor<B, 4>,
+        ssm_initial_state_bhpr: Tensor<B, 4>,
+        chunk_len: usize,
     ) -> (Tensor<B, 4>, Tensor<B, 4>) {
-        let [batch, sequence, nheads, headdim] = x.dims();
+        let [batch, sequence_unpadded, nheads, per_head_dim] = x_bshp.dims();
         let ngroups = self.ngroups;
-        let d_state = self.d_state;
-        let d_inner = nheads * headdim;
-        let device = &x.device();
+        let state_rank = self.state_rank;
+        let d_inner = nheads * per_head_dim;
+        let device = &x_bshp.device();
+        assert_eq!(nheads % ngroups, 0);
+        assert!(sequence_unpadded >= 1);
+        assert_eq!(d_inner, nheads * per_head_dim);
 
-        assert!(sequence >= 1);
-
-        let num_full_chunks = sequence / chunk_size;
-        let remainder_chunk_size = sequence % chunk_size;
-        let sequence_full_chunks = num_full_chunks * chunk_size;
-        debug_assert_eq!(sequence, sequence_full_chunks + remainder_chunk_size);
-        debug_assert_eq!(d_inner, nheads * headdim);
+        // padding
+        assert!(chunk_len > 0);
+        let sequence_mod = sequence_unpadded % chunk_len;
+        let pad = if sequence_mod == 0 {
+            0
+        } else {
+            chunk_len - sequence_mod
+        };
+        let (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence) = if pad == 0 {
+            (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence_unpadded)
+        } else {
+            // we will call both padded and unpadded sequence as `s`,
+            // but the output range and the last state should be corrected
+            //
+            // note: it's important that the pad tensors are zeroes.
+            // they imply identity operations for the unpadded final state up to the end of its chunk.
+            // (see the end of chunked_selective_scan Step 3 for more info)
+            let x_bshp = Tensor::cat(
+                vec![
+                    x_bshp,
+                    Tensor::zeros(Shape::new([batch, pad, nheads, per_head_dim]), device),
+                ],
+                1,
+            );
+            let dt_bsh = Tensor::cat(
+                vec![
+                    dt_bsh,
+                    Tensor::zeros(Shape::new([batch, pad, nheads]), device),
+                ],
+                1,
+            );
+            let b_bsgr = Tensor::cat(
+                vec![
+                    b_bsgr,
+                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), device),
+                ],
+                1,
+            );
+            let c_bsgr = Tensor::cat(
+                vec![
+                    c_bsgr,
+                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), device),
+                ],
+                1,
+            );
+            (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence_unpadded + pad)
+        };
+        assert_eq!(sequence % chunk_len, 0);
+        let nchunks = sequence / chunk_len;
 
         // expand B and C to per-head
         let heads_per_group = nheads / ngroups;
-        let b_per_head = b
+        let b_bshr = b_bsgr
             .clone()
-            .unsqueeze_dim::<5>(3)
-            .expand([batch, sequence, ngroups, heads_per_group, d_state])
-            .reshape([batch, sequence, nheads, d_state]);
-        let c_per_head = c
+            .unsqueeze_dim::<5>(3) // bsg1r
+            .expand([batch, sequence, ngroups, heads_per_group, state_rank])
+            .reshape([batch, sequence, nheads, state_rank]);
+        let c_bshr = c_bsgr
             .clone()
-            .unsqueeze_dim::<5>(3)
-            .expand([batch, sequence, ngroups, heads_per_group, d_state])
-            .reshape([batch, sequence, nheads, d_state]);
+            .unsqueeze_dim::<5>(3) // bsg1r
+            .expand([batch, sequence, ngroups, heads_per_group, state_rank])
+            .reshape([batch, sequence, nheads, state_rank]);
 
         // B̄ = Δ B
-        let delta_b = dt.clone().unsqueeze_dim(3) * b_per_head.clone();
-        debug_assert_eq!([batch, sequence, nheads, d_state], delta_b.dims());
+        let delta_b_bshr = dt_bsh.clone().unsqueeze_dim(3) * b_bshr.clone();
+        debug_assert_eq!([batch, sequence, nheads, state_rank], delta_b_bshr.dims());
 
         // A_input = Δ A
-        let a_input = a
+        let a_bsh = a_head_decay_h
             .clone()
-            .unsqueeze_dims::<3>(&[0, 1])
+            .unsqueeze_dims::<3>(&[0, 1]) // 11h
             .expand([batch, sequence, nheads]);
-        let a_input = dt.clone() * a_input;
+        let a_bsh = dt_bsh.clone() * a_bsh;
 
-        let (y, final_state) = if num_full_chunks > 0 {
-            let x_full = x.clone().narrow(1, 0, sequence_full_chunks);
-            let a_input_full = a_input.narrow(1, 0, sequence_full_chunks);
-            let b_full = delta_b.narrow(1, 0, sequence_full_chunks);
-            let c_full = c_per_head.clone().narrow(1, 0, sequence_full_chunks);
+        let x_bnlhp = x_bshp
+            .clone()
+            .reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
+        let a_bnlh = a_bsh.reshape([batch, nchunks, chunk_len, nheads]);
+        let b_bnlhr = delta_b_bshr.reshape([batch, nchunks, chunk_len, nheads, state_rank]);
+        let c_bnlhr = c_bshr
+            .clone()
+            .reshape([batch, nchunks, chunk_len, nheads, state_rank]);
 
-            // Rearrange into chunks
-            let x_chunk = x_full.reshape([batch, num_full_chunks, chunk_size, nheads, headdim]);
-            let a_chunk = a_input_full.reshape([batch, num_full_chunks, chunk_size, nheads]);
-            let b_chunk = b_full.reshape([batch, num_full_chunks, chunk_size, nheads, d_state]);
-            let c_chunk = c_full.reshape([batch, num_full_chunks, chunk_size, nheads, d_state]);
+        let a_bhnl = a_bnlh.permute([0, 3, 1, 2]);
+        assert_eq!([batch, nheads, nchunks, chunk_len], a_bhnl.dims());
+        let a_cumsum_bhnl = a_bhnl.clone().cumsum(3);
 
-            let a_chunk = a_chunk.permute([0, 3, 1, 2]);
-            assert_eq!([batch, nheads, num_full_chunks, chunk_size], a_chunk.dims());
-            let a_cumsum = a_chunk.clone().cumsum(3);
-
-            // reference annotations are usually as:
-            // - b == batch
-            // - c == num_full_chunks
-            // - h == nheads
-            // - l/s == chunk_size
-            // - n == d_state
-            // - p == headdim
-            // - z == 1 + num_full_chunks
-
-            // Step 1: Intra-chunk outputs: Y_diag = ∑_d_state ∑_chunk_size C B L X
-            let y_diag = {
-                // contract C and B over d_state
-                // let b_chunk = b_chunk.clone().swap_dims(2, 3);
-                let b_chunk = b_chunk.clone().permute([0, 1, 3, 2, 4]);
-                // let c_chunk = c_chunk.clone().swap_dims(2, 3);
-                let c_chunk = c_chunk.clone().permute([0, 1, 3, 2, 4]);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, d_state],
-                    b_chunk.dims()
-                );
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, d_state],
-                    c_chunk.dims()
-                );
-                // let b_chunk = b_chunk.transpose();
-                let b_chunk = b_chunk.permute([0, 1, 2, 4, 3]);
-                let temp1 = c_chunk.matmul(b_chunk);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, chunk_size],
-                    temp1.dims()
-                );
-                // let temp1 = temp1.swap_dims(2, 3);
-                let temp1 = temp1.permute([0, 1, 3, 2, 4]);
-                assert_eq!(
-                    [batch, num_full_chunks, chunk_size, nheads, chunk_size],
-                    temp1.dims()
-                );
-                // element-wise multiplication with permuted L
-                let l = segsum(a_chunk.clone()).exp();
-                assert_eq!(
-                    [batch, nheads, num_full_chunks, chunk_size, chunk_size],
-                    l.dims()
-                );
-                let l = l.permute([0, 2, 3, 1, 4]);
-                let temp2 = temp1 * l;
-                assert_eq!(
-                    [batch, num_full_chunks, chunk_size, nheads, chunk_size],
-                    temp2.dims()
-                );
-                // final contraction over last chunk_size via batched matmul with X
-                let temp2 = temp2.permute([0, 1, 3, 2, 4]);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, chunk_size],
-                    temp2.dims()
-                );
-                // let x_chunk = x_chunk.clone().swap_dims(2, 3);
-                let x_chunk = x_chunk.clone().permute([0, 1, 3, 2, 4]);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, headdim],
-                    x_chunk.dims()
-                );
-                let y_diag = temp2.matmul(x_chunk);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, headdim],
-                    y_diag.dims()
-                );
-                // y_diag.swap_dims(2, 3)
-                y_diag.permute([0, 1, 3, 2, 4])
-            };
+        // Step 1: Intra-chunk outputs: Y_diag = ∑_state_rank ∑_chunk_len C B L X
+        let y_diag_bnlhp = {
+            // contract C and B over state_rank
+            let b_bnhlr = b_bnlhr.clone().permute([0, 1, 3, 2, 4]); // b_bnlhr.clone().swap_dims(2, 3)
+            let c_bnhlr = c_bnlhr.clone().permute([0, 1, 3, 2, 4]); // c_bnlhr.clone().swap_dims(2, 3)
             assert_eq!(
-                [batch, num_full_chunks, chunk_size, nheads, headdim],
-                y_diag.dims()
+                [batch, nchunks, nheads, chunk_len, state_rank],
+                b_bnhlr.dims()
             );
-
-            // Step 2: Intra-chunk states: states = ∑_chunk_size B decay_states X
-            let states = {
-                // element-wise multiply decay_states and X
-                let decay_states =
-                    (a_cumsum.clone().narrow(3, chunk_size - 1, 1) - a_cumsum.clone()).exp();
-                assert_eq!(
-                    [batch, nheads, num_full_chunks, chunk_size],
-                    decay_states.dims()
-                );
-                let decay_states = decay_states.permute([0, 2, 3, 1]).unsqueeze_dim(4);
-                assert_eq!(
-                    [batch, num_full_chunks, chunk_size, nheads, 1],
-                    decay_states.dims()
-                );
-                let temp = decay_states * x_chunk.clone();
-                assert_eq!(
-                    [batch, num_full_chunks, chunk_size, nheads, headdim],
-                    temp.dims()
-                );
-                // contraction over chunk_size via batched matmul with B
-                let temp = temp.permute([0, 1, 3, 4, 2]);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, headdim, chunk_size],
-                    temp.dims()
-                );
-                let b_chunk = b_chunk.clone().permute([0, 1, 3, 2, 4]);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, d_state],
-                    b_chunk.dims()
-                );
-                let states = temp.matmul(b_chunk);
-                states
-            };
             assert_eq!(
-                [batch, num_full_chunks, nheads, headdim, d_state],
-                states.dims()
+                [batch, nchunks, nheads, chunk_len, state_rank],
+                c_bnhlr.dims()
             );
-
-            // Step 3: Inter-chunk state passing: new_states = ∑_num_full_chunks decay_chunks states
-            let (states, final_state) = {
-                // cat states
-                let initial_states = ssm_initial_state.unsqueeze_dim(1);
-                assert_eq!([batch, 1, nheads, headdim, d_state], initial_states.dims());
-                let states = Tensor::cat(vec![initial_states, states], 1);
-                assert_eq!(
-                    [
-                        batch,
-                        1 + num_full_chunks, // 1 + c
-                        nheads,
-                        headdim,
-                        d_state
-                    ],
-                    states.dims()
-                );
-                // decay_chunk
-                let a_chunk_ends = a_cumsum.clone().narrow(3, chunk_size - 1, 1).squeeze_dim(3);
-                assert_eq!([batch, nheads, num_full_chunks], a_chunk_ends.dims());
-                let a_chunk_pad = Tensor::cat(
-                    vec![
-                        Tensor::zeros(Shape::new([batch, nheads, 1]), device),
-                        a_chunk_ends,
-                    ],
-                    2,
-                );
-                assert_eq!([batch, nheads, 1 + num_full_chunks], a_chunk_pad.dims());
-                let decay_chunk = segsum(a_chunk_pad).exp();
-                assert_eq!(
-                    [
-                        batch,
-                        nheads,
-                        1 + num_full_chunks, // z
-                        1 + num_full_chunks  // 1+c
-                    ], // bhz(1+c)
-                    decay_chunk.dims()
-                );
-                // align for batched matmul
-                let states = states.clone().permute([0, 2, 1, 3, 4]); // b(1+c)hpn -> bh(1+c)pn
-                assert_eq!(
-                    [
-                        batch,
-                        nheads,
-                        1 + num_full_chunks, // 1+c
-                        headdim,
-                        d_state
-                    ],
-                    states.dims()
-                );
-                let states =
-                    states.reshape([batch, nheads, 1 + num_full_chunks, headdim * d_state]); // bh(1+c)pn -> bh(1+c)(pn)
-                assert_eq!(
-                    [batch, nheads, 1 + num_full_chunks, headdim * d_state],
-                    states.dims()
-                );
-                // contraction over (1+c): bhz(1+c) @ bh(1+c)(pn) -> bhz(pn)
-                let new_states = decay_chunk.matmul(states);
-                assert_eq!(
-                    [batch, nheads, 1 + num_full_chunks, headdim * d_state], // bhz(pn)
-                    new_states.dims()
-                );
-                let new_states =
-                    new_states.reshape([batch, nheads, 1 + num_full_chunks, headdim, d_state]); // bhzpn
-                //
-                let mut split = new_states
-                    .split_with_sizes(vec![num_full_chunks, 1], 2)
-                    .into_iter();
-                let states = split.next().unwrap(); // bhcpn
-                let final_state = split.next().unwrap(); // bh1pn
-                // (states.swap_dims(1, 2), final_state.squeeze_dim(2))
-                (states.permute([0, 2, 1, 3, 4]), final_state.squeeze_dim(2))
-            };
+            let b_bnhrl = b_bnhlr.permute([0, 1, 2, 4, 3]); // b_bnhlr.transpose()
+            let temp1_bnhll = c_bnhlr.matmul(b_bnhrl);
             assert_eq!(
-                [batch, num_full_chunks, nheads, headdim, d_state], // bchpn
-                states.dims()
+                [batch, nchunks, nheads, chunk_len, chunk_len],
+                temp1_bnhll.dims()
             );
-            assert_eq!([batch, nheads, headdim, d_state], final_state.dims()); // bhpn
-
-            // Step 4: Inter-chunk outputs: Y_off = state_decay_out ∑_d_state C state
-            let y_off = {
-                let state_decay_out = a_cumsum.exp();
-                assert_eq!(
-                    [batch, nheads, num_full_chunks, chunk_size], // bhcl
-                    state_decay_out.dims()
-                );
-                // contract C and states over d_state
-                // let c_chunk = c_chunk.swap_dims(2, 3); // bclhn -> bchln
-                let c_chunk = c_chunk.permute([0, 1, 3, 2, 4]); // bclhn -> bchln
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, d_state], // bchln
-                    c_chunk.dims()
-                );
-                // let states = states.transpose(); // bchpn -> bchnp
-                let states = states.permute([0, 1, 2, 4, 3]); // bchpn -> bchnp
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, d_state, headdim], // bchnp
-                    states.dims()
-                );
-                let temp = c_chunk.matmul(states);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, headdim], // bchlp
-                    temp.dims()
-                );
-                // element mul
-                let state_decay_out = state_decay_out.permute([0, 2, 1, 3]).unsqueeze_dim(4);
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, 1], // bchl1
-                    state_decay_out.dims()
-                );
-                let temp = temp * state_decay_out; // bchlp
-                assert_eq!(
-                    [batch, num_full_chunks, nheads, chunk_size, headdim], // bchlp
-                    temp.dims()
-                );
-                // temp.swap_dims(2, 3) // bclhp
-                temp.permute([0, 1, 3, 2, 4]) // bclhp
-            };
+            let temp1_bnlhl = temp1_bnhll.permute([0, 1, 3, 2, 4]); // temp1.swap_dims(2, 3)
             assert_eq!(
-                [batch, num_full_chunks, chunk_size, nheads, headdim], // bclhp
-                y_off.dims()
+                [batch, nchunks, chunk_len, nheads, chunk_len],
+                temp1_bnlhl.dims()
             );
-
-            // Combine intra and inter-chunk
-            let y_full_combined = y_diag + y_off;
-            let y_full = y_full_combined.reshape([batch, sequence_full_chunks, nheads, headdim]);
-
-            if remainder_chunk_size > 0 {
-                // some full chunks + remainder
-                let x_rem = x.narrow(1, sequence_full_chunks, remainder_chunk_size);
-                let dt_rem = dt.narrow(1, sequence_full_chunks, remainder_chunk_size);
-                let b_rem = b.narrow(1, sequence_full_chunks, remainder_chunk_size);
-                let c_rem = c.narrow(1, sequence_full_chunks, remainder_chunk_size);
-                // recursively calls chunked_selective_scan with a single chunk_size == remainder
-                let (y_rem, final_state) = self.chunked_selective_scan(
-                    x_rem,
-                    dt_rem,
-                    a,
-                    b_rem,
-                    c_rem,
-                    final_state,
-                    remainder_chunk_size,
-                );
-                (Tensor::cat(vec![y_full, y_rem], 1), final_state)
-            } else {
-                // some full chunks and no remainer
-                (y_full, final_state)
-            }
-        } else {
-            // no full chunks and implied remainder
-            // recursively calls chunked_selective_scan with a single chunk_size == remainder
-            let (y_rem, final_state) = self.chunked_selective_scan(
-                x,
-                dt,
-                a,
-                b,
-                c,
-                ssm_initial_state,
-                remainder_chunk_size,
+            // element-wise multiplication with permuted L
+            let l_bhnll = segsum(a_bhnl.clone()).exp();
+            assert_eq!(
+                [batch, nheads, nchunks, chunk_len, chunk_len],
+                l_bhnll.dims()
             );
-            (y_rem, final_state)
+            let l_bnlhl = l_bhnll.permute([0, 2, 3, 1, 4]);
+            let temp2_bnlhl = temp1_bnlhl * l_bnlhl;
+            assert_eq!(
+                [batch, nchunks, chunk_len, nheads, chunk_len],
+                temp2_bnlhl.dims()
+            );
+            // final contraction over last chunk_len via batched matmul with X
+            let temp2_bnhll = temp2_bnlhl.permute([0, 1, 3, 2, 4]);
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, chunk_len],
+                temp2_bnhll.dims()
+            );
+            let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]); // x_bnlhp.clone().swap_dims(2, 3)
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, per_head_dim],
+                x_bnhlp.dims()
+            );
+            let y_diag_bnhlp = temp2_bnhll.matmul(x_bnhlp);
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, per_head_dim],
+                y_diag_bnhlp.dims()
+            );
+            y_diag_bnhlp.permute([0, 1, 3, 2, 4]) // y_diag_bnhlp.swap_dims(2, 3)
         };
-        (y, final_state)
+        assert_eq!(
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            y_diag_bnlhp.dims()
+        );
+
+        // Step 2: Intra-chunk states: states = ∑_chunk_len B decay_states X
+        let states_bnhpr = {
+            // element-wise multiply decay_states and X
+            let a_cumsum_last_bhn1 = a_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
+            let decay_states_bhnl = (a_cumsum_last_bhn1 - a_cumsum_bhnl.clone()).exp();
+            assert_eq!(
+                [batch, nheads, nchunks, chunk_len],
+                decay_states_bhnl.dims()
+            );
+            let decay_states_bnlh1 = decay_states_bhnl.permute([0, 2, 3, 1]).unsqueeze_dim(4);
+            assert_eq!(
+                [batch, nchunks, chunk_len, nheads, 1],
+                decay_states_bnlh1.dims()
+            );
+            let temp_bnlhp = decay_states_bnlh1 * x_bnlhp.clone();
+            assert_eq!(
+                [batch, nchunks, chunk_len, nheads, per_head_dim],
+                temp_bnlhp.dims()
+            );
+            // contraction over chunk_len via batched matmul with B
+            let temp_bnhpl = temp_bnlhp.permute([0, 1, 3, 4, 2]);
+            assert_eq!(
+                [batch, nchunks, nheads, per_head_dim, chunk_len],
+                temp_bnhpl.dims()
+            );
+            let b_bnhlr = b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, state_rank],
+                b_bnhlr.dims()
+            );
+            temp_bnhpl.matmul(b_bnhlr)
+        };
+        assert_eq!(
+            [batch, nchunks, nheads, per_head_dim, state_rank],
+            states_bnhpr.dims()
+        );
+
+        // Step 3: Inter-chunk state passing: new_states = ∑_nchunks decay_chunks states
+        let (states_bnhpr, final_state_bnpr) = {
+            // cat states
+            let initial_states_b1hpr = ssm_initial_state_bhpr.unsqueeze_dim(1);
+            assert_eq!(
+                [batch, 1, nheads, per_head_dim, state_rank],
+                initial_states_b1hpr.dims()
+            );
+            let states_bNhpr = Tensor::cat(vec![initial_states_b1hpr, states_bnhpr], 1);
+            assert_eq!(
+                [
+                    batch,
+                    1 + nchunks, // 1+n
+                    nheads,
+                    per_head_dim,
+                    state_rank
+                ],
+                states_bNhpr.dims()
+            );
+            // decay_chunk
+            let a_cumsum_last_bhn = a_cumsum_bhnl
+                .clone()
+                .slice(s![.., .., .., -1])
+                .squeeze_dim(3);
+            assert_eq!([batch, nheads, nchunks], a_cumsum_last_bhn.dims());
+            let a_chunk_pad_bhN = Tensor::cat(
+                vec![
+                    Tensor::zeros(Shape::new([batch, nheads, 1]), device), // bh1
+                    a_cumsum_last_bhn,
+                ],
+                2,
+            );
+            assert_eq!([batch, nheads, 1 + nchunks], a_chunk_pad_bhN.dims());
+            let decay_chunk_bhNN = segsum(a_chunk_pad_bhN).exp();
+            assert_eq!(
+                [
+                    batch,
+                    nheads,
+                    1 + nchunks, // 1+n
+                    1 + nchunks  // 1+n
+                ],
+                decay_chunk_bhNN.dims()
+            );
+            // align for batched matmul
+            let states_bhNpr = states_bNhpr.clone().permute([0, 2, 1, 3, 4]);
+            assert_eq!(
+                [
+                    batch,
+                    nheads,
+                    1 + nchunks, // 1+n
+                    per_head_dim,
+                    state_rank
+                ],
+                states_bhNpr.dims()
+            );
+            let flat_state_dim = per_head_dim * state_rank; // f = (pr)
+            let states_bhNf = states_bhNpr.reshape([batch, nheads, 1 + nchunks, flat_state_dim]);
+            assert_eq!(
+                [batch, nheads, 1 + nchunks, flat_state_dim],
+                states_bhNf.dims()
+            );
+            let new_states_bhNf = decay_chunk_bhNN.matmul(states_bhNf);
+            assert_eq!(
+                [batch, nheads, 1 + nchunks, flat_state_dim],
+                new_states_bhNf.dims()
+            );
+            let new_states_bhNpr =
+                new_states_bhNf.reshape([batch, nheads, 1 + nchunks, per_head_dim, state_rank]);
+            let states_bhnpr = new_states_bhNpr
+                .clone()
+                .slice(s![.., .., 0..nchunks, .., ..]);
+            let final_state_bhpr = new_states_bhNpr
+                // note regarding the sequence padding:
+                // new_states_bhNpr contains the last state for each chunk.
+                // even if the sequence_unpadded implied an intermediary state inside the last chunk,
+                // that intermediary state is carried to the end of that chunk through identity operations:
+                // - Āₜ = exp(Δₜ A) = exp(0) = 1
+                // - B̄ₜ = Δₜ Bₜ = 0
+                // so it's ok to grab the final state of the last chunk, even for padded sequences
+                .slice(s![.., .., nchunks, .., ..])
+                .squeeze_dim(2);
+            (
+                states_bhnpr.permute([0, 2, 1, 3, 4]), // states_bhnpr.swap_dims(1, 2)
+                final_state_bhpr,
+            )
+        };
+        assert_eq!(
+            [batch, nchunks, nheads, per_head_dim, state_rank],
+            states_bnhpr.dims()
+        );
+        assert_eq!(
+            [batch, nheads, per_head_dim, state_rank],
+            final_state_bnpr.dims()
+        );
+
+        // Step 4: Inter-chunk outputs: Y_off = state_decay_out ∑_state_rank C state
+        let y_off_bnlhp = {
+            let state_decay_out_bhnl = a_cumsum_bhnl.exp();
+            assert_eq!(
+                [batch, nheads, nchunks, chunk_len],
+                state_decay_out_bhnl.dims()
+            );
+            // contract C and states over state_rank
+            let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]); // c_chunk.swap_dims(2, 3)
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, state_rank],
+                c_bnhlr.dims()
+            );
+            let states_bnhrp = states_bnhpr.permute([0, 1, 2, 4, 3]); // states_bnhpr.transpose()
+            assert_eq!(
+                [batch, nchunks, nheads, state_rank, per_head_dim],
+                states_bnhrp.dims()
+            );
+            let temp_bnhlp = c_bnhlr.matmul(states_bnhrp);
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, per_head_dim],
+                temp_bnhlp.dims()
+            );
+            // element mul
+            let state_decay_out_bnhl1 = state_decay_out_bhnl.permute([0, 2, 1, 3]).unsqueeze_dim(4);
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, 1],
+                state_decay_out_bnhl1.dims()
+            );
+            let temp_bnhlp = temp_bnhlp * state_decay_out_bnhl1;
+            assert_eq!(
+                [batch, nchunks, nheads, chunk_len, per_head_dim],
+                temp_bnhlp.dims()
+            );
+            temp_bnhlp.permute([0, 1, 3, 2, 4]) // temp_bnhlp.swap_dims(2, 3) // bclhp
+        };
+        assert_eq!(
+            [batch, nchunks, chunk_len, nheads, per_head_dim], // bclhp
+            y_off_bnlhp.dims()
+        );
+
+        // Combine intra and inter-chunk
+        let y_bnlhp = y_diag_bnlhp + y_off_bnlhp;
+        let y_bshp = y_bnlhp.reshape([batch, sequence, nheads, per_head_dim]);
+        let y_bshp = y_bshp.slice(s![.., 0..sequence_unpadded, .., ..]); // may correct for padding
+
+        (y_bshp, final_state_bnpr)
     }
 }
 
@@ -772,190 +795,192 @@ mod step {
         /// # Shapes
         /// - Input: [batch, d_model]
         /// - Output: [batch, d_model]
+        #[allow(non_snake_case)]
         pub fn step(
             &self,
-            input: Tensor<B, 2>,
+            input_bm: Tensor<B, 2>,
             cache: Option<Mamba2Cache<B>>,
         ) -> (Tensor<B, 2>, Mamba2Cache<B>) {
-            let [batch, d_model] = input.dims();
+            let [batch, d_model] = input_bm.dims();
             let d_inner = self.d_inner();
             let ngroups = self.ngroups;
             let nheads = self.nheads();
-            let headdim = self.headdim();
+            let per_head_dim = self.per_head_dim();
             let conv_dim = self.conv_dim();
-            let d_state = self.d_state;
-            let [_conv_dim, _, d_conv] = self.conv1d.weight.dims();
+            let state_rank = self.state_rank;
+            let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
+            let [_d_model, d_in_proj_output] = self.in_proj.weight.dims();
             assert_eq!(conv_dim, _conv_dim);
+            assert_eq!(nheads % ngroups, 0);
 
             let mut cache = cache.unwrap_or_else(|| {
-                let device = &input.device();
-                let conv = Tensor::zeros(Shape::new([batch, conv_dim, d_conv]), device);
-                let ssm = Tensor::zeros(Shape::new([batch, nheads, headdim, d_state]), device);
-                Mamba2Cache { conv, ssm }
+                let device = &input_bm.device();
+                let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
+                let ssm_bhpr = Tensor::zeros(
+                    Shape::new([batch, nheads, per_head_dim, state_rank]),
+                    device,
+                );
+                Mamba2Cache { conv_bvk, ssm_bhpr }
             });
 
             // Input projection
-            let z_xbc_dt = self.in_proj.forward(input);
-            debug_assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt.dims());
-            let z_xbc_dt = z_xbc_dt;
+            let (z_gate_bi, xbc_bv, dt_raw_bh) = {
+                let z_xbc_dt = self.in_proj.forward(input_bm);
+                debug_assert_eq!([batch, d_in_proj_output], z_xbc_dt.dims());
+                debug_assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt.dims());
 
-            let (z, xbc, dt) = {
-                let mut split = z_xbc_dt
+                let mut z_xbc_dt = z_xbc_dt
                     .split_with_sizes(vec![d_inner, conv_dim, nheads], 1)
                     .into_iter();
                 (
-                    split.next().unwrap(),
-                    split.next().unwrap(),
-                    split.next().unwrap(),
+                    z_xbc_dt.next().unwrap(),
+                    z_xbc_dt.next().unwrap(),
+                    z_xbc_dt.next().unwrap(),
                 )
             };
-            debug_assert_eq!([batch, d_inner], z.dims());
-            debug_assert_eq!([batch, conv_dim], xbc.dims());
-            debug_assert_eq!([batch, nheads], dt.dims());
+            debug_assert_eq!([batch, d_inner], z_gate_bi.dims());
+            debug_assert_eq!([batch, conv_dim], xbc_bv.dims());
+            debug_assert_eq!([batch, nheads], dt_raw_bh.dims());
 
             // Convolution step
-            cache.conv = {
-                let conv = cache.conv;
-                debug_assert_eq!([batch, conv_dim, d_conv], conv.dims());
+            cache.conv_bvk = {
+                let conv_bvk = cache.conv_bvk;
+                debug_assert_eq!([batch, conv_dim, conv_kernel], conv_bvk.dims());
 
                 // split-off oldest/first column (i.e. rolling leftwards)
-                let t0 = conv.narrow(2, 1, d_conv - 1);
-                debug_assert_eq!([batch, conv_dim, d_conv - 1], t0.dims());
+                let t0_bvK = conv_bvk.slice(s![.., .., 1..]);
+                debug_assert_eq!([batch, conv_dim, conv_kernel - 1], t0_bvK.dims());
 
                 // insert xbc as a the newest/last column
-                let conv = Tensor::cat([t0, xbc.unsqueeze_dim(2)].to_vec(), 2);
-                debug_assert_eq!([batch, conv_dim, d_conv], conv.dims());
+                let conv_bvk = Tensor::cat([t0_bvK, xbc_bv.unsqueeze_dim(2)].to_vec(), 2);
+                debug_assert_eq!([batch, conv_dim, conv_kernel], conv_bvk.dims());
 
-                conv
+                conv_bvk
             };
 
-            let xbc = {
-                let conv1d = self.conv1d.weight.val();
+            let xbc_bv = {
+                let conv1d_v1k = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
-                debug_assert_eq!([conv_dim, 1, d_conv], conv1d.dims());
-                // let conv1d = conv1d.swap_dims(0, 1);
-                let conv1d = conv1d.permute([1, 0, 2]);
-                debug_assert_eq!([1, conv_dim, d_conv], conv1d.dims());
-                let conv1d = conv1d.expand([batch, conv_dim, d_conv]);
-                debug_assert_eq!([batch, conv_dim, d_conv], conv1d.dims());
+                debug_assert_eq!([conv_dim, 1, conv_kernel], conv1d_v1k.dims());
+                let conv1d_1vk = conv1d_v1k.permute([1, 0, 2]); // conv1d_v1k.swap_dims(0, 1)
+                debug_assert_eq!([1, conv_dim, conv_kernel], conv1d_1vk.dims());
+                let conv1d_bvk = conv1d_1vk.expand([batch, conv_dim, conv_kernel]);
+                debug_assert_eq!([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
 
-                let xbc = cache.conv.clone() * conv1d;
-                debug_assert_eq!([batch, conv_dim, d_conv], xbc.dims());
-                let mut xbc = xbc.sum_dim(2).squeeze_dim(2);
-                debug_assert_eq!([batch, conv_dim], xbc.dims());
-                if let Some(bias) = &self.conv1d.bias {
-                    debug_assert_eq!([conv_dim], bias.dims());
-                    xbc = xbc + bias.val().unsqueeze();
+                let xbc_bvk = cache.conv_bvk.clone() * conv1d_bvk;
+                debug_assert_eq!([batch, conv_dim, conv_kernel], xbc_bvk.dims());
+                let mut xbc_bv = xbc_bvk.sum_dim(2).squeeze_dim(2);
+                debug_assert_eq!([batch, conv_dim], xbc_bv.dims());
+                if let Some(bias_v) = &self.conv1d.bias {
+                    debug_assert_eq!([conv_dim], bias_v.dims());
+                    xbc_bv = xbc_bv + bias_v.val().unsqueeze();
                 }
-                Silu::new().forward(xbc)
+                Silu::new().forward(xbc_bv)
             };
-            debug_assert_eq!([batch, conv_dim], xbc.dims());
+            debug_assert_eq!([batch, conv_dim], xbc_bv.dims());
 
-            // Split xbc
-            let (x, b, c) = {
-                let mut split = xbc
-                    .split_with_sizes(vec![d_inner, ngroups * d_state, ngroups * d_state], 1)
+            // Split (xₜ, Bₜ, Cₜ)
+            debug_assert_eq!(d_inner, nheads * per_head_dim);
+            let (x_bhp, b_bgr, c_bgr) = {
+                let mut split = xbc_bv
+                    .split_with_sizes(vec![d_inner, ngroups * state_rank, ngroups * state_rank], 1)
                     .into_iter();
                 (
-                    split.next().unwrap(),
-                    split.next().unwrap(),
-                    split.next().unwrap(),
+                    // xₜ
+                    split
+                        .next()
+                        .unwrap() // [batch, d_inner]
+                        .reshape([batch, nheads, per_head_dim]),
+                    split
+                        .next()
+                        .unwrap() // [batch, ngroups * state_rank]
+                        .reshape([batch, ngroups, state_rank]),
+                    split
+                        .next()
+                        .unwrap() // [batch, ngroups * state_rank]
+                        .reshape([batch, ngroups, state_rank]),
                 )
             };
-            debug_assert_eq!([batch, d_inner], x.dims());
-            debug_assert_eq!([batch, ngroups * d_state], b.dims());
-            debug_assert_eq!([batch, ngroups * d_state], c.dims());
 
             // SSM step
-            let ssm_shape = [batch, nheads, headdim, d_state]; // cache.ssm shape
+            let ssm_shape_bhpr = [batch, nheads, per_head_dim, state_rank]; // cache ssm shape
             // Δₜ = softplus(dt + dt_bias)
-            let dt = softplus(dt + self.dt_bias.val().unsqueeze_dim(0));
-            let dt = dt.clamp(self.dt_limit.0, self.dt_limit.1);
-            debug_assert_eq!([batch, nheads], dt.dims());
-            let a = -self.a_log.val().exp(); // A
-            debug_assert_eq!([nheads], a.dims());
-
-            debug_assert_eq!(d_inner, nheads * headdim);
-            let x = x.reshape([batch, nheads, headdim]); // xₜ
-            let b = b.reshape([batch, ngroups, d_state]); // Bₜ
-            let c = c.reshape([batch, ngroups, d_state]); // Cₜ
+            let dt_bias_1h = self.dt_bias_h.val().unsqueeze_dim(0);
+            debug_assert_eq!([1, nheads], dt_bias_1h.dims());
+            let dt_bh = softplus(dt_raw_bh + dt_bias_1h).clamp(self.dt_limit.0, self.dt_limit.1);
+            debug_assert_eq!([batch, nheads], dt_bh.dims());
+            let a_head_decay_h = -self.a_log_h.val().exp(); // A
+            debug_assert_eq!([nheads], a_head_decay_h.dims());
 
             // Āₜ = exp(Δₜ A)
-            let dta = (dt.clone() * a.clone().unsqueeze()).exp();
-            debug_assert_eq!([batch, nheads], dta.dims());
+            let dta_bh = (dt_bh.clone() * a_head_decay_h.clone().unsqueeze()).exp();
+            debug_assert_eq!([batch, nheads], dta_bh.dims());
 
-            let dta = dta.unsqueeze_dims(&[2, 3]);
-            debug_assert_eq!([batch, nheads, 1, 1], dta.dims());
-            let dta = dta.expand(ssm_shape);
+            let dta_bh11 = dta_bh.unsqueeze_dims(&[2, 3]);
+            debug_assert_eq!([batch, nheads, 1, 1], dta_bh11.dims());
+            let dta_bhpr = dta_bh11.expand(ssm_shape_bhpr);
 
-            // dt * b * x = [batch, nheads] * [batch, ngroups, d_state] * [batch, nheads, headdim]
+            // dt * b * x = [batch, nheads] * [batch, ngroups, state_rank] * [batch, nheads, per_head_dim]
             let heads_per_group = nheads / ngroups;
             // B̄ₜ xₜ = Δₜ Bₜ xₜ
-            let dtbx = {
-                let x = x.clone().unsqueeze_dim(3);
-                debug_assert_eq!([batch, nheads, headdim, 1], x.dims());
-                let x = x.expand(ssm_shape);
+            let dtbx_bhpr = {
+                let x_bhpr = x_bhp.clone().unsqueeze_dim::<4>(3).expand(ssm_shape_bhpr);
 
-                let b = b.unsqueeze_dims(&[1, 4]);
-                debug_assert_eq!([batch, 1, ngroups, d_state, 1], b.dims());
-                let b = b
-                    .expand([batch, heads_per_group, ngroups, d_state, 1])
-                    .reshape([batch, nheads, d_state, 1])
-                    // .swap_dims(2, 3)
-                    .permute([0, 1, 3, 2])
-                    .expand(ssm_shape);
+                let b_b1gr1 = b_bgr.unsqueeze_dims(&[1, 4]);
+                debug_assert_eq!([batch, 1, ngroups, state_rank, 1], b_b1gr1.dims());
+                let b_bhpr = b_b1gr1
+                    .expand([batch, heads_per_group, ngroups, state_rank, 1])
+                    .reshape([batch, nheads, state_rank, 1]) // bhr1
+                    .permute([0, 1, 3, 2]) // .swap_dims(2, 3) // bh1r
+                    .expand(ssm_shape_bhpr);
 
-                let dt = dt.unsqueeze_dims(&[2, 3]);
-                debug_assert_eq!([batch, nheads, 1, 1], dt.dims());
-                let dt = dt.expand(ssm_shape);
+                let dt_bhpr = dt_bh.unsqueeze_dims::<4>(&[2, 3]).expand(ssm_shape_bhpr);
 
-                dt * b * x
+                dt_bhpr * b_bhpr * x_bhpr
             };
-            debug_assert_eq!(ssm_shape, dtbx.dims());
-
-            let c = c.unsqueeze_dims(&[1, 4]);
-            debug_assert_eq!([batch, 1, ngroups, d_state, 1], c.dims());
-            let c = c
-                .expand([batch, heads_per_group, ngroups, d_state, 1])
-                .reshape([batch, nheads, d_state, 1])
-                // .swap_dims(2, 3)
-                .permute([0, 1, 3, 2])
-                .expand(ssm_shape);
-            let d = self.d.val().unsqueeze_dims(&[0, 2]);
-            debug_assert_eq!([1, nheads, 1], d.dims());
-            let d = d.expand([batch, nheads, headdim]);
-            //
-            debug_assert_eq!(ssm_shape, c.dims());
+            debug_assert_eq!(ssm_shape_bhpr, dtbx_bhpr.dims());
 
             // Compute state update
             // hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ
-            cache.ssm = cache.ssm * dta + dtbx;
-            debug_assert_eq!(ssm_shape, cache.ssm.dims());
+            cache.ssm_bhpr = cache.ssm_bhpr * dta_bhpr + dtbx_bhpr;
+            debug_assert_eq!(ssm_shape_bhpr, cache.ssm_bhpr.dims());
 
             // Compute output:yₜ = Cₜ hₜ + D xₜ
-            let y = {
-                // yₜ = Cₜ hₜ (matrix-vector product, without the skip)
-                let y = cache.ssm.clone() * c;
-                let y = y.sum_dim(3).squeeze_dim(3);
-                debug_assert_eq!([batch, nheads, headdim], y.dims());
+            let y_bi = {
+                // yᵢₜ = Cₜ hₜ
+                let c_b1gr1 = c_bgr.unsqueeze_dims(&[1, 4]);
+                debug_assert_eq!([batch, 1, ngroups, state_rank, 1], c_b1gr1.dims());
+                let c_bhpr = c_b1gr1
+                    .expand([batch, heads_per_group, ngroups, state_rank, 1])
+                    .reshape([batch, nheads, state_rank, 1]) // bhr1
+                    .permute([0, 1, 3, 2]) // .swap_dims(2, 3) // bh1r
+                    .expand(ssm_shape_bhpr);
+                debug_assert_eq!(ssm_shape_bhpr, c_bhpr.dims());
+                let y_state_bhpr = cache.ssm_bhpr.clone() * c_bhpr;
+                let y_state_bhp = y_state_bhpr.sum_dim(3).squeeze_dim(3);
+                debug_assert_eq!([batch, nheads, per_head_dim], y_state_bhp.dims());
 
-                // yₜ += D xₜ
-                let y = y + d * x;
-                debug_assert_eq!([batch, nheads, headdim], y.dims());
+                // yⱼₜ = D xₜ
+                let d_1h1 = self.d_h.val().unsqueeze_dims(&[0, 2]);
+                debug_assert_eq!([1, nheads, 1], d_1h1.dims());
+                let d_bhp = d_1h1.expand([batch, nheads, per_head_dim]);
+                let y_skip_bhp = d_bhp * x_bhp;
 
-                // Apply normalization with z
-                let y_flat = y.reshape([batch, d_inner]);
+                // yₜ = yᵢₜ + yⱼₜ
+                let y_bhp = y_state_bhp + y_skip_bhp;
+                debug_assert_eq!([batch, nheads, per_head_dim], y_bhp.dims());
 
-                let y = self.norm.forward(y_flat, z);
-                y
+                // Apply normalization with z_gate
+                let y_bi = y_bhp.reshape([batch, d_inner]);
+                self.norm.forward(y_bi, z_gate_bi)
             };
-            debug_assert_eq!([batch, d_inner], y.dims());
+            debug_assert_eq!([batch, d_inner], y_bi.dims());
 
             // Output projection
-            let out = self.out_proj.forward(y);
-            debug_assert_eq!([batch, d_model], out.dims());
+            let out_bm = self.out_proj.forward(y_bi);
+            debug_assert_eq!([batch, d_model], out_bm.dims());
 
-            (out, cache)
+            (out_bm, cache)
         }
     }
 }
