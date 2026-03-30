@@ -63,7 +63,7 @@ impl Mamba2BidiLayersConfig {
 }
 
 impl<B: Backend> Mamba2BidiLayers<B> {
-    /// `chunk_size`: Chunk size for selective scan. Defaults to 256.
+    /// `chunk_len`: Chunk size for selective scan. Defaults to 256.
     ///
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
@@ -74,9 +74,9 @@ impl<B: Backend> Mamba2BidiLayers<B> {
         caches: Option<Mamba2Caches<B>>,
         // straight_caches: Option<Mamba2Caches<B>>,
         // reverse_caches: Option<Mamba2Caches<B>>,
-        chunk_size: Option<usize>,
+        chunk_len: Option<usize>,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
-        let chunk_size = chunk_size.unwrap_or(256);
+        let chunk_len = chunk_len.unwrap_or(256);
 
         let n_virtual_layers = self
             .n_virtual_layers
@@ -95,16 +95,16 @@ impl<B: Backend> Mamba2BidiLayers<B> {
             let device = &x.device();
             let [batch, _sequence, _d_model] = x.dims();
             let layer0_block = &self.real_layers[0].mamba_block;
-            let [conv_dim, _, d_conv] = layer0_block.conv1d.weight.dims();
+            let [conv_dim, _, conv_kernel] = layer0_block.conv1d.weight.dims();
 
             Mamba2CachesConfig::new(
                 n_virtual_layers,
                 Mamba2CacheConfig {
                     batch,
-                    d_state: layer0_block.d_state,
-                    d_conv,
+                    state_rank: layer0_block.state_rank,
+                    conv_kernel,
                     conv_dim,
-                    headdim: layer0_block.headdim(),
+                    per_head_dim: layer0_block.per_head_dim(),
                     nheads: layer0_block.nheads(),
                 },
             )
@@ -161,7 +161,7 @@ impl<B: Backend> Mamba2BidiLayers<B> {
             };
 
             let (x_, straight_cache_, reverse_cache_) =
-                bidi_pair.forward(x, Some(straight_cache), Some(reverse_cache), chunk_size);
+                bidi_pair.forward(x, Some(straight_cache), Some(reverse_cache), chunk_len);
             x = x_;
             caches[straight_cache_idx] = Some(straight_cache_);
             caches[reverse_cache_idx] = Some(reverse_cache_);
@@ -218,7 +218,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         x: Tensor<B, 3>,
         straight_cache: Option<Mamba2Cache<B>>,
         reverse_cache: Option<Mamba2Cache<B>>,
-        chunk_size: usize,
+        chunk_len: usize,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
@@ -239,7 +239,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         // t₁ >x₀>x₁
         // t₂ >x₀>x₁>x₂
         // t₃ >x₀>x₁>x₂>x₃
-        let (x, straight_cache) = self.straight_block.forward(x, straight_cache, chunk_size);
+        let (x, straight_cache) = self.straight_block.forward(x, straight_cache, chunk_len);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         // reverse reads inputs as:
@@ -247,7 +247,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         // t₁      x₂<x₃<
         // t₂   x₁<x₂<x₃<
         // t₃ x₀<x₁<x₂<x₃<
-        let (x_rev, reverse_cache) = self.reverse_block.forward(x_rev, reverse_cache, chunk_size);
+        let (x_rev, reverse_cache) = self.reverse_block.forward(x_rev, reverse_cache, chunk_len);
         debug_assert_eq!([batch, sequence, d_model], x_rev.dims());
 
         // re-align the reversed read:
