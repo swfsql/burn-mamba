@@ -2,13 +2,13 @@ use crate::mamba2::bidi::naive::{OutputMerge, OutputMergeConfig};
 use crate::mamba2::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::module::Ignored;
 use burn::prelude::*;
 
 #[derive(Module, Debug)]
 pub struct Mamba2BidiLayers<B: Backend> {
     pub n_real_layers: usize,
-    pub n_virtual_layers: Ignored<Option<(usize, BidiSchedule)>>,
+    #[module(skip)]
+    pub n_virtual_layers: Option<(usize, BidiSchedule)>,
     /// # Shape
     /// - [n_real_layers]
     pub real_layers: Vec<Mamba2Layer<B>>,
@@ -53,7 +53,7 @@ impl Mamba2BidiLayersConfig {
 
         Mamba2BidiLayers {
             n_real_layers: self.n_real_layers,
-            n_virtual_layers: Ignored(self.n_virtual_layers.clone()),
+            n_virtual_layers: self.n_virtual_layers.clone(),
             real_layers,
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
@@ -125,7 +125,7 @@ impl<B: Backend> Mamba2BidiLayers<B> {
             // use real layers by reference (clone)
             let (straight_i, reverse_i) = (i * 2, i * 2 + 1);
             let (straight_layer_idx, reverse_layer_idx) =
-                if let Some((n_virtual_layers, bidi_schedule)) = &self.n_virtual_layers.0 {
+                if let Some((n_virtual_layers, bidi_schedule)) = &self.n_virtual_layers {
                     (
                         bidi_schedule.real_idx(straight_i, *n_virtual_layers, self.n_real_layers),
                         bidi_schedule.real_idx(reverse_i, *n_virtual_layers, self.n_real_layers),

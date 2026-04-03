@@ -48,6 +48,7 @@ where
 
     if app_args.training {
         let training_device = AutoB::main_device();
+        AutoB::set_dtype(&training_device);
         training::train::<AutoB>(
             training_config,
             model_config.clone(),
@@ -58,6 +59,9 @@ where
 
     if app_args.inference {
         let infer_device = B::main_device();
+        if !app_args.training {
+            B::set_dtype(&infer_device);
+        }
         let batch_size = 10;
         inference::infer::<B>(model_config, batch_size, infer_device, app_args);
     }

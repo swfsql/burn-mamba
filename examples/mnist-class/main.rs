@@ -47,11 +47,15 @@ where
 
     if app_args.training {
         let training_device = AutoB::main_device();
+        AutoB::set_dtype(&training_device);
         training::train::<AutoB>(training_config, model_config, training_device, app_args);
     }
 
     if app_args.inference {
-        let _infer_device = B::main_device();
+        let infer_device = B::main_device();
+        if !app_args.training {
+            B::set_dtype(&infer_device);
+        }
         println!("inference is not yet implemented");
     }
 

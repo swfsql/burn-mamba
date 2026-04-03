@@ -25,7 +25,7 @@ pub fn log_sigmoid<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> 
         | DType::U8 => {
             unreachable!()
         }
-        DType::Bool => {
+        DType::Bool(_) => {
             unreachable!()
         }
         DType::QFloat(_) => {

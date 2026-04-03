@@ -1,8 +1,8 @@
 pub mod bidi;
-mod cache;
-mod layer;
-mod mamba2;
-mod network;
+pub mod cache;
+pub mod layer;
+pub mod mamba2;
+pub mod network;
 
 pub use cache::{Mamba2Cache, Mamba2CacheConfig, Mamba2Caches, Mamba2CachesConfig};
 pub use layer::{Mamba2Layer, Mamba2LayerConfig, Mamba2Layers, Mamba2LayersConfig};

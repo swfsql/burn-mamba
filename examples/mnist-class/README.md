@@ -16,8 +16,8 @@ Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cach
 ##### Usage Example
 
 ```bash
-# debug check in ndarray (fp32)
-cargo check --example mnist-class --features "dev-ndarray"
+# debug check in flex (fp32)
+cargo check --example mnist-class --features "dev-flex"
 
 # training and running inference in wgpu (fp32)
 # note: the following requires ~7GB vram during training by default

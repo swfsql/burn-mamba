@@ -10,7 +10,7 @@ pub fn model_config() -> MyMamba2NetworkConfig {
         // the input shape is [batch_size, sequence_len = HEIGHT * WIDTH, 1]
         .with_input_size(1)
         // to keep it simple, don't use any class token
-        .with_class_tokens(Vec::new())
+        // .with_class_tokens(Vec::new()) // TODO: merge fork
         .with_layers(mamba2_layers_config(
             2, // two layers backed by unique weights is sufficient
             Some((

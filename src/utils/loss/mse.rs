@@ -66,7 +66,7 @@ impl MseLoss {
             | DType::U8 => {
                 unreachable!()
             }
-            DType::Bool => {
+            DType::Bool(_) => {
                 unreachable!()
             }
             DType::QFloat(_) => {

@@ -9,11 +9,11 @@ The dataset is generated based on two initial numbers between `0.0` and `1.0`, a
 ##### Usage Example
 
 ```bash
-# debug check in ndarray (fp32)
-cargo check --example fibonacci --features "dev-ndarray"
+# debug check in flex (fp32)
+cargo check --example fibonacci --features "dev-flex"
 
-# training and running inference in ndarray (fp32)
-cargo run --release --example fibonacci --features "dev-ndarray" -- --training --inference
+# training and running inference in flex (fp32)
+cargo run --release --example fibonacci --features "dev-flex" -- --training --inference
 ```
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.  
