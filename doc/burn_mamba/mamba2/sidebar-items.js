@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["bidi"],"struct":["Mamba2","Mamba2Cache","Mamba2CacheConfig","Mamba2Caches","Mamba2CachesConfig","Mamba2Config","Mamba2Layer","Mamba2LayerConfig","Mamba2Layers","Mamba2LayersConfig","Mamba2Network","Mamba2NetworkConfig"]};
+window.SIDEBAR_ITEMS = {"mod":["bidi","cache","layer","mamba2","network"]};

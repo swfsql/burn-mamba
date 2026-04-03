@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba1","Mamba1Cache","Mamba1CacheConfig","Mamba1Caches","Mamba1CachesConfig","Mamba1Config","Mamba1Layer","Mamba1LayerConfig","Mamba1Network","Mamba1NetworkConfig"]};
+window.SIDEBAR_ITEMS = {"mod":["cache","layer","mamba1","network"]};
