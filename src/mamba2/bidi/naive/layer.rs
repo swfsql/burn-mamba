@@ -1,5 +1,5 @@
 use crate::mamba2::bidi::naive::{OutputMerge, OutputMergeConfig};
-use crate::mamba2::*;
+use crate::mamba2::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
@@ -63,8 +63,6 @@ impl Mamba2BidiLayersConfig {
 }
 
 impl<B: Backend> Mamba2BidiLayers<B> {
-    /// `chunk_len`: Chunk size for selective scan. Defaults to 256.
-    ///
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output [batch, sequence, d_model]
@@ -74,10 +72,8 @@ impl<B: Backend> Mamba2BidiLayers<B> {
         caches: Option<Mamba2Caches<B>>,
         // straight_caches: Option<Mamba2Caches<B>>,
         // reverse_caches: Option<Mamba2Caches<B>>,
-        chunk_len: Option<usize>,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
-        let chunk_len = chunk_len.unwrap_or(256);
-
         let n_virtual_layers = self
             .n_virtual_layers
             .as_ref()
@@ -160,8 +156,12 @@ impl<B: Backend> Mamba2BidiLayers<B> {
                 residual_scale,
             };
 
-            let (x_, straight_cache_, reverse_cache_) =
-                bidi_pair.forward(x, Some(straight_cache), Some(reverse_cache), chunk_len);
+            let (x_, straight_cache_, reverse_cache_) = bidi_pair.forward(
+                x,
+                Some(straight_cache),
+                Some(reverse_cache),
+                ssd_path.clone(),
+            );
             x = x_;
             caches[straight_cache_idx] = Some(straight_cache_);
             caches[reverse_cache_idx] = Some(reverse_cache_);
@@ -218,7 +218,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         x: Tensor<B, 3>,
         straight_cache: Option<Mamba2Cache<B>>,
         reverse_cache: Option<Mamba2Cache<B>>,
-        chunk_len: usize,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
@@ -239,7 +239,9 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         // t₁ >x₀>x₁
         // t₂ >x₀>x₁>x₂
         // t₃ >x₀>x₁>x₂>x₃
-        let (x, straight_cache) = self.straight_block.forward(x, straight_cache, chunk_len);
+        let (x, straight_cache) = self
+            .straight_block
+            .forward(x, straight_cache, ssd_path.clone());
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         // reverse reads inputs as:
@@ -247,7 +249,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         // t₁      x₂<x₃<
         // t₂   x₁<x₂<x₃<
         // t₃ x₀<x₁<x₂<x₃<
-        let (x_rev, reverse_cache) = self.reverse_block.forward(x_rev, reverse_cache, chunk_len);
+        let (x_rev, reverse_cache) = self.reverse_block.forward(x_rev, reverse_cache, ssd_path);
         debug_assert_eq!([batch, sequence, d_model], x_rev.dims());
 
         // re-align the reversed read:

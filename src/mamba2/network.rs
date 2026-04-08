@@ -44,7 +44,7 @@
 //! | [`Mamba2Network::forward`] | `[B, T]` | Training, prefill |
 //! | [`Mamba2Network::step`]    | `[B]`    | Autoregressive decoding |
 
-use crate::mamba2::*;
+use crate::mamba2::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
@@ -181,9 +181,9 @@ impl<B: Backend> Mamba2Network<B> {
     ///                  start from a zero state (training) or to create fresh
     ///                  caches that can be returned and reused for a subsequent
     ///                  decoding step.
-    /// - `chunk_size` — SSD chunk length Q (default 256).  Larger values
-    ///                  increase the intra-chunk GEMM work and reduce the
-    ///                  inter-chunk scan length.  Optimal value ≈ √(N·P).
+    /// - `ssd_path`   — SSD algorithm and chunk length selection.
+    ///                  Defaults to the Core SSD algorithm with the chunk length
+    ///                  value of `√(state_rank · per_head_dim)`.
     ///
     /// # Returns
     /// `(logits, caches)` where:
@@ -194,7 +194,7 @@ impl<B: Backend> Mamba2Network<B> {
         &self,
         x: Tensor<B, 2, Int>,
         caches: Option<Mamba2Caches<B>>,
-        chunk_size: Option<usize>,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
@@ -204,7 +204,7 @@ impl<B: Backend> Mamba2Network<B> {
         assert_eq!([batch, sequence, d_model], x_bsm.dims());
 
         // Run the Mamba-2 layer stack (chunkwise SSD).
-        let (mut x_bsm, caches) = self.layers.forward(x_bsm, caches, chunk_size);
+        let (mut x_bsm, caches) = self.layers.forward(x_bsm, caches, ssd_path);
         assert_eq!([batch, sequence, d_model], x_bsm.dims());
 
         // Final normalisation before projection.

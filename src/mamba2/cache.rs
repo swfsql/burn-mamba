@@ -25,7 +25,7 @@
 //!    Transformer grows as O(T·N) with sequence length, whereas the SSM state
 //!    is always O(P·N).
 
-use crate::mamba2::*;
+use crate::mamba2::prelude::*;
 use burn::module::Module;
 use burn::prelude::*;
 

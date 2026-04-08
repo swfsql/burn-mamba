@@ -1,4 +1,4 @@
-use crate::mamba1::*;
+use crate::mamba1::prelude::*;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},

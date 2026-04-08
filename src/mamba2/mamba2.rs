@@ -86,7 +86,7 @@
 //! | `N`    | 1+nchunks (padded for state scan) | — |
 //! | `f`    | P·N (flattened state for matmul)   | — |
 
-use crate::mamba2::*;
+use crate::mamba2::prelude::*;
 use crate::utils::{
     rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
     silu::Silu,
@@ -501,6 +501,55 @@ impl Mamba2Config {
 // Mamba2::forward  (chunkwise SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
+/// Chunked ssd algorithm selection.
+///
+/// Each variant carries the chunk length Q for the SSD algorithm.  
+/// Larger values increase the intra-chunk GEMM work and reduce the
+/// inter-chunk scan length.  
+/// Optimal value is approximately `√(state_rank · per_head_dim)`.
+#[derive(Debug, Clone)]
+pub enum SsdPath {
+    Core(usize),
+    GpuNaive(usize),
+}
+
+impl SsdPath {
+    /// Optional Core variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
+        Self::Core((state_rank * per_head_dim).isqrt())
+    }
+
+    /// Optional Core variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    pub fn core_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+        Self::core_optimal(block.state_rank, block.per_head_dim())
+    }
+
+    /// Optional GPU Naive variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    pub fn gpu_naive_optimal(state_rank: usize, per_head_dim: usize) -> Self {
+        Self::GpuNaive((state_rank * per_head_dim).isqrt())
+    }
+
+    /// Optional GPU Naive variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    pub fn gpu_naive_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+        Self::gpu_naive_optimal(block.state_rank, block.per_head_dim())
+    }
+
+    pub fn chunk_len(&self) -> usize {
+        match self {
+            SsdPath::Core(chunk_len) => *chunk_len,
+            SsdPath::GpuNaive(chunk_len) => *chunk_len,
+        }
+    }
+}
+
 impl<B: Backend> Mamba2<B> {
     /// Process a full input sequence using the chunkwise SSD algorithm.
     ///
@@ -516,11 +565,19 @@ impl<B: Backend> Mamba2<B> {
     /// 3. **Split**: `xbc → (x, B, C)`.
     /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`;
     ///    `Ā = exp(Δ · A)`;  `B̄ = Δ · B`.
-    /// 5. **Chunked SSD**: four-step chunkwise algorithm (see
+    /// 5. **Padding**: sequence padding.
+    /// 6. **Chunked SSD**: four-step chunkwise algorithm (see
     ///    [`Self::chunked_selective_scan`]).
-    /// 6. **D skip**: `y += D · x`.
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y) · σ(z)`.
     /// 8. **Out-projection**: `y → output`.
+    ///
+    /// ## Sequence padding
+    ///
+    /// If `sequence_unpadded % chunk_len ≠ 0`, the sequence is zero-padded
+    /// to the next multiple of Q.  Zero-padding is equivalent to inserting
+    /// identity steps (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`), so the SSM
+    /// state is carried forward unchanged through the pad — making it safe to
+    /// read the final state of the padded last chunk as the true final state.
     ///
     /// # Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
@@ -531,7 +588,7 @@ impl<B: Backend> Mamba2<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        chunk_len: usize,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -542,18 +599,19 @@ impl<B: Backend> Mamba2<B> {
         let state_rank = self.state_rank;
         let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
         let [_d_model, d_in_proj_out] = self.in_proj.weight.dims();
-
+        let device = input_bsm.device();
+        assert_eq!(conv_dim, _conv_dim);
+        assert_ne!(ngroups, 0);
         assert_eq!(conv_dim, _conv_dim);
         assert_eq!(nheads % ngroups, 0);
         assert!(sequence > 0, "sequence length must be at least 1");
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
-            let device = &input_bsm.device();
-            let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
+            let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), &device);
             let ssm_bhpr = Tensor::zeros(
                 Shape::new([batch, nheads, per_head_dim, state_rank]),
-                device,
+                &device,
             );
             Mamba2Cache { conv_bvk, ssm_bhpr }
         });
@@ -685,19 +743,89 @@ impl<B: Backend> Mamba2<B> {
         let a_head_decay_h = -self.a_log_h.val().exp(); // A = -exp(a_log) < 0
         assert_eq!([nheads], a_head_decay_h.dims());
 
-        // ── Step 5: Chunked selective scan ────────────────────────────────────
-        // This is the heart of the Mamba-2 block.  See the extensive
-        // documentation inside `chunked_selective_scan` for the full algorithm.
-        let (y_bshp, final_state_bhpr) = self.chunked_selective_scan(
-            x_bshp.clone(),
-            dt_bsh,
-            a_head_decay_h,
-            b_bsgr,
-            c_bsgr,
-            cache.ssm_bhpr,
-            chunk_len,
+        // ── Step 5: Pad sequence to a multiple of chunk_len ───────────────────────────
+        // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
+        // The state is thus carried through unchanged, so the final state of
+        // the padded last chunk equals the state after the last real token.
+        let ssd_path = ssd_path.unwrap_or(SsdPath::core_optimal_from_block(&self));
+        let chunk_len = ssd_path.chunk_len();
+        let sequence_mod = sequence % chunk_len;
+        let pad = if sequence_mod == 0 {
+            0
+        } else {
+            chunk_len - sequence_mod
+        };
+        let (x_bShp, dt_bSh, b_bSgr, c_bSgr, sequence_padded) = if pad == 0 {
+            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr, sequence)
+        } else {
+            let x_bshp = Tensor::cat(
+                vec![
+                    x_bshp.clone(),
+                    Tensor::zeros(Shape::new([batch, pad, nheads, per_head_dim]), &device),
+                ],
+                1,
+            );
+            let dt_bsh = Tensor::cat(
+                vec![
+                    dt_bsh,
+                    Tensor::zeros(Shape::new([batch, pad, nheads]), &device),
+                ],
+                1,
+            );
+            let b_bsgr = Tensor::cat(
+                vec![
+                    b_bsgr,
+                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), &device),
+                ],
+                1,
+            );
+            let c_bsgr = Tensor::cat(
+                vec![
+                    c_bsgr,
+                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), &device),
+                ],
+                1,
+            );
+            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr, sequence + pad)
+        };
+
+        // ── Step 6: Chunked selective scan ────────────────────────────────────
+        let (y_bShp, final_state_bhpr) = match ssd_path {
+            SsdPath::Core(_chunk_len) => {
+                // This is the heart of the Mamba-2 block.  See the documentation
+                // inside `chunked_selective_scan` for the full algorithm.
+                Self::chunked_selective_scan(
+                    x_bShp,
+                    dt_bSh,
+                    a_head_decay_h,
+                    b_bSgr,
+                    c_bSgr,
+                    self.d_h.val(),
+                    cache.ssm_bhpr,
+                    self.init_states_hpr.as_ref().map(|s| s.val()),
+                    ngroups,
+                    state_rank,
+                    chunk_len,
+                )
+            }
+            SsdPath::GpuNaive(_chunk_len) => Self::chunked_selective_scan_hybrid_naive(
+                x_bShp,
+                dt_bSh,
+                a_head_decay_h,
+                b_bSgr,
+                c_bSgr,
+                self.d_h.val(),
+                cache.ssm_bhpr,
+                self.init_states_hpr.as_ref().map(|s| s.val()),
+                ngroups,
+                state_rank,
+                chunk_len,
+            ),
+        };
+        assert_eq!(
+            [batch, sequence_padded, nheads, per_head_dim],
+            y_bShp.dims()
         );
-        assert_eq!([batch, sequence, nheads, per_head_dim], y_bshp.dims());
 
         // Update the SSM state in the cache for the next call.
         cache.ssm_bhpr = final_state_bhpr;
@@ -706,16 +834,10 @@ impl<B: Backend> Mamba2<B> {
             cache.ssm_bhpr.dims()
         );
 
-        // ── Step 6: D skip connection ─────────────────────────────────────────
-        // yₜ += D · xₜ
-        // D is a per-head scalar; broadcast over batch, sequence, and per_head_dim.
-        let d_bsh1 = self
-            .d_h
-            .val()
-            .unsqueeze_dims::<4>(&[0, 0, 3]) // [H] → [1, 1, H, 1]
-            .expand([batch, sequence, nheads, 1]);
-        let y_bshp = y_bshp + d_bsh1 * x_bshp;
+        // Remove zero-pad columns that were added at Step 5.
+        let y_bshp = y_bShp.slice(s![.., 0..sequence, .., ..]);
 
+        // Reshape into sequence.
         let y_bsi = y_bshp.reshape([batch, sequence, d_inner]);
         assert_eq!([batch, sequence, d_inner], y_bsi.dims());
 
@@ -738,8 +860,7 @@ impl<B: Backend> Mamba2<B> {
     ///
     /// Implements the four-step decomposition of the semiseparable matrix
     /// multiplication described in §4 of the paper.  The sequence of length T
-    /// is split into `nchunks = ⌈T/Q⌉` chunks of length Q (padded with zeros
-    /// to the nearest multiple of Q when necessary).
+    /// is split into `nchunks = ⌈T/Q⌉` chunks of length Q.
     ///
     /// ## The four steps
     ///
@@ -794,19 +915,11 @@ impl<B: Backend> Mamba2<B> {
     ///
     /// This is again a batched GEMM.
     ///
-    /// ### Final output
+    /// ### Final output (with D skip-connection)
     ///
     /// ```text
-    ///   Y = Y_diag + Y_off
+    ///   Y = Y_diag + Y_off + D · X
     /// ```
-    ///
-    /// ## Sequence padding
-    ///
-    /// If `sequence_unpadded % chunk_len ≠ 0`, the sequence is zero-padded
-    /// to the next multiple of Q.  Zero-padding is equivalent to inserting
-    /// identity steps (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`), so the SSM
-    /// state is carried forward unchanged through the pad — making it safe to
-    /// read the final state of the padded last chunk as the true final state.
     ///
     /// # Shapes
     /// - `x_bshp`                  : `[batch, sequence, nheads, per_head_dim]`
@@ -814,72 +927,31 @@ impl<B: Backend> Mamba2<B> {
     /// - `a_head_decay_h` (A < 0)  : `[nheads]`
     /// - `b_bsgr`     (B)          : `[batch, sequence, ngroups, state_rank]`
     /// - `c_bsgr`     (C)          : `[batch, sequence, ngroups, state_rank]`
+    /// - `d_h`        (D)          : `[nheads]`
     /// - `ssm_initial_state_bhpr`  : `[batch, nheads, per_head_dim, state_rank]`
+    /// - `init_states_hpr`         : `[nheads, per_head_dim, state_rank]`
     /// - output.0 `y_bshp`         : `[batch, sequence, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
     pub fn chunked_selective_scan(
-        &self,
         x_bshp: Tensor<B, 4>,
         dt_bsh: Tensor<B, 3>,
         a_head_decay_h: Tensor<B, 1>,
         b_bsgr: Tensor<B, 4>,
         c_bsgr: Tensor<B, 4>,
+        d_h: Tensor<B, 1>,
         ssm_initial_state_bhpr: Tensor<B, 4>,
+        init_states_hpr: Option<Tensor<B, 3>>,
+        ngroups: usize,
+        state_rank: usize,
         chunk_len: usize,
     ) -> (Tensor<B, 4>, Tensor<B, 4>) {
-        let [batch, sequence_unpadded, nheads, per_head_dim] = x_bshp.dims();
-        let ngroups = self.ngroups;
-        let state_rank = self.state_rank;
+        let [batch, sequence, nheads, per_head_dim] = x_bshp.dims();
         let device = &x_bshp.device();
 
         assert_eq!(nheads % ngroups, 0);
-        assert!(sequence_unpadded >= 1, "sequence must be non-empty");
+        assert!(sequence >= 1, "sequence must be non-empty");
         assert!(chunk_len > 0, "chunk_len must be positive");
-
-        // ── Pad sequence to a multiple of chunk_len ───────────────────────────
-        // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
-        // The state is thus carried through unchanged, so the final state of
-        // the padded last chunk equals the state after the last real token.
-        let sequence_mod = sequence_unpadded % chunk_len;
-        let pad = if sequence_mod == 0 {
-            0
-        } else {
-            chunk_len - sequence_mod
-        };
-        let (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence) = if pad == 0 {
-            (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence_unpadded)
-        } else {
-            let x_bshp = Tensor::cat(
-                vec![
-                    x_bshp,
-                    Tensor::zeros(Shape::new([batch, pad, nheads, per_head_dim]), device),
-                ],
-                1,
-            );
-            let dt_bsh = Tensor::cat(
-                vec![
-                    dt_bsh,
-                    Tensor::zeros(Shape::new([batch, pad, nheads]), device),
-                ],
-                1,
-            );
-            let b_bsgr = Tensor::cat(
-                vec![
-                    b_bsgr,
-                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), device),
-                ],
-                1,
-            );
-            let c_bsgr = Tensor::cat(
-                vec![
-                    c_bsgr,
-                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), device),
-                ],
-                1,
-            );
-            (x_bshp, dt_bsh, b_bsgr, c_bsgr, sequence_unpadded + pad)
-        };
 
         assert_eq!(sequence % chunk_len, 0);
         let nchunks = sequence / chunk_len;
@@ -1114,8 +1186,8 @@ impl<B: Backend> Mamba2<B> {
             );
 
             // Optionally add learnable initial states (broadcast over batch).
-            let initial_states_b1hpr = if let Some(init_hpr) = &self.init_states_hpr {
-                let init_b1hpr = init_hpr.val().unsqueeze_dim::<4>(0).expand([
+            let initial_states_b1hpr = if let Some(init_hpr) = init_states_hpr {
+                let init_b1hpr = init_hpr.unsqueeze_dim::<4>(0).expand([
                     batch,
                     1,
                     nheads,
@@ -1279,8 +1351,14 @@ impl<B: Backend> Mamba2<B> {
 
         // Flatten chunks back into the sequence dimension.
         let y_bshp = y_bnlhp.reshape([batch, sequence, nheads, per_head_dim]);
-        // Remove zero-pad columns that were added above.
-        let y_bshp = y_bshp.slice(s![.., 0..sequence_unpadded, .., ..]);
+
+        // ── D skip connection ─────────────────────────────────────────────────
+        // yₜ += D · xₜ
+        // D is a per-head scalar; broadcast over batch, sequence, and per_head_dim.
+        let d_bsh1 = d_h
+            .unsqueeze_dims::<4>(&[0, 1, 3]) // [H] → [1, 1, H, 1]
+            .expand([batch, sequence, nheads, 1]);
+        let y_bshp = y_bshp + d_bsh1 * x_bshp;
 
         (y_bshp, final_state_bnpr)
     }

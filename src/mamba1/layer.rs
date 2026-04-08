@@ -1,4 +1,4 @@
-use crate::mamba1::*;
+use crate::mamba1::prelude::*;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
 

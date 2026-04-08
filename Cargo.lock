@@ -530,7 +530,7 @@ dependencies = [
 [[package]]
 name = "burn-flex"
 version = "0.21.0-pre.2"
-source = "git+https://github.com/antimora/burn-flex.git?rev=7d2d5d117#7d2d5d1175220bfa0e9bf42d643e035e6b8ccbcc"
+source = "git+https://github.com/antimora/burn-flex.git?rev=514e3b3f6abd03d2008e61cdcaeae37d5f0001c2#514e3b3f6abd03d2008e61cdcaeae37d5f0001c2"
 dependencies = [
  "aligned-vec",
  "burn-backend",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "burn",
  "burn-dataset",

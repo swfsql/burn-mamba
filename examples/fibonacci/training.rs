@@ -16,6 +16,7 @@ use burn::{
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
+use burn_mamba::mamba2::prelude::SsdPath;
 
 pub fn train<AutoB: AutodiffBackend>(
     training_config: TrainingConfig,
@@ -270,7 +271,8 @@ impl<B: Backend> Wrap<B> {
         assert_eq!([batch_size, 1], targets.dims());
         assert!(sequence_size >= 1);
 
-        let (output, _caches) = model.forward(input.clone(), None, Some(4));
+        let (output, _caches) = model.forward(input.clone(), None, Some(SsdPath::Core(4)));
+        // let (output, _caches) = model.forward(input.clone(), None, Some(SsdPath::GpuNaive(4)));
         assert_eq!([batch_size, sequence_size, 1], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 1], last_output.dims());

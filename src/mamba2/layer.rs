@@ -29,7 +29,7 @@
 //! hybrid Mamba-2 + attention architecture where neighbouring blocks already
 //! carry residuals).
 
-use crate::mamba2::*;
+use crate::mamba2::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
@@ -127,8 +127,9 @@ impl<B: Backend> Mamba2Layers<B> {
     /// - `x`          — input tensor, shape `[batch, sequence, d_model]`
     /// - `caches`     — optional pre-filled layer caches (useful for prefill
     ///                  followed by decode)
-    /// - `chunk_size` — chunk length Q for the SSD algorithm (default 256).
-    ///                  Optimal value is approximately `√(state_rank · per_head_dim)`.
+    /// - `ssd_path`   — SSD algorithm and chunk length selection.
+    ///                  Defaults to the Core SSD algorithm with the chunk length
+    ///                  value of `√(state_rank · per_head_dim)`.
     ///
     /// # Returns
     /// `(output, updated_caches)` where `output` has shape
@@ -137,10 +138,8 @@ impl<B: Backend> Mamba2Layers<B> {
         &self,
         mut x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        chunk_size: Option<usize>,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
-        let chunk_size = chunk_size.unwrap_or(256);
-
         // The effective number of forward passes equals the number of *virtual*
         // layers.  When no scheduling is configured this equals n_real_layers.
         let n_virtual_layers = self.n_virtual_count();
@@ -170,7 +169,7 @@ impl<B: Backend> Mamba2Layers<B> {
             let residual_scale = self.residual_scale(i, n_virtual_layers);
 
             let cache = caches[i].take().unwrap();
-            let (x_, cache_) = layer.forward(x, Some(cache), chunk_size, residual_scale);
+            let (x_, cache_) = layer.forward(x, Some(cache), ssd_path.clone(), residual_scale);
             x = x_;
             caches[i] = Some(cache_);
         }
@@ -365,7 +364,7 @@ impl<B: Backend> Mamba2Layer<B> {
         &self,
         x: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        chunk_size: usize,
+        ssd_path: Option<SsdPath>,
         residual_scale: f32,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
@@ -377,7 +376,9 @@ impl<B: Backend> Mamba2Layer<B> {
         let normed_bsm = self.norm.forward(x);
         assert_eq!([batch, sequence, d_model], normed_bsm.dims());
 
-        let (mamba_out_bsm, cache) = self.mamba_block.forward(normed_bsm, cache, chunk_size);
+        let (mamba_out_bsm, cache) = self
+            .mamba_block
+            .forward(normed_bsm, cache, ssd_path.clone());
         assert_eq!([batch, sequence, d_model], mamba_out_bsm.dims());
 
         // Residual addition:  y = x · scale + Mamba2(norm(x))

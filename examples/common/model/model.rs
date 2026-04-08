@@ -77,7 +77,7 @@ impl<B: Backend> MyMamba2Network<B> {
         &self,
         x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        chunk_size: Option<usize>,
+        ssd_path: Option<SsdPath>,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch_size, sequence_len, _input_dim] = x.dims();
         let [_input_dim, d_model] = self.in_proj.weight.dims();
@@ -88,7 +88,7 @@ impl<B: Backend> MyMamba2Network<B> {
         assert_eq!([batch_size, sequence_len, d_model], x.dims());
 
         // layers
-        let (x, caches) = self.layers.forward(x, caches, chunk_size);
+        let (x, caches) = self.layers.forward(x, caches, ssd_path);
 
         // output projection
         let x = self.out_proj.forward(x);

@@ -9,10 +9,10 @@ pub mod schedule;
 
 pub mod prelude {
     #[cfg(feature = "mamba1")]
-    pub use crate::mamba1::*;
+    pub use crate::mamba1::{self, prelude::*};
 
     #[cfg(feature = "mamba2")]
-    pub use crate::mamba2::*;
+    pub use crate::mamba2::{self, prelude::*};
 }
 
 pub mod utils;

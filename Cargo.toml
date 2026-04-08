@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 
 [features]
@@ -48,7 +48,7 @@ flate2 = "1.1.4"
 dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
-burn-flex = { git = "https://github.com/antimora/burn-flex.git", rev = "7d2d5d117", default-features = false, features = ["std", "simd"] } # 2026-04-02
+burn-flex = { git = "https://github.com/antimora/burn-flex.git", rev = "514e3b3f6abd03d2008e61cdcaeae37d5f0001c2", default-features = false, features = ["std", "simd"] } # 2026-04-07
 
 ### For the main branch. ###
 # burn = { version = "0.21.0-pre.2", default-features = false, features = ["autodiff", "train", "dataset", "std"] }

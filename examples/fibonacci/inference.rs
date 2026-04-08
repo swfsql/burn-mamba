@@ -10,6 +10,7 @@ use burn::{
     data::{dataloader::batcher::Batcher, dataset::Dataset},
     prelude::*,
 };
+use burn_mamba::mamba2::prelude::SsdPath;
 
 pub fn infer<B: Backend>(
     model_config: MyMamba2NetworkConfig,
@@ -28,7 +29,8 @@ pub fn infer<B: Backend>(
     let batcher = SequenceBatcher::default();
     // Put all items in one batch
     let batch = batcher.batch(items, &infer_device);
-    let (predicted, _caches) = model.forward(batch.sequences, None, Some(4));
+    let (predicted, _caches) = model.forward(batch.sequences, None, Some(SsdPath::Core(4)));
+    // let (predicted, _caches) = model.forward(batch.sequences, None, Some(SsdPath::GpuNaive(4)));
     assert_eq!([batch_size, SEQ_LENGTH + 1, 1], predicted.dims());
     let last_predicted = predicted.narrow(1, SEQ_LENGTH, 1);
     assert_eq!([batch_size, 1, 1], last_predicted.dims());
