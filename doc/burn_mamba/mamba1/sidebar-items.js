@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cache","layer","mamba1","network"]};
+window.SIDEBAR_ITEMS = {"mod":["cache","layer","mamba1","network","prelude"]};

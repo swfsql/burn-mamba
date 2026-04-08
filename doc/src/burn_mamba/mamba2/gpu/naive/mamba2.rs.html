@@ -1,0 +1,1116 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/gpu/naive/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (c75612477 2026-04-07)" data-channel="nightly" data-search-js="search-b5634cc7.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/gpu/naive/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// mamba2-pre-gpu.rs
+<a href=#2 id=2 data-nosnippet>2</a>//
+<a href=#3 id=3 data-nosnippet>3</a>// GPU-naive but Triton-faithful forward implementation of the Mamba-2 SSD module.
+<a href=#4 id=4 data-nosnippet>4</a>//
+<a href=#5 id=5 data-nosnippet>5</a>// This file mirrors `_mamba_chunk_scan_combined_fwd` from `ssd_combined.py`,
+<a href=#6 id=6 data-nosnippet>6</a>// which orchestrates the following five GPU kernels, each described in detail below:
+<a href=#7 id=7 data-nosnippet>7</a>//
+<a href=#8 id=8 data-nosnippet>8</a>//   Kernel 1: _chunk_cumsum_fwd_kernel  (ssd_chunk_state.py)
+<a href=#9 id=9 data-nosnippet>9</a>//   Kernel 2: _bmm_chunk_fwd_kernel     (ssd_bmm.py)
+<a href=#10 id=10 data-nosnippet>10</a>//   Kernel 3: _chunk_state_fwd_kernel   (ssd_chunk_state.py)
+<a href=#11 id=11 data-nosnippet>11</a>//   Kernel 4: _state_passing_fwd_kernel (ssd_state_passing.py)
+<a href=#12 id=12 data-nosnippet>12</a>//   Kernel 5: _chunk_scan_fwd_kernel    (ssd_chunk_scan.py)
+<a href=#13 id=13 data-nosnippet>13</a>//
+<a href=#14 id=14 data-nosnippet>14</a>// Parallelism conventions used in comments:
+<a href=#15 id=15 data-nosnippet>15</a>//   blockIdx.{x,y,z} — the outer for-loops in this file; in a real GPU each iteration
+<a href=#16 id=16 data-nosnippet>16</a>//                       would be a separate thread block running concurrently.
+<a href=#17 id=17 data-nosnippet>17</a>//   threadIdx / SRAM  — the inner slice/matmul operations inside a loop body; in a real GPU
+<a href=#18 id=18 data-nosnippet>18</a>//                       these are the per-warp register operations within a thread block.
+<a href=#19 id=19 data-nosnippet>19</a>//   autotune(N)       — a Triton `@triton.autotune` BLOCK_SIZE_* constant; N is the typical
+<a href=#20 id=20 data-nosnippet>20</a>//                       best value so a GPU translation can use it as a starting point.
+<a href=#21 id=21 data-nosnippet>21</a>//
+<a href=#22 id=22 data-nosnippet>22</a>// Each for-loop carries a `// blockIdx.*` or `// threadIdx` comment to make the
+<a href=#23 id=23 data-nosnippet>23</a>// mapping explicit. Tile-size variables are given full descriptive names instead of
+<a href=#24 id=24 data-nosnippet>24</a>// single letters so a reader can immediately understand what dimension they tile.
+<a href=#25 id=25 data-nosnippet>25</a>
+<a href=#26 id=26 data-nosnippet>26</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba2::prelude::<span class="kw-2">*</span>;
+<a href=#27 id=27 data-nosnippet>27</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
+<a href=#28 id=28 data-nosnippet>28</a>
+<a href=#29 id=29 data-nosnippet>29</a><span class="doccomment">/// Returns the Triton autotune fallback value for a BLOCK_SIZE_* constant.
+<a href=#30 id=30 data-nosnippet>30</a>///
+<a href=#31 id=31 data-nosnippet>31</a>/// In a real GPU kernel, Triton picks the best block size at JIT-compile time
+<a href=#32 id=32 data-nosnippet>32</a>/// by benchmarking configurations listed in `@triton.autotune(configs=[...])`.
+<a href=#33 id=33 data-nosnippet>33</a>/// Here we record the typical winning value so that CUDA/WGSL/Metal translations
+<a href=#34 id=34 data-nosnippet>34</a>/// can use it as a sensible starting tiling without re-running the search.
+<a href=#35 id=35 data-nosnippet>35</a></span><span class="kw">fn </span>autotune(fallback: usize) -&gt; usize {
+<a href=#36 id=36 data-nosnippet>36</a>    fallback
+<a href=#37 id=37 data-nosnippet>37</a>}
+<a href=#38 id=38 data-nosnippet>38</a>
+<a href=#39 id=39 data-nosnippet>39</a><span class="kw">impl</span>&lt;B: Backend&gt; Mamba2&lt;B&gt; {
+<a href=#40 id=40 data-nosnippet>40</a>    <span class="doccomment">/// GPU-naive, Triton-faithful forward pass for the Mamba-2 SSD module.
+<a href=#41 id=41 data-nosnippet>41</a>    ///
+<a href=#42 id=42 data-nosnippet>42</a>    /// Mirrors `_mamba_chunk_scan_combined_fwd` from `ssd_combined.py`,
+<a href=#43 id=43 data-nosnippet>43</a>    /// which is called from `Mamba2.forward()` via `mamba_chunk_scan_combined()`.
+<a href=#44 id=44 data-nosnippet>44</a>    ///
+<a href=#45 id=45 data-nosnippet>45</a>    /// # Tensor shapes flowing through the function
+<a href=#46 id=46 data-nosnippet>46</a>    ///
+<a href=#47 id=47 data-nosnippet>47</a>    /// ```text
+<a href=#48 id=48 data-nosnippet>48</a>    /// x_bshp:                  [batch, sequence, nheads, per_head_dim] OK
+<a href=#49 id=49 data-nosnippet>49</a>    /// dt_bsh:                  [batch, sequence, nheads] OK
+<a href=#50 id=50 data-nosnippet>50</a>    /// a_decay_h:               [nheads] OK
+<a href=#51 id=51 data-nosnippet>51</a>    /// b_bsgr:                  [batch, sequence, ngroups, state_rank]
+<a href=#52 id=52 data-nosnippet>52</a>    /// c_bsgr:                  [batch, sequence, ngroups, state_rank]
+<a href=#53 id=53 data-nosnippet>53</a>    /// d_h:                     [nheads]
+<a href=#54 id=54 data-nosnippet>54</a>    /// ssm_initial_state_bhpr   [batch, nheads, per_head_dim, state_rank]
+<a href=#55 id=55 data-nosnippet>55</a>    /// _init_states_hpr         [nheads, per_head_dim, state_rank]
+<a href=#56 id=56 data-nosnippet>56</a>    ///
+<a href=#57 id=57 data-nosnippet>57</a>    /// K1 outputs:
+<a href=#58 id=58 data-nosnippet>58</a>    ///   dA_cumsum          [batch, nheads, nchunks, chunk_len]  (intra-chunk cumsum)
+<a href=#59 id=59 data-nosnippet>59</a>    ///   dA_chunk_end       [batch, nheads, nchunks]              (last dA_cumsum per chunk)
+<a href=#60 id=60 data-nosnippet>60</a>    ///
+<a href=#61 id=61 data-nosnippet>61</a>    /// K2 output:
+<a href=#62 id=62 data-nosnippet>62</a>    ///   cb_mat             [batch, nchunks, ngroups, chunk_len, chunk_len]
+<a href=#63 id=63 data-nosnippet>63</a>    ///                      cb_mat[b,c,g,l,s] = sum_k C[b,c*cs+l,g,k] * B[b,c*cs+s,g,k]
+<a href=#64 id=64 data-nosnippet>64</a>    ///
+<a href=#65 id=65 data-nosnippet>65</a>    /// K3 output:
+<a href=#66 id=66 data-nosnippet>66</a>    ///   intra_chunk_states [batch, nchunks, nheads, per_head_dim, d_state]
+<a href=#67 id=67 data-nosnippet>67</a>    ///                      state assuming zero initial state at each chunk boundary
+<a href=#68 id=68 data-nosnippet>68</a>    ///
+<a href=#69 id=69 data-nosnippet>69</a>    /// K4 outputs:
+<a href=#70 id=70 data-nosnippet>70</a>    ///   chunk_input_states [batch, nchunks, nheads, per_head_dim, d_state]
+<a href=#71 id=71 data-nosnippet>71</a>    ///                      chunk_input_states[c] = true initial state entering chunk c
+<a href=#72 id=72 data-nosnippet>72</a>    ///   final_ssm_state    [batch, nheads, per_head_dim, d_state]
+<a href=#73 id=73 data-nosnippet>73</a>    ///
+<a href=#74 id=74 data-nosnippet>74</a>    /// K5 output:
+<a href=#75 id=75 data-nosnippet>75</a>    ///   y_chunked          [batch, nchunks, chunk_len, nheads, per_head_dim]
+<a href=#76 id=76 data-nosnippet>76</a>    ///   → reshaped →      [batch, sequence, nheads, per_head_dim]
+<a href=#77 id=77 data-nosnippet>77</a>    /// ```
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="attr">#[allow(non_snake_case)]
+<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub fn </span>chunked_selective_scan_hybrid_naive(
+<a href=#80 id=80 data-nosnippet>80</a>        x_bshp: Tensor&lt;B, <span class="number">4</span>&gt;,
+<a href=#81 id=81 data-nosnippet>81</a>        dt_bsh: Tensor&lt;B, <span class="number">3</span>&gt;,
+<a href=#82 id=82 data-nosnippet>82</a>        a_decay_h: Tensor&lt;B, <span class="number">1</span>&gt;,
+<a href=#83 id=83 data-nosnippet>83</a>        b_bsgr: Tensor&lt;B, <span class="number">4</span>&gt;,
+<a href=#84 id=84 data-nosnippet>84</a>        c_bsgr: Tensor&lt;B, <span class="number">4</span>&gt;,
+<a href=#85 id=85 data-nosnippet>85</a>        d_h: Tensor&lt;B, <span class="number">1</span>&gt;,
+<a href=#86 id=86 data-nosnippet>86</a>        ssm_initial_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt;,
+<a href=#87 id=87 data-nosnippet>87</a>        _init_states_hpr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt;,
+<a href=#88 id=88 data-nosnippet>88</a>        ngroups: usize,
+<a href=#89 id=89 data-nosnippet>89</a>        state_rank: usize,
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="comment">// currently must be set by caller
+<a href=#91 id=91 data-nosnippet>91</a>        </span>chunk_len: usize,
+<a href=#92 id=92 data-nosnippet>92</a>    ) -&gt; (Tensor&lt;B, <span class="number">4</span>&gt;, Tensor&lt;B, <span class="number">4</span>&gt;) {
+<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>[batch, sequence, nheads, per_head_dim] = x_bshp.dims();
+<a href=#94 id=94 data-nosnippet>94</a>        <span class="kw">let </span>device = x_bshp.device();
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="macro">assert_ne!</span>(ngroups, <span class="number">0</span>);
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
+<a href=#97 id=97 data-nosnippet>97</a>        <span class="macro">assert!</span>(sequence &gt; <span class="number">0</span>, <span class="string">"sequence length must be at least 1"</span>);
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="comment">// `heads_per_group` is called `nheads_ngroups_ratio` in every Triton kernel.
+<a href=#99 id=99 data-nosnippet>99</a>        // It is the compile-time constant used by GQA (Grouped Query Attention) to map
+<a href=#100 id=100 data-nosnippet>100</a>        // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
+<a href=#101 id=101 data-nosnippet>101</a>        </span><span class="kw">let </span>heads_per_group = nheads / ngroups;
+<a href=#102 id=102 data-nosnippet>102</a>
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// We require seqlen % chunk_len == 0 for simplicity (the Triton kernel handles a
+<a href=#104 id=104 data-nosnippet>104</a>        // partial last chunk via `chunk_len_limit = min(chunk_len, seqlen - pid_c * chunk_len)`).
+<a href=#105 id=105 data-nosnippet>105</a>        </span><span class="macro">debug_assert_eq!</span>(sequence % chunk_len, <span class="number">0</span>);
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">let </span>nchunks = sequence / chunk_len;
+<a href=#107 id=107 data-nosnippet>107</a>
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="macro">assert!</span>(
+<a href=#109 id=109 data-nosnippet>109</a>            _init_states_hpr.is_none(),
+<a href=#110 id=110 data-nosnippet>110</a>            <span class="string">"init_states_hpr not yet implemented"
+<a href=#111 id=111 data-nosnippet>111</a>        </span>);
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="comment">// ── Reshape into chunks ───────────────────────────────────────────────────────
+<a href=#114 id=114 data-nosnippet>114</a>        </span><span class="kw">let </span>x_bnlhp = x_bshp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>dt_bnlh = dt_bsh.reshape([batch, nchunks, chunk_len, nheads]);
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>b_bnlgr = b_bsgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="kw">let </span>c_bnlgr = c_bsgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
+<a href=#118 id=118 data-nosnippet>118</a>
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="comment">// ================================================================
+<a href=#120 id=120 data-nosnippet>120</a>        // KERNEL 1: _chunk_cumsum_fwd_kernel  (ssd_chunk_state.py)
+<a href=#121 id=121 data-nosnippet>121</a>        //
+<a href=#122 id=122 data-nosnippet>122</a>        // Triton compile-time constants for this call (from ssd_combined.py):
+<a href=#123 id=123 data-nosnippet>123</a>        //   DT_SOFTPLUS = True
+<a href=#124 id=124 data-nosnippet>124</a>        //   HAS_DT_BIAS = True  (dt_bias is provided)
+<a href=#125 id=125 data-nosnippet>125</a>        //
+<a href=#126 id=126 data-nosnippet>126</a>        // Grid: (batch, nchunks, ceil(nheads / BLOCK_SIZE_H))
+<a href=#127 id=127 data-nosnippet>127</a>        //   blockIdx.x = pid_b         — batch index
+<a href=#128 id=128 data-nosnippet>128</a>        //   blockIdx.y = pid_c         — chunk index
+<a href=#129 id=129 data-nosnippet>129</a>        //   blockIdx.z = pid_h_block   — block of BLOCK_SIZE_H heads
+<a href=#130 id=130 data-nosnippet>130</a>        //
+<a href=#131 id=131 data-nosnippet>131</a>        // threadIdx work per block:
+<a href=#132 id=132 data-nosnippet>132</a>        //   - Loads BLOCK_SIZE_H heads × BLOCK_SIZE_CHUNK positions from dt_raw.
+<a href=#133 id=133 data-nosnippet>133</a>        //   - Adds dt_bias, applies softplus, clamps to dt_limit.
+<a href=#134 id=134 data-nosnippet>134</a>        //   - Multiplies by A (scalar per head) to get dA per position.
+<a href=#135 id=135 data-nosnippet>135</a>        //   - Computes cumulative sum of dA along the chunk_len axis (axis=1 in Triton).
+<a href=#136 id=136 data-nosnippet>136</a>        //   - Stores dt_discretized and dA_cumsum back to VRAM.
+<a href=#137 id=137 data-nosnippet>137</a>        //
+<a href=#138 id=138 data-nosnippet>138</a>        // Outputs are stored in Triton's transposed layout [batch, nheads, nchunks, chunk_len],
+<a href=#139 id=139 data-nosnippet>139</a>        // which puts the heads dimension before chunks to allow coalesced per-head access
+<a href=#140 id=140 data-nosnippet>140</a>        // in the downstream kernels.
+<a href=#141 id=141 data-nosnippet>141</a>        // ================================================================
+<a href=#142 id=142 data-nosnippet>142</a>
+<a href=#143 id=143 data-nosnippet>143</a>        // BLOCK_SIZE_H: number of heads processed by one thread block in K1.
+<a href=#144 id=144 data-nosnippet>144</a>        // The autotune key is ['chunk_len', 'nheads'].
+<a href=#145 id=145 data-nosnippet>145</a>        </span><span class="kw">let </span>_heads_per_k1_block = autotune(<span class="number">8</span>);
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="comment">// BLOCK_SIZE_CHUNK: positions within a chunk processed by one thread block.
+<a href=#147 id=147 data-nosnippet>147</a>        // Must be a power-of-two ≥ chunk_len (next_power_of_2 in Triton).
+<a href=#148 id=148 data-nosnippet>148</a>        </span><span class="kw">let </span>_chunk_pos_k1_block = autotune(<span class="number">128</span>);
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="comment">// These tile sizes are used only for GPU layout annotation; the Rust loops below
+<a href=#150 id=150 data-nosnippet>150</a>        // iterate per-head per-chunk for clarity.
+<a href=#151 id=151 data-nosnippet>151</a>        </span><span class="kw">let _ </span>= (_heads_per_k1_block, _chunk_pos_k1_block);
+<a href=#152 id=152 data-nosnippet>152</a>
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="comment">// Outputs in Triton layout [batch, nheads, nchunks, chunk_len].
+<a href=#154 id=154 data-nosnippet>154</a>        // Note: dt_bnlh calculation moved to Step 4 (before padding).
+<a href=#155 id=155 data-nosnippet>155</a>        </span><span class="kw">let </span>dt_discretized_bhnl = dt_bnlh.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="macro">assert_eq!</span>(
+<a href=#157 id=157 data-nosnippet>157</a>            [batch, nheads, nchunks, chunk_len],
+<a href=#158 id=158 data-nosnippet>158</a>            dt_discretized_bhnl.dims()
+<a href=#159 id=159 data-nosnippet>159</a>        );
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="kw">let </span><span class="kw-2">mut </span>da_cumsum_bhnl =
+<a href=#161 id=161 data-nosnippet>161</a>            Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, chunk_len], <span class="kw-2">&amp;</span>device);
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="comment">// blockIdx.x = pid_b
+<a href=#164 id=164 data-nosnippet>164</a>        </span><span class="kw">for </span>i_batch <span class="kw">in </span><span class="number">0</span>..batch {
+<a href=#165 id=165 data-nosnippet>165</a>            <span class="comment">// blockIdx.y = pid_c
+<a href=#166 id=166 data-nosnippet>166</a>            </span><span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
+<a href=#167 id=167 data-nosnippet>167</a>                <span class="comment">// blockIdx.z = pid_h_block (one block per BLOCK_SIZE_H heads).
+<a href=#168 id=168 data-nosnippet>168</a>                // We expand one-per-head here; a GPU translation would use:
+<a href=#169 id=169 data-nosnippet>169</a>                //   offs_h = pid_h_block * BLOCK_SIZE_H + tl.arange(0, BLOCK_SIZE_H)
+<a href=#170 id=170 data-nosnippet>170</a>                </span><span class="kw">for </span>i_head <span class="kw">in </span><span class="number">0</span>..nheads {
+<a href=#171 id=171 data-nosnippet>171</a>                    <span class="comment">// threadIdx: load dt_raw tile for this (batch, chunk, head).
+<a href=#172 id=172 data-nosnippet>172</a>                    // Triton ptr: dt_ptr + pid_b*stride_dt_batch + pid_c*chunk_len*stride_dt_seqlen
+<a href=#173 id=173 data-nosnippet>173</a>                    //             + pid_h_block*BLOCK_H*stride_dt_head
+<a href=#174 id=174 data-nosnippet>174</a>                    //   offs_c spans BLOCK_CHUNK positions (threadIdx.x covers seqlen within block)
+<a href=#175 id=175 data-nosnippet>175</a>                    // Note: dt_l calculation moved to Step 4 (before padding).
+<a href=#176 id=176 data-nosnippet>176</a>                    </span><span class="kw">let </span>dt_l = dt_discretized_bhnl
+<a href=#177 id=177 data-nosnippet>177</a>                        .clone()
+<a href=#178 id=178 data-nosnippet>178</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, ..,])
+<a href=#179 id=179 data-nosnippet>179</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]); <span class="comment">// tile
+<a href=#180 id=180 data-nosnippet>180</a>                    </span><span class="macro">assert_eq!</span>([chunk_len], dt_l.dims());
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a>                    <span class="kw">let </span>da_cumsum_l = {
+<a href=#183 id=183 data-nosnippet>183</a>                        <span class="kw">let </span>a_decay_1 = a_decay_h.clone().slice(<span class="macro">s!</span>[i_head]);
+<a href=#184 id=184 data-nosnippet>184</a>                        <span class="macro">assert_eq!</span>([<span class="number">1</span>], a_decay_1.dims());
+<a href=#185 id=185 data-nosnippet>185</a>                        <span class="comment">// Per-position decay increment: dA[s] = dt_clamped[s] * A[h].
+<a href=#186 id=186 data-nosnippet>186</a>                        // A[h] &lt; 0 so dA[s] &lt; 0; exp(dA[s]) ∈ (0, 1) is a damping factor.
+<a href=#187 id=187 data-nosnippet>187</a>                        </span><span class="kw">let </span>da_decay_increment_l = dt_l.clone() * a_decay_1.expand([chunk_len]);
+<a href=#188 id=188 data-nosnippet>188</a>                        <span class="macro">assert_eq!</span>([chunk_len], da_decay_increment_l.dims());
+<a href=#189 id=189 data-nosnippet>189</a>                        <span class="comment">// Cumulative sum along chunk positions (Triton axis=1).
+<a href=#190 id=190 data-nosnippet>190</a>                        // dA_cumsum[s] = Σ_{t=0}^{s} dA[t] = total log-decay from chunk start to s.
+<a href=#191 id=191 data-nosnippet>191</a>                        // Triton: `dA_cs = tl.cumsum(dA, axis=1)`
+<a href=#192 id=192 data-nosnippet>192</a>                        </span>da_decay_increment_l.cumsum(<span class="number">0</span>) <span class="comment">// tile
+<a href=#193 id=193 data-nosnippet>193</a>                    </span>};
+<a href=#194 id=194 data-nosnippet>194</a>                    <span class="macro">assert_eq!</span>([chunk_len], da_cumsum_l.dims());
+<a href=#195 id=195 data-nosnippet>195</a>
+<a href=#196 id=196 data-nosnippet>196</a>                    <span class="comment">// threadIdx: write dt_discretized and dA_cumsum to VRAM.
+<a href=#197 id=197 data-nosnippet>197</a>                    // Triton: tl.store(dt_out_ptrs, dt, mask=(offs_h &lt; nheads) &amp; (offs_c &lt; chunk_len))
+<a href=#198 id=198 data-nosnippet>198</a>                    //         tl.store(dA_cs_ptrs,  dA_cs, ...)
+<a href=#199 id=199 data-nosnippet>199</a>                    // Note: dt_discretized already calculated at Step 4.
+<a href=#200 id=200 data-nosnippet>200</a>                    </span>da_cumsum_bhnl = da_cumsum_bhnl.slice_assign(
+<a href=#201 id=201 data-nosnippet>201</a>                        <span class="macro">s!</span>[i_batch, i_head, i_chunk, ..],
+<a href=#202 id=202 data-nosnippet>202</a>                        da_cumsum_l.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]),
+<a href=#203 id=203 data-nosnippet>203</a>                    );
+<a href=#204 id=204 data-nosnippet>204</a>                } <span class="comment">// n_heads loop
+<a href=#205 id=205 data-nosnippet>205</a>            </span>} <span class="comment">// nchunks loop
+<a href=#206 id=206 data-nosnippet>206</a>        </span>} <span class="comment">// batch loop
+<a href=#207 id=207 data-nosnippet>207</a>
+<a href=#208 id=208 data-nosnippet>208</a>        // dA_chunk_end[b, h, c] = dA_cumsum[b, h, c, chunk_len-1]
+<a href=#209 id=209 data-nosnippet>209</a>        // = total log-decay accumulated over the entire chunk c for head h.
+<a href=#210 id=210 data-nosnippet>210</a>        // Used in K4 as the inter-chunk decay exponent.
+<a href=#211 id=211 data-nosnippet>211</a>        // Triton in _mamba_chunk_scan_combined_fwd: `dA_cumsum[:, :, :, -1]`
+<a href=#212 id=212 data-nosnippet>212</a>        </span><span class="kw">let </span>da_chunk_end_bhn = da_cumsum_bhnl
+<a href=#213 id=213 data-nosnippet>213</a>            .clone()
+<a href=#214 id=214 data-nosnippet>214</a>            .slice(<span class="macro">s!</span>[.., .., .., -<span class="number">1</span>])
+<a href=#215 id=215 data-nosnippet>215</a>            .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>);
+<a href=#216 id=216 data-nosnippet>216</a>        <span class="macro">assert_eq!</span>([batch, nheads, nchunks], da_chunk_end_bhn.dims());
+<a href=#217 id=217 data-nosnippet>217</a>
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="comment">// ================================================================
+<a href=#219 id=219 data-nosnippet>219</a>        // KERNEL 2: _bmm_chunk_fwd_kernel  (ssd_bmm.py)
+<a href=#220 id=220 data-nosnippet>220</a>        //
+<a href=#221 id=221 data-nosnippet>221</a>        // Triton compile-time constants:
+<a href=#222 id=222 data-nosnippet>222</a>        //   IS_CAUSAL = False  (full chunk_len × chunk_len matrix, causal mask applied in K5)
+<a href=#223 id=223 data-nosnippet>223</a>        //   HAS_SEQ_IDX = False  (single-sequence batch, no packing)
+<a href=#224 id=224 data-nosnippet>224</a>        //
+<a href=#225 id=225 data-nosnippet>225</a>        // Computes: cb_mat[b, c, g, target_pos, source_pos]
+<a href=#226 id=226 data-nosnippet>226</a>        //         = Σ_k  C[b, c·cs + target_pos, g, k] · B[b, c·cs + source_pos, g, k]
+<a href=#227 id=227 data-nosnippet>227</a>        //         = C[target, :] · B[source, :]   (dot product over d_state)
+<a href=#228 id=228 data-nosnippet>228</a>        //
+<a href=#229 id=229 data-nosnippet>229</a>        // This is the "CB" product whose (l, s) entry weights the intra-chunk contribution
+<a href=#230 id=230 data-nosnippet>230</a>        // of source position s to output position l (the off-diagonal orange blocks and the
+<a href=#231 id=231 data-nosnippet>231</a>        // diagonal blocks of the semiseparable matrix M from Part II of the paper).
+<a href=#232 id=232 data-nosnippet>232</a>        //
+<a href=#233 id=233 data-nosnippet>233</a>        // Grid: (ceil(cs/BM) * ceil(cs/BN), batch * nchunks, ngroups)
+<a href=#234 id=234 data-nosnippet>234</a>        //   blockIdx.x = pid_tile = pid_m * n_tiles_N + pid_n
+<a href=#235 id=235 data-nosnippet>235</a>        //   blockIdx.y = pid_b * nchunks + pid_c
+<a href=#236 id=236 data-nosnippet>236</a>        //   blockIdx.z = pid_g   — group index
+<a href=#237 id=237 data-nosnippet>237</a>        //
+<a href=#238 id=238 data-nosnippet>238</a>        // threadIdx: standard Tensor Core GEMM tile:
+<a href=#239 id=239 data-nosnippet>239</a>        //   accumulates a [BLOCK_M, BLOCK_N] output sub-tile over BLOCK_K steps of d_state.
+<a href=#240 id=240 data-nosnippet>240</a>        //
+<a href=#241 id=241 data-nosnippet>241</a>        // Output dtype: float32  (`output_dtype=torch.float32` in the Python call).
+<a href=#242 id=242 data-nosnippet>242</a>        // ================================================================
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a>        // autotune key: ['chunk_len', 'K', 'IS_CAUSAL']
+<a href=#245 id=245 data-nosnippet>245</a>        </span><span class="kw">let </span>cb_target_pos_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_M  (target chunk_pos dimension)
+<a href=#246 id=246 data-nosnippet>246</a>        </span><span class="kw">let </span>cb_source_pos_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_N  (source chunk_pos dimension)
+<a href=#247 id=247 data-nosnippet>247</a>        </span><span class="kw">let </span>cb_state_rank_tile = autotune(<span class="number">32</span>); <span class="comment">// BLOCK_SIZE_K  (inner state_rank dimension)
+<a href=#248 id=248 data-nosnippet>248</a>
+<a href=#249 id=249 data-nosnippet>249</a>        // outputs
+<a href=#250 id=250 data-nosnippet>250</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>cb_bngll =
+<a href=#251 id=251 data-nosnippet>251</a>            Tensor::&lt;B, <span class="number">5</span>&gt;::zeros([batch, nchunks, ngroups, chunk_len, chunk_len], <span class="kw-2">&amp;</span>device);
+<a href=#252 id=252 data-nosnippet>252</a>
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="comment">// blockIdx.y part-1: pid_b
+<a href=#254 id=254 data-nosnippet>254</a>        </span><span class="kw">for </span>i_batch <span class="kw">in </span><span class="number">0</span>..batch {
+<a href=#255 id=255 data-nosnippet>255</a>            <span class="comment">// blockIdx.y part-2: pid_c
+<a href=#256 id=256 data-nosnippet>256</a>            </span><span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
+<a href=#257 id=257 data-nosnippet>257</a>                <span class="comment">// blockIdx.z: pid_g  — one group per block
+<a href=#258 id=258 data-nosnippet>258</a>                </span><span class="kw">for </span>i_group <span class="kw">in </span><span class="number">0</span>..ngroups {
+<a href=#259 id=259 data-nosnippet>259</a>                    <span class="comment">// Full [chunk_len, chunk_len] accumulator for this (batch, chunk, group).
+<a href=#260 id=260 data-nosnippet>260</a>                    // In the GPU, each (pid_m, pid_n) pair is a separate thread block;
+<a href=#261 id=261 data-nosnippet>261</a>                    // here we accumulate into a single tensor for clarity.
+<a href=#262 id=262 data-nosnippet>262</a>                    </span><span class="kw">let </span><span class="kw-2">mut </span>cb_tile_ll = Tensor::&lt;B, <span class="number">2</span>&gt;::zeros([chunk_len, chunk_len], <span class="kw-2">&amp;</span>device);
+<a href=#263 id=263 data-nosnippet>263</a>
+<a href=#264 id=264 data-nosnippet>264</a>                    <span class="comment">// blockIdx.x: pid_m — output target-position tile
+<a href=#265 id=265 data-nosnippet>265</a>                    </span><span class="kw">for </span>target_start <span class="kw">in </span>(<span class="number">0</span>..chunk_len).step_by(cb_target_pos_tile) {
+<a href=#266 id=266 data-nosnippet>266</a>                        <span class="kw">let </span>target_end = (target_start + cb_target_pos_tile).min(chunk_len);
+<a href=#267 id=267 data-nosnippet>267</a>                        <span class="kw">let </span>target_tile_width = target_end - target_start;
+<a href=#268 id=268 data-nosnippet>268</a>                        <span class="kw">let </span>target_range = target_start..target_end;
+<a href=#269 id=269 data-nosnippet>269</a>                        <span class="macro">assert_ne!</span>(target_tile_width, <span class="number">0</span>);
+<a href=#270 id=270 data-nosnippet>270</a>
+<a href=#271 id=271 data-nosnippet>271</a>                        <span class="comment">// blockIdx.x: pid_n — output source-position tile
+<a href=#272 id=272 data-nosnippet>272</a>                        </span><span class="kw">for </span>source_start <span class="kw">in </span>(<span class="number">0</span>..chunk_len).step_by(cb_source_pos_tile) {
+<a href=#273 id=273 data-nosnippet>273</a>                            <span class="kw">let </span>source_end = (source_start + cb_source_pos_tile).min(chunk_len);
+<a href=#274 id=274 data-nosnippet>274</a>                            <span class="kw">let </span>source_tile_width = source_end - source_start;
+<a href=#275 id=275 data-nosnippet>275</a>                            <span class="kw">let </span>source_range = source_start..source_end;
+<a href=#276 id=276 data-nosnippet>276</a>                            <span class="macro">assert_ne!</span>(source_tile_width, <span class="number">0</span>);
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a>                            <span class="comment">// threadIdx: accumulator for this [target_tile × source_tile] output block.
+<a href=#279 id=279 data-nosnippet>279</a>                            // Triton: acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=float32)
+<a href=#280 id=280 data-nosnippet>280</a>                            </span><span class="kw">let </span><span class="kw-2">mut </span>cb_subtile_accum_LL = Tensor::&lt;B, <span class="number">2</span>&gt;::zeros(
+<a href=#281 id=281 data-nosnippet>281</a>                                [target_tile_width, source_tile_width],
+<a href=#282 id=282 data-nosnippet>282</a>                                <span class="kw-2">&amp;</span>device,
+<a href=#283 id=283 data-nosnippet>283</a>                            );
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a>                            <span class="comment">// threadIdx K-loop: stream through d_state in BLOCK_K steps.
+<a href=#286 id=286 data-nosnippet>286</a>                            // Triton: `for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):`
+<a href=#287 id=287 data-nosnippet>287</a>                            //           acc += tl.dot(c_tile, b_tile_transposed)
+<a href=#288 id=288 data-nosnippet>288</a>                            </span><span class="kw">for </span>state_rank_start <span class="kw">in </span>(<span class="number">0</span>..state_rank).step_by(cb_state_rank_tile) {
+<a href=#289 id=289 data-nosnippet>289</a>                                <span class="kw">let </span>state_rank_end =
+<a href=#290 id=290 data-nosnippet>290</a>                                    (state_rank_start + cb_state_rank_tile).min(state_rank);
+<a href=#291 id=291 data-nosnippet>291</a>                                <span class="kw">let </span>state_rank_width = state_rank_end - state_rank_start;
+<a href=#292 id=292 data-nosnippet>292</a>                                <span class="kw">let </span>state_rank_range = state_rank_start..state_rank_end;
+<a href=#293 id=293 data-nosnippet>293</a>                                <span class="macro">assert_ne!</span>(state_rank_width, <span class="number">0</span>);
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>                                <span class="comment">// SRAM load: C tile [target_tile_width, state_rank_block_width]
+<a href=#296 id=296 data-nosnippet>296</a>                                // Triton ptr: a_ptr + offs_m * stride_a_seqlen + offs_k * stride_ak
+<a href=#297 id=297 data-nosnippet>297</a>                                //   offs_m → target chunk positions, offs_k → d_state indices
+<a href=#298 id=298 data-nosnippet>298</a>                                </span><span class="kw">let </span>c_LR = c_bnlgr
+<a href=#299 id=299 data-nosnippet>299</a>                                    .clone()
+<a href=#300 id=300 data-nosnippet>300</a>                                    .slice(<span class="macro">s!</span>[
+<a href=#301 id=301 data-nosnippet>301</a>                                        i_batch,
+<a href=#302 id=302 data-nosnippet>302</a>                                        i_chunk,
+<a href=#303 id=303 data-nosnippet>303</a>                                        target_range.clone(),
+<a href=#304 id=304 data-nosnippet>304</a>                                        i_group,
+<a href=#305 id=305 data-nosnippet>305</a>                                        state_rank_range.clone()
+<a href=#306 id=306 data-nosnippet>306</a>                                    ])
+<a href=#307 id=307 data-nosnippet>307</a>                                    .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// SRAM subtile
+<a href=#308 id=308 data-nosnippet>308</a>                                </span><span class="macro">assert_eq!</span>([target_tile_width, state_rank_width], c_LR.dims());
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a>                                <span class="comment">// SRAM load: B tile, loaded transposed as [state_rank_block_width, source_tile_width]
+<a href=#311 id=311 data-nosnippet>311</a>                                // Triton ptr: b_ptr + offs_k * stride_bk + offs_n * stride_b_seqlen
+<a href=#312 id=312 data-nosnippet>312</a>                                //   offs_k → d_state (fast stride), offs_n → source chunk positions
+<a href=#313 id=313 data-nosnippet>313</a>                                // The Triton layout means b[state_rank, source_pos], i.e. B is stored
+<a href=#314 id=314 data-nosnippet>314</a>                                // with d_state as the fast axis, yielding B^T naturally in the matmul.
+<a href=#315 id=315 data-nosnippet>315</a>                                </span><span class="kw">let </span>b_RL = b_bnlgr
+<a href=#316 id=316 data-nosnippet>316</a>                                    .clone()
+<a href=#317 id=317 data-nosnippet>317</a>                                    .slice(<span class="macro">s!</span>[
+<a href=#318 id=318 data-nosnippet>318</a>                                        i_batch,
+<a href=#319 id=319 data-nosnippet>319</a>                                        i_chunk,
+<a href=#320 id=320 data-nosnippet>320</a>                                        source_range.clone(),
+<a href=#321 id=321 data-nosnippet>321</a>                                        i_group,
+<a href=#322 id=322 data-nosnippet>322</a>                                        state_rank_range.clone()
+<a href=#323 id=323 data-nosnippet>323</a>                                    ])
+<a href=#324 id=324 data-nosnippet>324</a>                                    .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>])
+<a href=#325 id=325 data-nosnippet>325</a>                                    <span class="comment">// transpose
+<a href=#326 id=326 data-nosnippet>326</a>                                    </span>.permute([<span class="number">1</span>, <span class="number">0</span>]);
+<a href=#327 id=327 data-nosnippet>327</a>                                <span class="macro">assert_eq!</span>([state_rank_width, source_tile_width], b_RL.dims());
+<a href=#328 id=328 data-nosnippet>328</a>
+<a href=#329 id=329 data-nosnippet>329</a>                                <span class="comment">// Tensor Core: C[target, state_rank] @ B^T[state_rank, source] = [target, source]
+<a href=#330 id=330 data-nosnippet>330</a>                                // Triton: `acc += tl.dot(a, b)`
+<a href=#331 id=331 data-nosnippet>331</a>                                </span>cb_subtile_accum_LL = cb_subtile_accum_LL + c_LR.matmul(b_RL);
+<a href=#332 id=332 data-nosnippet>332</a>                            } <span class="comment">// state_rank tile loop
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a>                            // threadIdx: store completed subtile back (SRAM → VRAM).
+<a href=#335 id=335 data-nosnippet>335</a>                            // Triton: `tl.store(out_ptrs, out, mask=...)`
+<a href=#336 id=336 data-nosnippet>336</a>                            </span>cb_tile_ll = cb_tile_ll.slice_assign(
+<a href=#337 id=337 data-nosnippet>337</a>                                <span class="macro">s!</span>[target_range.clone(), source_range.clone()],
+<a href=#338 id=338 data-nosnippet>338</a>                                cb_subtile_accum_LL,
+<a href=#339 id=339 data-nosnippet>339</a>                            );
+<a href=#340 id=340 data-nosnippet>340</a>                        } <span class="comment">// source tile loop
+<a href=#341 id=341 data-nosnippet>341</a>                    </span>} <span class="comment">// target tile loop
+<a href=#342 id=342 data-nosnippet>342</a>
+<a href=#343 id=343 data-nosnippet>343</a>                    // Write the full [chunk_len, chunk_len] group-chunk tile to VRAM.
+<a href=#344 id=344 data-nosnippet>344</a>                    </span>cb_bngll = cb_bngll.slice_assign(
+<a href=#345 id=345 data-nosnippet>345</a>                        <span class="macro">s!</span>[i_batch, i_chunk, i_group, .., ..],
+<a href=#346 id=346 data-nosnippet>346</a>                        cb_tile_ll.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]),
+<a href=#347 id=347 data-nosnippet>347</a>                    ); <span class="comment">// tile to VRAM
+<a href=#348 id=348 data-nosnippet>348</a>                </span>} <span class="comment">// ngroups loop
+<a href=#349 id=349 data-nosnippet>349</a>            </span>} <span class="comment">// nchunks loop
+<a href=#350 id=350 data-nosnippet>350</a>        </span>} <span class="comment">// batch loop
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a>        // ================================================================
+<a href=#353 id=353 data-nosnippet>353</a>        // KERNEL 3: _chunk_state_fwd_kernel  (ssd_chunk_state.py)
+<a href=#354 id=354 data-nosnippet>354</a>        //
+<a href=#355 id=355 data-nosnippet>355</a>        // Triton compile-time constants:
+<a href=#356 id=356 data-nosnippet>356</a>        //   HAS_SEQ_IDX = False
+<a href=#357 id=357 data-nosnippet>357</a>        //
+<a href=#358 id=358 data-nosnippet>358</a>        // Computes the SSM state at the END of each chunk, assuming the state
+<a href=#359 id=359 data-nosnippet>359</a>        // was ZERO at the START of that chunk (the zero-initial-state assumption).
+<a href=#360 id=360 data-nosnippet>360</a>        // Kernel 4 will later correct for the actual non-zero initial state.
+<a href=#361 id=361 data-nosnippet>361</a>        //
+<a href=#362 id=362 data-nosnippet>362</a>        //   intra_state[b, c, h, per_head_dim_p, state_rank_n]
+<a href=#363 id=363 data-nosnippet>363</a>        //     = Σ_{s=0}^{chunk_len-1}  X[b, c, s, h, p]
+<a href=#364 id=364 data-nosnippet>364</a>        //                                * exp(dA_cumsum[b,h,c,chunk_len-1] - dA_cumsum[b,h,c,s])
+<a href=#365 id=365 data-nosnippet>365</a>        //                                * dt_discretized[b,h,c,s]
+<a href=#366 id=366 data-nosnippet>366</a>        //                                * B[b, c, s, group(h), n]
+<a href=#367 id=367 data-nosnippet>367</a>        //
+<a href=#368 id=368 data-nosnippet>368</a>        // The factor  exp(dA_last - dA[s]) * dt[s]  is the "scale" per position s:
+<a href=#369 id=369 data-nosnippet>369</a>        //   - exp(dA_last - dA[s]): decay from position s forward to end-of-chunk
+<a href=#370 id=370 data-nosnippet>370</a>        //   - dt[s]: discretization factor converting continuous B into discrete B-bar
+<a href=#371 id=371 data-nosnippet>371</a>        //
+<a href=#372 id=372 data-nosnippet>372</a>        // Grid: (ceil(per_head_dim/BM)*ceil(d_state/BN), batch*nchunks, nheads)
+<a href=#373 id=373 data-nosnippet>373</a>        //   blockIdx.x = pid_m * n_tiles_N + pid_n  — tile over per_head_dim × d_state
+<a href=#374 id=374 data-nosnippet>374</a>        //   blockIdx.y = pid_b * nchunks + pid_c    — batch-chunk pair
+<a href=#375 id=375 data-nosnippet>375</a>        //   blockIdx.z = pid_h                      — head index
+<a href=#376 id=376 data-nosnippet>376</a>        //
+<a href=#377 id=377 data-nosnippet>377</a>        // GQA: B is indexed as B[..., group(h), :] where group(h) = pid_h / heads_per_group.
+<a href=#378 id=378 data-nosnippet>378</a>        //
+<a href=#379 id=379 data-nosnippet>379</a>        // states_in_fp32=True in the Python call → output is float32 accumulation.
+<a href=#380 id=380 data-nosnippet>380</a>        // ================================================================
+<a href=#381 id=381 data-nosnippet>381</a>
+<a href=#382 id=382 data-nosnippet>382</a>        // autotune key: ['hdim', 'state_rank', 'chunk_len']
+<a href=#383 id=383 data-nosnippet>383</a>        </span><span class="kw">let </span>k3_per_head_dim_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_M  (per_head_dim output dimension)
+<a href=#384 id=384 data-nosnippet>384</a>        </span><span class="kw">let </span>k3_state_rank_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_N  (state_rank output dimension)
+<a href=#385 id=385 data-nosnippet>385</a>        </span><span class="kw">let </span>k3_chunk_pos_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_K  (chunk_len inner dimension)
+<a href=#386 id=386 data-nosnippet>386</a>
+<a href=#387 id=387 data-nosnippet>387</a>        // output
+<a href=#388 id=388 data-nosnippet>388</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>intra_chunk_states_bnhpr =
+<a href=#389 id=389 data-nosnippet>389</a>            Tensor::&lt;B, <span class="number">5</span>&gt;::zeros([batch, nchunks, nheads, per_head_dim, state_rank], <span class="kw-2">&amp;</span>device);
+<a href=#390 id=390 data-nosnippet>390</a>
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="comment">// blockIdx.y part-1: pid_b
+<a href=#392 id=392 data-nosnippet>392</a>        </span><span class="kw">for </span>i_batch <span class="kw">in </span><span class="number">0</span>..batch {
+<a href=#393 id=393 data-nosnippet>393</a>            <span class="comment">// blockIdx.y part-2: pid_c
+<a href=#394 id=394 data-nosnippet>394</a>            </span><span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
+<a href=#395 id=395 data-nosnippet>395</a>                <span class="comment">// blockIdx.z: pid_h
+<a href=#396 id=396 data-nosnippet>396</a>                </span><span class="kw">for </span>i_head <span class="kw">in </span><span class="number">0</span>..nheads {
+<a href=#397 id=397 data-nosnippet>397</a>                    <span class="comment">// GQA: map head → group.
+<a href=#398 id=398 data-nosnippet>398</a>                    // Triton: `b_ptr += (pid_h // nheads_ngroups_ratio) * stride_b_head`
+<a href=#399 id=399 data-nosnippet>399</a>                    </span><span class="kw">let </span>i_group = i_head / heads_per_group;
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a>                    <span class="comment">// dA_cumsum at the LAST position within this chunk (scalar).
+<a href=#402 id=402 data-nosnippet>402</a>                    // Triton: `dA_cs_last = tl.load(dA_cumsum_ptr + (chunk_len - 1) * stride)`
+<a href=#403 id=403 data-nosnippet>403</a>                    </span><span class="kw">let </span>da_cumsum_last_in_chunk_1 = da_cumsum_bhnl
+<a href=#404 id=404 data-nosnippet>404</a>                        .clone()
+<a href=#405 id=405 data-nosnippet>405</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, -<span class="number">1</span>])
+<a href=#406 id=406 data-nosnippet>406</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#407 id=407 data-nosnippet>407</a>                    <span class="macro">assert_eq!</span>([<span class="number">1</span>], da_cumsum_last_in_chunk_1.dims());
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a>                    <span class="comment">// dA_cumsum at every position within this chunk.
+<a href=#410 id=410 data-nosnippet>410</a>                    // Triton: `dA_cumsum_ptrs = dA_cumsum_ptr + offs_k * stride_dA_cs_csize`
+<a href=#411 id=411 data-nosnippet>411</a>                    </span><span class="kw">let </span>da_cumsum_within_chunk_l = da_cumsum_bhnl
+<a href=#412 id=412 data-nosnippet>412</a>                        .clone()
+<a href=#413 id=413 data-nosnippet>413</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, ..])
+<a href=#414 id=414 data-nosnippet>414</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#415 id=415 data-nosnippet>415</a>                    <span class="macro">assert_eq!</span>([chunk_len], da_cumsum_within_chunk_l.dims());
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a>                    <span class="comment">// dt_discretized at every position within this chunk.
+<a href=#418 id=418 data-nosnippet>418</a>                    // Triton: `dt_ptrs = dt_ptr + offs_k * stride_dt_csize`
+<a href=#419 id=419 data-nosnippet>419</a>                    </span><span class="kw">let </span>dt_within_chunk_l = dt_discretized_bhnl
+<a href=#420 id=420 data-nosnippet>420</a>                        .clone()
+<a href=#421 id=421 data-nosnippet>421</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, ..])
+<a href=#422 id=422 data-nosnippet>422</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#423 id=423 data-nosnippet>423</a>                    <span class="macro">assert_eq!</span>([chunk_len], dt_within_chunk_l.dims());
+<a href=#424 id=424 data-nosnippet>424</a>
+<a href=#425 id=425 data-nosnippet>425</a>                    <span class="comment">// scale[s] = exp(dA_last - dA[s]) * dt[s]
+<a href=#426 id=426 data-nosnippet>426</a>                    // = "forward decay from position s to end-of-chunk, times B-bar factor"
+<a href=#427 id=427 data-nosnippet>427</a>                    // Triton: `scale = tl.exp((dA_cs_last - dA_cs_k)) * dt_k`
+<a href=#428 id=428 data-nosnippet>428</a>                    </span><span class="kw">let </span>forward_decay_to_chunk_end_l =
+<a href=#429 id=429 data-nosnippet>429</a>                        (da_cumsum_last_in_chunk_1.expand([chunk_len]) - da_cumsum_within_chunk_l)
+<a href=#430 id=430 data-nosnippet>430</a>                            .exp();
+<a href=#431 id=431 data-nosnippet>431</a>                    <span class="macro">assert_eq!</span>([chunk_len], forward_decay_to_chunk_end_l.dims());
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a>                    <span class="kw">let </span>b_bar_scale_l = forward_decay_to_chunk_end_l * dt_within_chunk_l;
+<a href=#434 id=434 data-nosnippet>434</a>                    <span class="macro">assert_eq!</span>([chunk_len], b_bar_scale_l.dims());
+<a href=#435 id=435 data-nosnippet>435</a>
+<a href=#436 id=436 data-nosnippet>436</a>                    <span class="comment">// Tiled matmul: X[per_head_dim, chunk_len] @ (B ⊙ scale)[chunk_len, d_state]
+<a href=#437 id=437 data-nosnippet>437</a>                    // where ⊙ denotes element-wise multiplication over the chunk_len axis.
+<a href=#438 id=438 data-nosnippet>438</a>                    //
+<a href=#439 id=439 data-nosnippet>439</a>                    // blockIdx.x: pid_m — per_head_dim output tile
+<a href=#440 id=440 data-nosnippet>440</a>                    </span><span class="kw">for </span>per_head_dim_start <span class="kw">in </span>(<span class="number">0</span>..per_head_dim).step_by(k3_per_head_dim_tile) {
+<a href=#441 id=441 data-nosnippet>441</a>                        <span class="kw">let </span>per_head_dim_end =
+<a href=#442 id=442 data-nosnippet>442</a>                            (per_head_dim_start + k3_per_head_dim_tile).min(per_head_dim);
+<a href=#443 id=443 data-nosnippet>443</a>                        <span class="kw">let </span>per_head_dim_tile_width = per_head_dim_end - per_head_dim_start;
+<a href=#444 id=444 data-nosnippet>444</a>                        <span class="kw">let </span>per_head_dim_range = per_head_dim_start..per_head_dim_end;
+<a href=#445 id=445 data-nosnippet>445</a>                        <span class="macro">assert_ne!</span>(per_head_dim_tile_width, <span class="number">0</span>);
+<a href=#446 id=446 data-nosnippet>446</a>
+<a href=#447 id=447 data-nosnippet>447</a>                        <span class="comment">// blockIdx.x: pid_n — d_state output tile
+<a href=#448 id=448 data-nosnippet>448</a>                        </span><span class="kw">for </span>state_rank_start <span class="kw">in </span>(<span class="number">0</span>..state_rank).step_by(k3_state_rank_tile) {
+<a href=#449 id=449 data-nosnippet>449</a>                            <span class="kw">let </span>state_rank_end =
+<a href=#450 id=450 data-nosnippet>450</a>                                (state_rank_start + k3_state_rank_tile).min(state_rank);
+<a href=#451 id=451 data-nosnippet>451</a>                            <span class="kw">let </span>state_rank_tile_width = state_rank_end - state_rank_start;
+<a href=#452 id=452 data-nosnippet>452</a>                            <span class="kw">let </span>state_rank_range = state_rank_start..state_rank_end;
+<a href=#453 id=453 data-nosnippet>453</a>                            <span class="macro">assert_ne!</span>(state_rank_tile_width, <span class="number">0</span>);
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a>                            <span class="comment">// threadIdx: accumulator [per_head_dim_tile, state_rank_tile].
+<a href=#456 id=456 data-nosnippet>456</a>                            // Triton: `acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), float32)`
+<a href=#457 id=457 data-nosnippet>457</a>                            </span><span class="kw">let </span><span class="kw-2">mut </span>state_subtile_accum_PR = Tensor::&lt;B, <span class="number">2</span>&gt;::zeros(
+<a href=#458 id=458 data-nosnippet>458</a>                                [per_head_dim_tile_width, state_rank_tile_width],
+<a href=#459 id=459 data-nosnippet>459</a>                                <span class="kw-2">&amp;</span>device,
+<a href=#460 id=460 data-nosnippet>460</a>                            );
+<a href=#461 id=461 data-nosnippet>461</a>
+<a href=#462 id=462 data-nosnippet>462</a>                            <span class="comment">// threadIdx K-loop: tile the chunk_len inner dimension.
+<a href=#463 id=463 data-nosnippet>463</a>                            // Triton: `for k in range(0, chunk_len_limit, BLOCK_SIZE_K):`
+<a href=#464 id=464 data-nosnippet>464</a>                            </span><span class="kw">for </span>chunk_start <span class="kw">in </span>(<span class="number">0</span>..chunk_len).step_by(k3_chunk_pos_tile) {
+<a href=#465 id=465 data-nosnippet>465</a>                                <span class="kw">let </span>chunk_end = (chunk_start + k3_chunk_pos_tile).min(chunk_len);
+<a href=#466 id=466 data-nosnippet>466</a>                                <span class="kw">let </span>chunk_width = chunk_end - chunk_start;
+<a href=#467 id=467 data-nosnippet>467</a>                                <span class="kw">let </span>chunk_range = chunk_start..chunk_end;
+<a href=#468 id=468 data-nosnippet>468</a>                                <span class="macro">assert_ne!</span>(chunk_width, <span class="number">0</span>);
+<a href=#469 id=469 data-nosnippet>469</a>
+<a href=#470 id=470 data-nosnippet>470</a>                                <span class="comment">// SRAM load: X tile [per_head_dim_tile, chunk_block]
+<a href=#471 id=471 data-nosnippet>471</a>                                // Triton ptr: x_ptrs = offs_m * stride_x_hdim + offs_k * stride_x_seqlen
+<a href=#472 id=472 data-nosnippet>472</a>                                //   (offs_m → per_head_dim, offs_k → seqlen within chunk)
+<a href=#473 id=473 data-nosnippet>473</a>                                </span><span class="kw">let </span>x_PL = x_bnlhp
+<a href=#474 id=474 data-nosnippet>474</a>                                    .clone()
+<a href=#475 id=475 data-nosnippet>475</a>                                    .slice(<span class="macro">s!</span>[
+<a href=#476 id=476 data-nosnippet>476</a>                                        i_batch,
+<a href=#477 id=477 data-nosnippet>477</a>                                        i_chunk,
+<a href=#478 id=478 data-nosnippet>478</a>                                        chunk_range.clone(),
+<a href=#479 id=479 data-nosnippet>479</a>                                        i_head,
+<a href=#480 id=480 data-nosnippet>480</a>                                        per_head_dim_range.clone()
+<a href=#481 id=481 data-nosnippet>481</a>                                    ]) <span class="comment">// SRAM load
+<a href=#482 id=482 data-nosnippet>482</a>                                    </span>.squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>])
+<a href=#483 id=483 data-nosnippet>483</a>                                    .permute([<span class="number">1</span>, <span class="number">0</span>]);
+<a href=#484 id=484 data-nosnippet>484</a>                                <span class="macro">assert_eq!</span>([per_head_dim_tile_width, chunk_width], x_PL.dims());
+<a href=#485 id=485 data-nosnippet>485</a>
+<a href=#486 id=486 data-nosnippet>486</a>                                <span class="comment">// SRAM load: B tile [chunk_block, state_rank_tile]
+<a href=#487 id=487 data-nosnippet>487</a>                                // Triton ptr: b_ptrs = offs_n * stride_b_state_rank + offs_k * stride_b_seqlen
+<a href=#488 id=488 data-nosnippet>488</a>                                //   GQA: group_idx = pid_h / nheads_ngroups_ratio
+<a href=#489 id=489 data-nosnippet>489</a>                                </span><span class="kw">let </span>b_LR = b_bnlgr
+<a href=#490 id=490 data-nosnippet>490</a>                                    .clone()
+<a href=#491 id=491 data-nosnippet>491</a>                                    .slice(<span class="macro">s!</span>[
+<a href=#492 id=492 data-nosnippet>492</a>                                        i_batch,
+<a href=#493 id=493 data-nosnippet>493</a>                                        i_chunk,
+<a href=#494 id=494 data-nosnippet>494</a>                                        chunk_range.clone(),
+<a href=#495 id=495 data-nosnippet>495</a>                                        i_group,
+<a href=#496 id=496 data-nosnippet>496</a>                                        state_rank_range.clone()
+<a href=#497 id=497 data-nosnippet>497</a>                                    ])
+<a href=#498 id=498 data-nosnippet>498</a>                                    .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// SRAM load
+<a href=#499 id=499 data-nosnippet>499</a>                                </span><span class="macro">assert_eq!</span>([chunk_width, state_rank_tile_width], b_LR.dims());
+<a href=#500 id=500 data-nosnippet>500</a>
+<a href=#501 id=501 data-nosnippet>501</a>                                <span class="comment">// Scale B by b_bar_scale[s] (broadcast over d_state columns).
+<a href=#502 id=502 data-nosnippet>502</a>                                // Triton: `b *= scale[:, None]`
+<a href=#503 id=503 data-nosnippet>503</a>                                </span><span class="kw">let </span>scale_for_block_LR = b_bar_scale_l
+<a href=#504 id=504 data-nosnippet>504</a>                                    .clone()
+<a href=#505 id=505 data-nosnippet>505</a>                                    .slice(<span class="macro">s!</span>[chunk_range.clone()])
+<a href=#506 id=506 data-nosnippet>506</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">1</span>)
+<a href=#507 id=507 data-nosnippet>507</a>                                    .expand([chunk_width, state_rank_tile_width]);
+<a href=#508 id=508 data-nosnippet>508</a>
+<a href=#509 id=509 data-nosnippet>509</a>                                <span class="kw">let </span>b_scaled_LR = b_LR * scale_for_block_LR;
+<a href=#510 id=510 data-nosnippet>510</a>                                <span class="macro">assert_eq!</span>(
+<a href=#511 id=511 data-nosnippet>511</a>                                    [chunk_width, state_rank_tile_width],
+<a href=#512 id=512 data-nosnippet>512</a>                                    b_scaled_LR.dims()
+<a href=#513 id=513 data-nosnippet>513</a>                                );
+<a href=#514 id=514 data-nosnippet>514</a>
+<a href=#515 id=515 data-nosnippet>515</a>                                <span class="comment">// Tensor Core: X^T[per_head_dim, chunk] @ B_scaled[chunk, state_rank]
+<a href=#516 id=516 data-nosnippet>516</a>                                // Triton: `acc += tl.dot(x, b_scaled)`
+<a href=#517 id=517 data-nosnippet>517</a>                                </span>state_subtile_accum_PR =
+<a href=#518 id=518 data-nosnippet>518</a>                                    state_subtile_accum_PR + x_PL.matmul(b_scaled_LR);
+<a href=#519 id=519 data-nosnippet>519</a>                            } <span class="comment">// chunk tile loop
+<a href=#520 id=520 data-nosnippet>520</a>
+<a href=#521 id=521 data-nosnippet>521</a>                            // threadIdx: store completed subtile to VRAM.
+<a href=#522 id=522 data-nosnippet>522</a>                            // Triton: `tl.store(states_ptrs, states, mask=...)`
+<a href=#523 id=523 data-nosnippet>523</a>                            </span>intra_chunk_states_bnhpr = intra_chunk_states_bnhpr.slice_assign(
+<a href=#524 id=524 data-nosnippet>524</a>                                <span class="macro">s!</span>[
+<a href=#525 id=525 data-nosnippet>525</a>                                    i_batch,
+<a href=#526 id=526 data-nosnippet>526</a>                                    i_chunk,
+<a href=#527 id=527 data-nosnippet>527</a>                                    i_head,
+<a href=#528 id=528 data-nosnippet>528</a>                                    per_head_dim_range.clone(),
+<a href=#529 id=529 data-nosnippet>529</a>                                    state_rank_range.clone()
+<a href=#530 id=530 data-nosnippet>530</a>                                ],
+<a href=#531 id=531 data-nosnippet>531</a>                                state_subtile_accum_PR.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>]),
+<a href=#532 id=532 data-nosnippet>532</a>                            );
+<a href=#533 id=533 data-nosnippet>533</a>                        } <span class="comment">// state_rank tile loop
+<a href=#534 id=534 data-nosnippet>534</a>                    </span>} <span class="comment">// per_head_dim tile loop
+<a href=#535 id=535 data-nosnippet>535</a>                </span>} <span class="comment">// nheads loop
+<a href=#536 id=536 data-nosnippet>536</a>            </span>} <span class="comment">// chunk loop
+<a href=#537 id=537 data-nosnippet>537</a>        </span>} <span class="comment">// batch loop
+<a href=#538 id=538 data-nosnippet>538</a>
+<a href=#539 id=539 data-nosnippet>539</a>        // ================================================================
+<a href=#540 id=540 data-nosnippet>540</a>        // KERNEL 4: _state_passing_fwd_kernel  (ssd_state_passing.py)
+<a href=#541 id=541 data-nosnippet>541</a>        //
+<a href=#542 id=542 data-nosnippet>542</a>        // This is the ONLY inherently serial kernel in the SSD pipeline.
+<a href=#543 id=543 data-nosnippet>543</a>        // It performs the SSM recurrence BETWEEN chunks, accumulating history.
+<a href=#544 id=544 data-nosnippet>544</a>        //
+<a href=#545 id=545 data-nosnippet>545</a>        // Triton compile-time constants:
+<a href=#546 id=546 data-nosnippet>546</a>        //   HAS_INITSTATES = True   (initial states from cache.ssm)
+<a href=#547 id=547 data-nosnippet>547</a>        //   HAS_SEQ_IDX    = False
+<a href=#548 id=548 data-nosnippet>548</a>        //
+<a href=#549 id=549 data-nosnippet>549</a>        // The kernel works on the state flattened to a 1D vector per (batch, head):
+<a href=#550 id=550 data-nosnippet>550</a>        //   flat_state_dim = per_head_dim * d_state
+<a href=#551 id=551 data-nosnippet>551</a>        //
+<a href=#552 id=552 data-nosnippet>552</a>        // In the Python call:
+<a href=#553 id=553 data-nosnippet>553</a>        //   states_flat, _ = _state_passing_fwd(
+<a href=#554 id=554 data-nosnippet>554</a>        //       rearrange(intra_chunk_states, "... p n -&gt; ... (p n)"),
+<a href=#555 id=555 data-nosnippet>555</a>        //       dA_chunk_end,
+<a href=#556 id=556 data-nosnippet>556</a>        //       initial_states=rearrange(cache.ssm, "... p n -&gt; ... (p n)"),
+<a href=#557 id=557 data-nosnippet>557</a>        //       out_dtype=C.dtype)    ← output cast to C.dtype (typically fp16/bf16)
+<a href=#558 id=558 data-nosnippet>558</a>        //   chunk_input_states = rearrange(states_flat, "... (p n) -&gt; ... p n", n=d_state)
+<a href=#559 id=559 data-nosnippet>559</a>        //
+<a href=#560 id=560 data-nosnippet>560</a>        // Algorithm (per batch-head pair, serial over chunks):
+<a href=#561 id=561 data-nosnippet>561</a>        //   prev_state = initial_state
+<a href=#562 id=562 data-nosnippet>562</a>        //   out[0] = prev_state                    ← state entering chunk 0
+<a href=#563 id=563 data-nosnippet>563</a>        //   for c in 0..nchunks:
+<a href=#564 id=564 data-nosnippet>564</a>        //     decay = exp(dA_chunk_end[c])
+<a href=#565 id=565 data-nosnippet>565</a>        //     prev_state = decay * prev_state + intra_chunk_states[c]
+<a href=#566 id=566 data-nosnippet>566</a>        //     if c &lt; nchunks - 1:
+<a href=#567 id=567 data-nosnippet>567</a>        //         out[c+1] = prev_state            ← state entering chunk c+1
+<a href=#568 id=568 data-nosnippet>568</a>        //     else:
+<a href=#569 id=569 data-nosnippet>569</a>        //         final_ssm_state = prev_state     ← state after all chunks
+<a href=#570 id=570 data-nosnippet>570</a>        //
+<a href=#571 id=571 data-nosnippet>571</a>        // Grid: (ceil(flat_state_dim / BLOCK_SIZE), batch, nheads)
+<a href=#572 id=572 data-nosnippet>572</a>        //   blockIdx.x = pid_dim_block — tile over the flat state dimension
+<a href=#573 id=573 data-nosnippet>573</a>        //   blockIdx.y = pid_b
+<a href=#574 id=574 data-nosnippet>574</a>        //   blockIdx.z = pid_h
+<a href=#575 id=575 data-nosnippet>575</a>        //
+<a href=#576 id=576 data-nosnippet>576</a>        // threadIdx: each block owns BLOCK_SIZE contiguous elements of the flat state.
+<a href=#577 id=577 data-nosnippet>577</a>        // The serial loop over chunks is INSIDE the thread block (not a new grid dispatch),
+<a href=#578 id=578 data-nosnippet>578</a>        // which is what makes this kernel inherently serial.
+<a href=#579 id=579 data-nosnippet>579</a>        // ================================================================
+<a href=#580 id=580 data-nosnippet>580</a>
+<a href=#581 id=581 data-nosnippet>581</a>        // autotune key: ['dim']  where dim = per_head_dim * d_state
+<a href=#582 id=582 data-nosnippet>582</a>        </span><span class="kw">let </span>flat_state_dim = per_head_dim * state_rank;
+<a href=#583 id=583 data-nosnippet>583</a>        <span class="comment">// BLOCK_SIZE tiles the flat_state_dim dimension across thread blocks.
+<a href=#584 id=584 data-nosnippet>584</a>        </span><span class="kw">let </span>_state_flat_block_size = autotune(<span class="number">256</span>); <span class="comment">// BLOCK_SIZE
+<a href=#585 id=585 data-nosnippet>585</a>        // The Rust loop below processes the entire flat state at once, corresponding to
+<a href=#586 id=586 data-nosnippet>586</a>        // all pid_dim_block blocks combined.
+<a href=#587 id=587 data-nosnippet>587</a>        </span><span class="kw">let _ </span>= _state_flat_block_size;
+<a href=#588 id=588 data-nosnippet>588</a>
+<a href=#589 id=589 data-nosnippet>589</a>        <span class="comment">// Flatten intra_chunk_states for state-passing arithmetic.
+<a href=#590 id=590 data-nosnippet>590</a>        // Python: `rearrange(states, "... p n -&gt; ... (p n)")`
+<a href=#591 id=591 data-nosnippet>591</a>        </span><span class="kw">let </span>intra_states_bnhf =
+<a href=#592 id=592 data-nosnippet>592</a>            intra_chunk_states_bnhpr.reshape([batch, nchunks, nheads, flat_state_dim]);
+<a href=#593 id=593 data-nosnippet>593</a>
+<a href=#594 id=594 data-nosnippet>594</a>        <span class="comment">// Initial state from cache, also flattened.
+<a href=#595 id=595 data-nosnippet>595</a>        // Python: `rearrange(initial_states, "... p n -&gt; ... (p n)")`
+<a href=#596 id=596 data-nosnippet>596</a>        </span><span class="kw">let </span>initial_ssm_state_bhf =
+<a href=#597 id=597 data-nosnippet>597</a>            ssm_initial_state_bhpr
+<a href=#598 id=598 data-nosnippet>598</a>                .clone()
+<a href=#599 id=599 data-nosnippet>599</a>                .reshape([batch, nheads, flat_state_dim]);
+<a href=#600 id=600 data-nosnippet>600</a>
+<a href=#601 id=601 data-nosnippet>601</a>        <span class="comment">// outputs
+<a href=#602 id=602 data-nosnippet>602</a>        // chunk_input_states_flat[b, c, h, :] = state entering chunk c for (batch b, head h).
+<a href=#603 id=603 data-nosnippet>603</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>chunk_input_states_bnhf =
+<a href=#604 id=604 data-nosnippet>604</a>            Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nchunks, nheads, flat_state_dim], <span class="kw-2">&amp;</span>device);
+<a href=#605 id=605 data-nosnippet>605</a>        <span class="kw">let </span><span class="kw-2">mut </span>final_ssm_state_bnf =
+<a href=#606 id=606 data-nosnippet>606</a>            Tensor::&lt;B, <span class="number">3</span>&gt;::zeros([batch, nheads, flat_state_dim], <span class="kw-2">&amp;</span>device);
+<a href=#607 id=607 data-nosnippet>607</a>
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="comment">// blockIdx.y = pid_b
+<a href=#609 id=609 data-nosnippet>609</a>        </span><span class="kw">for </span>i_batch <span class="kw">in </span><span class="number">0</span>..batch {
+<a href=#610 id=610 data-nosnippet>610</a>            <span class="comment">// blockIdx.z = pid_h
+<a href=#611 id=611 data-nosnippet>611</a>            </span><span class="kw">for </span>i_head <span class="kw">in </span><span class="number">0</span>..nheads {
+<a href=#612 id=612 data-nosnippet>612</a>                <span class="comment">// blockIdx.x = pid_dim_block tiles the flat state dimension.
+<a href=#613 id=613 data-nosnippet>613</a>                // In a GPU translation, each thread block processes
+<a href=#614 id=614 data-nosnippet>614</a>                //   offs_m = pid_dim_block * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+<a href=#615 id=615 data-nosnippet>615</a>                // Here we process the full flat state to preserve algorithmic clarity.
+<a href=#616 id=616 data-nosnippet>616</a>
+<a href=#617 id=617 data-nosnippet>617</a>                // threadIdx: load initial state for this (batch, head) pair.
+<a href=#618 id=618 data-nosnippet>618</a>                // Triton: `if HAS_INITSTATES: states = tl.load(initstates_ptrs, ...)`
+<a href=#619 id=619 data-nosnippet>619</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>running_state_f = initial_ssm_state_bhf
+<a href=#620 id=620 data-nosnippet>620</a>                    .clone()
+<a href=#621 id=621 data-nosnippet>621</a>                    .slice(<span class="macro">s!</span>[i_batch, i_head, ..])
+<a href=#622 id=622 data-nosnippet>622</a>                    .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]);
+<a href=#623 id=623 data-nosnippet>623</a>                <span class="macro">assert_eq!</span>([flat_state_dim], running_state_f.dims());
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a>                <span class="comment">// Store the initial state as the state entering chunk 0.
+<a href=#626 id=626 data-nosnippet>626</a>                // Triton: `tl.store(out_ptrs, states, ...)` BEFORE the loop,
+<a href=#627 id=627 data-nosnippet>627</a>                //         then `out_ptrs += stride_out_chunk`.
+<a href=#628 id=628 data-nosnippet>628</a>                </span>chunk_input_states_bnhf = chunk_input_states_bnhf.slice_assign(
+<a href=#629 id=629 data-nosnippet>629</a>                    <span class="macro">s!</span>[i_batch, <span class="number">0</span>, i_head, ..],
+<a href=#630 id=630 data-nosnippet>630</a>                    running_state_f.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]),
+<a href=#631 id=631 data-nosnippet>631</a>                );
+<a href=#632 id=632 data-nosnippet>632</a>
+<a href=#633 id=633 data-nosnippet>633</a>                <span class="comment">// Serial loop over chunks — this loop CANNOT be parallelised.
+<a href=#634 id=634 data-nosnippet>634</a>                // Triton: `for c in range(nchunks):`
+<a href=#635 id=635 data-nosnippet>635</a>                </span><span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
+<a href=#636 id=636 data-nosnippet>636</a>                    <span class="comment">// threadIdx: load intra-chunk state for this chunk.
+<a href=#637 id=637 data-nosnippet>637</a>                    // Triton: `new_states = tl.load(states_ptrs, ...)`
+<a href=#638 id=638 data-nosnippet>638</a>                    </span><span class="kw">let </span>intra_state_for_chunk_f = intra_states_bnhf
+<a href=#639 id=639 data-nosnippet>639</a>                        .clone()
+<a href=#640 id=640 data-nosnippet>640</a>                        .slice(<span class="macro">s!</span>[i_batch, i_chunk, i_head, ..])
+<a href=#641 id=641 data-nosnippet>641</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#642 id=642 data-nosnippet>642</a>                    <span class="macro">assert_eq!</span>([flat_state_dim], intra_state_for_chunk_f.dims());
+<a href=#643 id=643 data-nosnippet>643</a>
+<a href=#644 id=644 data-nosnippet>644</a>                    <span class="comment">// Inter-chunk decay factor: exp(dA_chunk_end[b, h, c]).
+<a href=#645 id=645 data-nosnippet>645</a>                    // Triton: `dA_cs = tl.load(dA_cs_ptr); scale = tl.exp(dA_cs)`
+<a href=#646 id=646 data-nosnippet>646</a>                    // dA_chunk_end is a scalar per (batch, head, chunk).
+<a href=#647 id=647 data-nosnippet>647</a>                    </span><span class="kw">let </span>chunk_decay_f = da_chunk_end_bhn
+<a href=#648 id=648 data-nosnippet>648</a>                        .clone()
+<a href=#649 id=649 data-nosnippet>649</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk])
+<a href=#650 id=650 data-nosnippet>650</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]) <span class="comment">// [1]
+<a href=#651 id=651 data-nosnippet>651</a>                        </span>.exp()
+<a href=#652 id=652 data-nosnippet>652</a>                        .expand([flat_state_dim]);
+<a href=#653 id=653 data-nosnippet>653</a>
+<a href=#654 id=654 data-nosnippet>654</a>                    <span class="comment">// SSM recurrence: running_state = decay * running_state + intra_state
+<a href=#655 id=655 data-nosnippet>655</a>                    // Triton: `states = scale * states + new_states`
+<a href=#656 id=656 data-nosnippet>656</a>                    </span>running_state_f = chunk_decay_f * running_state_f + intra_state_for_chunk_f;
+<a href=#657 id=657 data-nosnippet>657</a>
+<a href=#658 id=658 data-nosnippet>658</a>                    <span class="kw">if </span>i_chunk &lt; nchunks - <span class="number">1 </span>{
+<a href=#659 id=659 data-nosnippet>659</a>                        <span class="comment">// Store the state entering chunk pid_c + 1.
+<a href=#660 id=660 data-nosnippet>660</a>                        // Triton: `if c &lt; nchunks - 1: tl.store(out_ptrs, states, ...)`
+<a href=#661 id=661 data-nosnippet>661</a>                        </span>chunk_input_states_bnhf = chunk_input_states_bnhf.slice_assign(
+<a href=#662 id=662 data-nosnippet>662</a>                            <span class="macro">s!</span>[i_batch, i_chunk + <span class="number">1</span>, i_head, ..],
+<a href=#663 id=663 data-nosnippet>663</a>                            running_state_f.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]),
+<a href=#664 id=664 data-nosnippet>664</a>                        );
+<a href=#665 id=665 data-nosnippet>665</a>                    } <span class="kw">else </span>{
+<a href=#666 id=666 data-nosnippet>666</a>                        <span class="comment">// Last chunk: store as the final SSM state.
+<a href=#667 id=667 data-nosnippet>667</a>                        // Triton: `else: tl.store(final_states_ptrs, states, ...)`
+<a href=#668 id=668 data-nosnippet>668</a>                        </span>final_ssm_state_bnf = final_ssm_state_bnf.slice_assign(
+<a href=#669 id=669 data-nosnippet>669</a>                            <span class="macro">s!</span>[i_batch, i_head, ..],
+<a href=#670 id=670 data-nosnippet>670</a>                            running_state_f.clone().unsqueeze_dims::&lt;<span class="number">3</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]),
+<a href=#671 id=671 data-nosnippet>671</a>                        );
+<a href=#672 id=672 data-nosnippet>672</a>                    }
+<a href=#673 id=673 data-nosnippet>673</a>                } <span class="comment">// nchunks serial loop
+<a href=#674 id=674 data-nosnippet>674</a>            </span>} <span class="comment">// nheads loop
+<a href=#675 id=675 data-nosnippet>675</a>        </span>} <span class="comment">// batch loop
+<a href=#676 id=676 data-nosnippet>676</a>
+<a href=#677 id=677 data-nosnippet>677</a>        // Restore the 5D shape after state-passing.
+<a href=#678 id=678 data-nosnippet>678</a>        // Python: `rearrange(states_flat, "... (p n) -&gt; ... p n", n=state_rank)`
+<a href=#679 id=679 data-nosnippet>679</a>        </span><span class="kw">let </span>chunk_input_states_bnhpr =
+<a href=#680 id=680 data-nosnippet>680</a>            chunk_input_states_bnhf.reshape([batch, nchunks, nheads, per_head_dim, state_rank]);
+<a href=#681 id=681 data-nosnippet>681</a>        <span class="kw">let </span>final_ssm_state_bnpr =
+<a href=#682 id=682 data-nosnippet>682</a>            final_ssm_state_bnf.reshape([batch, nheads, per_head_dim, state_rank]);
+<a href=#683 id=683 data-nosnippet>683</a>
+<a href=#684 id=684 data-nosnippet>684</a>        <span class="comment">// ================================================================
+<a href=#685 id=685 data-nosnippet>685</a>        // KERNEL 5: _chunk_scan_fwd_kernel  (ssd_chunk_scan.py)
+<a href=#686 id=686 data-nosnippet>686</a>        //
+<a href=#687 id=687 data-nosnippet>687</a>        // Triton compile-time constants for this call (from ssd_combined.py):
+<a href=#688 id=688 data-nosnippet>688</a>        //   IS_CAUSAL     = True   — output pos l only sees source pos s ≤ l
+<a href=#689 id=689 data-nosnippet>689</a>        //   HAS_D         = True   — the skip connection D·x is included
+<a href=#690 id=690 data-nosnippet>690</a>        //   D_HAS_HDIM    = False  — D is [nheads] (scalar per head, not per channel)
+<a href=#691 id=691 data-nosnippet>691</a>        //   HAS_Z         = False  — z gating is NOT done here; it is applied separately
+<a href=#692 id=692 data-nosnippet>692</a>        //                            via self.norm.forward(y, z) after this kernel
+<a href=#693 id=693 data-nosnippet>693</a>        //   HAS_SEQ_IDX   = False  — single-sequence batches
+<a href=#694 id=694 data-nosnippet>694</a>        //
+<a href=#695 id=695 data-nosnippet>695</a>        // For each output position l in chunk c, this kernel accumulates THREE contributions
+<a href=#696 id=696 data-nosnippet>696</a>        // corresponding to the three colour regions of the semiseparable matrix M
+<a href=#697 id=697 data-nosnippet>697</a>        // (see Part III of the paper, "Semiseparable Matrix M Block Decomposition"):
+<a href=#698 id=698 data-nosnippet>698</a>        //
+<a href=#699 id=699 data-nosnippet>699</a>        //   BLUE  — history contribution (off-diagonal, state entering from previous chunks):
+<a href=#700 id=700 data-nosnippet>700</a>        //     y_blue[l, p] = exp(dA_cumsum[l]) * Σ_n  C[l, n] * chunk_input_states[c, p, n]
+<a href=#701 id=701 data-nosnippet>701</a>        //     Triton code:
+<a href=#702 id=702 data-nosnippet>702</a>        //       scale_m = tl.exp(dA_cs_m)
+<a href=#703 id=703 data-nosnippet>703</a>        //       acc = tl.dot(C, prev_states) * scale_m[:, None]
+<a href=#704 id=704 data-nosnippet>704</a>        //
+<a href=#705 id=705 data-nosnippet>705</a>        //   ORANGE — intra-chunk causal contribution (diagonal blocks of M):
+<a href=#706 id=706 data-nosnippet>706</a>        //     y_orange[l, p] = Σ_{s ≤ l}  CB[l,s] · exp(dA[l] - dA[s]) · dt[s] · x[s, p]
+<a href=#707 id=707 data-nosnippet>707</a>        //     Triton code (IS_CAUSAL=True):
+<a href=#708 id=708 data-nosnippet>708</a>        //       K_MAX = min((pid_m + 1) * BLOCK_SIZE_M, chunk_len_limit)
+<a href=#709 id=709 data-nosnippet>709</a>        //       for k in range(0, K_MAX, BLOCK_SIZE_K):
+<a href=#710 id=710 data-nosnippet>710</a>        //           cb *= tl.exp(dA_cs_k - dA_cs_m)  ← note sign: source minus target
+<a href=#711 id=711 data-nosnippet>711</a>        //           cb *= dt_k
+<a href=#712 id=712 data-nosnippet>712</a>        //           mask = offs_m[:, None] &gt;= k + offs_k[None, :]
+<a href=#713 id=713 data-nosnippet>713</a>        //           cb = tl.where(mask, cb, 0.0)
+<a href=#714 id=714 data-nosnippet>714</a>        //           acc += tl.dot(cb, x)
+<a href=#715 id=715 data-nosnippet>715</a>        //     Note: the Triton sign convention for the decay in the orange part is
+<a href=#716 id=716 data-nosnippet>716</a>        //     exp(dA_cs_k - dA_cs_m) which equals exp(dA[source] - dA[target]).
+<a href=#717 id=717 data-nosnippet>717</a>        //     This is the INVERSE of the blue convention and encodes "decay from target
+<a href=#718 id=718 data-nosnippet>718</a>        //     back to source" — equivalent to exp(-(dA[target] - dA[source])).
+<a href=#719 id=719 data-nosnippet>719</a>        //
+<a href=#720 id=720 data-nosnippet>720</a>        //   SKIP  — D residual (outside the state-space recurrence):
+<a href=#721 id=721 data-nosnippet>721</a>        //     y_skip[l, p] = D[h] · x[l, p]
+<a href=#722 id=722 data-nosnippet>722</a>        //     D_HAS_HDIM=False means D is a scalar per head (shape [nheads]).
+<a href=#723 id=723 data-nosnippet>723</a>        //
+<a href=#724 id=724 data-nosnippet>724</a>        // Grid: (ceil(chunk_len/BM) * ceil(per_head_dim/BN), batch * nchunks, nheads)
+<a href=#725 id=725 data-nosnippet>725</a>        //   blockIdx.x = pid_m * n_tiles_N + pid_n  — tile over (chunk_len × per_head_dim)
+<a href=#726 id=726 data-nosnippet>726</a>        //   blockIdx.y = pid_b * nchunks + pid_c    — batch-chunk pair
+<a href=#727 id=727 data-nosnippet>727</a>        //   blockIdx.z = pid_h                      — head index
+<a href=#728 id=728 data-nosnippet>728</a>        // ================================================================
+<a href=#729 id=729 data-nosnippet>729</a>
+<a href=#730 id=730 data-nosnippet>730</a>        // autotune key: ['chunk_len', 'hdim', 'state_rank', 'IS_CAUSAL']
+<a href=#731 id=731 data-nosnippet>731</a>        </span><span class="kw">let </span>k5_output_pos_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_M  (output chunk_pos dimension)
+<a href=#732 id=732 data-nosnippet>732</a>        </span><span class="kw">let </span>k5_per_head_dim_tile = autotune(<span class="number">32</span>); <span class="comment">// BLOCK_SIZE_N  (per_head_dim output dimension)
+<a href=#733 id=733 data-nosnippet>733</a>        </span><span class="kw">let </span>k5_state_rank_tile = autotune(<span class="number">64</span>); <span class="comment">// BLOCK_SIZE_state_rank (d_state for blue part)
+<a href=#734 id=734 data-nosnippet>734</a>        </span><span class="kw">let </span>k5_source_pos_tile = autotune(<span class="number">32</span>); <span class="comment">// BLOCK_SIZE_K  (source chunk_pos for orange)
+<a href=#735 id=735 data-nosnippet>735</a>
+<a href=#736 id=736 data-nosnippet>736</a>        // output
+<a href=#737 id=737 data-nosnippet>737</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>y_bnlhp =
+<a href=#738 id=738 data-nosnippet>738</a>            Tensor::&lt;B, <span class="number">5</span>&gt;::zeros([batch, nchunks, chunk_len, nheads, per_head_dim], <span class="kw-2">&amp;</span>device);
+<a href=#739 id=739 data-nosnippet>739</a>
+<a href=#740 id=740 data-nosnippet>740</a>        <span class="comment">// blockIdx.y part-1: pid_b
+<a href=#741 id=741 data-nosnippet>741</a>        </span><span class="kw">for </span>i_batch <span class="kw">in </span><span class="number">0</span>..batch {
+<a href=#742 id=742 data-nosnippet>742</a>            <span class="comment">// blockIdx.y part-2: pid_c
+<a href=#743 id=743 data-nosnippet>743</a>            </span><span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
+<a href=#744 id=744 data-nosnippet>744</a>                <span class="comment">// blockIdx.z: pid_h
+<a href=#745 id=745 data-nosnippet>745</a>                </span><span class="kw">for </span>i_head <span class="kw">in </span><span class="number">0</span>..nheads {
+<a href=#746 id=746 data-nosnippet>746</a>                    <span class="comment">// GQA: CB and C use group_idx for the head dimension.
+<a href=#747 id=747 data-nosnippet>747</a>                    // Triton: `(pid_h // nheads_ngroups_ratio) * stride_cb_head`
+<a href=#748 id=748 data-nosnippet>748</a>                    </span><span class="kw">let </span>i_group = i_head / heads_per_group;
+<a href=#749 id=749 data-nosnippet>749</a>
+<a href=#750 id=750 data-nosnippet>750</a>                    <span class="comment">// Load dA_cumsum for this (batch, head, chunk) — shape [chunk_len].
+<a href=#751 id=751 data-nosnippet>751</a>                    // Triton ptr: dA_cumsum_ptr + pid_b*stride_batch + pid_c*stride_chunk + pid_h*stride_head
+<a href=#752 id=752 data-nosnippet>752</a>                    </span><span class="kw">let </span>da_cumsum_l = da_cumsum_bhnl
+<a href=#753 id=753 data-nosnippet>753</a>                        .clone()
+<a href=#754 id=754 data-nosnippet>754</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, ..])
+<a href=#755 id=755 data-nosnippet>755</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#756 id=756 data-nosnippet>756</a>                    <span class="macro">assert_eq!</span>([chunk_len], da_cumsum_l.dims());
+<a href=#757 id=757 data-nosnippet>757</a>
+<a href=#758 id=758 data-nosnippet>758</a>                    <span class="comment">// Load dt_discretized for this (batch, head, chunk) — shape [chunk_len].
+<a href=#759 id=759 data-nosnippet>759</a>                    // Triton ptr: dt_ptr + pid_b*stride + pid_c*stride + pid_h*stride
+<a href=#760 id=760 data-nosnippet>760</a>                    </span><span class="kw">let </span>dt_l = dt_discretized_bhnl
+<a href=#761 id=761 data-nosnippet>761</a>                        .clone()
+<a href=#762 id=762 data-nosnippet>762</a>                        .slice(<span class="macro">s!</span>[i_batch, i_head, i_chunk, ..])
+<a href=#763 id=763 data-nosnippet>763</a>                        .squeeze_dims::&lt;<span class="number">1</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#764 id=764 data-nosnippet>764</a>                    <span class="macro">assert_eq!</span>([chunk_len], dt_l.dims());
+<a href=#765 id=765 data-nosnippet>765</a>
+<a href=#766 id=766 data-nosnippet>766</a>                    <span class="comment">// Load the state entering this chunk: shape [per_head_dim, d_state].
+<a href=#767 id=767 data-nosnippet>767</a>                    // Triton ptr: prev_states_ptr + pid_b*stride_batch + pid_c*stride_chunk + pid_h*stride_head
+<a href=#768 id=768 data-nosnippet>768</a>                    // Layout: prev_states[per_head_dim_p, state_rank_n] (row=per_head_dim, col=d_state)
+<a href=#769 id=769 data-nosnippet>769</a>                    </span><span class="kw">let </span>state_entering_pr = chunk_input_states_bnhpr
+<a href=#770 id=770 data-nosnippet>770</a>                        .clone()
+<a href=#771 id=771 data-nosnippet>771</a>                        .slice(<span class="macro">s!</span>[i_batch, i_chunk, i_head, .., ..])
+<a href=#772 id=772 data-nosnippet>772</a>                        .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#773 id=773 data-nosnippet>773</a>                    <span class="macro">assert_eq!</span>([per_head_dim, state_rank], state_entering_pr.dims());
+<a href=#774 id=774 data-nosnippet>774</a>
+<a href=#775 id=775 data-nosnippet>775</a>                    <span class="comment">// Load x for this (batch, chunk, head): shape [chunk_len, per_head_dim].
+<a href=#776 id=776 data-nosnippet>776</a>                    // Triton ptr: x_ptr + pid_b*stride + pid_c*chunk_len*stride_seqlen + pid_h*stride_head
+<a href=#777 id=777 data-nosnippet>777</a>                    </span><span class="kw">let </span>x_lp = x_bnlhp
+<a href=#778 id=778 data-nosnippet>778</a>                        .clone()
+<a href=#779 id=779 data-nosnippet>779</a>                        .slice(<span class="macro">s!</span>[i_batch, i_chunk, .., i_head, ..])
+<a href=#780 id=780 data-nosnippet>780</a>                        .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#781 id=781 data-nosnippet>781</a>                    <span class="macro">assert_eq!</span>([chunk_len, per_head_dim], x_lp.dims());
+<a href=#782 id=782 data-nosnippet>782</a>
+<a href=#783 id=783 data-nosnippet>783</a>                    <span class="comment">// Load CB for this (batch, chunk, group): shape [chunk_len, chunk_len].
+<a href=#784 id=784 data-nosnippet>784</a>                    // Triton ptr: cb_ptr + ... (pid_h // ratio) * stride_cb_head
+<a href=#785 id=785 data-nosnippet>785</a>                    </span><span class="kw">let </span>cb_ll = cb_bngll
+<a href=#786 id=786 data-nosnippet>786</a>                        .clone()
+<a href=#787 id=787 data-nosnippet>787</a>                        .slice(<span class="macro">s!</span>[i_batch, i_chunk, i_group, .., ..])
+<a href=#788 id=788 data-nosnippet>788</a>                        .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#789 id=789 data-nosnippet>789</a>                    <span class="macro">assert_eq!</span>([chunk_len, chunk_len], cb_ll.dims());
+<a href=#790 id=790 data-nosnippet>790</a>                    <span class="comment">// [target, source]
+<a href=#791 id=791 data-nosnippet>791</a>
+<a href=#792 id=792 data-nosnippet>792</a>                    // D skip coefficient for this head.
+<a href=#793 id=793 data-nosnippet>793</a>                    // D_HAS_HDIM=False: D is [nheads], one scalar per head.
+<a href=#794 id=794 data-nosnippet>794</a>                    // Triton: `D = tl.load(D_ptr + pid_h * stride_D_head)` (single scalar load)
+<a href=#795 id=795 data-nosnippet>795</a>                    </span><span class="kw">let </span>d_skip_1 = d_h.clone().slice(<span class="macro">s!</span>[i_head]);
+<a href=#796 id=796 data-nosnippet>796</a>                    <span class="macro">assert_eq!</span>([<span class="number">1</span>], d_skip_1.dims());
+<a href=#797 id=797 data-nosnippet>797</a>
+<a href=#798 id=798 data-nosnippet>798</a>                    <span class="comment">// Accumulate the full output for this (batch, chunk, head).
+<a href=#799 id=799 data-nosnippet>799</a>                    // In the GPU, each (pid_m, pid_n) sub-block is a separate thread block.
+<a href=#800 id=800 data-nosnippet>800</a>                    // Here we use a single [chunk_len, per_head_dim] tensor.
+<a href=#801 id=801 data-nosnippet>801</a>                    </span><span class="kw">let </span><span class="kw-2">mut </span>y_lp = Tensor::&lt;B, <span class="number">2</span>&gt;::zeros([chunk_len, per_head_dim], <span class="kw-2">&amp;</span>device);
+<a href=#802 id=802 data-nosnippet>802</a>
+<a href=#803 id=803 data-nosnippet>803</a>                    <span class="comment">// blockIdx.x: pid_m — output target-position tile
+<a href=#804 id=804 data-nosnippet>804</a>                    </span><span class="kw">for </span>output_pos_start <span class="kw">in </span>(<span class="number">0</span>..chunk_len).step_by(k5_output_pos_tile) {
+<a href=#805 id=805 data-nosnippet>805</a>                        <span class="kw">let </span>output_pos_end = (output_pos_start + k5_output_pos_tile).min(chunk_len);
+<a href=#806 id=806 data-nosnippet>806</a>                        <span class="kw">let </span>output_pos_tile_width = output_pos_end - output_pos_start;
+<a href=#807 id=807 data-nosnippet>807</a>                        <span class="kw">let </span>output_pos_range = output_pos_start..output_pos_end;
+<a href=#808 id=808 data-nosnippet>808</a>                        <span class="macro">assert_ne!</span>(output_pos_tile_width, <span class="number">0</span>);
+<a href=#809 id=809 data-nosnippet>809</a>
+<a href=#810 id=810 data-nosnippet>810</a>                        <span class="comment">// blockIdx.x: pid_n — per_head_dim output tile
+<a href=#811 id=811 data-nosnippet>811</a>                        </span><span class="kw">for </span>per_head_dim_start <span class="kw">in </span>(<span class="number">0</span>..per_head_dim).step_by(k5_per_head_dim_tile) {
+<a href=#812 id=812 data-nosnippet>812</a>                            <span class="kw">let </span>per_head_dim_end =
+<a href=#813 id=813 data-nosnippet>813</a>                                (per_head_dim_start + k5_per_head_dim_tile).min(per_head_dim);
+<a href=#814 id=814 data-nosnippet>814</a>                            <span class="kw">let </span>per_head_dim_tile_width = per_head_dim_end - per_head_dim_start;
+<a href=#815 id=815 data-nosnippet>815</a>                            <span class="kw">let </span>per_head_dim_range = per_head_dim_start..per_head_dim_end;
+<a href=#816 id=816 data-nosnippet>816</a>                            <span class="macro">assert_ne!</span>(per_head_dim_tile_width, <span class="number">0</span>);
+<a href=#817 id=817 data-nosnippet>817</a>
+<a href=#818 id=818 data-nosnippet>818</a>                            <span class="comment">// threadIdx: accumulator for this [output_pos_tile × per_head_dim_tile] block.
+<a href=#819 id=819 data-nosnippet>819</a>                            // Triton: `acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=float32)`
+<a href=#820 id=820 data-nosnippet>820</a>                            </span><span class="kw">let </span><span class="kw-2">mut </span>output_subtile_accum_LP = Tensor::&lt;B, <span class="number">2</span>&gt;::zeros(
+<a href=#821 id=821 data-nosnippet>821</a>                                [output_pos_tile_width, per_head_dim_tile_width],
+<a href=#822 id=822 data-nosnippet>822</a>                                <span class="kw-2">&amp;</span>device,
+<a href=#823 id=823 data-nosnippet>823</a>                            );
+<a href=#824 id=824 data-nosnippet>824</a>
+<a href=#825 id=825 data-nosnippet>825</a>                            <span class="comment">// ----------------------------------------------------------------
+<a href=#826 id=826 data-nosnippet>826</a>                            // BLUE contribution — prev-state propagated forward to each output pos.
+<a href=#827 id=827 data-nosnippet>827</a>                            //
+<a href=#828 id=828 data-nosnippet>828</a>                            // Mathematical form:
+<a href=#829 id=829 data-nosnippet>829</a>                            //   y_blue[l, p] = exp(dA_cumsum[l]) * Σ_n  C[l, n] * state[p, n]
+<a href=#830 id=830 data-nosnippet>830</a>                            //
+<a href=#831 id=831 data-nosnippet>831</a>                            // Triton loads and stores:
+<a href=#832 id=832 data-nosnippet>832</a>                            //   C_ptrs      = offs_m * stride_C_seqlen + offs_k_state_rank * stride_C_state_rank
+<a href=#833 id=833 data-nosnippet>833</a>                            //   prev_states_ptrs = offs_n * stride_states_hdim + offs_k_state_rank * stride_states_state_rank
+<a href=#834 id=834 data-nosnippet>834</a>                            //
+<a href=#835 id=835 data-nosnippet>835</a>                            // Note the index roles:
+<a href=#836 id=836 data-nosnippet>836</a>                            //   offs_m  → output chunk positions (l),  shapes C as [output_pos, d_state]
+<a href=#837 id=837 data-nosnippet>837</a>                            //   offs_n  → per_head_dim output (p),          shapes prev_states as [d_state, per_head_dim]
+<a href=#838 id=838 data-nosnippet>838</a>                            //   offs_k_state_rank → inner d_state dim (n)
+<a href=#839 id=839 data-nosnippet>839</a>                            //
+<a href=#840 id=840 data-nosnippet>840</a>                            // Matmul: C[l, n] @ prev_states[n, p] = [output_pos_tile, per_head_dim_tile]
+<a href=#841 id=841 data-nosnippet>841</a>                            // ----------------------------------------------------------------
+<a href=#842 id=842 data-nosnippet>842</a>                            // threadIdx K-loop over d_state (BLOCK_SIZE_state_rank steps).
+<a href=#843 id=843 data-nosnippet>843</a>                            </span><span class="kw">for </span>state_rank_start <span class="kw">in </span>(<span class="number">0</span>..state_rank).step_by(k5_state_rank_tile) {
+<a href=#844 id=844 data-nosnippet>844</a>                                <span class="kw">let </span>state_rank_end =
+<a href=#845 id=845 data-nosnippet>845</a>                                    (state_rank_start + k5_state_rank_tile).min(state_rank);
+<a href=#846 id=846 data-nosnippet>846</a>                                <span class="kw">let </span>state_rank_block_width = state_rank_end - state_rank_start;
+<a href=#847 id=847 data-nosnippet>847</a>                                <span class="kw">let </span>state_rank_range = state_rank_start..state_rank_end;
+<a href=#848 id=848 data-nosnippet>848</a>                                <span class="macro">assert_ne!</span>(state_rank_block_width, <span class="number">0</span>);
+<a href=#849 id=849 data-nosnippet>849</a>
+<a href=#850 id=850 data-nosnippet>850</a>                                <span class="comment">// SRAM load: C tile [output_pos_tile, state_rank_block]
+<a href=#851 id=851 data-nosnippet>851</a>                                // Triton: C_ptrs = C_ptr + offs_m * stride_C_seqlen + offs_k * stride_C_state_rank
+<a href=#852 id=852 data-nosnippet>852</a>                                //         GQA: group_idx applied
+<a href=#853 id=853 data-nosnippet>853</a>                                </span><span class="kw">let </span>c_LR = c_bnlgr
+<a href=#854 id=854 data-nosnippet>854</a>                                    .clone()
+<a href=#855 id=855 data-nosnippet>855</a>                                    .slice(<span class="macro">s!</span>[
+<a href=#856 id=856 data-nosnippet>856</a>                                        i_batch,
+<a href=#857 id=857 data-nosnippet>857</a>                                        i_chunk,
+<a href=#858 id=858 data-nosnippet>858</a>                                        output_pos_range.clone(),
+<a href=#859 id=859 data-nosnippet>859</a>                                        i_group,
+<a href=#860 id=860 data-nosnippet>860</a>                                        state_rank_range.clone()
+<a href=#861 id=861 data-nosnippet>861</a>                                    ])
+<a href=#862 id=862 data-nosnippet>862</a>                                    .squeeze_dims::&lt;<span class="number">2</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#863 id=863 data-nosnippet>863</a>                                <span class="macro">assert_eq!</span>(
+<a href=#864 id=864 data-nosnippet>864</a>                                    [output_pos_tile_width, state_rank_block_width],
+<a href=#865 id=865 data-nosnippet>865</a>                                    c_LR.dims()
+<a href=#866 id=866 data-nosnippet>866</a>                                );
+<a href=#867 id=867 data-nosnippet>867</a>
+<a href=#868 id=868 data-nosnippet>868</a>                                <span class="comment">// SRAM load: prev_state tile [state_rank_block, per_head_dim_tile]
+<a href=#869 id=869 data-nosnippet>869</a>                                // Triton: prev_states_ptrs = offs_n * stride_states_hdim
+<a href=#870 id=870 data-nosnippet>870</a>                                //                           + offs_k * stride_states_state_rank
+<a href=#871 id=871 data-nosnippet>871</a>                                // state_entering_this_chunk has shape [per_head_dim, d_state].
+<a href=#872 id=872 data-nosnippet>872</a>                                // We slice [per_head_dim_start..per_head_dim_end, state_rank_start..state_rank_end]
+<a href=#873 id=873 data-nosnippet>873</a>                                // = [per_head_dim_tile, state_rank_block], then transpose to [state_rank_block, per_head_dim_tile].
+<a href=#874 id=874 data-nosnippet>874</a>                                // This matches the Triton access pattern where offs_n indexes per_head_dim
+<a href=#875 id=875 data-nosnippet>875</a>                                // and offs_k indexes d_state.
+<a href=#876 id=876 data-nosnippet>876</a>                                </span><span class="kw">let </span>state_entering_RP = state_entering_pr
+<a href=#877 id=877 data-nosnippet>877</a>                                    .clone()
+<a href=#878 id=878 data-nosnippet>878</a>                                    .slice(<span class="macro">s!</span>[per_head_dim_range.clone(), state_rank_range.clone()])
+<a href=#879 id=879 data-nosnippet>879</a>                                    .permute([<span class="number">1</span>, <span class="number">0</span>]); <span class="comment">// transpose
+<a href=#880 id=880 data-nosnippet>880</a>                                </span><span class="macro">assert_eq!</span>(
+<a href=#881 id=881 data-nosnippet>881</a>                                    [state_rank_block_width, per_head_dim_tile_width],
+<a href=#882 id=882 data-nosnippet>882</a>                                    state_entering_RP.dims()
+<a href=#883 id=883 data-nosnippet>883</a>                                );
+<a href=#884 id=884 data-nosnippet>884</a>
+<a href=#885 id=885 data-nosnippet>885</a>                                <span class="comment">// Tensor Core: C[output_pos, state_rank] @ prev_state^T[state_rank, per_head_dim]
+<a href=#886 id=886 data-nosnippet>886</a>                                // Triton: `acc = tl.dot(C, prev_states) * scale_m[:, None]`
+<a href=#887 id=887 data-nosnippet>887</a>                                // (scale is applied after the d_state accumulation loop)
+<a href=#888 id=888 data-nosnippet>888</a>                                </span>output_subtile_accum_LP =
+<a href=#889 id=889 data-nosnippet>889</a>                                    output_subtile_accum_LP + c_LR.matmul(state_entering_RP);
+<a href=#890 id=890 data-nosnippet>890</a>                            } <span class="comment">// state_rank tile loop
+<a href=#891 id=891 data-nosnippet>891</a>
+<a href=#892 id=892 data-nosnippet>892</a>                            // Apply the state decay to the blue term.
+<a href=#893 id=893 data-nosnippet>893</a>                            // exp(dA_cumsum[l]) = how much the initial state has decayed
+<a href=#894 id=894 data-nosnippet>894</a>                            // by the time we reach output position l in this chunk.
+<a href=#895 id=895 data-nosnippet>895</a>                            // Triton: `acc = tl.dot(...) * scale_m[:, None]`
+<a href=#896 id=896 data-nosnippet>896</a>                            //   where `scale_m = tl.exp(dA_cs_m)`
+<a href=#897 id=897 data-nosnippet>897</a>                            </span><span class="kw">let </span>state_decay_LP = da_cumsum_l
+<a href=#898 id=898 data-nosnippet>898</a>                                .clone()
+<a href=#899 id=899 data-nosnippet>899</a>                                .slice(<span class="macro">s!</span>[output_pos_range.clone()])
+<a href=#900 id=900 data-nosnippet>900</a>                                .exp()
+<a href=#901 id=901 data-nosnippet>901</a>                                .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">1</span>)
+<a href=#902 id=902 data-nosnippet>902</a>                                .expand([output_pos_tile_width, per_head_dim_tile_width]);
+<a href=#903 id=903 data-nosnippet>903</a>                            output_subtile_accum_LP = output_subtile_accum_LP * state_decay_LP;
+<a href=#904 id=904 data-nosnippet>904</a>
+<a href=#905 id=905 data-nosnippet>905</a>                            <span class="comment">// ----------------------------------------------------------------
+<a href=#906 id=906 data-nosnippet>906</a>                            // ORANGE contribution — intra-chunk causal attention.
+<a href=#907 id=907 data-nosnippet>907</a>                            //
+<a href=#908 id=908 data-nosnippet>908</a>                            // IS_CAUSAL=True: source position s can only contribute to output
+<a href=#909 id=909 data-nosnippet>909</a>                            // position l when s ≤ l.
+<a href=#910 id=910 data-nosnippet>910</a>                            //
+<a href=#911 id=911 data-nosnippet>911</a>                            // K_MAX (Triton): `min((pid_m + 1) * BLOCK_SIZE_M, chunk_len_limit)`
+<a href=#912 id=912 data-nosnippet>912</a>                            //   = output_pos_end in our notation.
+<a href=#913 id=913 data-nosnippet>913</a>                            // Source positions beyond output_pos_end cannot causally contribute
+<a href=#914 id=914 data-nosnippet>914</a>                            // to any output in [output_pos_start, output_pos_end), so we skip them.
+<a href=#915 id=915 data-nosnippet>915</a>                            //
+<a href=#916 id=916 data-nosnippet>916</a>                            // Triton orange loop (from _chunk_scan_fwd_kernel in ssd_chunk_scan.py):
+<a href=#917 id=917 data-nosnippet>917</a>                            //   for k in range(0, K_MAX, BLOCK_SIZE_K):
+<a href=#918 id=918 data-nosnippet>918</a>                            //     cb = tl.load(cb_ptrs, ...)
+<a href=#919 id=919 data-nosnippet>919</a>                            //     dA_cs_k = tl.load(dA_cumsum_ptrs, ...)   ← source positions
+<a href=#920 id=920 data-nosnippet>920</a>                            //     cb *= tl.exp(dA_cs_m[:, None] - dA_cs_k[None, :])
+<a href=#921 id=921 data-nosnippet>921</a>                            //                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<a href=#922 id=922 data-nosnippet>922</a>                            //                  target_cumsum - source_cumsum
+<a href=#923 id=923 data-nosnippet>923</a>                            //                  Since dA &lt; 0 and target ≥ source in causal region,
+<a href=#924 id=924 data-nosnippet>924</a>                            //                  dA_cumsum[target] ≤ dA_cumsum[source], so the
+<a href=#925 id=925 data-nosnippet>925</a>                            //                  difference is ≤ 0 and exp(⋅) ∈ (0, 1].
+<a href=#926 id=926 data-nosnippet>926</a>                            //     dt_k = tl.load(dt_ptrs, ...)
+<a href=#927 id=927 data-nosnippet>927</a>                            //     cb *= dt_k
+<a href=#928 id=928 data-nosnippet>928</a>                            //     if IS_CAUSAL:
+<a href=#929 id=929 data-nosnippet>929</a>                            //         mask = offs_m[:, None] &gt;= k + offs_k[None, :]
+<a href=#930 id=930 data-nosnippet>930</a>                            //         cb = tl.where(mask, cb, 0.0)
+<a href=#931 id=931 data-nosnippet>931</a>                            //     acc += tl.dot(cb, x)
+<a href=#932 id=932 data-nosnippet>932</a>                            // ----------------------------------------------------------------
+<a href=#933 id=933 data-nosnippet>933</a>                            </span><span class="kw">let </span>source_pos_upper_limit = output_pos_end; <span class="comment">// K_MAX = (pid_m+1)*BM
+<a href=#934 id=934 data-nosnippet>934</a>                            </span><span class="kw">for </span>source_pos_start <span class="kw">in
+<a href=#935 id=935 data-nosnippet>935</a>                                </span>(<span class="number">0</span>..source_pos_upper_limit).step_by(k5_source_pos_tile)
+<a href=#936 id=936 data-nosnippet>936</a>                            {
+<a href=#937 id=937 data-nosnippet>937</a>                                <span class="kw">let </span>source_pos_end = (source_pos_start + k5_source_pos_tile)
+<a href=#938 id=938 data-nosnippet>938</a>                                    .min(source_pos_upper_limit);
+<a href=#939 id=939 data-nosnippet>939</a>                                <span class="kw">let </span>source_pos_tile_width = source_pos_end - source_pos_start;
+<a href=#940 id=940 data-nosnippet>940</a>                                <span class="kw">let </span>source_pos_range = source_pos_start..source_pos_end;
+<a href=#941 id=941 data-nosnippet>941</a>                                <span class="macro">assert_ne!</span>(source_pos_tile_width, <span class="number">0</span>);
+<a href=#942 id=942 data-nosnippet>942</a>
+<a href=#943 id=943 data-nosnippet>943</a>                                <span class="comment">// SRAM load: CB tile [output_pos_tile, source_pos_tile]
+<a href=#944 id=944 data-nosnippet>944</a>                                // Triton: cb_ptrs = cb_ptr + offs_m * stride_cb_csize_m
+<a href=#945 id=945 data-nosnippet>945</a>                                //                          + offs_k * stride_cb_csize_k
+<a href=#946 id=946 data-nosnippet>946</a>                                //         GQA: (pid_h // ratio) * stride_cb_head
+<a href=#947 id=947 data-nosnippet>947</a>                                </span><span class="kw">let </span>cb_LL = cb_ll
+<a href=#948 id=948 data-nosnippet>948</a>                                    .clone()
+<a href=#949 id=949 data-nosnippet>949</a>                                    .slice(<span class="macro">s!</span>[output_pos_range.clone(), source_pos_range.clone()]);
+<a href=#950 id=950 data-nosnippet>950</a>                                <span class="macro">assert_eq!</span>(
+<a href=#951 id=951 data-nosnippet>951</a>                                    [output_pos_tile_width, source_pos_tile_width],
+<a href=#952 id=952 data-nosnippet>952</a>                                    cb_LL.dims()
+<a href=#953 id=953 data-nosnippet>953</a>                                );
+<a href=#954 id=954 data-nosnippet>954</a>
+<a href=#955 id=955 data-nosnippet>955</a>                                <span class="comment">// Inter-position decay: exp(dA_cumsum[target] - dA_cumsum[source])
+<a href=#956 id=956 data-nosnippet>956</a>                                //
+<a href=#957 id=957 data-nosnippet>957</a>                                // Triton: `cb *= tl.exp(dA_cs_m[:, None] - dA_cs_k[None, :])`
+<a href=#958 id=958 data-nosnippet>958</a>                                //   dA_cs_m → dA_cumsum at target (output) positions  (loaded outside K-loop)
+<a href=#959 id=959 data-nosnippet>959</a>                                //   dA_cs_k → dA_cumsum at source positions            (loaded inside K-loop)
+<a href=#960 id=960 data-nosnippet>960</a>                                //
+<a href=#961 id=961 data-nosnippet>961</a>                                // Physical meaning: the state at source position s has decayed
+<a href=#962 id=962 data-nosnippet>962</a>                                // by factor exp(sum of dA[s+1..=l]) when it reaches target l.
+<a href=#963 id=963 data-nosnippet>963</a>                                // Using the inclusive cumsum identity:
+<a href=#964 id=964 data-nosnippet>964</a>                                //   dA_cumsum[l] - dA_cumsum[s] = sum(dA[s+1..=l])
+<a href=#965 id=965 data-nosnippet>965</a>                                // So exp(dA_cumsum[target] - dA_cumsum[source]) encodes exactly that
+<a href=#966 id=966 data-nosnippet>966</a>                                // decay.  Because dA &lt; 0 and target ≥ source (causal), the difference
+<a href=#967 id=967 data-nosnippet>967</a>                                // is ≤ 0 and the factor lies in (0, 1]. This is consistent with the
+<a href=#968 id=968 data-nosnippet>968</a>                                // BLUE contribution which uses exp(dA_cumsum[l]) = decay from chunk
+<a href=#969 id=969 data-nosnippet>969</a>                                // start (before position 0) to position l.
+<a href=#970 id=970 data-nosnippet>970</a>                                </span><span class="kw">let </span>da_cumsum_at_target_LL = da_cumsum_l
+<a href=#971 id=971 data-nosnippet>971</a>                                    .clone()
+<a href=#972 id=972 data-nosnippet>972</a>                                    .slice(<span class="macro">s!</span>[output_pos_range.clone()])
+<a href=#973 id=973 data-nosnippet>973</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">1</span>)
+<a href=#974 id=974 data-nosnippet>974</a>                                    .expand([output_pos_tile_width, source_pos_tile_width]);
+<a href=#975 id=975 data-nosnippet>975</a>                                <span class="kw">let </span>da_cumsum_at_source_LL = da_cumsum_l
+<a href=#976 id=976 data-nosnippet>976</a>                                    .clone()
+<a href=#977 id=977 data-nosnippet>977</a>                                    .slice(<span class="macro">s!</span>[source_pos_range.clone()])
+<a href=#978 id=978 data-nosnippet>978</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">0</span>)
+<a href=#979 id=979 data-nosnippet>979</a>                                    .expand([output_pos_tile_width, source_pos_tile_width]);
+<a href=#980 id=980 data-nosnippet>980</a>
+<a href=#981 id=981 data-nosnippet>981</a>                                <span class="comment">// dA_at_source: [output_pos_tile_width, source_pos_tile_width]
+<a href=#982 id=982 data-nosnippet>982</a>                                //
+<a href=#983 id=983 data-nosnippet>983</a>                                // IMPORTANT: sign is (target - source), NOT (source - target).
+<a href=#984 id=984 data-nosnippet>984</a>                                // target_cumsum ≤ source_cumsum in the causal region (both are
+<a href=#985 id=985 data-nosnippet>985</a>                                // non-positive and target has accumulated more negative dA steps),
+<a href=#986 id=986 data-nosnippet>986</a>                                // so the difference is ≤ 0 and exp(⋅) ∈ (0, 1] as required.
+<a href=#987 id=987 data-nosnippet>987</a>                                </span><span class="kw">let </span>causal_intra_chunk_decay_LL =
+<a href=#988 id=988 data-nosnippet>988</a>                                    (da_cumsum_at_target_LL - da_cumsum_at_source_LL).exp();
+<a href=#989 id=989 data-nosnippet>989</a>                                <span class="macro">assert_eq!</span>(
+<a href=#990 id=990 data-nosnippet>990</a>                                    [output_pos_tile_width, source_pos_tile_width],
+<a href=#991 id=991 data-nosnippet>991</a>                                    causal_intra_chunk_decay_LL.dims()
+<a href=#992 id=992 data-nosnippet>992</a>                                );
+<a href=#993 id=993 data-nosnippet>993</a>
+<a href=#994 id=994 data-nosnippet>994</a>                                <span class="comment">// Discretization scale at each source position.
+<a href=#995 id=995 data-nosnippet>995</a>                                // Triton: `dt_k = tl.load(dt_ptrs, ...); cb *= dt_k`
+<a href=#996 id=996 data-nosnippet>996</a>                                </span><span class="kw">let </span>dt_at_source_LL = dt_l
+<a href=#997 id=997 data-nosnippet>997</a>                                    .clone()
+<a href=#998 id=998 data-nosnippet>998</a>                                    .slice([source_pos_range.clone()])
+<a href=#999 id=999 data-nosnippet>999</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">0</span>)
+<a href=#1000 id=1000 data-nosnippet>1000</a>                                    .expand([output_pos_tile_width, source_pos_tile_width]);
+<a href=#1001 id=1001 data-nosnippet>1001</a>
+<a href=#1002 id=1002 data-nosnippet>1002</a>                                <span class="kw">let </span>cb_weighted_LL =
+<a href=#1003 id=1003 data-nosnippet>1003</a>                                    cb_LL * causal_intra_chunk_decay_LL * dt_at_source_LL;
+<a href=#1004 id=1004 data-nosnippet>1004</a>                                <span class="macro">assert_eq!</span>(
+<a href=#1005 id=1005 data-nosnippet>1005</a>                                    [output_pos_tile_width, source_pos_tile_width],
+<a href=#1006 id=1006 data-nosnippet>1006</a>                                    cb_weighted_LL.dims()
+<a href=#1007 id=1007 data-nosnippet>1007</a>                                );
+<a href=#1008 id=1008 data-nosnippet>1008</a>
+<a href=#1009 id=1009 data-nosnippet>1009</a>                                <span class="comment">// Causal mask: output position (absolute) &gt;= source position (absolute).
+<a href=#1010 id=1010 data-nosnippet>1010</a>                                // Triton: `mask = offs_m[:, None] &gt;= k + offs_k[None, :]`
+<a href=#1011 id=1011 data-nosnippet>1011</a>                                //   where k = source_pos_start in our notation.
+<a href=#1012 id=1012 data-nosnippet>1012</a>                                // In CUDA this would be a per-thread integer comparison:
+<a href=#1013 id=1013 data-nosnippet>1013</a>                                //   valid = (output_pos_start + threadIdx_m) &gt;= (source_pos_start + threadIdx_k)
+<a href=#1014 id=1014 data-nosnippet>1014</a>                                // We approximate it with float broadcasting:
+<a href=#1015 id=1015 data-nosnippet>1015</a>                                </span><span class="kw">let </span>causal_mask_LL = {
+<a href=#1016 id=1016 data-nosnippet>1016</a>                                    <span class="kw">let </span>output_abs_indices: Vec&lt;f32&gt; =
+<a href=#1017 id=1017 data-nosnippet>1017</a>                                        output_pos_range.clone().map(|i| i <span class="kw">as </span>f32).collect();
+<a href=#1018 id=1018 data-nosnippet>1018</a>                                    <span class="kw">let </span>source_abs_indices: Vec&lt;f32&gt; =
+<a href=#1019 id=1019 data-nosnippet>1019</a>                                        source_pos_range.clone().map(|j| j <span class="kw">as </span>f32).collect();
+<a href=#1020 id=1020 data-nosnippet>1020</a>                                    <span class="kw">let </span>output_abs_float_LL = Tensor::&lt;B, <span class="number">1</span>&gt;::from_floats(
+<a href=#1021 id=1021 data-nosnippet>1021</a>                                        output_abs_indices.as_slice(),
+<a href=#1022 id=1022 data-nosnippet>1022</a>                                        <span class="kw-2">&amp;</span>device,
+<a href=#1023 id=1023 data-nosnippet>1023</a>                                    )
+<a href=#1024 id=1024 data-nosnippet>1024</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">1</span>)
+<a href=#1025 id=1025 data-nosnippet>1025</a>                                    .expand([output_pos_tile_width, source_pos_tile_width]);
+<a href=#1026 id=1026 data-nosnippet>1026</a>                                    <span class="kw">let </span>source_abs_float_LL = Tensor::&lt;B, <span class="number">1</span>&gt;::from_floats(
+<a href=#1027 id=1027 data-nosnippet>1027</a>                                        source_abs_indices.as_slice(),
+<a href=#1028 id=1028 data-nosnippet>1028</a>                                        <span class="kw-2">&amp;</span>device,
+<a href=#1029 id=1029 data-nosnippet>1029</a>                                    )
+<a href=#1030 id=1030 data-nosnippet>1030</a>                                    .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">0</span>)
+<a href=#1031 id=1031 data-nosnippet>1031</a>                                    .expand([output_pos_tile_width, source_pos_tile_width]);
+<a href=#1032 id=1032 data-nosnippet>1032</a>                                    <span class="comment">// causal_mask[target, source] = True when target_abs &gt;= source_abs
+<a href=#1033 id=1033 data-nosnippet>1033</a>                                    </span>output_abs_float_LL.greater_equal(source_abs_float_LL)
+<a href=#1034 id=1034 data-nosnippet>1034</a>                                };
+<a href=#1035 id=1035 data-nosnippet>1035</a>
+<a href=#1036 id=1036 data-nosnippet>1036</a>                                <span class="comment">// Zero out anti-causal entries.
+<a href=#1037 id=1037 data-nosnippet>1037</a>                                // Triton: `cb = tl.where(mask, cb, 0.0)`
+<a href=#1038 id=1038 data-nosnippet>1038</a>                                </span><span class="kw">let </span>cb_causal_LL =
+<a href=#1039 id=1039 data-nosnippet>1039</a>                                    cb_weighted_LL.mask_fill(causal_mask_LL.bool_not(), <span class="number">0.0</span>);
+<a href=#1040 id=1040 data-nosnippet>1040</a>
+<a href=#1041 id=1041 data-nosnippet>1041</a>                                <span class="comment">// SRAM load: X tile [source_pos_tile, per_head_dim_tile]
+<a href=#1042 id=1042 data-nosnippet>1042</a>                                // Triton: x_ptrs = offs_k * stride_x_seqlen + offs_n * stride_x_hdim
+<a href=#1043 id=1043 data-nosnippet>1043</a>                                </span><span class="kw">let </span>x_LP = x_lp
+<a href=#1044 id=1044 data-nosnippet>1044</a>                                    .clone()
+<a href=#1045 id=1045 data-nosnippet>1045</a>                                    .slice([source_pos_range.clone(), per_head_dim_range.clone()]);
+<a href=#1046 id=1046 data-nosnippet>1046</a>                                <span class="macro">assert_eq!</span>(
+<a href=#1047 id=1047 data-nosnippet>1047</a>                                    [source_pos_tile_width, per_head_dim_tile_width],
+<a href=#1048 id=1048 data-nosnippet>1048</a>                                    x_LP.dims()
+<a href=#1049 id=1049 data-nosnippet>1049</a>                                );
+<a href=#1050 id=1050 data-nosnippet>1050</a>
+<a href=#1051 id=1051 data-nosnippet>1051</a>                                <span class="comment">// Tensor Core: CB_causal[output, source] @ X[source, per_head_dim]
+<a href=#1052 id=1052 data-nosnippet>1052</a>                                // Triton: `acc += tl.dot(cb_causal.to(x.dtype), x)`
+<a href=#1053 id=1053 data-nosnippet>1053</a>                                </span>output_subtile_accum_LP =
+<a href=#1054 id=1054 data-nosnippet>1054</a>                                    output_subtile_accum_LP + cb_causal_LL.matmul(x_LP);
+<a href=#1055 id=1055 data-nosnippet>1055</a>                            } <span class="comment">// source_pos tile loop
+<a href=#1056 id=1056 data-nosnippet>1056</a>
+<a href=#1057 id=1057 data-nosnippet>1057</a>                            // ----------------------------------------------------------------
+<a href=#1058 id=1058 data-nosnippet>1058</a>                            // SKIP contribution — D residual connection.
+<a href=#1059 id=1059 data-nosnippet>1059</a>                            //
+<a href=#1060 id=1060 data-nosnippet>1060</a>                            // HAS_D=True, D_HAS_HDIM=False: D is a scalar per head.
+<a href=#1061 id=1061 data-nosnippet>1061</a>                            // Mathematical form: y_skip[l, p] = D[h] · x[l, p]
+<a href=#1062 id=1062 data-nosnippet>1062</a>                            //
+<a href=#1063 id=1063 data-nosnippet>1063</a>                            // Triton:
+<a href=#1064 id=1064 data-nosnippet>1064</a>                            //   D = tl.load(D_ptr + pid_h * stride_D_head)  ← scalar
+<a href=#1065 id=1065 data-nosnippet>1065</a>                            //   x_residual = tl.load(x_ptr + offs_m * stride_seqlen
+<a href=#1066 id=1066 data-nosnippet>1066</a>                            //                                + offs_n * stride_hdim)
+<a href=#1067 id=1067 data-nosnippet>1067</a>                            //   acc += x_residual * D
+<a href=#1068 id=1068 data-nosnippet>1068</a>                            // ----------------------------------------------------------------
+<a href=#1069 id=1069 data-nosnippet>1069</a>                            </span><span class="kw">let </span>x_skip_LP = x_lp
+<a href=#1070 id=1070 data-nosnippet>1070</a>                                .clone()
+<a href=#1071 id=1071 data-nosnippet>1071</a>                                .slice(<span class="macro">s!</span>[output_pos_range.clone(), per_head_dim_range.clone()]);
+<a href=#1072 id=1072 data-nosnippet>1072</a>                            <span class="macro">assert_eq!</span>(
+<a href=#1073 id=1073 data-nosnippet>1073</a>                                [output_pos_tile_width, per_head_dim_tile_width],
+<a href=#1074 id=1074 data-nosnippet>1074</a>                                x_skip_LP.dims()
+<a href=#1075 id=1075 data-nosnippet>1075</a>                            );
+<a href=#1076 id=1076 data-nosnippet>1076</a>
+<a href=#1077 id=1077 data-nosnippet>1077</a>                            <span class="kw">let </span>d_skip_LP = d_skip_1
+<a href=#1078 id=1078 data-nosnippet>1078</a>                                .clone()
+<a href=#1079 id=1079 data-nosnippet>1079</a>                                .unsqueeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">0</span>)
+<a href=#1080 id=1080 data-nosnippet>1080</a>                                .expand([output_pos_tile_width, per_head_dim_tile_width]);
+<a href=#1081 id=1081 data-nosnippet>1081</a>
+<a href=#1082 id=1082 data-nosnippet>1082</a>                            output_subtile_accum_LP =
+<a href=#1083 id=1083 data-nosnippet>1083</a>                                output_subtile_accum_LP + d_skip_LP * x_skip_LP;
+<a href=#1084 id=1084 data-nosnippet>1084</a>
+<a href=#1085 id=1085 data-nosnippet>1085</a>                            <span class="comment">// threadIdx: store the completed [output_pos_tile × per_head_dim_tile]
+<a href=#1086 id=1086 data-nosnippet>1086</a>                            // subtile back to the y_for_chunk accumulator (SRAM → registers).
+<a href=#1087 id=1087 data-nosnippet>1087</a>                            // Triton: `tl.store(out_ptrs, acc, mask=...)`
+<a href=#1088 id=1088 data-nosnippet>1088</a>                            </span>y_lp = y_lp.slice_assign(
+<a href=#1089 id=1089 data-nosnippet>1089</a>                                <span class="macro">s!</span>[output_pos_range.clone(), per_head_dim_range.clone()],
+<a href=#1090 id=1090 data-nosnippet>1090</a>                                output_subtile_accum_LP,
+<a href=#1091 id=1091 data-nosnippet>1091</a>                            );
+<a href=#1092 id=1092 data-nosnippet>1092</a>                        } <span class="comment">// per_head_dim tile loop
+<a href=#1093 id=1093 data-nosnippet>1093</a>                    </span>} <span class="comment">// output_pos tile loop
+<a href=#1094 id=1094 data-nosnippet>1094</a>
+<a href=#1095 id=1095 data-nosnippet>1095</a>                    // Write this (batch, chunk, head) output tile to VRAM.
+<a href=#1096 id=1096 data-nosnippet>1096</a>                    // Triton: out_ptr += pid_b*stride_batch + pid_c*chunk_len*stride_seqlen
+<a href=#1097 id=1097 data-nosnippet>1097</a>                    //                  + pid_h*stride_head
+<a href=#1098 id=1098 data-nosnippet>1098</a>                    </span>y_bnlhp = y_bnlhp.slice_assign(
+<a href=#1099 id=1099 data-nosnippet>1099</a>                        <span class="macro">s!</span>[i_batch, i_chunk, <span class="number">0</span>..chunk_len, i_head, <span class="number">0</span>..per_head_dim],
+<a href=#1100 id=1100 data-nosnippet>1100</a>                        y_lp
+<a href=#1101 id=1101 data-nosnippet>1101</a>                            <span class="comment">// TOD0: unsqueeze_dims::&lt;5&gt;(&amp;[0, 1, 3]) currently panics
+<a href=#1102 id=1102 data-nosnippet>1102</a>                            </span>.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">0</span>)
+<a href=#1103 id=1103 data-nosnippet>1103</a>                            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
+<a href=#1104 id=1104 data-nosnippet>1104</a>                            .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>),
+<a href=#1105 id=1105 data-nosnippet>1105</a>                    );
+<a href=#1106 id=1106 data-nosnippet>1106</a>                } <span class="comment">// nheads loop
+<a href=#1107 id=1107 data-nosnippet>1107</a>            </span>} <span class="comment">// nchunks loop
+<a href=#1108 id=1108 data-nosnippet>1108</a>        </span>} <span class="comment">// batch loop
+<a href=#1109 id=1109 data-nosnippet>1109</a>
+<a href=#1110 id=1110 data-nosnippet>1110</a>        // Reshape from chunked layout back to flat sequence.
+<a href=#1111 id=1111 data-nosnippet>1111</a>        </span><span class="kw">let </span>y_bshp = y_bnlhp.reshape([batch, sequence, nheads, per_head_dim]);
+<a href=#1112 id=1112 data-nosnippet>1112</a>
+<a href=#1113 id=1113 data-nosnippet>1113</a>        (y_bshp, final_ssm_state_bnpr)
+<a href=#1114 id=1114 data-nosnippet>1114</a>    }
+<a href=#1115 id=1115 data-nosnippet>1115</a>}
+</code></pre></div></section></main></body></html>
