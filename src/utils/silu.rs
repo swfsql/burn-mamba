@@ -1,6 +1,6 @@
 use burn::prelude::*;
 
-// silu activation for x is x * sigmoid(x)
+// silu(x) = x * sigmoid(x) = x / (1 + exp(-x))
 #[derive(Module, Clone, Debug, Default)]
 pub struct Silu;
 
@@ -9,6 +9,7 @@ impl Silu {
     pub fn new() -> Self {
         Self {}
     }
+
     /// Applies the forward pass on the input tensor.
     ///
     /// # Shapes
@@ -16,10 +17,7 @@ impl Silu {
     /// - input: `[..., any]`
     /// - output: `[..., any]`
     pub fn forward<B: Backend, const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
-        let sigmoid = nn::Sigmoid::new().forward(input.clone());
-
-        let res = input * sigmoid;
-
-        res
+        // silu(x) = x * sigmoid(x) = x / (1 + exp(-x))
+        input.clone() / ((-input).exp() + 1.0)
     }
 }

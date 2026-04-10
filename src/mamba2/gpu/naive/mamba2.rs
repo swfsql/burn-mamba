@@ -130,10 +130,10 @@ impl<B: Backend> Mamba2<B> {
         //
         // threadIdx work per block:
         //   - Loads BLOCK_SIZE_H heads × BLOCK_SIZE_CHUNK positions from dt_raw.
-        //   - Adds dt_bias, applies softplus, clamps to dt_limit.
+        //   - (Moved to Step 4) Adds dt_bias, applies softplus, clamps to dt_limit.
         //   - Multiplies by A (scalar per head) to get dA per position.
         //   - Computes cumulative sum of dA along the chunk_len axis (axis=1 in Triton).
-        //   - Stores dt_discretized and dA_cumsum back to VRAM.
+        //   - Stores dA_cumsum back to VRAM (dt_discretized moved to Step 4).
         //
         // Outputs are stored in Triton's transposed layout [batch, nheads, nchunks, chunk_len],
         // which puts the heads dimension before chunks to allow coalesced per-head access

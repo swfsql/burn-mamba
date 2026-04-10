@@ -1,5 +1,6 @@
 pub mod bidi;
 pub mod cache;
+#[cfg(feature = "cubecl")]
 pub mod gpu;
 pub mod layer;
 pub mod mamba2;

@@ -1,12 +1,14 @@
 [package]
 name = "burn-mamba"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 
 [features]
-default = ["mamba1", "mamba2"]
+default = ["mamba1", "mamba2", "cubecl", "wip"]
 mamba1 = []
 mamba2 = []
+cubecl = ["dep:cubecl", "dep:cubek"]
+wip = ["cubecl"] # WIP implementation (code not yet used)
 # backend selection for tests or examples
 dev-ndarray = ["burn/ndarray", "_dev-has-backend"]
 dev-ndarray-simd = ["dev-ndarray", "burn/simd", "burn/std"]
@@ -14,14 +16,14 @@ dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/std", "burn/accelerate"]
 dev-ndarray-blas-netlib = ["dev-ndarray", "burn/std", "burn/blas-netlib"]
 dev-ndarray-blas-openblas = ["dev-ndarray", "burn/std", "burn/openblas"]
 dev-flex = ["_dev-has-backend"]
-dev-cpu = ["burn/cpu", "burn/std", "_dev-has-backend"]
+dev-cpu = ["burn/cpu", "burn/std", "cubecl?/cpu" , "_dev-has-backend"]
 dev-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
 dev-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-dev-wgpu = ["burn/wgpu", "burn/std", "_dev-has-backend"]
-dev-metal = ["burn/metal", "burn/std", "_dev-has-backend"]
-dev-vulkan = ["burn/vulkan", "burn/std", "_dev-has-backend"]
-dev-cuda = ["burn/cuda", "burn/std", "_dev-has-backend"]
-dev-rocm = ["burn/rocm", "burn/std", "_dev-has-backend"]
+dev-wgpu = ["burn/wgpu", "burn/std", "cubecl?/wgpu", "_dev-has-backend"]
+dev-metal = ["burn/metal", "burn/std", "cubecl?/metal", "_dev-has-backend"]
+dev-vulkan = ["burn/vulkan", "burn/std", "cubecl?/vulkan", "_dev-has-backend"]
+dev-cuda = ["burn/cuda", "burn/std", "cubecl?/cuda", "_dev-has-backend"]
+dev-rocm = ["burn/rocm", "burn/std", "cubecl?/rocm", "_dev-has-backend"]
 dev-remote = ["burn/remote", "burn/std", "_dev-has-backend"]
 # misc features for tests or examples
 dev-f16 = []
@@ -31,14 +33,13 @@ _dev-has-backend = [] # signal if any backend was selected
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
+cubecl = { version = "0.10.0-pre.3", default-features = false, features = ["default"], optional = true }
+cubek = { version = "0.2.0-pre.3", default-features = false, features = ["default", "convolution", "matmul"], optional = true }
 
 ### For the main branch. ###
-# burn = { version = "0.21.0-pre.2", default-features = false }
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d7075e20d5103204a52aeaf907e7f0e0edd46c17", default-features = false} # 2026-04-02
+burn = { version = "0.21.0-pre.3", default-features = false}
 ### For local development. ###
-# burn = { path = "../burn/crates/burn", default-features = false } # local burn with ndarray-f16 + graph-sweep
-# [patch.crates-io]
-# ndarray = { path = "../ndarray" } # local ndarray with f16 support
+# burn = { path = "../burn/crates/burn", default-features = false }
 
 [dev-dependencies]
 num-traits = "0.2.19"
@@ -48,13 +49,11 @@ flate2 = "1.1.4"
 dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
-burn-flex = { git = "https://github.com/antimora/burn-flex.git", rev = "514e3b3f6abd03d2008e61cdcaeae37d5f0001c2", default-features = false, features = ["std", "simd"] } # 2026-04-07
+burn-flex = { version = "0.21.0-pre.3", default-features = false, features = ["std", "simd"] }
 
 ### For the main branch. ###
-# burn = { version = "0.21.0-pre.2", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
-# burn-dataset = { version = "0.21.0-pre.2", default-features = false, features = ["network"] }
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d7075e20d5103204a52aeaf907e7f0e0edd46c17", default-features = false, features = ["autodiff", "train", "dataset", "std"]} # 2026-04-02
-burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "d7075e20d5103204a52aeaf907e7f0e0edd46c17", default-features = false, features = ["network"] } # 2026-04-02
+burn = { version = "0.21.0-pre.3", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { version = "0.21.0-pre.3", default-features = false, features = ["network"] }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

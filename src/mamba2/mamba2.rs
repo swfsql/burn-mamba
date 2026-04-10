@@ -510,7 +510,10 @@ impl Mamba2Config {
 #[derive(Debug, Clone)]
 pub enum SsdPath {
     Core(usize),
+    #[cfg(feature = "cubecl")]
     GpuNaive(usize),
+    #[cfg(feature = "cubecl")]
+    Gpu(usize),
 }
 
 impl SsdPath {
@@ -531,6 +534,7 @@ impl SsdPath {
     /// Optional GPU Naive variant.
     ///
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    #[cfg(feature = "cubecl")]
     pub fn gpu_naive_optimal(state_rank: usize, per_head_dim: usize) -> Self {
         Self::GpuNaive((state_rank * per_head_dim).isqrt())
     }
@@ -538,14 +542,34 @@ impl SsdPath {
     /// Optional GPU Naive variant.
     ///
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    #[cfg(feature = "cubecl")]
     pub fn gpu_naive_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
         Self::gpu_naive_optimal(block.state_rank, block.per_head_dim())
+    }
+
+    /// Optional GPU Naive variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    #[cfg(feature = "cubecl")]
+    pub fn gpu_optimal(state_rank: usize, per_head_dim: usize) -> Self {
+        Self::Gpu((state_rank * per_head_dim).isqrt())
+    }
+
+    /// Optional GPU Naive variant.
+    ///
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    #[cfg(feature = "cubecl")]
+    pub fn gpu_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+        Self::gpu_optimal(block.state_rank, block.per_head_dim())
     }
 
     pub fn chunk_len(&self) -> usize {
         match self {
             SsdPath::Core(chunk_len) => *chunk_len,
+            #[cfg(feature = "cubecl")]
             SsdPath::GpuNaive(chunk_len) => *chunk_len,
+            #[cfg(feature = "cubecl")]
+            SsdPath::Gpu(chunk_len) => *chunk_len,
         }
     }
 }
@@ -808,6 +832,7 @@ impl<B: Backend> Mamba2<B> {
                     chunk_len,
                 )
             }
+            #[cfg(feature = "cubecl")]
             SsdPath::GpuNaive(_chunk_len) => Self::chunked_selective_scan_hybrid_naive(
                 x_bShp,
                 dt_bSh,
@@ -821,6 +846,8 @@ impl<B: Backend> Mamba2<B> {
                 state_rank,
                 chunk_len,
             ),
+            #[cfg(feature = "cubecl")]
+            SsdPath::Gpu(_chunk_len) => todo!(),
         };
         assert_eq!(
             [batch, sequence_padded, nheads, per_head_dim],
