@@ -1,45 +1,50 @@
 [package]
 name = "burn-mamba"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2024"
 
 [features]
-default = ["mamba1", "mamba2", "cubecl", "wip"]
+default = ["mamba1", "mamba2", "cubecl", "wip", "autodiff"]
 mamba1 = []
 mamba2 = []
-cubecl = ["dep:cubecl", "dep:cubek"]
+cubecl = ["dep:cubek", "dep:burn-cubecl", "burn/cubecl"]
 wip = ["cubecl"] # WIP implementation (code not yet used)
-# backend selection for tests or examples
-dev-ndarray = ["burn/ndarray", "_dev-has-backend"]
-dev-ndarray-simd = ["dev-ndarray", "burn/simd", "burn/std"]
-dev-ndarray-blas-accelerate = ["dev-ndarray", "burn/std", "burn/accelerate"]
-dev-ndarray-blas-netlib = ["dev-ndarray", "burn/std", "burn/blas-netlib"]
-dev-ndarray-blas-openblas = ["dev-ndarray", "burn/std", "burn/openblas"]
-dev-flex = ["_dev-has-backend"]
-dev-cpu = ["burn/cpu", "burn/std", "cubecl?/cpu" , "_dev-has-backend"]
-dev-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-dev-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-dev-wgpu = ["burn/wgpu", "burn/std", "cubecl?/wgpu", "_dev-has-backend"]
-dev-metal = ["burn/metal", "burn/std", "cubecl?/metal", "_dev-has-backend"]
-dev-vulkan = ["burn/vulkan", "burn/std", "cubecl?/vulkan", "_dev-has-backend"]
-dev-cuda = ["burn/cuda", "burn/std", "cubecl?/cuda", "_dev-has-backend"]
-dev-rocm = ["burn/rocm", "burn/std", "cubecl?/rocm", "_dev-has-backend"]
-dev-remote = ["burn/remote", "burn/std", "_dev-has-backend"]
+autodiff = ["burn/autodiff"]
+# backend selection
+backend-ndarray = ["burn/ndarray", "_dev-has-backend"]
+backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
+backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
+backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
+backend-flex = ["burn/flex", "_dev-has-backend"]
+backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
+backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
+backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
+backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-has-backend"]
+backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-has-backend"]
+backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-has-backend"]
+backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-has-backend"]
+backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-has-backend"]
+backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-has-backend"]
 # misc features for tests or examples
 dev-f16 = []
+dev-simd = ["burn/simd", "burn/std"]
 dev-autotune = ["burn/autotune"]
 dev-fusion = ["burn/fusion"]
 _dev-has-backend = [] # signal if any backend was selected
+# TODO: the `dev-*`/`backend-*` features were initially meant to only refer to testing/examples, but now they
+# leak into the library for the cubecl needs. Try to solve this.
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
-cubecl = { version = "0.10.0-pre.3", default-features = false, features = ["default"], optional = true }
-cubek = { version = "0.2.0-pre.3", default-features = false, features = ["default", "convolution", "matmul"], optional = true }
 
 ### For the main branch. ###
-burn = { version = "0.21.0-pre.3", default-features = false}
+burn = { version = "0.21.0-pre.4", default-features = false}
+burn-cubecl = { version = "0.21.0-pre.4", default-features = false, optional = true}
+cubek = { version = "0.2.0-pre.4", default-features = false, features = ["default", "convolution", "matmul"], optional = true }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
+# burn-cubecl = { path = "../burn/crates/burn-cubecl", default-features = false }
+# cubek = { path = "../cubek/crates/cubek", default-features = false, features = ["default", "convolution", "matmul"], optional = true }
 
 [dev-dependencies]
 num-traits = "0.2.19"
@@ -49,11 +54,10 @@ flate2 = "1.1.4"
 dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
-burn-flex = { version = "0.21.0-pre.3", default-features = false, features = ["std", "simd"] }
 
 ### For the main branch. ###
-burn = { version = "0.21.0-pre.3", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
-burn-dataset = { version = "0.21.0-pre.3", default-features = false, features = ["network"] }
+burn = { version = "0.21.0-pre.4", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { version = "0.21.0-pre.4", features = ["network"] }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

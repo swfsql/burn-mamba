@@ -163,7 +163,10 @@ impl Mamba2NetworkConfig {
 // Inference implementations
 // ---------------------------------------------------------------------------
 
-impl<B: Backend> Mamba2Network<B> {
+impl<B: Backend> Mamba2Network<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     // -----------------------------------------------------------------------
     // forward  (full sequence — training / prefill)
     // -----------------------------------------------------------------------
@@ -182,8 +185,6 @@ impl<B: Backend> Mamba2Network<B> {
     ///                  caches that can be returned and reused for a subsequent
     ///                  decoding step.
     /// - `ssd_path`   — SSD algorithm and chunk length selection.
-    ///                  Defaults to the Core SSD algorithm with the chunk length
-    ///                  value of `√(state_rank · per_head_dim)`.
     ///
     /// # Returns
     /// `(logits, caches)` where:
@@ -194,7 +195,7 @@ impl<B: Backend> Mamba2Network<B> {
         &self,
         x: Tensor<B, 2, Int>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();

@@ -76,7 +76,7 @@ where
     ///   → reshaped →      [batch, sequence, nheads, per_head_dim]
     /// ```
     #[allow(non_snake_case)]
-    pub fn chunked_selective_scan_hybrid(
+    pub fn chunked_selective_scan_hybrid_naive(
         x_bshp: Tensor<B, 4>,
         dt_bsh: Tensor<B, 3>,
         a_decay_h: Tensor<B, 1>,
@@ -158,7 +158,7 @@ where
             let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
             let [_batch, _nchunks, _chunk_len, ngroups, state_rank] = b_bnlgr.dims();
 
-            // permute b and x to prepare them for the matmul
+            // permute b and x to prepare them for the mamtul
             let x_bnhpl = x_bnlhp.clone().permute([0, 1, 3, 4, 2]);
             assert_eq!(
                 [batch, nchunks, nheads, per_head_dim, chunk_len],

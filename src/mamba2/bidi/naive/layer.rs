@@ -62,7 +62,10 @@ impl Mamba2BidiLayersConfig {
     }
 }
 
-impl<B: Backend> Mamba2BidiLayers<B> {
+impl<B: Backend> Mamba2BidiLayers<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output [batch, sequence, d_model]
@@ -72,7 +75,7 @@ impl<B: Backend> Mamba2BidiLayers<B> {
         caches: Option<Mamba2Caches<B>>,
         // straight_caches: Option<Mamba2Caches<B>>,
         // reverse_caches: Option<Mamba2Caches<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let n_virtual_layers = self
             .n_virtual_layers
@@ -209,7 +212,10 @@ impl Mamba2BidiLayerPairConfig {
     }
 }
 
-impl<B: Backend> Mamba2BidiLayerPair<B> {
+impl<B: Backend> Mamba2BidiLayerPair<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output.0 [batch, sequence, d_model]
@@ -218,7 +224,7 @@ impl<B: Backend> Mamba2BidiLayerPair<B> {
         x: Tensor<B, 3>,
         straight_cache: Option<Mamba2Cache<B>>,
         reverse_cache: Option<Mamba2Cache<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 

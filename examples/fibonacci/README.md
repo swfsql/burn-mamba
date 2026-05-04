@@ -10,10 +10,10 @@ The dataset is generated based on two initial numbers between `0.0` and `1.0`, a
 
 ```bash
 # debug check in flex (fp32)
-cargo check --example fibonacci --features "dev-flex"
+cargo check --example fibonacci --features "backend-flex"
 
 # training and running inference in flex (fp32)
-cargo run --release --example fibonacci --features "dev-flex" -- --training --inference
+cargo run --release --example fibonacci --features "backend-flex" -- --training --inference
 ```
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.  

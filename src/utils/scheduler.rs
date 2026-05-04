@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn test_cosine_annealing_warmup() {
-        let scheduler = CosineAnnealingLr::new(1.0, 0.01, 1000, 100);
+        let scheduler = CosineAnnealingLr::new(1000);
 
         // At step 0, LR should be 0
         assert_eq!(scheduler.get_lr(0), 0.0);
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_constant_lr() {
-        let scheduler = ConstantLr::new(0.001);
+        let scheduler = ConstantLr::new().with_lr(0.001);
         assert_eq!(scheduler.get_lr(0), 0.001);
         assert_eq!(scheduler.get_lr(1000), 0.001);
         assert_eq!(scheduler.get_lr(10000), 0.001);

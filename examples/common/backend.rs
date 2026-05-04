@@ -1,5 +1,5 @@
 use burn::prelude::*;
-use burn::tensor::backend::AutodiffBackend;
+use burn::tensor::backend::{AutodiffBackend, BackendTypes};
 
 #[cfg(feature = "dev-f16")]
 mod ty {
@@ -23,28 +23,32 @@ mod ty {
 }
 pub use ty::*;
 
-#[cfg(feature = "dev-ndarray")]
+#[cfg(feature = "backend-ndarray")]
 pub type MainBackend = burn::backend::NdArray<FloatElement, IntElement>;
-#[cfg(feature = "dev-flex")]
-pub type MainBackend = burn_flex::Flex;
-#[cfg(feature = "dev-cpu")]
+#[cfg(feature = "backend-flex")]
+pub type MainBackend = burn::backend::Flex;
+#[cfg(feature = "backend-cpu")]
 pub type MainBackend = burn::backend::Cpu<FloatElement, IntElement>;
-#[cfg(any(feature = "dev-tch-cpu", feature = "dev-tch-gpu"))]
+#[cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu"))]
 pub type MainBackend = burn::backend::libtorch::LibTorch<FloatElement, IntElement>;
-#[cfg(any(feature = "dev-wgpu", feature = "dev-metal", feature = "dev-vulkan"))]
+#[cfg(any(
+    feature = "backend-wgpu",
+    feature = "backend-metal",
+    feature = "backend-vulkan"
+))]
 pub type MainBackend = burn::backend::wgpu::Wgpu<FloatElement, IntElement>;
-#[cfg(feature = "dev-cuda")]
+#[cfg(feature = "backend-cuda")]
 pub type MainBackend = burn::backend::Cuda<FloatElement, IntElement>;
-#[cfg(feature = "dev-rocm")]
+#[cfg(feature = "backend-rocm")]
 pub type MainBackend = burn::backend::Rocm<FloatElement, IntElement>;
-#[cfg(feature = "dev-remote")]
+#[cfg(feature = "backend-remote")]
 pub type MainBackend = burn::backend::RemoteBackend<FloatElement, IntElement>;
 
 pub trait MainDevice: Backend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         Default::default()
     }
-    fn set_dtype(device: &<Self as Backend>::Device) {
+    fn set_dtype(device: &<Self as BackendTypes>::Device) {
         burn::tensor::set_default_dtypes::<Self>(
             &device,
             FLOAT_DTYPE, // default float
@@ -55,34 +59,34 @@ pub trait MainDevice: Backend {
 }
 
 #[cfg(any(
-    feature = "dev-ndarray",
-    feature = "dev-flex",
-    feature = "dev-cpu",
-    feature = "dev-tch-cpu",
-    feature = "dev-wgpu",
-    feature = "dev-metal",
-    feature = "dev-vulkan",
-    feature = "dev-cuda",
-    feature = "dev-rocm",
-    feature = "dev-remote"
+    feature = "backend-ndarray",
+    feature = "backend-flex",
+    feature = "backend-cpu",
+    feature = "backend-tch-cpu",
+    feature = "backend-wgpu",
+    feature = "backend-metal",
+    feature = "backend-vulkan",
+    feature = "backend-cuda",
+    feature = "backend-rocm",
+    feature = "backend-remote"
 ))]
 impl MainDevice for MainBackend {}
-#[cfg(all(feature = "dev-tch-gpu", not(target_os = "macos")))]
+#[cfg(all(feature = "backend-tch-gpu", not(target_os = "macos")))]
 impl MainDevice for MainBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         burn::backend::libtorch::LibTorchDevice::Cuda(0)
     }
 }
-#[cfg(all(feature = "dev-tch-gpu", target_os = "macos"))]
+#[cfg(all(feature = "backend-tch-gpu", target_os = "macos"))]
 impl MainDevice for MainBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         burn::backend::libtorch::LibTorchDevice::Mps
     }
 }
 
 pub type MainAutoBackend = burn::backend::Autodiff<MainBackend>;
 impl MainDevice for MainAutoBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         <<Self as AutodiffBackend>::InnerBackend as MainDevice>::main_device()
     }
 }

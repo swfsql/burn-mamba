@@ -72,12 +72,15 @@ impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
     }
 }
 
-impl<B: Backend> MyMamba2Network<B> {
+impl<B: Backend> MyMamba2Network<B>
+where
+    B: mamba2::gpu::BackendExt,
+{
     pub fn forward(
         &self,
         x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch_size, sequence_len, _input_dim] = x.dims();
         let [_input_dim, d_model] = self.in_proj.weight.dims();

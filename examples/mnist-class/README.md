@@ -17,11 +17,11 @@ Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cach
 
 ```bash
 # debug check in flex (fp32)
-cargo check --example mnist-class --features "dev-flex"
+cargo check --example mnist-class --features "backend-flex"
 
 # training and running inference in wgpu (fp32)
 # note: the following requires ~7GB vram during training by default
-cargo run --release --example mnist-class --features "dev-wgpu" -- --training --inference
+cargo run --release --example mnist-class --features "backend-wgpu" -- --training --inference
 ```
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.  

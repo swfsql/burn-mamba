@@ -1,0 +1,2 @@
+**/tmp/*.mpk filter=lfs diff=lfs merge=lfs -text
+**/tmp/*.json filter=lfs diff=lfs merge=lfs -text

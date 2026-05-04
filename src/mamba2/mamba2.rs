@@ -509,72 +509,120 @@ impl Mamba2Config {
 /// Optimal value is approximately `√(state_rank · per_head_dim)`.
 #[derive(Debug, Clone)]
 pub enum SsdPath {
-    Core(usize),
+    Core(Option<usize>),
+    // #[cfg(feature = "cubecl")]
+    GpuNaive(Option<usize>),
     #[cfg(feature = "cubecl")]
-    GpuNaive(usize),
-    #[cfg(feature = "cubecl")]
-    Gpu(usize),
+    Gpu(Option<usize>),
 }
 
 impl SsdPath {
-    /// Optional Core variant.
-    ///
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
-    pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        Self::Core((state_rank * per_head_dim).isqrt())
+    pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
+        (state_rank * per_head_dim)
+            .isqrt()
+            // rule-of-thumb
+            .next_multiple_of(4)
+            .min(512)
     }
 
-    /// Optional Core variant.
+    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`,
+    /// further ensured to be a multiple of the GPU's plane dimension.
+    #[cfg(feature = "cubecl")]
+    pub fn optimal_gpu(state_rank: usize, per_head_dim: usize) -> usize {
+        Self::optimal_default(state_rank, per_head_dim)
+            .next_multiple_of(crate::mamba2::gpu::USUAL_PLANE_DIM as usize) // 32
+            .min(512)
+        // Note: The current GPU impl requires all planes to be filled,
+        // and the GPU's PLANE_DIM is currently assumed to be 32.
+        // TODO: properly support the client's settings.
+    }
+
+    /// Optimal Core variant.
     ///
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    /// See [optimal_default](Self::optimal_default) for more info.
+    pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
+        let optim = Self::optimal_default(state_rank, per_head_dim);
+        Self::Core(Some(optim))
+    }
+
+    /// Optimal Core variant.
+    ///
+    /// See [optimal_default](Self::optimal_default) for more info.
     pub fn core_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
         Self::core_optimal(block.state_rank, block.per_head_dim())
     }
 
-    /// Optional GPU Naive variant.
+    /// Optimal GPU Naive variant.
     ///
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    /// See [optimal_default](Self::optimal_default) for more info.
     #[cfg(feature = "cubecl")]
     pub fn gpu_naive_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        Self::GpuNaive((state_rank * per_head_dim).isqrt())
+        let optim = Self::optimal_default(state_rank, per_head_dim);
+        Self::GpuNaive(Some(optim))
     }
 
-    /// Optional GPU Naive variant.
+    /// Optimal GPU Naive variant.
     ///
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    /// See [optimal_default](Self::optimal_default) for more info.
     #[cfg(feature = "cubecl")]
     pub fn gpu_naive_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
         Self::gpu_naive_optimal(block.state_rank, block.per_head_dim())
     }
 
-    /// Optional GPU Naive variant.
+    /// Optimal GPU Naive variant.
     ///
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    /// See [optimal_gpu](Self::optimal_gpu) for more info.
     #[cfg(feature = "cubecl")]
     pub fn gpu_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        Self::Gpu((state_rank * per_head_dim).isqrt())
+        let optim = Self::optimal_gpu(state_rank, per_head_dim);
+        Self::Gpu(Some(optim))
     }
 
-    /// Optional GPU Naive variant.
+    /// Optimal GPU Naive variant.
     ///
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
+    /// See [optimal_gpu](Self::optimal_gpu) for more info.
     #[cfg(feature = "cubecl")]
     pub fn gpu_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
         Self::gpu_optimal(block.state_rank, block.per_head_dim())
     }
 
-    pub fn chunk_len(&self) -> usize {
+    pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            SsdPath::Core(chunk_len) => *chunk_len,
+            SsdPath::Core(chunk_len) => chunk_len.clone(),
+            SsdPath::GpuNaive(chunk_len) => chunk_len.clone(),
             #[cfg(feature = "cubecl")]
-            SsdPath::GpuNaive(chunk_len) => *chunk_len,
+            SsdPath::Gpu(chunk_len) => chunk_len.clone(),
+        }
+    }
+
+    pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
+        match self {
+            SsdPath::Core(chunk_len) => {
+                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
+            }
+            SsdPath::GpuNaive(chunk_len) => {
+                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
+            }
             #[cfg(feature = "cubecl")]
-            SsdPath::Gpu(chunk_len) => *chunk_len,
+            SsdPath::Gpu(chunk_len) => {
+                chunk_len.unwrap_or_else(|| Self::optimal_gpu(state_rank, per_head_dim))
+            }
         }
     }
 }
 
-impl<B: Backend> Mamba2<B> {
+impl Default for SsdPath {
+    fn default() -> SsdPath {
+        // SsdPath defaults to the Core algorithm with the optimal chunk length.
+        SsdPath::Core(None)
+    }
+}
+
+impl<B: Backend> Mamba2<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     /// Process a full input sequence using the chunkwise SSD algorithm.
     ///
     /// This is the primary training and prefill path.  The computation is
@@ -612,7 +660,7 @@ impl<B: Backend> Mamba2<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -771,16 +819,11 @@ impl<B: Backend> Mamba2<B> {
         // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
         // The state is thus carried through unchanged, so the final state of
         // the padded last chunk equals the state after the last real token.
-        let ssd_path = ssd_path.unwrap_or(SsdPath::core_optimal_from_block(&self));
-        let chunk_len = ssd_path.chunk_len();
-        let sequence_mod = sequence % chunk_len;
-        let pad = if sequence_mod == 0 {
-            0
-        } else {
-            chunk_len - sequence_mod
-        };
-        let (x_bShp, dt_bSh, b_bSgr, c_bSgr, sequence_padded) = if pad == 0 {
-            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr, sequence)
+        let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+        let sequence_padded = sequence.next_multiple_of(chunk_len);
+        let pad = sequence_padded - sequence;
+        let (x_bShp, dt_bSh, b_bSgr, c_bSgr) = if pad == 0 {
+            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr)
         } else {
             let x_bshp = Tensor::cat(
                 vec![
@@ -810,7 +853,7 @@ impl<B: Backend> Mamba2<B> {
                 ],
                 1,
             );
-            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr, sequence + pad)
+            (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr)
         };
 
         // ── Step 6: Chunked selective scan ────────────────────────────────────
@@ -832,7 +875,6 @@ impl<B: Backend> Mamba2<B> {
                     chunk_len,
                 )
             }
-            #[cfg(feature = "cubecl")]
             SsdPath::GpuNaive(_chunk_len) => Self::chunked_selective_scan_hybrid_naive(
                 x_bShp,
                 dt_bSh,
@@ -847,7 +889,27 @@ impl<B: Backend> Mamba2<B> {
                 chunk_len,
             ),
             #[cfg(feature = "cubecl")]
-            SsdPath::Gpu(_chunk_len) => todo!(),
+            SsdPath::Gpu(_chunk_len) => {
+                // TODO: move assertion to the gpu css wrapper, and to individual kernels
+                assert_eq!(
+                    chunk_len % 32,
+                    0,
+                    "Only chunk lengths ({chunk_len}) multiple of 32 are supported by cubecl"
+                );
+                Self::chunked_selective_scan_hybrid(
+                    x_bShp,
+                    dt_bSh,
+                    a_head_decay_h,
+                    b_bSgr,
+                    c_bSgr,
+                    self.d_h.val(),
+                    cache.ssm_bhpr,
+                    self.init_states_hpr.as_ref().map(|s| s.val()),
+                    ngroups,
+                    state_rank,
+                    chunk_len,
+                )
+            }
         };
         assert_eq!(
             [batch, sequence_padded, nheads, per_head_dim],
@@ -862,7 +924,11 @@ impl<B: Backend> Mamba2<B> {
         );
 
         // Remove zero-pad columns that were added at Step 5.
-        let y_bshp = y_bShp.slice(s![.., 0..sequence, .., ..]);
+        let y_bshp = if pad == 0 {
+            y_bShp
+        } else {
+            y_bShp.slice(s![.., 0..sequence, .., ..])
+        };
 
         // Reshape into sequence.
         let y_bsi = y_bshp.reshape([batch, sequence, d_inner]);
@@ -1178,6 +1244,10 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 b_bnhlr.dims()
             );
+
+            // TODO: issue for needing to ensure decayed_x_bnhpl is contiguous
+            let decayed_x_bnhpl_data = decayed_x_bnhpl.into_data();
+            let decayed_x_bnhpl: Tensor<B, 5> = Tensor::from_data(decayed_x_bnhpl_data, device);
 
             decayed_x_bnhpl.matmul(b_bnhlr)
         };
@@ -1664,6 +1734,8 @@ mod step {
 /// rank `D + 1`.  Burn requires the output rank to be known at compile time,
 /// which is achieved through the const generic expression `{ D + 1 }`.
 fn segsum<B: Backend, const D: usize>(x: Tensor<B, D>) -> Tensor<B, { D + 1 }> {
+    assert!(D > 0);
+
     // cumsum[..., t] = x[..., 0] + x[..., 1] + ... + x[..., t]
     let x_cumsum = x.cumsum(D - 1);
 

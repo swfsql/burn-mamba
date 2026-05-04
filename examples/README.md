@@ -19,7 +19,7 @@ The overall model used throughout the examples is the `Mamba2Network`, defined i
 
 #### Backend Selection
 
-A single backend must be enabled, and features are used to select it -- e.g. `dev-ndarray`. See `burn-mamba/Cargo.toml` > `[features]` section for the backend list. Some extra "dev" features are also available for selection, them being the float precision selection (default f32 vs `dev-f16`) and whether fusion and/or autotune should be enabled.  
+A single backend must be enabled, and features are used to select it -- e.g. `backend-flex`. See `burn-mamba/Cargo.toml` > `[features]` section for the backend list. Some extra "dev" features are also available for selection, them being the float precision selection (default f32 vs `dev-f16`) and whether fusion and/or autotune should be enabled.  
 If no backend is selected, you should get a compile error message.
 
 #### Examples CLI
@@ -29,21 +29,21 @@ All examples use a CLI defined in `common/cli.rs`.
 ##### Usage Example
 
 ```bash
-# training the simplest example on ndarray (fp32) and running inference:
-cargo run --example fibonacci --features "dev-ndarray" -- --training --inference
+# training the simplest example on flex (fp32) and running inference:
+cargo run --example fibonacci --features "backend-flex" -- --training --inference
 
 # assume /tmp/fibonacci-abcd-0 got created:
 ARTIFACTS="/tmp/fibonacci-abcd-0"
 
 # running only the inference from the trained model:
-cargo run --example fibonacci --features "dev-ndarray" -- --inference --artifacts-path "$ARTIFACTS"
+cargo run --example fibonacci --features "backend-flex" -- --inference --artifacts-path "$ARTIFACTS"
 
 # assume /some/path/ contains a different training config file, e.g. with a different seed:
 TCONFIG="/some/path/training_config.json"
 
 # continue training from another training config
 # warning: "$ARTIFACTS/training_config.json" gets overwritten by "$TCONFIG"
-cargo run --example fibonacci --features "dev-ndarray" -- --training --artifacts-path "$ARTIFACTS" --training-config "$TCONFIG"
+cargo run --example fibonacci --features "backend-flex" -- --training --artifacts-path "$ARTIFACTS" --training-config "$TCONFIG"
 ```
 
 ##### CLI Help Message

@@ -110,7 +110,10 @@ impl Mamba2LayersConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layers<B> {
+impl<B: Backend> Mamba2Layers<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     // -----------------------------------------------------------------------
     // forward  (chunked SSD — used for training / prefill)
     // -----------------------------------------------------------------------
@@ -128,8 +131,6 @@ impl<B: Backend> Mamba2Layers<B> {
     /// - `caches`     — optional pre-filled layer caches (useful for prefill
     ///                  followed by decode)
     /// - `ssd_path`   — SSD algorithm and chunk length selection.
-    ///                  Defaults to the Core SSD algorithm with the chunk length
-    ///                  value of `√(state_rank · per_head_dim)`.
     ///
     /// # Returns
     /// `(output, updated_caches)` where `output` has shape
@@ -138,7 +139,7 @@ impl<B: Backend> Mamba2Layers<B> {
         &self,
         mut x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         // The effective number of forward passes equals the number of *virtual*
         // layers.  When no scheduling is configured this equals n_real_layers.
@@ -345,7 +346,10 @@ impl Mamba2LayerConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layer<B> {
+impl<B: Backend> Mamba2Layer<B>
+where
+    B: crate::mamba2::gpu::BackendExt,
+{
     // -----------------------------------------------------------------------
     // forward  (full sequence)
     // -----------------------------------------------------------------------
@@ -364,7 +368,7 @@ impl<B: Backend> Mamba2Layer<B> {
         &self,
         x: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        ssd_path: Option<SsdPath>,
+        ssd_path: SsdPath,
         residual_scale: f32,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();

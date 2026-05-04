@@ -16,14 +16,17 @@ use burn::{
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
-use burn_mamba::mamba2::prelude::SsdPath;
+use burn_mamba::prelude::*;
 
 pub fn train<AutoB: AutodiffBackend>(
     training_config: TrainingConfig,
     model_config: MyMamba2NetworkConfig,
     training_device: AutoB::Device,
     app_args: &AppArgs,
-) {
+) where
+    AutoB: mamba2::gpu::AutodiffBackendExt,
+    AutoB::InnerBackend: mamba2::gpu::BackendExt,
+{
     AutoB::seed(&training_device, training_config.seed);
 
     // load (or init and save) model and optim
@@ -110,21 +113,25 @@ pub fn train<AutoB: AutodiffBackend>(
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'static>;
 
-pub fn epoch_train<B: AutodiffBackend>(
-    dataloader_train: Dataloader<B>,
-    dataloader_valid: Dataloader<B::InnerBackend>,
-    training_model: MyMamba2Network<B>,
+pub fn epoch_train<AutoB: AutodiffBackend>(
+    dataloader_train: Dataloader<AutoB>,
+    dataloader_valid: Dataloader<AutoB::InnerBackend>,
+    training_model: MyMamba2Network<AutoB>,
     training_config: &TrainingConfig,
     model_config: &MyMamba2NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network<B>, B>,
+    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network<AutoB>, AutoB>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba2Network<B> {
+) -> MyMamba2Network<AutoB>
+where
+    AutoB: mamba2::gpu::AutodiffBackendExt,
+    AutoB::InnerBackend: mamba2::gpu::BackendExt,
+{
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
-    let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
+    let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
     let mut training_model = Wrap(training_model, model_config.clone());
@@ -165,7 +172,7 @@ pub fn epoch_train<B: AutodiffBackend>(
             app_args.save_optim(optim);
 
             println!("running validation (batch iteration limit: {valid_loop_limit:?})");
-            epoch_valid::<B::InnerBackend>(
+            epoch_valid::<AutoB::InnerBackend>(
                 std::sync::Arc::clone(&dataloader_valid),
                 training_model.0.valid(),
                 &training_config,
@@ -194,7 +201,9 @@ pub fn epoch_valid<B: Backend>(
     model_config: &MyMamba2NetworkConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
-) {
+) where
+    B: mamba2::gpu::BackendExt,
+{
     let valid_loop_limit = valid_loop_limit.unwrap_or(usize::MAX);
     let valid_num_items = dataloader_valid.num_items();
     let mut metric_meta = burn::train::metric::MetricMetadata {
@@ -231,9 +240,13 @@ pub fn epoch_valid<B: Backend>(
 /// Wrapper over [`Mamba2Network`] for custom implementations.
 pub struct Wrap<B: Backend>(pub MyMamba2Network<B>, pub MyMamba2NetworkConfig);
 
-impl<B: AutodiffBackend> TrainStep for Wrap<B> {
-    type Input = SequenceBatch<B>;
-    type Output = RegressionOutput<B>;
+impl<AutoB: AutodiffBackend> TrainStep for Wrap<AutoB>
+where
+    AutoB: mamba2::gpu::AutodiffBackendExt,
+    AutoB::InnerBackend: mamba2::gpu::BackendExt,
+{
+    type Input = SequenceBatch<AutoB>;
+    type Output = RegressionOutput<AutoB>;
 
     fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
         let pre_metrics = InferenceStep::step(self, batch);
@@ -243,7 +256,10 @@ impl<B: AutodiffBackend> TrainStep for Wrap<B> {
     }
 }
 
-impl<B: Backend> InferenceStep for Wrap<B> {
+impl<B: Backend> InferenceStep for Wrap<B>
+where
+    B: mamba2::gpu::BackendExt,
+{
     type Input = SequenceBatch<B>;
     type Output = RegressionOutput<B>;
 
@@ -259,7 +275,10 @@ impl<B: Backend> InferenceStep for Wrap<B> {
     }
 }
 
-impl<B: Backend> Wrap<B> {
+impl<B: Backend> Wrap<B>
+where
+    B: mamba2::gpu::BackendExt,
+{
     pub fn forward_regression(
         &self,
         input: Tensor<B, 3>,
@@ -271,8 +290,10 @@ impl<B: Backend> Wrap<B> {
         assert_eq!([batch_size, 1], targets.dims());
         assert!(sequence_size >= 1);
 
-        let (output, _caches) = model.forward(input.clone(), None, Some(SsdPath::Core(4)));
-        // let (output, _caches) = model.forward(input.clone(), None, Some(SsdPath::GpuNaive(4)));
+        let (output, _caches) = model.forward(input.clone(), None, SsdPath::Core(None));
+        // TODO: add path selection according to the cubecl cfg
+        // let (output, _caches) = model.forward(input.clone(), None, SsdPath::Gpu(None));
+
         assert_eq!([batch_size, sequence_size, 1], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 1], last_output.dims());
