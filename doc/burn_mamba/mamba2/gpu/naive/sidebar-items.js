@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["mamba2"]};
+window.SIDEBAR_ITEMS = {"mod":["mamba2","mamba2_naive"]};
