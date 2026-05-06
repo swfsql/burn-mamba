@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SsdPath"],"mod":["minimal","serial","serial_recalculated"]};
