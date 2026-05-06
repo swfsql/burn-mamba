@@ -62,10 +62,7 @@ impl Mamba2BidiLayersConfig {
     }
 }
 
-impl<B: Backend> Mamba2BidiLayers<B>
-where
-    B: crate::mamba2::gpu::BackendExt,
-{
+impl<B: Backend> Mamba2BidiLayers<B> {
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output [batch, sequence, d_model]
@@ -212,10 +209,7 @@ impl Mamba2BidiLayerPairConfig {
     }
 }
 
-impl<B: Backend> Mamba2BidiLayerPair<B>
-where
-    B: crate::mamba2::gpu::BackendExt,
-{
+impl<B: Backend> Mamba2BidiLayerPair<B> {
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output.0 [batch, sequence, d_model]

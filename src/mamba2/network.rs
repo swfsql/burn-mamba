@@ -163,10 +163,7 @@ impl Mamba2NetworkConfig {
 // Inference implementations
 // ---------------------------------------------------------------------------
 
-impl<B: Backend> Mamba2Network<B>
-where
-    B: crate::mamba2::gpu::BackendExt,
-{
+impl<B: Backend> Mamba2Network<B> {
     // -----------------------------------------------------------------------
     // forward  (full sequence — training / prefill)
     // -----------------------------------------------------------------------

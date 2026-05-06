@@ -470,7 +470,6 @@ dependencies = [
  "burn-train",
  "burn-vision",
  "burn-wgpu",
- "cubecl",
 ]
 
 [[package]]
@@ -746,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "burn",
  "burn-cubecl",

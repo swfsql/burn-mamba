@@ -72,10 +72,7 @@ impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
     }
 }
 
-impl<B: Backend> MyMamba2Network<B>
-where
-    B: mamba2::gpu::BackendExt,
-{
+impl<B: Backend> MyMamba2Network<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 3>,

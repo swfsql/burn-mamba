@@ -1,6 +1,5 @@
 use burn::prelude::*;
 use burn::tensor::backend::AutodiffBackend;
-use burn_mamba::prelude::*;
 pub use common::{
     backend::{MainAutoBackend, MainBackend, MainDevice},
     cli::AppArgs,
@@ -17,9 +16,8 @@ pub mod common;
 
 pub fn launch<B, AutoB>(app_args: &AppArgs)
 where
-    B: Backend + MainDevice + mamba2::gpu::BackendExt,
-    AutoB: AutodiffBackend + MainDevice + mamba2::gpu::AutodiffBackendExt,
-    AutoB::InnerBackend: mamba2::gpu::BackendExt,
+    B: Backend + MainDevice,
+    AutoB: AutodiffBackend + MainDevice,
 {
     app_args.create_artifact_dir();
 

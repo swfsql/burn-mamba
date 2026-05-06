@@ -110,10 +110,7 @@ impl Mamba2LayersConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layers<B>
-where
-    B: crate::mamba2::gpu::BackendExt,
-{
+impl<B: Backend> Mamba2Layers<B> {
     // -----------------------------------------------------------------------
     // forward  (chunked SSD — used for training / prefill)
     // -----------------------------------------------------------------------
@@ -346,10 +343,7 @@ impl Mamba2LayerConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layer<B>
-where
-    B: crate::mamba2::gpu::BackendExt,
-{
+impl<B: Backend> Mamba2Layer<B> {
     // -----------------------------------------------------------------------
     // forward  (full sequence)
     // -----------------------------------------------------------------------

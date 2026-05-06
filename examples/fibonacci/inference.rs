@@ -17,9 +17,7 @@ pub fn infer<B: Backend>(
     batch_size: usize,
     infer_device: B::Device,
     app_args: &AppArgs,
-) where
-    B: mamba2::gpu::BackendExt,
-{
+) {
     // load model
     let model: MyMamba2Network<B> = app_args
         .load_model(&model_config, &infer_device)
@@ -31,8 +29,8 @@ pub fn infer<B: Backend>(
     let batcher = SequenceBatcher::default();
     // Put all items in one batch
     let batch = batcher.batch(items, &infer_device);
-    let (predicted, _caches) = model.forward(batch.sequences, None, SsdPath::Core(None));
-    // let (predicted, _caches) = model.forward(batch.sequences, None, Some(SsdPath::GpuNaive(4)));
+    let (predicted, _caches) =
+        model.forward(batch.sequences, None, SsdPath::SerialRecalculated(None));
     assert_eq!([batch_size, SEQ_LENGTH + 1, 1], predicted.dims());
     let last_predicted = predicted.narrow(1, SEQ_LENGTH, 1);
     assert_eq!([batch_size, 1, 1], last_predicted.dims());

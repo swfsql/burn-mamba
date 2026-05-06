@@ -1,14 +1,12 @@
 [package]
 name = "burn-mamba"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2024"
 
 [features]
-default = ["mamba1", "mamba2", "cubecl", "wip", "autodiff"]
+default = ["mamba1", "mamba2", "autodiff"]
 mamba1 = []
 mamba2 = []
-cubecl = ["dep:cubek", "dep:burn-cubecl", "burn/cubecl"]
-wip = ["cubecl"] # WIP implementation (code not yet used)
 autodiff = ["burn/autodiff"]
 # backend selection
 backend-ndarray = ["burn/ndarray", "_dev-has-backend"]
@@ -16,15 +14,15 @@ backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelera
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
 backend-flex = ["burn/flex", "_dev-has-backend"]
-backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
+backend-cpu = ["burn/cpu", "burn/std", "_dev-has-backend"]
 backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
 backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-has-backend"]
-backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-has-backend"]
-backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-has-backend"]
-backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-has-backend"]
-backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-has-backend"]
-backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-has-backend"]
+backend-wgpu = ["burn/wgpu", "burn/std", "_dev-has-backend"]
+backend-metal = ["burn/metal", "burn/std", "_dev-has-backend"]
+backend-vulkan = ["burn/vulkan", "burn/std", "_dev-has-backend"]
+backend-cuda = ["burn/cuda", "burn/std", "_dev-has-backend"]
+backend-rocm = ["burn/rocm", "burn/std", "_dev-has-backend"]
+backend-remote = ["burn/remote", "burn/std", "_dev-has-backend"]
 # misc features for tests or examples
 dev-f16 = []
 dev-simd = ["burn/simd", "burn/std"]
