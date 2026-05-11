@@ -11,9 +11,8 @@ pub mod prelude {
     pub use layer::{Mamba2Layer, Mamba2LayerConfig, Mamba2Layers, Mamba2LayersConfig};
     pub use mamba2::{Mamba2, Mamba2Config};
     pub use network::{Mamba2Network, Mamba2NetworkConfig};
-    #[cfg(all(feature = "autodiff", feature = "cubecl"))]
+    #[cfg(all(feature = "autodiff"))]
     pub use ssd::Mamba2AutodiffBackendExt;
-    #[cfg(feature = "cubecl")]
     pub use ssd::Mamba2BackendExt;
     pub use ssd::SsdPath;
 }

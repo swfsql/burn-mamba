@@ -1,12 +1,12 @@
 [package]
 name = "burn-mamba"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2024"
 
 [features]
 default = ["mamba1", "mamba2", "autodiff"]
 mamba1 = []
-mamba2 = ["cubecl"]
+mamba2 = ["autodiff"]
 autodiff = ["burn/autodiff"]
 cubecl = ["dep:burn-cubecl", "burn/cubecl"]
 fusion = ["burn/fusion", "dep:burn-fusion"]

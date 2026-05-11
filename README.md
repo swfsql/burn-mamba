@@ -13,25 +13,31 @@ Mamba is a fast, efficient model for handling long data sequences such as in lan
 
 ```toml
 [dependencies]
-burn = "0.21.0-pre.3"
+burn = "0.21.0"
 burn-mamba = { git = 'https://github.com/swfsql/burn-mamba.git', rev = "abc..." } # add frozen rev
 ```
 
 ##### Features
 
-You can select the Mamba version, both enabled by default:
+- `mamba1`: Enable the Mamba1 types. Enabled by default.
+- `mamba2`: Enable the Mamba2 types. Enabled by default.
+- `autodiff`: Required if using Mamba2, enables an optional backwards algorithm that saves training memory by 1/3.
+- `cubecl`: Required if using Mamba2 in a cubecl backend, enables an optional backwards algorithm that saves memory.
+- `fusion`: Required if using Mamba2 with fusion, enables an optional backwards algorithm that saves memory.
+- `backend-*`: Required if using Mamba2 with a specific backend. The backend selection is also required by the examples.
+- `dev-f16`: Enables `f16` support in examples.
+- `dev-simd`: Enables `burn/simd` support in examples.
+- `dev-autotune`: Enables `burn/autotune` support in examples.
 
-- `mamba1`
-- `mamba2`
-
-For running examples, there are more `dev-` features that can be used for backend selection and configuration. Please check `Cargo.toml` for more information.
+Please check `Cargo.toml` for more info.
 
 ##### Usage
 
 Both models can be used with two methods:
 
-- `forward`: preferred for training, this is a parallel mode that generates a causal-autoregressive output for each timestep.
-- `step`: preferred for inference, this is a mode that generates a single causal output in constant time and memory.
+- `forward`: preferred for training, this is a parallel mode that generates a causal-autoregressive output for each timestep. See [Mamba1::forward](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba1/mamba1/struct.Mamba1.html#method.forward) and [Mamba2::forward](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/mamba2/struct.Mamba2.html#method.forward) for more info.
+  - For Mamba2, it is required an ssd algorithm selection. See [SsdPath](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/ssd/ssd_path/enum.SsdPath.html) for more info.
+- `step`: preferred for inference, this is a mode that generates a single causal output in constant time and memory. See [Mamba1::step](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba1/mamba1/struct.Mamba1.html#method.step) and [Mamba2::step](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/mamba2/struct.Mamba2.html#method.step) for more info.
 
 ###### Examples
 
