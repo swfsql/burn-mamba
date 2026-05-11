@@ -1,5 +1,5 @@
 use burn::prelude::*;
-use burn::tensor::backend::AutodiffBackend;
+use burn::tensor::backend::{AutodiffBackend};
 
 #[cfg(feature = "dev-f16")]
 mod ty {

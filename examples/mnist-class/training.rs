@@ -57,15 +57,15 @@ pub fn train<AutoB>(
         lr: Some(training_config.lr.get_lr(0)),
     };
 
-    println!("running small initial validation...");
-    epoch_valid::<AutoB::InnerBackend>(
-        std::sync::Arc::clone(&dataloader_valid),
-        model.0.valid(),
-        &training_config,
-        &model_config,
-        0,
-        Some(10),
-    );
+    // println!("running small initial validation...");
+    // epoch_valid::<AutoB::InnerBackend>(
+    //     std::sync::Arc::clone(&dataloader_valid),
+    //     model.0.valid(),
+    //     &training_config,
+    //     &model_config,
+    //     0,
+    //     Some(10),
+    // );
 
     println!("Starting training...");
     // Iterate over our training for X epochs

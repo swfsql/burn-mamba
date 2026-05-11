@@ -26,7 +26,7 @@ pub fn stable_max<B: Backend>() -> B::FloatElem {
         | DType::U8 => {
             unreachable!()
         }
-        DType::Bool => {
+        DType::Bool(_) => {
             unreachable!()
         }
         DType::QFloat(_) => {
@@ -73,7 +73,7 @@ pub fn div_eps_f32<B: Backend>() -> f32 {
         | DType::U32
         | DType::U16
         | DType::U8
-        | DType::Bool => {
+        | DType::Bool(_) => {
             unreachable!()
         }
         DType::QFloat(_) => {
