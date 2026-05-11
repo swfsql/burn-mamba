@@ -24,7 +24,16 @@ pub struct SequenceDatasetItem {
 impl SequenceDatasetItem {
     pub fn new(seq_length: usize, noise_level: f32) -> Self {
         // Start with two random numbers between 0 and 1
-        let mut seq = vec![rand::rng().random(), rand::rng().random()];
+
+        // TODO: half has rand_distr feature, but burn can't forward it.
+        // Either ask for a feature forward, or explicitly add half as a dependency. 
+        let lower = rand::rng().random::<f32>();
+        #[cfg(feature = "dev-f16")]
+        let lower = burn::tensor::f16::from_f32(lower);
+        let upper = rand::rng().random::<f32>();
+        #[cfg(feature = "dev-f16")]
+        let upper = burn::tensor::f16::from_f32(upper);
+        let mut seq = vec![lower, upper];
 
         // Generate sequence
         for _i in 0..seq_length {
