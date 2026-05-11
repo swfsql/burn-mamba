@@ -15,7 +15,7 @@ backend-ndarray = ["burn/ndarray", "_dev-has-backend"]
 backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
-backend-flex = ["burn/flex", "_dev-has-backend"]
+# backend-flex = ["burn/flex", "_dev-has-backend"]
 backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
 backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
 backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
@@ -37,9 +37,9 @@ _dev-has-backend = [] # signal if any backend was selected
 serde = { version = "1.0.0", features = ["derive"] }
 
 ### For the main branch. ###
-burn = { version = "0.21.0", default-features = false}
-burn-cubecl = { version = "0.21.0", default-features = false, optional = true}
-burn-fusion = { version = "0.21.0", default-features = false, optional = true}
+burn = { version = "=0.21.0-pre.1", default-features = false}
+burn-cubecl = { version = "=0.21.0-pre.1", default-features = false, optional = true}
+burn-fusion = { version = "=0.21.0-pre.1", default-features = false, optional = true}
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
@@ -56,8 +56,8 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 
 ### For the main branch. ###
-burn = { version = "0.21.0", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
-burn-dataset = { version = "0.21.0", features = ["network"] }
+burn = { version = "=0.21.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { version = "=0.21.0-pre.1", features = ["network"] }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

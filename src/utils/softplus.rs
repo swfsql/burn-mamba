@@ -30,7 +30,7 @@ pub fn softplus<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
         | DType::U8 => {
             unreachable!()
         }
-        DType::Bool(_) => {
+        DType::Bool => {
             unreachable!()
         }
         DType::QFloat(_) => {

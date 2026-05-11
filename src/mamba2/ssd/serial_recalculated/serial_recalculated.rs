@@ -173,8 +173,8 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
 // TODO: somehow avoid leaking backend-* features into the library
 #[cfg(feature = "backend-ndarray")]
 impl<F, I> Mamba2BackendExt for burn::backend::NdArray<F, I> {}
-#[cfg(feature = "backend-flex")]
-impl Mamba2BackendExt for burn::backend::Flex {}
+// #[cfg(feature = "backend-flex")]
+// impl Mamba2BackendExt for burn::backend::Flex {}
 #[cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu"))]
 impl<F, I> Mamba2BackendExt for burn::backend::libtorch::LibTorch<F, I> {}
 #[cfg(feature = "backend-remote")]

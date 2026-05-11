@@ -32,6 +32,7 @@
 use crate::mamba2::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
+use burn::module::Ignored;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -53,8 +54,8 @@ pub struct Mamba2Layers<B: Backend> {
     /// When `None`, the virtual layer count falls back to `n_real_layers` (no
     /// sharing).  Marked `module(skip)` so Burn does not treat it as a
     /// trainable parameter.
-    #[module(skip)]
-    pub n_virtual_layers: Option<(usize, Schedule)>,
+    // #[module(skip)]
+    pub n_virtual_layers: Ignored<Option<(usize, Schedule)>>,
 
     /// The actual weight-bearing layer instances.
     ///
@@ -102,7 +103,7 @@ impl Mamba2LayersConfig {
 
         Mamba2Layers {
             n_real_layers: self.n_real_layers,
-            n_virtual_layers: self.n_virtual_layers.clone(),
+            n_virtual_layers: Ignored(self.n_virtual_layers.clone()),
             real_layers,
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
@@ -247,7 +248,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     /// Map a virtual layer index to the corresponding real layer index using
     /// the configured schedule (or identity when no schedule is set).
     fn real_idx(&self, virtual_idx: usize) -> usize {
-        if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+        if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers.0 {
             schedule.real_idx(virtual_idx, *n_virtual_layers, self.n_real_layers)
         } else {
             virtual_idx

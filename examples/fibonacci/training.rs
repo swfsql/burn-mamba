@@ -280,7 +280,7 @@ impl<B: Backend + Mamba2BackendExt> Wrap<B> {
 
         let ssd_path = SsdPath::Minimal(None);
         // let ssd_path = SsdPath::Serial(None);
-        // let ssd_path = SsdPath::SerialRecalculated(None); // saves vram
+        // let ssd_path = SsdPath::SerialRecalculated(None); // saves ~33% vram
         //
         let (output, _caches) = model.forward(input.clone(), None, ssd_path);
 
