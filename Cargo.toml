@@ -37,9 +37,9 @@ _dev-has-backend = [] # signal if any backend was selected
 serde = { version = "1.0.0", features = ["derive"] }
 
 ### For the main branch. ###
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "5b4b33463232ba8841fd85a089372f6a3f4ecdde", default-features = false}
-burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "5b4b33463232ba8841fd85a089372f6a3f4ecdde", default-features = false, optional = true}
-burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "5b4b33463232ba8841fd85a089372f6a3f4ecdde", default-features = false, optional = true}
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "68a42bb490bf94547cf0157c45a167a6f23a57cb", default-features = false}
+burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "68a42bb490bf94547cf0157c45a167a6f23a57cb", default-features = false, optional = true}
+burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "68a42bb490bf94547cf0157c45a167a6f23a57cb", default-features = false, optional = true}
 # burn = { version = "=0.21.0-pre.2", default-features = false}
 # burn-cubecl = { version = "=0.21.0-pre.2", default-features = false, optional = true}
 # burn-fusion = { version = "=0.21.0-pre.2", default-features = false, optional = true}
@@ -59,8 +59,8 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 
 ### For the main branch. ###
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "5b4b33463232ba8841fd85a089372f6a3f4ecdde", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
-burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "5b4b33463232ba8841fd85a089372f6a3f4ecdde", features = ["network"] }
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "68a42bb490bf94547cf0157c45a167a6f23a57cb", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "68a42bb490bf94547cf0157c45a167a6f23a57cb", features = ["network"] }
 # burn = { version = "=0.21.0-pre.2", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
 # burn-dataset = { version = "=0.21.0-pre.2", features = ["network"] }
 ### For local development. ###
