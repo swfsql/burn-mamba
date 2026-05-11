@@ -1,5 +1,5 @@
 use burn::prelude::*;
-use burn::tensor::backend::{AutodiffBackend};
+use burn::tensor::backend::{AutodiffBackend, BackendTypes};
 
 #[cfg(feature = "dev-f16")]
 mod ty {
@@ -45,10 +45,10 @@ pub type MainBackend = burn::backend::Rocm<FloatElement, IntElement>;
 pub type MainBackend = burn::backend::RemoteBackend<FloatElement, IntElement>;
 
 pub trait MainDevice: Backend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         Default::default()
     }
-    fn set_dtype(device: &<Self as Backend>::Device) {
+    fn set_dtype(device: &<Self as BackendTypes>::Device) {
         burn::tensor::set_default_dtypes::<Self>(
             &device,
             FLOAT_DTYPE, // default float
@@ -73,20 +73,20 @@ pub trait MainDevice: Backend {
 impl MainDevice for MainBackend {}
 #[cfg(all(feature = "backend-tch-gpu", not(target_os = "macos")))]
 impl MainDevice for MainBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         burn::backend::libtorch::LibTorchDevice::Cuda(0)
     }
 }
 #[cfg(all(feature = "backend-tch-gpu", target_os = "macos"))]
 impl MainDevice for MainBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         burn::backend::libtorch::LibTorchDevice::Mps
     }
 }
 
 pub type MainAutoBackend = burn::backend::Autodiff<MainBackend>;
 impl MainDevice for MainAutoBackend {
-    fn main_device() -> <Self as Backend>::Device {
+    fn main_device() -> <Self as BackendTypes>::Device {
         <<Self as AutodiffBackend>::InnerBackend as MainDevice>::main_device()
     }
 }
