@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["SsdPath"]};
+window.SIDEBAR_ITEMS = {"enum":["SsdPath"],"struct":["SsdInput"]};
