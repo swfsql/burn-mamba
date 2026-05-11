@@ -18,12 +18,15 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-pub fn train<AutoB: AutodiffBackend>(
+pub fn train<AutoB>(
     training_config: TrainingConfig,
     model_config: MyMamba2NetworkConfig,
     training_device: AutoB::Device,
     app_args: &AppArgs,
-) {
+) where
+    AutoB: AutodiffBackend + Mamba2BackendExt,
+    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
+{
     AutoB::seed(&training_device, training_config.seed);
 
     // load (or init and save) model and optim
@@ -110,7 +113,7 @@ pub fn train<AutoB: AutodiffBackend>(
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'static>;
 
-pub fn epoch_train<AutoB: AutodiffBackend>(
+pub fn epoch_train<AutoB>(
     dataloader_train: Dataloader<AutoB>,
     dataloader_valid: Dataloader<AutoB::InnerBackend>,
     training_model: MyMamba2Network<AutoB>,
@@ -122,7 +125,11 @@ pub fn epoch_train<AutoB: AutodiffBackend>(
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba2Network<AutoB> {
+) -> MyMamba2Network<AutoB>
+where
+    AutoB: AutodiffBackend + Mamba2BackendExt,
+    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
+{
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
@@ -187,7 +194,7 @@ pub fn epoch_train<AutoB: AutodiffBackend>(
     training_model.0
 }
 
-pub fn epoch_valid<B: Backend>(
+pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
     dataloader_valid: Dataloader<B>,
     valid_model: MyMamba2Network<B>,
     training_config: &TrainingConfig,
@@ -231,7 +238,7 @@ pub fn epoch_valid<B: Backend>(
 /// Wrapper over [`Mamba2Network`] for custom implementations.
 pub struct Wrap<B: Backend>(pub MyMamba2Network<B>, pub MyMamba2NetworkConfig);
 
-impl<AutoB: AutodiffBackend> TrainStep for Wrap<AutoB> {
+impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
     type Input = SequenceBatch<AutoB>;
     type Output = RegressionOutput<AutoB>;
 
@@ -243,7 +250,7 @@ impl<AutoB: AutodiffBackend> TrainStep for Wrap<AutoB> {
     }
 }
 
-impl<B: Backend> InferenceStep for Wrap<B> {
+impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
     type Input = SequenceBatch<B>;
     type Output = RegressionOutput<B>;
 
@@ -259,7 +266,7 @@ impl<B: Backend> InferenceStep for Wrap<B> {
     }
 }
 
-impl<B: Backend> Wrap<B> {
+impl<B: Backend + Mamba2BackendExt> Wrap<B> {
     pub fn forward_regression(
         &self,
         input: Tensor<B, 3>,
@@ -271,8 +278,11 @@ impl<B: Backend> Wrap<B> {
         assert_eq!([batch_size, 1], targets.dims());
         assert!(sequence_size >= 1);
 
-        let (output, _caches) =
-            model.forward(input.clone(), None, SsdPath::SerialRecalculated(None));
+        let ssd_path = SsdPath::Minimal(None);
+        // let ssd_path = SsdPath::Serial(None);
+        // let ssd_path = SsdPath::SerialRecalculated(None); // saves vram
+        //
+        let (output, _caches) = model.forward(input.clone(), None, ssd_path);
 
         assert_eq!([batch_size, sequence_size, 1], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);

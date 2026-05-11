@@ -60,7 +60,7 @@ impl<B: Backend> ModelConfigExt<B> for MyMamba2BidiNetworkConfig {
     }
 }
 
-impl<B: Backend> MyMamba2BidiNetwork<B> {
+impl<B: Backend + Mamba2BackendExt> MyMamba2BidiNetwork<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 3>,

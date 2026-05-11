@@ -12,7 +12,7 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-pub fn infer<B: Backend>(
+pub fn infer<B: Backend + Mamba2BackendExt>(
     model_config: MyMamba2NetworkConfig,
     batch_size: usize,
     infer_device: B::Device,

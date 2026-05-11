@@ -203,7 +203,7 @@ pub struct Mamba2<B: Backend> {
     /// When `Some`, the stored tensor is used as the initial condition for
     /// *every* forward call (not per-batch; it is broadcast over the batch
     /// dimension).
-    pub init_states_hpr: Option<Param<Tensor<B, 3>>>,
+    pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
 
     /// State rank `N` — the number of latent dimensions in the SSM hidden
     /// state `h ∈ ℝ^{N×P}` per head.  Corresponds to the paper's `N`.
@@ -329,10 +329,10 @@ pub struct Mamba2Config {
     /// Whether to allocate a learnable initial SSM state `h₀`.
     ///
     /// When `false` (default), the hidden state starts at zero for every
-    /// sequence.  When `true`, `init_states_hpr` is allocated as a trainable
+    /// sequence.  When `true`, `init_state_hpr` is allocated as a trainable
     /// parameter of shape `[nheads, per_head_dim, state_rank]`.
     #[config(default = false)]
-    pub has_learnable_init_states: bool,
+    pub has_learnable_init_state: bool,
 }
 
 impl Mamba2Config {
@@ -461,7 +461,7 @@ impl Mamba2Config {
             .init(device);
 
         // ── learnable initial state (optional) ────────────────────────────────
-        let init_states_hpr = self.has_learnable_init_states.then(|| {
+        let init_state_hpr = self.has_learnable_init_state.then(|| {
             Initializer::Zeros.init::<B, 3, _>([nheads, self.per_head_dim, self.state_rank], device)
         });
 
@@ -474,7 +474,7 @@ impl Mamba2Config {
             d_h,
             norm,
             out_proj,
-            init_states_hpr,
+            init_state_hpr,
             state_rank: self.state_rank,
             ngroups: self.ngroups,
         }
@@ -485,7 +485,7 @@ impl Mamba2Config {
 // Mamba2::forward  (chunkwise SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
-impl<B: Backend> Mamba2<B> {
+impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     /// Process a full input sequence using the chunkwise SSD algorithm.
     ///
     /// This is the primary training and prefill path.  The computation is
@@ -582,7 +582,7 @@ impl<B: Backend> Mamba2<B> {
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
         assert_eq!([batch, sequence, nheads], dt_raw_bsh.dims());
 
-        // ── Step 2: Causal depthwise Conv1d ──────────────────────────────────
+        // ── Step 2: Causal depthwise Conv1d ───────────────────────────────────
         // Apply the causal 1-D depthwise convolution to `xbc`.  To maintain
         // strict causality, the input is left-padded with the last
         // `(conv_kernel - 1)` columns from the cache (the tail of the previous
@@ -626,7 +626,7 @@ impl<B: Backend> Mamba2<B> {
         let xbc_bsv = Silu::new().forward(xbc_bsv);
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
 
-        // ── Step 3: Split xbc into (x, B, C) ─────────────────────────────────
+        // ── Step 3: Split xbc into (x, B, C) ──────────────────────────────────
         // After activation, xbc is partitioned along the channel dimension:
         //   x [B, T, d_inner]          → reshaped to [B, T, H, P]   (input)
         //   B [B, T, ngroups·N]        → reshaped to [B, T, G, N]   (state input proj)
@@ -678,11 +678,12 @@ impl<B: Backend> Mamba2<B> {
         let a_head_decay_h = -self.a_log_h.val().exp(); // A = -exp(a_log) < 0
         assert_eq!([nheads], a_head_decay_h.dims());
 
-        // ── Step 5: Pad sequence to a multiple of chunk_len ───────────────────────────
+        // ── Step 5: Pad sequence to a multiple of chunk_len ───────────────────
         // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
         // The state is thus carried through unchanged, so the final state of
         // the padded last chunk equals the state after the last real token.
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+        assert!(chunk_len > 0);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
         let (x_bShp, dt_bSh, b_bSgr, c_bSgr) = if pad == 0 {
@@ -719,51 +720,49 @@ impl<B: Backend> Mamba2<B> {
             (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr)
         };
 
-        // ── Step 6: selective scan ────────────────────────────────────
-        let (y_bShp, final_state_bhpr) = match ssd_path {
+        // ── Reshapes into chunks ───────────────────────────────────────────────
+        let nchunks = sequence_padded / chunk_len;
+        let x_bnlhp = x_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
+        let dt_bnlh = dt_bSh.reshape([batch, nchunks, chunk_len, nheads]);
+        let b_bnlgr = b_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
+        let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
+
+        // ── Step 6: Selective Scan ────────────────────────────────────────────
+        let (y_bnlhp, final_state_bhpr) = match ssd_path {
             SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(
-                x_bShp,
-                dt_bSh,
+                x_bnlhp,
+                dt_bnlh,
                 a_head_decay_h,
-                b_bSgr,
-                c_bSgr,
+                b_bnlgr,
+                c_bnlgr,
                 self.d_h.val(),
                 cache.ssm_bhpr,
-                self.init_states_hpr.as_ref().map(|s| s.val()),
-                ngroups,
-                state_rank,
-                chunk_len,
+                self.init_state_hpr.as_ref().map(|s| s.val()),
             ),
             SsdPath::Serial(_chunk_len) => Self::ssd_serial(
-                x_bShp,
-                dt_bSh,
+                x_bnlhp,
+                dt_bnlh,
                 a_head_decay_h,
-                b_bSgr,
-                c_bSgr,
+                b_bnlgr,
+                c_bnlgr,
                 self.d_h.val(),
                 cache.ssm_bhpr,
-                self.init_states_hpr.as_ref().map(|s| s.val()),
-                ngroups,
-                state_rank,
-                chunk_len,
+                self.init_state_hpr.as_ref().map(|s| s.val()),
             ),
             SsdPath::SerialRecalculated(_chunk_len) => Self::ssd_serial_recalculated(
-                x_bShp,
-                dt_bSh,
+                x_bnlhp,
+                dt_bnlh,
                 a_head_decay_h,
-                b_bSgr,
-                c_bSgr,
+                b_bnlgr,
+                c_bnlgr,
                 self.d_h.val(),
                 cache.ssm_bhpr,
-                self.init_states_hpr.as_ref().map(|s| s.val()),
-                ngroups,
-                state_rank,
-                chunk_len,
+                self.init_state_hpr.as_ref().map(|s| s.val()),
             ),
         };
         assert_eq!(
-            [batch, sequence_padded, nheads, per_head_dim],
-            y_bShp.dims()
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            y_bnlhp.dims()
         );
 
         // Update the SSM state in the cache for the next call.
@@ -774,6 +773,7 @@ impl<B: Backend> Mamba2<B> {
         );
 
         // Remove zero-pad columns that were added at Step 5.
+        let y_bShp = y_bnlhp.reshape([batch, sequence_padded, nheads, per_head_dim]);
         let y_bshp = if pad == 0 {
             y_bShp
         } else {

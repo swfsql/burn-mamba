@@ -166,7 +166,7 @@ impl Mamba2CacheConfig {
     /// Zero initialisation is correct because:
     /// - The convolution cache represents "no previous tokens" (identity padding).
     /// - The SSM state represents `h₀ = 0` (zero initial condition), which is
-    ///   the standard default.  Learnable initial states (if configured) are
+    ///   the standard default.  Learnable initial state (if configured) are
     ///   added on top of this inside [`crate::mamba2::Mamba2::forward`] /
     ///   [`crate::mamba2::Mamba2::step`].
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Cache<B> {

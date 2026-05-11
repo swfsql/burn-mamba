@@ -470,6 +470,7 @@ dependencies = [
  "burn-train",
  "burn-vision",
  "burn-wgpu",
+ "cubecl",
 ]
 
 [[package]]
@@ -745,12 +746,11 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "burn",
  "burn-cubecl",
  "burn-dataset",
- "cubek",
  "dirs",
  "flate2",
  "num-traits",

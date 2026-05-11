@@ -110,7 +110,7 @@ impl Mamba2LayersConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layers<B> {
+impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     // -----------------------------------------------------------------------
     // forward  (chunked SSD — used for training / prefill)
     // -----------------------------------------------------------------------
@@ -343,7 +343,7 @@ impl Mamba2LayerConfig {
     }
 }
 
-impl<B: Backend> Mamba2Layer<B> {
+impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
     // -----------------------------------------------------------------------
     // forward  (full sequence)
     // -----------------------------------------------------------------------
