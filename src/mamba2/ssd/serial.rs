@@ -6,36 +6,14 @@ use burn::prelude::*;
 impl<B: Backend> Mamba2<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
-    /// # Tensor shapes flowing through the function
-    ///
-    /// ```text
-    /// x_bshp:                  [batch, sequence, nheads, per_head_dim]
-    /// dt_bsh:                  [batch, sequence, nheads]
-    /// a_decay_h:               [nheads]
-    /// b_bsgr:                  [batch, sequence, ngroups, state_rank]
-    /// c_bsgr:                  [batch, sequence, ngroups, state_rank]
-    /// d_h:                     [nheads]
-    /// initial_state_bhpr   [batch, nheads, per_head_dim, state_rank]
-    /// _init_state_hpr         [nheads, per_head_dim, state_rank]
-    /// ```
-    ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial(
-        x_bnlhp: Tensor<B, 5>,
-        dt_bnlh: Tensor<B, 4>,
-        a_decay_h: Tensor<B, 1>,
-        b_bnlgr: Tensor<B, 5>,
-        c_bnlgr: Tensor<B, 5>,
-        d_h: Tensor<B, 1>,
-        initial_state_bhpr: Tensor<B, 4>,
-        _init_state_hpr: Option<Tensor<B, 3>>,
-    ) -> (Tensor<B, 5>, Tensor<B, 4>) {
-        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-        let [.., ngroups, state_rank] = b_bnlgr.dims();
-        let device = x_bnlhp.device();
+    pub fn ssd_serial(input: super::SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
+        let [.., ngroups, state_rank] = input.b_bnlgr.dims();
+        let device = input.x_bnlhp.device();
         assert_ne!(ngroups, 0);
         assert_eq!(nheads % ngroups, 0);
         assert!(nchunks > 0, "sequence length must be at least 1");
@@ -45,13 +23,13 @@ impl<B: Backend> Mamba2<B> {
         let heads_per_group = nheads / ngroups;
 
         assert!(
-            _init_state_hpr.is_none(),
+            input.init_state_hpr.is_none(),
             "init_state_hpr not yet implemented"
         );
 
         // ── Permutes ──────────────────────────────────────────────────────────────────
         // Note: dt_bnlh calculation (originally in Kernel 1) moved to Step 4 (before padding).
-        let dt_discretized_bhnl = dt_bnlh.permute([0, 3, 1, 2]);
+        let dt_discretized_bhnl = input.dt_bnlh.permute([0, 3, 1, 2]);
         assert_eq!(
             [batch, nheads, nchunks, chunk_len],
             dt_discretized_bhnl.dims()
@@ -60,13 +38,13 @@ impl<B: Backend> Mamba2<B> {
         // ── Kernel 1 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (da_cumsum_bhnl [used in K3+K5][*], da_chunk_end_bhn [used in K4][omitted][*])
         let (da_cumsum_bhnl, da_chunk_end_bhn): (Tensor<B, 4>, Tensor<B, 3>) =
-            k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
+            k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), input.a_decay_h.clone());
         assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (cb_bngll [used in K5][!])
-        let cb_bngll: Tensor<B, 5> = k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
+        let cb_bngll: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlgr.clone(), input.b_bnlgr.clone());
         assert_eq!(
             [batch, nchunks, ngroups, chunk_len, chunk_len],
             cb_bngll.dims()
@@ -76,8 +54,8 @@ impl<B: Backend> Mamba2<B> {
         // ── Kernel 3 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (intra_chunk_state_bnhpr [used in K4][!])
         let intra_chunk_state_bnhpr: Tensor<B, 5> = k3_ssd_chunk_state(
-            x_bnlhp.clone(),
-            b_bnlgr.clone(),
+            input.x_bnlhp.clone(),
+            input.b_bnlgr.clone(),
             da_cumsum_bhnl.clone(),
             dt_discretized_bhnl.clone(),
         );
@@ -93,7 +71,7 @@ impl<B: Backend> Mamba2<B> {
             k4_ssd_state_passing(
                 intra_chunk_state_bnhpr.clone(),
                 da_chunk_end_bhn.clone(),
-                initial_state_bhpr,
+                input.initial_state_bhpr,
             );
         assert_eq!(
             [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -108,11 +86,11 @@ impl<B: Backend> Mamba2<B> {
         let y_bnlhp: Tensor<B, 5> = k5_ssd_chunk_scan(
             da_cumsum_bhnl,
             dt_discretized_bhnl,
-            x_bnlhp,
-            c_bnlgr,
+            input.x_bnlhp,
+            input.c_bnlgr,
             cb_bngll,
             chunk_input_state_bnhpr,
-            d_h,
+            input.d_h,
         );
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],

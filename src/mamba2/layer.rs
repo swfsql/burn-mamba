@@ -124,10 +124,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     /// If `caches` is `None`, zero-initialised caches are created automatically.
     ///
     /// # Arguments
-    /// - `x`          — input tensor, shape `[batch, sequence, d_model]`
-    /// - `caches`     — optional pre-filled layer caches (useful for prefill
-    ///                  followed by decode)
-    /// - `ssd_path`   — SSD algorithm and chunk length selection.
+    /// - `x` — input tensor, shape `[batch, sequence, d_model]`
+    /// - `caches` — optional pre-filled layer caches (useful for prefill
+    ///   followed by decode)
+    /// - `ssd_path` — SSD algorithm and chunk length selection.
     ///
     /// # Returns
     /// `(output, updated_caches)` where `output` has shape
@@ -157,6 +157,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
         // loop without cloning (Burn tensors are reference-counted).
         let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
             // Map virtual layer index → real (weight-bearing) layer index.
             let layer_idx = self.real_idx(i);
@@ -190,9 +191,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     /// requires no KV-cache.
     ///
     /// # Arguments
-    /// - `x`      — current token embedding, shape `[batch, d_model]`
+    /// - `x` — current token embedding, shape `[batch, d_model]`
     /// - `caches` — layer caches from the previous step (or `None` for the
-    ///              first token, in which case zero caches are created)
+    ///   first token, in which case zero caches are created)
     ///
     /// # Returns
     /// `(output, updated_caches)` where `output` has shape `[batch, d_model]`.
@@ -213,6 +214,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 
         let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
             let layer_idx = self.real_idx(i);
             let layer = &self.real_layers[layer_idx];

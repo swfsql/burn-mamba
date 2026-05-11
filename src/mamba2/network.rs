@@ -151,7 +151,7 @@ impl Mamba2NetworkConfig {
 
     /// Round `vocab_size` up to the next multiple of `multiple`.
     fn padded_vocab(vocab_size: usize, multiple: usize) -> usize {
-        if vocab_size % multiple == 0 {
+        if vocab_size.is_multiple_of(multiple) {
             vocab_size
         } else {
             ((vocab_size / multiple) + 1) * multiple
@@ -171,17 +171,17 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     /// Process a full token sequence and return next-token logits.
     ///
     /// Internally this calls [`Mamba2Layers::forward`], which runs the
-    /// chunkwise SSD algorithm over every layer.  This is the mode to use
+    /// chunkwise SSD algorithm over every layer. This is the mode to use
     /// during training (backpropagation through the entire sequence) and
     /// during the prefill phase of inference.
     ///
     /// # Arguments
-    /// - `x`          — integer token IDs, shape `[batch, sequence]`
-    /// - `caches`     — optional pre-filled layer caches.  Pass `None` to
-    ///                  start from a zero state (training) or to create fresh
-    ///                  caches that can be returned and reused for a subsequent
-    ///                  decoding step.
-    /// - `ssd_path`   — SSD algorithm and chunk length selection.
+    /// - `x` — integer token IDs, shape `[batch, sequence]`
+    /// - `caches` — optional pre-filled layer caches.  Pass `None` to
+    ///   start from a zero state (training) or to create fresh
+    ///   caches that can be returned and reused for a subsequent
+    ///   decoding step.
+    /// - `ssd_path` — SSD algorithm and chunk length selection.
     ///
     /// # Returns
     /// `(logits, caches)` where:
@@ -234,9 +234,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     /// the correct mode for token-by-token generation after prefill.
     ///
     /// # Arguments
-    /// - `x`      — current token IDs, shape `[batch]`
+    /// - `x` — current token IDs, shape `[batch]`
     /// - `caches` — layer caches from the previous step (or `None` for the
-    ///              very first token, which starts from a zero hidden state)
+    ///   very first token, which starts from a zero hidden state)
     ///
     /// # Returns
     /// `(logits, caches)` where:

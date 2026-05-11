@@ -182,8 +182,7 @@ impl Mamba1Config {
         self.d_inner.unwrap_or(self.expand * self.d_model)
     }
     pub fn dt_rank(&self) -> usize {
-        self.dt_rank
-            .unwrap_or((self.d_model + self.d_state - 1) / self.d_state)
+        self.dt_rank.unwrap_or(self.d_model.div_ceil(self.d_state))
     }
 }
 

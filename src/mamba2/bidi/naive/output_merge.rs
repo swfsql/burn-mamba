@@ -5,6 +5,7 @@ use burn::prelude::*;
 #[derive(Module, Clone, Debug)]
 pub struct NoOp;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Module, Debug)]
 pub enum OutputMerge<B: Backend> {
     Mean(NoOp),

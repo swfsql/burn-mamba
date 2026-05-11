@@ -41,6 +41,33 @@ pub enum SsdPath {
     SerialRecalculated(Option<usize>),
 }
 
+pub struct SsdInput<B: Backend> {
+    /// # Shape
+    /// - [batch, nchunks, chunk_len, nheads, per_head_dim]
+    pub x_bnlhp: Tensor<B, 5>,
+    /// # Shape
+    /// - [batch, nchunks, chunk_len, nheads]
+    pub dt_bnlh: Tensor<B, 4>,
+    /// # Shape
+    /// - [nheads]
+    pub a_decay_h: Tensor<B, 1>,
+    /// # Shape
+    /// - [batch, nchunks, chunk_len, ngroups, state_rank]
+    pub b_bnlgr: Tensor<B, 5>,
+    /// # Shape
+    /// - [batch, nchunks, chunk_len, ngroups, state_rank]
+    pub c_bnlgr: Tensor<B, 5>,
+    /// # Shape
+    /// - [nheads]
+    pub d_h: Tensor<B, 1>,
+    /// # Shape
+    /// - [batch, nheads, per_head_dim, state_rank]
+    pub initial_state_bhpr: Tensor<B, 4>,
+    /// # Shape
+    /// - [nheads, per_head_dim, state_rank]
+    pub init_state_hpr: Option<Tensor<B, 3>>,
+}
+
 impl SsdPath {
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
@@ -97,9 +124,9 @@ impl SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            SsdPath::Minimal(chunk_len) => chunk_len.clone(),
-            SsdPath::Serial(chunk_len) => chunk_len.clone(),
-            SsdPath::SerialRecalculated(chunk_len) => chunk_len.clone(),
+            SsdPath::Minimal(chunk_len) => *chunk_len,
+            SsdPath::Serial(chunk_len) => *chunk_len,
+            SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 

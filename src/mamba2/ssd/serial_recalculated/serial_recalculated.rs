@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use crate::mamba2::prelude::*;
 use crate::mamba2::ssd::serial;
 use burn::prelude::*;
@@ -8,53 +6,32 @@ use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
-    /// # Tensor shapes flowing through the function
-    ///
-    /// ```text
-    /// x_bnlhp:                  [batch, nchunks, chunk_len, nheads, per_head_dim]
-    /// dt_bnlh:                  [batch, nchunks, chunk_len, nheads]
-    /// a_decay_h:               [nheads]
-    /// b_bnlgr:                  [batch, nchunks, chunk_len, ngroups, state_rank]
-    /// c_bnlgr:                  [batch, nchunks, chunk_len, ngroups, state_rank]
-    /// d_h:                     [nheads]
-    /// initial_state_bhpr   [batch, nheads, per_head_dim, state_rank]
-    /// _init_state_hpr         [nheads, per_head_dim, state_rank]
-    /// ```
-    ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
     pub fn ssd_serial_recalculated(
-        x_bnlhp: Tensor<B, 5>,
-        dt_bnlh: Tensor<B, 4>,
-        a_decay_h: Tensor<B, 1>,
-        b_bnlgr: Tensor<B, 5>,
-        c_bnlgr: Tensor<B, 5>,
-        d_h: Tensor<B, 1>,
-        initial_state_bhpr: Tensor<B, 4>,
-        init_state_hpr: Option<Tensor<B, 3>>,
+        input: super::super::SsdInput<B>,
     ) -> (Tensor<B, 5>, Tensor<B, 4>) {
         // Must use a backend-dependent method.
         //
         // For inference, this will untimately replicate Mamba2::ssd_serial;
         // For autodiff, this will call the custom implementation.
 
-        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-        let [.., ngroups, state_rank] = b_bnlgr.dims();
-        let device = x_bnlhp.device();
+        let [batch, nchunks, chunk_len, nheads, _per_head_dim] = input.x_bnlhp.dims();
+        let [.., ngroups, _state_rank] = input.b_bnlgr.dims();
         assert_ne!(ngroups, 0);
         assert_eq!(nheads % ngroups, 0);
         assert!(nchunks > 0, "sequence length must be at least 1");
 
         assert!(
-            init_state_hpr.is_none(),
+            input.init_state_hpr.is_none(),
             "init_state_hpr not yet implemented"
         );
 
         // ── Permutes ──────────────────────────────────────────────────────────────────
         // Note: dt_bnlh calculation (originally in Kernel 1) moved to Step 4 (before padding).
-        let dt_discretized_bhnl = dt_bnlh.permute([0, 3, 1, 2]);
+        let dt_discretized_bhnl = input.dt_bnlh.permute([0, 3, 1, 2]);
         assert_eq!(
             [batch, nheads, nchunks, chunk_len],
             dt_discretized_bhnl.dims()
@@ -64,17 +41,17 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // ── Kernel 1 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (da_cumsum_bhnl [used in K3+K5][*], da_chunk_end_bhn [used in K4][omitted][*])
         let (da_cumsum_bhnl, _da_chunk_end_bhn): (Tensor<B, 4>, Tensor<B, 3>) =
-            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
+            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), input.a_decay_h.clone());
         assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], _da_chunk_end_bhn.dims());
 
         let (y_bnlhp, final_state_bhpr) = <B as Mamba2BackendExt>::ssd_serial_recalculated(
-            x_bnlhp.into_primitive().tensor(),
+            input.x_bnlhp.into_primitive().tensor(),
             dt_discretized_bhnl.into_primitive().tensor(),
-            b_bnlgr.into_primitive().tensor(),
-            c_bnlgr.into_primitive().tensor(),
-            d_h.into_primitive().tensor(),
-            initial_state_bhpr.into_primitive().tensor(),
+            input.b_bnlgr.into_primitive().tensor(),
+            input.c_bnlgr.into_primitive().tensor(),
+            input.d_h.into_primitive().tensor(),
+            input.initial_state_bhpr.into_primitive().tensor(),
             da_cumsum_bhnl.into_primitive().tensor(),
         );
         let y_bnlhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlhp));
@@ -111,14 +88,12 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
 
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
         let [.., ngroups, state_rank] = b_bnlgr.dims();
-        let device = x_bnlhp.device();
         assert_ne!(ngroups, 0);
         assert_eq!(nheads % ngroups, 0);
         assert!(nchunks > 0, "sequence length must be at least 1");
         // `heads_per_group` is called `nheads_ngroups_ratio` in every Triton kernel.
         // It is the compile-time constant used by GQA (Grouped Query Attention) to map
         // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
-        let heads_per_group = nheads / ngroups;
 
         // ── Kernel 1 ──────────────────────────────────────────────────────────
         // Note: This kernel is assumed to already have been called.
@@ -153,7 +128,6 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
 
         // ── Kernel 4 ──────────────────────────────────────────────────────────
         // IO: (..) -> (chunk_input_state_bnhpr [used in K5][!], final_state_bhpr [final output])
-        let flat_state_dim = per_head_dim * state_rank;
         let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<Self, 5>, Tensor<Self, 4>) =
             serial::k4_ssd_state_passing(
                 intra_chunk_state_bnhpr.clone(),
@@ -213,6 +187,14 @@ mod cubecl {
         for CubeBackend<R, F, I, BT>
     {
     }
+}
+
+// impl for fusion backends — delegates to the default impl, which runs the serial
+// computation using the inner backend's standard tensor operations.
+#[cfg(feature = "fusion")]
+mod fusion {
+    use burn_fusion::{Fusion, FusionBackend};
+    impl<B: FusionBackend + super::Mamba2BackendExt> super::Mamba2BackendExt for Fusion<B> {}
 }
 
 /// Marker for autodiff-compatible backends that are valid for the custom backward implementation.

@@ -728,37 +728,20 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
+        let ssd_input = crate::mamba2::ssd::SsdInput {
+            x_bnlhp,
+            dt_bnlh,
+            a_decay_h: a_head_decay_h,
+            b_bnlgr,
+            c_bnlgr,
+            d_h: self.d_h.val(),
+            initial_state_bhpr: cache.ssm_bhpr,
+            init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
+        };
         let (y_bnlhp, final_state_bhpr) = match ssd_path {
-            SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(
-                x_bnlhp,
-                dt_bnlh,
-                a_head_decay_h,
-                b_bnlgr,
-                c_bnlgr,
-                self.d_h.val(),
-                cache.ssm_bhpr,
-                self.init_state_hpr.as_ref().map(|s| s.val()),
-            ),
-            SsdPath::Serial(_chunk_len) => Self::ssd_serial(
-                x_bnlhp,
-                dt_bnlh,
-                a_head_decay_h,
-                b_bnlgr,
-                c_bnlgr,
-                self.d_h.val(),
-                cache.ssm_bhpr,
-                self.init_state_hpr.as_ref().map(|s| s.val()),
-            ),
-            SsdPath::SerialRecalculated(_chunk_len) => Self::ssd_serial_recalculated(
-                x_bnlhp,
-                dt_bnlh,
-                a_head_decay_h,
-                b_bnlgr,
-                c_bnlgr,
-                self.d_h.val(),
-                cache.ssm_bhpr,
-                self.init_state_hpr.as_ref().map(|s| s.val()),
-            ),
+            SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(ssd_input),
+            SsdPath::Serial(_chunk_len) => Self::ssd_serial(ssd_input),
+            SsdPath::SerialRecalculated(_chunk_len) => Self::ssd_serial_recalculated(ssd_input),
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],

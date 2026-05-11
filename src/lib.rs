@@ -1,3 +1,6 @@
+#![allow(clippy::let_and_return)]
+#![allow(clippy::module_inception)]
+
 #[cfg(feature = "mamba1")]
 pub mod mamba1;
 #[cfg(feature = "mamba2")]

@@ -90,32 +90,11 @@ impl<B: Backend> Mamba2<B> {
     /// ```text
     ///   Y = Y_diag + Y_off + D · X
     /// ```
-    ///
-    /// # Shapes
-    /// - `x_bnlhp`                  : `[batch, nchunks, chunk_len, nheads, per_head_dim]`
-    /// - `dt_bnlh`     (Δ)          : `[batch, nchunks, chunk_len, nheads]`
-    /// - `a_head_decay_h` (A < 0)   : `[nheads]`
-    /// - `b_bnlgr`     (B)          : `[batch, nchunks, chunk_len, ngroups, state_rank]`
-    /// - `c_bnlgr`     (C)          : `[batch, nchunks, chunk_len, ngroups, state_rank]`
-    /// - `d_h`        (D)           : `[nheads]`
-    /// - `initial_state_bhpr`   : `[batch, nheads, per_head_dim, state_rank]`
-    /// - `init_state_hpr`          : `[nheads, per_head_dim, state_rank]`
-    /// - output.0 `y_bshp`          : `[batch, nchunks, chunk_len, nheads, per_head_dim]`
-    /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(
-        x_bnlhp: Tensor<B, 5>,
-        dt_bnlh: Tensor<B, 4>,
-        a_head_decay_h: Tensor<B, 1>,
-        b_bnlgr: Tensor<B, 5>,
-        c_bnlgr: Tensor<B, 5>,
-        d_h: Tensor<B, 1>,
-        initial_state_bhpr: Tensor<B, 4>,
-        init_state_hpr: Option<Tensor<B, 3>>,
-    ) -> (Tensor<B, 5>, Tensor<B, 4>) {
-        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-        let [.., ngroups, state_rank] = b_bnlgr.dims();
-        let device = &x_bnlhp.device();
+    pub fn ssd_minimal(input: super::SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
+        let [.., ngroups, state_rank] = input.b_bnlgr.dims();
+        let device = &input.x_bnlhp.device();
 
         assert_eq!(nheads % ngroups, 0);
         assert!(nchunks >= 1, "sequence must be non-empty");
@@ -130,7 +109,8 @@ impl<B: Backend> Mamba2<B> {
         let heads_per_group = nheads / ngroups;
 
         // b_bnlgr → b_bnlhr  [batch, nchunks, chunk_len, nheads, state_rank]
-        let b_bnlhr = b_bnlgr
+        let b_bnlhr = input
+            .b_bnlgr
             .clone()
             .unsqueeze_dim::<6>(4) // b_bnlg1r
             .expand([
@@ -144,7 +124,8 @@ impl<B: Backend> Mamba2<B> {
             .reshape([batch, nchunks, chunk_len, nheads, state_rank]);
 
         // c_bnlgr → c_bnlhr  [batch, nchunks, chunk_len, nheads, state_rank]
-        let c_bnlhr = c_bnlgr
+        let c_bnlhr = input
+            .c_bnlgr
             .clone()
             .unsqueeze_dim::<6>(4) // c_bnlg1r
             .expand([
@@ -158,15 +139,16 @@ impl<B: Backend> Mamba2<B> {
             .reshape([batch, nchunks, chunk_len, nheads, state_rank]);
 
         // B̄ₜ = Δₜ · Bₜ   [batch, nchunks, chunk_len, nheads, state_rank]
-        let delta_b_bnlhr = dt_bnlh.clone().unsqueeze_dim(4) * b_bnlhr.clone();
+        let delta_b_bnlhr = input.dt_bnlh.clone().unsqueeze_dim(4) * b_bnlhr.clone();
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, state_rank],
             delta_b_bnlhr.dims()
         );
 
         // Ā in log-space: a_bnlh = Δₜ · A
-        let a_bnlh = dt_bnlh.clone()
-            * a_head_decay_h
+        let a_bnlh = input.dt_bnlh.clone()
+            * input
+                .a_decay_h
                 .clone()
                 .unsqueeze_dims::<4>(&[0, 1, 2]) // a_head_decay_111h
                 .expand([batch, nchunks, chunk_len, nheads]);
@@ -249,7 +231,7 @@ impl<B: Backend> Mamba2<B> {
                 masked_cb_bnhll.dims()
             );
 
-            let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]); // [B, n, H, Q, P]
+            let x_bnhlp = input.x_bnlhp.clone().permute([0, 1, 3, 2, 4]); // [B, n, H, Q, P]
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 x_bnhlp.dims()
@@ -297,7 +279,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, chunk_len, nheads, 1],
                 decay_state_bnlh1.dims()
             );
-            let decayed_x_bnlhp = decay_state_bnlh1 * x_bnlhp.clone();
+            let decayed_x_bnlhp = decay_state_bnlh1 * input.x_bnlhp.clone();
             assert_eq!(
                 [batch, nchunks, chunk_len, nheads, per_head_dim],
                 decayed_x_bnlhp.dims()
@@ -347,14 +329,14 @@ impl<B: Backend> Mamba2<B> {
         let (state_bnhpr, final_state_bnpr) = {
             // Prepend the initial state h₀ to the array of chunk state.
             // Shape: [B, 1+nchunks, H, P, N]
-            let initial_state_b1hpr = initial_state_bhpr.unsqueeze_dim(1);
+            let initial_state_b1hpr = input.initial_state_bhpr.unsqueeze_dim(1);
             assert_eq!(
                 [batch, 1, nheads, per_head_dim, state_rank],
                 initial_state_b1hpr.dims()
             );
 
             // Optionally add learnable initial state (broadcast over batch).
-            let initial_state_b1hpr = if let Some(init_hpr) = init_state_hpr {
+            let initial_state_b1hpr = if let Some(init_hpr) = input.init_state_hpr {
                 let init_b1hpr = init_hpr.unsqueeze_dim::<4>(0).expand([
                     batch,
                     1,
@@ -520,10 +502,11 @@ impl<B: Backend> Mamba2<B> {
         // ── D skip connection ─────────────────────────────────────────────────
         // yₜ += D · xₜ
         // D is a per-head scalar; broadcast over batch, sequence, and per_head_dim.
-        let d_bnlhp = d_h
+        let d_bnlhp = input
+            .d_h
             .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // d_111h1
             .expand([batch, nchunks, chunk_len, nheads, per_head_dim]);
-        let y_bnlhp = y_bnlhp + d_bnlhp * x_bnlhp;
+        let y_bnlhp = y_bnlhp + d_bnlhp * input.x_bnlhp;
 
         (y_bnlhp, final_state_bnpr)
     }

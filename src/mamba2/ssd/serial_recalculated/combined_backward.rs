@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use crate::mamba2::ssd::serial;
 use burn::prelude::*;
 
@@ -124,6 +122,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// `d_final_bhpr`      : upstream gradient of the final state  [B,H,P,R]
 ///
 /// Returns one `CombinedGrads` struct containing gradients for all 7 inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bnlhp: Tensor<B, 5>,
     d_final_bhpr: Tensor<B, 4>,
@@ -475,7 +474,7 @@ pub fn combined_backward<B: Backend>(
         d_intra_slices.push(d_running_state_bhpr.clone());
         //
         // - 3.8: add: (running_state_bhpr, intra_state_bhpr) -> (running_state_bhpr)
-        let d_intra_state_bhpr = d_running_state_bhpr.clone();
+        let _d_intra_state_bhpr = d_running_state_bhpr.clone();
         //
         // - 3.7: mul: (decay_bhpr, running_state_bhpr) -> (running_state_bhpr)
         let d_decay_bhpr = d_running_state_bhpr.clone() * running_state_bhpr.clone();

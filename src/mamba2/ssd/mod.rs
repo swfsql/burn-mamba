@@ -7,4 +7,4 @@ pub mod ssd_path;
 pub use serial_recalculated::Mamba2AutodiffBackendExt;
 #[cfg(feature = "cubecl")]
 pub use serial_recalculated::Mamba2BackendExt;
-pub use ssd_path::SsdPath;
+pub use ssd_path::{SsdInput, SsdPath};

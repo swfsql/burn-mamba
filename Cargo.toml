@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2024"
 
 [features]
@@ -9,6 +9,7 @@ mamba1 = []
 mamba2 = ["cubecl"]
 autodiff = ["burn/autodiff"]
 cubecl = ["dep:burn-cubecl", "burn/cubecl"]
+fusion = ["burn/fusion", "dep:burn-fusion"]
 # backend selection
 backend-ndarray = ["burn/ndarray", "_dev-has-backend"]
 backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
@@ -28,7 +29,6 @@ backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-has-backend"]
 dev-f16 = []
 dev-simd = ["burn/simd", "burn/std"]
 dev-autotune = ["burn/autotune"]
-dev-fusion = ["burn/fusion"]
 _dev-has-backend = [] # signal if any backend was selected
 # TODO: the `dev-*`/`backend-*` features were initially meant to only refer to testing/examples, but now they
 # leak into the library for the cubecl needs. Try to solve this.
@@ -37,12 +37,14 @@ _dev-has-backend = [] # signal if any backend was selected
 serde = { version = "1.0.0", features = ["derive"] }
 
 ### For the main branch. ###
-burn = { version = "0.21.0-pre.4", default-features = false}
-burn-cubecl = { version = "0.21.0-pre.4", default-features = false, optional = true}
+burn = { version = "0.21.0", default-features = false}
+burn-cubecl = { version = "0.21.0", default-features = false, optional = true}
+burn-fusion = { version = "0.21.0", default-features = false, optional = true}
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
 # burn-cubecl = { path = "../burn/crates/burn-cubecl", default-features = false }
+# burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
 num-traits = "0.2.19"
@@ -54,8 +56,8 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 
 ### For the main branch. ###
-burn = { version = "0.21.0-pre.4", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
-burn-dataset = { version = "0.21.0-pre.4", features = ["network"] }
+burn = { version = "0.21.0", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { version = "0.21.0", features = ["network"] }
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

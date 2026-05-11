@@ -48,7 +48,7 @@ impl Mamba1NetworkConfig {
         }
 
         let padded_vocab_size = {
-            if self.vocab_size % self.pad_vocab_size_multiple == 0 {
+            if self.vocab_size.is_multiple_of(self.pad_vocab_size_multiple) {
                 self.vocab_size
             } else {
                 ((self.vocab_size / self.pad_vocab_size_multiple) + 1)

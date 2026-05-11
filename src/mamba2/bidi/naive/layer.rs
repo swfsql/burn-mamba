@@ -78,11 +78,14 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
             .n_virtual_layers
             .as_ref()
             .map(|(l, _schedule)| {
-                assert!(l % 2 == 0, "Bidi virtual layers are used in pairs");
+                assert!(l.is_multiple_of(2), "Bidi virtual layers are used in pairs");
                 *l
             })
             .unwrap_or({
-                assert!(self.n_real_layers % 2 == 0, "Bidi layers are used in pairs");
+                assert!(
+                    self.n_real_layers.is_multiple_of(2),
+                    "Bidi layers are used in pairs"
+                );
                 // virtual layers fallback to the real layers
                 self.n_real_layers
             });
@@ -114,8 +117,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
             "straight and reverse layers in forward() currently cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba2Cache<B>>> =
-            caches.caches.into_iter().map(|c| Some(c)).collect();
+        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
         for i in 0..n_virtual_layers / 2 {
             // use real layers by reference (clone)

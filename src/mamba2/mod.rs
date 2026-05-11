@@ -13,7 +13,7 @@ pub mod prelude {
     pub use network::{Mamba2Network, Mamba2NetworkConfig};
     #[cfg(all(feature = "autodiff", feature = "cubecl"))]
     pub use ssd::Mamba2AutodiffBackendExt;
-    #[cfg(all(feature = "cubecl"))]
+    #[cfg(feature = "cubecl")]
     pub use ssd::Mamba2BackendExt;
     pub use ssd::SsdPath;
 }
