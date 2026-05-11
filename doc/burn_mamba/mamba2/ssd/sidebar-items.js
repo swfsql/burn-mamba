@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["SsdPath"],"mod":["minimal","serial","serial_recalculated"]};
+window.SIDEBAR_ITEMS = {"mod":["minimal","serial","serial_recalculated","ssd_path"]};
