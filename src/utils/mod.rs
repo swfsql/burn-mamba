@@ -9,6 +9,7 @@ pub mod rms_norm_gated;
 pub mod scheduler;
 pub mod silu;
 pub mod softplus;
+pub mod sanity;
 
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {
@@ -84,17 +85,4 @@ pub fn div_eps_f32<B: Backend>() -> f32 {
 
 pub fn div_eps<B: Backend>() -> B::FloatElem {
     div_eps_f32::<B>().elem()
-}
-
-pub fn contains_nan_or_inf<B: Backend, const D: usize>(_t: &Tensor<B, D>) -> bool {
-    // let is_inf = t.clone().is_inf().any().into_scalar().to_bool();
-    // let is_nan = t.clone().is_nan().any().into_scalar().to_bool();
-    // if is_nan {
-    //     println!("got a NAN");
-    // }
-    // if is_inf {
-    //     println!("got an INF");
-    // }
-    // is_nan || is_inf
-    false
 }

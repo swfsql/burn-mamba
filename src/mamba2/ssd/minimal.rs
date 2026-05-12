@@ -299,8 +299,8 @@ impl<B: Backend> Mamba2<B> {
             );
 
             // TODO: issue for needing to ensure decayed_x_bnhpl is contiguous
-            let decayed_x_bnhpl_data = decayed_x_bnhpl.into_data();
-            let decayed_x_bnhpl: Tensor<B, 5> = Tensor::from_data(decayed_x_bnhpl_data, device);
+            let data_decayed_x_bnhpl = decayed_x_bnhpl.into_data();
+            let decayed_x_bnhpl: Tensor<B, 5> = Tensor::from_data(data_decayed_x_bnhpl, device);
 
             decayed_x_bnhpl.matmul(b_bnhlr)
         };

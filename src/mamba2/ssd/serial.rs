@@ -2,6 +2,7 @@
 
 use crate::mamba2::prelude::*;
 use burn::prelude::*;
+use crate::utils::sanity::sanity as san;
 
 impl<B: Backend> Mamba2<B> {
     /// Forward pass for the Mamba-2 SSD module.
@@ -21,6 +22,14 @@ impl<B: Backend> Mamba2<B> {
         // It is the compile-time constant used by GQA (Grouped Query Attention) to map
         // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
         let heads_per_group = nheads / ngroups;
+        
+        san(&input.x_bnlhp);
+        san(&input.dt_bnlh);
+        san(&input.a_decay_h);
+        san(&input.b_bnlgr);
+        san(&input.c_bnlgr);
+        san(&input.d_h);
+        san(&input.initial_state_bhpr);
 
         assert!(
             input.init_state_hpr.is_none(),
@@ -34,6 +43,7 @@ impl<B: Backend> Mamba2<B> {
             [batch, nheads, nchunks, chunk_len],
             dt_discretized_bhnl.dims()
         );
+        san(&dt_discretized_bhnl);
 
         // ── Kernel 1 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (da_cumsum_bhnl [used in K3+K5][*], da_chunk_end_bhn [used in K4][omitted][*])
@@ -41,6 +51,9 @@ impl<B: Backend> Mamba2<B> {
             k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), input.a_decay_h.clone());
         assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
+        san(&da_cumsum_bhnl);
+        san(&da_chunk_end_bhn);
+        
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (cb_bngll [used in K5][!])
@@ -50,6 +63,7 @@ impl<B: Backend> Mamba2<B> {
             cb_bngll.dims()
         );
         // Note: cb_bngll is then only used by Kernel 5.
+        san(&cb_bngll);
 
         // ── Kernel 3 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (intra_chunk_state_bnhpr [used in K4][!])
@@ -63,6 +77,7 @@ impl<B: Backend> Mamba2<B> {
             [batch, nchunks, nheads, per_head_dim, state_rank],
             intra_chunk_state_bnhpr.dims()
         );
+        san(&intra_chunk_state_bnhpr);
 
         // ── Kernel 4 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (chunk_input_state_bnhpr [used in K5][!], final_state_bhpr [final output])
@@ -81,6 +96,8 @@ impl<B: Backend> Mamba2<B> {
             [batch, nheads, per_head_dim, state_rank],
             final_state_bhpr.dims()
         );
+        san(&chunk_input_state_bnhpr);
+        san(&final_state_bhpr);
 
         // ── Kernel 5 ──────────────────────────────────────────────────────────────────
         let y_bnlhp: Tensor<B, 5> = k5_ssd_chunk_scan(
@@ -96,6 +113,7 @@ impl<B: Backend> Mamba2<B> {
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             y_bnlhp.dims()
         );
+        san(&y_bnlhp);
 
         (y_bnlhp, final_state_bhpr)
     }
@@ -352,10 +370,13 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     // Rearrange inputs to the common [batch, nchunks, nheads, ...] ordering used below.
     // - 1/36: permute: (da_cumsum_bhnl [*]) -> (da_cumsum_bnhl)
     let da_cumsum_bnhl = da_cumsum_bhnl.permute([0, 2, 1, 3]);
+    san(&da_cumsum_bnhl);
     // - 2: permute: (dt_discretized_bhnl [*]) -> (dt_bnhl)
     let dt_bnhl = dt_discretized_bhnl.permute([0, 2, 1, 3]);
+    san(&dt_bnhl);
     // - 3: permute: (x_bnlhp [*]) -> (x_bnhlp)
     let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
+    san(&x_bnhlp);
 
     // GQA: expand C  [b,n,l,g,r] → [b,n,h,l,r].
     let c_bnhlr = c_bnlgr
@@ -374,6 +395,7 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
         .reshape([batch, nchunks, chunk_len, nheads, state_rank]) // c_bnlhr
         // - 7: permute: (c_bnlhr) -> (c_bnhlr)
         .permute([0, 1, 3, 2, 4]);
+    san(&c_bnhlr);
 
     // GQA: expand CB [b,n,g,l,l] → [b,n,h,l,l].
     let cb_bnhll = cb_bngll
@@ -390,6 +412,7 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
         ]) // cb_bngHll
         // - 10: reshape: (cb_bngHll) -> (cb_bnhll)
         .reshape([batch, nchunks, nheads, chunk_len, chunk_len]);
+    san(&cb_bnhll);
 
     // ── BLUE: exp(dA[l]) · C[l,:] @ state_in^T ─────────────────────────────
     //
@@ -404,6 +427,7 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
         .unsqueeze_dim::<5>(4) // exp_da_cumsum_bnhl1
         // - 13: expand: (exp_da_cumsum_bnhl1) -> (exp_da_cumsum_bnhlp)
         .expand([batch, nchunks, nheads, chunk_len, per_head_dim]);
+    san(&exp_da_cumsum_bnhlp);
     // - 14: permute: (chunk_input_state_bnhpr [!]) -> (chunk_input_state_bnhrp)
     let chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([0, 1, 2, 4, 3]);
     // - 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
@@ -411,49 +435,92 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
         .matmul(chunk_input_state_bnhrp)  // blue_bnhlp
         // - 16: mul: (blue_bnhlp, exp_da_cumsum_bnhlp) -> (blue_scaled_bnhlp)
         * exp_da_cumsum_bnhlp;
+    san(&blue_scaled_bnhlp);
 
     // ── ORANGE: causal CB_weighted @ X ──────────────────────────────────────
     //
     //   orange[b,n,h,l,p] = Σ_{s≤l} CB[l,s] · exp(da[l]-da[s]) · dt[s] · x[s,p]
     //
     // Precompute the full lower-triangular weight matrix, then do a single matmul.
+    //
     let da_cumsum_target_bnhll = da_cumsum_bnhl
         .clone()
         // - 17: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnhl1)
         .unsqueeze_dim::<5>(4) // da_cumsum_bnhl1
         // - 18: expand: (da_cumsum_bnhl1) -> (da_cumsum_target_bnhll)
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
+    // println!("{}", da_cumsum_target_bnhll);
+    san(&da_cumsum_target_bnhll);
     let da_cumsum_source_bnhll = da_cumsum_bnhl
         // - 19: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnh1l)
         .unsqueeze_dim::<5>(3) // da_cumsum_bnh1l
         // - 20: expand: (da_cumsum_bnh1l) -> (da_cumsum_source_bnhll)
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
+    // println!("{}", da_cumsum_source_bnhll);
+    san(&da_cumsum_source_bnhll);
     // - 21: sub: (da_cumsum_target_bnhll, da_cumsum_source_bnhll) -> (da_cumsum_diff_bnhll)
+    // 
+    // TODO: issue for needing to ensure the lhs and rhs are non-aliased,
+    // otherwise the subtraction result may contain NaNs, even if the lhs and rhs had no
+    // NaNs nor INFs themselves. This could be a "aliased zero-stride tensor bug".
+    // Note: the bug hapens in f16 for batch_size=16, but e.g. not for batch_size=1.
+    // let data_da_cumsum_target_bnhll = da_cumsum_target_bnhll.into_data();
+    // let data_da_cumsum_source_bnhll = da_cumsum_source_bnhll.into_data();
+    // let da_cumsum_target_bnhll: Tensor<B, 5> = Tensor::from_data(data_da_cumsum_target_bnhll, &device);
+    // let da_cumsum_source_bnhll: Tensor<B, 5> = Tensor::from_data(data_da_cumsum_source_bnhll, &device);
+    // let da_cumsum_source_bnhll = (da_cumsum_source_bnhll.clone() 
+    //     + Tensor::zeros_like(&da_cumsum_source_bnhll));
+    // println!("{}", da_cumsum_target_bnhll);
+    // println!("{}", da_cumsum_source_bnhll);
+    println!("target min: {}, max: {}", da_cumsum_target_bnhll.clone().min().into_scalar().to_f32(), da_cumsum_target_bnhll.clone().max().into_scalar().to_f32());
+    // println!("src min: {}, max: {}", da_cumsum_source_bnhll.clone().min(), da_cumsum_source_bnhll.clone().max());
+    // println!("{:?}", da_cumsum_target_bnhll.dims());
     let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll;
+    san(&da_cumsum_diff_bnhll);
+
+    // note: overflow instability at step 22, a `minimal::segsum`-like upper triangle protection is necessary.
+    // - 21.1: -inf: (-inf) -> (neg_inf_bnhll)
+    let neg_inf_bnhll = Tensor::full_like(&da_cumsum_diff_bnhll, f32::NEG_INFINITY);
+    // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
+    // - 21.2: triu: (neg_inf_bnhll, 1) -> (neg_inf_mask_bnhll)
+    let neg_inf_mask_bnhll = neg_inf_bnhll.triu(1);
+    // This is exactly the segsum trick: exp(segsum(da)) = exp(cumsum[l] - cumsum[s]) with upper=-inf.
+    // - 21.3: add: (da_cumsum_diff_bnhll, neg_inf_mask_bnhll) -> (da_cumsum_diff_masked_bnhll)
+    let da_cumsum_diff_masked_bnhll = da_cumsum_diff_bnhll + neg_inf_mask_bnhll;
+    
     // - 22: exp: (da_cumsum_diff_bnhll) -> (da_cumsum_diff_exp_bnhll)
-    let da_cumsum_diff_exp_bnhll = da_cumsum_diff_bnhll.exp();
+    // - 22: exp: (da_cumsum_diff_masked_bnhll) -> (da_cumsum_diff_exp_bnhll)
+    let da_cumsum_diff_exp_bnhll = da_cumsum_diff_masked_bnhll.exp();
+    san(&da_cumsum_diff_exp_bnhll);
     let dt_source_bnhll = dt_bnhl
         // - 23: unsqueeze: (dt_bnhl) -> (dt_bnh1l)
         .unsqueeze_dim::<5>(3) // dt_bnh1l
         // - 24: expand: (dt_bnh1l) -> (dt_source_bnhll)
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
+    san(&dt_source_bnhll);
 
-    // Causal mask (0 above the main diagonal, 1 elsewhere).
-    let causal_mask_bnhll =
-        // - 25: ones: (1) -> (ones_bnhll)
-        Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device)
-        // - 26: tril: (ones_bnhll, 0) -> (causal_mask_bnhll)
-        .tril(0);
+    // note: steps 25, 26 and 29 are no longer necessary.
+    // // Causal mask (0 above the main diagonal, 1 elsewhere).
+    // let causal_mask_bnhll =
+    //     // - 25: ones: (1) -> (ones_bnhll)
+    //     Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device)
+    //     // - 26: tril: (ones_bnhll, 0) -> (causal_mask_bnhll)
+    //     .tril(0);
 
     //   [b,n,h,l,l] @ [b,n,h,l,p]  →  [b,n,h,l,p]
     // - 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
     let orange_lhs_partial1_bnhll = cb_bnhll * da_cumsum_diff_exp_bnhll;
+    san(&orange_lhs_partial1_bnhll);
     // - 28: mul: (orange_lhs_partial1_bnhll, dt_source_bnhll) -> (orange_lhs_partial2_bnhll)
     let orange_lhs_partial2_bnhll = orange_lhs_partial1_bnhll * dt_source_bnhll;
-    // - 29: mul: (orange_lhs_partial2_bnhll, causal_mask_bnhll) -> (orange_lhs_partial3_bnhll)
-    let orange_lhs_partial3_bnhll = orange_lhs_partial2_bnhll * causal_mask_bnhll;
+    san(&orange_lhs_partial2_bnhll);
+    // // - 29: mul: (orange_lhs_partial2_bnhll, causal_mask_bnhll) -> (orange_lhs_partial3_bnhll)
+    // let orange_lhs_partial3_bnhll = orange_lhs_partial2_bnhll * causal_mask_bnhll;
+    // san(&orange_lhs_partial3_bnhll);
     // - 30: matmul: (orange_lhs_partial3_bnhll, x_bnhlp) -> (orange_bnhlp)
-    let orange_bnhlp = orange_lhs_partial3_bnhll.matmul(x_bnhlp);
+    // - 30: matmul: (orange_lhs_partial2_bnhll, x_bnhlp) -> (orange_bnhlp)
+    let orange_bnhlp = orange_lhs_partial2_bnhll.matmul(x_bnhlp);
+    san(&orange_bnhlp);
 
     // ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────
     //
@@ -472,14 +539,18 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
         ]) // d_bnlhp
     // - 33: mul: (d_bnlhp, x_bnlhp[*]) -> (skip_bnlhp)
     * x_bnlhp;
+    san(&skip_bnlhp);
 
     // Permute BLUE + ORANGE from [b,n,h,l,p] back to [b,n,l,h,p], then add SKIP.
     // - 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
     let y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
+    san(&y_partial_bnhlp);
     // - 35: permute: (y_partial_bnhlp) -> (y_partial_bnlhp)
     let y_partial_bnlhp = y_partial_bnhlp.permute([0, 1, 3, 2, 4]);
+    san(&y_partial_bnlhp);
     // - 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
     let y_bnlhp: Tensor<B, 5> = y_partial_bnlhp + skip_bnlhp;
+    san(&y_bnlhp);
 
     assert_eq!(
         [batch, nchunks, chunk_len, nheads, per_head_dim],
