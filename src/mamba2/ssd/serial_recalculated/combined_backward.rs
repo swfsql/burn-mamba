@@ -1,4 +1,5 @@
 use crate::mamba2::ssd::serial;
+use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
 pub struct CombinedGrads<B: Backend> {
@@ -76,16 +77,19 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
         da_cumsum_last_in_chunk_bhn1.expand([batch, nheads, nchunks, chunk_len]);
     // - 8: sub: (da_cumsum_last_bhnl, da_cumsum_bhnl [from K1][*]) -> (da_delta_bhnl)
     let da_delta_bhnl = da_cumsum_last_bhnl - da_cumsum_bhnl.clone();
+    san(&da_delta_bhnl);
     // - 9: exp: (da_delta_bhnl) -> (forward_decay_to_chunk_end_bhnl [+])
     let forward_decay_to_chunk_end_bhnl = da_delta_bhnl.exp();
     assert_eq!(
         [batch, nheads, nchunks, chunk_len],
         forward_decay_to_chunk_end_bhnl.dims()
     );
+    san(&forward_decay_to_chunk_end_bhnl);
 
     // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -> (b_bar_scale_bhnl [+])
     let b_bar_scale_bhnl = forward_decay_to_chunk_end_bhnl.clone() * dt_discretized_bhnl.clone();
     assert_eq!([batch, nheads, nchunks, chunk_len], b_bar_scale_bhnl.dims());
+    san(&b_bar_scale_bhnl);
 
     // - 11: permute: (b_bar_scale_bhnl [+]) -> (b_bar_scale_bnhl)
     let b_bar_scale_bnhl = b_bar_scale_bhnl.clone().permute([0, 2, 1, 3]);
@@ -101,6 +105,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
         [batch, nchunks, nheads, chunk_len, state_rank],
         b_scaled_bnhlr.dims()
     );
+    san(&b_scaled_bnhlr);
 
     // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -> (intra_chunk_state_bnhpr [out][!])
     let intra_chunk_state_bnhpr: Tensor<B, 5> = x_bnhpl.matmul(b_scaled_bnhlr.clone());
@@ -108,6 +113,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
         [batch, nchunks, nheads, per_head_dim, state_rank],
         intra_chunk_state_bnhpr.dims()
     );
+    san(&intra_chunk_state_bnhpr);
     (
         intra_chunk_state_bnhpr,
         b_bar_scale_bhnl,
@@ -141,6 +147,16 @@ pub fn combined_backward<B: Backend>(
     let heads_per_group = nheads / ngroups;
     let device = da_cumsum_bhnl.device();
 
+    san(&d_y_bnlhp);
+    san(&d_final_bhpr);
+    san(&x_bnlhp);
+    san(&dt_discretized_bhnl);
+    san(&b_bnlgr);
+    san(&c_bnlgr);
+    san(&d_h);
+    san(&initial_state_bhpr);
+    san(&da_cumsum_bhnl);
+
     // ═══════════════════════════════════════════════════════════════════════
     // RECOMPUTE FORWARD INTERMEDIATES (the memory-saving heart of this op)
     // ═══════════════════════════════════════════════════════════════════════
@@ -154,6 +170,7 @@ pub fn combined_backward<B: Backend>(
     // K2 ───────────────────────────────────────────────────────────────────
     let cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
     // let cb_bngll = k2_forward(&c_bnlgr, &b_bnlgr);          // [B,N,G,L,L]
+    san(&cb_bngll);
 
     // K3 (with intermediates) ──────────────────────────────────────────────
     let (
@@ -167,6 +184,10 @@ pub fn combined_backward<B: Backend>(
         da_cumsum_bhnl.clone(),
         dt_discretized_bhnl.clone(),
     );
+    san(&intra_chunk_state_bnhpr);
+    san(&b_bar_scale_bhnl);
+    san(&forward_decay_to_chunk_end_bhnl);
+    san(&b_scaled_bnhlr);
 
     // K4 ───────────────────────────────────────────────────────────────────
     let (chunk_input_state_bnhpr, _final_state_bhpr): (Tensor<B, 5>, Tensor<B, 4>) =
@@ -175,6 +196,8 @@ pub fn combined_backward<B: Backend>(
             da_chunk_end_bhn.clone(),
             initial_state_bhpr,
         );
+    san(&chunk_input_state_bnhpr);
+    san(&_final_state_bhpr);
 
     // ═══════════════════════════════════════════════════════════════════════
     // K5 BACKWARD
@@ -239,6 +262,7 @@ pub fn combined_backward<B: Backend>(
     }
     .sum_dim(1) // d_d_h1
     .reshape([nheads]);
+    san(&d_d_h);
     //
     // For d_x:
     // - - | 33: mul: (d_bnlhp, x_bnlhp[*]) -> (skip_bnlhp)
@@ -249,6 +273,7 @@ pub fn combined_backward<B: Backend>(
             .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // d_111h1
             // d_bnlhp
             .expand([batch, nchunks, chunk_len, nheads, per_head_dim]);
+    san(&d_x_skip_bnlhp);
 
     // ── BLUE backward ──────────────────────────────────────────────────────
     // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
@@ -264,6 +289,7 @@ pub fn combined_backward<B: Backend>(
     //
     // - | blue[b,n,h,l,p] = exp(da[b,n,h,l]) * Σ_r C[b,n,h,l,r] * state[b,n,h,p,r]
     let exp_da_cumsum_bnhl: Tensor<B, 4> = da_cumsum_bnhl.clone().exp();
+    san(&exp_da_cumsum_bnhl);
     let exp_da_cumsum_bnhlp = exp_da_cumsum_bnhl.clone().unsqueeze_dim::<5>(4).expand([
         batch,
         nchunks,
@@ -272,6 +298,7 @@ pub fn combined_backward<B: Backend>(
         per_head_dim,
     ]);
     let d_blue_bnhlp: Tensor<B, 5> = d_blue_scaled_bnhlp.clone() * exp_da_cumsum_bnhlp.clone();
+    san(&d_blue_bnhlp);
     //
     // For d_chunk_input_state_bnhpr:
     // - | 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
@@ -286,6 +313,7 @@ pub fn combined_backward<B: Backend>(
         .permute([0, 1, 2, 4, 3]) // c_bnhrl
         .matmul(d_blue_bnhlp.clone()) // d_chunk_input_state_bnhrp
         .permute([0, 1, 2, 4, 3]);
+    san(&d_chunk_input_state_bnhpr);
     //
     // For d_c from BLUE:
     // - | 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
@@ -298,6 +326,7 @@ pub fn combined_backward<B: Backend>(
     // - - | d_C[l,r] = Σ_p scaled_dy[l,p] * state[p,r]
     // - - |  [B,N,H,L,P] @ [B,N,H,P,R] → [B,N,H,L,R]
     let d_c_blue_bnhlr = d_blue_bnhlp.clone().matmul(chunk_input_state_bnhpr.clone());
+    san(&d_c_blue_bnhlr);
     // - - | GQA reduce: [B,N,H,L,R] → [B,N,L,G,R]
     let d_c_blue_bnlgr = d_c_blue_bnhlr
         .reshape([
@@ -311,6 +340,7 @@ pub fn combined_backward<B: Backend>(
         .sum_dim(3) // d_c_blue_bng1lr
         .squeeze_dim::<5>(3) // d_c_blue_bnglr
         .permute([0, 1, 3, 2, 4]);
+    san(&d_c_blue_bnlgr);
     //
     // For d_da_cumsum from BLUE:
     // - | 16: mul: (blue_bnhlp, exp_da_cumsum_bnhlp) -> (blue_scaled_bnhlp)
@@ -318,7 +348,9 @@ pub fn combined_backward<B: Backend>(
     let blue_bnhlp = c_bnhlr
         .clone()
         .matmul(chunk_input_state_bnhpr.clone().permute([0, 1, 2, 4, 3])); // replay forward step 15
+    san(&blue_bnhlp);
     let d_exp_da_cumsum_bnhlp = d_blue_scaled_bnhlp.clone() * blue_bnhlp;
+    san(&d_exp_da_cumsum_bnhlp);
     //
     // - | blue_no_scale = C @ state^T  [L,P]
     // - - | 13: expand: (exp_da_cumsum_bnhl1) -> (exp_da_cumsum_bnhlp)
@@ -331,35 +363,47 @@ pub fn combined_backward<B: Backend>(
     let d_da_blue_bnhl = (d_exp_da_cumsum_bnhlp * exp_da_cumsum_bnhlp)
         .sum_dim(4) // d_da_blue_bnhl1
         .squeeze_dim::<4>(4);
+    san(&d_da_blue_bnhl);
     let d_da_blue_bhnl = d_da_blue_bnhl.permute([0, 2, 1, 3]);
 
     // ── ORANGE backward ─────────────────────────────────────────────────────
     //  y_orange[l,p] = Σ_{s≤l} CB[l,s] * exp(da[l]-da[s]) * dt[s] * x[s,p]
     // Precompute weight matrix CB_w [B,N,H,L_tgt,L_src]
     // replay forward steps 17-29
-    let da_target_bnhll = da_cumsum_bnhl
+    let da_cumsum_target_bnhll = da_cumsum_bnhl
         .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bnhl1 // forward step 17
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 18
-    let da_source_bnhll = da_cumsum_bnhl
+    let da_cumsum_source_bnhll = da_cumsum_bnhl
         .clone()
         .unsqueeze_dim::<5>(3) // da_cumsum_bnh1l // forward step 19
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 20
-    let da_cumsum_diff_exp_bnhll = (da_target_bnhll.clone() - da_source_bnhll.clone()).exp(); // forward steps 21-22
+    let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll; // forward step 21
+    san(&da_cumsum_diff_bnhll);
+    let causal_mask_bnhll =
+        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 1, &device); // forward step 21.1
+    // forward step 21.2
+    // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
+    let da_cumsum_diff_masked_bnhll =
+        da_cumsum_diff_bnhll.mask_fill(causal_mask_bnhll.clone(), f32::NEG_INFINITY);
+    let da_cumsum_diff_exp_bnhll = (da_cumsum_diff_masked_bnhll).exp(); // forward steps 22
+    san(&da_cumsum_diff_exp_bnhll);
     let dt_source_bnhll = dt_bnhl
         .clone()
         .unsqueeze_dim::<5>(3) // dt_bnh1l // forward step 23
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 24
-    // Causal mask (0 above the main diagonal, 1 elsewhere).
-    let causal_mask_bnhll =
-        Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device).tril(0); // forward steps 25-26
+    // // Causal mask (0 above the main diagonal, 1 elsewhere).
+    // let causal_mask_bnhll =
+    //     Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device).tril(0); // forward steps 25-26
     // CB_w[l,s] = CB[l,s] * decay[l,s] * dt[s] * mask[l,s]
     let orange_lhs_partial1_bnhll: Tensor<B, 5> = // forward step 27
         cb_bnhll.clone() * da_cumsum_diff_exp_bnhll.clone();
+    san(&orange_lhs_partial1_bnhll);
     let orange_lhs_partial2_bnhll: Tensor<B, 5> = // forward step 28
         orange_lhs_partial1_bnhll.clone() * dt_source_bnhll.clone();
-    let orange_lhs_partial3_bnhll: Tensor<B, 5> = // forward step 29
-        orange_lhs_partial2_bnhll.clone() * causal_mask_bnhll.clone();
+    san(&orange_lhs_partial2_bnhll);
+    // let orange_lhs_partial3_bnhll: Tensor<B, 5> = // forward step 29
+    //     orange_lhs_partial2_bnhll.clone() * causal_mask_bnhll.clone();
     //
     // Backwads:
     // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
@@ -369,26 +413,31 @@ pub fn combined_backward<B: Backend>(
     // - | 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
     // - | (d_orange_bnhlp = d_y_partial_bnhlp)
     let d_orange_bnhlp = d_y_partial_bnhlp;
-    // - | 30: matmul: (orange_lhs_partial3_bnhll, x_bnhlp) -> (orange_bnhlp)
-    // - | (d_orange_lhs_partial3_bnhll = d_orange_bnhlp @ x_bnhlp^T)
+    // - | 30: matmul: (orange_lhs_partial2_bnhll, x_bnhlp) -> (orange_bnhlp)
+    // - | (d_orange_lhs_partial2_bnhll = d_orange_bnhlp @ x_bnhlp^T)
     // d_CB_w: dy @ x^T   [B,N,H,L_tgt,L_src]
-    let d_orange_lhs_partial3_bnhll = d_orange_bnhlp
+    let d_orange_lhs_partial2_bnhll = d_orange_bnhlp
         .clone()
         .matmul(x_bnhlp.clone().permute([0, 1, 2, 4, 3])); // [B,N,H,L_tgt,L_src]
+    san(&d_orange_lhs_partial2_bnhll);
     //
     // - | For d_x:
-    // - - | (d_x_bnhlp = orange_lhs_partial3_bnhll^T @ d_orange_bnhlp)
+    // - - | (d_x_bnhlp = orange_lhs_partial2_bnhll^T @ d_orange_bnhlp)
     // - - | d_x from ORANGE: CB_w^T @ dy  (transpose source/target dims)
     // - - |  [B,N,H,L_src,L_tgt] @ [B,N,H,L_tgt,P] → [B,N,H,L_src,P]
-    let d_x_orange_bnhlp = orange_lhs_partial3_bnhll
+    let d_x_orange_bnhlp = orange_lhs_partial2_bnhll
         .clone()
         .permute([0, 1, 2, 4, 3]) // [B,N,H,L_src,L_tgt]
         .matmul(d_orange_bnhlp.clone()); // [B,N,H,L_src,P]
+    san(&d_x_orange_bnhlp);
     //
-    // - | 29: mul: (orange_lhs_partial2_bnhll, causal_mask_bnhll) -> (orange_lhs_partial3_bnhll)
-    let d_orange_lhs_partial2_bnhll = d_orange_lhs_partial3_bnhll * causal_mask_bnhll.clone();
+    // - | 21.2: mask-fill: (.., ..) -> (..)
+    // Bring the (step 21.2) causal mask ahead: above upper diagonal set to 0.
+    let d_orange_lhs_partial2_bnhll = d_orange_lhs_partial2_bnhll.mask_fill(causal_mask_bnhll, 0.);
+    san(&d_orange_lhs_partial2_bnhll);
     // - | 28: mul: (orange_lhs_partial1_bnhll, dt_source_bnhll) -> (orange_lhs_partial2_bnhll)
     let d_orange_lhs_partial1_bnhll = d_orange_lhs_partial2_bnhll.clone() * dt_source_bnhll.clone();
+    san(&d_orange_lhs_partial1_bnhll);
     // - | For d_dt from ORANGE:
     // - - | 24: expand: (dt_bnh1l) -> (dt_source_bnhll)
     // - - | 23: unsqueeze: (dt_bnhl) -> (dt_bnh1l)
@@ -399,6 +448,7 @@ pub fn combined_backward<B: Backend>(
         * orange_lhs_partial1_bnhll.clone())
     .sum_dim(3) // d_dt_orange_bnh1l
     .squeeze_dim::<4>(3);
+    san(&d_dt_orange_bnhl);
     let d_dt_orange_bhnl = d_dt_orange_bnhl.permute([0, 2, 1, 3]);
     //
     // - | For d_da from ORANGE:
@@ -408,9 +458,11 @@ pub fn combined_backward<B: Backend>(
     // - - | d_da_src[s] -= Σ_l (d_decay * decay)[l,s]
     // - - | 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
     let d_da_cumsum_diff_exp_bnhll = d_orange_lhs_partial1_bnhll.clone() * cb_bnhll.clone();
+    san(&d_da_cumsum_diff_exp_bnhll);
     // - - | 22: exp: (da_cumsum_diff_bnhll) -> (da_cumsum_diff_exp_bnhll)
     // - - | (d_da_cumsum_diff_bnhll = d_da_cumsum_diff_exp_bnhll * exp(da_cumsum_diff_bnhll))
     let d_da_cumsum_diff_bnhll = d_da_cumsum_diff_exp_bnhll * da_cumsum_diff_exp_bnhll.clone();
+    san(&d_da_cumsum_diff_bnhll);
     // - - | 21: sub: (da_cumsum_target_bnhll, da_cumsum_source_bnhll) -> (da_cumsum_diff_bnhll)
     // - - | 20: expand: (da_cumsum_bnh1l) -> (da_cumsum_source_bnhll)
     // - - | 19: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnh1l)
@@ -421,14 +473,18 @@ pub fn combined_backward<B: Backend>(
         .clone()
         .sum_dim(4) // d_da_cumsum_diff_bnhl1
         .squeeze_dim::<4>(4);
+    san(&d_da_tgt_bnhl);
     let d_da_src_bnhl = d_da_cumsum_diff_bnhll
         .sum_dim(3) // d_da_cumsum_diff_bnh1l
         .squeeze_dim::<4>(3);
+    san(&d_da_src_bnhl);
     let d_da_orange_bhnl = (d_da_tgt_bnhl - d_da_src_bnhl).permute([0, 2, 1, 3]); // [B,H,N,L]
+    san(&d_da_orange_bhnl);
     //
     // - | For d_cb:
     // - - | 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
     let d_cb_bnhll = d_orange_lhs_partial1_bnhll * da_cumsum_diff_exp_bnhll.clone();
+    san(&d_cb_bnhll);
     // - - | d_CB (per head, before GQA reduction):
     // - - |  CB_w = CB * decay * dt * mask  →  d_CB[l,s] = d_CB_w[l,s] * decay[l,s] * dt[s] * mask
     // - - | GQA reduce: [B,N,H,L,L] → [B,N,G,L,L]
@@ -443,6 +499,7 @@ pub fn combined_backward<B: Backend>(
         ]) // d_cb_bngHll
         .sum_dim(3) // d_cb_bng1ll
         .squeeze_dim::<5>(3);
+    san(&d_cb_bngll);
 
     // ═══════════════════════════════════════════════════════════════════════
     // K4 BACKWARD (reverse serial recurrence)
@@ -478,6 +535,7 @@ pub fn combined_backward<B: Backend>(
         //
         // - 3.7: mul: (decay_bhpr, running_state_bhpr) -> (running_state_bhpr)
         let d_decay_bhpr = d_running_state_bhpr.clone() * running_state_bhpr.clone();
+        san(&d_decay_bhpr);
         // recalculate decay_bhpr
         let decay_bhpr = da_chunk_end_bhn
             .clone()
@@ -485,16 +543,19 @@ pub fn combined_backward<B: Backend>(
             .exp() // exp_da_chunk_end_bh1 // replay forward step 3.4
             .unsqueeze_dim::<4>(3) // exp_da_chunk_end_bh11 // replay forward step 3.5
             .expand([batch, nheads, per_head_dim, state_rank]); // replay forward step 3.6
+        san(&decay_bhpr);
         // - 3.6: expand: (exp_da_chunk_end_bh11) -> (decay_bhpr)
         // - 3.5: unsqueeze: (exp_da_chunk_end_bh1) -> (exp_da_chunk_end_bh11)
         // - 3.4: exp: (da_chunk_end_bh1) -> (exp_da_chunk_end_bh1)
         // (d_da_chunk_end_bh1 = d_exp_da_chunk_end_bh1 * exp(da_chunk_end_bh1))
         // - 3.3: slice: (da_chunk_end_bhn [in][*]) -> (da_chunk_end_bh1)
         let d_da_chunk_end_bhpr = d_decay_bhpr * decay_bhpr.clone(); // note: decay is expanded exp(da_chunk_end)
+        san(&d_da_chunk_end_bhpr);
         let d_da_chunk_end_bh = d_da_chunk_end_bhpr
             .reshape([batch, nheads, per_head_dim * state_rank]) // d_da_chunk_end_bhPR
             .sum_dim(2) // d_da_chunk_end_bh1
             .squeeze_dim::<2>(2);
+        san(&d_da_chunk_end_bh);
         d_da_end_bh_slices.push(d_da_chunk_end_bh);
         //
         // - 3.2: squeeze: (intra_chunk_state_b1hpr) -> (intra_state_bhpr)
@@ -508,6 +569,7 @@ pub fn combined_backward<B: Backend>(
             .squeeze_dim::<4>(1);
         // TODO: understand this.
         d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        san(&d_running_state_bhpr);
     }
     // - 2: vec-push: (running_state_bhpr [elem]) -> (chunk_input_state_vec_bhpr [vec][!])
     // - 1/5: init-mut: (initial_state_bhpr [in][*]) -> (running_state_bhpr)
@@ -542,6 +604,7 @@ pub fn combined_backward<B: Backend>(
     let d_x_k3_bnhpl = d_intra_chunk_state_bnhpr
         .clone()
         .matmul(b_scaled_bnhlr.clone().permute([0, 1, 2, 4, 3]));
+    san(&d_x_k3_bnhpl);
     // - 1/15: permute: (x_bnlhp [in][*]) -> (x_bnhpl)
     let d_x_k3_bnlhp = d_x_k3_bnhpl.permute([0, 1, 4, 2, 3]);
     //
@@ -550,6 +613,7 @@ pub fn combined_backward<B: Backend>(
     let d_b_scaled_bnhlr = x_bnhpl
         .permute([0, 1, 2, 4, 3]) // x_bnhlp
         .matmul(d_intra_chunk_state_bnhpr);
+    san(&d_b_scaled_bnhlr);
     //
     // For d_b:
     // - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -> (b_scaled_bnhlr [+])
@@ -560,6 +624,7 @@ pub fn combined_backward<B: Backend>(
         .unsqueeze_dim::<5>(4) // b_bar_scale_bnhl1 // replay forward step 12
         .expand([batch, nchunks, nheads, chunk_len, state_rank]); // replay forward step 13
     let d_b_k3_bnhlr = d_b_scaled_bnhlr.clone() * b_bar_scale_bnhlr;
+    san(&d_b_k3_bnhlr);
     // - 5: reshape: (b_bngHlr) -> (b_bnhlr)
     // - 4: expand: (b_bng1lr) -> (b_bngHlr)
     // - 3: unsqueeze: (b_bnglr) -> (b_bng1lr)
@@ -577,6 +642,7 @@ pub fn combined_backward<B: Backend>(
         .sum_dim(3) // d_b_k3_bng1lr
         .squeeze_dim::<5>(3) // d_b_k3_bnglr
         .permute([0, 1, 3, 2, 4]);
+    san(&d_b_k3_bnlgr);
 
     // - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -> (b_scaled_bnhlr [+])
     // - (d_b_bar_scale_bnhlr = d_b_scaled_bnhlr * b_bnhlr)
@@ -596,6 +662,7 @@ pub fn combined_backward<B: Backend>(
         ]) // replay forward step 4
         .reshape([batch, nchunks, nheads, chunk_len, state_rank]); // replay forward step 5
     let d_b_bar_scale_bnhlr = d_b_scaled_bnhlr.clone() * b_bnhlr;
+    san(&d_b_bar_scale_bnhlr);
     // - 13: expand: (b_bar_scale_bnhl1) -> (b_bar_scale_bnhlr)
     // - 12: unsqueeze: (b_bar_scale_bnhl) -> (b_bar_scale_bnhl1)
     // - 11: permute: (b_bar_scale_bhnl [+]) -> (b_bar_scale_bnhl)
@@ -603,16 +670,19 @@ pub fn combined_backward<B: Backend>(
         .sum_dim(4) // d_b_bar_scale_bnhl1
         .squeeze_dim::<4>(4) // d_b_bar_scale_bnhl
         .permute([0, 2, 1, 3]);
+    san(&d_b_bar_scale_bhnl);
     //
     // For d_da_cumsum_bhnl:
     // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -> (b_bar_scale_bhnl [+])
     // - (d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl * dt_discretized_bhnl)
     let d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl;
+    san(&d_forward_decay_to_chunk_end_bhnl);
     // - 9: exp: (da_delta_bhnl) -> (forward_decay_to_chunk_end_bhnl [+])
     // - (d_da_delta_bhnl = d_forward_decay_to_chunk_end_bhnl * exp(da_delta_bhnl))
     // note: forward_decay_to_chunk_end_bhnl = exp(da_delta_bhnl)
     let d_da_delta_bhnl =
         d_forward_decay_to_chunk_end_bhnl * forward_decay_to_chunk_end_bhnl.clone();
+    san(&d_da_delta_bhnl);
     // - 8: sub: (da_cumsum_last_bhnl, da_cumsum_bhnl [from K1][*]) -> (da_delta_bhnl)
     let d_da_cumsum_last_bhnl = d_da_delta_bhnl.clone();
     let d_da_cumsum_sub_bhnl = -d_da_delta_bhnl.clone();
@@ -621,11 +691,13 @@ pub fn combined_backward<B: Backend>(
     let d_da_cumsum_last_bhn = d_da_cumsum_last_bhnl
         .sum_dim(3) // d_da_cumsum_last_bhn1
         .squeeze_dim::<3>(3);
+    san(&d_da_cumsum_last_bhn);
     //
     // For d_dt_discretized_bhnl:
     // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -> (b_bar_scale_bhnl [+])
     // - (d_dt_discretized_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl)
     let d_dt_discretized_k3_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl;
+    san(&d_dt_discretized_k3_bhnl);
     //
 
     // TODO: understand this.
@@ -634,6 +706,7 @@ pub fn combined_backward<B: Backend>(
         let d_last = d_da_cumsum_last_bhn.unsqueeze_dim::<4>(3);
         d_da_cumsum_sub_bhnl + Tensor::cat(vec![zeros, d_last], 3)
     };
+    san(&d_da_cumsum_k3_bhnl);
 
     // ═══════════════════════════════════════════════════════════════════════
     // K2 BACKWARD (from d_cb_bngll)
@@ -645,11 +718,13 @@ pub fn combined_backward<B: Backend>(
     // -  d_C_bngls = d_CB @ B   [B,N,G,L,L_src] @ [B,N,G,L_src,R] → [B,N,G,L,R]
     // -  d_B_bngls = d_CB^T @ C [B,N,G,L_src,L] @ [B,N,G,L,R]   → [B,N,G,L_src,R]
     let d_c_k2_bnglr = d_cb_bngll.clone().matmul(b_bnglr.clone());
+    san(&d_c_k2_bnglr);
     let d_c_k2_bnlgr = d_c_k2_bnglr.permute([0, 1, 3, 2, 4]);
 
     let d_b_k2_bnglr = d_cb_bngll
         .permute([0, 1, 2, 4, 3]) // [B,N,G,L_src,L_tgt]
         .matmul(c_bnglr.clone()); // [B,N,G,L_src,R]
+    san(&d_b_k2_bnglr);
     let d_b_k2_bnlgr = d_b_k2_bnglr.permute([0, 1, 3, 2, 4]); // [B,N,L,G,R]
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -658,14 +733,19 @@ pub fn combined_backward<B: Backend>(
 
     let d_da_cumsum_bhnl =
         d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
+    san(&d_da_cumsum_bhnl);
 
     let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl;
+    san(&d_dt_discretized_bhnl);
 
     let d_x_orange_bnlhp = d_x_orange_bnhlp.permute([0, 1, 3, 2, 4]);
     let d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
+    san(&d_x_bnlhp);
 
     let d_b_bnlgr = d_b_k2_bnlgr + d_b_k3_bnlgr;
+    san(&d_b_bnlgr);
     let d_c_bnlgr = d_c_k2_bnlgr + d_c_blue_bnlgr;
+    san(&d_c_bnlgr);
 
     CombinedGrads {
         d_da_cumsum_bhnl,

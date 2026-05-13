@@ -16,3 +16,6 @@ pub mod prelude {
 }
 
 pub mod utils;
+
+pub const DENY_NAN: bool = false;
+pub const DENY_INF: bool = false;

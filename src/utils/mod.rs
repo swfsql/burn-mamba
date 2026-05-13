@@ -6,10 +6,10 @@ pub mod log_sigmoid;
 pub mod loss;
 pub mod rms_norm;
 pub mod rms_norm_gated;
+pub mod sanity;
 pub mod scheduler;
 pub mod silu;
 pub mod softplus;
-pub mod sanity;
 
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {

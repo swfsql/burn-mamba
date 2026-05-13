@@ -1,12 +1,10 @@
+use crate::{DENY_INF, DENY_NAN};
 use burn::prelude::*;
-
-pub const DENY_NAN: bool = true;
-pub const DENY_INF: bool = true;
 
 pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
     let mut has_nan = false;
     let mut has_inf = false;
-    
+
     if DENY_NAN {
         has_nan = t.clone().contains_nan().into_scalar().to_bool();
         if has_nan {
@@ -21,6 +19,21 @@ pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
     }
 
     if has_nan || has_inf {
+        panic!("sanity check failed");
+    }
+}
+
+pub fn sanity_nan<B: Backend, const D: usize>(t: &Tensor<B, D>) {
+    let mut has_nan = false;
+
+    if DENY_NAN {
+        has_nan = t.clone().contains_nan().into_scalar().to_bool();
+        if has_nan {
+            eprintln!("got a NaN");
+        }
+    }
+
+    if has_nan {
         panic!("sanity check failed");
     }
 }

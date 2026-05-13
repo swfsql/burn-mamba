@@ -19,6 +19,7 @@
 //! scan over `T/Q` elements rather than `T`.
 
 use crate::mamba2::prelude::*;
+use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
 impl<B: Backend> Mamba2<B> {
@@ -144,6 +145,7 @@ impl<B: Backend> Mamba2<B> {
             [batch, nchunks, chunk_len, nheads, state_rank],
             delta_b_bnlhr.dims()
         );
+        san(&delta_b_bnlhr);
 
         // Ā in log-space: a_bnlh = Δₜ · A
         let a_bnlh = input.dt_bnlh.clone()
@@ -152,6 +154,7 @@ impl<B: Backend> Mamba2<B> {
                 .clone()
                 .unsqueeze_dims::<4>(&[0, 1, 2]) // a_head_decay_111h
                 .expand([batch, nchunks, chunk_len, nheads]);
+        san(&a_bnlh);
 
         // ── Reshape ───────────────────────────────────────────────────────────
         // a (log-decay): [B, nchunks, chunk_len, H] → [B, H, nchunks, chunk_len]
@@ -164,6 +167,7 @@ impl<B: Backend> Mamba2<B> {
         // chunk to position t (inclusive).
         let a_cumsum_bhnl = a_bhnl.clone().cumsum(3);
         assert_eq!([batch, nheads, nchunks, chunk_len], a_cumsum_bhnl.dims());
+        san(&a_cumsum_bhnl);
 
         // =============================================================
         // STEP 1: Intra-chunk outputs (diagonal blocks, Y_diag)
@@ -200,6 +204,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, chunk_len, chunk_len],
                 cb_bnhll.dims()
             );
+            san(&cb_bnhll);
 
             // (b) Element-wise multiply with the 1-SS mask L.
             //     L = exp(segsum(a_bhnl))  [B, H, nchunks, Q, Q]
@@ -209,6 +214,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nheads, nchunks, chunk_len, chunk_len],
                 l_bhnll.dims()
             );
+            san(&l_bhnll);
 
             // Permute both to [B, n, Q, H, Q] for the broadcast multiply.
             let cb_bnlhl = cb_bnhll.permute([0, 1, 3, 2, 4]);
@@ -221,7 +227,10 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, chunk_len, nheads, chunk_len],
                 l_bnlhl.dims()
             );
+            san(&cb_bnlhl);
+            san(&l_bnlhl);
             let masked_cb_bnlhl = cb_bnlhl * l_bnlhl;
+            san(&masked_cb_bnlhl);
 
             // (c) masked_CB · X → Y_diag.
             //     Contract over the last Q dimension.
@@ -242,6 +251,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 y_diag_bnhlp.dims()
             );
+            san(&y_diag_bnhlp);
 
             y_diag_bnhlp.permute([0, 1, 3, 2, 4]) // → [B, n, Q, H, P]
         };
@@ -272,6 +282,7 @@ impl<B: Backend> Mamba2<B> {
 
             let decay_state_bhnl = (a_cumsum_last_bhn1 - a_cumsum_bhnl.clone()).exp();
             assert_eq!([batch, nheads, nchunks, chunk_len], decay_state_bhnl.dims());
+            san(&decay_state_bhnl);
 
             // Multiply decay into x: decay[n, t] · x[n, t]  → [B, n, Q, H, P]
             let decay_state_bnlh1 = decay_state_bhnl.permute([0, 2, 3, 1]).unsqueeze_dim(4);
@@ -284,6 +295,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, chunk_len, nheads, per_head_dim],
                 decayed_x_bnlhp.dims()
             );
+            san(&decayed_x_bnlhp);
 
             // Contract over Q: (decayed_x[n, :, h, :])ᵀ · B̄[n, :, h, :]
             //   [B, n, H, P, Q] × [B, n, H, Q, N] → [B, n, H, P, N]
@@ -308,6 +320,7 @@ impl<B: Backend> Mamba2<B> {
             [batch, nchunks, nheads, per_head_dim, state_rank],
             state_bnhpr.dims()
         );
+        san(&state_bnhpr);
 
         // =============================================================
         // STEP 3: Inter-chunk state scan (state passing)
@@ -348,6 +361,7 @@ impl<B: Backend> Mamba2<B> {
             } else {
                 initial_state_b1hpr
             };
+            san(&initial_state_b1hpr);
 
             let state_bNhpr = Tensor::cat(vec![initial_state_b1hpr, state_bnhpr], 1);
             assert_eq!(
@@ -382,6 +396,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nheads, 1 + nchunks, 1 + nchunks],
                 decay_chunk_bhNN.dims()
             );
+            san(&decay_chunk_bhNN);
 
             // Flatten the state's (P, N) dimensions for the matmul.
             let flat_state_dim = per_head_dim * state_rank; // f = P·N
@@ -400,6 +415,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nheads, 1 + nchunks, flat_state_dim],
                 new_state_bhNf.dims()
             );
+            san(&new_state_bhNf);
 
             let new_state_bhNpr =
                 new_state_bhNf.reshape([batch, nheads, 1 + nchunks, per_head_dim, state_rank]);
@@ -455,6 +471,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nheads, nchunks, chunk_len],
                 state_decay_out_bhnl.dims()
             );
+            san(&state_decay_out_bhnl);
 
             // (a) C[n] · h[n-1]ᵀ  → [B, n, H, Q, P]
             //   C: [B, n, H, Q, N],  h: [B, n, H, N, P]  (transposed from [B,n,H,P,N])
@@ -475,6 +492,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 ch_bnhlp.dims()
             );
+            san(&ch_bnhlp);
 
             // (b) Multiply by the intra-chunk cumulative decay.
             let state_decay_out_bnhl1 = state_decay_out_bhnl.permute([0, 2, 1, 3]).unsqueeze_dim(4);
@@ -488,6 +506,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 y_off_bnhlp.dims()
             );
+            san(&y_off_bnhlp);
 
             y_off_bnhlp.permute([0, 1, 3, 2, 4]) // → [B, n, Q, H, P]
         };
@@ -498,6 +517,7 @@ impl<B: Backend> Mamba2<B> {
 
         // ── Combine Y_diag and Y_off, undo padding ────────────────────────────
         let y_bnlhp = y_diag_bnlhp + y_off_bnlhp;
+        san(&y_bnlhp);
 
         // ── D skip connection ─────────────────────────────────────────────────
         // yₜ += D · xₜ
@@ -507,6 +527,7 @@ impl<B: Backend> Mamba2<B> {
             .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // d_111h1
             .expand([batch, nchunks, chunk_len, nheads, per_head_dim]);
         let y_bnlhp = y_bnlhp + d_bnlhp * input.x_bnlhp;
+        san(&y_bnlhp);
 
         (y_bnlhp, final_state_bnpr)
     }
@@ -558,6 +579,7 @@ fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tenso
 
     // cumsum[..., t] = x[..., 0] + x[..., 1] + ... + x[..., t]
     let x_cumsum = x.cumsum(D - 1);
+    san(&x_cumsum);
 
     // Broadcast along two different axes to compute all pairwise differences:
     //   x_cumsum_row[..., i, j] = cumsum[..., i]   (i varies along axis D)
@@ -568,6 +590,7 @@ fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tenso
     // diff[..., i, j] = cumsum[i] - cumsum[j]
     //                 = x[j+1] + ... + x[i]    for i ≥ j
     let diff = x_cumsum_row - x_cumsum_col; // [..., T, T]
+    san(&diff);
 
     // Mask the strict upper triangle (i < j) with -∞.
     // triu(1) returns a tensor that is -∞ above the main diagonal and 0

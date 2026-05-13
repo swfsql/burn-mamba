@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.18.0"
+version = "0.18.1"
 edition = "2024"
 
 [features]
@@ -16,6 +16,7 @@ backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelera
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
 backend-flex = ["burn/flex", "_dev-has-backend"]
+backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex/rayon", "_dev-has-backend"]
 backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
 backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
 backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
@@ -35,6 +36,7 @@ _dev-has-backend = [] # signal if any backend was selected
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
+burn-flex = { version = "0.21.0", default-features = false, optional = true }
 
 ### For the main branch. ###
 burn = { version = "0.21.0", default-features = false}

@@ -26,6 +26,7 @@
 //!    is always O(P·N).
 
 use crate::mamba2::prelude::*;
+use crate::utils::sanity::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -117,6 +118,13 @@ pub struct Mamba2Cache<B: Backend> {
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<B, 4>,
+}
+
+impl<B: Backend> Mamba2Cache<B> {
+    pub fn sanity(&self) {
+        san(&self.conv_bvk);
+        san(&self.ssm_bhpr);
+    }
 }
 
 /// Configuration / factory for a single [`Mamba2Cache`].

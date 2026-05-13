@@ -71,6 +71,7 @@
 //! | `f`    | P·N (flattened state for matmul)   | — |
 
 use crate::mamba2::prelude::*;
+use crate::utils::sanity::sanity as san;
 use crate::utils::{
     rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
     silu::Silu,
@@ -540,6 +541,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         assert_eq!(conv_dim, _conv_dim);
         assert_eq!(nheads % ngroups, 0);
         assert!(sequence > 0, "sequence length must be at least 1");
+        san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -550,6 +552,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             );
             Mamba2Cache { conv_bvk, ssm_bhpr }
         });
+        cache.sanity();
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         // One linear layer projects the input to all SSM parameters at once.
@@ -581,6 +584,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
         assert_eq!([batch, sequence, nheads], dt_raw_bsh.dims());
+        san(&z_gate_bsi);
+        san(&xbc_bsv);
+        san(&dt_raw_bsh);
 
         // ── Step 2: Causal depthwise Conv1d ───────────────────────────────────
         // Apply the causal 1-D depthwise convolution to `xbc`.  To maintain
@@ -609,6 +615,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             [batch, conv_dim, (conv_kernel - 1) + sequence],
             xbc_padded_bvS.dims()
         );
+        san(&xbc_padded_bvS);
 
         // Update the cache: save the last `conv_kernel` columns of the padded
         // input (i.e. starting at position `sequence - 1` from the new input).
@@ -618,6 +625,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // Apply the depthwise convolution and transpose back to [B, T, conv_dim].
         let xbc_bvs = self.conv1d.forward(xbc_padded_bvS);
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
+        san(&xbc_bvs);
 
         let xbc_bsv = xbc_bvs.permute([0, 2, 1]); // [B, T, conv_dim]
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
@@ -625,6 +633,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // SiLU activation (element-wise).
         let xbc_bsv = Silu::new().forward(xbc_bsv);
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
+        san(&xbc_bsv);
 
         // ── Step 3: Split xbc into (x, B, C) ──────────────────────────────────
         // After activation, xbc is partitioned along the channel dimension:
@@ -674,9 +683,11 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
 
         let dt_bsh = softplus(dt_raw_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1);
         assert_eq!([batch, sequence, nheads], dt_bsh.dims());
+        san(&dt_bsh);
 
         let a_head_decay_h = -self.a_log_h.val().exp(); // A = -exp(a_log) < 0
         assert_eq!([nheads], a_head_decay_h.dims());
+        san(&a_head_decay_h);
 
         // ── Step 5: Pad sequence to a multiple of chunk_len ───────────────────
         // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
@@ -738,6 +749,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
+        ssd_input.sanity();
         let (y_bnlhp, final_state_bhpr) = match ssd_path {
             SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(ssd_input),
             SsdPath::Serial(_chunk_len) => Self::ssd_serial(ssd_input),
@@ -747,6 +759,8 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             y_bnlhp.dims()
         );
+        san(&y_bnlhp);
+        san(&final_state_bhpr);
 
         // Update the SSM state in the cache for the next call.
         cache.ssm_bhpr = final_state_bhpr;
@@ -770,10 +784,12 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // ── Step 7: Gated RMSNorm ─────────────────────────────────────────────
         let y_bsi = self.norm.forward(y_bsi, z_gate_bsi);
         assert_eq!([batch, sequence, d_inner], y_bsi.dims());
+        san(&y_bsi);
 
         // ── Step 8: Out-projection ────────────────────────────────────────────
         let out_bsm = self.out_proj.forward(y_bsi);
         assert_eq!([batch, sequence, _d_model], out_bsm.dims());
+        san(&out_bsm);
 
         (out_bsm, cache)
     }

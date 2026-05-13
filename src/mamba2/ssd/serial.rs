@@ -1,8 +1,8 @@
 #![allow(unused_variables)]
 
 use crate::mamba2::prelude::*;
-use burn::prelude::*;
 use crate::utils::sanity::sanity as san;
+use burn::prelude::*;
 
 impl<B: Backend> Mamba2<B> {
     /// Forward pass for the Mamba-2 SSD module.
@@ -22,7 +22,7 @@ impl<B: Backend> Mamba2<B> {
         // It is the compile-time constant used by GQA (Grouped Query Attention) to map
         // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
         let heads_per_group = nheads / ngroups;
-        
+
         san(&input.x_bnlhp);
         san(&input.dt_bnlh);
         san(&input.a_decay_h);
@@ -53,7 +53,6 @@ impl<B: Backend> Mamba2<B> {
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
         san(&da_cumsum_bhnl);
         san(&da_chunk_end_bhn);
-        
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (cb_bngll [used in K5][!])
@@ -459,36 +458,19 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     // println!("{}", da_cumsum_source_bnhll);
     san(&da_cumsum_source_bnhll);
     // - 21: sub: (da_cumsum_target_bnhll, da_cumsum_source_bnhll) -> (da_cumsum_diff_bnhll)
-    // 
-    // TODO: issue for needing to ensure the lhs and rhs are non-aliased,
-    // otherwise the subtraction result may contain NaNs, even if the lhs and rhs had no
-    // NaNs nor INFs themselves. This could be a "aliased zero-stride tensor bug".
-    // Note: the bug hapens in f16 for batch_size=16, but e.g. not for batch_size=1.
-    // let data_da_cumsum_target_bnhll = da_cumsum_target_bnhll.into_data();
-    // let data_da_cumsum_source_bnhll = da_cumsum_source_bnhll.into_data();
-    // let da_cumsum_target_bnhll: Tensor<B, 5> = Tensor::from_data(data_da_cumsum_target_bnhll, &device);
-    // let da_cumsum_source_bnhll: Tensor<B, 5> = Tensor::from_data(data_da_cumsum_source_bnhll, &device);
-    // let da_cumsum_source_bnhll = (da_cumsum_source_bnhll.clone() 
-    //     + Tensor::zeros_like(&da_cumsum_source_bnhll));
-    // println!("{}", da_cumsum_target_bnhll);
-    // println!("{}", da_cumsum_source_bnhll);
-    println!("target min: {}, max: {}", da_cumsum_target_bnhll.clone().min().into_scalar().to_f32(), da_cumsum_target_bnhll.clone().max().into_scalar().to_f32());
-    // println!("src min: {}, max: {}", da_cumsum_source_bnhll.clone().min(), da_cumsum_source_bnhll.clone().max());
-    // println!("{:?}", da_cumsum_target_bnhll.dims());
     let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll;
     san(&da_cumsum_diff_bnhll);
 
     // note: overflow instability at step 22, a `minimal::segsum`-like upper triangle protection is necessary.
-    // - 21.1: -inf: (-inf) -> (neg_inf_bnhll)
-    let neg_inf_bnhll = Tensor::full_like(&da_cumsum_diff_bnhll, f32::NEG_INFINITY);
-    // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
-    // - 21.2: triu: (neg_inf_bnhll, 1) -> (neg_inf_mask_bnhll)
-    let neg_inf_mask_bnhll = neg_inf_bnhll.triu(1);
-    // This is exactly the segsum trick: exp(segsum(da)) = exp(cumsum[l] - cumsum[s]) with upper=-inf.
-    // - 21.3: add: (da_cumsum_diff_bnhll, neg_inf_mask_bnhll) -> (da_cumsum_diff_masked_bnhll)
-    let da_cumsum_diff_masked_bnhll = da_cumsum_diff_bnhll + neg_inf_mask_bnhll;
-    
-    // - 22: exp: (da_cumsum_diff_bnhll) -> (da_cumsum_diff_exp_bnhll)
+    // - 21.1: tril-mask: (1) -> (causal_mask_bnhll)
+    // true above the main diagonal, false at diagonal and below.
+    let causal_mask_bnhll =
+        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 1, &device);
+    // - 21.2: mask-fill: (da_cumsum_diff_bnhll, causal_mask_bnhll) -> (da_cumsum_diff_masked_bnhll)
+    // Causal mask and exp stabilizer: above upper diagonal set to -inf.
+    let da_cumsum_diff_masked_bnhll =
+        da_cumsum_diff_bnhll.mask_fill(causal_mask_bnhll, f32::NEG_INFINITY);
+
     // - 22: exp: (da_cumsum_diff_masked_bnhll) -> (da_cumsum_diff_exp_bnhll)
     let da_cumsum_diff_exp_bnhll = da_cumsum_diff_masked_bnhll.exp();
     san(&da_cumsum_diff_exp_bnhll);

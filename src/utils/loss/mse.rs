@@ -1,7 +1,7 @@
 use crate::utils::div_eps;
 use burn::module::Module;
 use burn::nn::loss::Reduction;
-use burn::tensor::{DType, Element, Tensor, backend::Backend, f16};
+use burn::tensor::{DType, Tensor, backend::Backend, f16};
 
 /// Calculate the mean squared error loss from the input logits and the targets.
 #[derive(Module, Clone, Debug)]
@@ -32,7 +32,7 @@ impl MseLoss {
         reduction: Reduction,
     ) -> Tensor<B, 1> {
         let [batch_size, _num_targets] = logits.dims();
-        match <B::FloatElem as Element>::dtype() {
+        match logits.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
                 let tensor = self.forward_no_reduction(logits, targets);
                 match reduction {

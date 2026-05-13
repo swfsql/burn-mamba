@@ -2,7 +2,7 @@ use crate::utils::div_eps;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;
-use burn::tensor::{DType, Element, f16};
+use burn::tensor::{DType, f16};
 
 /// Configuration to create a [RmsNorm](RmsNorm) layer.
 #[derive(Config, Debug)]
@@ -44,7 +44,7 @@ impl<B: Backend> RmsNorm<B> {
     /// - input `z`: `[..., any, d_model]`
     /// - output: `[..., any, d_model]`
     pub fn forward<const D: usize>(&self, x: Tensor<B, D>) -> Tensor<B, D> {
-        let normalized = match <B::FloatElem as Element>::dtype() {
+        let normalized = match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
                 let div_eps = div_eps::<B>();
                 let rms = (x.clone() * x.clone()).mean_dim(D - 1).sqrt();

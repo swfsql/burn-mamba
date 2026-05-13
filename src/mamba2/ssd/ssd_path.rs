@@ -68,6 +68,22 @@ pub struct SsdInput<B: Backend> {
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
+impl<B: Backend> SsdInput<B> {
+    pub fn sanity(&self) {
+        use crate::utils::sanity::sanity as san;
+        san(&self.x_bnlhp);
+        san(&self.dt_bnlh);
+        san(&self.a_decay_h);
+        san(&self.b_bnlgr);
+        san(&self.c_bnlgr);
+        san(&self.d_h);
+        san(&self.initial_state_bhpr);
+        if let Some(ref init_state_hpr) = self.init_state_hpr {
+            san(init_state_hpr);
+        }
+    }
+}
+
 impl SsdPath {
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {

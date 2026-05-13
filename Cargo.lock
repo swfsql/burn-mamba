@@ -751,6 +751,7 @@ dependencies = [
  "burn",
  "burn-cubecl",
  "burn-dataset",
+ "burn-flex",
  "burn-fusion",
  "dirs",
  "flate2",

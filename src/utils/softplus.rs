@@ -1,12 +1,11 @@
 use burn::prelude::*;
 use burn::tensor::DType;
-use burn::tensor::Element;
 
 /// Applies the SoftPlus function element-wise.
 ///
 /// The SoftPlus function is a smooth approximation of the ReLU function.
 pub fn softplus<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
-    match <B::FloatElem as Element>::dtype() {
+    match x.dtype() {
         DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
             // softplus = log(e^x + 1)
             x.exp().log1p()
