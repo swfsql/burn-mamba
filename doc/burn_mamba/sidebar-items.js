@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["mamba1","mamba2","prelude","schedule","utils"]};
+window.SIDEBAR_ITEMS = {"constant":["DENY_INF","DENY_NAN"],"mod":["mamba1","mamba2","prelude","schedule","utils"]};
