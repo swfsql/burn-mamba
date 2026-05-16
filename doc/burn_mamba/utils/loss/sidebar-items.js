@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["bce","mse"]};
+window.SIDEBAR_ITEMS = {"mod":["bce","cross_entropy","mse"]};
