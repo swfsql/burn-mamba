@@ -2,6 +2,7 @@ use crate::common::{backend::RecorderTy, model::ModelConfigExt, optim::OptimConf
 use burn::module::AutodiffModule;
 use burn::record::{FileRecorder, Recorder};
 use burn::{optim::Optimizer, prelude::*, tensor::backend::AutodiffBackend};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub const HELP: &str = "\
@@ -11,7 +12,7 @@ A command-line tool for training and/or running inference with machine learning 
 Models, optimizers, and configurations are persisted in an artifacts directory.
 
 USAGE:
-    example-name [OPTIONS]
+    example-name [OPTIONS] [-- <EXTRA_ARGS>...]
 
 When no --training or --inference flag is provided, the program exits after handling configuration logic.
 
@@ -23,6 +24,7 @@ BEHAVIOR OVERVIEW
 - With --remove-artifacts, any existing model and optimizer files in the artifacts directory are deleted before training (if --training is active).
 - Model and optimizer weights are loaded from the artifacts directory if present; otherwise new ones are created and saved.
 - If both --training and --inference are specified, training executes first, followed by inference using the trained model.
+- Any arguments following -- are captured as-is and forwarded to downstream processing.
 
 FLAGS:
     -h, --help                  Show this help message and exit
@@ -39,8 +41,13 @@ OPTIONS:
                                 Directory where configurations, model weights, and optimizer state are saved and loaded.
                                 If the directory does not exist, it will be created.
                                 Defaults to a newly created temporary directory (path will be printed).
+
+ARGS:
+    -- <EXTRA_ARGS>             All arguments after -- are forwarded verbatim to further processing stages.
+                                If further processing is available, passing -h or --help will display its help information.
 ";
 
+/// For field descriptions, see [HELP](HELP).
 #[derive(Debug)]
 pub struct AppArgs {
     pub training: bool,
@@ -49,11 +56,26 @@ pub struct AppArgs {
     pub training_config: Option<PathBuf>,
     pub model_config: Option<PathBuf>,
     pub artifacts_path: PathBuf,
+    pub extra_args: Vec<OsString>,
 }
 
 impl AppArgs {
     pub fn parse() -> Result<Self, pico_args::Error> {
-        let mut pargs = pico_args::Arguments::from_env();
+        let mut args: Vec<_> = std::env::args_os().collect();
+        args.remove(0); // remove the executable path.
+
+        // Find and process `--`.
+        let extra_args = if let Some(dash_dash) = args.iter().position(|arg| arg == "--") {
+            // Store all arguments following ...
+            let later_args = args.drain(dash_dash + 1..).collect();
+            // .. then remove the `--`
+            args.pop();
+            later_args
+        } else {
+            Vec::new()
+        };
+
+        let mut pargs = pico_args::Arguments::from_vec(args);
 
         // Help has a higher priority and should be handled separately.
         if pargs.contains(["-h", "--help"]) {
@@ -61,7 +83,7 @@ impl AppArgs {
             std::process::exit(0);
         }
 
-        let args = AppArgs {
+        let mut args = AppArgs {
             training_config: pargs
                 .opt_value_from_os_str(["-c", "--training-config"], parse_path)?,
             model_config: pargs.opt_value_from_os_str(["-m", "--model-config"], parse_path)?,
@@ -85,9 +107,9 @@ impl AppArgs {
             training: pargs.contains(["-t", "--training"]),
             inference: pargs.contains(["-i", "--inference"]),
             remove_artifacts: pargs.contains(["-r", "--remove-artifacts"]),
+            extra_args,
         };
 
-        // It's up to the caller what to do with the remaining arguments.
         let remaining = pargs.finish();
         if !remaining.is_empty() {
             panic!("unused arguments: {remaining:?}");
@@ -215,7 +237,7 @@ impl AppArgs {
     }
 }
 
-fn parse_path(s: &std::ffi::OsStr) -> Result<std::path::PathBuf, &'static str> {
+pub fn parse_path(s: &std::ffi::OsStr) -> Result<std::path::PathBuf, &'static str> {
     Ok(s.into())
 }
 

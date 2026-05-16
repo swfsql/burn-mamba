@@ -20,6 +20,10 @@ where
     AutoB: AutodiffBackend + MainDevice + Mamba2BackendExt,
     <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
 {
+    assert!(
+        app_args.extra_args.is_empty(),
+        "no extra arguments required"
+    );
     app_args.create_artifact_dir();
 
     // setup training and model configs

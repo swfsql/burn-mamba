@@ -26,7 +26,7 @@ impl SequenceDatasetItem {
         // Start with two random numbers between 0 and 1
 
         // TODO: half has rand_distr feature, but burn can't forward it.
-        // Either ask for a feature forward, or explicitly add half as a dependency. 
+        // Either ask for a feature forward, or explicitly add half as a dependency.
         let lower = rand::rng().random::<f32>();
         #[cfg(feature = "dev-f16")]
         let lower = burn::tensor::f16::from_f32(lower);
