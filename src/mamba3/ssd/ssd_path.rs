@@ -1,4 +1,4 @@
-use crate::mamba2::prelude::*;
+use crate::mamba3::prelude::*;
 use burn::prelude::*;
 
 /// Ssd algorithm selection.
@@ -104,7 +104,7 @@ impl SsdPath {
     /// Optimal Minimal variant.
     ///
     /// See [optimal_default](Self::optimal_default) for more info.
-    pub fn core_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+    pub fn core_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::core_optimal(block.state_rank, block.per_head_dim())
     }
 
@@ -119,7 +119,7 @@ impl SsdPath {
     /// Optimal Serial variant.
     ///
     /// See [optimal_default](Self::optimal_default) for more info.
-    pub fn chunked_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+    pub fn chunked_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::chunked_optimal(block.state_rank, block.per_head_dim())
     }
 
@@ -134,7 +134,7 @@ impl SsdPath {
     /// Optimal Serial Recalculated variant.
     ///
     /// See [optimal_default](Self::optimal_default) for more info.
-    pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+    pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::chunked_recalculated_optimal(block.state_rank, block.per_head_dim())
     }
 

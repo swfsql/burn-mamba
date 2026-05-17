@@ -1,12 +1,12 @@
 //! # Mamba-2 Layer and Layer Stack
 //!
 //! A **Mamba-2 layer** is the standard Pre-LN residual block used throughout
-//! the network.  It wraps a single [`Mamba2`] SSM block with an RMSNorm
+//! the network.  It wraps a single [`Mamba3`] SSM block with an RMSNorm
 //! (applied to the input, *before* the block) and adds the input back as a
 //! residual connection:
 //!
 //! ```text
-//!   y = x + Mamba2( RMSNorm(x) )
+//!   y = x + Mamba3( RMSNorm(x) )
 //! ```
 //!
 //! This matches the architecture described in §5 of the Mamba-2 paper and is
@@ -14,7 +14,7 @@
 //!
 //! ## Virtual layers
 //!
-//! [`Mamba2Layers`] supports *virtual layers*: a larger logical depth achieved
+//! [`Mamba3Layers`] supports *virtual layers*: a larger logical depth achieved
 //! by cycling through a smaller set of *real* (weight-bearing) layers
 //! according to a [`Schedule`].  For example, 48 virtual layers over 12 real
 //! layers repeats each weight set 4 times.  Each virtual layer still has its
@@ -29,13 +29,13 @@
 //! hybrid Mamba-2 + attention architecture where neighbouring blocks already
 //! carry residuals).
 
-use crate::mamba2::prelude::*;
+use crate::mamba3::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Mamba2Layers  (the full layer stack)
+// Mamba3Layers  (the full layer stack)
 // ---------------------------------------------------------------------------
 
 /// A stack of Mamba-2 layers with optional virtual-layer scheduling.
@@ -44,7 +44,7 @@ use burn::prelude::*;
 /// `n_virtual_layers` logical forward passes, cycling through weights
 /// according to the provided [`Schedule`].
 #[derive(Module, Debug)]
-pub struct Mamba2Layers<B: Backend> {
+pub struct Mamba3Layers<B: Backend> {
     /// Number of real (weight-bearing) layers.
     pub n_real_layers: usize,
 
@@ -59,7 +59,7 @@ pub struct Mamba2Layers<B: Backend> {
     /// The actual weight-bearing layer instances.
     ///
     /// Length: `n_real_layers`.
-    pub real_layers: Vec<Mamba2Layer<B>>,
+    pub real_layers: Vec<Mamba3Layer<B>>,
 
     /// When `true`, the residual connection of the **first** virtual layer is
     /// scaled to zero (i.e. the first block acts as a pure projection, not a
@@ -71,36 +71,36 @@ pub struct Mamba2Layers<B: Backend> {
     pub ignore_last_residual: bool,
 }
 
-/// Configuration / factory for [`Mamba2Layers`].
+/// Configuration / factory for [`Mamba3Layers`].
 #[derive(Config, Debug)]
-pub struct Mamba2LayersConfig {
+pub struct Mamba3LayersConfig {
     /// Number of distinct weight sets to allocate.
     pub n_real_layers: usize,
 
-    /// Optional virtual-layer scheduling.  See [`Mamba2Layers`] for details.
+    /// Optional virtual-layer scheduling.  See [`Mamba3Layers`] for details.
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, Schedule)>,
 
     /// Configuration shared by all Mamba-2 blocks in the stack.
-    pub mamba_block: Mamba2Config,
+    pub mamba_block: Mamba3Config,
 
-    /// See [`Mamba2Layers::ignore_first_residual`].
+    /// See [`Mamba3Layers::ignore_first_residual`].
     #[config(default = false)]
     pub ignore_first_residual: bool,
 
-    /// See [`Mamba2Layers::ignore_last_residual`].
+    /// See [`Mamba3Layers::ignore_last_residual`].
     #[config(default = false)]
     pub ignore_last_residual: bool,
 }
 
-impl Mamba2LayersConfig {
+impl Mamba3LayersConfig {
     /// Allocate and initialise all layers on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Layers<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3Layers<B> {
         let real_layers = (0..self.n_real_layers)
-            .map(|_| Mamba2LayerConfig::new(self.mamba_block.clone()).init(device))
+            .map(|_| Mamba3LayerConfig::new(self.mamba_block.clone()).init(device))
             .collect();
 
-        Mamba2Layers {
+        Mamba3Layers {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),
             real_layers,
@@ -110,14 +110,14 @@ impl Mamba2LayersConfig {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
     // -----------------------------------------------------------------------
     // forward  (chunked SSD — used for training / prefill)
     // -----------------------------------------------------------------------
 
     /// Process a full sequence through every (virtual) layer.
     ///
-    /// Internally each layer calls [`Mamba2::forward`], which runs the
+    /// Internally each layer calls [`Mamba3::forward`], which runs the
     /// chunkwise SSD algorithm.  This is efficient for training because the
     /// intra-chunk products can exploit GEMM / tensor cores.
     ///
@@ -135,9 +135,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     pub fn forward(
         &self,
         mut x: Tensor<B, 3>,
-        caches: Option<Mamba2Caches<B>>,
+        caches: Option<Mamba3Caches<B>>,
         ssd_path: SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
+    ) -> (Tensor<B, 3>, Mamba3Caches<B>) {
         // The effective number of forward passes equals the number of *virtual*
         // layers.  When no scheduling is configured this equals n_real_layers.
         let n_virtual_layers = self.n_virtual_count();
@@ -155,7 +155,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 
         // Unwrap each cache slot into an `Option` so we can `take` it in the
         // loop without cloning (Burn tensors are reference-counted).
-        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -173,7 +173,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba2Caches {
+        let caches = Mamba3Caches {
             caches: caches.into_iter().map(Option::unwrap).collect(),
         };
         (x, caches)
@@ -185,7 +185,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 
     /// Process a **single token** through every (virtual) layer.
     ///
-    /// Each layer calls [`Mamba2::step`], which runs one tick of the recurrent
+    /// Each layer calls [`Mamba3::step`], which runs one tick of the recurrent
     /// SSM:  `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ`,  `yₜ = Cₜᵀ hₜ + D xₜ`.
     /// This is O(H·P·N) per step — independent of sequence length — and
     /// requires no KV-cache.
@@ -200,8 +200,8 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     pub fn step(
         &self,
         mut x: Tensor<B, 2>,
-        caches: Option<Mamba2Caches<B>>,
-    ) -> (Tensor<B, 2>, Mamba2Caches<B>) {
+        caches: Option<Mamba3Caches<B>>,
+    ) -> (Tensor<B, 2>, Mamba3Caches<B>) {
         let n_virtual_layers = self.n_virtual_count();
         let caches = caches.unwrap_or_else(|| self.make_zero_caches_2d(&x, n_virtual_layers));
 
@@ -212,7 +212,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
              layers in step() cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -226,7 +226,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba2Caches {
+        let caches = Mamba3Caches {
             caches: caches.into_iter().map(Option::unwrap).collect(),
         };
         (x, caches)
@@ -262,19 +262,17 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     }
 
     /// Build zero-initialised caches from a 3-D input tensor `[B, S, D]`.
-    fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba2Caches<B> {
+    fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba3Caches<B> {
         let device = &x.device();
         let [batch, _sequence, _d_model] = x.dims();
         let layer0 = &self.real_layers[0].mamba_block;
-        let [conv_dim, _, conv_kernel] = layer0.conv1d.weight.dims();
 
-        Mamba2CachesConfig::new(
+        Mamba3CachesConfig::new(
             n_virtual,
-            Mamba2CacheConfig {
+            Mamba3CacheConfig {
                 batch,
                 state_rank: layer0.state_rank,
-                conv_kernel,
-                conv_dim,
+                num_rope_angles: layer0.num_rope_angles,
                 per_head_dim: layer0.per_head_dim(),
                 nheads: layer0.nheads(),
             },
@@ -283,19 +281,17 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     }
 
     /// Build zero-initialised caches from a 2-D input tensor `[B, D]`.
-    fn make_zero_caches_2d(&self, x: &Tensor<B, 2>, n_virtual: usize) -> Mamba2Caches<B> {
+    fn make_zero_caches_2d(&self, x: &Tensor<B, 2>, n_virtual: usize) -> Mamba3Caches<B> {
         let device = &x.device();
         let [batch, _d_model] = x.dims();
         let layer0 = &self.real_layers[0].mamba_block;
-        let [conv_dim, _, conv_kernel] = layer0.conv1d.weight.dims();
 
-        Mamba2CachesConfig::new(
+        Mamba3CachesConfig::new(
             n_virtual,
-            Mamba2CacheConfig {
+            Mamba3CacheConfig {
                 batch,
                 state_rank: layer0.state_rank,
-                conv_kernel,
-                conv_dim,
+                num_rope_angles: layer0.num_rope_angles,
                 per_head_dim: layer0.per_head_dim(),
                 nheads: layer0.nheads(),
             },
@@ -305,47 +301,47 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba2Layer  (single Pre-LN residual block)
+// Mamba3Layer  (single Pre-LN residual block)
 // ---------------------------------------------------------------------------
 
 /// A single Mamba-2 residual block:
 ///
 /// ```text
-///   output = x·scale + Mamba2( RMSNorm(x) )
+///   output = x·scale + Mamba3( RMSNorm(x) )
 /// ```
 ///
 /// where `scale` is 1.0 normally and 0.0 when the residual connection is
 /// intentionally suppressed by the layer stack configuration.
 #[derive(Module, Debug)]
-pub struct Mamba2Layer<B: Backend> {
+pub struct Mamba3Layer<B: Backend> {
     /// Pre-norm applied to the input before the SSM block.
     ///
     /// Using RMSNorm *before* the block (Pre-LN) is standard practice in
     /// modern LLMs and improves training stability.
     pub norm: RmsNorm<B>,
 
-    /// The Mamba-2 SSM block (see [`Mamba2`]).
-    pub mamba_block: Mamba2<B>,
+    /// The Mamba-2 SSM block (see [`Mamba3`]).
+    pub mamba_block: Mamba3<B>,
 }
 
-/// Configuration / factory for [`Mamba2Layer`].
+/// Configuration / factory for [`Mamba3Layer`].
 #[derive(Config, Debug)]
-pub struct Mamba2LayerConfig {
+pub struct Mamba3LayerConfig {
     /// Configuration for the inner Mamba-2 block.
-    pub mamba_block: Mamba2Config,
+    pub mamba_block: Mamba3Config,
 }
 
-impl Mamba2LayerConfig {
+impl Mamba3LayerConfig {
     /// Allocate and initialise the layer on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Layer<B> {
-        Mamba2Layer {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3Layer<B> {
+        Mamba3Layer {
             norm: RmsNormConfig::new(self.mamba_block.d_model).init(device),
             mamba_block: self.mamba_block.init(device),
         }
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3Layer<B> {
     // -----------------------------------------------------------------------
     // forward  (full sequence)
     // -----------------------------------------------------------------------
@@ -354,7 +350,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
     ///
     /// Computes:
     /// ```text
-    ///   output = x · residual_scale + Mamba2( RMSNorm(x) )
+    ///   output = x · residual_scale + Mamba3( RMSNorm(x) )
     /// ```
     ///
     /// # Shapes
@@ -363,10 +359,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 3>,
-        cache: Option<Mamba2Cache<B>>,
+        cache: Option<Mamba3Cache<B>>,
         ssd_path: SsdPath,
         residual_scale: f32,
-    ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
+    ) -> (Tensor<B, 3>, Mamba3Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
         // Save the (optionally scaled) residual *before* normalisation so that
@@ -405,9 +401,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
     pub fn step(
         &self,
         x: Tensor<B, 2>,
-        cache: Option<Mamba2Cache<B>>,
+        cache: Option<Mamba3Cache<B>>,
         residual_scale: f32,
-    ) -> (Tensor<B, 2>, Mamba2Cache<B>) {
+    ) -> (Tensor<B, 2>, Mamba3Cache<B>) {
         let [batch, d_model] = x.dims();
 
         let res_bm = x.clone() * residual_scale;

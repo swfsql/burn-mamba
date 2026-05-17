@@ -1,4 +1,4 @@
-use crate::mamba2::ssd::serial;
+use crate::mamba3::ssd::serial;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 

@@ -1,4 +1,4 @@
-//! Naive implementation where the Mamba2 block is not adapted.
+//! Naive implementation where the Mamba3 block is not adapted.
 //!
 //! Two independent layers are executed as a bidi pair,
 //! where the input flip-split happens before the layer normalization,
@@ -9,6 +9,6 @@ mod layer;
 mod output_merge;
 
 pub use layer::{
-    Mamba2BidiLayerPair, Mamba2BidiLayerPairConfig, Mamba2BidiLayers, Mamba2BidiLayersConfig,
+    Mamba3BidiLayerPair, Mamba3BidiLayerPairConfig, Mamba3BidiLayers, Mamba3BidiLayersConfig,
 };
 pub use output_merge::{OutputMerge, OutputMergeConfig};

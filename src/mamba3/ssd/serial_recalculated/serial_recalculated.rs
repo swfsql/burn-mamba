@@ -1,9 +1,9 @@
-use crate::mamba2::prelude::*;
-use crate::mamba2::ssd::serial;
+use crate::mamba3::prelude::*;
+use crate::mamba3::ssd::serial;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
-impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
     /// Returns:
@@ -45,7 +45,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], _da_chunk_end_bhn.dims());
 
-        let (y_bnlhp, final_state_bhpr) = <B as Mamba2BackendExt>::ssd_serial_recalculated(
+        let (y_bnlhp, final_state_bhpr) = <B as Mamba3BackendExt>::ssd_serial_recalculated(
             input.x_bnlhp.into_primitive().tensor(),
             dt_discretized_bhnl.into_primitive().tensor(),
             input.b_bnlgr.into_primitive().tensor(),
@@ -61,7 +61,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
 }
 
 /// Extends the backend and wraps it for `burn`.
-pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
+pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
@@ -166,24 +166,24 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
 
 // For inference and for any backend, fallback to the default impl (to Mamba2::ssd_serial).
 //
-// impl<B: Backend> Mamba2BackendExt for B {}
+// impl<B: Backend> Mamba3BackendExt for B {}
 // Note: cannot generally implement as above as it conflicts with the custom autodiff impl.
 // So it's necessary to implement for each backend.
 //
 // TODO: somehow avoid leaking backend-* features into the library
 #[cfg(feature = "backend-ndarray")]
-impl<F, I> Mamba2BackendExt for burn::backend::NdArray<F, I> {}
+impl<F, I> Mamba3BackendExt for burn::backend::NdArray<F, I> {}
 #[cfg(feature = "backend-flex")]
-impl Mamba2BackendExt for burn::backend::Flex {}
+impl Mamba3BackendExt for burn::backend::Flex {}
 #[cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu"))]
-impl<F, I> Mamba2BackendExt for burn::backend::libtorch::LibTorch<F, I> {}
+impl<F, I> Mamba3BackendExt for burn::backend::libtorch::LibTorch<F, I> {}
 #[cfg(feature = "backend-remote")]
-impl<F, I> Mamba2BackendExt for burn::backend::RemoteBackend<F, I> {}
+impl<F, I> Mamba3BackendExt for burn::backend::RemoteBackend<F, I> {}
 // impl for cubecl backends
 #[cfg(feature = "cubecl")]
 mod cubecl {
     use burn_cubecl::{CubeBackend, CubeRuntime, FloatElement, IntElement, element::BoolElement};
-    impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> super::Mamba2BackendExt
+    impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> super::Mamba3BackendExt
         for CubeBackend<R, F, I, BT>
     {
     }
@@ -194,21 +194,21 @@ mod cubecl {
 #[cfg(feature = "fusion")]
 mod fusion {
     use burn_fusion::{Fusion, FusionBackend};
-    impl<B: FusionBackend + super::Mamba2BackendExt> super::Mamba2BackendExt for Fusion<B> {}
+    impl<B: FusionBackend + super::Mamba3BackendExt> super::Mamba3BackendExt for Fusion<B> {}
 }
 
 /// Marker for autodiff-compatible backends that are valid for the custom backward implementation.
 #[cfg(feature = "autodiff")]
-pub trait Mamba2AutodiffBackendExt:
-    Backend + Mamba2BackendExt + burn::tensor::backend::AutodiffBackend
+pub trait Mamba3AutodiffBackendExt:
+    Backend + Mamba3BackendExt + burn::tensor::backend::AutodiffBackend
 {
 }
 // Any autodiff-compatible backend is valid with our custom implementation
 //
 // Note: This is just a marker. The actual custom implementation is at super::serial_recalculated::backward,
-// a custom Mamba2BackendExt implementation.
+// a custom Mamba3BackendExt implementation.
 #[cfg(feature = "autodiff")]
-impl<B: Backend + Mamba2BackendExt> Mamba2AutodiffBackendExt for burn::backend::Autodiff<B> {}
+impl<B: Backend + Mamba3BackendExt> Mamba3AutodiffBackendExt for burn::backend::Autodiff<B> {}
 
 /// Conversion helper.
 pub(crate) fn mk<B: Backend, const D: usize>(p: FloatTensor<B>) -> Tensor<B, D> {

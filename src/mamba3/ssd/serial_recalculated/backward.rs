@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
-use crate::mamba2::ssd::serial_recalculated::{
-    Mamba2BackendExt,
+use crate::mamba3::ssd::serial_recalculated::{
+    Mamba3BackendExt,
     combined_backward::{self, CombinedGrads},
 };
 use burn::backend::autodiff::{
@@ -13,7 +13,7 @@ use burn::backend::autodiff::{
 use burn::prelude::*;
 use burn::tensor::{TensorPrimitive, ops::FloatTensor};
 
-impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
+impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.
     ///
     /// The two output tensors are concatenated into a single 1-D tracked tensor
@@ -84,7 +84,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         /// Only the 7 original inputs are saved; all intermediates (cb, intra
         /// state, chunk_input_state) are recomputed during `backward`.
         #[allow(clippy::type_complexity)]
-        impl<B: Backend + Mamba2BackendExt> Backward<B, 7> for K2K3K4K5CombinedBackward {
+        impl<B: Backend + Mamba3BackendExt> Backward<B, 7> for K2K3K4K5CombinedBackward {
             type State = State<B>;
 
             fn backward(
@@ -356,4 +356,4 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             }
         } // end match
     } // end fn ssd_serial_recalculated on Autodiff<B, C>
-} // end impl Mamba2BackendExt for Autodiff<B, C>
+} // end impl Mamba3BackendExt for Autodiff<B, C>

@@ -18,11 +18,11 @@
 //! multiplications (exploiting tensor cores).  Step 3 is a short sequential
 //! scan over `T/Q` elements rather than `T`.
 
-use crate::mamba2::prelude::*;
+use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba2<B> {
+impl<B: Backend> Mamba3<B> {
     // -----------------------------------------------------------------------
     // chunked_selective_scan
     // -----------------------------------------------------------------------

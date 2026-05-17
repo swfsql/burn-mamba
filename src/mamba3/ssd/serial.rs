@@ -1,10 +1,10 @@
 #![allow(unused_variables)]
 
-use crate::mamba2::prelude::*;
+use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba2<B> {
+impl<B: Backend> Mamba3<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
     /// Returns:

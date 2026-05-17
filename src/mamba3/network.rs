@@ -10,7 +10,7 @@
 //!   Embedding  (vocab_size → d_model)
 //!       │
 //!       ▼  (×n_layers)
-//!   Mamba2Layer  [Pre-LN residual block]
+//!   Mamba3Layer  [Pre-LN residual block]
 //!       │
 //!       ▼
 //!   RMSNorm  (final normalisation)
@@ -41,17 +41,17 @@
 //!
 //! | Method | Input shape | Use case |
 //! |--------|-------------|----------|
-//! | [`Mamba2Network::forward`] | `[B, T]` | Training, prefill |
-//! | [`Mamba2Network::step`]    | `[B]`    | Autoregressive decoding |
+//! | [`Mamba3Network::forward`] | `[B, T]` | Training, prefill |
+//! | [`Mamba3Network::step`]    | `[B]`    | Autoregressive decoding |
 
-use crate::mamba2::prelude::*;
+use crate::mamba3::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Mamba2Network
+// Mamba3Network
 // ---------------------------------------------------------------------------
 
 /// A complete Mamba-2 language model.
@@ -59,7 +59,7 @@ use burn::prelude::*;
 /// See the [module-level documentation](self) for an overview of the
 /// architecture and the two execution modes.
 #[derive(Module, Debug)]
-pub struct Mamba2Network<B: Backend> {
+pub struct Mamba3Network<B: Backend> {
     /// Token embedding table.
     ///
     /// Shape of weight matrix: `[padded_vocab_size, d_model]`.
@@ -67,7 +67,7 @@ pub struct Mamba2Network<B: Backend> {
     pub embedding: Embedding<B>,
 
     /// The stack of Mamba-2 residual blocks.
-    pub layers: Mamba2Layers<B>,
+    pub layers: Mamba3Layers<B>,
 
     /// Final layer normalisation applied after all Mamba-2 blocks and before
     /// the LM head.  This is the `norm_f` in the original implementation.
@@ -83,16 +83,16 @@ pub struct Mamba2Network<B: Backend> {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba2NetworkConfig
+// Mamba3NetworkConfig
 // ---------------------------------------------------------------------------
 
-/// Configuration / factory for [`Mamba2Network`].
+/// Configuration / factory for [`Mamba3Network`].
 #[derive(Config, Debug)]
-pub struct Mamba2NetworkConfig {
+pub struct Mamba3NetworkConfig {
     /// Number of real (weight-bearing) Mamba-2 layers.
     pub n_real_layers: usize,
 
-    /// Optional virtual-layer scheduling.  See [`Mamba2Layers`] for details.
+    /// Optional virtual-layer scheduling.  See [`Mamba3Layers`] for details.
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, Schedule)>,
 
@@ -109,19 +109,19 @@ pub struct Mamba2NetworkConfig {
     pub pad_vocab_size_multiple: usize,
 
     /// Configuration shared by all Mamba-2 blocks.
-    pub mamba_block: Mamba2Config,
+    pub mamba_block: Mamba3Config,
 
     /// When `true`, the LM head weight is not allocated separately; instead
     /// the transposed embedding matrix is used directly (weight tying).
     pub missing_lm_head: bool,
 }
 
-impl Mamba2NetworkConfig {
+impl Mamba3NetworkConfig {
     /// Allocate and initialise the full network on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Network<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3Network<B> {
         let padded_vocab_size = Self::padded_vocab(self.vocab_size, self.pad_vocab_size_multiple);
 
-        let layers = Mamba2LayersConfig {
+        let layers = Mamba3LayersConfig {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),
             mamba_block: self.mamba_block.clone(),
@@ -140,7 +140,7 @@ impl Mamba2NetworkConfig {
             )
         };
 
-        Mamba2Network {
+        Mamba3Network {
             embedding: EmbeddingConfig::new(padded_vocab_size, self.mamba_block.d_model)
                 .init(device),
             layers,
@@ -163,14 +163,14 @@ impl Mamba2NetworkConfig {
 // Inference implementations
 // ---------------------------------------------------------------------------
 
-impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
     // -----------------------------------------------------------------------
     // forward  (full sequence — training / prefill)
     // -----------------------------------------------------------------------
 
     /// Process a full token sequence and return next-token logits.
     ///
-    /// Internally this calls [`Mamba2Layers::forward`], which runs the
+    /// Internally this calls [`Mamba3Layers::forward`], which runs the
     /// chunkwise SSD algorithm over every layer. This is the mode to use
     /// during training (backpropagation through the entire sequence) and
     /// during the prefill phase of inference.
@@ -191,9 +191,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     pub fn forward(
         &self,
         x: Tensor<B, 2, Int>,
-        caches: Option<Mamba2Caches<B>>,
+        caches: Option<Mamba3Caches<B>>,
         ssd_path: SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
+    ) -> (Tensor<B, 3>, Mamba3Caches<B>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -222,7 +222,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
 
     /// Process a **single** token and return next-token logits.
     ///
-    /// Internally this calls [`Mamba2Layers::step`], which advances each
+    /// Internally this calls [`Mamba3Layers::step`], which advances each
     /// layer's recurrent state by one step:
     ///
     /// ```text
@@ -245,8 +245,8 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     pub fn step(
         &self,
         x: Tensor<B, 1, Int>,
-        caches: Option<Mamba2Caches<B>>,
-    ) -> (Tensor<B, 2>, Mamba2Caches<B>) {
+        caches: Option<Mamba3Caches<B>>,
+    ) -> (Tensor<B, 2>, Mamba3Caches<B>) {
         let [batch] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
