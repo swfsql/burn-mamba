@@ -103,6 +103,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
                     num_rope_angles: layer0_block.num_rope_angles,
                     per_head_dim: layer0_block.per_head_dim(),
                     nheads: layer0_block.nheads(),
+                    mimo_rank: layer0_block.mimo_rank,
                 },
             )
             .init(device)

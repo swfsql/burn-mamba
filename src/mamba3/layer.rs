@@ -275,6 +275,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
                 num_rope_angles: layer0.num_rope_angles,
                 per_head_dim: layer0.per_head_dim(),
                 nheads: layer0.nheads(),
+                mimo_rank: layer0.mimo_rank,
             },
         )
         .init(device)
@@ -294,6 +295,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
                 num_rope_angles: layer0.num_rope_angles,
                 per_head_dim: layer0.per_head_dim(),
                 nheads: layer0.nheads(),
+                mimo_rank: layer0.mimo_rank,
             },
         )
         .init(device)
