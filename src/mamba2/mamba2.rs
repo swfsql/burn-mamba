@@ -972,13 +972,15 @@ mod step {
             let dtbx_bhpr = {
                 let x_bhpr = x_bhp.clone().unsqueeze_dim::<4>(3).expand(ssm_shape_bhpr);
 
-                // Expand B from groups to heads.
+                // Expand B from [B, G, N] → [B, H, P, N], matching the SSD forward path:
+                // each group's projection is replicated across the heads_per_group heads of
+                // that group so that heads 0..(H/G) belong to group 0, etc.
                 let b_bhpr = b_bgr
-                    .unsqueeze_dims::<5>(&[1, 4]) // [B, 1, G, N, 1]
-                    .expand([batch, heads_per_group, ngroups, state_rank, 1])
-                    .reshape([batch, nheads, state_rank, 1]) // [B, H, N, 1]
-                    .permute([0, 1, 3, 2]) // [B, H, 1, N]
-                    .expand(ssm_shape_bhpr);
+                    .unsqueeze_dim::<4>(2) // [B, G, 1, N]
+                    .expand([batch, ngroups, heads_per_group, state_rank]) // [B, G, H/G, N]
+                    .reshape([batch, nheads, state_rank]) // [B, H, N]
+                    .unsqueeze_dim::<4>(2) // [B, H, 1, N]
+                    .expand(ssm_shape_bhpr); // [B, H, P, N]
 
                 let dt_bhpr = dt_bh.unsqueeze_dims::<4>(&[2, 3]).expand(ssm_shape_bhpr);
 
@@ -995,11 +997,11 @@ mod step {
                 // Cₜ hₜ:  element-wise multiply C (broadcast to [B, H, P, N])
                 // with h_t, then sum over N.
                 let c_bhpr = c_bgr
-                    .unsqueeze_dims::<5>(&[1, 4])
-                    .expand([batch, heads_per_group, ngroups, state_rank, 1])
-                    .reshape([batch, nheads, state_rank, 1]) // [B, H, N, 1]
-                    .permute([0, 1, 3, 2]) // [B, H, 1, N]
-                    .expand(ssm_shape_bhpr);
+                    .unsqueeze_dim::<4>(2) // [B, G, 1, N]
+                    .expand([batch, ngroups, heads_per_group, state_rank]) // [B, G, H/G, N]
+                    .reshape([batch, nheads, state_rank]) // [B, H, N]
+                    .unsqueeze_dim::<4>(2) // [B, H, 1, N]
+                    .expand(ssm_shape_bhpr); // [B, H, P, N]
                 assert_eq!(ssm_shape_bhpr, c_bhpr.dims());
 
                 let ch_bhp = (cache.ssm_bhpr.clone() * c_bhpr).sum_dim(3).squeeze_dim(3); // sum over N → [B, H, P]
@@ -1026,5 +1028,194 @@ mod step {
 
             (out_bm, cache)
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "backend-flex"))]
+mod tests {
+    use super::*;
+    use burn::backend::Flex;
+
+    type B = Flex;
+
+    fn small_config() -> Mamba2Config {
+        Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+    }
+
+    fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
+        let device = Default::default();
+        let model = cfg.init::<B>(&device);
+
+        let batch = 2;
+        let seq_len = 5;
+        let d_model = cfg.d_model;
+
+        let input = Tensor::<B, 3>::random(
+            [batch, seq_len, d_model],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+
+        let (out_fwd, _) = model.forward(input.clone(), None, ssd_path);
+
+        let mut cache: Option<Mamba2Cache<B>> = None;
+        let mut step_outputs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+
+        for t in 0..seq_len {
+            let token = input.clone().narrow(1, t, 1).squeeze_dim(1);
+            let (out_t, new_cache) = model.step(token, cache);
+            cache = Some(new_cache);
+            step_outputs.push(out_t);
+        }
+
+        let out_step = Tensor::stack(step_outputs, 1);
+
+        let diff = (out_fwd - out_step).abs().max().into_scalar();
+        assert!(
+            diff < 1e-4,
+            "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
+        );
+    }
+
+    #[test]
+    fn step_matches_forward() {
+        run_step_matches_forward(small_config(), Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn step_matches_forward_ngroups2() {
+        let cfg = Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2);
+        run_step_matches_forward(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    /// forward(full) ≡ forward(prefix) then forward(suffix, cache_from_prefix).
+    ///
+    /// Verifies stateful chunked-prefill: the convolution window carried in the
+    /// cache must replay correctly at the start of the second segment.
+    fn run_split_matches_full(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
+        let device = Default::default();
+        let model = cfg.init::<B>(&device);
+
+        let batch = 2;
+        let seq_len = 6;
+        let split = 2;
+        let d_model = cfg.d_model;
+
+        let input = Tensor::<B, 3>::random(
+            [batch, seq_len, d_model],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+
+        let (out_full, _) = model.forward(input.clone(), None, ssd_path.clone());
+
+        let prefix = input.clone().narrow(1, 0, split);
+        let suffix = input.narrow(1, split, seq_len - split);
+        let (out_prefix, cache) = model.forward(prefix, None, ssd_path.clone());
+        let (out_suffix, _) = model.forward(suffix, Some(cache), ssd_path);
+        let out_split = Tensor::cat(vec![out_prefix, out_suffix], 1);
+
+        let diff = (out_full - out_split).abs().max().into_scalar();
+        assert!(
+            diff < 1e-4,
+            "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
+        );
+    }
+
+    #[test]
+    fn split_matches_full() {
+        run_split_matches_full(small_config(), Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn split_matches_full_ngroups2() {
+        let cfg = Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2);
+        run_split_matches_full(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    // ── is_norm_before_gate = true ───────────────────────────────────────────
+
+    #[test]
+    fn step_matches_forward_norm_before_gate() {
+        let cfg = Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_is_norm_before_gate(true);
+        run_step_matches_forward(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn split_matches_full_norm_before_gate() {
+        let cfg = Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_is_norm_before_gate(true);
+        run_split_matches_full(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    }
+
+    // ── SSD path agreement ───────────────────────────────────────────────────
+
+    fn run_ssd_paths_agree(cfg: Mamba2Config) {
+        let device = Default::default();
+        let model = cfg.init::<B>(&device);
+
+        let batch = 2;
+        let seq_len = 8;
+        let d_model = cfg.d_model;
+
+        let input = Tensor::<B, 3>::random(
+            [batch, seq_len, d_model],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+
+        let (out_min, _) = model.forward(input.clone(), None, Mamba2SsdPath::Minimal(Some(4)));
+        let (out_ser, _) = model.forward(input.clone(), None, Mamba2SsdPath::Serial(Some(4)));
+        let (out_rec, _) = model.forward(input, None, Mamba2SsdPath::SerialRecalculated(Some(4)));
+
+        let tol = 1e-4;
+        let d_ser = (out_min.clone() - out_ser).abs().max().into_scalar();
+        let d_rec = (out_min - out_rec).abs().max().into_scalar();
+
+        assert!(
+            d_ser < tol,
+            "Minimal vs Serial: forward max abs diff = {d_ser:.6} (tol {tol})"
+        );
+        assert!(
+            d_rec < tol,
+            "Minimal vs SerialRecalculated: forward max abs diff = {d_rec:.6} (tol {tol})"
+        );
+    }
+
+    #[test]
+    fn ssd_paths_agree() {
+        run_ssd_paths_agree(small_config());
+    }
+
+    #[test]
+    fn ssd_paths_agree_ngroups2() {
+        let cfg = Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2);
+        run_ssd_paths_agree(cfg);
     }
 }
