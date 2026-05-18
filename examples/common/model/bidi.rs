@@ -65,7 +65,7 @@ impl<B: Backend + Mamba2BackendExt> MyMamba2BidiNetwork<B> {
         &self,
         x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch_size, sequence_len, _input_dim] = x.dims();
         let [_input_dim, d_model] = self.in_proj.weight.dims();

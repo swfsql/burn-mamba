@@ -83,7 +83,7 @@ impl AppArgs {
             std::process::exit(0);
         }
 
-        let mut args = AppArgs {
+        let args = AppArgs {
             training_config: pargs
                 .opt_value_from_os_str(["-c", "--training-config"], parse_path)?,
             model_config: pargs.opt_value_from_os_str(["-m", "--model-config"], parse_path)?,

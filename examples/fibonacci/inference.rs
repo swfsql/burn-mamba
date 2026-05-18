@@ -29,8 +29,11 @@ pub fn infer<B: Backend + Mamba2BackendExt>(
     let batcher = SequenceBatcher::default();
     // Put all items in one batch
     let batch = batcher.batch(items, &infer_device);
-    let (predicted, _caches) =
-        model.forward(batch.sequences, None, SsdPath::SerialRecalculated(None));
+    let (predicted, _caches) = model.forward(
+        batch.sequences,
+        None,
+        Mamba2SsdPath::SerialRecalculated(None),
+    );
     assert_eq!([batch_size, SEQ_LENGTH + 1, 1], predicted.dims());
     let last_predicted = predicted.narrow(1, SEQ_LENGTH, 1);
     assert_eq!([batch_size, 1, 1], last_predicted.dims());
