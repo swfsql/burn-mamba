@@ -22,7 +22,8 @@ pub fn model_config() -> MyMamba2NetworkConfig {
                 32, // d_model (intra- and inter-layer expressivity, high impact on disk size)
                 64, // state_rank (intra-layer and time-wise expressivity, average impact on disk size)
                 4,  // conv_kernel (input convolution, possibly not needed)
-                4, // n_heads (intra-layer expressivity, no impact on disk size, high impact on vram)
+                4, // nheads (intra-layer expressivity, no impact on disk size, high impact on vram)
+                1, // ngroups (intra-layer expressivity)
                 4, // expand (intra-layer expressivity, small impact on disk size)
             ),
         ))

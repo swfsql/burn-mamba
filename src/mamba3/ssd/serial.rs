@@ -188,7 +188,7 @@ pub fn k3_ssd_chunk_state<B: Backend>(
 }
 
 // ---------------------------------------------------------------------------
-// K4 — inter-chunk state scan (sequential loop, unchanged from Mamba-2)
+// K4 — inter-chunk state scan (sequential loop)
 // ---------------------------------------------------------------------------
 
 /// Propagate hidden state across chunk boundaries using a sequential scan.

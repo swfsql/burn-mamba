@@ -1,7 +1,7 @@
-//! # Mamba-2 Language Model Network
+//! # Mamba-3 Language Model Network
 //!
 //! This module assembles a complete autoregressive language model from the
-//! Mamba-2 components:
+//! Mamba-3 components:
 //!
 //! ```text
 //!   tokens [B, T]
@@ -54,7 +54,7 @@ use burn::prelude::*;
 // Mamba3Network
 // ---------------------------------------------------------------------------
 
-/// A complete Mamba-2 language model.
+/// A complete Mamba-3 language model.
 ///
 /// See the [module-level documentation](self) for an overview of the
 /// architecture and the two execution modes.
@@ -66,10 +66,10 @@ pub struct Mamba3Network<B: Backend> {
     /// Maps integer token IDs to `d_model`-dimensional vectors.
     pub embedding: Embedding<B>,
 
-    /// The stack of Mamba-2 residual blocks.
+    /// The stack of Mamba-3 residual blocks.
     pub layers: Mamba3Layers<B>,
 
-    /// Final layer normalisation applied after all Mamba-2 blocks and before
+    /// Final layer normalisation applied after all Mamba-3 blocks and before
     /// the LM head.  This is the `norm_f` in the original implementation.
     pub norm_f: RmsNorm<B>,
 
@@ -89,7 +89,7 @@ pub struct Mamba3Network<B: Backend> {
 /// Configuration / factory for [`Mamba3Network`].
 #[derive(Config, Debug)]
 pub struct Mamba3NetworkConfig {
-    /// Number of real (weight-bearing) Mamba-2 layers.
+    /// Number of real (weight-bearing) Mamba-3 layers.
     pub n_real_layers: usize,
 
     /// Optional virtual-layer scheduling.  See [`Mamba3Layers`] for details.
@@ -108,7 +108,7 @@ pub struct Mamba3NetworkConfig {
     /// Set to `1` to disable rounding.  Common values: 8, 16, 64.
     pub pad_vocab_size_multiple: usize,
 
-    /// Configuration shared by all Mamba-2 blocks.
+    /// Configuration shared by all Mamba-3 blocks.
     pub mamba_block: Mamba3Config,
 
     /// When `true`, the LM head weight is not allocated separately; instead
@@ -201,7 +201,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
         let x_bsm = self.embedding.forward(x);
         assert_eq!([batch, sequence, d_model], x_bsm.dims());
 
-        // Run the Mamba-2 layer stack (chunkwise SSD).
+        // Run the Mamba-3 layer stack (chunkwise SSD).
         let (mut x_bsm, caches) = self.layers.forward(x_bsm, caches, ssd_path);
         assert_eq!([batch, sequence, d_model], x_bsm.dims());
 

@@ -12,7 +12,7 @@
 //!    `t`, needed to correctly continue data-dependent rotary embeddings.
 //!
 //! Note: Mamba-3 has **no conv cache** (the short 1-D convolution present in
-//! Mamba-2 is removed; its role is absorbed by the trapezoidal discretization
+//! Mamba-3 is removed; its role is absorbed by the trapezoidal discretization
 //! and the learnable B/C biases).
 
 use crate::mamba3::prelude::*;

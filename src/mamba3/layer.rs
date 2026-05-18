@@ -1,6 +1,6 @@
-//! # Mamba-2 Layer and Layer Stack
+//! # Mamba-3 Layer and Layer Stack
 //!
-//! A **Mamba-2 layer** is the standard Pre-LN residual block used throughout
+//! A **Mamba-3 layer** is the standard Pre-LN residual block used throughout
 //! the network.  It wraps a single [`Mamba3`] SSM block with an RMSNorm
 //! (applied to the input, *before* the block) and adds the input back as a
 //! residual connection:
@@ -25,8 +25,8 @@
 //!
 //! The first and/or last residual connection in the stack can optionally be
 //! zeroed out (`ignore_first_residual` / `ignore_last_residual`), which is
-//! useful when composing Mamba-2 blocks with other module types (e.g. in a
-//! hybrid Mamba-2 + attention architecture where neighbouring blocks already
+//! useful when composing Mamba-3 blocks with other module types (e.g. in a
+//! hybrid Mamba-3 + attention architecture where neighbouring blocks already
 //! carry residuals).
 
 use crate::mamba3::prelude::*;
@@ -38,7 +38,7 @@ use burn::prelude::*;
 // Mamba3Layers  (the full layer stack)
 // ---------------------------------------------------------------------------
 
-/// A stack of Mamba-2 layers with optional virtual-layer scheduling.
+/// A stack of Mamba-3 layers with optional virtual-layer scheduling.
 ///
 /// The stack maintains `n_real_layers` distinct weight sets but can execute
 /// `n_virtual_layers` logical forward passes, cycling through weights
@@ -81,7 +81,7 @@ pub struct Mamba3LayersConfig {
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, Schedule)>,
 
-    /// Configuration shared by all Mamba-2 blocks in the stack.
+    /// Configuration shared by all Mamba-3 blocks in the stack.
     pub mamba_block: Mamba3Config,
 
     /// See [`Mamba3Layers::ignore_first_residual`].
@@ -306,7 +306,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
 // Mamba3Layer  (single Pre-LN residual block)
 // ---------------------------------------------------------------------------
 
-/// A single Mamba-2 residual block:
+/// A single Mamba-3 residual block:
 ///
 /// ```text
 ///   output = x·scale + Mamba3( RMSNorm(x) )
@@ -322,14 +322,14 @@ pub struct Mamba3Layer<B: Backend> {
     /// modern LLMs and improves training stability.
     pub norm: RmsNorm<B>,
 
-    /// The Mamba-2 SSM block (see [`Mamba3`]).
+    /// The Mamba-3 SSM block (see [`Mamba3`]).
     pub mamba_block: Mamba3<B>,
 }
 
 /// Configuration / factory for [`Mamba3Layer`].
 #[derive(Config, Debug)]
 pub struct Mamba3LayerConfig {
-    /// Configuration for the inner Mamba-2 block.
+    /// Configuration for the inner Mamba-3 block.
     pub mamba_block: Mamba3Config,
 }
 
@@ -379,7 +379,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layer<B> {
             .forward(normed_bsm, cache, ssd_path.clone());
         assert_eq!([batch, sequence, d_model], mamba_out_bsm.dims());
 
-        // Residual addition:  y = x · scale + Mamba2(norm(x))
+        // Residual addition:  y = x · scale + Mamba3(norm(x))
         let out_bsm = mamba_out_bsm + res_bsm;
         assert_eq!([batch, sequence, d_model], out_bsm.dims());
 
@@ -394,7 +394,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layer<B> {
     ///
     /// Computes:
     /// ```text
-    ///   output = x · residual_scale + Mamba2.step( RMSNorm(x) )
+    ///   output = x · residual_scale + Mamba3.step( RMSNorm(x) )
     /// ```
     ///
     /// # Shapes
