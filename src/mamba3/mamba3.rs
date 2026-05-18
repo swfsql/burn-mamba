@@ -349,36 +349,58 @@ impl Mamba3Config {
 
 /// Apply rotary position embeddings to `x` along its last dimension.
 ///
-/// Uses **interleaved pairing** (NeoX / Triton style): adjacent pairs `(0,1)`, `(2,3)`, …
-/// are rotated together.  This matches the official Mamba-3 Triton kernel convention.
+/// Two pairing conventions are supported, selected by `rotate_pairwise`:
+///
+/// - `rotate_pairwise = true` — **interleaved** (NeoX / Triton style): adjacent
+///   pairs `(0,1)`, `(2,3)`, … are rotated together. Used by the SISO Triton
+///   kernel (`mamba3_siso_*.py`).
+/// - `rotate_pairwise = false` — **half-and-half** (GPT-J style): position `n`
+///   is paired with `n + N/2`. Used by the MIMO Tilelang kernel
+///   (`mamba3_mimo_fwd.py`).
+///
+/// Reference: `mamba3.py:335` sets `rotate_pairwise = not self.is_mimo`.
 ///
 /// # Shapes
 /// - `x`:      `[..., state_rank]` where `state_rank` is even
-/// - `angles`: `[..., state_rank / 2]`  (one angle per adjacent pair)
+/// - `angles`: `[..., state_rank / 2]`  (one angle per pair)
 /// - output:   same shape as `x`
 pub fn apply_rope<B: Backend, const D: usize>(
     x: Tensor<B, D>,
     angles: Tensor<B, D>,
+    rotate_pairwise: bool,
 ) -> Tensor<B, D> {
     let dims = x.dims();
     let n = dims[D - 1];
     let n2 = n / 2;
     let leading: usize = dims[..D - 1].iter().product();
 
-    let x_pairs = x.reshape([leading, n]).reshape([leading, n2, 2]);
     let angles_flat = angles.reshape([leading, n2]);
-
-    let x0 = x_pairs.clone().narrow(2, 0, 1).squeeze_dim(2);
-    let x1 = x_pairs.narrow(2, 1, 1).squeeze_dim(2);
-
     let cos = angles_flat.clone().cos();
     let sin = angles_flat.sin();
 
-    let x0r = cos.clone() * x0.clone() - sin.clone() * x1.clone();
-    let x1r = sin * x0 + cos * x1;
+    if rotate_pairwise {
+        // Interleaved: reshape to [leading, n2, 2], pairs along last axis.
+        let x_pairs = x.reshape([leading, n2, 2]);
+        let x0 = x_pairs.clone().narrow(2, 0, 1).squeeze_dim(2);
+        let x1 = x_pairs.narrow(2, 1, 1).squeeze_dim(2);
 
-    Tensor::cat(vec![x0r.unsqueeze_dim::<3>(2), x1r.unsqueeze_dim::<3>(2)], 2)
-        .reshape(dims)
+        let x0r = cos.clone() * x0.clone() - sin.clone() * x1.clone();
+        let x1r = sin * x0 + cos * x1;
+
+        Tensor::cat(vec![x0r.unsqueeze_dim::<3>(2), x1r.unsqueeze_dim::<3>(2)], 2)
+            .reshape(dims)
+    } else {
+        // Half-and-half: reshape to [leading, 2, n2], halves along middle axis.
+        let x_halves = x.reshape([leading, 2, n2]);
+        let x0 = x_halves.clone().narrow(1, 0, 1).squeeze_dim(1);
+        let x1 = x_halves.narrow(1, 1, 1).squeeze_dim(1);
+
+        let x0r = cos.clone() * x0.clone() - sin.clone() * x1.clone();
+        let x1r = sin * x0 + cos * x1;
+
+        Tensor::cat(vec![x0r.unsqueeze_dim::<3>(1), x1r.unsqueeze_dim::<3>(1)], 1)
+            .reshape(dims)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -549,7 +571,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         assert_eq!([batch, sequence, mimo_rank, nheads, state_rank], c_bsrhr.dims());
 
         // ── Step 5: Data-dependent cumulative RoPE angles ─────────────────────
-        let theta_scaled_bsa = (theta_bsa * std::f32::consts::PI).tanh();
+        let theta_scaled_bsa = theta_bsa.tanh() * std::f32::consts::PI;
         let raw_angles_bsha = dt_bsh.clone().unsqueeze_dim::<4>(3)
             * theta_scaled_bsa.unsqueeze_dim::<4>(2);
 
@@ -562,34 +584,37 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         // b_bsrhr: [b, T, R, H, N], angles: [b, T, H, A] → [b, T, 1, H, A]
         let angles_exp_bsrha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2)
             .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
-        let b_bsrhn = apply_rope::<B, 5>(b_bsrhr, angles_exp_bsrha.clone());
-        let c_bsrhn = apply_rope::<B, 5>(c_bsrhr, angles_exp_bsrha);
+        // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
+        let rotate_pairwise = mimo_rank == 1;
+        let b_bsrhn = apply_rope::<B, 5>(b_bsrhr, angles_exp_bsrha.clone(), rotate_pairwise);
+        let c_bsrhn = apply_rope::<B, 5>(c_bsrhr, angles_exp_bsrha, rotate_pairwise);
         san(&b_bsrhn);
         san(&c_bsrhn);
 
         // ── Step 6: Build shifted inputs for β term ───────────────────────────
-        let x_prev_bshp = if sequence > 1 {
+        //
+        // "Shift-Before-Chunking": prepend the cached x_{-1} / B_{-1} at the
+        // sequence level (before SSD chunking) so the β term at t=0 sees the
+        // prior token from a continued cache. For a fresh (zero) cache this is
+        // equivalent to zero-padding.
+        let x_prev_first_b1hp = cache.v_state_bhp.clone().unsqueeze_dim::<4>(1);
+        let x_prev_bshp = if sequence == 1 {
+            x_prev_first_b1hp
+        } else {
             Tensor::cat(
-                vec![
-                    Tensor::zeros([batch, 1, nheads, per_head_dim], &device),
-                    x_bshp.clone().narrow(1, 0, sequence - 1),
-                ],
+                vec![x_prev_first_b1hp, x_bshp.clone().narrow(1, 0, sequence - 1)],
                 1,
             )
-        } else {
-            Tensor::zeros([batch, sequence, nheads, per_head_dim], &device)
         };
         // b_prev: [b, T, R, H, N]
-        let b_prev_bsrhn = if sequence > 1 {
+        let b_prev_first_b1rhn = cache.k_state_brhn.clone().unsqueeze_dim::<5>(1);
+        let b_prev_bsrhn = if sequence == 1 {
+            b_prev_first_b1rhn
+        } else {
             Tensor::cat(
-                vec![
-                    Tensor::zeros([batch, 1, mimo_rank, nheads, state_rank], &device),
-                    b_bsrhn.clone().narrow(1, 0, sequence - 1),
-                ],
+                vec![b_prev_first_b1rhn, b_bsrhn.clone().narrow(1, 0, sequence - 1)],
                 1,
             )
-        } else {
-            Tensor::zeros([batch, sequence, mimo_rank, nheads, state_rank], &device)
         };
 
         // ── Step 7: Scale inputs by trapezoidal coefficients ──────────────────
@@ -883,7 +908,7 @@ mod step {
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_brhn.dims());
 
             // ── RoPE: update cumulative angle, rotate B and C ──────────────────
-            let theta_scaled_ba = (theta_ba * std::f32::consts::PI).tanh();
+            let theta_scaled_ba = theta_ba.tanh() * std::f32::consts::PI;
             let raw_angle_bha = dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
             let new_cum_angle_bha = cache.cum_angle_bhr.clone() + raw_angle_bha;
 
@@ -891,8 +916,10 @@ mod step {
             let angles_brha = new_cum_angle_bha.clone()
                 .unsqueeze_dim::<4>(1)
                 .expand([batch, mimo_rank, nheads, num_rope_angles]);
-            let b_brhn = apply_rope::<B, 4>(b_brhn, angles_brha.clone());
-            let c_brhn = apply_rope::<B, 4>(c_brhn, angles_brha);
+            // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
+            let rotate_pairwise = mimo_rank == 1;
+            let b_brhn = apply_rope::<B, 4>(b_brhn, angles_brha.clone(), rotate_pairwise);
+            let c_brhn = apply_rope::<B, 4>(c_brhn, angles_brha, rotate_pairwise);
 
             // ── Build MIMO value tensors ───────────────────────────────────────
             // x_vals[b, r, h, p] = x[b, h, p] * mimo_x[h, r, p]
@@ -1126,5 +1153,71 @@ mod tests {
             .with_ngroups(2)
             .with_mimo_rank(2);
         run_step_matches_forward(cfg);
+    }
+
+    /// forward(full) ≡ forward(prefix) then forward(suffix, cache_from_prefix).
+    ///
+    /// Verifies stateful chunked-prefill: the β term at the start of the second
+    /// chunk must see `x_{-1}` and `B_{-1}` from the cache, not zeros.
+    fn run_split_matches_full(cfg: Mamba3Config) {
+        let device = Default::default();
+        let model = cfg.init::<B>(&device);
+
+        let batch = 2;
+        let seq_len = 6;
+        let split = 2;
+        let d_model = cfg.d_model;
+
+        let input = Tensor::<B, 3>::random(
+            [batch, seq_len, d_model],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+
+        let ssd_path = SsdPath::Minimal(Some(4));
+        let (out_full, _) = model.forward(input.clone(), None, ssd_path.clone());
+
+        let prefix = input.clone().narrow(1, 0, split);
+        let suffix = input.narrow(1, split, seq_len - split);
+        let (out_prefix, cache) = model.forward(prefix, None, ssd_path.clone());
+        let (out_suffix, _) = model.forward(suffix, Some(cache), ssd_path);
+        let out_split = Tensor::cat(vec![out_prefix, out_suffix], 1);
+
+        let diff = (out_full - out_split).abs().max().into_scalar();
+        assert!(
+            diff < 1e-4,
+            "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
+        );
+    }
+
+    #[test]
+    fn split_matches_full() {
+        run_split_matches_full(small_config());
+    }
+
+    #[test]
+    fn split_matches_full_ngroups2() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2);
+        run_split_matches_full(cfg);
+    }
+
+    #[test]
+    fn split_matches_full_mimo() {
+        run_split_matches_full(small_config_mimo());
+    }
+
+    #[test]
+    fn split_matches_full_mimo_ngroups2() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2)
+            .with_mimo_rank(2);
+        run_split_matches_full(cfg);
     }
 }
