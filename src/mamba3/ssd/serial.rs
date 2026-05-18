@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
 
@@ -13,9 +15,8 @@ impl<B: Backend> Mamba3<B> {
     /// # Returns
     /// - `y_bnlrhp`: `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    #[allow(non_snake_case)]
     pub fn ssd_serial(input: super::SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
-        let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlrhp.dims();
+        let [batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlrhp.dims();
         let [.., state_rank] = input.b_bnlrhn.dims();
 
         assert!(
@@ -46,12 +47,19 @@ impl<B: Backend> Mamba3<B> {
 
         // ── K4: state passing (sequential loop) ───────────────────────────────
         let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<B, 5>, Tensor<B, 4>) =
-            k4_ssd_state_passing(intra_chunk_state_bnhpr, da_chunk_end_bhn, input.initial_state_bhpr);
+            k4_ssd_state_passing(
+                intra_chunk_state_bnhpr,
+                da_chunk_end_bhn,
+                input.initial_state_bhpr,
+            );
         assert_eq!(
             [batch, nchunks, nheads, per_head_dim, state_rank],
             chunk_input_state_bnhpr.dims()
         );
-        assert_eq!([batch, nheads, per_head_dim, state_rank], final_state_bhpr.dims());
+        assert_eq!(
+            [batch, nheads, per_head_dim, state_rank],
+            final_state_bhpr.dims()
+        );
 
         // ── K5: MIMO chunk scan ───────────────────────────────────────────────
         let y_bnlrhp: Tensor<B, 6> = k5_ssd_chunk_scan(
@@ -78,9 +86,7 @@ impl<B: Backend> Mamba3<B> {
 /// # Returns
 /// - `da_cumsum_bhnl`: `[batch, nheads, nchunks, chunk_len]` — intra-chunk prefix sums
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — last prefix sum per chunk (total decay)
-pub fn k1_ssd_chunk_cumsum<B: Backend>(
-    da_bnlh: Tensor<B, 4>,
-) -> (Tensor<B, 4>, Tensor<B, 3>) {
+pub fn k1_ssd_chunk_cumsum<B: Backend>(da_bnlh: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 3>) {
     let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
     // Permute to [b, H, n, l] for the cumsum along the last dim
     let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);

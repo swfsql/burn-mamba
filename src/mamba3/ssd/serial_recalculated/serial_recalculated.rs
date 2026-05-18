@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crate::mamba3::prelude::*;
 use crate::mamba3::ssd::serial;
 use burn::prelude::*;
@@ -15,7 +17,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     /// # Returns
     /// - `y_bnlrhp`:        `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    #[allow(non_snake_case)]
     pub fn ssd_serial_recalculated(
         input: super::super::SsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
@@ -62,7 +63,7 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     fn ssd_serial_recalculated(
         v_bnlrhp: FloatTensor<Self>,
-        da_bnlh: FloatTensor<Self>,
+        _da_bnlh: FloatTensor<Self>,
         b_bnlrhn: FloatTensor<Self>,
         c_bnlrhn: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
@@ -77,10 +78,8 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
         let init_state: Tensor<Self, 4> = mk(initial_state_bhpr);
 
         // Recalculate da_chunk_end_bhn from the pre-computed cumsum (the "recalculated" part).
-        let da_chunk_end_bhn: Tensor<Self, 3> = da_cumsum
-            .clone()
-            .slice(s![.., .., .., -1])
-            .squeeze_dim(3);
+        let da_chunk_end_bhn: Tensor<Self, 3> =
+            da_cumsum.clone().slice(s![.., .., .., -1]).squeeze_dim(3);
 
         let cb_bnhLL: Tensor<Self, 5> = serial::k2_ssd_bmm(c.clone(), b.clone());
         let intra_chunk_state_bnhpr: Tensor<Self, 5> =

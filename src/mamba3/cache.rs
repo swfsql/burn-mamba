@@ -163,14 +163,13 @@ impl Mamba3CacheConfig {
             [self.batch, self.mimo_rank, self.nheads, self.state_rank],
             device,
         );
-        let v_state_bhp = Tensor::zeros(
-            [self.batch, self.nheads, self.per_head_dim],
-            device,
-        );
-        let cum_angle_bhr = Tensor::zeros(
-            [self.batch, self.nheads, self.num_rope_angles],
-            device,
-        );
-        Mamba3Cache { ssm_bhpr, k_state_brhn, v_state_bhp, cum_angle_bhr }
+        let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
+        let cum_angle_bhr = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
+        Mamba3Cache {
+            ssm_bhpr,
+            k_state_brhn,
+            v_state_bhp,
+            cum_angle_bhr,
+        }
     }
 }

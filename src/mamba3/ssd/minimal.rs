@@ -50,10 +50,16 @@ impl<B: Backend> Mamba3<B> {
 
         // ── Fuse R into chunk_len ─────────────────────────────────────────────
         // [b, n, l, R, H, N] → [b, n, L, H, N]  where L = l*R
-        let b_bnLhn = input.b_bnlrhn.reshape([batch, nchunks, fused_len, nheads, state_rank]);
-        let c_bnLhn = input.c_bnlrhn.reshape([batch, nchunks, fused_len, nheads, state_rank]);
+        let b_bnLhn = input
+            .b_bnlrhn
+            .reshape([batch, nchunks, fused_len, nheads, state_rank]);
+        let c_bnLhn = input
+            .c_bnlrhn
+            .reshape([batch, nchunks, fused_len, nheads, state_rank]);
         // [b, n, l, R, H, P] → [b, n, L, H, P]
-        let v_bnLhp = input.v_bnlrhp.reshape([batch, nchunks, fused_len, nheads, per_head_dim]);
+        let v_bnLhp = input
+            .v_bnlrhp
+            .reshape([batch, nchunks, fused_len, nheads, per_head_dim]);
 
         // Base per-time-step cumulative log-decay: [b, H, n, l]
         let a_bhnl = input.da_bnlh.clone().permute([0, 3, 1, 2]);
@@ -70,8 +76,8 @@ impl<B: Backend> Mamba3<B> {
             // CB = C @ B^T: contract over state_rank N
             let c_bnhLr = c_bnLhn.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, L, N]
             let b_bnhLr = b_bnLhn.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, L, N]
-            let b_bnhrL = b_bnhLr.permute([0, 1, 2, 4, 3]);          // [b, n, H, N, L]
-            let cb_bnhLL = c_bnhLr.matmul(b_bnhrL);                   // [b, n, H, L, L]
+            let b_bnhrL = b_bnhLr.permute([0, 1, 2, 4, 3]); // [b, n, H, N, L]
+            let cb_bnhLL = c_bnhLr.matmul(b_bnhrL); // [b, n, H, L, L]
 
             // Build MIMO causal mask from segsum on base dimension, then interleave-expand.
             // l_base_bhnll[i,j] = exp(cumA[i] - cumA[j]) if i >= j, else 0
@@ -95,7 +101,7 @@ impl<B: Backend> Mamba3<B> {
             let masked_cb_bnhLL = (cb_bnLhL * l_bnLhL).permute([0, 1, 3, 2, 4]); // [b, n, H, L, L]
 
             let v_bnhLp = v_bnLhp.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, L, P]
-            let y_diag_bnhLp = masked_cb_bnhLL.matmul(v_bnhLp);      // [b, n, H, L, P]
+            let y_diag_bnhLp = masked_cb_bnhLL.matmul(v_bnhLp); // [b, n, H, L, P]
 
             y_diag_bnhLp.permute([0, 1, 3, 2, 4]) // [b, n, L, H, P]
         };
@@ -112,7 +118,8 @@ impl<B: Backend> Mamba3<B> {
             let a_cumsum_last_bhn1 = a_cumsum_bhnl.clone().slice(s![.., .., .., -1]); // [b,H,n,1]
             // Expand base cumsum to fused length (each time repeated R times):
             // [b, H, n, l] → [b, H, n, l, R] → [b, H, n, L]
-            let a_cumsum_fused_bhnL = a_cumsum_bhnl.clone()
+            let a_cumsum_fused_bhnL = a_cumsum_bhnl
+                .clone()
                 .unsqueeze_dim::<5>(4)
                 .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
                 .reshape([batch, nheads, nchunks, fused_len]);
@@ -137,9 +144,13 @@ impl<B: Backend> Mamba3<B> {
         let (state_bnhpr, final_state_bhpr) = {
             let initial_state_b1hpr = input.initial_state_bhpr.unsqueeze_dim(1);
             let initial_state_b1hpr = if let Some(init_hpr) = input.init_state_hpr {
-                let init_b1hpr = init_hpr
-                    .unsqueeze_dim::<4>(0)
-                    .expand([batch, 1, nheads, per_head_dim, state_rank]);
+                let init_b1hpr = init_hpr.unsqueeze_dim::<4>(0).expand([
+                    batch,
+                    1,
+                    nheads,
+                    per_head_dim,
+                    state_rank,
+                ]);
                 initial_state_b1hpr + init_b1hpr
             } else {
                 initial_state_b1hpr
@@ -164,10 +175,12 @@ impl<B: Backend> Mamba3<B> {
 
             // Flatten (P, N) for matmul
             let flat = per_head_dim * state_rank;
-            let state_bhNf = state_bNhpr
-                .clone()
-                .permute([0, 2, 1, 3, 4])
-                .reshape([batch, nheads, 1 + nchunks, flat]);
+            let state_bhNf = state_bNhpr.clone().permute([0, 2, 1, 3, 4]).reshape([
+                batch,
+                nheads,
+                1 + nchunks,
+                flat,
+            ]);
 
             // [b, H, 1+n, 1+n] × [b, H, 1+n, P·N] → [b, H, 1+n, P·N]
             let new_state_bhNf = decay_chunk_bhNN.matmul(state_bhNf);
@@ -175,7 +188,9 @@ impl<B: Backend> Mamba3<B> {
                 new_state_bhNf.reshape([batch, nheads, 1 + nchunks, per_head_dim, state_rank]);
 
             // Split: chunk input states [0..n], final state [n]
-            let s_bhnpr = new_state_bhNpr.clone().slice(s![.., .., 0..nchunks, .., ..]);
+            let s_bhnpr = new_state_bhNpr
+                .clone()
+                .slice(s![.., .., 0..nchunks, .., ..]);
             let f_bhpr: Tensor<B, 4> = new_state_bhNpr
                 .slice(s![.., .., nchunks, .., ..])
                 .squeeze_dim(2);

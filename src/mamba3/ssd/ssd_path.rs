@@ -294,17 +294,32 @@ mod tests {
     ) {
         let device = Default::default();
         let (v, da, b, c, init) = random_input(
-            batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank, &device,
+            batch,
+            nchunks,
+            chunk_len,
+            mimo_rank,
+            nheads,
+            per_head_dim,
+            state_rank,
+            &device,
         );
 
         let (y_min, s_min) = SsdPath::Minimal(Some(chunk_len)).run(make_input(
-            v.clone(), da.clone(), b.clone(), c.clone(), init.clone(),
+            v.clone(),
+            da.clone(),
+            b.clone(),
+            c.clone(),
+            init.clone(),
         ));
         let (y_ser, s_ser) = SsdPath::Serial(Some(chunk_len)).run(make_input(
-            v.clone(), da.clone(), b.clone(), c.clone(), init.clone(),
+            v.clone(),
+            da.clone(),
+            b.clone(),
+            c.clone(),
+            init.clone(),
         ));
-        let (y_rec, s_rec) = SsdPath::SerialRecalculated(Some(chunk_len))
-            .run(make_input(v, da, b, c, init));
+        let (y_rec, s_rec) =
+            SsdPath::SerialRecalculated(Some(chunk_len)).run(make_input(v, da, b, c, init));
 
         let tol = 1e-4;
 
@@ -313,10 +328,22 @@ mod tests {
         let dy_rec = (y_min - y_rec).abs().max().into_scalar();
         let ds_rec = (s_min - s_rec).abs().max().into_scalar();
 
-        assert!(dy_ser < tol, "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})");
-        assert!(ds_ser < tol, "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})");
-        assert!(dy_rec < tol, "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})");
-        assert!(ds_rec < tol, "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})");
+        assert!(
+            dy_ser < tol,
+            "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})"
+        );
+        assert!(
+            ds_ser < tol,
+            "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})"
+        );
+        assert!(
+            dy_rec < tol,
+            "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})"
+        );
+        assert!(
+            ds_rec < tol,
+            "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})"
+        );
     }
 
     #[test]
