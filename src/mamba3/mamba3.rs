@@ -635,49 +635,38 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let c_bnlrhn      = c_bSrhn.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
 
         // ── Step 9: Two MIMO-SSD calls ────────────────────────────────────────
-        let a_ones_h = Tensor::ones([nheads], &device);
-        let zeros_h  = Tensor::zeros([nheads], &device);
-
         // Build V tensors: [b, n, l, R, H, P]
         let mimo_x_val = self.mimo_x.as_ref().map(|p| p.val());
-        let v_gamma_bnlrhp = self.build_v_mimo_chunked(
+        let v_gamma_bnlrhp = build_v_mimo_chunked(
             x_gamma_bnlhp.clone(),
             mimo_x_val.as_ref(),
             batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim,
         );
-        let v_beta_bnlrhp = self.build_v_mimo_chunked(
+        let v_beta_bnlrhp = build_v_mimo_chunked(
             x_beta_bnlhp,
             mimo_x_val.as_ref(),
             batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim,
         );
 
-        // MIMO SSD for γ-path
-        let (y_gamma_bnlrhp, final_state_gamma) = self.ssd_mimo(
-            b_bnlrhn.clone(),
-            c_bnlrhn.clone(),
-            v_gamma_bnlrhp.clone(),
-            da_bnlh.clone(),
-            a_ones_h.clone(),
-            zeros_h.clone(),
-            cache.ssm_bhpr,
-            self.init_state_hpr.as_ref().map(|s| s.val()),
-            ssd_path.clone(),
-            batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank,
-        );
+        let input_gamma = SsdInput {
+            v_bnlrhp: v_gamma_bnlrhp,
+            da_bnlh: da_bnlh.clone(),
+            b_bnlrhn: b_bnlrhn.clone(),
+            c_bnlrhn: c_bnlrhn.clone(),
+            initial_state_bhpr: cache.ssm_bhpr,
+            init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
+        };
+        let (y_gamma_bnlrhp, final_state_gamma) = ssd_path.clone().run(input_gamma);
 
-        // MIMO SSD for β-path (zero initial state)
-        let (y_beta_bnlrhp, final_state_beta) = self.ssd_mimo(
-            b_prev_bnlrhn,
-            c_bnlrhn,
-            v_beta_bnlrhp,
+        let input_beta = SsdInput {
+            v_bnlrhp: v_beta_bnlrhp,
             da_bnlh,
-            a_ones_h,
-            zeros_h,
-            Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device),
-            None,
-            ssd_path,
-            batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank,
-        );
+            b_bnlrhn: b_prev_bnlrhn,
+            c_bnlrhn,
+            initial_state_bhpr: Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device),
+            init_state_hpr: None,
+        };
+        let (y_beta_bnlrhp, final_state_beta) = ssd_path.run(input_beta);
 
         // y_bnlrhp: [b, n, l, R, H, P]
         let y_bnlrhp = y_gamma_bnlrhp + y_beta_bnlrhp;
@@ -755,233 +744,27 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         (out_bsm, cache)
     }
 
-    /// Build V tensor from chunked x and optional mimo_x.
-    ///
-    /// Returns `[b, n, l, R, H, P]`.
-    fn build_v_mimo_chunked(
-        &self,
-        x_bnlhp: Tensor<B, 5>,
-        mimo_x: Option<&Tensor<B, 3>>,
-        batch: usize, nchunks: usize, chunk_len: usize,
-        mimo_rank: usize, nheads: usize, per_head_dim: usize,
-    ) -> Tensor<B, 6> {
-        match mimo_x {
-            None => {
-                // SISO: add rank dim of 1
-                x_bnlhp.unsqueeze_dim::<6>(3) // [b, n, l, 1, h, p]
-            }
-            Some(mx) => {
-                // x: [b, n, l, h, p] → [b, n, l, 1, h, p]
-                let x_exp = x_bnlhp.unsqueeze_dim::<6>(3)
-                    .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
-                // mimo_x: [h, r, p] → [r, h, p] → [1, 1, 1, r, h, p]
-                let mx_exp = mx.clone().permute([1, 0, 2])
-                    .unsqueeze_dim::<4>(0).unsqueeze_dim::<5>(0).unsqueeze_dim::<6>(0)
-                    .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
-                x_exp * mx_exp // [b, n, l, R, H, P]
-            }
-        }
-    }
-
-    /// MIMO chunkwise SSD computation.
-    ///
-    /// Handles both SISO (mimo_rank=1) and MIMO (mimo_rank>1) cases.
-    ///
-    /// # Inputs
-    /// - `b_bnlrhn`: `[b, n, l, R, H, N]` — key/B tensor
-    /// - `c_bnlrhn`: `[b, n, l, R, H, N]` — query/C tensor
-    /// - `v_bnlrhp`: `[b, n, l, R, H, P]` — value tensor (already scaled)
-    /// - `da_bnlh`:  `[b, n, l, H]`        — log-decay Δ·A
-    /// - `a_ones_h`: `[H]`                  — passed as a_decay but used as 1s (da already has A)
-    ///
-    /// # Returns
-    /// - output: `[b, n, l, R, H, P]`
-    /// - final_state: `[b, H, P, N]`
-    #[allow(non_snake_case)]
-    fn ssd_mimo(
-        &self,
-        b_bnlrhn: Tensor<B, 6>,
-        c_bnlrhn: Tensor<B, 6>,
-        v_bnlrhp: Tensor<B, 6>,
-        da_bnlh: Tensor<B, 4>,
-        _a_ones_h: Tensor<B, 1>,
-        zeros_h: Tensor<B, 1>,
-        initial_state_bhpr: Tensor<B, 4>,
-        init_state_hpr: Option<Tensor<B, 3>>,
-        _ssd_path: SsdPath,
-        batch: usize, nchunks: usize, chunk_len: usize,
-        mimo_rank: usize, nheads: usize, per_head_dim: usize, state_rank: usize,
-    ) -> (Tensor<B, 6>, Tensor<B, 4>) {
-        let device = b_bnlrhn.device();
-        let fused_len = chunk_len * mimo_rank;
-
-        // Interleave rank into the chunk_len dimension:
-        // [b, n, l, R, H, N] → reshape to [b, n, l*R, H, N]
-        // (This interleaves time and rank: position t*R+r = (time=t, rank=r))
-        let b_bnLhn = b_bnlrhn.reshape([batch, nchunks, fused_len, nheads, state_rank]);
-        let c_bnLhn = c_bnlrhn.reshape([batch, nchunks, fused_len, nheads, state_rank]);
-        let v_bnLhp = v_bnlrhp.reshape([batch, nchunks, fused_len, nheads, per_head_dim]);
-
-        // ── Step 1: Y_diag (intra-chunk) ─────────────────────────────────────
-        let y_diag_bnLhp = {
-            // CB = C @ B^T: [b, n, H, l*R, l*R]
-            let c_bnhLr = c_bnLhn.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, l*R, N]
-            let b_bnhLr = b_bnLhn.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, l*R, N]
-            let b_bnhrL = b_bnhLr.permute([0, 1, 2, 4, 3]);         // [b, n, H, N, l*R]
-            let cb_bnhLL = c_bnhLr.matmul(b_bnhrL);                  // [b, n, H, l*R, l*R]
-
-            // MIMO causal mask: L_mimo[i, j] = exp(cumA[t_i] - cumA[t_j]) if t_i >= t_j
-            // where t_i = i // R (floor), t_j = j // R (floor).
-            // Build from L_base (standard segsum on per-time-step cumA):
-            let a_bhnl_base = da_bnlh.clone().permute([0, 3, 1, 2]); // [b, H, n, l]
-            let l_base_bhnll = segsum::<B, 4, 5>(a_bhnl_base).exp(); // [b, H, n, l, l]
-
-            // Expand: [b, H, n, l, l] → [b, H, n, l*R, l*R] with interleaved ordering.
-            // L_mimo[i,j] = L_base[i//R, j//R] (all R ranks at the same time attend equally).
-            let l_mimo_bhnLL = l_base_bhnll
-                // Row interleaving: insert R at dim 4, then reshape → [b, H, n, l*R, l]
-                .unsqueeze_dim::<6>(4)
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank, chunk_len])
-                .reshape([batch, nheads, nchunks, fused_len, chunk_len])
-                // Col interleaving: insert R at dim 5, then reshape → [b, H, n, l*R, l*R]
-                .unsqueeze_dim::<6>(5)
-                .expand([batch, nheads, nchunks, fused_len, chunk_len, mimo_rank])
-                .reshape([batch, nheads, nchunks, fused_len, fused_len]);
-            assert_eq!([batch, nheads, nchunks, fused_len, fused_len], l_mimo_bhnLL.dims());
-
-            // masked_CB = CB * L_mimo (permuted to align dims)
-            let cb_bnLhL = cb_bnhLL.permute([0, 1, 3, 2, 4]); // [b, n, l*R, H, l*R]
-            let l_bnLhL  = l_mimo_bhnLL.permute([0, 2, 3, 1, 4]); // [b, n, l*R, H, l*R]
-            let masked_cb_bnLhL = cb_bnLhL * l_bnLhL;
-
-            // Y_diag = masked_CB @ V: [b, n, H, l*R, l*R] × [b, n, l*R, H, P]
-            let masked_cb_bnhLL = masked_cb_bnLhL.permute([0, 1, 3, 2, 4]); // [b, n, H, l*R, l*R]
-            let v_bnhLp = v_bnLhp.clone().permute([0, 1, 3, 2, 4]); // [b, n, H, l*R, P]
-            let y_bnhLp = masked_cb_bnhLL.matmul(v_bnhLp); // [b, n, H, l*R, P]
-
-            y_bnhLp.permute([0, 1, 3, 2, 4]) // [b, n, l*R, H, P]
-        };
-
-        // ── Step 2: Chunk state (input → state) ──────────────────────────────
-        let state_bnhpr = {
-            // decay from each position to end of chunk: exp(cumA_last - cumA[t])
-            // cumA uses per-time-step values (not fused):
-            let a_bhnl_base = da_bnlh.clone().permute([0, 3, 1, 2]); // [b, H, n, l]
-            let a_cumsum_last_bhn1 = a_bhnl_base.clone().cumsum(3).slice(s![.., .., .., -1]);
-            // a_cumsum_base: [b, H, n, l]
-            let a_cumsum_base = a_bhnl_base.cumsum(3);
-            let decay_bhnl = (a_cumsum_last_bhn1 - a_cumsum_base).exp(); // [b, H, n, l]
-
-            // Expand decay to fused: repeat R times per time position
-            let decay_bhnL = decay_bhnl
-                .unsqueeze_dim::<5>(4)
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
-                .reshape([batch, nheads, nchunks, fused_len]);
-
-            // decay * V: [b, n, l*R, H, P] weighted by decay
-            let decay_bnLh1 = decay_bhnL.permute([0, 2, 3, 1]).unsqueeze_dim(4); // [b, n, l*R, H, 1]
-            let decayed_v_bnLhp = decay_bnLh1 * v_bnLhp.clone();
-
-            // state = decayed_V^T @ B: contract over l*R
-            // [b, n, H, P, l*R] × [b, n, H, l*R, N] → [b, n, H, P, N]
-            let decayed_v_bnhpL = decayed_v_bnLhp.permute([0, 1, 3, 4, 2]); // [b, n, H, P, l*R]
-            let b_bnhLN = b_bnLhn.permute([0, 1, 3, 2, 4]);                  // [b, n, H, l*R, N]
-
-            decayed_v_bnhpL.matmul(b_bnhLN) // [b, n, H, P, N]
-        };
-        assert_eq!([batch, nchunks, nheads, per_head_dim, state_rank], state_bnhpr.dims());
-
-        // ── Step 3: Inter-chunk state scan ────────────────────────────────────
-        let (state_bnhpr, final_state_bhpr) = {
-            let initial_state_b1hpr = initial_state_bhpr.unsqueeze_dim(1);
-            let initial_state_b1hpr = if let Some(init_hpr) = init_state_hpr {
-                let init_b1hpr = init_hpr.unsqueeze_dim::<4>(0)
-                    .expand([batch, 1, nheads, per_head_dim, state_rank]);
-                initial_state_b1hpr + init_b1hpr
-            } else {
-                initial_state_b1hpr
-            };
-
-            let state_bNhpr = Tensor::cat(vec![initial_state_b1hpr, state_bnhpr], 1);
-
-            // Per-chunk cumulative decay: last position of each chunk
-            let a_bhnl_base = da_bnlh.clone().permute([0, 3, 1, 2]);
-            let a_cumsum_last_bhn = a_bhnl_base.cumsum(3)
-                .slice(s![.., .., .., -1]).squeeze_dim(3); // [b, H, n]
-            let a_chunk_pad_bhN = Tensor::cat(
-                vec![Tensor::zeros([batch, nheads, 1], &device), a_cumsum_last_bhn],
-                2,
-            );
-
-            let decay_chunk_bhNN = segsum::<B, 3, 4>(a_chunk_pad_bhN).exp();
-
-            let flat = per_head_dim * state_rank;
-            let state_bhNf = state_bNhpr.clone()
-                .permute([0, 2, 1, 3, 4])
-                .reshape([batch, nheads, 1 + nchunks, flat]);
-
-            let new_state_bhNf = decay_chunk_bhNN.matmul(state_bhNf);
-            let new_state_bhNpr = new_state_bhNf.reshape([batch, nheads, 1 + nchunks, per_head_dim, state_rank]);
-
-            let s_bhnpr = new_state_bhNpr.clone().slice(s![.., .., 0..nchunks, .., ..]);
-            let f_bhpr  = new_state_bhNpr.slice(s![.., .., nchunks, .., ..]).squeeze_dim(2);
-
-            (s_bhnpr.permute([0, 2, 1, 3, 4]), f_bhpr) // [b, n, H, P, N], [b, H, P, N]
-        };
-
-        // ── Step 4: Y_off (state → output) ───────────────────────────────────
-        let y_off_bnLhp = {
-            let state_decay_bhnL = {
-                let a_bhnl = da_bnlh.clone().permute([0, 3, 1, 2]);
-                let cum = a_bhnl.cumsum(3).exp(); // [b, H, n, l]
-                // Expand to fused length:
-                cum.unsqueeze_dim::<5>(4)
-                    .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
-                    .reshape([batch, nheads, nchunks, fused_len])
-            };
-
-            // C: [b, n, l*R, H, N] → [b, n, H, l*R, N]
-            let c_bnhLr = c_bnLhn.permute([0, 1, 3, 2, 4]);
-            // state: [b, n, H, P, N] → [b, n, H, N, P]
-            let state_bnhrp = state_bnhpr.permute([0, 1, 2, 4, 3]);
-            // ch = C @ state: [b, n, H, l*R, P]
-            let ch_bnhLp = c_bnhLr.matmul(state_bnhrp);
-
-            // Multiply by intra-chunk decay: state_decay_bhnL [b,H,n,l*R] → [b,n,H,l*R,1]
-            let decay_bnhL1 = state_decay_bhnL.permute([0, 2, 1, 3]).unsqueeze_dim(4);
-            let y_off_bnhLp = ch_bnhLp * decay_bnhL1;
-
-            y_off_bnhLp.permute([0, 1, 3, 2, 4]) // [b, n, l*R, H, P]
-        };
-
-        // ── Combine and reshape back to [b, n, l, R, H, P] ───────────────────
-        let y_bnLhp = y_diag_bnLhp + y_off_bnLhp;
-
-        // Add D skip (zeros_h is passed; D is added in the outer forward())
-        let d_bnLhp = zeros_h
-            .unsqueeze_dims::<5>(&[0, 1, 2, 4])
-            .expand([batch, nchunks, fused_len, nheads, per_head_dim]);
-        let y_bnLhp = y_bnLhp + d_bnLhp * v_bnLhp;
-
-        // Reshape: [b, n, l*R, H, P] → [b, n, l, R, H, P]
-        let y_bnlrhp = y_bnLhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
-
-        (y_bnlrhp, final_state_bhpr)
-    }
 }
 
-// ---------------------------------------------------------------------------
-// segsum helper (needed here for the MIMO SSD)
-// ---------------------------------------------------------------------------
-
-fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tensor<B, D2> {
-    assert_eq!(D + 1, D2);
-    let x_cumsum = x.cumsum(D - 1);
-    let x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D);
-    let x_cumsum_col = x_cumsum.unsqueeze_dim(D - 1);
-    let diff = x_cumsum_row - x_cumsum_col;
-    let neg_inf_mask = Tensor::full_like(&diff, f32::NEG_INFINITY).triu(1);
-    diff + neg_inf_mask
+fn build_v_mimo_chunked<B: Backend>(
+    x_bnlhp: Tensor<B, 5>,
+    mimo_x: Option<&Tensor<B, 3>>,
+    batch: usize, nchunks: usize, chunk_len: usize,
+    mimo_rank: usize, nheads: usize, per_head_dim: usize,
+) -> Tensor<B, 6> {
+    match mimo_x {
+        None => {
+            x_bnlhp.unsqueeze_dim::<6>(3)
+        }
+        Some(mx) => {
+            let x_exp = x_bnlhp.unsqueeze_dim::<6>(3)
+                .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+            let mx_exp = mx.clone().permute([1, 0, 2])
+                .unsqueeze_dim::<4>(0).unsqueeze_dim::<5>(0).unsqueeze_dim::<6>(0)
+                .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+            x_exp * mx_exp
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
