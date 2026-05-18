@@ -15,7 +15,7 @@ impl<B: Backend> Mamba3<B> {
     /// # Returns
     /// - `y_bnlrhp`: `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_serial(input: super::SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn ssd_serial(input: super::Mamba3SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let [batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlrhp.dims();
         let [.., state_rank] = input.b_bnlrhn.dims();
 

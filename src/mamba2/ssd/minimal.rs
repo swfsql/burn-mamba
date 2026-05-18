@@ -92,7 +92,7 @@ impl<B: Backend> Mamba2<B> {
     ///   Y = Y_diag + Y_off + D · X
     /// ```
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(input: super::SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_minimal(input: super::Mamba2SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
         let [.., ngroups, state_rank] = input.b_bnlgr.dims();
         let device = &input.x_bnlhp.device();

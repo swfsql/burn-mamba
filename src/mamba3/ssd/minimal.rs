@@ -35,11 +35,11 @@ impl<B: Backend> Mamba3<B> {
     /// No D skip is applied here — the caller handles it.
     ///
     /// # Shapes
-    /// - input: see [`SsdInput`]
+    /// - input: see [`Mamba3SsdInput`]
     /// - output.0 `y_bnlrhp`:       `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(input: super::SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn ssd_minimal(input: super::Mamba3SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlrhp.dims();
         let [.., state_rank] = input.b_bnlrhn.dims();
         let fused_len = chunk_len * mimo_rank; // L = Q·R

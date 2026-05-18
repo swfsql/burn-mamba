@@ -8,7 +8,7 @@ use burn::prelude::*;
 /// inter-chunk scan length.
 /// Optimal value is approximately `√(state_rank · per_head_dim)`.
 #[derive(Debug, Clone)]
-pub enum SsdPath {
+pub enum Mamba3SsdPath {
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.
@@ -46,7 +46,7 @@ pub enum SsdPath {
 /// All tensors are pre-processed: B/C are already QK-normed, RoPE-applied, bias-added, and
 /// expanded to per-head (not per-group). V is already scaled by the trapezoidal coefficient
 /// (γ or β). The combined log-decay `da = Δ·A` is pre-computed. D skip is handled by the caller.
-pub struct SsdInput<B: Backend> {
+pub struct Mamba3SsdInput<B: Backend> {
     /// Value tensor, already scaled by trapezoidal coefficient (γ or β).
     ///
     /// # Shape
@@ -84,7 +84,7 @@ pub struct SsdInput<B: Backend> {
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
-impl<B: Backend> SsdInput<B> {
+impl<B: Backend> Mamba3SsdInput<B> {
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
         san(&self.v_bnlrhp);
@@ -98,7 +98,7 @@ impl<B: Backend> SsdInput<B> {
     }
 }
 
-impl SsdPath {
+impl Mamba3SsdPath {
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
         (state_rank * per_head_dim)
@@ -154,21 +154,21 @@ impl SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            SsdPath::Minimal(chunk_len) => *chunk_len,
-            SsdPath::Serial(chunk_len) => *chunk_len,
-            SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba3SsdPath::Minimal(chunk_len) => *chunk_len,
+            Mamba3SsdPath::Serial(chunk_len) => *chunk_len,
+            Mamba3SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
     pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
         match self {
-            SsdPath::Minimal(chunk_len) => {
+            Mamba3SsdPath::Minimal(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
-            SsdPath::Serial(chunk_len) => {
+            Mamba3SsdPath::Serial(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
-            SsdPath::SerialRecalculated(chunk_len) => {
+            Mamba3SsdPath::SerialRecalculated(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
         }
@@ -183,20 +183,20 @@ impl SsdPath {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn run<B: Backend + Mamba3BackendExt>(
         &self,
-        input: SsdInput<B>,
+        input: Mamba3SsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match self {
-            SsdPath::Minimal(_) => Mamba3::<B>::ssd_minimal(input),
-            SsdPath::Serial(_) => Mamba3::<B>::ssd_serial(input),
-            SsdPath::SerialRecalculated(_) => Mamba3::<B>::ssd_serial_recalculated(input),
+            Mamba3SsdPath::Minimal(_) => Mamba3::<B>::ssd_minimal(input),
+            Mamba3SsdPath::Serial(_) => Mamba3::<B>::ssd_serial(input),
+            Mamba3SsdPath::SerialRecalculated(_) => Mamba3::<B>::ssd_serial_recalculated(input),
         }
     }
 }
 
-impl Default for SsdPath {
-    fn default() -> SsdPath {
-        // SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
-        SsdPath::SerialRecalculated(None)
+impl Default for Mamba3SsdPath {
+    fn default() -> Mamba3SsdPath {
+        // Mamba3SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        Mamba3SsdPath::SerialRecalculated(None)
     }
 }
 
@@ -212,7 +212,7 @@ mod tests {
 
     type B = Flex;
 
-    /// Build a randomised [`SsdInput`] suitable for cross-path comparison.
+    /// Build a randomised [`Mamba3SsdInput`] suitable for cross-path comparison.
     ///
     /// `da` is drawn from a negative-mean distribution so that the implied
     /// per-token decay `exp(da)` stays in `(0, 1]`, matching how the upstream
@@ -267,8 +267,8 @@ mod tests {
         b: Tensor<B, 6>,
         c: Tensor<B, 6>,
         initial_state: Tensor<B, 4>,
-    ) -> SsdInput<B> {
-        SsdInput {
+    ) -> Mamba3SsdInput<B> {
+        Mamba3SsdInput {
             v_bnlrhp: v,
             da_bnlh: da,
             b_bnlrhn: b,
@@ -279,7 +279,7 @@ mod tests {
         }
     }
 
-    /// Run the same `SsdInput` through `Minimal`, `Serial`, and
+    /// Run the same `Mamba3SsdInput` through `Minimal`, `Serial`, and
     /// `SerialRecalculated` and assert that all three yield the same output
     /// and final state. They are all chunkwise reformulations of the same
     /// MIMO-first SSD, so the results must agree up to floating-point noise.
@@ -304,14 +304,14 @@ mod tests {
             &device,
         );
 
-        let (y_min, s_min) = SsdPath::Minimal(Some(chunk_len)).run(make_input(
+        let (y_min, s_min) = Mamba3SsdPath::Minimal(Some(chunk_len)).run(make_input(
             v.clone(),
             da.clone(),
             b.clone(),
             c.clone(),
             init.clone(),
         ));
-        let (y_ser, s_ser) = SsdPath::Serial(Some(chunk_len)).run(make_input(
+        let (y_ser, s_ser) = Mamba3SsdPath::Serial(Some(chunk_len)).run(make_input(
             v.clone(),
             da.clone(),
             b.clone(),
@@ -319,7 +319,7 @@ mod tests {
             init.clone(),
         ));
         let (y_rec, s_rec) =
-            SsdPath::SerialRecalculated(Some(chunk_len)).run(make_input(v, da, b, c, init));
+            Mamba3SsdPath::SerialRecalculated(Some(chunk_len)).run(make_input(v, da, b, c, init));
 
         let tol = 1e-4;
 

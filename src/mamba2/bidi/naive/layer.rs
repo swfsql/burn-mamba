@@ -72,7 +72,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
         caches: Option<Mamba2Caches<B>>,
         // straight_caches: Option<Mamba2Caches<B>>,
         // reverse_caches: Option<Mamba2Caches<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let n_virtual_layers = self
             .n_virtual_layers
@@ -220,7 +220,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayerPair<B> {
         x: Tensor<B, 3>,
         straight_cache: Option<Mamba2Cache<B>>,
         reverse_cache: Option<Mamba2Cache<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 

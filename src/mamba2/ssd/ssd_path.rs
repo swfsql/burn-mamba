@@ -8,7 +8,7 @@ use burn::prelude::*;
 /// inter-chunk scan length.  
 /// Optimal value is approximately `√(state_rank · per_head_dim)`.
 #[derive(Debug, Clone)]
-pub enum SsdPath {
+pub enum Mamba2SsdPath {
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.  
@@ -41,7 +41,7 @@ pub enum SsdPath {
     SerialRecalculated(Option<usize>),
 }
 
-pub struct SsdInput<B: Backend> {
+pub struct Mamba2SsdInput<B: Backend> {
     /// # Shape
     /// - [batch, nchunks, chunk_len, nheads, per_head_dim]
     pub x_bnlhp: Tensor<B, 5>,
@@ -68,7 +68,7 @@ pub struct SsdInput<B: Backend> {
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
-impl<B: Backend> SsdInput<B> {
+impl<B: Backend> Mamba2SsdInput<B> {
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
         san(&self.x_bnlhp);
@@ -84,7 +84,7 @@ impl<B: Backend> SsdInput<B> {
     }
 }
 
-impl SsdPath {
+impl Mamba2SsdPath {
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
         (state_rank * per_head_dim)
@@ -140,30 +140,30 @@ impl SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            SsdPath::Minimal(chunk_len) => *chunk_len,
-            SsdPath::Serial(chunk_len) => *chunk_len,
-            SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba2SsdPath::Minimal(chunk_len) => *chunk_len,
+            Mamba2SsdPath::Serial(chunk_len) => *chunk_len,
+            Mamba2SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
     pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
         match self {
-            SsdPath::Minimal(chunk_len) => {
+            Mamba2SsdPath::Minimal(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
-            SsdPath::Serial(chunk_len) => {
+            Mamba2SsdPath::Serial(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
-            SsdPath::SerialRecalculated(chunk_len) => {
+            Mamba2SsdPath::SerialRecalculated(chunk_len) => {
                 chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
             }
         }
     }
 }
 
-impl Default for SsdPath {
-    fn default() -> SsdPath {
-        // SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
-        SsdPath::SerialRecalculated(None)
+impl Default for Mamba2SsdPath {
+    fn default() -> Mamba2SsdPath {
+        // Mamba2SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        Mamba2SsdPath::SerialRecalculated(None)
     }
 }

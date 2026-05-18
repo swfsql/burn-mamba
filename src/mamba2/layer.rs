@@ -136,7 +136,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
         &self,
         mut x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         // The effective number of forward passes equals the number of *virtual*
         // layers.  When no scheduling is configured this equals n_real_layers.
@@ -364,7 +364,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layer<B> {
         &self,
         x: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
         residual_scale: f32,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, d_model] = x.dims();

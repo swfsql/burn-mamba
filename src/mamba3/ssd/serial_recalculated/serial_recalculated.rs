@@ -18,7 +18,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     /// - `y_bnlrhp`:        `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn ssd_serial_recalculated(
-        input: super::super::SsdInput<B>,
+        input: super::super::Mamba3SsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         assert!(
             input.init_state_hpr.is_none(),

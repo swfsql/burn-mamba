@@ -192,7 +192,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
         &self,
         x: Tensor<B, 2, Int>,
         caches: Option<Mamba2Caches<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();

@@ -612,7 +612,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba3Cache<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba3SsdPath,
     ) -> (Tensor<B, 3>, Mamba3Cache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -905,7 +905,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
             per_head_dim,
         );
 
-        let input_gamma = SsdInput {
+        let input_gamma = Mamba3SsdInput {
             v_bnlrhp: v_gamma_bnlrhp,
             da_bnlh: da_bnlh.clone(),
             b_bnlrhn: b_bnlrhn.clone(),
@@ -915,7 +915,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         };
         let (y_gamma_bnlrhp, final_state_gamma) = ssd_path.clone().run(input_gamma);
 
-        let input_beta = SsdInput {
+        let input_beta = Mamba3SsdInput {
             v_bnlrhp: v_beta_bnlrhp,
             da_bnlh,
             b_bnlrhn: b_prev_bnlrhn,
@@ -1446,7 +1446,7 @@ mod tests {
             &device,
         );
 
-        let ssd_path = SsdPath::Minimal(Some(4));
+        let ssd_path = Mamba3SsdPath::Minimal(Some(4));
         let (out_fwd, _) = model.forward(input.clone(), None, ssd_path);
 
         let mut cache: Option<Mamba3Cache<B>> = None;
@@ -1518,7 +1518,7 @@ mod tests {
             &device,
         );
 
-        let ssd_path = SsdPath::Minimal(Some(4));
+        let ssd_path = Mamba3SsdPath::Minimal(Some(4));
         let (out_full, _) = model.forward(input.clone(), None, ssd_path.clone());
 
         let prefix = input.clone().narrow(1, 0, split);

@@ -11,7 +11,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
     pub fn ssd_serial_recalculated(
-        input: super::super::SsdInput<B>,
+        input: super::super::Mamba2SsdInput<B>,
     ) -> (Tensor<B, 5>, Tensor<B, 4>) {
         // Must use a backend-dependent method.
         //

@@ -7,4 +7,4 @@ pub mod trapezoidal;
 #[cfg(feature = "autodiff")]
 pub use serial_recalculated::Mamba3AutodiffBackendExt;
 pub use serial_recalculated::Mamba3BackendExt;
-pub use ssd_path::{SsdInput, SsdPath};
+pub use ssd_path::{Mamba3SsdInput, Mamba3SsdPath};

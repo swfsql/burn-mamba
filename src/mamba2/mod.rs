@@ -14,5 +14,5 @@ pub mod prelude {
     #[cfg(all(feature = "autodiff"))]
     pub use ssd::Mamba2AutodiffBackendExt;
     pub use ssd::Mamba2BackendExt;
-    pub use ssd::SsdPath;
+    pub use ssd::{Mamba2SsdInput, Mamba2SsdPath};
 }
