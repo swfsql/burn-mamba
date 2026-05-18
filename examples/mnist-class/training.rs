@@ -231,7 +231,7 @@ pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
         loss_metric.running_value().current(),
         acc_metric.running_value().current(),
     );
-    
+
     // let device = valid_model.0.in_proj.weight.device();
     // let () = B::sync(&device).unwrap();
     // let () = B::memory_cleanup(&device);

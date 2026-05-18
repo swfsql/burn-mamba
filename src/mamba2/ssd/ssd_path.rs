@@ -159,11 +159,208 @@ impl Mamba2SsdPath {
             }
         }
     }
+
+    /// Run the SSD algorithm on the given input.
+    ///
+    /// Dispatches to `ssd_minimal`, `ssd_serial`, or `ssd_serial_recalculated` based on the variant.
+    ///
+    /// # Returns
+    /// - `y_bnlhp`: `[batch, nchunks, chunk_len, nheads, per_head_dim]`
+    /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+    pub fn run<B: Backend + Mamba2BackendExt>(
+        &self,
+        input: Mamba2SsdInput<B>,
+    ) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        match self {
+            Mamba2SsdPath::Minimal(_) => Mamba2::<B>::ssd_minimal(input),
+            Mamba2SsdPath::Serial(_) => Mamba2::<B>::ssd_serial(input),
+            Mamba2SsdPath::SerialRecalculated(_) => Mamba2::<B>::ssd_serial_recalculated(input),
+        }
+    }
 }
 
 impl Default for Mamba2SsdPath {
     fn default() -> Mamba2SsdPath {
         // Mamba2SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
         Mamba2SsdPath::SerialRecalculated(None)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "backend-flex"))]
+mod tests {
+    use super::*;
+    use burn::backend::Flex;
+    use burn::tensor::Distribution;
+
+    type B = Flex;
+
+    /// Build a randomised set of tensors suitable for cross-path comparison.
+    ///
+    /// `dt` is drawn from a positive distribution (softplus-like) and `a_decay`
+    /// from a negative range so that the implied per-token decay `exp(dt·a)`
+    /// stays in `(0, 1]`, matching how the upstream block produces them.
+    fn random_input(
+        batch: usize,
+        nchunks: usize,
+        chunk_len: usize,
+        nheads: usize,
+        per_head_dim: usize,
+        ngroups: usize,
+        state_rank: usize,
+        device: &<B as burn::tensor::backend::BackendTypes>::Device,
+    ) -> (
+        Tensor<B, 5>,
+        Tensor<B, 4>,
+        Tensor<B, 1>,
+        Tensor<B, 5>,
+        Tensor<B, 5>,
+        Tensor<B, 1>,
+        Tensor<B, 4>,
+    ) {
+        let x = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let dt = Tensor::<B, 4>::random(
+            [batch, nchunks, chunk_len, nheads],
+            Distribution::Uniform(0.05, 0.3),
+            device,
+        );
+        let a_decay = Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
+        let b = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, ngroups, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let c = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, ngroups, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let d = Tensor::<B, 1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
+        let initial_state = Tensor::<B, 4>::random(
+            [batch, nheads, per_head_dim, state_rank],
+            Distribution::Normal(0.0, 0.1),
+            device,
+        );
+        (x, dt, a_decay, b, c, d, initial_state)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_input(
+        x: Tensor<B, 5>,
+        dt: Tensor<B, 4>,
+        a_decay: Tensor<B, 1>,
+        b: Tensor<B, 5>,
+        c: Tensor<B, 5>,
+        d: Tensor<B, 1>,
+        initial_state: Tensor<B, 4>,
+    ) -> Mamba2SsdInput<B> {
+        Mamba2SsdInput {
+            x_bnlhp: x,
+            dt_bnlh: dt,
+            a_decay_h: a_decay,
+            b_bnlgr: b,
+            c_bnlgr: c,
+            d_h: d,
+            initial_state_bhpr: initial_state,
+            // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
+            init_state_hpr: None,
+        }
+    }
+
+    /// Run the same `Mamba2SsdInput` through `Minimal`, `Serial`, and
+    /// `SerialRecalculated` and assert that all three yield the same output
+    /// and final state. They are all chunkwise reformulations of the same
+    /// SSD, so the results must agree up to floating-point noise.
+    fn run_minimal_matches_serial(
+        batch: usize,
+        nchunks: usize,
+        chunk_len: usize,
+        nheads: usize,
+        per_head_dim: usize,
+        ngroups: usize,
+        state_rank: usize,
+    ) {
+        let device = Default::default();
+        let (x, dt, a_decay, b, c, d, init) = random_input(
+            batch,
+            nchunks,
+            chunk_len,
+            nheads,
+            per_head_dim,
+            ngroups,
+            state_rank,
+            &device,
+        );
+
+        let (y_min, s_min) = Mamba2SsdPath::Minimal(Some(chunk_len)).run(make_input(
+            x.clone(),
+            dt.clone(),
+            a_decay.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            init.clone(),
+        ));
+        let (y_ser, s_ser) = Mamba2SsdPath::Serial(Some(chunk_len)).run(make_input(
+            x.clone(),
+            dt.clone(),
+            a_decay.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            init.clone(),
+        ));
+        let (y_rec, s_rec) = Mamba2SsdPath::SerialRecalculated(Some(chunk_len))
+            .run(make_input(x, dt, a_decay, b, c, d, init));
+
+        let tol = 1e-4;
+
+        let dy_ser = (y_min.clone() - y_ser).abs().max().into_scalar();
+        let ds_ser = (s_min.clone() - s_ser).abs().max().into_scalar();
+        let dy_rec = (y_min - y_rec).abs().max().into_scalar();
+        let ds_rec = (s_min - s_rec).abs().max().into_scalar();
+
+        assert!(
+            dy_ser < tol,
+            "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})"
+        );
+        assert!(
+            ds_ser < tol,
+            "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})"
+        );
+        assert!(
+            dy_rec < tol,
+            "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})"
+        );
+        assert!(
+            ds_rec < tol,
+            "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})"
+        );
+    }
+
+    #[test]
+    fn paths_agree_no_gqa() {
+        // ngroups == nheads (no GQA expansion): B/C are per-head.
+        run_minimal_matches_serial(2, 3, 4, 2, 8, 2, 8);
+    }
+
+    #[test]
+    fn paths_agree_gqa() {
+        // ngroups < nheads: B/C are shared across `heads_per_group` heads.
+        run_minimal_matches_serial(2, 3, 4, 4, 8, 1, 8);
+    }
+
+    #[test]
+    fn paths_agree_single_chunk() {
+        // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
+        // boundary case where K4 runs a single iteration.
+        run_minimal_matches_serial(2, 1, 4, 2, 8, 2, 8);
     }
 }

@@ -381,7 +381,7 @@ pub fn combined_backward<B: Backend>(
     let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll; // forward step 21
     san(&da_cumsum_diff_bnhll);
     let causal_mask_bnhll =
-        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 1, &device); // forward step 21.1
+        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 0, &device); // forward step 21.1
     // forward step 21.2
     // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
     let da_cumsum_diff_masked_bnhll =

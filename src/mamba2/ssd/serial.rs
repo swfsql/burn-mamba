@@ -462,10 +462,10 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     san(&da_cumsum_diff_bnhll);
 
     // note: overflow instability at step 22, a `minimal::segsum`-like upper triangle protection is necessary.
-    // - 21.1: tril-mask: (1) -> (causal_mask_bnhll)
+    // - 21.1: tril-mask: (0) -> (causal_mask_bnhll)
     // true above the main diagonal, false at diagonal and below.
     let causal_mask_bnhll =
-        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 1, &device);
+        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 0, &device);
     // - 21.2: mask-fill: (da_cumsum_diff_bnhll, causal_mask_bnhll) -> (da_cumsum_diff_masked_bnhll)
     // Causal mask and exp stabilizer: above upper diagonal set to -inf.
     let da_cumsum_diff_masked_bnhll =

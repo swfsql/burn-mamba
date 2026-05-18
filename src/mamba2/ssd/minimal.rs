@@ -185,7 +185,7 @@ impl<B: Backend> Mamba2<B> {
         //   (c) temp2 · X[n]  (contract over Q)              → Y_diag [B, nchunks, Q, H, P]
         let y_diag_bnlhp = {
             // Permute to [B, nchunks, H, Q, N] for the matmul along Q and N.
-            let b_bnhlr = b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
+            let b_bnhlr = delta_b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
             let c_bnhlr = c_bnlhr.clone().permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
@@ -304,7 +304,7 @@ impl<B: Backend> Mamba2<B> {
                 [batch, nchunks, nheads, per_head_dim, chunk_len],
                 decayed_x_bnhpl.dims()
             );
-            let b_bnhlr = b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
+            let b_bnhlr = delta_b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 b_bnhlr.dims()
