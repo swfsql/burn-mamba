@@ -45,6 +45,7 @@ use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::{
     rms_norm::{RmsNorm, RmsNormConfig},
+    rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
     silu::Silu,
     softplus::softplus,
 };
@@ -128,6 +129,13 @@ pub struct Mamba3<B: Backend> {
     /// Only present when `mimo_rank > 1`.
     pub mimo_o: Option<Param<Tensor<B, 3>>>,
 
+    /// Optional gated RMSNorm applied before the output projection.
+    ///
+    /// When `Some`, the SiLU gate at the block tail is replaced by
+    /// `RmsNormGated(y, z)` which normalises `y` over `per_head_dim` and
+    /// gates with `SiLU(z)`. Created when `has_outproj_norm = true`.
+    pub out_norm: Option<RmsNormGated<B>>,
+
     /// Output projection: maps `d_inner → d_model`.
     pub out_proj: Linear<B>,
 
@@ -141,8 +149,12 @@ pub struct Mamba3<B: Backend> {
     /// Number of B/C groups G.  Must divide `nheads`.
     pub ngroups: usize,
 
-    /// Number of RoPE angle pairs = state_rank / 2.
+    /// Number of RoPE angle pairs (`rope_dim / 2`).
     pub num_rope_angles: usize,
+
+    /// Effective RoPE dimension (= `2 · num_rope_angles`). Always even and
+    /// `≤ state_rank`. Only the first `rope_dim` entries of B/C are rotated.
+    pub rope_dim: usize,
 
     /// MIMO rank R.  1 = SISO (standard Mamba-3).
     pub mimo_rank: usize,
@@ -229,12 +241,40 @@ pub struct Mamba3Config {
     /// Whether to allocate a learnable initial SSM state `h₀`.
     #[config(default = false)]
     pub has_learnable_init_state: bool,
+
+    /// Fraction of `state_rank` to which RoPE is applied (must be `0.5` or `1.0`).
+    ///
+    /// - `1.0` (default): full RoPE — every B/C dimension is rotated.
+    /// - `0.5`: partial RoPE — only the first `state_rank / 2` dimensions are
+    ///   rotated; the remaining ones pass through unchanged.
+    ///
+    /// Matches the reference's `rope_fraction` argument in `mamba3.py:36`.
+    #[config(default = 1.0)]
+    pub rope_fraction: f64,
+
+    /// Whether to apply a gated RMSNorm before the output projection.
+    ///
+    /// When `true`, the SiLU gate at the end of the block is replaced by a
+    /// per-head [`RmsNormGated`] (group size = `per_head_dim`) which both
+    /// normalises `y` and gates it with `SiLU(z)`. Matches the reference's
+    /// `is_outproj_norm` argument in `mamba3.py:41`.
+    #[config(default = false)]
+    pub has_outproj_norm: bool,
 }
 
 impl Mamba3Config {
     pub fn d_inner(&self) -> usize { self.expand * self.d_model }
     pub fn nheads(&self) -> usize { self.d_inner() / self.per_head_dim }
-    pub fn num_rope_angles(&self) -> usize { self.state_rank / 2 }
+
+    /// Effective RoPE dimension: `2 · num_rope_angles`. Equals `state_rank`
+    /// for full RoPE, `state_rank / 2` for `rope_fraction = 0.5`.
+    pub fn rope_dim(&self) -> usize {
+        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
+        if d % 2 != 0 { d -= 1; }
+        d
+    }
+
+    pub fn num_rope_angles(&self) -> usize { self.rope_dim() / 2 }
 
     /// Total input projection output size.
     ///
@@ -262,6 +302,11 @@ impl Mamba3Config {
         assert_eq!(nheads % ngroups, 0, "nheads must be divisible by ngroups");
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
+        assert!(
+            self.rope_fraction == 0.5 || self.rope_fraction == 1.0,
+            "rope_fraction must be 0.5 or 1.0"
+        );
+        assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -311,6 +356,13 @@ impl Mamba3Config {
             (None, None, None)
         };
 
+        // Gated RMSNorm applied per-head (group size = per_head_dim).
+        let out_norm = self.has_outproj_norm.then(|| {
+            RmsNormGatedConfig::new(self.per_head_dim)
+                .with_norm_before_gate(true)
+                .init(device)
+        });
+
         let out_proj = LinearConfig::new(d_inner, self.d_model)
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(d_inner))
@@ -333,10 +385,12 @@ impl Mamba3Config {
             mimo_x,
             mimo_z,
             mimo_o,
+            out_norm,
             out_proj,
             init_state_hpr,
             state_rank,
             ngroups,
+            rope_dim: self.rope_dim(),
             num_rope_angles,
             mimo_rank,
         }
@@ -401,6 +455,25 @@ pub fn apply_rope<B: Backend, const D: usize>(
         Tensor::cat(vec![x0r.unsqueeze_dim::<3>(1), x1r.unsqueeze_dim::<3>(1)], 1)
             .reshape(dims)
     }
+}
+
+/// Apply RoPE to only the first `rope_dim` entries of the last dimension; the
+/// remainder passes through unchanged. Falls back to [`apply_rope`] when
+/// `rope_dim == state_rank` (full RoPE).
+fn apply_rope_partial<B: Backend, const D: usize>(
+    x: Tensor<B, D>,
+    angles: Tensor<B, D>,
+    rope_dim: usize,
+    rotate_pairwise: bool,
+) -> Tensor<B, D> {
+    let state_rank = x.dims()[D - 1];
+    if rope_dim == state_rank {
+        return apply_rope::<B, D>(x, angles, rotate_pairwise);
+    }
+    let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
+    let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
+    let x_rope_rotated = apply_rope::<B, D>(x_rope, angles, rotate_pairwise);
+    Tensor::cat(vec![x_rope_rotated, x_rest], D - 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -585,9 +658,11 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let angles_exp_bsrha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2)
             .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
         // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
+        // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
         let rotate_pairwise = mimo_rank == 1;
-        let b_bsrhn = apply_rope::<B, 5>(b_bsrhr, angles_exp_bsrha.clone(), rotate_pairwise);
-        let c_bsrhn = apply_rope::<B, 5>(c_bsrhr, angles_exp_bsrha, rotate_pairwise);
+        let rope_dim = self.rope_dim;
+        let b_bsrhn = apply_rope_partial::<B, 5>(b_bsrhr, angles_exp_bsrha.clone(), rope_dim, rotate_pairwise);
+        let c_bsrhn = apply_rope_partial::<B, 5>(c_bsrhr, angles_exp_bsrha, rope_dim, rotate_pairwise);
         san(&b_bsrhn);
         san(&c_bsrhn);
 
@@ -713,7 +788,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let d_11_h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]); // [1, 1, 1, H, 1]
         let y_bsrhp = y_bsrhp + d_11_h1 * v_raw_bsrhp.clone();
 
-        // ── Gate and rank aggregation ─────────────────────────────────────────
+        // ── Gate (or gated norm) and rank aggregation ─────────────────────────
+        // When `out_norm` is set, the SiLU gate is replaced by a per-head
+        // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
         let y_bsi = if mimo_rank > 1 {
             let mimo_z_val = self.mimo_z.as_ref().map(|p| p.val()).unwrap();
             let mimo_o_val = self.mimo_o.as_ref().map(|p| p.val()).unwrap();
@@ -731,8 +808,13 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                 z_exp * mz
             };
 
-            // Gate: y_r = y_r * silu(z_r)
-            let y_gated_bsrhp = y_bsrhp * Silu::new().forward(z_bsrhp);
+            // Per-rank gate or gated norm:
+            //   without out_norm: y_r * silu(z_r)
+            //   with    out_norm: norm(y_r) * silu(z_r)  (norm over per_head_dim)
+            let y_combined_bsrhp = match &self.out_norm {
+                Some(norm) => norm.forward(y_bsrhp, z_bsrhp),
+                None => y_bsrhp * Silu::new().forward(z_bsrhp),
+            };
 
             // Down-project with mimo_o: out = sum_r mimo_o[h, r, p] * y_r
             // mimo_o: [h, r, p] → [r, h, p] → [1, 1, r, h, p]
@@ -740,13 +822,17 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                 .unsqueeze_dim::<4>(0).unsqueeze_dim::<5>(0)
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
             // sum over rank dim (dim=2): [b, s, r, h, p] → [b, s, h, p]
-            let y_bhp: Tensor<B, 4> = (y_gated_bsrhp * mo).sum_dim(2).squeeze_dim(2); // [b, s, h, p]
+            let y_bhp: Tensor<B, 4> = (y_combined_bsrhp * mo).sum_dim(2).squeeze_dim(2);
             y_bhp.reshape([batch, sequence, d_inner])
         } else {
-            // SISO path: squeeze rank dim, apply gate
+            // SISO: squeeze rank dim, apply gate (or gated norm) over per_head_dim.
             let y_bshp: Tensor<B, 4> = y_bsrhp.squeeze_dim(2); // [b, s, h, p]
-            let y_bsi_flat = y_bshp.reshape([batch, sequence, d_inner]);
-            y_bsi_flat * Silu::new().forward(z_bsi)
+            let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
+            let y_combined_bshp = match &self.out_norm {
+                Some(norm) => norm.forward(y_bshp, z_bshp),
+                None => y_bshp * Silu::new().forward(z_bshp),
+            };
+            y_combined_bshp.reshape([batch, sequence, d_inner])
         };
         san(&y_bsi);
 
@@ -917,9 +1003,11 @@ mod step {
                 .unsqueeze_dim::<4>(1)
                 .expand([batch, mimo_rank, nheads, num_rope_angles]);
             // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
+            // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
             let rotate_pairwise = mimo_rank == 1;
-            let b_brhn = apply_rope::<B, 4>(b_brhn, angles_brha.clone(), rotate_pairwise);
-            let c_brhn = apply_rope::<B, 4>(c_brhn, angles_brha, rotate_pairwise);
+            let rope_dim = self.rope_dim;
+            let b_brhn = apply_rope_partial::<B, 4>(b_brhn, angles_brha.clone(), rope_dim, rotate_pairwise);
+            let c_brhn = apply_rope_partial::<B, 4>(c_brhn, angles_brha, rope_dim, rotate_pairwise);
 
             // ── Build MIMO value tensors ───────────────────────────────────────
             // x_vals[b, r, h, p] = x[b, h, p] * mimo_x[h, r, p]
@@ -989,7 +1077,9 @@ mod step {
                 .expand([batch, mimo_rank, nheads, per_head_dim]);
             let out_r_brhp = out_r_brhp + d_skip * x_vals_brhp;
 
-            // ── Gate and rank aggregation ─────────────────────────────────────
+            // ── Gate (or gated norm) and rank aggregation ─────────────────────
+            // When `out_norm` is set, the SiLU gate is replaced by a per-head
+            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
             let z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
             let y_bi = if mimo_rank > 1 {
                 let mimo_z_val = self.mimo_z.as_ref().map(|p| p.val()).unwrap();
@@ -1003,20 +1093,26 @@ mod step {
                     .expand([batch, mimo_rank, nheads, per_head_dim]);
                 let z_r = z_exp * mz;
 
-                // gated output: out_r * silu(z_r)
-                let gated = out_r_brhp * Silu::new().forward(z_r);
+                // Per-rank gate or gated norm.
+                let combined = match &self.out_norm {
+                    Some(norm) => norm.forward(out_r_brhp, z_r),
+                    None => out_r_brhp * Silu::new().forward(z_r),
+                };
 
-                // Project down: out = sum_r mimo_o[r] * gated[r]
+                // Project down: out = sum_r mimo_o[r] * combined[r]
                 // mimo_o: [h, r, p] → [r, h, p] → [1, r, h, p]
                 let mo = mimo_o_val.permute([1, 0, 2]).unsqueeze_dim::<4>(0)
                     .expand([batch, mimo_rank, nheads, per_head_dim]);
-                let out_bhp: Tensor<B, 3> = (gated * mo).sum_dim(1).squeeze_dim(1); // [b, h, p]
+                let out_bhp: Tensor<B, 3> = (combined * mo).sum_dim(1).squeeze_dim(1);
                 out_bhp.reshape([batch, d_inner])
             } else {
-                // SISO: squeeze rank dim, gate with z
+                // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
                 let y_bhp: Tensor<B, 3> = out_r_brhp.squeeze_dim(1); // [b, h, p]
-                let y_bi = y_bhp.reshape([batch, d_inner]);
-                y_bi * Silu::new().forward(z_bhp.reshape([batch, d_inner]))
+                let combined = match &self.out_norm {
+                    Some(norm) => norm.forward(y_bhp, z_bhp),
+                    None => y_bhp * Silu::new().forward(z_bhp),
+                };
+                combined.reshape([batch, d_inner])
             };
 
             // ── Out-projection ────────────────────────────────────────────────
@@ -1219,5 +1315,85 @@ mod tests {
             .with_ngroups(2)
             .with_mimo_rank(2);
         run_split_matches_full(cfg);
+    }
+
+    // ── rope_fraction = 0.5 (partial RoPE) ──────────────────────────────────
+
+    #[test]
+    fn step_matches_forward_rope_half() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_rope_fraction(0.5);
+        run_step_matches_forward(cfg);
+    }
+
+    #[test]
+    fn step_matches_forward_rope_half_mimo() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_mimo_rank(2)
+            .with_rope_fraction(0.5);
+        run_step_matches_forward(cfg);
+    }
+
+    #[test]
+    fn split_matches_full_rope_half() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_rope_fraction(0.5);
+        run_split_matches_full(cfg);
+    }
+
+    // ── has_outproj_norm = true (gated RMSNorm) ─────────────────────────────
+
+    #[test]
+    fn step_matches_forward_outproj_norm() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_has_outproj_norm(true);
+        run_step_matches_forward(cfg);
+    }
+
+    #[test]
+    fn step_matches_forward_outproj_norm_mimo() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_mimo_rank(2)
+            .with_has_outproj_norm(true);
+        run_step_matches_forward(cfg);
+    }
+
+    #[test]
+    fn split_matches_full_outproj_norm() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_has_outproj_norm(true);
+        run_split_matches_full(cfg);
+    }
+
+    // ── Both features combined ──────────────────────────────────────────────
+
+    #[test]
+    fn step_matches_forward_rope_half_outproj_norm_mimo() {
+        let cfg = Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_mimo_rank(2)
+            .with_rope_fraction(0.5)
+            .with_has_outproj_norm(true);
+        run_step_matches_forward(cfg);
     }
 }
