@@ -1,6 +1,6 @@
 use burn::prelude::*;
 use burn::tensor::backend::AutodiffBackend;
-use burn_mamba::prelude::Mamba2BackendExt;
+use burn_mamba::prelude::Mamba3BackendExt;
 pub use common::{
     backend::{MainAutoBackend, MainBackend, MainDevice},
     cli::AppArgs,
@@ -16,9 +16,9 @@ pub mod common;
 
 pub fn launch<B, AutoB>(app_args: &AppArgs)
 where
-    B: Backend + MainDevice + Mamba2BackendExt,
-    AutoB: AutodiffBackend + MainDevice + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
+    B: Backend + MainDevice + Mamba3BackendExt,
+    AutoB: AutodiffBackend + MainDevice + Mamba3BackendExt,
+    <AutoB as AutodiffBackend>::InnerBackend: Mamba3BackendExt,
 {
     assert!(
         app_args.extra_args.is_empty(),

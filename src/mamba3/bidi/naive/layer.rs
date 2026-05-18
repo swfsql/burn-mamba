@@ -1,17 +1,17 @@
-use crate::mamba2::bidi::naive::{OutputMerge, OutputMergeConfig};
-use crate::mamba2::prelude::*;
+use crate::mamba3::bidi::naive::{OutputMerge, OutputMergeConfig};
+use crate::mamba3::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
 
 #[derive(Module, Debug)]
-pub struct Mamba2BidiLayers<B: Backend> {
+pub struct Mamba3BidiLayers<B: Backend> {
     pub n_real_layers: usize,
     #[module(skip)]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
     /// # Shape
     /// - [n_real_layers]
-    pub real_layers: Vec<Mamba2Layer<B>>,
+    pub real_layers: Vec<Mamba3Layer<B>>,
     pub ignore_first_residual: bool,
     pub ignore_last_residual: bool,
     /// # Shape
@@ -20,11 +20,11 @@ pub struct Mamba2BidiLayers<B: Backend> {
 }
 
 #[derive(Config, Debug)]
-pub struct Mamba2BidiLayersConfig {
+pub struct Mamba3BidiLayersConfig {
     pub n_real_layers: usize,
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
-    pub mamba_block: Mamba2Config,
+    pub mamba_block: Mamba3Config,
     #[config(default = false)]
     pub ignore_first_residual: bool,
     #[config(default = false)]
@@ -35,15 +35,15 @@ pub struct Mamba2BidiLayersConfig {
     pub outputs_merge: Vec<OutputMergeConfig>,
 }
 
-impl Mamba2BidiLayersConfig {
+impl Mamba3BidiLayersConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BidiLayers<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3BidiLayers<B> {
         let d_model = self.mamba_block.d_model;
         let mut real_layers = Vec::with_capacity(self.n_real_layers);
         let mut outputs_merge = Vec::with_capacity(self.n_real_layers);
         for _ in 0..self.n_real_layers {
             let block_config = self.mamba_block.clone();
-            let layer = Mamba2LayerConfig::new(block_config).init(device);
+            let layer = Mamba3LayerConfig::new(block_config).init(device);
             real_layers.push(layer);
         }
         for i in 0..self.n_real_layers / 2 {
@@ -51,7 +51,7 @@ impl Mamba2BidiLayersConfig {
             outputs_merge.push(output_merge);
         }
 
-        Mamba2BidiLayers {
+        Mamba3BidiLayers {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),
             real_layers,
@@ -62,18 +62,18 @@ impl Mamba2BidiLayersConfig {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output [batch, sequence, d_model]
     pub fn forward(
         &self,
         mut x: Tensor<B, 3>,
-        caches: Option<Mamba2Caches<B>>,
-        // straight_caches: Option<Mamba2Caches<B>>,
-        // reverse_caches: Option<Mamba2Caches<B>>,
-        ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
+        caches: Option<Mamba3Caches<B>>,
+        // straight_caches: Option<Mamba3Caches<B>>,
+        // reverse_caches: Option<Mamba3Caches<B>>,
+        ssd_path: Mamba3SsdPath,
+    ) -> (Tensor<B, 3>, Mamba3Caches<B>) {
         let n_virtual_layers = self
             .n_virtual_layers
             .as_ref()
@@ -94,17 +94,16 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
             let device = &x.device();
             let [batch, _sequence, _d_model] = x.dims();
             let layer0_block = &self.real_layers[0].mamba_block;
-            let [conv_dim, _, conv_kernel] = layer0_block.conv1d.weight.dims();
 
-            Mamba2CachesConfig::new(
+            Mamba3CachesConfig::new(
                 n_virtual_layers,
-                Mamba2CacheConfig {
+                Mamba3CacheConfig {
                     batch,
                     state_rank: layer0_block.state_rank,
-                    conv_kernel,
-                    conv_dim,
+                    num_rope_angles: layer0_block.num_rope_angles,
                     per_head_dim: layer0_block.per_head_dim(),
                     nheads: layer0_block.nheads(),
+                    mimo_rank: layer0_block.mimo_rank,
                 },
             )
             .init(device)
@@ -117,7 +116,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
             "straight and reverse layers in forward() currently cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
 
         for i in 0..n_virtual_layers / 2 {
             // use real layers by reference (clone)
@@ -149,7 +148,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
                 1.0
             };
 
-            let bidi_pair = Mamba2BidiLayerPair {
+            let bidi_pair = Mamba3BidiLayerPair {
                 straight_norm: straight_layer.norm.clone(),
                 reverse_norm: reverse_layer.norm.clone(),
                 straight_block: straight_layer.mamba_block.clone(),
@@ -169,7 +168,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
             caches[reverse_cache_idx] = Some(reverse_cache_);
         }
 
-        let caches = Mamba2Caches {
+        let caches = Mamba3Caches {
             caches: caches.into_iter().map(|c| c.unwrap()).collect(),
         };
 
@@ -178,29 +177,29 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
 }
 
 #[derive(Module, Debug)]
-pub struct Mamba2BidiLayerPair<B: Backend> {
+pub struct Mamba3BidiLayerPair<B: Backend> {
     pub straight_norm: RmsNorm<B>,
     pub reverse_norm: RmsNorm<B>,
-    pub straight_block: Mamba2<B>,
-    pub reverse_block: Mamba2<B>,
+    pub straight_block: Mamba3<B>,
+    pub reverse_block: Mamba3<B>,
     pub output_merge: OutputMerge<B>,
     pub residual_scale: f32,
 }
 
 #[derive(Config, Debug)]
-pub struct Mamba2BidiLayerPairConfig {
-    pub straight_block: Mamba2Config,
-    pub reverse_block: Mamba2Config,
+pub struct Mamba3BidiLayerPairConfig {
+    pub straight_block: Mamba3Config,
+    pub reverse_block: Mamba3Config,
     #[config(default = 1.0)]
     pub residual_scale: f32,
     pub output_merge: OutputMergeConfig,
 }
 
-impl Mamba2BidiLayerPairConfig {
+impl Mamba3BidiLayerPairConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2BidiLayerPair<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3BidiLayerPair<B> {
         let d_model = self.straight_block.d_model;
-        Mamba2BidiLayerPair {
+        Mamba3BidiLayerPair {
             straight_norm: RmsNormConfig::new(self.straight_block.d_model).init(device),
             reverse_norm: RmsNormConfig::new(self.reverse_block.d_model).init(device),
             straight_block: self.straight_block.init(device),
@@ -211,17 +210,17 @@ impl Mamba2BidiLayerPairConfig {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayerPair<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayerPair<B> {
     /// # Shapes
     ///   - Input [batch, sequence, d_model]
     ///   - Output.0 [batch, sequence, d_model]
     pub fn forward(
         &self,
         x: Tensor<B, 3>,
-        straight_cache: Option<Mamba2Cache<B>>,
-        reverse_cache: Option<Mamba2Cache<B>>,
-        ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Cache<B>, Mamba2Cache<B>) {
+        straight_cache: Option<Mamba3Cache<B>>,
+        reverse_cache: Option<Mamba3Cache<B>>,
+        ssd_path: Mamba3SsdPath,
+    ) -> (Tensor<B, 3>, Mamba3Cache<B>, Mamba3Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
 
         let res = x.clone() * self.residual_scale;

@@ -5,6 +5,8 @@
 pub mod mamba1;
 #[cfg(feature = "mamba2")]
 pub mod mamba2;
+#[cfg(feature = "mamba3")]
+pub mod mamba3;
 pub mod schedule;
 
 pub mod prelude {
@@ -13,6 +15,9 @@ pub mod prelude {
 
     #[cfg(feature = "mamba2")]
     pub use crate::mamba2::{self, prelude::*};
+
+    #[cfg(feature = "mamba3")]
+    pub use crate::mamba3::{self, prelude::*};
 }
 
 pub mod utils;

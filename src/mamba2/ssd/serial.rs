@@ -11,7 +11,7 @@ impl<B: Backend> Mamba2<B> {
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial(input: super::SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_serial(input: super::Mamba2SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
         let [.., ngroups, state_rank] = input.b_bnlgr.dims();
         let device = input.x_bnlhp.device();

@@ -1,28 +1,30 @@
-pub use crate::common::model::{MyMamba2NetworkConfig, mamba2_block_config, mamba2_layers_config};
+pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
 use burn_mamba::schedule::Schedule;
 
-/// In FP16, this model configuration uses ~75KB when stored to disk.  
-/// Reaches ~65% valid accuracy after the first epoch, reaching ~90% after 5 epochs.  
-/// With a batch_size=16, this requires ~3.6GB vram during training.
-pub fn model_config() -> MyMamba2NetworkConfig {
-    MyMamba2NetworkConfig::new()
+/// In FP32, this model configuration uses ~37K params (~150KB disk space).  
+/// Reaches ~85% validation accuracy after the first epoch.  
+/// With a batch_size=16, this requires ~3.5GB vram during training.
+pub fn model_config() -> MyMamba3NetworkConfig {
+    MyMamba3NetworkConfig::new()
         // the input is a sequence of a single-dimensioned values
         // the input shape is [batch_size, sequence_len = HEIGHT * WIDTH, 1]
         .with_input_size(1)
         // to keep it simple, don't use any class token
         // .with_class_tokens(Vec::new()) // TODO: merge fork
-        .with_layers(mamba2_layers_config(
+        .with_layers(mamba3_layers_config(
             2, // two layers backed by unique weights is sufficient
             Some((
-                16,                  // allow more expressivity by virtually extending to 16 layers,
-                Schedule::Stretched, // by looping (8x) each layer in sequence
+                8,                   // allow more expressivity by virtually extending to 16 layers,
+                Schedule::Stretched, // by looping (4x) each layer in sequence
             )),
-            mamba2_block_config(
+            mamba3_block_config(
                 //
-                32, // d_model (intra- and inter-layer expressivity, high impact on disk size)
+                32,  // d_model (intra- and inter-layer expressivity, high impact on disk size)
                 64, // state_rank (intra-layer and time-wise expressivity, average impact on disk size)
-                4,  // conv_kernel (input convolution, possibly not needed)
-                4, // n_heads (intra-layer expressivity, no impact on disk size, high impact on vram)
+                4, // nheads (intra-layer expressivity, no impact on disk size, high impact on vram)
+                1, // ngroups (intra-layer expressivity)
+                1, // mimo_rank (intra-layer expressivity)
+                1.0, // apply rope to 100% of the latents
                 4, // expand (intra-layer expressivity, small impact on disk size)
             ),
         ))

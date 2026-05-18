@@ -524,7 +524,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba2Cache<B>>,
-        ssd_path: SsdPath,
+        ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -739,7 +739,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
-        let ssd_input = crate::mamba2::ssd::SsdInput {
+        let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
             x_bnlhp,
             dt_bnlh,
             a_decay_h: a_head_decay_h,
@@ -751,9 +751,11 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         };
         ssd_input.sanity();
         let (y_bnlhp, final_state_bhpr) = match ssd_path {
-            SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(ssd_input),
-            SsdPath::Serial(_chunk_len) => Self::ssd_serial(ssd_input),
-            SsdPath::SerialRecalculated(_chunk_len) => Self::ssd_serial_recalculated(ssd_input),
+            Mamba2SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(ssd_input),
+            Mamba2SsdPath::Serial(_chunk_len) => Self::ssd_serial(ssd_input),
+            Mamba2SsdPath::SerialRecalculated(_chunk_len) => {
+                Self::ssd_serial_recalculated(ssd_input)
+            }
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],

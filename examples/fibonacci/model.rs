@@ -32,7 +32,8 @@ pub fn model_config() -> MyMamba2NetworkConfig {
                 1, // d_model: one feature is sufficient
                 2, // state_rank: two states are sufficient
                 1, // conv_kernel: input conv is not necessary
-                1, // n_heads: a single head is sufficient
+                1, // nheads: a single head is sufficient
+                1, // ngroups: a single ngroups is sufficient
                 1, // expand: expansion is not necessary
             ),
         ))
