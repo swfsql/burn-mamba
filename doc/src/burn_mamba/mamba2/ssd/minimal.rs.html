@@ -185,7 +185,7 @@
 <a href=#185 id=185 data-nosnippet>185</a>        //   (c) temp2 · X[n]  (contract over Q)              → Y_diag [B, nchunks, Q, H, P]
 <a href=#186 id=186 data-nosnippet>186</a>        </span><span class="kw">let </span>y_diag_bnlhp = {
 <a href=#187 id=187 data-nosnippet>187</a>            <span class="comment">// Permute to [B, nchunks, H, Q, N] for the matmul along Q and N.
-<a href=#188 id=188 data-nosnippet>188</a>            </span><span class="kw">let </span>b_bnhlr = b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#188 id=188 data-nosnippet>188</a>            </span><span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
 <a href=#189 id=189 data-nosnippet>189</a>            <span class="kw">let </span>c_bnhlr = c_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
 <a href=#190 id=190 data-nosnippet>190</a>            <span class="macro">assert_eq!</span>(
 <a href=#191 id=191 data-nosnippet>191</a>                [batch, nchunks, nheads, chunk_len, state_rank],
@@ -304,7 +304,7 @@
 <a href=#304 id=304 data-nosnippet>304</a>                [batch, nchunks, nheads, per_head_dim, chunk_len],
 <a href=#305 id=305 data-nosnippet>305</a>                decayed_x_bnhpl.dims()
 <a href=#306 id=306 data-nosnippet>306</a>            );
-<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">let </span>b_bnhlr = b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
 <a href=#308 id=308 data-nosnippet>308</a>            <span class="macro">assert_eq!</span>(
 <a href=#309 id=309 data-nosnippet>309</a>                [batch, nchunks, nheads, chunk_len, state_rank],
 <a href=#310 id=310 data-nosnippet>310</a>                b_bnhlr.dims()

@@ -95,27 +95,30 @@
 <a href=#95 id=95 data-nosnippet>95</a>
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="attr">#[test]
 <a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">fn </span>test_cosine_annealing_warmup() {
-<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>scheduler = CosineAnnealingLr::new(<span class="number">1000</span>);
-<a href=#99 id=99 data-nosnippet>99</a>
-<a href=#100 id=100 data-nosnippet>100</a>        <span class="comment">// At step 0, LR should be 0
-<a href=#101 id=101 data-nosnippet>101</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">0</span>), <span class="number">0.0</span>);
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>scheduler = CosineAnnealingLr::new(<span class="number">1000</span>)
+<a href=#99 id=99 data-nosnippet>99</a>            .with_max_lr(<span class="number">1.</span>)
+<a href=#100 id=100 data-nosnippet>100</a>            .with_min_lr(<span class="number">0.01</span>)
+<a href=#101 id=101 data-nosnippet>101</a>            .with_warmup_steps(<span class="number">100</span>);
 <a href=#102 id=102 data-nosnippet>102</a>
-<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// At half warmup, LR should be max_lr / 2
-<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">50</span>), <span class="number">0.5</span>);
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="comment">// At step 0, LR should be 0.0001
+<a href=#104 id=104 data-nosnippet>104</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">0</span>), <span class="number">0.</span>);
 <a href=#105 id=105 data-nosnippet>105</a>
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="comment">// At end of warmup, LR should be max_lr
-<a href=#107 id=107 data-nosnippet>107</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">100</span>), <span class="number">1.0</span>);
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="comment">// At half warmup, LR should be max_lr / 2
+<a href=#107 id=107 data-nosnippet>107</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">50</span>), <span class="number">0.5</span>);
 <a href=#108 id=108 data-nosnippet>108</a>
-<a href=#109 id=109 data-nosnippet>109</a>        <span class="comment">// After total steps, LR should be min_lr
-<a href=#110 id=110 data-nosnippet>110</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">1000</span>), <span class="number">0.01</span>);
-<a href=#111 id=111 data-nosnippet>111</a>    }
-<a href=#112 id=112 data-nosnippet>112</a>
-<a href=#113 id=113 data-nosnippet>113</a>    <span class="attr">#[test]
-<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">fn </span>test_constant_lr() {
-<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>scheduler = ConstantLr::new().with_lr(<span class="number">0.001</span>);
-<a href=#116 id=116 data-nosnippet>116</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">0</span>), <span class="number">0.001</span>);
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">1000</span>), <span class="number">0.001</span>);
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">10000</span>), <span class="number">0.001</span>);
-<a href=#119 id=119 data-nosnippet>119</a>    }
-<a href=#120 id=120 data-nosnippet>120</a>}
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="comment">// At end of warmup, LR should be max_lr
+<a href=#110 id=110 data-nosnippet>110</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">100</span>), <span class="number">1.0</span>);
+<a href=#111 id=111 data-nosnippet>111</a>
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="comment">// After total steps, LR should be min_lr
+<a href=#113 id=113 data-nosnippet>113</a>        </span><span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">1000</span>), <span class="number">0.01</span>);
+<a href=#114 id=114 data-nosnippet>114</a>    }
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="attr">#[test]
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="kw">fn </span>test_constant_lr() {
+<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span>scheduler = ConstantLr::new().with_lr(<span class="number">0.001</span>);
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">0</span>), <span class="number">0.001</span>);
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">1000</span>), <span class="number">0.001</span>);
+<a href=#121 id=121 data-nosnippet>121</a>        <span class="macro">assert_eq!</span>(scheduler.get_lr(<span class="number">10000</span>), <span class="number">0.001</span>);
+<a href=#122 id=122 data-nosnippet>122</a>    }
+<a href=#123 id=123 data-nosnippet>123</a>}
 </code></pre></div></section></main></body></html>

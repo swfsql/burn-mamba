@@ -381,7 +381,7 @@
 <a href=#381 id=381 data-nosnippet>381</a>    </span><span class="kw">let </span>da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll; <span class="comment">// forward step 21
 <a href=#382 id=382 data-nosnippet>382</a>    </span>san(<span class="kw-2">&amp;</span>da_cumsum_diff_bnhll);
 <a href=#383 id=383 data-nosnippet>383</a>    <span class="kw">let </span>causal_mask_bnhll =
-<a href=#384 id=384 data-nosnippet>384</a>        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], <span class="number">1</span>, <span class="kw-2">&amp;</span>device); <span class="comment">// forward step 21.1
+<a href=#384 id=384 data-nosnippet>384</a>        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], <span class="number">0</span>, <span class="kw-2">&amp;</span>device); <span class="comment">// forward step 21.1
 <a href=#385 id=385 data-nosnippet>385</a>    // forward step 21.2
 <a href=#386 id=386 data-nosnippet>386</a>    // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
 <a href=#387 id=387 data-nosnippet>387</a>    </span><span class="kw">let </span>da_cumsum_diff_masked_bnhll =
