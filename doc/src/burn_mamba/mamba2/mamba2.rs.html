@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.0-nightly (d7f14d3d8 2026-05-15)" data-channel="nightly" data-search-js="search-b5634cc7.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-aa4d37ac.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.0-nightly (507271bc1 2026-05-17)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module implements the core **SSD layer** from the paper
 <a href=#4 id=4 data-nosnippet>4</a>//! *"Transformers are SSMs: Generalized Models and Efficient Algorithms
@@ -524,7 +524,7 @@
 <a href=#524 id=524 data-nosnippet>524</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#525 id=525 data-nosnippet>525</a>        input_bsm: Tensor&lt;B, <span class="number">3</span>&gt;,
 <a href=#526 id=526 data-nosnippet>526</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&lt;B&gt;&gt;,
-<a href=#527 id=527 data-nosnippet>527</a>        ssd_path: SsdPath,
+<a href=#527 id=527 data-nosnippet>527</a>        ssd_path: Mamba2SsdPath,
 <a href=#528 id=528 data-nosnippet>528</a>    ) -&gt; (Tensor&lt;B, <span class="number">3</span>&gt;, Mamba2Cache&lt;B&gt;) {
 <a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span>[batch, sequence, _d_model] = input_bsm.dims();
 <a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
@@ -739,7 +739,7 @@
 <a href=#739 id=739 data-nosnippet>739</a>        <span class="kw">let </span>c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 <a href=#740 id=740 data-nosnippet>740</a>
 <a href=#741 id=741 data-nosnippet>741</a>        <span class="comment">// ── Step 6: Selective Scan ────────────────────────────────────────────
-<a href=#742 id=742 data-nosnippet>742</a>        </span><span class="kw">let </span>ssd_input = <span class="kw">crate</span>::mamba2::ssd::SsdInput {
+<a href=#742 id=742 data-nosnippet>742</a>        </span><span class="kw">let </span>ssd_input = <span class="kw">crate</span>::mamba2::ssd::Mamba2SsdInput {
 <a href=#743 id=743 data-nosnippet>743</a>            x_bnlhp,
 <a href=#744 id=744 data-nosnippet>744</a>            dt_bnlh,
 <a href=#745 id=745 data-nosnippet>745</a>            a_decay_h: a_head_decay_h,
@@ -751,279 +751,281 @@
 <a href=#751 id=751 data-nosnippet>751</a>        };
 <a href=#752 id=752 data-nosnippet>752</a>        ssd_input.sanity();
 <a href=#753 id=753 data-nosnippet>753</a>        <span class="kw">let </span>(y_bnlhp, final_state_bhpr) = <span class="kw">match </span>ssd_path {
-<a href=#754 id=754 data-nosnippet>754</a>            SsdPath::Minimal(_chunk_len) =&gt; <span class="self">Self</span>::ssd_minimal(ssd_input),
-<a href=#755 id=755 data-nosnippet>755</a>            SsdPath::Serial(_chunk_len) =&gt; <span class="self">Self</span>::ssd_serial(ssd_input),
-<a href=#756 id=756 data-nosnippet>756</a>            SsdPath::SerialRecalculated(_chunk_len) =&gt; <span class="self">Self</span>::ssd_serial_recalculated(ssd_input),
-<a href=#757 id=757 data-nosnippet>757</a>        };
-<a href=#758 id=758 data-nosnippet>758</a>        <span class="macro">assert_eq!</span>(
-<a href=#759 id=759 data-nosnippet>759</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
-<a href=#760 id=760 data-nosnippet>760</a>            y_bnlhp.dims()
-<a href=#761 id=761 data-nosnippet>761</a>        );
-<a href=#762 id=762 data-nosnippet>762</a>        san(<span class="kw-2">&amp;</span>y_bnlhp);
-<a href=#763 id=763 data-nosnippet>763</a>        san(<span class="kw-2">&amp;</span>final_state_bhpr);
-<a href=#764 id=764 data-nosnippet>764</a>
-<a href=#765 id=765 data-nosnippet>765</a>        <span class="comment">// Update the SSM state in the cache for the next call.
-<a href=#766 id=766 data-nosnippet>766</a>        </span>cache.ssm_bhpr = final_state_bhpr;
-<a href=#767 id=767 data-nosnippet>767</a>        <span class="macro">assert_eq!</span>(
-<a href=#768 id=768 data-nosnippet>768</a>            [batch, nheads, per_head_dim, state_rank],
-<a href=#769 id=769 data-nosnippet>769</a>            cache.ssm_bhpr.dims()
-<a href=#770 id=770 data-nosnippet>770</a>        );
-<a href=#771 id=771 data-nosnippet>771</a>
-<a href=#772 id=772 data-nosnippet>772</a>        <span class="comment">// Remove zero-pad columns that were added at Step 5.
-<a href=#773 id=773 data-nosnippet>773</a>        </span><span class="kw">let </span>y_bShp = y_bnlhp.reshape([batch, sequence_padded, nheads, per_head_dim]);
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="kw">let </span>y_bshp = <span class="kw">if </span>pad == <span class="number">0 </span>{
-<a href=#775 id=775 data-nosnippet>775</a>            y_bShp
-<a href=#776 id=776 data-nosnippet>776</a>        } <span class="kw">else </span>{
-<a href=#777 id=777 data-nosnippet>777</a>            y_bShp.slice(<span class="macro">s!</span>[.., <span class="number">0</span>..sequence, .., ..])
-<a href=#778 id=778 data-nosnippet>778</a>        };
-<a href=#779 id=779 data-nosnippet>779</a>
-<a href=#780 id=780 data-nosnippet>780</a>        <span class="comment">// Reshape into sequence.
-<a href=#781 id=781 data-nosnippet>781</a>        </span><span class="kw">let </span>y_bsi = y_bshp.reshape([batch, sequence, d_inner]);
-<a href=#782 id=782 data-nosnippet>782</a>        <span class="macro">assert_eq!</span>([batch, sequence, d_inner], y_bsi.dims());
-<a href=#783 id=783 data-nosnippet>783</a>
-<a href=#784 id=784 data-nosnippet>784</a>        <span class="comment">// ── Step 7: Gated RMSNorm ─────────────────────────────────────────────
-<a href=#785 id=785 data-nosnippet>785</a>        </span><span class="kw">let </span>y_bsi = <span class="self">self</span>.norm.forward(y_bsi, z_gate_bsi);
-<a href=#786 id=786 data-nosnippet>786</a>        <span class="macro">assert_eq!</span>([batch, sequence, d_inner], y_bsi.dims());
-<a href=#787 id=787 data-nosnippet>787</a>        san(<span class="kw-2">&amp;</span>y_bsi);
-<a href=#788 id=788 data-nosnippet>788</a>
-<a href=#789 id=789 data-nosnippet>789</a>        <span class="comment">// ── Step 8: Out-projection ────────────────────────────────────────────
-<a href=#790 id=790 data-nosnippet>790</a>        </span><span class="kw">let </span>out_bsm = <span class="self">self</span>.out_proj.forward(y_bsi);
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="macro">assert_eq!</span>([batch, sequence, _d_model], out_bsm.dims());
-<a href=#792 id=792 data-nosnippet>792</a>        san(<span class="kw-2">&amp;</span>out_bsm);
-<a href=#793 id=793 data-nosnippet>793</a>
-<a href=#794 id=794 data-nosnippet>794</a>        (out_bsm, cache)
-<a href=#795 id=795 data-nosnippet>795</a>    }
-<a href=#796 id=796 data-nosnippet>796</a>}
-<a href=#797 id=797 data-nosnippet>797</a>
-<a href=#798 id=798 data-nosnippet>798</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#799 id=799 data-nosnippet>799</a>// Mamba2::step  (recurrent SSM — token-by-token decoding)
-<a href=#800 id=800 data-nosnippet>800</a>// ---------------------------------------------------------------------------
-<a href=#801 id=801 data-nosnippet>801</a>
-<a href=#802 id=802 data-nosnippet>802</a></span><span class="kw">mod </span>step {
-<a href=#803 id=803 data-nosnippet>803</a>    <span class="kw">use </span>super::<span class="kw-2">*</span>;
-<a href=#804 id=804 data-nosnippet>804</a>
-<a href=#805 id=805 data-nosnippet>805</a>    <span class="kw">impl</span>&lt;B: Backend&gt; Mamba2&lt;B&gt; {
-<a href=#806 id=806 data-nosnippet>806</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent SSM form.
-<a href=#807 id=807 data-nosnippet>807</a>        ///
-<a href=#808 id=808 data-nosnippet>808</a>        /// This is the O(H·P·N)-per-token decoding path.  It runs one tick of
-<a href=#809 id=809 data-nosnippet>809</a>        /// the discretised Mamba-2 recurrence:
-<a href=#810 id=810 data-nosnippet>810</a>        ///
-<a href=#811 id=811 data-nosnippet>811</a>        /// ```text
-<a href=#812 id=812 data-nosnippet>812</a>        ///   Āₜ  = exp(Δₜ · A)           scalar per head, ∈ (0, 1)
-<a href=#813 id=813 data-nosnippet>813</a>        ///   B̄ₜ  = Δₜ · Bₜ               ∈ ℝᴺ   (Euler discretisation)
-<a href=#814 id=814 data-nosnippet>814</a>        ///   hₜ  = Āₜ · hₜ₋₁ + B̄ₜ · xₜᵀ  ∈ ℝ^{P×N}   (outer product update)
-<a href=#815 id=815 data-nosnippet>815</a>        ///   yₜ  = Cₜᵀ · hₜ + D · xₜ     ∈ ℝᴾ   (output)
-<a href=#816 id=816 data-nosnippet>816</a>        /// ```
-<a href=#817 id=817 data-nosnippet>817</a>        ///
-<a href=#818 id=818 data-nosnippet>818</a>        /// The convolution is handled by manually sliding the cache window:
-<a href=#819 id=819 data-nosnippet>819</a>        /// the oldest input column is dropped and the new token's projection
-<a href=#820 id=820 data-nosnippet>820</a>        /// is appended.
-<a href=#821 id=821 data-nosnippet>821</a>        ///
-<a href=#822 id=822 data-nosnippet>822</a>        /// The SSM hidden state `cache.ssm_bhpr` is updated in-place via
-<a href=#823 id=823 data-nosnippet>823</a>        /// the recurrence above.
-<a href=#824 id=824 data-nosnippet>824</a>        ///
-<a href=#825 id=825 data-nosnippet>825</a>        /// # Shapes
-<a href=#826 id=826 data-nosnippet>826</a>        /// - `input_bm` : `[batch, d_model]`
-<a href=#827 id=827 data-nosnippet>827</a>        /// - output     : `[batch, d_model]`
-<a href=#828 id=828 data-nosnippet>828</a>        </span><span class="attr">#[allow(non_snake_case)]
-<a href=#829 id=829 data-nosnippet>829</a>        </span><span class="kw">pub fn </span>step(
-<a href=#830 id=830 data-nosnippet>830</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#831 id=831 data-nosnippet>831</a>            input_bm: Tensor&lt;B, <span class="number">2</span>&gt;,
-<a href=#832 id=832 data-nosnippet>832</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&lt;B&gt;&gt;,
-<a href=#833 id=833 data-nosnippet>833</a>        ) -&gt; (Tensor&lt;B, <span class="number">2</span>&gt;, Mamba2Cache&lt;B&gt;) {
-<a href=#834 id=834 data-nosnippet>834</a>            <span class="kw">let </span>[batch, d_model] = input_bm.dims();
-<a href=#835 id=835 data-nosnippet>835</a>            <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
-<a href=#836 id=836 data-nosnippet>836</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
-<a href=#837 id=837 data-nosnippet>837</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#838 id=838 data-nosnippet>838</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
-<a href=#839 id=839 data-nosnippet>839</a>            <span class="kw">let </span>conv_dim = <span class="self">self</span>.conv_dim();
-<a href=#840 id=840 data-nosnippet>840</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#841 id=841 data-nosnippet>841</a>            <span class="kw">let </span>[_conv_dim, <span class="kw">_</span>, conv_kernel] = <span class="self">self</span>.conv1d.weight.dims();
-<a href=#842 id=842 data-nosnippet>842</a>            <span class="kw">let </span>[_d_model, d_in_proj_out] = <span class="self">self</span>.in_proj.weight.dims();
-<a href=#843 id=843 data-nosnippet>843</a>
-<a href=#844 id=844 data-nosnippet>844</a>            <span class="macro">assert_eq!</span>(conv_dim, _conv_dim);
-<a href=#845 id=845 data-nosnippet>845</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
-<a href=#846 id=846 data-nosnippet>846</a>
-<a href=#847 id=847 data-nosnippet>847</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = cache.unwrap_or_else(|| {
-<a href=#848 id=848 data-nosnippet>848</a>                <span class="kw">let </span>device = <span class="kw-2">&amp;</span>input_bm.device();
-<a href=#849 id=849 data-nosnippet>849</a>                <span class="kw">let </span>conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
-<a href=#850 id=850 data-nosnippet>850</a>                <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
-<a href=#851 id=851 data-nosnippet>851</a>                    Shape::new([batch, nheads, per_head_dim, state_rank]),
-<a href=#852 id=852 data-nosnippet>852</a>                    device,
-<a href=#853 id=853 data-nosnippet>853</a>                );
-<a href=#854 id=854 data-nosnippet>854</a>                Mamba2Cache { conv_bvk, ssm_bhpr }
-<a href=#855 id=855 data-nosnippet>855</a>            });
-<a href=#856 id=856 data-nosnippet>856</a>
-<a href=#857 id=857 data-nosnippet>857</a>            <span class="comment">// ── In-projection ─────────────────────────────────────────────────
-<a href=#858 id=858 data-nosnippet>858</a>            </span><span class="kw">let </span>(z_gate_bi, xbc_bv, dt_raw_bh) = {
-<a href=#859 id=859 data-nosnippet>859</a>                <span class="kw">let </span>z_xbc_dt_bd = <span class="self">self</span>.in_proj.forward(input_bm);
-<a href=#860 id=860 data-nosnippet>860</a>                <span class="macro">assert_eq!</span>([batch, d_in_proj_out], z_xbc_dt_bd.dims());
-<a href=#861 id=861 data-nosnippet>861</a>                <span class="macro">assert_eq!</span>([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
-<a href=#862 id=862 data-nosnippet>862</a>
-<a href=#863 id=863 data-nosnippet>863</a>                <span class="kw">let </span><span class="kw-2">mut </span>parts = z_xbc_dt_bd
-<a href=#864 id=864 data-nosnippet>864</a>                    .split_with_sizes(<span class="macro">vec!</span>[d_inner, conv_dim, nheads], <span class="number">1</span>)
-<a href=#865 id=865 data-nosnippet>865</a>                    .into_iter();
-<a href=#866 id=866 data-nosnippet>866</a>                (
-<a href=#867 id=867 data-nosnippet>867</a>                    parts.next().unwrap(), <span class="comment">// z  [B, d_inner]
-<a href=#868 id=868 data-nosnippet>868</a>                    </span>parts.next().unwrap(), <span class="comment">// xbc[B, conv_dim]
-<a href=#869 id=869 data-nosnippet>869</a>                    </span>parts.next().unwrap(), <span class="comment">// dt [B, nheads]
-<a href=#870 id=870 data-nosnippet>870</a>                </span>)
-<a href=#871 id=871 data-nosnippet>871</a>            };
-<a href=#872 id=872 data-nosnippet>872</a>            <span class="macro">assert_eq!</span>([batch, d_inner], z_gate_bi.dims());
-<a href=#873 id=873 data-nosnippet>873</a>            <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
-<a href=#874 id=874 data-nosnippet>874</a>            <span class="macro">assert_eq!</span>([batch, nheads], dt_raw_bh.dims());
-<a href=#875 id=875 data-nosnippet>875</a>
-<a href=#876 id=876 data-nosnippet>876</a>            <span class="comment">// ── Causal convolution (single step) ──────────────────────────────
-<a href=#877 id=877 data-nosnippet>877</a>            // Slide the cache window left by one position, then insert the new
-<a href=#878 id=878 data-nosnippet>878</a>            // token's projection `xbc_bv` as the rightmost column.
-<a href=#879 id=879 data-nosnippet>879</a>            </span>cache.conv_bvk = {
-<a href=#880 id=880 data-nosnippet>880</a>                <span class="kw">let </span>conv_bvk = cache.conv_bvk;
-<a href=#881 id=881 data-nosnippet>881</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], conv_bvk.dims());
-<a href=#882 id=882 data-nosnippet>882</a>
-<a href=#883 id=883 data-nosnippet>883</a>                <span class="comment">// Drop the oldest (leftmost) column.
-<a href=#884 id=884 data-nosnippet>884</a>                </span><span class="kw">let </span>tail_bvK = conv_bvk.slice(<span class="macro">s!</span>[.., .., <span class="number">1</span>..]);
-<a href=#885 id=885 data-nosnippet>885</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel - <span class="number">1</span>], tail_bvK.dims());
-<a href=#886 id=886 data-nosnippet>886</a>
-<a href=#887 id=887 data-nosnippet>887</a>                <span class="comment">// Append the new token as the rightmost column.
-<a href=#888 id=888 data-nosnippet>888</a>                </span><span class="kw">let </span>updated_bvk = Tensor::cat([tail_bvK, xbc_bv.unsqueeze_dim(<span class="number">2</span>)].to_vec(), <span class="number">2</span>);
-<a href=#889 id=889 data-nosnippet>889</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], updated_bvk.dims());
-<a href=#890 id=890 data-nosnippet>890</a>                updated_bvk
-<a href=#891 id=891 data-nosnippet>891</a>            };
-<a href=#892 id=892 data-nosnippet>892</a>
-<a href=#893 id=893 data-nosnippet>893</a>            <span class="comment">// Apply the depthwise convolution manually (one step = dot product
-<a href=#894 id=894 data-nosnippet>894</a>            // of the cached window with the conv weight along the kernel axis).
-<a href=#895 id=895 data-nosnippet>895</a>            </span><span class="kw">let </span>xbc_bv = {
-<a href=#896 id=896 data-nosnippet>896</a>                <span class="kw">let </span>conv1d_v1k = <span class="self">self</span>.conv1d.weight.val(); <span class="comment">// [conv_dim, 1, conv_kernel]
-<a href=#897 id=897 data-nosnippet>897</a>                </span><span class="macro">assert_eq!</span>([conv_dim, <span class="number">1</span>, conv_kernel], conv1d_v1k.dims());
-<a href=#898 id=898 data-nosnippet>898</a>
-<a href=#899 id=899 data-nosnippet>899</a>                <span class="kw">let </span>conv1d_bvk = conv1d_v1k
-<a href=#900 id=900 data-nosnippet>900</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// [1, conv_dim, conv_kernel]
-<a href=#901 id=901 data-nosnippet>901</a>                    </span>.expand([batch, conv_dim, conv_kernel]);
-<a href=#902 id=902 data-nosnippet>902</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
-<a href=#903 id=903 data-nosnippet>903</a>
-<a href=#904 id=904 data-nosnippet>904</a>                <span class="comment">// Element-wise multiply and sum over the kernel axis.
-<a href=#905 id=905 data-nosnippet>905</a>                </span><span class="kw">let </span>product_bvk = cache.conv_bvk.clone() * conv1d_bvk;
-<a href=#906 id=906 data-nosnippet>906</a>                <span class="kw">let </span><span class="kw-2">mut </span>xbc_bv = product_bvk.sum_dim(<span class="number">2</span>).squeeze_dim(<span class="number">2</span>);
-<a href=#907 id=907 data-nosnippet>907</a>                <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
-<a href=#908 id=908 data-nosnippet>908</a>
-<a href=#909 id=909 data-nosnippet>909</a>                <span class="comment">// Add the (optional) bias.
-<a href=#910 id=910 data-nosnippet>910</a>                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(bias_v) = <span class="kw-2">&amp;</span><span class="self">self</span>.conv1d.bias {
-<a href=#911 id=911 data-nosnippet>911</a>                    <span class="macro">assert_eq!</span>([conv_dim], bias_v.dims());
-<a href=#912 id=912 data-nosnippet>912</a>                    xbc_bv = xbc_bv + bias_v.val().unsqueeze();
-<a href=#913 id=913 data-nosnippet>913</a>                }
-<a href=#914 id=914 data-nosnippet>914</a>
-<a href=#915 id=915 data-nosnippet>915</a>                Silu::new().forward(xbc_bv)
-<a href=#916 id=916 data-nosnippet>916</a>            };
-<a href=#917 id=917 data-nosnippet>917</a>            <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
-<a href=#918 id=918 data-nosnippet>918</a>
-<a href=#919 id=919 data-nosnippet>919</a>            <span class="comment">// ── Split (x, B, C) ───────────────────────────────────────────────
-<a href=#920 id=920 data-nosnippet>920</a>            </span><span class="macro">assert_eq!</span>(d_inner, nheads * per_head_dim);
-<a href=#921 id=921 data-nosnippet>921</a>            <span class="kw">let </span>(x_bhp, b_bgr, c_bgr) = {
-<a href=#922 id=922 data-nosnippet>922</a>                <span class="kw">let </span><span class="kw-2">mut </span>parts = xbc_bv
-<a href=#923 id=923 data-nosnippet>923</a>                    .split_with_sizes(<span class="macro">vec!</span>[d_inner, ngroups * state_rank, ngroups * state_rank], <span class="number">1</span>)
-<a href=#924 id=924 data-nosnippet>924</a>                    .into_iter();
-<a href=#925 id=925 data-nosnippet>925</a>                (
-<a href=#926 id=926 data-nosnippet>926</a>                    parts
-<a href=#927 id=927 data-nosnippet>927</a>                        .next()
-<a href=#928 id=928 data-nosnippet>928</a>                        .unwrap() <span class="comment">// [B, d_inner]
-<a href=#929 id=929 data-nosnippet>929</a>                        </span>.reshape([batch, nheads, per_head_dim]),
-<a href=#930 id=930 data-nosnippet>930</a>                    parts
-<a href=#931 id=931 data-nosnippet>931</a>                        .next()
-<a href=#932 id=932 data-nosnippet>932</a>                        .unwrap() <span class="comment">// [B, ngroups·N]
-<a href=#933 id=933 data-nosnippet>933</a>                        </span>.reshape([batch, ngroups, state_rank]),
-<a href=#934 id=934 data-nosnippet>934</a>                    parts
-<a href=#935 id=935 data-nosnippet>935</a>                        .next()
-<a href=#936 id=936 data-nosnippet>936</a>                        .unwrap() <span class="comment">// [B, ngroups·N]
-<a href=#937 id=937 data-nosnippet>937</a>                        </span>.reshape([batch, ngroups, state_rank]),
-<a href=#938 id=938 data-nosnippet>938</a>                )
-<a href=#939 id=939 data-nosnippet>939</a>            };
-<a href=#940 id=940 data-nosnippet>940</a>
-<a href=#941 id=941 data-nosnippet>941</a>            <span class="comment">// ── Discretisation ────────────────────────────────────────────────
-<a href=#942 id=942 data-nosnippet>942</a>            // Δₜ = softplus(dt_raw + dt_bias)
-<a href=#943 id=943 data-nosnippet>943</a>            </span><span class="kw">let </span>dt_bias_1h = <span class="self">self</span>.dt_bias_h.val().unsqueeze_dim(<span class="number">0</span>);
-<a href=#944 id=944 data-nosnippet>944</a>            <span class="macro">assert_eq!</span>([<span class="number">1</span>, nheads], dt_bias_1h.dims());
-<a href=#945 id=945 data-nosnippet>945</a>            <span class="kw">let </span>dt_bh = softplus(dt_raw_bh + dt_bias_1h).clamp(<span class="self">self</span>.dt_limit.<span class="number">0</span>, <span class="self">self</span>.dt_limit.<span class="number">1</span>);
-<a href=#946 id=946 data-nosnippet>946</a>            <span class="macro">assert_eq!</span>([batch, nheads], dt_bh.dims());
-<a href=#947 id=947 data-nosnippet>947</a>
-<a href=#948 id=948 data-nosnippet>948</a>            <span class="comment">// A = -exp(a_log) &lt; 0   (negative, decaying)
-<a href=#949 id=949 data-nosnippet>949</a>            </span><span class="kw">let </span>a_head_decay_h = -<span class="self">self</span>.a_log_h.val().exp();
-<a href=#950 id=950 data-nosnippet>950</a>            <span class="macro">assert_eq!</span>([nheads], a_head_decay_h.dims());
-<a href=#951 id=951 data-nosnippet>951</a>
-<a href=#952 id=952 data-nosnippet>952</a>            <span class="comment">// Āₜ = exp(Δₜ · A) ∈ (0, 1)   scalar per [B, H]
-<a href=#953 id=953 data-nosnippet>953</a>            </span><span class="kw">let </span>dta_bh = (dt_bh.clone() * a_head_decay_h.unsqueeze()).exp();
-<a href=#954 id=954 data-nosnippet>954</a>            <span class="macro">assert_eq!</span>([batch, nheads], dta_bh.dims());
-<a href=#955 id=955 data-nosnippet>955</a>
-<a href=#956 id=956 data-nosnippet>956</a>            <span class="comment">// ── SSM state update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────
-<a href=#957 id=957 data-nosnippet>957</a>            // The cache holds h_{t-1} with shape [B, H, P, N].
-<a href=#958 id=958 data-nosnippet>958</a>            // Āₜ is a scalar per head, so we broadcast it over P and N.
-<a href=#959 id=959 data-nosnippet>959</a>            // B̄ₜ xₜᵀ is an outer product producing a [P, N] matrix per [B, H].
-<a href=#960 id=960 data-nosnippet>960</a>
-<a href=#961 id=961 data-nosnippet>961</a>            </span><span class="kw">let </span>ssm_shape_bhpr = [batch, nheads, per_head_dim, state_rank];
+<a href=#754 id=754 data-nosnippet>754</a>            Mamba2SsdPath::Minimal(_chunk_len) =&gt; <span class="self">Self</span>::ssd_minimal(ssd_input),
+<a href=#755 id=755 data-nosnippet>755</a>            Mamba2SsdPath::Serial(_chunk_len) =&gt; <span class="self">Self</span>::ssd_serial(ssd_input),
+<a href=#756 id=756 data-nosnippet>756</a>            Mamba2SsdPath::SerialRecalculated(_chunk_len) =&gt; {
+<a href=#757 id=757 data-nosnippet>757</a>                <span class="self">Self</span>::ssd_serial_recalculated(ssd_input)
+<a href=#758 id=758 data-nosnippet>758</a>            }
+<a href=#759 id=759 data-nosnippet>759</a>        };
+<a href=#760 id=760 data-nosnippet>760</a>        <span class="macro">assert_eq!</span>(
+<a href=#761 id=761 data-nosnippet>761</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
+<a href=#762 id=762 data-nosnippet>762</a>            y_bnlhp.dims()
+<a href=#763 id=763 data-nosnippet>763</a>        );
+<a href=#764 id=764 data-nosnippet>764</a>        san(<span class="kw-2">&amp;</span>y_bnlhp);
+<a href=#765 id=765 data-nosnippet>765</a>        san(<span class="kw-2">&amp;</span>final_state_bhpr);
+<a href=#766 id=766 data-nosnippet>766</a>
+<a href=#767 id=767 data-nosnippet>767</a>        <span class="comment">// Update the SSM state in the cache for the next call.
+<a href=#768 id=768 data-nosnippet>768</a>        </span>cache.ssm_bhpr = final_state_bhpr;
+<a href=#769 id=769 data-nosnippet>769</a>        <span class="macro">assert_eq!</span>(
+<a href=#770 id=770 data-nosnippet>770</a>            [batch, nheads, per_head_dim, state_rank],
+<a href=#771 id=771 data-nosnippet>771</a>            cache.ssm_bhpr.dims()
+<a href=#772 id=772 data-nosnippet>772</a>        );
+<a href=#773 id=773 data-nosnippet>773</a>
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="comment">// Remove zero-pad columns that were added at Step 5.
+<a href=#775 id=775 data-nosnippet>775</a>        </span><span class="kw">let </span>y_bShp = y_bnlhp.reshape([batch, sequence_padded, nheads, per_head_dim]);
+<a href=#776 id=776 data-nosnippet>776</a>        <span class="kw">let </span>y_bshp = <span class="kw">if </span>pad == <span class="number">0 </span>{
+<a href=#777 id=777 data-nosnippet>777</a>            y_bShp
+<a href=#778 id=778 data-nosnippet>778</a>        } <span class="kw">else </span>{
+<a href=#779 id=779 data-nosnippet>779</a>            y_bShp.slice(<span class="macro">s!</span>[.., <span class="number">0</span>..sequence, .., ..])
+<a href=#780 id=780 data-nosnippet>780</a>        };
+<a href=#781 id=781 data-nosnippet>781</a>
+<a href=#782 id=782 data-nosnippet>782</a>        <span class="comment">// Reshape into sequence.
+<a href=#783 id=783 data-nosnippet>783</a>        </span><span class="kw">let </span>y_bsi = y_bshp.reshape([batch, sequence, d_inner]);
+<a href=#784 id=784 data-nosnippet>784</a>        <span class="macro">assert_eq!</span>([batch, sequence, d_inner], y_bsi.dims());
+<a href=#785 id=785 data-nosnippet>785</a>
+<a href=#786 id=786 data-nosnippet>786</a>        <span class="comment">// ── Step 7: Gated RMSNorm ─────────────────────────────────────────────
+<a href=#787 id=787 data-nosnippet>787</a>        </span><span class="kw">let </span>y_bsi = <span class="self">self</span>.norm.forward(y_bsi, z_gate_bsi);
+<a href=#788 id=788 data-nosnippet>788</a>        <span class="macro">assert_eq!</span>([batch, sequence, d_inner], y_bsi.dims());
+<a href=#789 id=789 data-nosnippet>789</a>        san(<span class="kw-2">&amp;</span>y_bsi);
+<a href=#790 id=790 data-nosnippet>790</a>
+<a href=#791 id=791 data-nosnippet>791</a>        <span class="comment">// ── Step 8: Out-projection ────────────────────────────────────────────
+<a href=#792 id=792 data-nosnippet>792</a>        </span><span class="kw">let </span>out_bsm = <span class="self">self</span>.out_proj.forward(y_bsi);
+<a href=#793 id=793 data-nosnippet>793</a>        <span class="macro">assert_eq!</span>([batch, sequence, _d_model], out_bsm.dims());
+<a href=#794 id=794 data-nosnippet>794</a>        san(<span class="kw-2">&amp;</span>out_bsm);
+<a href=#795 id=795 data-nosnippet>795</a>
+<a href=#796 id=796 data-nosnippet>796</a>        (out_bsm, cache)
+<a href=#797 id=797 data-nosnippet>797</a>    }
+<a href=#798 id=798 data-nosnippet>798</a>}
+<a href=#799 id=799 data-nosnippet>799</a>
+<a href=#800 id=800 data-nosnippet>800</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#801 id=801 data-nosnippet>801</a>// Mamba2::step  (recurrent SSM — token-by-token decoding)
+<a href=#802 id=802 data-nosnippet>802</a>// ---------------------------------------------------------------------------
+<a href=#803 id=803 data-nosnippet>803</a>
+<a href=#804 id=804 data-nosnippet>804</a></span><span class="kw">mod </span>step {
+<a href=#805 id=805 data-nosnippet>805</a>    <span class="kw">use </span>super::<span class="kw-2">*</span>;
+<a href=#806 id=806 data-nosnippet>806</a>
+<a href=#807 id=807 data-nosnippet>807</a>    <span class="kw">impl</span>&lt;B: Backend&gt; Mamba2&lt;B&gt; {
+<a href=#808 id=808 data-nosnippet>808</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent SSM form.
+<a href=#809 id=809 data-nosnippet>809</a>        ///
+<a href=#810 id=810 data-nosnippet>810</a>        /// This is the O(H·P·N)-per-token decoding path.  It runs one tick of
+<a href=#811 id=811 data-nosnippet>811</a>        /// the discretised Mamba-2 recurrence:
+<a href=#812 id=812 data-nosnippet>812</a>        ///
+<a href=#813 id=813 data-nosnippet>813</a>        /// ```text
+<a href=#814 id=814 data-nosnippet>814</a>        ///   Āₜ  = exp(Δₜ · A)           scalar per head, ∈ (0, 1)
+<a href=#815 id=815 data-nosnippet>815</a>        ///   B̄ₜ  = Δₜ · Bₜ               ∈ ℝᴺ   (Euler discretisation)
+<a href=#816 id=816 data-nosnippet>816</a>        ///   hₜ  = Āₜ · hₜ₋₁ + B̄ₜ · xₜᵀ  ∈ ℝ^{P×N}   (outer product update)
+<a href=#817 id=817 data-nosnippet>817</a>        ///   yₜ  = Cₜᵀ · hₜ + D · xₜ     ∈ ℝᴾ   (output)
+<a href=#818 id=818 data-nosnippet>818</a>        /// ```
+<a href=#819 id=819 data-nosnippet>819</a>        ///
+<a href=#820 id=820 data-nosnippet>820</a>        /// The convolution is handled by manually sliding the cache window:
+<a href=#821 id=821 data-nosnippet>821</a>        /// the oldest input column is dropped and the new token's projection
+<a href=#822 id=822 data-nosnippet>822</a>        /// is appended.
+<a href=#823 id=823 data-nosnippet>823</a>        ///
+<a href=#824 id=824 data-nosnippet>824</a>        /// The SSM hidden state `cache.ssm_bhpr` is updated in-place via
+<a href=#825 id=825 data-nosnippet>825</a>        /// the recurrence above.
+<a href=#826 id=826 data-nosnippet>826</a>        ///
+<a href=#827 id=827 data-nosnippet>827</a>        /// # Shapes
+<a href=#828 id=828 data-nosnippet>828</a>        /// - `input_bm` : `[batch, d_model]`
+<a href=#829 id=829 data-nosnippet>829</a>        /// - output     : `[batch, d_model]`
+<a href=#830 id=830 data-nosnippet>830</a>        </span><span class="attr">#[allow(non_snake_case)]
+<a href=#831 id=831 data-nosnippet>831</a>        </span><span class="kw">pub fn </span>step(
+<a href=#832 id=832 data-nosnippet>832</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#833 id=833 data-nosnippet>833</a>            input_bm: Tensor&lt;B, <span class="number">2</span>&gt;,
+<a href=#834 id=834 data-nosnippet>834</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&lt;B&gt;&gt;,
+<a href=#835 id=835 data-nosnippet>835</a>        ) -&gt; (Tensor&lt;B, <span class="number">2</span>&gt;, Mamba2Cache&lt;B&gt;) {
+<a href=#836 id=836 data-nosnippet>836</a>            <span class="kw">let </span>[batch, d_model] = input_bm.dims();
+<a href=#837 id=837 data-nosnippet>837</a>            <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
+<a href=#838 id=838 data-nosnippet>838</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
+<a href=#839 id=839 data-nosnippet>839</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#840 id=840 data-nosnippet>840</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#841 id=841 data-nosnippet>841</a>            <span class="kw">let </span>conv_dim = <span class="self">self</span>.conv_dim();
+<a href=#842 id=842 data-nosnippet>842</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#843 id=843 data-nosnippet>843</a>            <span class="kw">let </span>[_conv_dim, <span class="kw">_</span>, conv_kernel] = <span class="self">self</span>.conv1d.weight.dims();
+<a href=#844 id=844 data-nosnippet>844</a>            <span class="kw">let </span>[_d_model, d_in_proj_out] = <span class="self">self</span>.in_proj.weight.dims();
+<a href=#845 id=845 data-nosnippet>845</a>
+<a href=#846 id=846 data-nosnippet>846</a>            <span class="macro">assert_eq!</span>(conv_dim, _conv_dim);
+<a href=#847 id=847 data-nosnippet>847</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
+<a href=#848 id=848 data-nosnippet>848</a>
+<a href=#849 id=849 data-nosnippet>849</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = cache.unwrap_or_else(|| {
+<a href=#850 id=850 data-nosnippet>850</a>                <span class="kw">let </span>device = <span class="kw-2">&amp;</span>input_bm.device();
+<a href=#851 id=851 data-nosnippet>851</a>                <span class="kw">let </span>conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
+<a href=#852 id=852 data-nosnippet>852</a>                <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
+<a href=#853 id=853 data-nosnippet>853</a>                    Shape::new([batch, nheads, per_head_dim, state_rank]),
+<a href=#854 id=854 data-nosnippet>854</a>                    device,
+<a href=#855 id=855 data-nosnippet>855</a>                );
+<a href=#856 id=856 data-nosnippet>856</a>                Mamba2Cache { conv_bvk, ssm_bhpr }
+<a href=#857 id=857 data-nosnippet>857</a>            });
+<a href=#858 id=858 data-nosnippet>858</a>
+<a href=#859 id=859 data-nosnippet>859</a>            <span class="comment">// ── In-projection ─────────────────────────────────────────────────
+<a href=#860 id=860 data-nosnippet>860</a>            </span><span class="kw">let </span>(z_gate_bi, xbc_bv, dt_raw_bh) = {
+<a href=#861 id=861 data-nosnippet>861</a>                <span class="kw">let </span>z_xbc_dt_bd = <span class="self">self</span>.in_proj.forward(input_bm);
+<a href=#862 id=862 data-nosnippet>862</a>                <span class="macro">assert_eq!</span>([batch, d_in_proj_out], z_xbc_dt_bd.dims());
+<a href=#863 id=863 data-nosnippet>863</a>                <span class="macro">assert_eq!</span>([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
+<a href=#864 id=864 data-nosnippet>864</a>
+<a href=#865 id=865 data-nosnippet>865</a>                <span class="kw">let </span><span class="kw-2">mut </span>parts = z_xbc_dt_bd
+<a href=#866 id=866 data-nosnippet>866</a>                    .split_with_sizes(<span class="macro">vec!</span>[d_inner, conv_dim, nheads], <span class="number">1</span>)
+<a href=#867 id=867 data-nosnippet>867</a>                    .into_iter();
+<a href=#868 id=868 data-nosnippet>868</a>                (
+<a href=#869 id=869 data-nosnippet>869</a>                    parts.next().unwrap(), <span class="comment">// z  [B, d_inner]
+<a href=#870 id=870 data-nosnippet>870</a>                    </span>parts.next().unwrap(), <span class="comment">// xbc[B, conv_dim]
+<a href=#871 id=871 data-nosnippet>871</a>                    </span>parts.next().unwrap(), <span class="comment">// dt [B, nheads]
+<a href=#872 id=872 data-nosnippet>872</a>                </span>)
+<a href=#873 id=873 data-nosnippet>873</a>            };
+<a href=#874 id=874 data-nosnippet>874</a>            <span class="macro">assert_eq!</span>([batch, d_inner], z_gate_bi.dims());
+<a href=#875 id=875 data-nosnippet>875</a>            <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
+<a href=#876 id=876 data-nosnippet>876</a>            <span class="macro">assert_eq!</span>([batch, nheads], dt_raw_bh.dims());
+<a href=#877 id=877 data-nosnippet>877</a>
+<a href=#878 id=878 data-nosnippet>878</a>            <span class="comment">// ── Causal convolution (single step) ──────────────────────────────
+<a href=#879 id=879 data-nosnippet>879</a>            // Slide the cache window left by one position, then insert the new
+<a href=#880 id=880 data-nosnippet>880</a>            // token's projection `xbc_bv` as the rightmost column.
+<a href=#881 id=881 data-nosnippet>881</a>            </span>cache.conv_bvk = {
+<a href=#882 id=882 data-nosnippet>882</a>                <span class="kw">let </span>conv_bvk = cache.conv_bvk;
+<a href=#883 id=883 data-nosnippet>883</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], conv_bvk.dims());
+<a href=#884 id=884 data-nosnippet>884</a>
+<a href=#885 id=885 data-nosnippet>885</a>                <span class="comment">// Drop the oldest (leftmost) column.
+<a href=#886 id=886 data-nosnippet>886</a>                </span><span class="kw">let </span>tail_bvK = conv_bvk.slice(<span class="macro">s!</span>[.., .., <span class="number">1</span>..]);
+<a href=#887 id=887 data-nosnippet>887</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel - <span class="number">1</span>], tail_bvK.dims());
+<a href=#888 id=888 data-nosnippet>888</a>
+<a href=#889 id=889 data-nosnippet>889</a>                <span class="comment">// Append the new token as the rightmost column.
+<a href=#890 id=890 data-nosnippet>890</a>                </span><span class="kw">let </span>updated_bvk = Tensor::cat([tail_bvK, xbc_bv.unsqueeze_dim(<span class="number">2</span>)].to_vec(), <span class="number">2</span>);
+<a href=#891 id=891 data-nosnippet>891</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], updated_bvk.dims());
+<a href=#892 id=892 data-nosnippet>892</a>                updated_bvk
+<a href=#893 id=893 data-nosnippet>893</a>            };
+<a href=#894 id=894 data-nosnippet>894</a>
+<a href=#895 id=895 data-nosnippet>895</a>            <span class="comment">// Apply the depthwise convolution manually (one step = dot product
+<a href=#896 id=896 data-nosnippet>896</a>            // of the cached window with the conv weight along the kernel axis).
+<a href=#897 id=897 data-nosnippet>897</a>            </span><span class="kw">let </span>xbc_bv = {
+<a href=#898 id=898 data-nosnippet>898</a>                <span class="kw">let </span>conv1d_v1k = <span class="self">self</span>.conv1d.weight.val(); <span class="comment">// [conv_dim, 1, conv_kernel]
+<a href=#899 id=899 data-nosnippet>899</a>                </span><span class="macro">assert_eq!</span>([conv_dim, <span class="number">1</span>, conv_kernel], conv1d_v1k.dims());
+<a href=#900 id=900 data-nosnippet>900</a>
+<a href=#901 id=901 data-nosnippet>901</a>                <span class="kw">let </span>conv1d_bvk = conv1d_v1k
+<a href=#902 id=902 data-nosnippet>902</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// [1, conv_dim, conv_kernel]
+<a href=#903 id=903 data-nosnippet>903</a>                    </span>.expand([batch, conv_dim, conv_kernel]);
+<a href=#904 id=904 data-nosnippet>904</a>                <span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
+<a href=#905 id=905 data-nosnippet>905</a>
+<a href=#906 id=906 data-nosnippet>906</a>                <span class="comment">// Element-wise multiply and sum over the kernel axis.
+<a href=#907 id=907 data-nosnippet>907</a>                </span><span class="kw">let </span>product_bvk = cache.conv_bvk.clone() * conv1d_bvk;
+<a href=#908 id=908 data-nosnippet>908</a>                <span class="kw">let </span><span class="kw-2">mut </span>xbc_bv = product_bvk.sum_dim(<span class="number">2</span>).squeeze_dim(<span class="number">2</span>);
+<a href=#909 id=909 data-nosnippet>909</a>                <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
+<a href=#910 id=910 data-nosnippet>910</a>
+<a href=#911 id=911 data-nosnippet>911</a>                <span class="comment">// Add the (optional) bias.
+<a href=#912 id=912 data-nosnippet>912</a>                </span><span class="kw">if let </span><span class="prelude-val">Some</span>(bias_v) = <span class="kw-2">&amp;</span><span class="self">self</span>.conv1d.bias {
+<a href=#913 id=913 data-nosnippet>913</a>                    <span class="macro">assert_eq!</span>([conv_dim], bias_v.dims());
+<a href=#914 id=914 data-nosnippet>914</a>                    xbc_bv = xbc_bv + bias_v.val().unsqueeze();
+<a href=#915 id=915 data-nosnippet>915</a>                }
+<a href=#916 id=916 data-nosnippet>916</a>
+<a href=#917 id=917 data-nosnippet>917</a>                Silu::new().forward(xbc_bv)
+<a href=#918 id=918 data-nosnippet>918</a>            };
+<a href=#919 id=919 data-nosnippet>919</a>            <span class="macro">assert_eq!</span>([batch, conv_dim], xbc_bv.dims());
+<a href=#920 id=920 data-nosnippet>920</a>
+<a href=#921 id=921 data-nosnippet>921</a>            <span class="comment">// ── Split (x, B, C) ───────────────────────────────────────────────
+<a href=#922 id=922 data-nosnippet>922</a>            </span><span class="macro">assert_eq!</span>(d_inner, nheads * per_head_dim);
+<a href=#923 id=923 data-nosnippet>923</a>            <span class="kw">let </span>(x_bhp, b_bgr, c_bgr) = {
+<a href=#924 id=924 data-nosnippet>924</a>                <span class="kw">let </span><span class="kw-2">mut </span>parts = xbc_bv
+<a href=#925 id=925 data-nosnippet>925</a>                    .split_with_sizes(<span class="macro">vec!</span>[d_inner, ngroups * state_rank, ngroups * state_rank], <span class="number">1</span>)
+<a href=#926 id=926 data-nosnippet>926</a>                    .into_iter();
+<a href=#927 id=927 data-nosnippet>927</a>                (
+<a href=#928 id=928 data-nosnippet>928</a>                    parts
+<a href=#929 id=929 data-nosnippet>929</a>                        .next()
+<a href=#930 id=930 data-nosnippet>930</a>                        .unwrap() <span class="comment">// [B, d_inner]
+<a href=#931 id=931 data-nosnippet>931</a>                        </span>.reshape([batch, nheads, per_head_dim]),
+<a href=#932 id=932 data-nosnippet>932</a>                    parts
+<a href=#933 id=933 data-nosnippet>933</a>                        .next()
+<a href=#934 id=934 data-nosnippet>934</a>                        .unwrap() <span class="comment">// [B, ngroups·N]
+<a href=#935 id=935 data-nosnippet>935</a>                        </span>.reshape([batch, ngroups, state_rank]),
+<a href=#936 id=936 data-nosnippet>936</a>                    parts
+<a href=#937 id=937 data-nosnippet>937</a>                        .next()
+<a href=#938 id=938 data-nosnippet>938</a>                        .unwrap() <span class="comment">// [B, ngroups·N]
+<a href=#939 id=939 data-nosnippet>939</a>                        </span>.reshape([batch, ngroups, state_rank]),
+<a href=#940 id=940 data-nosnippet>940</a>                )
+<a href=#941 id=941 data-nosnippet>941</a>            };
+<a href=#942 id=942 data-nosnippet>942</a>
+<a href=#943 id=943 data-nosnippet>943</a>            <span class="comment">// ── Discretisation ────────────────────────────────────────────────
+<a href=#944 id=944 data-nosnippet>944</a>            // Δₜ = softplus(dt_raw + dt_bias)
+<a href=#945 id=945 data-nosnippet>945</a>            </span><span class="kw">let </span>dt_bias_1h = <span class="self">self</span>.dt_bias_h.val().unsqueeze_dim(<span class="number">0</span>);
+<a href=#946 id=946 data-nosnippet>946</a>            <span class="macro">assert_eq!</span>([<span class="number">1</span>, nheads], dt_bias_1h.dims());
+<a href=#947 id=947 data-nosnippet>947</a>            <span class="kw">let </span>dt_bh = softplus(dt_raw_bh + dt_bias_1h).clamp(<span class="self">self</span>.dt_limit.<span class="number">0</span>, <span class="self">self</span>.dt_limit.<span class="number">1</span>);
+<a href=#948 id=948 data-nosnippet>948</a>            <span class="macro">assert_eq!</span>([batch, nheads], dt_bh.dims());
+<a href=#949 id=949 data-nosnippet>949</a>
+<a href=#950 id=950 data-nosnippet>950</a>            <span class="comment">// A = -exp(a_log) &lt; 0   (negative, decaying)
+<a href=#951 id=951 data-nosnippet>951</a>            </span><span class="kw">let </span>a_head_decay_h = -<span class="self">self</span>.a_log_h.val().exp();
+<a href=#952 id=952 data-nosnippet>952</a>            <span class="macro">assert_eq!</span>([nheads], a_head_decay_h.dims());
+<a href=#953 id=953 data-nosnippet>953</a>
+<a href=#954 id=954 data-nosnippet>954</a>            <span class="comment">// Āₜ = exp(Δₜ · A) ∈ (0, 1)   scalar per [B, H]
+<a href=#955 id=955 data-nosnippet>955</a>            </span><span class="kw">let </span>dta_bh = (dt_bh.clone() * a_head_decay_h.unsqueeze()).exp();
+<a href=#956 id=956 data-nosnippet>956</a>            <span class="macro">assert_eq!</span>([batch, nheads], dta_bh.dims());
+<a href=#957 id=957 data-nosnippet>957</a>
+<a href=#958 id=958 data-nosnippet>958</a>            <span class="comment">// ── SSM state update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────
+<a href=#959 id=959 data-nosnippet>959</a>            // The cache holds h_{t-1} with shape [B, H, P, N].
+<a href=#960 id=960 data-nosnippet>960</a>            // Āₜ is a scalar per head, so we broadcast it over P and N.
+<a href=#961 id=961 data-nosnippet>961</a>            // B̄ₜ xₜᵀ is an outer product producing a [P, N] matrix per [B, H].
 <a href=#962 id=962 data-nosnippet>962</a>
-<a href=#963 id=963 data-nosnippet>963</a>            <span class="kw">let </span>dta_bhpr = dta_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]).expand(ssm_shape_bhpr); <span class="comment">// [B, H, P, N]
+<a href=#963 id=963 data-nosnippet>963</a>            </span><span class="kw">let </span>ssm_shape_bhpr = [batch, nheads, per_head_dim, state_rank];
 <a href=#964 id=964 data-nosnippet>964</a>
-<a href=#965 id=965 data-nosnippet>965</a>            // B̄ₜ xₜᵀ = (Δₜ Bₜ) xₜᵀ:
-<a href=#966 id=966 data-nosnippet>966</a>            //   x:  [B, H, P]     → broadcast to [B, H, P, N]
-<a href=#967 id=967 data-nosnippet>967</a>            //   B:  [B, G, N]     → expand to [B, H, N]  → broadcast to [B, H, P, N]
-<a href=#968 id=968 data-nosnippet>968</a>            //   Δ:  [B, H]        → broadcast to [B, H, P, N]
-<a href=#969 id=969 data-nosnippet>969</a>            </span><span class="kw">let </span>heads_per_group = nheads / ngroups;
-<a href=#970 id=970 data-nosnippet>970</a>            <span class="kw">let </span>dtbx_bhpr = {
-<a href=#971 id=971 data-nosnippet>971</a>                <span class="kw">let </span>x_bhpr = x_bhp.clone().unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).expand(ssm_shape_bhpr);
-<a href=#972 id=972 data-nosnippet>972</a>
-<a href=#973 id=973 data-nosnippet>973</a>                <span class="comment">// Expand B from groups to heads.
-<a href=#974 id=974 data-nosnippet>974</a>                </span><span class="kw">let </span>b_bhpr = b_bgr
-<a href=#975 id=975 data-nosnippet>975</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">4</span>]) <span class="comment">// [B, 1, G, N, 1]
-<a href=#976 id=976 data-nosnippet>976</a>                    </span>.expand([batch, heads_per_group, ngroups, state_rank, <span class="number">1</span>])
-<a href=#977 id=977 data-nosnippet>977</a>                    .reshape([batch, nheads, state_rank, <span class="number">1</span>]) <span class="comment">// [B, H, N, 1]
-<a href=#978 id=978 data-nosnippet>978</a>                    </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// [B, H, 1, N]
-<a href=#979 id=979 data-nosnippet>979</a>                    </span>.expand(ssm_shape_bhpr);
-<a href=#980 id=980 data-nosnippet>980</a>
-<a href=#981 id=981 data-nosnippet>981</a>                <span class="kw">let </span>dt_bhpr = dt_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]).expand(ssm_shape_bhpr);
+<a href=#965 id=965 data-nosnippet>965</a>            <span class="kw">let </span>dta_bhpr = dta_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]).expand(ssm_shape_bhpr); <span class="comment">// [B, H, P, N]
+<a href=#966 id=966 data-nosnippet>966</a>
+<a href=#967 id=967 data-nosnippet>967</a>            // B̄ₜ xₜᵀ = (Δₜ Bₜ) xₜᵀ:
+<a href=#968 id=968 data-nosnippet>968</a>            //   x:  [B, H, P]     → broadcast to [B, H, P, N]
+<a href=#969 id=969 data-nosnippet>969</a>            //   B:  [B, G, N]     → expand to [B, H, N]  → broadcast to [B, H, P, N]
+<a href=#970 id=970 data-nosnippet>970</a>            //   Δ:  [B, H]        → broadcast to [B, H, P, N]
+<a href=#971 id=971 data-nosnippet>971</a>            </span><span class="kw">let </span>heads_per_group = nheads / ngroups;
+<a href=#972 id=972 data-nosnippet>972</a>            <span class="kw">let </span>dtbx_bhpr = {
+<a href=#973 id=973 data-nosnippet>973</a>                <span class="kw">let </span>x_bhpr = x_bhp.clone().unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).expand(ssm_shape_bhpr);
+<a href=#974 id=974 data-nosnippet>974</a>
+<a href=#975 id=975 data-nosnippet>975</a>                <span class="comment">// Expand B from groups to heads.
+<a href=#976 id=976 data-nosnippet>976</a>                </span><span class="kw">let </span>b_bhpr = b_bgr
+<a href=#977 id=977 data-nosnippet>977</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">4</span>]) <span class="comment">// [B, 1, G, N, 1]
+<a href=#978 id=978 data-nosnippet>978</a>                    </span>.expand([batch, heads_per_group, ngroups, state_rank, <span class="number">1</span>])
+<a href=#979 id=979 data-nosnippet>979</a>                    .reshape([batch, nheads, state_rank, <span class="number">1</span>]) <span class="comment">// [B, H, N, 1]
+<a href=#980 id=980 data-nosnippet>980</a>                    </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// [B, H, 1, N]
+<a href=#981 id=981 data-nosnippet>981</a>                    </span>.expand(ssm_shape_bhpr);
 <a href=#982 id=982 data-nosnippet>982</a>
-<a href=#983 id=983 data-nosnippet>983</a>                dt_bhpr * b_bhpr * x_bhpr <span class="comment">// B̄ₜ xₜᵀ  [B, H, P, N]
-<a href=#984 id=984 data-nosnippet>984</a>            </span>};
-<a href=#985 id=985 data-nosnippet>985</a>            <span class="macro">assert_eq!</span>(ssm_shape_bhpr, dtbx_bhpr.dims());
-<a href=#986 id=986 data-nosnippet>986</a>
-<a href=#987 id=987 data-nosnippet>987</a>            <span class="comment">// hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ
-<a href=#988 id=988 data-nosnippet>988</a>            </span>cache.ssm_bhpr = cache.ssm_bhpr * dta_bhpr + dtbx_bhpr;
-<a href=#989 id=989 data-nosnippet>989</a>            <span class="macro">assert_eq!</span>(ssm_shape_bhpr, cache.ssm_bhpr.dims());
-<a href=#990 id=990 data-nosnippet>990</a>
-<a href=#991 id=991 data-nosnippet>991</a>            <span class="comment">// ── Output:  yₜ = Cₜ hₜ + D xₜ ──────────────────────────────────
-<a href=#992 id=992 data-nosnippet>992</a>            </span><span class="kw">let </span>y_bi = {
-<a href=#993 id=993 data-nosnippet>993</a>                <span class="comment">// Cₜ hₜ:  element-wise multiply C (broadcast to [B, H, P, N])
-<a href=#994 id=994 data-nosnippet>994</a>                // with h_t, then sum over N.
-<a href=#995 id=995 data-nosnippet>995</a>                </span><span class="kw">let </span>c_bhpr = c_bgr
-<a href=#996 id=996 data-nosnippet>996</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">4</span>])
-<a href=#997 id=997 data-nosnippet>997</a>                    .expand([batch, heads_per_group, ngroups, state_rank, <span class="number">1</span>])
-<a href=#998 id=998 data-nosnippet>998</a>                    .reshape([batch, nheads, state_rank, <span class="number">1</span>]) <span class="comment">// [B, H, N, 1]
-<a href=#999 id=999 data-nosnippet>999</a>                    </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// [B, H, 1, N]
-<a href=#1000 id=1000 data-nosnippet>1000</a>                    </span>.expand(ssm_shape_bhpr);
-<a href=#1001 id=1001 data-nosnippet>1001</a>                <span class="macro">assert_eq!</span>(ssm_shape_bhpr, c_bhpr.dims());
-<a href=#1002 id=1002 data-nosnippet>1002</a>
-<a href=#1003 id=1003 data-nosnippet>1003</a>                <span class="kw">let </span>ch_bhp = (cache.ssm_bhpr.clone() * c_bhpr).sum_dim(<span class="number">3</span>).squeeze_dim(<span class="number">3</span>); <span class="comment">// sum over N → [B, H, P]
-<a href=#1004 id=1004 data-nosnippet>1004</a>                </span><span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], ch_bhp.dims());
-<a href=#1005 id=1005 data-nosnippet>1005</a>
-<a href=#1006 id=1006 data-nosnippet>1006</a>                <span class="comment">// D xₜ:  per-head scalar skip.
-<a href=#1007 id=1007 data-nosnippet>1007</a>                </span><span class="kw">let </span>d_1h1 = <span class="self">self</span>.d_h.val().unsqueeze_dims(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">2</span>]);
-<a href=#1008 id=1008 data-nosnippet>1008</a>                <span class="macro">assert_eq!</span>([<span class="number">1</span>, nheads, <span class="number">1</span>], d_1h1.dims());
-<a href=#1009 id=1009 data-nosnippet>1009</a>                <span class="kw">let </span>skip_bhp = d_1h1.expand([batch, nheads, per_head_dim]) * x_bhp;
-<a href=#1010 id=1010 data-nosnippet>1010</a>                <span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], skip_bhp.dims());
-<a href=#1011 id=1011 data-nosnippet>1011</a>
-<a href=#1012 id=1012 data-nosnippet>1012</a>                <span class="kw">let </span>y_bhp = ch_bhp + skip_bhp;
-<a href=#1013 id=1013 data-nosnippet>1013</a>                <span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], y_bhp.dims());
-<a href=#1014 id=1014 data-nosnippet>1014</a>
-<a href=#1015 id=1015 data-nosnippet>1015</a>                <span class="comment">// Flatten heads → [B, d_inner], then apply gated RMSNorm.
-<a href=#1016 id=1016 data-nosnippet>1016</a>                </span><span class="kw">let </span>y_bi = y_bhp.reshape([batch, d_inner]);
-<a href=#1017 id=1017 data-nosnippet>1017</a>                <span class="self">self</span>.norm.forward(y_bi, z_gate_bi)
-<a href=#1018 id=1018 data-nosnippet>1018</a>            };
-<a href=#1019 id=1019 data-nosnippet>1019</a>            <span class="macro">assert_eq!</span>([batch, d_inner], y_bi.dims());
-<a href=#1020 id=1020 data-nosnippet>1020</a>
-<a href=#1021 id=1021 data-nosnippet>1021</a>            <span class="comment">// ── Out-projection ────────────────────────────────────────────────
-<a href=#1022 id=1022 data-nosnippet>1022</a>            </span><span class="kw">let </span>out_bm = <span class="self">self</span>.out_proj.forward(y_bi);
-<a href=#1023 id=1023 data-nosnippet>1023</a>            <span class="macro">assert_eq!</span>([batch, d_model], out_bm.dims());
-<a href=#1024 id=1024 data-nosnippet>1024</a>
-<a href=#1025 id=1025 data-nosnippet>1025</a>            (out_bm, cache)
-<a href=#1026 id=1026 data-nosnippet>1026</a>        }
-<a href=#1027 id=1027 data-nosnippet>1027</a>    }
-<a href=#1028 id=1028 data-nosnippet>1028</a>}
+<a href=#983 id=983 data-nosnippet>983</a>                <span class="kw">let </span>dt_bhpr = dt_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]).expand(ssm_shape_bhpr);
+<a href=#984 id=984 data-nosnippet>984</a>
+<a href=#985 id=985 data-nosnippet>985</a>                dt_bhpr * b_bhpr * x_bhpr <span class="comment">// B̄ₜ xₜᵀ  [B, H, P, N]
+<a href=#986 id=986 data-nosnippet>986</a>            </span>};
+<a href=#987 id=987 data-nosnippet>987</a>            <span class="macro">assert_eq!</span>(ssm_shape_bhpr, dtbx_bhpr.dims());
+<a href=#988 id=988 data-nosnippet>988</a>
+<a href=#989 id=989 data-nosnippet>989</a>            <span class="comment">// hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ
+<a href=#990 id=990 data-nosnippet>990</a>            </span>cache.ssm_bhpr = cache.ssm_bhpr * dta_bhpr + dtbx_bhpr;
+<a href=#991 id=991 data-nosnippet>991</a>            <span class="macro">assert_eq!</span>(ssm_shape_bhpr, cache.ssm_bhpr.dims());
+<a href=#992 id=992 data-nosnippet>992</a>
+<a href=#993 id=993 data-nosnippet>993</a>            <span class="comment">// ── Output:  yₜ = Cₜ hₜ + D xₜ ──────────────────────────────────
+<a href=#994 id=994 data-nosnippet>994</a>            </span><span class="kw">let </span>y_bi = {
+<a href=#995 id=995 data-nosnippet>995</a>                <span class="comment">// Cₜ hₜ:  element-wise multiply C (broadcast to [B, H, P, N])
+<a href=#996 id=996 data-nosnippet>996</a>                // with h_t, then sum over N.
+<a href=#997 id=997 data-nosnippet>997</a>                </span><span class="kw">let </span>c_bhpr = c_bgr
+<a href=#998 id=998 data-nosnippet>998</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">4</span>])
+<a href=#999 id=999 data-nosnippet>999</a>                    .expand([batch, heads_per_group, ngroups, state_rank, <span class="number">1</span>])
+<a href=#1000 id=1000 data-nosnippet>1000</a>                    .reshape([batch, nheads, state_rank, <span class="number">1</span>]) <span class="comment">// [B, H, N, 1]
+<a href=#1001 id=1001 data-nosnippet>1001</a>                    </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// [B, H, 1, N]
+<a href=#1002 id=1002 data-nosnippet>1002</a>                    </span>.expand(ssm_shape_bhpr);
+<a href=#1003 id=1003 data-nosnippet>1003</a>                <span class="macro">assert_eq!</span>(ssm_shape_bhpr, c_bhpr.dims());
+<a href=#1004 id=1004 data-nosnippet>1004</a>
+<a href=#1005 id=1005 data-nosnippet>1005</a>                <span class="kw">let </span>ch_bhp = (cache.ssm_bhpr.clone() * c_bhpr).sum_dim(<span class="number">3</span>).squeeze_dim(<span class="number">3</span>); <span class="comment">// sum over N → [B, H, P]
+<a href=#1006 id=1006 data-nosnippet>1006</a>                </span><span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], ch_bhp.dims());
+<a href=#1007 id=1007 data-nosnippet>1007</a>
+<a href=#1008 id=1008 data-nosnippet>1008</a>                <span class="comment">// D xₜ:  per-head scalar skip.
+<a href=#1009 id=1009 data-nosnippet>1009</a>                </span><span class="kw">let </span>d_1h1 = <span class="self">self</span>.d_h.val().unsqueeze_dims(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">2</span>]);
+<a href=#1010 id=1010 data-nosnippet>1010</a>                <span class="macro">assert_eq!</span>([<span class="number">1</span>, nheads, <span class="number">1</span>], d_1h1.dims());
+<a href=#1011 id=1011 data-nosnippet>1011</a>                <span class="kw">let </span>skip_bhp = d_1h1.expand([batch, nheads, per_head_dim]) * x_bhp;
+<a href=#1012 id=1012 data-nosnippet>1012</a>                <span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], skip_bhp.dims());
+<a href=#1013 id=1013 data-nosnippet>1013</a>
+<a href=#1014 id=1014 data-nosnippet>1014</a>                <span class="kw">let </span>y_bhp = ch_bhp + skip_bhp;
+<a href=#1015 id=1015 data-nosnippet>1015</a>                <span class="macro">assert_eq!</span>([batch, nheads, per_head_dim], y_bhp.dims());
+<a href=#1016 id=1016 data-nosnippet>1016</a>
+<a href=#1017 id=1017 data-nosnippet>1017</a>                <span class="comment">// Flatten heads → [B, d_inner], then apply gated RMSNorm.
+<a href=#1018 id=1018 data-nosnippet>1018</a>                </span><span class="kw">let </span>y_bi = y_bhp.reshape([batch, d_inner]);
+<a href=#1019 id=1019 data-nosnippet>1019</a>                <span class="self">self</span>.norm.forward(y_bi, z_gate_bi)
+<a href=#1020 id=1020 data-nosnippet>1020</a>            };
+<a href=#1021 id=1021 data-nosnippet>1021</a>            <span class="macro">assert_eq!</span>([batch, d_inner], y_bi.dims());
+<a href=#1022 id=1022 data-nosnippet>1022</a>
+<a href=#1023 id=1023 data-nosnippet>1023</a>            <span class="comment">// ── Out-projection ────────────────────────────────────────────────
+<a href=#1024 id=1024 data-nosnippet>1024</a>            </span><span class="kw">let </span>out_bm = <span class="self">self</span>.out_proj.forward(y_bi);
+<a href=#1025 id=1025 data-nosnippet>1025</a>            <span class="macro">assert_eq!</span>([batch, d_model], out_bm.dims());
+<a href=#1026 id=1026 data-nosnippet>1026</a>
+<a href=#1027 id=1027 data-nosnippet>1027</a>            (out_bm, cache)
+<a href=#1028 id=1028 data-nosnippet>1028</a>        }
+<a href=#1029 id=1029 data-nosnippet>1029</a>    }
+<a href=#1030 id=1030 data-nosnippet>1030</a>}
 </code></pre></div></section></main></body></html>
