@@ -135,7 +135,8 @@ pub struct Mamba3CacheConfig {
     #[config(default = 1)]
     pub mimo_rank: usize,
 
-    /// Number of RoPE angle pairs = state_rank / 2.
+    /// Number of RoPE angle pairs = `rope_dim / 2` = `(state_rank * rope_fraction) / 2`
+    /// (rounded down to even via `Mamba3Config::rope_dim`).
     pub num_rope_angles: usize,
 }
 

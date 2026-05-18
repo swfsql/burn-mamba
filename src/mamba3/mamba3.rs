@@ -244,12 +244,12 @@ pub struct Mamba3Config {
 
     /// Fraction of `state_rank` to which RoPE is applied (must be `0.5` or `1.0`).
     ///
-    /// - `1.0` (default): full RoPE — every B/C dimension is rotated.
-    /// - `0.5`: partial RoPE — only the first `state_rank / 2` dimensions are
-    ///   rotated; the remaining ones pass through unchanged.
+    /// - `0.5` (default): partial RoPE — only `state_rank / 2` dimensions are
+    ///   rotated; the rest pass through unchanged.
+    /// - `1.0`: full RoPE — every B/C dimension is rotated.
     ///
-    /// Matches the reference's `rope_fraction` argument in `mamba3.py:36`.
-    #[config(default = 1.0)]
+    /// Default matches the reference's `rope_fraction` argument in `mamba3.py:36`.
+    #[config(default = 0.5)]
     pub rope_fraction: f64,
 
     /// Whether to apply a gated RMSNorm before the output projection.
@@ -457,9 +457,22 @@ pub fn apply_rope<B: Backend, const D: usize>(
     }
 }
 
-/// Apply RoPE to only the first `rope_dim` entries of the last dimension; the
+/// Apply RoPE to only the rotation-active entries of the last dimension; the
 /// remainder passes through unchanged. Falls back to [`apply_rope`] when
 /// `rope_dim == state_rank` (full RoPE).
+///
+/// Pairing scheme (must match the reference kernels — see Section
+/// "Data-Dependent RoPE" in the paper, and `mamba3_siso_fwd.py` /
+/// `mamba3_mimo_fwd.py`):
+///
+/// - `rotate_pairwise = true` (SISO, interleaved/NeoX): pairs `(0,1), (2,3), …`.
+///   Only pairs `0..num_rope_angles` are rotated; pairs beyond are passed
+///   through. Equivalent to slicing the first `rope_dim` entries and rotating
+///   them.
+/// - `rotate_pairwise = false` (MIMO, half-and-half/GPT-J): pair distance is
+///   always `state_rank/2`, i.e. element `n` is paired with element
+///   `state_rank/2 + n`. With partial RoPE only the first `num_rope_angles`
+///   pairs are rotated; the remaining elements in both halves pass through.
 fn apply_rope_partial<B: Backend, const D: usize>(
     x: Tensor<B, D>,
     angles: Tensor<B, D>,
@@ -470,10 +483,43 @@ fn apply_rope_partial<B: Backend, const D: usize>(
     if rope_dim == state_rank {
         return apply_rope::<B, D>(x, angles, rotate_pairwise);
     }
-    let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
-    let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
-    let x_rope_rotated = apply_rope::<B, D>(x_rope, angles, rotate_pairwise);
-    Tensor::cat(vec![x_rope_rotated, x_rest], D - 1)
+
+    if rotate_pairwise {
+        // Pairs are local — slicing the first rope_dim entries gives the same
+        // result as the reference (which rotates the whole headdim but with
+        // identity cos/sin for the tail pairs).
+        let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
+        let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
+        let x_rope_rotated = apply_rope::<B, D>(x_rope, angles, true);
+        return Tensor::cat(vec![x_rope_rotated, x_rest], D - 1);
+    }
+
+    // Half-and-half partial RoPE: pair distance must be `state_rank/2`, not
+    // `rope_dim/2`. Slicing the first `rope_dim` entries and calling
+    // `apply_rope` would pair within the slice and produce the wrong rotation.
+    let half = state_rank / 2;
+    let num_rope_angles = rope_dim / 2;
+    debug_assert!(num_rope_angles < half, "partial RoPE requires rope_dim < state_rank here");
+
+    // Split x into the two halves, then within each half separate the
+    // rotation-active prefix from the pass-through suffix.
+    let x_h1 = x.clone().narrow(D - 1, 0, half);
+    let x_h2 = x.narrow(D - 1, half, half);
+    let x_h1_rope = x_h1.clone().narrow(D - 1, 0, num_rope_angles);
+    let x_h1_pass = x_h1.narrow(D - 1, num_rope_angles, half - num_rope_angles);
+    let x_h2_rope = x_h2.clone().narrow(D - 1, 0, num_rope_angles);
+    let x_h2_pass = x_h2.narrow(D - 1, num_rope_angles, half - num_rope_angles);
+
+    // angles: [..., num_rope_angles] — broadcasts element-wise against the rope-active slices.
+    let cos = angles.clone().cos();
+    let sin = angles.sin();
+    let x_h1_rot = cos.clone() * x_h1_rope.clone() - sin.clone() * x_h2_rope.clone();
+    let x_h2_rot = sin * x_h1_rope + cos * x_h2_rope;
+
+    // Reassemble: [ first-half-rotated | first-half-passthrough | second-half-rotated | second-half-passthrough ]
+    let x_h1_out = Tensor::cat(vec![x_h1_rot, x_h1_pass], D - 1);
+    let x_h2_out = Tensor::cat(vec![x_h2_rot, x_h2_pass], D - 1);
+    Tensor::cat(vec![x_h1_out, x_h2_out], D - 1)
 }
 
 // ---------------------------------------------------------------------------

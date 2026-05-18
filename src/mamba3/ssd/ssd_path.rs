@@ -199,3 +199,142 @@ impl Default for SsdPath {
         SsdPath::SerialRecalculated(None)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "backend-flex"))]
+mod tests {
+    use super::*;
+    use burn::backend::Flex;
+    use burn::tensor::Distribution;
+
+    type B = Flex;
+
+    /// Build a randomised [`SsdInput`] suitable for cross-path comparison.
+    ///
+    /// `da` is drawn from a negative-mean distribution so that the implied
+    /// per-token decay `exp(da)` stays in `(0, 1]`, matching how the upstream
+    /// block produces `Δ · A` with `A < 0`.
+    fn random_input(
+        batch: usize,
+        nchunks: usize,
+        chunk_len: usize,
+        mimo_rank: usize,
+        nheads: usize,
+        per_head_dim: usize,
+        state_rank: usize,
+        device: &<B as burn::tensor::backend::BackendTypes>::Device,
+    ) -> (
+        Tensor<B, 6>,
+        Tensor<B, 4>,
+        Tensor<B, 6>,
+        Tensor<B, 6>,
+        Tensor<B, 4>,
+    ) {
+        let v = Tensor::<B, 6>::random(
+            [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let da = Tensor::<B, 4>::random(
+            [batch, nchunks, chunk_len, nheads],
+            Distribution::Normal(-0.5, 0.1),
+            device,
+        );
+        let b = Tensor::<B, 6>::random(
+            [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let c = Tensor::<B, 6>::random(
+            [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            device,
+        );
+        let initial_state = Tensor::<B, 4>::random(
+            [batch, nheads, per_head_dim, state_rank],
+            Distribution::Normal(0.0, 0.1),
+            device,
+        );
+        (v, da, b, c, initial_state)
+    }
+
+    fn make_input(
+        v: Tensor<B, 6>,
+        da: Tensor<B, 4>,
+        b: Tensor<B, 6>,
+        c: Tensor<B, 6>,
+        initial_state: Tensor<B, 4>,
+    ) -> SsdInput<B> {
+        SsdInput {
+            v_bnlrhp: v,
+            da_bnlh: da,
+            b_bnlrhn: b,
+            c_bnlrhn: c,
+            initial_state_bhpr: initial_state,
+            // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
+            init_state_hpr: None,
+        }
+    }
+
+    /// Run the same `SsdInput` through `Minimal`, `Serial`, and
+    /// `SerialRecalculated` and assert that all three yield the same output
+    /// and final state. They are all chunkwise reformulations of the same
+    /// MIMO-first SSD, so the results must agree up to floating-point noise.
+    fn run_minimal_matches_serial(
+        batch: usize,
+        nchunks: usize,
+        chunk_len: usize,
+        mimo_rank: usize,
+        nheads: usize,
+        per_head_dim: usize,
+        state_rank: usize,
+    ) {
+        let device = Default::default();
+        let (v, da, b, c, init) = random_input(
+            batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank, &device,
+        );
+
+        let (y_min, s_min) = SsdPath::Minimal(Some(chunk_len)).run(make_input(
+            v.clone(), da.clone(), b.clone(), c.clone(), init.clone(),
+        ));
+        let (y_ser, s_ser) = SsdPath::Serial(Some(chunk_len)).run(make_input(
+            v.clone(), da.clone(), b.clone(), c.clone(), init.clone(),
+        ));
+        let (y_rec, s_rec) = SsdPath::SerialRecalculated(Some(chunk_len))
+            .run(make_input(v, da, b, c, init));
+
+        let tol = 1e-4;
+
+        let dy_ser = (y_min.clone() - y_ser).abs().max().into_scalar();
+        let ds_ser = (s_min.clone() - s_ser).abs().max().into_scalar();
+        let dy_rec = (y_min - y_rec).abs().max().into_scalar();
+        let ds_rec = (s_min - s_rec).abs().max().into_scalar();
+
+        assert!(dy_ser < tol, "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})");
+        assert!(ds_ser < tol, "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})");
+        assert!(dy_rec < tol, "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})");
+        assert!(ds_rec < tol, "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})");
+    }
+
+    #[test]
+    fn paths_agree_siso() {
+        // batch=2, nchunks=3, chunk_len=4, mimo_rank=1, nheads=2, per_head_dim=8, state_rank=8
+        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8);
+    }
+
+    #[test]
+    fn paths_agree_mimo() {
+        // mimo_rank=2 exercises the fused-L (= chunk_len · R) reshape shared by all three paths.
+        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8);
+    }
+
+    #[test]
+    fn paths_agree_single_chunk() {
+        // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
+        // boundary case where K4 runs a single iteration.
+        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8);
+    }
+}
