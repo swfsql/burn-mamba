@@ -1,7 +1,7 @@
 pub use crate::common::{
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
-    model::{MyMamba2Network, MyMamba2NetworkConfig},
+    model::{MyMamba3Network, MyMamba3NetworkConfig},
     training::TrainingConfig,
 };
 use burn::prelude::*;
@@ -17,17 +17,17 @@ use burn_mamba::prelude::*;
 
 pub fn train<AutoB>(
     training_config: TrainingConfig,
-    model_config: MyMamba2NetworkConfig,
+    model_config: MyMamba3NetworkConfig,
     training_device: AutoB::Device,
     app_args: &AppArgs,
 ) where
-    AutoB: AutodiffBackend + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
+    AutoB: AutodiffBackend + Mamba3BackendExt,
+    <AutoB as AutodiffBackend>::InnerBackend: Mamba3BackendExt,
 {
     AutoB::seed(&training_device, training_config.seed);
 
     // load (or init and save) model and optim
-    let model: MyMamba2Network<AutoB> =
+    let model: MyMamba3Network<AutoB> =
         app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
     let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &training_device);
@@ -107,19 +107,19 @@ type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, MnistBatch<B>> + 'static>;
 pub fn epoch_train<AutoB>(
     dataloader_train: Dataloader<AutoB>,
     dataloader_valid: Dataloader<AutoB::InnerBackend>,
-    training_model: MyMamba2Network<AutoB>,
+    training_model: MyMamba3Network<AutoB>,
     training_config: &TrainingConfig,
-    model_config: &MyMamba2NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network<AutoB>, AutoB>,
+    model_config: &MyMamba3NetworkConfig,
+    optim: &mut OptimizerAdaptor<AdamW, MyMamba3Network<AutoB>, AutoB>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba2Network<AutoB>
+) -> MyMamba3Network<AutoB>
 where
-    AutoB: AutodiffBackend + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
+    AutoB: AutodiffBackend + Mamba3BackendExt,
+    <AutoB as AutodiffBackend>::InnerBackend: Mamba3BackendExt,
 {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
@@ -189,11 +189,11 @@ where
     training_model.0
 }
 
-pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
+pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
     dataloader_valid: Dataloader<B>,
-    valid_model: MyMamba2Network<B>,
+    valid_model: MyMamba3Network<B>,
     training_config: &TrainingConfig,
-    model_config: &MyMamba2NetworkConfig,
+    model_config: &MyMamba3NetworkConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
 ) {
@@ -231,12 +231,16 @@ pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
         loss_metric.running_value().current(),
         acc_metric.running_value().current(),
     );
+    
+    // let device = valid_model.0.in_proj.weight.device();
+    // let () = B::sync(&device).unwrap();
+    // let () = B::memory_cleanup(&device);
 }
 
-/// Wrapper over [`MyMamba2Network`] for custom implementations.
-pub struct Wrap<B: Backend>(pub MyMamba2Network<B>, pub MyMamba2NetworkConfig);
+/// Wrapper over [`MyMamba3Network`] for custom implementations.
+pub struct Wrap<B: Backend>(pub MyMamba3Network<B>, pub MyMamba3NetworkConfig);
 
-impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
+impl<AutoB: AutodiffBackend + Mamba3BackendExt> TrainStep for Wrap<AutoB> {
     type Input = MnistBatch<AutoB>;
     type Output = ClassificationOutput<AutoB>;
 
@@ -248,7 +252,7 @@ impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
+impl<B: Backend + Mamba3BackendExt> InferenceStep for Wrap<B> {
     type Input = MnistBatch<B>;
     type Output = ClassificationOutput<B>;
 
@@ -268,7 +272,7 @@ impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Wrap<B> {
+impl<B: Backend + Mamba3BackendExt> Wrap<B> {
     pub fn forward_classification(
         &self,
         input: Tensor<B, 3>,
@@ -281,9 +285,7 @@ impl<B: Backend + Mamba2BackendExt> Wrap<B> {
         assert_eq!(input_size, 1);
         assert_eq!([batch_size], targets.dims());
 
-        // let ssd_path = Mamba2SsdPath::Minimal(None);
-        // let ssd_path = Mamba2SsdPath::Serial(None);
-        let ssd_path = Mamba2SsdPath::SerialRecalculated(None); // saves ~33% vram
+        let ssd_path = Mamba3SsdPath::Minimal(None);
         //
         let (output, _caches) = model.forward(input.clone(), None, ssd_path);
         assert_eq!([batch_size, sequence_size, 10], output.dims());

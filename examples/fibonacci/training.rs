@@ -234,6 +234,10 @@ pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
         training_config.num_epochs,
         loss_metric.running_value().current(),
     );
+
+    // let device = valid_model.0.in_proj.weight.device();
+    // let () = B::sync(&device).unwrap();
+    // let () = B::memory_cleanup(&device);
 }
 
 /// Wrapper over [`Mamba2Network`] for custom implementations.

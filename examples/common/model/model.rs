@@ -141,7 +141,7 @@ pub mod mamba3 {
             .with_mimo_rank(mimo_rank)
             .with_rope_fraction(rope_fraction)
             .with_has_proj_bias(true)
-            .with_has_outproj_norm(false)
+            .with_has_outproj_norm(true)
     }
 
     pub fn mamba3_layers_config(
