@@ -1413,9 +1413,16 @@ mod step {
 #[cfg(all(test, feature = "backend-flex"))]
 mod tests {
     use super::*;
-    use burn::backend::Flex;
+    use burn::backend::{Autodiff, Flex};
+    use burn::tensor::Distribution;
 
-    type B = Flex;
+    /// Inner (non-autodiff) backend used for materialising values and
+    /// extracted gradients.
+    type InnerB = Flex;
+    /// Autodiff-wrapped backend used to drive `.backward()`.
+    type B = Autodiff<InnerB>;
+
+    type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
 
     fn small_config() -> Mamba3Config {
         Mamba3Config::new(32) // d_model = 32
@@ -1432,40 +1439,176 @@ mod tests {
             .with_mimo_rank(2)
     }
 
+    /// A bundle of input + model-parameter gradients extracted from one
+    /// forward+backward run.  Each `check_grads_match` call compares these
+    /// across two runs that should be mathematically equivalent.
+    struct RunGrads {
+        out: Tensor<InnerB, 3>,
+        d_input: Tensor<InnerB, 3>,
+        d_in_proj_w: Tensor<InnerB, 2>,
+        d_dt_bias: Tensor<InnerB, 1>,
+        d_d: Tensor<InnerB, 1>,
+        d_b_norm_gamma: Tensor<InnerB, 1>,
+        d_c_norm_gamma: Tensor<InnerB, 1>,
+        d_b_bias: Tensor<InnerB, 3>,
+        d_c_bias: Tensor<InnerB, 3>,
+        d_out_proj_w: Tensor<InnerB, 2>,
+    }
+
+    /// Run a closure that produces an output tensor from a model and an input
+    /// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
+    /// scalar loss with a fixed (non-tracked) random "head" and return the
+    /// gradients of the input and a representative set of model parameters.
+    fn run_with_grads(
+        model: &Mamba3<B>,
+        input: &Param<Tensor<B, 3>>,
+        head: &Tensor<InnerB, 3>,
+        forward: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+    ) -> RunGrads {
+        let out = forward(model, input.val());
+        let out_inner = out.clone().inner();
+
+        let head = Tensor::from_inner(head.clone());
+        let loss = (out * head).sum();
+        let grads = loss.backward();
+
+        RunGrads {
+            out: out_inner,
+            d_input: input.val().grad(&grads).expect("grad input"),
+            d_in_proj_w: model
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("grad in_proj.weight"),
+            d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("grad dt_bias_h"),
+            d_d: model.d_h.val().grad(&grads).expect("grad d_h"),
+            d_b_norm_gamma: model
+                .b_norm
+                .gamma
+                .val()
+                .grad(&grads)
+                .expect("grad b_norm.gamma"),
+            d_c_norm_gamma: model
+                .c_norm
+                .gamma
+                .val()
+                .grad(&grads)
+                .expect("grad c_norm.gamma"),
+            d_b_bias: model
+                .b_bias_hrn
+                .val()
+                .grad(&grads)
+                .expect("grad b_bias_hrn"),
+            d_c_bias: model
+                .c_bias_hrn
+                .val()
+                .grad(&grads)
+                .expect("grad c_bias_hrn"),
+            d_out_proj_w: model
+                .out_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("grad out_proj.weight"),
+        }
+    }
+
+    /// Assert that every entry in `a` and `b` agrees to within `grad_tol`,
+    /// printing every comparison so a failure dump shows the full picture
+    /// (instead of stopping at the first mismatch).
+    fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+        let mut failures: Vec<String> = Vec::new();
+        macro_rules! check {
+            ($field:ident, $name:expr) => {{
+                let d = (a.$field.clone() - b.$field.clone())
+                    .abs()
+                    .max()
+                    .into_scalar();
+                eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
+                if d >= grad_tol {
+                    failures.push(format!(
+                        "{}: grad of {} max abs diff = {:.6} (tol {})",
+                        label, $name, d, grad_tol
+                    ));
+                }
+            }};
+        }
+        check!(d_input, "input");
+        check!(d_in_proj_w, "in_proj.weight");
+        check!(d_dt_bias, "dt_bias_h");
+        check!(d_d, "d_h");
+        check!(d_b_norm_gamma, "b_norm.gamma");
+        check!(d_c_norm_gamma, "c_norm.gamma");
+        check!(d_b_bias, "b_bias_hrn");
+        check!(d_c_bias, "c_bias_hrn");
+        check!(d_out_proj_w, "out_proj.weight");
+        assert!(
+            failures.is_empty(),
+            "gradient mismatches:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// Build a fresh `Param<Tensor>` from a stable inner tensor.
+    /// A new Param is needed per run so that the autodiff leaf has a fresh
+    /// node, isolating each backward pass to its own forward graph.
+    fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
+        Param::from_tensor(Tensor::from_inner(input.clone()))
+    }
+
     fn run_step_matches_forward(cfg: Mamba3Config) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 5;
         let d_model = cfg.d_model;
 
-        let input = Tensor::<B, 3>::random(
+        let input = Tensor::<InnerB, 3>::random(
             [batch, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let head = Tensor::<InnerB, 3>::random(
+            [batch, seq_len, d_model],
+            Distribution::Normal(0.0, 1.0),
             &device,
         );
 
         let ssd_path = Mamba3SsdPath::Minimal(Some(4));
-        let (out_fwd, _) = model.forward(input.clone(), None, ssd_path);
 
-        let mut cache: Option<Mamba3Cache<B>> = None;
-        let mut step_outputs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+        let input_fwd = param_input(&input);
+        let r_fwd = run_with_grads(&model, &input_fwd, &head, |m, x| {
+            let (out, _) = m.forward(x, None, ssd_path.clone());
+            out
+        });
 
-        for t in 0..seq_len {
-            let token = input.clone().narrow(1, t, 1).squeeze_dim(1);
-            let (out_t, new_cache) = model.step(token, cache);
-            cache = Some(new_cache);
-            step_outputs.push(out_t);
-        }
+        let input_step = param_input(&input);
+        let r_step = run_with_grads(&model, &input_step, &head, |m, x| {
+            let mut cache: Option<Mamba3Cache<B>> = None;
+            let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+            for t in 0..seq_len {
+                let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
+                let (out_t, new_cache) = m.step(token, cache);
+                cache = Some(new_cache);
+                outs.push(out_t);
+            }
+            Tensor::stack(outs, 1)
+        });
 
-        let out_step = Tensor::stack(step_outputs, 1);
-
-        let diff = (out_fwd - out_step).abs().max().into_scalar();
+        // ── Forward agreement (existing check) ───────────────────────────
+        let diff = (r_fwd.out.clone() - r_step.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             diff < 1e-4,
             "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
     }
 
     #[test]
@@ -1504,7 +1647,7 @@ mod tests {
     /// Verifies stateful chunked-prefill: the β term at the start of the second
     /// chunk must see `x_{-1}` and `B_{-1}` from the cache, not zeros.
     fn run_split_matches_full(cfg: Mamba3Config) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
@@ -1512,26 +1655,46 @@ mod tests {
         let split = 2;
         let d_model = cfg.d_model;
 
-        let input = Tensor::<B, 3>::random(
+        let input = Tensor::<InnerB, 3>::random(
             [batch, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let head = Tensor::<InnerB, 3>::random(
+            [batch, seq_len, d_model],
+            Distribution::Normal(0.0, 1.0),
             &device,
         );
 
         let ssd_path = Mamba3SsdPath::Minimal(Some(4));
-        let (out_full, _) = model.forward(input.clone(), None, ssd_path.clone());
 
-        let prefix = input.clone().narrow(1, 0, split);
-        let suffix = input.narrow(1, split, seq_len - split);
-        let (out_prefix, cache) = model.forward(prefix, None, ssd_path.clone());
-        let (out_suffix, _) = model.forward(suffix, Some(cache), ssd_path);
-        let out_split = Tensor::cat(vec![out_prefix, out_suffix], 1);
+        let input_full = param_input(&input);
+        let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
+            let (out, _) = m.forward(x, None, ssd_path.clone());
+            out
+        });
 
-        let diff = (out_full - out_split).abs().max().into_scalar();
+        let input_split = param_input(&input);
+        let r_split = run_with_grads(&model, &input_split, &head, |m, x| {
+            let prefix = x.clone().narrow(1, 0, split);
+            let suffix = x.narrow(1, split, seq_len - split);
+            let (out_prefix, cache) = m.forward(prefix, None, ssd_path.clone());
+            let (out_suffix, _) = m.forward(suffix, Some(cache), ssd_path.clone());
+            Tensor::cat(vec![out_prefix, out_suffix], 1)
+        });
+
+        // ── Forward agreement (existing check) ───────────────────────────
+        let diff = (r_full.out.clone() - r_split.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             diff < 1e-4,
             "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        check_grads_match("split vs full", &r_full, &r_split, 1e-3);
     }
 
     #[test]

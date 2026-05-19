@@ -456,12 +456,18 @@ mod tests {
 
         // ── Forward agreement ────────────────────────────────────────────
         let tol = 1e-4;
-        let dy_ser = (r_min.y.clone() - r_ser.y.clone()).abs().max().into_scalar();
+        let dy_ser = (r_min.y.clone() - r_ser.y.clone())
+            .abs()
+            .max()
+            .into_scalar();
         let ds_ser = (r_min.state.clone() - r_ser.state.clone())
             .abs()
             .max()
             .into_scalar();
-        let dy_rec = (r_min.y.clone() - r_rec.y.clone()).abs().max().into_scalar();
+        let dy_rec = (r_min.y.clone() - r_rec.y.clone())
+            .abs()
+            .max()
+            .into_scalar();
         let ds_rec = (r_min.state.clone() - r_rec.state.clone())
             .abs()
             .max()
@@ -525,7 +531,11 @@ mod tests {
         check_grad!(d_d, "d");
         check_grad!(d_init_state, "initial_state");
 
-        assert!(failures.is_empty(), "gradient mismatches:\n  {}", failures.join("\n  "));
+        assert!(
+            failures.is_empty(),
+            "gradient mismatches:\n  {}",
+            failures.join("\n  ")
+        );
     }
 
     #[test]

@@ -1106,7 +1106,12 @@ mod tests {
             d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("grad dt_bias_h"),
             d_a_log: model.a_log_h.val().grad(&grads).expect("grad a_log_h"),
             d_d: model.d_h.val().grad(&grads).expect("grad d_h"),
-            d_norm_gamma: model.norm.gamma.val().grad(&grads).expect("grad norm.gamma"),
+            d_norm_gamma: model
+                .norm
+                .gamma
+                .val()
+                .grad(&grads)
+                .expect("grad norm.gamma"),
             d_out_proj_w: model
                 .out_proj
                 .weight
