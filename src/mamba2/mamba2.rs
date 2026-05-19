@@ -1038,9 +1038,16 @@ mod step {
 #[cfg(all(test, feature = "backend-flex"))]
 mod tests {
     use super::*;
-    use burn::backend::Flex;
+    use burn::backend::{Autodiff, Flex};
+    use burn::tensor::Distribution;
 
-    type B = Flex;
+    /// Inner (non-autodiff) backend used for materialising values and
+    /// extracted gradients.
+    type InnerB = Flex;
+    /// Autodiff-wrapped backend used to drive `.backward()`.
+    type B = Autodiff<InnerB>;
+
+    type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
 
     fn small_config() -> Mamba2Config {
         Mamba2Config::new(32)
@@ -1049,39 +1056,161 @@ mod tests {
             .with_per_head_dim(8)
     }
 
+    /// A bundle of input + model-parameter gradients extracted from one
+    /// forward+backward run.  Each `check_grads_match` call compares these
+    /// across two runs that should be mathematically equivalent.
+    struct RunGrads {
+        out: Tensor<InnerB, 3>,
+        d_input: Tensor<InnerB, 3>,
+        d_in_proj_w: Tensor<InnerB, 2>,
+        d_conv1d_w: Tensor<InnerB, 3>,
+        d_dt_bias: Tensor<InnerB, 1>,
+        d_a_log: Tensor<InnerB, 1>,
+        d_d: Tensor<InnerB, 1>,
+        d_norm_gamma: Tensor<InnerB, 1>,
+        d_out_proj_w: Tensor<InnerB, 2>,
+    }
+
+    /// Run a closure that produces an output tensor from a model and an input
+    /// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
+    /// scalar loss with a fixed (non-tracked) random "head" and return the
+    /// gradients of the input and a representative set of model parameters.
+    fn run_with_grads(
+        model: &Mamba2<B>,
+        input: &Param<Tensor<B, 3>>,
+        head: &Tensor<InnerB, 3>,
+        forward: impl FnOnce(&Mamba2<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+    ) -> RunGrads {
+        let out = forward(model, input.val());
+        let out_inner = out.clone().inner();
+
+        let head = Tensor::from_inner(head.clone());
+        let loss = (out * head).sum();
+        let grads = loss.backward();
+
+        RunGrads {
+            out: out_inner,
+            d_input: input.val().grad(&grads).expect("grad input"),
+            d_in_proj_w: model
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("grad in_proj.weight"),
+            d_conv1d_w: model
+                .conv1d
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("grad conv1d.weight"),
+            d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("grad dt_bias_h"),
+            d_a_log: model.a_log_h.val().grad(&grads).expect("grad a_log_h"),
+            d_d: model.d_h.val().grad(&grads).expect("grad d_h"),
+            d_norm_gamma: model.norm.gamma.val().grad(&grads).expect("grad norm.gamma"),
+            d_out_proj_w: model
+                .out_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("grad out_proj.weight"),
+        }
+    }
+
+    /// Assert that every entry in `a` and `b` agrees to within `grad_tol`,
+    /// printing every comparison so a failure dump shows the full picture
+    /// (instead of stopping at the first mismatch).
+    fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+        let mut failures: Vec<String> = Vec::new();
+        macro_rules! check {
+            ($field:ident, $name:expr) => {{
+                let d = (a.$field.clone() - b.$field.clone())
+                    .abs()
+                    .max()
+                    .into_scalar();
+                eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
+                if d >= grad_tol {
+                    failures.push(format!(
+                        "{}: grad of {} max abs diff = {:.6} (tol {})",
+                        label, $name, d, grad_tol
+                    ));
+                }
+            }};
+        }
+        check!(d_input, "input");
+        check!(d_in_proj_w, "in_proj.weight");
+        check!(d_conv1d_w, "conv1d.weight");
+        check!(d_dt_bias, "dt_bias_h");
+        check!(d_a_log, "a_log_h");
+        check!(d_d, "d_h");
+        check!(d_norm_gamma, "norm.gamma");
+        check!(d_out_proj_w, "out_proj.weight");
+        assert!(
+            failures.is_empty(),
+            "gradient mismatches:\n  {}",
+            failures.join("\n  ")
+        );
+    }
+
+    /// Helper that builds a fresh `Param<Tensor>` from a stable inner tensor.
+    /// A new Param is needed per run so that the autodiff leaf has a fresh
+    /// node, isolating each backward pass to its own forward graph.
+    fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
+        Param::from_tensor(Tensor::from_inner(input.clone()))
+    }
+
     fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 5;
         let d_model = cfg.d_model;
 
-        let input = Tensor::<B, 3>::random(
+        let input = Tensor::<InnerB, 3>::random(
             [batch, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let head = Tensor::<InnerB, 3>::random(
+            [batch, seq_len, d_model],
+            Distribution::Normal(0.0, 1.0),
             &device,
         );
 
-        let (out_fwd, _) = model.forward(input.clone(), None, ssd_path);
+        let input_fwd = param_input(&input);
+        let r_fwd = run_with_grads(&model, &input_fwd, &head, |m, x| {
+            let (out, _) = m.forward(x, None, ssd_path.clone());
+            out
+        });
 
-        let mut cache: Option<Mamba2Cache<B>> = None;
-        let mut step_outputs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+        let input_step = param_input(&input);
+        let r_step = run_with_grads(&model, &input_step, &head, |m, x| {
+            let mut cache: Option<Mamba2Cache<B>> = None;
+            let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+            for t in 0..seq_len {
+                let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
+                let (out_t, new_cache) = m.step(token, cache);
+                cache = Some(new_cache);
+                outs.push(out_t);
+            }
+            Tensor::stack(outs, 1)
+        });
 
-        for t in 0..seq_len {
-            let token = input.clone().narrow(1, t, 1).squeeze_dim(1);
-            let (out_t, new_cache) = model.step(token, cache);
-            cache = Some(new_cache);
-            step_outputs.push(out_t);
-        }
-
-        let out_step = Tensor::stack(step_outputs, 1);
-
-        let diff = (out_fwd - out_step).abs().max().into_scalar();
+        // ── Forward agreement (existing check) ───────────────────────────
+        let diff = (r_fwd.out.clone() - r_step.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             diff < 1e-4,
             "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        // step() and forward() are different reductions of the same SSM,
+        // so their per-parameter gradients should also agree, modulo
+        // float-summation order noise.
+        check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
     }
 
     #[test]
@@ -1104,7 +1233,7 @@ mod tests {
     /// Verifies stateful chunked-prefill: the convolution window carried in the
     /// cache must replay correctly at the start of the second segment.
     fn run_split_matches_full(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
@@ -1112,25 +1241,44 @@ mod tests {
         let split = 2;
         let d_model = cfg.d_model;
 
-        let input = Tensor::<B, 3>::random(
+        let input = Tensor::<InnerB, 3>::random(
             [batch, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let head = Tensor::<InnerB, 3>::random(
+            [batch, seq_len, d_model],
+            Distribution::Normal(0.0, 1.0),
             &device,
         );
 
-        let (out_full, _) = model.forward(input.clone(), None, ssd_path.clone());
+        let input_full = param_input(&input);
+        let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
+            let (out, _) = m.forward(x, None, ssd_path.clone());
+            out
+        });
 
-        let prefix = input.clone().narrow(1, 0, split);
-        let suffix = input.narrow(1, split, seq_len - split);
-        let (out_prefix, cache) = model.forward(prefix, None, ssd_path.clone());
-        let (out_suffix, _) = model.forward(suffix, Some(cache), ssd_path);
-        let out_split = Tensor::cat(vec![out_prefix, out_suffix], 1);
+        let input_split = param_input(&input);
+        let r_split = run_with_grads(&model, &input_split, &head, |m, x| {
+            let prefix = x.clone().narrow(1, 0, split);
+            let suffix = x.narrow(1, split, seq_len - split);
+            let (out_prefix, cache) = m.forward(prefix, None, ssd_path.clone());
+            let (out_suffix, _) = m.forward(suffix, Some(cache), ssd_path.clone());
+            Tensor::cat(vec![out_prefix, out_suffix], 1)
+        });
 
-        let diff = (out_full - out_split).abs().max().into_scalar();
+        // ── Forward agreement (existing check) ───────────────────────────
+        let diff = (r_full.out.clone() - r_split.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             diff < 1e-4,
             "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        check_grads_match("split vs full", &r_full, &r_split, 1e-3);
     }
 
     #[test]
@@ -1173,27 +1321,53 @@ mod tests {
     // ── SSD path agreement ───────────────────────────────────────────────────
 
     fn run_ssd_paths_agree(cfg: Mamba2Config) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 8;
         let d_model = cfg.d_model;
 
-        let input = Tensor::<B, 3>::random(
+        let input = Tensor::<InnerB, 3>::random(
             [batch, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let head = Tensor::<InnerB, 3>::random(
+            [batch, seq_len, d_model],
+            Distribution::Normal(0.0, 1.0),
             &device,
         );
 
-        let (out_min, _) = model.forward(input.clone(), None, Mamba2SsdPath::Minimal(Some(4)));
-        let (out_ser, _) = model.forward(input.clone(), None, Mamba2SsdPath::Serial(Some(4)));
-        let (out_rec, _) = model.forward(input, None, Mamba2SsdPath::SerialRecalculated(Some(4)));
+        // Each path gets its own input Param so the autodiff leaves are
+        // independent across the three backward passes.
+        let input_min = param_input(&input);
+        let input_ser = param_input(&input);
+        let input_rec = param_input(&input);
 
+        let r_min = run_with_grads(&model, &input_min, &head, |m, x| {
+            let (out, _) = m.forward(x, None, Mamba2SsdPath::Minimal(Some(4)));
+            out
+        });
+        let r_ser = run_with_grads(&model, &input_ser, &head, |m, x| {
+            let (out, _) = m.forward(x, None, Mamba2SsdPath::Serial(Some(4)));
+            out
+        });
+        let r_rec = run_with_grads(&model, &input_rec, &head, |m, x| {
+            let (out, _) = m.forward(x, None, Mamba2SsdPath::SerialRecalculated(Some(4)));
+            out
+        });
+
+        // ── Forward agreement ────────────────────────────────────────────
         let tol = 1e-4;
-        let d_ser = (out_min.clone() - out_ser).abs().max().into_scalar();
-        let d_rec = (out_min - out_rec).abs().max().into_scalar();
-
+        let d_ser = (r_min.out.clone() - r_ser.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
+        let d_rec = (r_min.out.clone() - r_rec.out.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             d_ser < tol,
             "Minimal vs Serial: forward max abs diff = {d_ser:.6} (tol {tol})"
@@ -1202,6 +1376,10 @@ mod tests {
             d_rec < tol,
             "Minimal vs SerialRecalculated: forward max abs diff = {d_rec:.6} (tol {tol})"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        check_grads_match("Minimal vs Serial", &r_min, &r_ser, 1e-3);
+        check_grads_match("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-3);
     }
 
     #[test]

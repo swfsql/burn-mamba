@@ -193,12 +193,21 @@ impl Default for Mamba2SsdPath {
 #[cfg(all(test, feature = "backend-flex"))]
 mod tests {
     use super::*;
-    use burn::backend::Flex;
+    use burn::backend::{Autodiff, Flex};
+    use burn::module::Param;
     use burn::tensor::Distribution;
 
-    type B = Flex;
+    /// Inner (non-autodiff) backend used for materialising values and
+    /// extracted gradients.
+    type InnerB = Flex;
+    /// Autodiff-wrapped backend used to drive `.backward()`.
+    type B = Autodiff<InnerB>;
 
-    /// Build a randomised set of tensors suitable for cross-path comparison.
+    type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+
+    /// Build a randomised set of tensors on the inner backend (no grad
+    /// tracking yet — `Param::from_tensor` is applied per-path below to
+    /// give each path its own fresh autodiff graph).
     ///
     /// `dt` is drawn from a positive distribution (softplus-like) and `a_decay`
     /// from a negative range so that the implied per-token decay `exp(dt·a)`
@@ -211,39 +220,40 @@ mod tests {
         per_head_dim: usize,
         ngroups: usize,
         state_rank: usize,
-        device: &<B as burn::tensor::backend::BackendTypes>::Device,
+        device: &Device,
     ) -> (
-        Tensor<B, 5>,
-        Tensor<B, 4>,
-        Tensor<B, 1>,
-        Tensor<B, 5>,
-        Tensor<B, 5>,
-        Tensor<B, 1>,
-        Tensor<B, 4>,
+        Tensor<InnerB, 5>,
+        Tensor<InnerB, 4>,
+        Tensor<InnerB, 1>,
+        Tensor<InnerB, 5>,
+        Tensor<InnerB, 5>,
+        Tensor<InnerB, 1>,
+        Tensor<InnerB, 4>,
     ) {
-        let x = Tensor::<B, 5>::random(
+        let x = Tensor::<InnerB, 5>::random(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             Distribution::Normal(0.0, 1.0),
             device,
         );
-        let dt = Tensor::<B, 4>::random(
+        let dt = Tensor::<InnerB, 4>::random(
             [batch, nchunks, chunk_len, nheads],
             Distribution::Uniform(0.05, 0.3),
             device,
         );
-        let a_decay = Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
-        let b = Tensor::<B, 5>::random(
+        let a_decay =
+            Tensor::<InnerB, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
+        let b = Tensor::<InnerB, 5>::random(
             [batch, nchunks, chunk_len, ngroups, state_rank],
             Distribution::Normal(0.0, 1.0),
             device,
         );
-        let c = Tensor::<B, 5>::random(
+        let c = Tensor::<InnerB, 5>::random(
             [batch, nchunks, chunk_len, ngroups, state_rank],
             Distribution::Normal(0.0, 1.0),
             device,
         );
-        let d = Tensor::<B, 1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
-        let initial_state = Tensor::<B, 4>::random(
+        let d = Tensor::<InnerB, 1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
+        let initial_state = Tensor::<InnerB, 4>::random(
             [batch, nheads, per_head_dim, state_rank],
             Distribution::Normal(0.0, 0.1),
             device,
@@ -251,33 +261,124 @@ mod tests {
         (x, dt, a_decay, b, c, d, initial_state)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn make_input(
-        x: Tensor<B, 5>,
-        dt: Tensor<B, 4>,
-        a_decay: Tensor<B, 1>,
-        b: Tensor<B, 5>,
-        c: Tensor<B, 5>,
-        d: Tensor<B, 1>,
-        initial_state: Tensor<B, 4>,
-    ) -> Mamba2SsdInput<B> {
-        Mamba2SsdInput {
-            x_bnlhp: x,
-            dt_bnlh: dt,
-            a_decay_h: a_decay,
-            b_bnlgr: b,
-            c_bnlgr: c,
-            d_h: d,
-            initial_state_bhpr: initial_state,
-            // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
-            init_state_hpr: None,
+    /// Inputs wrapped as `Param`s so each tensor becomes an autodiff leaf
+    /// with `require_grad`. One `Inputs` is built per path, sharing the same
+    /// underlying inner values but its own autodiff graph.
+    struct Inputs {
+        x: Param<Tensor<B, 5>>,
+        dt: Param<Tensor<B, 4>>,
+        a_decay: Param<Tensor<B, 1>>,
+        b: Param<Tensor<B, 5>>,
+        c: Param<Tensor<B, 5>>,
+        d: Param<Tensor<B, 1>>,
+        initial_state: Param<Tensor<B, 4>>,
+    }
+
+    impl Inputs {
+        #[allow(clippy::too_many_arguments)]
+        fn from_inner(
+            x: Tensor<InnerB, 5>,
+            dt: Tensor<InnerB, 4>,
+            a_decay: Tensor<InnerB, 1>,
+            b: Tensor<InnerB, 5>,
+            c: Tensor<InnerB, 5>,
+            d: Tensor<InnerB, 1>,
+            initial_state: Tensor<InnerB, 4>,
+        ) -> Self {
+            Self {
+                x: Param::from_tensor(Tensor::from_inner(x)),
+                dt: Param::from_tensor(Tensor::from_inner(dt)),
+                a_decay: Param::from_tensor(Tensor::from_inner(a_decay)),
+                b: Param::from_tensor(Tensor::from_inner(b)),
+                c: Param::from_tensor(Tensor::from_inner(c)),
+                d: Param::from_tensor(Tensor::from_inner(d)),
+                initial_state: Param::from_tensor(Tensor::from_inner(initial_state)),
+            }
+        }
+
+        fn ssd_input(&self) -> Mamba2SsdInput<B> {
+            Mamba2SsdInput {
+                x_bnlhp: self.x.val(),
+                dt_bnlh: self.dt.val(),
+                a_decay_h: self.a_decay.val(),
+                b_bnlgr: self.b.val(),
+                c_bnlgr: self.c.val(),
+                d_h: self.d.val(),
+                initial_state_bhpr: self.initial_state.val(),
+                // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
+                init_state_hpr: None,
+            }
         }
     }
 
-    /// Run the same `Mamba2SsdInput` through `Minimal`, `Serial`, and
-    /// `SerialRecalculated` and assert that all three yield the same output
-    /// and final state. They are all chunkwise reformulations of the same
-    /// SSD, so the results must agree up to floating-point noise.
+    /// Collected forward outputs and input gradients for a single SSD path run.
+    struct PathRun {
+        y: Tensor<InnerB, 5>,
+        state: Tensor<InnerB, 4>,
+        d_x: Tensor<InnerB, 5>,
+        d_dt: Tensor<InnerB, 4>,
+        d_a_decay: Tensor<InnerB, 1>,
+        d_b: Tensor<InnerB, 5>,
+        d_c: Tensor<InnerB, 5>,
+        d_d: Tensor<InnerB, 1>,
+        d_init_state: Tensor<InnerB, 4>,
+    }
+
+    /// Combine `y` and `final_state` into a single deterministic scalar loss
+    /// using fixed (non-tracked) random "head" tensors. The two heads differ so
+    /// that gradients for the y-branch and the state-branch are independent
+    /// (a mistake in either path shows up in the parameter grads).
+    fn loss_from_outputs(
+        y_bnlhp: Tensor<B, 5>,
+        final_state_bhpr: Tensor<B, 4>,
+        y_head: Tensor<InnerB, 5>,
+        s_head: Tensor<InnerB, 4>,
+    ) -> Tensor<B, 1> {
+        let y_head = Tensor::from_inner(y_head);
+        let s_head = Tensor::from_inner(s_head);
+        (y_bnlhp * y_head).sum() + (final_state_bhpr * s_head).sum()
+    }
+
+    /// Run a single SSD path and extract the gradients of all 7 inputs.
+    fn run_path(
+        path: Mamba2SsdPath,
+        inputs: &Inputs,
+        y_head: Tensor<InnerB, 5>,
+        s_head: Tensor<InnerB, 4>,
+    ) -> PathRun {
+        let (y, state) = path.run(inputs.ssd_input());
+        let y_inner = y.clone().inner();
+        let state_inner = state.clone().inner();
+
+        let loss = loss_from_outputs(y, state, y_head, s_head);
+        let grads = loss.backward();
+
+        // Inline grad extraction (a closure cannot be reused here since the
+        // gradient tensor rank varies per call).
+        PathRun {
+            y: y_inner,
+            state: state_inner,
+            d_x: inputs.x.val().grad(&grads).expect("grad x"),
+            d_dt: inputs.dt.val().grad(&grads).expect("grad dt"),
+            d_a_decay: inputs.a_decay.val().grad(&grads).expect("grad a_decay"),
+            d_b: inputs.b.val().grad(&grads).expect("grad b"),
+            d_c: inputs.c.val().grad(&grads).expect("grad c"),
+            d_d: inputs.d.val().grad(&grads).expect("grad d"),
+            d_init_state: inputs
+                .initial_state
+                .val()
+                .grad(&grads)
+                .expect("grad initial_state"),
+        }
+    }
+
+    /// Run the same input through `Minimal`, `Serial`, and `SerialRecalculated`
+    /// and assert that all three agree on:
+    ///   1. the forward outputs (`y`, `final_state`)
+    ///   2. the gradients of every input through a fixed scalar loss.
+    ///
+    /// All three are chunkwise reformulations of the same SSD, so both the
+    /// values and their gradients must agree up to floating-point noise.
     fn run_minimal_matches_serial(
         batch: usize,
         nchunks: usize,
@@ -287,7 +388,7 @@ mod tests {
         ngroups: usize,
         state_rank: usize,
     ) {
-        let device = Default::default();
+        let device: Device = Default::default();
         let (x, dt, a_decay, b, c, d, init) = random_input(
             batch,
             nchunks,
@@ -299,34 +400,72 @@ mod tests {
             &device,
         );
 
-        let (y_min, s_min) = Mamba2SsdPath::Minimal(Some(chunk_len)).run(make_input(
-            x.clone(),
-            dt.clone(),
-            a_decay.clone(),
-            b.clone(),
-            c.clone(),
-            d.clone(),
-            init.clone(),
-        ));
-        let (y_ser, s_ser) = Mamba2SsdPath::Serial(Some(chunk_len)).run(make_input(
-            x.clone(),
-            dt.clone(),
-            a_decay.clone(),
-            b.clone(),
-            c.clone(),
-            d.clone(),
-            init.clone(),
-        ));
-        let (y_rec, s_rec) = Mamba2SsdPath::SerialRecalculated(Some(chunk_len))
-            .run(make_input(x, dt, a_decay, b, c, d, init));
+        // Fixed (non-tracked) "downstream heads" for the loss. Two distinct
+        // random tensors so y- and state-gradient paths are exercised
+        // independently.
+        let y_head = Tensor::<InnerB, 5>::random(
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let s_head = Tensor::<InnerB, 4>::random(
+            [batch, nheads, per_head_dim, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
 
+        // Each path gets its own fresh autodiff graph (Param leaves).
+        let inputs_min = Inputs::from_inner(
+            x.clone(),
+            dt.clone(),
+            a_decay.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            init.clone(),
+        );
+        let inputs_ser = Inputs::from_inner(
+            x.clone(),
+            dt.clone(),
+            a_decay.clone(),
+            b.clone(),
+            c.clone(),
+            d.clone(),
+            init.clone(),
+        );
+        let inputs_rec = Inputs::from_inner(x, dt, a_decay, b, c, d, init);
+
+        let r_min = run_path(
+            Mamba2SsdPath::Minimal(Some(chunk_len)),
+            &inputs_min,
+            y_head.clone(),
+            s_head.clone(),
+        );
+        let r_ser = run_path(
+            Mamba2SsdPath::Serial(Some(chunk_len)),
+            &inputs_ser,
+            y_head.clone(),
+            s_head.clone(),
+        );
+        let r_rec = run_path(
+            Mamba2SsdPath::SerialRecalculated(Some(chunk_len)),
+            &inputs_rec,
+            y_head,
+            s_head,
+        );
+
+        // ── Forward agreement ────────────────────────────────────────────
         let tol = 1e-4;
-
-        let dy_ser = (y_min.clone() - y_ser).abs().max().into_scalar();
-        let ds_ser = (s_min.clone() - s_ser).abs().max().into_scalar();
-        let dy_rec = (y_min - y_rec).abs().max().into_scalar();
-        let ds_rec = (s_min - s_rec).abs().max().into_scalar();
-
+        let dy_ser = (r_min.y.clone() - r_ser.y.clone()).abs().max().into_scalar();
+        let ds_ser = (r_min.state.clone() - r_ser.state.clone())
+            .abs()
+            .max()
+            .into_scalar();
+        let dy_rec = (r_min.y.clone() - r_rec.y.clone()).abs().max().into_scalar();
+        let ds_rec = (r_min.state.clone() - r_rec.state.clone())
+            .abs()
+            .max()
+            .into_scalar();
         assert!(
             dy_ser < tol,
             "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})"
@@ -343,6 +482,50 @@ mod tests {
             ds_rec < tol,
             "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})"
         );
+
+        // ── Gradient agreement ───────────────────────────────────────────
+        // Looser tolerance: every path computes the same mathematical
+        // gradients, but the chunkwise reformulations accumulate the
+        // summations in different orders, so small drift is expected.
+        let grad_tol = 1e-3;
+
+        let mut failures: Vec<String> = Vec::new();
+        macro_rules! diff {
+            ($a:expr, $b:expr) => {
+                ($a.clone() - $b.clone()).abs().max().into_scalar()
+            };
+        }
+        macro_rules! check_grad {
+            ($field:ident, $name:expr) => {{
+                let d_ser = diff!(r_min.$field, r_ser.$field);
+                let d_rec = diff!(r_min.$field, r_rec.$field);
+                eprintln!(
+                    "grad {:>14} | min↔ser = {:>10.6} | min↔rec = {:>10.6}",
+                    $name, d_ser, d_rec
+                );
+                if d_ser >= grad_tol {
+                    failures.push(format!(
+                        "Minimal vs Serial: grad of {} max abs diff = {:.6} (tol {})",
+                        $name, d_ser, grad_tol
+                    ));
+                }
+                if d_rec >= grad_tol {
+                    failures.push(format!(
+                        "Minimal vs SerialRecalculated: grad of {} max abs diff = {:.6} (tol {})",
+                        $name, d_rec, grad_tol
+                    ));
+                }
+            }};
+        }
+        check_grad!(d_x, "x");
+        check_grad!(d_dt, "dt");
+        check_grad!(d_a_decay, "a_decay");
+        check_grad!(d_b, "b");
+        check_grad!(d_c, "c");
+        check_grad!(d_d, "d");
+        check_grad!(d_init_state, "initial_state");
+
+        assert!(failures.is_empty(), "gradient mismatches:\n  {}", failures.join("\n  "));
     }
 
     #[test]

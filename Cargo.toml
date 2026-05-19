@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2024"
 
 [features]
@@ -17,7 +17,7 @@ backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelera
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
 backend-flex = ["burn/flex", "_dev-has-backend"]
-backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex/rayon", "_dev-has-backend"]
+backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon", "_dev-has-backend"]
 backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
 backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
 backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
@@ -46,7 +46,7 @@ burn-fusion = { version = "0.21.0", default-features = false, optional = true}
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
-# burn-cubecl = { path = "../burn/crates/burn-cubecl", default-features = false }
+# burn-cubecl = { path = "../burn/crates/burn-cubecl", default-features = false, optional = true }
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
