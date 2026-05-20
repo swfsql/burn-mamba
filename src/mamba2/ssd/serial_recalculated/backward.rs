@@ -32,24 +32,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // d_h: FloatTensor<Self>,
         // initial_state_bhpr: FloatTensor<Self>,
 
-        // actual required interface:
-        //
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
         b_bnlgr: FloatTensor<Self>,
         c_bnlgr: FloatTensor<Self>,
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
-        da_cumsum_bhnl: FloatTensor<Self>,
-        // current inner interface:
-        //
-        // d_da_cumsum_bhnl: Tensor<B, 4>,
-        // d_dt_discretized_bhnl: Tensor<B, 4>,
-        // d_x_bnlhp: Tensor<B, 5>,
-        // d_b_bnlgr: Tensor<B, 5>,
-        // d_c_bnlgr: Tensor<B, 5>,
-        // d_d_h: Tensor<B, 1>,
-        // d_initial_state_bhpr: Tensor<B, 4>,
+        a_decay_h: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward struct ──────────────────────────────────────────────────
         #[derive(Debug)]
@@ -63,7 +52,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             c_bnlgr: FloatTensor<B>,
             d_h: FloatTensor<B>,
             initial_state_bhpr: FloatTensor<B>,
-            da_cumsum_bhnl: FloatTensor<B>, // (from K1)
+            a_decay_h: FloatTensor<B>,
             // flat byte-sizes for splitting the combined gradient vector
             flat_len_y_BNLHP: usize,
             flat_len_final_state_BHPR: usize,
@@ -74,7 +63,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             shape_c_bnlgr: [usize; 5],
             shape_d_h: [usize; 1],
             shape_initial_state_bhpr: [usize; 4],
-            shape_da_cumsum_bhnl: [usize; 4],   // (from K1)
+            shape_a_decay_h: [usize; 1],
             shape_y_bnlhp: [usize; 5],          // (output 1)
             shape_final_state_bhpr: [usize; 4], // (output 2)
         }
@@ -100,7 +89,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     node_c_bnlgr,
                     node_d_h,
                     node_initial_state_bhpr,
-                    node_da_cumsum_bhnl,
+                    node_a_decay_h,
                 ] = ops.parents;
 
                 // Retrieve the gradient of the combined 1-D output.
@@ -114,7 +103,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     c_bnlgr,
                     d_h,
                     initial_state_bhpr,
-                    da_cumsum_bhnl,
+                    a_decay_h,
                     //
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
@@ -125,7 +114,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     shape_c_bnlgr,
                     shape_d_h,
                     shape_initial_state_bhpr,
-                    shape_da_cumsum_bhnl,
+                    shape_a_decay_h,
                     //
                     shape_y_bnlhp,
                     shape_final_state_bhpr,
@@ -142,7 +131,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let d_h = mk::<_, 1>(d_h).reshape(shape_d_h);
                 let initial_state_bhpr =
                     mk::<_, 4>(initial_state_bhpr).reshape(shape_initial_state_bhpr);
-                let da_cumsum_bhnl = mk::<_, 4>(da_cumsum_bhnl).reshape(shape_da_cumsum_bhnl);
+                let a_decay_h = mk::<_, 1>(a_decay_h).reshape(shape_a_decay_h);
 
                 // ── Split incoming combined gradient ───────────────────────
                 // d_combined : [y_flat_len_BNLHP + fs_flat_len_BHPR]
@@ -162,7 +151,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_c_bnlgr,
                     d_d_h,
                     d_initial_state_bhpr,
-                    d_da_cumsum_bhnl,
+                    d_a_decay_h,
                 } = combined_backward::combined_backward(
                     d_y_bnlhp,
                     d_final_state_bhpr,
@@ -173,7 +162,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     c_bnlgr,
                     d_h,
                     initial_state_bhpr,
-                    da_cumsum_bhnl,
+                    a_decay_h,
                 );
 
                 // ── Register gradients ─────────────────────────────────────
@@ -212,8 +201,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 if let Some(n) = node_initial_state_bhpr {
                     grads.register::<B>(n.id, d_initial_state_bhpr.into_primitive().tensor());
                 }
-                if let Some(n) = node_da_cumsum_bhnl {
-                    grads.register::<B>(n.id, d_da_cumsum_bhnl.into_primitive().tensor());
+                if let Some(n) = node_a_decay_h {
+                    grads.register::<B>(n.id, d_a_decay_h.into_primitive().tensor());
                 }
             }
         } // end impl Backward
@@ -234,7 +223,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         let shape_c_bnlgr: [usize; 5] = [batch, nchunks, chunk_len, ngroups, state_rank];
         let shape_d_h: [usize; 1] = [nheads];
         let shape_initial_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
-        let shape_da_cumsum_bhnl: [usize; 4] = [batch, nheads, nchunks, chunk_len];
+        let shape_a_decay_h: [usize; 1] = [nheads];
         let shape_y_bnlhp: [usize; 5] = [batch, nchunks, chunk_len, nheads, per_head_dim];
         let shape_final_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
 
@@ -247,7 +236,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 c_bnlgr.node.clone(),
                 d_h.node.clone(),
                 initial_state_bhpr.node.clone(),
-                da_cumsum_bhnl.node.clone(),
+                a_decay_h.node.clone(),
             ])
             .compute_bound()
             .stateful() // requires compute_bound
@@ -261,7 +250,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     c_bnlgr.primitive.clone(),
                     d_h.primitive.clone(),
                     initial_state_bhpr.primitive.clone(),
-                    da_cumsum_bhnl.primitive.clone(),
+                    a_decay_h.primitive.clone(),
                 );
 
                 // Note: prep.finish accepts only a single tensor.
@@ -283,12 +272,12 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     c_bnlgr: c_bnlgr.primitive.clone(),
                     d_h: d_h.primitive.clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive.clone(),
-                    da_cumsum_bhnl: da_cumsum_bhnl.primitive.clone(),
+                    a_decay_h: a_decay_h.primitive.clone(),
                     //
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
                     //
-                    shape_x_bnlhp, shape_dt_discretized_bhnl, shape_b_bnlgr, shape_c_bnlgr, shape_d_h, shape_initial_state_bhpr, shape_da_cumsum_bhnl,
+                    shape_x_bnlhp, shape_dt_discretized_bhnl, shape_b_bnlgr, shape_c_bnlgr, shape_d_h, shape_initial_state_bhpr, shape_a_decay_h,
                     shape_y_bnlhp, shape_final_state_bhpr,
                 };
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
@@ -324,7 +313,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     c_bnlgr.primitive,
                     d_h.primitive,
                     initial_state_bhpr.primitive,
-                    da_cumsum_bhnl.primitive,
+                    a_decay_h.primitive,
                 );
 
                 // Note: prep.finish accepts only a single tensor.

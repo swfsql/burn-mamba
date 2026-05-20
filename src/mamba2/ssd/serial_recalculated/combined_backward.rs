@@ -9,7 +9,7 @@ pub struct CombinedGrads<B: Backend> {
     pub d_c_bnlgr: Tensor<B, 5>,
     pub d_d_h: Tensor<B, 1>,
     pub d_initial_state_bhpr: Tensor<B, 4>,
-    pub d_da_cumsum_bhnl: Tensor<B, 4>,
+    pub d_a_decay_h: Tensor<B, 1>,
 }
 
 /// Same as [k3_ssd_chunk_state](serial::k3_ssd_chunk_state) but return some intermediaries
@@ -139,13 +139,13 @@ pub fn combined_backward<B: Backend>(
     c_bnlgr: Tensor<B, 5>,
     d_h: Tensor<B, 1>,
     initial_state_bhpr: Tensor<B, 4>,
-    da_cumsum_bhnl: Tensor<B, 4>, // from K1
+    a_decay_h: Tensor<B, 1>,
 ) -> CombinedGrads<B> {
-    let [batch, nheads, nchunks, chunk_len] = da_cumsum_bhnl.dims();
+    let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
     let [.., per_head_dim] = x_bnlhp.dims();
     let [.., ngroups, state_rank] = b_bnlgr.dims();
     let heads_per_group = nheads / ngroups;
-    let device = da_cumsum_bhnl.device();
+    let device = dt_discretized_bhnl.device();
 
     san(&d_y_bnlhp);
     san(&d_final_bhpr);
@@ -155,17 +155,18 @@ pub fn combined_backward<B: Backend>(
     san(&c_bnlgr);
     san(&d_h);
     san(&initial_state_bhpr);
-    san(&da_cumsum_bhnl);
+    san(&a_decay_h);
 
     // ═══════════════════════════════════════════════════════════════════════
     // RECOMPUTE FORWARD INTERMEDIATES (the memory-saving heart of this op)
     // ═══════════════════════════════════════════════════════════════════════
 
-    // K1 (steps 5~6) ───────────────────────────────────────────────────────
-    let da_chunk_end_bhn = da_cumsum_bhnl
-        .clone()
-        .slice(s![.., .., .., -1]) // da_chunk_end_bhn1
-        .squeeze_dim::<3>(3);
+    // K1 recomputation ─────────────────────────────────────────────────────
+    // da_cumsum is not saved across the boundary; recompute from dt and a_decay.
+    let (da_cumsum_bhnl, da_chunk_end_bhn) =
+        serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
+    san(&da_cumsum_bhnl);
+    san(&da_chunk_end_bhn);
 
     // K2 ───────────────────────────────────────────────────────────────────
     let cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
@@ -380,8 +381,11 @@ pub fn combined_backward<B: Backend>(
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 20
     let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll; // forward step 21
     san(&da_cumsum_diff_bnhll);
-    let causal_mask_bnhll =
-        Tensor::tril_mask([batch, nchunks, nheads, chunk_len, chunk_len], 0, &device); // forward step 21.1
+    // forward step 21.1: built at [L,L] and broadcast — mask values do not depend on (b,n,h).
+    let causal_mask_bnhll: Tensor<B, 5, burn::prelude::Bool> =
+        Tensor::<B, 2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device)
+            .reshape([1, 1, 1, chunk_len, chunk_len])
+            .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
     // forward step 21.2
     // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
     let da_cumsum_diff_masked_bnhll =
@@ -675,7 +679,7 @@ pub fn combined_backward<B: Backend>(
     // For d_da_cumsum_bhnl:
     // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -> (b_bar_scale_bhnl [+])
     // - (d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl * dt_discretized_bhnl)
-    let d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl;
+    let d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl.clone();
     san(&d_forward_decay_to_chunk_end_bhnl);
     // - 9: exp: (da_delta_bhnl) -> (forward_decay_to_chunk_end_bhnl [+])
     // - (d_da_delta_bhnl = d_forward_decay_to_chunk_end_bhnl * exp(da_delta_bhnl))
@@ -731,11 +735,44 @@ pub fn combined_backward<B: Backend>(
     // SUM GRADIENT CONTRIBUTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Accumulated gradient of the cumulative sum produced by K1.
     let d_da_cumsum_bhnl =
         d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
     san(&d_da_cumsum_bhnl);
 
-    let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl;
+    // ── K1 BACKWARD ────────────────────────────────────────────────────────
+    // K1 forward: da_cumsum[l] = cumsum_l(dt[l] * a_decay)
+    //
+    // Reverse cumsum (suffix sum) converts d_da_cumsum → d_da:
+    //   d_da[l] = sum_{k >= l} d_da_cumsum[k]
+    //           = total_sum - cumsum(d_da_cumsum)[l-1]   (cumsum[-1] == 0)
+    let d_da_cumsum_total_bhnl = d_da_cumsum_bhnl
+        .clone()
+        .sum_dim(3) // [B,H,N,1]
+        .expand([batch, nheads, nchunks, chunk_len]);
+    let prefix_sum_bhnl = d_da_cumsum_bhnl.clone().cumsum(3); // [B,H,N,L]
+    let zeros_bhn1 = Tensor::<B, 4>::zeros([batch, nheads, nchunks, 1], &device);
+    // prefix_sum shifted right by 1 (i.e., cumsum[l-1], with cumsum[-1] = 0)
+    let prefix_sum_shifted_bhnl = Tensor::cat(
+        vec![zeros_bhn1, prefix_sum_bhnl.narrow(3, 0, chunk_len - 1)],
+        3,
+    );
+    let d_da_bhnl = d_da_cumsum_total_bhnl - prefix_sum_shifted_bhnl; // suffix sum [B,H,N,L]
+    san(&d_da_bhnl);
+    // d_dt from K1: d_dt = d_da * a_decay
+    let a_decay_expand =
+        a_decay_h.clone().unsqueeze_dims::<4>(&[0, 2, 3]).expand([batch, nheads, nchunks, chunk_len]);
+    let d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_expand;
+    san(&d_dt_k1_bhnl);
+    // d_a_decay_h from K1: d_a[h] = sum_{b,n,l} d_da[b,h,n,l] * dt[b,h,n,l]
+    let d_a_decay_h = (d_da_bhnl * dt_discretized_bhnl.clone())
+        .permute([1, 0, 2, 3]) // [H,B,N,L]
+        .reshape([nheads, batch * nchunks * chunk_len])
+        .sum_dim(1) // [H,1]
+        .reshape([nheads]);
+    san(&d_a_decay_h);
+
+    let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
     san(&d_dt_discretized_bhnl);
 
     let d_x_orange_bnlhp = d_x_orange_bnhlp.permute([0, 1, 3, 2, 4]);
@@ -748,7 +785,7 @@ pub fn combined_backward<B: Backend>(
     san(&d_c_bnlgr);
 
     CombinedGrads {
-        d_da_cumsum_bhnl,
+        d_a_decay_h,
         d_dt_discretized_bhnl,
         d_x_bnlhp,
         d_b_bnlgr,

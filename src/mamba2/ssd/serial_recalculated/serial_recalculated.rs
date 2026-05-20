@@ -15,7 +15,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     ) -> (Tensor<B, 5>, Tensor<B, 4>) {
         // Must use a backend-dependent method.
         //
-        // For inference, this will untimately replicate Mamba2::ssd_serial;
+        // For inference, this will ultimately replicate Mamba2::ssd_serial;
         // For autodiff, this will call the custom implementation.
 
         let [batch, nchunks, chunk_len, nheads, _per_head_dim] = input.x_bnlhp.dims();
@@ -37,14 +37,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             dt_discretized_bhnl.dims()
         );
 
-        // Always executes K1 in autodiff.
-        // ── Kernel 1 ──────────────────────────────────────────────────────────────────
-        // IO: (..) -> (da_cumsum_bhnl [used in K3+K5][*], da_chunk_end_bhn [used in K4][omitted][*])
-        let (da_cumsum_bhnl, _da_chunk_end_bhn): (Tensor<B, 4>, Tensor<B, 3>) =
-            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), input.a_decay_h.clone());
-        assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
-        assert_eq!([batch, nheads, nchunks], _da_chunk_end_bhn.dims());
-
+        // K1 is now computed inside the custom op (both forward and backward).
+        // a_decay_h is passed directly; da_cumsum is no longer an autodiff-tracked
+        // intermediate crossing the boundary.
         let (y_bnlhp, final_state_bhpr) = <B as Mamba2BackendExt>::ssd_serial_recalculated(
             input.x_bnlhp.into_primitive().tensor(),
             dt_discretized_bhnl.into_primitive().tensor(),
@@ -52,7 +47,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             input.c_bnlgr.into_primitive().tensor(),
             input.d_h.into_primitive().tensor(),
             input.initial_state_bhpr.into_primitive().tensor(),
-            da_cumsum_bhnl.into_primitive().tensor(),
+            input.a_decay_h.into_primitive().tensor(),
         );
         let y_bnlhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
@@ -67,14 +62,12 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
     /// - `final_state_bhpr`.
     fn ssd_serial_recalculated(
         x_bnlhp: FloatTensor<Self>,
-        // dt_bnlh: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
-        // a_decay_h: FloatTensor<Self>,
         b_bnlgr: FloatTensor<Self>,
         c_bnlgr: FloatTensor<Self>,
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
-        da_cumsum_bhnl: FloatTensor<Self>, // from K1
+        a_decay_h: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl essentially replicates Mamba2::ssd_serial.
 
@@ -84,7 +77,7 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
         let c_bnlgr: Tensor<Self, 5> = mk(c_bnlgr);
         let d_h: Tensor<Self, 1> = mk(d_h);
         let initial_state_bhpr: Tensor<Self, 4> = mk(initial_state_bhpr);
-        let da_cumsum_bhnl: Tensor<Self, 4> = mk(da_cumsum_bhnl);
+        let a_decay_h: Tensor<Self, 1> = mk(a_decay_h);
 
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
         let [.., ngroups, state_rank] = b_bnlgr.dims();
@@ -96,12 +89,9 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
         // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
 
         // ── Kernel 1 ──────────────────────────────────────────────────────────
-        // Note: This kernel is assumed to already have been called.
-        // Just recalculate da_chunk_end_bhn.
-        let da_chunk_end_bhn = da_cumsum_bhnl
-            .clone()
-            .slice(s![.., .., .., -1]) // da_cumsum_bhn1 // replay forward step 5
-            .squeeze_dim::<3>(3); // replay forward step 6
+        let (da_cumsum_bhnl, da_chunk_end_bhn) =
+            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h);
+        assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────

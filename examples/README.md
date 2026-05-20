@@ -2,8 +2,8 @@
 
 #### List of Examples:
 
-- `fibonacci`: Very small model training on a fibonacci-like sequence.
-- `mnist-class`: A small model training to classify mnist digits.
+- `fibonacci`: Very small Mamba-2 model training on a fibonacci-like sequence.
+- `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 
 #### Examples Structure
 
