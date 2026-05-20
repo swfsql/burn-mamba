@@ -31,7 +31,6 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // c_bnlgr: FloatTensor<Self>,
         // d_h: FloatTensor<Self>,
         // initial_state_bhpr: FloatTensor<Self>,
-
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
         b_bnlgr: FloatTensor<Self>,

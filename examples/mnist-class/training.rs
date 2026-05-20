@@ -45,6 +45,7 @@ pub fn train<AutoB>(
         .build(MnistDataset::train());
     let dataloader_valid = DataLoaderBuilder::new(batcher)
         .batch_size(training_config.batch_size)
+        .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
         .build(MnistDataset::test());
 

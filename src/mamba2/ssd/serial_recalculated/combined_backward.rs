@@ -679,7 +679,8 @@ pub fn combined_backward<B: Backend>(
     // For d_da_cumsum_bhnl:
     // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -> (b_bar_scale_bhnl [+])
     // - (d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl * dt_discretized_bhnl)
-    let d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl.clone();
+    let d_forward_decay_to_chunk_end_bhnl =
+        d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl.clone();
     san(&d_forward_decay_to_chunk_end_bhnl);
     // - 9: exp: (da_delta_bhnl) -> (forward_decay_to_chunk_end_bhnl [+])
     // - (d_da_delta_bhnl = d_forward_decay_to_chunk_end_bhnl * exp(da_delta_bhnl))
@@ -760,8 +761,10 @@ pub fn combined_backward<B: Backend>(
     let d_da_bhnl = d_da_cumsum_total_bhnl - prefix_sum_shifted_bhnl; // suffix sum [B,H,N,L]
     san(&d_da_bhnl);
     // d_dt from K1: d_dt = d_da * a_decay
-    let a_decay_expand =
-        a_decay_h.clone().unsqueeze_dims::<4>(&[0, 2, 3]).expand([batch, nheads, nchunks, chunk_len]);
+    let a_decay_expand = a_decay_h
+        .clone()
+        .unsqueeze_dims::<4>(&[0, 2, 3])
+        .expand([batch, nheads, nchunks, chunk_len]);
     let d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_expand;
     san(&d_dt_k1_bhnl);
     // d_a_decay_h from K1: d_a[h] = sum_{b,n,l} d_da[b,h,n,l] * dt[b,h,n,l]
