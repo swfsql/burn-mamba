@@ -201,44 +201,14 @@ pub fn combined_backward<B: Backend>(
     san(&_final_state_bhpr);
 
     // ═══════════════════════════════════════════════════════════════════════
-    // K5 BACKWARD
+    // K5 + K4 FUSED BACKWARD (reverse per-chunk loop)
     // ═══════════════════════════════════════════════════════════════════════
-    // Expand CB for all heads
-    let cb_bnhll = cb_bngll
-        .clone()
-        .unsqueeze_dim::<6>(3) // cb_bng1ll
-        .expand([
-            batch,
-            nchunks,
-            ngroups,
-            heads_per_group,
-            chunk_len,
-            chunk_len,
-        ]) // cb_bngHll
-        .reshape([batch, nchunks, nheads, chunk_len, chunk_len]);
+    //
+    // Peak memory: each iteration allocates [B,H,L,L] working tensors (vs the
+    // [B,N,H,L,L] tensors a fully batched K5 backward would materialise). Saves
+    // a factor of N (nchunks) in the dominant L×L terms.
 
-    // Reshape inputs to [B,N,H,L,...] convention used inside K5
-    let da_cumsum_bnhl: Tensor<B, 4> = da_cumsum_bhnl.permute([0, 2, 1, 3]);
-    let dt_bnhl: Tensor<B, 4> = dt_discretized_bhnl.clone().permute([0, 2, 1, 3]);
-    let x_bnhlp: Tensor<B, 5> = x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
-    let d_y_bnhlp: Tensor<B, 5> = d_y_bnlhp.clone().permute([0, 1, 3, 2, 4]);
-
-    // GQA-expand C: [B,N,L,G,R] → [B,N,H,L,R]
-    let c_bnhlr = c_bnlgr
-        .clone()
-        .unsqueeze_dim::<6>(4) // c_bnlg1r
-        .expand([
-            batch,
-            nchunks,
-            chunk_len,
-            ngroups,
-            heads_per_group,
-            state_rank,
-        ]) // c_bnlgHr
-        .reshape([batch, nchunks, chunk_len, nheads, state_rank]) // c_bnlhr
-        .permute([0, 1, 3, 2, 4]);
-
-    // ── SKIP backward ──────────────────────────────────────────────────────
+    // ── SKIP backward (batched; allocates only [B,N,L,H,P] working sets) ───
     // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
     // - | (d_skip_bnlhp = d_y_bnlhp)
     let d_skip_bnlhp = d_y_bnlhp.clone();
@@ -276,322 +246,285 @@ pub fn combined_backward<B: Backend>(
             .expand([batch, nchunks, chunk_len, nheads, per_head_dim]);
     san(&d_x_skip_bnlhp);
 
-    // ── BLUE backward ──────────────────────────────────────────────────────
-    // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
-    // - | (d_y_partial_bnlhp = d_y_bnlhp)
-    let d_y_partial_bnhlp = d_y_bnhlp.clone();
+    // ── Fused K5 (BLUE + ORANGE) + K4 reverse loop ─────────────────────────
     //
-    // - | 35: permute: (y_partial_bnhlp) -> (y_partial_bnlhp)
-    // - | 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
-    // - | (d_blue_scaled_bnhlp = d_y_partial_bnhlp)
-    let d_blue_scaled_bnhlp = d_y_partial_bnhlp;
-    // - | 16: mul: (blue_bnhlp, exp_da_cumsum_bnhlp) -> (blue_scaled_bnhlp)
-    // - | (d_blue_bnhlp = d_blue_scaled_bnhlp * exp_da_cumsum_bnhlp)
-    //
-    // - | blue[b,n,h,l,p] = exp(da[b,n,h,l]) * Σ_r C[b,n,h,l,r] * state[b,n,h,p,r]
-    let exp_da_cumsum_bnhl: Tensor<B, 4> = da_cumsum_bnhl.clone().exp();
-    san(&exp_da_cumsum_bnhl);
-    let exp_da_cumsum_bnhlp = exp_da_cumsum_bnhl.clone().unsqueeze_dim::<5>(4).expand([
-        batch,
-        nchunks,
-        nheads,
-        chunk_len,
-        per_head_dim,
-    ]);
-    let d_blue_bnhlp: Tensor<B, 5> = d_blue_scaled_bnhlp.clone() * exp_da_cumsum_bnhlp.clone();
-    san(&d_blue_bnhlp);
-    //
-    // For d_chunk_input_state_bnhpr:
-    // - | 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
-    // - - | (d_chunk_input_state_bnhrp = c_bnhlr^T @ d_blue_bnhlp)
-    // - - | 14: permute: (chunk_input_state_bnhpr [!]) -> (chunk_input_state_bnhrp)
-    //
-    // - - | d_state[b,n,h,p,r] = Σ_l (scaled_dy[b,n,h,l,p] * C[b,n,h,l,r])
-    // - - |  = C^T[R,L] @ scaled_dy[L,P]  for fixed (b,n,h)
-    // - - |  [B,N,H,R,L] @ [B,N,H,L,P] → [B,N,H,R,P] → permute → [B,N,H,P,R]
-    let d_chunk_input_state_bnhpr = c_bnhlr
-        .clone()
-        .permute([0, 1, 2, 4, 3]) // c_bnhrl
-        .matmul(d_blue_bnhlp.clone()) // d_chunk_input_state_bnhrp
-        .permute([0, 1, 2, 4, 3]);
-    san(&d_chunk_input_state_bnhpr);
-    //
-    // For d_c from BLUE:
-    // - | 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
-    // - - | (d_c_bnhlr = d_blue_bnhlp @ chunk_input_state_bnhrp^T)
-    // - - | 7: permute: (c_bnlhr) -> (c_bnhlr)
-    // - - | 6: reshape: (c_bnlgHr) -> (c_bnlhr)
-    // - - | 5: expand: (c_bnlg1r) -> (c_bnlgHr)
-    // - - | 4: unsqueeze: (c_bnlgr [*]) -> (c_bnlg1r)
-    //
-    // - - | d_C[l,r] = Σ_p scaled_dy[l,p] * state[p,r]
-    // - - |  [B,N,H,L,P] @ [B,N,H,P,R] → [B,N,H,L,R]
-    let d_c_blue_bnhlr = d_blue_bnhlp.clone().matmul(chunk_input_state_bnhpr.clone());
-    san(&d_c_blue_bnhlr);
-    // - - | GQA reduce: [B,N,H,L,R] → [B,N,L,G,R]
-    let d_c_blue_bnlgr = d_c_blue_bnhlr
-        .reshape([
-            batch,
-            nchunks,
-            ngroups,
-            heads_per_group,
-            chunk_len,
-            state_rank,
-        ]) // d_c_blue_bngHlr
-        .sum_dim(3) // d_c_blue_bng1lr
-        .squeeze_dim::<5>(3) // d_c_blue_bnglr
-        .permute([0, 1, 3, 2, 4]);
-    san(&d_c_blue_bnlgr);
-    //
-    // For d_da_cumsum from BLUE:
-    // - | 16: mul: (blue_bnhlp, exp_da_cumsum_bnhlp) -> (blue_scaled_bnhlp)
-    // - | (d_exp_da_cumsum_bnhlp = d_blue_scaled_bnhlp * blue_bnhlp)
-    let blue_bnhlp = c_bnhlr
-        .clone()
-        .matmul(chunk_input_state_bnhpr.clone().permute([0, 1, 2, 4, 3])); // replay forward step 15
-    san(&blue_bnhlp);
-    let d_exp_da_cumsum_bnhlp = d_blue_scaled_bnhlp.clone() * blue_bnhlp;
-    san(&d_exp_da_cumsum_bnhlp);
-    //
-    // - | blue_no_scale = C @ state^T  [L,P]
-    // - - | 13: expand: (exp_da_cumsum_bnhl1) -> (exp_da_cumsum_bnhlp)
-    // - - | 12: unsqueeze: (exp_da_cumsum_bnhl) -> (exp_da_cumsum_bnhl1)
-    // - - | 11: exp: (da_cumsum_bnhl) -> (exp_da_cumsum_bnhl)
-    // - - | (d_da_cumsum_bnhl = d_exp_da_cumsum_bnhlp * exp(da_cumsum_bnhl))
-    // - - | 1/36: permute: (da_cumsum_bhnl [*]) -> (da_cumsum_bnhl)
-    //
-    // - - | d_da[l] = Σ_p dy[l,p] * exp_da[l] * blue_no_scale[l,p]
-    let d_da_blue_bnhl = (d_exp_da_cumsum_bnhlp * exp_da_cumsum_bnhlp)
-        .sum_dim(4) // d_da_blue_bnhl1
-        .squeeze_dim::<4>(4);
-    san(&d_da_blue_bnhl);
-    let d_da_blue_bhnl = d_da_blue_bnhl.permute([0, 2, 1, 3]);
+    // Per-iteration working set is [B,H,L,L] (not [B,N,H,L,L]). Per-chunk
+    // gradients are collected in vecs and stacked once the loop is done.
 
-    // ── ORANGE backward ─────────────────────────────────────────────────────
-    //  y_orange[l,p] = Σ_{s≤l} CB[l,s] * exp(da[l]-da[s]) * dt[s] * x[s,p]
-    // Precompute weight matrix CB_w [B,N,H,L_tgt,L_src]
-    // replay forward steps 17-29
-    let da_cumsum_target_bnhll = da_cumsum_bnhl
-        .clone()
-        .unsqueeze_dim::<5>(4) // da_cumsum_bnhl1 // forward step 17
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 18
-    let da_cumsum_source_bnhll = da_cumsum_bnhl
-        .clone()
-        .unsqueeze_dim::<5>(3) // da_cumsum_bnh1l // forward step 19
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 20
-    let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll; // forward step 21
-    san(&da_cumsum_diff_bnhll);
-    // forward step 21.1: built at [L,L] and broadcast — mask values do not depend on (b,n,h).
-    let causal_mask_bnhll: Tensor<B, 5, burn::prelude::Bool> =
-        Tensor::<B, 2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device)
-            .reshape([1, 1, 1, chunk_len, chunk_len])
-            .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    // forward step 21.2
-    // Causal mask and exp stabilizer (-inf above the main diagonal, 0 elsewhere).
-    let da_cumsum_diff_masked_bnhll =
-        da_cumsum_diff_bnhll.mask_fill(causal_mask_bnhll.clone(), f32::NEG_INFINITY);
-    let da_cumsum_diff_exp_bnhll = (da_cumsum_diff_masked_bnhll).exp(); // forward steps 22
-    san(&da_cumsum_diff_exp_bnhll);
-    let dt_source_bnhll = dt_bnhl
-        .clone()
-        .unsqueeze_dim::<5>(3) // dt_bnh1l // forward step 23
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // forward step 24
-    // // Causal mask (0 above the main diagonal, 1 elsewhere).
-    // let causal_mask_bnhll =
-    //     Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device).tril(0); // forward steps 25-26
-    // CB_w[l,s] = CB[l,s] * decay[l,s] * dt[s] * mask[l,s]
-    let orange_lhs_partial1_bnhll: Tensor<B, 5> = // forward step 27
-        cb_bnhll.clone() * da_cumsum_diff_exp_bnhll.clone();
-    san(&orange_lhs_partial1_bnhll);
-    let orange_lhs_partial2_bnhll: Tensor<B, 5> = // forward step 28
-        orange_lhs_partial1_bnhll.clone() * dt_source_bnhll.clone();
-    san(&orange_lhs_partial2_bnhll);
-    // let orange_lhs_partial3_bnhll: Tensor<B, 5> = // forward step 29
-    //     orange_lhs_partial2_bnhll.clone() * causal_mask_bnhll.clone();
-    //
-    // Backwads:
-    // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
-    // - | (d_y_partial_bnlhp = d_y_bnlhp)
-    let d_y_partial_bnhlp = d_y_bnhlp.clone();
-    // - | 35: permute: (y_partial_bnhlp) -> (y_partial_bnlhp)
-    // - | 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
-    // - | (d_orange_bnhlp = d_y_partial_bnhlp)
-    let d_orange_bnhlp = d_y_partial_bnhlp;
-    // - | 30: matmul: (orange_lhs_partial2_bnhll, x_bnhlp) -> (orange_bnhlp)
-    // - | (d_orange_lhs_partial2_bnhll = d_orange_bnhlp @ x_bnhlp^T)
-    // d_CB_w: dy @ x^T   [B,N,H,L_tgt,L_src]
-    let d_orange_lhs_partial2_bnhll = d_orange_bnhlp
-        .clone()
-        .matmul(x_bnhlp.clone().permute([0, 1, 2, 4, 3])); // [B,N,H,L_tgt,L_src]
-    san(&d_orange_lhs_partial2_bnhll);
-    //
-    // - | For d_x:
-    // - - | (d_x_bnhlp = orange_lhs_partial2_bnhll^T @ d_orange_bnhlp)
-    // - - | d_x from ORANGE: CB_w^T @ dy  (transpose source/target dims)
-    // - - |  [B,N,H,L_src,L_tgt] @ [B,N,H,L_tgt,P] → [B,N,H,L_src,P]
-    let d_x_orange_bnhlp = orange_lhs_partial2_bnhll
-        .clone()
-        .permute([0, 1, 2, 4, 3]) // [B,N,H,L_src,L_tgt]
-        .matmul(d_orange_bnhlp.clone()); // [B,N,H,L_src,P]
-    san(&d_x_orange_bnhlp);
-    //
-    // - | 21.2: mask-fill: (.., ..) -> (..)
-    // Bring the (step 21.2) causal mask ahead: above upper diagonal set to 0.
-    let d_orange_lhs_partial2_bnhll = d_orange_lhs_partial2_bnhll.mask_fill(causal_mask_bnhll, 0.);
-    san(&d_orange_lhs_partial2_bnhll);
-    // - | 28: mul: (orange_lhs_partial1_bnhll, dt_source_bnhll) -> (orange_lhs_partial2_bnhll)
-    let d_orange_lhs_partial1_bnhll = d_orange_lhs_partial2_bnhll.clone() * dt_source_bnhll.clone();
-    san(&d_orange_lhs_partial1_bnhll);
-    // - | For d_dt from ORANGE:
-    // - - | 24: expand: (dt_bnh1l) -> (dt_source_bnhll)
-    // - - | 23: unsqueeze: (dt_bnhl) -> (dt_bnh1l)
-    // - - | 2: permute: (dt_discretized_bhnl [*]) -> (dt_bnhl)
-    // - - | d_dt[s] = Σ_{l≥s} d_CB_w[l,s] * CB[l,s] * decay[l,s] * mask[l,s]
-    // - - |  = (d_cb_w * cb * decay * mask).sum(L_tgt dim=3)
-    let d_dt_orange_bnhl = (d_orange_lhs_partial2_bnhll.clone()
-        * orange_lhs_partial1_bnhll.clone())
-    .sum_dim(3) // d_dt_orange_bnh1l
-    .squeeze_dim::<4>(3);
-    san(&d_dt_orange_bnhl);
-    let d_dt_orange_bhnl = d_dt_orange_bnhl.permute([0, 2, 1, 3]);
-    //
-    // - | For d_da from ORANGE:
-    // - - | decay = exp(da_tgt - da_src)
-    // - - | d_decay = d_CB_w * CB * dt_src * mask
-    // - - | d_da_tgt[l] += Σ_s (d_decay * decay)[l,s]
-    // - - | d_da_src[s] -= Σ_l (d_decay * decay)[l,s]
-    // - - | 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
-    let d_da_cumsum_diff_exp_bnhll = d_orange_lhs_partial1_bnhll.clone() * cb_bnhll.clone();
-    san(&d_da_cumsum_diff_exp_bnhll);
-    // - - | 22: exp: (da_cumsum_diff_bnhll) -> (da_cumsum_diff_exp_bnhll)
-    // - - | (d_da_cumsum_diff_bnhll = d_da_cumsum_diff_exp_bnhll * exp(da_cumsum_diff_bnhll))
-    let d_da_cumsum_diff_bnhll = d_da_cumsum_diff_exp_bnhll * da_cumsum_diff_exp_bnhll.clone();
-    san(&d_da_cumsum_diff_bnhll);
-    // - - | 21: sub: (da_cumsum_target_bnhll, da_cumsum_source_bnhll) -> (da_cumsum_diff_bnhll)
-    // - - | 20: expand: (da_cumsum_bnh1l) -> (da_cumsum_source_bnhll)
-    // - - | 19: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnh1l)
-    // - - | 18: expand: (da_cumsum_bnhl1) -> (da_cumsum_target_bnhll)
-    // - - | 17: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnhl1)
-    // - - | 1/36: permute: (da_cumsum_bhnl [*]) -> (da_cumsum_bnhl)
-    let d_da_tgt_bnhl = d_da_cumsum_diff_bnhll
-        .clone()
-        .sum_dim(4) // d_da_cumsum_diff_bnhl1
-        .squeeze_dim::<4>(4);
-    san(&d_da_tgt_bnhl);
-    let d_da_src_bnhl = d_da_cumsum_diff_bnhll
-        .sum_dim(3) // d_da_cumsum_diff_bnh1l
-        .squeeze_dim::<4>(3);
-    san(&d_da_src_bnhl);
-    let d_da_orange_bhnl = (d_da_tgt_bnhl - d_da_src_bnhl).permute([0, 2, 1, 3]); // [B,H,N,L]
-    san(&d_da_orange_bhnl);
-    //
-    // - | For d_cb:
-    // - - | 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
-    let d_cb_bnhll = d_orange_lhs_partial1_bnhll * da_cumsum_diff_exp_bnhll.clone();
-    san(&d_cb_bnhll);
-    // - - | d_CB (per head, before GQA reduction):
-    // - - |  CB_w = CB * decay * dt * mask  →  d_CB[l,s] = d_CB_w[l,s] * decay[l,s] * dt[s] * mask
-    // - - | GQA reduce: [B,N,H,L,L] → [B,N,G,L,L]
-    let d_cb_bngll = d_cb_bnhll
-        .reshape([
-            batch,
-            nchunks,
-            ngroups,
-            heads_per_group,
-            chunk_len,
-            chunk_len,
-        ]) // d_cb_bngHll
-        .sum_dim(3) // d_cb_bng1ll
-        .squeeze_dim::<5>(3);
-    san(&d_cb_bngll);
+    // [L,L] causal mask, broadcast as a view inside each iteration —
+    // value does not depend on (b,n,h).
+    let causal_mask_ll: Tensor<B, 2, burn::prelude::Bool> =
+        Tensor::<B, 2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // K4 BACKWARD (reverse serial recurrence)
-    // ═══════════════════════════════════════════════════════════════════════
-    //
-    // - 5/5: stack: (chunk_input_state_vec_bhpr [!]) -> (chunk_input_state_bnhpr [out][!])
-    // - 4: vec-pop: (chunk_input_state_vec_bhpr [vec][!]) -> (final_state_bhpr [elem][out][!])
-    // - 3: serial-loop: (0..nchunks)
-    //
-    // last d_running_state_bhpr:
+    let mut d_x_orange_vec: Vec<Tensor<B, 4>> = Vec::with_capacity(nchunks); // [B,H,L,P]
+    let mut d_dt_orange_vec: Vec<Tensor<B, 3>> = Vec::with_capacity(nchunks); // [B,H,L]
+    let mut d_da_orange_vec: Vec<Tensor<B, 3>> = Vec::with_capacity(nchunks); // [B,H,L]
+    let mut d_cb_vec: Vec<Tensor<B, 4>> = Vec::with_capacity(nchunks); // [B,G,L,L]
+    let mut d_c_blue_vec: Vec<Tensor<B, 4>> = Vec::with_capacity(nchunks); // [B,H,L,R]
+    let mut d_da_blue_vec: Vec<Tensor<B, 3>> = Vec::with_capacity(nchunks); // [B,H,L]
+    let mut d_intra_slices: Vec<Tensor<B, 4>> = Vec::with_capacity(nchunks); // [B,H,P,R]
+    let mut d_da_end_bh_slices: Vec<Tensor<B, 2>> = Vec::with_capacity(nchunks); // [B,H]
+
     let mut d_running_state_bhpr: Tensor<B, 4> = d_final_bhpr; // [B,H,P,R]
-    //
-    // d_intra[c] and d_da_end[c] collected during reverse traversal.
-    let mut d_intra_slices: Vec<Tensor<B, 4>> = Vec::with_capacity(nchunks);
-    let mut d_da_end_bh_slices: Vec<Tensor<B, 2>> = Vec::with_capacity(nchunks);
-    //
+
     for i_chunk in (0..nchunks).rev() {
-        // access re-calculated running state
-        let running_state_bhpr = chunk_input_state_bnhpr
+        // ── Per-chunk inputs (slice the batched tensors to [B,H,...]) ──────
+        let da_cumsum_bhl: Tensor<B, 3> = da_cumsum_bhnl
+            .clone()
+            .slice(s![.., .., i_chunk, ..])
+            .squeeze_dim::<3>(2); // [B,H,L]
+        let dt_bhl: Tensor<B, 3> = dt_discretized_bhnl
+            .clone()
+            .slice(s![.., .., i_chunk, ..])
+            .squeeze_dim::<3>(2); // [B,H,L]
+        let x_bhlp: Tensor<B, 4> = x_bnlhp
             .clone()
             .slice(s![.., i_chunk, .., .., ..])
-            .squeeze_dim(1);
-        assert_eq!(
-            [batch, nheads, per_head_dim, state_rank],
-            running_state_bhpr.dims()
-        );
-        //
-        // - 3.9/3.9: vec-push: (running_state_bhpr [elem]) -> (chunk_input_state_vec_bhpr [vec][!])
-        d_intra_slices.push(d_running_state_bhpr.clone());
-        //
-        // - 3.8: add: (running_state_bhpr, intra_state_bhpr) -> (running_state_bhpr)
-        let _d_intra_state_bhpr = d_running_state_bhpr.clone();
-        //
-        // - 3.7: mul: (decay_bhpr, running_state_bhpr) -> (running_state_bhpr)
-        let d_decay_bhpr = d_running_state_bhpr.clone() * running_state_bhpr.clone();
-        san(&d_decay_bhpr);
-        // recalculate decay_bhpr
-        let decay_bhpr = da_chunk_end_bhn
+            .squeeze_dim::<4>(1) // [B,L,H,P]
+            .permute([0, 2, 1, 3]); // [B,H,L,P]
+        let d_y_bhlp: Tensor<B, 4> = d_y_bnlhp
             .clone()
-            .slice(s![.., .., i_chunk]) // da_chunk_end_bh1 // replay forward step 3.3
-            .exp() // exp_da_chunk_end_bh1 // replay forward step 3.4
-            .unsqueeze_dim::<4>(3) // exp_da_chunk_end_bh11 // replay forward step 3.5
-            .expand([batch, nheads, per_head_dim, state_rank]); // replay forward step 3.6
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1) // [B,L,H,P]
+            .permute([0, 2, 1, 3]); // [B,H,L,P]
+
+        // GQA-expand C for this chunk: [B,L,G,R] → [B,H,L,R]
+        let c_bhlr: Tensor<B, 4> = c_bnlgr
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1) // [B,L,G,R]
+            .unsqueeze_dim::<5>(3) // [B,L,G,1,R]
+            .expand([batch, chunk_len, ngroups, heads_per_group, state_rank])
+            .reshape([batch, chunk_len, nheads, state_rank]) // [B,L,H,R]
+            .permute([0, 2, 1, 3]); // [B,H,L,R]
+
+        // GQA-expand CB for this chunk: [B,G,L,L] → [B,H,L,L]
+        let cb_bhll: Tensor<B, 4> = cb_bngll
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1) // [B,G,L,L]
+            .unsqueeze_dim::<5>(2) // [B,G,1,L,L]
+            .expand([batch, ngroups, heads_per_group, chunk_len, chunk_len])
+            .reshape([batch, nheads, chunk_len, chunk_len]); // [B,H,L,L]
+
+        let causal_mask_bhll: Tensor<B, 4, burn::prelude::Bool> = causal_mask_ll
+            .clone()
+            .reshape([1, 1, chunk_len, chunk_len])
+            .expand([batch, nheads, chunk_len, chunk_len]);
+
+        // Running state entering chunk i.
+        let chunk_input_state_bhpr: Tensor<B, 4> = chunk_input_state_bnhpr
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1); // [B,H,P,R]
+        san(&chunk_input_state_bhpr);
+
+        // ── BLUE backward for chunk i ──────────────────────────────────────
+        // y_blue[l,p] = exp(da[l]) · Σ_r C[l,r] · state[p,r]
+        let exp_da_cumsum_bhl: Tensor<B, 3> = da_cumsum_bhl.clone().exp(); // [B,H,L]
+        let exp_da_cumsum_bhlp: Tensor<B, 4> = exp_da_cumsum_bhl
+            .clone()
+            .unsqueeze_dim::<4>(3)
+            .expand([batch, nheads, chunk_len, per_head_dim]); // [B,H,L,P]
+        let d_blue_scaled_bhlp: Tensor<B, 4> = d_y_bhlp.clone(); // = d_y_partial
+        let d_blue_bhlp: Tensor<B, 4> = d_blue_scaled_bhlp.clone() * exp_da_cumsum_bhlp.clone();
+        san(&d_blue_bhlp);
+
+        // d_chunk_input_state = c^T @ d_blue
+        //   c_bhlr [B,H,L,R].permute([0,1,3,2]) → c_bhrl [B,H,R,L]
+        //   c_bhrl @ d_blue_bhlp [B,H,L,P] → [B,H,R,P] → permute → [B,H,P,R]
+        let d_chunk_input_state_bhpr: Tensor<B, 4> = c_bhlr
+            .clone()
+            .permute([0, 1, 3, 2]) // [B,H,R,L]
+            .matmul(d_blue_bhlp.clone()) // [B,H,R,P]
+            .permute([0, 1, 3, 2]); // [B,H,P,R]
+        san(&d_chunk_input_state_bhpr);
+
+        // d_c_blue = d_blue @ chunk_input_state  [B,H,L,P] @ [B,H,P,R] → [B,H,L,R]
+        let d_c_blue_bhlr: Tensor<B, 4> =
+            d_blue_bhlp.clone().matmul(chunk_input_state_bhpr.clone());
+        san(&d_c_blue_bhlr);
+        d_c_blue_vec.push(d_c_blue_bhlr);
+
+        // d_da from BLUE:
+        //   blue_no_scale = c @ state^T  [B,H,L,R] @ [B,H,R,P] → [B,H,L,P]
+        //   d_da[l] = Σ_p (d_blue_scaled[l,p] * blue_no_scale[l,p]) * exp_da[l]
+        let blue_bhlp: Tensor<B, 4> = c_bhlr
+            .clone()
+            .matmul(chunk_input_state_bhpr.clone().permute([0, 1, 3, 2])); // [B,H,L,P]
+        let d_exp_da_cumsum_bhlp: Tensor<B, 4> = d_blue_scaled_bhlp.clone() * blue_bhlp;
+        let d_da_blue_bhl: Tensor<B, 3> = (d_exp_da_cumsum_bhlp * exp_da_cumsum_bhlp)
+            .sum_dim(3)
+            .squeeze_dim::<3>(3); // [B,H,L]
+        san(&d_da_blue_bhl);
+        d_da_blue_vec.push(d_da_blue_bhl);
+
+        // ── ORANGE backward for chunk i ────────────────────────────────────
+        // y_orange[l,p] = Σ_{s≤l} CB[l,s] · exp(da[l]-da[s]) · dt[s] · x[s,p]
+        //   CB_w[l,s] = CB[l,s] · exp_diff[l,s] · dt[s] · mask
+        let da_cumsum_target_bhll: Tensor<B, 4> = da_cumsum_bhl
+            .clone()
+            .unsqueeze_dim::<4>(3) // [B,H,L_tgt,1]
+            .expand([batch, nheads, chunk_len, chunk_len]); // [B,H,L_tgt,L_src]
+        let da_cumsum_source_bhll: Tensor<B, 4> = da_cumsum_bhl
+            .unsqueeze_dim::<4>(2) // [B,H,1,L_src]
+            .expand([batch, nheads, chunk_len, chunk_len]);
+        let da_cumsum_diff_bhll = da_cumsum_target_bhll - da_cumsum_source_bhll;
+        san(&da_cumsum_diff_bhll);
+
+        // Causal mask + exp stabiliser (-inf above the main diagonal).
+        let da_cumsum_diff_masked_bhll =
+            da_cumsum_diff_bhll.mask_fill(causal_mask_bhll.clone(), f32::NEG_INFINITY);
+        let da_cumsum_diff_exp_bhll = da_cumsum_diff_masked_bhll.exp(); // [B,H,L,L]
+        san(&da_cumsum_diff_exp_bhll);
+
+        let dt_source_bhll: Tensor<B, 4> = dt_bhl
+            .unsqueeze_dim::<4>(2) // [B,H,1,L_src]
+            .expand([batch, nheads, chunk_len, chunk_len]);
+
+        let orange_lhs_partial1_bhll: Tensor<B, 4> =
+            cb_bhll.clone() * da_cumsum_diff_exp_bhll.clone();
+        san(&orange_lhs_partial1_bhll);
+        let orange_lhs_partial2_bhll: Tensor<B, 4> =
+            orange_lhs_partial1_bhll.clone() * dt_source_bhll.clone();
+        san(&orange_lhs_partial2_bhll);
+
+        let d_orange_bhlp: Tensor<B, 4> = d_y_bhlp; // = d_y_partial
+        // d_CB_w = d_orange @ x^T  [B,H,L_tgt,P] @ [B,H,P,L_src] → [B,H,L_tgt,L_src]
+        let d_orange_lhs_partial2_bhll: Tensor<B, 4> = d_orange_bhlp
+            .clone()
+            .matmul(x_bhlp.permute([0, 1, 3, 2]));
+        san(&d_orange_lhs_partial2_bhll);
+
+        // d_x = CB_w^T @ d_orange  [B,H,L_src,L_tgt] @ [B,H,L_tgt,P] → [B,H,L_src,P]
+        let d_x_orange_bhlp: Tensor<B, 4> = orange_lhs_partial2_bhll
+            .permute([0, 1, 3, 2])
+            .matmul(d_orange_bhlp);
+        san(&d_x_orange_bhlp);
+        d_x_orange_vec.push(d_x_orange_bhlp);
+
+        // Mask off above-diagonal (set to 0 above the main diagonal).
+        let d_orange_lhs_partial2_bhll =
+            d_orange_lhs_partial2_bhll.mask_fill(causal_mask_bhll, 0.);
+        san(&d_orange_lhs_partial2_bhll);
+        let d_orange_lhs_partial1_bhll =
+            d_orange_lhs_partial2_bhll.clone() * dt_source_bhll;
+        san(&d_orange_lhs_partial1_bhll);
+
+        // d_dt[s] = Σ_{l≥s} d_CB_w[l,s] · CB[l,s] · decay[l,s]
+        let d_dt_orange_bhl: Tensor<B, 3> = (d_orange_lhs_partial2_bhll
+            * orange_lhs_partial1_bhll.clone())
+        .sum_dim(2)
+        .squeeze_dim::<3>(2); // [B,H,L]
+        san(&d_dt_orange_bhl);
+        d_dt_orange_vec.push(d_dt_orange_bhl);
+
+        // d_da from ORANGE: decay = exp(da_tgt - da_src)
+        //   d_da_tgt[l] += Σ_s (d_decay · decay)[l,s]
+        //   d_da_src[s] -= Σ_l (d_decay · decay)[l,s]
+        let d_da_cumsum_diff_exp_bhll = d_orange_lhs_partial1_bhll.clone() * cb_bhll;
+        let d_da_cumsum_diff_bhll =
+            d_da_cumsum_diff_exp_bhll * da_cumsum_diff_exp_bhll.clone();
+        let d_da_tgt_bhl: Tensor<B, 3> = d_da_cumsum_diff_bhll
+            .clone()
+            .sum_dim(3)
+            .squeeze_dim::<3>(3);
+        let d_da_src_bhl: Tensor<B, 3> =
+            d_da_cumsum_diff_bhll.sum_dim(2).squeeze_dim::<3>(2);
+        let d_da_orange_bhl: Tensor<B, 3> = d_da_tgt_bhl - d_da_src_bhl;
+        san(&d_da_orange_bhl);
+        d_da_orange_vec.push(d_da_orange_bhl);
+
+        // d_cb (GQA reduce H → G): [B,H,L,L] → [B,G,L,L]
+        let d_cb_bhll = d_orange_lhs_partial1_bhll * da_cumsum_diff_exp_bhll;
+        let d_cb_bgll: Tensor<B, 4> = d_cb_bhll
+            .reshape([batch, ngroups, heads_per_group, chunk_len, chunk_len])
+            .sum_dim(2)
+            .squeeze_dim::<4>(2); // [B,G,L,L]
+        san(&d_cb_bgll);
+        d_cb_vec.push(d_cb_bgll);
+
+        // ── K4 backward step for chunk i ───────────────────────────────────
+        // d_intra[i] = current d_running_state (before the propagation step).
+        d_intra_slices.push(d_running_state_bhpr.clone());
+
+        // Recompute decay for this chunk.
+        let decay_bhpr: Tensor<B, 4> = da_chunk_end_bhn
+            .clone()
+            .slice(s![.., .., i_chunk]) // [B,H,1]
+            .exp()
+            .unsqueeze_dim::<4>(3) // [B,H,1,1]
+            .expand([batch, nheads, per_head_dim, state_rank]); // [B,H,P,R]
         san(&decay_bhpr);
-        // - 3.6: expand: (exp_da_chunk_end_bh11) -> (decay_bhpr)
-        // - 3.5: unsqueeze: (exp_da_chunk_end_bh1) -> (exp_da_chunk_end_bh11)
-        // - 3.4: exp: (da_chunk_end_bh1) -> (exp_da_chunk_end_bh1)
-        // (d_da_chunk_end_bh1 = d_exp_da_chunk_end_bh1 * exp(da_chunk_end_bh1))
-        // - 3.3: slice: (da_chunk_end_bhn [in][*]) -> (da_chunk_end_bh1)
-        let d_da_chunk_end_bhpr = d_decay_bhpr * decay_bhpr.clone(); // note: decay is expanded exp(da_chunk_end)
-        san(&d_da_chunk_end_bhpr);
-        let d_da_chunk_end_bh = d_da_chunk_end_bhpr
-            .reshape([batch, nheads, per_head_dim * state_rank]) // d_da_chunk_end_bhPR
-            .sum_dim(2) // d_da_chunk_end_bh1
+
+        // d_decay = d_running_state · running_state (running_state = chunk_input_state[i]).
+        let d_decay_bhpr = d_running_state_bhpr.clone() * chunk_input_state_bhpr;
+        san(&d_decay_bhpr);
+
+        // d_da_chunk_end[b,h] = Σ_{p,r} d_decay · decay   (decay = exp(da_chunk_end)).
+        let d_da_chunk_end_bh: Tensor<B, 2> = (d_decay_bhpr * decay_bhpr.clone())
+            .reshape([batch, nheads, per_head_dim * state_rank])
+            .sum_dim(2)
             .squeeze_dim::<2>(2);
         san(&d_da_chunk_end_bh);
         d_da_end_bh_slices.push(d_da_chunk_end_bh);
-        //
-        // - 3.2: squeeze: (intra_chunk_state_b1hpr) -> (intra_state_bhpr)
-        // - 3.1/3.9: slice: (intra_chunk_state_bnhpr [in][!]) -> (intra_chunk_state_b1hpr)
-        //
-        // Propagate: d_running_state_bhpr_prev = scale * d_running_state_bhpr + d_chunk_input_state_bhpr
-        //   (d_cis[c] = gradient of chunk_input_state[:, c] flowing in from K5 BLUE)
-        let d_chunk_input_state_bhpr = d_chunk_input_state_bnhpr
-            .clone()
-            .slice(s![.., i_chunk, .., .., ..]) // d_chunk_input_state_b1hpr // d_chunk_input_state_b1hpr
-            .squeeze_dim::<4>(1);
-        // TODO: understand this.
-        d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+
+        // Propagate to previous chunk:
+        //   d_running_state_prev = decay · d_running_state + d_chunk_input_state.
+        d_running_state_bhpr =
+            decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
         san(&d_running_state_bhpr);
     }
-    // - 2: vec-push: (running_state_bhpr [elem]) -> (chunk_input_state_vec_bhpr [vec][!])
-    // - 1/5: init-mut: (initial_state_bhpr [in][*]) -> (running_state_bhpr)
-    //
-    // After the loop, d_initial_state = the (reverse loop) tailing d_running_state_bhpr
+    // d_initial_state = the trailing d_running_state after the reverse loop.
     let d_initial_state_bhpr = d_running_state_bhpr;
-    //
-    // Restore natural order
+
+    // ── Stack per-chunk gradients into the batched tensors K3/K2/K1 expect ──
+    // Restore natural (forward) chunk order — vecs were filled in reverse.
+    d_x_orange_vec.reverse();
+    d_dt_orange_vec.reverse();
+    d_da_orange_vec.reverse();
+    d_cb_vec.reverse();
+    d_c_blue_vec.reverse();
+    d_da_blue_vec.reverse();
     d_intra_slices.reverse();
     d_da_end_bh_slices.reverse();
-    //
-    let d_intra_chunk_state_bnhpr = Tensor::stack(d_intra_slices, 1);
-    //
-    // d_da_end_bhn [B,H,N]: scatter to last position of d_da_cumsum
+
+    // d_x_orange: [B,H,L,P] → stack@1 → [B,N,H,L,P] → permute → [B,N,L,H,P]
+    let d_x_orange_bnlhp: Tensor<B, 5> =
+        Tensor::stack::<5>(d_x_orange_vec, 1).permute([0, 1, 3, 2, 4]);
+    san(&d_x_orange_bnlhp);
+
+    // d_dt_orange: [B,H,L] → stack@2 → [B,H,N,L]
+    let d_dt_orange_bhnl: Tensor<B, 4> = Tensor::stack(d_dt_orange_vec, 2);
+    san(&d_dt_orange_bhnl);
+
+    // d_da_orange: [B,H,L] → stack@2 → [B,H,N,L]
+    let d_da_orange_bhnl: Tensor<B, 4> = Tensor::stack(d_da_orange_vec, 2);
+    san(&d_da_orange_bhnl);
+
+    // d_cb: [B,G,L,L] → stack@1 → [B,N,G,L,L]
+    let d_cb_bngll: Tensor<B, 5> = Tensor::stack(d_cb_vec, 1);
+    san(&d_cb_bngll);
+
+    // d_c_blue: [B,H,L,R] → stack@1 → [B,N,H,L,R] → GQA reduce → [B,N,L,G,R]
+    let d_c_blue_bnhlr: Tensor<B, 5> = Tensor::stack(d_c_blue_vec, 1);
+    let d_c_blue_bnlgr: Tensor<B, 5> = d_c_blue_bnhlr
+        .reshape([batch, nchunks, ngroups, heads_per_group, chunk_len, state_rank])
+        .sum_dim(3)
+        .squeeze_dim::<5>(3)
+        .permute([0, 1, 3, 2, 4]);
+    san(&d_c_blue_bnlgr);
+
+    // d_da_blue: [B,H,L] → stack@2 → [B,H,N,L]
+    let d_da_blue_bhnl: Tensor<B, 4> = Tensor::stack(d_da_blue_vec, 2);
+    san(&d_da_blue_bhnl);
+
+    // d_intra_chunk_state: [B,H,P,R] → stack@1 → [B,N,H,P,R]
+    let d_intra_chunk_state_bnhpr: Tensor<B, 5> = Tensor::stack(d_intra_slices, 1);
+    san(&d_intra_chunk_state_bnhpr);
+
+    // d_da_end: [B,H] → stack@2 → [B,H,N]; scatter to last L position of d_da_cumsum_k4.
     let d_da_end_bhn: Tensor<B, 3> = Tensor::stack(d_da_end_bh_slices, 2);
-    //
-    // TODO: understand this.
-    // Pad to [B,H,N,L] — only last L-position is non-zero
     let d_da_cumsum_k4_bhnl = {
         let zeros = Tensor::<B, 4>::zeros([batch, nheads, nchunks, chunk_len - 1], &device);
         let d_da_end_bhn1 = d_da_end_bhn.unsqueeze_dim::<4>(3);
@@ -778,7 +711,6 @@ pub fn combined_backward<B: Backend>(
     let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
     san(&d_dt_discretized_bhnl);
 
-    let d_x_orange_bnlhp = d_x_orange_bnhlp.permute([0, 1, 3, 2, 4]);
     let d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
     san(&d_x_bnlhp);
 
