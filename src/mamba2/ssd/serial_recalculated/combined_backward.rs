@@ -403,9 +403,8 @@ pub fn combined_backward<B: Backend>(
 
         let d_orange_bhlp: Tensor<B, 4> = d_y_bhlp; // = d_y_partial
         // d_CB_w = d_orange @ x^T  [B,H,L_tgt,P] @ [B,H,P,L_src] → [B,H,L_tgt,L_src]
-        let d_orange_lhs_partial2_bhll: Tensor<B, 4> = d_orange_bhlp
-            .clone()
-            .matmul(x_bhlp.permute([0, 1, 3, 2]));
+        let d_orange_lhs_partial2_bhll: Tensor<B, 4> =
+            d_orange_bhlp.clone().matmul(x_bhlp.permute([0, 1, 3, 2]));
         san(&d_orange_lhs_partial2_bhll);
 
         // d_x = CB_w^T @ d_orange  [B,H,L_src,L_tgt] @ [B,H,L_tgt,P] → [B,H,L_src,P]
@@ -416,11 +415,9 @@ pub fn combined_backward<B: Backend>(
         d_x_orange_vec.push(d_x_orange_bhlp);
 
         // Mask off above-diagonal (set to 0 above the main diagonal).
-        let d_orange_lhs_partial2_bhll =
-            d_orange_lhs_partial2_bhll.mask_fill(causal_mask_bhll, 0.);
+        let d_orange_lhs_partial2_bhll = d_orange_lhs_partial2_bhll.mask_fill(causal_mask_bhll, 0.);
         san(&d_orange_lhs_partial2_bhll);
-        let d_orange_lhs_partial1_bhll =
-            d_orange_lhs_partial2_bhll.clone() * dt_source_bhll;
+        let d_orange_lhs_partial1_bhll = d_orange_lhs_partial2_bhll.clone() * dt_source_bhll;
         san(&d_orange_lhs_partial1_bhll);
 
         // d_dt[s] = Σ_{l≥s} d_CB_w[l,s] · CB[l,s] · decay[l,s]
@@ -435,14 +432,10 @@ pub fn combined_backward<B: Backend>(
         //   d_da_tgt[l] += Σ_s (d_decay · decay)[l,s]
         //   d_da_src[s] -= Σ_l (d_decay · decay)[l,s]
         let d_da_cumsum_diff_exp_bhll = d_orange_lhs_partial1_bhll.clone() * cb_bhll;
-        let d_da_cumsum_diff_bhll =
-            d_da_cumsum_diff_exp_bhll * da_cumsum_diff_exp_bhll.clone();
-        let d_da_tgt_bhl: Tensor<B, 3> = d_da_cumsum_diff_bhll
-            .clone()
-            .sum_dim(3)
-            .squeeze_dim::<3>(3);
-        let d_da_src_bhl: Tensor<B, 3> =
-            d_da_cumsum_diff_bhll.sum_dim(2).squeeze_dim::<3>(2);
+        let d_da_cumsum_diff_bhll = d_da_cumsum_diff_exp_bhll * da_cumsum_diff_exp_bhll.clone();
+        let d_da_tgt_bhl: Tensor<B, 3> =
+            d_da_cumsum_diff_bhll.clone().sum_dim(3).squeeze_dim::<3>(3);
+        let d_da_src_bhl: Tensor<B, 3> = d_da_cumsum_diff_bhll.sum_dim(2).squeeze_dim::<3>(2);
         let d_da_orange_bhl: Tensor<B, 3> = d_da_tgt_bhl - d_da_src_bhl;
         san(&d_da_orange_bhl);
         d_da_orange_vec.push(d_da_orange_bhl);
@@ -483,8 +476,7 @@ pub fn combined_backward<B: Backend>(
 
         // Propagate to previous chunk:
         //   d_running_state_prev = decay · d_running_state + d_chunk_input_state.
-        d_running_state_bhpr =
-            decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
         san(&d_running_state_bhpr);
     }
     // d_initial_state = the trailing d_running_state after the reverse loop.
@@ -521,7 +513,14 @@ pub fn combined_backward<B: Backend>(
     // d_c_blue: [B,H,L,R] → stack@1 → [B,N,H,L,R] → GQA reduce → [B,N,L,G,R]
     let d_c_blue_bnhlr: Tensor<B, 5> = Tensor::stack(d_c_blue_vec, 1);
     let d_c_blue_bnlgr: Tensor<B, 5> = d_c_blue_bnhlr
-        .reshape([batch, nchunks, ngroups, heads_per_group, chunk_len, state_rank])
+        .reshape([
+            batch,
+            nchunks,
+            ngroups,
+            heads_per_group,
+            chunk_len,
+            state_rank,
+        ])
         .sum_dim(3)
         .squeeze_dim::<5>(3)
         .permute([0, 1, 3, 2, 4]);
@@ -730,8 +729,7 @@ pub fn combined_backward<B: Backend>(
     // Test-only: keep d_dt_orange_bhnl alive for the oracle return.
     #[cfg(test)]
     let d_dt_orange_bhnl_save = d_dt_orange_bhnl.clone();
-    let d_dt_discretized_bhnl =
-        d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
+    let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
     san(&d_dt_discretized_bhnl);
 
     let d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
@@ -885,9 +883,9 @@ mod tests {
 
         // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
         let einsum_bhnl: Tensor<B, 4> = (out_x_bnlhp * d_y_bnlhp)
-            .sum_dim(4)                 // [B,N,L,H,1]
-            .squeeze_dim::<4>(4)        // [B,N,L,H]
-            .permute([0, 3, 1, 2]);     // [B,H,N,L]
+            .sum_dim(4) // [B,N,L,H,1]
+            .squeeze_dim::<4>(4) // [B,N,L,H]
+            .permute([0, 3, 1, 2]); // [B,H,N,L]
         let oracle_bhnl = einsum_bhnl - grads.d_dt_orange_bhnl * dt_discretized_bhnl;
 
         // ─── Compare ─────────────────────────────────────────────────────
