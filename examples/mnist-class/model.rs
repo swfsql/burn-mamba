@@ -1,9 +1,9 @@
 pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
 use burn_mamba::schedule::Schedule;
 
-/// In FP32, this model configuration uses ~37K params (~150KB disk space).  
+/// This model configuration uses ~37K params (~153KB disk space in FP32).  
 /// Reaches ~85% validation accuracy after the first epoch.  
-/// With a batch_size=16, this requires ~3.5GB vram during training.
+/// With a batch_size=16 in FP32, this requires ~4GB vram during training.
 pub fn model_config() -> MyMamba3NetworkConfig {
     MyMamba3NetworkConfig::new()
         // the input is a sequence of a single-dimensioned values
@@ -14,8 +14,8 @@ pub fn model_config() -> MyMamba3NetworkConfig {
         .with_layers(mamba3_layers_config(
             2, // two layers backed by unique weights is sufficient
             Some((
-                8,                   // allow more expressivity by virtually extending to 16 layers,
-                Schedule::Stretched, // by looping (4x) each layer in sequence
+                16,                  // allow more expressivity by virtually extending to 16 layers,
+                Schedule::Stretched, // by looping (8x) each layer in sequence
             )),
             mamba3_block_config(
                 //
@@ -24,7 +24,7 @@ pub fn model_config() -> MyMamba3NetworkConfig {
                 4, // nheads (intra-layer expressivity, no impact on disk size, high impact on vram)
                 1, // ngroups (intra-layer expressivity)
                 1, // mimo_rank (intra-layer expressivity)
-                1.0, // apply rope to 100% of the latents
+                1.0, // apply rope to 100% of the projections
                 4, // expand (intra-layer expressivity, small impact on disk size)
             ),
         ))

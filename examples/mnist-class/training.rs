@@ -286,7 +286,7 @@ impl<B: Backend + Mamba3BackendExt> Wrap<B> {
         assert_eq!(input_size, 1);
         assert_eq!([batch_size], targets.dims());
 
-        let ssd_path = Mamba3SsdPath::Minimal(None);
+        let ssd_path = Mamba3SsdPath::SerialRecalculated(None); // saves ~1/3 vram against Minimal
         //
         let (output, _caches) = model.forward(input.clone(), None, ssd_path);
         assert_eq!([batch_size, sequence_size, 10], output.dims());
