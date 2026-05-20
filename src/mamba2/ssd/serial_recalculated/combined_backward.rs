@@ -14,10 +14,13 @@ pub struct CombinedGrads<B: Backend> {
     /// Local same-chunk contribution to `d_da_cumsum` from BLUE+ORANGE only
     /// (excludes K3 and K4 cross-chunk contributions). Exposed for the
     /// `out_x · dout − ddt · dt` oracle test from Tri Dao's reference
-    /// (`_chunk_scan_bwd_ddAcs_unstable`). The autodiff wrapper ignores it.
+    /// (`_chunk_scan_bwd_ddAcs_unstable`). Test-only; absent in release builds.
+    #[cfg(test)]
     pub d_da_local_bhnl: Tensor<B, 4>,
     /// Same-chunk d_dt contribution from ORANGE only (= what Tri Dao calls
-    /// `ddt` in `_chunk_scan_bwd_ddAcs_unstable`). Exposed for the oracle test.
+    /// `ddt` in `_chunk_scan_bwd_ddAcs_unstable`). Test-only; absent in release
+    /// builds.
+    #[cfg(test)]
     pub d_dt_orange_bhnl: Tensor<B, 4>,
 }
 
@@ -678,9 +681,12 @@ pub fn combined_backward<B: Backend>(
     // SUM GRADIENT CONTRIBUTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Local same-chunk d_da contribution (BLUE + ORANGE). Snapshot for the
-    // oracle test; full d_da_cumsum below also folds K3 + K4 (cross-chunk).
+    // Test-only: local same-chunk d_da contribution (BLUE + ORANGE) snapshot
+    // for the `out_x · dout − ddt · dt` oracle. Production builds skip the
+    // extra add and the retained [B,H,N,L] tensor.
+    #[cfg(test)]
     let d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
+    #[cfg(test)]
     san(&d_da_local_bhnl);
     // Accumulated gradient of the cumulative sum produced by K1.
     let d_da_cumsum_bhnl =
@@ -721,8 +727,11 @@ pub fn combined_backward<B: Backend>(
         .reshape([nheads]);
     san(&d_a_decay_h);
 
+    // Test-only: keep d_dt_orange_bhnl alive for the oracle return.
+    #[cfg(test)]
+    let d_dt_orange_bhnl_save = d_dt_orange_bhnl.clone();
     let d_dt_discretized_bhnl =
-        d_dt_orange_bhnl.clone() + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
+        d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
     san(&d_dt_discretized_bhnl);
 
     let d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
@@ -741,8 +750,10 @@ pub fn combined_backward<B: Backend>(
         d_c_bnlgr,
         d_d_h,
         d_initial_state_bhpr,
+        #[cfg(test)]
         d_da_local_bhnl,
-        d_dt_orange_bhnl,
+        #[cfg(test)]
+        d_dt_orange_bhnl: d_dt_orange_bhnl_save,
     }
 }
 
