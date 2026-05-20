@@ -31,7 +31,7 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward node definition ─────────────────────────────────────────
         #[derive(Debug)]
-        struct K1K2K3K4K5CombinedBackward;
+        struct CombinedKernelsBackward;
 
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
@@ -54,7 +54,7 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
             shape_final_state_bhpr: [usize; 4],
         }
 
-        impl<B: Backend + Mamba3BackendExt> Backward<B, 5> for K1K2K3K4K5CombinedBackward {
+        impl<B: Backend + Mamba3BackendExt> Backward<B, 5> for CombinedKernelsBackward {
             type State = State<B>;
 
             fn backward(
@@ -166,7 +166,7 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
         let shape_final_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
 
         // ── Register backward / run forward ───────────────────────────────
-        match K1K2K3K4K5CombinedBackward
+        match CombinedKernelsBackward
             .prepare::<C>([
                 v_bnlrhp.node.clone(),
                 da_bnlh.node.clone(),

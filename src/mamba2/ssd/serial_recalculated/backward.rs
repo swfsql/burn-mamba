@@ -22,15 +22,6 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
     /// accumulates their upstream gradients back into a single gradient vector
     /// before firing this backward.
     fn ssd_serial_recalculated(
-        // AI init interface:
-        //
-        // da_cumsum_bhnl: FloatTensor<Self>,
-        // dt_discretized_bhnl: FloatTensor<Self>,
-        // x_bnlhp: FloatTensor<Self>,
-        // b_bnlgr: FloatTensor<Self>,
-        // c_bnlgr: FloatTensor<Self>,
-        // d_h: FloatTensor<Self>,
-        // initial_state_bhpr: FloatTensor<Self>,
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
         b_bnlgr: FloatTensor<Self>,
@@ -41,7 +32,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward struct ──────────────────────────────────────────────────
         #[derive(Debug)]
-        struct K2K3K4K5CombinedBackward;
+        struct CombinedKernelsBackward;
 
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
@@ -72,7 +63,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         /// Only the 7 original inputs are saved; all intermediates (cb, intra
         /// state, chunk_input_state) are recomputed during `backward`.
         #[allow(clippy::type_complexity)]
-        impl<B: Backend + Mamba2BackendExt> Backward<B, 7> for K2K3K4K5CombinedBackward {
+        impl<B: Backend + Mamba2BackendExt> Backward<B, 7> for CombinedKernelsBackward {
             type State = State<B>;
 
             fn backward(
@@ -228,7 +219,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         let shape_final_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
 
         // ── Register backward / run forward ───────────────────────────────
-        match K2K3K4K5CombinedBackward
+        match CombinedKernelsBackward
             .prepare::<C>([
                 x_bnlhp.node.clone(),
                 dt_discretized_bhnl.node.clone(),

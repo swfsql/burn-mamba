@@ -326,13 +326,11 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
 
     // MIMO causal neg-inf mask: −∞ where j//R > i//R (source strictly ahead of target in time).
     // Build as interleaved expansion of the standard 2D upper-triangle mask.
-    let neg_inf_base_bnhll: Tensor<B, 5> = {
-        let zero_ll: Tensor<B, 2> = Tensor::zeros([chunk_len, chunk_len], &device);
-        Tensor::full_like(&zero_ll, f32::NEG_INFINITY)
+    let neg_inf_base_bnhll: Tensor<B, 5> =
+        Tensor::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device)
             .triu(1) // [l, l]: -inf above diagonal
             .unsqueeze_dims::<5>(&[0, 1, 2])
-            .expand([batch, nchunks, nheads, chunk_len, chunk_len])
-    };
+            .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
     // Interleave-expand: [b, n, H, l, l] → [b, n, H, L, L]
     let neg_inf_mimo_bnhLL: Tensor<B, 5> = neg_inf_base_bnhll
         .unsqueeze_dim::<6>(4)
