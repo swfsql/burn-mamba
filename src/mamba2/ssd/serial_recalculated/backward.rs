@@ -151,6 +151,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_d_h,
                     d_initial_state_bhpr,
                     d_a_decay_h,
+                    ..
                 } = combined_backward::combined_backward(
                     d_y_bnlhp,
                     d_final_state_bhpr,

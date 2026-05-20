@@ -2,6 +2,7 @@ use crate::mamba2::ssd::serial;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
+#[non_exhaustive]
 pub struct CombinedGrads<B: Backend> {
     pub d_x_bnlhp: Tensor<B, 5>,
     pub d_dt_discretized_bhnl: Tensor<B, 4>,
@@ -10,6 +11,14 @@ pub struct CombinedGrads<B: Backend> {
     pub d_d_h: Tensor<B, 1>,
     pub d_initial_state_bhpr: Tensor<B, 4>,
     pub d_a_decay_h: Tensor<B, 1>,
+    /// Local same-chunk contribution to `d_da_cumsum` from BLUE+ORANGE only
+    /// (excludes K3 and K4 cross-chunk contributions). Exposed for the
+    /// `out_x · dout − ddt · dt` oracle test from Tri Dao's reference
+    /// (`_chunk_scan_bwd_ddAcs_unstable`). The autodiff wrapper ignores it.
+    pub d_da_local_bhnl: Tensor<B, 4>,
+    /// Same-chunk d_dt contribution from ORANGE only (= what Tri Dao calls
+    /// `ddt` in `_chunk_scan_bwd_ddAcs_unstable`). Exposed for the oracle test.
+    pub d_dt_orange_bhnl: Tensor<B, 4>,
 }
 
 /// Same as [k3_ssd_chunk_state](serial::k3_ssd_chunk_state) but return some intermediaries
@@ -669,6 +678,10 @@ pub fn combined_backward<B: Backend>(
     // SUM GRADIENT CONTRIBUTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
+    // Local same-chunk d_da contribution (BLUE + ORANGE). Snapshot for the
+    // oracle test; full d_da_cumsum below also folds K3 + K4 (cross-chunk).
+    let d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
+    san(&d_da_local_bhnl);
     // Accumulated gradient of the cumulative sum produced by K1.
     let d_da_cumsum_bhnl =
         d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
@@ -708,7 +721,8 @@ pub fn combined_backward<B: Backend>(
         .reshape([nheads]);
     san(&d_a_decay_h);
 
-    let d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
+    let d_dt_discretized_bhnl =
+        d_dt_orange_bhnl.clone() + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
     san(&d_dt_discretized_bhnl);
 
     let d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
@@ -727,5 +741,153 @@ pub fn combined_backward<B: Backend>(
         d_c_bnlgr,
         d_d_h,
         d_initial_state_bhpr,
+        d_da_local_bhnl,
+        d_dt_orange_bhnl,
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "backend-flex")]
+mod tests {
+    use super::*;
+    use crate::mamba2::ssd::serial;
+    use burn::backend::Flex;
+    use burn::tensor::Distribution;
+
+    type B = Flex;
+
+    /// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
+    ///
+    /// Per Tri Dao's `_chunk_scan_bwd_ddAcs_unstable` (ssd_chunk_scan.py:1618):
+    /// ```text
+    /// d_da_cumsum_local[b,h,n,l]
+    ///   = Σ_p out_x[b,n,l,h,p] · d_y[b,n,l,h,p]
+    ///     − d_dt_orange[b,h,n,l] · dt[b,h,n,l]
+    /// ```
+    /// where `out_x = y − D·x` (output before D-skip) and `d_dt_orange` is
+    /// the same-chunk d_dt contribution from ORANGE only.
+    ///
+    /// This is a stronger correctness check than the autodiff comparison:
+    /// both sides are computed via independent analytical paths and should
+    /// match to fp32 precision on small inputs. The identity is numerically
+    /// unstable for large inputs (catastrophic cancellation between einsum
+    /// and ddt·dt).
+    #[test]
+    fn oracle_da_local_matches_einsum_minus_ddt_dt() {
+        let device = Default::default();
+        let batch = 2;
+        let nchunks = 3;
+        let chunk_len = 4;
+        let nheads = 4;
+        let per_head_dim = 4;
+        let ngroups = 2;
+        let state_rank = 6;
+
+        // ─── Random inputs (small, gentle distributions) ─────────────────
+        let x_bnlhp = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let dt_bnlh = Tensor::<B, 4>::random(
+            [batch, nchunks, chunk_len, nheads],
+            Distribution::Uniform(0.05, 0.3),
+            &device,
+        );
+        let a_decay_h =
+            Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), &device);
+        let b_bnlgr = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, ngroups, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let c_bnlgr = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, ngroups, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let d_h = Tensor::<B, 1>::random([nheads], Distribution::Normal(0.0, 0.1), &device);
+        let initial_state_bhpr = Tensor::<B, 4>::random(
+            [batch, nheads, per_head_dim, state_rank],
+            Distribution::Normal(0.0, 0.1),
+            &device,
+        );
+        let dt_discretized_bhnl = dt_bnlh.permute([0, 3, 1, 2]); // [B,H,N,L]
+
+        // ─── Forward (Serial path) ───────────────────────────────────────
+        let (da_cumsum_bhnl, da_chunk_end_bhn) =
+            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
+        let cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
+        let intra_chunk_state_bnhpr = serial::k3_ssd_chunk_state(
+            x_bnlhp.clone(),
+            b_bnlgr.clone(),
+            da_cumsum_bhnl.clone(),
+            dt_discretized_bhnl.clone(),
+        );
+        let (chunk_input_state_bnhpr, _final_state_bhpr) = serial::k4_ssd_state_passing(
+            intra_chunk_state_bnhpr,
+            da_chunk_end_bhn,
+            initial_state_bhpr.clone(),
+        );
+        let y_bnlhp = serial::k5_ssd_chunk_scan(
+            da_cumsum_bhnl,
+            dt_discretized_bhnl.clone(),
+            x_bnlhp.clone(),
+            c_bnlgr.clone(),
+            cb_bngll,
+            chunk_input_state_bnhpr,
+            d_h.clone(),
+        );
+
+        // ─── out_x = y − D·x  (output before D-skip) ─────────────────────
+        let skip_bnlhp = d_h
+            .clone()
+            .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // [1,1,1,H,1]
+            .expand([batch, nchunks, chunk_len, nheads, per_head_dim])
+            * x_bnlhp.clone();
+        let out_x_bnlhp = y_bnlhp - skip_bnlhp;
+
+        // ─── Random upstream gradients ────────────────────────────────────
+        let d_y_bnlhp = Tensor::<B, 5>::random(
+            [batch, nchunks, chunk_len, nheads, per_head_dim],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let d_final_bhpr = Tensor::<B, 4>::random(
+            [batch, nheads, per_head_dim, state_rank],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+
+        // ─── Run combined_backward (gets d_da_local + d_dt_orange) ───────
+        let grads = combined_backward(
+            d_y_bnlhp.clone(),
+            d_final_bhpr,
+            x_bnlhp,
+            dt_discretized_bhnl.clone(),
+            b_bnlgr,
+            c_bnlgr,
+            d_h,
+            initial_state_bhpr,
+            a_decay_h,
+        );
+
+        // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
+        let einsum_bhnl: Tensor<B, 4> = (out_x_bnlhp * d_y_bnlhp)
+            .sum_dim(4)                 // [B,N,L,H,1]
+            .squeeze_dim::<4>(4)        // [B,N,L,H]
+            .permute([0, 3, 1, 2]);     // [B,H,N,L]
+        let oracle_bhnl = einsum_bhnl - grads.d_dt_orange_bhnl * dt_discretized_bhnl;
+
+        // ─── Compare ─────────────────────────────────────────────────────
+        let diff: f32 = (grads.d_da_local_bhnl - oracle_bhnl)
+            .abs()
+            .max()
+            .into_scalar()
+            .elem();
+        assert!(
+            diff < 1e-3,
+            "d_da_local oracle identity violated; max abs diff = {diff}",
+        );
     }
 }
