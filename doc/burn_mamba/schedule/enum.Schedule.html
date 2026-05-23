@@ -6,21 +6,21 @@
 <h4 id="example"><a class="doc-anchor" href="#example">§</a>Example</h4>
 <ul>
 <li>virtual len = 8, real len = 3:<br />
-<code> →    →    →      →    →    →      →    →      </code>
+<code> →    →    →      →    →    →      →    →      </code><br />
 <code>(0⇒0, 1⇒1, 2⇒2), (3⇒0, 4⇒1, 5⇒2), (6⇒0, 7⇒1, ...)</code></li>
 </ul>
 </div><section id="variant.Stretched" class="variant"><a href="#variant.Stretched" class="anchor">§</a><h3 class="code-header">Stretched</h3></section><div class="docblock"><p>Fills virtual positions by stretching the real schedule.</p>
 <h4 id="example-1"><a class="doc-anchor" href="#example-1">§</a>Example</h4>
 <ul>
 <li>virtual len = 8, real len = 3:<br />
-<code> →    →    →      →    →    →      →    →      </code>
+<code> →    →    →      →    →    →      →    →      </code><br />
 <code>(0⇒0, 1⇒0, 2⇒0), (3⇒1, 4⇒1, 5⇒1), (6⇒2, 7⇒2, ...)</code></li>
 </ul>
 </div><section id="variant.Custom" class="variant"><a href="#variant.Custom" class="anchor">§</a><h3 class="code-header">Custom(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;)</h3></section><div class="docblock"><p>Fills virtual positions by referring to the index vector.</p>
 <h4 id="example-2"><a class="doc-anchor" href="#example-2">§</a>Example</h4>
 <ul>
 <li>virtual len = 8, real len = 3, custom = <code>[0, 1, 2, 2, 1, 0, 0, 0]</code>:<br />
-<code> →    →    →    →    →    →    →    →      </code>
+<code> →    →    →    →    →    →    →    →      </code><br />
 <code>(0⇒0, 1⇒1, 2⇒2, 3⇒2, 4⇒1, 5⇒0, 6⇒0, 7⇒0, ...)</code></li>
 </ul>
 </div></div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Schedule" class="impl"><a class="src rightside" href="../../src/burn_mamba/schedule.rs.html#27-35">Source</a><a href="#impl-Schedule" class="anchor">§</a><h3 class="code-header">impl <a class="enum" href="enum.Schedule.html" title="enum burn_mamba::schedule::Schedule">Schedule</a></h3></section></summary><div class="impl-items"><section id="method.real_idx" class="method"><a class="src rightside" href="../../src/burn_mamba/schedule.rs.html#28-34">Source</a><h4 class="code-header">pub fn <a href="#method.real_idx" class="fn">real_idx</a>(

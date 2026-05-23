@@ -9,7 +9,7 @@ reverse-direction (←), wrapping around for each schedule.</p>
 <h4 id="example"><a class="doc-anchor" href="#example">§</a>Example</h4>
 <ul>
 <li>virtual len = 10, real len = 4:<br />
-<code>  →    ←      →    ←        →    ←      →    ←        →    ←         </code>
+<code>  →    ←      →    ←        →    ←      →    ←        →    ←         </code><br />
 <code>[(0⇒0, 1⇒1), (2⇒2, 3⇒3)], [(4⇒0, 5⇒1), (6⇒2, 7⇒3)], [(8⇒0, 9⇒1), (...)]</code></li>
 </ul>
 </div><section id="variant.StridedStretched" class="variant"><a href="#variant.StridedStretched" class="anchor">§</a><h3 class="code-header">StridedStretched</h3></section><div class="docblock"><p>Use even virtual positions for straight-direction (→), and odd virtual positions for
@@ -17,7 +17,7 @@ reverse-direction (←), stretching for each schedule.</p>
 <h4 id="example-1"><a class="doc-anchor" href="#example-1">§</a>Example</h4>
 <ul>
 <li>virtual len = 10, real len = 4:<br />
-<code>  →    ←      →    ←      →    ←        →    ←      →    ←         </code>
+<code>  →    ←      →    ←      →    ←        →    ←      →    ←         </code><br />
 <code>[(0⇒0, 1⇒1), (2⇒0, 3⇒1), (4⇒0, 5⇒1)], [(6⇒2, 7⇒3), (8⇒2, 9⇒3), (...)]</code></li>
 </ul>
 </div><section id="variant.SymmetricCyclic" class="variant"><a href="#variant.SymmetricCyclic" class="anchor">§</a><h3 class="code-header">SymmetricCyclic</h3></section><div class="docblock"><p>Fills virtual positions by wrapping around the real schedule in a looping fashion,
@@ -25,7 +25,7 @@ replicating between the straight (→) and reverse (←) directions.</p>
 <h4 id="example-2"><a class="doc-anchor" href="#example-2">§</a>Example</h4>
 <ul>
 <li>virtual len = 10, real len = 4:<br />
-<code>  →    ←      →    ←      →    ←      →    ←        →    ←         </code>
+<code>  →    ←      →    ←      →    ←      →    ←        →    ←         </code><br />
 <code>[(0⇒0, 1⇒0), (2⇒1, 3⇒1), (4⇒2, 5⇒2), (6⇒3, 7⇒3)], [(8⇒0, 9⇒0), (...)]</code></li>
 </ul>
 </div><section id="variant.SymmetricStretched" class="variant"><a href="#variant.SymmetricStretched" class="anchor">§</a><h3 class="code-header">SymmetricStretched</h3></section><div class="docblock"><p>Fills virtual positions by stretching the real schedule, replicating between
@@ -33,14 +33,14 @@ the straight (→) and reverse (←) directions.</p>
 <h4 id="example-3"><a class="doc-anchor" href="#example-3">§</a>Example</h4>
 <ul>
 <li>virtual len = 10, real len = 4:<br />
-<code>  →    ←      →    ←       →    ←               →    ←        →    ←  </code>
+<code>  →    ←      →    ←       →    ←               →    ←        →    ←  </code><br />
 <code>[(0⇒0, 1⇒0), (2⇒0, 3⇒0)],[(4⇒1, 5⇒1), (...)], [(6⇒2, 7⇒2)], [(8⇒3, 9⇒3)]</code></li>
 </ul>
 </div><section id="variant.Custom" class="variant"><a href="#variant.Custom" class="anchor">§</a><h3 class="code-header">Custom(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>&gt;)</h3></section><div class="docblock"><p>Fills virtual positions by referring to the index vector.</p>
 <h4 id="example-4"><a class="doc-anchor" href="#example-4">§</a>Example</h4>
 <ul>
 <li>virtual len = 10, real len = 4, custom = <code>[0, 1, 2, 2, 1, 0, 0, 0, 3, 2]</code>:<br />
-<code>  →    ←        →    ←        →    ←        →    ←        →    ←           </code>
+<code>  →    ←        →    ←        →    ←        →    ←        →    ←           </code><br />
 <code>[(0⇒0, 1⇒1)], [(2⇒2, 3⇒2)], [(4⇒1, 5⇒0)], [(6⇒0, 7⇒0)], [(8⇒3, 9⇒2)], [(...)]</code></li>
 </ul>
 </div></div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-BidiSchedule" class="impl"><a class="src rightside" href="../../src/burn_mamba/schedule.rs.html#81-111">Source</a><a href="#impl-BidiSchedule" class="anchor">§</a><h3 class="code-header">impl <a class="enum" href="enum.BidiSchedule.html" title="enum burn_mamba::schedule::BidiSchedule">BidiSchedule</a></h3></section></summary><div class="impl-items"><section id="method.real_idx" class="method"><a class="src rightside" href="../../src/burn_mamba/schedule.rs.html#82-110">Source</a><h4 class="code-header">pub fn <a href="#method.real_idx" class="fn">real_idx</a>(
