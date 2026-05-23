@@ -46,7 +46,7 @@
 //!
 //! ## The Chunkwise SSD Algorithm
 //!
-//! See [`minimal`] for more information.
+//! See [`ssd::minimal`](crate::mamba2::ssd::minimal) for more information.
 //!
 //! ## Notation / Dimension Keys
 //!
@@ -102,7 +102,6 @@ use burn::{
 ///   (exploits tensor cores; linear in sequence length)
 /// - [`Self::step`]    — pure recurrent form for token-by-token decoding
 ///   (O(`nheads`·`per_head_dim`·`state_rank`) per step)
-/// ```
 #[derive(Module, Debug)]
 pub struct Mamba2<B: Backend> {
     /// Input projection: maps `d_model → d_inner + conv_dim + nheads`.
@@ -498,7 +497,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     ///    `Ā = exp(Δ · A)`;  `B̄ = Δ · B`.
     /// 5. **Padding**: sequence padding.
     /// 6. **SSD Algorithm**: chunkwise selective scan algorithm selection.
-    ///     See [Mamba2SsdPath](Mamba2SsdPath) for more info.
+    ///     See [`Mamba2SsdPath`] for more info.
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y) · σ(z)`.
     /// 8. **Out-projection**: `y → output`.
     ///

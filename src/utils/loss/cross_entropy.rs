@@ -2,7 +2,7 @@ use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};
 
-/// Configuration to create a [Cross-entropy loss](CrossEntropyLoss) using the [init function](CrossEntropyLossConfig::init).
+/// Configuration to create a [`CrossEntropyLoss`] using the [`CrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]
 pub struct CrossEntropyLossConfig {
     /// Treat the outputs as logits, applying log-softmax when computing the loss.
@@ -20,7 +20,7 @@ pub struct CrossEntropyLossConfig {
 }
 
 impl CrossEntropyLossConfig {
-    /// Initialize [Cross-entropy loss](CrossEntropyLoss).
+    /// Initialize [`CrossEntropyLoss`].
     pub fn init(&self) -> CrossEntropyLoss {
         CrossEntropyLoss {
             output_logits: self.output_logits,
@@ -31,7 +31,7 @@ impl CrossEntropyLossConfig {
 
 /// Calculate the cross-entropy loss from the output logits and the targets.
 ///
-/// Unlike the full [`CrossEntropyLoss`](super::CrossEntropyLoss), this variant accepts
+/// Unlike the full [`burn::nn::loss::CrossEntropyLoss`], this variant accepts
 /// floating-point targets (e.g. one-hot, soft label distributions, or un-normalized logits)
 /// rather than integer class indices, and omits padding, per-class weights, and label smoothing.
 ///

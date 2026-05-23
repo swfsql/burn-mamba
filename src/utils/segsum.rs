@@ -12,6 +12,7 @@ use burn::prelude::*;
 /// ```text
 ///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]   for i ≥ j  (lower triangle)
 ///   out[..., i, j] = -∞                        for i < j  (upper triangle)
+/// ```
 ///
 /// ## Implementation
 ///
@@ -25,7 +26,6 @@ use burn::prelude::*;
 ///
 /// The upper triangle is masked to -∞ so that `exp(segsum(...))` gives 0
 /// for non-causal positions (the strict upper triangle of L must be zero).
-/// ```
 pub fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tensor<B, D2> {
     assert_eq!(D + 1, D2);
 

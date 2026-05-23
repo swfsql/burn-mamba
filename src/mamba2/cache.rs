@@ -3,9 +3,9 @@
 //! This module defines the state that must be preserved between calls during
 //! autoregressive (token-by-token) generation.  During *training* or *prefill*
 //! the full sequence is available at once and the chunked SSD algorithm is used
-//! (see [`crate::mamba2::Mamba2::forward`]).  During *decoding* the model
+//! (see [`Mamba2::forward`]).  During *decoding* the model
 //! processes one token per step and the SSM operates in its pure recurrent
-//! form (see [`crate::mamba2::Mamba2::step`]):
+//! form (see [`Mamba2::step`]):
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ        (state update)
@@ -37,7 +37,7 @@ use burn::prelude::*;
 /// A collection of per-layer caches for a complete Mamba-2 network.
 ///
 /// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
-/// through every call to [`crate::layer::Mamba2Layers::step`].  Each element
+/// through every call to [`Mamba2Layers::step`].  Each element
 /// of `caches` corresponds to one (virtual) layer in the network.
 #[derive(Module, Debug)]
 pub struct Mamba2Caches<B: Backend> {
@@ -92,7 +92,7 @@ impl Mamba2CachesConfig {
 /// layer.
 ///
 /// Both tensors are updated in-place (via Burn's functional clone) at every
-/// call to [`crate::mamba2::Mamba2::step`].
+/// call to [`Mamba2::step`].
 #[derive(Module, Debug)]
 pub struct Mamba2Cache<B: Backend> {
     /// **Convolution rolling window.**
@@ -175,8 +175,8 @@ impl Mamba2CacheConfig {
     /// - The convolution cache represents "no previous tokens" (identity padding).
     /// - The SSM state represents `h₀ = 0` (zero initial condition), which is
     ///   the standard default.  Learnable initial state (if configured) are
-    ///   added on top of this inside [`crate::mamba2::Mamba2::forward`] /
-    ///   [`crate::mamba2::Mamba2::step`].
+    ///   added on top of this inside [`Mamba2::forward`] /
+    ///   [`Mamba2::step`].
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Cache<B> {
         let conv_bvk = Tensor::zeros(
             Shape::new([self.batch, self.conv_dim, self.conv_kernel]),

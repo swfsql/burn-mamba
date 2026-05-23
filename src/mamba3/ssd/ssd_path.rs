@@ -14,9 +14,9 @@ pub enum Mamba3SsdPath {
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.
-    /// See [`Mamba3::ssd_minimal`] for more info.
+    /// See [`Mamba3SsdInput::ssd_minimal`] for more info.
     ///
-    /// For training, you may prefer using [SerialRecalculated](Self::SerialRecalculated) instead.
+    /// For training, you may prefer using [`Self::SerialRecalculated`] instead.
     ///
     /// Based on `/mamba_ssm/modules/ssd_minimal.py` from the `state-spaces/mamba` github reference,
     /// adapted to Mamba-3.
@@ -26,9 +26,9 @@ pub enum Mamba3SsdPath {
     /// (Hybrid) Serial SSD.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba3::ssd_serial`] for more info.  
+    /// See [`Mamba3SsdInput::ssd_serial`] for more info.  
     /// For the backward operation, this relies on autodiff.
-    /// For a custom backwards that saves memory, see [SerialRecalculated](Self::SerialRecalculated).
+    /// For a custom backwards that saves memory, see [`Self::SerialRecalculated`].
     ///
     /// Based on 5 kernels on `/mamba_ssm/ops/triton/`, adapted to mamba-3,
     /// from the `state-spaces/mamba` github reference:
@@ -42,9 +42,9 @@ pub enum Mamba3SsdPath {
     /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba3::ssd_serial_recalculated`] for more info.  
+    /// See [`Mamba3SsdInput::ssd_serial_recalculated`] for more info.  
     /// Contains a custom backward operation that saves memory.
-    /// For an autodiff backwards, see [Serial](Self::Serial).
+    /// For an autodiff backwards, see [`Self::Serial`].
     ///
     /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py`, adapted to Mamba-3,
     /// from the `state-spaces/mamba` github reference.
@@ -60,37 +60,37 @@ pub struct Mamba3SsdInput<B: Backend> {
     /// Value tensor, already scaled by trapezoidal coefficient (γ or β).
     ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]
+    /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     pub v_bnlmhp: Tensor<B, 6>,
 
     /// Pre-combined log-decay `Δ·A` (negative).
     ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, nheads]
+    /// - `[batch, nchunks, chunk_len, nheads]`
     pub da_bnlh: Tensor<B, 4>,
 
     /// Key/B tensor: QK-normed, RoPE-applied, bias-added, expanded to per-head, per-rank.
     ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]
+    /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     pub b_bnlmhr: Tensor<B, 6>,
 
     /// Query/C tensor: same processing as B.
     ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]
+    /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     pub c_bnlmhr: Tensor<B, 6>,
 
     /// Initial SSM hidden state.
     ///
     /// # Shape
-    /// - [batch, nheads, per_head_dim, state_rank]
+    /// - `[batch, nheads, per_head_dim, state_rank]`
     pub initial_state_bhpr: Tensor<B, 4>,
 
     /// Optional learnable initial state (broadcast over batch).
     ///
     /// # Shape
-    /// - [nheads, per_head_dim, state_rank]
+    /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
@@ -119,7 +119,7 @@ impl Mamba3SsdPath {
 
     /// Optimal Minimal variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
         let optim = Self::optimal_default(state_rank, per_head_dim);
         Self::Minimal(Some(optim))
@@ -127,14 +127,14 @@ impl Mamba3SsdPath {
 
     /// Optimal Minimal variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn core_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::core_optimal(block.state_rank, block.per_head_dim())
     }
 
     /// Optimal Serial variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn chunked_optimal(state_rank: usize, per_head_dim: usize) -> Self {
         let optim = Self::optimal_default(state_rank, per_head_dim);
         Self::Serial(Some(optim))
@@ -142,14 +142,14 @@ impl Mamba3SsdPath {
 
     /// Optimal Serial variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn chunked_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::chunked_optimal(block.state_rank, block.per_head_dim())
     }
 
     /// Optimal Serial variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn chunked_recalculated_optimal(state_rank: usize, per_head_dim: usize) -> Self {
         let optim = Self::optimal_default(state_rank, per_head_dim);
         Self::SerialRecalculated(Some(optim))
@@ -157,7 +157,7 @@ impl Mamba3SsdPath {
 
     /// Optimal Serial Recalculated variant.
     ///
-    /// See [optimal_default](Self::optimal_default) for more info.
+    /// See [`Self::optimal_default`] for more info.
     pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
         Self::chunked_recalculated_optimal(block.state_rank, block.per_head_dim())
     }

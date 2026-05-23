@@ -23,8 +23,8 @@ impl MseLoss {
     ///
     /// # Shapes
     ///
-    /// - logits: [batch_size, num_targets]
-    /// - targets: [batch_size, num_targets]
+    /// - logits: `[batch_size, num_targets]`
+    /// - targets: `[batch_size, num_targets]`
     pub fn forward<B: Backend>(
         &self,
         logits: Tensor<B, 2>,

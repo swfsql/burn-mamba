@@ -25,10 +25,10 @@ pub struct Mamba1<B: Backend> {
     /// Output channel: d_inner.
     pub dt_proj: Linear<B>,
 
-    /// Dims: [d_inner, d_state].
+    /// Dims: `[d_inner, d_state]`.
     pub a_log: Param<Tensor<B, 2>>,
 
-    /// Dims: [d_inner].
+    /// Dims: `[d_inner]`.
     pub d: Param<Tensor<B, 1>>,
 
     /// Input channel: d_inner.
@@ -190,8 +190,8 @@ impl<B: Backend> Mamba1<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output [batch, sequence, d_model]
+    ///   - Input `[batch, sequence, d_model]`
+    ///   - Output `[batch, sequence, d_model]`
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
@@ -252,8 +252,8 @@ impl<B: Backend> Mamba1<B> {
     }
 
     /// # Shapes
-    ///   - Input [batch, sequence, d_inner]
-    ///   - Output [batch, sequence, d_inner]
+    ///   - Input `[batch, sequence, d_inner]`
+    ///   - Output `[batch, sequence, d_inner]`
     pub fn ss(&self, u: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch, sequence, d_inner] = u.dims();
         let [_d_inner, d_state] = self.a_log.dims();
@@ -308,13 +308,13 @@ impl<B: Backend> Mamba1<B> {
     /// - run_SSM(A, B, C, u) from The Annotated S4.
     ///
     /// # Shapes
-    ///   - Input delta [sequence, batch, d_inner]
-    ///   - Input a [d_inner, d_state]
-    ///   - Input b [batch, sequence, d_state]
-    ///   - Input c [sequence, batch, d_state]
-    ///   - Input d [d_inner]
-    ///   - Input u [batch, sequence, d_inner]
-    ///   - Output [batch, sequence, d_inner]
+    ///   - Input delta `[sequence, batch, d_inner]`
+    ///   - Input a `[d_inner, d_state]`
+    ///   - Input b `[batch, sequence, d_state]`
+    ///   - Input c `[sequence, batch, d_state]`
+    ///   - Input d `[d_inner]`
+    ///   - Input u `[batch, sequence, d_inner]`
+    ///   - Output `[batch, sequence, d_inner]`
     pub fn selective_scan(
         delta: Tensor<B, 3>,
         a: Tensor<B, 2>,
@@ -429,8 +429,8 @@ mod step {
 
     impl<B: Backend> Mamba1<B> {
         /// # Shapes
-        ///   - Input [batch, d_model]
-        ///   - Output [batch, d_model]
+        ///   - Input `[batch, d_model]`
+        ///   - Output `[batch, d_model]`
         pub fn step(
             &self,
             x: Tensor<B, 2>,
@@ -515,8 +515,8 @@ mod step {
         /// - run_SSM(A, B, C, u) from The Annotated S4.
         ///
         /// # Shapes
-        ///   - Input u [batch, d_inner]
-        ///   - Output [batch, d_inner]
+        ///   - Input u `[batch, d_inner]`
+        ///   - Output `[batch, d_inner]`
         pub fn ss_step(
             &self,
             u: Tensor<B, 2>,
@@ -565,13 +565,13 @@ mod step {
         /// - run_SSM(A, B, C, u) from The Annotated S4.
         ///
         /// # Shapes
-        ///   - Input delta [batch, d_inner]
-        ///   - Input a [d_inner, d_state]
-        ///   - Input b [batch, d_state]
-        ///   - Input c [batch, d_state]
-        ///   - Input d [d_inner]
-        ///   - Input u [batch, d_inner]
-        ///   - Output [batch, d_inner]
+        ///   - Input delta `[batch, d_inner]`
+        ///   - Input a `[d_inner, d_state]`
+        ///   - Input b `[batch, d_state]`
+        ///   - Input c `[batch, d_state]`
+        ///   - Input d `[d_inner]`
+        ///   - Input u `[batch, d_inner]`
+        ///   - Output `[batch, d_inner]`
         pub fn selective_scan_step(
             delta: Tensor<B, 2>,
             a: Tensor<B, 2>,

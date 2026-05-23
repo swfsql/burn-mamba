@@ -113,8 +113,8 @@ impl<B: Backend> Mamba2SsdInput<B> {
 /// Based on the Kernel 1 Triton reference `_chunk_cumsum_fwd_kernel` (`ssd_chunk_state.py`).
 ///
 /// Returns:
-/// - da_cumsum_bhnl [used in K3+K5][*] - intra-chunk cumsum.
-/// - da_chunk_end_bhn [used in K4][omitted][*] - last da_cumsum per chunk.
+/// - da_cumsum_bhnl `[used in K3+K5][*]` - intra-chunk cumsum.
+/// - da_chunk_end_bhn `[used in K4][omitted][*]` - last da_cumsum per chunk.
 pub fn k1_ssd_chunk_cumsum<B: Backend>(
     dt_discretized_bhnl: Tensor<B, 4>,
     a_decay_h: Tensor<B, 1>,
@@ -146,7 +146,7 @@ pub fn k1_ssd_chunk_cumsum<B: Backend>(
 /// Based on the Kernel 2 Triton reference `_bmm_chunk_fwd_kernel` (`ssd_bmm.py`).
 ///
 /// Returns:
-/// - cb_bnhll [used in K5][!].
+/// - cb_bnhll `[used in K5][!]`.
 pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> Tensor<B, 5> {
     let [batch, nchunks, chunk_len, nheads, _state_rank] = c_bnlhr.dims();
 
@@ -167,8 +167,8 @@ pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> T
 /// Based on the Kernel 3 Triton reference `_chunk_state_fwd_kernel` (`ssd_chunk_state.py`).
 ///
 /// Returns:
-/// - cb_bngll [used in K5][!] - state assuming zero initial state at each chunk boundary.
-/// - b_bar_scale_bhnl [*] - intermediary
+/// - cb_bngll `[used in K5][!]` - state assuming zero initial state at each chunk boundary.
+/// - b_bar_scale_bhnl `[*]` - intermediary
 pub fn k3_ssd_chunk_state<B: Backend>(
     x_bnlhp: Tensor<B, 5>,
     b_bnlhr: Tensor<B, 5>,
@@ -250,8 +250,8 @@ pub fn k3_ssd_chunk_state<B: Backend>(
 /// Based on the Kernel 4 Triton reference `_state_passing_fwd_kernel` (`ssd_state_passing.py`).
 ///
 /// Returns:
-/// - chunk_input_state_bnhpr [used in K5][!].
-/// - final_state_bhpr [final output].
+/// - chunk_input_state_bnhpr `[used in K5][!]`.
+/// - final_state_bhpr `[final output]`.
 pub fn k4_ssd_state_passing<B: Backend>(
     intra_chunk_state_bnhpr: Tensor<B, 5>,
     da_chunk_end_bhn: Tensor<B, 3>,
@@ -325,7 +325,7 @@ pub fn k4_ssd_state_passing<B: Backend>(
 /// Based on the Kernel 5 Triton reference `_chunk_scan_fwd_kernel` (`ssd_chunk_scan.py`).
 ///
 /// Returns:
-/// - y_bnlhp [final output]
+/// - y_bnlhp `[final output]`
 pub fn k5_ssd_chunk_scan<B: Backend>(
     da_cumsum_bhnl: Tensor<B, 4>,
     dt_discretized_bhnl: Tensor<B, 4>,

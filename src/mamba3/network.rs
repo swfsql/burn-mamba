@@ -56,7 +56,7 @@ use burn::prelude::*;
 
 /// A complete Mamba-3 language model.
 ///
-/// See the [module-level documentation](self) for an overview of the
+/// See the [`crate::mamba3::network`] for an overview of the
 /// architecture and the two execution modes.
 #[derive(Module, Debug)]
 pub struct Mamba3Network<B: Backend> {

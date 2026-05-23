@@ -1,8 +1,8 @@
 //! Utilizes Mamba1 and other Modules to build a Mamba1 model capable of utilizing the state-spaces/mamba-130m text prediction models.
 //!
 //! References:
-//! - https://github.com/huggingface/candle/blob/fd7c8565646039e35925b8730d27ddad195d7e73/candle-examples/examples/mamba-minimal/
-//! - https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/
+//! - [huggingface/candle](https://github.com/huggingface/candle/blob/fd7c8565646039e35925b8730d27ddad195d7e73/candle-examples/examples/mamba-minimal/)
+//! - [johnma2006/mamba-minimal](https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/)
 
 use crate::mamba1::prelude::*;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
@@ -78,8 +78,8 @@ impl<B: Backend> Mamba1Network<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
-    ///   - Input [batch, sequence]
-    ///   - Output [batch, sequence, d_model]
+    ///   - Input `[batch, sequence]`
+    ///   - Output `[batch, sequence, d_model]`
     pub fn forward(&self, x: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
@@ -110,8 +110,8 @@ impl<B: Backend> Mamba1Network<B> {
     /// See also [`Self::forward`].
     ///
     /// # Shapes
-    ///   - Input [batch]
-    ///   - Output [batch, d_model]
+    ///   - Input `[batch]`
+    ///   - Output `[batch, d_model]`
     pub fn step(
         &self,
         x: Tensor<B, 1, Int>,

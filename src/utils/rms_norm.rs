@@ -4,7 +4,7 @@ use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::{DType, f16};
 
-/// Configuration to create a [RmsNorm](RmsNorm) layer.
+/// Configuration to create a [`RmsNorm`] layer.
 #[derive(Config, Debug)]
 pub struct RmsNormConfig {
     /// The size of the input features.
@@ -12,7 +12,7 @@ pub struct RmsNormConfig {
 }
 
 impl RmsNormConfig {
-    /// Initialize a new [RmsNorm](RmsNorm) module.
+    /// Initialize a new [`RmsNorm`] module.
     pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNorm<B> {
         let gamma = Initializer::Ones.init([self.d_model], device);
         RmsNorm { gamma }
@@ -28,7 +28,7 @@ impl RmsNormConfig {
 /// - `gamma` is the learnable weight
 /// - `mean` is the mean operation
 ///
-/// Should be created using the [RmsNormConfig](RmsNormConfig) configuration.
+/// Should be created using the [`RmsNormConfig`] configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
 pub struct RmsNorm<B: Backend> {

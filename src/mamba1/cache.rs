@@ -8,10 +8,10 @@ use burn::{
 #[derive(Module, Debug)]
 pub struct Mamba1Cache<B: Backend> {
     /// # Shape
-    /// [batch, d_inner, d_conv]
+    /// `[batch, d_inner, d_conv]`
     pub conv: Param<Tensor<B, 3>>,
     /// # Shape
-    /// [batch, d_inner, d_state]
+    /// `[batch, d_inner, d_state]`
     pub ssm: Param<Tensor<B, 3>>,
 }
 
@@ -50,7 +50,7 @@ impl Mamba1CacheConfig {
 #[derive(Module, Debug)]
 pub struct Mamba1Caches<B: Backend> {
     /// # Shape
-    /// [n_layers]
+    /// `[n_layers]`
     pub caches: Vec<Mamba1Cache<B>>,
 }
 

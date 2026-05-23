@@ -86,7 +86,7 @@
 //!
 //! Implementation note: the trapezoidal recurrence is computed by splitting it
 //! into a γ-SSD (current-token contributions) and a β-SSD (previous-token
-//! contributions); see [`ssd::ssd_path`]. RoPE is applied to B and C before the
+//! contributions); see [`crate::mamba3::ssd::ssd_path`]. RoPE is applied to B and C before the
 //! SSD calls (see [`apply_rope`]), and MIMO expansion happens by augmenting the
 //! V tensor with the per-rank `mimo_x` projection.
 //!
@@ -700,25 +700,18 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
 
         // [batch, sequence, *] split along channel dim.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
+        #[rustfmt::skip]
         let [
-            z_bsi,
-            x_bsi,
-            b_raw_bsMGR,
-            c_raw_bsMGR,
-            dd_dt_bsh,
-            dd_A_raw_bsh,
-            lambda_raw_bsh,
-            theta_bsa,
+                z_bsi, x_bsi,
+                b_raw_bsMGR, c_raw_bsMGR,
+                dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
+                theta_bsa
         ] = crate::utils::split::split_into(
             proj_bsd,
             [
-                d_inner,
-                d_inner,
-                bc_size,
-                bc_size,
-                nheads,
-                nheads,
-                nheads,
+                d_inner, d_inner,
+                bc_size, bc_size,
+                nheads, nheads, nheads,
                 num_rope_angles,
             ],
             2,
@@ -863,15 +856,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
+        #[rustfmt::skip]
         let (x_gamma_bShp, x_beta_bShp, da_bSh, b_bSmhr, b_prev_bSmhr, c_bSmhr) = if pad == 0 {
-            (
-                x_gamma_bshp,
-                x_beta_bshp,
-                da_bsh,
-                b_bsmhr,
-                b_prev_bsmhr,
-                c_bsmhr,
-            )
+            (x_gamma_bshp, x_beta_bshp, da_bsh, b_bsmhr, b_prev_bsmhr, c_bsmhr)
         } else {
             let pad_bShp = Tensor::zeros([batch, pad, nheads, per_head_dim], &device);
             let pad_bSh = Tensor::zeros([batch, pad, nheads], &device);
@@ -1085,25 +1072,18 @@ mod step {
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
+            #[rustfmt::skip]
             let [
-                z_bi,
-                x_bi,
-                b_raw_bMGR,
-                c_raw_bMGR,
-                dd_dt_bh,
-                dd_a_raw_bh,
-                lambda_raw_bh,
-                theta_ba,
+                    z_bi, x_bi,
+                    b_raw_bMGR, c_raw_bMGR,
+                    dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
+                    theta_ba,
             ] = crate::utils::split::split_into(
                 proj_bd,
                 [
-                    d_inner,
-                    d_inner,
-                    bc_size,
-                    bc_size,
-                    nheads,
-                    nheads,
-                    nheads,
+                    d_inner, d_inner,
+                    bc_size, bc_size,
+                    nheads, nheads, nheads,
                     num_rope_angles,
                 ],
                 1,

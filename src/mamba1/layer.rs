@@ -32,8 +32,8 @@ impl<B: Backend> Mamba1Layer<B> {
     /// See also [`Self::step`].
     ///
     /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output [batch, sequence, d_model]
+    ///   - Input `[batch, sequence, d_model]`
+    ///   - Output `[batch, sequence, d_model]`
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch, sequence, d_model] = x.dims();
 
@@ -51,8 +51,8 @@ impl<B: Backend> Mamba1Layer<B> {
     /// See also [`Self::forward`].
     ///
     /// # Shapes
-    ///   - Input [batch, d_model]
-    ///   - Output [batch, d_model]
+    ///   - Input `[batch, d_model]`
+    ///   - Output `[batch, d_model]`
     pub fn step(&self, x: Tensor<B, 2>, cache: Mamba1Cache<B>) -> (Tensor<B, 2>, Mamba1Cache<B>) {
         let [batch, d_model] = x.dims();
 

@@ -7,7 +7,7 @@ impl<B: Backend> Mamba3SsdInput<B> {
     /// MIMO-first (Hybrid) Serial SSD.
     ///
     /// Implements K1-K5 with a sequential loop (K4) for the inter-chunk scan instead
-    /// of the quadratic segsum approach in [`ssd_minimal`](Self::ssd_minimal).
+    /// of the quadratic segsum approach in [`Self::ssd_minimal`].
     /// This is more memory-efficient for long sequences with many chunks.
     ///
     /// SISO (mimo_rank=1) is the special case where the fused length equals the chunk length.

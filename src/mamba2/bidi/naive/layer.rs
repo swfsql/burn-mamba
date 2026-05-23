@@ -10,12 +10,12 @@ pub struct Mamba2BidiLayers<B: Backend> {
     #[module(skip)]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
     /// # Shape
-    /// - [n_real_layers]
+    /// - `[n_real_layers]`
     pub real_layers: Vec<Mamba2Layer<B>>,
     pub ignore_first_residual: bool,
     pub ignore_last_residual: bool,
     /// # Shape
-    /// - [n_real_layers / 2]
+    /// - `[n_real_layers / 2]`
     pub outputs_merge: Vec<OutputMerge<B>>,
 }
 
@@ -31,7 +31,7 @@ pub struct Mamba2BidiLayersConfig {
     pub ignore_last_residual: bool,
 
     /// # Shape
-    /// - [n_real_layers / 2]
+    /// - `[n_real_layers / 2]`
     pub outputs_merge: Vec<OutputMergeConfig>,
 }
 
@@ -64,8 +64,8 @@ impl Mamba2BidiLayersConfig {
 
 impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
     /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output [batch, sequence, d_model]
+    ///   - Input `[batch, sequence, d_model]`
+    ///   - Output `[batch, sequence, d_model]`
     pub fn forward(
         &self,
         mut x: Tensor<B, 3>,
@@ -213,8 +213,8 @@ impl Mamba2BidiLayerPairConfig {
 
 impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayerPair<B> {
     /// # Shapes
-    ///   - Input [batch, sequence, d_model]
-    ///   - Output.0 [batch, sequence, d_model]
+    ///   - Input `[batch, sequence, d_model]`
+    ///   - Output.0 `[batch, sequence, d_model]`
     pub fn forward(
         &self,
         x: Tensor<B, 3>,

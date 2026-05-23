@@ -18,7 +18,7 @@ pub enum Schedule {
     /// Fills virtual positions by referring to the index vector.
     ///
     /// # Example
-    /// - virtual len = 8, real len = 3, custom = [0, 1, 2, 2, 1, 0, 0, 0]:  
+    /// - virtual len = 8, real len = 3, custom = `[0, 1, 2, 2, 1, 0, 0, 0]`:  
     ///   `  →    →    →    →    →    →    →    →       `
     ///   `(0⇒0, 1⇒1, 2⇒2, 3⇒2, 4⇒1, 5⇒0, 6⇒0, 7⇒0, ...)`
     Custom(Vec<usize>),
@@ -72,7 +72,7 @@ pub enum BidiSchedule {
     /// Fills virtual positions by referring to the index vector.
     ///
     /// # Example
-    /// - virtual len = 10, real len = 4, custom = [0, 1, 2, 2, 1, 0, 0, 0, 3, 2]:  
+    /// - virtual len = 10, real len = 4, custom = `[0, 1, 2, 2, 1, 0, 0, 0, 3, 2]`:  
     ///   `   →    ←        →    ←        →    ←        →    ←        →    ←            `
     ///   `[(0⇒0, 1⇒1)], [(2⇒2, 3⇒2)], [(4⇒1, 5⇒0)], [(6⇒0, 7⇒0)], [(8⇒3, 9⇒2)], [(...)]`
     Custom(Vec<usize>),

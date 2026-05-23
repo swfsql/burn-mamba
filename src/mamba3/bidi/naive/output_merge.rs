@@ -10,14 +10,14 @@ pub struct NoOp;
 pub enum OutputMerge<B: Backend> {
     Mean(NoOp),
     /// # Shape
-    /// - [2 * d_model, d_model]
+    /// - `[2 * d_model, d_model]`
     CatLinear(Linear<B>),
 }
 
 /// # Shapes
-///   - Input straight [batch_size, sequence_len, d_model]
-///   - Input reverse [batch_size, sequence_len, d_model]
-///   - Output [batch_size, sequence_len, d_model]
+///   - Input straight `[batch_size, sequence_len, d_model]`
+///   - Input reverse `[batch_size, sequence_len, d_model]`
+///   - Output `[batch_size, sequence_len, d_model]`
 impl<B: Backend> OutputMerge<B> {
     pub fn forward(&self, straight: Tensor<B, 3>, reverse: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, sequence_len, d_model] = straight.dims();

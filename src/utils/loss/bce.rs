@@ -2,7 +2,7 @@ use crate::utils::log_sigmoid::log_sigmoid;
 use burn::module::Module;
 use burn::prelude::*;
 
-/// Configuration to create a [Binary Cross-entropy loss](BinaryCrossEntropyLoss) using the [init function](BinaryCrossEntropyLossConfig::init).
+/// Configuration to create a [`BinaryCrossEntropyLoss`] using the [`BinaryCrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]
 pub struct BinaryCrossEntropyLossConfig {
     /// Treat the inputs as logits, applying a sigmoid activation when computing the loss.
@@ -11,7 +11,7 @@ pub struct BinaryCrossEntropyLossConfig {
 }
 
 impl BinaryCrossEntropyLossConfig {
-    /// Initialize [Binary Cross-entropy loss](BinaryCrossEntropyLoss).
+    /// Initialize [`BinaryCrossEntropyLoss`].
     pub fn init(&self) -> BinaryCrossEntropyLoss {
         BinaryCrossEntropyLoss {
             logits: self.logits,

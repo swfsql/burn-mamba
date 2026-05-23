@@ -5,7 +5,7 @@ use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::{DType, f16};
 
-/// Configuration to create a [RmsNormGated](RmsNormGated) layer.
+/// Configuration to create a [`RmsNormGated`] layer.
 #[derive(Config, Debug)]
 pub struct RmsNormGatedConfig {
     /// The size of the input features.
@@ -20,7 +20,7 @@ pub struct RmsNormGatedConfig {
 }
 
 impl RmsNormGatedConfig {
-    /// Initialize a new [RmsNormGated](RmsNormGated) module.
+    /// Initialize a new [`RmsNormGated`] module.
     pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNormGated<B> {
         // assert!(self.epsilon > 0.0, "epsilon must be positive.");
 
@@ -47,7 +47,7 @@ impl RmsNormGatedConfig {
 /// - `mean` is the mean operation
 /// - `eps` is a small value to avoid division by zero.
 ///
-/// Should be created using the [RmsNormGatedConfig](RmsNormGatedConfig) configuration.
+/// Should be created using the [`RmsNormGatedConfig`] configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
 pub struct RmsNormGated<B: Backend> {

@@ -17,7 +17,7 @@ jobs:
     build:
         runs-on: ubuntu-latest
         permissions:
-          contents: write
+            contents: write
         steps:
             - uses: actions/checkout@v4
 
@@ -27,22 +27,22 @@ jobs:
 
             # Runs some Rust-related caching
             - uses: Swatinem/rust-cache@v2
-            
+
             - name: Doc build
               uses: actions-rs/cargo@v1
               with:
-                command: doc
-                args: --all --no-deps
-            
+                  command: doc
+                  args: --all --no-deps --document-private-items
+
             - name: Prepare Doc deploy
               run: |
-                mkdir -p publish/
-                cp -r ./target/doc/ publish/
-                
+                  mkdir -p publish/
+                  cp -r ./target/doc/ publish/
+
             - name: Doc deploy
               uses: peaceiris/actions-gh-pages@v3
               with:
-                personal_token: ${{ secrets.GITHUB_TOKEN }}
-                publish_branch: gh-pages
-                publish_dir: ./publish
-                keep_files: false
+                  personal_token: ${{ secrets.GITHUB_TOKEN }}
+                  publish_branch: gh-pages
+                  publish_dir: ./publish
+                  keep_files: false
