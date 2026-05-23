@@ -1006,6 +1006,10 @@ mod tests {
     /// across two runs that should be mathematically equivalent.
     struct RunGrads {
         out: Tensor<InnerB, 3>,
+        /// Final convolution window from the returned cache.
+        final_conv: Tensor<InnerB, 3>,
+        /// Final SSM hidden state from the returned cache.
+        final_ssm: Tensor<InnerB, 4>,
         d_input: Tensor<InnerB, 3>,
         d_in_proj_w: Tensor<InnerB, 2>,
         d_conv1d_w: Tensor<InnerB, 3>,
@@ -1016,6 +1020,65 @@ mod tests {
         d_out_proj_w: Tensor<InnerB, 2>,
     }
 
+    /// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
+    /// from the output **and** the final cache, so the backward pass exercises
+    /// both the output and the state path.
+    struct Heads {
+        out: Tensor<InnerB, 3>,
+        conv: Tensor<InnerB, 3>,
+        ssm: Tensor<InnerB, 4>,
+    }
+
+    /// Build the initial cache passed to both `forward` and the `step`
+    /// unrolling. With `random = false` it is zero (the standard fresh start);
+    /// with `random = true` it holds random values, exercising parity from an
+    /// arbitrary initial state (conv window + SSM hidden state).
+    fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cache<B> {
+        let device: Device = Default::default();
+        let conv_dim = cfg.conv_dim();
+        let conv_kernel = cfg.conv_kernel;
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let (conv, ssm) = if random {
+            let dist = Distribution::Normal(0.0, 1.0);
+            (
+                Tensor::<InnerB, 3>::random([batch, conv_dim, conv_kernel], dist, &device),
+                Tensor::<InnerB, 4>::random(
+                    [batch, nheads, per_head_dim, state_rank],
+                    dist,
+                    &device,
+                ),
+            )
+        } else {
+            (
+                Tensor::<InnerB, 3>::zeros([batch, conv_dim, conv_kernel], &device),
+                Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], &device),
+            )
+        };
+        Mamba2Cache {
+            conv_bvk: Tensor::from_inner(conv),
+            ssm_bhpr: Tensor::from_inner(ssm),
+        }
+    }
+
+    /// Compare the output and final cache (conv window + SSM state) of two runs.
+    fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
+        use crate::utils::test_helpers::max_abs_diff;
+        let d_out = max_abs_diff(a.out.clone(), b.out.clone());
+        let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
+        let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
+        assert!(d_out < tol, "{label}: output max abs diff = {d_out:.6} (tol {tol})");
+        assert!(
+            d_conv < tol,
+            "{label}: final conv window max abs diff = {d_conv:.6} (tol {tol})"
+        );
+        assert!(
+            d_ssm < tol,
+            "{label}: final SSM state max abs diff = {d_ssm:.6} (tol {tol})"
+        );
+    }
+
     /// Run a closure that produces an output tensor from a model and an input
     /// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
     /// scalar loss with a fixed (non-tracked) random "head" and return the
@@ -1023,18 +1086,28 @@ mod tests {
     fn run_with_grads(
         model: &Mamba2<B>,
         input: &Param<Tensor<B, 3>>,
-        head: &Tensor<InnerB, 3>,
-        forward: impl FnOnce(&Mamba2<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+        heads: &Heads,
+        forward: impl FnOnce(&Mamba2<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba2Cache<B>),
     ) -> RunGrads {
-        let out = forward(model, input.val());
+        let (out, cache) = forward(model, input.val());
         let out_inner = out.clone().inner();
+        let conv = cache.conv_bvk;
+        let ssm = cache.ssm_bhpr;
+        let final_conv = conv.clone().inner();
+        let final_ssm = ssm.clone().inner();
 
-        let head = Tensor::from_inner(head.clone());
-        let loss = (out * head).sum();
+        // Loss couples the output and the final cache (each via its own random
+        // head) so parameter gradients reflect both the output and state paths.
+        let out_head = Tensor::from_inner(heads.out.clone());
+        let conv_head = Tensor::from_inner(heads.conv.clone());
+        let ssm_head = Tensor::from_inner(heads.ssm.clone());
+        let loss = (out * out_head).sum() + (conv * conv_head).sum() + (ssm * ssm_head).sum();
         let grads = loss.backward();
 
         RunGrads {
             out: out_inner,
+            final_conv,
+            final_ssm,
             d_input: input.val().grad(&grads).expect("grad input"),
             d_in_proj_w: model
                 .in_proj
@@ -1108,34 +1181,56 @@ mod tests {
         Param::from_tensor(Tensor::from_inner(input.clone()))
     }
 
-    fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
+    /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
+    /// token-by-token from the **same** initial cache. Outputs, the final cache
+    /// (conv window + SSM state), and parameter gradients must all agree up to
+    /// float-summation-order noise.
+    ///
+    /// With `random_init = true` the shared initial cache is random rather than
+    /// zero. Parity from an arbitrary initial state subsumes the chunked-prefill
+    /// (split-vs-full) guarantee: if `forward` from any state matches the
+    /// recurrent unrolling from that same state — outputs *and* final cache —
+    /// then feeding a `forward`-produced cache back in continues correctly.
+    fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath, random_init: bool) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
+        // seq_len >= conv_kernel so the final conv window is fully determined by
+        // the sequence (the initial window is flushed out), keeping the window
+        // comparison well-defined for both zero and random init.
         let seq_len = 5;
         let d_model = cfg.d_model;
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            conv: Tensor::<InnerB, 3>::random(
+                [batch, cfg.conv_dim(), cfg.conv_kernel],
+                normal,
+                &device,
+            ),
+            ssm: Tensor::<InnerB, 4>::random(
+                [batch, cfg.nheads(), cfg.per_head_dim, cfg.state_rank],
+                normal,
+                &device,
+            ),
+        };
+
+        let init_cache = build_init_cache(&cfg, batch, random_init);
 
         let input_fwd = param_input(&input);
-        let r_fwd = run_with_grads(&model, &input_fwd, &head, |m, x| {
-            let (out, _) = m.forward(x, None, ssd_path.clone());
-            out
+        let cache_fwd = init_cache.clone();
+        let path_fwd = ssd_path.clone();
+        let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
+            m.forward(x, Some(cache_fwd), path_fwd)
         });
 
         let input_step = param_input(&input);
-        let r_step = run_with_grads(&model, &input_step, &head, |m, x| {
-            let mut cache: Option<Mamba2Cache<B>> = None;
+        let cache_step = init_cache;
+        let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
+            let mut cache: Option<Mamba2Cache<B>> = Some(cache_step);
             let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
             for t in 0..seq_len {
                 let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
@@ -1143,207 +1238,127 @@ mod tests {
                 cache = Some(new_cache);
                 outs.push(out_t);
             }
-            Tensor::stack(outs, 1)
+            (Tensor::stack(outs, 1), cache.unwrap())
         });
 
-        // ── Forward agreement (existing check) ───────────────────────────
-        let diff = (r_fwd.out.clone() - r_step.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            diff < 1e-4,
-            "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
-        );
-
-        // ── Gradient agreement ───────────────────────────────────────────
-        // step() and forward() are different reductions of the same SSM,
-        // so their per-parameter gradients should also agree, modulo
-        // float-summation order noise.
+        assert_outputs_match("step vs forward", &r_fwd, &r_step, 1e-4);
+        // step() and forward() are different reductions of the same SSM, so
+        // their per-parameter gradients should also agree, modulo float-
+        // summation order noise.
         check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
+    }
+
+    fn cfg_ngroups2() -> Mamba2Config {
+        Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2)
+    }
+
+    fn cfg_norm_before_gate() -> Mamba2Config {
+        Mamba2Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_is_norm_before_gate(true)
     }
 
     #[test]
     fn step_matches_forward() {
-        run_step_matches_forward(small_config(), Mamba2SsdPath::Minimal(Some(4)));
+        run_step_matches_forward(small_config(), Mamba2SsdPath::Minimal(Some(4)), false);
+    }
+
+    #[test]
+    fn step_matches_forward_random_init() {
+        run_step_matches_forward(small_config(), Mamba2SsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
     fn step_matches_forward_ngroups2() {
-        let cfg = Mamba2Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_step_matches_forward(cfg, Mamba2SsdPath::Minimal(Some(4)));
-    }
-
-    /// forward(full) ≡ forward(prefix) then forward(suffix, cache_from_prefix).
-    ///
-    /// Verifies stateful chunked-prefill: the convolution window carried in the
-    /// cache must replay correctly at the start of the second segment.
-    fn run_split_matches_full(cfg: Mamba2Config, ssd_path: Mamba2SsdPath) {
-        let device: Device = Default::default();
-        let model = cfg.init::<B>(&device);
-
-        let batch = 2;
-        let seq_len = 6;
-        let split = 2;
-        let d_model = cfg.d_model;
-
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-
-        let input_full = param_input(&input);
-        let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
-            let (out, _) = m.forward(x, None, ssd_path.clone());
-            out
-        });
-
-        let input_split = param_input(&input);
-        let r_split = run_with_grads(&model, &input_split, &head, |m, x| {
-            let prefix = x.clone().narrow(1, 0, split);
-            let suffix = x.narrow(1, split, seq_len - split);
-            let (out_prefix, cache) = m.forward(prefix, None, ssd_path.clone());
-            let (out_suffix, _) = m.forward(suffix, Some(cache), ssd_path.clone());
-            Tensor::cat(vec![out_prefix, out_suffix], 1)
-        });
-
-        // ── Forward agreement (existing check) ───────────────────────────
-        let diff = (r_full.out.clone() - r_split.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            diff < 1e-4,
-            "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
-        );
-
-        // ── Gradient agreement ───────────────────────────────────────────
-        check_grads_match("split vs full", &r_full, &r_split, 1e-3);
+        run_step_matches_forward(cfg_ngroups2(), Mamba2SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn split_matches_full() {
-        run_split_matches_full(small_config(), Mamba2SsdPath::Minimal(Some(4)));
-    }
-
-    #[test]
-    fn split_matches_full_ngroups2() {
-        let cfg = Mamba2Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_split_matches_full(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    fn step_matches_forward_ngroups2_random_init() {
+        run_step_matches_forward(cfg_ngroups2(), Mamba2SsdPath::Minimal(Some(4)), true);
     }
 
     // ── is_norm_before_gate = true ───────────────────────────────────────────
 
     #[test]
     fn step_matches_forward_norm_before_gate() {
-        let cfg = Mamba2Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_is_norm_before_gate(true);
-        run_step_matches_forward(cfg, Mamba2SsdPath::Minimal(Some(4)));
+        run_step_matches_forward(cfg_norm_before_gate(), Mamba2SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn split_matches_full_norm_before_gate() {
-        let cfg = Mamba2Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_is_norm_before_gate(true);
-        run_split_matches_full(cfg, Mamba2SsdPath::Minimal(Some(4)));
+    fn step_matches_forward_norm_before_gate_random_init() {
+        run_step_matches_forward(cfg_norm_before_gate(), Mamba2SsdPath::Minimal(Some(4)), true);
     }
 
     // ── SSD path agreement ───────────────────────────────────────────────────
 
-    fn run_ssd_paths_agree(cfg: Mamba2Config) {
+    /// `Minimal`, `Serial`, and `SerialRecalculated` are chunkwise reformulations
+    /// of the same SSD, so their block-level outputs, final caches, and gradients
+    /// must agree — from a zero (`random_init = false`) or random initial cache.
+    fn run_ssd_paths_agree(cfg: Mamba2Config, random_init: bool) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 8;
         let d_model = cfg.d_model;
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            conv: Tensor::<InnerB, 3>::random(
+                [batch, cfg.conv_dim(), cfg.conv_kernel],
+                normal,
+                &device,
+            ),
+            ssm: Tensor::<InnerB, 4>::random(
+                [batch, cfg.nheads(), cfg.per_head_dim, cfg.state_rank],
+                normal,
+                &device,
+            ),
+        };
 
-        // Each path gets its own input Param so the autodiff leaves are
-        // independent across the three backward passes.
-        let input_min = param_input(&input);
-        let input_ser = param_input(&input);
-        let input_rec = param_input(&input);
+        let init_cache = build_init_cache(&cfg, batch, random_init);
 
-        let r_min = run_with_grads(&model, &input_min, &head, |m, x| {
-            let (out, _) = m.forward(x, None, Mamba2SsdPath::Minimal(Some(4)));
-            out
-        });
-        let r_ser = run_with_grads(&model, &input_ser, &head, |m, x| {
-            let (out, _) = m.forward(x, None, Mamba2SsdPath::Serial(Some(4)));
-            out
-        });
-        let r_rec = run_with_grads(&model, &input_rec, &head, |m, x| {
-            let (out, _) = m.forward(x, None, Mamba2SsdPath::SerialRecalculated(Some(4)));
-            out
-        });
+        let run = |path: Mamba2SsdPath| {
+            let input_p = param_input(&input);
+            let cache_p = init_cache.clone();
+            run_with_grads(&model, &input_p, &heads, |m, x| m.forward(x, Some(cache_p), path))
+        };
+        let r_min = run(Mamba2SsdPath::Minimal(Some(4)));
+        let r_ser = run(Mamba2SsdPath::Serial(Some(4)));
+        let r_rec = run(Mamba2SsdPath::SerialRecalculated(Some(4)));
 
-        // ── Forward agreement ────────────────────────────────────────────
-        let tol = 1e-4;
-        let d_ser = (r_min.out.clone() - r_ser.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        let d_rec = (r_min.out.clone() - r_rec.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            d_ser < tol,
-            "Minimal vs Serial: forward max abs diff = {d_ser:.6} (tol {tol})"
-        );
-        assert!(
-            d_rec < tol,
-            "Minimal vs SerialRecalculated: forward max abs diff = {d_rec:.6} (tol {tol})"
-        );
-
-        // ── Gradient agreement ───────────────────────────────────────────
+        assert_outputs_match("Minimal vs Serial", &r_min, &r_ser, 1e-4);
+        assert_outputs_match("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-4);
         check_grads_match("Minimal vs Serial", &r_min, &r_ser, 1e-3);
         check_grads_match("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-3);
     }
 
     #[test]
     fn ssd_paths_agree() {
-        run_ssd_paths_agree(small_config());
+        run_ssd_paths_agree(small_config(), false);
+    }
+
+    #[test]
+    fn ssd_paths_agree_random_init() {
+        run_ssd_paths_agree(small_config(), true);
     }
 
     #[test]
     fn ssd_paths_agree_ngroups2() {
-        let cfg = Mamba2Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_ssd_paths_agree(cfg);
+        run_ssd_paths_agree(cfg_ngroups2(), false);
+    }
+
+    #[test]
+    fn ssd_paths_agree_ngroups2_random_init() {
+        run_ssd_paths_agree(cfg_ngroups2(), true);
     }
 }
