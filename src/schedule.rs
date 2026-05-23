@@ -4,7 +4,7 @@ pub enum Schedule {
     ///
     /// # Example
     /// - virtual len = 8, real len = 3:  
-    ///   `  →    →    →      →    →    →      →    →       `
+    ///   `  →    →    →      →    →    →      →    →       `  
     ///   `(0⇒0, 1⇒1, 2⇒2), (3⇒0, 4⇒1, 5⇒2), (6⇒0, 7⇒1, ...)`
     #[default]
     Cyclic,
@@ -12,14 +12,14 @@ pub enum Schedule {
     ///
     /// # Example
     /// - virtual len = 8, real len = 3:  
-    ///   `  →    →    →      →    →    →      →    →       `
+    ///   `  →    →    →      →    →    →      →    →       `  
     ///   `(0⇒0, 1⇒0, 2⇒0), (3⇒1, 4⇒1, 5⇒1), (6⇒2, 7⇒2, ...)`
     Stretched,
     /// Fills virtual positions by referring to the index vector.
     ///
     /// # Example
     /// - virtual len = 8, real len = 3, custom = `[0, 1, 2, 2, 1, 0, 0, 0]`:  
-    ///   `  →    →    →    →    →    →    →    →       `
+    ///   `  →    →    →    →    →    →    →    →       `  
     ///   `(0⇒0, 1⇒1, 2⇒2, 3⇒2, 4⇒1, 5⇒0, 6⇒0, 7⇒0, ...)`
     Custom(Vec<usize>),
 }
@@ -41,7 +41,7 @@ pub enum BidiSchedule {
     //
     /// # Example
     /// - virtual len = 10, real len = 4:  
-    ///   `   →    ←      →    ←        →    ←      →    ←        →    ←          `
+    ///   `   →    ←      →    ←        →    ←      →    ←        →    ←          `  
     ///   `[(0⇒0, 1⇒1), (2⇒2, 3⇒3)], [(4⇒0, 5⇒1), (6⇒2, 7⇒3)], [(8⇒0, 9⇒1), (...)]`
     #[default]
     StridedCyclic,
@@ -50,7 +50,7 @@ pub enum BidiSchedule {
     ///
     /// # Example
     /// - virtual len = 10, real len = 4:  
-    ///   `   →    ←      →    ←      →    ←        →    ←      →    ←          `
+    ///   `   →    ←      →    ←      →    ←        →    ←      →    ←          `  
     ///   `[(0⇒0, 1⇒1), (2⇒0, 3⇒1), (4⇒0, 5⇒1)], [(6⇒2, 7⇒3), (8⇒2, 9⇒3), (...)]`
     StridedStretched,
     /// Fills virtual positions by wrapping around the real schedule in a looping fashion,
@@ -58,7 +58,7 @@ pub enum BidiSchedule {
     ///
     /// # Example
     /// - virtual len = 10, real len = 4:  
-    ///   `   →    ←      →    ←      →    ←      →    ←        →    ←          `
+    ///   `   →    ←      →    ←      →    ←      →    ←        →    ←          `  
     ///   `[(0⇒0, 1⇒0), (2⇒1, 3⇒1), (4⇒2, 5⇒2), (6⇒3, 7⇒3)], [(8⇒0, 9⇒0), (...)]`
     SymmetricCyclic,
     /// Fills virtual positions by stretching the real schedule, replicating between
@@ -66,14 +66,14 @@ pub enum BidiSchedule {
     ///
     /// # Example
     /// - virtual len = 10, real len = 4:  
-    ///   `   →    ←      →    ←       →    ←               →    ←        →    ←   `
+    ///   `   →    ←      →    ←       →    ←               →    ←        →    ←   `  
     ///   `[(0⇒0, 1⇒0), (2⇒0, 3⇒0)],[(4⇒1, 5⇒1), (...)], [(6⇒2, 7⇒2)], [(8⇒3, 9⇒3)]`
     SymmetricStretched,
     /// Fills virtual positions by referring to the index vector.
     ///
     /// # Example
     /// - virtual len = 10, real len = 4, custom = `[0, 1, 2, 2, 1, 0, 0, 0, 3, 2]`:  
-    ///   `   →    ←        →    ←        →    ←        →    ←        →    ←            `
+    ///   `   →    ←        →    ←        →    ←        →    ←        →    ←            `  
     ///   `[(0⇒0, 1⇒1)], [(2⇒2, 3⇒2)], [(4⇒1, 5⇒0)], [(6⇒0, 7⇒0)], [(8⇒3, 9⇒2)], [(...)]`
     Custom(Vec<usize>),
 }
