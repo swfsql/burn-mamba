@@ -1,5 +1,6 @@
 pub mod bidi;
 pub mod cache;
+pub(crate) mod helpers;
 pub mod layer;
 pub mod mamba3;
 pub mod network;

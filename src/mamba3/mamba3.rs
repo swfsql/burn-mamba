@@ -117,13 +117,13 @@
 //! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
+use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::{
     rms_norm::{RmsNorm, RmsNormConfig},
     rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
     silu::Silu,
-    softplus::softplus,
 };
 use burn::prelude::*;
 use burn::{
@@ -646,43 +646,6 @@ fn apply_rope_partial<B: Backend, const D: usize>(
 }
 
 // ---------------------------------------------------------------------------
-// MIMO helpers
-// ---------------------------------------------------------------------------
-
-/// Build the V (value) tensor for MIMO by expanding x over ranks.
-///
-/// # Shapes
-/// - `x_bshp`:    `[batch, sequence, nheads, per_head_dim]`
-/// - `mimo_x_hmp`: `[nheads, mimo_rank, per_head_dim]`
-/// - output_bsmhp:       `[batch, sequence, mimo_rank, nheads, per_head_dim]`
-///
-/// When `mimo_x_hmp` is `None` (SISO), wraps `x` in a rank-1 dim.
-fn build_v_mimo<B: Backend>(
-    x_bshp: Tensor<B, 4>,
-    mimo_x_hmp: Option<&Tensor<B, 3>>,
-) -> Tensor<B, 5> {
-    let [batch, sequence, nheads, per_head_dim] = x_bshp.dims();
-    match mimo_x_hmp {
-        None => {
-            // SISO: just add a rank dimension of size 1
-            x_bshp.unsqueeze_dim::<5>(2) // x_bs1hp
-        }
-        Some(mimo_x_hmp) => {
-            let [_, mimo_rank, _] = mimo_x_hmp.dims();
-            let x_bsmhp = x_bshp
-                .unsqueeze_dim::<5>(2) // x_bs1hp
-                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // x_bsmhp
-            let mimo_x_bsmhp = mimo_x_hmp
-                .clone()
-                .permute([1, 0, 2]) // mimo_x_mhp
-                .unsqueeze_dims::<5>(&[0, 1]) // mimo_x_11mhp
-                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_x_bsmhp
-            x_bsmhp * mimo_x_bsmhp
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Mamba3::forward  (chunkwise two-SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
@@ -710,7 +673,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
         let num_rope_angles = self.num_rope_angles;
-        let heads_per_group = nheads / ngroups;
         let mimo_rank = self.mimo_rank;
         let device = input_bsm.device();
 
@@ -759,16 +721,20 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         san(&dd_dt_bsh);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
-        let dt_bias_11h = self.dt_bias_h.val().unsqueeze_dims(&[0, 1]);
-        let dt_bsh = softplus(dd_dt_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1);
-
-        let a_bsh = -softplus(dd_A_raw_bsh).clamp(f64::NEG_INFINITY, -self.a_floor);
-        let da_bsh = dt_bsh.clone() * a_bsh;
-
-        let lambda_bsh = burn::tensor::activation::sigmoid(lambda_raw_bsh);
-        let alpha_bsh = da_bsh.clone().exp();
-        let beta_bsh = (-lambda_bsh.clone() + 1.0) * dt_bsh.clone() * alpha_bsh.clone();
-        let gamma_bsh = lambda_bsh.clone() * dt_bsh.clone();
+        let helpers::TrapCoeffs {
+            dt: dt_bsh,
+            da: da_bsh,
+            alpha: _alpha_bsh,
+            beta: beta_bsh,
+            gamma: gamma_bsh,
+        } = helpers::trapezoidal_coefficients(
+            dd_dt_bsh,
+            dd_A_raw_bsh,
+            lambda_raw_bsh,
+            self.dt_bias_h.val(),
+            self.dt_limit,
+            self.a_floor,
+        );
 
         san(&dt_bsh);
         san(&da_bsh);
@@ -779,54 +745,23 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let x_bshp = x_bsi.reshape([batch, sequence, nheads, per_head_dim]);
 
         // ── Step 4: QK-Norm on B and C  ───────────────────────────────────────
-        // QK-Norm over state_rank, then expand ngroups→nheads, then add per-head+rank bias [nheads, mimo_rank, state_rank].
-        let b_bsmhr = {
-            let b_raw_bsmgr =
-                b_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]);
-            // Norm over last dim (state_rank) for each (b, s, m, g) slice:
-            // Flatten leading dims so RmsNorm operates on last dim only.
-            let b_norm_bsmgr = self
-                .b_norm
-                .forward(
-                    b_raw_bsmgr.reshape([batch * sequence * mimo_rank, ngroups, state_rank]), // b_raw_BSMgr
-                ) // b_norm_BSMgr
-                .reshape([batch, sequence, mimo_rank, ngroups, state_rank]); // b_norm_bsmgr
-            // Expand groups → heads at axis 3 (group dim of `_bsmgr`).
-            let b_norm_bsmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(
-                b_norm_bsmgr,
-                3,
-                nheads,
-            );
-            // Add bias [nheads, mimo_rank, state_rank] → broadcast as [1, 1, mimo_rank, nheads, state_rank]
-            // b_bias_hmr: [nheads, R, state_rank] → permute to [R, nheads, state_rank] → unsqueeze → [1, 1, R, nheads, state_rank]
-            let b_bias_11mhr = self
-                .b_bias_hmr
-                .val()
-                .permute([1, 0, 2]) // b_bias_mhr
-                .unsqueeze_dims::<5>(&[0, 1]); // b_bias_11mhr
-            b_norm_bsmhr + b_bias_11mhr
-        };
-        let c_bsmhr = {
-            let c_raw_bsmgr =
-                c_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]);
-            let c_norm_bsmgr = self
-                .c_norm
-                .forward(
-                    c_raw_bsmgr.reshape([batch * sequence * mimo_rank, ngroups, state_rank]), // c_raw_BSMgr
-                )
-                .reshape([batch, sequence, mimo_rank, ngroups, state_rank]); // c_norm_bsmgr
-            let c_norm_bsmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(
-                c_norm_bsmgr,
-                3,
-                nheads,
-            );
-            let c_bias_11mhr = self
-                .c_bias_hmr
-                .val()
-                .permute([1, 0, 2]) // c_bias_mhr
-                .unsqueeze_dims::<5>(&[0, 1]); // c_bias_11mhr
-            c_norm_bsmhr + c_bias_11mhr
-        };
+        // QK-Norm over state_rank, then expand ngroups→nheads, then add per-(head,
+        // mimo-rank) bias [nheads, mimo_rank, state_rank]. Group dim is axis 3 of
+        // `_bsmgr` (D = 5).
+        let b_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+            b_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
+            &self.b_norm,
+            self.b_bias_hmr.val(),
+            3,
+            nheads,
+        );
+        let c_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+            c_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
+            &self.c_norm,
+            self.c_bias_hmr.val(),
+            3,
+            nheads,
+        );
         assert_eq!(
             [batch, sequence, mimo_rank, nheads, state_rank],
             b_bsmhr.dims()
@@ -954,28 +889,12 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let c_bnlmhr = c_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
 
         // ── Step 9: Two MIMO-SSD calls ────────────────────────────────────────
-        // Build V tensors
+        // Build V tensors — insert the mimo_rank axis at position 3 of `_bnlhp`.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let v_gamma_bnlmhp = build_v_mimo_chunked(
-            x_gamma_bnlhp.clone(),
-            mimo_x_hmp.as_ref(),
-            batch,
-            nchunks,
-            chunk_len,
-            mimo_rank,
-            nheads,
-            per_head_dim,
-        );
-        let v_beta_bnlmhp = build_v_mimo_chunked(
-            x_beta_bnlhp,
-            mimo_x_hmp.as_ref(),
-            batch,
-            nchunks,
-            chunk_len,
-            mimo_rank,
-            nheads,
-            per_head_dim,
-        );
+        let v_gamma_bnlmhp =
+            helpers::build_v_with_mimo::<_, 5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
+        let v_beta_bnlmhp =
+            helpers::build_v_with_mimo::<_, 5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
 
         let input_gamma = Mamba3SsdInput {
             v_bnlmhp: v_gamma_bnlmhp,
@@ -1015,7 +934,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
 
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
         // D skip uses raw x * mimo_x_hmp (not gamma-scaled)
-        let v_raw_bsmhp = build_v_mimo::<B>(x_bshp.clone(), mimo_x_hmp.as_ref());
+        // Insert the mimo_rank axis at position 2 of `_bshp`.
+        let v_raw_bsmhp =
+            helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
 
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
@@ -1093,32 +1014,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     }
 }
 
-fn build_v_mimo_chunked<B: Backend>(
-    x_bnlhp: Tensor<B, 5>,
-    mimo_x_hmp: Option<&Tensor<B, 3>>,
-    batch: usize,
-    nchunks: usize,
-    chunk_len: usize,
-    mimo_rank: usize,
-    nheads: usize,
-    per_head_dim: usize,
-) -> Tensor<B, 6> {
-    match mimo_x_hmp {
-        None => x_bnlhp.unsqueeze_dim::<6>(3), // x_bnl1hp
-        Some(mimo_x_hmp) => {
-            let x_bnlmhp = x_bnlhp
-                .unsqueeze_dim::<6>(3) // x_bnl1hp
-                .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // x_bnlmhp
-            let mimo_x_bnlmhp = mimo_x_hmp
-                .clone()
-                .permute([1, 0, 2]) // mimo_x_mhp
-                .unsqueeze_dims::<6>(&[0, 1, 2]) // mimo_x_111mhp
-                .expand([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // mimo_x_bnlmhp
-            x_bnlmhp * mimo_x_bnlmhp
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Mamba3::step  (recurrent SSM — token-by-token decoding)
 // ---------------------------------------------------------------------------
@@ -1158,7 +1053,6 @@ mod step {
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
             let num_rope_angles = self.num_rope_angles;
-            let heads_per_group = nheads / ngroups;
             let mimo_rank = self.mimo_rank;
             let device = &input_bd.device();
             let ssm_shape = [batch, nheads, per_head_dim, state_rank];
@@ -1202,58 +1096,38 @@ mod step {
             // ── Reshape x ─────────────────────────────────────────────────────
             let x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);
 
-            // ── Discretisation ─────────────────────────────────────────────────
-            let dt_bias_1h = self.dt_bias_h.val().unsqueeze_dim(0);
-            let dt_bh = softplus(dd_dt_bh + dt_bias_1h).clamp(self.dt_limit.0, self.dt_limit.1);
-            let a_bh = -softplus(dd_a_raw_bh).clamp(f64::NEG_INFINITY, -self.a_floor);
-            let da_bh = dt_bh.clone() * a_bh;
-            let alpha_bh = da_bh.exp();
-            let lambda_bh = burn::tensor::activation::sigmoid(lambda_raw_bh);
-            let gamma_bh = lambda_bh.clone() * dt_bh.clone();
-            let beta_bh = (-lambda_bh.clone() + 1.0) * dt_bh.clone() * alpha_bh.clone();
+            // ── Discretisation + trapezoidal coefficients ─────────────────────
+            let helpers::TrapCoeffs {
+                dt: dt_bh,
+                da: _da_bh,
+                alpha: alpha_bh,
+                beta: beta_bh,
+                gamma: gamma_bh,
+            } = helpers::trapezoidal_coefficients(
+                dd_dt_bh,
+                dd_a_raw_bh,
+                lambda_raw_bh,
+                self.dt_bias_h.val(),
+                self.dt_limit,
+                self.a_floor,
+            );
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
-            let b_bmhr = {
-                let b_bmgr = b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]);
-                let b_norm_bmgr = self
-                    .b_norm
-                    .forward(
-                        b_bmgr.reshape([batch * mimo_rank, ngroups, state_rank]), // b_BMgr
-                    )
-                    .reshape([batch, mimo_rank, ngroups, state_rank]); // b_norm_bmgr
-                // Expand groups → heads at axis 2 (group dim of `_bmgr`).
-                let b_norm_bmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 4, 5>(
-                    b_norm_bmgr,
-                    2,
-                    nheads,
-                );
-                let b_bias_1mhr = self
-                    .b_bias_hmr
-                    .val()
-                    .permute([1, 0, 2]) // b_bias_mhr
-                    .unsqueeze_dim::<4>(0); // b_bias_1mhr
-                b_norm_bmhr + b_bias_1mhr
-            };
-            let c_bmhr = {
-                let c_bmgr = c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]);
-                let c_norm_bmgr = self
-                    .c_norm
-                    .forward(
-                        c_bmgr.reshape([batch * mimo_rank, ngroups, state_rank]), // c_BMgr
-                    )
-                    .reshape([batch, mimo_rank, ngroups, state_rank]); // c_norm_bmgr
-                let c_norm_bmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 4, 5>(
-                    c_norm_bmgr,
-                    2,
-                    nheads,
-                );
-                let c_bias_1mhr = self
-                    .c_bias_hmr
-                    .val()
-                    .permute([1, 0, 2]) // c_bias_mhr
-                    .unsqueeze_dim::<4>(0); // c_bias_1mhr
-                c_norm_bmhr + c_bias_1mhr
-            };
+            // Group dim is axis 2 of `_bmgr` (D = 4).
+            let b_bmhr = helpers::qk_norm_expand_bias::<_, 4, 5>(
+                b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+                &self.b_norm,
+                self.b_bias_hmr.val(),
+                2,
+                nheads,
+            );
+            let c_bmhr = helpers::qk_norm_expand_bias::<_, 4, 5>(
+                c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+                &self.c_norm,
+                self.c_bias_hmr.val(),
+                2,
+                nheads,
+            );
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
 
             // ── RoPE: update cumulative angle, rotate B and C ──────────────────
@@ -1280,16 +1154,14 @@ mod step {
                 apply_rope_partial::<B, 4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
 
             // ── Build MIMO value tensors ───────────────────────────────────────
+            // Insert the mimo_rank axis at position 1 of `_bhp`.
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-            let (x_vals_bmhp, xs_vals_bmhp) = build_mimo_vals(
-                x_bhp.clone(),
+            let x_vals_bmhp =
+                helpers::build_v_with_mimo::<_, 3, 4>(x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
+            let xs_vals_bmhp = helpers::build_v_with_mimo::<_, 3, 4>(
                 cache.v_state_bhp.clone(),
                 mimo_x_hmp.as_ref(),
-                batch,
-                mimo_rank,
-                nheads,
-                per_head_dim,
-                device,
+                1,
             );
 
             // ── SSM state update ───────────────────────────────────────────────
@@ -1400,45 +1272,6 @@ mod step {
         }
     }
 
-    /// Build MIMO value tensors for x_current and x_state.
-    ///
-    /// # Shapes
-    /// - output `x_vals_bmhp` : `[batch, mimo_rank, nheads, per_head_dim]`
-    /// - output `xs_vals_bmhp` : `[batch, mimo_rank, nheads, per_head_dim]`
-    fn build_mimo_vals<B: Backend>(
-        x_bhp: Tensor<B, 3>,
-        x_state_bhp: Tensor<B, 3>,
-        mimo_x_hmp: Option<&Tensor<B, 3>>,
-        batch: usize,
-        mimo_rank: usize,
-        nheads: usize,
-        per_head_dim: usize,
-        _device: &B::Device,
-    ) -> (Tensor<B, 4>, Tensor<B, 4>) {
-        match mimo_x_hmp {
-            None => {
-                // SISO: add rank dim of 1
-                (
-                    x_bhp.unsqueeze_dim::<4>(1),       // x_b1hp
-                    x_state_bhp.unsqueeze_dim::<4>(1), // x_state_b1hp
-                )
-            }
-            Some(mimo_x_hmp) => {
-                let x_bmhp = x_bhp
-                    .unsqueeze_dim::<4>(1) // x_b1hp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // x_bmhp
-                let x_state_bmhp = x_state_bhp
-                    .unsqueeze_dim::<4>(1) // x_state_b1hp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // x_state_bmhp
-                let mimo_x_bmhp = mimo_x_hmp
-                    .clone()
-                    .permute([1, 0, 2]) // mimo_x_mhp
-                    .unsqueeze_dim::<4>(0) // mimo_x_1mhp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_x_bmhp
-                (x_bmhp * mimo_x_bmhp.clone(), x_state_bmhp * mimo_x_bmhp)
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
