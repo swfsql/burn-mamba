@@ -10,6 +10,7 @@ pub mod sanity;
 pub mod scheduler;
 pub mod silu;
 pub mod softplus;
+pub mod segsum;
 
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {

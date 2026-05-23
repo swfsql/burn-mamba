@@ -20,6 +20,7 @@
 
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
+use crate::utils::segsum::segsum;
 
 impl<B: Backend> Mamba3<B> {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
@@ -242,28 +243,4 @@ impl<B: Backend> Mamba3<B> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// segsum  (stable segment sum for the 1-SS mask)
-// ---------------------------------------------------------------------------
 
-/// Compute stable segment sums for constructing the 1-semiseparable mask.
-///
-/// Given a tensor `x` of shape `[..., sequence]`, returns a tensor of shape `[..., sequence, sequence]` where:
-///
-/// ```text
-///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]   for i ≥ j  (lower triangle)
-///   out[..., i, j] = -∞                           for i < j  (upper triangle)
-/// ```
-pub(super) fn segsum<B: Backend, const D: usize, const D2: usize>(
-    x: Tensor<B, D>,
-) -> Tensor<B, D2> {
-    assert_eq!(D + 1, D2);
-
-    let x_cumsum = x.cumsum(D - 1);
-    let x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D); // [..., sequence, 1]
-    let x_cumsum_col = x_cumsum.unsqueeze_dim(D - 1); //     [..., 1, sequence]
-
-    let diff = x_cumsum_row - x_cumsum_col; // [..., sequence, sequence]
-    let neg_inf_mask = Tensor::full_like(&diff, f32::NEG_INFINITY).triu(1);
-    diff + neg_inf_mask
-}

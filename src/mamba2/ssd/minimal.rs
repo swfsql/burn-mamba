@@ -19,7 +19,7 @@
 //! scan over `sequence/chunk_len` elements rather than `sequence`.
 
 use crate::mamba2::prelude::*;
-use crate::utils::sanity::sanity as san;
+use crate::utils::{sanity::sanity as san, segsum::segsum};
 use burn::prelude::*;
 
 impl<B: Backend> Mamba2<B> {
@@ -524,70 +524,4 @@ impl<B: Backend> Mamba2<B> {
 
         (y_bnlhp, final_state_bnpr)
     }
-}
-
-// ---------------------------------------------------------------------------
-// segsum  (stable segment sum for the 1-SS mask)
-// ---------------------------------------------------------------------------
-
-/// Compute stable segment sums for constructing the 1-semiseparable mask.
-///
-/// Given a tensor `x` of shape `[..., sequence]`, returns a tensor of shape
-/// `[..., sequence, sequence]` where:
-///
-/// ```text
-///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]     for i ≥ j   (lower triangle)
-///   out[..., i, j] = -∞                             for i < j   (upper triangle)
-/// ```
-///
-/// The 1-semiseparable mask is then obtained by exponentiating:
-///
-/// ```text
-///   L = exp(segsum(log_A))
-///   L[i, j] = exp(log_A[j+1] + ... + log_A[i])
-///            = A[j+1] · A[j+2] · ... · A[i]       (Eq. 4–5 in the paper)
-/// ```
-///
-/// ## Implementation
-///
-/// A naive computation of all pairwise products `A[j+1]·...·A[i]` would
-/// suffer from underflow for long sequences (e.g. `0.9^1000 ≈ 2.6×10⁻⁴⁶`).
-/// Working in log-space and computing differences of prefix sums avoids this:
-///
-/// ```text
-///   segsum(x)[i, j] = cumsum(x)[i] - cumsum(x)[j]
-/// ```
-///
-/// The upper triangle is masked to -∞ so that `exp(segsum(...))` gives 0
-/// for non-causal positions (the strict upper triangle of L must be zero).
-///
-/// ## Const-generic dimension handling
-///
-/// This function is generic over the input rank `D` and returns a tensor of
-/// rank `D + 1`.  Burn requires the output rank to be known at compile time,
-/// which is achieved through the const generic expression `{ D + 1 }`.
-fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tensor<B, D2> {
-    assert!(D > 0);
-    assert_eq!(D + 1, D2);
-
-    // cumsum[..., t] = x[..., 0] + x[..., 1] + ... + x[..., t]
-    let x_cumsum = x.cumsum(D - 1);
-    san(&x_cumsum);
-
-    // Broadcast along two different axes to compute all pairwise differences:
-    //   x_cumsum_row[..., i, j] = cumsum[..., i]   (i varies along axis D)
-    //   x_cumsum_col[..., i, j] = cumsum[..., j]   (j varies along axis D-1)
-    let x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D); // [..., sequence, 1]
-    let x_cumsum_col = x_cumsum.unsqueeze_dim(D - 1); //     [..., 1, sequence]
-
-    // diff[..., i, j] = cumsum[i] - cumsum[j]
-    //                 = x[j+1] + ... + x[i]    for i ≥ j
-    let diff = x_cumsum_row - x_cumsum_col; // [..., sequence, sequence]
-    san(&diff);
-
-    // Mask the strict upper triangle (i < j) with -∞.
-    // triu(1) returns a tensor that is -∞ above the main diagonal and 0
-    // elsewhere; adding it to `diff` zeroes out the upper triangle of exp(diff).
-    let neg_inf_mask = Tensor::full_like(&diff, f32::NEG_INFINITY).triu(1);
-    diff + neg_inf_mask
 }
