@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/serial_recalculated/combined_backward.rs`."><title>combined_backward.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.97.0-nightly (e50aa6fba 2026-05-19)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/serial_recalculated/</div>combined_backward.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span><span class="kw">crate</span>::mamba2::ssd::serial;
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/serial_recalculated/combined_backward.rs`."><title>combined_backward.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (54333ff07 2026-05-22)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/serial_recalculated/</div>combined_backward.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span><span class="kw">crate</span>::mamba2::ssd::serial;
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span><span class="kw">crate</span>::utils::sanity::sanity <span class="kw">as </span>san;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#4 id=4 data-nosnippet>4</a>
@@ -73,9 +73,9 @@
 <a href=#73 id=73 data-nosnippet>73</a>            state_rank,
 <a href=#74 id=74 data-nosnippet>74</a>        ]) <span class="comment">// b_bngHlr
 <a href=#75 id=75 data-nosnippet>75</a>        // - 5: reshape: (b_bngHlr) -&gt; (b_bnhlr)
-<a href=#76 id=76 data-nosnippet>76</a>        </span>.reshape([batch, nchunks, nheads, chunk_len, state_rank]);
+<a href=#76 id=76 data-nosnippet>76</a>        </span>.reshape([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// b_bnhlr
 <a href=#77 id=77 data-nosnippet>77</a>
-<a href=#78 id=78 data-nosnippet>78</a>    <span class="comment">// scale b
+<a href=#78 id=78 data-nosnippet>78</a>    // scale b
 <a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">let </span>da_cumsum_last_in_chunk_bhn1 =
 <a href=#80 id=80 data-nosnippet>80</a>        <span class="comment">// - 6: slice: (da_cumsum_bhnl [in][*]) -&gt; (da_cumsum_last_in_chunk_bhn1)
 <a href=#81 id=81 data-nosnippet>81</a>        </span>da_cumsum_bhnl.clone().slice(<span class="macro">s!</span>[.., .., .., -<span class="number">1</span>]);
@@ -110,8 +110,8 @@
 <a href=#110 id=110 data-nosnippet>110</a>        <span class="comment">// - 12: unsqueeze: (b_bar_scale_bnhl) -&gt; (b_bar_scale_bnhl1)
 <a href=#111 id=111 data-nosnippet>111</a>        </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// b_bar_scale_bnhl1
 <a href=#112 id=112 data-nosnippet>112</a>        // - 13: expand: (b_bar_scale_bnhl1) -&gt; (b_bar_scale_bnhlr)
-<a href=#113 id=113 data-nosnippet>113</a>        </span>.expand([batch, nchunks, nheads, chunk_len, state_rank]);
-<a href=#114 id=114 data-nosnippet>114</a>    <span class="comment">// - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
+<a href=#113 id=113 data-nosnippet>113</a>        </span>.expand([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// b_bar_scale_bnhlr
+<a href=#114 id=114 data-nosnippet>114</a>    // - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
 <a href=#115 id=115 data-nosnippet>115</a>    </span><span class="kw">let </span>b_scaled_bnhlr = b_bnhlr * b_bar_scale_bnhlr;
 <a href=#116 id=116 data-nosnippet>116</a>    <span class="macro">assert_eq!</span>(
 <a href=#117 id=117 data-nosnippet>117</a>        [batch, nchunks, nheads, chunk_len, state_rank],
@@ -136,8 +136,8 @@
 <a href=#136 id=136 data-nosnippet>136</a>
 <a href=#137 id=137 data-nosnippet>137</a><span class="doccomment">/// Core gradient computation.  All arguments use the shapes from the forward.
 <a href=#138 id=138 data-nosnippet>138</a>///
-<a href=#139 id=139 data-nosnippet>139</a>/// `d_y_bnlhp`         : upstream gradient of the scan output  [B,N,L,H,P]
-<a href=#140 id=140 data-nosnippet>140</a>/// `d_final_bhpr`      : upstream gradient of the final state  [B,H,P,R]
+<a href=#139 id=139 data-nosnippet>139</a>/// `d_y_bnlhp`         : upstream gradient of the scan output  [batch,state_rank,chunk_len,nheads,per_head_dim]
+<a href=#140 id=140 data-nosnippet>140</a>/// `d_final_bhpr`      : upstream gradient of the final state  [batch,nheads,per_head_dim,R]
 <a href=#141 id=141 data-nosnippet>141</a>///
 <a href=#142 id=142 data-nosnippet>142</a>/// Returns one `CombinedGrads` struct containing gradients for all 7 inputs.
 <a href=#143 id=143 data-nosnippet>143</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
@@ -182,722 +182,700 @@
 <a href=#182 id=182 data-nosnippet>182</a>
 <a href=#183 id=183 data-nosnippet>183</a>    <span class="comment">// K2 ───────────────────────────────────────────────────────────────────
 <a href=#184 id=184 data-nosnippet>184</a>    </span><span class="kw">let </span>cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
-<a href=#185 id=185 data-nosnippet>185</a>    <span class="comment">// let cb_bngll = k2_forward(&amp;c_bnlgr, &amp;b_bnlgr);          // [B,N,G,L,L]
-<a href=#186 id=186 data-nosnippet>186</a>    </span>san(<span class="kw-2">&amp;</span>cb_bngll);
-<a href=#187 id=187 data-nosnippet>187</a>
-<a href=#188 id=188 data-nosnippet>188</a>    <span class="comment">// K3 (with intermediates) ──────────────────────────────────────────────
-<a href=#189 id=189 data-nosnippet>189</a>    </span><span class="kw">let </span>(
-<a href=#190 id=190 data-nosnippet>190</a>        intra_chunk_state_bnhpr,
-<a href=#191 id=191 data-nosnippet>191</a>        b_bar_scale_bhnl,
-<a href=#192 id=192 data-nosnippet>192</a>        forward_decay_to_chunk_end_bhnl,
-<a href=#193 id=193 data-nosnippet>193</a>        b_scaled_bnhlr,
-<a href=#194 id=194 data-nosnippet>194</a>    ) = k3_ssd_chunk_state_extended(
-<a href=#195 id=195 data-nosnippet>195</a>        x_bnlhp.clone(),
-<a href=#196 id=196 data-nosnippet>196</a>        b_bnlgr.clone(),
-<a href=#197 id=197 data-nosnippet>197</a>        da_cumsum_bhnl.clone(),
-<a href=#198 id=198 data-nosnippet>198</a>        dt_discretized_bhnl.clone(),
-<a href=#199 id=199 data-nosnippet>199</a>    );
-<a href=#200 id=200 data-nosnippet>200</a>    san(<span class="kw-2">&amp;</span>intra_chunk_state_bnhpr);
-<a href=#201 id=201 data-nosnippet>201</a>    san(<span class="kw-2">&amp;</span>b_bar_scale_bhnl);
-<a href=#202 id=202 data-nosnippet>202</a>    san(<span class="kw-2">&amp;</span>forward_decay_to_chunk_end_bhnl);
-<a href=#203 id=203 data-nosnippet>203</a>    san(<span class="kw-2">&amp;</span>b_scaled_bnhlr);
-<a href=#204 id=204 data-nosnippet>204</a>
-<a href=#205 id=205 data-nosnippet>205</a>    <span class="comment">// K4 ───────────────────────────────────────────────────────────────────
-<a href=#206 id=206 data-nosnippet>206</a>    </span><span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr): (Tensor&lt;B, <span class="number">5</span>&gt;, Tensor&lt;B, <span class="number">4</span>&gt;) =
-<a href=#207 id=207 data-nosnippet>207</a>        serial::k4_ssd_state_passing(
-<a href=#208 id=208 data-nosnippet>208</a>            intra_chunk_state_bnhpr.clone(),
-<a href=#209 id=209 data-nosnippet>209</a>            da_chunk_end_bhn.clone(),
-<a href=#210 id=210 data-nosnippet>210</a>            initial_state_bhpr,
-<a href=#211 id=211 data-nosnippet>211</a>        );
-<a href=#212 id=212 data-nosnippet>212</a>    san(<span class="kw-2">&amp;</span>chunk_input_state_bnhpr);
-<a href=#213 id=213 data-nosnippet>213</a>    san(<span class="kw-2">&amp;</span>_final_state_bhpr);
-<a href=#214 id=214 data-nosnippet>214</a>
-<a href=#215 id=215 data-nosnippet>215</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
-<a href=#216 id=216 data-nosnippet>216</a>    // K5 + K4 FUSED BACKWARD (reverse per-chunk loop)
-<a href=#217 id=217 data-nosnippet>217</a>    // ═══════════════════════════════════════════════════════════════════════
-<a href=#218 id=218 data-nosnippet>218</a>    //
-<a href=#219 id=219 data-nosnippet>219</a>    // Peak memory: each iteration allocates [B,H,L,L] working tensors (vs the
-<a href=#220 id=220 data-nosnippet>220</a>    // [B,N,H,L,L] tensors a fully batched K5 backward would materialise). Saves
-<a href=#221 id=221 data-nosnippet>221</a>    // a factor of N (nchunks) in the dominant L×L terms.
-<a href=#222 id=222 data-nosnippet>222</a>
-<a href=#223 id=223 data-nosnippet>223</a>    // ── SKIP backward (batched; allocates only [B,N,L,H,P] working sets) ───
-<a href=#224 id=224 data-nosnippet>224</a>    // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -&gt; (y_bnlhp [out])
-<a href=#225 id=225 data-nosnippet>225</a>    // - | (d_skip_bnlhp = d_y_bnlhp)
-<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="kw">let </span>d_skip_bnlhp = d_y_bnlhp.clone();
-<a href=#227 id=227 data-nosnippet>227</a>    <span class="comment">//
-<a href=#228 id=228 data-nosnippet>228</a>    //
-<a href=#229 id=229 data-nosnippet>229</a>    // For d_h:
-<a href=#230 id=230 data-nosnippet>230</a>    // - - | 33: mul: (d_bnlhp, x_bnlhp[*]) -&gt; (skip_bnlhp)
-<a href=#231 id=231 data-nosnippet>231</a>    // - - | (d_d_bnlhp = d_skip_bnlhp * x_bnlhp)
-<a href=#232 id=232 data-nosnippet>232</a>    // - - | 32: expand: (d_111h1) -&gt; (d_bnlhp)
-<a href=#233 id=233 data-nosnippet>233</a>    // - - | 31: unsqueeze-dims: (d_h [*]) -&gt; (d_111h1)
-<a href=#234 id=234 data-nosnippet>234</a>    //
-<a href=#235 id=235 data-nosnippet>235</a>    // - - | d_d[h] = Σ_{b,n,l,p} dy * x   — use permute+reshape to avoid chained sum_dim
-<a href=#236 id=236 data-nosnippet>236</a>    </span><span class="kw">let </span>d_d_h = {
-<a href=#237 id=237 data-nosnippet>237</a>        <span class="comment">// [B,N,L,H,P] → permute to [H,B,N,L,P] → reshape [H, rest] → sum → [H]
-<a href=#238 id=238 data-nosnippet>238</a>        </span>d_skip_bnlhp.clone()
-<a href=#239 id=239 data-nosnippet>239</a>            .permute([<span class="number">3</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// d_y_hbnlp
-<a href=#240 id=240 data-nosnippet>240</a>            </span>.reshape([nheads, batch * nchunks * chunk_len * per_head_dim]) <span class="comment">// d_y_hBNLP
-<a href=#241 id=241 data-nosnippet>241</a>            </span>* x_bnlhp
-<a href=#242 id=242 data-nosnippet>242</a>                .clone()
-<a href=#243 id=243 data-nosnippet>243</a>                .permute([<span class="number">3</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// x_hbnlp
-<a href=#244 id=244 data-nosnippet>244</a>                </span>.reshape([nheads, batch * nchunks * chunk_len * per_head_dim]) <span class="comment">// x_hBNLP
-<a href=#245 id=245 data-nosnippet>245</a>    </span>}
-<a href=#246 id=246 data-nosnippet>246</a>    .sum_dim(<span class="number">1</span>) <span class="comment">// d_d_h1
-<a href=#247 id=247 data-nosnippet>247</a>    </span>.reshape([nheads]);
-<a href=#248 id=248 data-nosnippet>248</a>    san(<span class="kw-2">&amp;</span>d_d_h);
-<a href=#249 id=249 data-nosnippet>249</a>    <span class="comment">//
-<a href=#250 id=250 data-nosnippet>250</a>    // For d_x:
-<a href=#251 id=251 data-nosnippet>251</a>    // - - | 33: mul: (d_bnlhp, x_bnlhp[*]) -&gt; (skip_bnlhp)
-<a href=#252 id=252 data-nosnippet>252</a>    // - - | (d_x_skip_bnlhp = d_skip_bnlhp * d_bnlhp)
-<a href=#253 id=253 data-nosnippet>253</a>    </span><span class="kw">let </span>d_x_skip_bnlhp = d_skip_bnlhp
-<a href=#254 id=254 data-nosnippet>254</a>        * d_h
-<a href=#255 id=255 data-nosnippet>255</a>            .clone()
-<a href=#256 id=256 data-nosnippet>256</a>            .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// d_111h1
-<a href=#257 id=257 data-nosnippet>257</a>            // d_bnlhp
-<a href=#258 id=258 data-nosnippet>258</a>            </span>.expand([batch, nchunks, chunk_len, nheads, per_head_dim]);
-<a href=#259 id=259 data-nosnippet>259</a>    san(<span class="kw-2">&amp;</span>d_x_skip_bnlhp);
-<a href=#260 id=260 data-nosnippet>260</a>
-<a href=#261 id=261 data-nosnippet>261</a>    <span class="comment">// ── Fused K5 (BLUE + ORANGE) + K4 reverse loop ─────────────────────────
-<a href=#262 id=262 data-nosnippet>262</a>    //
-<a href=#263 id=263 data-nosnippet>263</a>    // Per-iteration working set is [B,H,L,L] (not [B,N,H,L,L]). Per-chunk
-<a href=#264 id=264 data-nosnippet>264</a>    // gradients are collected in vecs and stacked once the loop is done.
-<a href=#265 id=265 data-nosnippet>265</a>
-<a href=#266 id=266 data-nosnippet>266</a>    // [L,L] causal mask, broadcast as a view inside each iteration —
-<a href=#267 id=267 data-nosnippet>267</a>    // value does not depend on (b,n,h).
-<a href=#268 id=268 data-nosnippet>268</a>    </span><span class="kw">let </span>causal_mask_ll: Tensor&lt;B, <span class="number">2</span>, burn::prelude::Bool&gt; =
-<a href=#269 id=269 data-nosnippet>269</a>        Tensor::&lt;B, <span class="number">2</span>, burn::prelude::Bool&gt;::tril_mask([chunk_len, chunk_len], <span class="number">0</span>, <span class="kw-2">&amp;</span>device);
-<a href=#270 id=270 data-nosnippet>270</a>
-<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">let </span><span class="kw-2">mut </span>d_x_orange_vec: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,L,P]
-<a href=#272 id=272 data-nosnippet>272</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_dt_orange_vec: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,L]
-<a href=#273 id=273 data-nosnippet>273</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_da_orange_vec: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,L]
-<a href=#274 id=274 data-nosnippet>274</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_cb_vec: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,G,L,L]
-<a href=#275 id=275 data-nosnippet>275</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_c_blue_vec: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,L,R]
-<a href=#276 id=276 data-nosnippet>276</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_da_blue_vec: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,L]
-<a href=#277 id=277 data-nosnippet>277</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_intra_slices: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H,P,R]
-<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_da_end_bh_slices: Vec&lt;Tensor&lt;B, <span class="number">2</span>&gt;&gt; = Vec::with_capacity(nchunks); <span class="comment">// [B,H]
-<a href=#279 id=279 data-nosnippet>279</a>
-<a href=#280 id=280 data-nosnippet>280</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>d_running_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = d_final_bhpr; <span class="comment">// [B,H,P,R]
-<a href=#281 id=281 data-nosnippet>281</a>
-<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">for </span>i_chunk <span class="kw">in </span>(<span class="number">0</span>..nchunks).rev() {
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="comment">// ── Per-chunk inputs (slice the batched tensors to [B,H,...]) ──────
-<a href=#284 id=284 data-nosnippet>284</a>        </span><span class="kw">let </span>da_cumsum_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = da_cumsum_bhnl
-<a href=#285 id=285 data-nosnippet>285</a>            .clone()
-<a href=#286 id=286 data-nosnippet>286</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk, ..])
-<a href=#287 id=287 data-nosnippet>287</a>            .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// [B,H,L]
-<a href=#288 id=288 data-nosnippet>288</a>        </span><span class="kw">let </span>dt_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = dt_discretized_bhnl
-<a href=#289 id=289 data-nosnippet>289</a>            .clone()
-<a href=#290 id=290 data-nosnippet>290</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk, ..])
-<a href=#291 id=291 data-nosnippet>291</a>            .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// [B,H,L]
-<a href=#292 id=292 data-nosnippet>292</a>        </span><span class="kw">let </span>x_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = x_bnlhp
-<a href=#293 id=293 data-nosnippet>293</a>            .clone()
-<a href=#294 id=294 data-nosnippet>294</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..])
-<a href=#295 id=295 data-nosnippet>295</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// [B,L,H,P]
-<a href=#296 id=296 data-nosnippet>296</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// [B,H,L,P]
-<a href=#297 id=297 data-nosnippet>297</a>        </span><span class="kw">let </span>d_y_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bnlhp
-<a href=#298 id=298 data-nosnippet>298</a>            .clone()
-<a href=#299 id=299 data-nosnippet>299</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..])
-<a href=#300 id=300 data-nosnippet>300</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// [B,L,H,P]
-<a href=#301 id=301 data-nosnippet>301</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// [B,H,L,P]
-<a href=#302 id=302 data-nosnippet>302</a>
-<a href=#303 id=303 data-nosnippet>303</a>        // GQA-expand C for this chunk: [B,L,G,R] → [B,H,L,R]
-<a href=#304 id=304 data-nosnippet>304</a>        </span><span class="kw">let </span>c_bhlr: Tensor&lt;B, <span class="number">4</span>&gt; = c_bnlgr
-<a href=#305 id=305 data-nosnippet>305</a>            .clone()
-<a href=#306 id=306 data-nosnippet>306</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..])
-<a href=#307 id=307 data-nosnippet>307</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// [B,L,G,R]
-<a href=#308 id=308 data-nosnippet>308</a>            </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) <span class="comment">// [B,L,G,1,R]
-<a href=#309 id=309 data-nosnippet>309</a>            </span>.expand([batch, chunk_len, ngroups, heads_per_group, state_rank])
-<a href=#310 id=310 data-nosnippet>310</a>            .reshape([batch, chunk_len, nheads, state_rank]) <span class="comment">// [B,L,H,R]
-<a href=#311 id=311 data-nosnippet>311</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// [B,H,L,R]
-<a href=#312 id=312 data-nosnippet>312</a>
-<a href=#313 id=313 data-nosnippet>313</a>        // GQA-expand CB for this chunk: [B,G,L,L] → [B,H,L,L]
-<a href=#314 id=314 data-nosnippet>314</a>        </span><span class="kw">let </span>cb_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = cb_bngll
-<a href=#315 id=315 data-nosnippet>315</a>            .clone()
-<a href=#316 id=316 data-nosnippet>316</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..])
-<a href=#317 id=317 data-nosnippet>317</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// [B,G,L,L]
-<a href=#318 id=318 data-nosnippet>318</a>            </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>) <span class="comment">// [B,G,1,L,L]
-<a href=#319 id=319 data-nosnippet>319</a>            </span>.expand([batch, ngroups, heads_per_group, chunk_len, chunk_len])
-<a href=#320 id=320 data-nosnippet>320</a>            .reshape([batch, nheads, chunk_len, chunk_len]); <span class="comment">// [B,H,L,L]
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>        </span><span class="kw">let </span>causal_mask_bhll: Tensor&lt;B, <span class="number">4</span>, burn::prelude::Bool&gt; = causal_mask_ll
+<a href=#185 id=185 data-nosnippet>185</a>    san(<span class="kw-2">&amp;</span>cb_bngll);
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>    <span class="comment">// K3 (with intermediates) ──────────────────────────────────────────────
+<a href=#188 id=188 data-nosnippet>188</a>    </span><span class="kw">let </span>(
+<a href=#189 id=189 data-nosnippet>189</a>        intra_chunk_state_bnhpr,
+<a href=#190 id=190 data-nosnippet>190</a>        b_bar_scale_bhnl,
+<a href=#191 id=191 data-nosnippet>191</a>        forward_decay_to_chunk_end_bhnl,
+<a href=#192 id=192 data-nosnippet>192</a>        b_scaled_bnhlr,
+<a href=#193 id=193 data-nosnippet>193</a>    ) = k3_ssd_chunk_state_extended(
+<a href=#194 id=194 data-nosnippet>194</a>        x_bnlhp.clone(),
+<a href=#195 id=195 data-nosnippet>195</a>        b_bnlgr.clone(),
+<a href=#196 id=196 data-nosnippet>196</a>        da_cumsum_bhnl.clone(),
+<a href=#197 id=197 data-nosnippet>197</a>        dt_discretized_bhnl.clone(),
+<a href=#198 id=198 data-nosnippet>198</a>    );
+<a href=#199 id=199 data-nosnippet>199</a>    san(<span class="kw-2">&amp;</span>intra_chunk_state_bnhpr);
+<a href=#200 id=200 data-nosnippet>200</a>    san(<span class="kw-2">&amp;</span>b_bar_scale_bhnl);
+<a href=#201 id=201 data-nosnippet>201</a>    san(<span class="kw-2">&amp;</span>forward_decay_to_chunk_end_bhnl);
+<a href=#202 id=202 data-nosnippet>202</a>    san(<span class="kw-2">&amp;</span>b_scaled_bnhlr);
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="comment">// K4 ───────────────────────────────────────────────────────────────────
+<a href=#205 id=205 data-nosnippet>205</a>    </span><span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr): (Tensor&lt;B, <span class="number">5</span>&gt;, Tensor&lt;B, <span class="number">4</span>&gt;) =
+<a href=#206 id=206 data-nosnippet>206</a>        serial::k4_ssd_state_passing(
+<a href=#207 id=207 data-nosnippet>207</a>            intra_chunk_state_bnhpr.clone(),
+<a href=#208 id=208 data-nosnippet>208</a>            da_chunk_end_bhn.clone(),
+<a href=#209 id=209 data-nosnippet>209</a>            initial_state_bhpr,
+<a href=#210 id=210 data-nosnippet>210</a>        );
+<a href=#211 id=211 data-nosnippet>211</a>    san(<span class="kw-2">&amp;</span>chunk_input_state_bnhpr);
+<a href=#212 id=212 data-nosnippet>212</a>    san(<span class="kw-2">&amp;</span>_final_state_bhpr);
+<a href=#213 id=213 data-nosnippet>213</a>
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
+<a href=#215 id=215 data-nosnippet>215</a>    // K5 + K4 FUSED BACKWARD (reverse per-chunk loop)
+<a href=#216 id=216 data-nosnippet>216</a>    // ═══════════════════════════════════════════════════════════════════════
+<a href=#217 id=217 data-nosnippet>217</a>
+<a href=#218 id=218 data-nosnippet>218</a>    // ── SKIP backward ─────────────────────────────────────────────────────
+<a href=#219 id=219 data-nosnippet>219</a>    // - | 36/36: add: (y_partial_bnlhp, skip_bnlhp) -&gt; (y_bnlhp [out])
+<a href=#220 id=220 data-nosnippet>220</a>    // - | (d_skip_bnlhp = d_y_bnlhp)
+<a href=#221 id=221 data-nosnippet>221</a>    </span><span class="kw">let </span>d_skip_bnlhp = d_y_bnlhp.clone();
+<a href=#222 id=222 data-nosnippet>222</a>    <span class="comment">//
+<a href=#223 id=223 data-nosnippet>223</a>    //
+<a href=#224 id=224 data-nosnippet>224</a>    // For d_h:
+<a href=#225 id=225 data-nosnippet>225</a>    // - - | 33: mul: (d_bnlhp, x_bnlhp[*]) -&gt; (skip_bnlhp)
+<a href=#226 id=226 data-nosnippet>226</a>    // - - | (d_d_bnlhp = d_skip_bnlhp * x_bnlhp)
+<a href=#227 id=227 data-nosnippet>227</a>    // - - | 32: expand: (d_111h1) -&gt; (d_bnlhp)
+<a href=#228 id=228 data-nosnippet>228</a>    // - - | 31: unsqueeze-dims: (d_h [*]) -&gt; (d_111h1)
+<a href=#229 id=229 data-nosnippet>229</a>    //
+<a href=#230 id=230 data-nosnippet>230</a>    // - - | d_d[h] = Σ_{b,n,l,p} dy * x   — use permute+reshape to avoid chained sum_dim
+<a href=#231 id=231 data-nosnippet>231</a>    </span><span class="kw">let </span>d_d_h = {
+<a href=#232 id=232 data-nosnippet>232</a>        d_skip_bnlhp.clone()
+<a href=#233 id=233 data-nosnippet>233</a>            .permute([<span class="number">3</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// d_y_hbnlp
+<a href=#234 id=234 data-nosnippet>234</a>            </span>.reshape([nheads, batch * nchunks * chunk_len * per_head_dim]) <span class="comment">// d_y_hBNLP
+<a href=#235 id=235 data-nosnippet>235</a>            </span>* x_bnlhp
+<a href=#236 id=236 data-nosnippet>236</a>                .clone()
+<a href=#237 id=237 data-nosnippet>237</a>                .permute([<span class="number">3</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// x_hbnlp
+<a href=#238 id=238 data-nosnippet>238</a>                </span>.reshape([nheads, batch * nchunks * chunk_len * per_head_dim]) <span class="comment">// x_hBNLP
+<a href=#239 id=239 data-nosnippet>239</a>    </span>}
+<a href=#240 id=240 data-nosnippet>240</a>    .sum_dim(<span class="number">1</span>) <span class="comment">// d_d_h1
+<a href=#241 id=241 data-nosnippet>241</a>    </span>.reshape([nheads]); <span class="comment">// d_d_h
+<a href=#242 id=242 data-nosnippet>242</a>    </span>san(<span class="kw-2">&amp;</span>d_d_h);
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="comment">//
+<a href=#244 id=244 data-nosnippet>244</a>    // For d_x:
+<a href=#245 id=245 data-nosnippet>245</a>    // - - | 33: mul: (d_bnlhp, x_bnlhp[*]) -&gt; (skip_bnlhp)
+<a href=#246 id=246 data-nosnippet>246</a>    // - - | (d_x_skip_bnlhp = d_skip_bnlhp * d_bnlhp)
+<a href=#247 id=247 data-nosnippet>247</a>    </span><span class="kw">let </span>d_x_skip_bnlhp = d_skip_bnlhp
+<a href=#248 id=248 data-nosnippet>248</a>        * d_h
+<a href=#249 id=249 data-nosnippet>249</a>            .clone()
+<a href=#250 id=250 data-nosnippet>250</a>            .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// d_111h1
+<a href=#251 id=251 data-nosnippet>251</a>            </span>.expand([batch, nchunks, chunk_len, nheads, per_head_dim]) <span class="comment">// d_bnlhp
+<a href=#252 id=252 data-nosnippet>252</a>        </span>;
+<a href=#253 id=253 data-nosnippet>253</a>    san(<span class="kw-2">&amp;</span>d_x_skip_bnlhp);
+<a href=#254 id=254 data-nosnippet>254</a>
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="comment">// ── Fused K5 (BLUE + ORANGE) + K4 reverse loop ─────────────────────────
+<a href=#256 id=256 data-nosnippet>256</a>    //
+<a href=#257 id=257 data-nosnippet>257</a>    // Per-iteration working set is _bhll (not _bnhll).
+<a href=#258 id=258 data-nosnippet>258</a>    // Per-chunk gradients are collected in vecs and stacked once the loop is done.
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>    // _ll causal mask, broadcast as a view inside each iteration —
+<a href=#261 id=261 data-nosnippet>261</a>    // value does not depend on (b,n,h).
+<a href=#262 id=262 data-nosnippet>262</a>    </span><span class="kw">let </span>causal_mask_ll: Tensor&lt;B, <span class="number">2</span>, burn::prelude::Bool&gt; =
+<a href=#263 id=263 data-nosnippet>263</a>        Tensor::&lt;B, <span class="number">2</span>, burn::prelude::Bool&gt;::tril_mask([chunk_len, chunk_len], <span class="number">0</span>, <span class="kw-2">&amp;</span>device);
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_orange_d_x_bhlp: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#266 id=266 data-nosnippet>266</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_orange_d_dt_bhl: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_orange_d_da_bhl: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_d_cb_bgll: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_blue_d_c_bhlr: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_blue_d_da_bhl: Vec&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_d_intra_bhpr: Vec&lt;Tensor&lt;B, <span class="number">4</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">let </span><span class="kw-2">mut </span>vec_d_da_end_bh: Vec&lt;Tensor&lt;B, <span class="number">2</span>&gt;&gt; = Vec::with_capacity(nchunks);
+<a href=#273 id=273 data-nosnippet>273</a>
+<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span><span class="kw-2">mut </span>d_running_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = d_final_bhpr;
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">for </span>i_chunk <span class="kw">in </span>(<span class="number">0</span>..nchunks).rev() {
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="comment">// ── Per-chunk inputs (slice the batched tensors to [batch,nheads,...]) ──────
+<a href=#278 id=278 data-nosnippet>278</a>        </span><span class="kw">let </span>da_cumsum_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = da_cumsum_bhnl
+<a href=#279 id=279 data-nosnippet>279</a>            .clone()
+<a href=#280 id=280 data-nosnippet>280</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk, ..]) <span class="comment">// da_cumsum_bh1l
+<a href=#281 id=281 data-nosnippet>281</a>            </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// da_cumsum_bhl
+<a href=#282 id=282 data-nosnippet>282</a>        </span><span class="kw">let </span>dt_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = dt_discretized_bhnl
+<a href=#283 id=283 data-nosnippet>283</a>            .clone()
+<a href=#284 id=284 data-nosnippet>284</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk, ..]) <span class="comment">// dt_discretized_bh1l
+<a href=#285 id=285 data-nosnippet>285</a>            </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// dt_bhl
+<a href=#286 id=286 data-nosnippet>286</a>        </span><span class="kw">let </span>x_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = x_bnlhp
+<a href=#287 id=287 data-nosnippet>287</a>            .clone()
+<a href=#288 id=288 data-nosnippet>288</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..]) <span class="comment">// x_b1lhp
+<a href=#289 id=289 data-nosnippet>289</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// x_blhp
+<a href=#290 id=290 data-nosnippet>290</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// x_bhlp
+<a href=#291 id=291 data-nosnippet>291</a>        </span><span class="kw">let </span>d_y_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bnlhp
+<a href=#292 id=292 data-nosnippet>292</a>            .clone()
+<a href=#293 id=293 data-nosnippet>293</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..]) <span class="comment">// d_y_b1lhp
+<a href=#294 id=294 data-nosnippet>294</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// d_y_blhp
+<a href=#295 id=295 data-nosnippet>295</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// d_y_bhlp
+<a href=#296 id=296 data-nosnippet>296</a>
+<a href=#297 id=297 data-nosnippet>297</a>        // GQA-expand C for this chunk: _blgr → _bhlr
+<a href=#298 id=298 data-nosnippet>298</a>        </span><span class="kw">let </span>c_bhlr: Tensor&lt;B, <span class="number">4</span>&gt; = c_bnlgr
+<a href=#299 id=299 data-nosnippet>299</a>            .clone()
+<a href=#300 id=300 data-nosnippet>300</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..]) <span class="comment">// c_b1lgr
+<a href=#301 id=301 data-nosnippet>301</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// c_blgr
+<a href=#302 id=302 data-nosnippet>302</a>            </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) <span class="comment">// c_blg1r
+<a href=#303 id=303 data-nosnippet>303</a>            </span>.expand([batch, chunk_len, ngroups, heads_per_group, state_rank]) <span class="comment">// c_blgHr
+<a href=#304 id=304 data-nosnippet>304</a>            </span>.reshape([batch, chunk_len, nheads, state_rank]) <span class="comment">// c_blhr
+<a href=#305 id=305 data-nosnippet>305</a>            </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// c_bhlr
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a>        // GQA-expand CB for this chunk: _bgll → _bhll
+<a href=#308 id=308 data-nosnippet>308</a>        </span><span class="kw">let </span>cb_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = cb_bngll
+<a href=#309 id=309 data-nosnippet>309</a>            .clone()
+<a href=#310 id=310 data-nosnippet>310</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..]) <span class="comment">// cb_b1gll
+<a href=#311 id=311 data-nosnippet>311</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// cb_bgll
+<a href=#312 id=312 data-nosnippet>312</a>            </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>) <span class="comment">// cb_bg1ll
+<a href=#313 id=313 data-nosnippet>313</a>            </span>.expand([batch, ngroups, heads_per_group, chunk_len, chunk_len]) <span class="comment">// cb_bgHll
+<a href=#314 id=314 data-nosnippet>314</a>            </span>.reshape([batch, nheads, chunk_len, chunk_len]); <span class="comment">// cb_bhll
+<a href=#315 id=315 data-nosnippet>315</a>
+<a href=#316 id=316 data-nosnippet>316</a>        </span><span class="kw">let </span>causal_mask_bhll: Tensor&lt;B, <span class="number">4</span>, burn::prelude::Bool&gt; = causal_mask_ll
+<a href=#317 id=317 data-nosnippet>317</a>            .clone()
+<a href=#318 id=318 data-nosnippet>318</a>            .unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]) <span class="comment">// causal_mask_11ll
+<a href=#319 id=319 data-nosnippet>319</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]); <span class="comment">// causal_mask_bhll
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a>        // Running state entering chunk i.
+<a href=#322 id=322 data-nosnippet>322</a>        </span><span class="kw">let </span>chunk_input_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = chunk_input_state_bnhpr
 <a href=#323 id=323 data-nosnippet>323</a>            .clone()
-<a href=#324 id=324 data-nosnippet>324</a>            .reshape([<span class="number">1</span>, <span class="number">1</span>, chunk_len, chunk_len])
-<a href=#325 id=325 data-nosnippet>325</a>            .expand([batch, nheads, chunk_len, chunk_len]);
-<a href=#326 id=326 data-nosnippet>326</a>
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="comment">// Running state entering chunk i.
-<a href=#328 id=328 data-nosnippet>328</a>        </span><span class="kw">let </span>chunk_input_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = chunk_input_state_bnhpr
-<a href=#329 id=329 data-nosnippet>329</a>            .clone()
-<a href=#330 id=330 data-nosnippet>330</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..])
-<a href=#331 id=331 data-nosnippet>331</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>); <span class="comment">// [B,H,P,R]
-<a href=#332 id=332 data-nosnippet>332</a>        </span>san(<span class="kw-2">&amp;</span>chunk_input_state_bhpr);
-<a href=#333 id=333 data-nosnippet>333</a>
-<a href=#334 id=334 data-nosnippet>334</a>        <span class="comment">// ── BLUE backward for chunk i ──────────────────────────────────────
-<a href=#335 id=335 data-nosnippet>335</a>        // y_blue[l,p] = exp(da[l]) · Σ_r C[l,r] · state[p,r]
-<a href=#336 id=336 data-nosnippet>336</a>        </span><span class="kw">let </span>exp_da_cumsum_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = da_cumsum_bhl.clone().exp(); <span class="comment">// [B,H,L]
-<a href=#337 id=337 data-nosnippet>337</a>        </span><span class="kw">let </span>exp_da_cumsum_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = exp_da_cumsum_bhl
-<a href=#338 id=338 data-nosnippet>338</a>            .clone()
-<a href=#339 id=339 data-nosnippet>339</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>)
-<a href=#340 id=340 data-nosnippet>340</a>            .expand([batch, nheads, chunk_len, per_head_dim]); <span class="comment">// [B,H,L,P]
-<a href=#341 id=341 data-nosnippet>341</a>        </span><span class="kw">let </span>d_blue_scaled_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bhlp.clone(); <span class="comment">// = d_y_partial
-<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="kw">let </span>d_blue_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_blue_scaled_bhlp.clone() * exp_da_cumsum_bhlp.clone();
-<a href=#343 id=343 data-nosnippet>343</a>        san(<span class="kw-2">&amp;</span>d_blue_bhlp);
-<a href=#344 id=344 data-nosnippet>344</a>
-<a href=#345 id=345 data-nosnippet>345</a>        <span class="comment">// d_chunk_input_state = c^T @ d_blue
-<a href=#346 id=346 data-nosnippet>346</a>        //   c_bhlr [B,H,L,R].permute([0,1,3,2]) → c_bhrl [B,H,R,L]
-<a href=#347 id=347 data-nosnippet>347</a>        //   c_bhrl @ d_blue_bhlp [B,H,L,P] → [B,H,R,P] → permute → [B,H,P,R]
-<a href=#348 id=348 data-nosnippet>348</a>        </span><span class="kw">let </span>d_chunk_input_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = c_bhlr
-<a href=#349 id=349 data-nosnippet>349</a>            .clone()
-<a href=#350 id=350 data-nosnippet>350</a>            .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// [B,H,R,L]
-<a href=#351 id=351 data-nosnippet>351</a>            </span>.matmul(d_blue_bhlp.clone()) <span class="comment">// [B,H,R,P]
-<a href=#352 id=352 data-nosnippet>352</a>            </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]); <span class="comment">// [B,H,P,R]
-<a href=#353 id=353 data-nosnippet>353</a>        </span>san(<span class="kw-2">&amp;</span>d_chunk_input_state_bhpr);
-<a href=#354 id=354 data-nosnippet>354</a>
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="comment">// d_c_blue = d_blue @ chunk_input_state  [B,H,L,P] @ [B,H,P,R] → [B,H,L,R]
-<a href=#356 id=356 data-nosnippet>356</a>        </span><span class="kw">let </span>d_c_blue_bhlr: Tensor&lt;B, <span class="number">4</span>&gt; =
-<a href=#357 id=357 data-nosnippet>357</a>            d_blue_bhlp.clone().matmul(chunk_input_state_bhpr.clone());
-<a href=#358 id=358 data-nosnippet>358</a>        san(<span class="kw-2">&amp;</span>d_c_blue_bhlr);
-<a href=#359 id=359 data-nosnippet>359</a>        d_c_blue_vec.push(d_c_blue_bhlr);
-<a href=#360 id=360 data-nosnippet>360</a>
-<a href=#361 id=361 data-nosnippet>361</a>        <span class="comment">// d_da from BLUE:
-<a href=#362 id=362 data-nosnippet>362</a>        //   blue_no_scale = c @ state^T  [B,H,L,R] @ [B,H,R,P] → [B,H,L,P]
-<a href=#363 id=363 data-nosnippet>363</a>        //   d_da[l] = Σ_p (d_blue_scaled[l,p] * blue_no_scale[l,p]) * exp_da[l]
-<a href=#364 id=364 data-nosnippet>364</a>        </span><span class="kw">let </span>blue_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = c_bhlr
-<a href=#365 id=365 data-nosnippet>365</a>            .clone()
-<a href=#366 id=366 data-nosnippet>366</a>            .matmul(chunk_input_state_bhpr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>])); <span class="comment">// [B,H,L,P]
-<a href=#367 id=367 data-nosnippet>367</a>        </span><span class="kw">let </span>d_exp_da_cumsum_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_blue_scaled_bhlp.clone() * blue_bhlp;
-<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">let </span>d_da_blue_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = (d_exp_da_cumsum_bhlp * exp_da_cumsum_bhlp)
-<a href=#369 id=369 data-nosnippet>369</a>            .sum_dim(<span class="number">3</span>)
-<a href=#370 id=370 data-nosnippet>370</a>            .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>); <span class="comment">// [B,H,L]
-<a href=#371 id=371 data-nosnippet>371</a>        </span>san(<span class="kw-2">&amp;</span>d_da_blue_bhl);
-<a href=#372 id=372 data-nosnippet>372</a>        d_da_blue_vec.push(d_da_blue_bhl);
-<a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a>        <span class="comment">// ── ORANGE backward for chunk i ────────────────────────────────────
-<a href=#375 id=375 data-nosnippet>375</a>        // y_orange[l,p] = Σ_{s≤l} CB[l,s] · exp(da[l]-da[s]) · dt[s] · x[s,p]
-<a href=#376 id=376 data-nosnippet>376</a>        //   CB_w[l,s] = CB[l,s] · exp_diff[l,s] · dt[s] · mask
-<a href=#377 id=377 data-nosnippet>377</a>        </span><span class="kw">let </span>da_cumsum_target_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = da_cumsum_bhl
-<a href=#378 id=378 data-nosnippet>378</a>            .clone()
-<a href=#379 id=379 data-nosnippet>379</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// [B,H,L_tgt,1]
-<a href=#380 id=380 data-nosnippet>380</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]); <span class="comment">// [B,H,L_tgt,L_src]
-<a href=#381 id=381 data-nosnippet>381</a>        </span><span class="kw">let </span>da_cumsum_source_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = da_cumsum_bhl
-<a href=#382 id=382 data-nosnippet>382</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>) <span class="comment">// [B,H,1,L_src]
-<a href=#383 id=383 data-nosnippet>383</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]);
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>da_cumsum_diff_bhll = da_cumsum_target_bhll - da_cumsum_source_bhll;
-<a href=#385 id=385 data-nosnippet>385</a>        san(<span class="kw-2">&amp;</span>da_cumsum_diff_bhll);
-<a href=#386 id=386 data-nosnippet>386</a>
-<a href=#387 id=387 data-nosnippet>387</a>        <span class="comment">// Causal mask + exp stabiliser (-inf above the main diagonal).
-<a href=#388 id=388 data-nosnippet>388</a>        </span><span class="kw">let </span>da_cumsum_diff_masked_bhll =
-<a href=#389 id=389 data-nosnippet>389</a>            da_cumsum_diff_bhll.mask_fill(causal_mask_bhll.clone(), f32::NEG_INFINITY);
-<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">let </span>da_cumsum_diff_exp_bhll = da_cumsum_diff_masked_bhll.exp(); <span class="comment">// [B,H,L,L]
-<a href=#391 id=391 data-nosnippet>391</a>        </span>san(<span class="kw-2">&amp;</span>da_cumsum_diff_exp_bhll);
-<a href=#392 id=392 data-nosnippet>392</a>
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>dt_source_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = dt_bhl
-<a href=#394 id=394 data-nosnippet>394</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>) <span class="comment">// [B,H,1,L_src]
-<a href=#395 id=395 data-nosnippet>395</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]);
-<a href=#396 id=396 data-nosnippet>396</a>
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="kw">let </span>orange_lhs_partial1_bhll: Tensor&lt;B, <span class="number">4</span>&gt; =
-<a href=#398 id=398 data-nosnippet>398</a>            cb_bhll.clone() * da_cumsum_diff_exp_bhll.clone();
-<a href=#399 id=399 data-nosnippet>399</a>        san(<span class="kw-2">&amp;</span>orange_lhs_partial1_bhll);
-<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">let </span>orange_lhs_partial2_bhll: Tensor&lt;B, <span class="number">4</span>&gt; =
-<a href=#401 id=401 data-nosnippet>401</a>            orange_lhs_partial1_bhll.clone() * dt_source_bhll.clone();
-<a href=#402 id=402 data-nosnippet>402</a>        san(<span class="kw-2">&amp;</span>orange_lhs_partial2_bhll);
-<a href=#403 id=403 data-nosnippet>403</a>
-<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>d_orange_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bhlp; <span class="comment">// = d_y_partial
-<a href=#405 id=405 data-nosnippet>405</a>        // d_CB_w = d_orange @ x^T  [B,H,L_tgt,P] @ [B,H,P,L_src] → [B,H,L_tgt,L_src]
-<a href=#406 id=406 data-nosnippet>406</a>        </span><span class="kw">let </span>d_orange_lhs_partial2_bhll: Tensor&lt;B, <span class="number">4</span>&gt; =
-<a href=#407 id=407 data-nosnippet>407</a>            d_orange_bhlp.clone().matmul(x_bhlp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]));
-<a href=#408 id=408 data-nosnippet>408</a>        san(<span class="kw-2">&amp;</span>d_orange_lhs_partial2_bhll);
+<a href=#324 id=324 data-nosnippet>324</a>            .slice(<span class="macro">s!</span>[.., i_chunk, .., .., ..]) <span class="comment">// chunk_input_state_b1hpr
+<a href=#325 id=325 data-nosnippet>325</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>); <span class="comment">// chunk_input_state_bhpr
+<a href=#326 id=326 data-nosnippet>326</a>        </span>san(<span class="kw-2">&amp;</span>chunk_input_state_bhpr);
+<a href=#327 id=327 data-nosnippet>327</a>
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="comment">// ── BLUE backward for chunk i ──────────────────────────────────────
+<a href=#329 id=329 data-nosnippet>329</a>        // y_blue[l,p] = exp(da[l]) · Σ_r C[l,r] · state[p,r]
+<a href=#330 id=330 data-nosnippet>330</a>        </span><span class="kw">let </span>exp_da_cumsum_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = da_cumsum_bhl.clone().exp();
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span>exp_da_cumsum_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = exp_da_cumsum_bhl
+<a href=#332 id=332 data-nosnippet>332</a>            .clone()
+<a href=#333 id=333 data-nosnippet>333</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// exp_da_cumsum_bhl1
+<a href=#334 id=334 data-nosnippet>334</a>            </span>.expand([batch, nheads, chunk_len, per_head_dim]); <span class="comment">// exp_da_cumsum_bhlp
+<a href=#335 id=335 data-nosnippet>335</a>        </span><span class="kw">let </span>d_blue_scaled_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bhlp.clone(); <span class="comment">// = d_y_partial
+<a href=#336 id=336 data-nosnippet>336</a>        </span><span class="kw">let </span>d_blue_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_blue_scaled_bhlp.clone() * exp_da_cumsum_bhlp.clone();
+<a href=#337 id=337 data-nosnippet>337</a>        san(<span class="kw-2">&amp;</span>d_blue_bhlp);
+<a href=#338 id=338 data-nosnippet>338</a>
+<a href=#339 id=339 data-nosnippet>339</a>        <span class="comment">// d_chunk_input_state = c^T @ d_blue
+<a href=#340 id=340 data-nosnippet>340</a>        </span><span class="kw">let </span>d_chunk_input_state_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = c_bhlr
+<a href=#341 id=341 data-nosnippet>341</a>            .clone()
+<a href=#342 id=342 data-nosnippet>342</a>            .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// c_bhrl
+<a href=#343 id=343 data-nosnippet>343</a>            </span>.matmul(d_blue_bhlp.clone()) <span class="comment">// d_chunk_input_state_bhrp
+<a href=#344 id=344 data-nosnippet>344</a>            </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]); <span class="comment">// d_chunk_input_state_bhpr
+<a href=#345 id=345 data-nosnippet>345</a>        </span>san(<span class="kw-2">&amp;</span>d_chunk_input_state_bhpr);
+<a href=#346 id=346 data-nosnippet>346</a>
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="comment">// d_c_blue = d_blue @ chunk_input_state
+<a href=#348 id=348 data-nosnippet>348</a>        </span><span class="kw">let </span>d_c_blue_bhlr: Tensor&lt;B, <span class="number">4</span>&gt; =
+<a href=#349 id=349 data-nosnippet>349</a>            d_blue_bhlp.clone().matmul(chunk_input_state_bhpr.clone());
+<a href=#350 id=350 data-nosnippet>350</a>        san(<span class="kw-2">&amp;</span>d_c_blue_bhlr);
+<a href=#351 id=351 data-nosnippet>351</a>        vec_blue_d_c_bhlr.push(d_c_blue_bhlr);
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a>        <span class="comment">// d_da from BLUE:
+<a href=#354 id=354 data-nosnippet>354</a>        //   blue_no_scale = c @ state^T
+<a href=#355 id=355 data-nosnippet>355</a>        //   d_da[l] = Σ_p (d_blue_scaled[l,p] * blue_no_scale[l,p]) * exp_da[l]
+<a href=#356 id=356 data-nosnippet>356</a>        </span><span class="kw">let </span>blue_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = c_bhlr.clone().matmul(
+<a href=#357 id=357 data-nosnippet>357</a>            chunk_input_state_bhpr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]), <span class="comment">// chunk_input_state_bhrp
+<a href=#358 id=358 data-nosnippet>358</a>        </span>); <span class="comment">// blue_bhlp
+<a href=#359 id=359 data-nosnippet>359</a>        </span><span class="kw">let </span>d_exp_da_cumsum_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_blue_scaled_bhlp.clone() * blue_bhlp;
+<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">let </span>d_da_blue_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = (d_exp_da_cumsum_bhlp * exp_da_cumsum_bhlp)
+<a href=#361 id=361 data-nosnippet>361</a>            .sum_dim(<span class="number">3</span>) <span class="comment">// d_da_blue_bhl1
+<a href=#362 id=362 data-nosnippet>362</a>            </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>); <span class="comment">// d_da_blue_bhl
+<a href=#363 id=363 data-nosnippet>363</a>        </span>san(<span class="kw-2">&amp;</span>d_da_blue_bhl);
+<a href=#364 id=364 data-nosnippet>364</a>        vec_blue_d_da_bhl.push(d_da_blue_bhl);
+<a href=#365 id=365 data-nosnippet>365</a>
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="comment">// ── ORANGE backward for chunk i ────────────────────────────────────
+<a href=#367 id=367 data-nosnippet>367</a>        // y_orange[l,p] = Σ_{s≤l} CB[l,s] · exp(da[l]-da[s]) · dt[s] · x[s,p]
+<a href=#368 id=368 data-nosnippet>368</a>        //   CB_w[l,s] = CB[l,s] · exp_diff[l,s] · dt[s] · mask
+<a href=#369 id=369 data-nosnippet>369</a>        </span><span class="kw">let </span>da_cumsum_target_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = da_cumsum_bhl
+<a href=#370 id=370 data-nosnippet>370</a>            .clone()
+<a href=#371 id=371 data-nosnippet>371</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// [batch,nheads,chunk_len_tgt,1]
+<a href=#372 id=372 data-nosnippet>372</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]); <span class="comment">// [batch,nheads,chunk_len_tgt,chunk_len_src]
+<a href=#373 id=373 data-nosnippet>373</a>        </span><span class="kw">let </span>da_cumsum_source_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = da_cumsum_bhl
+<a href=#374 id=374 data-nosnippet>374</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>) <span class="comment">// [batch,nheads,1,chunk_len_src]
+<a href=#375 id=375 data-nosnippet>375</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]); <span class="comment">// [batch,nheads,chunk_len_tgt,chunk_len_src]
+<a href=#376 id=376 data-nosnippet>376</a>        </span><span class="kw">let </span>da_cumsum_diff_bhll = da_cumsum_target_bhll - da_cumsum_source_bhll;
+<a href=#377 id=377 data-nosnippet>377</a>        san(<span class="kw-2">&amp;</span>da_cumsum_diff_bhll);
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="comment">// Causal mask + exp stabiliser (-inf above the main diagonal).
+<a href=#380 id=380 data-nosnippet>380</a>        </span><span class="kw">let </span>da_cumsum_diff_masked_bhll =
+<a href=#381 id=381 data-nosnippet>381</a>            da_cumsum_diff_bhll.mask_fill(causal_mask_bhll.clone(), f32::NEG_INFINITY);
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">let </span>da_cumsum_diff_exp_bhll = da_cumsum_diff_masked_bhll.exp();
+<a href=#383 id=383 data-nosnippet>383</a>        san(<span class="kw-2">&amp;</span>da_cumsum_diff_exp_bhll);
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="kw">let </span>dt_source_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = dt_bhl
+<a href=#386 id=386 data-nosnippet>386</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>) <span class="comment">// dt_bh1l
+<a href=#387 id=387 data-nosnippet>387</a>            </span>.expand([batch, nheads, chunk_len, chunk_len]);
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="kw">let </span>orange_lhs_partial1_bhll: Tensor&lt;B, <span class="number">4</span>&gt; =
+<a href=#390 id=390 data-nosnippet>390</a>            cb_bhll.clone() * da_cumsum_diff_exp_bhll.clone();
+<a href=#391 id=391 data-nosnippet>391</a>        san(<span class="kw-2">&amp;</span>orange_lhs_partial1_bhll);
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>orange_lhs_partial2_bhll: Tensor&lt;B, <span class="number">4</span>&gt; =
+<a href=#393 id=393 data-nosnippet>393</a>            orange_lhs_partial1_bhll.clone() * dt_source_bhll.clone();
+<a href=#394 id=394 data-nosnippet>394</a>        san(<span class="kw-2">&amp;</span>orange_lhs_partial2_bhll);
+<a href=#395 id=395 data-nosnippet>395</a>
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">let </span>d_orange_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = d_y_bhlp; <span class="comment">// = d_y_partial
+<a href=#397 id=397 data-nosnippet>397</a>        // d_CB_w = d_orange @ x^T
+<a href=#398 id=398 data-nosnippet>398</a>        </span><span class="kw">let </span>d_orange_lhs_partial2_bhll: Tensor&lt;B, <span class="number">4</span>&gt; = d_orange_bhlp.clone().matmul(
+<a href=#399 id=399 data-nosnippet>399</a>            x_bhlp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]), <span class="comment">// x_bhpl
+<a href=#400 id=400 data-nosnippet>400</a>        </span>); <span class="comment">// d_orange_lhs_partial2_bhll
+<a href=#401 id=401 data-nosnippet>401</a>        </span>san(<span class="kw-2">&amp;</span>d_orange_lhs_partial2_bhll);
+<a href=#402 id=402 data-nosnippet>402</a>
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="comment">// d_x = CB_w^T @ d_orange
+<a href=#404 id=404 data-nosnippet>404</a>        </span><span class="kw">let </span>d_x_orange_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = orange_lhs_partial2_bhll
+<a href=#405 id=405 data-nosnippet>405</a>            .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>]) <span class="comment">// TODO: describe this shape (contrast src and tgt)
+<a href=#406 id=406 data-nosnippet>406</a>            </span>.matmul(d_orange_bhlp); <span class="comment">// d_x_orange_bhlp
+<a href=#407 id=407 data-nosnippet>407</a>        </span>san(<span class="kw-2">&amp;</span>d_x_orange_bhlp);
+<a href=#408 id=408 data-nosnippet>408</a>        vec_orange_d_x_bhlp.push(d_x_orange_bhlp);
 <a href=#409 id=409 data-nosnippet>409</a>
-<a href=#410 id=410 data-nosnippet>410</a>        <span class="comment">// d_x = CB_w^T @ d_orange  [B,H,L_src,L_tgt] @ [B,H,L_tgt,P] → [B,H,L_src,P]
-<a href=#411 id=411 data-nosnippet>411</a>        </span><span class="kw">let </span>d_x_orange_bhlp: Tensor&lt;B, <span class="number">4</span>&gt; = orange_lhs_partial2_bhll
-<a href=#412 id=412 data-nosnippet>412</a>            .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>])
-<a href=#413 id=413 data-nosnippet>413</a>            .matmul(d_orange_bhlp);
-<a href=#414 id=414 data-nosnippet>414</a>        san(<span class="kw-2">&amp;</span>d_x_orange_bhlp);
-<a href=#415 id=415 data-nosnippet>415</a>        d_x_orange_vec.push(d_x_orange_bhlp);
-<a href=#416 id=416 data-nosnippet>416</a>
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="comment">// Mask off above-diagonal (set to 0 above the main diagonal).
-<a href=#418 id=418 data-nosnippet>418</a>        </span><span class="kw">let </span>d_orange_lhs_partial2_bhll = d_orange_lhs_partial2_bhll.mask_fill(causal_mask_bhll, <span class="number">0.</span>);
-<a href=#419 id=419 data-nosnippet>419</a>        san(<span class="kw-2">&amp;</span>d_orange_lhs_partial2_bhll);
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span>d_orange_lhs_partial1_bhll = d_orange_lhs_partial2_bhll.clone() * dt_source_bhll;
-<a href=#421 id=421 data-nosnippet>421</a>        san(<span class="kw-2">&amp;</span>d_orange_lhs_partial1_bhll);
-<a href=#422 id=422 data-nosnippet>422</a>
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="comment">// d_dt[s] = Σ_{l≥s} d_CB_w[l,s] · CB[l,s] · decay[l,s]
-<a href=#424 id=424 data-nosnippet>424</a>        </span><span class="kw">let </span>d_dt_orange_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = (d_orange_lhs_partial2_bhll
-<a href=#425 id=425 data-nosnippet>425</a>            * orange_lhs_partial1_bhll.clone())
-<a href=#426 id=426 data-nosnippet>426</a>        .sum_dim(<span class="number">2</span>)
-<a href=#427 id=427 data-nosnippet>427</a>        .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// [B,H,L]
-<a href=#428 id=428 data-nosnippet>428</a>        </span>san(<span class="kw-2">&amp;</span>d_dt_orange_bhl);
-<a href=#429 id=429 data-nosnippet>429</a>        d_dt_orange_vec.push(d_dt_orange_bhl);
-<a href=#430 id=430 data-nosnippet>430</a>
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="comment">// d_da from ORANGE: decay = exp(da_tgt - da_src)
-<a href=#432 id=432 data-nosnippet>432</a>        //   d_da_tgt[l] += Σ_s (d_decay · decay)[l,s]
-<a href=#433 id=433 data-nosnippet>433</a>        //   d_da_src[s] -= Σ_l (d_decay · decay)[l,s]
-<a href=#434 id=434 data-nosnippet>434</a>        </span><span class="kw">let </span>d_da_cumsum_diff_exp_bhll = d_orange_lhs_partial1_bhll.clone() * cb_bhll;
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>d_da_cumsum_diff_bhll = d_da_cumsum_diff_exp_bhll * da_cumsum_diff_exp_bhll.clone();
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>d_da_tgt_bhl: Tensor&lt;B, <span class="number">3</span>&gt; =
-<a href=#437 id=437 data-nosnippet>437</a>            d_da_cumsum_diff_bhll.clone().sum_dim(<span class="number">3</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>);
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">let </span>d_da_src_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = d_da_cumsum_diff_bhll.sum_dim(<span class="number">2</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>);
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span>d_da_orange_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = d_da_tgt_bhl - d_da_src_bhl;
-<a href=#440 id=440 data-nosnippet>440</a>        san(<span class="kw-2">&amp;</span>d_da_orange_bhl);
-<a href=#441 id=441 data-nosnippet>441</a>        d_da_orange_vec.push(d_da_orange_bhl);
-<a href=#442 id=442 data-nosnippet>442</a>
-<a href=#443 id=443 data-nosnippet>443</a>        <span class="comment">// d_cb (GQA reduce H → G): [B,H,L,L] → [B,G,L,L]
-<a href=#444 id=444 data-nosnippet>444</a>        </span><span class="kw">let </span>d_cb_bhll = d_orange_lhs_partial1_bhll * da_cumsum_diff_exp_bhll;
-<a href=#445 id=445 data-nosnippet>445</a>        <span class="kw">let </span>d_cb_bgll: Tensor&lt;B, <span class="number">4</span>&gt; = d_cb_bhll
-<a href=#446 id=446 data-nosnippet>446</a>            .reshape([batch, ngroups, heads_per_group, chunk_len, chunk_len])
-<a href=#447 id=447 data-nosnippet>447</a>            .sum_dim(<span class="number">2</span>)
-<a href=#448 id=448 data-nosnippet>448</a>            .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>); <span class="comment">// [B,G,L,L]
-<a href=#449 id=449 data-nosnippet>449</a>        </span>san(<span class="kw-2">&amp;</span>d_cb_bgll);
-<a href=#450 id=450 data-nosnippet>450</a>        d_cb_vec.push(d_cb_bgll);
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a>        <span class="comment">// ── K4 backward step for chunk i ───────────────────────────────────
-<a href=#453 id=453 data-nosnippet>453</a>        // d_intra[i] = current d_running_state (before the propagation step).
-<a href=#454 id=454 data-nosnippet>454</a>        </span>d_intra_slices.push(d_running_state_bhpr.clone());
-<a href=#455 id=455 data-nosnippet>455</a>
-<a href=#456 id=456 data-nosnippet>456</a>        <span class="comment">// Recompute decay for this chunk.
-<a href=#457 id=457 data-nosnippet>457</a>        </span><span class="kw">let </span>decay_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = da_chunk_end_bhn
-<a href=#458 id=458 data-nosnippet>458</a>            .clone()
-<a href=#459 id=459 data-nosnippet>459</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk]) <span class="comment">// [B,H,1]
-<a href=#460 id=460 data-nosnippet>460</a>            </span>.exp()
-<a href=#461 id=461 data-nosnippet>461</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// [B,H,1,1]
-<a href=#462 id=462 data-nosnippet>462</a>            </span>.expand([batch, nheads, per_head_dim, state_rank]); <span class="comment">// [B,H,P,R]
-<a href=#463 id=463 data-nosnippet>463</a>        </span>san(<span class="kw-2">&amp;</span>decay_bhpr);
-<a href=#464 id=464 data-nosnippet>464</a>
-<a href=#465 id=465 data-nosnippet>465</a>        <span class="comment">// d_decay = d_running_state · running_state (running_state = chunk_input_state[i]).
-<a href=#466 id=466 data-nosnippet>466</a>        </span><span class="kw">let </span>d_decay_bhpr = d_running_state_bhpr.clone() * chunk_input_state_bhpr;
-<a href=#467 id=467 data-nosnippet>467</a>        san(<span class="kw-2">&amp;</span>d_decay_bhpr);
-<a href=#468 id=468 data-nosnippet>468</a>
-<a href=#469 id=469 data-nosnippet>469</a>        <span class="comment">// d_da_chunk_end[b,h] = Σ_{p,r} d_decay · decay   (decay = exp(da_chunk_end)).
-<a href=#470 id=470 data-nosnippet>470</a>        </span><span class="kw">let </span>d_da_chunk_end_bh: Tensor&lt;B, <span class="number">2</span>&gt; = (d_decay_bhpr * decay_bhpr.clone())
-<a href=#471 id=471 data-nosnippet>471</a>            .reshape([batch, nheads, per_head_dim * state_rank])
-<a href=#472 id=472 data-nosnippet>472</a>            .sum_dim(<span class="number">2</span>)
-<a href=#473 id=473 data-nosnippet>473</a>            .squeeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">2</span>);
-<a href=#474 id=474 data-nosnippet>474</a>        san(<span class="kw-2">&amp;</span>d_da_chunk_end_bh);
-<a href=#475 id=475 data-nosnippet>475</a>        d_da_end_bh_slices.push(d_da_chunk_end_bh);
-<a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a>        <span class="comment">// Propagate to previous chunk:
-<a href=#478 id=478 data-nosnippet>478</a>        //   d_running_state_prev = decay · d_running_state + d_chunk_input_state.
-<a href=#479 id=479 data-nosnippet>479</a>        </span>d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
-<a href=#480 id=480 data-nosnippet>480</a>        san(<span class="kw-2">&amp;</span>d_running_state_bhpr);
-<a href=#481 id=481 data-nosnippet>481</a>    }
-<a href=#482 id=482 data-nosnippet>482</a>    <span class="comment">// d_initial_state = the trailing d_running_state after the reverse loop.
-<a href=#483 id=483 data-nosnippet>483</a>    </span><span class="kw">let </span>d_initial_state_bhpr = d_running_state_bhpr;
-<a href=#484 id=484 data-nosnippet>484</a>
-<a href=#485 id=485 data-nosnippet>485</a>    <span class="comment">// ── Stack per-chunk gradients into the batched tensors K3/K2/K1 expect ──
-<a href=#486 id=486 data-nosnippet>486</a>    // Restore natural (forward) chunk order — vecs were filled in reverse.
-<a href=#487 id=487 data-nosnippet>487</a>    </span>d_x_orange_vec.reverse();
-<a href=#488 id=488 data-nosnippet>488</a>    d_dt_orange_vec.reverse();
-<a href=#489 id=489 data-nosnippet>489</a>    d_da_orange_vec.reverse();
-<a href=#490 id=490 data-nosnippet>490</a>    d_cb_vec.reverse();
-<a href=#491 id=491 data-nosnippet>491</a>    d_c_blue_vec.reverse();
-<a href=#492 id=492 data-nosnippet>492</a>    d_da_blue_vec.reverse();
-<a href=#493 id=493 data-nosnippet>493</a>    d_intra_slices.reverse();
-<a href=#494 id=494 data-nosnippet>494</a>    d_da_end_bh_slices.reverse();
-<a href=#495 id=495 data-nosnippet>495</a>
-<a href=#496 id=496 data-nosnippet>496</a>    <span class="comment">// d_x_orange: [B,H,L,P] → stack@1 → [B,N,H,L,P] → permute → [B,N,L,H,P]
-<a href=#497 id=497 data-nosnippet>497</a>    </span><span class="kw">let </span>d_x_orange_bnlhp: Tensor&lt;B, <span class="number">5</span>&gt; =
-<a href=#498 id=498 data-nosnippet>498</a>        Tensor::stack::&lt;<span class="number">5</span>&gt;(d_x_orange_vec, <span class="number">1</span>).permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#499 id=499 data-nosnippet>499</a>    san(<span class="kw-2">&amp;</span>d_x_orange_bnlhp);
-<a href=#500 id=500 data-nosnippet>500</a>
-<a href=#501 id=501 data-nosnippet>501</a>    <span class="comment">// d_dt_orange: [B,H,L] → stack@2 → [B,H,N,L]
-<a href=#502 id=502 data-nosnippet>502</a>    </span><span class="kw">let </span>d_dt_orange_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(d_dt_orange_vec, <span class="number">2</span>);
-<a href=#503 id=503 data-nosnippet>503</a>    san(<span class="kw-2">&amp;</span>d_dt_orange_bhnl);
-<a href=#504 id=504 data-nosnippet>504</a>
-<a href=#505 id=505 data-nosnippet>505</a>    <span class="comment">// d_da_orange: [B,H,L] → stack@2 → [B,H,N,L]
-<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">let </span>d_da_orange_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(d_da_orange_vec, <span class="number">2</span>);
-<a href=#507 id=507 data-nosnippet>507</a>    san(<span class="kw-2">&amp;</span>d_da_orange_bhnl);
-<a href=#508 id=508 data-nosnippet>508</a>
-<a href=#509 id=509 data-nosnippet>509</a>    <span class="comment">// d_cb: [B,G,L,L] → stack@1 → [B,N,G,L,L]
-<a href=#510 id=510 data-nosnippet>510</a>    </span><span class="kw">let </span>d_cb_bngll: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(d_cb_vec, <span class="number">1</span>);
-<a href=#511 id=511 data-nosnippet>511</a>    san(<span class="kw-2">&amp;</span>d_cb_bngll);
-<a href=#512 id=512 data-nosnippet>512</a>
-<a href=#513 id=513 data-nosnippet>513</a>    <span class="comment">// d_c_blue: [B,H,L,R] → stack@1 → [B,N,H,L,R] → GQA reduce → [B,N,L,G,R]
-<a href=#514 id=514 data-nosnippet>514</a>    </span><span class="kw">let </span>d_c_blue_bnhlr: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(d_c_blue_vec, <span class="number">1</span>);
-<a href=#515 id=515 data-nosnippet>515</a>    <span class="kw">let </span>d_c_blue_bnlgr: Tensor&lt;B, <span class="number">5</span>&gt; = d_c_blue_bnhlr
-<a href=#516 id=516 data-nosnippet>516</a>        .reshape([
-<a href=#517 id=517 data-nosnippet>517</a>            batch,
-<a href=#518 id=518 data-nosnippet>518</a>            nchunks,
-<a href=#519 id=519 data-nosnippet>519</a>            ngroups,
-<a href=#520 id=520 data-nosnippet>520</a>            heads_per_group,
-<a href=#521 id=521 data-nosnippet>521</a>            chunk_len,
-<a href=#522 id=522 data-nosnippet>522</a>            state_rank,
-<a href=#523 id=523 data-nosnippet>523</a>        ])
-<a href=#524 id=524 data-nosnippet>524</a>        .sum_dim(<span class="number">3</span>)
-<a href=#525 id=525 data-nosnippet>525</a>        .squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>)
-<a href=#526 id=526 data-nosnippet>526</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#527 id=527 data-nosnippet>527</a>    san(<span class="kw-2">&amp;</span>d_c_blue_bnlgr);
-<a href=#528 id=528 data-nosnippet>528</a>
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="comment">// d_da_blue: [B,H,L] → stack@2 → [B,H,N,L]
-<a href=#530 id=530 data-nosnippet>530</a>    </span><span class="kw">let </span>d_da_blue_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(d_da_blue_vec, <span class="number">2</span>);
-<a href=#531 id=531 data-nosnippet>531</a>    san(<span class="kw-2">&amp;</span>d_da_blue_bhnl);
-<a href=#532 id=532 data-nosnippet>532</a>
-<a href=#533 id=533 data-nosnippet>533</a>    <span class="comment">// d_intra_chunk_state: [B,H,P,R] → stack@1 → [B,N,H,P,R]
-<a href=#534 id=534 data-nosnippet>534</a>    </span><span class="kw">let </span>d_intra_chunk_state_bnhpr: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(d_intra_slices, <span class="number">1</span>);
-<a href=#535 id=535 data-nosnippet>535</a>    san(<span class="kw-2">&amp;</span>d_intra_chunk_state_bnhpr);
-<a href=#536 id=536 data-nosnippet>536</a>
-<a href=#537 id=537 data-nosnippet>537</a>    <span class="comment">// d_da_end: [B,H] → stack@2 → [B,H,N]; scatter to last L position of d_da_cumsum_k4.
-<a href=#538 id=538 data-nosnippet>538</a>    </span><span class="kw">let </span>d_da_end_bhn: Tensor&lt;B, <span class="number">3</span>&gt; = Tensor::stack(d_da_end_bh_slices, <span class="number">2</span>);
-<a href=#539 id=539 data-nosnippet>539</a>    <span class="kw">let </span>d_da_cumsum_k4_bhnl = {
-<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">let </span>zeros = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, chunk_len - <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
-<a href=#541 id=541 data-nosnippet>541</a>        <span class="kw">let </span>d_da_end_bhn1 = d_da_end_bhn.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
-<a href=#542 id=542 data-nosnippet>542</a>        Tensor::cat(<span class="macro">vec!</span>[zeros, d_da_end_bhn1], <span class="number">3</span>)
-<a href=#543 id=543 data-nosnippet>543</a>    };
-<a href=#544 id=544 data-nosnippet>544</a>
-<a href=#545 id=545 data-nosnippet>545</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
-<a href=#546 id=546 data-nosnippet>546</a>    // K3 BACKWARD
-<a href=#547 id=547 data-nosnippet>547</a>    // ═══════════════════════════════════════════════════════════════════════
-<a href=#548 id=548 data-nosnippet>548</a>    </span><span class="kw">let </span>x_bnhpl = x_bnlhp.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
-<a href=#549 id=549 data-nosnippet>549</a>    <span class="comment">// For d_x_bnlhp:
-<a href=#550 id=550 data-nosnippet>550</a>    // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -&gt; (intra_chunk_state_bnhpr [out][!])
-<a href=#551 id=551 data-nosnippet>551</a>    // - (d_x_bnhpl = d_intra_chunk_state_bnhpr @ b_scaled_bnhlr^T)
-<a href=#552 id=552 data-nosnippet>552</a>    </span><span class="kw">let </span>d_x_k3_bnhpl = d_intra_chunk_state_bnhpr
-<a href=#553 id=553 data-nosnippet>553</a>        .clone()
-<a href=#554 id=554 data-nosnippet>554</a>        .matmul(b_scaled_bnhlr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]));
-<a href=#555 id=555 data-nosnippet>555</a>    san(<span class="kw-2">&amp;</span>d_x_k3_bnhpl);
-<a href=#556 id=556 data-nosnippet>556</a>    <span class="comment">// - 1/15: permute: (x_bnlhp [in][*]) -&gt; (x_bnhpl)
-<a href=#557 id=557 data-nosnippet>557</a>    </span><span class="kw">let </span>d_x_k3_bnlhp = d_x_k3_bnhpl.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">4</span>, <span class="number">2</span>, <span class="number">3</span>]);
-<a href=#558 id=558 data-nosnippet>558</a>    <span class="comment">//
-<a href=#559 id=559 data-nosnippet>559</a>    // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -&gt; (intra_chunk_state_bnhpr [out][!])
-<a href=#560 id=560 data-nosnippet>560</a>    // (d_b_scaled_bnhlr = x_bnhpl^T @ d_intra_chunk_state_bnhpr)
-<a href=#561 id=561 data-nosnippet>561</a>    </span><span class="kw">let </span>d_b_scaled_bnhlr = x_bnhpl
-<a href=#562 id=562 data-nosnippet>562</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]) <span class="comment">// x_bnhlp
-<a href=#563 id=563 data-nosnippet>563</a>        </span>.matmul(d_intra_chunk_state_bnhpr);
-<a href=#564 id=564 data-nosnippet>564</a>    san(<span class="kw-2">&amp;</span>d_b_scaled_bnhlr);
-<a href=#565 id=565 data-nosnippet>565</a>    <span class="comment">//
-<a href=#566 id=566 data-nosnippet>566</a>    // For d_b:
-<a href=#567 id=567 data-nosnippet>567</a>    // - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
-<a href=#568 id=568 data-nosnippet>568</a>    // - (d_b_bnhlr = d_b_scaled_bnhlr * b_bar_scale_bnhlr)
-<a href=#569 id=569 data-nosnippet>569</a>    </span><span class="kw">let </span>b_bar_scale_bnhlr = b_bar_scale_bhnl
-<a href=#570 id=570 data-nosnippet>570</a>        .clone()
-<a href=#571 id=571 data-nosnippet>571</a>        .permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// b_bar_scale_bnhl // replay forward step 11
-<a href=#572 id=572 data-nosnippet>572</a>        </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// b_bar_scale_bnhl1 // replay forward step 12
-<a href=#573 id=573 data-nosnippet>573</a>        </span>.expand([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// replay forward step 13
-<a href=#574 id=574 data-nosnippet>574</a>    </span><span class="kw">let </span>d_b_k3_bnhlr = d_b_scaled_bnhlr.clone() * b_bar_scale_bnhlr;
-<a href=#575 id=575 data-nosnippet>575</a>    san(<span class="kw-2">&amp;</span>d_b_k3_bnhlr);
-<a href=#576 id=576 data-nosnippet>576</a>    <span class="comment">// - 5: reshape: (b_bngHlr) -&gt; (b_bnhlr)
-<a href=#577 id=577 data-nosnippet>577</a>    // - 4: expand: (b_bng1lr) -&gt; (b_bngHlr)
-<a href=#578 id=578 data-nosnippet>578</a>    // - 3: unsqueeze: (b_bnglr) -&gt; (b_bng1lr)
-<a href=#579 id=579 data-nosnippet>579</a>    // - 2: permute: (b_bnlgr [in][*]) -&gt; (b_bnglr)
-<a href=#580 id=580 data-nosnippet>580</a>    // GQA reduce: [B,N,H,L,R] → [B,N,G,L,R] → [B,N,L,G,R]
-<a href=#581 id=581 data-nosnippet>581</a>    </span><span class="kw">let </span>d_b_k3_bnlgr = d_b_k3_bnhlr
-<a href=#582 id=582 data-nosnippet>582</a>        .reshape([
-<a href=#583 id=583 data-nosnippet>583</a>            batch,
-<a href=#584 id=584 data-nosnippet>584</a>            nchunks,
-<a href=#585 id=585 data-nosnippet>585</a>            ngroups,
-<a href=#586 id=586 data-nosnippet>586</a>            heads_per_group,
-<a href=#587 id=587 data-nosnippet>587</a>            chunk_len,
-<a href=#588 id=588 data-nosnippet>588</a>            state_rank,
-<a href=#589 id=589 data-nosnippet>589</a>        ]) <span class="comment">// d_b_k3_bngHlr
-<a href=#590 id=590 data-nosnippet>590</a>        </span>.sum_dim(<span class="number">3</span>) <span class="comment">// d_b_k3_bng1lr
-<a href=#591 id=591 data-nosnippet>591</a>        </span>.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) <span class="comment">// d_b_k3_bnglr
-<a href=#592 id=592 data-nosnippet>592</a>        </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#593 id=593 data-nosnippet>593</a>    san(<span class="kw-2">&amp;</span>d_b_k3_bnlgr);
-<a href=#594 id=594 data-nosnippet>594</a>
-<a href=#595 id=595 data-nosnippet>595</a>    <span class="comment">// - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
-<a href=#596 id=596 data-nosnippet>596</a>    // - (d_b_bar_scale_bnhlr = d_b_scaled_bnhlr * b_bnhlr)
-<a href=#597 id=597 data-nosnippet>597</a>    // GQA-expand B back to per-head for the product: [B,N,G,L,R] → [B,N,H,L,R]
-<a href=#598 id=598 data-nosnippet>598</a>    </span><span class="kw">let </span>b_bnhlr = b_bnlgr
-<a href=#599 id=599 data-nosnippet>599</a>        .clone()
-<a href=#600 id=600 data-nosnippet>600</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// b_bnglr // replay forward step 2
-<a href=#601 id=601 data-nosnippet>601</a>        </span>.unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>) <span class="comment">// b_bng1lr // replay forward step 3
-<a href=#602 id=602 data-nosnippet>602</a>        // b_bngHlr
-<a href=#603 id=603 data-nosnippet>603</a>        </span>.expand([
-<a href=#604 id=604 data-nosnippet>604</a>            batch,
-<a href=#605 id=605 data-nosnippet>605</a>            nchunks,
-<a href=#606 id=606 data-nosnippet>606</a>            ngroups,
-<a href=#607 id=607 data-nosnippet>607</a>            heads_per_group,
-<a href=#608 id=608 data-nosnippet>608</a>            chunk_len,
-<a href=#609 id=609 data-nosnippet>609</a>            state_rank,
-<a href=#610 id=610 data-nosnippet>610</a>        ]) <span class="comment">// replay forward step 4
-<a href=#611 id=611 data-nosnippet>611</a>        </span>.reshape([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// replay forward step 5
-<a href=#612 id=612 data-nosnippet>612</a>    </span><span class="kw">let </span>d_b_bar_scale_bnhlr = d_b_scaled_bnhlr.clone() * b_bnhlr;
-<a href=#613 id=613 data-nosnippet>613</a>    san(<span class="kw-2">&amp;</span>d_b_bar_scale_bnhlr);
-<a href=#614 id=614 data-nosnippet>614</a>    <span class="comment">// - 13: expand: (b_bar_scale_bnhl1) -&gt; (b_bar_scale_bnhlr)
-<a href=#615 id=615 data-nosnippet>615</a>    // - 12: unsqueeze: (b_bar_scale_bnhl) -&gt; (b_bar_scale_bnhl1)
-<a href=#616 id=616 data-nosnippet>616</a>    // - 11: permute: (b_bar_scale_bhnl [+]) -&gt; (b_bar_scale_bnhl)
-<a href=#617 id=617 data-nosnippet>617</a>    </span><span class="kw">let </span>d_b_bar_scale_bhnl = d_b_bar_scale_bnhlr
-<a href=#618 id=618 data-nosnippet>618</a>        .sum_dim(<span class="number">4</span>) <span class="comment">// d_b_bar_scale_bnhl1
-<a href=#619 id=619 data-nosnippet>619</a>        </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>) <span class="comment">// d_b_bar_scale_bnhl
-<a href=#620 id=620 data-nosnippet>620</a>        </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
-<a href=#621 id=621 data-nosnippet>621</a>    san(<span class="kw-2">&amp;</span>d_b_bar_scale_bhnl);
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="comment">// Mask off above-diagonal (set to 0 above the main diagonal).
+<a href=#411 id=411 data-nosnippet>411</a>        </span><span class="kw">let </span>d_orange_lhs_partial2_bhll = d_orange_lhs_partial2_bhll.mask_fill(causal_mask_bhll, <span class="number">0.</span>);
+<a href=#412 id=412 data-nosnippet>412</a>        san(<span class="kw-2">&amp;</span>d_orange_lhs_partial2_bhll);
+<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">let </span>d_orange_lhs_partial1_bhll = d_orange_lhs_partial2_bhll.clone() * dt_source_bhll;
+<a href=#414 id=414 data-nosnippet>414</a>        san(<span class="kw-2">&amp;</span>d_orange_lhs_partial1_bhll);
+<a href=#415 id=415 data-nosnippet>415</a>
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="comment">// d_dt[s] = Σ_{l≥s} d_CB_w[l,s] · CB[l,s] · decay[l,s]
+<a href=#417 id=417 data-nosnippet>417</a>        </span><span class="kw">let </span>d_dt_orange_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = (d_orange_lhs_partial2_bhll
+<a href=#418 id=418 data-nosnippet>418</a>            * orange_lhs_partial1_bhll.clone()) <span class="comment">// d_dt_orange_bhll
+<a href=#419 id=419 data-nosnippet>419</a>        </span>.sum_dim(<span class="number">2</span>) <span class="comment">// d_dt_orange_bh1l; TODO: describe this shape (contrast src and tgt)
+<a href=#420 id=420 data-nosnippet>420</a>        </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>); <span class="comment">// d_dt_orange_bhl
+<a href=#421 id=421 data-nosnippet>421</a>        </span>san(<span class="kw-2">&amp;</span>d_dt_orange_bhl);
+<a href=#422 id=422 data-nosnippet>422</a>        vec_orange_d_dt_bhl.push(d_dt_orange_bhl);
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a>        <span class="comment">// d_da from ORANGE: decay = exp(da_tgt - da_src)
+<a href=#425 id=425 data-nosnippet>425</a>        //   d_da_tgt[l] += Σₛ (d_decay · decay)[l,s]
+<a href=#426 id=426 data-nosnippet>426</a>        //   d_da_src[s] -= Σₗ (d_decay · decay)[l,s]
+<a href=#427 id=427 data-nosnippet>427</a>        </span><span class="kw">let </span>d_da_cumsum_diff_exp_bhll = d_orange_lhs_partial1_bhll.clone() * cb_bhll;
+<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">let </span>d_da_cumsum_diff_bhll = d_da_cumsum_diff_exp_bhll * da_cumsum_diff_exp_bhll.clone();
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span>d_da_tgt_bhl: Tensor&lt;B, <span class="number">3</span>&gt; =
+<a href=#430 id=430 data-nosnippet>430</a>            d_da_cumsum_diff_bhll.clone().sum_dim(<span class="number">3</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>);
+<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">let </span>d_da_src_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = d_da_cumsum_diff_bhll.sum_dim(<span class="number">2</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>);
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>d_da_orange_bhl: Tensor&lt;B, <span class="number">3</span>&gt; = d_da_tgt_bhl - d_da_src_bhl;
+<a href=#433 id=433 data-nosnippet>433</a>        san(<span class="kw-2">&amp;</span>d_da_orange_bhl);
+<a href=#434 id=434 data-nosnippet>434</a>        vec_orange_d_da_bhl.push(d_da_orange_bhl);
+<a href=#435 id=435 data-nosnippet>435</a>
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="comment">// d_cb (GQA reduce nheads → ngroups): [batch,nheads,chunk_len,chunk_len] → [batch,ngroups,chunk_len,chunk_len]
+<a href=#437 id=437 data-nosnippet>437</a>        </span><span class="kw">let </span>d_cb_bhll = d_orange_lhs_partial1_bhll * da_cumsum_diff_exp_bhll;
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">let </span>d_cb_bgll: Tensor&lt;B, <span class="number">4</span>&gt; = d_cb_bhll
+<a href=#439 id=439 data-nosnippet>439</a>            .reshape([batch, ngroups, heads_per_group, chunk_len, chunk_len]) <span class="comment">// d_cb_bgHll
+<a href=#440 id=440 data-nosnippet>440</a>            </span>.sum_dim(<span class="number">2</span>) <span class="comment">// d_cb_bg1ll
+<a href=#441 id=441 data-nosnippet>441</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>); <span class="comment">// d_cb_bgll
+<a href=#442 id=442 data-nosnippet>442</a>        </span>san(<span class="kw-2">&amp;</span>d_cb_bgll);
+<a href=#443 id=443 data-nosnippet>443</a>        vec_d_cb_bgll.push(d_cb_bgll);
+<a href=#444 id=444 data-nosnippet>444</a>
+<a href=#445 id=445 data-nosnippet>445</a>        <span class="comment">// ── K4 backward step for chunk i ───────────────────────────────────
+<a href=#446 id=446 data-nosnippet>446</a>        // d_intra[i] = current d_running_state (before the propagation step).
+<a href=#447 id=447 data-nosnippet>447</a>        </span>vec_d_intra_bhpr.push(d_running_state_bhpr.clone());
+<a href=#448 id=448 data-nosnippet>448</a>
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="comment">// Recompute decay for this chunk.
+<a href=#450 id=450 data-nosnippet>450</a>        </span><span class="kw">let </span>decay_bhpr: Tensor&lt;B, <span class="number">4</span>&gt; = da_chunk_end_bhn
+<a href=#451 id=451 data-nosnippet>451</a>            .clone()
+<a href=#452 id=452 data-nosnippet>452</a>            .slice(<span class="macro">s!</span>[.., .., i_chunk]) <span class="comment">// da_chunk_end_bh1
+<a href=#453 id=453 data-nosnippet>453</a>            </span>.exp()
+<a href=#454 id=454 data-nosnippet>454</a>            .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// da_chunk_end_bh11
+<a href=#455 id=455 data-nosnippet>455</a>            </span>.expand([batch, nheads, per_head_dim, state_rank]); <span class="comment">// decay_bhpr
+<a href=#456 id=456 data-nosnippet>456</a>        </span>san(<span class="kw-2">&amp;</span>decay_bhpr);
+<a href=#457 id=457 data-nosnippet>457</a>
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="comment">// d_decay = d_running_state · running_state (running_state = chunk_input_state[i]).
+<a href=#459 id=459 data-nosnippet>459</a>        </span><span class="kw">let </span>d_decay_bhpr = d_running_state_bhpr.clone() * chunk_input_state_bhpr;
+<a href=#460 id=460 data-nosnippet>460</a>        san(<span class="kw-2">&amp;</span>d_decay_bhpr);
+<a href=#461 id=461 data-nosnippet>461</a>
+<a href=#462 id=462 data-nosnippet>462</a>        <span class="comment">// d_da_chunk_end[b,h] = Σ_{p,r} d_decay · decay   (decay = exp(da_chunk_end)).
+<a href=#463 id=463 data-nosnippet>463</a>        </span><span class="kw">let </span>d_da_chunk_end_bh: Tensor&lt;B, <span class="number">2</span>&gt; = (d_decay_bhpr * decay_bhpr.clone())
+<a href=#464 id=464 data-nosnippet>464</a>            .reshape([batch, nheads, per_head_dim * state_rank]) <span class="comment">// d_da_chunk_end_bhPR
+<a href=#465 id=465 data-nosnippet>465</a>            </span>.sum_dim(<span class="number">2</span>) <span class="comment">// d_da_chunk_end_bh1
+<a href=#466 id=466 data-nosnippet>466</a>            </span>.squeeze_dim::&lt;<span class="number">2</span>&gt;(<span class="number">2</span>); <span class="comment">// d_da_chunk_end_bh
+<a href=#467 id=467 data-nosnippet>467</a>        </span>san(<span class="kw-2">&amp;</span>d_da_chunk_end_bh);
+<a href=#468 id=468 data-nosnippet>468</a>        vec_d_da_end_bh.push(d_da_chunk_end_bh);
+<a href=#469 id=469 data-nosnippet>469</a>
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="comment">// Propagate to previous chunk:
+<a href=#471 id=471 data-nosnippet>471</a>        //   d_running_state_prev = decay · d_running_state + d_chunk_input_state.
+<a href=#472 id=472 data-nosnippet>472</a>        </span>d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+<a href=#473 id=473 data-nosnippet>473</a>        san(<span class="kw-2">&amp;</span>d_running_state_bhpr);
+<a href=#474 id=474 data-nosnippet>474</a>    }
+<a href=#475 id=475 data-nosnippet>475</a>    <span class="comment">// d_initial_state = the trailing d_running_state after the reverse loop.
+<a href=#476 id=476 data-nosnippet>476</a>    </span><span class="kw">let </span>d_initial_state_bhpr = d_running_state_bhpr;
+<a href=#477 id=477 data-nosnippet>477</a>
+<a href=#478 id=478 data-nosnippet>478</a>    <span class="comment">// ── Stack per-chunk gradients into the batched tensors K3/K2/K1 expect ──
+<a href=#479 id=479 data-nosnippet>479</a>    // Restore natural (forward) chunk order — vecs were filled in reverse.
+<a href=#480 id=480 data-nosnippet>480</a>    </span>vec_orange_d_x_bhlp.reverse();
+<a href=#481 id=481 data-nosnippet>481</a>    vec_orange_d_dt_bhl.reverse();
+<a href=#482 id=482 data-nosnippet>482</a>    vec_orange_d_da_bhl.reverse();
+<a href=#483 id=483 data-nosnippet>483</a>    vec_d_cb_bgll.reverse();
+<a href=#484 id=484 data-nosnippet>484</a>    vec_blue_d_c_bhlr.reverse();
+<a href=#485 id=485 data-nosnippet>485</a>    vec_blue_d_da_bhl.reverse();
+<a href=#486 id=486 data-nosnippet>486</a>    vec_d_intra_bhpr.reverse();
+<a href=#487 id=487 data-nosnippet>487</a>    vec_d_da_end_bh.reverse();
+<a href=#488 id=488 data-nosnippet>488</a>
+<a href=#489 id=489 data-nosnippet>489</a>    <span class="comment">// Stack tensors
+<a href=#490 id=490 data-nosnippet>490</a>    </span><span class="kw">let </span>d_x_orange_bnlhp: Tensor&lt;B, <span class="number">5</span>&gt; =
+<a href=#491 id=491 data-nosnippet>491</a>        Tensor::stack::&lt;<span class="number">5</span>&gt;(vec_orange_d_x_bhlp, <span class="number">1</span>).permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#492 id=492 data-nosnippet>492</a>    <span class="kw">let </span>d_dt_orange_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(vec_orange_d_dt_bhl, <span class="number">2</span>);
+<a href=#493 id=493 data-nosnippet>493</a>    <span class="kw">let </span>d_da_orange_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(vec_orange_d_da_bhl, <span class="number">2</span>);
+<a href=#494 id=494 data-nosnippet>494</a>    <span class="kw">let </span>d_cb_bngll: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(vec_d_cb_bgll, <span class="number">1</span>);
+<a href=#495 id=495 data-nosnippet>495</a>    <span class="kw">let </span>d_da_blue_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = Tensor::stack(vec_blue_d_da_bhl, <span class="number">2</span>);
+<a href=#496 id=496 data-nosnippet>496</a>    <span class="kw">let </span>d_intra_chunk_state_bnhpr: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(vec_d_intra_bhpr, <span class="number">1</span>);
+<a href=#497 id=497 data-nosnippet>497</a>    san(<span class="kw-2">&amp;</span>d_x_orange_bnlhp);
+<a href=#498 id=498 data-nosnippet>498</a>    san(<span class="kw-2">&amp;</span>d_dt_orange_bhnl);
+<a href=#499 id=499 data-nosnippet>499</a>    san(<span class="kw-2">&amp;</span>d_da_orange_bhnl);
+<a href=#500 id=500 data-nosnippet>500</a>    san(<span class="kw-2">&amp;</span>d_cb_bngll);
+<a href=#501 id=501 data-nosnippet>501</a>    san(<span class="kw-2">&amp;</span>d_da_blue_bhnl);
+<a href=#502 id=502 data-nosnippet>502</a>    san(<span class="kw-2">&amp;</span>d_intra_chunk_state_bnhpr);
+<a href=#503 id=503 data-nosnippet>503</a>    <span class="kw">let </span>d_c_blue_bnhlr: Tensor&lt;B, <span class="number">5</span>&gt; = Tensor::stack(vec_blue_d_c_bhlr, <span class="number">1</span>);
+<a href=#504 id=504 data-nosnippet>504</a>    <span class="kw">let </span>d_c_blue_bnlgr: Tensor&lt;B, <span class="number">5</span>&gt; = d_c_blue_bnhlr
+<a href=#505 id=505 data-nosnippet>505</a>        .reshape([
+<a href=#506 id=506 data-nosnippet>506</a>            batch,
+<a href=#507 id=507 data-nosnippet>507</a>            nchunks,
+<a href=#508 id=508 data-nosnippet>508</a>            ngroups,
+<a href=#509 id=509 data-nosnippet>509</a>            heads_per_group,
+<a href=#510 id=510 data-nosnippet>510</a>            chunk_len,
+<a href=#511 id=511 data-nosnippet>511</a>            state_rank,
+<a href=#512 id=512 data-nosnippet>512</a>        ]) <span class="comment">// d_c_blue_bngHlr
+<a href=#513 id=513 data-nosnippet>513</a>        </span>.sum_dim(<span class="number">3</span>) <span class="comment">// d_c_blue_bng1lr
+<a href=#514 id=514 data-nosnippet>514</a>        </span>.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) <span class="comment">// d_c_blue_bnglr
+<a href=#515 id=515 data-nosnippet>515</a>        </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]); <span class="comment">// d_c_blue_bnlgr
+<a href=#516 id=516 data-nosnippet>516</a>    </span>san(<span class="kw-2">&amp;</span>d_c_blue_bnlgr);
+<a href=#517 id=517 data-nosnippet>517</a>    <span class="kw">let </span>d_da_end_bhn: Tensor&lt;B, <span class="number">3</span>&gt; = Tensor::stack(vec_d_da_end_bh, <span class="number">2</span>);
+<a href=#518 id=518 data-nosnippet>518</a>    <span class="kw">let </span>d_da_cumsum_k4_bhnl = {
+<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">let </span>zeros = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, chunk_len - <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
+<a href=#520 id=520 data-nosnippet>520</a>        <span class="kw">let </span>d_da_end_bhn1 = d_da_end_bhn.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
+<a href=#521 id=521 data-nosnippet>521</a>        Tensor::cat(<span class="macro">vec!</span>[zeros, d_da_end_bhn1], <span class="number">3</span>)
+<a href=#522 id=522 data-nosnippet>522</a>    };
+<a href=#523 id=523 data-nosnippet>523</a>
+<a href=#524 id=524 data-nosnippet>524</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
+<a href=#525 id=525 data-nosnippet>525</a>    // K3 BACKWARD
+<a href=#526 id=526 data-nosnippet>526</a>    // ═══════════════════════════════════════════════════════════════════════
+<a href=#527 id=527 data-nosnippet>527</a>    </span><span class="kw">let </span>x_bnhpl = x_bnlhp.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
+<a href=#528 id=528 data-nosnippet>528</a>    <span class="comment">// For d_x_bnlhp:
+<a href=#529 id=529 data-nosnippet>529</a>    // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -&gt; (intra_chunk_state_bnhpr [out][!])
+<a href=#530 id=530 data-nosnippet>530</a>    // - (d_x_bnhpl = d_intra_chunk_state_bnhpr @ b_scaled_bnhlr^T)
+<a href=#531 id=531 data-nosnippet>531</a>    </span><span class="kw">let </span>d_x_k3_bnhpl = d_intra_chunk_state_bnhpr.clone().matmul(
+<a href=#532 id=532 data-nosnippet>532</a>        b_scaled_bnhlr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]), <span class="comment">// b_scaled_bnhrl
+<a href=#533 id=533 data-nosnippet>533</a>    </span>);
+<a href=#534 id=534 data-nosnippet>534</a>    san(<span class="kw-2">&amp;</span>d_x_k3_bnhpl);
+<a href=#535 id=535 data-nosnippet>535</a>    <span class="comment">// - 1/15: permute: (x_bnlhp [in][*]) -&gt; (x_bnhpl)
+<a href=#536 id=536 data-nosnippet>536</a>    </span><span class="kw">let </span>d_x_k3_bnlhp = d_x_k3_bnhpl.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">4</span>, <span class="number">2</span>, <span class="number">3</span>]);
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="comment">//
+<a href=#538 id=538 data-nosnippet>538</a>    // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -&gt; (intra_chunk_state_bnhpr [out][!])
+<a href=#539 id=539 data-nosnippet>539</a>    // (d_b_scaled_bnhlr = x_bnhpl^T @ d_intra_chunk_state_bnhpr)
+<a href=#540 id=540 data-nosnippet>540</a>    </span><span class="kw">let </span>d_b_scaled_bnhlr = x_bnhpl
+<a href=#541 id=541 data-nosnippet>541</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]) <span class="comment">// x_bnhlp
+<a href=#542 id=542 data-nosnippet>542</a>        </span>.matmul(d_intra_chunk_state_bnhpr); <span class="comment">// d_b_scaled_bnhlr
+<a href=#543 id=543 data-nosnippet>543</a>    </span>san(<span class="kw-2">&amp;</span>d_b_scaled_bnhlr);
+<a href=#544 id=544 data-nosnippet>544</a>    <span class="comment">//
+<a href=#545 id=545 data-nosnippet>545</a>    // For d_b:
+<a href=#546 id=546 data-nosnippet>546</a>    // - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
+<a href=#547 id=547 data-nosnippet>547</a>    // - (d_b_bnhlr = d_b_scaled_bnhlr * b_bar_scale_bnhlr)
+<a href=#548 id=548 data-nosnippet>548</a>    </span><span class="kw">let </span>b_bar_scale_bnhlr = b_bar_scale_bhnl
+<a href=#549 id=549 data-nosnippet>549</a>        .clone()
+<a href=#550 id=550 data-nosnippet>550</a>        .permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// b_bar_scale_bnhl // replay forward step 11
+<a href=#551 id=551 data-nosnippet>551</a>        </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// b_bar_scale_bnhl1 // replay forward step 12
+<a href=#552 id=552 data-nosnippet>552</a>        </span>.expand([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// replay forward step 13
+<a href=#553 id=553 data-nosnippet>553</a>    </span><span class="kw">let </span>d_b_k3_bnhlr = d_b_scaled_bnhlr.clone() * b_bar_scale_bnhlr;
+<a href=#554 id=554 data-nosnippet>554</a>    san(<span class="kw-2">&amp;</span>d_b_k3_bnhlr);
+<a href=#555 id=555 data-nosnippet>555</a>    <span class="comment">// - 5: reshape: (b_bngHlr) -&gt; (b_bnhlr)
+<a href=#556 id=556 data-nosnippet>556</a>    // - 4: expand: (b_bng1lr) -&gt; (b_bngHlr)
+<a href=#557 id=557 data-nosnippet>557</a>    // - 3: unsqueeze: (b_bnglr) -&gt; (b_bng1lr)
+<a href=#558 id=558 data-nosnippet>558</a>    // - 2: permute: (b_bnlgr [in][*]) -&gt; (b_bnglr)
+<a href=#559 id=559 data-nosnippet>559</a>    // GQA reduce: [batch,nchunks,H,chunk_len,R] → [batch,nchunks,ngroups,chunk_len,R] → [batch,nchunks,chunk_len,ngroups,R]
+<a href=#560 id=560 data-nosnippet>560</a>    </span><span class="kw">let </span>d_b_k3_bnlgr = d_b_k3_bnhlr
+<a href=#561 id=561 data-nosnippet>561</a>        .reshape([
+<a href=#562 id=562 data-nosnippet>562</a>            batch,
+<a href=#563 id=563 data-nosnippet>563</a>            nchunks,
+<a href=#564 id=564 data-nosnippet>564</a>            ngroups,
+<a href=#565 id=565 data-nosnippet>565</a>            heads_per_group,
+<a href=#566 id=566 data-nosnippet>566</a>            chunk_len,
+<a href=#567 id=567 data-nosnippet>567</a>            state_rank,
+<a href=#568 id=568 data-nosnippet>568</a>        ]) <span class="comment">// d_b_k3_bngHlr
+<a href=#569 id=569 data-nosnippet>569</a>        </span>.sum_dim(<span class="number">3</span>) <span class="comment">// d_b_k3_bng1lr
+<a href=#570 id=570 data-nosnippet>570</a>        </span>.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) <span class="comment">// d_b_k3_bnglr
+<a href=#571 id=571 data-nosnippet>571</a>        </span>.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#572 id=572 data-nosnippet>572</a>    san(<span class="kw-2">&amp;</span>d_b_k3_bnlgr);
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>    <span class="comment">// - 14: mul: (b_bnhlr, b_bar_scale_bnhlr) -&gt; (b_scaled_bnhlr [+])
+<a href=#575 id=575 data-nosnippet>575</a>    // - (d_b_bar_scale_bnhlr = d_b_scaled_bnhlr * b_bnhlr)
+<a href=#576 id=576 data-nosnippet>576</a>    // GQA-expand B back to per-head for the product: [batch,nchunks,ngroups,chunk_len,R] → [batch,nchunks,H,chunk_len,R]
+<a href=#577 id=577 data-nosnippet>577</a>    </span><span class="kw">let </span>b_bnhlr = b_bnlgr
+<a href=#578 id=578 data-nosnippet>578</a>        .clone()
+<a href=#579 id=579 data-nosnippet>579</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// b_bnglr // replay forward step 2
+<a href=#580 id=580 data-nosnippet>580</a>        </span>.unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>) <span class="comment">// b_bng1lr // replay forward step 3
+<a href=#581 id=581 data-nosnippet>581</a>        </span>.expand([
+<a href=#582 id=582 data-nosnippet>582</a>            batch,
+<a href=#583 id=583 data-nosnippet>583</a>            nchunks,
+<a href=#584 id=584 data-nosnippet>584</a>            ngroups,
+<a href=#585 id=585 data-nosnippet>585</a>            heads_per_group,
+<a href=#586 id=586 data-nosnippet>586</a>            chunk_len,
+<a href=#587 id=587 data-nosnippet>587</a>            state_rank,
+<a href=#588 id=588 data-nosnippet>588</a>        ]) <span class="comment">// b_bngHlr // replay forward step 4
+<a href=#589 id=589 data-nosnippet>589</a>        </span>.reshape([batch, nchunks, nheads, chunk_len, state_rank]); <span class="comment">// b_bnhlr // replay forward step 5
+<a href=#590 id=590 data-nosnippet>590</a>    </span><span class="kw">let </span>d_b_bar_scale_bnhlr = d_b_scaled_bnhlr.clone() * b_bnhlr;
+<a href=#591 id=591 data-nosnippet>591</a>    san(<span class="kw-2">&amp;</span>d_b_bar_scale_bnhlr);
+<a href=#592 id=592 data-nosnippet>592</a>    <span class="comment">// - 13: expand: (b_bar_scale_bnhl1) -&gt; (b_bar_scale_bnhlr)
+<a href=#593 id=593 data-nosnippet>593</a>    // - 12: unsqueeze: (b_bar_scale_bnhl) -&gt; (b_bar_scale_bnhl1)
+<a href=#594 id=594 data-nosnippet>594</a>    // - 11: permute: (b_bar_scale_bhnl [+]) -&gt; (b_bar_scale_bnhl)
+<a href=#595 id=595 data-nosnippet>595</a>    </span><span class="kw">let </span>d_b_bar_scale_bhnl = d_b_bar_scale_bnhlr
+<a href=#596 id=596 data-nosnippet>596</a>        .sum_dim(<span class="number">4</span>) <span class="comment">// d_b_bar_scale_bnhl1
+<a href=#597 id=597 data-nosnippet>597</a>        </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>) <span class="comment">// d_b_bar_scale_bnhl
+<a href=#598 id=598 data-nosnippet>598</a>        </span>.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]); <span class="comment">// d_b_bar_scale_bhnl
+<a href=#599 id=599 data-nosnippet>599</a>    </span>san(<span class="kw-2">&amp;</span>d_b_bar_scale_bhnl);
+<a href=#600 id=600 data-nosnippet>600</a>    <span class="comment">//
+<a href=#601 id=601 data-nosnippet>601</a>    // For d_da_cumsum_bhnl:
+<a href=#602 id=602 data-nosnippet>602</a>    // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -&gt; (b_bar_scale_bhnl [+])
+<a href=#603 id=603 data-nosnippet>603</a>    // - (d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl * dt_discretized_bhnl)
+<a href=#604 id=604 data-nosnippet>604</a>    </span><span class="kw">let </span>d_forward_decay_to_chunk_end_bhnl =
+<a href=#605 id=605 data-nosnippet>605</a>        d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl.clone();
+<a href=#606 id=606 data-nosnippet>606</a>    san(<span class="kw-2">&amp;</span>d_forward_decay_to_chunk_end_bhnl);
+<a href=#607 id=607 data-nosnippet>607</a>    <span class="comment">// - 9: exp: (da_delta_bhnl) -&gt; (forward_decay_to_chunk_end_bhnl [+])
+<a href=#608 id=608 data-nosnippet>608</a>    // - (d_da_delta_bhnl = d_forward_decay_to_chunk_end_bhnl * exp(da_delta_bhnl))
+<a href=#609 id=609 data-nosnippet>609</a>    // note: forward_decay_to_chunk_end_bhnl = exp(da_delta_bhnl)
+<a href=#610 id=610 data-nosnippet>610</a>    </span><span class="kw">let </span>d_da_delta_bhnl =
+<a href=#611 id=611 data-nosnippet>611</a>        d_forward_decay_to_chunk_end_bhnl * forward_decay_to_chunk_end_bhnl.clone();
+<a href=#612 id=612 data-nosnippet>612</a>    san(<span class="kw-2">&amp;</span>d_da_delta_bhnl);
+<a href=#613 id=613 data-nosnippet>613</a>    <span class="comment">// - 8: sub: (da_cumsum_last_bhnl, da_cumsum_bhnl [from K1][*]) -&gt; (da_delta_bhnl)
+<a href=#614 id=614 data-nosnippet>614</a>    </span><span class="kw">let </span>d_da_cumsum_last_bhnl = d_da_delta_bhnl.clone();
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>d_da_cumsum_sub_bhnl = -d_da_delta_bhnl.clone();
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="comment">// - 7: expand: (da_cumsum_last_in_chunk_bhn1) -&gt; (da_cumsum_last_bhnl)
+<a href=#617 id=617 data-nosnippet>617</a>    // - 6: slice: (da_cumsum_bhnl [in][*]) -&gt; (da_cumsum_last_in_chunk_bhn1)
+<a href=#618 id=618 data-nosnippet>618</a>    </span><span class="kw">let </span>d_da_cumsum_last_bhn = d_da_cumsum_last_bhnl
+<a href=#619 id=619 data-nosnippet>619</a>        .sum_dim(<span class="number">3</span>) <span class="comment">// d_da_cumsum_last_bhn1
+<a href=#620 id=620 data-nosnippet>620</a>        </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>); <span class="comment">// d_da_cumsum_last_bhn
+<a href=#621 id=621 data-nosnippet>621</a>    </span>san(<span class="kw-2">&amp;</span>d_da_cumsum_last_bhn);
 <a href=#622 id=622 data-nosnippet>622</a>    <span class="comment">//
-<a href=#623 id=623 data-nosnippet>623</a>    // For d_da_cumsum_bhnl:
+<a href=#623 id=623 data-nosnippet>623</a>    // For d_dt_discretized_bhnl:
 <a href=#624 id=624 data-nosnippet>624</a>    // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -&gt; (b_bar_scale_bhnl [+])
-<a href=#625 id=625 data-nosnippet>625</a>    // - (d_forward_decay_to_chunk_end_bhnl = d_b_bar_scale_bhnl * dt_discretized_bhnl)
-<a href=#626 id=626 data-nosnippet>626</a>    </span><span class="kw">let </span>d_forward_decay_to_chunk_end_bhnl =
-<a href=#627 id=627 data-nosnippet>627</a>        d_b_bar_scale_bhnl.clone() * dt_discretized_bhnl.clone();
-<a href=#628 id=628 data-nosnippet>628</a>    san(<span class="kw-2">&amp;</span>d_forward_decay_to_chunk_end_bhnl);
-<a href=#629 id=629 data-nosnippet>629</a>    <span class="comment">// - 9: exp: (da_delta_bhnl) -&gt; (forward_decay_to_chunk_end_bhnl [+])
-<a href=#630 id=630 data-nosnippet>630</a>    // - (d_da_delta_bhnl = d_forward_decay_to_chunk_end_bhnl * exp(da_delta_bhnl))
-<a href=#631 id=631 data-nosnippet>631</a>    // note: forward_decay_to_chunk_end_bhnl = exp(da_delta_bhnl)
-<a href=#632 id=632 data-nosnippet>632</a>    </span><span class="kw">let </span>d_da_delta_bhnl =
-<a href=#633 id=633 data-nosnippet>633</a>        d_forward_decay_to_chunk_end_bhnl * forward_decay_to_chunk_end_bhnl.clone();
-<a href=#634 id=634 data-nosnippet>634</a>    san(<span class="kw-2">&amp;</span>d_da_delta_bhnl);
-<a href=#635 id=635 data-nosnippet>635</a>    <span class="comment">// - 8: sub: (da_cumsum_last_bhnl, da_cumsum_bhnl [from K1][*]) -&gt; (da_delta_bhnl)
-<a href=#636 id=636 data-nosnippet>636</a>    </span><span class="kw">let </span>d_da_cumsum_last_bhnl = d_da_delta_bhnl.clone();
-<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">let </span>d_da_cumsum_sub_bhnl = -d_da_delta_bhnl.clone();
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="comment">// - 7: expand: (da_cumsum_last_in_chunk_bhn1) -&gt; (da_cumsum_last_bhnl)
-<a href=#639 id=639 data-nosnippet>639</a>    // - 6: slice: (da_cumsum_bhnl [in][*]) -&gt; (da_cumsum_last_in_chunk_bhn1)
-<a href=#640 id=640 data-nosnippet>640</a>    </span><span class="kw">let </span>d_da_cumsum_last_bhn = d_da_cumsum_last_bhnl
-<a href=#641 id=641 data-nosnippet>641</a>        .sum_dim(<span class="number">3</span>) <span class="comment">// d_da_cumsum_last_bhn1
-<a href=#642 id=642 data-nosnippet>642</a>        </span>.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">3</span>);
-<a href=#643 id=643 data-nosnippet>643</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_last_bhn);
-<a href=#644 id=644 data-nosnippet>644</a>    <span class="comment">//
-<a href=#645 id=645 data-nosnippet>645</a>    // For d_dt_discretized_bhnl:
-<a href=#646 id=646 data-nosnippet>646</a>    // - 10: mul: (forward_decay_to_chunk_end_bhnl [+], dt_discretized_bhnl [in][*]) -&gt; (b_bar_scale_bhnl [+])
-<a href=#647 id=647 data-nosnippet>647</a>    // - (d_dt_discretized_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl)
-<a href=#648 id=648 data-nosnippet>648</a>    </span><span class="kw">let </span>d_dt_discretized_k3_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl;
-<a href=#649 id=649 data-nosnippet>649</a>    san(<span class="kw-2">&amp;</span>d_dt_discretized_k3_bhnl);
-<a href=#650 id=650 data-nosnippet>650</a>    <span class="comment">//
-<a href=#651 id=651 data-nosnippet>651</a>
-<a href=#652 id=652 data-nosnippet>652</a>    // TODO: understand this.
-<a href=#653 id=653 data-nosnippet>653</a>    </span><span class="kw">let </span>d_da_cumsum_k3_bhnl = {
-<a href=#654 id=654 data-nosnippet>654</a>        <span class="kw">let </span>zeros = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, chunk_len - <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
-<a href=#655 id=655 data-nosnippet>655</a>        <span class="kw">let </span>d_last = d_da_cumsum_last_bhn.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
-<a href=#656 id=656 data-nosnippet>656</a>        d_da_cumsum_sub_bhnl + Tensor::cat(<span class="macro">vec!</span>[zeros, d_last], <span class="number">3</span>)
-<a href=#657 id=657 data-nosnippet>657</a>    };
-<a href=#658 id=658 data-nosnippet>658</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_k3_bhnl);
-<a href=#659 id=659 data-nosnippet>659</a>
-<a href=#660 id=660 data-nosnippet>660</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
-<a href=#661 id=661 data-nosnippet>661</a>    // K2 BACKWARD (from d_cb_bngll)
-<a href=#662 id=662 data-nosnippet>662</a>    // ═══════════════════════════════════════════════════════════════════════
-<a href=#663 id=663 data-nosnippet>663</a>    </span><span class="kw">let </span>c_bnglr = c_bnlgr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#664 id=664 data-nosnippet>664</a>    <span class="kw">let </span>b_bnglr = b_bnlgr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#665 id=665 data-nosnippet>665</a>    <span class="comment">// - 3/3: matmul: (c_bnglr, b_bngrl) -&gt; (cb_bngll [out][!])
-<a href=#666 id=666 data-nosnippet>666</a>    // - cb[b,n,g,l,s] = Σ_r c[l,r]*b[s,r]  →  CB = C @ B^T
-<a href=#667 id=667 data-nosnippet>667</a>    // -  d_C_bngls = d_CB @ B   [B,N,G,L,L_src] @ [B,N,G,L_src,R] → [B,N,G,L,R]
-<a href=#668 id=668 data-nosnippet>668</a>    // -  d_B_bngls = d_CB^T @ C [B,N,G,L_src,L] @ [B,N,G,L,R]   → [B,N,G,L_src,R]
-<a href=#669 id=669 data-nosnippet>669</a>    </span><span class="kw">let </span>d_c_k2_bnglr = d_cb_bngll.clone().matmul(b_bnglr.clone());
-<a href=#670 id=670 data-nosnippet>670</a>    san(<span class="kw-2">&amp;</span>d_c_k2_bnglr);
-<a href=#671 id=671 data-nosnippet>671</a>    <span class="kw">let </span>d_c_k2_bnlgr = d_c_k2_bnglr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#625 id=625 data-nosnippet>625</a>    // - (d_dt_discretized_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl)
+<a href=#626 id=626 data-nosnippet>626</a>    </span><span class="kw">let </span>d_dt_discretized_k3_bhnl = d_b_bar_scale_bhnl * forward_decay_to_chunk_end_bhnl;
+<a href=#627 id=627 data-nosnippet>627</a>    san(<span class="kw-2">&amp;</span>d_dt_discretized_k3_bhnl);
+<a href=#628 id=628 data-nosnippet>628</a>    <span class="comment">//
+<a href=#629 id=629 data-nosnippet>629</a>
+<a href=#630 id=630 data-nosnippet>630</a>    // TODO: understand this.
+<a href=#631 id=631 data-nosnippet>631</a>    </span><span class="kw">let </span>d_da_cumsum_k3_bhnl = {
+<a href=#632 id=632 data-nosnippet>632</a>        <span class="kw">let </span>zeros = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, chunk_len - <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
+<a href=#633 id=633 data-nosnippet>633</a>        <span class="kw">let </span>d_last = d_da_cumsum_last_bhn.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
+<a href=#634 id=634 data-nosnippet>634</a>        d_da_cumsum_sub_bhnl + Tensor::cat(<span class="macro">vec!</span>[zeros, d_last], <span class="number">3</span>)
+<a href=#635 id=635 data-nosnippet>635</a>    };
+<a href=#636 id=636 data-nosnippet>636</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_k3_bhnl);
+<a href=#637 id=637 data-nosnippet>637</a>
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
+<a href=#639 id=639 data-nosnippet>639</a>    // K2 BACKWARD (from d_cb_bngll)
+<a href=#640 id=640 data-nosnippet>640</a>    // ═══════════════════════════════════════════════════════════════════════
+<a href=#641 id=641 data-nosnippet>641</a>    </span><span class="kw">let </span>c_bnglr = c_bnlgr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#642 id=642 data-nosnippet>642</a>    <span class="kw">let </span>b_bnglr = b_bnlgr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#643 id=643 data-nosnippet>643</a>    <span class="comment">// - 3/3: matmul: (c_bnglr, b_bngrl) -&gt; (cb_bngll [out][!])
+<a href=#644 id=644 data-nosnippet>644</a>    // - cb[b,n,g,l,s] = Σ_r c[l,r]*b[s,r]  →  CB = C @ B^T
+<a href=#645 id=645 data-nosnippet>645</a>    // -  d_C_bngls = d_CB @ B
+<a href=#646 id=646 data-nosnippet>646</a>    // -  d_B_bngls = d_CB^T @ C
+<a href=#647 id=647 data-nosnippet>647</a>    </span><span class="kw">let </span>d_c_k2_bnglr = d_cb_bngll.clone().matmul(b_bnglr.clone());
+<a href=#648 id=648 data-nosnippet>648</a>    san(<span class="kw-2">&amp;</span>d_c_k2_bnglr);
+<a href=#649 id=649 data-nosnippet>649</a>    <span class="kw">let </span>d_c_k2_bnlgr = d_c_k2_bnglr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#650 id=650 data-nosnippet>650</a>
+<a href=#651 id=651 data-nosnippet>651</a>    <span class="kw">let </span>d_b_k2_bnglr = d_cb_bngll
+<a href=#652 id=652 data-nosnippet>652</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]) <span class="comment">// [batch,nchunks,ngroups,chunk_len_src,chunk_len_tgt]
+<a href=#653 id=653 data-nosnippet>653</a>        </span>.matmul(c_bnglr.clone()); <span class="comment">// d_b_k2_bnglr
+<a href=#654 id=654 data-nosnippet>654</a>    </span>san(<span class="kw-2">&amp;</span>d_b_k2_bnglr);
+<a href=#655 id=655 data-nosnippet>655</a>    <span class="kw">let </span>d_b_k2_bnlgr = d_b_k2_bnglr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#656 id=656 data-nosnippet>656</a>
+<a href=#657 id=657 data-nosnippet>657</a>    <span class="comment">// ═══════════════════════════════════════════════════════════════════════
+<a href=#658 id=658 data-nosnippet>658</a>    // SUM GRADIENT CONTRIBUTIONS
+<a href=#659 id=659 data-nosnippet>659</a>    // ═══════════════════════════════════════════════════════════════════════
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a>    // Test-only: local same-chunk d_da contribution (BLUE + ORANGE) snapshot
+<a href=#662 id=662 data-nosnippet>662</a>    // for the `out_x · dout − ddt · dt` oracle. Production builds skip the
+<a href=#663 id=663 data-nosnippet>663</a>    // extra add and the retained _bhnl tensor.
+<a href=#664 id=664 data-nosnippet>664</a>    </span><span class="attr">#[cfg(test)]
+<a href=#665 id=665 data-nosnippet>665</a>    </span><span class="kw">let </span>d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
+<a href=#666 id=666 data-nosnippet>666</a>    <span class="attr">#[cfg(test)]
+<a href=#667 id=667 data-nosnippet>667</a>    </span>san(<span class="kw-2">&amp;</span>d_da_local_bhnl);
+<a href=#668 id=668 data-nosnippet>668</a>    <span class="comment">// Accumulated gradient of the cumulative sum produced by K1.
+<a href=#669 id=669 data-nosnippet>669</a>    </span><span class="kw">let </span>d_da_cumsum_bhnl =
+<a href=#670 id=670 data-nosnippet>670</a>        d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
+<a href=#671 id=671 data-nosnippet>671</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_bhnl);
 <a href=#672 id=672 data-nosnippet>672</a>
-<a href=#673 id=673 data-nosnippet>673</a>    <span class="kw">let </span>d_b_k2_bnglr = d_cb_bngll
-<a href=#674 id=674 data-nosnippet>674</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]) <span class="comment">// [B,N,G,L_src,L_tgt]
-<a href=#675 id=675 data-nosnippet>675</a>        </span>.matmul(c_bnglr.clone()); <span class="comment">// [B,N,G,L_src,R]
-<a href=#676 id=676 data-nosnippet>676</a>    </span>san(<span class="kw-2">&amp;</span>d_b_k2_bnglr);
-<a href=#677 id=677 data-nosnippet>677</a>    <span class="kw">let </span>d_b_k2_bnlgr = d_b_k2_bnglr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]); <span class="comment">// [B,N,L,G,R]
-<a href=#678 id=678 data-nosnippet>678</a>
-<a href=#679 id=679 data-nosnippet>679</a>    // ═══════════════════════════════════════════════════════════════════════
-<a href=#680 id=680 data-nosnippet>680</a>    // SUM GRADIENT CONTRIBUTIONS
-<a href=#681 id=681 data-nosnippet>681</a>    // ═══════════════════════════════════════════════════════════════════════
-<a href=#682 id=682 data-nosnippet>682</a>
-<a href=#683 id=683 data-nosnippet>683</a>    // Test-only: local same-chunk d_da contribution (BLUE + ORANGE) snapshot
-<a href=#684 id=684 data-nosnippet>684</a>    // for the `out_x · dout − ddt · dt` oracle. Production builds skip the
-<a href=#685 id=685 data-nosnippet>685</a>    // extra add and the retained [B,H,N,L] tensor.
-<a href=#686 id=686 data-nosnippet>686</a>    </span><span class="attr">#[cfg(test)]
-<a href=#687 id=687 data-nosnippet>687</a>    </span><span class="kw">let </span>d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
-<a href=#688 id=688 data-nosnippet>688</a>    <span class="attr">#[cfg(test)]
-<a href=#689 id=689 data-nosnippet>689</a>    </span>san(<span class="kw-2">&amp;</span>d_da_local_bhnl);
-<a href=#690 id=690 data-nosnippet>690</a>    <span class="comment">// Accumulated gradient of the cumulative sum produced by K1.
-<a href=#691 id=691 data-nosnippet>691</a>    </span><span class="kw">let </span>d_da_cumsum_bhnl =
-<a href=#692 id=692 data-nosnippet>692</a>        d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
-<a href=#693 id=693 data-nosnippet>693</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_bhnl);
-<a href=#694 id=694 data-nosnippet>694</a>
-<a href=#695 id=695 data-nosnippet>695</a>    <span class="comment">// ── K1 BACKWARD ────────────────────────────────────────────────────────
-<a href=#696 id=696 data-nosnippet>696</a>    // K1 forward: da_cumsum[l] = cumsum_l(dt[l] * a_decay)
-<a href=#697 id=697 data-nosnippet>697</a>    //
-<a href=#698 id=698 data-nosnippet>698</a>    // Reverse cumsum (suffix sum) converts d_da_cumsum → d_da:
-<a href=#699 id=699 data-nosnippet>699</a>    //   d_da[l] = sum_{k &gt;= l} d_da_cumsum[k]
-<a href=#700 id=700 data-nosnippet>700</a>    //           = total_sum - cumsum(d_da_cumsum)[l-1]   (cumsum[-1] == 0)
-<a href=#701 id=701 data-nosnippet>701</a>    </span><span class="kw">let </span>d_da_cumsum_total_bhnl = d_da_cumsum_bhnl
-<a href=#702 id=702 data-nosnippet>702</a>        .clone()
-<a href=#703 id=703 data-nosnippet>703</a>        .sum_dim(<span class="number">3</span>) <span class="comment">// [B,H,N,1]
-<a href=#704 id=704 data-nosnippet>704</a>        </span>.expand([batch, nheads, nchunks, chunk_len]);
-<a href=#705 id=705 data-nosnippet>705</a>    <span class="kw">let </span>prefix_sum_bhnl = d_da_cumsum_bhnl.clone().cumsum(<span class="number">3</span>); <span class="comment">// [B,H,N,L]
-<a href=#706 id=706 data-nosnippet>706</a>    </span><span class="kw">let </span>zeros_bhn1 = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
-<a href=#707 id=707 data-nosnippet>707</a>    <span class="comment">// prefix_sum shifted right by 1 (i.e., cumsum[l-1], with cumsum[-1] = 0)
-<a href=#708 id=708 data-nosnippet>708</a>    </span><span class="kw">let </span>prefix_sum_shifted_bhnl = Tensor::cat(
-<a href=#709 id=709 data-nosnippet>709</a>        <span class="macro">vec!</span>[zeros_bhn1, prefix_sum_bhnl.narrow(<span class="number">3</span>, <span class="number">0</span>, chunk_len - <span class="number">1</span>)],
-<a href=#710 id=710 data-nosnippet>710</a>        <span class="number">3</span>,
-<a href=#711 id=711 data-nosnippet>711</a>    );
-<a href=#712 id=712 data-nosnippet>712</a>    <span class="kw">let </span>d_da_bhnl = d_da_cumsum_total_bhnl - prefix_sum_shifted_bhnl; <span class="comment">// suffix sum [B,H,N,L]
-<a href=#713 id=713 data-nosnippet>713</a>    </span>san(<span class="kw-2">&amp;</span>d_da_bhnl);
-<a href=#714 id=714 data-nosnippet>714</a>    <span class="comment">// d_dt from K1: d_dt = d_da * a_decay
-<a href=#715 id=715 data-nosnippet>715</a>    </span><span class="kw">let </span>a_decay_expand = a_decay_h
-<a href=#716 id=716 data-nosnippet>716</a>        .clone()
-<a href=#717 id=717 data-nosnippet>717</a>        .unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>])
-<a href=#718 id=718 data-nosnippet>718</a>        .expand([batch, nheads, nchunks, chunk_len]);
-<a href=#719 id=719 data-nosnippet>719</a>    <span class="kw">let </span>d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_expand;
-<a href=#720 id=720 data-nosnippet>720</a>    san(<span class="kw-2">&amp;</span>d_dt_k1_bhnl);
-<a href=#721 id=721 data-nosnippet>721</a>    <span class="comment">// d_a_decay_h from K1: d_a[h] = sum_{b,n,l} d_da[b,h,n,l] * dt[b,h,n,l]
-<a href=#722 id=722 data-nosnippet>722</a>    </span><span class="kw">let </span>d_a_decay_h = (d_da_bhnl * dt_discretized_bhnl.clone())
-<a href=#723 id=723 data-nosnippet>723</a>        .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>]) <span class="comment">// [H,B,N,L]
-<a href=#724 id=724 data-nosnippet>724</a>        </span>.reshape([nheads, batch * nchunks * chunk_len])
-<a href=#725 id=725 data-nosnippet>725</a>        .sum_dim(<span class="number">1</span>) <span class="comment">// [H,1]
-<a href=#726 id=726 data-nosnippet>726</a>        </span>.reshape([nheads]);
-<a href=#727 id=727 data-nosnippet>727</a>    san(<span class="kw-2">&amp;</span>d_a_decay_h);
-<a href=#728 id=728 data-nosnippet>728</a>
-<a href=#729 id=729 data-nosnippet>729</a>    <span class="comment">// Test-only: keep d_dt_orange_bhnl alive for the oracle return.
-<a href=#730 id=730 data-nosnippet>730</a>    </span><span class="attr">#[cfg(test)]
-<a href=#731 id=731 data-nosnippet>731</a>    </span><span class="kw">let </span>d_dt_orange_bhnl_save = d_dt_orange_bhnl.clone();
-<a href=#732 id=732 data-nosnippet>732</a>    <span class="kw">let </span>d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
-<a href=#733 id=733 data-nosnippet>733</a>    san(<span class="kw-2">&amp;</span>d_dt_discretized_bhnl);
-<a href=#734 id=734 data-nosnippet>734</a>
-<a href=#735 id=735 data-nosnippet>735</a>    <span class="kw">let </span>d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
-<a href=#736 id=736 data-nosnippet>736</a>    san(<span class="kw-2">&amp;</span>d_x_bnlhp);
-<a href=#737 id=737 data-nosnippet>737</a>
-<a href=#738 id=738 data-nosnippet>738</a>    <span class="kw">let </span>d_b_bnlgr = d_b_k2_bnlgr + d_b_k3_bnlgr;
-<a href=#739 id=739 data-nosnippet>739</a>    san(<span class="kw-2">&amp;</span>d_b_bnlgr);
-<a href=#740 id=740 data-nosnippet>740</a>    <span class="kw">let </span>d_c_bnlgr = d_c_k2_bnlgr + d_c_blue_bnlgr;
-<a href=#741 id=741 data-nosnippet>741</a>    san(<span class="kw-2">&amp;</span>d_c_bnlgr);
-<a href=#742 id=742 data-nosnippet>742</a>
-<a href=#743 id=743 data-nosnippet>743</a>    CombinedGrads {
-<a href=#744 id=744 data-nosnippet>744</a>        d_a_decay_h,
-<a href=#745 id=745 data-nosnippet>745</a>        d_dt_discretized_bhnl,
-<a href=#746 id=746 data-nosnippet>746</a>        d_x_bnlhp,
-<a href=#747 id=747 data-nosnippet>747</a>        d_b_bnlgr,
-<a href=#748 id=748 data-nosnippet>748</a>        d_c_bnlgr,
-<a href=#749 id=749 data-nosnippet>749</a>        d_d_h,
-<a href=#750 id=750 data-nosnippet>750</a>        d_initial_state_bhpr,
-<a href=#751 id=751 data-nosnippet>751</a>        <span class="attr">#[cfg(test)]
-<a href=#752 id=752 data-nosnippet>752</a>        </span>d_da_local_bhnl,
-<a href=#753 id=753 data-nosnippet>753</a>        <span class="attr">#[cfg(test)]
-<a href=#754 id=754 data-nosnippet>754</a>        </span>d_dt_orange_bhnl: d_dt_orange_bhnl_save,
-<a href=#755 id=755 data-nosnippet>755</a>    }
-<a href=#756 id=756 data-nosnippet>756</a>}
-<a href=#757 id=757 data-nosnippet>757</a>
-<a href=#758 id=758 data-nosnippet>758</a><span class="attr">#[cfg(test)]
-<a href=#759 id=759 data-nosnippet>759</a>#[cfg(feature = <span class="string">"backend-flex"</span>)]
-<a href=#760 id=760 data-nosnippet>760</a></span><span class="kw">mod </span>tests {
-<a href=#761 id=761 data-nosnippet>761</a>    <span class="kw">use </span>super::<span class="kw-2">*</span>;
-<a href=#762 id=762 data-nosnippet>762</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba2::ssd::serial;
-<a href=#763 id=763 data-nosnippet>763</a>    <span class="kw">use </span>burn::backend::Flex;
-<a href=#764 id=764 data-nosnippet>764</a>    <span class="kw">use </span>burn::tensor::Distribution;
-<a href=#765 id=765 data-nosnippet>765</a>
-<a href=#766 id=766 data-nosnippet>766</a>    <span class="kw">type </span>B = Flex;
-<a href=#767 id=767 data-nosnippet>767</a>
-<a href=#768 id=768 data-nosnippet>768</a>    <span class="doccomment">/// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
-<a href=#769 id=769 data-nosnippet>769</a>    ///
-<a href=#770 id=770 data-nosnippet>770</a>    /// Per Tri Dao's `_chunk_scan_bwd_ddAcs_unstable` (ssd_chunk_scan.py:1618):
-<a href=#771 id=771 data-nosnippet>771</a>    /// ```text
-<a href=#772 id=772 data-nosnippet>772</a>    /// d_da_cumsum_local[b,h,n,l]
-<a href=#773 id=773 data-nosnippet>773</a>    ///   = Σ_p out_x[b,n,l,h,p] · d_y[b,n,l,h,p]
-<a href=#774 id=774 data-nosnippet>774</a>    ///     − d_dt_orange[b,h,n,l] · dt[b,h,n,l]
-<a href=#775 id=775 data-nosnippet>775</a>    /// ```
-<a href=#776 id=776 data-nosnippet>776</a>    /// where `out_x = y − D·x` (output before D-skip) and `d_dt_orange` is
-<a href=#777 id=777 data-nosnippet>777</a>    /// the same-chunk d_dt contribution from ORANGE only.
-<a href=#778 id=778 data-nosnippet>778</a>    ///
-<a href=#779 id=779 data-nosnippet>779</a>    /// This is a stronger correctness check than the autodiff comparison:
-<a href=#780 id=780 data-nosnippet>780</a>    /// both sides are computed via independent analytical paths and should
-<a href=#781 id=781 data-nosnippet>781</a>    /// match to fp32 precision on small inputs. The identity is numerically
-<a href=#782 id=782 data-nosnippet>782</a>    /// unstable for large inputs (catastrophic cancellation between einsum
-<a href=#783 id=783 data-nosnippet>783</a>    /// and ddt·dt).
-<a href=#784 id=784 data-nosnippet>784</a>    </span><span class="attr">#[test]
-<a href=#785 id=785 data-nosnippet>785</a>    </span><span class="kw">fn </span>oracle_da_local_matches_einsum_minus_ddt_dt() {
-<a href=#786 id=786 data-nosnippet>786</a>        <span class="kw">let </span>device = Default::default();
-<a href=#787 id=787 data-nosnippet>787</a>        <span class="kw">let </span>batch = <span class="number">2</span>;
-<a href=#788 id=788 data-nosnippet>788</a>        <span class="kw">let </span>nchunks = <span class="number">3</span>;
-<a href=#789 id=789 data-nosnippet>789</a>        <span class="kw">let </span>chunk_len = <span class="number">4</span>;
-<a href=#790 id=790 data-nosnippet>790</a>        <span class="kw">let </span>nheads = <span class="number">4</span>;
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="kw">let </span>per_head_dim = <span class="number">4</span>;
-<a href=#792 id=792 data-nosnippet>792</a>        <span class="kw">let </span>ngroups = <span class="number">2</span>;
-<a href=#793 id=793 data-nosnippet>793</a>        <span class="kw">let </span>state_rank = <span class="number">6</span>;
-<a href=#794 id=794 data-nosnippet>794</a>
-<a href=#795 id=795 data-nosnippet>795</a>        <span class="comment">// ─── Random inputs (small, gentle distributions) ─────────────────
-<a href=#796 id=796 data-nosnippet>796</a>        </span><span class="kw">let </span>x_bnlhp = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
-<a href=#797 id=797 data-nosnippet>797</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
-<a href=#798 id=798 data-nosnippet>798</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
-<a href=#799 id=799 data-nosnippet>799</a>            <span class="kw-2">&amp;</span>device,
-<a href=#800 id=800 data-nosnippet>800</a>        );
-<a href=#801 id=801 data-nosnippet>801</a>        <span class="kw">let </span>dt_bnlh = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
-<a href=#802 id=802 data-nosnippet>802</a>            [batch, nchunks, chunk_len, nheads],
-<a href=#803 id=803 data-nosnippet>803</a>            Distribution::Uniform(<span class="number">0.05</span>, <span class="number">0.3</span>),
-<a href=#804 id=804 data-nosnippet>804</a>            <span class="kw-2">&amp;</span>device,
-<a href=#805 id=805 data-nosnippet>805</a>        );
-<a href=#806 id=806 data-nosnippet>806</a>        <span class="kw">let </span>a_decay_h =
-<a href=#807 id=807 data-nosnippet>807</a>            Tensor::&lt;B, <span class="number">1</span>&gt;::random([nheads], Distribution::Uniform(-<span class="number">1.0</span>, -<span class="number">0.5</span>), <span class="kw-2">&amp;</span>device);
-<a href=#808 id=808 data-nosnippet>808</a>        <span class="kw">let </span>b_bnlgr = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
-<a href=#809 id=809 data-nosnippet>809</a>            [batch, nchunks, chunk_len, ngroups, state_rank],
-<a href=#810 id=810 data-nosnippet>810</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
-<a href=#811 id=811 data-nosnippet>811</a>            <span class="kw-2">&amp;</span>device,
-<a href=#812 id=812 data-nosnippet>812</a>        );
-<a href=#813 id=813 data-nosnippet>813</a>        <span class="kw">let </span>c_bnlgr = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
-<a href=#814 id=814 data-nosnippet>814</a>            [batch, nchunks, chunk_len, ngroups, state_rank],
-<a href=#815 id=815 data-nosnippet>815</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
-<a href=#816 id=816 data-nosnippet>816</a>            <span class="kw-2">&amp;</span>device,
-<a href=#817 id=817 data-nosnippet>817</a>        );
-<a href=#818 id=818 data-nosnippet>818</a>        <span class="kw">let </span>d_h = Tensor::&lt;B, <span class="number">1</span>&gt;::random([nheads], Distribution::Normal(<span class="number">0.0</span>, <span class="number">0.1</span>), <span class="kw-2">&amp;</span>device);
-<a href=#819 id=819 data-nosnippet>819</a>        <span class="kw">let </span>initial_state_bhpr = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
-<a href=#820 id=820 data-nosnippet>820</a>            [batch, nheads, per_head_dim, state_rank],
-<a href=#821 id=821 data-nosnippet>821</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">0.1</span>),
-<a href=#822 id=822 data-nosnippet>822</a>            <span class="kw-2">&amp;</span>device,
-<a href=#823 id=823 data-nosnippet>823</a>        );
-<a href=#824 id=824 data-nosnippet>824</a>        <span class="kw">let </span>dt_discretized_bhnl = dt_bnlh.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]); <span class="comment">// [B,H,N,L]
-<a href=#825 id=825 data-nosnippet>825</a>
-<a href=#826 id=826 data-nosnippet>826</a>        // ─── Forward (Serial path) ───────────────────────────────────────
-<a href=#827 id=827 data-nosnippet>827</a>        </span><span class="kw">let </span>(da_cumsum_bhnl, da_chunk_end_bhn) =
-<a href=#828 id=828 data-nosnippet>828</a>            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
-<a href=#829 id=829 data-nosnippet>829</a>        <span class="kw">let </span>cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
-<a href=#830 id=830 data-nosnippet>830</a>        <span class="kw">let </span>intra_chunk_state_bnhpr = serial::k3_ssd_chunk_state(
-<a href=#831 id=831 data-nosnippet>831</a>            x_bnlhp.clone(),
-<a href=#832 id=832 data-nosnippet>832</a>            b_bnlgr.clone(),
-<a href=#833 id=833 data-nosnippet>833</a>            da_cumsum_bhnl.clone(),
-<a href=#834 id=834 data-nosnippet>834</a>            dt_discretized_bhnl.clone(),
-<a href=#835 id=835 data-nosnippet>835</a>        );
-<a href=#836 id=836 data-nosnippet>836</a>        <span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr) = serial::k4_ssd_state_passing(
-<a href=#837 id=837 data-nosnippet>837</a>            intra_chunk_state_bnhpr,
-<a href=#838 id=838 data-nosnippet>838</a>            da_chunk_end_bhn,
-<a href=#839 id=839 data-nosnippet>839</a>            initial_state_bhpr.clone(),
-<a href=#840 id=840 data-nosnippet>840</a>        );
-<a href=#841 id=841 data-nosnippet>841</a>        <span class="kw">let </span>y_bnlhp = serial::k5_ssd_chunk_scan(
-<a href=#842 id=842 data-nosnippet>842</a>            da_cumsum_bhnl,
-<a href=#843 id=843 data-nosnippet>843</a>            dt_discretized_bhnl.clone(),
-<a href=#844 id=844 data-nosnippet>844</a>            x_bnlhp.clone(),
-<a href=#845 id=845 data-nosnippet>845</a>            c_bnlgr.clone(),
-<a href=#846 id=846 data-nosnippet>846</a>            cb_bngll,
-<a href=#847 id=847 data-nosnippet>847</a>            chunk_input_state_bnhpr,
-<a href=#848 id=848 data-nosnippet>848</a>            d_h.clone(),
-<a href=#849 id=849 data-nosnippet>849</a>        );
-<a href=#850 id=850 data-nosnippet>850</a>
-<a href=#851 id=851 data-nosnippet>851</a>        <span class="comment">// ─── out_x = y − D·x  (output before D-skip) ─────────────────────
-<a href=#852 id=852 data-nosnippet>852</a>        </span><span class="kw">let </span>skip_bnlhp = d_h
-<a href=#853 id=853 data-nosnippet>853</a>            .clone()
-<a href=#854 id=854 data-nosnippet>854</a>            .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// [1,1,1,H,1]
-<a href=#855 id=855 data-nosnippet>855</a>            </span>.expand([batch, nchunks, chunk_len, nheads, per_head_dim])
-<a href=#856 id=856 data-nosnippet>856</a>            * x_bnlhp.clone();
-<a href=#857 id=857 data-nosnippet>857</a>        <span class="kw">let </span>out_x_bnlhp = y_bnlhp - skip_bnlhp;
-<a href=#858 id=858 data-nosnippet>858</a>
-<a href=#859 id=859 data-nosnippet>859</a>        <span class="comment">// ─── Random upstream gradients ────────────────────────────────────
-<a href=#860 id=860 data-nosnippet>860</a>        </span><span class="kw">let </span>d_y_bnlhp = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
-<a href=#861 id=861 data-nosnippet>861</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
-<a href=#862 id=862 data-nosnippet>862</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
-<a href=#863 id=863 data-nosnippet>863</a>            <span class="kw-2">&amp;</span>device,
-<a href=#864 id=864 data-nosnippet>864</a>        );
-<a href=#865 id=865 data-nosnippet>865</a>        <span class="kw">let </span>d_final_bhpr = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
-<a href=#866 id=866 data-nosnippet>866</a>            [batch, nheads, per_head_dim, state_rank],
-<a href=#867 id=867 data-nosnippet>867</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
-<a href=#868 id=868 data-nosnippet>868</a>            <span class="kw-2">&amp;</span>device,
-<a href=#869 id=869 data-nosnippet>869</a>        );
-<a href=#870 id=870 data-nosnippet>870</a>
-<a href=#871 id=871 data-nosnippet>871</a>        <span class="comment">// ─── Run combined_backward (gets d_da_local + d_dt_orange) ───────
-<a href=#872 id=872 data-nosnippet>872</a>        </span><span class="kw">let </span>grads = combined_backward(
-<a href=#873 id=873 data-nosnippet>873</a>            d_y_bnlhp.clone(),
-<a href=#874 id=874 data-nosnippet>874</a>            d_final_bhpr,
-<a href=#875 id=875 data-nosnippet>875</a>            x_bnlhp,
-<a href=#876 id=876 data-nosnippet>876</a>            dt_discretized_bhnl.clone(),
-<a href=#877 id=877 data-nosnippet>877</a>            b_bnlgr,
-<a href=#878 id=878 data-nosnippet>878</a>            c_bnlgr,
-<a href=#879 id=879 data-nosnippet>879</a>            d_h,
-<a href=#880 id=880 data-nosnippet>880</a>            initial_state_bhpr,
-<a href=#881 id=881 data-nosnippet>881</a>            a_decay_h,
-<a href=#882 id=882 data-nosnippet>882</a>        );
-<a href=#883 id=883 data-nosnippet>883</a>
-<a href=#884 id=884 data-nosnippet>884</a>        <span class="comment">// ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp-&gt;bhnl") − d_dt_orange·dt
-<a href=#885 id=885 data-nosnippet>885</a>        </span><span class="kw">let </span>einsum_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = (out_x_bnlhp * d_y_bnlhp)
-<a href=#886 id=886 data-nosnippet>886</a>            .sum_dim(<span class="number">4</span>) <span class="comment">// [B,N,L,H,1]
-<a href=#887 id=887 data-nosnippet>887</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>) <span class="comment">// [B,N,L,H]
-<a href=#888 id=888 data-nosnippet>888</a>            </span>.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]); <span class="comment">// [B,H,N,L]
-<a href=#889 id=889 data-nosnippet>889</a>        </span><span class="kw">let </span>oracle_bhnl = einsum_bhnl - grads.d_dt_orange_bhnl * dt_discretized_bhnl;
-<a href=#890 id=890 data-nosnippet>890</a>
-<a href=#891 id=891 data-nosnippet>891</a>        <span class="comment">// ─── Compare ─────────────────────────────────────────────────────
-<a href=#892 id=892 data-nosnippet>892</a>        </span><span class="kw">let </span>diff: f32 = (grads.d_da_local_bhnl - oracle_bhnl)
-<a href=#893 id=893 data-nosnippet>893</a>            .abs()
-<a href=#894 id=894 data-nosnippet>894</a>            .max()
-<a href=#895 id=895 data-nosnippet>895</a>            .into_scalar()
-<a href=#896 id=896 data-nosnippet>896</a>            .elem();
-<a href=#897 id=897 data-nosnippet>897</a>        <span class="macro">assert!</span>(
-<a href=#898 id=898 data-nosnippet>898</a>            diff &lt; <span class="number">1e-3</span>,
-<a href=#899 id=899 data-nosnippet>899</a>            <span class="string">"d_da_local oracle identity violated; max abs diff = {diff}"</span>,
-<a href=#900 id=900 data-nosnippet>900</a>        );
-<a href=#901 id=901 data-nosnippet>901</a>    }
-<a href=#902 id=902 data-nosnippet>902</a>}
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="comment">// ── K1 BACKWARD ────────────────────────────────────────────────────────
+<a href=#674 id=674 data-nosnippet>674</a>    // K1 forward: da_cumsum[l] = cumsumₗ(dt[l] * a_decay)
+<a href=#675 id=675 data-nosnippet>675</a>    //
+<a href=#676 id=676 data-nosnippet>676</a>    // Reverse cumsum (suffix sum) converts d_da_cumsum → d_da:
+<a href=#677 id=677 data-nosnippet>677</a>    //   d_da[l] = sum_{k &gt;= l} d_da_cumsum[k]
+<a href=#678 id=678 data-nosnippet>678</a>    //           = total_sum - cumsum(d_da_cumsum)[l-1]   (cumsum[-1] == 0)
+<a href=#679 id=679 data-nosnippet>679</a>    </span><span class="kw">let </span>d_da_cumsum_total_bhnl = d_da_cumsum_bhnl
+<a href=#680 id=680 data-nosnippet>680</a>        .clone()
+<a href=#681 id=681 data-nosnippet>681</a>        .sum_dim(<span class="number">3</span>) <span class="comment">// d_da_cumsum_bhn1
+<a href=#682 id=682 data-nosnippet>682</a>        </span>.expand([batch, nheads, nchunks, chunk_len]);
+<a href=#683 id=683 data-nosnippet>683</a>    <span class="kw">let </span>prefix_sum_bhnl = d_da_cumsum_bhnl.clone().cumsum(<span class="number">3</span>);
+<a href=#684 id=684 data-nosnippet>684</a>    <span class="kw">let </span>zeros_bhn1 = Tensor::&lt;B, <span class="number">4</span>&gt;::zeros([batch, nheads, nchunks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="comment">// prefix_sum shifted right by 1 (i.e., cumsum[l-1], with cumsum[-1] = 0)
+<a href=#686 id=686 data-nosnippet>686</a>    </span><span class="kw">let </span>prefix_sum_shifted_bhnl = Tensor::cat(
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="macro">vec!</span>[zeros_bhn1, prefix_sum_bhnl.narrow(<span class="number">3</span>, <span class="number">0</span>, chunk_len - <span class="number">1</span>)],
+<a href=#688 id=688 data-nosnippet>688</a>        <span class="number">3</span>,
+<a href=#689 id=689 data-nosnippet>689</a>    );
+<a href=#690 id=690 data-nosnippet>690</a>    <span class="kw">let </span>d_da_bhnl = d_da_cumsum_total_bhnl - prefix_sum_shifted_bhnl; <span class="comment">// suffix sum
+<a href=#691 id=691 data-nosnippet>691</a>    </span>san(<span class="kw-2">&amp;</span>d_da_bhnl);
+<a href=#692 id=692 data-nosnippet>692</a>    <span class="comment">// d_dt from K1: d_dt = d_da * a_decay
+<a href=#693 id=693 data-nosnippet>693</a>    </span><span class="kw">let </span>a_decay_expand = a_decay_h
+<a href=#694 id=694 data-nosnippet>694</a>        .clone()
+<a href=#695 id=695 data-nosnippet>695</a>        .unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>])
+<a href=#696 id=696 data-nosnippet>696</a>        .expand([batch, nheads, nchunks, chunk_len]);
+<a href=#697 id=697 data-nosnippet>697</a>    <span class="kw">let </span>d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_expand;
+<a href=#698 id=698 data-nosnippet>698</a>    san(<span class="kw-2">&amp;</span>d_dt_k1_bhnl);
+<a href=#699 id=699 data-nosnippet>699</a>    <span class="comment">// d_a_decay_h from K1: d_a[h] = sum_{b,n,l} d_da[b,h,n,l] * dt[b,h,n,l]
+<a href=#700 id=700 data-nosnippet>700</a>    </span><span class="kw">let </span>d_a_decay_h = (d_da_bhnl * dt_discretized_bhnl.clone())
+<a href=#701 id=701 data-nosnippet>701</a>        .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>]) <span class="comment">// d_a_decay_hbnl
+<a href=#702 id=702 data-nosnippet>702</a>        </span>.reshape([nheads, batch * nchunks * chunk_len]) <span class="comment">// d_a_decay_hBNL
+<a href=#703 id=703 data-nosnippet>703</a>        </span>.sum_dim(<span class="number">1</span>) <span class="comment">// d_a_decay_h1
+<a href=#704 id=704 data-nosnippet>704</a>        </span>.squeeze_dim::&lt;<span class="number">1</span>&gt;(<span class="number">1</span>);
+<a href=#705 id=705 data-nosnippet>705</a>    san(<span class="kw-2">&amp;</span>d_a_decay_h);
+<a href=#706 id=706 data-nosnippet>706</a>
+<a href=#707 id=707 data-nosnippet>707</a>    <span class="comment">// Test-only: keep d_dt_orange_bhnl alive for the oracle return.
+<a href=#708 id=708 data-nosnippet>708</a>    </span><span class="attr">#[cfg(test)]
+<a href=#709 id=709 data-nosnippet>709</a>    </span><span class="kw">let </span>d_dt_orange_bhnl_save = d_dt_orange_bhnl.clone();
+<a href=#710 id=710 data-nosnippet>710</a>    <span class="kw">let </span>d_dt_discretized_bhnl = d_dt_orange_bhnl + d_dt_discretized_k3_bhnl + d_dt_k1_bhnl;
+<a href=#711 id=711 data-nosnippet>711</a>    san(<span class="kw-2">&amp;</span>d_dt_discretized_bhnl);
+<a href=#712 id=712 data-nosnippet>712</a>
+<a href=#713 id=713 data-nosnippet>713</a>    <span class="kw">let </span>d_x_bnlhp = d_x_skip_bnlhp + d_x_k3_bnlhp + d_x_orange_bnlhp;
+<a href=#714 id=714 data-nosnippet>714</a>    san(<span class="kw-2">&amp;</span>d_x_bnlhp);
+<a href=#715 id=715 data-nosnippet>715</a>
+<a href=#716 id=716 data-nosnippet>716</a>    <span class="kw">let </span>d_b_bnlgr = d_b_k2_bnlgr + d_b_k3_bnlgr;
+<a href=#717 id=717 data-nosnippet>717</a>    san(<span class="kw-2">&amp;</span>d_b_bnlgr);
+<a href=#718 id=718 data-nosnippet>718</a>    <span class="kw">let </span>d_c_bnlgr = d_c_k2_bnlgr + d_c_blue_bnlgr;
+<a href=#719 id=719 data-nosnippet>719</a>    san(<span class="kw-2">&amp;</span>d_c_bnlgr);
+<a href=#720 id=720 data-nosnippet>720</a>
+<a href=#721 id=721 data-nosnippet>721</a>    CombinedGrads {
+<a href=#722 id=722 data-nosnippet>722</a>        d_a_decay_h,
+<a href=#723 id=723 data-nosnippet>723</a>        d_dt_discretized_bhnl,
+<a href=#724 id=724 data-nosnippet>724</a>        d_x_bnlhp,
+<a href=#725 id=725 data-nosnippet>725</a>        d_b_bnlgr,
+<a href=#726 id=726 data-nosnippet>726</a>        d_c_bnlgr,
+<a href=#727 id=727 data-nosnippet>727</a>        d_d_h,
+<a href=#728 id=728 data-nosnippet>728</a>        d_initial_state_bhpr,
+<a href=#729 id=729 data-nosnippet>729</a>        <span class="attr">#[cfg(test)]
+<a href=#730 id=730 data-nosnippet>730</a>        </span>d_da_local_bhnl,
+<a href=#731 id=731 data-nosnippet>731</a>        <span class="attr">#[cfg(test)]
+<a href=#732 id=732 data-nosnippet>732</a>        </span>d_dt_orange_bhnl: d_dt_orange_bhnl_save,
+<a href=#733 id=733 data-nosnippet>733</a>    }
+<a href=#734 id=734 data-nosnippet>734</a>}
+<a href=#735 id=735 data-nosnippet>735</a>
+<a href=#736 id=736 data-nosnippet>736</a><span class="attr">#[cfg(test)]
+<a href=#737 id=737 data-nosnippet>737</a>#[cfg(feature = <span class="string">"backend-flex"</span>)]
+<a href=#738 id=738 data-nosnippet>738</a></span><span class="kw">mod </span>tests {
+<a href=#739 id=739 data-nosnippet>739</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#740 id=740 data-nosnippet>740</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba2::ssd::serial;
+<a href=#741 id=741 data-nosnippet>741</a>    <span class="kw">use </span>burn::backend::Flex;
+<a href=#742 id=742 data-nosnippet>742</a>    <span class="kw">use </span>burn::tensor::Distribution;
+<a href=#743 id=743 data-nosnippet>743</a>
+<a href=#744 id=744 data-nosnippet>744</a>    <span class="kw">type </span>B = Flex;
+<a href=#745 id=745 data-nosnippet>745</a>
+<a href=#746 id=746 data-nosnippet>746</a>    <span class="doccomment">/// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
+<a href=#747 id=747 data-nosnippet>747</a>    ///
+<a href=#748 id=748 data-nosnippet>748</a>    /// Per Tri Dao's `_chunk_scan_bwd_ddAcs_unstable` (ssd_chunk_scan.py:1618):
+<a href=#749 id=749 data-nosnippet>749</a>    /// ```text
+<a href=#750 id=750 data-nosnippet>750</a>    /// d_da_cumsum_local[b,h,n,l]
+<a href=#751 id=751 data-nosnippet>751</a>    ///   = Σ_p out_x[b,n,l,h,p] · d_y[b,n,l,h,p]
+<a href=#752 id=752 data-nosnippet>752</a>    ///     − d_dt_orange[b,h,n,l] · dt[b,h,n,l]
+<a href=#753 id=753 data-nosnippet>753</a>    /// ```
+<a href=#754 id=754 data-nosnippet>754</a>    /// where `out_x = y − D·x` (output before D-skip) and `d_dt_orange` is
+<a href=#755 id=755 data-nosnippet>755</a>    /// the same-chunk d_dt contribution from ORANGE only.
+<a href=#756 id=756 data-nosnippet>756</a>    ///
+<a href=#757 id=757 data-nosnippet>757</a>    /// This is a stronger correctness check than the autodiff comparison:
+<a href=#758 id=758 data-nosnippet>758</a>    /// both sides are computed via independent analytical paths and should
+<a href=#759 id=759 data-nosnippet>759</a>    /// match to fp32 precision on small inputs. The identity is numerically
+<a href=#760 id=760 data-nosnippet>760</a>    /// unstable for large inputs (catastrophic cancellation between einsum
+<a href=#761 id=761 data-nosnippet>761</a>    /// and ddt·dt).
+<a href=#762 id=762 data-nosnippet>762</a>    </span><span class="attr">#[test]
+<a href=#763 id=763 data-nosnippet>763</a>    </span><span class="kw">fn </span>oracle_da_local_matches_einsum_minus_ddt_dt() {
+<a href=#764 id=764 data-nosnippet>764</a>        <span class="kw">let </span>device = Default::default();
+<a href=#765 id=765 data-nosnippet>765</a>        <span class="kw">let </span>batch = <span class="number">2</span>;
+<a href=#766 id=766 data-nosnippet>766</a>        <span class="kw">let </span>nchunks = <span class="number">3</span>;
+<a href=#767 id=767 data-nosnippet>767</a>        <span class="kw">let </span>chunk_len = <span class="number">4</span>;
+<a href=#768 id=768 data-nosnippet>768</a>        <span class="kw">let </span>nheads = <span class="number">4</span>;
+<a href=#769 id=769 data-nosnippet>769</a>        <span class="kw">let </span>per_head_dim = <span class="number">4</span>;
+<a href=#770 id=770 data-nosnippet>770</a>        <span class="kw">let </span>ngroups = <span class="number">2</span>;
+<a href=#771 id=771 data-nosnippet>771</a>        <span class="kw">let </span>state_rank = <span class="number">6</span>;
+<a href=#772 id=772 data-nosnippet>772</a>
+<a href=#773 id=773 data-nosnippet>773</a>        <span class="comment">// ─── Random inputs (small, gentle distributions) ─────────────────
+<a href=#774 id=774 data-nosnippet>774</a>        </span><span class="kw">let </span>x_bnlhp = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
+<a href=#775 id=775 data-nosnippet>775</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
+<a href=#776 id=776 data-nosnippet>776</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
+<a href=#777 id=777 data-nosnippet>777</a>            <span class="kw-2">&amp;</span>device,
+<a href=#778 id=778 data-nosnippet>778</a>        );
+<a href=#779 id=779 data-nosnippet>779</a>        <span class="kw">let </span>dt_bnlh = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
+<a href=#780 id=780 data-nosnippet>780</a>            [batch, nchunks, chunk_len, nheads],
+<a href=#781 id=781 data-nosnippet>781</a>            Distribution::Uniform(<span class="number">0.05</span>, <span class="number">0.3</span>),
+<a href=#782 id=782 data-nosnippet>782</a>            <span class="kw-2">&amp;</span>device,
+<a href=#783 id=783 data-nosnippet>783</a>        );
+<a href=#784 id=784 data-nosnippet>784</a>        <span class="kw">let </span>a_decay_h =
+<a href=#785 id=785 data-nosnippet>785</a>            Tensor::&lt;B, <span class="number">1</span>&gt;::random([nheads], Distribution::Uniform(-<span class="number">1.0</span>, -<span class="number">0.5</span>), <span class="kw-2">&amp;</span>device);
+<a href=#786 id=786 data-nosnippet>786</a>        <span class="kw">let </span>b_bnlgr = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
+<a href=#787 id=787 data-nosnippet>787</a>            [batch, nchunks, chunk_len, ngroups, state_rank],
+<a href=#788 id=788 data-nosnippet>788</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
+<a href=#789 id=789 data-nosnippet>789</a>            <span class="kw-2">&amp;</span>device,
+<a href=#790 id=790 data-nosnippet>790</a>        );
+<a href=#791 id=791 data-nosnippet>791</a>        <span class="kw">let </span>c_bnlgr = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
+<a href=#792 id=792 data-nosnippet>792</a>            [batch, nchunks, chunk_len, ngroups, state_rank],
+<a href=#793 id=793 data-nosnippet>793</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
+<a href=#794 id=794 data-nosnippet>794</a>            <span class="kw-2">&amp;</span>device,
+<a href=#795 id=795 data-nosnippet>795</a>        );
+<a href=#796 id=796 data-nosnippet>796</a>        <span class="kw">let </span>d_h = Tensor::&lt;B, <span class="number">1</span>&gt;::random([nheads], Distribution::Normal(<span class="number">0.0</span>, <span class="number">0.1</span>), <span class="kw-2">&amp;</span>device);
+<a href=#797 id=797 data-nosnippet>797</a>        <span class="kw">let </span>initial_state_bhpr = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
+<a href=#798 id=798 data-nosnippet>798</a>            [batch, nheads, per_head_dim, state_rank],
+<a href=#799 id=799 data-nosnippet>799</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">0.1</span>),
+<a href=#800 id=800 data-nosnippet>800</a>            <span class="kw-2">&amp;</span>device,
+<a href=#801 id=801 data-nosnippet>801</a>        );
+<a href=#802 id=802 data-nosnippet>802</a>        <span class="kw">let </span>dt_discretized_bhnl = dt_bnlh.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#803 id=803 data-nosnippet>803</a>
+<a href=#804 id=804 data-nosnippet>804</a>        <span class="comment">// ─── Forward (Serial path) ───────────────────────────────────────
+<a href=#805 id=805 data-nosnippet>805</a>        </span><span class="kw">let </span>(da_cumsum_bhnl, da_chunk_end_bhn) =
+<a href=#806 id=806 data-nosnippet>806</a>            serial::k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), a_decay_h.clone());
+<a href=#807 id=807 data-nosnippet>807</a>        <span class="kw">let </span>cb_bngll = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
+<a href=#808 id=808 data-nosnippet>808</a>        <span class="kw">let </span>intra_chunk_state_bnhpr = serial::k3_ssd_chunk_state(
+<a href=#809 id=809 data-nosnippet>809</a>            x_bnlhp.clone(),
+<a href=#810 id=810 data-nosnippet>810</a>            b_bnlgr.clone(),
+<a href=#811 id=811 data-nosnippet>811</a>            da_cumsum_bhnl.clone(),
+<a href=#812 id=812 data-nosnippet>812</a>            dt_discretized_bhnl.clone(),
+<a href=#813 id=813 data-nosnippet>813</a>        );
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr) = serial::k4_ssd_state_passing(
+<a href=#815 id=815 data-nosnippet>815</a>            intra_chunk_state_bnhpr,
+<a href=#816 id=816 data-nosnippet>816</a>            da_chunk_end_bhn,
+<a href=#817 id=817 data-nosnippet>817</a>            initial_state_bhpr.clone(),
+<a href=#818 id=818 data-nosnippet>818</a>        );
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="kw">let </span>y_bnlhp = serial::k5_ssd_chunk_scan(
+<a href=#820 id=820 data-nosnippet>820</a>            da_cumsum_bhnl,
+<a href=#821 id=821 data-nosnippet>821</a>            dt_discretized_bhnl.clone(),
+<a href=#822 id=822 data-nosnippet>822</a>            x_bnlhp.clone(),
+<a href=#823 id=823 data-nosnippet>823</a>            c_bnlgr.clone(),
+<a href=#824 id=824 data-nosnippet>824</a>            cb_bngll,
+<a href=#825 id=825 data-nosnippet>825</a>            chunk_input_state_bnhpr,
+<a href=#826 id=826 data-nosnippet>826</a>            d_h.clone(),
+<a href=#827 id=827 data-nosnippet>827</a>        );
+<a href=#828 id=828 data-nosnippet>828</a>
+<a href=#829 id=829 data-nosnippet>829</a>        <span class="comment">// ─── out_x = y − D·x  (output before D-skip) ─────────────────────
+<a href=#830 id=830 data-nosnippet>830</a>        </span><span class="kw">let </span>skip_bnlhp = d_h
+<a href=#831 id=831 data-nosnippet>831</a>            .clone()
+<a href=#832 id=832 data-nosnippet>832</a>            .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// d_111h1
+<a href=#833 id=833 data-nosnippet>833</a>            </span>.expand([batch, nchunks, chunk_len, nheads, per_head_dim]) <span class="comment">// d_bnlhp
+<a href=#834 id=834 data-nosnippet>834</a>            </span>* x_bnlhp.clone();
+<a href=#835 id=835 data-nosnippet>835</a>        <span class="kw">let </span>out_x_bnlhp = y_bnlhp - skip_bnlhp;
+<a href=#836 id=836 data-nosnippet>836</a>
+<a href=#837 id=837 data-nosnippet>837</a>        <span class="comment">// ─── Random upstream gradients ────────────────────────────────────
+<a href=#838 id=838 data-nosnippet>838</a>        </span><span class="kw">let </span>d_y_bnlhp = Tensor::&lt;B, <span class="number">5</span>&gt;::random(
+<a href=#839 id=839 data-nosnippet>839</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
+<a href=#840 id=840 data-nosnippet>840</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
+<a href=#841 id=841 data-nosnippet>841</a>            <span class="kw-2">&amp;</span>device,
+<a href=#842 id=842 data-nosnippet>842</a>        );
+<a href=#843 id=843 data-nosnippet>843</a>        <span class="kw">let </span>d_final_bhpr = Tensor::&lt;B, <span class="number">4</span>&gt;::random(
+<a href=#844 id=844 data-nosnippet>844</a>            [batch, nheads, per_head_dim, state_rank],
+<a href=#845 id=845 data-nosnippet>845</a>            Distribution::Normal(<span class="number">0.0</span>, <span class="number">1.0</span>),
+<a href=#846 id=846 data-nosnippet>846</a>            <span class="kw-2">&amp;</span>device,
+<a href=#847 id=847 data-nosnippet>847</a>        );
+<a href=#848 id=848 data-nosnippet>848</a>
+<a href=#849 id=849 data-nosnippet>849</a>        <span class="comment">// ─── Run combined_backward (gets d_da_local + d_dt_orange) ───────
+<a href=#850 id=850 data-nosnippet>850</a>        </span><span class="kw">let </span>grads = combined_backward(
+<a href=#851 id=851 data-nosnippet>851</a>            d_y_bnlhp.clone(),
+<a href=#852 id=852 data-nosnippet>852</a>            d_final_bhpr,
+<a href=#853 id=853 data-nosnippet>853</a>            x_bnlhp,
+<a href=#854 id=854 data-nosnippet>854</a>            dt_discretized_bhnl.clone(),
+<a href=#855 id=855 data-nosnippet>855</a>            b_bnlgr,
+<a href=#856 id=856 data-nosnippet>856</a>            c_bnlgr,
+<a href=#857 id=857 data-nosnippet>857</a>            d_h,
+<a href=#858 id=858 data-nosnippet>858</a>            initial_state_bhpr,
+<a href=#859 id=859 data-nosnippet>859</a>            a_decay_h,
+<a href=#860 id=860 data-nosnippet>860</a>        );
+<a href=#861 id=861 data-nosnippet>861</a>
+<a href=#862 id=862 data-nosnippet>862</a>        <span class="comment">// ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp-&gt;bhnl") − d_dt_orange·dt
+<a href=#863 id=863 data-nosnippet>863</a>        </span><span class="kw">let </span>einsum_bhnl: Tensor&lt;B, <span class="number">4</span>&gt; = (out_x_bnlhp * d_y_bnlhp)
+<a href=#864 id=864 data-nosnippet>864</a>            .sum_dim(<span class="number">4</span>) <span class="comment">// einsum_bnlh1
+<a href=#865 id=865 data-nosnippet>865</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>) <span class="comment">// einsum_bnlh
+<a href=#866 id=866 data-nosnippet>866</a>            </span>.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]); <span class="comment">// einsum_bhnl
+<a href=#867 id=867 data-nosnippet>867</a>        </span><span class="kw">let </span>oracle_bhnl = einsum_bhnl - grads.d_dt_orange_bhnl * dt_discretized_bhnl;
+<a href=#868 id=868 data-nosnippet>868</a>
+<a href=#869 id=869 data-nosnippet>869</a>        <span class="comment">// ─── Compare ─────────────────────────────────────────────────────
+<a href=#870 id=870 data-nosnippet>870</a>        </span><span class="kw">let </span>diff: f32 = (grads.d_da_local_bhnl - oracle_bhnl)
+<a href=#871 id=871 data-nosnippet>871</a>            .abs()
+<a href=#872 id=872 data-nosnippet>872</a>            .max()
+<a href=#873 id=873 data-nosnippet>873</a>            .into_scalar()
+<a href=#874 id=874 data-nosnippet>874</a>            .elem();
+<a href=#875 id=875 data-nosnippet>875</a>        <span class="macro">assert!</span>(
+<a href=#876 id=876 data-nosnippet>876</a>            diff &lt; <span class="number">1e-3</span>,
+<a href=#877 id=877 data-nosnippet>877</a>            <span class="string">"d_da_local oracle identity violated; max abs diff = {diff}"</span>,
+<a href=#878 id=878 data-nosnippet>878</a>        );
+<a href=#879 id=879 data-nosnippet>879</a>    }
+<a href=#880 id=880 data-nosnippet>880</a>}
 </code></pre></div></section></main></body></html>
