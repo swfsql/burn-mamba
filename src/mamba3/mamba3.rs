@@ -1307,6 +1307,14 @@ mod tests {
     /// across two runs that should be mathematically equivalent.
     struct RunGrads {
         out: Tensor<InnerB, 3>,
+        /// Final SSM hidden state from the returned cache.
+        final_ssm: Tensor<InnerB, 4>,
+        /// Final previous-token B state from the returned cache.
+        final_k: Tensor<InnerB, 4>,
+        /// Final previous-token x state from the returned cache.
+        final_v: Tensor<InnerB, 3>,
+        /// Final cumulative RoPE angle from the returned cache.
+        final_angle: Tensor<InnerB, 3>,
         d_input: Tensor<InnerB, 3>,
         d_in_proj_w: Tensor<InnerB, 2>,
         d_dt_bias: Tensor<InnerB, 1>,
@@ -1318,6 +1326,69 @@ mod tests {
         d_out_proj_w: Tensor<InnerB, 2>,
     }
 
+    /// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
+    /// from the output **and** every final cache field, so the backward pass
+    /// exercises both the output and the state path.
+    struct Heads {
+        out: Tensor<InnerB, 3>,
+        ssm: Tensor<InnerB, 4>,
+        k: Tensor<InnerB, 4>,
+        v: Tensor<InnerB, 3>,
+        angle: Tensor<InnerB, 3>,
+    }
+
+    /// Build the initial cache passed to both `forward` and the `step`
+    /// unrolling. With `random = false` it is zero (the standard fresh start);
+    /// with `random = true` every field (SSM state, previous-token B/x, and
+    /// cumulative RoPE angle) holds random values, exercising parity from an
+    /// arbitrary initial state.
+    fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Cache<B> {
+        let device: Device = Default::default();
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let dist = Distribution::Normal(0.0, 1.0);
+        let mk4 = |shape: [usize; 4]| {
+            let t = if random {
+                Tensor::<InnerB, 4>::random(shape, dist, &device)
+            } else {
+                Tensor::<InnerB, 4>::zeros(shape, &device)
+            };
+            Tensor::from_inner(t)
+        };
+        let mk3 = |shape: [usize; 3]| {
+            let t = if random {
+                Tensor::<InnerB, 3>::random(shape, dist, &device)
+            } else {
+                Tensor::<InnerB, 3>::zeros(shape, &device)
+            };
+            Tensor::from_inner(t)
+        };
+        Mamba3Cache {
+            ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
+            k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
+            v_state_bhp: mk3([batch, nheads, per_head_dim]),
+            cum_angle_bha: mk3([batch, nheads, num_rope_angles]),
+        }
+    }
+
+    /// Compare the output and every final cache field of two runs.
+    fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
+        use crate::utils::test_helpers::max_abs_diff;
+        let checks = [
+            ("output", max_abs_diff(a.out.clone(), b.out.clone())),
+            ("final ssm", max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone())),
+            ("final k_state", max_abs_diff(a.final_k.clone(), b.final_k.clone())),
+            ("final v_state", max_abs_diff(a.final_v.clone(), b.final_v.clone())),
+            ("final cum_angle", max_abs_diff(a.final_angle.clone(), b.final_angle.clone())),
+        ];
+        for (name, d) in checks {
+            assert!(d < tol, "{label}: {name} max abs diff = {d:.6} (tol {tol})");
+        }
+    }
+
     /// Run a closure that produces an output tensor from a model and an input
     /// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
     /// scalar loss with a fixed (non-tracked) random "head" and return the
@@ -1325,18 +1396,40 @@ mod tests {
     fn run_with_grads(
         model: &Mamba3<B>,
         input: &Param<Tensor<B, 3>>,
-        head: &Tensor<InnerB, 3>,
-        forward: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+        heads: &Heads,
+        forward: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3Cache<B>),
     ) -> RunGrads {
-        let out = forward(model, input.val());
+        let (out, cache) = forward(model, input.val());
         let out_inner = out.clone().inner();
+        let ssm = cache.ssm_bhpr;
+        let k = cache.k_state_bmhr;
+        let v = cache.v_state_bhp;
+        let angle = cache.cum_angle_bha;
+        let final_ssm = ssm.clone().inner();
+        let final_k = k.clone().inner();
+        let final_v = v.clone().inner();
+        let final_angle = angle.clone().inner();
 
-        let head = Tensor::from_inner(head.clone());
-        let loss = (out * head).sum();
+        // Loss couples the output and every final cache field (each via its own
+        // random head) so parameter gradients reflect both output and state.
+        let out_head = Tensor::from_inner(heads.out.clone());
+        let ssm_head = Tensor::from_inner(heads.ssm.clone());
+        let k_head = Tensor::from_inner(heads.k.clone());
+        let v_head = Tensor::from_inner(heads.v.clone());
+        let angle_head = Tensor::from_inner(heads.angle.clone());
+        let loss = (out * out_head).sum()
+            + (ssm * ssm_head).sum()
+            + (k * k_head).sum()
+            + (v * v_head).sum()
+            + (angle * angle_head).sum();
         let grads = loss.backward();
 
         RunGrads {
             out: out_inner,
+            final_ssm,
+            final_k,
+            final_v,
+            final_angle,
             d_input: input.val().grad(&grads).expect("grad input"),
             d_in_proj_w: model
                 .in_proj
@@ -1420,36 +1513,61 @@ mod tests {
         Param::from_tensor(Tensor::from_inner(input.clone()))
     }
 
-    fn run_step_matches_forward(cfg: Mamba3Config) {
+    /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
+    /// token-by-token from the **same** initial cache. Outputs, every final
+    /// cache field (SSM state, previous-token B/x, cumulative RoPE angle), and
+    /// parameter gradients must all agree up to float-summation-order noise.
+    ///
+    /// With `random_init = true` the shared initial cache is random rather than
+    /// zero. Parity from an arbitrary initial state subsumes the chunked-prefill
+    /// (split-vs-full) guarantee: if `forward` from any state matches the
+    /// recurrent unrolling from that same state — outputs *and* final cache —
+    /// then feeding a `forward`-produced cache back in continues correctly.
+    fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 5;
         let d_model = cfg.d_model;
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            ssm: Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                normal,
+                &device,
+            ),
+            k: Tensor::<InnerB, 4>::random(
+                [batch, mimo_rank, nheads, state_rank],
+                normal,
+                &device,
+            ),
+            v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
+            angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        };
 
         let ssd_path = Mamba3SsdPath::Minimal(Some(4));
+        let init_cache = build_init_cache(&cfg, batch, random_init);
 
         let input_fwd = param_input(&input);
-        let r_fwd = run_with_grads(&model, &input_fwd, &head, |m, x| {
-            let (out, _) = m.forward(x, None, ssd_path.clone());
-            out
+        let cache_fwd = init_cache.clone();
+        let path_fwd = ssd_path.clone();
+        let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
+            m.forward(x, Some(cache_fwd), path_fwd)
         });
 
         let input_step = param_input(&input);
-        let r_step = run_with_grads(&model, &input_step, &head, |m, x| {
-            let mut cache: Option<Mamba3Cache<B>> = None;
+        let cache_step = init_cache;
+        let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
+            let mut cache: Option<Mamba3Cache<B>> = Some(cache_step);
             let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
             for t in 0..seq_len {
                 let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
@@ -1457,217 +1575,147 @@ mod tests {
                 cache = Some(new_cache);
                 outs.push(out_t);
             }
-            Tensor::stack(outs, 1)
+            (Tensor::stack(outs, 1), cache.unwrap())
         });
 
-        // ── Forward agreement (existing check) ───────────────────────────
-        let diff = (r_fwd.out.clone() - r_step.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            diff < 1e-4,
-            "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
-        );
-
-        // ── Gradient agreement ───────────────────────────────────────────
+        assert_outputs_match("step vs forward", &r_fwd, &r_step, 1e-4);
         check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
+    }
+
+    // Config variants exercised by the parity tests below.
+    fn cfg_ngroups2() -> Mamba3Config {
+        Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2)
+    }
+    fn cfg_mimo_ngroups2() -> Mamba3Config {
+        cfg_ngroups2().with_mimo_rank(2)
+    }
+    fn cfg_rope_half() -> Mamba3Config {
+        Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_rope_fraction(0.5)
+    }
+    fn cfg_rope_half_mimo() -> Mamba3Config {
+        cfg_rope_half().with_mimo_rank(2)
+    }
+    fn cfg_outproj_norm() -> Mamba3Config {
+        Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_has_outproj_norm(true)
+    }
+    fn cfg_outproj_norm_mimo() -> Mamba3Config {
+        cfg_outproj_norm().with_mimo_rank(2)
+    }
+    fn cfg_rope_half_outproj_norm_mimo() -> Mamba3Config {
+        Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_mimo_rank(2)
+            .with_rope_fraction(0.5)
+            .with_has_outproj_norm(true)
     }
 
     #[test]
     fn step_matches_forward() {
-        run_step_matches_forward(small_config());
+        run_step_matches_forward(small_config(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_random_init() {
+        run_step_matches_forward(small_config(), true);
     }
 
     #[test]
     fn step_matches_forward_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_ngroups2(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_ngroups2_random_init() {
+        run_step_matches_forward(cfg_ngroups2(), true);
     }
 
     #[test]
     fn step_matches_forward_mimo() {
-        run_step_matches_forward(small_config_mimo());
+        run_step_matches_forward(small_config_mimo(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_mimo_random_init() {
+        run_step_matches_forward(small_config_mimo(), true);
     }
 
     #[test]
     fn step_matches_forward_mimo_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2)
-            .with_mimo_rank(2);
-        run_step_matches_forward(cfg);
-    }
-
-    /// forward(full) ≡ forward(prefix) then forward(suffix, cache_from_prefix).
-    ///
-    /// Verifies stateful chunked-prefill: the β term at the start of the second
-    /// chunk must see `xₜ₋₁` and `Bₜ₋₁` from the cache, not zeros.
-    fn run_split_matches_full(cfg: Mamba3Config) {
-        let device: Device = Default::default();
-        let model = cfg.init::<B>(&device);
-
-        let batch = 2;
-        let seq_len = 6;
-        let split = 2;
-        let d_model = cfg.d_model;
-
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-
-        let ssd_path = Mamba3SsdPath::Minimal(Some(4));
-
-        let input_full = param_input(&input);
-        let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
-            let (out, _) = m.forward(x, None, ssd_path.clone());
-            out
-        });
-
-        let input_split = param_input(&input);
-        let r_split = run_with_grads(&model, &input_split, &head, |m, x| {
-            let prefix = x.clone().narrow(1, 0, split);
-            let suffix = x.narrow(1, split, seq_len - split);
-            let (out_prefix, cache) = m.forward(prefix, None, ssd_path.clone());
-            let (out_suffix, _) = m.forward(suffix, Some(cache), ssd_path.clone());
-            Tensor::cat(vec![out_prefix, out_suffix], 1)
-        });
-
-        // ── Forward agreement (existing check) ───────────────────────────
-        let diff = (r_full.out.clone() - r_split.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            diff < 1e-4,
-            "split forward vs full forward max absolute difference = {diff:.6} (expected < 1e-4)"
-        );
-
-        // ── Gradient agreement ───────────────────────────────────────────
-        check_grads_match("split vs full", &r_full, &r_split, 1e-3);
+        run_step_matches_forward(cfg_mimo_ngroups2(), false);
     }
 
     #[test]
-    fn split_matches_full() {
-        run_split_matches_full(small_config());
-    }
-
-    #[test]
-    fn split_matches_full_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_split_matches_full(cfg);
-    }
-
-    #[test]
-    fn split_matches_full_mimo() {
-        run_split_matches_full(small_config_mimo());
-    }
-
-    #[test]
-    fn split_matches_full_mimo_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2)
-            .with_mimo_rank(2);
-        run_split_matches_full(cfg);
+    fn step_matches_forward_mimo_ngroups2_random_init() {
+        run_step_matches_forward(cfg_mimo_ngroups2(), true);
     }
 
     // ── rope_fraction = 0.5 (partial RoPE) ──────────────────────────────────
 
     #[test]
     fn step_matches_forward_rope_half() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_rope_fraction(0.5);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_rope_half(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_rope_half_random_init() {
+        run_step_matches_forward(cfg_rope_half(), true);
     }
 
     #[test]
     fn step_matches_forward_rope_half_mimo() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_mimo_rank(2)
-            .with_rope_fraction(0.5);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_rope_half_mimo(), false);
     }
 
     #[test]
-    fn split_matches_full_rope_half() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_rope_fraction(0.5);
-        run_split_matches_full(cfg);
+    fn step_matches_forward_rope_half_mimo_random_init() {
+        run_step_matches_forward(cfg_rope_half_mimo(), true);
     }
 
     // ── has_outproj_norm = true (gated RMSNorm) ─────────────────────────────
 
     #[test]
     fn step_matches_forward_outproj_norm() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_has_outproj_norm(true);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_outproj_norm(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_outproj_norm_random_init() {
+        run_step_matches_forward(cfg_outproj_norm(), true);
     }
 
     #[test]
     fn step_matches_forward_outproj_norm_mimo() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_mimo_rank(2)
-            .with_has_outproj_norm(true);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_outproj_norm_mimo(), false);
     }
 
     #[test]
-    fn split_matches_full_outproj_norm() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_has_outproj_norm(true);
-        run_split_matches_full(cfg);
+    fn step_matches_forward_outproj_norm_mimo_random_init() {
+        run_step_matches_forward(cfg_outproj_norm_mimo(), true);
     }
 
     // ── Both features combined ──────────────────────────────────────────────
 
     #[test]
     fn step_matches_forward_rope_half_outproj_norm_mimo() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(8)
-            .with_mimo_rank(2)
-            .with_rope_fraction(0.5)
-            .with_has_outproj_norm(true);
-        run_step_matches_forward(cfg);
+        run_step_matches_forward(cfg_rope_half_outproj_norm_mimo(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_rope_half_outproj_norm_mimo_random_init() {
+        run_step_matches_forward(cfg_rope_half_outproj_norm_mimo(), true);
     }
 }
