@@ -791,18 +791,12 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                     b_raw_bsmgr.reshape([batch * sequence * mimo_rank, ngroups, state_rank]), // b_raw_BSMgr
                 ) // b_norm_BSMgr
                 .reshape([batch, sequence, mimo_rank, ngroups, state_rank]); // b_norm_bsmgr
-            // Expand groups → heads: [batch, sequence, mimo_rank, ngroups, state_rank] → [batch, sequence, mimo_rank, ngroups, nheads/ngroups, state_rank] → [batch, sequence, mimo_rank, nheads, state_rank]
-            let b_norm_bsmhr = b_norm_bsmgr
-                .unsqueeze_dim::<6>(4) // b_norm_bsmg1r
-                .expand([
-                    batch,
-                    sequence,
-                    mimo_rank,
-                    ngroups,
-                    heads_per_group,
-                    state_rank,
-                ]) // b_norm_bsmgHr
-                .reshape([batch, sequence, mimo_rank, nheads, state_rank]); // b_norm_bsmhr
+            // Expand groups → heads at axis 3 (group dim of `_bsmgr`).
+            let b_norm_bsmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(
+                b_norm_bsmgr,
+                3,
+                nheads,
+            );
             // Add bias [nheads, mimo_rank, state_rank] → broadcast as [1, 1, mimo_rank, nheads, state_rank]
             // b_bias_hmr: [nheads, R, state_rank] → permute to [R, nheads, state_rank] → unsqueeze → [1, 1, R, nheads, state_rank]
             let b_bias_11mhr = self
@@ -821,17 +815,11 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                     c_raw_bsmgr.reshape([batch * sequence * mimo_rank, ngroups, state_rank]), // c_raw_BSMgr
                 )
                 .reshape([batch, sequence, mimo_rank, ngroups, state_rank]); // c_norm_bsmgr
-            let c_norm_bsmhr = c_norm_bsmgr
-                .unsqueeze_dim::<6>(4) // c_norm_bsmg1r
-                .expand([
-                    batch,
-                    sequence,
-                    mimo_rank,
-                    ngroups,
-                    heads_per_group,
-                    state_rank,
-                ]) // c_norm_bsmgHr
-                .reshape([batch, sequence, mimo_rank, nheads, state_rank]); // c_norm_bsmhr
+            let c_norm_bsmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(
+                c_norm_bsmgr,
+                3,
+                nheads,
+            );
             let c_bias_11mhr = self
                 .c_bias_hmr
                 .val()
@@ -1233,10 +1221,12 @@ mod step {
                         b_bmgr.reshape([batch * mimo_rank, ngroups, state_rank]), // b_BMgr
                     )
                     .reshape([batch, mimo_rank, ngroups, state_rank]); // b_norm_bmgr
-                let b_norm_bmhr = b_norm_bmgr
-                    .unsqueeze_dim::<5>(3) // b_norm_bmg1r
-                    .expand([batch, mimo_rank, ngroups, heads_per_group, state_rank]) // b_norm_bmgHr
-                    .reshape([batch, mimo_rank, nheads, state_rank]); // b_norm_bmhr
+                // Expand groups → heads at axis 2 (group dim of `_bmgr`).
+                let b_norm_bmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 4, 5>(
+                    b_norm_bmgr,
+                    2,
+                    nheads,
+                );
                 let b_bias_1mhr = self
                     .b_bias_hmr
                     .val()
@@ -1252,10 +1242,11 @@ mod step {
                         c_bmgr.reshape([batch * mimo_rank, ngroups, state_rank]), // c_BMgr
                     )
                     .reshape([batch, mimo_rank, ngroups, state_rank]); // c_norm_bmgr
-                let c_norm_bmhr = c_norm_bmgr
-                    .unsqueeze_dim::<5>(3) // c_norm_bmg1r
-                    .expand([batch, mimo_rank, ngroups, heads_per_group, state_rank]) // c_norm_bmgHr
-                    .reshape([batch, mimo_rank, nheads, state_rank]); // c_norm_bmhr
+                let c_norm_bmhr = crate::utils::gqa::gqa_expand_to_heads::<_, 4, 5>(
+                    c_norm_bmgr,
+                    2,
+                    nheads,
+                );
                 let c_bias_1mhr = self
                     .c_bias_hmr
                     .val()

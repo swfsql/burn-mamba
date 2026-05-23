@@ -2,6 +2,7 @@ use ElementConversion;
 use burn::prelude::*;
 use burn::tensor::{DType, Element};
 
+pub mod gqa;
 pub mod log_sigmoid;
 pub mod loss;
 pub(crate) mod primitive;

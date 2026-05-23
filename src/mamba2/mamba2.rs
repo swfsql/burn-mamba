@@ -701,17 +701,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
         // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
-        // them per-head. Replicate each group's projection across the heads_per_group
-        // heads of that group (heads 0..heads_per_group belong to group 0, etc.).
-        let heads_per_group = nheads / ngroups;
-        let gqa_expand = |t_bnlgr: Tensor<B, 5>| -> Tensor<B, 5> {
-            t_bnlgr
-                .unsqueeze_dim::<6>(4) // _bnlg1r
-                .expand([batch, nchunks, chunk_len, ngroups, heads_per_group, state_rank]) // _bnlgHr
-                .reshape([batch, nchunks, chunk_len, nheads, state_rank]) // _bnlhr
-        };
-        let b_bnlhr = gqa_expand(b_bnlgr);
-        let c_bnlhr = gqa_expand(c_bnlgr);
+        // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
+        let b_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(b_bnlgr, 3, nheads);
+        let c_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(c_bnlgr, 3, nheads);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
         let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
