@@ -25,10 +25,10 @@
 <a href=#25 id=25 data-nosnippet>25</a>    /// Output channel: d_inner.
 <a href=#26 id=26 data-nosnippet>26</a>    </span><span class="kw">pub </span>dt_proj: Linear&lt;B&gt;,
 <a href=#27 id=27 data-nosnippet>27</a>
-<a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// Dims: [d_inner, d_state].
+<a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// Dims: `[d_inner, d_state]`.
 <a href=#29 id=29 data-nosnippet>29</a>    </span><span class="kw">pub </span>a_log: Param&lt;Tensor&lt;B, <span class="number">2</span>&gt;&gt;,
 <a href=#30 id=30 data-nosnippet>30</a>
-<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// Dims: [d_inner].
+<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// Dims: `[d_inner]`.
 <a href=#32 id=32 data-nosnippet>32</a>    </span><span class="kw">pub </span>d: Param&lt;Tensor&lt;B, <span class="number">1</span>&gt;&gt;,
 <a href=#33 id=33 data-nosnippet>33</a>
 <a href=#34 id=34 data-nosnippet>34</a>    <span class="doccomment">/// Input channel: d_inner.
@@ -190,8 +190,8 @@
 <a href=#190 id=190 data-nosnippet>190</a>    <span class="doccomment">/// See also [`Self::step`].
 <a href=#191 id=191 data-nosnippet>191</a>    ///
 <a href=#192 id=192 data-nosnippet>192</a>    /// # Shapes
-<a href=#193 id=193 data-nosnippet>193</a>    ///   - Input [batch, sequence, d_model]
-<a href=#194 id=194 data-nosnippet>194</a>    ///   - Output [batch, sequence, d_model]
+<a href=#193 id=193 data-nosnippet>193</a>    ///   - Input `[batch, sequence, d_model]`
+<a href=#194 id=194 data-nosnippet>194</a>    ///   - Output `[batch, sequence, d_model]`
 <a href=#195 id=195 data-nosnippet>195</a>    </span><span class="kw">pub fn </span>forward(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;B, <span class="number">3</span>&gt;) -&gt; Tensor&lt;B, <span class="number">3</span>&gt; {
 <a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">let </span>[batch, sequence, d_model] = x.dims();
 <a href=#197 id=197 data-nosnippet>197</a>        <span class="kw">let </span>[d_inner] = <span class="self">self</span>.d.dims();
@@ -252,8 +252,8 @@
 <a href=#252 id=252 data-nosnippet>252</a>    }
 <a href=#253 id=253 data-nosnippet>253</a>
 <a href=#254 id=254 data-nosnippet>254</a>    <span class="doccomment">/// # Shapes
-<a href=#255 id=255 data-nosnippet>255</a>    ///   - Input [batch, sequence, d_inner]
-<a href=#256 id=256 data-nosnippet>256</a>    ///   - Output [batch, sequence, d_inner]
+<a href=#255 id=255 data-nosnippet>255</a>    ///   - Input `[batch, sequence, d_inner]`
+<a href=#256 id=256 data-nosnippet>256</a>    ///   - Output `[batch, sequence, d_inner]`
 <a href=#257 id=257 data-nosnippet>257</a>    </span><span class="kw">pub fn </span>ss(<span class="kw-2">&amp;</span><span class="self">self</span>, u: Tensor&lt;B, <span class="number">3</span>&gt;) -&gt; Tensor&lt;B, <span class="number">3</span>&gt; {
 <a href=#258 id=258 data-nosnippet>258</a>        <span class="kw">let </span>[batch, sequence, d_inner] = u.dims();
 <a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span>[_d_inner, d_state] = <span class="self">self</span>.a_log.dims();
@@ -308,13 +308,13 @@
 <a href=#308 id=308 data-nosnippet>308</a>    /// - run_SSM(A, B, C, u) from The Annotated S4.
 <a href=#309 id=309 data-nosnippet>309</a>    ///
 <a href=#310 id=310 data-nosnippet>310</a>    /// # Shapes
-<a href=#311 id=311 data-nosnippet>311</a>    ///   - Input delta [sequence, batch, d_inner]
-<a href=#312 id=312 data-nosnippet>312</a>    ///   - Input a [d_inner, d_state]
-<a href=#313 id=313 data-nosnippet>313</a>    ///   - Input b [batch, sequence, d_state]
-<a href=#314 id=314 data-nosnippet>314</a>    ///   - Input c [sequence, batch, d_state]
-<a href=#315 id=315 data-nosnippet>315</a>    ///   - Input d [d_inner]
-<a href=#316 id=316 data-nosnippet>316</a>    ///   - Input u [batch, sequence, d_inner]
-<a href=#317 id=317 data-nosnippet>317</a>    ///   - Output [batch, sequence, d_inner]
+<a href=#311 id=311 data-nosnippet>311</a>    ///   - Input delta `[sequence, batch, d_inner]`
+<a href=#312 id=312 data-nosnippet>312</a>    ///   - Input a `[d_inner, d_state]`
+<a href=#313 id=313 data-nosnippet>313</a>    ///   - Input b `[batch, sequence, d_state]`
+<a href=#314 id=314 data-nosnippet>314</a>    ///   - Input c `[sequence, batch, d_state]`
+<a href=#315 id=315 data-nosnippet>315</a>    ///   - Input d `[d_inner]`
+<a href=#316 id=316 data-nosnippet>316</a>    ///   - Input u `[batch, sequence, d_inner]`
+<a href=#317 id=317 data-nosnippet>317</a>    ///   - Output `[batch, sequence, d_inner]`
 <a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">pub fn </span>selective_scan(
 <a href=#319 id=319 data-nosnippet>319</a>        delta: Tensor&lt;B, <span class="number">3</span>&gt;,
 <a href=#320 id=320 data-nosnippet>320</a>        a: Tensor&lt;B, <span class="number">2</span>&gt;,
@@ -429,8 +429,8 @@
 <a href=#429 id=429 data-nosnippet>429</a>
 <a href=#430 id=430 data-nosnippet>430</a>    <span class="kw">impl</span>&lt;B: Backend&gt; Mamba1&lt;B&gt; {
 <a href=#431 id=431 data-nosnippet>431</a>        <span class="doccomment">/// # Shapes
-<a href=#432 id=432 data-nosnippet>432</a>        ///   - Input [batch, d_model]
-<a href=#433 id=433 data-nosnippet>433</a>        ///   - Output [batch, d_model]
+<a href=#432 id=432 data-nosnippet>432</a>        ///   - Input `[batch, d_model]`
+<a href=#433 id=433 data-nosnippet>433</a>        ///   - Output `[batch, d_model]`
 <a href=#434 id=434 data-nosnippet>434</a>        </span><span class="kw">pub fn </span>step(
 <a href=#435 id=435 data-nosnippet>435</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#436 id=436 data-nosnippet>436</a>            x: Tensor&lt;B, <span class="number">2</span>&gt;,
@@ -515,8 +515,8 @@
 <a href=#515 id=515 data-nosnippet>515</a>        /// - run_SSM(A, B, C, u) from The Annotated S4.
 <a href=#516 id=516 data-nosnippet>516</a>        ///
 <a href=#517 id=517 data-nosnippet>517</a>        /// # Shapes
-<a href=#518 id=518 data-nosnippet>518</a>        ///   - Input u [batch, d_inner]
-<a href=#519 id=519 data-nosnippet>519</a>        ///   - Output [batch, d_inner]
+<a href=#518 id=518 data-nosnippet>518</a>        ///   - Input u `[batch, d_inner]`
+<a href=#519 id=519 data-nosnippet>519</a>        ///   - Output `[batch, d_inner]`
 <a href=#520 id=520 data-nosnippet>520</a>        </span><span class="kw">pub fn </span>ss_step(
 <a href=#521 id=521 data-nosnippet>521</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#522 id=522 data-nosnippet>522</a>            u: Tensor&lt;B, <span class="number">2</span>&gt;,
@@ -565,13 +565,13 @@
 <a href=#565 id=565 data-nosnippet>565</a>        /// - run_SSM(A, B, C, u) from The Annotated S4.
 <a href=#566 id=566 data-nosnippet>566</a>        ///
 <a href=#567 id=567 data-nosnippet>567</a>        /// # Shapes
-<a href=#568 id=568 data-nosnippet>568</a>        ///   - Input delta [batch, d_inner]
-<a href=#569 id=569 data-nosnippet>569</a>        ///   - Input a [d_inner, d_state]
-<a href=#570 id=570 data-nosnippet>570</a>        ///   - Input b [batch, d_state]
-<a href=#571 id=571 data-nosnippet>571</a>        ///   - Input c [batch, d_state]
-<a href=#572 id=572 data-nosnippet>572</a>        ///   - Input d [d_inner]
-<a href=#573 id=573 data-nosnippet>573</a>        ///   - Input u [batch, d_inner]
-<a href=#574 id=574 data-nosnippet>574</a>        ///   - Output [batch, d_inner]
+<a href=#568 id=568 data-nosnippet>568</a>        ///   - Input delta `[batch, d_inner]`
+<a href=#569 id=569 data-nosnippet>569</a>        ///   - Input a `[d_inner, d_state]`
+<a href=#570 id=570 data-nosnippet>570</a>        ///   - Input b `[batch, d_state]`
+<a href=#571 id=571 data-nosnippet>571</a>        ///   - Input c `[batch, d_state]`
+<a href=#572 id=572 data-nosnippet>572</a>        ///   - Input d `[d_inner]`
+<a href=#573 id=573 data-nosnippet>573</a>        ///   - Input u `[batch, d_inner]`
+<a href=#574 id=574 data-nosnippet>574</a>        ///   - Output `[batch, d_inner]`
 <a href=#575 id=575 data-nosnippet>575</a>        </span><span class="kw">pub fn </span>selective_scan_step(
 <a href=#576 id=576 data-nosnippet>576</a>            delta: Tensor&lt;B, <span class="number">2</span>&gt;,
 <a href=#577 id=577 data-nosnippet>577</a>            a: Tensor&lt;B, <span class="number">2</span>&gt;,

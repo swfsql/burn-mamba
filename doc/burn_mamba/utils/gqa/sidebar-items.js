@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["gqa_expand_to_heads"]};

@@ -2,7 +2,7 @@
     pub caches: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="struct.Mamba2Cache.html" title="struct burn_mamba::mamba2::cache::Mamba2Cache">Mamba2Cache</a>&lt;B&gt;&gt;,
 }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A collection of per-layer caches for a complete Mamba-2 network.</p>
 <p>During autoregressive decoding, a <a href="struct.Mamba2Caches.html" title="struct burn_mamba::mamba2::cache::Mamba2Caches"><code>Mamba2Caches</code></a> instance is threaded
-through every call to [<code>crate::layer::Mamba2Layers::step</code>].  Each element
+through every call to <a href="../layer/struct.Mamba2Layers.html#method.step" title="method burn_mamba::mamba2::layer::Mamba2Layers::step"><code>Mamba2Layers::step</code></a>.  Each element
 of <code>caches</code> corresponds to one (virtual) layer in the network.</p>
 </div></details><h2 id="fields" class="fields section-header">Fields<a href="#fields" class="anchor">§</a></h2><span id="structfield.caches" class="structfield section-header"><a href="#structfield.caches" class="anchor field">§</a><code>caches: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="struct.Mamba2Cache.html" title="struct burn_mamba::mamba2::cache::Mamba2Cache">Mamba2Cache</a>&lt;B&gt;&gt;</code></span><div class="docblock"><p>Per-layer caches.</p>
 <p>Length: <code>n_real_caches</code> (the number of <em>virtual</em> layers, which may

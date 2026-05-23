@@ -8,10 +8,10 @@
 <a href=#8 id=8 data-nosnippet>8</a><span class="attr">#[derive(Module, Debug)]
 <a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">pub struct </span>Mamba1Cache&lt;B: Backend&gt; {
 <a href=#10 id=10 data-nosnippet>10</a>    <span class="doccomment">/// # Shape
-<a href=#11 id=11 data-nosnippet>11</a>    /// [batch, d_inner, d_conv]
+<a href=#11 id=11 data-nosnippet>11</a>    /// `[batch, d_inner, d_conv]`
 <a href=#12 id=12 data-nosnippet>12</a>    </span><span class="kw">pub </span>conv: Param&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt;,
 <a href=#13 id=13 data-nosnippet>13</a>    <span class="doccomment">/// # Shape
-<a href=#14 id=14 data-nosnippet>14</a>    /// [batch, d_inner, d_state]
+<a href=#14 id=14 data-nosnippet>14</a>    /// `[batch, d_inner, d_state]`
 <a href=#15 id=15 data-nosnippet>15</a>    </span><span class="kw">pub </span>ssm: Param&lt;Tensor&lt;B, <span class="number">3</span>&gt;&gt;,
 <a href=#16 id=16 data-nosnippet>16</a>}
 <a href=#17 id=17 data-nosnippet>17</a>
@@ -50,7 +50,7 @@
 <a href=#50 id=50 data-nosnippet>50</a><span class="attr">#[derive(Module, Debug)]
 <a href=#51 id=51 data-nosnippet>51</a></span><span class="kw">pub struct </span>Mamba1Caches&lt;B: Backend&gt; {
 <a href=#52 id=52 data-nosnippet>52</a>    <span class="doccomment">/// # Shape
-<a href=#53 id=53 data-nosnippet>53</a>    /// [n_layers]
+<a href=#53 id=53 data-nosnippet>53</a>    /// `[n_layers]`
 <a href=#54 id=54 data-nosnippet>54</a>    </span><span class="kw">pub </span>caches: Vec&lt;Mamba1Cache&lt;B&gt;&gt;,
 <a href=#55 id=55 data-nosnippet>55</a>}
 <a href=#56 id=56 data-nosnippet>56</a>

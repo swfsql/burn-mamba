@@ -4,7 +4,7 @@
 }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The mutable state carried between decoding steps for a <strong>single</strong> Mamba-2
 layer.</p>
 <p>Both tensors are updated in-place (via Burn’s functional clone) at every
-call to [<code>crate::mamba2::Mamba2::step</code>].</p>
+call to <a href="../mamba2/struct.Mamba2.html#method.step" title="method burn_mamba::mamba2::mamba2::Mamba2::step"><code>Mamba2::step</code></a>.</p>
 </div></details><h2 id="fields" class="fields section-header">Fields<a href="#fields" class="anchor">§</a></h2><span id="structfield.conv_bvk" class="structfield section-header"><a href="#structfield.conv_bvk" class="anchor field">§</a><code>conv_bvk: Tensor&lt;B, 3&gt;</code></span><div class="docblock"><p><strong>Convolution rolling window.</strong></p>
 <p>Stores the last <code>conv_kernel</code> pre-activation feature vectors fed into
 the depthwise Conv1d.  At each step, the oldest column is discarded and

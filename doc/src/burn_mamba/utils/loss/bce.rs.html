@@ -2,7 +2,7 @@
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>burn::module::Module;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#4 id=4 data-nosnippet>4</a>
-<a href=#5 id=5 data-nosnippet>5</a><span class="doccomment">/// Configuration to create a [Binary Cross-entropy loss](BinaryCrossEntropyLoss) using the [init function](BinaryCrossEntropyLossConfig::init).
+<a href=#5 id=5 data-nosnippet>5</a><span class="doccomment">/// Configuration to create a [`BinaryCrossEntropyLoss`] using the [`BinaryCrossEntropyLossConfig::init`].
 <a href=#6 id=6 data-nosnippet>6</a></span><span class="attr">#[derive(Config, Debug)]
 <a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">pub struct </span>BinaryCrossEntropyLossConfig {
 <a href=#8 id=8 data-nosnippet>8</a>    <span class="doccomment">/// Treat the inputs as logits, applying a sigmoid activation when computing the loss.
@@ -11,7 +11,7 @@
 <a href=#11 id=11 data-nosnippet>11</a>}
 <a href=#12 id=12 data-nosnippet>12</a>
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">impl </span>BinaryCrossEntropyLossConfig {
-<a href=#14 id=14 data-nosnippet>14</a>    <span class="doccomment">/// Initialize [Binary Cross-entropy loss](BinaryCrossEntropyLoss).
+<a href=#14 id=14 data-nosnippet>14</a>    <span class="doccomment">/// Initialize [`BinaryCrossEntropyLoss`].
 <a href=#15 id=15 data-nosnippet>15</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; BinaryCrossEntropyLoss {
 <a href=#16 id=16 data-nosnippet>16</a>        BinaryCrossEntropyLoss {
 <a href=#17 id=17 data-nosnippet>17</a>            logits: <span class="self">self</span>.logits,

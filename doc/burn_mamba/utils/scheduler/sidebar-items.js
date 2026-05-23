@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Lr"],"struct":["ConstantLr","CosineAnnealingLr"]};
+window.SIDEBAR_ITEMS = {"enum":["Lr","LrSerde"],"struct":["ConstantLr","CosineAnnealingLr"]};

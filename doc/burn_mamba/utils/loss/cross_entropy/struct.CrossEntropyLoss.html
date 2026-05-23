@@ -2,7 +2,7 @@
     pub output_logits: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
     pub target_logits: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
 }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Calculate the cross-entropy loss from the output logits and the targets.</p>
-<p>Unlike the full <a href="super::CrossEntropyLoss"><code>CrossEntropyLoss</code></a>, this variant accepts
+<p>Unlike the full [<code>burn::nn::loss::CrossEntropyLoss</code>], this variant accepts
 floating-point targets (e.g. one-hot, soft label distributions, or un-normalized logits)
 rather than integer class indices, and omits padding, per-class weights, and label smoothing.</p>
 <p>Should be created using <a href="struct.CrossEntropyLossConfig.html" title="struct burn_mamba::utils::loss::cross_entropy::CrossEntropyLossConfig">CrossEntropyLossConfig</a>.</p>

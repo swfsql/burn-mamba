@@ -10,14 +10,14 @@
 <a href=#10 id=10 data-nosnippet>10</a></span><span class="kw">pub enum </span>OutputMerge&lt;B: Backend&gt; {
 <a href=#11 id=11 data-nosnippet>11</a>    Mean(NoOp),
 <a href=#12 id=12 data-nosnippet>12</a>    <span class="doccomment">/// # Shape
-<a href=#13 id=13 data-nosnippet>13</a>    /// - [2 * d_model, d_model]
+<a href=#13 id=13 data-nosnippet>13</a>    /// - `[2 * d_model, d_model]`
 <a href=#14 id=14 data-nosnippet>14</a>    </span>CatLinear(Linear&lt;B&gt;),
 <a href=#15 id=15 data-nosnippet>15</a>}
 <a href=#16 id=16 data-nosnippet>16</a>
 <a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// # Shapes
-<a href=#18 id=18 data-nosnippet>18</a>///   - Input straight [batch_size, sequence_len, d_model]
-<a href=#19 id=19 data-nosnippet>19</a>///   - Input reverse [batch_size, sequence_len, d_model]
-<a href=#20 id=20 data-nosnippet>20</a>///   - Output [batch_size, sequence_len, d_model]
+<a href=#18 id=18 data-nosnippet>18</a>///   - Input straight `[batch_size, sequence_len, d_model]`
+<a href=#19 id=19 data-nosnippet>19</a>///   - Input reverse `[batch_size, sequence_len, d_model]`
+<a href=#20 id=20 data-nosnippet>20</a>///   - Output `[batch_size, sequence_len, d_model]`
 <a href=#21 id=21 data-nosnippet>21</a></span><span class="kw">impl</span>&lt;B: Backend&gt; OutputMerge&lt;B&gt; {
 <a href=#22 id=22 data-nosnippet>22</a>    <span class="kw">pub fn </span>forward(<span class="kw-2">&amp;</span><span class="self">self</span>, straight: Tensor&lt;B, <span class="number">3</span>&gt;, reverse: Tensor&lt;B, <span class="number">3</span>&gt;) -&gt; Tensor&lt;B, <span class="number">3</span>&gt; {
 <a href=#23 id=23 data-nosnippet>23</a>        <span class="kw">let </span>[batch_size, sequence_len, d_model] = straight.dims();

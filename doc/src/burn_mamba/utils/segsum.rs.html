@@ -1,0 +1,42 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/utils/segsum.rs`."><title>segsum.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (54333ff07 2026-05-22)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/utils/</div>segsum.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-2"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span><span class="kw">crate</span>::utils::sanity::sanity <span class="kw">as </span>san;
+<a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
+<a href=#3 id=3 data-nosnippet>3</a>
+<a href=#4 id=4 data-nosnippet>4</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#5 id=5 data-nosnippet>5</a>// segsum  (stable segment sum for the 1-SS mask)
+<a href=#6 id=6 data-nosnippet>6</a>// ---------------------------------------------------------------------------
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a></span><span class="doccomment">/// Compute stable segment sums for constructing the 1-semiseparable mask.
+<a href=#9 id=9 data-nosnippet>9</a>///
+<a href=#10 id=10 data-nosnippet>10</a>/// Given a tensor `x` of shape `[..., sequence]`, returns a tensor of shape `[..., sequence, sequence]` where:
+<a href=#11 id=11 data-nosnippet>11</a>///
+<a href=#12 id=12 data-nosnippet>12</a>/// ```text
+<a href=#13 id=13 data-nosnippet>13</a>///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]   for i ≥ j  (lower triangle)
+<a href=#14 id=14 data-nosnippet>14</a>///   out[..., i, j] = -∞                        for i &lt; j  (upper triangle)
+<a href=#15 id=15 data-nosnippet>15</a>/// ```
+<a href=#16 id=16 data-nosnippet>16</a>///
+<a href=#17 id=17 data-nosnippet>17</a>/// ## Implementation
+<a href=#18 id=18 data-nosnippet>18</a>///
+<a href=#19 id=19 data-nosnippet>19</a>/// A naive computation of all pairwise products `A[j+1]·...·A[i]` would
+<a href=#20 id=20 data-nosnippet>20</a>/// suffer from underflow for long sequences (e.g. `0.9^1000 ≈ 2.6×10⁻⁴⁶`).
+<a href=#21 id=21 data-nosnippet>21</a>/// Working in log-space and computing differences of prefix sums avoids this:
+<a href=#22 id=22 data-nosnippet>22</a>///
+<a href=#23 id=23 data-nosnippet>23</a>/// ```text
+<a href=#24 id=24 data-nosnippet>24</a>///   segsum(x)[i, j] = cumsum(x)[i] - cumsum(x)[j]
+<a href=#25 id=25 data-nosnippet>25</a>/// ```
+<a href=#26 id=26 data-nosnippet>26</a>///
+<a href=#27 id=27 data-nosnippet>27</a>/// The upper triangle is masked to -∞ so that `exp(segsum(...))` gives 0
+<a href=#28 id=28 data-nosnippet>28</a>/// for non-causal positions (the strict upper triangle of L must be zero).
+<a href=#29 id=29 data-nosnippet>29</a></span><span class="kw">pub fn </span>segsum&lt;B: Backend, <span class="kw">const </span>D: usize, <span class="kw">const </span>D2: usize&gt;(x: Tensor&lt;B, D&gt;) -&gt; Tensor&lt;B, D2&gt; {
+<a href=#30 id=30 data-nosnippet>30</a>    <span class="macro">assert_eq!</span>(D + <span class="number">1</span>, D2);
+<a href=#31 id=31 data-nosnippet>31</a>
+<a href=#32 id=32 data-nosnippet>32</a>    <span class="kw">let </span>x_cumsum = x.cumsum(D - <span class="number">1</span>);
+<a href=#33 id=33 data-nosnippet>33</a>    san(<span class="kw-2">&amp;</span>x_cumsum);
+<a href=#34 id=34 data-nosnippet>34</a>    <span class="kw">let </span>x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D); <span class="comment">// [..., sequence, 1]
+<a href=#35 id=35 data-nosnippet>35</a>    </span><span class="kw">let </span>x_cumsum_col = x_cumsum.unsqueeze_dim(D - <span class="number">1</span>); <span class="comment">//     [..., 1, sequence]
+<a href=#36 id=36 data-nosnippet>36</a>
+<a href=#37 id=37 data-nosnippet>37</a>    </span><span class="kw">let </span>diff = x_cumsum_row - x_cumsum_col; <span class="comment">// [..., sequence, sequence]
+<a href=#38 id=38 data-nosnippet>38</a>    </span>san(<span class="kw-2">&amp;</span>diff);
+<a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">let </span>neg_inf_mask = Tensor::full_like(<span class="kw-2">&amp;</span>diff, f32::NEG_INFINITY).triu(<span class="number">1</span>);
+<a href=#40 id=40 data-nosnippet>40</a>    diff + neg_inf_mask
+<a href=#41 id=41 data-nosnippet>41</a>}
+</code></pre></div></section></main></body></html>

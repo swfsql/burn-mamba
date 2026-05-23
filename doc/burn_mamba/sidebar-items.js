@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["DENY_INF","DENY_NAN"],"mod":["mamba1","mamba2","mamba3","prelude","schedule","utils"]};
+window.SIDEBAR_ITEMS = {"constant":["DENY_INF","DENY_NAN"],"macro":[["decl_ssd_autodiff_backend_ext",1],["impl_ssd_backend_ext_for_burn_backends",1]],"mod":["mamba1","mamba2","mamba3","prelude","schedule","utils"]};

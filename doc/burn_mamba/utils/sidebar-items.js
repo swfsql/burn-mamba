@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["div_eps","div_eps_f32","stable_max"],"mod":["log_sigmoid","loss","rms_norm","rms_norm_gated","sanity","scheduler","silu","softplus"]};
+window.SIDEBAR_ITEMS = {"fn":["div_eps","div_eps_f32","stable_max"],"mod":["backend_macros","combined_grad","gqa","log_sigmoid","loss","primitive","rms_norm","rms_norm_gated","sanity","scheduler","segsum","silu","softplus","split"]};

@@ -2,9 +2,9 @@
 <p>This module defines the state that must be preserved between calls during
 autoregressive (token-by-token) generation.  During <em>training</em> or <em>prefill</em>
 the full sequence is available at once and the chunked SSD algorithm is used
-(see [<code>crate::mamba2::Mamba2::forward</code>]).  During <em>decoding</em> the model
+(see <a href="../mamba2/struct.Mamba2.html#method.forward" title="method burn_mamba::mamba2::mamba2::Mamba2::forward"><code>Mamba2::forward</code></a>).  During <em>decoding</em> the model
 processes one token per step and the SSM operates in its pure recurrent
-form (see [<code>crate::mamba2::Mamba2::step</code>]):</p>
+form (see <a href="../mamba2/struct.Mamba2.html#method.step" title="method burn_mamba::mamba2::mamba2::Mamba2::step"><code>Mamba2::step</code></a>):</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ        (state update)
   yₜ = Cₜᵀ hₜ + D xₜ            (output)</code></pre></div>
 <p>Two pieces of state are required per layer:</p>

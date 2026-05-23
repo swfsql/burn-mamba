@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["OutputMerge","OutputMergeConfig"],"struct":["Mamba2BidiLayerPair","Mamba2BidiLayerPairConfig","Mamba2BidiLayers","Mamba2BidiLayersConfig"]};
+window.SIDEBAR_ITEMS = {"enum":["OutputMerge","OutputMergeConfig"],"mod":["layer","output_merge"],"struct":["Mamba2BidiLayerPair","Mamba2BidiLayerPairConfig","Mamba2BidiLayers","Mamba2BidiLayersConfig"]};

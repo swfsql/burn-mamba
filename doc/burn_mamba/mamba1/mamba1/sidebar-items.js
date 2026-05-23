@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba1","Mamba1Config","Mamba1Record","Mamba1RecordItem"]};
+window.SIDEBAR_ITEMS = {"mod":["step"],"struct":["Mamba1","Mamba1Config","Mamba1Record","Mamba1RecordItem"]};

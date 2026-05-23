@@ -32,8 +32,8 @@
 <a href=#32 id=32 data-nosnippet>32</a>    <span class="doccomment">/// See also [`Self::step`].
 <a href=#33 id=33 data-nosnippet>33</a>    ///
 <a href=#34 id=34 data-nosnippet>34</a>    /// # Shapes
-<a href=#35 id=35 data-nosnippet>35</a>    ///   - Input [batch, sequence, d_model]
-<a href=#36 id=36 data-nosnippet>36</a>    ///   - Output [batch, sequence, d_model]
+<a href=#35 id=35 data-nosnippet>35</a>    ///   - Input `[batch, sequence, d_model]`
+<a href=#36 id=36 data-nosnippet>36</a>    ///   - Output `[batch, sequence, d_model]`
 <a href=#37 id=37 data-nosnippet>37</a>    </span><span class="kw">pub fn </span>forward(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;B, <span class="number">3</span>&gt;) -&gt; Tensor&lt;B, <span class="number">3</span>&gt; {
 <a href=#38 id=38 data-nosnippet>38</a>        <span class="kw">let </span>[batch, sequence, d_model] = x.dims();
 <a href=#39 id=39 data-nosnippet>39</a>
@@ -51,8 +51,8 @@
 <a href=#51 id=51 data-nosnippet>51</a>    <span class="doccomment">/// See also [`Self::forward`].
 <a href=#52 id=52 data-nosnippet>52</a>    ///
 <a href=#53 id=53 data-nosnippet>53</a>    /// # Shapes
-<a href=#54 id=54 data-nosnippet>54</a>    ///   - Input [batch, d_model]
-<a href=#55 id=55 data-nosnippet>55</a>    ///   - Output [batch, d_model]
+<a href=#54 id=54 data-nosnippet>54</a>    ///   - Input `[batch, d_model]`
+<a href=#55 id=55 data-nosnippet>55</a>    ///   - Output `[batch, d_model]`
 <a href=#56 id=56 data-nosnippet>56</a>    </span><span class="kw">pub fn </span>step(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;B, <span class="number">2</span>&gt;, cache: Mamba1Cache&lt;B&gt;) -&gt; (Tensor&lt;B, <span class="number">2</span>&gt;, Mamba1Cache&lt;B&gt;) {
 <a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>[batch, d_model] = x.dims();
 <a href=#58 id=58 data-nosnippet>58</a>

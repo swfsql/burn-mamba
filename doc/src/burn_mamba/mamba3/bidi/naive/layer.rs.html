@@ -10,12 +10,12 @@
 <a href=#10 id=10 data-nosnippet>10</a>    <span class="attr">#[module(skip)]
 <a href=#11 id=11 data-nosnippet>11</a>    </span><span class="kw">pub </span>n_virtual_layers: <span class="prelude-ty">Option</span>&lt;(usize, BidiSchedule)&gt;,
 <a href=#12 id=12 data-nosnippet>12</a>    <span class="doccomment">/// # Shape
-<a href=#13 id=13 data-nosnippet>13</a>    /// - [n_real_layers]
+<a href=#13 id=13 data-nosnippet>13</a>    /// - `[n_real_layers]`
 <a href=#14 id=14 data-nosnippet>14</a>    </span><span class="kw">pub </span>real_layers: Vec&lt;Mamba3Layer&lt;B&gt;&gt;,
 <a href=#15 id=15 data-nosnippet>15</a>    <span class="kw">pub </span>ignore_first_residual: bool,
 <a href=#16 id=16 data-nosnippet>16</a>    <span class="kw">pub </span>ignore_last_residual: bool,
 <a href=#17 id=17 data-nosnippet>17</a>    <span class="doccomment">/// # Shape
-<a href=#18 id=18 data-nosnippet>18</a>    /// - [n_real_layers / 2]
+<a href=#18 id=18 data-nosnippet>18</a>    /// - `[n_real_layers / 2]`
 <a href=#19 id=19 data-nosnippet>19</a>    </span><span class="kw">pub </span>outputs_merge: Vec&lt;OutputMerge&lt;B&gt;&gt;,
 <a href=#20 id=20 data-nosnippet>20</a>}
 <a href=#21 id=21 data-nosnippet>21</a>
@@ -31,7 +31,7 @@
 <a href=#31 id=31 data-nosnippet>31</a>    </span><span class="kw">pub </span>ignore_last_residual: bool,
 <a href=#32 id=32 data-nosnippet>32</a>
 <a href=#33 id=33 data-nosnippet>33</a>    <span class="doccomment">/// # Shape
-<a href=#34 id=34 data-nosnippet>34</a>    /// - [n_real_layers / 2]
+<a href=#34 id=34 data-nosnippet>34</a>    /// - `[n_real_layers / 2]`
 <a href=#35 id=35 data-nosnippet>35</a>    </span><span class="kw">pub </span>outputs_merge: Vec&lt;OutputMergeConfig&gt;,
 <a href=#36 id=36 data-nosnippet>36</a>}
 <a href=#37 id=37 data-nosnippet>37</a>
@@ -64,8 +64,8 @@
 <a href=#64 id=64 data-nosnippet>64</a>
 <a href=#65 id=65 data-nosnippet>65</a><span class="kw">impl</span>&lt;B: Backend + Mamba3BackendExt&gt; Mamba3BidiLayers&lt;B&gt; {
 <a href=#66 id=66 data-nosnippet>66</a>    <span class="doccomment">/// # Shapes
-<a href=#67 id=67 data-nosnippet>67</a>    ///   - Input [batch, sequence, d_model]
-<a href=#68 id=68 data-nosnippet>68</a>    ///   - Output [batch, sequence, d_model]
+<a href=#67 id=67 data-nosnippet>67</a>    ///   - Input `[batch, sequence, d_model]`
+<a href=#68 id=68 data-nosnippet>68</a>    ///   - Output `[batch, sequence, d_model]`
 <a href=#69 id=69 data-nosnippet>69</a>    </span><span class="kw">pub fn </span>forward(
 <a href=#70 id=70 data-nosnippet>70</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#71 id=71 data-nosnippet>71</a>        <span class="kw-2">mut </span>x: Tensor&lt;B, <span class="number">3</span>&gt;,
@@ -212,8 +212,8 @@
 <a href=#212 id=212 data-nosnippet>212</a>
 <a href=#213 id=213 data-nosnippet>213</a><span class="kw">impl</span>&lt;B: Backend + Mamba3BackendExt&gt; Mamba3BidiLayerPair&lt;B&gt; {
 <a href=#214 id=214 data-nosnippet>214</a>    <span class="doccomment">/// # Shapes
-<a href=#215 id=215 data-nosnippet>215</a>    ///   - Input [batch, sequence, d_model]
-<a href=#216 id=216 data-nosnippet>216</a>    ///   - Output.0 [batch, sequence, d_model]
+<a href=#215 id=215 data-nosnippet>215</a>    ///   - Input `[batch, sequence, d_model]`
+<a href=#216 id=216 data-nosnippet>216</a>    ///   - Output.0 `[batch, sequence, d_model]`
 <a href=#217 id=217 data-nosnippet>217</a>    </span><span class="kw">pub fn </span>forward(
 <a href=#218 id=218 data-nosnippet>218</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#219 id=219 data-nosnippet>219</a>        x: Tensor&lt;B, <span class="number">3</span>&gt;,

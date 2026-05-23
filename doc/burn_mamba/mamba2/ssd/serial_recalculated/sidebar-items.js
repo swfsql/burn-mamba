@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["backward","combined_backward"],"trait":["Mamba2AutodiffBackendExt","Mamba2BackendExt"]};
+window.SIDEBAR_ITEMS = {"mod":["backward","combined_backward","serial_recalculated"],"trait":["Mamba2AutodiffBackendExt","Mamba2BackendExt"]};

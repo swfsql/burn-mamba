@@ -14,8 +14,8 @@ Output channel: d_inner.</p>
 Output channel: dt_rank + 2 * d_state.</p>
 </div><span id="structfield.dt_proj" class="structfield section-header"><a href="#structfield.dt_proj" class="anchor field">§</a><code>dt_proj: Linear&lt;B&gt;</code></span><div class="docblock"><p>Input channel: dt_rank.
 Output channel: d_inner.</p>
-</div><span id="structfield.a_log" class="structfield section-header"><a href="#structfield.a_log" class="anchor field">§</a><code>a_log: Param&lt;Tensor&lt;B, 2&gt;&gt;</code></span><div class="docblock"><p>Dims: [d_inner, d_state].</p>
-</div><span id="structfield.d" class="structfield section-header"><a href="#structfield.d" class="anchor field">§</a><code>d: Param&lt;Tensor&lt;B, 1&gt;&gt;</code></span><div class="docblock"><p>Dims: [d_inner].</p>
+</div><span id="structfield.a_log" class="structfield section-header"><a href="#structfield.a_log" class="anchor field">§</a><code>a_log: Param&lt;Tensor&lt;B, 2&gt;&gt;</code></span><div class="docblock"><p>Dims: <code>[d_inner, d_state]</code>.</p>
+</div><span id="structfield.d" class="structfield section-header"><a href="#structfield.d" class="anchor field">§</a><code>d: Param&lt;Tensor&lt;B, 1&gt;&gt;</code></span><div class="docblock"><p>Dims: <code>[d_inner]</code>.</p>
 </div><span id="structfield.out_proj" class="structfield section-header"><a href="#structfield.out_proj" class="anchor field">§</a><code>out_proj: Linear&lt;B&gt;</code></span><div class="docblock"><p>Input channel: d_inner.
 Output channel: d_model.</p>
 </div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1%3CB%3E" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#430-643">Source</a><a href="#impl-Mamba1%3CB%3E" class="anchor">§</a><h3 class="code-header">impl&lt;B: Backend&gt; <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a>&lt;B&gt;</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#434-511">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
@@ -24,8 +24,8 @@ Output channel: d_model.</p>
     cache: <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&lt;B&gt;,
 ) -&gt; (Tensor&lt;B, 2&gt;, <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&lt;B&gt;)</h4></section></summary><div class="docblock"><h5 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h5>
 <ul>
-<li>Input [batch, d_model]</li>
-<li>Output [batch, d_model]</li>
+<li>Input <code>[batch, d_model]</code></li>
+<li>Output <code>[batch, d_model]</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.ss_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#520-558">Source</a><h4 class="code-header">pub fn <a href="#method.ss_step" class="fn">ss_step</a>(
     &amp;self,
@@ -38,8 +38,8 @@ Output channel: d_model.</p>
 </ul>
 <h5 id="shapes-1"><a class="doc-anchor" href="#shapes-1">§</a>Shapes</h5>
 <ul>
-<li>Input u [batch, d_inner]</li>
-<li>Output [batch, d_inner]</li>
+<li>Input u <code>[batch, d_inner]</code></li>
+<li>Output <code>[batch, d_inner]</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#575-642">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan_step" class="fn">selective_scan_step</a>(
     delta: Tensor&lt;B, 2&gt;,
@@ -58,24 +58,24 @@ Output channel: d_model.</p>
 </ul>
 <h5 id="shapes-2"><a class="doc-anchor" href="#shapes-2">§</a>Shapes</h5>
 <ul>
-<li>Input delta [batch, d_inner]</li>
-<li>Input a [d_inner, d_state]</li>
-<li>Input b [batch, d_state]</li>
-<li>Input c [batch, d_state]</li>
-<li>Input d [d_inner]</li>
-<li>Input u [batch, d_inner]</li>
-<li>Output [batch, d_inner]</li>
+<li>Input delta <code>[batch, d_inner]</code></li>
+<li>Input a <code>[d_inner, d_state]</code></li>
+<li>Input b <code>[batch, d_state]</code></li>
+<li>Input c <code>[batch, d_state]</code></li>
+<li>Input d <code>[d_inner]</code></li>
+<li>Input u <code>[batch, d_inner]</code></li>
+<li>Output <code>[batch, d_inner]</code></li>
 </ul>
 </div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1%3CB%3E-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#189-425">Source</a><a href="#impl-Mamba1%3CB%3E-1" class="anchor">§</a><h3 class="code-header">impl&lt;B: Backend&gt; <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a>&lt;B&gt;</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#195-252">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(&amp;self, x: Tensor&lt;B, 3&gt;) -&gt; Tensor&lt;B, 3&gt;</h4></section></summary><div class="docblock"><p>See also <a href="struct.Mamba1.html#method.step" title="method burn_mamba::mamba1::mamba1::Mamba1::step"><code>Self::step</code></a>.</p>
 <h5 id="shapes-3"><a class="doc-anchor" href="#shapes-3">§</a>Shapes</h5>
 <ul>
-<li>Input [batch, sequence, d_model]</li>
-<li>Output [batch, sequence, d_model]</li>
+<li>Input <code>[batch, sequence, d_model]</code></li>
+<li>Output <code>[batch, sequence, d_model]</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.ss" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#257-301">Source</a><h4 class="code-header">pub fn <a href="#method.ss" class="fn">ss</a>(&amp;self, u: Tensor&lt;B, 3&gt;) -&gt; Tensor&lt;B, 3&gt;</h4></section></summary><div class="docblock"><h5 id="shapes-4"><a class="doc-anchor" href="#shapes-4">§</a>Shapes</h5>
 <ul>
-<li>Input [batch, sequence, d_inner]</li>
-<li>Output [batch, sequence, d_inner]</li>
+<li>Input <code>[batch, sequence, d_inner]</code></li>
+<li>Output <code>[batch, sequence, d_inner]</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#318-424">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan" class="fn">selective_scan</a>(
     delta: Tensor&lt;B, 3&gt;,
@@ -93,13 +93,13 @@ Output channel: d_model.</p>
 </ul>
 <h5 id="shapes-5"><a class="doc-anchor" href="#shapes-5">§</a>Shapes</h5>
 <ul>
-<li>Input delta [sequence, batch, d_inner]</li>
-<li>Input a [d_inner, d_state]</li>
-<li>Input b [batch, sequence, d_state]</li>
-<li>Input c [sequence, batch, d_state]</li>
-<li>Input d [d_inner]</li>
-<li>Input u [batch, sequence, d_inner]</li>
-<li>Output [batch, sequence, d_inner]</li>
+<li>Input delta <code>[sequence, batch, d_inner]</code></li>
+<li>Input a <code>[d_inner, d_state]</code></li>
+<li>Input b <code>[batch, sequence, d_state]</code></li>
+<li>Input c <code>[sequence, batch, d_state]</code></li>
+<li>Input d <code>[d_inner]</code></li>
+<li>Input u <code>[batch, sequence, d_inner]</code></li>
+<li>Output <code>[batch, sequence, d_inner]</code></li>
 </ul>
 </div></details></div></details></div><h2 id="trait-implementations" class="section-header">Trait Implementations<a href="#trait-implementations" class="anchor">§</a></h2><div id="trait-implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-AutodiffModule%3CB%3E-for-Mamba1%3CB%3E" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#10">Source</a><a href="#impl-AutodiffModule%3CB%3E-for-Mamba1%3CB%3E" class="anchor">§</a><h3 class="code-header">impl&lt;B&gt; AutodiffModule&lt;B&gt; for <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a>&lt;B&gt;<div class="where">where
     B: AutodiffBackend + Backend,

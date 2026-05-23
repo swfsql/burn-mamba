@@ -7,8 +7,8 @@
 </div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1Network%3CB%3E" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/network.rs.html#77-152">Source</a><a href="#impl-Mamba1Network%3CB%3E" class="anchor">§</a><h3 class="code-header">impl&lt;B: Backend&gt; <a class="struct" href="struct.Mamba1Network.html" title="struct burn_mamba::mamba1::network::Mamba1Network">Mamba1Network</a>&lt;B&gt;</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/network.rs.html#83-108">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(&amp;self, x: Tensor&lt;B, 2, Int&gt;) -&gt; Tensor&lt;B, 3&gt;</h4></section></summary><div class="docblock"><p>See also <a href="struct.Mamba1Network.html#method.step" title="method burn_mamba::mamba1::network::Mamba1Network::step"><code>Self::step</code></a>.</p>
 <h5 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h5>
 <ul>
-<li>Input [batch, sequence]</li>
-<li>Output [batch, sequence, d_model]</li>
+<li>Input <code>[batch, sequence]</code></li>
+<li>Output <code>[batch, sequence, d_model]</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/network.rs.html#115-151">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
     &amp;self,
@@ -17,8 +17,8 @@
 ) -&gt; (Tensor&lt;B, 2&gt;, <a class="struct" href="../cache/struct.Mamba1Caches.html" title="struct burn_mamba::mamba1::cache::Mamba1Caches">Mamba1Caches</a>&lt;B&gt;)</h4></section></summary><div class="docblock"><p>See also <a href="struct.Mamba1Network.html#method.forward" title="method burn_mamba::mamba1::network::Mamba1Network::forward"><code>Self::forward</code></a>.</p>
 <h5 id="shapes-1"><a class="doc-anchor" href="#shapes-1">§</a>Shapes</h5>
 <ul>
-<li>Input [batch]</li>
-<li>Output [batch, d_model]</li>
+<li>Input <code>[batch]</code></li>
+<li>Output <code>[batch, d_model]</code></li>
 </ul>
 </div></details></div></details></div><h2 id="trait-implementations" class="section-header">Trait Implementations<a href="#trait-implementations" class="anchor">§</a></h2><div id="trait-implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-AutodiffModule%3CB%3E-for-Mamba1Network%3CB%3E" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/network.rs.html#12">Source</a><a href="#impl-AutodiffModule%3CB%3E-for-Mamba1Network%3CB%3E" class="anchor">§</a><h3 class="code-header">impl&lt;B&gt; AutodiffModule&lt;B&gt; for <a class="struct" href="struct.Mamba1Network.html" title="struct burn_mamba::mamba1::network::Mamba1Network">Mamba1Network</a>&lt;B&gt;<div class="where">where
     B: AutodiffBackend + Backend,
