@@ -434,84 +434,33 @@ mod tests {
         );
 
         // ── Forward agreement ────────────────────────────────────────────
-        let tol = 1e-4;
-        let dy_ser = (r_min.y.clone() - r_ser.y.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        let ds_ser = (r_min.state.clone() - r_ser.state.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        let dy_rec = (r_min.y.clone() - r_rec.y.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        let ds_rec = (r_min.state.clone() - r_rec.state.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            dy_ser < tol,
-            "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})"
-        );
-        assert!(
-            ds_ser < tol,
-            "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})"
-        );
-        assert!(
-            dy_rec < tol,
-            "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})"
-        );
-        assert!(
-            ds_rec < tol,
-            "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})"
-        );
+        use crate::utils::test_helpers::max_abs_diff;
+        let tol = 1e-4f32;
+        let dy_ser = max_abs_diff(r_min.y.clone(), r_ser.y.clone());
+        let ds_ser = max_abs_diff(r_min.state.clone(), r_ser.state.clone());
+        let dy_rec = max_abs_diff(r_min.y.clone(), r_rec.y.clone());
+        let ds_rec = max_abs_diff(r_min.state.clone(), r_rec.state.clone());
+        assert!(dy_ser < tol, "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})");
+        assert!(ds_ser < tol, "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})");
+        assert!(dy_rec < tol, "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})");
+        assert!(ds_rec < tol, "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})");
 
         // ── Gradient agreement ───────────────────────────────────────────
         // Looser tolerance: every path computes the same mathematical
         // gradients, but the chunkwise reformulations accumulate sums in
         // different orders, so small drift is expected.
-        let grad_tol = 1e-3;
-
-        let mut failures: Vec<String> = Vec::new();
-        macro_rules! diff {
-            ($a:expr, $b:expr) => {
-                ($a.clone() - $b.clone()).abs().max().into_scalar()
-            };
-        }
-        macro_rules! check_grad {
-            ($field:ident, $name:expr) => {{
-                let d_ser = diff!(r_min.$field, r_ser.$field);
-                let d_rec = diff!(r_min.$field, r_rec.$field);
-                eprintln!(
-                    "grad {:>14} | min↔ser = {:>10.6} | min↔rec = {:>10.6}",
-                    $name, d_ser, d_rec
-                );
-                if d_ser >= grad_tol {
-                    failures.push(format!(
-                        "Minimal vs Serial: grad of {} max abs diff = {:.6} (tol {})",
-                        $name, d_ser, grad_tol
-                    ));
-                }
-                if d_rec >= grad_tol {
-                    failures.push(format!(
-                        "Minimal vs SerialRecalculated: grad of {} max abs diff = {:.6} (tol {})",
-                        $name, d_rec, grad_tol
-                    ));
-                }
-            }};
-        }
-        check_grad!(d_v, "v");
-        check_grad!(d_da, "da");
-        check_grad!(d_b, "b");
-        check_grad!(d_c, "c");
-        check_grad!(d_init_state, "initial_state");
-
-        assert!(
-            failures.is_empty(),
-            "gradient mismatches:\n  {}",
-            failures.join("\n  ")
+        crate::check_grads_match_two_paths!(
+            baseline: r_min,
+            alt1: ("Serial", r_ser),
+            alt2: ("SerialRecalculated", r_rec),
+            tol: 1e-3,
+            fields: [
+                d_v => "v",
+                d_da => "da",
+                d_b => "b",
+                d_c => "c",
+                d_init_state => "initial_state",
+            ],
         );
     }
 

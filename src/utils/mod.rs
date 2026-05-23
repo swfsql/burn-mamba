@@ -17,6 +17,8 @@ pub mod silu;
 pub mod softplus;
 pub mod segsum;
 pub mod split;
+#[cfg(test)]
+pub mod test_helpers;
 
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {
