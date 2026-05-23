@@ -1,4 +1,4 @@
-# burn-mamba <img src="https://raw.githubusercontent.com/swfsql/burn-mamba/main/assets/logo-small.png" height="20px"/> &emsp; [![deepwiki]][deepwikiurl] [![docs]][docsurl]
+# burn-mamba &emsp; [![deepwiki]][deepwikiurl] [![docs]][docsurl] &emsp; <img src="https://raw.githubusercontent.com/swfsql/burn-mamba/main/assets/logo-small.png?raw=true" alt="Logo" width="20px"/>
 
 [deepwiki]: https://deepwiki.com/badge.svg
 [deepwikiurl]: https://deepwiki.com/swfsql/burn-mamba
