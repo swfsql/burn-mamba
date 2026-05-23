@@ -474,7 +474,7 @@ mod tests {
     }
 
     /// forward2 ≡ forward (double-SSD) on values and gradients.
-    fn run_forward2_matches_forward(cfg: Mamba3Config) {
+    fn run_forward2_matches_forward(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
@@ -494,7 +494,6 @@ mod tests {
         );
 
         let ssd_path = Mamba3SsdPath::Minimal(Some(4));
-        let trap_path = Mamba3TrapSsdPath::Minimal(Some(4));
 
         let input_a = param_input(&input);
         let r_fwd = run_with_grads(&model, &input_a, &head, |m, x| {
@@ -521,7 +520,7 @@ mod tests {
 
     #[test]
     fn forward2_matches_forward() {
-        run_forward2_matches_forward(small_config());
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
     }
 
     #[test]
@@ -531,12 +530,12 @@ mod tests {
             .with_expand(2)
             .with_per_head_dim(16)
             .with_ngroups(2);
-        run_forward2_matches_forward(cfg);
+        run_forward2_matches_forward(cfg, Mamba3TrapSsdPath::Minimal(Some(4)));
     }
 
     #[test]
     fn forward2_matches_forward_mimo() {
-        run_forward2_matches_forward(small_config_mimo());
+        run_forward2_matches_forward(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
     }
 
     #[test]
@@ -547,11 +546,21 @@ mod tests {
             .with_per_head_dim(16)
             .with_ngroups(2)
             .with_mimo_rank(2);
-        run_forward2_matches_forward(cfg);
+        run_forward2_matches_forward(cfg, Mamba3TrapSsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_forward_serial() {
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_forward_serial_mimo() {
+        run_forward2_matches_forward(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
     }
 
     /// forward2 ≡ token-by-token step on values and gradients.
-    fn run_forward2_matches_step(cfg: Mamba3Config) {
+    fn run_forward2_matches_step(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
@@ -569,8 +578,6 @@ mod tests {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-
-        let trap_path = Mamba3TrapSsdPath::Minimal(Some(4));
 
         let input_a = param_input(&input);
         let r_fwd2 = run_with_grads(&model, &input_a, &head, |m, x| {
@@ -604,16 +611,26 @@ mod tests {
 
     #[test]
     fn forward2_matches_step() {
-        run_forward2_matches_step(small_config());
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
     }
 
     #[test]
     fn forward2_matches_step_mimo() {
-        run_forward2_matches_step(small_config_mimo());
+        run_forward2_matches_step(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_step_serial() {
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_step_serial_mimo() {
+        run_forward2_matches_step(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
     }
 
     /// forward2(full) ≡ forward2(prefix) then forward2(suffix, cache).
-    fn run_forward2_split_matches_full(cfg: Mamba3Config) {
+    fn run_forward2_split_matches_full(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
@@ -632,8 +649,6 @@ mod tests {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-
-        let trap_path = Mamba3TrapSsdPath::Minimal(Some(4));
 
         let input_full = param_input(&input);
         let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
@@ -663,11 +678,21 @@ mod tests {
 
     #[test]
     fn forward2_split_matches_full() {
-        run_forward2_split_matches_full(small_config());
+        run_forward2_split_matches_full(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
     }
 
     #[test]
     fn forward2_split_matches_full_mimo() {
-        run_forward2_split_matches_full(small_config_mimo());
+        run_forward2_split_matches_full(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn forward2_split_matches_full_serial() {
+        run_forward2_split_matches_full(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
+    }
+
+    #[test]
+    fn forward2_split_matches_full_serial_mimo() {
+        run_forward2_split_matches_full(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
     }
 }
