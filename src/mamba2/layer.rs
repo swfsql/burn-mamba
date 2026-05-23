@@ -187,7 +187,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     ///
     /// Each layer calls [`Mamba2::step`], which runs one tick of the recurrent
     /// SSM:  `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ`,  `yₜ = Cₜᵀ hₜ + D xₜ`.
-    /// This is O(H·P·N) per step — independent of sequence length — and
+    /// This is O(nheads·per_head_dim·state_rank) per step — independent of sequence length — and
     /// requires no KV-cache.
     ///
     /// # Arguments
@@ -261,7 +261,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
         if is_first || is_last { 0.0 } else { 1.0 }
     }
 
-    /// Build zero-initialised caches from a 3-D input tensor `[B, S, D]`.
+    /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
     fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba2Caches<B> {
         let device = &x.device();
         let [batch, _sequence, _d_model] = x.dims();
@@ -282,7 +282,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
         .init(device)
     }
 
-    /// Build zero-initialised caches from a 2-D input tensor `[B, D]`.
+    /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
     fn make_zero_caches_2d(&self, x: &Tensor<B, 2>, n_virtual: usize) -> Mamba2Caches<B> {
         let device = &x.device();
         let [batch, _d_model] = x.dims();

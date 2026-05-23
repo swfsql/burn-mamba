@@ -12,7 +12,7 @@ pub enum Mamba2SsdPath {
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.  
-    /// See [`chunked_selective_scan`] for more info.
+    /// See [`Mamba2::ssd_minimal`] for more info.
     ///
     /// For training, you may prefer using [SerialRecalculated](Self::SerialRecalculated) instead.
     ///
@@ -21,6 +21,7 @@ pub enum Mamba2SsdPath {
     /// (Hybrid) Serial SSD.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
+    /// See [`Mamba2::ssd_serial`] for more info.  
     /// For the backward operation, this relies on autodiff.  
     /// For a custom backwards that saves memory, see [SerialRecalculated](Self::SerialRecalculated).
     ///
@@ -33,6 +34,7 @@ pub enum Mamba2SsdPath {
     /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
+    /// See [`Mamba3::ssd_serial_recalculated`] for more info.  
     /// Contains a custom backward operation that saves memory.  
     /// For an autodiff backwards, see [Serial](Self::Serial).
     ///

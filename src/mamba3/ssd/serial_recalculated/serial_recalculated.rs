@@ -14,7 +14,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     /// Falls back to the standard K1-K5 serial computation on unsupported backends.
     ///
     /// # Returns
-    /// - `y_bnlrhp`:         `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
+    /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn ssd_serial_recalculated(
         input: super::super::Mamba3SsdInput<B>,
@@ -24,16 +24,16 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
-        let (y_bnlrhp, final_state_bhpr) = <B as Mamba3BackendExt>::ssd_serial_recalculated(
-            input.v_bnlrhp.into_primitive().tensor(),
+        let (y_bnlmhp, final_state_bhpr) = <B as Mamba3BackendExt>::ssd_serial_recalculated(
+            input.v_bnlmhp.into_primitive().tensor(),
             input.da_bnlh.into_primitive().tensor(),
-            input.b_bnlrhn.into_primitive().tensor(),
-            input.c_bnlrhn.into_primitive().tensor(),
+            input.b_bnlmhr.into_primitive().tensor(),
+            input.c_bnlmhr.into_primitive().tensor(),
             input.initial_state_bhpr.into_primitive().tensor(),
         );
-        let y_bnlrhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlrhp));
+        let y_bnlmhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlmhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
-        (y_bnlrhp, final_state_bhpr)
+        (y_bnlmhp, final_state_bhpr)
     }
 }
 
@@ -47,42 +47,50 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     /// Memory-efficient MIMO serial SSD.
     ///
     /// # Arguments
-    /// - `v_bnlrhp`:           `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
+    /// - `v_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `da_bnlh`:            `[batch, nchunks, chunk_len, nheads]` — pre-combined Δ·A
-    /// - `b_bnlrhn`:           `[batch, nchunks, chunk_len, R, nheads, state_rank]`
-    /// - `c_bnlrhn`:           `[batch, nchunks, chunk_len, R, nheads, state_rank]`
+    /// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
+    /// - `c_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     ///
     /// # Returns
-    /// - `y_bnlrhp`:         `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
+    /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     fn ssd_serial_recalculated(
-        v_bnlrhp: FloatTensor<Self>,
+        v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
-        b_bnlrhn: FloatTensor<Self>,
-        c_bnlrhn: FloatTensor<Self>,
+        b_bnlmhr: FloatTensor<Self>,
+        c_bnlmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate Mamba3::ssd_serial (K1-K5).
 
-        let v: Tensor<Self, 6> = mk(v_bnlrhp);
-        let da: Tensor<Self, 4> = mk(da_bnlh);
-        let b: Tensor<Self, 6> = mk(b_bnlrhn);
-        let c: Tensor<Self, 6> = mk(c_bnlrhn);
-        let init_state: Tensor<Self, 4> = mk(initial_state_bhpr);
+        let v_bnlmhp: Tensor<Self, 6> = mk(v_bnlmhp);
+        let da_bnlh: Tensor<Self, 4> = mk(da_bnlh);
+        let b_bnlmhr: Tensor<Self, 6> = mk(b_bnlmhr);
+        let c_bnlmhr: Tensor<Self, 6> = mk(c_bnlmhr);
+        let initial_state_bhpr: Tensor<Self, 4> = mk(initial_state_bhpr);
 
-        let (da_cumsum_bhnl, da_chunk_end_bhn) = serial::k1_ssd_chunk_cumsum(da);
-        let cb_bnhLL = serial::k2_ssd_bmm(c.clone(), b.clone());
+        let (da_cumsum_bhnl, da_chunk_end_bhn) = serial::k1_ssd_chunk_cumsum(da_bnlh);
+        let cb_bnhLMLM = serial::k2_ssd_bmm(c_bnlmhr.clone(), b_bnlmhr.clone());
         let intra_chunk_state_bnhpr =
-            serial::k3_ssd_chunk_state(v.clone(), b, da_cumsum_bhnl.clone());
-        let (chunk_input_state_bnhpr, final_state_bhpr) =
-            serial::k4_ssd_state_passing(intra_chunk_state_bnhpr, da_chunk_end_bhn, init_state);
-        let y_bnlrhp =
-            serial::k5_ssd_chunk_scan(da_cumsum_bhnl, v, c, cb_bnhLL, chunk_input_state_bnhpr);
+            serial::k3_ssd_chunk_state(v_bnlmhp.clone(), b_bnlmhr, da_cumsum_bhnl.clone());
+        let (chunk_input_state_bnhpr, final_state_bhpr) = serial::k4_ssd_state_passing(
+            intra_chunk_state_bnhpr,
+            da_chunk_end_bhn,
+            initial_state_bhpr,
+        );
+        let y_bnlmhp = serial::k5_ssd_chunk_scan(
+            da_cumsum_bhnl,
+            v_bnlmhp,
+            c_bnlmhr,
+            cb_bnhLMLM,
+            chunk_input_state_bnhpr,
+        );
 
-        let y_bnlrhp = y_bnlrhp.into_primitive().tensor();
+        let y_bnlmhp = y_bnlmhp.into_primitive().tensor();
         let final_state_bhpr = final_state_bhpr.into_primitive().tensor();
-        (y_bnlrhp, final_state_bhpr)
+        (y_bnlmhp, final_state_bhpr)
     }
 }
 

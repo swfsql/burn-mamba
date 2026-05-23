@@ -16,7 +16,7 @@ use burn::tensor::{TensorPrimitive, ops::FloatTensor};
 impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.
     ///
-    /// The two output tensors are concatenated into a single 1-D tracked tensor
+    /// The two output tensors are concatenated into a single 1-dimensional tracked tensor
     /// so that one `Backward<B, 7>` node covers both outputs.  The caller
     /// receives split+reshaped slices of that combined tensor; burn's autodiff
     /// accumulates their upstream gradients back into a single gradient vector
@@ -82,7 +82,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     node_a_decay_h,
                 ] = ops.parents;
 
-                // Retrieve the gradient of the combined 1-D output.
+                // Retrieve the gradient of the combined 1-dimensional output.
                 let d_combined: Tensor<B, 1> =
                     Tensor::from_primitive(TensorPrimitive::Float(grads.consume::<B>(&ops.node)));
 
@@ -245,7 +245,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 );
 
                 // Note: prep.finish accepts only a single tensor.
-                // Flatten both outputs and cat into one 1-D tensor so that
+                // Flatten both outputs and cat into one 1-dimensional tensor so that
                 // one Backward node covers both.
                 let flat_y_BNLHP: Tensor<B, 1> =
                     Tensor::<B, 5>::from_primitive(TensorPrimitive::Float(prim_y_bnlhp))
@@ -274,7 +274,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
                     prep.finish(state, combined.into_primitive().tensor());
 
-                // Split the tracked 1-D tensor back into the two outputs.
+                // Split the tracked 1-dimensional tensor back into the two outputs.
                 // The narrow / reshape ops create thin pass-through autodiff
                 // nodes; their backward accumulates gradients into the
                 // combined gradient vector consumed above.

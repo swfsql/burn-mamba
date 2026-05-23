@@ -18,12 +18,12 @@
 //!    Conv1d, kept so that every decoding step can apply the causal filter
 //!    without re-processing previous tokens.
 //!
-//! 2. **SSM hidden state** — the matrix `hₜ ∈ ℝ^{P×N}` (per head), which
+//! 2. **SSM hidden state** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` (per head), which
 //!    compresses the entire past context into a fixed-size representation
 //!    regardless of how many tokens have been generated.  This is the key
 //!    memory-efficiency advantage of SSMs over attention: the KV-cache of a
-//!    Transformer grows as O(T·N) with sequence length, whereas the SSM state
-//!    is always O(P·N).
+//!    Transformer grows as O(sequence·state_rank) with sequence length, whereas the SSM state
+//!    is always O(per_head_dim·state_rank).
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -109,12 +109,12 @@ pub struct Mamba2Cache<B: Backend> {
 
     /// **SSM hidden state** `hₜ`.
     ///
-    /// This is the O(P·N) compressed summary of all tokens seen so far.
+    /// This is the O(per_head_dim·state_rank) compressed summary of all tokens seen so far.
     /// Updated via `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ` at each decoding step.
     ///
     /// The tensor is indexed as `[batch, nheads, per_head_dim, state_rank]`
-    /// (i.e. `[B, H, P, N]` in the paper's notation), which is the transpose
-    /// of the mathematical `hₜ ∈ ℝ^{N×P}` but equivalent in content.
+    /// (i.e. `[batch, nheads, per_head_dim, state_rank]` in the paper's notation), which is the transpose
+    /// of the mathematical `hₜ ∈ ℝ^{state_rank×per_head_dim}` but equivalent in content.
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<B, 4>,
@@ -133,7 +133,7 @@ pub struct Mamba2CacheConfig {
     /// Batch size.
     pub batch: usize,
 
-    /// State rank `N` — the number of latent dimensions in the SSM hidden
+    /// `state_rank` — the number of latent dimensions in the SSM hidden
     /// state.  Corresponds to `state_rank` in [`Mamba2Config`].
     #[config(default = 128)]
     pub state_rank: usize,
@@ -147,11 +147,11 @@ pub struct Mamba2CacheConfig {
     /// Equal to `d_inner + 2 · ngroups · state_rank`.
     pub conv_dim: usize,
 
-    /// Head dimension `P`.  Corresponds to `per_head_dim` in [`Mamba2Config`].
+    /// Head dimension `per_head_dim`.  Corresponds to `per_head_dim` in [`Mamba2Config`].
     #[config(default = 64)]
     pub per_head_dim: usize,
 
-    /// Number of SSM heads `H`.
+    /// Number of SSM heads `nheads`.
     pub nheads: usize,
 }
 

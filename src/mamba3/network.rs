@@ -4,7 +4,7 @@
 //! Mamba-3 components:
 //!
 //! ```text
-//!   tokens [B, T]
+//!   tokens [batch, sequence]
 //!       │
 //!       ▼
 //!   Embedding  (vocab_size → d_model)
@@ -19,7 +19,7 @@
 //!   LM head  (d_model → vocab_size)
 //!       │
 //!       ▼
-//!   logits [B, T, vocab_size]
+//!   logits [batch, sequence, vocab_size]
 //! ```
 //!
 //! ## Vocabulary padding
@@ -41,8 +41,8 @@
 //!
 //! | Method | Input shape | Use case |
 //! |--------|-------------|----------|
-//! | [`Mamba3Network::forward`] | `[B, T]` | Training, prefill |
-//! | [`Mamba3Network::step`]    | `[B]`    | Autoregressive decoding |
+//! | [`Mamba3Network::forward`] | `[batch, sequence]` | Training, prefill |
+//! | [`Mamba3Network::step`]    | `[batch]`    | Autoregressive decoding |
 
 use crate::mamba3::prelude::*;
 use crate::schedule::Schedule;
@@ -230,7 +230,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
     ///   yₜ = Cₜᵀ hₜ + D xₜ
     /// ```
     ///
-    /// This is O(H·P·N) per token — independent of sequence length — and is
+    /// This is O(nheads·per_head_dim·state_rank) per token — independent of sequence length — and is
     /// the correct mode for token-by-token generation after prefill.
     ///
     /// # Arguments
@@ -251,7 +251,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
         // Embed the single token.  We temporarily add a sequence dimension so
-        // that the embedding module (which expects `[B, T]`) is satisfied, then
+        // that the embedding module (which expects `[batch, sequence]`) is satisfied, then
         // immediately squeeze it out.
         let x_b1 = x.unsqueeze_dim::<2>(1);
         assert_eq!([batch, 1], x_b1.dims());

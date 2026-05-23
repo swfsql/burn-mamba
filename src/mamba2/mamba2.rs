@@ -7,16 +7,16 @@
 //! ## The SSD Model
 //!
 //! The SSD layer is a multi-head selective SSM.  Each head processes a
-//! sequence of `P`-dimensional inputs `X ∈ ℝ^{T×P}` through the recurrence
+//! sequence of `per_head_dim`-dimensional inputs `X ∈ ℝ^{sequence×per_head_dim}` through the recurrence
 //! (Eq. 1–2 of the paper):
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ          (state update)
-//!   yₜ = Cₜᵀ hₜ                     (output readout)
+//!   yₜ = Cₜᵀ hₜ                  (output readout)
 //! ```
 //!
 //! where:
-//! - `hₜ ∈ ℝ^{N×P}` is the hidden state (N = `state_rank`, P = `per_head_dim`)
+//! - `hₜ ∈ ℝ^{`state_rank`×per_head_dim}` is the hidden state
 //! - `Āₜ = exp(Δₜ A) ∈ ℝ` is a scalar decay (the key SSD constraint:
 //!   Āₜ = αₜ · I, i.e. scalar times identity, rather than a diagonal matrix)
 //! - `B̄ₜ = Δₜ Bₜ ∈ ℝᴺ`  is the (discretised) input projection
@@ -30,7 +30,7 @@
 //! (Eq. 6–7):
 //!
 //! ```text
-//!   M = L ∘ (C Bᵀ)      ∈ ℝ^{T×T}
+//!   M = L ∘ (C Bᵀ)      ∈ ℝ^{sequence×sequence}
 //!   Y = M · X
 //! ```
 //!
@@ -38,7 +38,7 @@
 //!
 //! ```text
 //!   Lᵢⱼ = āᵢ · āᵢ₋₁ · ... · āⱼ₊₁    (i ≥ j)
-//!   Lᵢⱼ = 0                           (i < j)
+//!   Lᵢⱼ = 0                     (i < j)
 //! ```
 //!
 //! This makes the layer equivalent to causal linear attention
@@ -50,25 +50,28 @@
 //!
 //! ## Notation / Dimension Keys
 //!
-//! Throughout all file, tensor names carry a suffix encoding their shape.
+//! Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.  
+//! The letters used differs from the reference papers and related projects.  
 //! The letters used are:
 //!
 //! | Letter | Dimension | Typical value |
 //! |--------|-----------|---------------|
-//! | `b`    | batch     | varies        |
-//! | `s`    | sequence length T | varies |
-//! | `m`    | d_model   | 768, 1024 … |
-//! | `i`    | d_inner = expand·d_model | 2·d_model |
-//! | `h`    | nheads H  | d_inner / P  |
-//! | `p`    | per_head_dim P | 64, 128 |
-//! | `r`    | state_rank N   | 64–256  |
-//! | `v`    | conv_dim  | d_inner + 2·G·N |
-//! | `k`    | conv_kernel    | 4       |
-//! | `g`    | ngroups G      | 1–H     |
-//! | `n`    | nchunks = T/Q  | varies  |
-//! | `l`    | chunk_len Q    | 64–256  |
-//! | `N`    | 1+nchunks (padded for state scan) | — |
-//! | `f`    | P·N (flattened state for matmul)   | — |
+//! | `b`    | `batch` | varies        |
+//! | `s`    | `sequence` length | varies |
+//! | `d`    | `d_model` | 768, 1024 |
+//! | `i`    | `d_inner` = `expand`·`d_model` | 2·`d_model` |
+//! | `h`    | `nheads` | `d_inner` / `per_head_dim`  |
+//! | `p`    | `per_head_dim` | 64, 128 |
+//! | `r`    | `state_rank` | 64, 256  |
+//! | `v`    | `conv_dim` | `d_inner` + 2·`ngroups`·`state_rank` |
+//! | `k`    | `conv_kernel`    | 4       |
+//! | `g`    | `ngroups` | 1, .., `nheads`     |
+//! | `n`    | `nchunks` = `sequence`/`chunk_len`  | varies  |
+//! | `l`    | `chunk_len`    | 64, .., 256  |
+//!
+//! Uppercase latters represent a relation (e.g. offset, multiple, concat, stacking)
+//! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
+//! `XY` may also represent `x+y`, `x*y`, etc.  
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -94,45 +97,19 @@ use burn::{
 /// two execution modes:
 ///
 /// - [`Self::forward`] — chunkwise SSD for training / prefill
-///   (exploits tensor cores; linear in sequence length T)
+///   (exploits tensor cores; linear in sequence length)
 /// - [`Self::step`]    — pure recurrent form for token-by-token decoding
-///   (O(H·P·N) per step; no KV-cache)
-///
-/// ## Architecture (one forward pass through the block)
-///
-/// ```text
-///   u  [B, T, D]
-///   ├─ in_proj ──────────────────────────────────┐
-///   │                                            │
-///   │  z [B,T,I]   xbc [B,T,V]   dt_raw [B,T,H] │
-///   │                │                           │
-///   │            causal Conv1d                   │
-///   │                │ SiLU                      │
-///   │           split into                       │
-///   │       x [B,T,H,P]  B [B,T,G,N]  C [B,T,G,N]
-///   │                                            │
-///   │     Δ = softplus(dt_raw + dt_bias)         │
-///   │     Ā = exp(Δ · A)   [scalar per head]     │
-///   │     B̄ = Δ · B                              │
-///   │                                            │
-///   │  ┌──── chunked_selective_scan ─────────┐   │
-///   │  │  (Steps 1–4, see below)             │   │
-///   │  └────────────────────────────────────-┘   │
-///   │     y [B,T,H,P]                            │
-///   │     + D skip                               │
-///   │     RmsNormGated(·, z)                     │
-///   └─ out_proj ─────────────────────────────────┘
-///   output  [B, T, D]
+///   (O(`nheads`·`per_head_dim`·`state_rank`) per step)
 /// ```
 #[derive(Module, Debug)]
 pub struct Mamba2<B: Backend> {
     /// Input projection: maps `d_model → d_inner + conv_dim + nheads`.
     ///
     /// The output is split into three parts:
-    /// - `z      [B, T, d_inner]`  — multiplicative gate for the output norm
-    /// - `xbc    [B, T, conv_dim]` — input to the causal convolution, which
+    /// - `z      [batch, sequence, d_inner]`  — multiplicative gate for the output norm
+    /// - `xbc    [batch, sequence, conv_dim]` — input to the causal convolution, which
     ///   is then split into (x, B, C) after activation
-    /// - `dt_raw [B, T, nheads]`   — raw (pre-softplus) discretisation step Δ
+    /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) discretisation step Δ
     pub in_proj: Linear<B>,
 
     /// Causal depthwise Conv1d applied to the `xbc` projection.
@@ -152,7 +129,7 @@ pub struct Mamba2<B: Backend> {
     ///
     /// Shape: `[nheads]`
     ///
-    /// At inference time, `Δₜ = softplus(dt_raw_t + dt_bias)`.
+    /// At inference time, `Δₜ = softplus(dt_rawₜ + dt_bias)`.
     /// Initialised such that the corresponding initial `Δ` values are
     /// log-uniformly distributed in `[dt_min, dt_max]`.
     pub dt_bias_h: Param<Tensor<B, 1>>,
@@ -198,7 +175,7 @@ pub struct Mamba2<B: Backend> {
 
     /// Optional learnable initial hidden state `h₀`.
     ///
-    /// Shape: `[nheads, per_head_dim, state_rank]` (i.e. `[H, P, N]`)
+    /// Shape: `[nheads, per_head_dim, state_rank]`.
     ///
     /// When `None`, the initial state is zero (the standard default).
     /// When `Some`, the stored tensor is used as the initial condition for
@@ -206,12 +183,12 @@ pub struct Mamba2<B: Backend> {
     /// dimension).
     pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
 
-    /// State rank `N` — the number of latent dimensions in the SSM hidden
-    /// state `h ∈ ℝ^{N×P}` per head.  Corresponds to the paper's `N`.
+    /// `state_rank` — the number of latent dimensions in the SSM hidden
+    /// state `h ∈ ℝ^{state_rank×per_head_dim}` per head.  Corresponds to the paper's `N`.
     pub state_rank: usize,
 
-    /// Number of B/C groups `G` for grouped SSM heads (analogous to
-    /// grouped-query attention).  `G` divides `nheads`; all `nheads/G` heads
+    /// Number of B/C groups `ngroups` for grouped SSM heads (analogous to
+    /// grouped-query attention).  `ngroups` divides `nheads`; all `nheads/ngroups` heads
     /// within a group share the same B and C projections while having
     /// independent X, A, and Z projections.
     pub ngroups: usize,
@@ -224,13 +201,14 @@ impl<B: Backend> Mamba2<B> {
         d_inner
     }
 
-    /// `nheads = d_inner / per_head_dim`.  Inferred from `a_log_h`.
+    /// `nheads = d_inner / per_head_dim`.
     pub fn nheads(&self) -> usize {
+        // Inferred from `a_log_h`
         let [nheads] = self.a_log_h.dims();
         nheads
     }
 
-    /// `per_head_dim P = d_inner / nheads`.
+    /// `per_head_dim = d_inner / nheads`.
     pub fn per_head_dim(&self) -> usize {
         self.d_inner() / self.nheads()
     }
@@ -251,14 +229,14 @@ impl<B: Backend> Mamba2<B> {
 /// from the stored fields; see the helper methods on [`Mamba2Config`].
 #[derive(Config, Debug)]
 pub struct Mamba2Config {
-    /// Model (hidden) dimension D.  Every token is represented as a
-    /// D-dimensional vector at the input and output of the block.
+    /// Model (hidden) dimension `d`.  Every token is represented as a
+    /// `d`-dimensional vector at the input and output of the block.
     pub d_model: usize,
 
-    /// State rank N — the latent dimension of the SSM hidden state.
+    /// State rank — the latent dimension of the SSM hidden state.
     ///
-    /// Larger N gives a more expressive state but increases memory and compute
-    /// per step.  The paper uses N ∈ {64, 128, 256} for most experiments.
+    /// Larger `state_rank` gives a more expressive state but increases memory and compute
+    /// per step.  Corresponds to the paper's `N`, which uses N ∈ {64, 128, 256} for most experiments.
     #[config(default = 128)]
     pub state_rank: usize,
 
@@ -273,17 +251,16 @@ pub struct Mamba2Config {
     #[config(default = 2)]
     pub expand: usize,
 
-    /// Head dimension P.  The total `d_inner` is split into
-    /// `nheads = d_inner / P` independent SSM heads.
+    /// Head dimension nheads.  The total `d_inner` is split into
+    /// `per_head_dim = d_inner / nheads` independent SSM heads.
     ///
-    /// Typical values: 64 or 128.  Smaller P means more heads and a larger
-    /// hidden state per model dimension.
+    /// Typical values: 64 or 128.
     #[config(default = 64)]
     pub per_head_dim: usize,
 
-    /// Number of B/C groups G.  Must divide `nheads`.
+    /// Number of B/C groups ngroups.  Must divide `nheads`.
     ///
-    /// Setting G < nheads reduces the B and C projection sizes (analogous to
+    /// Setting ngroups < nheads reduces the B and C projection sizes (analogous to
     /// GQA in attention), saving memory without a large accuracy cost.
     #[config(default = 1)]
     pub ngroups: usize,
@@ -346,7 +323,7 @@ impl Mamba2Config {
         self.expand * self.d_model
     }
 
-    /// `nheads H = d_inner / per_head_dim`.
+    /// `nheads = d_inner / per_head_dim`.
     pub fn nheads(&self) -> usize {
         self.d_inner() / self.per_head_dim
     }
@@ -490,9 +467,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     /// Process a full input sequence using the chunkwise SSD algorithm.
     ///
     /// This is the primary training and prefill path.  The computation is
-    /// **linear in T** but uses batched matrix multiplications (GEMMs) that
+    /// **linear in sequence** but uses batched matrix multiplications (GEMMs) that
     /// can exploit GPU tensor cores — unlike the naive sequential recurrence,
-    /// which requires O(T) serial steps.
+    /// which requires O(sequence) serial steps.
     ///
     /// ## Full dataflow
     ///
@@ -502,20 +479,20 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`;
     ///    `Ā = exp(Δ · A)`;  `B̄ = Δ · B`.
     /// 5. **Padding**: sequence padding.
-    /// 6. **Chunked SSD**: four-step chunkwise algorithm (see
-    ///    [`Self::chunked_selective_scan`]).
+    /// 6. **SSD Algorithm**: chunkwise selective scan algorithm selection.
+    ///     See [Mamba2SsdPath](Mamba2SsdPath) for more info.
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y) · σ(z)`.
     /// 8. **Out-projection**: `y → output`.
     ///
     /// ## Sequence padding
     ///
     /// If `sequence_unpadded % chunk_len ≠ 0`, the sequence is zero-padded
-    /// to the next multiple of Q.  Zero-padding is equivalent to inserting
+    /// to the next multiple of chunk_len.  Zero-padding is equivalent to inserting
     /// identity steps (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`), so the SSM
     /// state is carried forward unchanged through the pad — making it safe to
     /// read the final state of the padded last chunk as the true final state.
     ///
-    /// # Shapes
+    /// ## Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - output      : `[batch, sequence, d_model]`
     /// - cache (out) : updated convolution window and SSM state
@@ -561,9 +538,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // layer instead of 2.
         //
         // Projection output:  [z | xbc | dt_raw]
-        //   z      [B, T, d_inner]  — gate for the output RMSNorm
-        //   xbc    [B, T, conv_dim] — will become (x, B, C) after conv + split
-        //   dt_raw [B, T, nheads]   — raw discretisation step (pre-softplus)
+        //   `z      [batch, sequence, d_inner]`  — gate for the output RMSNorm
+        //   `xbc    [batch, sequence, conv_dim]` — will become (x, B, C) after conv + split
+        //   `dt_raw [batch, sequence, nheads]`   — raw discretisation step (pre-softplus)
         let (z_gate_bsi, xbc_bsv, dt_raw_bsh) = {
             let z_xbc_dt_bsd = self.in_proj.forward(input_bsm);
             assert_eq!([batch, sequence, d_in_proj_out], z_xbc_dt_bsd.dims());
@@ -576,9 +553,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
                 .split_with_sizes(vec![d_inner, conv_dim, nheads], 2)
                 .into_iter();
             (
-                parts.next().unwrap(), // z      [B, T, d_inner]
-                parts.next().unwrap(), // xbc    [B, T, conv_dim]
-                parts.next().unwrap(), // dt_raw [B, T, nheads]
+                parts.next().unwrap(), // z_gate_bsi
+                parts.next().unwrap(), // xbc_bsv
+                parts.next().unwrap(), // dt_raw_bsh
             )
         };
         assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
@@ -589,7 +566,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         san(&dt_raw_bsh);
 
         // ── Step 2: Causal depthwise Conv1d ───────────────────────────────────
-        // Apply the causal 1-D depthwise convolution to `xbc`.  To maintain
+        // Apply the causal 1-dimensional depthwise convolution to `xbc`.  To maintain
         // strict causality, the input is left-padded with the last
         // `(conv_kernel - 1)` columns from the cache (the tail of the previous
         // chunk), giving a padded input of length `(conv_kernel-1) + sequence`.
@@ -597,7 +574,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         //
         // The right-most `conv_kernel` columns of the padded input become the
         // new convolution cache for the next call.
-        let xbc_bvs = xbc_bsv.permute([0, 2, 1]); // [B, conv_dim, T]
+        let xbc_bvs = xbc_bsv.permute([0, 2, 1]);
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
 
         // Build the causally-padded input: [cached tail | new input]
@@ -622,12 +599,12 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         cache.conv_bvk = xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]);
         assert_eq!([batch, conv_dim, conv_kernel], cache.conv_bvk.dims());
 
-        // Apply the depthwise convolution and transpose back to [B, T, conv_dim].
+        // Apply the depthwise convolution and transpose back to [batch, sequence, conv_dim].
         let xbc_bvs = self.conv1d.forward(xbc_padded_bvS);
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
         san(&xbc_bvs);
 
-        let xbc_bsv = xbc_bvs.permute([0, 2, 1]); // [B, T, conv_dim]
+        let xbc_bsv = xbc_bvs.permute([0, 2, 1]);
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
 
         // SiLU activation (element-wise).
@@ -637,9 +614,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
 
         // ── Step 3: Split xbc into (x, B, C) ──────────────────────────────────
         // After activation, xbc is partitioned along the channel dimension:
-        //   x [B, T, d_inner]          → reshaped to [B, T, H, P]   (input)
-        //   B [B, T, ngroups·N]        → reshaped to [B, T, G, N]   (state input proj)
-        //   C [B, T, ngroups·N]        → reshaped to [B, T, G, N]   (state output proj)
+        //   x_bsi          → reshaped to x_bshp   (input)
+        //   b_bsGR        → reshaped to b_bsgr   (state input proj)
+        //   c_bsGR        → reshaped to c_bsgr   (state output proj)
         //
         // Note: in the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
@@ -649,15 +626,15 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             (
                 parts
                     .next()
-                    .unwrap() // [B, T, d_inner]
+                    .unwrap() // x_bsi
                     .reshape([batch, sequence, nheads, per_head_dim]),
                 parts
                     .next()
-                    .unwrap() // [B, T, ngroups·N]
+                    .unwrap() // b_bsGR
                     .reshape([batch, sequence, ngroups, state_rank]),
                 parts
                     .next()
-                    .unwrap() // [B, T, ngroups·N]
+                    .unwrap() // c_bsGR
                     .reshape([batch, sequence, ngroups, state_rank]),
             )
         };
@@ -667,7 +644,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // Compute the discrete-time parameters from the continuous-time A
         // and input-dependent step size Δ (ZOH discretisation, §4.5):
         //
-        //   Δₜ = softplus(dt_raw_t + dt_bias)     ∈ (0, ∞)
+        //   Δₜ = softplus(dt_rawₜ + dt_bias)     ∈ (0, ∞)
         //   Āₜ = exp(Δₜ · A)                       ∈ (0, 1)   [scalar per head]
         //   B̄ₜ = Δₜ · Bₜ                           ∈ ℝᴺ       [Euler approx]
         //
@@ -675,7 +652,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         // is standard in Mamba-1 and Mamba-2 (see §4.5 of the reference).
         //
         // `a_head_decay_h` = A = -exp(a_log) < 0 (negative, one scalar per head).
-        // Note: we pass this negative value to `chunked_selective_scan`; inside
+        // Note: we pass this negative value to the ssd algo; inside
         // that function it is multiplied by Δ > 0, giving a negative exponent
         // which produces Āₜ = exp(Δₜ·A) ∈ (0,1) as required.
         let dt_bias_11h = self.dt_bias_h.val().unsqueeze_dims(&[0, 1]);
@@ -700,34 +677,13 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let (x_bShp, dt_bSh, b_bSgr, c_bSgr) = if pad == 0 {
             (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr)
         } else {
-            let x_bshp = Tensor::cat(
-                vec![
-                    x_bshp.clone(),
-                    Tensor::zeros(Shape::new([batch, pad, nheads, per_head_dim]), &device),
-                ],
-                1,
-            );
-            let dt_bsh = Tensor::cat(
-                vec![
-                    dt_bsh,
-                    Tensor::zeros(Shape::new([batch, pad, nheads]), &device),
-                ],
-                1,
-            );
-            let b_bsgr = Tensor::cat(
-                vec![
-                    b_bsgr,
-                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), &device),
-                ],
-                1,
-            );
-            let c_bsgr = Tensor::cat(
-                vec![
-                    c_bsgr,
-                    Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), &device),
-                ],
-                1,
-            );
+            let pad_bShp = Tensor::zeros(Shape::new([batch, pad, nheads, per_head_dim]), &device);
+            let pad_bSh = Tensor::zeros(Shape::new([batch, pad, nheads]), &device);
+            let pad_bSgr = Tensor::zeros(Shape::new([batch, pad, ngroups, state_rank]), &device);
+            let x_bshp = Tensor::cat(vec![x_bshp.clone(), pad_bShp], 1);
+            let dt_bsh = Tensor::cat(vec![dt_bsh, pad_bSh], 1);
+            let b_bsgr = Tensor::cat(vec![b_bsgr, pad_bSgr.clone()], 1);
+            let c_bsgr = Tensor::cat(vec![c_bsgr, pad_bSgr], 1);
             (x_bshp.clone(), dt_bsh, b_bsgr, c_bsgr)
         };
 
@@ -807,13 +763,13 @@ mod step {
     impl<B: Backend> Mamba2<B> {
         /// Process a **single token** using the pure recurrent SSM form.
         ///
-        /// This is the O(H·P·N)-per-token decoding path.  It runs one tick of
+        /// This is the O(nheads·per_head_dim·state_rank)-per-token decoding path.  It runs one tick of
         /// the discretised Mamba-2 recurrence:
         ///
         /// ```text
         ///   Āₜ  = exp(Δₜ · A)           scalar per head, ∈ (0, 1)
         ///   B̄ₜ  = Δₜ · Bₜ               ∈ ℝᴺ   (Euler discretisation)
-        ///   hₜ  = Āₜ · hₜ₋₁ + B̄ₜ · xₜᵀ  ∈ ℝ^{P×N}   (outer product update)
+        ///   hₜ  = Āₜ · hₜ₋₁ + B̄ₜ · xₜᵀ  ∈ ℝ^{per_head_dim×state_rank}   (outer product update)
         ///   yₜ  = Cₜᵀ · hₜ + D · xₜ     ∈ ℝᴾ   (output)
         /// ```
         ///
@@ -866,9 +822,9 @@ mod step {
                     .split_with_sizes(vec![d_inner, conv_dim, nheads], 1)
                     .into_iter();
                 (
-                    parts.next().unwrap(), // z  [B, d_inner]
-                    parts.next().unwrap(), // xbc[B, conv_dim]
-                    parts.next().unwrap(), // dt [B, nheads]
+                    parts.next().unwrap(), // z_gate_bi
+                    parts.next().unwrap(), // xbc_bv
+                    parts.next().unwrap(), // dt_raw_bh
                 )
             };
             assert_eq!([batch, d_inner], z_gate_bi.dims());
@@ -899,8 +855,8 @@ mod step {
                 assert_eq!([conv_dim, 1, conv_kernel], conv1d_v1k.dims());
 
                 let conv1d_bvk = conv1d_v1k
-                    .permute([1, 0, 2]) // [1, conv_dim, conv_kernel]
-                    .expand([batch, conv_dim, conv_kernel]);
+                    .permute([1, 0, 2]) // conv1d_1vk
+                    .expand([batch, conv_dim, conv_kernel]); // conv1d_bvk
                 assert_eq!([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
 
                 // Element-wise multiply and sum over the kernel axis.
@@ -927,16 +883,16 @@ mod step {
                 (
                     parts
                         .next()
-                        .unwrap() // [B, d_inner]
-                        .reshape([batch, nheads, per_head_dim]),
+                        .unwrap() // x_bi
+                        .reshape([batch, nheads, per_head_dim]), // x_bhp
                     parts
                         .next()
-                        .unwrap() // [B, ngroups·N]
-                        .reshape([batch, ngroups, state_rank]),
+                        .unwrap() // b_bGR
+                        .reshape([batch, ngroups, state_rank]), // b_bgr
                     parts
                         .next()
-                        .unwrap() // [B, ngroups·N]
-                        .reshape([batch, ngroups, state_rank]),
+                        .unwrap() // c_bGR
+                        .reshape([batch, ngroups, state_rank]), // c_bgr
                 )
             };
 
@@ -951,40 +907,37 @@ mod step {
             let a_head_decay_h = -self.a_log_h.val().exp();
             assert_eq!([nheads], a_head_decay_h.dims());
 
-            // Āₜ = exp(Δₜ · A) ∈ (0, 1)   scalar per [B, H]
+            // Āₜ = exp(Δₜ · A) ∈ (0, 1)   scalar per [batch, nheads]
             let dta_bh = (dt_bh.clone() * a_head_decay_h.unsqueeze()).exp();
             assert_eq!([batch, nheads], dta_bh.dims());
 
             // ── SSM state update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────
-            // The cache holds h_{t-1} with shape [B, H, P, N].
-            // Āₜ is a scalar per head, so we broadcast it over P and N.
-            // B̄ₜ xₜᵀ is an outer product producing a [P, N] matrix per [B, H].
+            // The cache holds h_{t-1} with shape _bhpr.
+            // Āₜ is a scalar per head, so we broadcast it over per_head_dim and state_rank.
+            // B̄ₜ xₜᵀ is an outer product producing a _pr matrix per _bh.
 
             let ssm_shape_bhpr = [batch, nheads, per_head_dim, state_rank];
 
-            let dta_bhpr = dta_bh.unsqueeze_dims::<4>(&[2, 3]).expand(ssm_shape_bhpr); // [B, H, P, N]
+            let dta_bhpr = dta_bh.unsqueeze_dims::<4>(&[2, 3]).expand(ssm_shape_bhpr);
 
-            // B̄ₜ xₜᵀ = (Δₜ Bₜ) xₜᵀ:
-            //   x:  [B, H, P]     → broadcast to [B, H, P, N]
-            //   B:  [B, G, N]     → expand to [B, H, N]  → broadcast to [B, H, P, N]
-            //   Δ:  [B, H]        → broadcast to [B, H, P, N]
+            // B̄ₜ xₜᵀ = (Δₜ Bₜ) xₜᵀ
             let heads_per_group = nheads / ngroups;
             let dtbx_bhpr = {
                 let x_bhpr = x_bhp.clone().unsqueeze_dim::<4>(3).expand(ssm_shape_bhpr);
 
-                // Expand B from [B, G, N] → [B, H, P, N], matching the SSD forward path:
+                // Expand B from _bgr → _bhpr, matching the SSD forward path:
                 // each group's projection is replicated across the heads_per_group heads of
-                // that group so that heads 0..(H/G) belong to group 0, etc.
+                // that group so that heads 0..(nheads/ngroups) belong to group 0, etc.
                 let b_bhpr = b_bgr
-                    .unsqueeze_dim::<4>(2) // [B, G, 1, N]
-                    .expand([batch, ngroups, heads_per_group, state_rank]) // [B, G, H/G, N]
-                    .reshape([batch, nheads, state_rank]) // [B, H, N]
-                    .unsqueeze_dim::<4>(2) // [B, H, 1, N]
-                    .expand(ssm_shape_bhpr); // [B, H, P, N]
+                    .unsqueeze_dim::<4>(2) // b_bg1r
+                    .expand([batch, ngroups, heads_per_group, state_rank]) // b_bgHr
+                    .reshape([batch, nheads, state_rank]) // b_bhr
+                    .unsqueeze_dim::<4>(2) // b_bh1r
+                    .expand(ssm_shape_bhpr); // b_bhpr
 
                 let dt_bhpr = dt_bh.unsqueeze_dims::<4>(&[2, 3]).expand(ssm_shape_bhpr);
 
-                dt_bhpr * b_bhpr * x_bhpr // B̄ₜ xₜᵀ  [B, H, P, N]
+                dt_bhpr * b_bhpr * x_bhpr // B̄ₜ xₜᵀ
             };
             assert_eq!(ssm_shape_bhpr, dtbx_bhpr.dims());
 
@@ -994,17 +947,17 @@ mod step {
 
             // ── Output:  yₜ = Cₜ hₜ + D xₜ ──────────────────────────────────
             let y_bi = {
-                // Cₜ hₜ:  element-wise multiply C (broadcast to [B, H, P, N])
-                // with h_t, then sum over N.
+                // Cₜ hₜ:  element-wise multiply C
+                // with hₜ, then sum over state_rank.
                 let c_bhpr = c_bgr
-                    .unsqueeze_dim::<4>(2) // [B, G, 1, N]
-                    .expand([batch, ngroups, heads_per_group, state_rank]) // [B, G, H/G, N]
-                    .reshape([batch, nheads, state_rank]) // [B, H, N]
-                    .unsqueeze_dim::<4>(2) // [B, H, 1, N]
-                    .expand(ssm_shape_bhpr); // [B, H, P, N]
+                    .unsqueeze_dim::<4>(2) // c_bg1r
+                    .expand([batch, ngroups, heads_per_group, state_rank]) // c_bgHr
+                    .reshape([batch, nheads, state_rank]) // c_bhr
+                    .unsqueeze_dim::<4>(2) // c_bh1r
+                    .expand(ssm_shape_bhpr); // c_bhpr
                 assert_eq!(ssm_shape_bhpr, c_bhpr.dims());
 
-                let ch_bhp = (cache.ssm_bhpr.clone() * c_bhpr).sum_dim(3).squeeze_dim(3); // sum over N → [B, H, P]
+                let ch_bhp = (cache.ssm_bhpr.clone() * c_bhpr).sum_dim(3).squeeze_dim(3);
                 assert_eq!([batch, nheads, per_head_dim], ch_bhp.dims());
 
                 // D xₜ:  per-head scalar skip.
@@ -1016,7 +969,7 @@ mod step {
                 let y_bhp = ch_bhp + skip_bhp;
                 assert_eq!([batch, nheads, per_head_dim], y_bhp.dims());
 
-                // Flatten heads → [B, d_inner], then apply gated RMSNorm.
+                // Flatten heads, then apply gated RMSNorm.
                 let y_bi = y_bhp.reshape([batch, d_inner]);
                 self.norm.forward(y_bi, z_gate_bi)
             };

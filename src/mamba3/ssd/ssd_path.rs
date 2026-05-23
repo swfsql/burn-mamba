@@ -3,41 +3,51 @@ use burn::prelude::*;
 
 /// Ssd algorithm selection.
 ///
-/// Each variant carries the chunk length Q for the SSD algorithm.
+/// Each variant carries the chunk length for the SSD algorithm.
 /// Larger values increase the intra-chunk GEMM work and reduce the
 /// inter-chunk scan length.
 /// Optimal value is approximately `√(state_rank · per_head_dim)`.
 #[derive(Debug, Clone)]
 pub enum Mamba3SsdPath {
+    // TODO: add specific mamba-3 python files references. Currently the references are for mamba-2.
+    //
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.
-    /// See [`chunked_selective_scan`] for more info.
+    /// See [`Mamba3::ssd_minimal`] for more info.
     ///
     /// For training, you may prefer using [SerialRecalculated](Self::SerialRecalculated) instead.
     ///
-    /// Based on `/mamba_ssm/modules/ssd_minimal.py` from the `state-spaces/mamba` github reference.
+    /// Based on `/mamba_ssm/modules/ssd_minimal.py` from the `state-spaces/mamba` github reference,
+    /// adapted to Mamba-3.
     Minimal(Option<usize>),
+    // TODO: add specific mamba-3 python files references. Currently the references are for mamba-2.
+    //
     /// (Hybrid) Serial SSD.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
+    /// See [`Mamba3::ssd_serial`] for more info.  
     /// For the backward operation, this relies on autodiff.
     /// For a custom backwards that saves memory, see [SerialRecalculated](Self::SerialRecalculated).
     ///
-    /// Based on 5 kernels on `/mamba_ssm/ops/triton/` from the `state-spaces/mamba` github reference:
+    /// Based on 5 kernels on `/mamba_ssm/ops/triton/`, adapted to mamba-3,
+    /// from the `state-spaces/mamba` github reference:
     /// - `ssd_chunk_state.py` (K1, K3).
     /// - `ssd_bmm.py` (K2).
     /// - `ssd_state_passing.py` (K4).
     /// - `ssd_chunk_scan.py` (K5).
     Serial(Option<usize>),
+    // TODO: add specific mamba-3 python files references. Currently the references are for mamba-2.
+    //
     /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
+    /// See [`Mamba3::ssd_serial_recalculated`] for more info.  
     /// Contains a custom backward operation that saves memory.
     /// For an autodiff backwards, see [Serial](Self::Serial).
     ///
-    /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py` from the `state-spaces/mamba`
-    /// github reference.
+    /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py`, adapted to Mamba-3,
+    /// from the `state-spaces/mamba` github reference.
     SerialRecalculated(Option<usize>),
 }
 
@@ -51,7 +61,7 @@ pub struct Mamba3SsdInput<B: Backend> {
     ///
     /// # Shape
     /// - [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]
-    pub v_bnlrhp: Tensor<B, 6>,
+    pub v_bnlmhp: Tensor<B, 6>,
 
     /// Pre-combined log-decay `Δ·A` (negative).
     ///
@@ -63,13 +73,13 @@ pub struct Mamba3SsdInput<B: Backend> {
     ///
     /// # Shape
     /// - [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]
-    pub b_bnlrhn: Tensor<B, 6>,
+    pub b_bnlmhr: Tensor<B, 6>,
 
     /// Query/C tensor: same processing as B.
     ///
     /// # Shape
     /// - [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]
-    pub c_bnlrhn: Tensor<B, 6>,
+    pub c_bnlmhr: Tensor<B, 6>,
 
     /// Initial SSM hidden state.
     ///
@@ -87,10 +97,10 @@ pub struct Mamba3SsdInput<B: Backend> {
 impl<B: Backend> Mamba3SsdInput<B> {
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
-        san(&self.v_bnlrhp);
+        san(&self.v_bnlmhp);
         san(&self.da_bnlh);
-        san(&self.b_bnlrhn);
-        san(&self.c_bnlrhn);
+        san(&self.b_bnlmhr);
+        san(&self.c_bnlmhr);
         san(&self.initial_state_bhpr);
         if let Some(ref init_state_hpr) = self.init_state_hpr {
             san(init_state_hpr);
@@ -179,7 +189,7 @@ impl Mamba3SsdPath {
     /// Dispatches to `ssd_minimal`, `ssd_serial`, or `ssd_serial_recalculated` based on the variant.
     ///
     /// # Returns
-    /// - `y_bnlrhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn run<B: Backend + Mamba3BackendExt>(
         &self,
@@ -300,10 +310,10 @@ mod tests {
 
         fn ssd_input(&self) -> Mamba3SsdInput<B> {
             Mamba3SsdInput {
-                v_bnlrhp: self.v.val(),
+                v_bnlmhp: self.v.val(),
                 da_bnlh: self.da.val(),
-                b_bnlrhn: self.b.val(),
-                c_bnlrhn: self.c.val(),
+                b_bnlmhr: self.b.val(),
+                c_bnlmhr: self.c.val(),
                 initial_state_bhpr: self.initial_state.val(),
                 // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
                 init_state_hpr: None,
@@ -326,14 +336,14 @@ mod tests {
     /// using fixed (non-tracked) random "head" tensors. Two distinct heads so
     /// that gradients for the y-branch and the state-branch are independent.
     fn loss_from_outputs(
-        y_bnlrhp: Tensor<B, 6>,
+        y_bnlmhp: Tensor<B, 6>,
         final_state_bhpr: Tensor<B, 4>,
         y_head: Tensor<InnerB, 6>,
         s_head: Tensor<InnerB, 4>,
     ) -> Tensor<B, 1> {
         let y_head = Tensor::from_inner(y_head);
         let s_head = Tensor::from_inner(s_head);
-        (y_bnlrhp * y_head).sum() + (final_state_bhpr * s_head).sum()
+        (y_bnlmhp * y_head).sum() + (final_state_bhpr * s_head).sum()
     }
 
     /// Run a single SSD path and extract the gradients of all 5 inputs.

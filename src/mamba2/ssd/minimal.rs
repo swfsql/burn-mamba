@@ -2,7 +2,7 @@
 //!
 //! During training (and prefill), a naive sequential recurrence cannot
 //! exploit GPU tensor cores.  The **chunkwise SSD algorithm** (§4 of the
-//! paper) achieves this by splitting the sequence into chunks of length Q
+//! paper) achieves this by splitting the sequence into chunks of length chunk_len
 //! and decomposing the computation into four steps:
 //!
 //! ```text
@@ -16,7 +16,7 @@
 //!
 //! Steps 1, 2, 4 are fully parallel across chunks and use batched matrix
 //! multiplications (exploiting tensor cores).  Step 3 is a short sequential
-//! scan over `T/Q` elements rather than `T`.
+//! scan over `sequence/chunk_len` elements rather than `sequence`.
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -30,8 +30,8 @@ impl<B: Backend> Mamba2<B> {
     /// Minimal chunkwise SSD algorithm.
     ///
     /// Implements the four-step decomposition of the semiseparable matrix
-    /// multiplication described in §4 of the paper.  The sequence of length T
-    /// is split into `nchunks = ⌈T/Q⌉` chunks of length Q.
+    /// multiplication described in §4 of the paper.  The sequence of length
+    /// is split into `nchunks = ⌈sequence/chunk_len⌉` chunks of length chunk_len.
     ///
     /// ## The four steps
     ///
@@ -39,13 +39,13 @@ impl<B: Backend> Mamba2<B> {
     ///
     /// Within each chunk, compute the output assuming the initial hidden state
     /// is zero.  This is the *quadratic attention form* of the SSD layer
-    /// restricted to a window of Q tokens (§4.1):
+    /// restricted to a window of chunk_len tokens (§4.1):
     ///
     /// ```text
     ///   Y_diag[n] = (L[n] ∘ C[n] B[n]ᵀ) · X[n]
     /// ```
     ///
-    /// where `L[n]` is the Q×Q 1-semiseparable mask for chunk n.
+    /// where `L[n]` is the chunk_len×chunk_len 1-semiseparable mask for chunk n.
     /// This step is a batched GEMM (exploits tensor cores).
     ///
     /// ### Step 2 — Chunk state (state_bnhpr)
@@ -72,7 +72,7 @@ impl<B: Backend> Mamba2<B> {
     /// decay over the whole chunk.  This step is implemented as a single
     /// batched matrix multiplication using the 1-semiseparable structure of
     /// the inter-chunk decay matrix (same `segsum` trick, now over chunks).
-    /// The scan has length `nchunks = T/Q` rather than T, so its cost is
+    /// The scan has length `nchunks = sequence/chunk_len` rather than sequence, so its cost is
     /// negligible for typical chunk sizes.
     ///
     /// ### Step 4 — State-to-output (Y_off)
@@ -109,7 +109,7 @@ impl<B: Backend> Mamba2<B> {
         // projection across all heads_per_group heads in that group.
         let heads_per_group = nheads / ngroups;
 
-        // b_bnlgr → b_bnlhr  [batch, nchunks, chunk_len, nheads, state_rank]
+        // b_bnlgr → b_bnlhr
         let b_bnlhr = input
             .b_bnlgr
             .clone()
@@ -122,9 +122,9 @@ impl<B: Backend> Mamba2<B> {
                 heads_per_group,
                 state_rank,
             ]) // b_bnlgHr
-            .reshape([batch, nchunks, chunk_len, nheads, state_rank]);
+            .reshape([batch, nchunks, chunk_len, nheads, state_rank]); // b_bnlhr
 
-        // c_bnlgr → c_bnlhr  [batch, nchunks, chunk_len, nheads, state_rank]
+        // c_bnlgr → c_bnlhr
         let c_bnlhr = input
             .c_bnlgr
             .clone()
@@ -137,9 +137,9 @@ impl<B: Backend> Mamba2<B> {
                 heads_per_group,
                 state_rank,
             ]) // c_bnlgHr
-            .reshape([batch, nchunks, chunk_len, nheads, state_rank]);
+            .reshape([batch, nchunks, chunk_len, nheads, state_rank]); // c_bnlhr
 
-        // B̄ₜ = Δₜ · Bₜ   [batch, nchunks, chunk_len, nheads, state_rank]
+        // B̄ₜ = Δₜ · Bₜ
         let delta_b_bnlhr = input.dt_bnlh.clone().unsqueeze_dim(4) * b_bnlhr.clone();
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, state_rank],
@@ -153,11 +153,12 @@ impl<B: Backend> Mamba2<B> {
                 .a_decay_h
                 .clone()
                 .unsqueeze_dims::<4>(&[0, 1, 2]) // a_head_decay_111h
-                .expand([batch, nchunks, chunk_len, nheads]);
+                .expand([batch, nchunks, chunk_len, nheads]) // a_decay_bnlh
+            ;
         san(&a_bnlh);
 
         // ── Reshape ───────────────────────────────────────────────────────────
-        // a (log-decay): [B, nchunks, chunk_len, H] → [B, H, nchunks, chunk_len]
+        // a (log-decay)
         let a_bhnl = a_bnlh.permute([0, 3, 1, 2]);
         assert_eq!([batch, nheads, nchunks, chunk_len], a_bhnl.dims());
 
@@ -174,17 +175,17 @@ impl<B: Backend> Mamba2<B> {
         // =============================================================
         //
         // For each chunk n, compute Y_diag[n] = (L[n] ∘ C[n] B[n]ᵀ) · X[n]
-        // where L[n] ∈ ℝ^{Q×Q} is the 1-semiseparable mask for the chunk.
+        // where L[n] ∈ ℝ^{chunk_len×chunk_len} is the 1-semiseparable mask for the chunk.
         //
         // L[n]_{i,j} = exp(Σ_{k=j+1..i} a_{n,k})  for i ≥ j
         //            = exp(a_cumsum[n,i] - a_cumsum[n,j])   (using segsum trick)
         //
         // Implementation uses three batched matmuls:
-        //   (a) C[n] · B[n]ᵀ  (contract over state_rank N)  → temp1 [B, nchunks, H, Q, Q]
-        //   (b) temp1 ∘ L[n]                                 → temp2 [B, nchunks, H, Q, Q]
-        //   (c) temp2 · X[n]  (contract over Q)              → Y_diag [B, nchunks, Q, H, P]
+        //   (a) C[n] · B[n]ᵀ  (contract over state_rank state_rank)  → temp1
+        //   (b) temp1 ∘ L[n]                                 → temp2
+        //   (c) temp2 · X[n]  (contract over chunk_len)              → Y_diag
         let y_diag_bnlhp = {
-            // Permute to [B, nchunks, H, Q, N] for the matmul along Q and N.
+            // Permute for the matmul along chunk_len and state_rank.
             let b_bnhlr = delta_b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
             let c_bnhlr = c_bnlhr.clone().permute([0, 1, 3, 2, 4]);
             assert_eq!(
@@ -196,10 +197,10 @@ impl<B: Backend> Mamba2<B> {
                 c_bnhlr.dims()
             );
 
-            // (a) C[n] · B[n]ᵀ → [B, nchunks, H, Q, Q]
-            //     Contracts over state_rank N.
-            let b_bnhrl = b_bnhlr.permute([0, 1, 2, 4, 3]); // [B, n, H, N, Q]
-            let cb_bnhll = c_bnhlr.matmul(b_bnhrl); // [B, n, H, Q, Q]
+            // (a) C[n] · B[n]ᵀ
+            //     Contracts over state_rank.
+            let b_bnhrl = b_bnhlr.permute([0, 1, 2, 4, 3]);
+            let cb_bnhll = c_bnhlr.matmul(b_bnhrl);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, chunk_len],
                 cb_bnhll.dims()
@@ -207,7 +208,7 @@ impl<B: Backend> Mamba2<B> {
             san(&cb_bnhll);
 
             // (b) Element-wise multiply with the 1-SS mask L.
-            //     L = exp(segsum(a_bhnl))  [B, H, nchunks, Q, Q]
+            //     L = exp(segsum(a_bhnl))
             //     Lᵢⱼ = exp(a_cumsum[n,i] - a_cumsum[n,j])  (Eq. 4–5)
             let l_bhnll = segsum(a_bhnl.clone()).exp();
             assert_eq!(
@@ -216,7 +217,7 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&l_bhnll);
 
-            // Permute both to [B, n, Q, H, Q] for the broadcast multiply.
+            // Permute both for the broadcast multiply.
             let cb_bnlhl = cb_bnhll.permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, chunk_len, nheads, chunk_len],
@@ -233,14 +234,14 @@ impl<B: Backend> Mamba2<B> {
             san(&masked_cb_bnlhl);
 
             // (c) masked_CB · X → Y_diag.
-            //     Contract over the last Q dimension.
+            //     Contract over the last chunk_len dimension.
             let masked_cb_bnhll = masked_cb_bnlhl.permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, chunk_len],
                 masked_cb_bnhll.dims()
             );
 
-            let x_bnhlp = input.x_bnlhp.clone().permute([0, 1, 3, 2, 4]); // [B, n, H, Q, P]
+            let x_bnhlp = input.x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 x_bnhlp.dims()
@@ -253,7 +254,7 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&y_diag_bnhlp);
 
-            y_diag_bnhlp.permute([0, 1, 3, 2, 4]) // → [B, n, Q, H, P]
+            y_diag_bnhlp.permute([0, 1, 3, 2, 4]) // y_diag_bnlhp
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
@@ -267,16 +268,16 @@ impl<B: Backend> Mamba2<B> {
         // For each chunk n, compute the SSM state at the end of the chunk
         // assuming the initial state is zero (Eq. 20):
         //
-        //   s[n] = Σ_{t ∈ [0, Q)} exp(a_cumsum[n,-1] - a_cumsum[n,t]) · B̄[n,t] · x[n,t]ᵀ
+        //   s[n] = Σ_{t ∈ [0, chunk_len)} exp(a_cumsum[n,-1] - a_cumsum[n,t]) · B̄[n,t] · x[n,t]ᵀ
         //
         // Equivalently:
         //   decay_state[n, t] = exp(a_cum_last[n] - a_cum[n, t])
-        //   s[n] = Σ_t  decay_state[n, t] · x[n, t]ᵀ · B̄[n, t]     (outer product over P and N)
+        //   s[n] = Σₜ  decay_state[n, t] · x[n, t]ᵀ · B̄[n, t]     (outer product over per_head_dim and state_rank)
         //
         // This is a batched GEMM, fully parallel across n and b.
         let state_bnhpr = {
             // Decay from each position t to the end of the chunk:
-            //   decay_state[n, t] = exp(a_cum[n, Q-1] - a_cum[n, t])
+            //   decay_state[n, t] = exp(a_cum[n, chunk_len-1] - a_cum[n, t])
             let a_cumsum_last_bhn1 = a_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
             assert_eq!([batch, nheads, nchunks, 1], a_cumsum_last_bhn1.dims());
 
@@ -284,7 +285,7 @@ impl<B: Backend> Mamba2<B> {
             assert_eq!([batch, nheads, nchunks, chunk_len], decay_state_bhnl.dims());
             san(&decay_state_bhnl);
 
-            // Multiply decay into x: decay[n, t] · x[n, t]  → [B, n, Q, H, P]
+            // Multiply decay into x: decay[n, t] · x[n, t]
             let decay_state_bnlh1 = decay_state_bhnl.permute([0, 2, 3, 1]).unsqueeze_dim(4);
             assert_eq!(
                 [batch, nchunks, chunk_len, nheads, 1],
@@ -297,8 +298,7 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&decayed_x_bnlhp);
 
-            // Contract over Q: (decayed_x[n, :, h, :])ᵀ · B̄[n, :, h, :]
-            //   [B, n, H, P, Q] × [B, n, H, Q, N] → [B, n, H, P, N]
+            // Contract over chunk_len: (decayed_x[n, :, h, :])ᵀ · B̄[n, :, h, :]
             let decayed_x_bnhpl = decayed_x_bnlhp.permute([0, 1, 3, 4, 2]);
             assert_eq!(
                 [batch, nchunks, nheads, per_head_dim, chunk_len],
@@ -326,7 +326,7 @@ impl<B: Backend> Mamba2<B> {
         //
         //   h[n] = Ā_chunk[n] · h[n-1] + s[n]     (Eq. 22)
         //
-        // where Ā_chunk[n] = exp(Σ_{t ∈ chunk n} Δₜ · A) = exp(a_cum[n, Q-1]).
+        // where Ā_chunk[n] = exp(Σ_{t ∈ chunk n} Δₜ · A) = exp(a_cum[n, chunk_len-1]).
         //
         // Unrolling the recurrence gives a matrix form identical to Step 2 but
         // at the chunk level: each new state is a weighted sum of all previous
@@ -337,7 +337,6 @@ impl<B: Backend> Mamba2<B> {
         // for n ∈ {0, ..., nchunks-1}, plus the final state after all chunks.
         let (state_bnhpr, final_state_bnpr) = {
             // Prepend the initial state h₀ to the array of chunk state.
-            // Shape: [B, 1+nchunks, H, P, N]
             let initial_state_b1hpr = input.initial_state_bhpr.unsqueeze_dim(1);
             assert_eq!(
                 [batch, 1, nheads, per_head_dim, state_rank],
@@ -369,8 +368,8 @@ impl<B: Backend> Mamba2<B> {
             // a_cum_last[n] = Σ_{t ∈ chunk n} Δₜ · A   (the total log-decay of chunk n)
             let a_cumsum_last_bhn = a_cumsum_bhnl
                 .clone()
-                .slice(s![.., .., .., -1])
-                .squeeze_dim(3); // [B, H, nchunks]
+                .slice(s![.., .., .., -1]) // a_cumsum_bhn1
+                .squeeze_dim(3); // a_cumsum_bhn
             assert_eq!([batch, nheads, nchunks], a_cumsum_last_bhn.dims());
 
             // Prepend a zero for the initial state (no decay before chunk 0).
@@ -380,7 +379,7 @@ impl<B: Backend> Mamba2<B> {
                     a_cumsum_last_bhn,
                 ],
                 2,
-            ); // [B, H, 1+nchunks]
+            );
             assert_eq!([batch, nheads, 1 + nchunks], a_chunk_pad_bhN.dims());
 
             // 1-SS inter-chunk decay matrix.
@@ -394,18 +393,17 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&decay_chunk_bhNN);
 
-            // Flatten the state's (P, N) dimensions for the matmul.
-            let flat_state_dim = per_head_dim * state_rank; // f = P·N
+            // Flatten the state's (per_head_dim, state_rank) dimensions for the matmul.
+            let flat_state_dim = per_head_dim * state_rank; // f = per_head_dim·state_rank
             let state_bhNf = state_bNhpr
                 .clone()
-                .permute([0, 2, 1, 3, 4]) // [B, H, 1+n, P, N]
-                .reshape([batch, nheads, 1 + nchunks, flat_state_dim]);
+                .permute([0, 2, 1, 3, 4]) // state_bhNpr
+                .reshape([batch, nheads, 1 + nchunks, flat_state_dim]); // state_bhNf
             assert_eq!(
                 [batch, nheads, 1 + nchunks, flat_state_dim],
                 state_bhNf.dims()
             );
 
-            // Matmul: [B, H, 1+n, 1+n] × [B, H, 1+n, f] → [B, H, 1+n, f]
             let new_state_bhNf = decay_chunk_bhNN.matmul(state_bhNf);
             assert_eq!(
                 [batch, nheads, 1 + nchunks, flat_state_dim],
@@ -431,7 +429,7 @@ impl<B: Backend> Mamba2<B> {
                 .squeeze_dim(2);
 
             (
-                state_bhnpr.permute([0, 2, 1, 3, 4]), // → [B, n, H, P, N]
+                state_bhnpr.permute([0, 2, 1, 3, 4]), // state_bnhpr
                 final_state_bhpr,
             )
         };
@@ -458,7 +456,7 @@ impl<B: Backend> Mamba2<B> {
         // start of the chunk to position t.
         //
         // Implementation:
-        //   (a) C[n] · h[n-1]ᵀ  (contract over N)  → [B, n, H, Q, P]
+        //   (a) C[n] · h[n-1]ᵀ  (contract over state_rank)
         //   (b) element-wise multiply with exp(a_cum)
         let y_off_bnlhp = {
             // exp(a_cumsum[n, t]): decay from start of chunk to position t.
@@ -469,21 +467,20 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&state_decay_out_bhnl);
 
-            // (a) C[n] · h[n-1]ᵀ  → [B, n, H, Q, P]
-            //   C: [B, n, H, Q, N],  h: [B, n, H, N, P]  (transposed from [B,n,H,P,N])
-            let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]); // [B, n, H, Q, N]
+            // (a) C[n] · h[n-1]ᵀ
+            let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 c_bnhlr.dims()
             );
 
-            let state_bnhrp = state_bnhpr.permute([0, 1, 2, 4, 3]); // [B, n, H, N, P]
+            let state_bnhrp = state_bnhpr.permute([0, 1, 2, 4, 3]);
             assert_eq!(
                 [batch, nchunks, nheads, state_rank, per_head_dim],
                 state_bnhrp.dims()
             );
 
-            let ch_bnhlp = c_bnhlr.matmul(state_bnhrp); // [B, n, H, Q, P]
+            let ch_bnhlp = c_bnhlr.matmul(state_bnhrp);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 ch_bnhlp.dims()
@@ -504,7 +501,7 @@ impl<B: Backend> Mamba2<B> {
             );
             san(&y_off_bnhlp);
 
-            y_off_bnhlp.permute([0, 1, 3, 2, 4]) // → [B, n, Q, H, P]
+            y_off_bnhlp.permute([0, 1, 3, 2, 4]) // y_off_bnlhp
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
@@ -535,8 +532,8 @@ impl<B: Backend> Mamba2<B> {
 
 /// Compute stable segment sums for constructing the 1-semiseparable mask.
 ///
-/// Given a tensor `x` of shape `[..., T]`, returns a tensor of shape
-/// `[..., T, T]` where:
+/// Given a tensor `x` of shape `[..., sequence]`, returns a tensor of shape
+/// `[..., sequence, sequence]` where:
 ///
 /// ```text
 ///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]     for i ≥ j   (lower triangle)
@@ -580,12 +577,12 @@ fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tenso
     // Broadcast along two different axes to compute all pairwise differences:
     //   x_cumsum_row[..., i, j] = cumsum[..., i]   (i varies along axis D)
     //   x_cumsum_col[..., i, j] = cumsum[..., j]   (j varies along axis D-1)
-    let x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D); // [..., T, 1]
-    let x_cumsum_col = x_cumsum.unsqueeze_dim(D - 1); // [..., 1, T]
+    let x_cumsum_row = x_cumsum.clone().unsqueeze_dim(D); // [..., sequence, 1]
+    let x_cumsum_col = x_cumsum.unsqueeze_dim(D - 1); //     [..., 1, sequence]
 
     // diff[..., i, j] = cumsum[i] - cumsum[j]
     //                 = x[j+1] + ... + x[i]    for i ≥ j
-    let diff = x_cumsum_row - x_cumsum_col; // [..., T, T]
+    let diff = x_cumsum_row - x_cumsum_col; // [..., sequence, sequence]
     san(&diff);
 
     // Mask the strict upper triangle (i < j) with -∞.

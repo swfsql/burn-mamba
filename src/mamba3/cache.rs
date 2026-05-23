@@ -3,15 +3,15 @@
 //! During autoregressive (token-by-token) generation, three pieces of state
 //! must be preserved between calls:
 //!
-//! 1. **SSM hidden state** — `hₜ ∈ ℝ^{P×N}` per head, compressed context.
-//! 2. **Previous K state** — `B_{t-1}` per rank `[batch, mimo_rank, nheads, state_rank]`,
+//! 1. **SSM hidden state** — `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, compressed context.
+//! 2. **Previous K state** — `Bₜ₋₁` per rank `[batch, mimo_rank, nheads, state_rank]`,
 //!    needed for the β term of the trapezoidal recurrence.
-//! 3. **Previous V state** — `x_{t-1}` per head `[batch, nheads, per_head_dim]`,
-//!    paired with k_state to reconstruct β B_{t-1} ⊗ x_{t-1}.
+//! 3. **Previous V state** — `xₜ₋₁` per head `[batch, nheads, per_head_dim]`,
+//!    paired with k_state to reconstruct β Bₜ₋₁ ⊗ xₜ₋₁.
 //! 4. **Cumulative RoPE angle** — the accumulated rotation angle up to position
 //!    `t`, needed to correctly continue data-dependent rotary embeddings.
 //!
-//! Note: Mamba-3 has **no conv cache** (the short 1-D convolution present in
+//! Note: Mamba-3 has **no conv cache** (the short 1-dimensional convolution present in
 //! Mamba-3 is removed; its role is absorbed by the trapezoidal discretization
 //! and the learnable B/C biases).
 
@@ -75,42 +75,42 @@ pub struct Mamba3Cache<B: Backend> {
     /// **SSM hidden state** `hₜ`.
     ///
     /// Updated via the trapezoidal recurrence:
-    /// `hₜ = αₜ hₜ₋₁ + βₜ (sum_r K_{t-1}[r] ⊗ (V_{t-1} * mimo_x[r])) + γₜ (sum_r Bₜ[r] ⊗ (xₜ * mimo_x[r]))`
+    /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Kₜ₋₁[m] ⊗ (Vₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<B, 4>,
 
-    /// **Previous token's B per rank** = `B_{t-1}[r]`.
+    /// **Previous token's B per mimo rank** = `Bₜ₋₁[m]`.
     ///
-    /// Used to reconstruct the β term: `β * sum_r B_{t-1}[r] ⊗ (x_{t-1} * mimo_x[r])`.
+    /// Used to reconstruct the β term: `β * sum_r Bₜ₋₁[m] ⊗ (xₜ₋₁ * mimo_x[m])`.
     /// For SISO (mimo_rank=1) this is shape `[batch, 1, nheads, state_rank]`.
     ///
     /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_brhn: Tensor<B, 4>,
+    pub k_state_bmhr: Tensor<B, 4>,
 
-    /// **Previous token's x** = `x_{t-1}`.
+    /// **Previous token's x** = `xₜ₋₁`.
     ///
-    /// Combined with `k_state_brhn` and `mimo_x` to produce the β term.
+    /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term.
     ///
     /// Shape: `[batch, nheads, per_head_dim]`
     pub v_state_bhp: Tensor<B, 3>,
 
     /// **Cumulative data-dependent RoPE angle** up to the current position.
     ///
-    /// Each step updates: `cum_angle_{t} = cum_angle_{t-1} + Δ_t · tanh(θ_t) · π`
+    /// Each step updates: `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · tanh(θₜ) · π`
     ///
     /// Starts at zero for fresh sequences; continued across calls for streaming.
     ///
     /// Shape: `[batch, nheads, num_rope_angles]`
-    pub cum_angle_bhr: Tensor<B, 3>,
+    pub cum_angle_bha: Tensor<B, 3>,
 }
 
 impl<B: Backend> Mamba3Cache<B> {
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        san(&self.k_state_brhn);
+        san(&self.k_state_bmhr);
         san(&self.v_state_bhp);
-        san(&self.cum_angle_bhr);
+        san(&self.cum_angle_bha);
     }
 }
 
@@ -120,18 +120,18 @@ pub struct Mamba3CacheConfig {
     /// Batch size.
     pub batch: usize,
 
-    /// State rank N.
+    /// State rank.
     #[config(default = 128)]
     pub state_rank: usize,
 
-    /// Head dimension P.
+    /// Head dimension per_head_dim.
     #[config(default = 64)]
     pub per_head_dim: usize,
 
-    /// Number of SSM heads H.
+    /// Number of SSM heads.
     pub nheads: usize,
 
-    /// MIMO rank R.  1 = SISO.
+    /// MIMO rank.  1 = SISO.
     #[config(default = 1)]
     pub mimo_rank: usize,
 
@@ -159,17 +159,17 @@ impl Mamba3CacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let k_state_brhn = Tensor::zeros(
+        let k_state_bmhr = Tensor::zeros(
             [self.batch, self.mimo_rank, self.nheads, self.state_rank],
             device,
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let cum_angle_bhr = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
+        let cum_angle_bha = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
         Mamba3Cache {
             ssm_bhpr,
-            k_state_brhn,
+            k_state_bmhr,
             v_state_bhp,
-            cum_angle_bhr,
+            cum_angle_bha,
         }
     }
 }
