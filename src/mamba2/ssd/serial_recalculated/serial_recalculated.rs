@@ -145,49 +145,11 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
     }
 }
 
-// For inference and for any backend, fallback to the default impl (to Mamba2::ssd_serial).
+// Per-backend impls: each delegates to the trait's default body. The custom
+// autodiff backward lives in `super::backward` as a separate impl.
 //
-// impl<B: Backend> Mamba2BackendExt for B {}
-// Note: cannot generally implement as above as it conflicts with the custom autodiff impl.
-// So it's necessary to implement for each backend.
-//
-// TODO: somehow avoid leaking backend-* features into the library
-#[cfg(feature = "backend-ndarray")]
-impl<F, I> Mamba2BackendExt for burn::backend::NdArray<F, I> {}
-#[cfg(feature = "backend-flex")]
-impl Mamba2BackendExt for burn::backend::Flex {}
-#[cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu"))]
-impl<F, I> Mamba2BackendExt for burn::backend::libtorch::LibTorch<F, I> {}
-#[cfg(feature = "backend-remote")]
-impl<F, I> Mamba2BackendExt for burn::backend::RemoteBackend<F, I> {}
-// impl for cubecl backends
-#[cfg(feature = "cubecl")]
-mod cubecl {
-    use burn_cubecl::{CubeBackend, CubeRuntime, FloatElement, IntElement, element::BoolElement};
-    impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> super::Mamba2BackendExt
-        for CubeBackend<R, F, I, BT>
-    {
-    }
-}
+// TODO: somehow avoid leaking backend-* features into the library.
+crate::impl_ssd_backend_ext_for_burn_backends!(Mamba2BackendExt);
 
-// impl for fusion backends — delegates to the default impl, which runs the serial
-// computation using the inner backend's standard tensor operations.
-#[cfg(feature = "fusion")]
-mod fusion {
-    use burn_fusion::{Fusion, FusionBackend};
-    impl<B: FusionBackend + super::Mamba2BackendExt> super::Mamba2BackendExt for Fusion<B> {}
-}
-
-/// Marker for autodiff-compatible backends that are valid for the custom backward implementation.
-#[cfg(feature = "autodiff")]
-pub trait Mamba2AutodiffBackendExt:
-    Backend + Mamba2BackendExt + burn::tensor::backend::AutodiffBackend
-{
-}
-// Any autodiff-compatible backend is valid with our custom implementation
-//
-// Note: This is just a marker. The actual custom implementation is at super::serial_recalculated::backward,
-// a custom Mamba2BackendExt implementation.
-#[cfg(feature = "autodiff")]
-impl<B: Backend + Mamba2BackendExt> Mamba2AutodiffBackendExt for burn::backend::Autodiff<B> {}
+crate::decl_ssd_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);
 

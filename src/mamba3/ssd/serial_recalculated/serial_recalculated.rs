@@ -94,47 +94,11 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     }
 }
 
-/// Marker for autodiff-compatible backends that support the custom MIMO backward.
-#[cfg(feature = "autodiff")]
-pub trait Mamba3AutodiffBackendExt:
-    Backend + Mamba3BackendExt + burn::tensor::backend::AutodiffBackend
-{
-}
-/// Any autodiff-wrapped backend satisfies the marker.
-///
-/// The actual custom backward lives in [super::backward], which provides the
-/// [`Mamba3BackendExt`] impl for [`burn::backend::Autodiff<B, C>`].
-#[cfg(feature = "autodiff")]
-impl<B: Backend + Mamba3BackendExt> Mamba3AutodiffBackendExt for burn::backend::Autodiff<B> {}
+crate::decl_ssd_autodiff_backend_ext!(Mamba3AutodiffBackendExt, Mamba3BackendExt);
 
 // ---------------------------------------------------------------------------
-// Backend impls — each backend uses the default (K1-K5) implementation.
-// Autodiff backends use the custom implementation defined in `backward.rs`.
+// Per-backend impls: each delegates to the trait's default (K1-K5) body. The
+// custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
-
-#[cfg(feature = "backend-ndarray")]
-impl<F, I> Mamba3BackendExt for burn::backend::NdArray<F, I> {}
-#[cfg(feature = "backend-flex")]
-impl Mamba3BackendExt for burn::backend::Flex {}
-#[cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu"))]
-impl<F, I> Mamba3BackendExt for burn::backend::libtorch::LibTorch<F, I> {}
-#[cfg(feature = "backend-remote")]
-impl<F, I> Mamba3BackendExt for burn::backend::RemoteBackend<F, I> {}
-
-// CubeCL backends
-#[cfg(feature = "cubecl")]
-mod cubecl {
-    use burn_cubecl::{CubeBackend, CubeRuntime, FloatElement, IntElement, element::BoolElement};
-    impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> super::Mamba3BackendExt
-        for CubeBackend<R, F, I, BT>
-    {
-    }
-}
-
-// Fusion backends
-#[cfg(feature = "fusion")]
-mod fusion {
-    use burn_fusion::{Fusion, FusionBackend};
-    impl<B: FusionBackend + super::Mamba3BackendExt> super::Mamba3BackendExt for Fusion<B> {}
-}
+crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3BackendExt);
 
