@@ -102,12 +102,13 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                     mk::<_, 4>(initial_state_bhpr).reshape(shape_initial_state_bhpr);
 
                 // ── Split combined gradient vector ──────────────────────
-                let flat_d_y_BNLMHP = d_combined.clone().narrow(0, 0, flat_len_y_BNLMHP);
-                let flat_d_final_state_BHPR =
-                    d_combined.narrow(0, flat_len_y_BNLMHP, flat_len_final_state_BHPR);
-                let d_y_bnlmhp: Tensor<B, 6> = flat_d_y_BNLMHP.reshape(shape_y_bnlmhp);
-                let d_final_state_bhpr: Tensor<B, 4> =
-                    flat_d_final_state_BHPR.reshape(shape_final_state_bhpr);
+                let (d_y_bnlmhp, d_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair(
+                    d_combined,
+                    flat_len_y_BNLMHP,
+                    flat_len_final_state_BHPR,
+                    shape_y_bnlmhp,
+                    shape_final_state_bhpr,
+                );
 
                 // ── Core gradient computation ───────────────────────────
                 let CombinedGrads {
@@ -186,16 +187,12 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                     initial_state_bhpr.primitive.clone(),
                 );
 
-                // Flatten + cat both outputs into one tracked 1-dimensional tensor so a
-                // single backward node covers both.
-                let flat_y_BNLMHP: Tensor<B, 1> =
-                    Tensor::<B, 6>::from_primitive(TensorPrimitive::Float(prim_y_bnlmhp))
-                        .reshape([flat_len_y_BNLMHP]);
-                let flat_final_state_BHPR: Tensor<B, 1> =
-                    Tensor::<B, 4>::from_primitive(TensorPrimitive::Float(prim_final_state_bhpr))
-                        .reshape([flat_len_final_state_BHPR]);
-                let combined: Tensor<B, 1> =
-                    Tensor::cat(vec![flat_y_BNLMHP, flat_final_state_BHPR], 0);
+                // prep.finish takes a single tensor, so pack both outputs into a
+                // single 1-D tensor; one Backward node then covers both.
+                let (combined, _, _) = crate::utils::combined_grad::flatten_pair(
+                    crate::utils::primitive::mk::<B, 6>(prim_y_bnlmhp),
+                    crate::utils::primitive::mk::<B, 4>(prim_final_state_bhpr),
+                );
 
                 let state = State {
                     v_bnlmhp: v_bnlmhp.primitive.clone(),
@@ -220,16 +217,13 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                 // The narrow/reshape ops are thin autodiff pass-throughs whose
                 // backwards accumulate into the combined gradient vector that
                 // `backward` above consumes.
-                let tracked_combined: Tensor<Autodiff<B, C>, 1> =
-                    Tensor::from_primitive(TensorPrimitive::Float(tracked_combined));
-
-                let tracked_y_bnlmhp: Tensor<Autodiff<B, C>, 6> = tracked_combined
-                    .clone()
-                    .narrow(0, 0, flat_len_y_BNLMHP)
-                    .reshape(shape_y_bnlmhp);
-                let tracked_final_state_bhpr: Tensor<Autodiff<B, C>, 4> = tracked_combined
-                    .narrow(0, flat_len_y_BNLMHP, flat_len_final_state_BHPR)
-                    .reshape(shape_final_state_bhpr);
+                let (tracked_y_bnlmhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
+                    crate::utils::primitive::mk(tracked_combined),
+                    flat_len_y_BNLMHP,
+                    flat_len_final_state_BHPR,
+                    shape_y_bnlmhp,
+                    shape_final_state_bhpr,
+                );
 
                 (
                     tracked_y_bnlmhp.into_primitive().tensor(),
@@ -247,27 +241,21 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                     initial_state_bhpr.primitive,
                 );
 
-                let flat_y_BNLMHP: Tensor<B, 1> =
-                    Tensor::<B, 6>::from_primitive(TensorPrimitive::Float(prim_y_bnlmhp))
-                        .reshape([flat_len_y_BNLMHP]);
-                let flat_final_state_BHPR: Tensor<B, 1> =
-                    Tensor::<B, 4>::from_primitive(TensorPrimitive::Float(prim_final_state_bhpr))
-                        .reshape([flat_len_final_state_BHPR]);
-                let combined: Tensor<B, 1> =
-                    Tensor::cat(vec![flat_y_BNLMHP, flat_final_state_BHPR], 0);
+                let (combined, _, _) = crate::utils::combined_grad::flatten_pair(
+                    crate::utils::primitive::mk::<B, 6>(prim_y_bnlmhp),
+                    crate::utils::primitive::mk::<B, 4>(prim_final_state_bhpr),
+                );
 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
                     prep.finish(combined.into_primitive().tensor());
 
-                let tracked_combined: Tensor<Autodiff<B, C>, 1> =
-                    Tensor::from_primitive(TensorPrimitive::Float(tracked_combined));
-                let tracked_y_bnlmhp: Tensor<Autodiff<B, C>, 6> = tracked_combined
-                    .clone()
-                    .narrow(0, 0, flat_len_y_BNLMHP)
-                    .reshape(shape_y_bnlmhp);
-                let tracked_final_state_bhpr: Tensor<Autodiff<B, C>, 4> = tracked_combined
-                    .narrow(0, flat_len_y_BNLMHP, flat_len_final_state_BHPR)
-                    .reshape(shape_final_state_bhpr);
+                let (tracked_y_bnlmhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
+                    crate::utils::primitive::mk(tracked_combined),
+                    flat_len_y_BNLMHP,
+                    flat_len_final_state_BHPR,
+                    shape_y_bnlmhp,
+                    shape_final_state_bhpr,
+                );
 
                 (
                     tracked_y_bnlmhp.into_primitive().tensor(),

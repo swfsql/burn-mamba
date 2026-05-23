@@ -4,6 +4,7 @@ use burn::tensor::{DType, Element};
 
 #[macro_use]
 pub mod backend_macros;
+pub mod combined_grad;
 pub mod gqa;
 pub mod log_sigmoid;
 pub mod loss;
