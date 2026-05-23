@@ -4,50 +4,118 @@
 //! *"The Mamba-3 Framework: Structured State Spaces with Trapezoidal
 //! Discretization and Data-Dependent Rotary Embeddings"*.
 //!
-//! ## The Mamba-3 Recurrence (SISO, Proposition 1)
+//! Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:
+//! (1) trapezoidal discretisation, (2) data-dependent rotary position embeddings
+//! (RoPE) on B and C, and (3) MIMO (multiple-input multiple-output) projection.
+//! Each is shown in isolation below, then combined.
+//!
+//! ## 1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ xₜ₋₁ᵀ + γₜ Bₜ xₜᵀ   (state update)
-//!   yₜ = Cₜᵀ hₜ + D xₜ                   (output)
+//!   yₜ = Cₜᵀ hₜ + D xₜ                          (output)
 //! ```
 //!
-//! ## MIMO Extension (mimo_rank = M > 1)
-//!
-//! With MIMO, the state update becomes a sum of M outer-product contributions:
+//! where the trapezoidal coefficients are
 //!
 //! ```text
-//!   hₜ = αₜ hₜ₋₁ + βₜ Σₘ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x[m]) + γₜ Σₘ Bₜ[m] ⊗ (xₜ ⊙ mimo_x[m])
-//!   yₜ[m] = Cₜ[m]ᵀ hₜ + D xₜ ⊙ mimo_x[m]
-//!   outₜ = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]
+//!   αₜ = exp(Δₜ Aₜ)                — decay (Aₜ < 0, data-dependent)
+//!   βₜ = (1 − λₜ) Δₜ αₜ            — left-endpoint weight (Bₜ₋₁ xₜ₋₁ contribution)
+//!   γₜ = λₜ Δₜ                      — right-endpoint weight (Bₜ xₜ contribution)
+//! ```
+//!
+//! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)` controlling the left/right split of the trapezoid.
+//! Setting `λ ≡ 1` collapses this to the Mamba-2 (Euler / right-endpoint) form.
+//!
+//! ## 2. Data-dependent RoPE (no trapezoid, no MIMO — Section "Data-Dependent RoPE")
+//!
+//! Each Bₜ, Cₜ ∈ ℝᴺ (N = `state_rank`, even) is treated as N/2 complex pairs and
+//! rotated by a cumulative, data-dependent angle θₜ ∈ ℝ^{N/2}:
+//!
+//! ```text
+//!   θₜ = θₜ₋₁ + Δₜ · π · tanh(ϑₜ)        — cumulative angles (per-pair)
+//!   Rₜ = R(θₜ) ∈ SO(2)^{N/2}             — block-diagonal pairwise rotation
+//!   B̃ₜ = Rₜ Bₜ,   C̃ₜ = Rₜ Cₜ              — rotated state-space projections
+//! ```
+//!
+//! The standard recurrence then runs with `B̃ₜ`/`C̃ₜ` in place of `Bₜ`/`Cₜ`:
+//!
+//! ```text
+//!   hₜ = Āₜ hₜ₋₁ + B̄̃ₜ xₜᵀ                (state update with RoPE)
+//!   yₜ = C̃ₜᵀ hₜ + D xₜ                   (output with RoPE)
+//! ```
+//!
+//! Because each rotation `Rₜ` is orthogonal, the readout-vs-input similarity
+//! folds into the relative rotation between the two steps:
+//!
+//! ```text
+//!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
+//! ```
+//!
+//! so the cumulative-angle difference encodes the (data-dependent) relative
+//! position between query step i and key step j.
+//!
+//! ## 3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M > 1`)
+//!
+//! With MIMO, B/C carry M parallel rank channels and the state update is a sum
+//! of M outer-product contributions; the readout produces M outputs which are
+//! gated and combined back:
+//!
+//! ```text
+//!   hₜ = Āₜ hₜ₋₁ + Σₘ B̄ₜ[m] ⊗ (xₜ ⊙ mimo_x[m])                  (state update)
+//!   yₜ[m] = Cₜ[m]ᵀ hₜ + D · (xₜ ⊙ mimo_x[m])                    (per-rank output)
+//!   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]         (rank merge)
 //! ```
 //!
 //! The hidden state hₜ is shared across ranks; each rank contributes to it
 //! independently but reads the full shared state when producing its output.
 //!
+//! ## 4. Combined formulation (everything together)
+//!
+//! Putting trapezoid + RoPE + MIMO into a single expression — `B̃ₜ[m] = Rₜ Bₜ[m]`
+//! and `C̃ₜ[m] = Rₜ Cₜ[m]` denote the RoPE-rotated MIMO projections:
+//!
+//! ```text
+//!   hₜ = αₜ hₜ₋₁
+//!      + βₜ Σₘ B̃ₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x[m])
+//!      + γₜ Σₘ B̃ₜ[m]   ⊗ (xₜ   ⊙ mimo_x[m])
+//!
+//!   yₜ[m] = C̃ₜ[m]ᵀ hₜ + D · (xₜ ⊙ mimo_x[m])
+//!   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]
+//! ```
+//!
+//! Implementation note: the trapezoidal recurrence is computed by splitting it
+//! into a γ-SSD (current-token contributions) and a β-SSD (previous-token
+//! contributions); see [`ssd::ssd_path`]. RoPE is applied to B and C before the
+//! SSD calls (see [`apply_rope`]), and MIMO expansion happens by augmenting the
+//! V tensor with the per-rank `mimo_x` projection.
+//!
 //! ## Notation / Dimension Keys
 //!
-//! Throughout all Mamba-3 files, tensor names carry a suffix representing their shape.  
-//! The letters used differs from the reference papers and related projects.  
-//! The letters used are:
+//! Throughout all Mamba-3 files, tensor names carry a suffix representing their shape.
+//! The letters used differ from the reference paper and the python implementation.
+//! The "Paper" column gives the symbol from the Mamba-3 paper; the "Python" column
+//! gives the field/variable name in the reference implementation
+//! (`refs/state-spaces/mamba/mamba_ssm/modules/mamba3.py`).
 //!
-//! | Letter | Dimension | Typical value |
-//! |--------|-----------|---------------|
-//! | `b`    | `batch` | varies |
-//! | `s`    | `sequence` length | varies |
-//! | `d`    | `d_model` | 768, 1024 |
-//! | `i`    | `d_inner` = `expand`·`d_model` | 2·`d_model` |
-//! | `h`    | `nheads` | `d_inner` / `per_head_dim`  |
-//! | `p`    | `per_head_dim` | 64, 128 |
-//! | `r`    | `state_rank` | 64, 256 |
-//! | `m`    | `mimo_rank` | 1, .., 8 |
-//! | `n`    | `nchunks` = `sequence`/`chunk_len`  | varies  |
-//! | `g`    | `ngroups` | 1, .., `nheads` |
-//! | `l`    | `chunk_len` | 64, .., 256  |
-//! | `a`    | num_rope_angles = state_rank / 2 | varies |
+//! | Letter | Dimension | Paper | Python | Typical value |
+//! |--------|-----------|-------|--------|---------------|
+//! | `b`    | `batch` | — | `batch` | varies |
+//! | `s`    | `sequence` length | `T` | `seqlen` | varies |
+//! | `d`    | `d_model` | `D` | `d_model` | 768, 1024 |
+//! | `i`    | `d_inner` = `expand`·`d_model` | `E·D` | `d_inner` | 2·`d_model` |
+//! | `h`    | `nheads` | `H` | `nheads` | `d_inner` / `per_head_dim` |
+//! | `p`    | `per_head_dim` | `P` | `headdim` | 64, 128 |
+//! | `r`    | `state_rank` | `N` | `d_state` | 64, 256 |
+//! | `m`    | `mimo_rank` | `M` | `mimo_rank` | 1, .., 8 |
+//! | `n`    | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
+//! | `g`    | `ngroups` | `G` | `num_bc_heads` | 1, .., `nheads` |
+//! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
+//! | `a`    | `num_rope_angles` = `state_rank` / 2 (or `rope_dim` / 2) | — | `num_rope_angles` | varies |
 //!
-//! Uppercase latters represent a relation (e.g. offset, multiple, concat, stacking)
+//! Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
 //! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
-//! `XY` may also represent `x+y`, `x*y`, etc.  
+//! `XY` may also represent `x+y`, `x*y`, etc.
 
 use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -146,20 +214,28 @@ pub struct Mamba3<B: Backend> {
     /// Shape: `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
 
-    /// State rank.
+    /// State rank — the latent dimension of the SSM hidden state.
+    ///
+    /// Paper: `N`. Python: `d_state`.
     pub state_rank: usize,
 
-    /// Number of B/C groups ngroups.  Must divide `nheads`.
+    /// Number of B/C groups. Must divide `nheads`.
+    ///
+    /// Paper: `G`. Python: `num_bc_heads`.
     pub ngroups: usize,
 
     /// Number of RoPE angle pairs (`rope_dim / 2`).
+    ///
+    /// Python: `num_rope_angles`.
     pub num_rope_angles: usize,
 
     /// Effective RoPE dimension (= `2 · num_rope_angles`). Always even and
     /// `≤ state_rank`. Only the first `rope_dim` entries of B/C are rotated.
     pub rope_dim: usize,
 
-    /// MIMO rank.  1 = SISO (standard Mamba-3).
+    /// MIMO rank. 1 = SISO (standard Mamba-3).
+    ///
+    /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 }
 
@@ -192,30 +268,42 @@ impl<B: Backend> Mamba3<B> {
 #[derive(Config, Debug)]
 pub struct Mamba3Config {
     /// Model (hidden) dimension.
+    ///
+    /// Paper: `D`. Python: `d_model`.
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
     /// **Must be even** (required for RoPE pairing).
+    ///
+    /// Paper: `N`. Python: `d_state`.
     #[config(default = 128)]
     pub state_rank: usize,
 
     /// Expansion factor for `d_inner = expand · d_model`.
+    ///
+    /// Paper: `E`. Python: `expand`.
     #[config(default = 2)]
     pub expand: usize,
 
-    /// Head dimension per_head_dim.  `per_head_dim = d_inner / nheads`.
+    /// Head dimension. `per_head_dim = d_inner / nheads`.
+    ///
+    /// Paper: `P`. Python: `headdim`.
     #[config(default = 64)]
     pub per_head_dim: usize,
 
-    /// Number of B/C groups ngroups.  Must divide `nheads`.
+    /// Number of B/C groups. Must divide `nheads`.
+    ///
+    /// Paper: `G`. Python: `num_bc_heads`.
     #[config(default = 1)]
     pub ngroups: usize,
 
-    /// MIMO rank.  `1` = standard SISO Mamba-3.
+    /// MIMO rank. `1` = standard SISO Mamba-3.
     ///
     /// When `mimo_rank > 1`, the B/C projections have `mimo_rank` parallel rank channels.
     /// Three extra weight matrices (`mimo_x_hmp`, `mimo_z_hmp`, `mimo_o_hmp`) provide
     /// element-wise up/down projections in head-space across ranks.
+    ///
+    /// Paper: `M`. Python: `mimo_rank`.
     #[config(default = 1)]
     pub mimo_rank: usize,
 

@@ -50,28 +50,30 @@
 //!
 //! ## Notation / Dimension Keys
 //!
-//! Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.  
-//! The letters used differs from the reference papers and related projects.  
-//! The letters used are:
+//! Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.
+//! The letters used differ from the reference paper and the python implementation.
+//! The "Paper" column gives the symbol from the Mamba-2 paper (Dao & Gu, 2024); the
+//! "Python" column gives the field/variable name in the reference implementation
+//! (`refs/state-spaces/mamba/mamba_ssm/modules/mamba2.py`).
 //!
-//! | Letter | Dimension | Typical value |
-//! |--------|-----------|---------------|
-//! | `b`    | `batch` | varies        |
-//! | `s`    | `sequence` length | varies |
-//! | `d`    | `d_model` | 768, 1024 |
-//! | `i`    | `d_inner` = `expand`·`d_model` | 2·`d_model` |
-//! | `h`    | `nheads` | `d_inner` / `per_head_dim`  |
-//! | `p`    | `per_head_dim` | 64, 128 |
-//! | `r`    | `state_rank` | 64, 256  |
-//! | `v`    | `conv_dim` | `d_inner` + 2·`ngroups`·`state_rank` |
-//! | `k`    | `conv_kernel`    | 4       |
-//! | `g`    | `ngroups` | 1, .., `nheads`     |
-//! | `n`    | `nchunks` = `sequence`/`chunk_len`  | varies  |
-//! | `l`    | `chunk_len`    | 64, .., 256  |
+//! | Letter | Dimension | Paper | Python | Typical value |
+//! |--------|-----------|-------|--------|---------------|
+//! | `b`    | `batch` | — | `batch` | varies |
+//! | `s`    | `sequence` length | `T` | `seqlen` | varies |
+//! | `d`    | `d_model` | `D` | `d_model` | 768, 1024 |
+//! | `i`    | `d_inner` = `expand`·`d_model` | `E·D` | `d_inner` | 2·`d_model` |
+//! | `h`    | `nheads` | `H` | `nheads` | `d_inner` / `per_head_dim` |
+//! | `p`    | `per_head_dim` | `P` | `headdim` | 64, 128 |
+//! | `r`    | `state_rank` | `N` | `d_state` | 64, 256 |
+//! | `v`    | `conv_dim` | — | `conv_dim` | `d_inner` + 2·`ngroups`·`state_rank` |
+//! | `k`    | `conv_kernel` | — | `d_conv` | 4 |
+//! | `g`    | `ngroups` | `G` | `ngroups` | 1, .., `nheads` |
+//! | `n`    | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
+//! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
 //!
-//! Uppercase latters represent a relation (e.g. offset, multiple, concat, stacking)
+//! Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
 //! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
-//! `XY` may also represent `x+y`, `x*y`, etc.  
+//! `XY` may also represent `x+y`, `x*y`, etc.
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -184,13 +186,17 @@ pub struct Mamba2<B: Backend> {
     pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
 
     /// `state_rank` — the number of latent dimensions in the SSM hidden
-    /// state `h ∈ ℝ^{state_rank×per_head_dim}` per head.  Corresponds to the paper's `N`.
+    /// state `h ∈ ℝ^{state_rank×per_head_dim}` per head.
+    ///
+    /// Paper: `N`. Python: `d_state`.
     pub state_rank: usize,
 
     /// Number of B/C groups `ngroups` for grouped SSM heads (analogous to
-    /// grouped-query attention).  `ngroups` divides `nheads`; all `nheads/ngroups` heads
+    /// grouped-query attention). `ngroups` divides `nheads`; all `nheads/ngroups` heads
     /// within a group share the same B and C projections while having
     /// independent X, A, and Z projections.
+    ///
+    /// Paper: `G`. Python: `ngroups`.
     pub ngroups: usize,
 }
 
@@ -229,18 +235,24 @@ impl<B: Backend> Mamba2<B> {
 /// from the stored fields; see the helper methods on [`Mamba2Config`].
 #[derive(Config, Debug)]
 pub struct Mamba2Config {
-    /// Model (hidden) dimension `d`.  Every token is represented as a
-    /// `d`-dimensional vector at the input and output of the block.
+    /// Model (hidden) dimension. Every token is represented as a
+    /// `d_model`-dimensional vector at the input and output of the block.
+    ///
+    /// Paper: `D`. Python: `d_model`.
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
     ///
     /// Larger `state_rank` gives a more expressive state but increases memory and compute
-    /// per step.  Corresponds to the paper's `N`, which uses N ∈ {64, 128, 256} for most experiments.
+    /// per step. The paper uses N ∈ {64, 128, 256} for most experiments.
+    ///
+    /// Paper: `N`. Python: `d_state`.
     #[config(default = 128)]
     pub state_rank: usize,
 
-    /// Causal convolution window length.  Typically 4.
+    /// Causal convolution window length. Typically 4.
+    ///
+    /// Python: `d_conv`.
     #[config(default = 4)]
     pub conv_kernel: usize,
 
@@ -248,20 +260,26 @@ pub struct Mamba2Config {
     ///
     /// An expansion of 2 doubles the internal width, keeping the parameter
     /// count of the SSM block comparable to a standard attention layer.
+    ///
+    /// Paper: `E`. Python: `expand`.
     #[config(default = 2)]
     pub expand: usize,
 
-    /// Head dimension nheads.  The total `d_inner` is split into
-    /// `per_head_dim = d_inner / nheads` independent SSM heads.
+    /// Head dimension. The total `d_inner` is split into
+    /// `nheads = d_inner / per_head_dim` independent SSM heads.
     ///
     /// Typical values: 64 or 128.
+    ///
+    /// Paper: `P`. Python: `headdim`.
     #[config(default = 64)]
     pub per_head_dim: usize,
 
-    /// Number of B/C groups ngroups.  Must divide `nheads`.
+    /// Number of B/C groups. Must divide `nheads`.
     ///
-    /// Setting ngroups < nheads reduces the B and C projection sizes (analogous to
+    /// Setting `ngroups < nheads` reduces the B and C projection sizes (analogous to
     /// GQA in attention), saving memory without a large accuracy cost.
+    ///
+    /// Paper: `G`. Python: `ngroups`.
     #[config(default = 1)]
     pub ngroups: usize,
 
