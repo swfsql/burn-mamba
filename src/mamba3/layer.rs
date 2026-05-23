@@ -110,6 +110,37 @@ impl Mamba3LayersConfig {
     }
 }
 
+impl<B: Backend> Mamba3Layers<B> {
+    // -----------------------------------------------------------------------
+    // Pathway-agnostic private helpers (no SSD-backend-ext bound)
+    // -----------------------------------------------------------------------
+
+    /// Effective number of forward passes (virtual layers).
+    fn n_virtual_count(&self) -> usize {
+        self.n_virtual_layers
+            .as_ref()
+            .map(|(l, _)| *l)
+            .unwrap_or(self.n_real_layers)
+    }
+
+    /// Map a virtual layer index to the corresponding real layer index using
+    /// the configured schedule (or identity when no schedule is set).
+    fn real_idx(&self, virtual_idx: usize) -> usize {
+        if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
+            schedule.real_idx(virtual_idx, *n_virtual_layers, self.n_real_layers)
+        } else {
+            virtual_idx
+        }
+    }
+
+    /// Returns 0.0 if this layer's residual should be suppressed, else 1.0.
+    fn residual_scale(&self, i: usize, n_virtual: usize) -> f32 {
+        let is_first = self.ignore_first_residual && i == 0;
+        let is_last = self.ignore_last_residual && i + 1 == n_virtual;
+        if is_first || is_last { 0.0 } else { 1.0 }
+    }
+}
+
 impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
     // -----------------------------------------------------------------------
     // forward  (chunked SSD — used for training / prefill)
@@ -232,35 +263,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
         (x, caches)
     }
 
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
-
-    /// Effective number of forward passes (virtual layers).
-    fn n_virtual_count(&self) -> usize {
-        self.n_virtual_layers
-            .as_ref()
-            .map(|(l, _)| *l)
-            .unwrap_or(self.n_real_layers)
-    }
-
-    /// Map a virtual layer index to the corresponding real layer index using
-    /// the configured schedule (or identity when no schedule is set).
-    fn real_idx(&self, virtual_idx: usize) -> usize {
-        if let Some((n_virtual_layers, schedule)) = &self.n_virtual_layers {
-            schedule.real_idx(virtual_idx, *n_virtual_layers, self.n_real_layers)
-        } else {
-            virtual_idx
-        }
-    }
-
-    /// Returns 0.0 if this layer's residual should be suppressed, else 1.0.
-    fn residual_scale(&self, i: usize, n_virtual: usize) -> f32 {
-        let is_first = self.ignore_first_residual && i == 0;
-        let is_last = self.ignore_last_residual && i + 1 == n_virtual;
-        if is_first || is_last { 0.0 } else { 1.0 }
-    }
-
     /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
     fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba3Caches<B> {
         let device = &x.device();
@@ -290,6 +292,85 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
         Mamba3CachesConfig::new(
             n_virtual,
             Mamba3CacheConfig {
+                batch,
+                state_rank: layer0.state_rank,
+                num_rope_angles: layer0.num_rope_angles,
+                per_head_dim: layer0.per_head_dim(),
+                nheads: layer0.nheads(),
+                mimo_rank: layer0.mimo_rank,
+            },
+        )
+        .init(device)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mamba3Layers::forward2  (merged-form / single-pass trapezoidal SSD)
+// ---------------------------------------------------------------------------
+
+impl<B: Backend + Mamba3TrapBackendExt> Mamba3Layers<B> {
+    /// Process a full sequence through every (virtual) layer using the
+    /// **merged-form (single-pass) trapezoidal** algorithm.
+    ///
+    /// This is the [`Mamba3::forward2`] analogue of [`Self::forward`]: same
+    /// stacking, virtual-layer scheduling, and residual handling, but each
+    /// layer runs the single-SSD-pass trapezoidal kernel and carries a
+    /// [`Mamba3MergedCache`] instead of a [`Mamba3Cache`].
+    ///
+    /// # Arguments
+    /// - `x` — input tensor, shape `[batch, sequence, d_model]`
+    /// - `caches` — optional pre-filled merged-form layer caches
+    /// - `trap_path` — merged-form SSD algorithm and chunk length selection
+    pub fn forward2(
+        &self,
+        mut x: Tensor<B, 3>,
+        caches: Option<Mamba3MergedCaches<B>>,
+        trap_path: Mamba3TrapSsdPath,
+    ) -> (Tensor<B, 3>, Mamba3MergedCaches<B>) {
+        let n_virtual_layers = self.n_virtual_count();
+        let caches = caches.unwrap_or_else(|| self.make_zero_merged_caches(&x, n_virtual_layers));
+
+        assert_eq!(
+            caches.caches.len(),
+            n_virtual_layers,
+            "cache count must match the number of virtual layers; \
+             layers in forward2() cannot share caches"
+        );
+
+        let mut caches: Vec<Option<Mamba3MergedCache<B>>> =
+            caches.caches.into_iter().map(Some).collect();
+
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..n_virtual_layers {
+            let layer_idx = self.real_idx(i);
+            let layer = &self.real_layers[layer_idx];
+            let residual_scale = self.residual_scale(i, n_virtual_layers);
+
+            let cache = caches[i].take().unwrap();
+            let (x_, cache_) = layer.forward2(x, Some(cache), trap_path.clone(), residual_scale);
+            x = x_;
+            caches[i] = Some(cache_);
+        }
+
+        let caches = Mamba3MergedCaches {
+            caches: caches.into_iter().map(Option::unwrap).collect(),
+        };
+        (x, caches)
+    }
+
+    /// Build zero-initialised merged-form caches from a `[batch, sequence, d_model]` input.
+    fn make_zero_merged_caches(
+        &self,
+        x: &Tensor<B, 3>,
+        n_virtual: usize,
+    ) -> Mamba3MergedCaches<B> {
+        let device = &x.device();
+        let [batch, _sequence, _d_model] = x.dims();
+        let layer0 = &self.real_layers[0].mamba_block;
+
+        Mamba3MergedCachesConfig::new(
+            n_virtual,
+            Mamba3MergedCacheConfig {
                 batch,
                 state_rank: layer0.state_rank,
                 num_rope_angles: layer0.num_rope_angles,
@@ -420,5 +501,43 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layer<B> {
         assert_eq!([batch, d_model], out_bm.dims());
 
         (out_bm, cache)
+    }
+}
+
+impl<B: Backend + Mamba3TrapBackendExt> Mamba3Layer<B> {
+    /// Run the Pre-LN residual block over a full sequence using the
+    /// **merged-form (single-pass) trapezoidal** algorithm.
+    ///
+    /// Identical in structure to [`Self::forward`] but delegates to
+    /// [`Mamba3::forward2`] and carries a [`Mamba3MergedCache`].
+    ///
+    /// ```text
+    ///   output = x · residual_scale + Mamba3::forward2( RMSNorm(x) )
+    /// ```
+    ///
+    /// # Shapes
+    /// - `x`    : `[batch, sequence, d_model]`
+    /// - output : `[batch, sequence, d_model]`
+    pub fn forward2(
+        &self,
+        x: Tensor<B, 3>,
+        cache: Option<Mamba3MergedCache<B>>,
+        trap_path: Mamba3TrapSsdPath,
+        residual_scale: f32,
+    ) -> (Tensor<B, 3>, Mamba3MergedCache<B>) {
+        let [batch, sequence, d_model] = x.dims();
+
+        let res_bsm = x.clone() * residual_scale;
+
+        let normed_bsm = self.norm.forward(x);
+        assert_eq!([batch, sequence, d_model], normed_bsm.dims());
+
+        let (mamba_out_bsm, cache) = self.mamba_block.forward2(normed_bsm, cache, trap_path);
+        assert_eq!([batch, sequence, d_model], mamba_out_bsm.dims());
+
+        let out_bsm = mamba_out_bsm + res_bsm;
+        assert_eq!([batch, sequence, d_model], out_bsm.dims());
+
+        (out_bsm, cache)
     }
 }

@@ -6,6 +6,7 @@ pub(crate) mod helpers;
 pub mod layer;
 pub mod mamba3;
 pub mod network;
+pub mod pathway;
 pub mod ssd;
 
 pub mod prelude {
@@ -17,6 +18,7 @@ pub mod prelude {
     pub use layer::{Mamba3Layer, Mamba3LayerConfig, Mamba3Layers, Mamba3LayersConfig};
     pub use mamba3::{Mamba3, Mamba3Config};
     pub use network::{Mamba3Network, Mamba3NetworkConfig};
+    pub use pathway::{Mamba3AnyCaches, Mamba3Pathway};
     #[cfg(all(feature = "autodiff"))]
     pub use ssd::Mamba3AutodiffBackendExt;
     pub use ssd::Mamba3BackendExt;
