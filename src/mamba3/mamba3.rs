@@ -593,7 +593,7 @@ pub fn apply_rope<B: Backend, const D: usize>(
 ///   always `state_rank/2`, i.e. element `n` is paired with element
 ///   `state_rank/2 + n`. With partial RoPE only the first `num_rope_angles`
 ///   pairs are rotated; the remaining elements in both halves pass through.
-fn apply_rope_partial<B: Backend, const D: usize>(
+pub(crate) fn apply_rope_partial<B: Backend, const D: usize>(
     x: Tensor<B, D>,
     angles: Tensor<B, D>,
     rope_dim: usize,
