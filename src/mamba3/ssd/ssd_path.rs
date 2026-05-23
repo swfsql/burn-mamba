@@ -164,24 +164,15 @@ impl Mamba3SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba3SsdPath::Minimal(chunk_len) => *chunk_len,
-            Mamba3SsdPath::Serial(chunk_len) => *chunk_len,
-            Mamba3SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba3SsdPath::Minimal(chunk_len)
+            | Mamba3SsdPath::Serial(chunk_len)
+            | Mamba3SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
     pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
-        match self {
-            Mamba3SsdPath::Minimal(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-            Mamba3SsdPath::Serial(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-            Mamba3SsdPath::SerialRecalculated(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-        }
+        self.chunk_len()
+            .unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
     }
 
     /// Run the SSD algorithm on the given MIMO-first input.

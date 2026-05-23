@@ -736,9 +736,12 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         let proj_bsd = self.in_proj.forward(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
-        let mut parts = proj_bsd
-            .split_with_sizes(
-                vec![
+        // [batch, sequence, *] split along channel dim.
+        // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
+        let [z_bsi, x_bsi, b_raw_bsMGR, c_raw_bsMGR, dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh, theta_bsa] =
+            crate::utils::split::split_into(
+                proj_bsd,
+                [
                     d_inner,
                     d_inner,
                     bc_size,
@@ -749,16 +752,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                     num_rope_angles,
                 ],
                 2,
-            )
-            .into_iter();
-        let z_bsi = parts.next().unwrap();
-        let x_bsi = parts.next().unwrap();
-        let b_raw_bsMGR = parts.next().unwrap(); // [batch, sequence, mimo_rank*ngroups*state_rank]
-        let c_raw_bsMGR = parts.next().unwrap(); // [batch, sequence, mimo_rank*ngroups*state_rank]
-        let dd_dt_bsh = parts.next().unwrap();
-        let dd_A_raw_bsh = parts.next().unwrap();
-        let lambda_raw_bsh = parts.next().unwrap();
-        let theta_bsa = parts.next().unwrap();
+            );
 
         san(&z_bsi);
         san(&x_bsi);
@@ -1199,9 +1193,12 @@ mod step {
             // ── In-projection ─────────────────────────────────────────────────
             let proj_bd = self.in_proj.forward(input_bd);
             let bc_size = ngroups * state_rank * mimo_rank;
-            let mut parts = proj_bd
-                .split_with_sizes(
-                    vec![
+            // [batch, *] split along channel dim.
+            // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
+            let [z_bi, x_bi, b_raw_bMGR, c_raw_bMGR, dd_dt_bh, dd_a_raw_bh, lambda_raw_bh, theta_ba] =
+                crate::utils::split::split_into(
+                    proj_bd,
+                    [
                         d_inner,
                         d_inner,
                         bc_size,
@@ -1212,16 +1209,7 @@ mod step {
                         num_rope_angles,
                     ],
                     1,
-                )
-                .into_iter();
-            let z_bi = parts.next().unwrap();
-            let x_bi = parts.next().unwrap();
-            let b_raw_bMGR = parts.next().unwrap(); // [batch, mimo_rank*ngroups*state_rank]
-            let c_raw_bMGR = parts.next().unwrap(); // [batch, mimo_rank*ngroups*state_rank]
-            let dd_dt_bh = parts.next().unwrap();
-            let dd_a_raw_bh = parts.next().unwrap();
-            let lambda_raw_bh = parts.next().unwrap();
-            let theta_ba = parts.next().unwrap();
+                );
 
             // ── Reshape x ─────────────────────────────────────────────────────
             let x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);

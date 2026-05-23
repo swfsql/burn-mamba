@@ -149,24 +149,15 @@ impl Mamba2SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba2SsdPath::Minimal(chunk_len) => *chunk_len,
-            Mamba2SsdPath::Serial(chunk_len) => *chunk_len,
-            Mamba2SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba2SsdPath::Minimal(chunk_len)
+            | Mamba2SsdPath::Serial(chunk_len)
+            | Mamba2SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
     pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
-        match self {
-            Mamba2SsdPath::Minimal(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-            Mamba2SsdPath::Serial(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-            Mamba2SsdPath::SerialRecalculated(chunk_len) => {
-                chunk_len.unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-            }
-        }
+        self.chunk_len()
+            .unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
     }
 
     /// Run the SSD algorithm on the given input.

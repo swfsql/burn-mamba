@@ -4,6 +4,7 @@ use burn::tensor::{DType, Element};
 
 pub mod log_sigmoid;
 pub mod loss;
+pub(crate) mod primitive;
 pub mod rms_norm;
 pub mod rms_norm_gated;
 pub mod sanity;
@@ -11,6 +12,7 @@ pub mod scheduler;
 pub mod silu;
 pub mod softplus;
 pub mod segsum;
+pub mod split;
 
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {

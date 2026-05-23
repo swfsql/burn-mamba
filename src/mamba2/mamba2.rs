@@ -567,14 +567,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
                 z_xbc_dt_bsd.dims(),
             );
 
-            let mut parts = z_xbc_dt_bsd
-                .split_with_sizes(vec![d_inner, conv_dim, nheads], 2)
-                .into_iter();
-            (
-                parts.next().unwrap(), // z_gate_bsi
-                parts.next().unwrap(), // xbc_bsv
-                parts.next().unwrap(), // dt_raw_bsh
-            )
+            let [z_gate_bsi, xbc_bsv, dt_raw_bsh] =
+                crate::utils::split::split_into(z_xbc_dt_bsd, [d_inner, conv_dim, nheads], 2);
+            (z_gate_bsi, xbc_bsv, dt_raw_bsh)
         };
         assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
@@ -638,22 +633,15 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         //
         // Note: in the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
-            let mut parts = xbc_bsv
-                .split_with_sizes(vec![d_inner, ngroups * state_rank, ngroups * state_rank], 2)
-                .into_iter();
+            let [x_bsi, b_bsGR, c_bsGR] = crate::utils::split::split_into(
+                xbc_bsv,
+                [d_inner, ngroups * state_rank, ngroups * state_rank],
+                2,
+            );
             (
-                parts
-                    .next()
-                    .unwrap() // x_bsi
-                    .reshape([batch, sequence, nheads, per_head_dim]),
-                parts
-                    .next()
-                    .unwrap() // b_bsGR
-                    .reshape([batch, sequence, ngroups, state_rank]),
-                parts
-                    .next()
-                    .unwrap() // c_bsGR
-                    .reshape([batch, sequence, ngroups, state_rank]),
+                x_bsi.reshape([batch, sequence, nheads, per_head_dim]), // x_bshp
+                b_bsGR.reshape([batch, sequence, ngroups, state_rank]), // b_bsgr
+                c_bsGR.reshape([batch, sequence, ngroups, state_rank]), // c_bsgr
             )
         };
         // No shape assertions on reshapes (shapes are algebraically guaranteed).
@@ -843,14 +831,9 @@ mod step {
                 assert_eq!([batch, d_in_proj_out], z_xbc_dt_bd.dims());
                 assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
 
-                let mut parts = z_xbc_dt_bd
-                    .split_with_sizes(vec![d_inner, conv_dim, nheads], 1)
-                    .into_iter();
-                (
-                    parts.next().unwrap(), // z_gate_bi
-                    parts.next().unwrap(), // xbc_bv
-                    parts.next().unwrap(), // dt_raw_bh
-                )
+                let [z_gate_bi, xbc_bv, dt_raw_bh] =
+                    crate::utils::split::split_into(z_xbc_dt_bd, [d_inner, conv_dim, nheads], 1);
+                (z_gate_bi, xbc_bv, dt_raw_bh)
             };
             assert_eq!([batch, d_inner], z_gate_bi.dims());
             assert_eq!([batch, conv_dim], xbc_bv.dims());
@@ -902,22 +885,15 @@ mod step {
             // ── Split (x, B, C) ───────────────────────────────────────────────
             assert_eq!(d_inner, nheads * per_head_dim);
             let (x_bhp, b_bgr, c_bgr) = {
-                let mut parts = xbc_bv
-                    .split_with_sizes(vec![d_inner, ngroups * state_rank, ngroups * state_rank], 1)
-                    .into_iter();
+                let [x_bi, b_bGR, c_bGR] = crate::utils::split::split_into(
+                    xbc_bv,
+                    [d_inner, ngroups * state_rank, ngroups * state_rank],
+                    1,
+                );
                 (
-                    parts
-                        .next()
-                        .unwrap() // x_bi
-                        .reshape([batch, nheads, per_head_dim]), // x_bhp
-                    parts
-                        .next()
-                        .unwrap() // b_bGR
-                        .reshape([batch, ngroups, state_rank]), // b_bgr
-                    parts
-                        .next()
-                        .unwrap() // c_bGR
-                        .reshape([batch, ngroups, state_rank]), // c_bgr
+                    x_bi.reshape([batch, nheads, per_head_dim]), // x_bhp
+                    b_bGR.reshape([batch, ngroups, state_rank]), // b_bgr
+                    c_bGR.reshape([batch, ngroups, state_rank]), // c_bgr
                 )
             };
 

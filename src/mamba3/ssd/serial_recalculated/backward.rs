@@ -93,7 +93,7 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                 } = ops.state;
 
                 // ── Reconstruct saved tensors ───────────────────────────
-                use super::serial_recalculated::mk;
+                use crate::utils::primitive::mk;
                 let v_bnlmhp = mk::<_, 6>(v_bnlmhp).reshape(shape_v_bnlmhp);
                 let da_bnlh = mk::<_, 4>(da_bnlh).reshape(shape_da_bnlh);
                 let b_bnlmhr = mk::<_, 6>(b_bnlmhr).reshape(shape_b_bnlmhr);

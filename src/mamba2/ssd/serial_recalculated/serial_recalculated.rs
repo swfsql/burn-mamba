@@ -1,5 +1,6 @@
 use crate::mamba2::prelude::*;
 use crate::mamba2::ssd::serial;
+use crate::utils::primitive::mk;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
@@ -190,7 +191,3 @@ pub trait Mamba2AutodiffBackendExt:
 #[cfg(feature = "autodiff")]
 impl<B: Backend + Mamba2BackendExt> Mamba2AutodiffBackendExt for burn::backend::Autodiff<B> {}
 
-/// Conversion helper.
-pub(crate) fn mk<B: Backend, const D: usize>(p: FloatTensor<B>) -> Tensor<B, D> {
-    Tensor::from_primitive(TensorPrimitive::Float(p))
-}

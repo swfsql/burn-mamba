@@ -2,6 +2,7 @@
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::ssd::serial;
+use crate::utils::primitive::mk;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
@@ -137,7 +138,3 @@ mod fusion {
     impl<B: FusionBackend + super::Mamba3BackendExt> super::Mamba3BackendExt for Fusion<B> {}
 }
 
-/// Conversion helper: `FloatTensor<B>` → `Tensor<B, D>`.
-pub(crate) fn mk<B: Backend, const D: usize>(p: FloatTensor<B>) -> Tensor<B, D> {
-    Tensor::from_primitive(TensorPrimitive::Float(p))
-}
