@@ -43,6 +43,9 @@ pub enum Mamba2SsdPath {
     SerialRecalculated(Option<usize>),
 }
 
+/// SSD input.
+///
+/// All tensors are pre-processed: B/C are already GQA-expanded to per-head.
 pub struct Mamba2SsdInput<B: Backend> {
     /// # Shape
     /// - [batch, nchunks, chunk_len, nheads, per_head_dim]
@@ -53,12 +56,16 @@ pub struct Mamba2SsdInput<B: Backend> {
     /// # Shape
     /// - [nheads]
     pub a_decay_h: Tensor<B, 1>,
+    /// B tensor, expanded to per-head.
+    ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, ngroups, state_rank]
-    pub b_bnlgr: Tensor<B, 5>,
+    /// - [batch, nchunks, chunk_len, nheads, state_rank]
+    pub b_bnlhr: Tensor<B, 5>,
+    /// C tensor, expanded to per-head.
+    ///
     /// # Shape
-    /// - [batch, nchunks, chunk_len, ngroups, state_rank]
-    pub c_bnlgr: Tensor<B, 5>,
+    /// - [batch, nchunks, chunk_len, nheads, state_rank]
+    pub c_bnlhr: Tensor<B, 5>,
     /// # Shape
     /// - [nheads]
     pub d_h: Tensor<B, 1>,
@@ -76,8 +83,8 @@ impl<B: Backend> Mamba2SsdInput<B> {
         san(&self.x_bnlhp);
         san(&self.dt_bnlh);
         san(&self.a_decay_h);
-        san(&self.b_bnlgr);
-        san(&self.c_bnlgr);
+        san(&self.b_bnlhr);
+        san(&self.c_bnlhr);
         san(&self.d_h);
         san(&self.initial_state_bhpr);
         if let Some(ref init_state_hpr) = self.init_state_hpr {
@@ -174,9 +181,9 @@ impl Mamba2SsdPath {
         input: Mamba2SsdInput<B>,
     ) -> (Tensor<B, 5>, Tensor<B, 4>) {
         match self {
-            Mamba2SsdPath::Minimal(_) => Mamba2::<B>::ssd_minimal(input),
-            Mamba2SsdPath::Serial(_) => Mamba2::<B>::ssd_serial(input),
-            Mamba2SsdPath::SerialRecalculated(_) => Mamba2::<B>::ssd_serial_recalculated(input),
+            Mamba2SsdPath::Minimal(_) => input.ssd_minimal(),
+            Mamba2SsdPath::Serial(_) => input.ssd_serial(),
+            Mamba2SsdPath::SerialRecalculated(_) => input.ssd_serial_recalculated(),
         }
     }
 }
@@ -220,7 +227,6 @@ mod tests {
         chunk_len: usize,
         nheads: usize,
         per_head_dim: usize,
-        ngroups: usize,
         state_rank: usize,
         device: &Device,
     ) -> (
@@ -245,12 +251,12 @@ mod tests {
         let a_decay =
             Tensor::<InnerB, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
         let b = Tensor::<InnerB, 5>::random(
-            [batch, nchunks, chunk_len, ngroups, state_rank],
+            [batch, nchunks, chunk_len, nheads, state_rank],
             Distribution::Normal(0.0, 1.0),
             device,
         );
         let c = Tensor::<InnerB, 5>::random(
-            [batch, nchunks, chunk_len, ngroups, state_rank],
+            [batch, nchunks, chunk_len, nheads, state_rank],
             Distribution::Normal(0.0, 1.0),
             device,
         );
@@ -303,8 +309,8 @@ mod tests {
                 x_bnlhp: self.x.val(),
                 dt_bnlh: self.dt.val(),
                 a_decay_h: self.a_decay.val(),
-                b_bnlgr: self.b.val(),
-                c_bnlgr: self.c.val(),
+                b_bnlhr: self.b.val(),
+                c_bnlhr: self.c.val(),
                 d_h: self.d.val(),
                 initial_state_bhpr: self.initial_state.val(),
                 // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
@@ -387,7 +393,6 @@ mod tests {
         chunk_len: usize,
         nheads: usize,
         per_head_dim: usize,
-        ngroups: usize,
         state_rank: usize,
     ) {
         let device: Device = Default::default();
@@ -397,7 +402,6 @@ mod tests {
             chunk_len,
             nheads,
             per_head_dim,
-            ngroups,
             state_rank,
             &device,
         );
@@ -541,21 +545,21 @@ mod tests {
     }
 
     #[test]
-    fn paths_agree_no_gqa() {
-        // ngroups == nheads (no GQA expansion): B/C are per-head.
-        run_minimal_matches_serial(2, 3, 4, 2, 8, 2, 8);
+    fn paths_agree() {
+        // B/C are already per-head (GQA expansion happens before constructing the SsdInput).
+        run_minimal_matches_serial(2, 3, 4, 2, 8, 8);
     }
 
     #[test]
-    fn paths_agree_gqa() {
-        // ngroups < nheads: B/C are shared across `heads_per_group` heads.
-        run_minimal_matches_serial(2, 3, 4, 4, 8, 1, 8);
+    fn paths_agree_more_heads() {
+        // Slightly larger nheads to vary the shape.
+        run_minimal_matches_serial(2, 3, 4, 4, 8, 8);
     }
 
     #[test]
     fn paths_agree_single_chunk() {
         // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
         // boundary case where K4 runs a single iteration.
-        run_minimal_matches_serial(2, 1, 4, 2, 8, 2, 8);
+        run_minimal_matches_serial(2, 1, 4, 2, 8, 8);
     }
 }

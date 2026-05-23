@@ -196,9 +196,9 @@ impl Mamba3SsdPath {
         input: Mamba3SsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match self {
-            Mamba3SsdPath::Minimal(_) => Mamba3::<B>::ssd_minimal(input),
-            Mamba3SsdPath::Serial(_) => Mamba3::<B>::ssd_serial(input),
-            Mamba3SsdPath::SerialRecalculated(_) => Mamba3::<B>::ssd_serial_recalculated(input),
+            Mamba3SsdPath::Minimal(_) => input.ssd_minimal(),
+            Mamba3SsdPath::Serial(_) => input.ssd_serial(),
+            Mamba3SsdPath::SerialRecalculated(_) => input.ssd_serial_recalculated(),
         }
     }
 }

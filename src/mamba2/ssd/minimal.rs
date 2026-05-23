@@ -22,7 +22,7 @@ use crate::mamba2::prelude::*;
 use crate::utils::{sanity::sanity as san, segsum::segsum};
 use burn::prelude::*;
 
-impl<B: Backend> Mamba2<B> {
+impl<B: Backend> Mamba2SsdInput<B> {
     // -----------------------------------------------------------------------
     // chunked_selective_scan
     // -----------------------------------------------------------------------
@@ -92,12 +92,12 @@ impl<B: Backend> Mamba2<B> {
     ///   Y = Y_diag + Y_off + D · X
     /// ```
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(input: super::Mamba2SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_minimal(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        let input = self;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
-        let [.., ngroups, state_rank] = input.b_bnlgr.dims();
+        let [.., state_rank] = input.b_bnlhr.dims();
         let device = &input.x_bnlhp.device();
 
-        assert_eq!(nheads % ngroups, 0);
         assert!(nchunks >= 1, "sequence must be non-empty");
         assert!(chunk_len > 0, "chunk_len must be positive");
 
@@ -105,39 +105,9 @@ impl<B: Backend> Mamba2<B> {
         // Ā = exp(Δ · A)   stored in log-space as  a_bnlh = Δ · A  (negative)
         // B̄ = Δ · B        (Euler/ZOH approximation)
 
-        // Expand B and C from ngroups to nheads by repeating each group's
-        // projection across all heads_per_group heads in that group.
-        let heads_per_group = nheads / ngroups;
-
-        // b_bnlgr → b_bnlhr
-        let b_bnlhr = input
-            .b_bnlgr
-            .clone()
-            .unsqueeze_dim::<6>(4) // b_bnlg1r
-            .expand([
-                batch,
-                nchunks,
-                chunk_len,
-                ngroups,
-                heads_per_group,
-                state_rank,
-            ]) // b_bnlgHr
-            .reshape([batch, nchunks, chunk_len, nheads, state_rank]); // b_bnlhr
-
-        // c_bnlgr → c_bnlhr
-        let c_bnlhr = input
-            .c_bnlgr
-            .clone()
-            .unsqueeze_dim::<6>(4) // c_bnlg1r
-            .expand([
-                batch,
-                nchunks,
-                chunk_len,
-                ngroups,
-                heads_per_group,
-                state_rank,
-            ]) // c_bnlgHr
-            .reshape([batch, nchunks, chunk_len, nheads, state_rank]); // c_bnlhr
+        // B/C are already GQA-expanded to per-head.
+        let b_bnlhr = input.b_bnlhr.clone();
+        let c_bnlhr = input.c_bnlhr.clone();
 
         // B̄ₜ = Δₜ · Bₜ
         let delta_b_bnlhr = input.dt_bnlh.clone().unsqueeze_dim(4) * b_bnlhr.clone();

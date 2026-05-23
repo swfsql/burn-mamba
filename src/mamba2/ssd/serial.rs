@@ -4,30 +4,24 @@ use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba2<B> {
+impl<B: Backend> Mamba2SsdInput<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial(input: super::Mamba2SsdInput<B>) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_serial(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        let input = self;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
-        let [.., ngroups, state_rank] = input.b_bnlgr.dims();
-        let device = input.x_bnlhp.device();
-        assert_ne!(ngroups, 0);
-        assert_eq!(nheads % ngroups, 0);
+        let [.., state_rank] = input.b_bnlhr.dims();
         assert!(nchunks > 0, "sequence length must be at least 1");
-        // `heads_per_group` is called `nheads_ngroups_ratio` in every Triton kernel.
-        // It is the compile-time constant used by GQA (Grouped Query Attention) to map
-        // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
-        let heads_per_group = nheads / ngroups;
 
         san(&input.x_bnlhp);
         san(&input.dt_bnlh);
         san(&input.a_decay_h);
-        san(&input.b_bnlgr);
-        san(&input.c_bnlgr);
+        san(&input.b_bnlhr);
+        san(&input.c_bnlhr);
         san(&input.d_h);
         san(&input.initial_state_bhpr);
 
@@ -55,20 +49,19 @@ impl<B: Backend> Mamba2<B> {
         san(&da_chunk_end_bhn);
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────────────
-        // IO: (..) -> (cb_bngll [used in K5][!])
-        let cb_bngll: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlgr.clone(), input.b_bnlgr.clone());
+        // IO: (..) -> (cb_bnhll [used in K5][!])
+        let cb_bnhll: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlhr.clone(), input.b_bnlhr.clone());
         assert_eq!(
-            [batch, nchunks, ngroups, chunk_len, chunk_len],
-            cb_bngll.dims()
+            [batch, nchunks, nheads, chunk_len, chunk_len],
+            cb_bnhll.dims()
         );
-        // Note: cb_bngll is then only used by Kernel 5.
-        san(&cb_bngll);
+        san(&cb_bnhll);
 
         // ── Kernel 3 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (intra_chunk_state_bnhpr [used in K4][!])
         let intra_chunk_state_bnhpr: Tensor<B, 5> = k3_ssd_chunk_state(
             input.x_bnlhp.clone(),
-            input.b_bnlgr.clone(),
+            input.b_bnlhr.clone(),
             da_cumsum_bhnl.clone(),
             dt_discretized_bhnl.clone(),
         );
@@ -80,7 +73,6 @@ impl<B: Backend> Mamba2<B> {
 
         // ── Kernel 4 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (chunk_input_state_bnhpr [used in K5][!], final_state_bhpr [final output])
-        let flat_state_dim = per_head_dim * state_rank;
         let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<B, 5>, Tensor<B, 4>) =
             k4_ssd_state_passing(
                 intra_chunk_state_bnhpr.clone(),
@@ -103,8 +95,8 @@ impl<B: Backend> Mamba2<B> {
             da_cumsum_bhnl,
             dt_discretized_bhnl,
             input.x_bnlhp,
-            input.c_bnlgr,
-            cb_bngll,
+            input.c_bnlhr,
+            cb_bnhll,
             chunk_input_state_bnhpr,
             input.d_h,
         );
@@ -154,22 +146,22 @@ pub fn k1_ssd_chunk_cumsum<B: Backend>(
 /// Based on the Kernel 2 Triton reference `_bmm_chunk_fwd_kernel` (`ssd_bmm.py`).
 ///
 /// Returns:
-/// - cb_bngll [used in K5][!].
-pub fn k2_ssd_bmm<B: Backend>(c_bnlgr: Tensor<B, 5>, b_bnlgr: Tensor<B, 5>) -> Tensor<B, 5> {
-    let [batch, nchunks, chunk_len, ngroups, state_rank] = c_bnlgr.dims();
+/// - cb_bnhll [used in K5][!].
+pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> Tensor<B, 5> {
+    let [batch, nchunks, chunk_len, nheads, _state_rank] = c_bnlhr.dims();
 
-    // - 1/3: permute: (c_bnlgr [in][*]) -> (c_bnglr)
-    let c_bnglr = c_bnlgr.clone().permute([0, 1, 3, 2, 4]);
-    // - 2: permute: (b_bnlgr [in][*]) -> (b_bngrl)
-    let b_bngrl = b_bnlgr.clone().permute([0, 1, 3, 4, 2]);
-    // - 3/3: matmul: (c_bnglr, b_bngrl) -> (cb_bngll [out][!])
-    let cb_bngll: Tensor<B, 5> = c_bnglr.matmul(b_bngrl);
+    // - 1/3: permute: (c_bnlhr [in][*]) -> (c_bnhlr)
+    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+    // - 2: permute: (b_bnlhr [in][*]) -> (b_bnhrl)
+    let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
+    // - 3/3: matmul: (c_bnhlr, b_bnhrl) -> (cb_bnhll [out][!])
+    let cb_bnhll: Tensor<B, 5> = c_bnhlr.matmul(b_bnhrl);
     assert_eq!(
-        [batch, nchunks, ngroups, chunk_len, chunk_len],
-        cb_bngll.dims()
+        [batch, nchunks, nheads, chunk_len, chunk_len],
+        cb_bnhll.dims()
     );
-    // Note: cb_bngll is then only used by Kernel 5.
-    cb_bngll
+    // Note: cb_bnhll is then only used by Kernel 5.
+    cb_bnhll
 }
 
 /// Based on the Kernel 3 Triton reference `_chunk_state_fwd_kernel` (`ssd_chunk_state.py`).
@@ -179,46 +171,28 @@ pub fn k2_ssd_bmm<B: Backend>(c_bnlgr: Tensor<B, 5>, b_bnlgr: Tensor<B, 5>) -> T
 /// - b_bar_scale_bhnl [*] - intermediary
 pub fn k3_ssd_chunk_state<B: Backend>(
     x_bnlhp: Tensor<B, 5>,
-    b_bnlgr: Tensor<B, 5>,
+    b_bnlhr: Tensor<B, 5>,
     da_cumsum_bhnl: Tensor<B, 4>,
     dt_discretized_bhnl: Tensor<B, 4>,
 ) -> Tensor<B, 5> {
     use burn::tensor::s;
 
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-    let [.., ngroups, state_rank] = b_bnlgr.dims();
+    let [.., state_rank] = b_bnlhr.dims();
 
-    // permute b and x to prepare them for the mamtul
+    // permute b and x to prepare them for the matmul
     // - 1/15: permute: (x_bnlhp [in][*]) -> (x_bnhpl)
     let x_bnhpl = x_bnlhp.clone().permute([0, 1, 3, 4, 2]);
     assert_eq!(
         [batch, nchunks, nheads, per_head_dim, chunk_len],
         x_bnhpl.dims()
     );
-    // - 2: permute: (b_bnlgr [in][*]) -> (b_bnglr)
-    let b_bnglr = b_bnlgr.permute([0, 1, 3, 2, 4]); // note: still in groups instead of heads
+    // - 2: permute: (b_bnlhr [in][*]) -> (b_bnhlr)
+    let b_bnhlr = b_bnlhr.permute([0, 1, 3, 2, 4]);
     assert_eq!(
-        [batch, nchunks, ngroups, chunk_len, state_rank],
-        b_bnglr.dims()
+        [batch, nchunks, nheads, chunk_len, state_rank],
+        b_bnhlr.dims()
     );
-
-    // Expand B from ngroups to nheads by repeating each group's
-    // projection across all heads_per_group heads in that group.
-    let heads_per_group = nheads / ngroups;
-    let b_bnhlr = b_bnglr
-        // - 3: unsqueeze: (b_bnglr) -> (b_bng1lr)
-        .unsqueeze_dim::<6>(3) // b_bng1lr
-        // - 4: expand: (b_bng1lr) -> (b_bngHlr)
-        .expand([
-            batch,
-            nchunks,
-            ngroups,
-            heads_per_group,
-            chunk_len,
-            state_rank,
-        ]) // b_bngHlr
-        // - 5: reshape: (b_bngHlr) -> (b_bnhlr)
-        .reshape([batch, nchunks, nheads, chunk_len, state_rank]);
 
     // scale b
     let b_scaled_bnhlr = {
@@ -356,14 +330,12 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     da_cumsum_bhnl: Tensor<B, 4>,
     dt_discretized_bhnl: Tensor<B, 4>,
     x_bnlhp: Tensor<B, 5>,
-    c_bnlgr: Tensor<B, 5>,
-    cb_bngll: Tensor<B, 5>,
+    c_bnlhr: Tensor<B, 5>,
+    cb_bnhll: Tensor<B, 5>,
     chunk_input_state_bnhpr: Tensor<B, 5>,
     d_h: Tensor<B, 1>,
 ) -> Tensor<B, 5> {
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-    let [.., ngroups, state_rank] = c_bnlgr.dims();
-    let heads_per_group = nheads / ngroups;
     let device = x_bnlhp.device();
 
     // Rearrange inputs to the common [batch, nchunks, nheads, ...] ordering used below.
@@ -377,40 +349,9 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
     san(&x_bnhlp);
 
-    // GQA: expand C  [b,n,l,g,r] → [b,n,h,l,r].
-    let c_bnhlr = c_bnlgr
-        // - 4: unsqueeze: (c_bnlgr [*]) -> (c_bnlg1r)
-        .unsqueeze_dim::<6>(4) // c_bnlg1r
-        // - 5: expand: (c_bnlg1r) -> (c_bnlgHr)
-        .expand([
-            batch,
-            nchunks,
-            chunk_len,
-            ngroups,
-            heads_per_group,
-            state_rank,
-        ]) // c_bnlgHr
-        // - 6: reshape: (c_bnlgHr) -> (c_bnlhr)
-        .reshape([batch, nchunks, chunk_len, nheads, state_rank]) // c_bnlhr
-        // - 7: permute: (c_bnlhr) -> (c_bnhlr)
-        .permute([0, 1, 3, 2, 4]);
+    // B/C are already per-head — only a permute is needed.
+    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
     san(&c_bnhlr);
-
-    // GQA: expand CB [b,n,g,l,l] → [b,n,h,l,l].
-    let cb_bnhll = cb_bngll
-        // - 8: unsqueeze: (cb_bngll [!]) -> (cb_bng1ll)
-        .unsqueeze_dim::<6>(3) // cb_bng1ll
-        // - 9: expand: (cb_bng1ll) -> (cb_bngHll)
-        .expand([
-            batch,
-            nchunks,
-            ngroups,
-            heads_per_group,
-            chunk_len,
-            chunk_len,
-        ]) // cb_bngHll
-        // - 10: reshape: (cb_bngHll) -> (cb_bnhll)
-        .reshape([batch, nchunks, nheads, chunk_len, chunk_len]);
     san(&cb_bnhll);
 
     // ── BLUE: exp(dA[l]) · C[l,:] @ state_in^T ─────────────────────────────

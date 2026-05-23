@@ -24,8 +24,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
     fn ssd_serial_recalculated(
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
-        b_bnlgr: FloatTensor<Self>,
-        c_bnlgr: FloatTensor<Self>,
+        b_bnlhr: FloatTensor<Self>,
+        c_bnlhr: FloatTensor<Self>,
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
@@ -38,8 +38,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         struct State<B: Backend> {
             x_bnlhp: FloatTensor<B>,
             dt_discretized_bhnl: FloatTensor<B>,
-            b_bnlgr: FloatTensor<B>,
-            c_bnlgr: FloatTensor<B>,
+            b_bnlhr: FloatTensor<B>,
+            c_bnlhr: FloatTensor<B>,
             d_h: FloatTensor<B>,
             initial_state_bhpr: FloatTensor<B>,
             a_decay_h: FloatTensor<B>,
@@ -49,8 +49,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             // shapes needed to reconstruct tensors in the right ranks
             shape_x_bnlhp: [usize; 5],
             shape_dt_discretized_bhnl: [usize; 4],
-            shape_b_bnlgr: [usize; 5],
-            shape_c_bnlgr: [usize; 5],
+            shape_b_bnlhr: [usize; 5],
+            shape_c_bnlhr: [usize; 5],
             shape_d_h: [usize; 1],
             shape_initial_state_bhpr: [usize; 4],
             shape_a_decay_h: [usize; 1],
@@ -75,8 +75,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let [
                     node_x_bnlhp,
                     node_dt_discretized_bhnl,
-                    node_b_bnlgr,
-                    node_c_bnlgr,
+                    node_b_bnlhr,
+                    node_c_bnlhr,
                     node_d_h,
                     node_initial_state_bhpr,
                     node_a_decay_h,
@@ -89,8 +89,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let State {
                     x_bnlhp,
                     dt_discretized_bhnl,
-                    b_bnlgr,
-                    c_bnlgr,
+                    b_bnlhr,
+                    c_bnlhr,
                     d_h,
                     initial_state_bhpr,
                     a_decay_h,
@@ -100,8 +100,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     //
                     shape_x_bnlhp,
                     shape_dt_discretized_bhnl,
-                    shape_b_bnlgr,
-                    shape_c_bnlgr,
+                    shape_b_bnlhr,
+                    shape_c_bnlhr,
                     shape_d_h,
                     shape_initial_state_bhpr,
                     shape_a_decay_h,
@@ -116,8 +116,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let x_bnlhp = mk::<_, 5>(x_bnlhp).reshape(shape_x_bnlhp);
                 let dt_discretized_bhnl =
                     mk::<_, 4>(dt_discretized_bhnl).reshape(shape_dt_discretized_bhnl);
-                let b_bnlgr = mk::<_, 5>(b_bnlgr).reshape(shape_b_bnlgr);
-                let c_bnlgr = mk::<_, 5>(c_bnlgr).reshape(shape_c_bnlgr);
+                let b_bnlhr = mk::<_, 5>(b_bnlhr).reshape(shape_b_bnlhr);
+                let c_bnlhr = mk::<_, 5>(c_bnlhr).reshape(shape_c_bnlhr);
                 let d_h = mk::<_, 1>(d_h).reshape(shape_d_h);
                 let initial_state_bhpr =
                     mk::<_, 4>(initial_state_bhpr).reshape(shape_initial_state_bhpr);
@@ -137,8 +137,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let CombinedGrads {
                     d_x_bnlhp,
                     d_dt_discretized_bhnl,
-                    d_b_bnlgr,
-                    d_c_bnlgr,
+                    d_b_bnlhr,
+                    d_c_bnlhr,
                     d_d_h,
                     d_initial_state_bhpr,
                     d_a_decay_h,
@@ -149,8 +149,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     //
                     x_bnlhp,
                     dt_discretized_bhnl,
-                    b_bnlgr,
-                    c_bnlgr,
+                    b_bnlhr,
+                    c_bnlhr,
                     d_h,
                     initial_state_bhpr,
                     a_decay_h,
@@ -168,8 +168,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 // };
                 // let () = reg(node_x_bnlhp, d_x_bnlhp);
                 // let () = reg(node_dt_discretized_bhnl, d_dt_discretized_bhnl);
-                // let () = reg(node_b_bnlgr, d_b_bnlgr);
-                // let () = reg(node_c_bnlgr, d_c_bnlgr);
+                // let () = reg(node_b_bnlhr, d_b_bnlhr);
+                // let () = reg(node_c_bnlhr, d_c_bnlhr);
                 // let () = reg(node_d_h, d_d_h);
                 // let () = reg(node_initial_state_bhpr, d_initial_state_bhpr);
                 // let () = reg(node_da_cumsum_bhnl, d_da_cumsum_bhnl);
@@ -180,11 +180,11 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 if let Some(n) = node_dt_discretized_bhnl {
                     grads.register::<B>(n.id, d_dt_discretized_bhnl.into_primitive().tensor());
                 }
-                if let Some(n) = node_b_bnlgr {
-                    grads.register::<B>(n.id, d_b_bnlgr.into_primitive().tensor());
+                if let Some(n) = node_b_bnlhr {
+                    grads.register::<B>(n.id, d_b_bnlhr.into_primitive().tensor());
                 }
-                if let Some(n) = node_c_bnlgr {
-                    grads.register::<B>(n.id, d_c_bnlgr.into_primitive().tensor());
+                if let Some(n) = node_c_bnlhr {
+                    grads.register::<B>(n.id, d_c_bnlhr.into_primitive().tensor());
                 }
                 if let Some(n) = node_d_h {
                     grads.register::<B>(n.id, d_d_h.into_primitive().tensor());
@@ -203,15 +203,15 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // and .primitive).
         use burn::tensor::TensorMetadata;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive.shape().dims();
-        let [_, _, _, ngroups, state_rank] = b_bnlgr.primitive.shape().dims();
+        let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive.shape().dims();
 
         let flat_len_y_BNLHP = batch * nchunks * chunk_len * nheads * per_head_dim;
         let flat_len_final_state_BHPR = batch * nheads * per_head_dim * state_rank;
 
         let shape_x_bnlhp: [usize; 5] = [batch, nchunks, chunk_len, nheads, per_head_dim];
         let shape_dt_discretized_bhnl: [usize; 4] = [batch, nheads, nchunks, chunk_len];
-        let shape_b_bnlgr: [usize; 5] = [batch, nchunks, chunk_len, ngroups, state_rank];
-        let shape_c_bnlgr: [usize; 5] = [batch, nchunks, chunk_len, ngroups, state_rank];
+        let shape_b_bnlhr: [usize; 5] = [batch, nchunks, chunk_len, nheads, state_rank];
+        let shape_c_bnlhr: [usize; 5] = [batch, nchunks, chunk_len, nheads, state_rank];
         let shape_d_h: [usize; 1] = [nheads];
         let shape_initial_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
         let shape_a_decay_h: [usize; 1] = [nheads];
@@ -223,8 +223,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             .prepare::<C>([
                 x_bnlhp.node.clone(),
                 dt_discretized_bhnl.node.clone(),
-                b_bnlgr.node.clone(),
-                c_bnlgr.node.clone(),
+                b_bnlhr.node.clone(),
+                c_bnlhr.node.clone(),
                 d_h.node.clone(),
                 initial_state_bhpr.node.clone(),
                 a_decay_h.node.clone(),
@@ -237,8 +237,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
                     x_bnlhp.primitive.clone(),
                     dt_discretized_bhnl.primitive.clone(),
-                    b_bnlgr.primitive.clone(),
-                    c_bnlgr.primitive.clone(),
+                    b_bnlhr.primitive.clone(),
+                    c_bnlhr.primitive.clone(),
                     d_h.primitive.clone(),
                     initial_state_bhpr.primitive.clone(),
                     a_decay_h.primitive.clone(),
@@ -259,8 +259,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let state = State {
                     x_bnlhp: x_bnlhp.primitive.clone(),
                     dt_discretized_bhnl: dt_discretized_bhnl.primitive.clone(),
-                    b_bnlgr: b_bnlgr.primitive.clone(),
-                    c_bnlgr: c_bnlgr.primitive.clone(),
+                    b_bnlhr: b_bnlhr.primitive.clone(),
+                    c_bnlhr: c_bnlhr.primitive.clone(),
                     d_h: d_h.primitive.clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive.clone(),
                     a_decay_h: a_decay_h.primitive.clone(),
@@ -268,7 +268,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
                     //
-                    shape_x_bnlhp, shape_dt_discretized_bhnl, shape_b_bnlgr, shape_c_bnlgr, shape_d_h, shape_initial_state_bhpr, shape_a_decay_h,
+                    shape_x_bnlhp, shape_dt_discretized_bhnl, shape_b_bnlhr, shape_c_bnlhr, shape_d_h, shape_initial_state_bhpr, shape_a_decay_h,
                     shape_y_bnlhp, shape_final_state_bhpr,
                 };
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
@@ -300,8 +300,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
                     x_bnlhp.primitive,
                     dt_discretized_bhnl.primitive,
-                    b_bnlgr.primitive,
-                    c_bnlgr.primitive,
+                    b_bnlhr.primitive,
+                    c_bnlhr.primitive,
                     d_h.primitive,
                     initial_state_bhpr.primitive,
                     a_decay_h.primitive,

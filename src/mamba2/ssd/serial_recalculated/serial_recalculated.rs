@@ -3,25 +3,21 @@ use crate::mamba2::ssd::serial;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
-impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
+impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
     /// Forward pass for the Mamba-2 SSD module.
     ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial_recalculated(
-        input: super::super::Mamba2SsdInput<B>,
-    ) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_serial_recalculated(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        let input = self;
         // Must use a backend-dependent method.
         //
         // For inference, this will ultimately replicate Mamba2::ssd_serial;
         // For autodiff, this will call the custom implementation.
 
         let [batch, nchunks, chunk_len, nheads, _per_head_dim] = input.x_bnlhp.dims();
-        let [.., ngroups, _state_rank] = input.b_bnlgr.dims();
-        assert_ne!(ngroups, 0);
-        assert_eq!(nheads % ngroups, 0);
         assert!(nchunks > 0, "sequence length must be at least 1");
 
         assert!(
@@ -43,8 +39,8 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let (y_bnlhp, final_state_bhpr) = <B as Mamba2BackendExt>::ssd_serial_recalculated(
             input.x_bnlhp.into_primitive().tensor(),
             dt_discretized_bhnl.into_primitive().tensor(),
-            input.b_bnlgr.into_primitive().tensor(),
-            input.c_bnlgr.into_primitive().tensor(),
+            input.b_bnlhr.into_primitive().tensor(),
+            input.c_bnlhr.into_primitive().tensor(),
             input.d_h.into_primitive().tensor(),
             input.initial_state_bhpr.into_primitive().tensor(),
             input.a_decay_h.into_primitive().tensor(),
@@ -63,30 +59,25 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
     fn ssd_serial_recalculated(
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
-        b_bnlgr: FloatTensor<Self>,
-        c_bnlgr: FloatTensor<Self>,
+        b_bnlhr: FloatTensor<Self>,
+        c_bnlhr: FloatTensor<Self>,
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        // Default impl essentially replicates Mamba2::ssd_serial.
+        // Default impl essentially replicates Mamba2SsdInput::ssd_serial.
 
         let x_bnlhp: Tensor<Self, 5> = mk(x_bnlhp);
         let dt_discretized_bhnl: Tensor<Self, 4> = mk(dt_discretized_bhnl);
-        let b_bnlgr: Tensor<Self, 5> = mk(b_bnlgr);
-        let c_bnlgr: Tensor<Self, 5> = mk(c_bnlgr);
+        let b_bnlhr: Tensor<Self, 5> = mk(b_bnlhr);
+        let c_bnlhr: Tensor<Self, 5> = mk(c_bnlhr);
         let d_h: Tensor<Self, 1> = mk(d_h);
         let initial_state_bhpr: Tensor<Self, 4> = mk(initial_state_bhpr);
         let a_decay_h: Tensor<Self, 1> = mk(a_decay_h);
 
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-        let [.., ngroups, state_rank] = b_bnlgr.dims();
-        assert_ne!(ngroups, 0);
-        assert_eq!(nheads % ngroups, 0);
+        let [.., state_rank] = b_bnlhr.dims();
         assert!(nchunks > 0, "sequence length must be at least 1");
-        // `heads_per_group` is called `nheads_ngroups_ratio` in every Triton kernel.
-        // It is the compile-time constant used by GQA (Grouped Query Attention) to map
-        // a head index to its B/C group: `group_idx = head_idx / heads_per_group`.
 
         // ── Kernel 1 ──────────────────────────────────────────────────────────
         let (da_cumsum_bhnl, da_chunk_end_bhn) =
@@ -95,19 +86,18 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────
-        // IO: (..) -> (cb_bngll [used in K5][!])
-        let cb_bngll: Tensor<Self, 5> = serial::k2_ssd_bmm(c_bnlgr.clone(), b_bnlgr.clone());
+        // IO: (..) -> (cb_bnhll [used in K5][!])
+        let cb_bnhll: Tensor<Self, 5> = serial::k2_ssd_bmm(c_bnlhr.clone(), b_bnlhr.clone());
         assert_eq!(
-            [batch, nchunks, ngroups, chunk_len, chunk_len],
-            cb_bngll.dims()
+            [batch, nchunks, nheads, chunk_len, chunk_len],
+            cb_bnhll.dims()
         );
-        // Note: cb_bngll is then only used by Kernel 5.
 
         // ── Kernel 3 ──────────────────────────────────────────────────────────
         // IO: (..) -> (intra_chunk_state_bnhpr [used in K4][!])
         let intra_chunk_state_bnhpr: Tensor<Self, 5> = serial::k3_ssd_chunk_state(
             x_bnlhp.clone(),
-            b_bnlgr.clone(),
+            b_bnlhr.clone(),
             da_cumsum_bhnl.clone(),
             dt_discretized_bhnl.clone(),
         );
@@ -138,8 +128,8 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
             da_cumsum_bhnl,
             dt_discretized_bhnl,
             x_bnlhp,
-            c_bnlgr,
-            cb_bngll,
+            c_bnlhr,
+            cb_bnhll,
             chunk_input_state_bnhpr,
             d_h,
         );

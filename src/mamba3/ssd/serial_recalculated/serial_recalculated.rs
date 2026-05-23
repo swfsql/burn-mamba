@@ -5,7 +5,7 @@ use crate::mamba3::ssd::serial;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
-impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
+impl<B: Backend + Mamba3BackendExt> Mamba3SsdInput<B> {
     /// MIMO-first Serial SSD with recalculated backward.
     ///
     /// Delegates the full K1-K5 computation to [`Mamba3BackendExt::ssd_serial_recalculated`]
@@ -16,9 +16,8 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_serial_recalculated(
-        input: super::super::Mamba3SsdInput<B>,
-    ) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+        let input = self;
         assert!(
             input.init_state_hpr.is_none(),
             "init_state_hpr not yet implemented for ssd_serial_recalculated"

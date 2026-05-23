@@ -22,7 +22,7 @@ use crate::mamba3::prelude::*;
 use burn::prelude::*;
 use crate::utils::segsum::segsum;
 
-impl<B: Backend> Mamba3<B> {
+impl<B: Backend> Mamba3SsdInput<B> {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
     ///
     /// Implements the four-step decomposition for the MIMO trapezoidal recurrence.
@@ -35,7 +35,8 @@ impl<B: Backend> Mamba3<B> {
     /// - output.0 `y_bnlrhp`:       `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(input: super::Mamba3SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+        let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
         // note: L above denotes the chunk_len

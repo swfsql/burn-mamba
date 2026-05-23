@@ -694,25 +694,32 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
         let b_bnlgr = b_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
+        // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
+        // them per-head. Replicate each group's projection across the heads_per_group
+        // heads of that group (heads 0..heads_per_group belong to group 0, etc.).
+        let heads_per_group = nheads / ngroups;
+        let gqa_expand = |t_bnlgr: Tensor<B, 5>| -> Tensor<B, 5> {
+            t_bnlgr
+                .unsqueeze_dim::<6>(4) // _bnlg1r
+                .expand([batch, nchunks, chunk_len, ngroups, heads_per_group, state_rank]) // _bnlgHr
+                .reshape([batch, nchunks, chunk_len, nheads, state_rank]) // _bnlhr
+        };
+        let b_bnlhr = gqa_expand(b_bnlgr);
+        let c_bnlhr = gqa_expand(c_bnlgr);
+
         // ── Step 6: Selective Scan ────────────────────────────────────────────
         let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
             x_bnlhp,
             dt_bnlh,
             a_decay_h: a_head_decay_h,
-            b_bnlgr,
-            c_bnlgr,
+            b_bnlhr,
+            c_bnlhr,
             d_h: self.d_h.val(),
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
         ssd_input.sanity();
-        let (y_bnlhp, final_state_bhpr) = match ssd_path {
-            Mamba2SsdPath::Minimal(_chunk_len) => Self::ssd_minimal(ssd_input),
-            Mamba2SsdPath::Serial(_chunk_len) => Self::ssd_serial(ssd_input),
-            Mamba2SsdPath::SerialRecalculated(_chunk_len) => {
-                Self::ssd_serial_recalculated(ssd_input)
-            }
-        };
+        let (y_bnlhp, final_state_bhpr) = ssd_path.run(ssd_input);
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             y_bnlhp.dims()

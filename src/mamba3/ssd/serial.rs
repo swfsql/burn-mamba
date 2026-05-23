@@ -3,7 +3,7 @@
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3<B> {
+impl<B: Backend> Mamba3SsdInput<B> {
     /// MIMO-first (Hybrid) Serial SSD.
     ///
     /// Implements K1-K5 with a sequential loop (K4) for the inter-chunk scan instead
@@ -15,7 +15,8 @@ impl<B: Backend> Mamba3<B> {
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_serial(input: super::Mamba3SsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn ssd_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+        let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
 
