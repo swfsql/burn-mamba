@@ -40,7 +40,7 @@ impl<B: Backend> Mamba1Layer<B> {
         let res = x.clone();
         let x = self.norm.forward(x);
 
-        let x = self.mamba_block.forward(x);
+        let (x, _cache) = self.mamba_block.forward(x, None);
         debug_assert_eq!([batch, sequence, d_model], x.dims());
 
         x + res

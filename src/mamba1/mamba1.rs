@@ -154,9 +154,9 @@ impl Mamba1Config {
                 .with_initializer(uniform_init(self.d_model))
                 .init(device),
             conv1d: Conv1dConfig::new(d_inner, d_inner, self.d_conv)
-                // TODO: only left-padding is necessary,
-                // and possibly a narrowing will no longer be necessary
-                .with_padding(PaddingConfig1d::Explicit(self.d_conv - 1, self.d_conv - 1))
+                // Causal left-padding is applied manually in `forward` (from the
+                // conv cache window), so the convolution itself uses no padding.
+                .with_padding(PaddingConfig1d::Valid)
                 .with_groups(d_inner)
                 .with_bias(self.conv_bias)
                 // follows PyTorch's default initializer
@@ -189,13 +189,31 @@ impl Mamba1Config {
 impl<B: Backend> Mamba1<B> {
     /// See also [`Self::step`].
     ///
+    /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]: an optional `cache`
+    /// supplies the initial convolution window and SSM state (zero-initialised
+    /// when `None`), and the updated cache is returned so a sequence can be
+    /// processed in segments (prefill then decode, or chunked prefill).
+    ///
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
     ///   - Output `[batch, sequence, d_model]`
-    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+    pub fn forward(
+        &self,
+        x: Tensor<B, 3>,
+        cache: Option<Mamba1Cache<B>>,
+    ) -> (Tensor<B, 3>, Mamba1Cache<B>) {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
         let [_, _, d_conv] = self.conv1d.weight.dims();
+        let [_d_inner, d_state] = self.a_log.dims();
+        let device = x.device();
+        debug_assert!(sequence > 0, "sequence length must be at least 1");
+
+        // Zero-initialise the cache (conv window + SSM state) when not provided.
+        let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
+            conv: Param::from_tensor(Tensor::zeros([batch, d_inner, d_conv], &device)),
+            ssm: Param::from_tensor(Tensor::zeros([batch, d_inner, d_state], &device)),
+        });
 
         // layer 1 (in_proj)
         let (xs, res) = {
@@ -212,17 +230,32 @@ impl<B: Backend> Mamba1<B> {
         debug_assert_eq!([batch, sequence, d_inner], xs.dims());
         debug_assert_eq!([batch, sequence, d_inner], res.dims());
 
-        // layer 2 (conv1d)
+        // layer 2 (conv1d) — causal, with the cache window threaded as left context
         let xs = {
-            // let xs = xs.swap_dims(1, 2);
-            let xs = xs.permute([0, 2, 1]);
-            debug_assert_eq!([batch, d_inner, sequence], xs.dims());
-
             debug_assert!(d_conv > 0);
-            let xs = self.conv1d.forward(xs);
-            debug_assert_eq!([batch, d_inner, sequence + d_conv - 1], xs.dims());
+            // let xs = xs.swap_dims(1, 2);
+            let xs_bis = xs.permute([0, 2, 1]);
+            debug_assert_eq!([batch, d_inner, sequence], xs_bis.dims());
 
-            let xs = xs.narrow(2, 0, sequence);
+            // Left-pad with the last (d_conv - 1) columns of the cached window so
+            // the convolution is strictly causal and continues a prior segment.
+            let xs_padded = if d_conv >= 2 {
+                let tail = cache.conv.val().narrow(2, 1, d_conv - 1);
+                debug_assert_eq!([batch, d_inner, d_conv - 1], tail.dims());
+                Tensor::cat(vec![tail, xs_bis], 2)
+            } else {
+                xs_bis
+            };
+            debug_assert_eq!([batch, d_inner, (d_conv - 1) + sequence], xs_padded.dims());
+
+            // Update the conv window: the last d_conv columns of the padded input.
+            // `Param::map` (rather than `Param::from_tensor`) is required because
+            // the new window is a computed, non-leaf autodiff tensor.
+            let new_conv = xs_padded.clone().narrow(2, sequence - 1, d_conv);
+            cache.conv = cache.conv.map(|_| new_conv);
+            debug_assert_eq!([batch, d_inner, d_conv], cache.conv.dims());
+
+            let xs = self.conv1d.forward(xs_padded);
             debug_assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
@@ -238,8 +271,9 @@ impl<B: Backend> Mamba1<B> {
         };
         debug_assert_eq!([batch, sequence, d_inner], xs.dims());
 
-        let ss = self.ss(xs);
+        let (ss, final_ssm) = self.ss(xs, cache.ssm.val());
         debug_assert_eq!([batch, sequence, d_inner], ss.dims());
+        cache.ssm = cache.ssm.map(|_| final_ssm);
 
         // activation
         let ys = ss * Silu::new().forward(res);
@@ -248,13 +282,15 @@ impl<B: Backend> Mamba1<B> {
         let y = self.out_proj.forward(ys);
         debug_assert_eq!([batch, sequence, d_model], y.dims());
 
-        y
+        (y, cache)
     }
 
     /// # Shapes
-    ///   - Input `[batch, sequence, d_inner]`
+    ///   - Input u `[batch, sequence, d_inner]`
+    ///   - Input init_ssm `[batch, d_inner, d_state]`
     ///   - Output `[batch, sequence, d_inner]`
-    pub fn ss(&self, u: Tensor<B, 3>) -> Tensor<B, 3> {
+    ///   - Output (final state) `[batch, d_inner, d_state]`
+    pub fn ss(&self, u: Tensor<B, 3>, init_ssm: Tensor<B, 3>) -> (Tensor<B, 3>, Tensor<B, 3>) {
         let [batch, sequence, d_inner] = u.dims();
         let [_d_inner, d_state] = self.a_log.dims();
         let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
@@ -297,7 +333,7 @@ impl<B: Backend> Mamba1<B> {
         let c = c.permute([1, 0, 2]);
         debug_assert_eq!([sequence, batch, d_state], c.dims());
 
-        Self::selective_scan(delta, a, b, c, self.d.val(), u)
+        Self::selective_scan(delta, a, b, c, self.d.val(), u, init_ssm)
     }
 
     /// Selective Scan.
@@ -314,7 +350,9 @@ impl<B: Backend> Mamba1<B> {
     ///   - Input c `[sequence, batch, d_state]`
     ///   - Input d `[d_inner]`
     ///   - Input u `[batch, sequence, d_inner]`
+    ///   - Input init_ssm `[batch, d_inner, d_state]`
     ///   - Output `[batch, sequence, d_inner]`
+    ///   - Output (final state) `[batch, d_inner, d_state]`
     pub fn selective_scan(
         delta: Tensor<B, 3>,
         a: Tensor<B, 2>,
@@ -322,8 +360,8 @@ impl<B: Backend> Mamba1<B> {
         c: Tensor<B, 3>,
         d: Tensor<B, 1>,
         u: Tensor<B, 3>,
-    ) -> Tensor<B, 3> {
-        let device = &u.device();
+        init_ssm: Tensor<B, 3>,
+    ) -> (Tensor<B, 3>, Tensor<B, 3>) {
         let [sequence, batch, d_inner] = delta.dims();
         let [_d_inner, d_state] = a.dims();
         let outer_shape = [sequence, batch, d_inner, d_state];
@@ -388,7 +426,8 @@ impl<B: Backend> Mamba1<B> {
         debug_assert_eq!(c.len(), sequence);
 
         let inner_shape = [batch, d_inner, d_state];
-        let mut xs: Tensor<B, 3> = Tensor::zeros(inner_shape, device);
+        debug_assert_eq!(inner_shape, init_ssm.dims());
+        let mut xs: Tensor<B, 3> = init_ssm;
         let mut ys = Vec::with_capacity(sequence); // inner shape: [batch, d_inner]
         for ((delta_a, delta_bu), c) in delta_a
             .into_iter()
@@ -420,7 +459,7 @@ impl<B: Backend> Mamba1<B> {
         let ys = ys + (d * u);
         debug_assert_eq!([batch, sequence, d_inner], ys.dims());
 
-        ys
+        (ys, xs)
     }
 }
 
@@ -673,6 +712,10 @@ mod tests {
     /// across two runs that should be mathematically equivalent.
     struct RunGrads {
         out: Tensor<InnerB, 3>,
+        /// Final convolution window from the returned cache.
+        final_conv: Tensor<InnerB, 3>,
+        /// Final SSM state from the returned cache.
+        final_ssm: Tensor<InnerB, 3>,
         d_input: Tensor<InnerB, 3>,
         d_in_proj_w: Tensor<InnerB, 2>,
         d_conv1d_w: Tensor<InnerB, 3>,
@@ -684,6 +727,15 @@ mod tests {
         d_out_proj_w: Tensor<InnerB, 2>,
     }
 
+    /// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
+    /// from the output **and** the final cache, so the backward pass exercises
+    /// both the output and the state path.
+    struct Heads {
+        out: Tensor<InnerB, 3>,
+        conv: Tensor<InnerB, 3>,
+        ssm: Tensor<InnerB, 3>,
+    }
+
     /// Run a closure that produces an output tensor from a model and an input
     /// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
     /// scalar loss with a fixed (non-tracked) random "head" and return the
@@ -691,18 +743,28 @@ mod tests {
     fn run_with_grads(
         model: &Mamba1<B>,
         input: &Param<Tensor<B, 3>>,
-        head: &Tensor<InnerB, 3>,
-        forward: impl FnOnce(&Mamba1<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+        heads: &Heads,
+        forward: impl FnOnce(&Mamba1<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba1Cache<B>),
     ) -> RunGrads {
-        let out = forward(model, input.val());
+        let (out, cache) = forward(model, input.val());
         let out_inner = out.clone().inner();
+        let conv = cache.conv.val();
+        let ssm = cache.ssm.val();
+        let final_conv = conv.clone().inner();
+        let final_ssm = ssm.clone().inner();
 
-        let head = Tensor::from_inner(head.clone());
-        let loss = (out * head).sum();
+        // Loss couples the output and the final cache (each via its own random
+        // head) so parameter gradients reflect both the output and state paths.
+        let out_head = Tensor::from_inner(heads.out.clone());
+        let conv_head = Tensor::from_inner(heads.conv.clone());
+        let ssm_head = Tensor::from_inner(heads.ssm.clone());
+        let loss = (out * out_head).sum() + (conv * conv_head).sum() + (ssm * ssm_head).sum();
         let grads = loss.backward();
 
         RunGrads {
             out: out_inner,
+            final_conv,
+            final_ssm,
             d_input: input.val().grad(&grads).expect("grad input"),
             d_in_proj_w: model
                 .in_proj
@@ -790,39 +852,78 @@ mod tests {
         Param::from_tensor(Tensor::from_inner(input.clone()))
     }
 
+    /// Build the initial cache (conv window + SSM state) passed to both
+    /// `forward` and the `step` unrolling. With `random = false` the cache is
+    /// zero (the standard fresh start); with `random = true` it holds random
+    /// values, exercising forward/step parity from an arbitrary initial state.
+    fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache<B> {
+        let device: Device = Default::default();
+        let d_inner = cfg.d_inner();
+        let d_conv = cfg.d_conv;
+        let d_state = cfg.d_state;
+        let (conv, ssm) = if random {
+            let dist = Distribution::Normal(0.0, 1.0);
+            (
+                Tensor::<InnerB, 3>::random([batch, d_inner, d_conv], dist, &device),
+                Tensor::<InnerB, 3>::random([batch, d_inner, d_state], dist, &device),
+            )
+        } else {
+            (
+                Tensor::<InnerB, 3>::zeros([batch, d_inner, d_conv], &device),
+                Tensor::<InnerB, 3>::zeros([batch, d_inner, d_state], &device),
+            )
+        };
+        Mamba1Cache {
+            conv: Param::from_tensor(Tensor::from_inner(conv)),
+            ssm: Param::from_tensor(Tensor::from_inner(ssm)),
+        }
+    }
+
     /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
-    /// token-by-token starting from a zero cache: the latter is essentially
-    /// the recurrent unrolling of the former.  Both the forward outputs and
-    /// the parameter gradients should agree up to float-summation order
-    /// noise.
-    fn run_step_matches_forward(cfg: Mamba1Config) {
+    /// token-by-token from the **same** initial cache: the latter is the
+    /// recurrent unrolling of the former. Both the outputs, the final cache
+    /// (conv window + SSM state), and the parameter gradients must agree up to
+    /// float-summation-order noise.
+    ///
+    /// With `random_init = true` the shared initial cache is random rather than
+    /// zero. Parity from an arbitrary initial state subsumes the chunked-prefill
+    /// (split-vs-full) guarantee: if `forward` from any state equals the
+    /// recurrent unrolling from that same state — outputs *and* final cache —
+    /// then feeding a `forward`-produced cache back in continues correctly.
+    fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
+        // seq_len >= d_conv so the final conv window is fully determined by the
+        // sequence (the initial window has been flushed out), keeping the
+        // window comparison well-defined for both zero and random init.
         let seq_len = 5;
         let d_model = cfg.d_model;
+        let d_inner = cfg.d_inner();
+        let d_conv = cfg.d_conv;
+        let d_state = cfg.d_state;
+        assert!(seq_len >= d_conv);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let normal = Distribution::Normal(0.0, 1.0);
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            conv: Tensor::<InnerB, 3>::random([batch, d_inner, d_conv], normal, &device),
+            ssm: Tensor::<InnerB, 3>::random([batch, d_inner, d_state], normal, &device),
+        };
+
+        let init_cache = build_init_cache(&cfg, batch, random_init);
 
         let input_fwd = param_input(&input);
-        let r_fwd = run_with_grads(&model, &input_fwd, &head, |m, x| m.forward(x));
+        let cache_fwd = init_cache.clone();
+        let r_fwd =
+            run_with_grads(&model, &input_fwd, &heads, |m, x| m.forward(x, Some(cache_fwd)));
 
         let input_step = param_input(&input);
-        let cfg_step = cfg.clone();
-        let r_step = run_with_grads(&model, &input_step, &head, |m, x| {
-            let device = x.device();
-            let mut cache: Mamba1Cache<B> =
-                Mamba1CacheConfig::new_from_block_config(batch, cfg_step.clone()).init(&device);
+        let cache_step = init_cache;
+        let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
+            let mut cache = cache_step;
             let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
             for t in 0..seq_len {
                 let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
@@ -830,17 +931,23 @@ mod tests {
                 cache = new_cache;
                 outs.push(out_t);
             }
-            Tensor::stack(outs, 1)
+            (Tensor::stack(outs, 1), cache)
         });
 
-        // ── Forward agreement ────────────────────────────────────────────
-        let diff = (r_fwd.out.clone() - r_step.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
+        // ── Forward + final-state agreement ──────────────────────────────
+        use crate::utils::test_helpers::max_abs_diff;
+        let val_tol = 1e-4;
+        let d_out = max_abs_diff(r_fwd.out.clone(), r_step.out.clone());
+        let d_conv_state = max_abs_diff(r_fwd.final_conv.clone(), r_step.final_conv.clone());
+        let d_ssm_state = max_abs_diff(r_fwd.final_ssm.clone(), r_step.final_ssm.clone());
+        assert!(d_out < val_tol, "step vs forward: output max abs diff = {d_out:.6}");
         assert!(
-            diff < 1e-4,
-            "step() vs forward() max absolute difference = {diff:.6} (expected < 1e-4)"
+            d_conv_state < val_tol,
+            "step vs forward: final conv window max abs diff = {d_conv_state:.6}"
+        );
+        assert!(
+            d_ssm_state < val_tol,
+            "step vs forward: final SSM state max abs diff = {d_ssm_state:.6}"
         );
 
         // ── Gradient agreement ───────────────────────────────────────────
@@ -852,51 +959,88 @@ mod tests {
 
     #[test]
     fn step_matches_forward() {
-        run_step_matches_forward(small_config());
+        run_step_matches_forward(small_config(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_random_init() {
+        run_step_matches_forward(small_config(), true);
     }
 
     // ── Varying d_state ─────────────────────────────────────────────────────
 
-    #[test]
-    fn step_matches_forward_d_state_16() {
-        let cfg = Mamba1Config::new(32)
+    fn cfg_d_state_16() -> Mamba1Config {
+        Mamba1Config::new(32)
             .with_d_state(16)
             .with_d_conv(4)
-            .with_expand(2);
-        run_step_matches_forward(cfg);
+            .with_expand(2)
+    }
+
+    #[test]
+    fn step_matches_forward_d_state_16() {
+        run_step_matches_forward(cfg_d_state_16(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_d_state_16_random_init() {
+        run_step_matches_forward(cfg_d_state_16(), true);
     }
 
     // ── Varying d_conv (causal convolution window) ──────────────────────────
 
-    #[test]
-    fn step_matches_forward_d_conv_2() {
-        let cfg = Mamba1Config::new(32)
+    fn cfg_d_conv_2() -> Mamba1Config {
+        Mamba1Config::new(32)
             .with_d_state(8)
             .with_d_conv(2)
-            .with_expand(2);
-        run_step_matches_forward(cfg);
+            .with_expand(2)
+    }
+
+    #[test]
+    fn step_matches_forward_d_conv_2() {
+        run_step_matches_forward(cfg_d_conv_2(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_d_conv_2_random_init() {
+        run_step_matches_forward(cfg_d_conv_2(), true);
     }
 
     // ── Varying expand (inner width) ────────────────────────────────────────
 
-    #[test]
-    fn step_matches_forward_expand_1() {
-        let cfg = Mamba1Config::new(32)
+    fn cfg_expand_1() -> Mamba1Config {
+        Mamba1Config::new(32)
             .with_d_state(8)
             .with_d_conv(4)
-            .with_expand(1);
-        run_step_matches_forward(cfg);
+            .with_expand(1)
+    }
+
+    #[test]
+    fn step_matches_forward_expand_1() {
+        run_step_matches_forward(cfg_expand_1(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_expand_1_random_init() {
+        run_step_matches_forward(cfg_expand_1(), true);
     }
 
     // ── Custom dt_rank (Δ projection rank) ──────────────────────────────────
 
-    #[test]
-    fn step_matches_forward_custom_dt_rank() {
-        let cfg = Mamba1Config::new(32)
+    fn cfg_custom_dt_rank() -> Mamba1Config {
+        Mamba1Config::new(32)
             .with_d_state(8)
             .with_d_conv(4)
             .with_expand(2)
-            .with_dt_rank(Some(8));
-        run_step_matches_forward(cfg);
+            .with_dt_rank(Some(8))
+    }
+
+    #[test]
+    fn step_matches_forward_custom_dt_rank() {
+        run_step_matches_forward(cfg_custom_dt_rank(), false);
+    }
+
+    #[test]
+    fn step_matches_forward_custom_dt_rank_random_init() {
+        run_step_matches_forward(cfg_custom_dt_rank(), true);
     }
 }
