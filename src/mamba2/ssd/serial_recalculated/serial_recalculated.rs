@@ -152,4 +152,3 @@ pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
 crate::impl_ssd_backend_ext_for_burn_backends!(Mamba2BackendExt);
 
 crate::decl_ssd_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);
-

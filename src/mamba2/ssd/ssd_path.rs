@@ -458,10 +458,22 @@ mod tests {
         let ds_ser = max_abs_diff(r_min.state.clone(), r_ser.state.clone());
         let dy_rec = max_abs_diff(r_min.y.clone(), r_rec.y.clone());
         let ds_rec = max_abs_diff(r_min.state.clone(), r_rec.state.clone());
-        assert!(dy_ser < tol, "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})");
-        assert!(ds_ser < tol, "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})");
-        assert!(dy_rec < tol, "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})");
-        assert!(ds_rec < tol, "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})");
+        assert!(
+            dy_ser < tol,
+            "Minimal vs Serial: y max abs diff = {dy_ser:.6} (tol {tol})"
+        );
+        assert!(
+            ds_ser < tol,
+            "Minimal vs Serial: final_state max abs diff = {ds_ser:.6} (tol {tol})"
+        );
+        assert!(
+            dy_rec < tol,
+            "Minimal vs SerialRecalculated: y max abs diff = {dy_rec:.6} (tol {tol})"
+        );
+        assert!(
+            ds_rec < tol,
+            "Minimal vs SerialRecalculated: final_state max abs diff = {ds_rec:.6} (tol {tol})"
+        );
 
         // ── Gradient agreement ───────────────────────────────────────────
         // Looser tolerance: every path computes the same mathematical

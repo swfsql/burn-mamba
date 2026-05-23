@@ -249,8 +249,7 @@ pub fn combined_backward<B: Backend>(
         san(&d_chunk_input_state_bhpr);
 
         // d_C_blue = d_ch @ state
-        let d_c_blue_bhlr: Tensor<B, 4> =
-            d_ch_bhlp.clone().matmul(chunk_input_state_bhpr.clone());
+        let d_c_blue_bhlr: Tensor<B, 4> = d_ch_bhlp.clone().matmul(chunk_input_state_bhpr.clone());
         san(&d_c_blue_bhlr);
         vec_blue_d_c_bhlr.push(d_c_blue_bhlr);
 
@@ -465,7 +464,8 @@ pub fn combined_backward<B: Backend>(
         .squeeze_dim::<3>(3); // _bhn
     let d_da_cumsum_k3_bhnl = {
         let zeros = Tensor::<B, 4>::zeros([batch, nheads, nchunks, chunk_len - 1], &device);
-        d_da_cumsum_sub_bhnl + Tensor::cat(vec![zeros, d_da_cumsum_last_bhn.unsqueeze_dim::<4>(3)], 3)
+        d_da_cumsum_sub_bhnl
+            + Tensor::cat(vec![zeros, d_da_cumsum_last_bhn.unsqueeze_dim::<4>(3)], 3)
     };
     san(&d_da_cumsum_k3_bhnl);
 

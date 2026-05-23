@@ -217,13 +217,14 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                 // The narrow/reshape ops are thin autodiff pass-throughs whose
                 // backwards accumulate into the combined gradient vector that
                 // `backward` above consumes.
-                let (tracked_y_bnlmhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
-                    crate::utils::primitive::mk(tracked_combined),
-                    flat_len_y_BNLMHP,
-                    flat_len_final_state_BHPR,
-                    shape_y_bnlmhp,
-                    shape_final_state_bhpr,
-                );
+                let (tracked_y_bnlmhp, tracked_final_state_bhpr) =
+                    crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
+                        crate::utils::primitive::mk(tracked_combined),
+                        flat_len_y_BNLMHP,
+                        flat_len_final_state_BHPR,
+                        shape_y_bnlmhp,
+                        shape_final_state_bhpr,
+                    );
 
                 (
                     tracked_y_bnlmhp.into_primitive().tensor(),
@@ -249,13 +250,14 @@ impl<B: Backend + Mamba3BackendExt, C: CheckpointStrategy> Mamba3BackendExt for 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
                     prep.finish(combined.into_primitive().tensor());
 
-                let (tracked_y_bnlmhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
-                    crate::utils::primitive::mk(tracked_combined),
-                    flat_len_y_BNLMHP,
-                    flat_len_final_state_BHPR,
-                    shape_y_bnlmhp,
-                    shape_final_state_bhpr,
-                );
+                let (tracked_y_bnlmhp, tracked_final_state_bhpr) =
+                    crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 6, 4>(
+                        crate::utils::primitive::mk(tracked_combined),
+                        flat_len_y_BNLMHP,
+                        flat_len_final_state_BHPR,
+                        shape_y_bnlmhp,
+                        shape_final_state_bhpr,
+                    );
 
                 (
                     tracked_y_bnlmhp.into_primitive().tensor(),

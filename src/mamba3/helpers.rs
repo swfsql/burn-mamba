@@ -105,8 +105,7 @@ pub fn build_v_with_mimo<B: Backend, const D: usize, const DP1: usize>(
             // mimo_x_hmp [nheads, mimo_rank, per_head_dim] → permute to
             // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
             // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
-            let mimo_x_broadcast =
-                mimo_x_hmp.clone().permute([1, 0, 2]).unsqueeze::<DP1>();
+            let mimo_x_broadcast = mimo_x_hmp.clone().permute([1, 0, 2]).unsqueeze::<DP1>();
             x_with_rank_axis * mimo_x_broadcast
         }
     }

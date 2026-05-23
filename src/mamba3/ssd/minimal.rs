@@ -19,8 +19,8 @@
 //! maintaining causal ordering across time steps.
 
 use crate::mamba3::prelude::*;
-use burn::prelude::*;
 use crate::utils::segsum::segsum;
+use burn::prelude::*;
 
 impl<B: Backend> Mamba3SsdInput<B> {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
@@ -243,5 +243,3 @@ impl<B: Backend> Mamba3SsdInput<B> {
         (y_bnlmhp, final_state_bhpr)
     }
 }
-
-

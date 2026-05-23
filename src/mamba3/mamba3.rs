@@ -700,21 +700,29 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
 
         // [batch, sequence, *] split along channel dim.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
-        let [z_bsi, x_bsi, b_raw_bsMGR, c_raw_bsMGR, dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh, theta_bsa] =
-            crate::utils::split::split_into(
-                proj_bsd,
-                [
-                    d_inner,
-                    d_inner,
-                    bc_size,
-                    bc_size,
-                    nheads,
-                    nheads,
-                    nheads,
-                    num_rope_angles,
-                ],
-                2,
-            );
+        let [
+            z_bsi,
+            x_bsi,
+            b_raw_bsMGR,
+            c_raw_bsMGR,
+            dd_dt_bsh,
+            dd_A_raw_bsh,
+            lambda_raw_bsh,
+            theta_bsa,
+        ] = crate::utils::split::split_into(
+            proj_bsd,
+            [
+                d_inner,
+                d_inner,
+                bc_size,
+                bc_size,
+                nheads,
+                nheads,
+                nheads,
+                num_rope_angles,
+            ],
+            2,
+        );
 
         san(&z_bsi);
         san(&x_bsi);
@@ -1077,21 +1085,29 @@ mod step {
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
-            let [z_bi, x_bi, b_raw_bMGR, c_raw_bMGR, dd_dt_bh, dd_a_raw_bh, lambda_raw_bh, theta_ba] =
-                crate::utils::split::split_into(
-                    proj_bd,
-                    [
-                        d_inner,
-                        d_inner,
-                        bc_size,
-                        bc_size,
-                        nheads,
-                        nheads,
-                        nheads,
-                        num_rope_angles,
-                    ],
-                    1,
-                );
+            let [
+                z_bi,
+                x_bi,
+                b_raw_bMGR,
+                c_raw_bMGR,
+                dd_dt_bh,
+                dd_a_raw_bh,
+                lambda_raw_bh,
+                theta_ba,
+            ] = crate::utils::split::split_into(
+                proj_bd,
+                [
+                    d_inner,
+                    d_inner,
+                    bc_size,
+                    bc_size,
+                    nheads,
+                    nheads,
+                    nheads,
+                    num_rope_angles,
+                ],
+                1,
+            );
 
             // ── Reshape x ─────────────────────────────────────────────────────
             let x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);
@@ -1271,7 +1287,6 @@ mod step {
             (out_bm, cache)
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------

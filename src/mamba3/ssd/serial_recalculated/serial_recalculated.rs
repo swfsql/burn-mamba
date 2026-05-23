@@ -101,4 +101,3 @@ crate::decl_ssd_autodiff_backend_ext!(Mamba3AutodiffBackendExt, Mamba3BackendExt
 // custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
 crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3BackendExt);
-

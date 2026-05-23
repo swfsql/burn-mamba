@@ -1,5 +1,5 @@
-use burn::prelude::*;
 use crate::utils::sanity::sanity as san;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // segsum  (stable segment sum for the 1-SS mask)
@@ -12,7 +12,7 @@ use crate::utils::sanity::sanity as san;
 /// ```text
 ///   out[..., i, j] = Σ_{k=j+1}^{i} x[..., k]   for i ≥ j  (lower triangle)
 ///   out[..., i, j] = -∞                        for i < j  (upper triangle)
-/// 
+///
 /// ## Implementation
 ///
 /// A naive computation of all pairwise products `A[j+1]·...·A[i]` would
@@ -26,9 +26,7 @@ use crate::utils::sanity::sanity as san;
 /// The upper triangle is masked to -∞ so that `exp(segsum(...))` gives 0
 /// for non-causal positions (the strict upper triangle of L must be zero).
 /// ```
-pub fn segsum<B: Backend, const D: usize, const D2: usize>(
-    x: Tensor<B, D>,
-) -> Tensor<B, D2> {
+pub fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tensor<B, D2> {
     assert_eq!(D + 1, D2);
 
     let x_cumsum = x.cumsum(D - 1);

@@ -13,9 +13,9 @@ pub mod rms_norm;
 pub mod rms_norm_gated;
 pub mod sanity;
 pub mod scheduler;
+pub mod segsum;
 pub mod silu;
 pub mod softplus;
-pub mod segsum;
 pub mod split;
 #[cfg(test)]
 pub mod test_helpers;
