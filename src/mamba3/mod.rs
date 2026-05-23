@@ -20,6 +20,9 @@ pub mod prelude {
     #[cfg(all(feature = "autodiff"))]
     pub use ssd::Mamba3AutodiffBackendExt;
     pub use ssd::Mamba3BackendExt;
+    #[cfg(all(feature = "autodiff"))]
+    pub use ssd::Mamba3TrapAutodiffBackendExt;
+    pub use ssd::Mamba3TrapBackendExt;
     pub use ssd::{Mamba3SsdInput, Mamba3SsdPath};
     pub use ssd::{Mamba3TrapSsdInput, Mamba3TrapSsdPath};
 }

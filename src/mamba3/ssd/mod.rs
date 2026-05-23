@@ -4,6 +4,7 @@ pub mod serial_recalculated;
 pub mod ssd_path;
 pub mod trap_minimal;
 pub mod trap_serial;
+pub mod trap_serial_recalculated;
 pub mod trap_ssd_path;
 pub mod trapezoidal;
 
@@ -11,4 +12,7 @@ pub mod trapezoidal;
 pub use serial_recalculated::Mamba3AutodiffBackendExt;
 pub use serial_recalculated::Mamba3BackendExt;
 pub use ssd_path::{Mamba3SsdInput, Mamba3SsdPath};
+#[cfg(feature = "autodiff")]
+pub use trap_serial_recalculated::Mamba3TrapAutodiffBackendExt;
+pub use trap_serial_recalculated::Mamba3TrapBackendExt;
 pub use trap_ssd_path::{Mamba3TrapSsdInput, Mamba3TrapSsdPath};

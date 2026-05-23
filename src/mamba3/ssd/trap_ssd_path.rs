@@ -40,6 +40,15 @@ pub enum Mamba3TrapSsdPath {
     /// matching [`Mamba3SsdPath::Serial`]. See
     /// [`Mamba3TrapSsdInput::ssd_trap_serial`].
     Serial(Option<usize>),
+
+    /// (Hybrid) Serial variant with a custom, memory-efficient backward.
+    ///
+    /// Forward is identical to [`Self::Serial`] (shared K1–K5). On the Autodiff
+    /// backend the backward recomputes the forward intermediates instead of
+    /// saving them, trading compute for memory — the merged-form analogue of
+    /// [`Mamba3SsdPath::SerialRecalculated`]. See
+    /// [`Mamba3TrapSsdInput::ssd_trap_serial_recalculated`].
+    SerialRecalculated(Option<usize>),
 }
 
 /// MIMO-first input bundle for the merged-form SSD.
@@ -155,11 +164,22 @@ impl Mamba3TrapSsdPath {
         Self::chunked_optimal(block.state_rank, block.per_head_dim())
     }
 
+    /// Optimal SerialRecalculated variant.
+    pub fn chunked_recalculated_optimal(state_rank: usize, per_head_dim: usize) -> Self {
+        let optim = Self::optimal_default(state_rank, per_head_dim);
+        Self::SerialRecalculated(Some(optim))
+    }
+
+    /// Optimal SerialRecalculated variant from a block.
+    pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
+        Self::chunked_recalculated_optimal(block.state_rank, block.per_head_dim())
+    }
+
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba3TrapSsdPath::Minimal(chunk_len) | Mamba3TrapSsdPath::Serial(chunk_len) => {
-                *chunk_len
-            }
+            Mamba3TrapSsdPath::Minimal(chunk_len)
+            | Mamba3TrapSsdPath::Serial(chunk_len)
+            | Mamba3TrapSsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
@@ -175,10 +195,14 @@ impl Mamba3TrapSsdPath {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the merged-form accumulator at the last token (to be stored in the
     ///   cache for streaming).
-    pub fn run<B: Backend>(&self, input: Mamba3TrapSsdInput<B>) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn run<B: Backend + Mamba3TrapBackendExt>(
+        &self,
+        input: Mamba3TrapSsdInput<B>,
+    ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match self {
             Mamba3TrapSsdPath::Minimal(_) => input.ssd_trap_minimal(),
             Mamba3TrapSsdPath::Serial(_) => input.ssd_trap_serial(),
+            Mamba3TrapSsdPath::SerialRecalculated(_) => input.ssd_trap_serial_recalculated(),
         }
     }
 }
@@ -435,7 +459,16 @@ mod tests {
             scale.clone(),
             init.clone(),
         );
-        let inputs_ser = Inputs::from_inner(v, b, c, da, gamma, scale, init);
+        let inputs_ser = Inputs::from_inner(
+            v.clone(),
+            b.clone(),
+            c.clone(),
+            da.clone(),
+            gamma.clone(),
+            scale.clone(),
+            init.clone(),
+        );
+        let inputs_rec = Inputs::from_inner(v, b, c, da, gamma, scale, init);
 
         let r_min = run_path(
             Mamba3TrapSsdPath::Minimal(Some(chunk_len)),
@@ -446,14 +479,27 @@ mod tests {
         let r_ser = run_path(
             Mamba3TrapSsdPath::Serial(Some(chunk_len)),
             &inputs_ser,
+            y_head.clone(),
+            s_head.clone(),
+        );
+        let r_rec = run_path(
+            Mamba3TrapSsdPath::SerialRecalculated(Some(chunk_len)),
+            &inputs_rec,
             y_head,
             s_head,
         );
 
-        // Same algorithm, different schedule: stricter on values (1e-4),
-        // moderate on gradients (1e-3) — same tolerances as the original-form
-        // SSD-path agreement tests.
+        // Same algorithm, different schedule / backward: stricter on values
+        // (1e-4), moderate on gradients (1e-3) — same tolerances as the
+        // original-form SSD-path agreement tests.
         assert_path_runs_agree("Minimal vs Serial", &r_min, &r_ser, 1e-4, 1e-3);
+        assert_path_runs_agree(
+            "Minimal vs SerialRecalculated",
+            &r_min,
+            &r_rec,
+            1e-4,
+            1e-3,
+        );
     }
 
     #[test]

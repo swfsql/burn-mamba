@@ -43,7 +43,7 @@ use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3<B> {
+impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
     /// Process a full input sequence using the **merged-form (single-pass)**
     /// trapezoidal algorithm.
     ///
@@ -559,6 +559,19 @@ mod tests {
         run_forward2_matches_forward(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
     }
 
+    #[test]
+    fn forward2_matches_forward_recalc() {
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::SerialRecalculated(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_forward_recalc_mimo() {
+        run_forward2_matches_forward(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+        );
+    }
+
     /// forward2 ≡ token-by-token step on values and gradients.
     fn run_forward2_matches_step(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
@@ -629,6 +642,19 @@ mod tests {
         run_forward2_matches_step(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
     }
 
+    #[test]
+    fn forward2_matches_step_recalc() {
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::SerialRecalculated(Some(4)));
+    }
+
+    #[test]
+    fn forward2_matches_step_recalc_mimo() {
+        run_forward2_matches_step(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+        );
+    }
+
     /// forward2(full) ≡ forward2(prefix) then forward2(suffix, cache).
     fn run_forward2_split_matches_full(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
@@ -694,5 +720,21 @@ mod tests {
     #[test]
     fn forward2_split_matches_full_serial_mimo() {
         run_forward2_split_matches_full(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
+    }
+
+    #[test]
+    fn forward2_split_matches_full_recalc() {
+        run_forward2_split_matches_full(
+            small_config(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+        );
+    }
+
+    #[test]
+    fn forward2_split_matches_full_recalc_mimo() {
+        run_forward2_split_matches_full(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+        );
     }
 }
