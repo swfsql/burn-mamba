@@ -241,6 +241,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
         device: &Device,
     ) -> (
         Tensor<InnerB, 6>, // v
@@ -281,11 +282,17 @@ mod tests {
             Distribution::Uniform(0.05, 0.5),
             device,
         );
-        let initial_state = Tensor::<InnerB, 4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            Distribution::Normal(0.0, 0.1),
-            device,
-        );
+        // Random (general case) or zero (fresh-start) initial merged-form state
+        // per `random_init`, covering the whole {zero, random} dimension.
+        let initial_state = if random_init {
+            Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                Distribution::Normal(0.0, 0.1),
+                device,
+            )
+        } else {
+            Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], device)
+        };
         (v, b, c, da, gamma, scale, initial_state)
     }
 
@@ -418,6 +425,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_minimal_matches_serial(
         batch: usize,
         nchunks: usize,
@@ -426,6 +434,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
     ) {
         let device: Device = Default::default();
         let (v, b, c, da, gamma, scale, init) = random_input(
@@ -436,6 +445,7 @@ mod tests {
             nheads,
             per_head_dim,
             state_rank,
+            random_init,
             &device,
         );
 
@@ -493,27 +503,36 @@ mod tests {
         // (1e-4), moderate on gradients (1e-3) — same tolerances as the
         // original-form SSD-path agreement tests.
         assert_path_runs_agree("Minimal vs Serial", &r_min, &r_ser, 1e-4, 1e-3);
-        assert_path_runs_agree(
-            "Minimal vs SerialRecalculated",
-            &r_min,
-            &r_rec,
-            1e-4,
-            1e-3,
-        );
+        assert_path_runs_agree("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-4, 1e-3);
     }
 
     #[test]
     fn trap_paths_agree_siso() {
-        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn trap_paths_agree_siso_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, false);
     }
 
     #[test]
     fn trap_paths_agree_mimo() {
-        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn trap_paths_agree_mimo_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, false);
     }
 
     #[test]
     fn trap_paths_agree_single_chunk() {
-        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8);
+        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn trap_paths_agree_single_chunk_zero_init() {
+        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, false);
     }
 }

@@ -1379,10 +1379,22 @@ mod tests {
         use crate::utils::test_helpers::max_abs_diff;
         let checks = [
             ("output", max_abs_diff(a.out.clone(), b.out.clone())),
-            ("final ssm", max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone())),
-            ("final k_state", max_abs_diff(a.final_k.clone(), b.final_k.clone())),
-            ("final v_state", max_abs_diff(a.final_v.clone(), b.final_v.clone())),
-            ("final cum_angle", max_abs_diff(a.final_angle.clone(), b.final_angle.clone())),
+            (
+                "final ssm",
+                max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone()),
+            ),
+            (
+                "final k_state",
+                max_abs_diff(a.final_k.clone(), b.final_k.clone()),
+            ),
+            (
+                "final v_state",
+                max_abs_diff(a.final_v.clone(), b.final_v.clone()),
+            ),
+            (
+                "final cum_angle",
+                max_abs_diff(a.final_angle.clone(), b.final_angle.clone()),
+            ),
         ];
         for (name, d) in checks {
             assert!(d < tol, "{label}: {name} max abs diff = {d:.6} (tol {tol})");
@@ -1545,11 +1557,7 @@ mod tests {
                 normal,
                 &device,
             ),
-            k: Tensor::<InnerB, 4>::random(
-                [batch, mimo_rank, nheads, state_rank],
-                normal,
-                &device,
-            ),
+            k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
             v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
             angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
         };

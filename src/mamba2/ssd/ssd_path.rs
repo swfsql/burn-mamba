@@ -212,6 +212,7 @@ mod tests {
     /// `dt` is drawn from a positive distribution (softplus-like) and `a_decay`
     /// from a negative range so that the implied per-token decay `exp(dt·a)`
     /// stays in `(0, 1]`, matching how the upstream block produces them.
+    #[allow(clippy::too_many_arguments)]
     fn random_input(
         batch: usize,
         nchunks: usize,
@@ -219,6 +220,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
         device: &Device,
     ) -> (
         Tensor<InnerB, 5>,
@@ -252,11 +254,18 @@ mod tests {
             device,
         );
         let d = Tensor::<InnerB, 1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
-        let initial_state = Tensor::<InnerB, 4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            Distribution::Normal(0.0, 0.1),
-            device,
-        );
+        // The initial SSM state is random (the general case) or zero (the
+        // standard fresh-start case) per `random_init`. All paths must agree on
+        // both, so the comparison spans the whole {zero, random} dimension.
+        let initial_state = if random_init {
+            Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                Distribution::Normal(0.0, 0.1),
+                device,
+            )
+        } else {
+            Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], device)
+        };
         (x, dt, a_decay, b, c, d, initial_state)
     }
 
@@ -378,6 +387,7 @@ mod tests {
     ///
     /// All three are chunkwise reformulations of the same SSD, so both the
     /// values and their gradients must agree up to floating-point noise.
+    #[allow(clippy::too_many_arguments)]
     fn run_minimal_matches_serial(
         batch: usize,
         nchunks: usize,
@@ -385,6 +395,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
     ) {
         let device: Device = Default::default();
         let (x, dt, a_decay, b, c, d, init) = random_input(
@@ -394,6 +405,7 @@ mod tests {
             nheads,
             per_head_dim,
             state_rank,
+            random_init,
             &device,
         );
 
@@ -499,19 +511,34 @@ mod tests {
     #[test]
     fn paths_agree() {
         // B/C are already per-head (GQA expansion happens before constructing the SsdInput).
-        run_minimal_matches_serial(2, 3, 4, 2, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 2, 8, 8, false);
     }
 
     #[test]
     fn paths_agree_more_heads() {
         // Slightly larger nheads to vary the shape.
-        run_minimal_matches_serial(2, 3, 4, 4, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 4, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_more_heads_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 4, 8, 8, false);
     }
 
     #[test]
     fn paths_agree_single_chunk() {
         // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
         // boundary case where K4 runs a single iteration.
-        run_minimal_matches_serial(2, 1, 4, 2, 8, 8);
+        run_minimal_matches_serial(2, 1, 4, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_single_chunk_zero_init() {
+        run_minimal_matches_serial(2, 1, 4, 2, 8, 8, false);
     }
 }

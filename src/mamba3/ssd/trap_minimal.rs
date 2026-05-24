@@ -91,14 +91,20 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
         );
 
         // ── Fuse mimo_rank into chunk_len (matches `ssd_minimal`) ─────────────
-        let c_bnLMhr = input
-            .c_bnlmhr
-            .clone()
-            .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-        let v_bnLMhp = input
-            .v_bnlmhp
-            .clone()
-            .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+        let c_bnLMhr = input.c_bnlmhr.clone().reshape([
+            batch,
+            nchunks,
+            chunk_len * mimo_rank,
+            nheads,
+            state_rank,
+        ]);
+        let v_bnLMhp = input.v_bnlmhp.clone().reshape([
+            batch,
+            nchunks,
+            chunk_len * mimo_rank,
+            nheads,
+            per_head_dim,
+        ]);
 
         // Per-time-step cumulative log-decay (used for L_strict, decay_states, y_off)
         let a_bhnl = input.da_bnlh.permute([0, 3, 1, 2]);
@@ -260,10 +266,12 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
             let decay_chunk_bhNN = segsum::<B, 3, 4>(a_chunk_pad_bhN).exp();
 
             let flat = per_head_dim * state_rank;
-            let state_bhNPR = state_bNhpr
-                .clone()
-                .permute([0, 2, 1, 3, 4])
-                .reshape([batch, nheads, 1 + nchunks, flat]);
+            let state_bhNPR = state_bNhpr.clone().permute([0, 2, 1, 3, 4]).reshape([
+                batch,
+                nheads,
+                1 + nchunks,
+                flat,
+            ]);
 
             let new_state_bhNPR = decay_chunk_bhNN.matmul(state_bhNPR);
             let new_state_bhNpr =

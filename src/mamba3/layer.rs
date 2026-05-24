@@ -359,11 +359,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3Layers<B> {
     }
 
     /// Build zero-initialised merged-form caches from a `[batch, sequence, d_model]` input.
-    fn make_zero_merged_caches(
-        &self,
-        x: &Tensor<B, 3>,
-        n_virtual: usize,
-    ) -> Mamba3MergedCaches<B> {
+    fn make_zero_merged_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba3MergedCaches<B> {
         let device = &x.device();
         let [batch, _sequence, _d_model] = x.dims();
         let layer0 = &self.real_layers[0].mamba_block;

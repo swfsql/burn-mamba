@@ -84,7 +84,11 @@ pub fn combined_backward<B: Backend>(
     let scale_bnlh11 = scale_bnlh.clone().unsqueeze_dims::<6>(&[3, 5]);
     let k_scaled_bnlmhr = b_bnlmhr.clone() * scale_bnlh11.clone();
     let (intra_chunk_state_bnhpr, k3_decay_bhnLM, k3_decayed_v_bnLMhp) =
-        k3_ssd_chunk_state_extended(v_bnlmhp.clone(), k_scaled_bnlmhr.clone(), da_cumsum_bhnl.clone());
+        k3_ssd_chunk_state_extended(
+            v_bnlmhp.clone(),
+            k_scaled_bnlmhr.clone(),
+            da_cumsum_bhnl.clone(),
+        );
 
     // K4 — chunk-input state stream consumed by BLUE.
     let (chunk_input_state_bnhpr, _final_state_bhpr) = serial::k4_ssd_state_passing(
@@ -121,7 +125,9 @@ pub fn combined_backward<B: Backend>(
         let d_y_bnlhmp = d_y_bnlmhp.clone().permute([0, 1, 2, 4, 3, 5]); // [b,n,l,h,m_out,p]
 
         // qk_dot[m_out, m_in] = Σ_r C[m_out,r] · B[m_in,r]
-        let qk_dot_bnlhmM = c_bnlhmr.clone().matmul(b_bnlhmr.clone().permute([0, 1, 2, 3, 5, 4]));
+        let qk_dot_bnlhmM = c_bnlhmr
+            .clone()
+            .matmul(b_bnlhmr.clone().permute([0, 1, 2, 3, 5, 4]));
         // y_d_unweighted[m_out, p] = Σ_{m_in} qk_dot · V[m_in, p]
         let y_d_unw_bnlhmp = qk_dot_bnlhmM.clone().matmul(v_bnlhmp.clone());
 
@@ -158,7 +164,12 @@ pub fn combined_backward<B: Backend>(
         let d_v_diag_bnlmhp = d_v_diag_bnlhmp.permute([0, 1, 2, 4, 3, 5]);
         let d_c_diag_bnlmhr = d_c_diag_bnlhmr.permute([0, 1, 2, 4, 3, 5]);
         let d_b_diag_bnlmhr = d_b_diag_bnlhmr.permute([0, 1, 2, 4, 3, 5]);
-        (d_v_diag_bnlmhp, d_c_diag_bnlmhr, d_b_diag_bnlmhr, d_gamma_bnlh)
+        (
+            d_v_diag_bnlmhp,
+            d_c_diag_bnlmhr,
+            d_b_diag_bnlmhr,
+            d_gamma_bnlh,
+        )
     };
 
     // Reusable [chunk_len, chunk_len] -inf strict-upper mask (triu(0): on+above
@@ -243,7 +254,8 @@ pub fn combined_backward<B: Backend>(
             .permute([0, 1, 3, 2]); // bhpr
         san(&d_chunk_input_state_bhpr);
 
-        let d_c_blue_bhLMr: Tensor<B, 4> = d_ch_bhLMp.clone().matmul(chunk_input_state_bhpr.clone());
+        let d_c_blue_bhLMr: Tensor<B, 4> =
+            d_ch_bhLMp.clone().matmul(chunk_input_state_bhpr.clone());
         vec_blue_d_c_bhLMr.push(d_c_blue_bhLMr);
 
         let ch_bhLMp: Tensor<B, 4> = c_bhLMr
@@ -259,13 +271,18 @@ pub fn combined_backward<B: Backend>(
         vec_blue_d_da_bhl.push(d_da_blue_bhl);
 
         // ── LOWER backward (strict lower-tri + per-column scale) ────────
-        let da_target_bhLMLM: Tensor<B, 4> = da_cumsum_bhLM
-            .clone()
-            .unsqueeze_dim::<4>(3)
-            .expand([batch, nheads, chunk_len * mimo_rank, chunk_len * mimo_rank]);
-        let da_source_bhLMLM: Tensor<B, 4> = da_cumsum_bhLM
-            .unsqueeze_dim::<4>(2)
-            .expand([batch, nheads, chunk_len * mimo_rank, chunk_len * mimo_rank]);
+        let da_target_bhLMLM: Tensor<B, 4> = da_cumsum_bhLM.clone().unsqueeze_dim::<4>(3).expand([
+            batch,
+            nheads,
+            chunk_len * mimo_rank,
+            chunk_len * mimo_rank,
+        ]);
+        let da_source_bhLMLM: Tensor<B, 4> = da_cumsum_bhLM.unsqueeze_dim::<4>(2).expand([
+            batch,
+            nheads,
+            chunk_len * mimo_rank,
+            chunk_len * mimo_rank,
+        ]);
         let diff_bhLMLM = da_target_bhLMLM - da_source_bhLMLM;
 
         // Strict-lower MIMO mask: -inf where s_time ≥ t_time — interleaved
@@ -292,12 +309,14 @@ pub fn combined_backward<B: Backend>(
         let w_bhLMLM = prod_bhLMLM.clone() * scale_col_bhLMLM.clone();
 
         // d_w = d_y · vᵀ
-        let d_w_bhLMLM: Tensor<B, 4> =
-            d_y_bhLMp.clone().matmul(v_bhLMp.clone().permute([0, 1, 3, 2]));
+        let d_w_bhLMLM: Tensor<B, 4> = d_y_bhLMp
+            .clone()
+            .matmul(v_bhLMp.clone().permute([0, 1, 3, 2]));
         san(&d_w_bhLMLM);
 
         // d_v_lower = wᵀ · d_y
-        let d_v_lower_bhLMp: Tensor<B, 4> = w_bhLMLM.permute([0, 1, 3, 2]).matmul(d_y_bhLMp.clone());
+        let d_v_lower_bhLMp: Tensor<B, 4> =
+            w_bhLMLM.permute([0, 1, 3, 2]).matmul(d_y_bhLMp.clone());
         san(&d_v_lower_bhLMp);
         vec_lower_d_v_bhLMp.push(d_v_lower_bhLMp);
 
@@ -473,9 +492,14 @@ pub fn combined_backward<B: Backend>(
     let d_c_blue_bnlmhr: Tensor<B, 6> = d_c_blue_bnhLMr
         .permute([0, 1, 3, 2, 4])
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
-    let d_v_lower_bnlmhp: Tensor<B, 6> = d_v_lower_bnhLMp
-        .permute([0, 1, 3, 2, 4])
-        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+    let d_v_lower_bnlmhp: Tensor<B, 6> = d_v_lower_bnhLMp.permute([0, 1, 3, 2, 4]).reshape([
+        batch,
+        nchunks,
+        chunk_len,
+        mimo_rank,
+        nheads,
+        per_head_dim,
+    ]);
 
     // ═══════════════════════════════════════════════════════════════════════
     // K1 BACKWARD + SUM CONTRIBUTIONS

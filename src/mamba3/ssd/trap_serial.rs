@@ -166,10 +166,9 @@ pub fn k5_trap_ssd_chunk_scan<B: Backend>(
     let fused = chunk_len * mimo_rank;
 
     // Fuse mimo_rank into chunk_len for the SSM-style matmul.
-    let v_bnLMhp =
-        v_bnlmhp
-            .clone()
-            .reshape([batch, nchunks, fused, nheads, per_head_dim]);
+    let v_bnLMhp = v_bnlmhp
+        .clone()
+        .reshape([batch, nchunks, fused, nheads, per_head_dim]);
     let c_bnLMhr = c_bnlmhr
         .clone()
         .reshape([batch, nchunks, fused, nheads, state_rank]);
@@ -210,8 +209,8 @@ pub fn k5_trap_ssd_chunk_scan<B: Backend>(
     // Strict-upper -inf mask on the base time grid (`t1 <= t2` → -inf),
     // then interleave-expand to fused length so that MIMO same-time blocks
     // are zeroed out.
-    let inf_upper_ll = Tensor::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device)
-        .triu(0); // upper triangle INCLUDING diagonal
+    let inf_upper_ll =
+        Tensor::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device).triu(0); // upper triangle INCLUDING diagonal
     let inf_upper_bnhll = inf_upper_ll
         .unsqueeze_dims::<5>(&[0, 1, 2])
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);

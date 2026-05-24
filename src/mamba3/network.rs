@@ -285,7 +285,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
 
         (logits_bv, caches)
     }
-
 }
 
 impl<B: Backend> Mamba3Network<B> {

@@ -227,6 +227,7 @@ mod tests {
     /// `da` is drawn from a negative-mean distribution so that the implied
     /// per-token decay `exp(da)` stays in `(0, 1]`, matching how the upstream
     /// block produces `Δ · A` with `A < 0`.
+    #[allow(clippy::too_many_arguments)]
     fn random_input(
         batch: usize,
         nchunks: usize,
@@ -235,6 +236,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
         device: &Device,
     ) -> (
         Tensor<InnerB, 6>,
@@ -263,11 +265,18 @@ mod tests {
             Distribution::Normal(0.0, 1.0),
             device,
         );
-        let initial_state = Tensor::<InnerB, 4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            Distribution::Normal(0.0, 0.1),
-            device,
-        );
+        // Random (general case) or zero (fresh-start) initial SSM state per
+        // `random_init`, so the path-agreement check spans the whole
+        // {zero, random} initial-state dimension.
+        let initial_state = if random_init {
+            Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                Distribution::Normal(0.0, 0.1),
+                device,
+            )
+        } else {
+            Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], device)
+        };
         (v, da, b, c, initial_state)
     }
 
@@ -374,6 +383,7 @@ mod tests {
     /// All three are chunkwise reformulations of the same MIMO-first SSD, so
     /// both the values and their gradients must agree up to floating-point
     /// noise.
+    #[allow(clippy::too_many_arguments)]
     fn run_minimal_matches_serial(
         batch: usize,
         nchunks: usize,
@@ -382,6 +392,7 @@ mod tests {
         nheads: usize,
         per_head_dim: usize,
         state_rank: usize,
+        random_init: bool,
     ) {
         let device: Device = Default::default();
         let (v, da, b, c, init) = random_input(
@@ -392,6 +403,7 @@ mod tests {
             nheads,
             per_head_dim,
             state_rank,
+            random_init,
             &device,
         );
 
@@ -479,19 +491,34 @@ mod tests {
     #[test]
     fn paths_agree_siso() {
         // batch=2, nchunks=3, chunk_len=4, mimo_rank=1, nheads=2, per_head_dim=8, state_rank=8
-        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_siso_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, false);
     }
 
     #[test]
     fn paths_agree_mimo() {
         // mimo_rank=2 exercises the fused-L (= chunk_len · R) reshape shared by all three paths.
-        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8);
+        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_mimo_zero_init() {
+        run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, false);
     }
 
     #[test]
     fn paths_agree_single_chunk() {
         // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
         // boundary case where K4 runs a single iteration.
-        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8);
+        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, true);
+    }
+
+    #[test]
+    fn paths_agree_single_chunk_zero_init() {
+        run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, false);
     }
 }

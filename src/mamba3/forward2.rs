@@ -149,10 +149,8 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
                     vec![dt_bsh.clone().narrow(1, 1, sequence - 1), zero_b1h.clone()],
                     1,
                 );
-                let lambda_next_bsh = Tensor::cat(
-                    vec![lambda_bsh.narrow(1, 1, sequence - 1), zero_b1h],
-                    1,
-                );
+                let lambda_next_bsh =
+                    Tensor::cat(vec![lambda_bsh.narrow(1, 1, sequence - 1), zero_b1h], 1);
                 dt_next_bsh * (-lambda_next_bsh + 1.0)
             }
         };
@@ -180,16 +178,19 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
 
         // ── Step 5: Data-dependent cumulative RoPE angles ─────────────────────
         let theta_scaled_bsa = theta_bsa.tanh() * std::f32::consts::PI;
-        let raw_angles_bsha = dt_bsh.clone().unsqueeze_dim::<4>(3)
-            * theta_scaled_bsa.unsqueeze_dim::<4>(2);
+        let raw_angles_bsha =
+            dt_bsh.clone().unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
         let cumsum_bsha = raw_angles_bsha.cumsum(1);
         let cum_angles_bsha = cache.cum_angle_bha.clone().unsqueeze_dim::<4>(1) + cumsum_bsha;
         san(&cum_angles_bsha);
 
-        let cum_angles_bsmha = cum_angles_bsha
-            .clone()
-            .unsqueeze_dim::<5>(2)
-            .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
+        let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
+            batch,
+            sequence,
+            mimo_rank,
+            nheads,
+            num_rope_angles,
+        ]);
 
         let rotate_pairwise = mimo_rank == 1;
         let rope_dim = self.rope_dim;
@@ -199,7 +200,8 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
             rope_dim,
             rotate_pairwise,
         );
-        let c_bsmhr = apply_rope_partial::<B, 5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+        let c_bsmhr =
+            apply_rope_partial::<B, 5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -237,9 +239,12 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
         };
         let initial_state_bhpr = cache.ssm_bhpr.clone()
             + boundary_seed_bhpr
-                * boundary_factor_bh
-                    .unsqueeze_dims::<4>(&[2, 3])
-                    .expand([batch, nheads, per_head_dim, state_rank]);
+                * boundary_factor_bh.unsqueeze_dims::<4>(&[2, 3]).expand([
+                    batch,
+                    nheads,
+                    per_head_dim,
+                    state_rank,
+                ]);
         san(&initial_state_bhpr);
 
         // ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
@@ -248,8 +253,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
         let pad = sequence_padded - sequence;
 
         // V passed to SSD is raw x with MIMO_V applied (not γ-scaled).
-        let v_bshmp =
-            helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+        let v_bshmp = helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
         // v_bshmp has axis order [b, s, m, h, p] (insert_dim=2 onto [b,s,h,p]).
 
         #[rustfmt::skip]
@@ -271,7 +275,8 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
 
         // ── Reshape into chunks ───────────────────────────────────────────────
         let nchunks = sequence_padded / chunk_len;
-        let v_bnlmhp = v_bShmp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+        let v_bnlmhp =
+            v_bShmp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
         let da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
         let gamma_bnlh = gamma_bSh.reshape([batch, nchunks, chunk_len, nheads]);
         let scale_bnlh = scale_bSh.reshape([batch, nchunks, chunk_len, nheads]);
@@ -314,11 +319,17 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
             let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
             let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
 
-            let z_bshp = z_bsi.clone().reshape([batch, sequence, nheads, per_head_dim]);
+            let z_bshp = z_bsi
+                .clone()
+                .reshape([batch, sequence, nheads, per_head_dim]);
             let z_bsmhp = {
-                let z_bsmhp = z_bshp
-                    .unsqueeze_dim::<5>(2)
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
+                let z_bsmhp = z_bshp.unsqueeze_dim::<5>(2).expand([
+                    batch,
+                    sequence,
+                    mimo_rank,
+                    nheads,
+                    per_head_dim,
+                ]);
                 let mimo_z_bsmhp = mimo_z_hmp
                     .permute([1, 0, 2])
                     .unsqueeze_dims::<5>(&[0, 1])
@@ -335,9 +346,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
                 .permute([1, 0, 2])
                 .unsqueeze_dims::<5>(&[0, 1])
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-            let y_bshp: Tensor<B, 4> = (y_combined_bsmhp * mimo_o_bsmhp)
-                .sum_dim(2)
-                .squeeze_dim(2);
+            let y_bshp: Tensor<B, 4> = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(2).squeeze_dim(2);
             y_bshp.reshape([batch, sequence, d_inner])
         } else {
             let y_bshp: Tensor<B, 4> = y_bsmhp.squeeze_dim(2);
@@ -396,6 +405,100 @@ mod tests {
             .with_mimo_rank(2)
     }
 
+    fn cfg_ngroups2() -> Mamba3Config {
+        Mamba3Config::new(32)
+            .with_state_rank(8)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_ngroups(2)
+    }
+
+    fn cfg_mimo_ngroups2() -> Mamba3Config {
+        cfg_ngroups2().with_mimo_rank(2)
+    }
+
+    /// Build a matched pair of initial caches for cross-algorithm parity
+    /// (`forward`/`step` use [`Mamba3Cache`]; `forward2` uses
+    /// [`Mamba3MergedCache`]). With `random = true` the SSM state and cumulative
+    /// RoPE angle are random while the previous-token K/V history is **zero** — so
+    /// the merged form's boundary-β seed is zero and both forms share the exact
+    /// same logical initial state. With `random = false` everything is zero.
+    fn build_cross_caches(
+        cfg: &Mamba3Config,
+        batch: usize,
+        random: bool,
+    ) -> (Mamba3Cache<B>, Mamba3MergedCache<B>) {
+        let device: Device = Default::default();
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let dist = Distribution::Normal(0.0, 1.0);
+        let ssm = if random {
+            Tensor::<InnerB, 4>::random([batch, nheads, per_head_dim, state_rank], dist, &device)
+        } else {
+            Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], &device)
+        };
+        let angle = if random {
+            Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], dist, &device)
+        } else {
+            Tensor::<InnerB, 3>::zeros([batch, nheads, num_rope_angles], &device)
+        };
+        // Zero previous-token history so the two cache forms agree logically.
+        let k = Tensor::<InnerB, 4>::zeros([batch, mimo_rank, nheads, state_rank], &device);
+        let v = Tensor::<InnerB, 3>::zeros([batch, nheads, per_head_dim], &device);
+        let c3 = Mamba3Cache {
+            ssm_bhpr: Tensor::from_inner(ssm.clone()),
+            k_state_bmhr: Tensor::from_inner(k.clone()),
+            v_state_bhp: Tensor::from_inner(v.clone()),
+            cum_angle_bha: Tensor::from_inner(angle.clone()),
+        };
+        let cm = Mamba3MergedCache {
+            ssm_bhpr: Tensor::from_inner(ssm),
+            k_state_bmhr: Tensor::from_inner(k),
+            v_state_bhp: Tensor::from_inner(v),
+            cum_angle_bha: Tensor::from_inner(angle),
+        };
+        (c3, cm)
+    }
+
+    /// Build an initial [`Mamba3MergedCache`] for the merged-form continuity test.
+    /// With `random = true` *every* field (including the previous-token K/V
+    /// history) is random, exercising forward2 continuation from an arbitrary
+    /// merged-form state.
+    fn build_merged_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3MergedCache<B> {
+        let device: Device = Default::default();
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let dist = Distribution::Normal(0.0, 1.0);
+        let mk4 = |shape: [usize; 4]| {
+            let t = if random {
+                Tensor::<InnerB, 4>::random(shape, dist, &device)
+            } else {
+                Tensor::<InnerB, 4>::zeros(shape, &device)
+            };
+            Tensor::from_inner(t)
+        };
+        let mk3 = |shape: [usize; 3]| {
+            let t = if random {
+                Tensor::<InnerB, 3>::random(shape, dist, &device)
+            } else {
+                Tensor::<InnerB, 3>::zeros(shape, &device)
+            };
+            Tensor::from_inner(t)
+        };
+        Mamba3MergedCache {
+            ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
+            k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
+            v_state_bhp: mk3([batch, nheads, per_head_dim]),
+            cum_angle_bha: mk3([batch, nheads, num_rope_angles]),
+        }
+    }
+
     /// Per-run gradient bundle (subset of params; mirrors the equivalent struct
     /// in `mamba3::tests` but kept local to avoid cross-module visibility).
     struct RunGrads {
@@ -425,14 +528,24 @@ mod tests {
         RunGrads {
             out: out_inner,
             d_input: input.val().grad(&grads).expect("grad input"),
-            d_in_proj_w: model.in_proj.weight.val().grad(&grads).expect("in_proj.weight"),
+            d_in_proj_w: model
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("in_proj.weight"),
             d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("dt_bias_h"),
             d_d: model.d_h.val().grad(&grads).expect("d_h"),
             d_b_norm_gamma: model.b_norm.gamma.val().grad(&grads).expect("b_norm.gamma"),
             d_c_norm_gamma: model.c_norm.gamma.val().grad(&grads).expect("c_norm.gamma"),
             d_b_bias: model.b_bias_hmr.val().grad(&grads).expect("b_bias_hmr"),
             d_c_bias: model.c_bias_hmr.val().grad(&grads).expect("c_bias_hmr"),
-            d_out_proj_w: model.out_proj.weight.val().grad(&grads).expect("out_proj.weight"),
+            d_out_proj_w: model
+                .out_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("out_proj.weight"),
         }
     }
 
@@ -473,37 +586,187 @@ mod tests {
         Param::from_tensor(Tensor::from_inner(input.clone()))
     }
 
-    /// forward2 ≡ forward (double-SSD) on values and gradients.
-    fn run_forward2_matches_forward(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
+    /// Random downstream heads for the merged-form continuity loss (output plus
+    /// every merged-cache field).
+    struct Heads {
+        out: Tensor<InnerB, 3>,
+        ssm: Tensor<InnerB, 4>,
+        k: Tensor<InnerB, 4>,
+        v: Tensor<InnerB, 3>,
+        angle: Tensor<InnerB, 3>,
+    }
+
+    /// A [`RunGrads`] plus the final merged-cache fields, for the continuity test.
+    struct MergedRun {
+        rg: RunGrads,
+        final_ssm: Tensor<InnerB, 4>,
+        final_k: Tensor<InnerB, 4>,
+        final_v: Tensor<InnerB, 3>,
+        final_angle: Tensor<InnerB, 3>,
+    }
+
+    /// Like [`run_with_grads`] but the loss couples the output with every final
+    /// merged-cache field, and the final cache is returned for comparison. Both
+    /// runs being compared use `forward2`, so the merged-cache semantics match.
+    fn run_with_grads_merged(
+        model: &Mamba3<B>,
+        input: &Param<Tensor<B, 3>>,
+        heads: &Heads,
+        runner: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3MergedCache<B>),
+    ) -> MergedRun {
+        let (out, cache) = runner(model, input.val());
+        let out_inner = out.clone().inner();
+        let ssm = cache.ssm_bhpr;
+        let k = cache.k_state_bmhr;
+        let v = cache.v_state_bhp;
+        let angle = cache.cum_angle_bha;
+        let final_ssm = ssm.clone().inner();
+        let final_k = k.clone().inner();
+        let final_v = v.clone().inner();
+        let final_angle = angle.clone().inner();
+
+        let out_head = Tensor::from_inner(heads.out.clone());
+        let ssm_head = Tensor::from_inner(heads.ssm.clone());
+        let k_head = Tensor::from_inner(heads.k.clone());
+        let v_head = Tensor::from_inner(heads.v.clone());
+        let angle_head = Tensor::from_inner(heads.angle.clone());
+        let loss = (out * out_head).sum()
+            + (ssm * ssm_head).sum()
+            + (k * k_head).sum()
+            + (v * v_head).sum()
+            + (angle * angle_head).sum();
+        let grads = loss.backward();
+
+        let rg = RunGrads {
+            out: out_inner,
+            d_input: input.val().grad(&grads).expect("grad input"),
+            d_in_proj_w: model
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("in_proj.weight"),
+            d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("dt_bias_h"),
+            d_d: model.d_h.val().grad(&grads).expect("d_h"),
+            d_b_norm_gamma: model.b_norm.gamma.val().grad(&grads).expect("b_norm.gamma"),
+            d_c_norm_gamma: model.c_norm.gamma.val().grad(&grads).expect("c_norm.gamma"),
+            d_b_bias: model.b_bias_hmr.val().grad(&grads).expect("b_bias_hmr"),
+            d_c_bias: model.c_bias_hmr.val().grad(&grads).expect("c_bias_hmr"),
+            d_out_proj_w: model
+                .out_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("out_proj.weight"),
+        };
+        MergedRun {
+            rg,
+            final_ssm,
+            final_k,
+            final_v,
+            final_angle,
+        }
+    }
+
+    /// Compare output, every final merged-cache field, and parameter gradients.
+    fn check_merged_match(label: &str, a: &MergedRun, b: &MergedRun, val_tol: f32, grad_tol: f32) {
+        use crate::utils::test_helpers::max_abs_diff;
+        let vals = [
+            ("output", max_abs_diff(a.rg.out.clone(), b.rg.out.clone())),
+            (
+                "final ssm",
+                max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone()),
+            ),
+            (
+                "final k_state",
+                max_abs_diff(a.final_k.clone(), b.final_k.clone()),
+            ),
+            (
+                "final v_state",
+                max_abs_diff(a.final_v.clone(), b.final_v.clone()),
+            ),
+            (
+                "final cum_angle",
+                max_abs_diff(a.final_angle.clone(), b.final_angle.clone()),
+            ),
+        ];
+        for (name, d) in vals {
+            assert!(
+                d < val_tol,
+                "{label}: {name} max abs diff = {d:.6} (tol {val_tol})"
+            );
+        }
+        check_grads_match(label, &a.rg, &b.rg, grad_tol);
+    }
+
+    /// Guard: a random initial state must actually change the forward2 output
+    /// (vs a *zero* merged cache). Otherwise the initial state is being silently
+    /// ignored, which would make the parity comparisons pass trivially.
+    fn guard_random_init_consumed(
+        random_init: bool,
+        model: &Mamba3<B>,
+        cfg: &Mamba3Config,
+        batch: usize,
+        input: &Tensor<InnerB, 3>,
+        trap_path: &Mamba3TrapSsdPath,
+        random_out: &Tensor<InnerB, 3>,
+    ) {
+        if !random_init {
+            return;
+        }
+        use crate::utils::test_helpers::max_abs_diff;
+        let (out_zero, _) = model.forward2(
+            Tensor::from_inner(input.clone()),
+            Some(build_merged_cache(cfg, batch, false)),
+            trap_path.clone(),
+        );
+        let d = max_abs_diff(random_out.clone(), out_zero.inner());
+        assert!(
+            d > 1e-3,
+            "random initial state appears ignored: random-init vs zero-init \
+             output max abs diff = {d:.6} (expected a clear difference)"
+        );
+    }
+
+    /// forward2 ≡ forward (double-SSD) on values and gradients, from the same
+    /// initial state. With `random_init = true` the shared logical initial state
+    /// is random (random SSM state + cumulative RoPE angle; zero previous-token
+    /// history so the merged and double forms coincide). The output and all
+    /// parameter gradients must agree. The merged-cache SSM accumulator itself is
+    /// not compared here (different semantics from the double-form state); the
+    /// merged cache is compared in `run_forward2_split_matches_full`.
+    fn run_forward2_matches_forward(
+        cfg: Mamba3Config,
+        trap_path: Mamba3TrapSsdPath,
+        random_init: bool,
+    ) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 5;
         let d_model = cfg.d_model;
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
 
         let ssd_path = Mamba3SsdPath::Minimal(Some(4));
+        let (c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
         let input_a = param_input(&input);
+        let c3c = c3;
+        let path_a = ssd_path;
         let r_fwd = run_with_grads(&model, &input_a, &head, |m, x| {
-            let (out, _) = m.forward(x, None, ssd_path.clone());
+            let (out, _) = m.forward(x, Some(c3c), path_a);
             out
         });
 
         let input_b = param_input(&input);
+        let cmc = cm;
+        let trap_b = trap_path.clone();
         let r_fwd2 = run_with_grads(&model, &input_b, &head, |m, x| {
-            let (out, _) = m.forward2(x, None, trap_path.clone());
+            let (out, _) = m.forward2(x, Some(cmc), trap_b);
             out
         });
 
@@ -516,52 +779,95 @@ mod tests {
             "forward vs forward2 max absolute difference = {diff:.6} (expected < 1e-4)"
         );
         check_grads_match("forward2 vs forward", &r_fwd, &r_fwd2, 1e-3);
+
+        guard_random_init_consumed(
+            random_init,
+            &model,
+            &cfg,
+            batch,
+            &input,
+            &trap_path,
+            &r_fwd2.out,
+        );
     }
 
     #[test]
     fn forward2_matches_forward() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
+    }
+
+    #[test]
+    fn forward2_matches_forward_random_init() {
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
     fn forward2_matches_forward_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2);
-        run_forward2_matches_forward(cfg, Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_forward(cfg_ngroups2(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
+    }
+
+    #[test]
+    fn forward2_matches_forward_ngroups2_random_init() {
+        run_forward2_matches_forward(cfg_ngroups2(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
     fn forward2_matches_forward_mimo() {
-        run_forward2_matches_forward(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_forward(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            false,
+        );
+    }
+
+    #[test]
+    fn forward2_matches_forward_mimo_random_init() {
+        run_forward2_matches_forward(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            true,
+        );
     }
 
     #[test]
     fn forward2_matches_forward_mimo_ngroups2() {
-        let cfg = Mamba3Config::new(32)
-            .with_state_rank(8)
-            .with_expand(2)
-            .with_per_head_dim(16)
-            .with_ngroups(2)
-            .with_mimo_rank(2);
-        run_forward2_matches_forward(cfg, Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_forward(
+            cfg_mimo_ngroups2(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            false,
+        );
+    }
+
+    #[test]
+    fn forward2_matches_forward_mimo_ngroups2_random_init() {
+        run_forward2_matches_forward(
+            cfg_mimo_ngroups2(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            true,
+        );
     }
 
     #[test]
     fn forward2_matches_forward_serial() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
+        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Serial(Some(4)), false);
     }
 
     #[test]
     fn forward2_matches_forward_serial_mimo() {
-        run_forward2_matches_forward(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
+        run_forward2_matches_forward(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Serial(Some(4)),
+            false,
+        );
     }
 
     #[test]
     fn forward2_matches_forward_recalc() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::SerialRecalculated(Some(4)));
+        run_forward2_matches_forward(
+            small_config(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            false,
+        );
     }
 
     #[test]
@@ -569,38 +875,43 @@ mod tests {
         run_forward2_matches_forward(
             small_config_mimo(),
             Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            false,
         );
     }
 
-    /// forward2 ≡ token-by-token step on values and gradients.
-    fn run_forward2_matches_step(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
+    /// forward2 ≡ token-by-token step on values and gradients, from the same
+    /// initial state (random when `random_init = true`, with zero previous-token
+    /// history so the merged and recurrent forms coincide).
+    fn run_forward2_matches_step(
+        cfg: Mamba3Config,
+        trap_path: Mamba3TrapSsdPath,
+        random_init: bool,
+    ) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
         let batch = 2;
         let seq_len = 5;
         let d_model = cfg.d_model;
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+
+        let (c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
         let input_a = param_input(&input);
+        let cmc = cm;
+        let trap_a = trap_path.clone();
         let r_fwd2 = run_with_grads(&model, &input_a, &head, |m, x| {
-            let (out, _) = m.forward2(x, None, trap_path.clone());
+            let (out, _) = m.forward2(x, Some(cmc), trap_a);
             out
         });
 
         let input_b = param_input(&input);
+        let c3c = c3;
         let r_step = run_with_grads(&model, &input_b, &head, |m, x| {
-            let mut cache: Option<Mamba3Cache<B>> = None;
+            let mut cache: Option<Mamba3Cache<B>> = Some(c3c);
             let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
             for t in 0..seq_len {
                 let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
@@ -620,31 +931,67 @@ mod tests {
             "forward2 vs step max absolute difference = {diff:.6} (expected < 1e-4)"
         );
         check_grads_match("forward2 vs step", &r_fwd2, &r_step, 1e-3);
+
+        guard_random_init_consumed(
+            random_init,
+            &model,
+            &cfg,
+            batch,
+            &input,
+            &trap_path,
+            &r_fwd2.out,
+        );
     }
 
     #[test]
     fn forward2_matches_step() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
+    }
+
+    #[test]
+    fn forward2_matches_step_random_init() {
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
     fn forward2_matches_step_mimo() {
-        run_forward2_matches_step(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
+        run_forward2_matches_step(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            false,
+        );
+    }
+
+    #[test]
+    fn forward2_matches_step_mimo_random_init() {
+        run_forward2_matches_step(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Minimal(Some(4)),
+            true,
+        );
     }
 
     #[test]
     fn forward2_matches_step_serial() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
+        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Serial(Some(4)), false);
     }
 
     #[test]
     fn forward2_matches_step_serial_mimo() {
-        run_forward2_matches_step(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
+        run_forward2_matches_step(
+            small_config_mimo(),
+            Mamba3TrapSsdPath::Serial(Some(4)),
+            false,
+        );
     }
 
     #[test]
     fn forward2_matches_step_recalc() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::SerialRecalculated(Some(4)));
+        run_forward2_matches_step(
+            small_config(),
+            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            false,
+        );
     }
 
     #[test]
@@ -652,10 +999,17 @@ mod tests {
         run_forward2_matches_step(
             small_config_mimo(),
             Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            false,
         );
     }
 
-    /// forward2(full) ≡ forward2(prefix) then forward2(suffix, cache).
+    /// forward2 continuation from a **random** initial merged cache:
+    /// `forward2(full, cache) ≡ forward2(prefix, cache)` then
+    /// `forward2(suffix, mid_cache)`. Compares outputs, the final merged cache,
+    /// and gradients. This replaces the old zero-init split-vs-full test: a
+    /// random initial cache subsumes the chunked-prefill continuity guarantee
+    /// from an arbitrary starting state, and the guard at the end confirms the
+    /// initial cache is actually consumed (not silently ignored).
     fn run_forward2_split_matches_full(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
@@ -664,42 +1018,63 @@ mod tests {
         let seq_len = 6;
         let split = 2;
         let d_model = cfg.d_model;
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let normal = Distribution::Normal(0.0, 1.0);
 
-        let input = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let head = Tensor::<InnerB, 3>::random(
-            [batch, seq_len, d_model],
-            Distribution::Normal(0.0, 1.0),
-            &device,
-        );
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            ssm: Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                normal,
+                &device,
+            ),
+            k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+            v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
+            angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        };
+
+        let init_cache = build_merged_cache(&cfg, batch, true);
 
         let input_full = param_input(&input);
-        let r_full = run_with_grads(&model, &input_full, &head, |m, x| {
-            let (out, _) = m.forward2(x, None, trap_path.clone());
-            out
+        let cache_full = init_cache.clone();
+        let trap_f = trap_path.clone();
+        let r_full = run_with_grads_merged(&model, &input_full, &heads, |m, x| {
+            m.forward2(x, Some(cache_full), trap_f)
         });
 
         let input_split = param_input(&input);
-        let r_split = run_with_grads(&model, &input_split, &head, |m, x| {
+        let cache_split = init_cache;
+        let trap_s = trap_path.clone();
+        let r_split = run_with_grads_merged(&model, &input_split, &heads, |m, x| {
             let prefix = x.clone().narrow(1, 0, split);
             let suffix = x.narrow(1, split, seq_len - split);
-            let (out_prefix, cache) = m.forward2(prefix, None, trap_path.clone());
-            let (out_suffix, _) = m.forward2(suffix, Some(cache), trap_path.clone());
-            Tensor::cat(vec![out_prefix, out_suffix], 1)
+            let (out_prefix, mid) = m.forward2(prefix, Some(cache_split), trap_s.clone());
+            let (out_suffix, last) = m.forward2(suffix, Some(mid), trap_s);
+            (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
         });
 
-        let diff = (r_full.out.clone() - r_split.out.clone())
-            .abs()
-            .max()
-            .into_scalar();
-        assert!(
-            diff < 1e-4,
-            "forward2 split vs full max absolute difference = {diff:.6} (expected < 1e-4)"
-        );
-        check_grads_match("forward2 split vs full", &r_full, &r_split, 1e-3);
+        check_merged_match("forward2 split vs full", &r_full, &r_split, 1e-4, 1e-3);
+
+        // Guard: the random initial merged cache must change the full output.
+        {
+            use crate::utils::test_helpers::max_abs_diff;
+            let (out_zero, _) = model.forward2(
+                Tensor::from_inner(input.clone()),
+                Some(build_merged_cache(&cfg, batch, false)),
+                trap_path.clone(),
+            );
+            let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
+            assert!(
+                d > 1e-3,
+                "random initial state appears ignored: random-init vs zero-init \
+                 output max abs diff = {d:.6} (expected a clear difference)"
+            );
+        }
     }
 
     #[test]

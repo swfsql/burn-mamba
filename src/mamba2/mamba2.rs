@@ -1068,7 +1068,10 @@ mod tests {
         let d_out = max_abs_diff(a.out.clone(), b.out.clone());
         let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
         let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
-        assert!(d_out < tol, "{label}: output max abs diff = {d_out:.6} (tol {tol})");
+        assert!(
+            d_out < tol,
+            "{label}: output max abs diff = {d_out:.6} (tol {tol})"
+        );
         assert!(
             d_conv < tol,
             "{label}: final conv window max abs diff = {d_conv:.6} (tol {tol})"
@@ -1307,12 +1310,20 @@ mod tests {
 
     #[test]
     fn step_matches_forward_norm_before_gate() {
-        run_step_matches_forward(cfg_norm_before_gate(), Mamba2SsdPath::Minimal(Some(4)), false);
+        run_step_matches_forward(
+            cfg_norm_before_gate(),
+            Mamba2SsdPath::Minimal(Some(4)),
+            false,
+        );
     }
 
     #[test]
     fn step_matches_forward_norm_before_gate_random_init() {
-        run_step_matches_forward(cfg_norm_before_gate(), Mamba2SsdPath::Minimal(Some(4)), true);
+        run_step_matches_forward(
+            cfg_norm_before_gate(),
+            Mamba2SsdPath::Minimal(Some(4)),
+            true,
+        );
     }
 
     // ── SSD path agreement ───────────────────────────────────────────────────
@@ -1349,7 +1360,9 @@ mod tests {
         let run = |path: Mamba2SsdPath| {
             let input_p = param_input(&input);
             let cache_p = init_cache.clone();
-            run_with_grads(&model, &input_p, &heads, |m, x| m.forward(x, Some(cache_p), path))
+            run_with_grads(&model, &input_p, &heads, |m, x| {
+                m.forward(x, Some(cache_p), path)
+            })
         };
         let r_min = run(Mamba2SsdPath::Minimal(Some(4)));
         let r_ser = run(Mamba2SsdPath::Serial(Some(4)));

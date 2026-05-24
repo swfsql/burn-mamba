@@ -25,15 +25,16 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3TrapSsdInput<B> {
             "init_state_hpr not yet implemented for ssd_trap_serial_recalculated"
         );
 
-        let (y_bnlmhp, final_state_bhpr) = <B as Mamba3TrapBackendExt>::ssd_trap_serial_recalculated(
-            input.v_bnlmhp.into_primitive().tensor(),
-            input.da_bnlh.into_primitive().tensor(),
-            input.b_bnlmhr.into_primitive().tensor(),
-            input.c_bnlmhr.into_primitive().tensor(),
-            input.gamma_bnlh.into_primitive().tensor(),
-            input.scale_bnlh.into_primitive().tensor(),
-            input.initial_state_bhpr.into_primitive().tensor(),
-        );
+        let (y_bnlmhp, final_state_bhpr) =
+            <B as Mamba3TrapBackendExt>::ssd_trap_serial_recalculated(
+                input.v_bnlmhp.into_primitive().tensor(),
+                input.da_bnlh.into_primitive().tensor(),
+                input.b_bnlmhr.into_primitive().tensor(),
+                input.c_bnlmhr.into_primitive().tensor(),
+                input.gamma_bnlh.into_primitive().tensor(),
+                input.scale_bnlh.into_primitive().tensor(),
+                input.initial_state_bhpr.into_primitive().tensor(),
+            );
         let y_bnlmhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlmhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
         (y_bnlmhp, final_state_bhpr)

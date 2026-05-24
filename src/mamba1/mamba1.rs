@@ -917,8 +917,9 @@ mod tests {
 
         let input_fwd = param_input(&input);
         let cache_fwd = init_cache.clone();
-        let r_fwd =
-            run_with_grads(&model, &input_fwd, &heads, |m, x| m.forward(x, Some(cache_fwd)));
+        let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
+            m.forward(x, Some(cache_fwd))
+        });
 
         let input_step = param_input(&input);
         let cache_step = init_cache;
@@ -940,7 +941,10 @@ mod tests {
         let d_out = max_abs_diff(r_fwd.out.clone(), r_step.out.clone());
         let d_conv_state = max_abs_diff(r_fwd.final_conv.clone(), r_step.final_conv.clone());
         let d_ssm_state = max_abs_diff(r_fwd.final_ssm.clone(), r_step.final_ssm.clone());
-        assert!(d_out < val_tol, "step vs forward: output max abs diff = {d_out:.6}");
+        assert!(
+            d_out < val_tol,
+            "step vs forward: output max abs diff = {d_out:.6}"
+        );
         assert!(
             d_conv_state < val_tol,
             "step vs forward: final conv window max abs diff = {d_conv_state:.6}"
