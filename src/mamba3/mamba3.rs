@@ -1580,6 +1580,25 @@ mod tests {
 
         assert_outputs_match("step vs forward", &r_fwd, &r_step, 1e-4);
         check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
+
+        // ── Guard: the random initial state must actually be consumed ─────
+        // Re-run forward from a *zero* initial cache; its output must differ
+        // from the random-init output. Otherwise the initial state is being
+        // silently ignored and forward/step would match trivially.
+        if random_init {
+            use crate::utils::test_helpers::max_abs_diff;
+            let (out_zero, _) = model.forward(
+                Tensor::from_inner(input.clone()),
+                Some(build_init_cache(&cfg, batch, false)),
+                ssd_path.clone(),
+            );
+            let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
+            assert!(
+                d > 1e-3,
+                "random initial state appears ignored: random-init vs zero-init \
+                 output max abs diff = {d:.6} (expected a clear difference)"
+            );
+        }
     }
 
     // Config variants exercised by the parity tests below.
