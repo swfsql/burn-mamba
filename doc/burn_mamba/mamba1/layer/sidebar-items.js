@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba1Layer","Mamba1LayerConfig","Mamba1LayerRecord","Mamba1LayerRecordItem"]};
+window.SIDEBAR_ITEMS = {"struct":["Mamba1Layer","Mamba1LayerConfig","Mamba1LayerRecord","Mamba1LayerRecordItem","Mamba1Layers","Mamba1LayersConfig","Mamba1LayersRecord","Mamba1LayersRecordItem"]};

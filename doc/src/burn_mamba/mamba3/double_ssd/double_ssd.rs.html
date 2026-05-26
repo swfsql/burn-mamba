@@ -174,7 +174,7 @@
 <a href=#174 id=174 data-nosnippet>174</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#175 id=175 data-nosnippet>175</a>        input_bsm: Tensor&lt;B, <span class="number">3</span>&gt;,
 <a href=#176 id=176 data-nosnippet>176</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba3DoubleSsdCache&lt;B&gt;&gt;,
-<a href=#177 id=177 data-nosnippet>177</a>        ssd_path: Mamba3DoubleSsdPath,
+<a href=#177 id=177 data-nosnippet>177</a>        ssd_path: <span class="kw-2">&amp;</span>Mamba3SsdPath,
 <a href=#178 id=178 data-nosnippet>178</a>    ) -&gt; (Tensor&lt;B, <span class="number">3</span>&gt;, Mamba3DoubleSsdCache&lt;B&gt;) {
 <a href=#179 id=179 data-nosnippet>179</a>        <span class="kw">let </span>[batch, sequence, _d_model] = input_bsm.dims();
 <a href=#180 id=180 data-nosnippet>180</a>        <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
@@ -409,7 +409,7 @@
 <a href=#409 id=409 data-nosnippet>409</a>            initial_state_bhpr: cache.ssm_bhpr,
 <a href=#410 id=410 data-nosnippet>410</a>            init_state_hpr: <span class="self">self</span>.init_state_hpr.as_ref().map(|s| s.val()),
 <a href=#411 id=411 data-nosnippet>411</a>        };
-<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">let </span>(y_gamma_bnlmhp, final_state_gamma_bhpr) = ssd_path.clone().run(input_gamma);
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">let </span>(y_gamma_bnlmhp, final_state_gamma_bhpr) = input_gamma.run(ssd_path);
 <a href=#413 id=413 data-nosnippet>413</a>
 <a href=#414 id=414 data-nosnippet>414</a>        <span class="kw">let </span>input_beta = Mamba3DoubleSsdInput {
 <a href=#415 id=415 data-nosnippet>415</a>            v_bnlmhp: v_beta_bnlmhp,
@@ -419,7 +419,7 @@
 <a href=#419 id=419 data-nosnippet>419</a>            initial_state_bhpr: Tensor::zeros([batch, nheads, per_head_dim, state_rank], <span class="kw-2">&amp;</span>device),
 <a href=#420 id=420 data-nosnippet>420</a>            init_state_hpr: <span class="prelude-val">None</span>,
 <a href=#421 id=421 data-nosnippet>421</a>        };
-<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>(y_beta_bnlmhp, final_state_beta_bhpr) = ssd_path.run(input_beta);
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="kw">let </span>(y_beta_bnlmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
 <a href=#423 id=423 data-nosnippet>423</a>
 <a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">let </span>y_bnlmhp = y_gamma_bnlmhp + y_beta_bnlmhp;
 <a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">let </span>final_state_bhpr = final_state_gamma_bhpr + final_state_beta_bhpr;
