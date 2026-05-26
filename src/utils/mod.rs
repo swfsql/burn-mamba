@@ -1,25 +1,55 @@
+//! # Shared utilities
+//!
+//! Building blocks reused across the Mamba families: custom activations and
+//! norms (often fp16-stable variants Burn lacks), loss functions, the
+//! `segsum` / `gqa` tensor helpers, the custom-backward plumbing
+//! (`backend_macros` / `combined_grad` / `primitive`), runtime `sanity` guards,
+//! LR `scheduler`s, and the per-dtype numerical constants below.
+
 use ElementConversion;
 use burn::prelude::*;
 use burn::tensor::{DType, Element};
 
+/// Macros emitting per-backend `BackendExt` impls + autodiff marker traits.
 #[macro_use]
 pub mod backend_macros;
+/// Flatten/unflatten `(y, final_state)` into one tracked tensor for the custom
+/// backward.
 pub mod combined_grad;
+/// Group→head expansion of B/C (GQA-style sharing).
 pub mod gqa;
+/// Numerically-stable log-sigmoid (fp16-aware).
 pub mod log_sigmoid;
+/// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
 pub mod loss;
+/// `FloatTensor` primitive ↔ `Tensor<B, D>` conversion helper.
 pub(crate) mod primitive;
+/// Root-mean-square normalisation (last-dim, fp16-safe); also the Mamba-3
+/// QK-Norm.
 pub mod rms_norm;
+/// RMSNorm followed by a SiLU(z) gate (Mamba-2 output norm).
 pub mod rms_norm_gated;
+/// Optional `NaN`/`Inf` guards gated by [`crate::DENY_NAN`] / [`crate::DENY_INF`].
 pub mod sanity;
+/// Learning-rate schedulers (cosine-annealing + warmup, constant).
 pub mod scheduler;
+/// Stable segment-sum → 1-semiseparable mask (log-space prefix-sum differences).
 pub mod segsum;
+/// SiLU activation (fp16-aware).
 pub mod silu;
+/// Softplus activation (fp16-aware).
 pub mod softplus;
+/// Typed-array variant of `split_with_sizes` for clean destructuring.
 pub mod split;
+/// `max_abs_diff` + gradient-comparison macros used across the test suites.
 #[cfg(test)]
 pub mod test_helpers;
 
+/// The largest finite value representable by the backend's float element type.
+///
+/// Used as a saturating upper bound (e.g. clamping) that works uniformly across
+/// f64/f32/f16/bf16 without overflowing the narrower formats.  Panics on
+/// non-float element types.
 pub fn stable_max<B: Backend>() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {
         DType::F64 => f64::MAX.elem(),
@@ -45,6 +75,15 @@ pub fn stable_max<B: Backend>() -> B::FloatElem {
     }
 }
 
+/// A small per-dtype epsilon for safe division (`x / (y + eps)`), returned as
+/// `f32`.
+///
+/// The value is chosen per float format as the geometric mean (average in
+/// log10 space) of two reference magnitudes: a scaled function of the format's
+/// minimum exponent and the format's machine epsilon.  This places `eps`
+/// comfortably above the denormal/underflow floor while staying negligible
+/// relative to typical activations, for each of f64/f32/f16/bf16.  The
+/// resulting constants are noted inline.  Panics on non-float element types.
 pub fn div_eps_f32<B: Backend>() -> f32 {
     match <B::FloatElem as Element>::dtype() {
         // 4.0693917e-16
@@ -92,6 +131,7 @@ pub fn div_eps_f32<B: Backend>() -> f32 {
     }
 }
 
+/// [`div_eps_f32`] converted to the backend's native float element type.
 pub fn div_eps<B: Backend>() -> B::FloatElem {
     div_eps_f32::<B>().elem()
 }

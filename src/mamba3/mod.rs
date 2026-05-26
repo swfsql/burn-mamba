@@ -1,3 +1,24 @@
+//! # Mamba-3
+//!
+//! Mamba-3 extends Mamba-2 with three independent additions (each works alone
+//! or combined): **trapezoidal discretisation**, **data-dependent RoPE** on the
+//! B/C projections, and **MIMO** (multiple-input multiple-output) rank
+//! expansion.  See [`mamba3`] for the full combined math.
+//!
+//! ## Two SSD pathways
+//!
+//! The trapezoidal recurrence is realised by two interchangeable algorithms,
+//! selected at runtime by which **cache variant** is supplied:
+//!
+//! - [`double_ssd`] — splits the trapezoid into two standard SSD calls
+//!   (simple, easy to verify; ~2× the intra-chunk memory).
+//! - [`single_ssd`] — one SSD call in the official-kernel form
+//!   (≈ half the training memory; the cache's SSM accumulator has different
+//!   mid-sequence semantics).
+//!
+//! [`cache`] holds the enum that dispatches between them; [`ssd_path`] selects
+//! the pathway-agnostic *algorithm* (Minimal / Serial / SerialRecalculated).
+
 pub mod double_ssd;
 pub mod single_ssd;
 
@@ -13,6 +34,12 @@ use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use burn::tensor::backend::Backend;
 
+/// Backend capability required to run Mamba-3.
+///
+/// Aggregates the per-pathway extension traits ([`Mamba3DoubleSsdBackendExt`]
+/// and [`Mamba3SingleSsdBackendExt`]); every plain Burn backend satisfies it
+/// via the default implementations, and `Autodiff<B>` additionally gets the
+/// custom memory-efficient backward.
 pub trait Mamba3BackendExt:
     burn::tensor::backend::Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
 {
@@ -26,6 +53,7 @@ crate::decl_ssd_autodiff_backend_ext!(
 );
 crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3BackendExt);
 
+/// Blanket [`Mamba3BackendExt`] implementation for autodiff backends.
 #[cfg(feature = "autodiff")]
 pub mod backwards {
     use super::*;
@@ -37,6 +65,7 @@ pub mod backwards {
     }
 }
 
+/// Public re-exports for Mamba-3.
 pub mod prelude {
     #[cfg(feature = "autodiff")]
     pub use super::Mamba3AutodiffBackendExt;
