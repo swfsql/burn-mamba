@@ -1173,4 +1173,232 @@ mod tests {
             Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
         );
     }
+
+    // ── Cross-pathway cache conversion parity ───────────────────────────────
+
+    /// Like [`run_with_grads_single_ssd`], but the runner hands back the four
+    /// final-cache field tensors directly (so the concrete cache type — single
+    /// or double — does not matter). The loss couples the output with every
+    /// final-cache field; gradients of the input and representative parameters
+    /// are returned alongside the (inner) output and final-cache values.
+    #[allow(clippy::type_complexity)]
+    fn run_cache_fields_with_grads(
+        model: &Mamba3<B>,
+        input: &Param<Tensor<B, 3>>,
+        heads: &Heads,
+        runner: impl FnOnce(
+            &Mamba3<B>,
+            Tensor<B, 3>,
+        ) -> (
+            Tensor<B, 3>, // out
+            Tensor<B, 4>, // ssm_bhpr
+            Tensor<B, 4>, // k_state_bmhr
+            Tensor<B, 3>, // v_state_bhp
+            Tensor<B, 3>, // cum_angle_bha
+        ),
+    ) -> SingleSsdRun {
+        let (out, ssm, k, v, angle) = runner(model, input.val());
+        let out_inner = out.clone().inner();
+        let final_ssm = ssm.clone().inner();
+        let final_k = k.clone().inner();
+        let final_v = v.clone().inner();
+        let final_angle = angle.clone().inner();
+
+        let out_head = Tensor::from_inner(heads.out.clone());
+        let ssm_head = Tensor::from_inner(heads.ssm.clone());
+        let k_head = Tensor::from_inner(heads.k.clone());
+        let v_head = Tensor::from_inner(heads.v.clone());
+        let angle_head = Tensor::from_inner(heads.angle.clone());
+        let loss = (out * out_head).sum()
+            + (ssm * ssm_head).sum()
+            + (k * k_head).sum()
+            + (v * v_head).sum()
+            + (angle * angle_head).sum();
+        let grads = loss.backward();
+
+        let rg = RunGrads {
+            out: out_inner,
+            d_input: input.val().grad(&grads).expect("grad input"),
+            d_in_proj_w: model
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("in_proj.weight"),
+            d_dt_bias: model.dt_bias_h.val().grad(&grads).expect("dt_bias_h"),
+            d_d: model.d_h.val().grad(&grads).expect("d_h"),
+            d_b_norm_gamma: model.b_norm.gamma.val().grad(&grads).expect("b_norm.gamma"),
+            d_c_norm_gamma: model.c_norm.gamma.val().grad(&grads).expect("c_norm.gamma"),
+            d_b_bias: model.b_bias_hmr.val().grad(&grads).expect("b_bias_hmr"),
+            d_c_bias: model.c_bias_hmr.val().grad(&grads).expect("c_bias_hmr"),
+            d_out_proj_w: model
+                .out_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("out_proj.weight"),
+        };
+        SingleSsdRun {
+            rg,
+            final_ssm,
+            final_k,
+            final_v,
+            final_angle,
+        }
+    }
+
+    /// Cache-conversion parity. From one shared, fully-random initial cache,
+    /// two consecutive forward calls split a sequence into prefix+suffix with a
+    /// cross-pathway cache conversion in between:
+    ///
+    /// - **A**: `forward_double_ssd(prefix)` → convert (double→single) →
+    ///   `forward_single_ssd(suffix)`.
+    /// - **B**: `forward_single_ssd(prefix)` → convert (single→double) →
+    ///   `forward_double_ssd(suffix)`.
+    ///
+    /// Both directions must yield the same concatenated output, the same final
+    /// cache (every field — compared directly, with no further conversion), and
+    /// the same parameter/input gradients. This exercises the `From` impls in
+    /// [`crate::mamba3::cache`] inside the autodiff graph (so the conversion must
+    /// also be gradient-transparent), and the mid-point cache always carries a
+    /// non-trivial previous-token K/V history.
+    fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+        let device: Device = Default::default();
+        let model = cfg.init::<B>(&device);
+
+        let batch = 2;
+        let seq_len = 6;
+        let split = 2;
+        let d_model = cfg.d_model;
+        let nheads = cfg.nheads();
+        let per_head_dim = cfg.per_head_dim;
+        let state_rank = cfg.state_rank;
+        let mimo_rank = cfg.mimo_rank;
+        let num_rope_angles = cfg.num_rope_angles();
+        let normal = Distribution::Normal(0.0, 1.0);
+
+        let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+        let heads = Heads {
+            out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
+            ssm: Tensor::<InnerB, 4>::random(
+                [batch, nheads, per_head_dim, state_rank],
+                normal,
+                &device,
+            ),
+            k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+            v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
+            angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        };
+
+        // Shared, fully-random initial cache fields (including the previous-token
+        // K/V history) — both runs start from the exact same logical state.
+        let init_ssm =
+            Tensor::<InnerB, 4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
+        let init_k =
+            Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
+        let init_v = Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device);
+        let init_angle =
+            Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device);
+
+        let path_double = Mamba3DoubleSsdPath::from(ssd_path.clone());
+        let path_single = Mamba3SingleSsdPath::from(ssd_path);
+
+        // ── Run A: double → (convert) → single ───────────────────────────────
+        let input_a = param_input(&input);
+        let (pd_a, ps_a) = (path_double.clone(), path_single.clone());
+        let (ssm_a, k_a, v_a, ang_a) = (
+            init_ssm.clone(),
+            init_k.clone(),
+            init_v.clone(),
+            init_angle.clone(),
+        );
+        let run_a = run_cache_fields_with_grads(&model, &input_a, &heads, move |m, x| {
+            let init_double = Mamba3DoubleSsdCache {
+                ssm_bhpr: Tensor::from_inner(ssm_a),
+                k_state_bmhr: Tensor::from_inner(k_a),
+                v_state_bhp: Tensor::from_inner(v_a),
+                cum_angle_bha: Tensor::from_inner(ang_a),
+            };
+            let prefix = x.clone().narrow(1, 0, split);
+            let suffix = x.narrow(1, split, seq_len - split);
+            let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), pd_a);
+            let mid_single = Mamba3SingleSsdCache::from(mid_double);
+            let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), ps_a);
+            let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
+            (
+                out,
+                last.ssm_bhpr,
+                last.k_state_bmhr,
+                last.v_state_bhp,
+                last.cum_angle_bha,
+            )
+        });
+
+        // ── Run B: single → (convert) → double ───────────────────────────────
+        let input_b = param_input(&input);
+        let (pd_b, ps_b) = (path_double, path_single);
+        let (ssm_b, k_b, v_b, ang_b) = (init_ssm, init_k, init_v, init_angle);
+        let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
+            let init_single = Mamba3SingleSsdCache {
+                ssm_bhpr: Tensor::from_inner(ssm_b),
+                k_state_bmhr: Tensor::from_inner(k_b),
+                v_state_bhp: Tensor::from_inner(v_b),
+                cum_angle_bha: Tensor::from_inner(ang_b),
+            };
+            let prefix = x.clone().narrow(1, 0, split);
+            let suffix = x.narrow(1, split, seq_len - split);
+            let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), ps_b);
+            let mid_double = Mamba3DoubleSsdCache::from(mid_single);
+            let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), pd_b);
+            let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
+            (
+                out,
+                last.ssm_bhpr,
+                last.k_state_bmhr,
+                last.v_state_bhp,
+                last.cum_angle_bha,
+            )
+        });
+
+        check_single_ssd_match(
+            "cache conversion parity (double↔single)",
+            &run_a,
+            &run_b,
+            1e-4,
+            1e-3,
+        );
+    }
+
+    #[test]
+    fn cache_conversion_parity() {
+        run_cache_conversion_parity(small_config(), Mamba3SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn cache_conversion_parity_mimo() {
+        run_cache_conversion_parity(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn cache_conversion_parity_ngroups2() {
+        run_cache_conversion_parity(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn cache_conversion_parity_mimo_ngroups2() {
+        run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
+    }
+
+    #[test]
+    fn cache_conversion_parity_serial() {
+        run_cache_conversion_parity(small_config(), Mamba3SsdPath::Serial(Some(4)));
+    }
+
+    #[test]
+    fn cache_conversion_parity_recalc_mimo() {
+        run_cache_conversion_parity(
+            small_config_mimo(),
+            Mamba3SsdPath::SerialRecalculated(Some(4)),
+        );
+    }
 }
