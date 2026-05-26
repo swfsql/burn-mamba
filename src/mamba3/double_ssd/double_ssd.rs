@@ -176,7 +176,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         cache: Option<Mamba3DoubleSsdCache<B>>,
         ssd_path: Mamba3DoubleSsdPath,
     ) -> (Tensor<B, 3>, Mamba3DoubleSsdCache<B>) {
-        println!("double-ssd forward");
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
