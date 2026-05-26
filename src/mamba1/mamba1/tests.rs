@@ -12,8 +12,8 @@ type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
 
 fn small_config() -> Mamba1Config {
     Mamba1Config::new(32) // d_model = 32
-        .with_d_state(8)
-        .with_d_conv(4)
+        .with_state_rank(8)
+        .with_conv_kernel(4)
         .with_expand(2)
 }
 
@@ -58,8 +58,8 @@ fn run_with_grads(
 ) -> RunGrads {
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
-    let conv = cache.conv.val();
-    let ssm = cache.ssm.val();
+    let conv = cache.conv_bik.clone();
+    let ssm = cache.ssm_bir.clone();
     let final_conv = conv.clone().inner();
     let final_ssm = ssm.clone().inner();
 
@@ -169,23 +169,23 @@ fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
 fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache<B> {
     let device: Device = Default::default();
     let d_inner = cfg.d_inner();
-    let d_conv = cfg.d_conv;
-    let d_state = cfg.d_state;
+    let conv_kernel = cfg.conv_kernel;
+    let state_rank = cfg.state_rank;
     let (conv, ssm) = if random {
         let dist = Distribution::Normal(0.0, 1.0);
         (
-            Tensor::<InnerB, 3>::random([batch, d_inner, d_conv], dist, &device),
-            Tensor::<InnerB, 3>::random([batch, d_inner, d_state], dist, &device),
+            Tensor::<InnerB, 3>::random([batch, d_inner, conv_kernel], dist, &device),
+            Tensor::<InnerB, 3>::random([batch, d_inner, state_rank], dist, &device),
         )
     } else {
         (
-            Tensor::<InnerB, 3>::zeros([batch, d_inner, d_conv], &device),
-            Tensor::<InnerB, 3>::zeros([batch, d_inner, d_state], &device),
+            Tensor::<InnerB, 3>::zeros([batch, d_inner, conv_kernel], &device),
+            Tensor::<InnerB, 3>::zeros([batch, d_inner, state_rank], &device),
         )
     };
     Mamba1Cache {
-        conv: Param::from_tensor(Tensor::from_inner(conv)),
-        ssm: Param::from_tensor(Tensor::from_inner(ssm)),
+        conv_bik: Tensor::from_inner(conv),
+        ssm_bir: Tensor::from_inner(ssm),
     }
 }
 
@@ -211,16 +211,16 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let seq_len = 5;
     let d_model = cfg.d_model;
     let d_inner = cfg.d_inner();
-    let d_conv = cfg.d_conv;
-    let d_state = cfg.d_state;
-    assert!(seq_len >= d_conv);
+    let conv_kernel = cfg.conv_kernel;
+    let state_rank = cfg.state_rank;
+    assert!(seq_len >= conv_kernel);
 
     let normal = Distribution::Normal(0.0, 1.0);
     let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
-        conv: Tensor::<InnerB, 3>::random([batch, d_inner, d_conv], normal, &device),
-        ssm: Tensor::<InnerB, 3>::random([batch, d_inner, d_state], normal, &device),
+        conv: Tensor::<InnerB, 3>::random([batch, d_inner, conv_kernel], normal, &device),
+        ssm: Tensor::<InnerB, 3>::random([batch, d_inner, state_rank], normal, &device),
     };
 
     let init_cache = build_init_cache(&cfg, batch, random_init);
@@ -302,8 +302,8 @@ fn step_matches_forward_random_init() {
 
 fn cfg_d_state_16() -> Mamba1Config {
     Mamba1Config::new(32)
-        .with_d_state(16)
-        .with_d_conv(4)
+        .with_state_rank(16)
+        .with_conv_kernel(4)
         .with_expand(2)
 }
 
@@ -321,8 +321,8 @@ fn step_matches_forward_d_state_16_random_init() {
 
 fn cfg_d_conv_2() -> Mamba1Config {
     Mamba1Config::new(32)
-        .with_d_state(8)
-        .with_d_conv(2)
+        .with_state_rank(8)
+        .with_conv_kernel(2)
         .with_expand(2)
 }
 
@@ -340,8 +340,8 @@ fn step_matches_forward_d_conv_2_random_init() {
 
 fn cfg_expand_1() -> Mamba1Config {
     Mamba1Config::new(32)
-        .with_d_state(8)
-        .with_d_conv(4)
+        .with_state_rank(8)
+        .with_conv_kernel(4)
         .with_expand(1)
 }
 
@@ -359,8 +359,8 @@ fn step_matches_forward_expand_1_random_init() {
 
 fn cfg_custom_dt_rank() -> Mamba1Config {
     Mamba1Config::new(32)
-        .with_d_state(8)
-        .with_d_conv(4)
+        .with_state_rank(8)
+        .with_conv_kernel(4)
         .with_expand(2)
         .with_dt_rank(Some(8))
 }

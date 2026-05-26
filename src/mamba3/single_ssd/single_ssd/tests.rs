@@ -553,7 +553,7 @@ fn run_forward_single_ssd_matches_step(
         &cfg,
         batch,
         &input,
-        &(single_ssd_path.into()),
+        &single_ssd_path,
         &r_fwd_single_ssd.out,
     );
 }

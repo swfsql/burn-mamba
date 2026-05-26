@@ -1,10 +1,30 @@
-//! Utilizes Mamba1 and other Modules to build a Mamba1 model capable of utilizing the state-spaces/mamba-130m text prediction models.
+//! # Mamba-1 Language Model Network
+//!
+//! Assembles a complete autoregressive language model from the Mamba-1
+//! components:
+//!
+//! ```text
+//!   tokens [batch, sequence]
+//!       │  Embedding (vocab_size → d_model)
+//!       ▼  (×n_virtual_layers)
+//!   Mamba1Layer [Pre-LN residual block]
+//!       │  RMSNorm (final)
+//!       ▼  LM head (d_model → vocab_size)
+//!   logits [batch, sequence, vocab_size]
+//! ```
+//!
+//! Mirrors [`crate::mamba2::network`]: vocabulary is padded up to
+//! `pad_vocab_size_multiple`, the LM head can be weight-tied to the embedding
+//! (`missing_lm_head = true`), and both [`Mamba1Network::forward`] and
+//! [`Mamba1Network::step`] thread a [`Mamba1Caches`] so prefill can be followed
+//! by decoding.
 //!
 //! References:
 //! - [huggingface/candle](https://github.com/huggingface/candle/blob/fd7c8565646039e35925b8730d27ddad195d7e73/candle-examples/examples/mamba-minimal/)
 //! - [johnma2006/mamba-minimal](https://github.com/johnma2006/mamba-minimal/blob/61f01953ca153f8c4a850d7111beecbf4be9cee1/)
 
 use crate::mamba1::prelude::*;
+use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
@@ -12,7 +32,7 @@ use burn::prelude::*;
 #[derive(Module, Debug)]
 pub struct Mamba1Network<B: Backend> {
     pub embedding: Embedding<B>,
-    pub layers: Vec<Mamba1Layer<B>>,
+    pub layers: Mamba1Layers<B>,
     pub norm_f: RmsNorm<B>,
     /// If missing, re-utilizes a transposed `embedding` weight.
     pub lm_head: Option<Linear<B>>,
@@ -20,7 +40,12 @@ pub struct Mamba1Network<B: Backend> {
 
 #[derive(Config, Debug)]
 pub struct Mamba1NetworkConfig {
-    pub n_layer: usize,
+    /// Number of real (weight-bearing) Mamba-1 layers.
+    pub n_real_layers: usize,
+
+    /// Optional virtual-layer scheduling.  See [`Mamba1Layers`] for details.
+    #[config(default = "None")]
+    pub n_virtual_layers: Option<(usize, Schedule)>,
 
     /// If vocab_size is divisible by pad_vocab_size_multiple, this should be considered the unpadded vocab size.
     /// Otherwise, this is padded into `((vocab_size / self.pad_vocab_size_multiple) + 1) * pad_vocab_size_multiple`.
@@ -41,11 +66,14 @@ pub struct Mamba1NetworkConfig {
 impl Mamba1NetworkConfig {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1Network<B> {
-        let mut layers = Vec::with_capacity(self.n_layer);
-        for _ in 0..self.n_layer {
-            let layer = Mamba1LayerConfig::new(self.mamba_block.clone()).init(device);
-            layers.push(layer);
+        let layers = Mamba1LayersConfig {
+            n_real_layers: self.n_real_layers,
+            n_virtual_layers: self.n_virtual_layers.clone(),
+            mamba_block: self.mamba_block.clone(),
+            ignore_first_residual: false,
+            ignore_last_residual: false,
         }
+        .init(device);
 
         let padded_vocab_size = {
             if self.vocab_size.is_multiple_of(self.pad_vocab_size_multiple) {
@@ -77,76 +105,86 @@ impl Mamba1NetworkConfig {
 impl<B: Backend> Mamba1Network<B> {
     /// See also [`Self::step`].
     ///
+    /// Processes a full token sequence and returns next-token logits along with
+    /// the updated caches (ready for a subsequent [`Self::step`] call).
+    ///
     /// # Shapes
     ///   - Input `[batch, sequence]`
-    ///   - Output `[batch, sequence, d_model]`
-    pub fn forward(&self, x: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    ///   - Output `[batch, sequence, padded_vocab_size]`
+    pub fn forward(
+        &self,
+        x: Tensor<B, 2, Int>,
+        caches: Option<Mamba1Caches<B>>,
+    ) -> (Tensor<B, 3>, Mamba1Caches<B>) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
-        let mut x = self.embedding.forward(x);
-        debug_assert_eq!([batch, sequence, d_model], x.dims());
+        let x = self.embedding.forward(x);
+        assert_eq!([batch, sequence, d_model], x.dims());
 
-        for layer in self.layers.iter() {
-            x = layer.forward(x);
-        }
+        let (mut x, caches) = self.layers.forward(x, caches);
+        assert_eq!([batch, sequence, d_model], x.dims());
 
         x = self.norm_f.forward(x);
-        if let Some(lm_head) = &self.lm_head {
-            x = lm_head.forward(x);
-        } else {
-            // let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
-            let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
-            debug_assert_eq!([d_model, padded_vocab], weight.dims());
+        x = self.apply_lm_head(x, d_model, padded_vocab);
+        assert_eq!([batch, sequence, padded_vocab], x.dims());
 
-            let linear = Linear { weight, bias: None };
-            x = linear.forward(x);
-        };
-        debug_assert_eq!([batch, sequence, padded_vocab], x.dims());
-
-        x
+        (x, caches)
     }
 
     /// See also [`Self::forward`].
     ///
+    /// Processes a **single** token and returns next-token logits along with
+    /// the caches updated for the next step.
+    ///
     /// # Shapes
     ///   - Input `[batch]`
-    ///   - Output `[batch, d_model]`
+    ///   - Output `[batch, padded_vocab_size]`
     pub fn step(
         &self,
         x: Tensor<B, 1, Int>,
-        mut caches: Mamba1Caches<B>,
+        caches: Option<Mamba1Caches<B>>,
     ) -> (Tensor<B, 2>, Mamba1Caches<B>) {
         let [batch] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
-        let x = x.unsqueeze_dim(1);
-        debug_assert_eq!([batch, 1], x.dims());
+        let x = x.unsqueeze_dim::<2>(1);
+        assert_eq!([batch, 1], x.dims());
 
         let x = self.embedding.forward(x);
-        debug_assert_eq!([batch, 1, d_model], x.dims());
-        let mut x = x.squeeze_dim(1);
-        debug_assert_eq!([batch, d_model], x.dims());
+        assert_eq!([batch, 1, d_model], x.dims());
+        let x = x.squeeze_dim(1);
+        assert_eq!([batch, d_model], x.dims());
 
-        for (i, layer) in self.layers.iter().enumerate() {
-            let (x_, cache) = layer.step(x, caches.caches[i].clone());
-            x = x_;
-            caches.caches[i] = cache;
-        }
+        let (mut x, caches) = self.layers.step(x, caches);
+        assert_eq!([batch, d_model], x.dims());
 
         x = self.norm_f.forward(x);
+
+        // Re-use the `apply_lm_head` helper by temporarily unsqueezing the
+        // sequence dimension then squeezing it back out.
+        let x = x.unsqueeze_dim(1);
+        let logits = self.apply_lm_head(x, d_model, padded_vocab);
+        assert_eq!([batch, 1, padded_vocab], logits.dims());
+        let logits = logits.squeeze_dim(1);
+        assert_eq!([batch, padded_vocab], logits.dims());
+
+        (logits, caches)
+    }
+
+    /// Apply the LM head projection to a `[batch, sequence, d_model]` tensor,
+    /// returning `[batch, sequence, padded_vocab]`.
+    ///
+    /// Uses the dedicated `lm_head` linear layer when available, or the
+    /// transposed embedding weight matrix otherwise (weight tying).
+    fn apply_lm_head(&self, x: Tensor<B, 3>, d_model: usize, padded_vocab: usize) -> Tensor<B, 3> {
         if let Some(lm_head) = &self.lm_head {
-            x = lm_head.forward(x);
+            lm_head.forward(x)
         } else {
-            // let weight = self.embedding.weight.clone().map(|w| w.swap_dims(0, 1));
             let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
-            debug_assert_eq!([d_model, padded_vocab], weight.dims());
-
+            assert_eq!([d_model, padded_vocab], weight.dims());
             let linear = Linear { weight, bias: None };
-            x = linear.forward(x);
-        };
-        debug_assert_eq!([batch, padded_vocab], x.dims());
-
-        (x, caches)
+            linear.forward(x)
+        }
     }
 }

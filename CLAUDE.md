@@ -96,12 +96,12 @@ minimal impl) and are intentionally not analyzed here — see
 ├── src
 │   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
 │   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
-│   │   ├── cache.rs                   # Mamba1Cache(s): conv window + SSM state, and configs
-│   │   ├── layer.rs                   # Mamba1Layer (Pre-LN residual block); NO Layers-stack / virtual-layer scheduling
+│   │   ├── cache.rs                   # Mamba1Cache(s): conv window (bik) + SSM state (bir), and configs
+│   │   ├── layer.rs                   # Mamba1Layer / Mamba1Layers (Pre-LN residual + virtual layers)
 │   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
 │   │   ├── mamba1/tests.rs            # unit tests for mamba1.rs (forward/step parity, grads)
 │   │   ├── mod.rs                     # module + prelude re-exports
-│   │   └── network.rs                 # Mamba1Network (embedding → plain Vec<Mamba1Layer> → norm → LM head)
+│   │   └── network.rs                 # Mamba1Network (embedding → Mamba1Layers → norm → LM head; cache-threaded)
 │   ├── mamba2                         # Mamba-2: Structured State Space Duality (SSD)
 │   │   ├── bidi
 │   │   │   ├── mod.rs
@@ -223,10 +223,9 @@ Each model family follows the same composition, top to bottom:
   the `{Model}Layers` stack owns **virtual-layer scheduling** (see
   [Virtual layers](#virtual-layer-scheduling)) plus `ignore_first/last_residual`
   flags (zero out the first/last residual when composing with other module
-  types). **Exception: Mamba-1** has no `Mamba1Layers` stack and no
-  virtual-layer support — `Mamba1Network` simply holds a `Vec<Mamba1Layer>` and
-  loops over it. Virtual layers and the `…Layers` stack exist only for Mamba-2
-  and Mamba-3.
+  types). All three families (Mamba-1, Mamba-2, Mamba-3) provide a `{Model}Layers`
+  stack with virtual-layer support; only the **bidirectional** wrappers
+  (`*/bidi/`) are Mamba-2/3-only (Mamba-1 has no `bidi/`).
 - `network.rs` assembles the LM: token `Embedding` → layer stack → `norm_f`
   (final RMSNorm) → LM head. The LM head can be **tied** to the (transposed)
   embedding weights (`missing_lm_head = true` ⇒ `lm_head: None`) or a separate
@@ -291,7 +290,10 @@ Original selective SSM. `mamba1.rs`: in-projection → causal depthwise `conv1d`
 (left-padded from the conv cache window for strict causality) → SiLU → the
 `x_proj`/`dt_proj` selective projections → a **sequential `selective_scan`**
 (ZOH for A, Euler for B) → SiLU gate → out-projection. `step()` is the
-single-token recurrence sharing the same cache (`conv` window + `ssm` state).
+single-token recurrence sharing the same cache (`conv_bik` window + `ssm_bir`
+state). Like Mamba-2/3, `Mamba1Layers` provides the Pre-LN residual stack with
+virtual-layer scheduling, and `Mamba1Network::forward`/`step` thread a
+`Mamba1Caches`.
 
 ### Mamba-2 (`src/mamba2/`)
 

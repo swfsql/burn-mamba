@@ -38,44 +38,51 @@ enabled (`_dev-has-backend` signal) or a compile error fires. A `TODO` notes the
 ## Mamba-1 (`src/mamba1/`)
 
 The original selective SSM. Mamba-1 is the simplest family: **no SSD, no
-backend-ext trait, no `Layers` stack, no virtual-layer scheduling, no
-bidirectional support.**
+backend-ext trait, no bidirectional support.** It does share the `Layers`
+stack with virtual-layer scheduling and the cache-threaded network with
+Mamba-2/3.
 
 ### `mamba1/mamba1.rs`
-The core block.
+The core block. Read its module header for the file-local notation table.
 - `struct Mamba1<B>` — params: `in_proj` (`d_model → 2·d_inner`), depthwise
-  causal `conv1d`, `x_proj` (`d_inner → dt_rank + 2·d_state`), `dt_proj`
-  (`dt_rank → d_inner`), `a_log [d_inner, d_state]`, `d [d_inner]`, `out_proj`.
-- `struct Mamba1Config` — `d_model`, `d_state` (16), `d_conv` (4), `expand` (2),
-  dt init params, optional `dt_rank`/`d_inner`. PyTorch-style uniform init; A
-  initialised from `arange(1..=d_state)` then `log`.
+  causal `conv1d`, `x_proj` (`d_inner → dt_rank + 2·state_rank`), `dt_proj`
+  (`dt_rank → d_inner`), `a_log [d_inner, state_rank]`, `d [d_inner]`, `out_proj`.
+- `struct Mamba1Config` — `d_model`, `state_rank` (16), `conv_kernel` (4),
+  `expand` (2), dt init params, `has_proj_bias`/`has_conv_bias`, optional
+  `dt_rank`/`d_inner`. PyTorch-style uniform init; A initialised from
+  `arange(1..=state_rank)` then `log`. (Field names mirror Mamba-2/3.)
 - `forward(x, cache) -> (y, cache)` — in_proj → causal conv (left-padded from
-  `cache.conv`) → SiLU → `ss()` selective scan → SiLU gate → out_proj. Threads a
-  `Mamba1Cache` so a sequence can be processed in segments.
-- `ss()` / `selective_scan()` — the **sequential** scan: ZOH discretisation for
+  `cache.conv_bik`) → SiLU → `ssm()` selective scan → SiLU gate → out_proj.
+  Threads a `Mamba1Cache` so a sequence can be processed in segments.
+- `ssm()` / `selective_scan()` — the **sequential** scan: ZOH discretisation for
   A (`exp(Δ·A)`), Euler for B (`Δ·B`); loops over the sequence stacking outputs.
-- `step()` / `ss_step()` / `selective_scan_step()` — single-token recurrence
-  sharing the same cache (rolling conv window + `ssm` state update).
+- `step()` / `ssm_step()` / `selective_scan_step()` — single-token recurrence
+  sharing the same cache (rolling conv window + `ssm_bir` state update).
 
 Key characteristic: A is input-**independent** here (unlike Mamba-2's per-head
 scalar and Mamba-3's data-dependent A).
 
 ### `mamba1/cache.rs`
-- `struct Mamba1Cache<B>` — `conv [b, i, k]` (conv window) + `ssm [b, i, r]`
-  (SSM state), both `Param` (computed non-leaf tensors updated via `Param::map`).
-- `struct Mamba1Caches<B>` — `Vec<Mamba1Cache>`, one per layer.
-- `*Config` factories (zero-init), `new_from_block_config`.
+- `struct Mamba1Cache<B>` — `conv_bik [b, i, k]` (conv window) + `ssm_bir [b, i, r]`
+  (SSM state), plain `Tensor`s (updated by reassignment). `sanity()` guards.
+- `struct Mamba1Caches<B>` — `Vec<Mamba1Cache>`, one per **virtual** layer;
+  helpers `caches_len`/`from_vec`/`into_options`/`from_options`.
+- `*Config` factories (zero-init), `new_from_block_config` (`n_real_caches`).
 
 ### `mamba1/layer.rs`
+- `struct Mamba1Layers<B>` — the stack: `n_real_layers` weight sets,
+  `n_virtual_layers: Option<(usize, Schedule)>` (`module(skip)`), `real_layers`,
+  `ignore_first/last_residual`. `forward`/`step` loop over virtual indices,
+  mapping each to a real layer via the schedule, each with its own cache. No
+  backend-ext bound (Mamba-1 has no SSD path), so `impl<B: Backend>`.
 - `struct Mamba1Layer<B>` — `RmsNorm` + `Mamba1` block. `forward`/`step` apply
-  Pre-LN residual `y = x + Block(norm(x))`. **Always full residual** (no
-  `residual_scale` knob, unlike Mamba-2/3).
+  Pre-LN residual `y = x·residual_scale + Block(norm(x))`, threading a cache.
 
 ### `mamba1/network.rs`
-- `struct Mamba1Network<B>` — `embedding` → **plain `Vec<Mamba1Layer>`** →
-  `norm_f` → optional tied/untied `lm_head`. Targets the `state-spaces/mamba-130m`
-  text models.
-- `forward(tokens) -> logits` and `step(token, caches)`; vocab padding to
+- `struct Mamba1Network<B>` — `embedding` → `Mamba1Layers` → `norm_f` → optional
+  tied/untied `lm_head`. Targets the `state-spaces/mamba-130m` text models.
+- `forward(tokens, caches) -> (logits, caches)` and `step(token, caches)` (both
+  take `Option<Mamba1Caches>` and return the updated caches); vocab padding to
   `pad_vocab_size_multiple`; weight-tied LM head when `missing_lm_head`.
 
 ---
@@ -83,8 +90,8 @@ scalar and Mamba-3's data-dependent A).
 ## Mamba-2 (`src/mamba2/`)
 
 Structured State Space Duality (SSD). Adds the pluggable chunkwise SSD, the
-backend-ext trait, the `Layers` stack with virtual scheduling, and bidirectional
-support.
+backend-ext trait, and bidirectional support (the `Layers` stack with virtual
+scheduling is now shared with Mamba-1).
 
 ### `mamba2/mamba2.rs`
 The core SSD block. **Read its module header** for the full SSD math (recurrence
