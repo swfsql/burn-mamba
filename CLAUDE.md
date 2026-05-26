@@ -99,6 +99,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── cache.rs                   # Mamba1Cache(s): conv window + SSM state, and configs
 │   │   ├── layer.rs                   # Mamba1Layer (Pre-LN residual block); NO Layers-stack / virtual-layer scheduling
 │   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
+│   │   ├── mamba1/tests.rs            # unit tests for mamba1.rs (forward/step parity, grads)
 │   │   ├── mod.rs                     # module + prelude re-exports
 │   │   └── network.rs                 # Mamba1Network (embedding → plain Vec<Mamba1Layer> → norm → LM head)
 │   ├── mamba2                         # Mamba-2: Structured State Space Duality (SSD)
@@ -111,6 +112,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── cache.rs                   # Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
 │   │   ├── layer.rs                   # Mamba2Layer / Mamba2Layers (Pre-LN residual + virtual layers)
 │   │   ├── mamba2.rs                  # Mamba2 block + Mamba2Config; chunkwise forward() and recurrent step()
+│   │   ├── mamba2/tests.rs            # unit tests for mamba2.rs (forward/step parity, grads)
 │   │   ├── mod.rs                     # module + prelude (incl. Mamba2BackendExt, SsdPath/SsdInput)
 │   │   ├── network.rs                 # Mamba2Network (full LM)
 │   │   └── ssd                        # chunkwise SSD algorithms (the heart of Mamba-2)
@@ -120,9 +122,11 @@ minimal impl) and are intentionally not analyzed here — see
 │   │       ├── serial_recalculated
 │   │       │   ├── backward.rs        # registered custom Backward node (autodiff op)
 │   │       │   ├── combined_backward.rs # recompute-based gradient math (memory-efficient)
+│   │       │   ├── combined_backward/tests.rs # unit tests for combined_backward.rs (grad recompute)
 │   │       │   ├── mod.rs             # wiring + BackendExt trait exports
 │   │       │   └── serial_recalculated.rs # forward + Mamba2BackendExt impl
-│   │       └── ssd_path.rs            # Mamba2SsdPath enum, Mamba2SsdInput struct, run() dispatch, optimal chunk_len
+│   │       ├── ssd_path.rs            # Mamba2SsdPath enum, Mamba2SsdInput struct, run() dispatch, optimal chunk_len
+│   │       └── ssd_path/tests.rs      # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
 │   ├── mamba3                         # Mamba-3: trapezoidal SSD + data-dependent RoPE + MIMO
 │   │   ├── bidi
 │   │   │   ├── mod.rs
@@ -134,6 +138,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── double_ssd                 # double-pass trapezoidal decomposition (γ-SSD + β-SSD); VikramLex-style
 │   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/cum_angle (NO conv cache)
 │   │   │   ├── double_ssd.rs          # forward_double_ssd / step_double_ssd; apply_rope / apply_rope_partial
+│   │   │   ├── double_ssd/tests.rs     # unit tests for double_ssd.rs (forward/step parity, grads)
 │   │   │   ├── mod.rs
 │   │   │   └── ssd                    # standard SSD kernels (reused by both γ and β passes)
 │   │   │       ├── minimal.rs         # matmul/segsum MIMO-first SSD; autodiff backward
@@ -144,7 +149,8 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   │       │   ├── combined_backward.rs
 │   │   │       │   ├── mod.rs
 │   │   │       │   └── serial_recalculated.rs
-│   │   │       └── ssd_path.rs        # Mamba3DoubleSsdPath / Mamba3DoubleSsdInput (v_bnlmhp, da, b/c_bnlmhr, …)
+│   │   │       ├── ssd_path.rs        # Mamba3DoubleSsdPath / Mamba3DoubleSsdInput (v_bnlmhp, da, b/c_bnlmhr, …)
+│   │   │       └── ssd_path/tests.rs  # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
 │   │   ├── helpers.rs                 # shared forward/step helpers: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
 │   │   ├── layer.rs                   # Mamba3Layer / Mamba3Layers (Pre-LN residual, virtual layers, zero-cache factories)
 │   │   ├── mamba3.rs                  # Mamba3 block + Mamba3Config; forward()/step() dispatch by cache variant
@@ -154,6 +160,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
 │   │   │   ├── mod.rs
 │   │   │   ├── single_ssd.rs          # forward_single_ssd (scale + boundary-β seed); step_single_ssd (via double-ssd cache round-trip)
+│   │   │   ├── single_ssd/tests.rs     # unit tests for single_ssd.rs (forward/step parity, grads)
 │   │   │   └── ssd
 │   │   │       ├── minimal.rs
 │   │   │       ├── mod.rs
@@ -163,9 +170,11 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   │       │   ├── combined_backward.rs
 │   │   │       │   ├── mod.rs
 │   │   │       │   └── serial_recalculated.rs
-│   │   │       └── ssd_path.rs        # Mamba3SingleSsdPath / Mamba3SingleSsdInput (adds gamma_bnlh, scale_bnlh)
+│   │   │       ├── ssd_path.rs        # Mamba3SingleSsdPath / Mamba3SingleSsdInput (adds gamma_bnlh, scale_bnlh)
+│   │   │       └── ssd_path/tests.rs  # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
 │   │   └── ssd_path.rs                # Mamba3SsdPath: pathway-agnostic algo selector; From<>/Into<> both sub-paths
 │   ├── schedule.rs                    # Schedule + BidiSchedule: virtual-layer → real-weight index mapping
+│   ├── schedule/tests.rs              # unit tests for schedule.rs (virtual→real index mapping)
 │   └── utils
 │       ├── backend_macros.rs          # macros emitting per-backend BackendExt impls + autodiff marker traits
 │       ├── combined_grad.rs           # flatten/unflatten (y, final_state) into one tracked tensor for custom backward
@@ -182,6 +191,7 @@ minimal impl) and are intentionally not analyzed here — see
 │       ├── rms_norm_gated.rs          # RmsNormGated: norm + SiLU(z) gate (Mamba-2 out norm; Mamba-3 optional out norm)
 │       ├── sanity.rs                  # sanity(): optional NaN/Inf guards gated by DENY_NAN/DENY_INF
 │       ├── scheduler.rs               # LR schedulers (CosineAnnealing+warmup, Constant) — example use
+│       ├── scheduler/tests.rs         # unit tests for scheduler.rs (LR schedule values)
 │       ├── segsum.rs                  # stable segment-sum → 1-semiseparable mask (log-space prefix-sum diff)
 │       ├── silu.rs                    # SiLU activation (custom, fp16-aware)
 │       ├── softplus.rs                # softplus activation (custom, fp16-aware)
