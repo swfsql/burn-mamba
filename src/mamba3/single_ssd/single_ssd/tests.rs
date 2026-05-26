@@ -560,20 +560,12 @@ fn run_forward_single_ssd_matches_step(
 
 #[test]
 fn forward_single_ssd_matches_step() {
-    run_forward_single_ssd_matches_step(
-        small_config(),
-        Mamba3SsdPath::Minimal(Some(4)),
-        false,
-    );
+    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Minimal(Some(4)), false);
 }
 
 #[test]
 fn forward_single_ssd_matches_step_random_init() {
-    run_forward_single_ssd_matches_step(
-        small_config(),
-        Mamba3SsdPath::Minimal(Some(4)),
-        true,
-    );
+    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Minimal(Some(4)), true);
 }
 
 #[test]
@@ -587,29 +579,17 @@ fn forward_single_ssd_matches_step_mimo() {
 
 #[test]
 fn forward_single_ssd_matches_step_mimo_random_init() {
-    run_forward_single_ssd_matches_step(
-        small_config_mimo(),
-        Mamba3SsdPath::Minimal(Some(4)),
-        true,
-    );
+    run_forward_single_ssd_matches_step(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), true);
 }
 
 #[test]
 fn forward_single_ssd_matches_step_serial() {
-    run_forward_single_ssd_matches_step(
-        small_config(),
-        Mamba3SsdPath::Serial(Some(4)),
-        false,
-    );
+    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Serial(Some(4)), false);
 }
 
 #[test]
 fn forward_single_ssd_matches_step_serial_mimo() {
-    run_forward_single_ssd_matches_step(
-        small_config_mimo(),
-        Mamba3SsdPath::Serial(Some(4)),
-        false,
-    );
+    run_forward_single_ssd_matches_step(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)), false);
 }
 
 #[test]
@@ -637,10 +617,7 @@ fn forward_single_ssd_matches_step_recalc_mimo() {
 /// random initial cache subsumes the chunked-prefill continuity guarantee
 /// from an arbitrary starting state, and the guard at the end confirms the
 /// initial cache is actually consumed (not silently ignored).
-fn run_forward_single_ssd_split_matches_full(
-    cfg: Mamba3Config,
-    single_ssd_path: Mamba3SsdPath,
-) {
+fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path: Mamba3SsdPath) {
     let device: Device = Default::default();
     let model = cfg.init::<B>(&device);
 
@@ -683,8 +660,7 @@ fn run_forward_single_ssd_split_matches_full(
     let r_split = run_with_grads_single_ssd(&model, &input_split, &heads, |m, x| {
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid) =
-            m.forward_single_ssd(prefix, Some(cache_split), &single_ssd_s);
+        let (out_prefix, mid) = m.forward_single_ssd(prefix, Some(cache_split), &single_ssd_s);
         let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), &single_ssd_s);
         (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
     });
@@ -716,18 +692,12 @@ fn run_forward_single_ssd_split_matches_full(
 
 #[test]
 fn forward_single_ssd_split_matches_full() {
-    run_forward_single_ssd_split_matches_full(
-        small_config(),
-        Mamba3SsdPath::Minimal(Some(4)),
-    );
+    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SsdPath::Minimal(Some(4)));
 }
 
 #[test]
 fn forward_single_ssd_split_matches_full_mimo() {
-    run_forward_single_ssd_split_matches_full(
-        small_config_mimo(),
-        Mamba3SsdPath::Minimal(Some(4)),
-    );
+    run_forward_single_ssd_split_matches_full(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)));
 }
 
 #[test]
@@ -737,10 +707,7 @@ fn forward_single_ssd_split_matches_full_serial() {
 
 #[test]
 fn forward_single_ssd_split_matches_full_serial_mimo() {
-    run_forward_single_ssd_split_matches_full(
-        small_config_mimo(),
-        Mamba3SsdPath::Serial(Some(4)),
-    );
+    run_forward_single_ssd_split_matches_full(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)));
 }
 
 #[test]

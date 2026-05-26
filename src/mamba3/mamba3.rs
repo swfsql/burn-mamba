@@ -569,13 +569,11 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         // ── SSD Pathway Selection ─────────────────────────────────────────────
         match cache {
             Mamba3Cache::DoubleSsd(cache) => {
-                let (out_bsm, cache) =
-                    self.forward_double_ssd(input_bsm, Some(cache), &ssd_path);
+                let (out_bsm, cache) = self.forward_double_ssd(input_bsm, Some(cache), &ssd_path);
                 (out_bsm, cache.into())
             }
             Mamba3Cache::SingleSsd(cache) => {
-                let (out_bsm, cache) =
-                    self.forward_single_ssd(input_bsm, Some(cache), &ssd_path);
+                let (out_bsm, cache) = self.forward_single_ssd(input_bsm, Some(cache), &ssd_path);
                 (out_bsm, cache.into())
             }
         }

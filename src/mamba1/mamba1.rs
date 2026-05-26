@@ -232,7 +232,8 @@ impl Mamba1Config {
     /// Rank of the Δ projection: the `dt_rank` override if set, else
     /// `ceil(d_model / state_rank)`.
     pub fn dt_rank(&self) -> usize {
-        self.dt_rank.unwrap_or(self.d_model.div_ceil(self.state_rank))
+        self.dt_rank
+            .unwrap_or(self.d_model.div_ceil(self.state_rank))
     }
 }
 
