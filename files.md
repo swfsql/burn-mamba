@@ -208,8 +208,8 @@ combined math (trapezoid + RoPE + MIMO) and the file-local notation table.
 - `forward(input, cache, ssd_path)` / `step(input, cache)` — **dispatch by cache
   variant**: missing cache ⇒ defaults to **SingleSsd**; otherwise matches
   `Mamba3Cache::{DoubleSsd, SingleSsd}` and delegates to
-  `forward_double_ssd`/`forward_single_ssd` (or `step_double_ssd`; **single-ssd
-  step is `todo!()`**).
+  `forward_double_ssd`/`forward_single_ssd` (or `step_double_ssd`/
+  `step_single_ssd`).
 
 ### `mamba3/mod.rs`
 Wires the backend-ext trait aggregation. Defines `Mamba3BackendExt:
@@ -236,13 +236,18 @@ The pathway-tagged cache **enums** — the heart of the dual-pathway design.
 - Conversions `From`/`Into` both ways, `double_ssd()`/`single_ssd()` extractors,
   `into_options`/`from_options`/`from_vec` (peeks the first element; **empty ⇒
   SingleSsd**). The enum lets one dispatch entry accept/return either family.
+- **Cross-pathway cache conversions**: field-identity `From` impls between
+  `Mamba3SingleSsdCache`↔`Mamba3DoubleSsdCache` (and the plural `…Caches`). Valid
+  because at a sequence boundary `scaleₜ = γₜ`, so the single-ssd accumulator `h'`
+  equals the double-ssd state `h`. Used by `step_single_ssd`.
 
 ### `mamba3/double_ssd/double_ssd.rs`
 The **double-pass trapezoidal** forward/step (VikramLex-style) + the RoPE
 utilities. Splits the trapezoid into two **standard** SSD calls:
 γ-SSM (current token, scaled by γ) + β-SSM (previous token, scaled by β,
-"shift-before-chunking"), summed. Simple/verifiable but ~2× SSD memory. **Only
-pathway with a working `step()`.**
+"shift-before-chunking"), summed. Simple/verifiable but ~2× SSD memory. Its
+`step_double_ssd` recurrence is reused (via cache conversion) for single-ssd
+decoding too.
 - `forward_double_ssd(input, cache, Mamba3DoubleSsdPath)` — 11 steps: in-proj
   split → trapezoid coeffs → reshape x → QK-norm B/C → cumulative RoPE angles →
   build shifted (prev-token) inputs → scale by γ/β → pad → two
@@ -286,9 +291,10 @@ form), ≈ half the training memory of double-ssd.
   intra-chunk mask + same-step γ correction (inside the kernel), and a
   **boundary-β seed** `(1−λ₀)·Δ₀·Kₜ₋₁⊗xₜ₋₁` folded into the initial state from
   the cache. Saves last-token B/x and `cum_angle` into the cache.
-- `step_single_ssd(...)` — **`todo!()`** (the currently-failing tests). Decoding
-  always uses the double-ssd recurrent form; a single→double cache conversion
-  would be needed first.
+- `step_single_ssd(...)` — converts the single-ssd cache to a double-ssd cache,
+  runs `step_double_ssd` (the pure recurrent form, matching the official
+  `mamba3_siso_step` / `mamba3_step_fn` kernels), then converts back. Lossless
+  because the two accumulators coincide at the per-token boundary.
 
 ### `mamba3/single_ssd/cache.rs`
 - `struct Mamba3SingleSsdCache<B>` — same four fields as the double cache, **but
@@ -296,7 +302,9 @@ form), ≈ half the training memory of double-ssd.
   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ`, giving correct output everywhere except the
   diagonal (patched by the in-kernel γ correction). The distinct type **prevents
   feeding a double-ssd cache into single-ssd mid-sequence** (which would silently
-  corrupt state). `+ Caches`/`*Config`.
+  corrupt state); at boundaries the accumulators coincide, so the explicit
+  cross-pathway `From` conversions in `mamba3/cache.rs` are lossless.
+  `+ Caches`/`*Config`.
 
 ### `mamba3/single_ssd/ssd/ssd_path.rs`
 - `enum Mamba3SingleSsdPath` + `struct Mamba3SingleSsdInput<B>` — like the

@@ -644,14 +644,9 @@ mod step {
                     let (out_bsm, cache) = self.step_double_ssd(input_bd, Some(cache));
                     (out_bsm, cache.into())
                 }
-                Mamba3Cache::SingleSsd(_cache) => {
-                    // currently not changed from the double_ssd
-                    todo!("step method for single_ssd form is not yet implemented")
-
-                    // Hint:
-                    // Token-by-token decoding always uses the recurrent form (double-ssd cache).
-                    // When running a step that uses a single-ssd cache, the single-ssd cache
-                    // would first need converting into the double-ssd form.
+                Mamba3Cache::SingleSsd(cache) => {
+                    let (out_bsm, cache) = self.step_single_ssd(input_bd, Some(cache));
+                    (out_bsm, cache.into())
                 }
             }
         }

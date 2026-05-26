@@ -142,3 +142,60 @@ impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3Cache<B> {
         Mamba3Cache::SingleSsd(cache)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Conversions between the two pathway caches
+// ---------------------------------------------------------------------------
+//
+// At a cache boundary (the last token of a `forward` / `step` call) the
+// look-ahead term `(1 − λₜ₊₁)·Δₜ₊₁` vanishes, so `scaleₜ = γₜ` for the final
+// position. Substituting that into the single-ssd accumulator
+// `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` makes it coincide *exactly* with the
+// double-ssd state `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁⊗xₜ₋₁ + γₜ Bₜ⊗xₜ` — the deferred β
+// contribution of the next token is reconstructed on the following call from
+// the saved `k_state`/`v_state`, identically in both forms. The remaining
+// three fields (previous-token K/V history and cumulative RoPE angle) carry the
+// same meaning in both caches. Hence the conversion is a field-by-field move.
+//
+// The accumulators differ only *mid-sequence*; since caches are only ever
+// produced and consumed at boundaries, the move is lossless there. The distinct
+// types still prevent silently mixing the two accumulators inside a single
+// chunked pass.
+
+impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3DoubleSsdCache<B> {
+    fn from(cache: Mamba3SingleSsdCache<B>) -> Self {
+        Mamba3DoubleSsdCache {
+            ssm_bhpr: cache.ssm_bhpr,
+            k_state_bmhr: cache.k_state_bmhr,
+            v_state_bhp: cache.v_state_bhp,
+            cum_angle_bha: cache.cum_angle_bha,
+        }
+    }
+}
+
+impl<B: Backend> From<Mamba3DoubleSsdCache<B>> for Mamba3SingleSsdCache<B> {
+    fn from(cache: Mamba3DoubleSsdCache<B>) -> Self {
+        Mamba3SingleSsdCache {
+            ssm_bhpr: cache.ssm_bhpr,
+            k_state_bmhr: cache.k_state_bmhr,
+            v_state_bhp: cache.v_state_bhp,
+            cum_angle_bha: cache.cum_angle_bha,
+        }
+    }
+}
+
+impl<B: Backend> From<Mamba3SingleSsdCaches<B>> for Mamba3DoubleSsdCaches<B> {
+    fn from(caches: Mamba3SingleSsdCaches<B>) -> Self {
+        Mamba3DoubleSsdCaches {
+            caches: caches.caches.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl<B: Backend> From<Mamba3DoubleSsdCaches<B>> for Mamba3SingleSsdCaches<B> {
+    fn from(caches: Mamba3DoubleSsdCaches<B>) -> Self {
+        Mamba3SingleSsdCaches {
+            caches: caches.caches.into_iter().map(Into::into).collect(),
+        }
+    }
+}

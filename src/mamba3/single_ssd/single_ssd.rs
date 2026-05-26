@@ -20,6 +20,7 @@
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
 use crate::mamba3::double_ssd::double_ssd::apply_rope_partial;
+use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
@@ -387,16 +388,18 @@ mod step {
         #[allow(non_snake_case)]
         pub fn step_single_ssd(
             &self,
-            _input_bd: Tensor<B, 2>,
-            _cache: Option<Mamba3SingleSsdCache<B>>,
+            input_bd: Tensor<B, 2>,
+            cache: Option<Mamba3SingleSsdCache<B>>,
         ) -> (Tensor<B, 2>, Mamba3SingleSsdCache<B>) {
-            // currently not changed from the double_ssd
-            todo!("step method for single_ssd form is not yet implemented")
-
-            // Hint:
-            // Token-by-token decoding always uses the recurrent form (double-ssd cache).
-            // When running a step that uses a single-ssd cache, the single-ssd cache
-            // would first need converting into the double-ssd form.
+            // Token-by-token decoding always uses the recurrent (double-ssd)
+            // form. A single-ssd cache holds the trapezoid state at a sequence
+            // boundary, where the single- and double-ssd accumulators coincide
+            // (see the `From` impls in `crate::mamba3::cache`), so converting in
+            // and back out is lossless. The single recurrence step is itself a
+            // boundary-to-boundary transition, so the round-trip stays exact.
+            let cache = cache.map(Mamba3DoubleSsdCache::from);
+            let (out_bd, cache) = self.step_double_ssd(input_bd, cache);
+            (out_bd, cache.into())
         }
     }
 }

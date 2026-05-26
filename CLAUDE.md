@@ -153,7 +153,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── single_ssd                 # single-pass official-kernel trapezoidal form (≈½ training memory)
 │   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
 │   │   │   ├── mod.rs
-│   │   │   ├── single_ssd.rs          # forward_single_ssd (scale + boundary-β seed); step_single_ssd = todo!()
+│   │   │   ├── single_ssd.rs          # forward_single_ssd (scale + boundary-β seed); step_single_ssd (via double-ssd cache round-trip)
 │   │   │   └── ssd
 │   │   │       ├── minimal.rs
 │   │   │       ├── mod.rs
@@ -375,16 +375,20 @@ match on the variant and delegate. A missing cache defaults to **SingleSsd**.
   - β-SSM: `hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋₁ xₜ₋₁` (previous token, "shift-before-chunking")
   - `hₜ = hᵞₜ + hᵝₜ`. Simple and easy to verify, but ~2× the intra-chunk and
     chunk-state memory. Both passes feed `da = Δ·A` so the SSD computes
-    `exp(Δ·A) = α`. **This is the only path with a working `step()`.**
+    `exp(Δ·A) = α`. `step()` runs this recurrence directly.
 
 - **Single-SSD** (`src/mamba3/single_ssd/`, official Triton-SISO /
   Tilelang-MIMO form): one SSD call using `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` as the
   key scale, a strict lower-triangular intra-chunk mask, a same-step γ
   correction, and a **boundary β seed** `(1−λ₀)·Δ₀·Kₜ₋₁⊗xₜ₋₁` folded into the
   initial state. ≈ half the training memory of double-ssd. Its cache's SSM
-  accumulator `h'` has **different semantics** than the double-ssd state — hence
-  a distinct `Mamba3SingleSsdCache` type so the two can't be mixed mid-sequence.
-  **`step_single_ssd` is `todo!()`** (the failing tests).
+  accumulator `h'` has **different semantics** than the double-ssd state
+  mid-sequence — hence a distinct `Mamba3SingleSsdCache` type so the two can't be
+  mixed inside a chunked pass. At sequence boundaries (where caches are stored)
+  `scaleₜ = γₜ`, so `h'` coincides with the double-ssd state; the two caches
+  therefore convert via field-identity `From` impls (`src/mamba3/cache.rs`).
+  `step_single_ssd` decodes by converting to the double-ssd cache, running
+  `step_double_ssd`, and converting back.
 
 `Mamba3SsdPath` (top-level) is pathway-agnostic; it converts to/from
 `Mamba3DoubleSsdPath` / `Mamba3SingleSsdPath` via `From`. The SSD inputs differ:
@@ -457,10 +461,12 @@ relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo
 
 - **No optimized kernels** — relies entirely on Burn's portable tensor ops, so
   the same code runs on every backend.
-- **Two Mamba-3 SSD pathways** — double-ssd (simple, verifiable, only one with a
-  working `step()`) vs single-ssd (official-kernel form, ~½ training memory).
-  The cache type is what selects the pathway; the two caches are deliberately
-  non-interchangeable because their SSM accumulators differ.
+- **Two Mamba-3 SSD pathways** — double-ssd (simple, verifiable) vs single-ssd
+  (official-kernel form, ~½ training memory). The cache type is what selects the
+  pathway; the SSM accumulators differ mid-sequence, but coincide at boundaries,
+  so the two caches inter-convert via field-identity `From` impls. `step()` runs
+  the recurrent (double-ssd) form for both; single-ssd decoding round-trips
+  through the double-ssd cache.
 - **Three SSD algorithm variants** (`Minimal`/`Serial`/`SerialRecalculated`),
   the last with a custom recompute backward for memory savings; all proven
   equal on values + gradients by tests.
