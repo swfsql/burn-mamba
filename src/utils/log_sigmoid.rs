@@ -1,9 +1,15 @@
+//! Numerically-stable log-sigmoid: `log σ(x) = −log(1 + e^−x)`.
+//!
+//! The wider float formats evaluate `log(1 / (1 + e^−x))` directly; the fp16
+//! path uses the stable identity `log σ(x) = −softplus(−x)` (see
+//! [`softplus`](crate::utils::softplus)) to avoid overflow.
+
 use burn::prelude::*;
 use burn::tensor::DType;
 
-/// Applies the log sigmoid function element-wise.
+/// Applies the log-sigmoid function element-wise: `log(1 / (1 + e^−x))`.
 ///
-/// `log_sigmoid(x) = log(1 / (1 + exp(-x)))`
+/// Panics on non-float element types.
 pub fn log_sigmoid<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
     match x.dtype() {
         DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {

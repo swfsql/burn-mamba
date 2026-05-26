@@ -1,3 +1,9 @@
+//! Binary cross-entropy loss.
+//!
+//! When `logits = true` the loss is computed in a numerically stable way from
+//! raw logits via [`log_sigmoid`]; otherwise the inputs are treated as
+//! probabilities and the logs are clamped to avoid `−∞`.
+
 use crate::utils::log_sigmoid::log_sigmoid;
 use burn::module::Module;
 use burn::prelude::*;

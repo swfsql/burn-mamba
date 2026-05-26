@@ -49,6 +49,8 @@ macro_rules! impl_ssd_backend_ext_for_burn_backends {
 #[macro_export]
 macro_rules! decl_ssd_autodiff_backend_ext {
     ($autodiff_trait:ident, $ext_trait:path $(, $extra_bound:path)*) => {
+        /// Marker for an autodiff-capable backend that also implements the SSD
+        /// extension trait (so the custom memory-efficient backward is available).
         #[cfg(feature = "autodiff")]
         pub trait $autodiff_trait:
             burn::tensor::backend::Backend

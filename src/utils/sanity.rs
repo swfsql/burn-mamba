@@ -1,6 +1,15 @@
+//! Optional `NaN`/`Inf` guards for debugging numerical issues.
+//!
+//! Both checks are gated by the compile-time flags [`crate::DENY_NAN`] /
+//! [`crate::DENY_INF`] (both `false` by default).  When the flags are off the
+//! functions compile down to nothing — there is no runtime cost in release
+//! builds — so calls can be sprinkled liberally through the forward passes.
+
 use crate::{DENY_INF, DENY_NAN};
 use burn::prelude::*;
 
+/// Panics if `t` contains a `NaN` (when [`crate::DENY_NAN`] is set) or an `Inf`
+/// (when [`crate::DENY_INF`] is set).  A no-op when both flags are `false`.
 pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
     let mut has_nan = false;
     let mut has_inf = false;
@@ -23,6 +32,7 @@ pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
     }
 }
 
+/// Like [`sanity`] but checks only for `NaN` (ignores `Inf`).
 pub fn sanity_nan<B: Backend, const D: usize>(t: &Tensor<B, D>) {
     let mut has_nan = false;
 

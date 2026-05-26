@@ -1,3 +1,11 @@
+//! Cross-entropy loss accepting floating-point target distributions.
+//!
+//! A lighter variant of [`burn::nn::loss::CrossEntropyLoss`]: it takes soft
+//! float targets (one-hot, soft labels, or raw logits) rather than integer
+//! class indices, and drops padding/weights/label-smoothing.  `output_logits`
+//! and `target_logits` control whether each side is normalised (log-softmax /
+//! softmax) before the loss.
+
 use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};

@@ -1,3 +1,14 @@
+//! RMS normalisation fused with a SiLU(z) gate — the Mamba-2 output norm.
+//!
+//! `norm_before_gate` selects the order of the two operations:
+//! - `true`  — normalise, then gate:   `y = (x / rms(x) · γ) · SiLU(z)`
+//! - `false` — gate, then normalise:   `y = rms(x · SiLU(z)) · γ` applied to
+//!   `x · SiLU(z)`
+//!
+//! The numerical-stability epsilon is the per-dtype [`div_eps`] (so there is no
+//! configurable epsilon); the fp16 path uses the same `max(|x|)`-rescaling
+//! trick as [`RmsNorm`](crate::utils::rms_norm::RmsNorm).
+
 use crate::utils::div_eps;
 use crate::utils::silu::Silu;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
@@ -10,10 +21,6 @@ use burn::tensor::{DType, f16};
 pub struct RmsNormGatedConfig {
     /// The size of the input features.
     pub d_model: usize,
-    // // TODO: config epsilon is no longer used.
-    // /// A value required for numerical stability. Default: 1e-5
-    // #[config(default = 1e-5)]
-    // pub epsilon: f64,
     /// Whether to apply normalization before gating. Default: true
     #[config(default = true)]
     pub norm_before_gate: bool,
@@ -22,13 +29,9 @@ pub struct RmsNormGatedConfig {
 impl RmsNormGatedConfig {
     /// Initialize a new [`RmsNormGated`] module.
     pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNormGated<B> {
-        // assert!(self.epsilon > 0.0, "epsilon must be positive.");
-
         let gamma = Initializer::Ones.init([self.d_model], device);
-
         RmsNormGated {
             gamma,
-            // epsilon: self.epsilon,
             norm_before_gate: self.norm_before_gate,
         }
     }
@@ -51,11 +54,8 @@ impl RmsNormGatedConfig {
 #[derive(Module, Debug)]
 #[module(custom_display)]
 pub struct RmsNormGated<B: Backend> {
-    /// The learnable parameter to scale the normalized tensor.
+    /// The learnable per-channel scale `γ`, shape `[d_model]`.
     pub gamma: Param<Tensor<B, 1>>,
-    // // TODO: config epsilon is no longer used.
-    // /// A value required for numerical stability.
-    // pub epsilon: f64,
     /// Whether to normalize before applying the gating.
     pub norm_before_gate: bool,
 }
@@ -76,7 +76,6 @@ impl<B: Backend> RmsNormGated<B> {
         } else {
             // gate before norm
             x * silu.forward(z.clone())
-            // x * burn::tensor::activation::leaky_relu(z.clone(), 0.01)
         };
 
         let normalized = match x.dtype() {
@@ -136,9 +135,6 @@ impl<B: Backend> ModuleDisplay for RmsNormGated<B> {
 
     fn custom_content(&self, content: Content) -> Option<Content> {
         let [d_model] = self.gamma.shape().dims();
-        content
-            .add("d_model", &d_model)
-            // .add("epsilon", &self.epsilon)
-            .optional()
+        content.add("d_model", &d_model).optional()
     }
 }

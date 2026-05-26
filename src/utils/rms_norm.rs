@@ -1,3 +1,17 @@
+//! Root-mean-square normalisation over the last dimension.
+//!
+//! `RMSNorm(x) = x / rms(x) · γ` where `rms(x) = √(mean(x²))`.  Unlike
+//! LayerNorm there is no mean-subtraction or bias — only a learnable per-channel
+//! scale `γ`.  Used both as the Pre-LN of every residual block and, in Mamba-3,
+//! as the **QK-Norm** applied to the B/C projections.
+//!
+//! The fp16 path avoids forming `x²` directly (which overflows for moderately
+//! large activations, e.g. 256·256): it first normalises against `max(|x|)` so
+//! the squared values stay `≤ 1`, then rescales.  See [`rms_norm_gated`] for the
+//! SiLU-gated variant.
+//!
+//! [`rms_norm_gated`]: crate::utils::rms_norm_gated
+
 use crate::utils::div_eps;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
@@ -19,30 +33,23 @@ impl RmsNormConfig {
     }
 }
 
-/// Applies Rms Normalization over an input tensor along the last dimension.
-///
-/// Where:
-/// - `X` is the input tensor
-/// - `Y` is the output tensor
-/// - `z` is the gating tensor
-/// - `gamma` is the learnable weight
-/// - `mean` is the mean operation
+/// Applies RMS normalisation over an input tensor along the last dimension:
+/// `y = x / √(mean(x²)) · γ`.
 ///
 /// Should be created using the [`RmsNormConfig`] configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
 pub struct RmsNorm<B: Backend> {
-    /// The learnable parameter to scale the normalized tensor.
+    /// The learnable per-channel scale `γ`, shape `[d_model]`.
     pub gamma: Param<Tensor<B, 1>>,
 }
 
 impl<B: Backend> RmsNorm<B> {
-    /// Applies the forward pass on the input tensor with gating.
+    /// Applies the forward pass on the input tensor.
     ///
     /// # Shapes
-    /// - input `x`: `[..., any, d_model]`
-    /// - input `z`: `[..., any, d_model]`
-    /// - output: `[..., any, d_model]`
+    /// - input `x`: `[..., d_model]`
+    /// - output: `[..., d_model]`
     pub fn forward<const D: usize>(&self, x: Tensor<B, D>) -> Tensor<B, D> {
         let normalized = match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {

@@ -1,3 +1,9 @@
+//! Mean squared error loss.
+//!
+//! The fp16 path avoids forming `(logits − targets)²` directly (which overflows
+//! for large differences) by factoring out `max(|diff|)` before squaring, then
+//! multiplying it back in after the reduction.
+
 use crate::utils::div_eps;
 use burn::module::Module;
 use burn::nn::loss::Reduction;

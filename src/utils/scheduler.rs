@@ -10,13 +10,17 @@
 use burn::prelude::*;
 use std::f64::consts::PI;
 
+/// A learning-rate schedule, dispatching to one of the concrete schedulers.
 #[derive(Config, Debug)]
 pub enum Lr {
+    /// Cosine annealing with linear warmup. See [`CosineAnnealingLr`].
     CosineAnnealing(CosineAnnealingLr),
+    /// Fixed learning rate for all steps. See [`ConstantLr`].
     Constant(ConstantLr),
 }
 
 impl Lr {
+    /// Learning rate for the given (0-indexed) training `step`.
     pub fn get_lr(&self, step: usize) -> f64 {
         match self {
             Lr::CosineAnnealing(inner) => inner.get_lr(step),
@@ -79,11 +83,13 @@ impl CosineAnnealingLr {
 /// Useful for simple experiments or when learning rate scheduling is not needed.
 #[derive(Config, Debug)]
 pub struct ConstantLr {
+    /// The fixed learning rate returned for every step.
     #[config(default = 1e-4)]
     pub lr: f64,
 }
 
 impl ConstantLr {
+    /// Returns the fixed learning rate (independent of `step`).
     pub fn get_lr(&self, _step: usize) -> f64 {
         self.lr
     }

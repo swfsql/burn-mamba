@@ -1,9 +1,16 @@
+//! Softplus activation: `softplus(x) = log(1 + eˣ)`, a smooth ReLU.
+//!
+//! Used to produce the strictly-positive discretisation step `Δ` (and, in
+//! Mamba-3, the data-dependent `A`).  The fp16 path uses the numerically-stable
+//! identity `softplus(x) = max(x, 0) + log(1 + e^−|x|)` to avoid overflow in
+//! `eˣ`; the wider formats use `log1p(eˣ)` directly.
+
 use burn::prelude::*;
 use burn::tensor::DType;
 
-/// Applies the SoftPlus function element-wise.
+/// Applies the softplus function element-wise: `log(1 + eˣ)`.
 ///
-/// The SoftPlus function is a smooth approximation of the ReLU function.
+/// Panics on non-float element types.
 pub fn softplus<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
     match x.dtype() {
         DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
