@@ -1,3 +1,13 @@
+//! # SSD input bundle for the Mamba-3 double-SSD pathway
+//!
+//! [`Mamba3DoubleSsdInput`] gathers the pre-processed tensors a single standard
+//! SSD pass consumes (B/C already QK-normed, RoPE-applied, bias-added, and
+//! GQA-expanded to per-head; `v` already scaled by the trapezoid coefficient γ
+//! or β; `da = Δ·A` pre-combined).  [`Mamba3DoubleSsdInput::run`] dispatches to
+//! the algorithm chosen by the shared [`Mamba3SsdPath`].
+//!
+//! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
+
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
 use burn::prelude::*;

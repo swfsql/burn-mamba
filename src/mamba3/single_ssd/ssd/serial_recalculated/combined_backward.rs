@@ -1,3 +1,14 @@
+//! # Recompute-based gradient math for the Mamba-3 single-SSD
+//!
+//! The analytic backward of the single-pass MIMO-first scan.  Forward
+//! intermediates (K1–K4) are recomputed from the saved leaf inputs, then a
+//! reverse per-chunk loop fuses the K5 state-to-output (BLUE), the strict
+//! lower-triangular intra-chunk (LOWER), and the K4 state-passing backwards; the
+//! γ-weighted same-step (DIAG) term is computed batched (no recurrence, tiny
+//! `m × m` tensors).  Because this pathway applies the trapezoid weights
+//! internally, it additionally returns `d_gamma` and `d_scale`.  The shared K3
+//! extended helper is reused from the double-SSD module.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::k3_ssd_chunk_state_extended;
@@ -11,12 +22,19 @@ use ssd::serial;
 /// [`crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::CombinedGrads`].
 #[non_exhaustive]
 pub struct CombinedSingleSsdGrads<B: Backend> {
+    /// Gradient of the raw input `v`.
     pub d_v_bnlmhp: Tensor<B, 6>,
+    /// Gradient of `Δ·A` (`da`).
     pub d_da_bnlh: Tensor<B, 4>,
+    /// Gradient of the input projection `B`.
     pub d_b_bnlmhr: Tensor<B, 6>,
+    /// Gradient of the output projection `C`.
     pub d_c_bnlmhr: Tensor<B, 6>,
+    /// Gradient of the same-step trapezoid weight `γ`.
     pub d_gamma_bnlh: Tensor<B, 4>,
+    /// Gradient of the key scale `scale = γ + (1−λ₊₁)·Δ₊₁`.
     pub d_scale_bnlh: Tensor<B, 4>,
+    /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: Tensor<B, 4>,
 }
 

@@ -1,3 +1,12 @@
+//! # Custom autodiff node for the Mamba-3 single-SSD recompute backward
+//!
+//! Implements [`Mamba3SingleSsdBackendExt`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdBackendExt)
+//! for `Autodiff<B>` via a single Burn [`Backward`] node.  The forward keeps only
+//! its leaf inputs; backprop replays the serial kernels and the gradient math in
+//! [`super::combined_backward`], so the large intermediates are never retained.
+//! The two outputs (`y`, `final_state`) are flattened into one tracked tensor
+//! (via [`crate::utils::combined_grad`]) so one node covers both.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::single_ssd::ssd;

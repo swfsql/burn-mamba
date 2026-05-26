@@ -1,18 +1,36 @@
+//! # Recompute-based gradient math for the Mamba-2 SSD
+//!
+//! The analytic backward of the five-kernel serial scan, mirroring
+//! `_mamba_chunk_scan_combined_bwd` in the reference `ssd_combined.py`.  The
+//! forward intermediates (K1–K4) are **recomputed** from the saved leaf inputs
+//! rather than stashed, then a reverse per-chunk loop fuses the K5 and K4
+//! backwards; K1/K2/K3 backwards run as batched ops once the loop has gathered
+//! the per-chunk slices.  Comment colours (BLUE / ORANGE / …) tag the
+//! corresponding terms of the chunk-scan gradient, matching the reference.
+
 #![allow(non_snake_case)]
 
 use crate::mamba2::ssd::serial;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
-/// Per-input gradients produced by [`combined_backward`].
+/// Per-input gradients produced by [`combined_backward`] (one field per
+/// differentiable forward input).
 #[non_exhaustive]
 pub struct CombinedGrads<B: Backend> {
+    /// Gradient of the input `x`.
     pub d_x_bnlhp: Tensor<B, 5>,
+    /// Gradient of the discretised step `Δ` (`dt`).
     pub d_dt_discretized_bhnl: Tensor<B, 4>,
+    /// Gradient of the input projection `B`.
     pub d_b_bnlhr: Tensor<B, 5>,
+    /// Gradient of the output projection `C`.
     pub d_c_bnlhr: Tensor<B, 5>,
+    /// Gradient of the per-head skip term `D`.
     pub d_d_h: Tensor<B, 1>,
+    /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: Tensor<B, 4>,
+    /// Gradient of the per-head decay rate `A` (as `a_decay_h`).
     pub d_a_decay_h: Tensor<B, 1>,
     /// Local same-chunk contribution to `d_da_cumsum` from BLUE+ORANGE only
     /// (excludes K3 and K4 cross-chunk contributions). Exposed for the

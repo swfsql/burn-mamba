@@ -1,3 +1,16 @@
+//! # Custom autodiff node for the Mamba-2 recompute backward
+//!
+//! Implements [`Mamba2BackendExt`] for `Autodiff<B>` by registering a single
+//! Burn [`Backward`] node.  The forward stores only its (small) leaf inputs;
+//! during backprop those are replayed through the K1–K5 kernels and the
+//! analytic gradient math in [`combined_backward`], so the large intermediate
+//! tensors never have to be kept alive — the ~⅓ training-memory saving of the
+//! `SerialRecalculated` path.
+//!
+//! The two forward outputs (`y` and `final_state`) are flattened into one
+//! tracked 1-D tensor (via [`crate::utils::combined_grad`]) so that a single
+//! `Backward<B, 7>` node — one per the 7 differentiable inputs — covers both.
+
 #![allow(non_snake_case)]
 
 use crate::mamba2::ssd::serial_recalculated::{

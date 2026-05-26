@@ -1,3 +1,12 @@
+//! # Recompute-based gradient math for the Mamba-3 double-SSD
+//!
+//! The analytic backward of the MIMO-first serial scan used by each pass of the
+//! double-SSD decomposition.  The forward intermediates (K1–K4) are recomputed
+//! from the saved leaf inputs rather than stashed, then a reverse per-chunk loop
+//! fuses the K5 and K4 backwards; K1/K2/K3 backwards run batched once the loop
+//! has gathered the per-chunk slices.  The fused `L·M` length carries the
+//! `mimo_rank` axis through the intra-chunk products.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::ssd;
@@ -5,13 +14,19 @@ use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 use ssd::serial;
 
-/// Per-input gradients produced by [`combined_backward`].
+/// Per-input gradients produced by [`combined_backward`] (one field per
+/// differentiable forward input of the double-SSD scan).
 #[non_exhaustive]
 pub struct CombinedGrads<B: Backend> {
+    /// Gradient of the (pre-scaled) input `v`.
     pub d_v_bnlmhp: Tensor<B, 6>,
+    /// Gradient of `Δ·A` (`da`).
     pub d_da_bnlh: Tensor<B, 4>,
+    /// Gradient of the input projection `B`.
     pub d_b_bnlmhr: Tensor<B, 6>,
+    /// Gradient of the output projection `C`.
     pub d_c_bnlmhr: Tensor<B, 6>,
+    /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: Tensor<B, 4>,
 }
 

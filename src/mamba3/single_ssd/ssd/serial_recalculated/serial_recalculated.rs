@@ -1,3 +1,13 @@
+//! # Serial SSD with a custom, memory-efficient backward (Mamba-3 single-SSD)
+//!
+//! The `SerialRecalculated` path for the single-SSD pathway.  The forward is the
+//! same serial scan as [`super::super::serial`], routed through the
+//! [`Mamba3SingleSsdBackendExt`] trait so `Autodiff` backends substitute a
+//! custom backward that recomputes per-chunk intermediates rather than storing
+//! them (see [`super::backward`] / [`super::combined_backward`]).  Unlike the
+//! double-SSD form, the kernels here apply the trapezoid `gamma`/`scale` and the
+//! boundary-β seed internally, so the backward also returns `d_gamma`/`d_scale`.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::single_ssd::prelude::*;

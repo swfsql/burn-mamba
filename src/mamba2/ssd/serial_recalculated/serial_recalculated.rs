@@ -1,3 +1,18 @@
+//! # Serial SSD with a custom, memory-efficient backward (Mamba-2)
+//!
+//! This is the `SerialRecalculated` path.  The forward is the same five-kernel
+//! serial scan as [`super::super::serial`], but it is routed through the
+//! [`Mamba2BackendExt`] trait so that `Autodiff` backends can substitute a
+//! **custom backward** that recomputes the per-chunk intermediates instead of
+//! storing them (see [`super::backward`] / [`super::combined_backward`]),
+//! trading a little extra compute for ~⅓ less training memory.
+//!
+//! Every plain (non-autodiff) backend uses the trait's default body, which
+//! simply replays the [`super::super::serial`] kernels K1–K5.  The
+//! [`crate::impl_ssd_backend_ext_for_burn_backends!`] /
+//! [`crate::decl_ssd_autodiff_backend_ext!`] macros wire up the per-backend
+//! impls and the autodiff marker trait.
+
 use crate::mamba2::prelude::*;
 use crate::mamba2::ssd::serial;
 use crate::utils::primitive::mk;
@@ -5,7 +20,7 @@ use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
 
 impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
-    /// Forward pass for the Mamba-2 SSD module.
+    /// Forward pass for the Mamba-2 SSD module (recompute-backward path).
     ///
     /// Returns:
     /// - `y_bnlhp`.

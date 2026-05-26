@@ -1,3 +1,12 @@
+//! # Serial SSD with a custom, memory-efficient backward (Mamba-3 double-SSD)
+//!
+//! The `SerialRecalculated` path for the double-SSD pathway.  The forward is the
+//! same serial scan as [`super::super::serial`], routed through the
+//! [`Mamba3DoubleSsdBackendExt`] trait so that `Autodiff` backends substitute a
+//! custom backward that recomputes per-chunk intermediates instead of storing
+//! them (see [`super::backward`] / [`super::combined_backward`]).  Plain
+//! backends use the trait's default body, which replays the serial kernels.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;

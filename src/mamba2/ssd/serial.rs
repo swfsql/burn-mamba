@@ -1,3 +1,23 @@
+//! # Serial-over-chunks SSD (Mamba-2)
+//!
+//! The chunkwise SSD scan expressed as a serial loop over chunks, mirroring the
+//! five Triton kernels of the reference `ssd_combined.py` (`ssd_chunk_state.py`,
+//! `ssd_bmm.py`, `ssd_state_passing.py`, `ssd_chunk_scan.py`):
+//!
+//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul.
+//! - **K3** [`k3_ssd_chunk_state`] — each chunk's contribution to its end state
+//!   (assuming a zero state at the chunk's start).
+//! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan that carries the
+//!   running state across chunk boundaries.
+//! - **K5** [`k5_ssd_chunk_scan`] — combines the intra-chunk (attention-like) and
+//!   inter-chunk (state-carried) contributions into the output `y`.
+//!
+//! This produces identical values and gradients to [`super::minimal`]; the
+//! serial form keeps per-chunk tensors small (lower peak memory) and is the
+//! basis of the recompute backward in [`super::serial_recalculated`].  Gradients
+//! here still flow through plain autodiff.
+
 #![allow(unused_variables)]
 
 use crate::mamba2::prelude::*;
@@ -5,7 +25,7 @@ use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
 
 impl<B: Backend> Mamba2SsdInput<B> {
-    /// Forward pass for the Mamba-2 SSD module.
+    /// Forward pass for the Mamba-2 SSD module (serial-over-chunks form).
     ///
     /// Returns:
     /// - `y_bnlhp`.

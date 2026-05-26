@@ -1,3 +1,22 @@
+//! # Serial-over-chunks SSD (Mamba-3 double-SSD pathway)
+//!
+//! The MIMO-first chunkwise scan as a serial loop over chunks, structured like
+//! the five Mamba-2 kernels ([`super::super`](crate::mamba3::double_ssd)) but
+//! generalised over the `mimo_rank` axis: the chunk and rank axes are fused into
+//! a single length `L·M` for the intra-chunk products.  The standard kernels
+//! here are reused by **both** the γ-pass and the β-pass of the double-SSD
+//! decomposition (the caller pre-scales `v` by γ or β and shifts the β inputs).
+//!
+//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul (fused `L·M`).
+//! - **K3** [`k3_ssd_chunk_state`] — each chunk's end-state contribution.
+//! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan.
+//! - **K5** [`k5_ssd_chunk_scan`] — combines intra- and inter-chunk parts into `y`.
+//!
+//! Produces identical values/gradients to [`super::minimal`]; SISO
+//! (`mimo_rank = 1`) is the special case where the fused length equals the chunk
+//! length.  Gradients flow through plain autodiff.
+
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
