@@ -47,8 +47,7 @@ fn random_input(
         Distribution::Uniform(0.05, 0.3),
         device,
     );
-    let a_decay =
-        Tensor::<InnerB, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
+    let a_decay = Tensor::<InnerB, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
     let b = Tensor::<InnerB, 5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),

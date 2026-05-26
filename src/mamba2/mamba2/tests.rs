@@ -60,11 +60,7 @@ fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cac
         let dist = Distribution::Normal(0.0, 1.0);
         (
             Tensor::<InnerB, 3>::random([batch, conv_dim, conv_kernel], dist, &device),
-            Tensor::<InnerB, 4>::random(
-                [batch, nheads, per_head_dim, state_rank],
-                dist,
-                &device,
-            ),
+            Tensor::<InnerB, 4>::random([batch, nheads, per_head_dim, state_rank], dist, &device),
         )
     } else {
         (

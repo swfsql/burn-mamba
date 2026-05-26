@@ -732,10 +732,7 @@ fn forward_single_ssd_split_matches_full_mimo() {
 
 #[test]
 fn forward_single_ssd_split_matches_full_serial() {
-    run_forward_single_ssd_split_matches_full(
-        small_config(),
-        Mamba3SingleSsdPath::Serial(Some(4)),
-    );
+    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SingleSsdPath::Serial(Some(4)));
 }
 
 #[test]
@@ -885,8 +882,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let init_k =
         Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
     let init_v = Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device);
-    let init_angle =
-        Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device);
+    let init_angle = Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device);
 
     let path_double = Mamba3DoubleSsdPath::from(ssd_path.clone());
     let path_single = Mamba3SingleSsdPath::from(ssd_path);

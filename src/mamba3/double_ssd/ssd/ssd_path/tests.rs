@@ -211,10 +211,8 @@ fn run_minimal_matches_serial(
     );
 
     // Each path gets its own fresh autodiff graph (Param leaves).
-    let inputs_min =
-        Inputs::from_inner(v.clone(), da.clone(), b.clone(), c.clone(), init.clone());
-    let inputs_ser =
-        Inputs::from_inner(v.clone(), da.clone(), b.clone(), c.clone(), init.clone());
+    let inputs_min = Inputs::from_inner(v.clone(), da.clone(), b.clone(), c.clone(), init.clone());
+    let inputs_ser = Inputs::from_inner(v.clone(), da.clone(), b.clone(), c.clone(), init.clone());
     let inputs_rec = Inputs::from_inner(v, da, b, c, init);
 
     let r_min = run_path(

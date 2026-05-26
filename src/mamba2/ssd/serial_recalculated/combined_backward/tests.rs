@@ -42,8 +42,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         Distribution::Uniform(0.05, 0.3),
         &device,
     );
-    let a_decay_h =
-        Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), &device);
+    let a_decay_h = Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), &device);
     let b_bnlhr = Tensor::<B, 5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
