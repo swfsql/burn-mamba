@@ -1,12 +1,13 @@
-//! # Trapezoidal-Merged (Single-Pass) SSD — Path Dispatcher
+//! # Single-Pass SSD — Path Dispatcher
 //!
-//! Sibling to [`crate::mamba3::ssd::ssd_path::Mamba3SsdPath`]. Where the existing
-//! [`Mamba3SsdPath`] runs the *standard* SSD twice (γ-term and β-term), this
-//! module's [`Mamba3TrapSsdPath`] runs **one** merged SSD pass that absorbs both
-//! contributions by scaling `K` with `scaleₜ = γₜ + (1−λₜ₊₁) Δₜ₊₁`. The same-step
-//! diagonal contribution differs (it must use `γₜ`, not `scaleₜ`) and is patched
-//! via an explicit correction term inside each variant.
-//!
+//! Sibling to [`crate::mamba3::double_ssd::ssd::ssd_path`]. Where the existing
+//! [`crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath`] runs the
+//! *standard* SSD twice (γ-term and β-term), this module's [`Mamba3SingleSsdPath`]
+//! runs **one** merged SSD pass that absorbs both contributions by scaling `K`
+//! with `scaleₜ = γₜ + (1−λₜ₊₁) Δₜ₊₁`. The same-step diagonal contribution differs
+//! (it must use `γₜ`, not `scaleₜ`) and is patched via an explicit correction term
+//! inside each variant.
+//
 //! Reference kernels:
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
@@ -15,30 +16,31 @@
 //! with `R = 1` collapsing to the SISO case.
 
 use crate::mamba3::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
 
-/// Algorithm selection for the trapezoidal-merged (single-pass) SSD.
+/// Algorithm selection for the single-pass SSD.
 ///
-/// Mirrors [`Mamba3SsdPath`] but each variant computes the trapezoidal
+/// Mirrors [`Mamba3SingleSsdPath`] but each variant computes the single-ssd
 /// recurrence with **one** chunkwise pass.
 #[derive(Debug, Clone)]
-pub enum Mamba3TrapSsdPath {
+pub enum Mamba3SingleSsdPath {
     /// Minimal/segsum variant.
     ///
     /// Mostly batched matmuls; the backward pass relies on autodiff. The
-    /// algorithm is the merged-form analogue of [`Mamba3SsdPath::Minimal`]:
+    /// algorithm is the merged-form analogue of [`Mamba3SingleSsdPath::Minimal`]:
     /// strict lower-triangular intra-chunk (excludes same-step block),
     /// a separate γ-scaled diagonal correction, and a state recurrence using
-    /// the `scaleₜ`-scaled K. See [`Mamba3TrapSsdInput::ssd_trap_minimal`].
+    /// the `scaleₜ`-scaled K. See [`Mamba3SingleSsdInput::single_ssd_minimal`].
     Minimal(Option<usize>),
 
     /// (Hybrid) Serial variant — chunk-serial K1–K5 reformulation.
     ///
-    /// Reuses K1–K4 from [`crate::mamba3::ssd::serial`] and supplies a new K5
+    /// Reuses K1–K4 from [`crate::mamba3::double_ssd::ssd::serial`] and supplies a new K5
     /// that does strict-lower intra-chunk + per-column `scaleₜ` + γ-weighted
     /// same-step diagonal correction. The state passing loop is sequential,
-    /// matching [`Mamba3SsdPath::Serial`]. See
-    /// [`Mamba3TrapSsdInput::ssd_trap_serial`].
+    /// matching [`Mamba3SingleSsdPath::Serial`]. See
+    /// [`Mamba3SingleSsdInput::single_ssd_serial`].
     Serial(Option<usize>),
 
     /// (Hybrid) Serial variant with a custom, memory-efficient backward.
@@ -46,21 +48,21 @@ pub enum Mamba3TrapSsdPath {
     /// Forward is identical to [`Self::Serial`] (shared K1–K5). On the Autodiff
     /// backend the backward recomputes the forward intermediates instead of
     /// saving them, trading compute for memory — the merged-form analogue of
-    /// [`Mamba3SsdPath::SerialRecalculated`]. See
-    /// [`Mamba3TrapSsdInput::ssd_trap_serial_recalculated`].
+    /// [`Mamba3SingleSsdPath::SerialRecalculated`]. See
+    /// [`Mamba3SingleSsdInput::single_ssd_serial_recalculated`].
     SerialRecalculated(Option<usize>),
 }
 
 /// MIMO-first input bundle for the merged-form SSD.
 ///
-/// All tensors are pre-processed by the caller (`Mamba3::forward2`): B/C are
+/// All tensors are pre-processed by the caller (`Mamba3::forward_single_ssd`): B/C are
 /// already QK-normed, RoPE-applied, bias-added, and expanded to per-head; V is
 /// the raw, *unscaled* MIMO-expanded value. The combined log-decay `da = Δ·A`
 /// is pre-computed. The two trapezoidal coefficients `gammaₜ` and `scaleₜ` are
 /// supplied separately because the SSD itself does the K-scaling and γ-weighted
 /// diagonal correction internally. D-skip and Z-gating are handled by the
 /// caller.
-pub struct Mamba3TrapSsdInput<B: Backend> {
+pub struct Mamba3SingleSsdInput<B: Backend> {
     /// Value tensor, MIMO-expanded but **not** trapezoidally scaled.
     ///
     /// # Shape
@@ -120,7 +122,7 @@ pub struct Mamba3TrapSsdInput<B: Backend> {
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
-impl<B: Backend> Mamba3TrapSsdInput<B> {
+impl<B: Backend> Mamba3SingleSsdInput<B> {
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
         san(&self.v_bnlmhp);
@@ -136,10 +138,14 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
     }
 }
 
-impl Mamba3TrapSsdPath {
-    /// Optimal chunk length — same heuristic as [`Mamba3SsdPath::optimal_default`].
+impl Mamba3SingleSsdPath {
+    /// Optimal chunk length — same heuristic as
+    /// [`crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath::optimal_default`].
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
-        Mamba3SsdPath::optimal_default(state_rank, per_head_dim)
+        crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath::optimal_default(
+            state_rank,
+            per_head_dim,
+        )
     }
 
     /// Optimal Minimal variant.
@@ -177,9 +183,9 @@ impl Mamba3TrapSsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba3TrapSsdPath::Minimal(chunk_len)
-            | Mamba3TrapSsdPath::Serial(chunk_len)
-            | Mamba3TrapSsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba3SingleSsdPath::Minimal(chunk_len)
+            | Mamba3SingleSsdPath::Serial(chunk_len)
+            | Mamba3SingleSsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
@@ -195,21 +201,34 @@ impl Mamba3TrapSsdPath {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the merged-form accumulator at the last token (to be stored in the
     ///   cache for streaming).
-    pub fn run<B: Backend + Mamba3TrapBackendExt>(
+    pub fn run<B: Backend + Mamba3SingleSsdBackendExt>(
         &self,
-        input: Mamba3TrapSsdInput<B>,
+        input: Mamba3SingleSsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match self {
-            Mamba3TrapSsdPath::Minimal(_) => input.ssd_trap_minimal(),
-            Mamba3TrapSsdPath::Serial(_) => input.ssd_trap_serial(),
-            Mamba3TrapSsdPath::SerialRecalculated(_) => input.ssd_trap_serial_recalculated(),
+            Mamba3SingleSsdPath::Minimal(_) => input.single_ssd_minimal(),
+            Mamba3SingleSsdPath::Serial(_) => input.single_ssd_serial(),
+            Mamba3SingleSsdPath::SerialRecalculated(_) => input.single_ssd_serial_recalculated(),
         }
     }
 }
 
-impl Default for Mamba3TrapSsdPath {
-    fn default() -> Mamba3TrapSsdPath {
-        Mamba3TrapSsdPath::Minimal(None)
+impl Default for Mamba3SingleSsdPath {
+    fn default() -> Mamba3SingleSsdPath {
+        // The SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        Mamba3SingleSsdPath::SerialRecalculated(None)
+    }
+}
+
+impl From<Mamba3SsdPath> for Mamba3SingleSsdPath {
+    fn from(path: Mamba3SsdPath) -> Self {
+        match path {
+            Mamba3SsdPath::Minimal(chunk_len) => Mamba3SingleSsdPath::Minimal(chunk_len),
+            Mamba3SsdPath::Serial(chunk_len) => Mamba3SingleSsdPath::Serial(chunk_len),
+            Mamba3SsdPath::SerialRecalculated(chunk_len) => {
+                Mamba3SingleSsdPath::SerialRecalculated(chunk_len)
+            }
+        }
     }
 }
 
@@ -228,7 +247,7 @@ mod tests {
     type B = Autodiff<InnerB>;
     type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
 
-    /// Random inputs for the trapezoidal-merged SSD. `da` is drawn from a
+    /// Random inputs for the single-SSD. `da` is drawn from a
     /// negative-mean distribution so the implied per-token decay `exp(da)`
     /// stays in `(0, 1]`. `gamma` and `scale` are non-negative (matching
     /// `Δ·σ(λ)`-style outputs of `helpers::trapezoidal_coefficients`).
@@ -328,8 +347,8 @@ mod tests {
             }
         }
 
-        fn ssd_input(&self) -> Mamba3TrapSsdInput<B> {
-            Mamba3TrapSsdInput {
+        fn ssd_input(&self) -> Mamba3SingleSsdInput<B> {
+            Mamba3SingleSsdInput {
                 v_bnlmhp: self.v.val(),
                 b_bnlmhr: self.b.val(),
                 c_bnlmhr: self.c.val(),
@@ -337,7 +356,7 @@ mod tests {
                 gamma_bnlh: self.gamma.val(),
                 scale_bnlh: self.scale.val(),
                 initial_state_bhpr: self.initial_state.val(),
-                // Serial asserts this is None — see ssd_trap_serial.
+                // Serial asserts this is None — see single_ssd_serial.
                 init_state_hpr: None,
             }
         }
@@ -367,7 +386,7 @@ mod tests {
     }
 
     fn run_path(
-        path: Mamba3TrapSsdPath,
+        path: Mamba3SingleSsdPath,
         inputs: &Inputs,
         y_head: Tensor<InnerB, 6>,
         s_head: Tensor<InnerB, 4>,
@@ -420,7 +439,7 @@ mod tests {
         check_inner!(d_init_state, "grad init_state", grad_tol);
         assert!(
             failures.is_empty(),
-            "trap-path mismatches:\n  {}",
+            "single-ssd path mismatches:\n  {}",
             failures.join("\n  ")
         );
     }
@@ -481,19 +500,19 @@ mod tests {
         let inputs_rec = Inputs::from_inner(v, b, c, da, gamma, scale, init);
 
         let r_min = run_path(
-            Mamba3TrapSsdPath::Minimal(Some(chunk_len)),
+            Mamba3SingleSsdPath::Minimal(Some(chunk_len)),
             &inputs_min,
             y_head.clone(),
             s_head.clone(),
         );
         let r_ser = run_path(
-            Mamba3TrapSsdPath::Serial(Some(chunk_len)),
+            Mamba3SingleSsdPath::Serial(Some(chunk_len)),
             &inputs_ser,
             y_head.clone(),
             s_head.clone(),
         );
         let r_rec = run_path(
-            Mamba3TrapSsdPath::SerialRecalculated(Some(chunk_len)),
+            Mamba3SingleSsdPath::SerialRecalculated(Some(chunk_len)),
             &inputs_rec,
             y_head,
             s_head,
@@ -507,32 +526,32 @@ mod tests {
     }
 
     #[test]
-    fn trap_paths_agree_siso() {
+    fn single_ssd_paths_agree_siso() {
         run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, true);
     }
 
     #[test]
-    fn trap_paths_agree_siso_zero_init() {
+    fn single_ssd_paths_agree_siso_zero_init() {
         run_minimal_matches_serial(2, 3, 4, 1, 2, 8, 8, false);
     }
 
     #[test]
-    fn trap_paths_agree_mimo() {
+    fn single_ssd_paths_agree_mimo() {
         run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, true);
     }
 
     #[test]
-    fn trap_paths_agree_mimo_zero_init() {
+    fn single_ssd_paths_agree_mimo_zero_init() {
         run_minimal_matches_serial(2, 3, 4, 2, 2, 8, 8, false);
     }
 
     #[test]
-    fn trap_paths_agree_single_chunk() {
+    fn single_ssd_paths_agree_single_chunk() {
         run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, true);
     }
 
     #[test]
-    fn trap_paths_agree_single_chunk_zero_init() {
+    fn single_ssd_paths_agree_single_chunk_zero_init() {
         run_minimal_matches_serial(2, 1, 4, 1, 2, 8, 8, false);
     }
 }

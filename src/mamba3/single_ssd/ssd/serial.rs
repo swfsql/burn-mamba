@@ -1,10 +1,10 @@
-//! # Trapezoidal-Merged Serial (K1–K5) SSD
+//! # SingleSsd Serial (K1–K5) SSD
 //!
-//! Chunk-serial counterpart to [`crate::mamba3::ssd::trap_minimal`]. Whereas the
-//! Minimal variant uses a segsum-based quadratic state passing, this one reuses
-//! the K1–K4 helpers from [`crate::mamba3::ssd::serial`] (which run a sequential
-//! loop for K4) and supplies a **new K5** that bakes in the merged-form
-//! trapezoidal logic:
+//! Chunk-serial counterpart to [`crate::mamba3::single_ssd::ssd::minimal`].
+//! Whereas the Minimal variant uses a segsum-based quadratic state passing,
+//! this one reuses the K1–K4 helpers from [`crate::mamba3::double_ssd::ssd::serial`]
+//! (which run a sequential loop for K4) and supplies a **new K5** that bakes
+//! in the single-ssd logic:
 //!
 //! - Strict lower-triangular intra-chunk path (the same-time-step block is
 //!   excluded from the SSM sum; it is the “diagonal correction” territory).
@@ -12,47 +12,47 @@
 //! - Same-time-step block contributes via an explicit `γₜ · (C·Bᵀ at t) · Vₜ`
 //!   correction term, restoring the right diagonal weighting.
 //!
-//! K1–K4 are identical to the original (non-trapezoidal) SSD because:
+//! K1–K4 are identical to the double-SSD because:
 //! - K1 (`da_cumsum`, `da_chunk_end`) depends only on `da = Δ·A`.
-//! - K2 (`cb = C · Bᵀ`) is computed on **unscaled** B / C; the merged-form
-//!   trap algorithm wants the unscaled CB so it can apply `scaleₜ` per-column
+//! - K2 (`cb = C · Bᵀ`) is computed on **unscaled** B / C; the single-ssd
+//!   algorithm wants the unscaled CB so it can apply `scaleₜ` per-column
 //!   (lower triangular) and reuse the same-step block for the γ-correction.
 //! - K3 (chunk-end state from V·decay·K) is form-invariant: passing the
-//!   scale-multiplied K (`K_scaled = scaleₜ · B`) recovers the merged-form
+//!   scale-multiplied K (`K_scaled = scaleₜ · B`) recovers the single-ssd
 //!   chunk state, with no other changes needed.
 //! - K4 (sequential state passing across chunks) operates on a `[H, P, R]`
 //!   per-chunk state and a per-chunk decay total; both are mode-agnostic.
 //!
-//! Reference kernels (same as `trap_minimal`):
+//! Reference kernels (same as `single_ssd_minimal`):
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 #![allow(non_snake_case)]
 
-use crate::mamba3::prelude::*;
-use crate::mamba3::ssd::serial::{
+pub use crate::mamba3::double_ssd::ssd::serial::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
+use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3TrapSsdInput<B> {
-    /// MIMO-first merged-form SSD — chunk-serial (K1–K5) variant.
+impl<B: Backend> Mamba3SingleSsdInput<B> {
+    /// MIMO-first Single-SSD — chunk-serial (K1–K5) variant.
     ///
-    /// Sequence of kernels (matches the original-form `ssd_serial`):
+    /// Sequence of kernels (matches the double-ssd `ssd_serial`):
     /// 1. **K1**: intra-chunk cumulative log-decay and per-chunk decay totals.
     /// 2. **K2**: `cb = C · Bᵀ` block matrix (unscaled).
     /// 3. **K3**: per-chunk hidden state assuming zero initial state, fed
     ///    `K_scaled = scaleₜ · B`.
     /// 4. **K4**: sequential state passing across chunks (loop over chunks).
-    /// 5. **K5** (this module's new function): merged-form chunk scan with
+    /// 5. **K5** (this module's new function): single-ssd chunk scan with
     ///    strict lower-triangular masking, scale broadcasting, and the
     ///    `γₜ`-weighted same-step diagonal correction.
     ///
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
-    ///   the merged-form accumulator at the last token.
-    pub fn ssd_trap_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    ///   the single-ssd accumulator at the last token.
+    pub fn single_ssd_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         input.sanity();
         let [batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
@@ -60,7 +60,7 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
 
         assert!(
             input.init_state_hpr.is_none(),
-            "init_state_hpr is not yet supported in ssd_trap_serial; use ssd_trap_minimal instead"
+            "init_state_hpr is not yet supported in single_ssd_serial; use single_ssd_minimal instead"
         );
         assert!(nchunks > 0, "sequence length must be at least 1");
         assert_eq!(
@@ -78,13 +78,13 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
         let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum(input.da_bnlh.clone());
 
         // ── K2: CB matrix on unscaled B/C ─────────────────────────────────────
-        // Trap K5 applies the `scale` and `gamma` weights post-hoc, so K2 is
-        // identical to the original-form K2.
+        // SingleSsd K5 applies the `scale` and `gamma` weights post-hoc, so K2 is
+        // identical to the double-ssd K2.
         let cb_bnhLMLM: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlmhr.clone(), input.b_bnlmhr.clone());
 
         // ── K3: chunk state using K_scaled = scaleₜ · B ───────────────────────
         // The existing K3 computes `state = (V * decay)^T @ B_input`, so passing
-        // `B_input = K_scaled` recovers the merged-form per-chunk state.
+        // `B_input = K_scaled` recovers the single-ssd per-chunk state.
         let scale_bnlh11 = input.scale_bnlh.clone().unsqueeze_dims::<6>(&[3, 5]);
         let k_scaled_bnlmhr = input.b_bnlmhr.clone() * scale_bnlh11;
         let intra_chunk_state_bnhpr: Tensor<B, 5> = k3_ssd_chunk_state(
@@ -105,8 +105,8 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
             chunk_input_state_bnhpr.dims()
         );
 
-        // ── K5: merged-form chunk scan (strict-lower + diag γ-correction + Y_off)
-        let y_bnlmhp = k5_trap_ssd_chunk_scan(
+        // ── K5: single-ssd chunk scan (strict-lower + diag γ-correction + Y_off)
+        let y_bnlmhp = k5_single_ssd_chunk_scan(
             da_cumsum_bhnl,
             input.v_bnlmhp,
             input.c_bnlmhr,
@@ -122,17 +122,17 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
 }
 
 // ---------------------------------------------------------------------------
-// K5 (trap) — strict-lower intra-chunk + γ-correction + state-to-output
+// K5 (single-ssd) — strict-lower intra-chunk + γ-correction + state-to-output
 // ---------------------------------------------------------------------------
 
-/// Merged-form chunk scan.
+/// SingleSsd chunk scan.
 ///
 /// Computes the per-chunk output from three contributions:
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
 ///   `(cb[i,j] · scale[t2] · exp(cumA[t1] − cumA[t2])) · V[t2]`
 /// - **Same-time-step (`t1 == t2`) γ-correction**:
 ///   `γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]`
-/// - **State-to-output (Y_off)** — same formula as the original-form K5:
+/// - **State-to-output (Y_off)** — same formula as the double-ssd K5:
 ///   `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
 /// `cb_bnhLMLM` is the unscaled `C · Bᵀ` matrix from K2; `b_bnlmhr` is the
@@ -150,7 +150,8 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
 ///
 /// # Returns
 /// - `y_bnlmhp`: `[B, N, L, M, H, P]`
-pub fn k5_trap_ssd_chunk_scan<B: Backend>(
+#[allow(clippy::too_many_arguments)]
+pub fn k5_single_ssd_chunk_scan<B: Backend>(
     da_cumsum_bhnl: Tensor<B, 4>,
     v_bnlmhp: Tensor<B, 6>,
     c_bnlmhr: Tensor<B, 6>,
@@ -179,7 +180,7 @@ pub fn k5_trap_ssd_chunk_scan<B: Backend>(
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
         .reshape([batch, nheads, nchunks, fused]);
 
-    // ── Y_off: exp(cumA[t]) · C[t] · h'[n-1]  (same form as original K5) ──
+    // ── Y_off: exp(cumA[t]) · C[t] · h'[n-1]  (same form as double-ssd K5) ──
     let exp_da_bnhLMp = da_cumsum_bhnLM
         .clone()
         .exp()

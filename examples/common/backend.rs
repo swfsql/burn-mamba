@@ -50,7 +50,7 @@ pub trait MainDevice: Backend {
     }
     fn set_dtype(device: &<Self as BackendTypes>::Device) {
         burn::tensor::set_default_dtypes::<Self>(
-            &device,
+            device,
             FLOAT_DTYPE, // default float
             INT_DTYPE,   // default int
         )

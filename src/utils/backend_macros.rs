@@ -48,18 +48,23 @@ macro_rules! impl_ssd_backend_ext_for_burn_backends {
 /// generics on "autodiff-capable backend that also implements the SSD ext."
 #[macro_export]
 macro_rules! decl_ssd_autodiff_backend_ext {
-    ($autodiff_trait:ident, $ext_trait:path) => {
+    ($autodiff_trait:ident, $ext_trait:path $(, $extra_bound:path)*) => {
         #[cfg(feature = "autodiff")]
         pub trait $autodiff_trait:
-            burn::tensor::backend::Backend + $ext_trait + burn::tensor::backend::AutodiffBackend
+            burn::tensor::backend::Backend
+            + burn::tensor::backend::AutodiffBackend
+            + $ext_trait
+            $(+ $extra_bound)*
         {
         }
         /// Any autodiff-compatible backend whose inner backend implements the
         /// ext trait satisfies the marker. The actual custom backward lives in
         /// `super::backward` (a custom impl of the ext trait for `Autodiff<B>`).
         #[cfg(feature = "autodiff")]
-        impl<B: burn::tensor::backend::Backend + $ext_trait> $autodiff_trait
+        impl<B> $autodiff_trait
             for burn::backend::Autodiff<B>
+            where
+                B: burn::tensor::backend::Backend + $ext_trait $(+ $extra_bound)*
         {
         }
     };

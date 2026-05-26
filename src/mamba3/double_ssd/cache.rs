@@ -1,21 +1,19 @@
-//! # Mamba-3 Merged-Form Inference Cache (`forward2` path)
+//! # Mamba-3 Inference Caches
 //!
-//! The cache used by [`crate::mamba3::mamba3::Mamba3::forward2`] (the single-pass,
-//! "merged"/trapezoidal-fused SSD algorithm — see the Triton SISO and Tilelang MIMO
-//! reference kernels). The four tensor fields mirror those of [`Mamba3Cache`] but
-//! their **SSM accumulator carries different semantics**:
+//! During autoregressive (token-by-token) generation, three pieces of state
+//! must be preserved between calls:
 //!
-//! - [`Mamba3Cache`]: `ssm_bhpr` holds the original trapezoidal hidden state
-//!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ`.
-//! - [`Mamba3MergedCache`]: `ssm_bhpr` holds the **merged accumulator** `h'ₜ`
-//!   defined by `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, where
-//!   `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁`. The merged form gives the correct output
-//!   `yₜ = Cₜᵀ h'ₜ` for all positions except the diagonal (s = t), which is
-//!   patched by an explicit `γₜ · (Cₜᵀ Bₜ) · xₜ` correction term in the kernel.
+//! 1. **SSM hidden state** — `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, compressed context.
+//! 2. **Previous K state** — `Bₜ₋₁` per rank `[batch, mimo_rank, nheads, state_rank]`,
+//!    needed for the β term of the (double-ssd) trapezoidal recurrence.
+//! 3. **Previous V state** — `xₜ₋₁` per head `[batch, nheads, per_head_dim]`,
+//!    paired with k_state to reconstruct β Bₜ₋₁ ⊗ xₜ₋₁.
+//! 4. **Cumulative RoPE angle** — the accumulated rotation angle up to position
+//!    `t`, needed to correctly continue data-dependent rotary embeddings.
 //!
-//! Because the two accumulators differ, the two caches are not interchangeable.
-//! The distinct type prevents accidentally feeding a `forward` cache into
-//! `forward2` (or vice versa) mid-sequence — that would silently corrupt state.
+//! Note: Mamba-3 has **no conv cache** (the short 1-dimensional convolution present in
+//! Mamba-3 is removed; its role is absorbed by the trapezoidal discretization
+//! and the learnable B/C biases).
 
 use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
@@ -23,27 +21,27 @@ use burn::module::Module;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Mamba3MergedCaches  (one cache entry per layer)
+// Mamba3DoubleSsdCaches  (one cache entry per layer)
 // ---------------------------------------------------------------------------
 
-/// A collection of per-layer merged-form caches for a complete Mamba-3 network.
+/// A collection of per-layer caches for a complete Mamba-3 network.
 #[derive(Module, Debug)]
-pub struct Mamba3MergedCaches<B: Backend> {
-    /// Per-layer caches. Length equals the number of virtual layers.
-    pub caches: Vec<Mamba3MergedCache<B>>,
+pub struct Mamba3DoubleSsdCaches<B: Backend> {
+    /// Per-layer caches.  Length equals the number of virtual layers.
+    pub caches: Vec<Mamba3DoubleSsdCache<B>>,
 }
 
-/// Configuration / factory for [`Mamba3MergedCaches`].
+/// Configuration / factory for [`Mamba3DoubleSsdCaches`].
 #[derive(Config, Debug)]
-pub struct Mamba3MergedCachesConfig {
+pub struct Mamba3DoubleSsdCachesConfig {
     /// Number of cache slots (= number of virtual layers).
     pub n_real_caches: usize,
 
     /// Shared configuration that determines the shape of each cache.
-    pub cache: Mamba3MergedCacheConfig,
+    pub cache: Mamba3DoubleSsdCacheConfig,
 }
 
-impl Mamba3MergedCachesConfig {
+impl Mamba3DoubleSsdCachesConfig {
     /// Convenience constructor from a block config.
     pub fn new_from_block_config(
         n_real_caches: usize,
@@ -52,62 +50,62 @@ impl Mamba3MergedCachesConfig {
     ) -> Self {
         Self {
             n_real_caches,
-            cache: Mamba3MergedCacheConfig::new_from_block_config(batch, block_config),
+            cache: Mamba3DoubleSsdCacheConfig::new_from_block_config(batch, block_config),
         }
     }
 
     /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3MergedCaches<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3DoubleSsdCaches<B> {
         let caches = (0..self.n_real_caches)
             .map(|_| self.cache.clone().init(device))
             .collect();
-        Mamba3MergedCaches { caches }
+        Mamba3DoubleSsdCaches { caches }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Mamba3MergedCache  (state for a single layer)
+// Mamba3DoubleSsdCache  (state for a single layer)
 // ---------------------------------------------------------------------------
 
-/// Mutable state for a single Mamba-3 layer running the merged-form algorithm.
+/// The mutable state carried between decoding steps for a **single** Mamba-3 layer.
 ///
-/// Tensor shapes match [`Mamba3Cache`]. The semantic difference lives entirely
-/// in `ssm_bhpr` (see the module-level documentation).
+/// All tensors are updated at every call to [`crate::mamba3::mamba3::Mamba3::step`].
 #[derive(Module, Debug)]
-pub struct Mamba3MergedCache<B: Backend> {
-    /// **Merged-form SSM accumulator** `h'ₜ`.
+pub struct Mamba3DoubleSsdCache<B: Backend> {
+    /// **SSM hidden state** `hₜ`.
     ///
-    /// Update rule: `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ · sumₘ Bₜ[m] ⊗ (xₜ ⊙ mimo_xₘ)`.
-    /// Different from `Mamba3Cache::ssm_bhpr`.
+    /// Updated via the (double-ssd) trapezoidal recurrence:
+    /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Kₜ₋₁[m] ⊗ (Vₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<B, 4>,
 
-    /// **Previous token's K per mimo rank** = post-RoPE, post-bias `Bₜ₋₁[m]`.
+    /// **Previous token's B per mimo rank** = `Bₜ₋₁[m]`.
     ///
-    /// Used at the start of the next forward2 call to seed the boundary β
-    /// contribution `(1 − λ₀) · Δ₀ · Bₜ₋₁ ⊗ xₜ₋₁` (which the previous call could
-    /// not yet add because it did not know `λ₀, Δ₀`).
+    /// Used to reconstruct the β term: `β * sum_r Bₜ₋₁[m] ⊗ (xₜ₋₁ * mimo_x[m])`.
+    /// For SISO (mimo_rank=1) this is shape `[batch, 1, nheads, state_rank]`.
     ///
     /// Shape: `[batch, mimo_rank, nheads, state_rank]`
     pub k_state_bmhr: Tensor<B, 4>,
 
     /// **Previous token's x** = `xₜ₋₁`.
     ///
-    /// Paired with [`Self::k_state_bmhr`] to form the boundary β term.
+    /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term.
     ///
     /// Shape: `[batch, nheads, per_head_dim]`
     pub v_state_bhp: Tensor<B, 3>,
 
     /// **Cumulative data-dependent RoPE angle** up to the current position.
     ///
-    /// Same role as in [`Mamba3Cache`]: continued across calls for streaming.
+    /// Each step updates: `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · tanh(θₜ) · π`
+    ///
+    /// Starts at zero for fresh sequences; continued across calls for streaming.
     ///
     /// Shape: `[batch, nheads, num_rope_angles]`
     pub cum_angle_bha: Tensor<B, 3>,
 }
 
-impl<B: Backend> Mamba3MergedCache<B> {
+impl<B: Backend> Mamba3DoubleSsdCache<B> {
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);
@@ -116,9 +114,9 @@ impl<B: Backend> Mamba3MergedCache<B> {
     }
 }
 
-/// Configuration / factory for a single [`Mamba3MergedCache`].
+/// Configuration / factory for a single [`Mamba3DoubleSsdCache`].
 #[derive(Config, Debug)]
-pub struct Mamba3MergedCacheConfig {
+pub struct Mamba3DoubleSsdCacheConfig {
     /// Batch size.
     pub batch: usize,
 
@@ -133,15 +131,16 @@ pub struct Mamba3MergedCacheConfig {
     /// Number of SSM heads.
     pub nheads: usize,
 
-    /// MIMO rank. 1 = SISO.
+    /// MIMO rank.  1 = SISO.
     #[config(default = 1)]
     pub mimo_rank: usize,
 
-    /// Number of RoPE angle pairs (see [`Mamba3CacheConfig::num_rope_angles`]).
+    /// Number of RoPE angle pairs = `rope_dim / 2` = `(state_rank * rope_fraction) / 2`
+    /// (rounded down to even via `Mamba3Config::rope_dim`).
     pub num_rope_angles: usize,
 }
 
-impl Mamba3MergedCacheConfig {
+impl Mamba3DoubleSsdCacheConfig {
     /// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
     pub fn new_from_block_config(batch: usize, block_config: Mamba3Config) -> Self {
         Self {
@@ -155,7 +154,7 @@ impl Mamba3MergedCacheConfig {
     }
 
     /// Allocate zero-initialised cache tensors on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3MergedCache<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3DoubleSsdCache<B> {
         let ssm_bhpr = Tensor::zeros(
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
@@ -166,7 +165,7 @@ impl Mamba3MergedCacheConfig {
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
         let cum_angle_bha = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
-        Mamba3MergedCache {
+        Mamba3DoubleSsdCache {
             ssm_bhpr,
             k_state_bmhr,
             v_state_bhp,

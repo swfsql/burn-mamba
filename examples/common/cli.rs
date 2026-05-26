@@ -134,7 +134,7 @@ impl AppArgs {
         self.training_config
             .as_ref()
             .map(|path| {
-                load_training_config(&path)
+                load_training_config(path)
                     .expect("Failed to find the training config file {path:?}")
             })
             .or({
@@ -160,7 +160,7 @@ impl AppArgs {
         self.model_config
             .as_ref()
             .map(|path| {
-                load_model_config::<B, ModelConfig>(&path)
+                load_model_config::<B, ModelConfig>(path)
                     .expect("Failed to find the model config file {path:?}")
             })
             .or({
@@ -253,7 +253,7 @@ pub fn create_artifact_dir(artifact_dir: &Path, delete: bool) {
     std::fs::create_dir_all(artifact_dir).ok();
 }
 
-pub const TRAINING_CONFIG_NAME: &'static str = "training_config";
+pub const TRAINING_CONFIG_NAME: &str = "training_config";
 pub fn save_training_config(path: &Path, training_config: &impl Config) {
     println!("Saving training config into {path:?}");
     training_config
@@ -262,7 +262,7 @@ pub fn save_training_config(path: &Path, training_config: &impl Config) {
 }
 
 pub fn load_training_config<TrainingConfig: Config>(path: &Path) -> Option<TrainingConfig> {
-    let exists = std::fs::exists(&path).expect("failed to check {path:?}");
+    let exists = std::fs::exists(path).expect("failed to check {path:?}");
     if exists {
         println!("Loading training config from {path:?}");
         let training_config =
@@ -273,7 +273,7 @@ pub fn load_training_config<TrainingConfig: Config>(path: &Path) -> Option<Train
     }
 }
 
-pub const MODEL_CONFIG_NAME: &'static str = "model_config";
+pub const MODEL_CONFIG_NAME: &str = "model_config";
 pub fn save_model_config(path: &Path, model_config: &impl Config) {
     println!("Saving model config into {path:?}");
     model_config
@@ -282,7 +282,7 @@ pub fn save_model_config(path: &Path, model_config: &impl Config) {
 }
 
 pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option<ModelConfig> {
-    let exists = std::fs::exists(&path).expect("failed to check {path:?}");
+    let exists = std::fs::exists(path).expect("failed to check {path:?}");
     if exists {
         println!("Loading model config from {path:?}");
         let model_config = ModelConfig::load(path).expect("Failed to load the model config");
@@ -292,7 +292,7 @@ pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option
     }
 }
 
-pub const MODEL_NAME: &'static str = "model";
+pub const MODEL_NAME: &str = "model";
 pub fn save_model<B: Backend>(artifact_dir: &Path, model: &impl Module<B>) {
     let path = artifact_dir.join(MODEL_NAME);
     let file_ext = <RecorderTy as FileRecorder<B>>::file_extension();
@@ -332,7 +332,7 @@ pub fn init_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     model_config.init(device)
 }
 
-pub const OPTIM_NAME: &'static str = "optim";
+pub const OPTIM_NAME: &str = "optim";
 pub fn save_optim<AutoB, AutoM, Optim>(artifact_dir: &Path, optim: &Optim)
 where
     AutoB: AutodiffBackend,

@@ -1,3 +1,4 @@
+use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
 
@@ -8,13 +9,13 @@ use burn::prelude::*;
 /// inter-chunk scan length.
 /// Optimal value is approximately `√(state_rank · per_head_dim)`.
 #[derive(Debug, Clone)]
-pub enum Mamba3SsdPath {
+pub enum Mamba3DoubleSsdPath {
     // TODO: add specific mamba-3 python files references. Currently the references are for mamba-2.
     //
     /// Minimal SSD.
     ///
     /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.
-    /// See [`Mamba3SsdInput::ssd_minimal`] for more info.
+    /// See [`Mamba3DoubleSsdInput::double_ssd_minimal`] for more info.
     ///
     /// For training, you may prefer using [`Self::SerialRecalculated`] instead.
     ///
@@ -26,7 +27,7 @@ pub enum Mamba3SsdPath {
     /// (Hybrid) Serial SSD.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba3SsdInput::ssd_serial`] for more info.  
+    /// See [`Mamba3DoubleSsdInput::double_ssd_serial`] for more info.  
     /// For the backward operation, this relies on autodiff.
     /// For a custom backwards that saves memory, see [`Self::SerialRecalculated`].
     ///
@@ -42,7 +43,7 @@ pub enum Mamba3SsdPath {
     /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
     ///
     /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba3SsdInput::ssd_serial_recalculated`] for more info.  
+    /// See [`Mamba3DoubleSsdInput::double_ssd_serial_recalculated`] for more info.  
     /// Contains a custom backward operation that saves memory.
     /// For an autodiff backwards, see [`Self::Serial`].
     ///
@@ -54,10 +55,11 @@ pub enum Mamba3SsdPath {
 /// MIMO-first SSD input.
 ///
 /// All tensors are pre-processed: B/C are already QK-normed, RoPE-applied, bias-added, and
-/// expanded to per-head (not per-group). V is already scaled by the trapezoidal coefficient
-/// (γ or β). The combined log-decay `da = Δ·A` is pre-computed. D skip is handled by the caller.
-pub struct Mamba3SsdInput<B: Backend> {
-    /// Value tensor, already scaled by trapezoidal coefficient (γ or β).
+/// expanded to per-head (not per-group). V is already scaled by the (double-ssd) trapezoidal
+/// coefficient (γ or β). The combined log-decay `da = Δ·A` is pre-computed. D skip is handled
+/// by the caller.
+pub struct Mamba3DoubleSsdInput<B: Backend> {
+    /// Value tensor, already scaled by (double-ssd) trapezoidal coefficient (γ or β).
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
@@ -94,7 +96,7 @@ pub struct Mamba3SsdInput<B: Backend> {
     pub init_state_hpr: Option<Tensor<B, 3>>,
 }
 
-impl<B: Backend> Mamba3SsdInput<B> {
+impl<B: Backend> Mamba3DoubleSsdInput<B> {
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
         san(&self.v_bnlmhp);
@@ -108,7 +110,7 @@ impl<B: Backend> Mamba3SsdInput<B> {
     }
 }
 
-impl Mamba3SsdPath {
+impl Mamba3DoubleSsdPath {
     /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
     pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
         (state_rank * per_head_dim)
@@ -164,9 +166,9 @@ impl Mamba3SsdPath {
 
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba3SsdPath::Minimal(chunk_len)
-            | Mamba3SsdPath::Serial(chunk_len)
-            | Mamba3SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Mamba3DoubleSsdPath::Minimal(chunk_len)
+            | Mamba3DoubleSsdPath::Serial(chunk_len)
+            | Mamba3DoubleSsdPath::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
@@ -182,22 +184,34 @@ impl Mamba3SsdPath {
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn run<B: Backend + Mamba3BackendExt>(
+    pub fn run<B: Backend + Mamba3DoubleSsdBackendExt>(
         &self,
-        input: Mamba3SsdInput<B>,
+        input: Mamba3DoubleSsdInput<B>,
     ) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match self {
-            Mamba3SsdPath::Minimal(_) => input.ssd_minimal(),
-            Mamba3SsdPath::Serial(_) => input.ssd_serial(),
-            Mamba3SsdPath::SerialRecalculated(_) => input.ssd_serial_recalculated(),
+            Mamba3DoubleSsdPath::Minimal(_) => input.double_ssd_minimal(),
+            Mamba3DoubleSsdPath::Serial(_) => input.double_ssd_serial(),
+            Mamba3DoubleSsdPath::SerialRecalculated(_) => input.double_ssd_serial_recalculated(),
         }
     }
 }
 
-impl Default for Mamba3SsdPath {
-    fn default() -> Mamba3SsdPath {
-        // Mamba3SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
-        Mamba3SsdPath::SerialRecalculated(None)
+impl Default for Mamba3DoubleSsdPath {
+    fn default() -> Mamba3DoubleSsdPath {
+        // The SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        Mamba3DoubleSsdPath::SerialRecalculated(None)
+    }
+}
+
+impl From<Mamba3SsdPath> for Mamba3DoubleSsdPath {
+    fn from(path: Mamba3SsdPath) -> Self {
+        match path {
+            Mamba3SsdPath::Minimal(chunk_len) => Mamba3DoubleSsdPath::Minimal(chunk_len),
+            Mamba3SsdPath::Serial(chunk_len) => Mamba3DoubleSsdPath::Serial(chunk_len),
+            Mamba3SsdPath::SerialRecalculated(chunk_len) => {
+                Mamba3DoubleSsdPath::SerialRecalculated(chunk_len)
+            }
+        }
     }
 }
 
@@ -308,8 +322,8 @@ mod tests {
             }
         }
 
-        fn ssd_input(&self) -> Mamba3SsdInput<B> {
-            Mamba3SsdInput {
+        fn ssd_input(&self) -> Mamba3DoubleSsdInput<B> {
+            Mamba3DoubleSsdInput {
                 v_bnlmhp: self.v.val(),
                 da_bnlh: self.da.val(),
                 b_bnlmhr: self.b.val(),
@@ -348,7 +362,7 @@ mod tests {
 
     /// Run a single SSD path and extract the gradients of all 5 inputs.
     fn run_path(
-        path: Mamba3SsdPath,
+        path: Mamba3DoubleSsdPath,
         inputs: &Inputs,
         y_head: Tensor<InnerB, 6>,
         s_head: Tensor<InnerB, 4>,
@@ -427,19 +441,19 @@ mod tests {
         let inputs_rec = Inputs::from_inner(v, da, b, c, init);
 
         let r_min = run_path(
-            Mamba3SsdPath::Minimal(Some(chunk_len)),
+            Mamba3DoubleSsdPath::Minimal(Some(chunk_len)),
             &inputs_min,
             y_head.clone(),
             s_head.clone(),
         );
         let r_ser = run_path(
-            Mamba3SsdPath::Serial(Some(chunk_len)),
+            Mamba3DoubleSsdPath::Serial(Some(chunk_len)),
             &inputs_ser,
             y_head.clone(),
             s_head.clone(),
         );
         let r_rec = run_path(
-            Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
+            Mamba3DoubleSsdPath::SerialRecalculated(Some(chunk_len)),
             &inputs_rec,
             y_head,
             s_head,

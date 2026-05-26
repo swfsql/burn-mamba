@@ -3,7 +3,7 @@ use burn_mamba::schedule::Schedule;
 
 /// This model configuration uses ~37K params (~153KB disk space in FP32).  
 /// Reaches ~85% validation accuracy after the first epoch.  
-/// With a batch_size=16 in FP32, this requires ~4GB vram during training.
+/// With a batch_size=16 in FP32, this requires ~3.5GB vram during training.
 pub fn model_config() -> MyMamba3NetworkConfig {
     MyMamba3NetworkConfig::new()
         // the input is a sequence of a single-dimensioned values

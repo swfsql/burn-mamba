@@ -35,7 +35,7 @@ pub fn gqa_expand_to_heads<B: Backend, const D: usize, const DP1: usize>(
     let dims = t.dims();
     let ngroups = dims[group_dim];
     assert!(
-        nheads % ngroups == 0,
+        nheads.is_multiple_of(ngroups),
         "nheads ({nheads}) must be a multiple of ngroups ({ngroups})"
     );
     let heads_per_group = nheads / ngroups;

@@ -181,7 +181,7 @@ impl Mamba2SsdPath {
 
 impl Default for Mamba2SsdPath {
     fn default() -> Mamba2SsdPath {
-        // Mamba2SsdPath defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        // SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
         Mamba2SsdPath::SerialRecalculated(None)
     }
 }

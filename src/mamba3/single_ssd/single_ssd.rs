@@ -1,67 +1,51 @@
-//! # `Mamba3::forward2` — Single-Pass (Merged-Form) Trapezoidal Forward
+//! # Mamba-3 — Single-Pass SSD Forward
 //!
-//! This module provides the `forward2` method on [`Mamba3`]: an alternative to
-//! [`Mamba3::forward`] that computes the trapezoidal recurrence with **one**
-//! chunkwise SSD pass instead of two.
-//!
-//! ## Why two paths?
-//!
-//! The existing [`Mamba3::forward`] is the burn-mamba implementation of the
-//! `VikramLex/mamba3-minimal` decomposition:
-//!
-//! ```text
-//!   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ      (original trapezoidal)
-//!
-//!   forward:    h = SSD(γ-scaled V, B)   +   SSD(β-scaled V_shifted, B_shifted)
-//! ```
-//!
-//! This is simple to derive and to verify (everything reuses the standard SSD)
-//! but doubles the intra-chunk and chunk-state memory during training.
-//!
-//! [`Mamba3::forward2`] is the burn-mamba implementation of the **official
-//! Mamba-3 algorithm** as shipped in Triton (SISO) and Tilelang (MIMO):
+//! This module provides the `forward_single_ssd` method on [`Mamba3`]:
+//! The burn-mamba implementation of the **official Mamba-3 algorithm**
+//! as shipped in Triton (SISO) and Tilelang (MIMO):
 //!
 //! ```text
 //!   scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁
 //!
-//!   forward2:    h' = SSD(V_raw, K_scaled = scaleₜ B) with:
-//!                 * strict lower-triangular intra-chunk mask
-//!                 * additive γ-weighted same-step correction
-//!                 * boundary β seed (1−λ₀) Δ₀ Kₜ₋₁ ⊗ xₜ₋₁
+//!   forward_single_ssd:    h' = SSD(V_raw, K_scaled = scaleₜ B) with:
+//!                               * strict lower-triangular intra-chunk mask
+//!                               * additive γ-weighted same-step correction
+//!                               * boundary β seed (1−λ₀) Δ₀ Kₜ₋₁ ⊗ xₜ₋₁
 //! ```
 //!
-//! The two formulations are mathematically equivalent; the parity tests in
-//! `mamba3.rs` and elsewhere assert this on small configurations.
+//! References:
+//! - [`mamba3_siso_fwd.py`](https://github.com/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py),
+//! - [`mamba3_mimo_fwd.py`](https://github.com/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py).
 //!
-//! Reference: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`,
-//! `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`.
+//! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
+use crate::mamba3::double_ssd::double_ssd::apply_rope_partial;
 use crate::mamba3::helpers;
-use crate::mamba3::mamba3::apply_rope_partial;
 use crate::mamba3::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::prelude::*;
 
-impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
-    /// Process a full input sequence using the **merged-form (single-pass)**
+impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
+    /// Process a full input sequence using the **single-ssd form (single-pass)**
     /// trapezoidal algorithm.
     ///
     /// Functionally equivalent to [`Self::forward`] but uses approximately half
     /// the SSD memory during training. Cache is a separate type
-    /// ([`Mamba3MergedCache`]) because the stored hidden state has different
+    /// ([`Mamba3SingleSsdCache`]) because the stored hidden state has different
     /// semantics than the original-form cache used by [`Self::forward`].
     ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
     /// - output: `[batch, sequence, d_model]`
     #[allow(non_snake_case)]
-    pub fn forward2(
+    pub fn forward_single_ssd(
         &self,
         input_bsm: Tensor<B, 3>,
-        cache: Option<Mamba3MergedCache<B>>,
-        ssd_path: Mamba3TrapSsdPath,
-    ) -> (Tensor<B, 3>, Mamba3MergedCache<B>) {
+        cache: Option<Mamba3SingleSsdCache<B>>,
+        ssd_path: Mamba3SingleSsdPath,
+    ) -> (Tensor<B, 3>, Mamba3SingleSsdCache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
@@ -82,7 +66,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
             let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], &device);
-            Mamba3MergedCache {
+            Mamba3SingleSsdCache {
                 ssm_bhpr,
                 k_state_bmhr,
                 v_state_bhp,
@@ -116,7 +100,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
         san(&dd_dt_bsh);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
-        let helpers::TrapCoeffs {
+        let helpers::TrapezoidCoeffs {
             dt: dt_bsh,
             da: da_bsh,
             alpha: _alpha_bsh,
@@ -217,7 +201,7 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
 
         // ── Boundary β seed for initial state ─────────────────────────────────
         // Add (1 − λ₀) · Δ₀ · Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ) to the carried
-        // merged SSM state. λ₀, Δ₀ are taken from the current call's first
+        // single-ssd SSM state. λ₀, Δ₀ are taken from the current call's first
         // token; Kₜ₋₁ and xₜ₋₁ come from the cache (zeros on fresh start).
         //
         // γₜ = λₜ·Δₜ, so (1−λ₀)·Δ₀ = Δ₀ − γ₀.
@@ -283,8 +267,8 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
         let b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
         let c_bnlmhr = c_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
 
-        // ── Step 7: Run merged-form SSD ───────────────────────────────────────
-        let ssd_input = Mamba3TrapSsdInput {
+        // ── Step 7: Run single-pass form SSD ───────────────────────────────────────
+        let ssd_input = Mamba3SingleSsdInput {
             v_bnlmhp,
             b_bnlmhr,
             c_bnlmhr,
@@ -375,12 +359,56 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3<B> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — forward2 parity with forward (double-SSD), step, and split-prefill
+// Mamba3::step  (recurrent SSM — token-by-token decoding)
+// ---------------------------------------------------------------------------
+
+mod step {
+    use super::*;
+
+    impl<B: Backend> Mamba3<B> {
+        /// Process a **single token** using the pure recurrent form.
+        ///
+        /// For SISO (mimo_rank=1):
+        /// ```text
+        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
+        ///   yₜ = Cₜᵀ hₜ + D xₜ
+        /// ```
+        ///
+        /// For MIMO (mimo_rank>1):
+        /// ```text
+        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
+        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
+        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
+        /// ```
+        ///
+        /// # Shapes
+        /// - `input_bd` : `[batch, d_model]`
+        /// - output     : `[batch, d_model]`
+        #[allow(non_snake_case)]
+        pub fn step_single_ssd(
+            &self,
+            _input_bd: Tensor<B, 2>,
+            _cache: Option<Mamba3SingleSsdCache<B>>,
+        ) -> (Tensor<B, 2>, Mamba3SingleSsdCache<B>) {
+            // currently not changed from the double_ssd
+            todo!("step method for single_ssd form is not yet implemented")
+
+            // Hint:
+            // Token-by-token decoding always uses the recurrent form (double-ssd cache).
+            // When running a step that uses a single-ssd cache, the single-ssd cache
+            // would first need converting into the double-ssd form.
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — forward_single_ssd parity with forward_double_ssd, step, and split-prefill
 // ---------------------------------------------------------------------------
 
 #[cfg(all(test, feature = "backend-flex"))]
 mod tests {
     use super::*;
+    use crate::mamba3::double_ssd::prelude::*;
     use crate::mamba3::mamba3::Mamba3Config;
     use burn::backend::{Autodiff, Flex};
     use burn::module::Param;
@@ -418,16 +446,17 @@ mod tests {
     }
 
     /// Build a matched pair of initial caches for cross-algorithm parity
-    /// (`forward`/`step` use [`Mamba3Cache`]; `forward2` uses
-    /// [`Mamba3MergedCache`]). With `random = true` the SSM state and cumulative
-    /// RoPE angle are random while the previous-token K/V history is **zero** — so
-    /// the merged form's boundary-β seed is zero and both forms share the exact
-    /// same logical initial state. With `random = false` everything is zero.
+    /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
+    /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
+    /// With `random = true` the SSM state and cumulative RoPE angle are random while
+    /// the previous-token K/V history is **zero** — so the single-ssd form's
+    /// boundary-β seed is zero and both forms share the exact same logical initial state.
+    /// With `random = false` everything is zero.
     fn build_cross_caches(
         cfg: &Mamba3Config,
         batch: usize,
         random: bool,
-    ) -> (Mamba3Cache<B>, Mamba3MergedCache<B>) {
+    ) -> (Mamba3DoubleSsdCache<B>, Mamba3SingleSsdCache<B>) {
         let device: Device = Default::default();
         let nheads = cfg.nheads();
         let per_head_dim = cfg.per_head_dim;
@@ -448,13 +477,13 @@ mod tests {
         // Zero previous-token history so the two cache forms agree logically.
         let k = Tensor::<InnerB, 4>::zeros([batch, mimo_rank, nheads, state_rank], &device);
         let v = Tensor::<InnerB, 3>::zeros([batch, nheads, per_head_dim], &device);
-        let c3 = Mamba3Cache {
+        let c3 = Mamba3DoubleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm.clone()),
             k_state_bmhr: Tensor::from_inner(k.clone()),
             v_state_bhp: Tensor::from_inner(v.clone()),
             cum_angle_bha: Tensor::from_inner(angle.clone()),
         };
-        let cm = Mamba3MergedCache {
+        let cm = Mamba3SingleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm),
             k_state_bmhr: Tensor::from_inner(k),
             v_state_bhp: Tensor::from_inner(v),
@@ -463,11 +492,15 @@ mod tests {
         (c3, cm)
     }
 
-    /// Build an initial [`Mamba3MergedCache`] for the merged-form continuity test.
+    /// Build an initial [`Mamba3SingleSsdCache`] for the single-ssd form continuity test.
     /// With `random = true` *every* field (including the previous-token K/V
-    /// history) is random, exercising forward2 continuation from an arbitrary
-    /// merged-form state.
-    fn build_merged_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3MergedCache<B> {
+    /// history) is random, exercising forward_single_ssd continuation from an arbitrary
+    /// single-ssd form state.
+    fn build_single_ssd_cache(
+        cfg: &Mamba3Config,
+        batch: usize,
+        random: bool,
+    ) -> Mamba3SingleSsdCache<B> {
         let device: Device = Default::default();
         let nheads = cfg.nheads();
         let per_head_dim = cfg.per_head_dim;
@@ -491,7 +524,7 @@ mod tests {
             };
             Tensor::from_inner(t)
         };
-        Mamba3MergedCache {
+        Mamba3SingleSsdCache {
             ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
             k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
             v_state_bhp: mk3([batch, nheads, per_head_dim]),
@@ -586,8 +619,8 @@ mod tests {
         Param::from_tensor(Tensor::from_inner(input.clone()))
     }
 
-    /// Random downstream heads for the merged-form continuity loss (output plus
-    /// every merged-cache field).
+    /// Random downstream heads for the single-ssd form continuity loss (output plus
+    /// every single-ssd cache field).
     struct Heads {
         out: Tensor<InnerB, 3>,
         ssm: Tensor<InnerB, 4>,
@@ -596,8 +629,8 @@ mod tests {
         angle: Tensor<InnerB, 3>,
     }
 
-    /// A [`RunGrads`] plus the final merged-cache fields, for the continuity test.
-    struct MergedRun {
+    /// A [`RunGrads`] plus the final single-ssd cache fields, for the continuity test.
+    struct SingleSsdRun {
         rg: RunGrads,
         final_ssm: Tensor<InnerB, 4>,
         final_k: Tensor<InnerB, 4>,
@@ -606,14 +639,14 @@ mod tests {
     }
 
     /// Like [`run_with_grads`] but the loss couples the output with every final
-    /// merged-cache field, and the final cache is returned for comparison. Both
-    /// runs being compared use `forward2`, so the merged-cache semantics match.
-    fn run_with_grads_merged(
+    /// single-ssd cache field, and the final cache is returned for comparison. Both
+    /// runs being compared use `forward_single_ssd`, so the single-ssd cache semantics match.
+    fn run_with_grads_single_ssd(
         model: &Mamba3<B>,
         input: &Param<Tensor<B, 3>>,
         heads: &Heads,
-        runner: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3MergedCache<B>),
-    ) -> MergedRun {
+        runner: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3SingleSsdCache<B>),
+    ) -> SingleSsdRun {
         let (out, cache) = runner(model, input.val());
         let out_inner = out.clone().inner();
         let ssm = cache.ssm_bhpr;
@@ -659,7 +692,7 @@ mod tests {
                 .grad(&grads)
                 .expect("out_proj.weight"),
         };
-        MergedRun {
+        SingleSsdRun {
             rg,
             final_ssm,
             final_k,
@@ -668,8 +701,14 @@ mod tests {
         }
     }
 
-    /// Compare output, every final merged-cache field, and parameter gradients.
-    fn check_merged_match(label: &str, a: &MergedRun, b: &MergedRun, val_tol: f32, grad_tol: f32) {
+    /// Compare output, every final single-ssd cache field, and parameter gradients.
+    fn check_single_ssd_match(
+        label: &str,
+        a: &SingleSsdRun,
+        b: &SingleSsdRun,
+        val_tol: f32,
+        grad_tol: f32,
+    ) {
         use crate::utils::test_helpers::max_abs_diff;
         let vals = [
             ("output", max_abs_diff(a.rg.out.clone(), b.rg.out.clone())),
@@ -699,8 +738,8 @@ mod tests {
         check_grads_match(label, &a.rg, &b.rg, grad_tol);
     }
 
-    /// Guard: a random initial state must actually change the forward2 output
-    /// (vs a *zero* merged cache). Otherwise the initial state is being silently
+    /// Guard: a random initial state must actually change the forward_single_ssd output
+    /// (vs a *zero* single-ssd cache). Otherwise the initial state is being silently
     /// ignored, which would make the parity comparisons pass trivially.
     fn guard_random_init_consumed(
         random_init: bool,
@@ -708,17 +747,17 @@ mod tests {
         cfg: &Mamba3Config,
         batch: usize,
         input: &Tensor<InnerB, 3>,
-        trap_path: &Mamba3TrapSsdPath,
+        ssd_path: &Mamba3SsdPath,
         random_out: &Tensor<InnerB, 3>,
     ) {
         if !random_init {
             return;
         }
         use crate::utils::test_helpers::max_abs_diff;
-        let (out_zero, _) = model.forward2(
+        let (out_zero, _) = model.forward_single_ssd(
             Tensor::from_inner(input.clone()),
-            Some(build_merged_cache(cfg, batch, false)),
-            trap_path.clone(),
+            Some(build_single_ssd_cache(cfg, batch, false)),
+            Mamba3SingleSsdPath::from(ssd_path.clone()),
         );
         let d = max_abs_diff(random_out.clone(), out_zero.inner());
         assert!(
@@ -728,18 +767,14 @@ mod tests {
         );
     }
 
-    /// forward2 ≡ forward (double-SSD) on values and gradients, from the same
+    /// forward_single_ssd ≡ forward_double_ssd on values and gradients, from the same
     /// initial state. With `random_init = true` the shared logical initial state
     /// is random (random SSM state + cumulative RoPE angle; zero previous-token
-    /// history so the merged and double forms coincide). The output and all
-    /// parameter gradients must agree. The merged-cache SSM accumulator itself is
+    /// history so the single-ssd and double-ssd forms coincide). The output and all
+    /// parameter gradients must agree. The single-ssd cache SSM accumulator itself is
     /// not compared here (different semantics from the double-form state); the
-    /// merged cache is compared in `run_forward2_split_matches_full`.
-    fn run_forward2_matches_forward(
-        cfg: Mamba3Config,
-        trap_path: Mamba3TrapSsdPath,
-        random_init: bool,
-    ) {
+    /// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
+    fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
@@ -751,34 +786,38 @@ mod tests {
         let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
         let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
 
-        let ssd_path = Mamba3SsdPath::Minimal(Some(4));
         let (c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
         let input_a = param_input(&input);
         let c3c = c3;
-        let path_a = ssd_path;
-        let r_fwd = run_with_grads(&model, &input_a, &head, |m, x| {
-            let (out, _) = m.forward(x, Some(c3c), path_a);
+        let path_a = Mamba3DoubleSsdPath::from(ssd_path.clone());
+        let r_fwd_double_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
+            let (out, _) = m.forward_double_ssd(x, Some(c3c), path_a);
             out
         });
 
         let input_b = param_input(&input);
         let cmc = cm;
-        let trap_b = trap_path.clone();
-        let r_fwd2 = run_with_grads(&model, &input_b, &head, |m, x| {
-            let (out, _) = m.forward2(x, Some(cmc), trap_b);
+        let single_ssd_b = Mamba3SingleSsdPath::from(ssd_path.clone());
+        let r_fwd_single_ssd = run_with_grads(&model, &input_b, &head, |m, x| {
+            let (out, _) = m.forward_single_ssd(x, Some(cmc), single_ssd_b);
             out
         });
 
-        let diff = (r_fwd.out.clone() - r_fwd2.out.clone())
+        let diff = (r_fwd_double_ssd.out.clone() - r_fwd_single_ssd.out.clone())
             .abs()
             .max()
             .into_scalar();
         assert!(
             diff < 1e-4,
-            "forward vs forward2 max absolute difference = {diff:.6} (expected < 1e-4)"
+            "forward_double_ssd vs forward_single_ssd max absolute difference = {diff:.6} (expected < 1e-4)"
         );
-        check_grads_match("forward2 vs forward", &r_fwd, &r_fwd2, 1e-3);
+        check_grads_match(
+            "forward_single_ssd vs forward_double_ssd",
+            &r_fwd_double_ssd,
+            &r_fwd_single_ssd,
+            1e-3,
+        );
 
         guard_random_init_consumed(
             random_init,
@@ -786,105 +825,85 @@ mod tests {
             &cfg,
             batch,
             &input,
-            &trap_path,
-            &r_fwd2.out,
+            &ssd_path,
+            &r_fwd_single_ssd.out,
         );
     }
 
     #[test]
-    fn forward2_matches_forward() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
+    fn forward_match_simple() {
+        forward_match(small_config(), Mamba3SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_random_init() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
+    fn forward_match_random_init() {
+        forward_match(small_config(), Mamba3SsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
-    fn forward2_matches_forward_ngroups2() {
-        run_forward2_matches_forward(cfg_ngroups2(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
+    fn forward_match_ngroups2() {
+        forward_match(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_ngroups2_random_init() {
-        run_forward2_matches_forward(cfg_ngroups2(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
+    fn forward_match_ngroups2_random_init() {
+        forward_match(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
-    fn forward2_matches_forward_mimo() {
-        run_forward2_matches_forward(
-            small_config_mimo(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
-            false,
-        );
+    fn forward_match_mimo() {
+        forward_match(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_mimo_random_init() {
-        run_forward2_matches_forward(
-            small_config_mimo(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
-            true,
-        );
+    fn forward_match_mimo_random_init() {
+        forward_match(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
-    fn forward2_matches_forward_mimo_ngroups2() {
-        run_forward2_matches_forward(
-            cfg_mimo_ngroups2(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
-            false,
-        );
+    fn forward_match_mimo_ngroups2() {
+        forward_match(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_mimo_ngroups2_random_init() {
-        run_forward2_matches_forward(
-            cfg_mimo_ngroups2(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
-            true,
-        );
+    fn forward_match_mimo_ngroups2_random_init() {
+        forward_match(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), true);
     }
 
     #[test]
-    fn forward2_matches_forward_serial() {
-        run_forward2_matches_forward(small_config(), Mamba3TrapSsdPath::Serial(Some(4)), false);
+    fn forward_match_serial() {
+        forward_match(small_config(), Mamba3SsdPath::Serial(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_serial_mimo() {
-        run_forward2_matches_forward(
-            small_config_mimo(),
-            Mamba3TrapSsdPath::Serial(Some(4)),
-            false,
-        );
+    fn forward_match_serial_mimo() {
+        forward_match(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)), false);
     }
 
     #[test]
-    fn forward2_matches_forward_recalc() {
-        run_forward2_matches_forward(
+    fn forward_match_recalc() {
+        forward_match(
             small_config(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SsdPath::SerialRecalculated(Some(4)),
             false,
         );
     }
 
     #[test]
-    fn forward2_matches_forward_recalc_mimo() {
-        run_forward2_matches_forward(
+    fn forward_match_recalc_mimo() {
+        forward_match(
             small_config_mimo(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SsdPath::SerialRecalculated(Some(4)),
             false,
         );
     }
 
-    /// forward2 ≡ token-by-token step on values and gradients, from the same
+    /// forward_single_ssd ≡ token-by-token step on values and gradients, from the same
     /// initial state (random when `random_init = true`, with zero previous-token
-    /// history so the merged and recurrent forms coincide).
-    fn run_forward2_matches_step(
+    /// history so the single-ssd and recurrent forms coincide).
+    fn run_forward_single_ssd_matches_step(
         cfg: Mamba3Config,
-        trap_path: Mamba3TrapSsdPath,
+        single_ssd_path: Mamba3SingleSsdPath,
         random_init: bool,
     ) {
         let device: Device = Default::default();
@@ -898,39 +917,44 @@ mod tests {
         let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
         let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
 
-        let (c3, cm) = build_cross_caches(&cfg, batch, random_init);
+        let (_c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
         let input_a = param_input(&input);
-        let cmc = cm;
-        let trap_a = trap_path.clone();
-        let r_fwd2 = run_with_grads(&model, &input_a, &head, |m, x| {
-            let (out, _) = m.forward2(x, Some(cmc), trap_a);
+        let cmc = cm.clone();
+        let single_ssd_a = single_ssd_path.clone();
+        let r_fwd_single_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
+            let (out, _) = m.forward_single_ssd(x, Some(cmc), single_ssd_a);
             out
         });
 
         let input_b = param_input(&input);
-        let c3c = c3;
+        let cmc = cm;
         let r_step = run_with_grads(&model, &input_b, &head, |m, x| {
-            let mut cache: Option<Mamba3Cache<B>> = Some(c3c);
+            let mut cache: Option<Mamba3SingleSsdCache<B>> = Some(cmc);
             let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
             for t in 0..seq_len {
                 let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
-                let (out_t, new_cache) = m.step(token, cache);
+                let (out_t, new_cache) = m.step_single_ssd(token, cache);
                 cache = Some(new_cache);
                 outs.push(out_t);
             }
             Tensor::stack(outs, 1)
         });
 
-        let diff = (r_fwd2.out.clone() - r_step.out.clone())
+        let diff = (r_fwd_single_ssd.out.clone() - r_step.out.clone())
             .abs()
             .max()
             .into_scalar();
         assert!(
             diff < 1e-4,
-            "forward2 vs step max absolute difference = {diff:.6} (expected < 1e-4)"
+            "forward_single_ssd vs step max absolute difference = {diff:.6} (expected < 1e-4)"
         );
-        check_grads_match("forward2 vs step", &r_fwd2, &r_step, 1e-3);
+        check_grads_match(
+            "forward_single_ssd vs step",
+            &r_fwd_single_ssd,
+            &r_step,
+            1e-3,
+        );
 
         guard_random_init_consumed(
             random_init,
@@ -938,79 +962,94 @@ mod tests {
             &cfg,
             batch,
             &input,
-            &trap_path,
-            &r_fwd2.out,
+            &(single_ssd_path.into()),
+            &r_fwd_single_ssd.out,
         );
     }
 
     #[test]
-    fn forward2_matches_step() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), false);
-    }
-
-    #[test]
-    fn forward2_matches_step_random_init() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)), true);
-    }
-
-    #[test]
-    fn forward2_matches_step_mimo() {
-        run_forward2_matches_step(
-            small_config_mimo(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
+    fn forward_single_ssd_matches_step() {
+        run_forward_single_ssd_matches_step(
+            small_config(),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
             false,
         );
     }
 
     #[test]
-    fn forward2_matches_step_mimo_random_init() {
-        run_forward2_matches_step(
-            small_config_mimo(),
-            Mamba3TrapSsdPath::Minimal(Some(4)),
+    fn forward_single_ssd_matches_step_random_init() {
+        run_forward_single_ssd_matches_step(
+            small_config(),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
             true,
         );
     }
 
     #[test]
-    fn forward2_matches_step_serial() {
-        run_forward2_matches_step(small_config(), Mamba3TrapSsdPath::Serial(Some(4)), false);
-    }
-
-    #[test]
-    fn forward2_matches_step_serial_mimo() {
-        run_forward2_matches_step(
+    fn forward_single_ssd_matches_step_mimo() {
+        run_forward_single_ssd_matches_step(
             small_config_mimo(),
-            Mamba3TrapSsdPath::Serial(Some(4)),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
             false,
         );
     }
 
     #[test]
-    fn forward2_matches_step_recalc() {
-        run_forward2_matches_step(
+    fn forward_single_ssd_matches_step_mimo_random_init() {
+        run_forward_single_ssd_matches_step(
+            small_config_mimo(),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
+            true,
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_matches_step_serial() {
+        run_forward_single_ssd_matches_step(
             small_config(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SingleSsdPath::Serial(Some(4)),
             false,
         );
     }
 
     #[test]
-    fn forward2_matches_step_recalc_mimo() {
-        run_forward2_matches_step(
+    fn forward_single_ssd_matches_step_serial_mimo() {
+        run_forward_single_ssd_matches_step(
             small_config_mimo(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SingleSsdPath::Serial(Some(4)),
             false,
         );
     }
 
-    /// forward2 continuation from a **random** initial merged cache:
-    /// `forward2(full, cache) ≡ forward2(prefix, cache)` then
-    /// `forward2(suffix, mid_cache)`. Compares outputs, the final merged cache,
+    #[test]
+    fn forward_single_ssd_matches_step_recalc() {
+        run_forward_single_ssd_matches_step(
+            small_config(),
+            Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+            false,
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_matches_step_recalc_mimo() {
+        run_forward_single_ssd_matches_step(
+            small_config_mimo(),
+            Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+            false,
+        );
+    }
+
+    /// forward_single_ssd continuation from a **random** initial single-ssd cache:
+    /// `forward_single_ssd(full, cache) ≡ forward_single_ssd(prefix, cache)` then
+    /// `forward_single_ssd(suffix, mid_cache)`. Compares outputs, the final single-ssd cache,
     /// and gradients. This replaces the old zero-init split-vs-full test: a
     /// random initial cache subsumes the chunked-prefill continuity guarantee
     /// from an arbitrary starting state, and the guard at the end confirms the
     /// initial cache is actually consumed (not silently ignored).
-    fn run_forward2_split_matches_full(cfg: Mamba3Config, trap_path: Mamba3TrapSsdPath) {
+    fn run_forward_single_ssd_split_matches_full(
+        cfg: Mamba3Config,
+        single_ssd_path: Mamba3SingleSsdPath,
+    ) {
         let device: Device = Default::default();
         let model = cfg.init::<B>(&device);
 
@@ -1038,35 +1077,42 @@ mod tests {
             angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
         };
 
-        let init_cache = build_merged_cache(&cfg, batch, true);
+        let init_cache = build_single_ssd_cache(&cfg, batch, true);
 
         let input_full = param_input(&input);
         let cache_full = init_cache.clone();
-        let trap_f = trap_path.clone();
-        let r_full = run_with_grads_merged(&model, &input_full, &heads, |m, x| {
-            m.forward2(x, Some(cache_full), trap_f)
+        let single_ssd_f = single_ssd_path.clone();
+        let r_full = run_with_grads_single_ssd(&model, &input_full, &heads, |m, x| {
+            m.forward_single_ssd(x, Some(cache_full), single_ssd_f)
         });
 
         let input_split = param_input(&input);
         let cache_split = init_cache;
-        let trap_s = trap_path.clone();
-        let r_split = run_with_grads_merged(&model, &input_split, &heads, |m, x| {
+        let single_ssd_s = single_ssd_path.clone();
+        let r_split = run_with_grads_single_ssd(&model, &input_split, &heads, |m, x| {
             let prefix = x.clone().narrow(1, 0, split);
             let suffix = x.narrow(1, split, seq_len - split);
-            let (out_prefix, mid) = m.forward2(prefix, Some(cache_split), trap_s.clone());
-            let (out_suffix, last) = m.forward2(suffix, Some(mid), trap_s);
+            let (out_prefix, mid) =
+                m.forward_single_ssd(prefix, Some(cache_split), single_ssd_s.clone());
+            let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), single_ssd_s);
             (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
         });
 
-        check_merged_match("forward2 split vs full", &r_full, &r_split, 1e-4, 1e-3);
+        check_single_ssd_match(
+            "forward_single_ssd split vs full",
+            &r_full,
+            &r_split,
+            1e-4,
+            1e-3,
+        );
 
-        // Guard: the random initial merged cache must change the full output.
+        // Guard: the random initial single_ssd cache must change the full output.
         {
             use crate::utils::test_helpers::max_abs_diff;
-            let (out_zero, _) = model.forward2(
+            let (out_zero, _) = model.forward_single_ssd(
                 Tensor::from_inner(input.clone()),
-                Some(build_merged_cache(&cfg, batch, false)),
-                trap_path.clone(),
+                Some(build_single_ssd_cache(&cfg, batch, false)),
+                single_ssd_path.clone(),
             );
             let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
             assert!(
@@ -1078,38 +1124,50 @@ mod tests {
     }
 
     #[test]
-    fn forward2_split_matches_full() {
-        run_forward2_split_matches_full(small_config(), Mamba3TrapSsdPath::Minimal(Some(4)));
-    }
-
-    #[test]
-    fn forward2_split_matches_full_mimo() {
-        run_forward2_split_matches_full(small_config_mimo(), Mamba3TrapSsdPath::Minimal(Some(4)));
-    }
-
-    #[test]
-    fn forward2_split_matches_full_serial() {
-        run_forward2_split_matches_full(small_config(), Mamba3TrapSsdPath::Serial(Some(4)));
-    }
-
-    #[test]
-    fn forward2_split_matches_full_serial_mimo() {
-        run_forward2_split_matches_full(small_config_mimo(), Mamba3TrapSsdPath::Serial(Some(4)));
-    }
-
-    #[test]
-    fn forward2_split_matches_full_recalc() {
-        run_forward2_split_matches_full(
+    fn forward_single_ssd_split_matches_full() {
+        run_forward_single_ssd_split_matches_full(
             small_config(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
         );
     }
 
     #[test]
-    fn forward2_split_matches_full_recalc_mimo() {
-        run_forward2_split_matches_full(
+    fn forward_single_ssd_split_matches_full_mimo() {
+        run_forward_single_ssd_split_matches_full(
             small_config_mimo(),
-            Mamba3TrapSsdPath::SerialRecalculated(Some(4)),
+            Mamba3SingleSsdPath::Minimal(Some(4)),
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_split_matches_full_serial() {
+        run_forward_single_ssd_split_matches_full(
+            small_config(),
+            Mamba3SingleSsdPath::Serial(Some(4)),
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_split_matches_full_serial_mimo() {
+        run_forward_single_ssd_split_matches_full(
+            small_config_mimo(),
+            Mamba3SingleSsdPath::Serial(Some(4)),
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_split_matches_full_recalc() {
+        run_forward_single_ssd_split_matches_full(
+            small_config(),
+            Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+        );
+    }
+
+    #[test]
+    fn forward_single_ssd_split_matches_full_recalc_mimo() {
+        run_forward_single_ssd_split_matches_full(
+            small_config_mimo(),
+            Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
         );
     }
 }

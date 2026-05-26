@@ -1,13 +1,13 @@
-//! # Single-Pass Trapezoidal SSD (Minimal / segsum variant)
+//! # Single-Pass SSD (Minimal / segsum variant)
 //!
-//! This is the MIMO-first, merged-form ("single SSD pass") implementation of the
-//! Mamba-3 trapezoidal recurrence. It is the Burn analogue of the official
+//! This is the MIMO-first, single SSD pass implementation of the
+//! Mamba-3 trapezoid recurrence. It is the Burn analogue of the official
 //! Tilelang MIMO kernel and Triton SISO kernel; SISO is the `mimo_rank = 1`
 //! degenerate case.
 //!
-//! ## Background — the merged recurrence
+//! ## Background — the single-ssd recurrence
 //!
-//! The original trapezoidal hidden state is
+//! The double-ssd trapezoid hidden state is
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁ + βₜ (Bₜ₋₁ ⊗ xₜ₋₁) + γₜ (Bₜ ⊗ xₜ)
@@ -18,18 +18,18 @@
 //! state `t` (for `s < t`). At `s = t` the coefficient is just `γₜ`.
 //!
 //! Define `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` (with `scaleₜ = γₜ` at the last
-//! position). The "merged" SSD
+//! position). The single-SSD
 //!
 //! ```text
 //!   h'ₜ = αₜ h'ₜ₋₁ + scaleₜ (Bₜ ⊗ xₜ)
 //! ```
 //!
-//! produces the same outputs `yₜ = Cₜᵀ h'ₜ` as the trapezoidal one **except**
-//! at the same-step diagonal (`s = t`), where the merged form has `scaleₜ`
+//! produces the same outputs `yₜ = Cₜᵀ h'ₜ` as the double-ssd one **except**
+//! at the same-step diagonal (`s = t`), where the single-ssd form has `scaleₜ`
 //! instead of `γₜ`. We compensate by:
 //!
 //! 1. Using a **strict** lower-triangular mask in the intra-chunk path (the
-//!    `s = t` block is excluded from the merged sum).
+//!    `s = t` block is excluded from the trapezoid sum).
 //! 2. Adding a separate γ-weighted same-step term `γₜ · (Cₜᵀ Bₜ) · xₜ`.
 //!
 //! ## Algorithm (per chunk, MIMO-first)
@@ -47,30 +47,30 @@
 //!                + K_scaled · exp(da_cs_rev)ᵀ · PsiV   // standard state update
 //! ```
 //!
-//! The MIMO causal mask is identical to [`crate::mamba3::ssd::minimal`] but
+//! The MIMO causal mask is identical to [`crate::mamba3::double_ssd::ssd::minimal`] but
 //! with a stricter inequality (`i_time > j_time` rather than `i_time ≥ j_time`).
 //!
 //! Reference implementations:
 //! - SISO: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
 //! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
-use crate::mamba3::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::segsum::segsum;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3TrapSsdInput<B> {
-    /// MIMO-first merged-form SSD — segsum variant.
+impl<B: Backend> Mamba3SingleSsdInput<B> {
+    /// MIMO-first single-SSD — segsum variant.
     ///
     /// See module documentation for the algorithm. Returns the chunked outputs
-    /// and the final merged-form accumulator.
+    /// and the final single-ssd accumulator.
     ///
     /// # Shapes
-    /// - input: see [`Mamba3TrapSsdInput`]
+    /// - input: see [`Mamba3SingleSsdInput`]
     /// - output `(y_bnlmhp, final_state_bhpr)`:
     ///   - `y_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     ///   - `final_state_bhpr`:   `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn ssd_trap_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn single_ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         input.sanity();
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
@@ -212,7 +212,7 @@ impl<B: Backend> Mamba3TrapSsdInput<B> {
             y_diag_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
 
         // =============================================================
-        // STEP 2: Per-chunk merged state (standard SSD with K_scaled)
+        // STEP 2: Per-chunk single-ssd state (standard SSD with K_scaled)
         //
         // s[n] = Σ_{t,m} exp(cumA[n,-1] - cumA[n,t]) · V[n,t*M+m] · K_scaled[n,t*M+m]^T
         // =============================================================

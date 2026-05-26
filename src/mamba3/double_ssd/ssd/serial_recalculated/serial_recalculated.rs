@@ -1,15 +1,16 @@
 #![allow(non_snake_case)]
 
-use crate::mamba3::prelude::*;
-use crate::mamba3::ssd::serial;
+use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::double_ssd::ssd;
 use crate::utils::primitive::mk;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
+use ssd::serial;
 
-impl<B: Backend + Mamba3BackendExt> Mamba3SsdInput<B> {
+impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
     /// MIMO-first Serial SSD with recalculated backward.
     ///
-    /// Delegates the full K1-K5 computation to [`Mamba3BackendExt::ssd_serial_recalculated`]
+    /// Delegates the full K1-K5 computation to [`Mamba3DoubleSsdBackendExt::double_ssd_serial_recalculated`]
     /// which can provide a memory-efficient custom backward for supported backends.
     ///
     /// Falls back to the standard K1-K5 serial computation on unsupported backends.
@@ -17,20 +18,21 @@ impl<B: Backend + Mamba3BackendExt> Mamba3SsdInput<B> {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn double_ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         assert!(
             input.init_state_hpr.is_none(),
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
-        let (y_bnlmhp, final_state_bhpr) = <B as Mamba3BackendExt>::ssd_serial_recalculated(
-            input.v_bnlmhp.into_primitive().tensor(),
-            input.da_bnlh.into_primitive().tensor(),
-            input.b_bnlmhr.into_primitive().tensor(),
-            input.c_bnlmhr.into_primitive().tensor(),
-            input.initial_state_bhpr.into_primitive().tensor(),
-        );
+        let (y_bnlmhp, final_state_bhpr) =
+            <B as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
+                input.v_bnlmhp.into_primitive().tensor(),
+                input.da_bnlh.into_primitive().tensor(),
+                input.b_bnlmhr.into_primitive().tensor(),
+                input.c_bnlmhr.into_primitive().tensor(),
+                input.initial_state_bhpr.into_primitive().tensor(),
+            );
         let y_bnlmhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlmhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
         (y_bnlmhp, final_state_bhpr)
@@ -43,7 +45,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3SsdInput<B> {
 /// Backends that support a custom memory-efficient backward (specifically the
 /// Autodiff wrapper) override this to recompute forward intermediates during
 /// the backward pass instead of saving them.
-pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
+pub trait Mamba3DoubleSsdBackendExt: burn::tensor::backend::Backend {
     /// Memory-efficient MIMO serial SSD.
     ///
     /// # Arguments
@@ -56,7 +58,7 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    fn ssd_serial_recalculated(
+    fn double_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
         b_bnlmhr: FloatTensor<Self>,
@@ -94,10 +96,10 @@ pub trait Mamba3BackendExt: burn::tensor::backend::Backend {
     }
 }
 
-crate::decl_ssd_autodiff_backend_ext!(Mamba3AutodiffBackendExt, Mamba3BackendExt);
+crate::decl_ssd_autodiff_backend_ext!(Mamba3DoubleSsdAutodiffBackendExt, Mamba3DoubleSsdBackendExt);
 
 // ---------------------------------------------------------------------------
 // Per-backend impls: each delegates to the trait's default (K1-K5) body. The
 // custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3BackendExt);
+crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3DoubleSsdBackendExt);

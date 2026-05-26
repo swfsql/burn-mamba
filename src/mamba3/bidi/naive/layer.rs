@@ -1,5 +1,7 @@
 use crate::mamba3::bidi::naive::{OutputMerge, OutputMergeConfig};
+use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
@@ -90,33 +92,23 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
                 self.n_real_layers
             });
 
+        // Lazily allocate zero caches the first time (e.g. during training or
+        // the first prefill call).
         let caches = caches.unwrap_or_else(|| {
-            let device = &x.device();
-            let [batch, _sequence, _d_model] = x.dims();
-            let layer0_block = &self.real_layers[0].mamba_block;
-
-            Mamba3CachesConfig::new(
-                n_virtual_layers,
-                Mamba3CacheConfig {
-                    batch,
-                    state_rank: layer0_block.state_rank,
-                    num_rope_angles: layer0_block.num_rope_angles,
-                    per_head_dim: layer0_block.per_head_dim(),
-                    nheads: layer0_block.nheads(),
-                    mimo_rank: layer0_block.mimo_rank,
-                },
-            )
-            .init(device)
+            self.make_zero_caches_single_ssd_3d(&x, n_virtual_layers)
+                .into()
         });
 
         // assertions
         assert_eq!(
-            caches.caches.len(),
+            caches.caches_len(),
             n_virtual_layers,
             "straight and reverse layers in forward() currently cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        // Wrap each cache slot into an `Option` so we can `take` it in the
+        // loop without cloning (Burn tensors are reference-counted).
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.into_options();
 
         for i in 0..n_virtual_layers / 2 {
             // use real layers by reference (clone)
@@ -168,11 +160,48 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
             caches[reverse_cache_idx] = Some(reverse_cache_);
         }
 
-        let caches = Mamba3Caches {
-            caches: caches.into_iter().map(|c| c.unwrap()).collect(),
-        };
-
+        let caches = Mamba3Caches::from_options(caches);
         (x, caches)
+    }
+
+    /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
+    pub fn make_zero_caches_double_ssd_3d(
+        &self,
+        x: &Tensor<B, 3>,
+        n_virtual: usize,
+    ) -> Mamba3DoubleSsdCaches<B> {
+        use crate::mamba3::layer::*;
+        make_zero_caches_double_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
+    }
+
+    /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
+    pub fn make_zero_caches_double_ssd_2d(
+        &self,
+        x: &Tensor<B, 2>,
+        n_virtual: usize,
+    ) -> Mamba3DoubleSsdCaches<B> {
+        use crate::mamba3::layer::*;
+        make_zero_caches_double_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
+    }
+
+    /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
+    pub fn make_zero_caches_single_ssd_3d(
+        &self,
+        x: &Tensor<B, 3>,
+        n_virtual: usize,
+    ) -> Mamba3SingleSsdCaches<B> {
+        use crate::mamba3::layer::*;
+        make_zero_caches_single_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
+    }
+
+    /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
+    pub fn make_zero_caches_single_ssd_2d(
+        &self,
+        x: &Tensor<B, 2>,
+        n_virtual: usize,
+    ) -> Mamba3SingleSsdCaches<B> {
+        use crate::mamba3::layer::*;
+        make_zero_caches_single_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
 }
 

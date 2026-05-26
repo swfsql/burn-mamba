@@ -1,13 +1,13 @@
 #![allow(non_snake_case)]
 
-use crate::mamba3::prelude::*;
+use crate::mamba3::double_ssd::prelude::*;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3SsdInput<B> {
+impl<B: Backend> Mamba3DoubleSsdInput<B> {
     /// MIMO-first (Hybrid) Serial SSD.
     ///
     /// Implements K1-K5 with a sequential loop (K4) for the inter-chunk scan instead
-    /// of the quadratic segsum approach in [`Self::ssd_minimal`].
+    /// of the quadratic segsum approach in [`Self::double_ssd_minimal`].
     /// This is more memory-efficient for long sequences with many chunks.
     ///
     /// SISO (mimo_rank=1) is the special case where the fused length equals the chunk length.
@@ -15,7 +15,7 @@ impl<B: Backend> Mamba3SsdInput<B> {
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn double_ssd_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();

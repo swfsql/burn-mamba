@@ -1,32 +1,33 @@
 #![allow(non_snake_case)]
 
-use crate::mamba3::prelude::*;
-use crate::mamba3::ssd::{serial, trap_serial};
+use crate::mamba3::single_ssd::prelude::*;
+use crate::mamba3::single_ssd::ssd;
 use crate::utils::primitive::mk;
 use burn::prelude::*;
 use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
+use ssd::serial;
 
-impl<B: Backend + Mamba3TrapBackendExt> Mamba3TrapSsdInput<B> {
-    /// MIMO-first merged-form Serial SSD with recalculated backward.
+impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
+    /// MIMO-first single-ssd form Serial SSD with recalculated backward.
     ///
-    /// Delegates the full K1–K5 (trapezoidal) computation to
-    /// [`Mamba3TrapBackendExt::ssd_trap_serial_recalculated`], which can provide
+    /// Delegates the full K1–K5 (single-ssd) computation to
+    /// [`Mamba3SingleSsdBackendExt::single_ssd_serial_recalculated`], which can provide
     /// a memory-efficient custom backward for supported backends (the Autodiff
     /// wrapper) and falls back to the standard K1–K5 forward on others.
     ///
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn ssd_trap_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn single_ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         input.sanity();
         assert!(
             input.init_state_hpr.is_none(),
-            "init_state_hpr not yet implemented for ssd_trap_serial_recalculated"
+            "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
         let (y_bnlmhp, final_state_bhpr) =
-            <B as Mamba3TrapBackendExt>::ssd_trap_serial_recalculated(
+            <B as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
                 input.v_bnlmhp.into_primitive().tensor(),
                 input.da_bnlh.into_primitive().tensor(),
                 input.b_bnlmhr.into_primitive().tensor(),
@@ -41,17 +42,16 @@ impl<B: Backend + Mamba3TrapBackendExt> Mamba3TrapSsdInput<B> {
     }
 }
 
-/// Extends the backend for the memory-efficient merged-form (trapezoidal)
-/// serial SSD.
+/// Extends the backend for the memory-efficient single-ssd form serial SSD.
 ///
 /// The default implementation runs K1–K5 using standard tensor operations,
-/// reusing K1/K2/K4 from [`crate::mamba3::ssd::serial`] (mode-agnostic) and the
-/// merged-form K5 from [`crate::mamba3::ssd::trap_serial`]. Backends that
+/// reusing K1/K2/K4 from [`crate::mamba3::double_ssd::ssd::serial`] (mode-agnostic) and the
+/// single-ssd form K5 from [`crate::mamba3::single_ssd::ssd::serial`]. Backends that
 /// support a custom memory-efficient backward (the Autodiff wrapper) override
 /// this to recompute forward intermediates during backward instead of saving
 /// them.
-pub trait Mamba3TrapBackendExt: burn::tensor::backend::Backend {
-    /// Memory-efficient MIMO merged-form serial SSD.
+pub trait Mamba3SingleSsdBackendExt: burn::tensor::backend::Backend {
+    /// Memory-efficient MIMO single-ssd form serial SSD.
     ///
     /// # Arguments
     /// - `v_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
@@ -65,7 +65,7 @@ pub trait Mamba3TrapBackendExt: burn::tensor::backend::Backend {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    fn ssd_trap_serial_recalculated(
+    fn single_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
         b_bnlmhr: FloatTensor<Self>,
@@ -74,7 +74,7 @@ pub trait Mamba3TrapBackendExt: burn::tensor::backend::Backend {
         scale_bnlh: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        // Default impl: replicate the merged-form K1–K5 (see `ssd_trap_serial`).
+        // Default impl: replicate the single-ssd form K1–K5 (see `single_ssd_serial`).
         let v_bnlmhp: Tensor<Self, 6> = mk(v_bnlmhp);
         let da_bnlh: Tensor<Self, 4> = mk(da_bnlh);
         let b_bnlmhr: Tensor<Self, 6> = mk(b_bnlmhr);
@@ -98,8 +98,8 @@ pub trait Mamba3TrapBackendExt: burn::tensor::backend::Backend {
             da_chunk_end_bhn,
             initial_state_bhpr,
         );
-        // K5 — merged-form chunk scan.
-        let y_bnlmhp = trap_serial::k5_trap_ssd_chunk_scan(
+        // K5 — single-ssd form chunk scan.
+        let y_bnlmhp = serial::k5_single_ssd_chunk_scan(
             da_cumsum_bhnl,
             v_bnlmhp,
             c_bnlmhr,
@@ -116,10 +116,10 @@ pub trait Mamba3TrapBackendExt: burn::tensor::backend::Backend {
     }
 }
 
-crate::decl_ssd_autodiff_backend_ext!(Mamba3TrapAutodiffBackendExt, Mamba3TrapBackendExt);
+crate::decl_ssd_autodiff_backend_ext!(Mamba3SingleSsdAutodiffBackendExt, Mamba3SingleSsdBackendExt);
 
 // ---------------------------------------------------------------------------
 // Per-backend impls: each delegates to the trait's default (K1–K5) body. The
 // custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3TrapBackendExt);
+crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);

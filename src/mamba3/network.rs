@@ -220,9 +220,6 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Network<B> {
     // step  (single token — autoregressive decoding)
     // -----------------------------------------------------------------------
 
-    // NOTE: the merged-form (trapezoidal) full-sequence path lives in
-    // `forward2` below, gated on `Mamba3TrapBackendExt`.
-
     /// Process a **single** token and return next-token logits.
     ///
     /// Internally this calls [`Mamba3Layers::step`], which advances each
@@ -317,49 +314,5 @@ impl<B: Backend> Mamba3Network<B> {
             };
             tied_linear.forward(x_bsm)
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Merged-form (single-pass trapezoidal) full-sequence path
-// ---------------------------------------------------------------------------
-
-impl<B: Backend + Mamba3TrapBackendExt> Mamba3Network<B> {
-    /// Process a full token sequence with the **merged-form (single-pass)
-    /// trapezoidal** algorithm and return next-token logits.
-    ///
-    /// The [`Self::forward`] analogue: same embedding → layers → norm → LM head
-    /// pipeline, but the layer stack runs [`Mamba3Layers::forward2`] (one SSD
-    /// pass per layer) and carries [`Mamba3MergedCaches`].
-    ///
-    /// # Arguments
-    /// - `x` — integer token IDs, shape `[batch, sequence]`
-    /// - `caches` — optional pre-filled merged-form caches
-    /// - `trap_path` — merged-form SSD algorithm and chunk length selection
-    ///
-    /// # Returns
-    /// `(logits, caches)` where `logits` has shape `[batch, sequence, padded_vocab_size]`.
-    pub fn forward2(
-        &self,
-        x: Tensor<B, 2, Int>,
-        caches: Option<Mamba3MergedCaches<B>>,
-        trap_path: Mamba3TrapSsdPath,
-    ) -> (Tensor<B, 3>, Mamba3MergedCaches<B>) {
-        let [batch, sequence] = x.dims();
-        let [padded_vocab, d_model] = self.embedding.weight.dims();
-
-        let x_bsm = self.embedding.forward(x);
-        assert_eq!([batch, sequence, d_model], x_bsm.dims());
-
-        let (mut x_bsm, caches) = self.layers.forward2(x_bsm, caches, trap_path);
-        assert_eq!([batch, sequence, d_model], x_bsm.dims());
-
-        x_bsm = self.norm_f.forward(x_bsm);
-        assert_eq!([batch, sequence, d_model], x_bsm.dims());
-
-        x_bsm = self.apply_lm_head(x_bsm, d_model, padded_vocab);
-        assert_eq!([batch, sequence, padded_vocab], x_bsm.dims());
-
-        (x_bsm, caches)
     }
 }

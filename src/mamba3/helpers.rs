@@ -18,7 +18,7 @@ use burn::prelude::*;
 /// Output of [`trapezoidal_coefficients`].
 ///
 /// All tensors share the rank `D` of the inputs.
-pub struct TrapCoeffs<B: Backend, const D: usize> {
+pub struct TrapezoidCoeffs<B: Backend, const D: usize> {
     /// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
     pub dt: Tensor<B, D>,
     /// `Δₜ · Aₜ` (negative; the log-decay).
@@ -44,7 +44,7 @@ pub fn trapezoidal_coefficients<B: Backend, const D: usize>(
     dt_bias_h: Tensor<B, 1>,
     dt_limit: (f64, f64),
     a_floor: f64,
-) -> TrapCoeffs<B, D> {
+) -> TrapezoidCoeffs<B, D> {
     // Broadcast dt_bias_h [nheads] → [1, ..., 1, nheads] so the addition aligns
     // on the last dim regardless of leading shape.
     let dt_bias_broadcast = dt_bias_h.unsqueeze::<D>();
@@ -55,7 +55,7 @@ pub fn trapezoidal_coefficients<B: Backend, const D: usize>(
     let alpha = da.clone().exp();
     let beta = (-lambda.clone() + 1.0) * dt.clone() * alpha.clone();
     let gamma = lambda * dt.clone();
-    TrapCoeffs {
+    TrapezoidCoeffs {
         dt,
         da,
         alpha,

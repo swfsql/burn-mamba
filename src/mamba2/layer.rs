@@ -144,10 +144,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 
         // Lazily allocate zero caches the first time (e.g. during training or
         // the first prefill call).
-        let caches = caches.unwrap_or_else(|| self.make_zero_caches(&x, n_virtual_layers));
+        let caches = caches.unwrap_or_else(|| self.make_zero_caches_3d(&x, n_virtual_layers));
 
         assert_eq!(
-            caches.caches.len(),
+            caches.caches_len(),
             n_virtual_layers,
             "cache count must match the number of virtual layers; \
              layers in forward() cannot share caches"
@@ -155,7 +155,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
 
         // Unwrap each cache slot into an `Option` so we can `take` it in the
         // loop without cloning (Burn tensors are reference-counted).
-        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.into_options();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -173,9 +173,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba2Caches {
-            caches: caches.into_iter().map(Option::unwrap).collect(),
-        };
+        let caches = Mamba2Caches::from_options(caches);
         (x, caches)
     }
 
@@ -206,13 +204,13 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
         let caches = caches.unwrap_or_else(|| self.make_zero_caches_2d(&x, n_virtual_layers));
 
         assert_eq!(
-            caches.caches.len(),
+            caches.caches_len(),
             n_virtual_layers,
             "cache count must match the number of virtual layers; \
              layers in step() cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba2Cache<B>>> = caches.into_options();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -226,9 +224,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba2Caches {
-            caches: caches.into_iter().map(Option::unwrap).collect(),
-        };
+        let caches = Mamba2Caches::from_options(caches);
         (x, caches)
     }
 
@@ -262,7 +258,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Layers<B> {
     }
 
     /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
-    fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba2Caches<B> {
+    fn make_zero_caches_3d(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba2Caches<B> {
         let device = &x.device();
         let [batch, _sequence, _d_model] = x.dims();
         let layer0 = &self.real_layers[0].mamba_block;

@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 
-use crate::mamba3::ssd::serial;
+use crate::mamba3::double_ssd::ssd;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
+use ssd::serial;
 
 /// Per-input gradients produced by [`combined_backward`].
 #[non_exhaustive]

@@ -1,15 +1,16 @@
 #![allow(non_snake_case)]
 
-use crate::mamba3::ssd::serial;
-use crate::mamba3::ssd::serial_recalculated::combined_backward::k3_ssd_chunk_state_extended;
+use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::k3_ssd_chunk_state_extended;
+use crate::mamba3::single_ssd::ssd;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
+use ssd::serial;
 
-/// Per-input gradients produced by [`combined_backward`] for the merged-form
-/// (trapezoidal) SSD. Adds `d_gamma_bnlh` and `d_scale_bnlh` over the
-/// original-form [`crate::mamba3::ssd::serial_recalculated::combined_backward::CombinedGrads`].
+/// Per-input gradients produced by [`combined_backward`] for the Single-SSD.
+/// Adds `d_gamma_bnlh` and `d_scale_bnlh` over the double-ssd form
+/// [`crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::CombinedGrads`].
 #[non_exhaustive]
-pub struct CombinedTrapGrads<B: Backend> {
+pub struct CombinedSingleSsdGrads<B: Backend> {
     pub d_v_bnlmhp: Tensor<B, 6>,
     pub d_da_bnlh: Tensor<B, 4>,
     pub d_b_bnlmhr: Tensor<B, 6>,
@@ -19,8 +20,7 @@ pub struct CombinedTrapGrads<B: Backend> {
     pub d_initial_state_bhpr: Tensor<B, 4>,
 }
 
-/// Memory-efficient backward for the Mamba-3 MIMO-first **merged-form**
-/// (trapezoidal) chunkwise SSD.
+/// Memory-efficient backward for the Mamba-3 MIMO-first chunkwise Single-SSD.
 ///
 /// Recomputes the forward intermediates (K1–K4) from the saved inputs, then:
 /// - runs a reverse per-chunk loop that fuses the K5 BLUE (state-to-output) and
@@ -39,7 +39,8 @@ pub struct CombinedTrapGrads<B: Backend> {
 ///   `initial_state_bhpr` — the seven saved forward inputs
 ///
 /// # Returns
-/// One [`CombinedTrapGrads`] with gradients for all 7 inputs.
+/// One [`CombinedSingleSsdGrads`] with gradients for all 7 inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bnlmhp: Tensor<B, 6>,
     d_final_bhpr: Tensor<B, 4>,
@@ -51,7 +52,7 @@ pub fn combined_backward<B: Backend>(
     gamma_bnlh: Tensor<B, 4>,
     scale_bnlh: Tensor<B, 4>,
     initial_state_bhpr: Tensor<B, 4>,
-) -> CombinedTrapGrads<B> {
+) -> CombinedSingleSsdGrads<B> {
     use burn::tensor::s;
 
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
@@ -69,7 +70,7 @@ pub fn combined_backward<B: Backend>(
     san(&initial_state_bhpr);
 
     // ═══════════════════════════════════════════════════════════════════════
-    // RECOMPUTE FORWARD INTERMEDIATES (K1–K4, merged-form)
+    // RECOMPUTE FORWARD INTERMEDIATES (K1–K4, single-ssd form)
     // ═══════════════════════════════════════════════════════════════════════
 
     // K1
@@ -238,7 +239,7 @@ pub fn combined_backward<B: Backend>(
             .slice(s![.., i_chunk, .., .., ..])
             .squeeze_dim::<4>(1);
 
-        // ── BLUE backward (identical to original-form) ─────────────────
+        // ── BLUE backward (identical to double-ssd form) ─────────────────
         let exp_da_cumsum_bhLM: Tensor<B, 3> = da_cumsum_bhLM.clone().exp();
         let exp_da_cumsum_bhLMp: Tensor<B, 4> = exp_da_cumsum_bhLM
             .clone()
@@ -536,7 +537,7 @@ pub fn combined_backward<B: Backend>(
     san(&d_scale_bnlh);
     san(&d_initial_state_bhpr);
 
-    CombinedTrapGrads {
+    CombinedSingleSsdGrads {
         d_v_bnlmhp,
         d_da_bnlh,
         d_b_bnlmhr,

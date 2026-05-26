@@ -29,7 +29,9 @@
 //! hybrid Mamba-3 + attention architecture where neighbouring blocks already
 //! carry residuals).
 
+use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
@@ -175,18 +177,21 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
 
         // Lazily allocate zero caches the first time (e.g. during training or
         // the first prefill call).
-        let caches = caches.unwrap_or_else(|| self.make_zero_caches(&x, n_virtual_layers));
+        let caches = caches.unwrap_or_else(|| {
+            self.make_zero_caches_single_ssd_3d(&x, n_virtual_layers)
+                .into()
+        });
 
         assert_eq!(
-            caches.caches.len(),
+            caches.caches_len(),
             n_virtual_layers,
             "cache count must match the number of virtual layers; \
              layers in forward() cannot share caches"
         );
 
-        // Unwrap each cache slot into an `Option` so we can `take` it in the
+        // Wrap each cache slot into an `Option` so we can `take` it in the
         // loop without cloning (Burn tensors are reference-counted).
-        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.into_options();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -204,9 +209,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba3Caches {
-            caches: caches.into_iter().map(Option::unwrap).collect(),
-        };
+        let caches = Mamba3Caches::from_options(caches);
         (x, caches)
     }
 
@@ -234,16 +237,24 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
         caches: Option<Mamba3Caches<B>>,
     ) -> (Tensor<B, 2>, Mamba3Caches<B>) {
         let n_virtual_layers = self.n_virtual_count();
-        let caches = caches.unwrap_or_else(|| self.make_zero_caches_2d(&x, n_virtual_layers));
+
+        // Lazily allocate zero caches the first time (e.g. during training or
+        // the first prefill call).
+        let caches = caches.unwrap_or_else(|| {
+            self.make_zero_caches_single_ssd_2d(&x, n_virtual_layers)
+                .into()
+        });
 
         assert_eq!(
-            caches.caches.len(),
+            caches.caches_len(),
             n_virtual_layers,
             "cache count must match the number of virtual layers; \
-             layers in step() cannot share caches"
+                layers in step() cannot share caches"
         );
 
-        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.caches.into_iter().map(Some).collect();
+        // Unwrap each cache slot into an `Option` so we can `take` it in the
+        // loop without cloning (Burn tensors are reference-counted).
+        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.into_options();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n_virtual_layers {
@@ -257,126 +268,137 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layers<B> {
             caches[i] = Some(cache_);
         }
 
-        let caches = Mamba3Caches {
-            caches: caches.into_iter().map(Option::unwrap).collect(),
-        };
+        let caches = Mamba3Caches::from_options(caches);
         (x, caches)
     }
 
     /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
-    fn make_zero_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba3Caches<B> {
-        let device = &x.device();
-        let [batch, _sequence, _d_model] = x.dims();
-        let layer0 = &self.real_layers[0].mamba_block;
-
-        Mamba3CachesConfig::new(
-            n_virtual,
-            Mamba3CacheConfig {
-                batch,
-                state_rank: layer0.state_rank,
-                num_rope_angles: layer0.num_rope_angles,
-                per_head_dim: layer0.per_head_dim(),
-                nheads: layer0.nheads(),
-                mimo_rank: layer0.mimo_rank,
-            },
-        )
-        .init(device)
+    pub fn make_zero_caches_double_ssd_3d(
+        &self,
+        x: &Tensor<B, 3>,
+        n_virtual: usize,
+    ) -> Mamba3DoubleSsdCaches<B> {
+        make_zero_caches_double_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
 
     /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
-    fn make_zero_caches_2d(&self, x: &Tensor<B, 2>, n_virtual: usize) -> Mamba3Caches<B> {
-        let device = &x.device();
-        let [batch, _d_model] = x.dims();
-        let layer0 = &self.real_layers[0].mamba_block;
+    pub fn make_zero_caches_double_ssd_2d(
+        &self,
+        x: &Tensor<B, 2>,
+        n_virtual: usize,
+    ) -> Mamba3DoubleSsdCaches<B> {
+        make_zero_caches_double_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
+    }
 
-        Mamba3CachesConfig::new(
-            n_virtual,
-            Mamba3CacheConfig {
-                batch,
-                state_rank: layer0.state_rank,
-                num_rope_angles: layer0.num_rope_angles,
-                per_head_dim: layer0.per_head_dim(),
-                nheads: layer0.nheads(),
-                mimo_rank: layer0.mimo_rank,
-            },
-        )
-        .init(device)
+    /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
+    pub fn make_zero_caches_single_ssd_3d(
+        &self,
+        x: &Tensor<B, 3>,
+        n_virtual: usize,
+    ) -> Mamba3SingleSsdCaches<B> {
+        make_zero_caches_single_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
+    }
+
+    /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
+    pub fn make_zero_caches_single_ssd_2d(
+        &self,
+        x: &Tensor<B, 2>,
+        n_virtual: usize,
+    ) -> Mamba3SingleSsdCaches<B> {
+        make_zero_caches_single_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Mamba3Layers::forward2  (merged-form / single-pass trapezoidal SSD)
-// ---------------------------------------------------------------------------
+/// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
+pub fn make_zero_caches_double_ssd_3d<B: Backend>(
+    mamba_block: &Mamba3<B>,
+    x: &Tensor<B, 3>,
+    n_virtual: usize,
+) -> Mamba3DoubleSsdCaches<B> {
+    let device = &x.device();
+    let [batch, _sequence, _d_model] = x.dims();
 
-impl<B: Backend + Mamba3TrapBackendExt> Mamba3Layers<B> {
-    /// Process a full sequence through every (virtual) layer using the
-    /// **merged-form (single-pass) trapezoidal** algorithm.
-    ///
-    /// This is the [`Mamba3::forward2`] analogue of [`Self::forward`]: same
-    /// stacking, virtual-layer scheduling, and residual handling, but each
-    /// layer runs the single-SSD-pass trapezoidal kernel and carries a
-    /// [`Mamba3MergedCache`] instead of a [`Mamba3Cache`].
-    ///
-    /// # Arguments
-    /// - `x` — input tensor, shape `[batch, sequence, d_model]`
-    /// - `caches` — optional pre-filled merged-form layer caches
-    /// - `trap_path` — merged-form SSD algorithm and chunk length selection
-    pub fn forward2(
-        &self,
-        mut x: Tensor<B, 3>,
-        caches: Option<Mamba3MergedCaches<B>>,
-        trap_path: Mamba3TrapSsdPath,
-    ) -> (Tensor<B, 3>, Mamba3MergedCaches<B>) {
-        let n_virtual_layers = self.n_virtual_count();
-        let caches = caches.unwrap_or_else(|| self.make_zero_merged_caches(&x, n_virtual_layers));
+    Mamba3DoubleSsdCachesConfig::new(
+        n_virtual,
+        Mamba3DoubleSsdCacheConfig {
+            batch,
+            state_rank: mamba_block.state_rank,
+            num_rope_angles: mamba_block.num_rope_angles,
+            per_head_dim: mamba_block.per_head_dim(),
+            nheads: mamba_block.nheads(),
+            mimo_rank: mamba_block.mimo_rank,
+        },
+    )
+    .init(device)
+}
 
-        assert_eq!(
-            caches.caches.len(),
-            n_virtual_layers,
-            "cache count must match the number of virtual layers; \
-             layers in forward2() cannot share caches"
-        );
+/// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
+pub fn make_zero_caches_double_ssd_2d<B: Backend>(
+    mamba_block: &Mamba3<B>,
+    x: &Tensor<B, 2>,
+    n_virtual: usize,
+) -> Mamba3DoubleSsdCaches<B> {
+    let device = &x.device();
+    let [batch, _d_model] = x.dims();
 
-        let mut caches: Vec<Option<Mamba3MergedCache<B>>> =
-            caches.caches.into_iter().map(Some).collect();
+    Mamba3DoubleSsdCachesConfig::new(
+        n_virtual,
+        Mamba3DoubleSsdCacheConfig {
+            batch,
+            state_rank: mamba_block.state_rank,
+            num_rope_angles: mamba_block.num_rope_angles,
+            per_head_dim: mamba_block.per_head_dim(),
+            nheads: mamba_block.nheads(),
+            mimo_rank: mamba_block.mimo_rank,
+        },
+    )
+    .init(device)
+}
 
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..n_virtual_layers {
-            let layer_idx = self.real_idx(i);
-            let layer = &self.real_layers[layer_idx];
-            let residual_scale = self.residual_scale(i, n_virtual_layers);
+/// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
+pub fn make_zero_caches_single_ssd_3d<B: Backend>(
+    mamba_block: &Mamba3<B>,
+    x: &Tensor<B, 3>,
+    n_virtual: usize,
+) -> Mamba3SingleSsdCaches<B> {
+    let device = &x.device();
+    let [batch, _sequence, _d_model] = x.dims();
 
-            let cache = caches[i].take().unwrap();
-            let (x_, cache_) = layer.forward2(x, Some(cache), trap_path.clone(), residual_scale);
-            x = x_;
-            caches[i] = Some(cache_);
-        }
+    Mamba3SingleSsdCachesConfig::new(
+        n_virtual,
+        Mamba3SingleSsdCacheConfig {
+            batch,
+            state_rank: mamba_block.state_rank,
+            num_rope_angles: mamba_block.num_rope_angles,
+            per_head_dim: mamba_block.per_head_dim(),
+            nheads: mamba_block.nheads(),
+            mimo_rank: mamba_block.mimo_rank,
+        },
+    )
+    .init(device)
+}
 
-        let caches = Mamba3MergedCaches {
-            caches: caches.into_iter().map(Option::unwrap).collect(),
-        };
-        (x, caches)
-    }
+/// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
+pub fn make_zero_caches_single_ssd_2d<B: Backend>(
+    mamba_block: &Mamba3<B>,
+    x: &Tensor<B, 2>,
+    n_virtual: usize,
+) -> Mamba3SingleSsdCaches<B> {
+    let device = &x.device();
+    let [batch, _d_model] = x.dims();
 
-    /// Build zero-initialised merged-form caches from a `[batch, sequence, d_model]` input.
-    fn make_zero_merged_caches(&self, x: &Tensor<B, 3>, n_virtual: usize) -> Mamba3MergedCaches<B> {
-        let device = &x.device();
-        let [batch, _sequence, _d_model] = x.dims();
-        let layer0 = &self.real_layers[0].mamba_block;
-
-        Mamba3MergedCachesConfig::new(
-            n_virtual,
-            Mamba3MergedCacheConfig {
-                batch,
-                state_rank: layer0.state_rank,
-                num_rope_angles: layer0.num_rope_angles,
-                per_head_dim: layer0.per_head_dim(),
-                nheads: layer0.nheads(),
-                mimo_rank: layer0.mimo_rank,
-            },
-        )
-        .init(device)
-    }
+    Mamba3SingleSsdCachesConfig::new(
+        n_virtual,
+        Mamba3SingleSsdCacheConfig {
+            batch,
+            state_rank: mamba_block.state_rank,
+            num_rope_angles: mamba_block.num_rope_angles,
+            per_head_dim: mamba_block.per_head_dim(),
+            nheads: mamba_block.nheads(),
+            mimo_rank: mamba_block.mimo_rank,
+        },
+    )
+    .init(device)
 }
 
 // ---------------------------------------------------------------------------
@@ -497,43 +519,5 @@ impl<B: Backend + Mamba3BackendExt> Mamba3Layer<B> {
         assert_eq!([batch, d_model], out_bm.dims());
 
         (out_bm, cache)
-    }
-}
-
-impl<B: Backend + Mamba3TrapBackendExt> Mamba3Layer<B> {
-    /// Run the Pre-LN residual block over a full sequence using the
-    /// **merged-form (single-pass) trapezoidal** algorithm.
-    ///
-    /// Identical in structure to [`Self::forward`] but delegates to
-    /// [`Mamba3::forward2`] and carries a [`Mamba3MergedCache`].
-    ///
-    /// ```text
-    ///   output = x · residual_scale + Mamba3::forward2( RMSNorm(x) )
-    /// ```
-    ///
-    /// # Shapes
-    /// - `x`    : `[batch, sequence, d_model]`
-    /// - output : `[batch, sequence, d_model]`
-    pub fn forward2(
-        &self,
-        x: Tensor<B, 3>,
-        cache: Option<Mamba3MergedCache<B>>,
-        trap_path: Mamba3TrapSsdPath,
-        residual_scale: f32,
-    ) -> (Tensor<B, 3>, Mamba3MergedCache<B>) {
-        let [batch, sequence, d_model] = x.dims();
-
-        let res_bsm = x.clone() * residual_scale;
-
-        let normed_bsm = self.norm.forward(x);
-        assert_eq!([batch, sequence, d_model], normed_bsm.dims());
-
-        let (mamba_out_bsm, cache) = self.mamba_block.forward2(normed_bsm, cache, trap_path);
-        assert_eq!([batch, sequence, d_model], mamba_out_bsm.dims());
-
-        let out_bsm = mamba_out_bsm + res_bsm;
-        assert_eq!([batch, sequence, d_model], out_bsm.dims());
-
-        (out_bsm, cache)
     }
 }

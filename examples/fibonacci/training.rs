@@ -114,6 +114,7 @@ pub fn train<AutoB>(
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'static>;
 
+#[allow(clippy::too_many_arguments)]
 pub fn epoch_train<AutoB>(
     dataloader_train: Dataloader<AutoB>,
     dataloader_valid: Dataloader<AutoB::InnerBackend>,
@@ -152,8 +153,8 @@ where
         let train_output = TrainStep::step(&training_model, batch);
         let pre_metrics = &train_output.item;
 
-        loss_metric.update(&pre_metrics.adapt(), &metric_meta);
-        iteration_speed_metric.update(&pre_metrics.adapt(), &metric_meta);
+        loss_metric.update(&pre_metrics.adapt(), metric_meta);
+        iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
 
         let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
         training_model.0 = optim.step(lr, training_model.0, train_output.grads);
@@ -176,8 +177,8 @@ where
             epoch_valid::<AutoB::InnerBackend>(
                 std::sync::Arc::clone(&dataloader_valid),
                 training_model.0.valid(),
-                &training_config,
-                &model_config,
+                training_config,
+                model_config,
                 epoch,
                 valid_loop_limit,
             );

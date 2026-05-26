@@ -1,175 +1,144 @@
-//! # Mamba-3 Inference Caches
-//!
-//! During autoregressive (token-by-token) generation, three pieces of state
-//! must be preserved between calls:
-//!
-//! 1. **SSM hidden state** — `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, compressed context.
-//! 2. **Previous K state** — `Bₜ₋₁` per rank `[batch, mimo_rank, nheads, state_rank]`,
-//!    needed for the β term of the trapezoidal recurrence.
-//! 3. **Previous V state** — `xₜ₋₁` per head `[batch, nheads, per_head_dim]`,
-//!    paired with k_state to reconstruct β Bₜ₋₁ ⊗ xₜ₋₁.
-//! 4. **Cumulative RoPE angle** — the accumulated rotation angle up to position
-//!    `t`, needed to correctly continue data-dependent rotary embeddings.
-//!
-//! Note: Mamba-3 has **no conv cache** (the short 1-dimensional convolution present in
-//! Mamba-3 is removed; its role is absorbed by the trapezoidal discretization
-//! and the learnable B/C biases).
+//! # Mamba-3 Cache and Pathway Selection
 
-use crate::mamba3::prelude::*;
-use crate::utils::sanity::sanity as san;
-use burn::module::Module;
+use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
 
-// ---------------------------------------------------------------------------
-// Mamba3Caches  (one cache entry per layer)
-// ---------------------------------------------------------------------------
-
-/// A collection of per-layer caches for a complete Mamba-3 network.
-#[derive(Module, Debug)]
-pub struct Mamba3Caches<B: Backend> {
-    /// Per-layer caches.  Length equals the number of virtual layers.
-    pub caches: Vec<Mamba3Cache<B>>,
+/// A pathway-tagged bundle of per-layer caches, so a single dispatch entry can
+/// accept / return either cache family.
+///
+/// The caches selection infers whether Double-SSD or Single-SSD is used.  
+/// If none is specified, this defaults to [`Self::SingleSsd`].
+///
+/// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
+#[derive(Debug)]
+pub enum Mamba3Caches<B: Backend> {
+    /// Caches for the double-ssd pathway.
+    DoubleSsd(Mamba3DoubleSsdCaches<B>),
+    /// Caches for the single-ssd pathway.
+    SingleSsd(Mamba3SingleSsdCaches<B>),
 }
 
-/// Configuration / factory for [`Mamba3Caches`].
-#[derive(Config, Debug)]
-pub struct Mamba3CachesConfig {
-    /// Number of cache slots (= number of virtual layers).
-    pub n_real_caches: usize,
-
-    /// Shared configuration that determines the shape of each cache.
-    pub cache: Mamba3CacheConfig,
+/// A pathway-tagged bundle of per-block cache, so a single dispatch entry can
+/// accept / return either cache family.
+///
+/// The cache selection infers whether Double-SSD or Single-SSD is used.  
+/// If none is specified, this defaults to [`Self::SingleSsd`].
+///
+/// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
+#[derive(Debug)]
+pub enum Mamba3Cache<B: Backend> {
+    /// Caches for double-ssd pathway.
+    DoubleSsd(Mamba3DoubleSsdCache<B>),
+    /// Caches for single-ssd pathway.
+    SingleSsd(Mamba3SingleSsdCache<B>),
 }
 
-impl Mamba3CachesConfig {
-    /// Convenience constructor from a block config.
-    pub fn new_from_block_config(
-        n_real_caches: usize,
-        batch: usize,
-        block_config: Mamba3Config,
-    ) -> Self {
-        Self {
-            n_real_caches,
-            cache: Mamba3CacheConfig::new_from_block_config(batch, block_config),
+impl<B: Backend> Mamba3Caches<B> {
+    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCaches<B>> {
+        match self {
+            Self::DoubleSsd(caches) => Some(caches),
+            Self::SingleSsd(_caches) => None,
         }
     }
 
-    /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3Caches<B> {
-        let caches = (0..self.n_real_caches)
-            .map(|_| self.cache.clone().init(device))
-            .collect();
-        Mamba3Caches { caches }
+    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCaches<B>> {
+        match self {
+            Self::DoubleSsd(_caches) => None,
+            Self::SingleSsd(caches) => Some(caches),
+        }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Mamba3Cache  (state for a single layer)
-// ---------------------------------------------------------------------------
+    pub fn caches_len(&self) -> usize {
+        match self {
+            Self::DoubleSsd(caches) => caches.caches.len(),
+            Self::SingleSsd(caches) => caches.caches.len(),
+        }
+    }
 
-/// The mutable state carried between decoding steps for a **single** Mamba-3 layer.
-///
-/// All tensors are updated at every call to [`crate::mamba3::mamba3::Mamba3::step`].
-#[derive(Module, Debug)]
-pub struct Mamba3Cache<B: Backend> {
-    /// **SSM hidden state** `hₜ`.
-    ///
-    /// Updated via the trapezoidal recurrence:
-    /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Kₜ₋₁[m] ⊗ (Vₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`
-    ///
-    /// Shape: `[batch, nheads, per_head_dim, state_rank]`
-    pub ssm_bhpr: Tensor<B, 4>,
+    pub fn from_vec(vec: Vec<Mamba3Cache<B>>) -> Self {
+        // peek at first; empty implies single_ssd
+        let is_double = matches!(vec.first(), Some(Mamba3Cache::DoubleSsd(_)));
+        if is_double {
+            Mamba3DoubleSsdCaches {
+                caches: vec
+                    .into_iter()
+                    .map(Mamba3Cache::double_ssd)
+                    .map(Option::unwrap)
+                    .collect(),
+            }
+            .into()
+        } else {
+            Mamba3SingleSsdCaches {
+                caches: vec
+                    .into_iter()
+                    .map(Mamba3Cache::single_ssd)
+                    .map(Option::unwrap)
+                    .collect(),
+            }
+            .into()
+        }
+    }
 
-    /// **Previous token's B per mimo rank** = `Bₜ₋₁[m]`.
-    ///
-    /// Used to reconstruct the β term: `β * sum_r Bₜ₋₁[m] ⊗ (xₜ₋₁ * mimo_x[m])`.
-    /// For SISO (mimo_rank=1) this is shape `[batch, 1, nheads, state_rank]`.
-    ///
-    /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_bmhr: Tensor<B, 4>,
+    pub fn into_options(self) -> Vec<Option<Mamba3Cache<B>>> {
+        match self {
+            Self::DoubleSsd(caches) => caches
+                .caches
+                .into_iter()
+                .map(Mamba3Cache::from)
+                .map(Some)
+                .collect(),
+            Self::SingleSsd(caches) => caches
+                .caches
+                .into_iter()
+                .map(Mamba3Cache::from)
+                .map(Some)
+                .collect(),
+        }
+    }
 
-    /// **Previous token's x** = `xₜ₋₁`.
-    ///
-    /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term.
-    ///
-    /// Shape: `[batch, nheads, per_head_dim]`
-    pub v_state_bhp: Tensor<B, 3>,
-
-    /// **Cumulative data-dependent RoPE angle** up to the current position.
-    ///
-    /// Each step updates: `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · tanh(θₜ) · π`
-    ///
-    /// Starts at zero for fresh sequences; continued across calls for streaming.
-    ///
-    /// Shape: `[batch, nheads, num_rope_angles]`
-    pub cum_angle_bha: Tensor<B, 3>,
+    pub fn from_options(options: Vec<Option<Mamba3Cache<B>>>) -> Self {
+        let caches = options.into_iter().map(Option::unwrap).collect();
+        Self::from_vec(caches)
+    }
 }
 
 impl<B: Backend> Mamba3Cache<B> {
-    pub fn sanity(&self) {
-        san(&self.ssm_bhpr);
-        san(&self.k_state_bmhr);
-        san(&self.v_state_bhp);
-        san(&self.cum_angle_bha);
-    }
-}
-
-/// Configuration / factory for a single [`Mamba3Cache`].
-#[derive(Config, Debug)]
-pub struct Mamba3CacheConfig {
-    /// Batch size.
-    pub batch: usize,
-
-    /// State rank.
-    #[config(default = 128)]
-    pub state_rank: usize,
-
-    /// Head dimension per_head_dim.
-    #[config(default = 64)]
-    pub per_head_dim: usize,
-
-    /// Number of SSM heads.
-    pub nheads: usize,
-
-    /// MIMO rank.  1 = SISO.
-    #[config(default = 1)]
-    pub mimo_rank: usize,
-
-    /// Number of RoPE angle pairs = `rope_dim / 2` = `(state_rank * rope_fraction) / 2`
-    /// (rounded down to even via `Mamba3Config::rope_dim`).
-    pub num_rope_angles: usize,
-}
-
-impl Mamba3CacheConfig {
-    /// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
-    pub fn new_from_block_config(batch: usize, block_config: Mamba3Config) -> Self {
-        Self {
-            batch,
-            state_rank: block_config.state_rank,
-            per_head_dim: block_config.per_head_dim,
-            nheads: block_config.nheads(),
-            mimo_rank: block_config.mimo_rank,
-            num_rope_angles: block_config.num_rope_angles(),
+    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCache<B>> {
+        match self {
+            Self::DoubleSsd(cache) => Some(cache),
+            Self::SingleSsd(_cache) => None,
         }
     }
 
-    /// Allocate zero-initialised cache tensors on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3Cache<B> {
-        let ssm_bhpr = Tensor::zeros(
-            [self.batch, self.nheads, self.per_head_dim, self.state_rank],
-            device,
-        );
-        let k_state_bmhr = Tensor::zeros(
-            [self.batch, self.mimo_rank, self.nheads, self.state_rank],
-            device,
-        );
-        let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let cum_angle_bha = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
-        Mamba3Cache {
-            ssm_bhpr,
-            k_state_bmhr,
-            v_state_bhp,
-            cum_angle_bha,
+    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCache<B>> {
+        match self {
+            Self::DoubleSsd(_cache) => None,
+            Self::SingleSsd(cache) => Some(cache),
         }
+    }
+}
+
+impl<B: Backend> From<Mamba3DoubleSsdCaches<B>> for Mamba3Caches<B> {
+    fn from(caches: Mamba3DoubleSsdCaches<B>) -> Self {
+        Mamba3Caches::DoubleSsd(caches)
+    }
+}
+
+impl<B: Backend> From<Mamba3SingleSsdCaches<B>> for Mamba3Caches<B> {
+    fn from(caches: Mamba3SingleSsdCaches<B>) -> Self {
+        Mamba3Caches::SingleSsd(caches)
+    }
+}
+
+impl<B: Backend> From<Mamba3DoubleSsdCache<B>> for Mamba3Cache<B> {
+    fn from(cache: Mamba3DoubleSsdCache<B>) -> Self {
+        Mamba3Cache::DoubleSsd(cache)
+    }
+}
+
+impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3Cache<B> {
+    fn from(cache: Mamba3SingleSsdCache<B>) -> Self {
+        Mamba3Cache::SingleSsd(cache)
     }
 }

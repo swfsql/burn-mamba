@@ -497,7 +497,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     ///    `Ā = exp(Δ · A)`;  `B̄ = Δ · B`.
     /// 5. **Padding**: sequence padding.
     /// 6. **SSD Algorithm**: chunkwise selective scan algorithm selection.
-    ///     See [`Mamba2SsdPath`] for more info.
+    ///    See [`Mamba2SsdPath`] for more info.
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y) · σ(z)`.
     /// 8. **Out-projection**: `y → output`.
     ///

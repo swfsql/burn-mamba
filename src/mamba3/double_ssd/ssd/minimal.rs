@@ -18,24 +18,24 @@
 //! allows all mimo_ranks ranks at the same time step to attend to each other while
 //! maintaining causal ordering across time steps.
 
-use crate::mamba3::prelude::*;
+use crate::mamba3::double_ssd::prelude::*;
 use crate::utils::segsum::segsum;
 use burn::prelude::*;
 
-impl<B: Backend> Mamba3SsdInput<B> {
+impl<B: Backend> Mamba3DoubleSsdInput<B> {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
     ///
-    /// Implements the four-step decomposition for the MIMO trapezoidal recurrence.
+    /// Implements the four-step decomposition for the MIMO (double-ssd) trapezoidal recurrence.
     /// SISO (mimo_rank=1) is the degenerate case where the fused length equals the chunk length.
     ///
     /// No D skip is applied here — the caller handles it.
     ///
     /// # Shapes
-    /// - input: see [`Mamba3SsdInput`]
+    /// - input: see [`Mamba3DoubleSsdInput`]
     /// - output.0 `y_bnlrhp`:       `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn double_ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
         let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();

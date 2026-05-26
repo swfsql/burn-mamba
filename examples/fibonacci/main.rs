@@ -1,3 +1,6 @@
+#![allow(clippy::let_and_return)]
+#![allow(clippy::module_inception)]
+
 use burn::prelude::*;
 use burn::tensor::backend::AutodiffBackend;
 use burn_mamba::prelude::Mamba2BackendExt;

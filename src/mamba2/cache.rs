@@ -189,3 +189,22 @@ impl Mamba2CacheConfig {
         Mamba2Cache { conv_bvk, ssm_bhpr }
     }
 }
+
+impl<B: Backend> Mamba2Caches<B> {
+    pub fn caches_len(&self) -> usize {
+        self.caches.len()
+    }
+
+    pub fn from_vec(vec: Vec<Mamba2Cache<B>>) -> Self {
+        Self { caches: vec }
+    }
+
+    pub fn into_options(self) -> Vec<Option<Mamba2Cache<B>>> {
+        self.caches.into_iter().map(Some).collect()
+    }
+
+    pub fn from_options(options: Vec<Option<Mamba2Cache<B>>>) -> Self {
+        let caches = options.into_iter().map(Option::unwrap).collect();
+        Self::from_vec(caches)
+    }
+}
