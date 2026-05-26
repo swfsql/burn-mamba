@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["minimal","serial","serial_recalculated","ssd_path"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["apply_rope","apply_rope_partial"],"mod":["step"],"struct":["Mamba3","Mamba3Config","Mamba3Record","Mamba3RecordItem"]};
+window.SIDEBAR_ITEMS = {"mod":["step"],"struct":["Mamba3","Mamba3Config","Mamba3Record","Mamba3RecordItem"]};

@@ -1,0 +1,37 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="SingleSsd chunk scan."><title>k5_single_ssd_chunk_scan in burn_mamba::mamba3::single_ssd::ssd::serial - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (31a9463c6 2026-05-25)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">k5_single_ssd_chunk_scan</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.23.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">k5_<wbr>single_<wbr>ssd_<wbr>chunk_<wbr>scan</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#shapes" title="Shapes">Shapes</a></li><li><a href="#returns" title="Returns">Returns</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In burn_<wbr>mamba::<wbr>mamba3::<wbr>single_<wbr>ssd::<wbr>ssd::<wbr>serial</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../../index.html">burn_mamba</a>::<wbr><a href="../../../index.html">mamba3</a>::<wbr><a href="../../index.html">single_ssd</a>::<wbr><a href="../index.html">ssd</a>::<wbr><a href="index.html">serial</a></div><h1>Function <span class="fn">k5_<wbr>single_<wbr>ssd_<wbr>chunk_<wbr>scan</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../../../src/burn_mamba/mamba3/single_ssd/ssd/serial.rs.html#154-266">Source</a> </span></div><pre class="rust item-decl"><code>pub fn k5_single_ssd_chunk_scan&lt;B: Backend&gt;(
+    da_cumsum_bhnl: Tensor&lt;B, 4&gt;,
+    v_bnlmhp: Tensor&lt;B, 6&gt;,
+    c_bnlmhr: Tensor&lt;B, 6&gt;,
+    b_bnlmhr: Tensor&lt;B, 6&gt;,
+    cb_bnhLMLM: Tensor&lt;B, 5&gt;,
+    gamma_bnlh: Tensor&lt;B, 4&gt;,
+    scale_bnlh: Tensor&lt;B, 4&gt;,
+    chunk_input_state_bnhpr: Tensor&lt;B, 5&gt;,
+) -&gt; Tensor&lt;B, 6&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>SingleSsd chunk scan.</p>
+<p>Computes the per-chunk output from three contributions:</p>
+<ul>
+<li><strong>Strict lower triangular intra-chunk</strong> (<code>t1 &gt; t2</code>):
+<code>(cb[i,j] · scale[t2] · exp(cumA[t1] − cumA[t2])) · V[t2]</code></li>
+<li><strong>Same-time-step (<code>t1 == t2</code>) γ-correction</strong>:
+<code>γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]</code></li>
+<li><strong>State-to-output (Y_off)</strong> — same formula as the double-ssd K5:
+<code>exp(cumA[t]) · C[t] · h'[n-1]</code></li>
+</ul>
+<p><code>cb_bnhLMLM</code> is the unscaled <code>C · Bᵀ</code> matrix from K2; <code>b_bnlmhr</code> is the
+unscaled K/B tensor (used for the γ-correction matmul). The strict-lower
+MIMO mask excludes the same-step <code>R × R</code> block, leaving only <code>t1 &gt; t2</code>
+contributions in the masked CB.</p>
+<h2 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h2>
+<ul>
+<li><code>da_cumsum_bhnl</code>: <code>[B, H, N, L]</code> (base time grid, not fused)</li>
+<li><code>v_bnlmhp</code>: <code>[B, N, L, M, H, P]</code></li>
+<li><code>c_bnlmhr</code>, <code>b_bnlmhr</code>: <code>[B, N, L, M, H, R]</code></li>
+<li><code>cb_bnhLMLM</code>: <code>[B, N, H, L·M, L·M]</code> (output of K2)</li>
+<li><code>gamma_bnlh</code>, <code>scale_bnlh</code>: <code>[B, N, L, H]</code></li>
+<li><code>chunk_input_state_bnhpr</code>: <code>[B, N, H, P, R]</code> (h’ at chunk start)</li>
+</ul>
+<h2 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h2>
+<ul>
+<li><code>y_bnlmhp</code>: <code>[B, N, L, M, H, P]</code></li>
+</ul>
+</div></details></section></div></main></body></html>

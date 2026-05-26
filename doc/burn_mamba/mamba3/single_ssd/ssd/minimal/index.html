@@ -1,0 +1,40 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Single-Pass SSD (Minimal / segsum variant)"><title>burn_mamba::mamba3::single_ssd::ssd::minimal - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (31a9463c6 2026-05-25)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module minimal</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.23.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module minimal</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#single-pass-ssd-minimal--segsum-variant" title="Single-Pass SSD (Minimal / segsum variant)">Single-Pass SSD (Minimal / segsum variant)</a><ul><li><a href="#background--the-single-ssd-recurrence" title="Background — the single-ssd recurrence">Background — the single-ssd recurrence</a></li><li><a href="#algorithm-per-chunk-mimo-first" title="Algorithm (per chunk, MIMO-first)">Algorithm (per chunk, MIMO-first)</a></li></ul></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3::<wbr>single_<wbr>ssd::<wbr>ssd</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../../index.html">burn_mamba</a>::<wbr><a href="../../../index.html">mamba3</a>::<wbr><a href="../../index.html">single_ssd</a>::<wbr><a href="../index.html">ssd</a></div><h1>Module <span>minimal</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../../../src/burn_mamba/mamba3/single_ssd/ssd/minimal.rs.html#1-319">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="single-pass-ssd-minimal--segsum-variant"><a class="doc-anchor" href="#single-pass-ssd-minimal--segsum-variant">§</a>Single-Pass SSD (Minimal / segsum variant)</h2>
+<p>This is the MIMO-first, single SSD pass implementation of the
+Mamba-3 trapezoid recurrence. It is the Burn analogue of the official
+Tilelang MIMO kernel and Triton SISO kernel; SISO is the <code>mimo_rank = 1</code>
+degenerate case.</p>
+<h3 id="background--the-single-ssd-recurrence"><a class="doc-anchor" href="#background--the-single-ssd-recurrence">§</a>Background — the single-ssd recurrence</h3>
+<p>The double-ssd trapezoid hidden state is</p>
+<div class="example-wrap"><pre class="language-text"><code>  hₜ = αₜ hₜ₋₁ + βₜ (Bₜ₋₁ ⊗ xₜ₋₁) + γₜ (Bₜ ⊗ xₜ)</code></pre></div>
+<p>Expanding the recurrence and grouping by <code>(Bₛ ⊗ xₛ)</code> gives the coefficient
+<code>(Πᵣ₌ₛ₊₁ᵗ αᵣ) · [γₛ + (1−λₛ₊₁)·Δₛ₊₁]</code> for the contribution of step <code>s</code> to
+state <code>t</code> (for <code>s &lt; t</code>). At <code>s = t</code> the coefficient is just <code>γₜ</code>.</p>
+<p>Define <code>scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁</code> (with <code>scaleₜ = γₜ</code> at the last
+position). The single-SSD</p>
+<div class="example-wrap"><pre class="language-text"><code>  h&#39;ₜ = αₜ h&#39;ₜ₋₁ + scaleₜ (Bₜ ⊗ xₜ)</code></pre></div>
+<p>produces the same outputs <code>yₜ = Cₜᵀ h'ₜ</code> as the double-ssd one <strong>except</strong>
+at the same-step diagonal (<code>s = t</code>), where the single-ssd form has <code>scaleₜ</code>
+instead of <code>γₜ</code>. We compensate by:</p>
+<ol>
+<li>Using a <strong>strict</strong> lower-triangular mask in the intra-chunk path (the
+<code>s = t</code> block is excluded from the trapezoid sum).</li>
+<li>Adding a separate γ-weighted same-step term <code>γₜ · (Cₜᵀ Bₜ) · xₜ</code>.</li>
+</ol>
+<h3 id="algorithm-per-chunk-mimo-first"><a class="doc-anchor" href="#algorithm-per-chunk-mimo-first">§</a>Algorithm (per chunk, MIMO-first)</h3><div class="example-wrap"><pre class="language-text"><code>  K_scaled[t, m, h, n] = scaleₜ · B[t, m, h, n]     // K scaled inside the SSD
+
+  y_lower  = (C ⊗ K_scaledᵀ ⊙ L_strict) · PsiV     // strict lower-tri
+  y_diag   = γₜ · (C ⊗ Bᵀ at same step) · PsiV      // diagonal correction
+  y_off    = C · h&#39;_chunk_in · exp(da_cs)           // state-to-output
+
+  y        = y_lower + y_diag + y_off
+
+  h&#39;_chunk_out = exp(da_cs_last) · h&#39;_chunk_in
+               + K_scaled · exp(da_cs_rev)ᵀ · PsiV   // standard state update</code></pre></div>
+<p>The MIMO causal mask is identical to <a href="../../../double_ssd/ssd/minimal/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::minimal"><code>crate::mamba3::double_ssd::ssd::minimal</code></a> but
+with a stricter inequality (<code>i_time &gt; j_time</code> rather than <code>i_time ≥ j_time</code>).</p>
+<p>Reference implementations:</p>
+<ul>
+<li>SISO: <code>refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py</code></li>
+<li>MIMO: <code>refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py</code></li>
+</ul>
+</div></details></section></div></main></body></html>

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"trait":["Mamba3AutodiffBackendExt","Mamba3BackendExt"]};

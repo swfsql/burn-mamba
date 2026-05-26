@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Extends the backend for the memory-efficient single-ssd form serial SSD."><title>Mamba3SingleSsdBackendExt in burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::serial_recalculated - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../../" data-static-root-path="../../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (31a9463c6 2026-05-25)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Mamba3SingleSsdBackendExt</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.23.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Mamba3<wbr>Single<wbr>SsdBackend<wbr>Ext</a></h2><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.single_ssd_serial_recalculated" title="single_ssd_serial_recalculated">single_ssd_serial_recalculated</a></li></ul><h3><a href="#foreign-impls">Implementations on Foreign Types</a></h3><ul class="block"><li><a href="#impl-Mamba3SingleSsdBackendExt-for-Autodiff%3CB,+C%3E" title="Autodiff&#60;B, C&#62;">Autodiff&#60;B, C&#62;</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In burn_<wbr>mamba::<wbr>mamba3::<wbr>single_<wbr>ssd::<wbr>ssd::<wbr>serial_<wbr>recalculated::<wbr>serial_<wbr>recalculated</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../../../index.html">burn_mamba</a>::<wbr><a href="../../../../index.html">mamba3</a>::<wbr><a href="../../../index.html">single_ssd</a>::<wbr><a href="../../index.html">ssd</a>::<wbr><a href="../index.html">serial_recalculated</a>::<wbr><a href="index.html">serial_recalculated</a></div><h1>Trait <span class="trait">Mamba3<wbr>Single<wbr>SsdBackend<wbr>Ext</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../../../../src/burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/serial_recalculated.rs.html#53-117">Source</a> </span></div><pre class="rust item-decl"><code>pub trait Mamba3SingleSsdBackendExt: Backend {
+    // Provided method
+    fn <a href="#method.single_ssd_serial_recalculated" class="fn">single_ssd_serial_recalculated</a>(
+        v_bnlmhp: FloatTensor&lt;Self&gt;,
+        da_bnlh: FloatTensor&lt;Self&gt;,
+        b_bnlmhr: FloatTensor&lt;Self&gt;,
+        c_bnlmhr: FloatTensor&lt;Self&gt;,
+        gamma_bnlh: FloatTensor&lt;Self&gt;,
+        scale_bnlh: FloatTensor&lt;Self&gt;,
+        initial_state_bhpr: FloatTensor&lt;Self&gt;,
+    ) -&gt; (FloatTensor&lt;Self&gt;, FloatTensor&lt;Self&gt;) { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Extends the backend for the memory-efficient single-ssd form serial SSD.</p>
+<p>The default implementation runs K1–K5 using standard tensor operations,
+reusing K1/K2/K4 from <a href="../../../../double_ssd/ssd/serial/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::serial"><code>crate::mamba3::double_ssd::ssd::serial</code></a> (mode-agnostic) and the
+single-ssd form K5 from <a href="../../serial/index.html" title="mod burn_mamba::mamba3::single_ssd::ssd::serial"><code>crate::mamba3::single_ssd::ssd::serial</code></a>. Backends that
+support a custom memory-efficient backward (the Autodiff wrapper) override
+this to recompute forward intermediates during backward instead of saving
+them.</p>
+</div></details><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.single_ssd_serial_recalculated" class="method"><a class="src rightside" href="../../../../../../src/burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/serial_recalculated.rs.html#68-116">Source</a><h4 class="code-header">fn <a href="#method.single_ssd_serial_recalculated" class="fn">single_ssd_serial_recalculated</a>(
+    v_bnlmhp: FloatTensor&lt;Self&gt;,
+    da_bnlh: FloatTensor&lt;Self&gt;,
+    b_bnlmhr: FloatTensor&lt;Self&gt;,
+    c_bnlmhr: FloatTensor&lt;Self&gt;,
+    gamma_bnlh: FloatTensor&lt;Self&gt;,
+    scale_bnlh: FloatTensor&lt;Self&gt;,
+    initial_state_bhpr: FloatTensor&lt;Self&gt;,
+) -&gt; (FloatTensor&lt;Self&gt;, FloatTensor&lt;Self&gt;)</h4></section></summary><div class="docblock"><p>Memory-efficient MIMO single-ssd form serial SSD.</p>
+<h5 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h5>
+<ul>
+<li><code>v_bnlmhp</code>:           <code>[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]</code></li>
+<li><code>da_bnlh</code>:            <code>[batch, nchunks, chunk_len, nheads]</code> — pre-combined Δ·A</li>
+<li><code>b_bnlmhr</code>:           <code>[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]</code></li>
+<li><code>c_bnlmhr</code>:           <code>[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]</code></li>
+<li><code>gamma_bnlh</code>:         <code>[batch, nchunks, chunk_len, nheads]</code> — <code>γₜ = λₜ Δₜ</code></li>
+<li><code>scale_bnlh</code>:         <code>[batch, nchunks, chunk_len, nheads]</code> — <code>scaleₜ = γₜ + (1−λₜ₊₁)Δₜ₊₁</code></li>
+<li><code>initial_state_bhpr</code>: <code>[batch, nheads, per_head_dim, state_rank]</code></li>
+</ul>
+<h5 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h5>
+<ul>
+<li><code>y_bnlmhp</code>:         <code>[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]</code></li>
+<li><code>final_state_bhpr</code>: <code>[batch, nheads, per_head_dim, state_rank]</code></li>
+</ul>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="foreign-impls" class="section-header">Implementations on Foreign Types<a href="#foreign-impls" class="anchor">§</a></h2><details class="toggle implementors-toggle"><summary><section id="impl-Mamba3SingleSsdBackendExt-for-Autodiff%3CB,+C%3E" class="impl"><a class="src rightside" href="../../../../../../src/burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/backward.rs.html#17-288">Source</a><a href="#impl-Mamba3SingleSsdBackendExt-for-Autodiff%3CB,+C%3E" class="anchor">§</a><h3 class="code-header">impl&lt;B: Backend + <a class="trait" href="../trait.Mamba3SingleSsdBackendExt.html" title="trait burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::Mamba3SingleSsdBackendExt">Mamba3SingleSsdBackendExt</a>, C: CheckpointStrategy&gt; <a class="trait" href="../trait.Mamba3SingleSsdBackendExt.html" title="trait burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::Mamba3SingleSsdBackendExt">Mamba3SingleSsdBackendExt</a> for Autodiff&lt;B, C&gt;</h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.single_ssd_serial_recalculated-1" class="method trait-impl"><a class="src rightside" href="../../../../../../src/burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/backward.rs.html#27-287">Source</a><a href="#method.single_ssd_serial_recalculated-1" class="anchor">§</a><h4 class="code-header">fn <a href="#method.single_ssd_serial_recalculated" class="fn">single_ssd_serial_recalculated</a>(
+    v_bnlmhp: FloatTensor&lt;Self&gt;,
+    da_bnlh: FloatTensor&lt;Self&gt;,
+    b_bnlmhr: FloatTensor&lt;Self&gt;,
+    c_bnlmhr: FloatTensor&lt;Self&gt;,
+    gamma_bnlh: FloatTensor&lt;Self&gt;,
+    scale_bnlh: FloatTensor&lt;Self&gt;,
+    initial_state_bhpr: FloatTensor&lt;Self&gt;,
+) -&gt; (FloatTensor&lt;Self&gt;, FloatTensor&lt;Self&gt;)</h4></section></summary><div class="docblock"><p>Memory-efficient combined forward+backward for the Mamba-3 MIMO
+Single-SSD.</p>
+<p>The two outputs (<code>y_bnlmhp</code>, <code>final_state_bhpr</code>) are flattened and
+concatenated into a single 1-D tracked tensor so one <code>Backward&lt;B, 7&gt;</code>
+node covers both. The seven differentiable inputs are <code>v, da, b, c, gamma, scale, initial_state</code>.</p>
+</div></details></div></details><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../../../../../trait.impl/burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/serial_recalculated/trait.Mamba3SingleSsdBackendExt.js" data-ignore-extern-crates="burn_autodiff" async></script></section></div></main></body></html>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["bidi","cache","helpers","layer","mamba3","network","prelude","ssd"]};
+window.SIDEBAR_ITEMS = {"mod":["backwards","bidi","cache","double_ssd","helpers","layer","mamba3","network","prelude","single_ssd","ssd_path"],"trait":["Mamba3AutodiffBackendExt","Mamba3BackendExt"]};
