@@ -1,3 +1,10 @@
+//! # Fibonacci example
+//!
+//! The smallest end-to-end demo: a tiny Mamba-2 model trained on a
+//! fibonacci-like synthetic sequence, then used for autoregressive generation.
+//! Exercises the full train → save → infer flow on the `backend-flex` (fp32)
+//! backend.
+
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
 
@@ -10,14 +17,20 @@ pub use common::{
     training::{ConstantLr, Lr, TrainingConfig},
 };
 
+/// The synthetic fibonacci-like dataset.
 pub mod dataset;
+/// Autoregressive generation via `step()`.
 pub mod inference;
+/// The example's `model_config()`.
 pub mod model;
+/// Training entry point for the fibonacci task.
 pub mod training;
 
+/// Shared example infrastructure (included by path).
 #[path = "../common/mod.rs"]
 pub mod common;
 
+/// Wire up backend, configs, and the train/infer flow for the fibonacci task.
 pub fn launch<B, AutoB>(app_args: &AppArgs)
 where
     B: Backend + MainDevice + Mamba2BackendExt,

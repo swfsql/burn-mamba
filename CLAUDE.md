@@ -483,6 +483,11 @@ relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo
   the last with a custom recompute backward for memory savings; all proven
   equal on values + gradients by tests.
 - **Bidirectional support** in both Mamba-2 and Mamba-3.
+- **`#![warn(missing_docs)]`** is enabled at the crate root (`src/lib.rs`):
+  every public item (module, struct, enum, trait, fn, const, struct/config
+  field, enum variant) should carry a doc comment, and any gap surfaces as a
+  build warning. Keep the crate warning-clean — document public surface as you
+  add it.
 - **Burn 0.21+.0** — a recent version; APIs may differ from older online docs.
 - The root of the project is `/shared/claude/burn-mamba/`; do not read/write
   outside it.

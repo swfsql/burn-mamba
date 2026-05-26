@@ -1,3 +1,7 @@
+//! The model configuration for the `mnist-class` example — a small Mamba-3
+//! classifier (2 real layers stretched to 16 virtual layers); see
+//! [`model_config`].
+
 pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
 use burn_mamba::schedule::Schedule;
 

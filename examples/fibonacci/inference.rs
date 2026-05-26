@@ -1,3 +1,6 @@
+//! Inference for the fibonacci example: loads the trained model and predicts
+//! the next value of held-out sequences, printing predictions against targets.
+
 use crate::AppArgs;
 pub use crate::common::{
     backend::FloatElement,
@@ -12,6 +15,7 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
+/// Load the trained model and run inference on a fresh batch of sequences.
 pub fn infer<B: Backend + Mamba2BackendExt>(
     model_config: MyMamba2NetworkConfig,
     batch_size: usize,

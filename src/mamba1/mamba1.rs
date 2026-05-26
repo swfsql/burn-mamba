@@ -49,6 +49,7 @@ use burn::{
     nn::{Initializer, Linear, LinearConfig, PaddingConfig1d},
 };
 
+/// The Mamba-1 selective SSM block.
 #[derive(Module, Debug)]
 pub struct Mamba1<B: Backend> {
     /// Input channel: d_model.
@@ -78,6 +79,7 @@ pub struct Mamba1<B: Backend> {
     pub out_proj: Linear<B>,
 }
 
+/// Configuration / factory for [`Mamba1`].
 #[derive(Config, Debug)]
 pub struct Mamba1Config {
     /// Hidden dimension.
@@ -92,6 +94,7 @@ pub struct Mamba1Config {
     #[config(default = 4)]
     pub conv_kernel: usize,
 
+    /// Expansion factor for `d_inner = expand · d_model`.
     #[config(default = 2)]
     pub expand: usize,
 
@@ -221,9 +224,13 @@ impl Mamba1Config {
                 .init(device),
         }
     }
+    /// Inner (expanded) channel width: the `d_inner` override if set, else
+    /// `expand · d_model`.
     pub fn d_inner(&self) -> usize {
         self.d_inner.unwrap_or(self.expand * self.d_model)
     }
+    /// Rank of the Δ projection: the `dt_rank` override if set, else
+    /// `ceil(d_model / state_rank)`.
     pub fn dt_rank(&self) -> usize {
         self.dt_rank.unwrap_or(self.d_model.div_ceil(self.state_rank))
     }

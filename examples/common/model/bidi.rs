@@ -1,9 +1,13 @@
+//! Bidirectional counterparts of the example networks: `in_proj` →
+//! `{Mamba2,Mamba3}BidiLayers` → `out_proj`, for non-autoregressive tasks.
+
 use crate::common::model::ModelConfigExt;
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 use burn_mamba::prelude::*;
 use burn_mamba::schedule::BidiSchedule;
 
+/// Bidirectional Mamba-2 example network and config builders.
 pub mod mamba2 {
     use super::*;
     use crate::common::model::mamba2_block_config;
@@ -11,21 +15,25 @@ pub mod mamba2 {
         Mamba2BidiLayers, Mamba2BidiLayersConfig, OutputMergeConfig,
     };
 
-    /// Basic Mamba network containing input and output heads, with Mamba2Layers in between.
+    /// Basic bidirectional Mamba network with input/output heads.
     #[derive(Config, Debug)]
     pub struct MyMamba2BidiNetworkConfig {
+        /// Width of the input features fed to `in_proj`.
         #[config(default = 1)]
         pub input_size: usize,
 
+        /// Configuration for the bidirectional Mamba-2 layer stack.
         #[config(
             default = "mamba2_bidi_layers_config(1, None, mamba2_block_config(1, 1, 1, 1, 1, 1), OutputMergeConfig::mean(1))"
         )]
         pub layers: Mamba2BidiLayersConfig,
 
+        /// Width of the output features produced by `out_proj`.
         #[config(default = 1)]
         pub output_size: usize,
     }
 
+    /// Build a [`Mamba2BidiLayersConfig`] with optional virtual-layer scheduling.
     pub fn mamba2_bidi_layers_config(
         n_real_layers: usize,
         n_virtual_layers: Option<(usize, BidiSchedule)>,
@@ -36,10 +44,14 @@ pub mod mamba2 {
             .with_n_virtual_layers(n_virtual_layers)
     }
 
+    /// `in_proj` → bidirectional Mamba-2 layer stack → `out_proj`.
     #[derive(Module, Debug)]
     pub struct MyMamba2BidiNetwork<B: Backend> {
+        /// Linear projection from `input_size` to `d_model`.
         pub in_proj: Linear<B>,
+        /// The bidirectional Mamba-2 layer stack.
         pub layers: Mamba2BidiLayers<B>,
+        /// Linear projection from `d_model` to `output_size`.
         pub out_proj: Linear<B>,
     }
 
@@ -65,6 +77,8 @@ pub mod mamba2 {
     }
 
     impl<B: Backend + Mamba2BackendExt> MyMamba2BidiNetwork<B> {
+        /// `in_proj` → bidirectional layers → `out_proj` over a full sequence
+        /// (`[batch, sequence, input_size]` → `[batch, sequence, output_size]`).
         pub fn forward(
             &self,
             x: Tensor<B, 3>,
@@ -92,6 +106,7 @@ pub mod mamba2 {
     }
 }
 
+/// Bidirectional Mamba-3 example network and config builders.
 pub mod mamba3 {
     use super::*;
     use crate::common::model::mamba3_block_config;
@@ -99,21 +114,25 @@ pub mod mamba3 {
         Mamba3BidiLayers, Mamba3BidiLayersConfig, OutputMergeConfig,
     };
 
-    /// Basic Mamba network containing input and output heads, with Mamba3Layers in between.
+    /// Basic bidirectional Mamba network with input/output heads.
     #[derive(Config, Debug)]
     pub struct MyMamba3BidiNetworkConfig {
+        /// Width of the input features fed to `in_proj`.
         #[config(default = 1)]
         pub input_size: usize,
 
+        /// Configuration for the bidirectional Mamba-3 layer stack.
         #[config(
             default = "mamba3_bidi_layers_config(1, None, mamba3_block_config(1, 2, 1, 1, 1, 1.0, 1), OutputMergeConfig::mean(1))"
         )]
         pub layers: Mamba3BidiLayersConfig,
 
+        /// Width of the output features produced by `out_proj`.
         #[config(default = 1)]
         pub output_size: usize,
     }
 
+    /// Build a [`Mamba3BidiLayersConfig`] with optional virtual-layer scheduling.
     pub fn mamba3_bidi_layers_config(
         n_real_layers: usize,
         n_virtual_layers: Option<(usize, BidiSchedule)>,
@@ -124,10 +143,14 @@ pub mod mamba3 {
             .with_n_virtual_layers(n_virtual_layers)
     }
 
+    /// `in_proj` → bidirectional Mamba-3 layer stack → `out_proj`.
     #[derive(Module, Debug)]
     pub struct MyMamba3BidiNetwork<B: Backend> {
+        /// Linear projection from `input_size` to `d_model`.
         pub in_proj: Linear<B>,
+        /// The bidirectional Mamba-3 layer stack.
         pub layers: Mamba3BidiLayers<B>,
+        /// Linear projection from `d_model` to `output_size`.
         pub out_proj: Linear<B>,
     }
 
@@ -153,6 +176,8 @@ pub mod mamba3 {
     }
 
     impl<B: Backend + Mamba3BackendExt> MyMamba3BidiNetwork<B> {
+        /// `in_proj` → bidirectional layers → `out_proj` over a full sequence
+        /// (`[batch, sequence, input_size]` → `[batch, sequence, output_size]`).
         pub fn forward(
             &self,
             x: Tensor<B, 3>,

@@ -48,6 +48,13 @@
 //!
 //! See [`ssd::minimal`](crate::mamba2::ssd::minimal) for more information.
 //!
+//! ## Relationship to the other families
+//!
+//! [`Mamba-1`](crate::mamba1) is the predecessor: a sequential selective scan
+//! with a diagonal (rather than scalar) state transition.  [`Mamba-3`](crate::mamba3)
+//! extends the SSD layer below with trapezoidal discretisation, data-dependent
+//! RoPE on B/C, and MIMO rank expansion.
+//!
 //! ## Notation / Dimension Keys
 //!
 //! Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.

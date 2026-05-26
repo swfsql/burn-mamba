@@ -1,3 +1,6 @@
+//! The model configuration for the fibonacci example — a deliberately tiny
+//! Mamba-2 network sized to the synthetic task (see [`model_config`]).
+
 pub use crate::common::model::{MyMamba2NetworkConfig, mamba2_block_config, mamba2_layers_config};
 
 /// The Fibonacci-like sequence xₜ = xₜ₋₁ + xₜ₋₂ can be modeled as:

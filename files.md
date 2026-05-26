@@ -20,7 +20,9 @@ Files not listed here are either trivial `mod.rs` re-export glue or test-only.
 
 ### `src/lib.rs`
 Crate root. Declares the feature-gated modules (`mamba1`/`2`/`3`, `schedule`,
-`utils`) and the top-level `prelude`. Defines two crate-wide sanity constants:
+`utils`) and the top-level `prelude`, and carries the crate-level overview doc.
+Enables `#![warn(missing_docs)]`, so any undocumented public item surfaces as a
+build warning. Defines two crate-wide sanity constants:
 - `pub const DENY_NAN: bool` / `pub const DENY_INF: bool` — when `true`, the
   `utils::sanity` guards actually run NaN/Inf checks (both `false` by default,
   so the checks are no-ops in release).

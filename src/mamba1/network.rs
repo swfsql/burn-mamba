@@ -29,15 +29,20 @@ use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
 
+/// A complete Mamba-1 language model.
 #[derive(Module, Debug)]
 pub struct Mamba1Network<B: Backend> {
+    /// Token embedding table (`padded_vocab_size → d_model`).
     pub embedding: Embedding<B>,
+    /// The stack of Mamba-1 residual layers.
     pub layers: Mamba1Layers<B>,
+    /// Final RMSNorm applied before the LM head.
     pub norm_f: RmsNorm<B>,
     /// If missing, re-utilizes a transposed `embedding` weight.
     pub lm_head: Option<Linear<B>>,
 }
 
+/// Configuration / factory for [`Mamba1Network`].
 #[derive(Config, Debug)]
 pub struct Mamba1NetworkConfig {
     /// Number of real (weight-bearing) Mamba-1 layers.
@@ -57,6 +62,7 @@ pub struct Mamba1NetworkConfig {
     /// To disable vocab padding, you can set this to `1`.
     pub pad_vocab_size_multiple: usize,
 
+    /// Configuration shared by all Mamba-1 blocks.
     pub mamba_block: Mamba1Config,
 
     /// If set to true, `lm_head` is set to `None` and it re-utilizes the transposed `embedding` weights.

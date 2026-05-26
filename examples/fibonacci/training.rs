@@ -1,3 +1,8 @@
+//! Training loop for the fibonacci example: builds the dataloaders, runs the
+//! train/validate epochs, and periodically saves the model and optimizer. The
+//! [`Wrap`] newtype adapts the example network to Burn's `TrainStep` /
+//! `InferenceStep` via an MSE regression head on the last timestep.
+
 pub use crate::common::{
     cli::AppArgs,
     model::{MyMamba2Network, MyMamba2NetworkConfig},
@@ -18,6 +23,9 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
+/// Run the full training routine: load/init the model and optimizer, then train
+/// for the configured number of epochs (validating and checkpointing along the
+/// way).
 pub fn train<AutoB>(
     training_config: TrainingConfig,
     model_config: MyMamba2NetworkConfig,
@@ -114,6 +122,8 @@ pub fn train<AutoB>(
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'static>;
 
+/// Train for a single epoch, stepping the optimizer per batch and periodically
+/// validating + checkpointing; returns the updated model.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train<AutoB>(
     dataloader_train: Dataloader<AutoB>,
@@ -196,6 +206,8 @@ where
     training_model.0
 }
 
+/// Run validation over (up to `valid_loop_limit`) batches and report the
+/// average loss.
 pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
     dataloader_valid: Dataloader<B>,
     valid_model: MyMamba2Network<B>,
@@ -273,6 +285,8 @@ impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
 }
 
 impl<B: Backend + Mamba2BackendExt> Wrap<B> {
+    /// Forward the model and compute the MSE regression loss against the last
+    /// timestep's prediction.
     pub fn forward_regression(
         &self,
         input: Tensor<B, 3>,

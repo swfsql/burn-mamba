@@ -192,18 +192,23 @@ impl Mamba2CacheConfig {
 }
 
 impl<B: Backend> Mamba2Caches<B> {
+    /// Number of per-layer caches.
     pub fn caches_len(&self) -> usize {
         self.caches.len()
     }
 
+    /// Wrap a vector of per-layer caches.
     pub fn from_vec(vec: Vec<Mamba2Cache<B>>) -> Self {
         Self { caches: vec }
     }
 
+    /// Wrap each per-layer cache in `Some` so the layer loop can `take` it
+    /// without cloning (Burn tensors are reference-counted).
     pub fn into_options(self) -> Vec<Option<Mamba2Cache<B>>> {
         self.caches.into_iter().map(Some).collect()
     }
 
+    /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
     pub fn from_options(options: Vec<Option<Mamba2Cache<B>>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)

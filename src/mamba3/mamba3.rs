@@ -358,9 +358,11 @@ pub struct Mamba3Config {
 }
 
 impl Mamba3Config {
+    /// Inner (expanded) channel width: `expand · d_model`.
     pub fn d_inner(&self) -> usize {
         self.expand * self.d_model
     }
+    /// Number of SSM heads: `d_inner / per_head_dim`.
     pub fn nheads(&self) -> usize {
         self.d_inner() / self.per_head_dim
     }
@@ -375,6 +377,7 @@ impl Mamba3Config {
         d
     }
 
+    /// Number of RoPE rotation angles projected per head: `rope_dim / 2`.
     pub fn num_rope_angles(&self) -> usize {
         self.rope_dim() / 2
     }

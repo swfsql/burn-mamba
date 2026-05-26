@@ -35,6 +35,7 @@
 //! same initial cache — a parity property the test suites assert on outputs,
 //! final cache, and gradients.
 
+#![warn(missing_docs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
 

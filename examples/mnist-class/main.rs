@@ -1,3 +1,9 @@
+//! # Sequential-MNIST classifier example
+//!
+//! Classifies MNIST digits by reading each image as a length-784 sequence of
+//! single-pixel tokens with a Mamba-3 model (a classification head on the last
+//! timestep), trained with cosine-annealing LR. Inference is currently a stub.
+
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
 
@@ -11,12 +17,16 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's `model_config()`.
 pub mod model;
+/// Training entry point for the classifier.
 pub mod training;
 
+/// Shared example infrastructure (included by path).
 #[path = "../common/mod.rs"]
 pub mod common;
 
+/// Wire up backend, configs, and the train/infer flow for the classifier.
 pub fn launch<B, AutoB>(app_args: &AppArgs)
 where
     B: Backend + MainDevice + Mamba3BackendExt,

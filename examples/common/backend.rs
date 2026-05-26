@@ -1,3 +1,11 @@
+//! Compile-time backend and dtype selection for the examples.
+//!
+//! Exactly one `backend-*` feature picks the concrete [`MainBackend`]; the
+//! `dev-f16` feature switches the float/int element types (and the model
+//! recorder) between fp32 and fp16.  [`MainAutoBackend`] wraps it in
+//! `Autodiff` for training, and the [`MainDevice`] trait yields the default
+//! device and installs the chosen default dtypes.
+
 use burn::prelude::*;
 use burn::tensor::backend::{AutodiffBackend, BackendTypes};
 
@@ -44,10 +52,13 @@ pub type MainBackend = burn::backend::Rocm<FloatElement, IntElement>;
 #[cfg(feature = "backend-remote")]
 pub type MainBackend = burn::backend::RemoteBackend<FloatElement, IntElement>;
 
+/// The default device for the selected backend, plus default-dtype setup.
 pub trait MainDevice: Backend {
+    /// The device the example runs on (backend default unless overridden).
     fn main_device() -> <Self as BackendTypes>::Device {
         Default::default()
     }
+    /// Install the example's default float/int dtypes for this device.
     fn set_dtype(device: &<Self as BackendTypes>::Device) {
         burn::tensor::set_default_dtypes::<Self>(
             device,

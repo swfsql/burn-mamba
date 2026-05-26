@@ -1,3 +1,8 @@
+//! Synthetic fibonacci-like dataset: each item is a short sequence where every
+//! value is (roughly) the sum of the previous two plus Gaussian noise, and the
+//! target is the next value. Used to give the fibonacci example a learnable
+//! recurrence to fit.
+
 pub use crate::common::backend::FloatElement;
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -9,15 +14,19 @@ use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use serde::{Deserialize, Serialize};
 
-// Dataset parameters
+/// Number of sequences in the generated dataset.
 pub const NUM_SEQUENCES: usize = 1000;
+/// Length of each generated sequence.
 pub const SEQ_LENGTH: usize = 10;
+/// Standard deviation of the additive Gaussian noise.
 pub const NOISE_LEVEL: f32 = 0.1;
 
-// Generate a sequence where each number is the sum of previous two numbers plus noise
+/// One sequence plus its next-value target.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequenceDatasetItem {
+    /// The input sequence.
     pub sequence: Vec<FloatElement>,
+    /// The value following the sequence (the regression target).
     pub target: FloatElement,
 }
 
@@ -52,12 +61,13 @@ impl SequenceDatasetItem {
     }
 }
 
-// Custom Dataset for Sequence Data
+/// An in-memory dataset of randomly generated [`SequenceDatasetItem`]s.
 pub struct SequenceDataset {
     dataset: InMemDataset<SequenceDatasetItem>,
 }
 
 impl SequenceDataset {
+    /// Generate `num_sequences` random sequences of the given length and noise.
     pub fn new(num_sequences: usize, seq_length: usize, noise_level: f32) -> Self {
         let mut items = vec![];
         for _i in 0..num_sequences {
@@ -79,16 +89,16 @@ impl Dataset<SequenceDatasetItem> for SequenceDataset {
     }
 }
 
+/// Collates [`SequenceDatasetItem`]s into a [`SequenceBatch`].
 #[derive(Clone, Debug, Default)]
 pub struct SequenceBatcher {}
 
+/// A batch of sequences and their regression targets.
 #[derive(Clone, Debug)]
 pub struct SequenceBatch<B: Backend> {
-    /// # Shape
-    /// [batch_size, seq_length, 1]
+    /// Input sequences, shape `[batch_size, seq_length, 1]`.
     pub sequences: Tensor<B, 3>,
-    /// # Shape
-    /// [batch_size, 1]
+    /// Targets, shape `[batch_size, 1]`.
     pub targets: Tensor<B, 2>,
 }
 

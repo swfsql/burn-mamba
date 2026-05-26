@@ -1,3 +1,8 @@
+//! CLI plumbing shared by the examples: argument parsing into [`AppArgs`],
+//! artifact-directory management, and load/save of the training config, model
+//! config, model weights, and optimizer state.  See [`HELP`] for the full
+//! command-line behaviour.
+
 use crate::common::{backend::RecorderTy, model::ModelConfigExt, optim::OptimConfigExt};
 use burn::module::AutodiffModule;
 use burn::record::{FileRecorder, Recorder};
@@ -5,6 +10,7 @@ use burn::{optim::Optimizer, prelude::*, tensor::backend::AutodiffBackend};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+/// The `--help` text describing every flag and the train/infer/config flow.
 pub const HELP: &str = "\
 Burn Mamba Example
 
@@ -47,19 +53,27 @@ ARGS:
                                 If further processing is available, passing -h or --help will display its help information.
 ";
 
-/// For field descriptions, see [HELP](HELP).
+/// Parsed command-line arguments. For field descriptions, see [`HELP`].
 #[derive(Debug)]
 pub struct AppArgs {
+    /// Whether to run training.
     pub training: bool,
+    /// Whether to run inference.
     pub inference: bool,
+    /// Whether to delete existing model/optim artifacts before training.
     pub remove_artifacts: bool,
+    /// Optional path to load the training config from.
     pub training_config: Option<PathBuf>,
+    /// Optional path to load the model config from.
     pub model_config: Option<PathBuf>,
+    /// Directory for configs, model weights, and optimizer state.
     pub artifacts_path: PathBuf,
+    /// Arguments after `--`, forwarded verbatim to downstream processing.
     pub extra_args: Vec<OsString>,
 }
 
 impl AppArgs {
+    /// Parse [`AppArgs`] from `std::env::args_os` (handles `--`, `-h/--help`).
     pub fn parse() -> Result<Self, pico_args::Error> {
         let mut args: Vec<_> = std::env::args_os().collect();
         args.remove(0); // remove the executable path.
@@ -118,10 +132,12 @@ impl AppArgs {
         Ok(args)
     }
 
+    /// Create the artifacts directory (removing model/optim first if requested).
     pub fn create_artifact_dir(&self) {
         create_artifact_dir(&self.artifacts_path, self.remove_artifacts && self.training)
     }
 
+    /// Save the training config into the artifacts directory.
     pub fn save_training_config(&self, training_config: &impl Config) {
         let path = self
             .artifacts_path
@@ -130,6 +146,7 @@ impl AppArgs {
         save_training_config(&path, training_config)
     }
 
+    /// Load the training config (from `--training-config` or the artifacts dir).
     pub fn load_training_config<TrainingConfig: Config>(&self) -> Option<TrainingConfig> {
         self.training_config
             .as_ref()
@@ -146,6 +163,7 @@ impl AppArgs {
             })
     }
 
+    /// Save the model config into the artifacts directory.
     pub fn save_model_config(&self, model_config: &impl Config) {
         let path = self
             .artifacts_path
@@ -154,6 +172,7 @@ impl AppArgs {
         save_model_config(&path, model_config)
     }
 
+    /// Load the model config (from `--model-config` or the artifacts dir).
     pub fn load_model_config<B: Backend, ModelConfig: ModelConfigExt<B>>(
         &self,
     ) -> Option<ModelConfig> {
@@ -172,10 +191,12 @@ impl AppArgs {
             })
     }
 
+    /// Save the model weights into the artifacts directory.
     pub fn save_model<B: Backend>(&self, model: &impl Module<B>) {
         save_model(&self.artifacts_path, model)
     }
 
+    /// Load model weights from the artifacts directory, if present.
     pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
         &self,
         model_config: &ModelConfig,
@@ -184,6 +205,7 @@ impl AppArgs {
         load_model(&self.artifacts_path, model_config, device)
     }
 
+    /// Load the model if saved, otherwise initialise a new one and save it.
     pub fn load_or_save_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
         &self,
         model_config: &ModelConfig,
@@ -197,6 +219,7 @@ impl AppArgs {
         })
     }
 
+    /// Save the optimizer state into the artifacts directory.
     pub fn save_optim<AutoB, AutoM>(&self, optim: &impl Optimizer<AutoM, AutoB>)
     where
         AutoB: AutodiffBackend,
@@ -205,6 +228,7 @@ impl AppArgs {
         save_optim(&self.artifacts_path, optim)
     }
 
+    /// Load optimizer state from the artifacts directory, if present.
     pub fn load_optim<AutoB, AutoM, OptimConfig>(
         &self,
         optim_config: &OptimConfig,
@@ -218,6 +242,7 @@ impl AppArgs {
         load_optim(&self.artifacts_path, optim_config, device)
     }
 
+    /// Load the optimizer if saved, otherwise initialise a new one and save it.
     pub fn load_or_save_optim<AutoB, AutoM, OptimConfig>(
         &self,
         optim_config: &OptimConfig,
@@ -237,11 +262,13 @@ impl AppArgs {
     }
 }
 
+/// `pico-args` value parser turning an `OsStr` into a `PathBuf`.
 pub fn parse_path(s: &std::ffi::OsStr) -> Result<std::path::PathBuf, &'static str> {
     Ok(s.into())
 }
 
-// Create the directory to save the model and model config
+/// Create the artifacts directory; when `delete` is set, remove any existing
+/// `model`/`optim` files first.
 pub fn create_artifact_dir(artifact_dir: &Path, delete: bool) {
     if delete {
         // enforce that the removal should not have errors,
@@ -253,7 +280,9 @@ pub fn create_artifact_dir(artifact_dir: &Path, delete: bool) {
     std::fs::create_dir_all(artifact_dir).ok();
 }
 
+/// Base filename (without extension) for the persisted training config.
 pub const TRAINING_CONFIG_NAME: &str = "training_config";
+/// Save a training config as JSON to `path`.
 pub fn save_training_config(path: &Path, training_config: &impl Config) {
     println!("Saving training config into {path:?}");
     training_config
@@ -261,6 +290,7 @@ pub fn save_training_config(path: &Path, training_config: &impl Config) {
         .expect("Failed to save the training config");
 }
 
+/// Load a training config from `path`, or `None` if the file is absent.
 pub fn load_training_config<TrainingConfig: Config>(path: &Path) -> Option<TrainingConfig> {
     let exists = std::fs::exists(path).expect("failed to check {path:?}");
     if exists {
@@ -273,7 +303,9 @@ pub fn load_training_config<TrainingConfig: Config>(path: &Path) -> Option<Train
     }
 }
 
+/// Base filename (without extension) for the persisted model config.
 pub const MODEL_CONFIG_NAME: &str = "model_config";
+/// Save a model config as JSON to `path`.
 pub fn save_model_config(path: &Path, model_config: &impl Config) {
     println!("Saving model config into {path:?}");
     model_config
@@ -281,6 +313,7 @@ pub fn save_model_config(path: &Path, model_config: &impl Config) {
         .expect("Failed to save the model config");
 }
 
+/// Load a model config from `path`, or `None` if the file is absent.
 pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option<ModelConfig> {
     let exists = std::fs::exists(path).expect("failed to check {path:?}");
     if exists {
@@ -292,7 +325,9 @@ pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option
     }
 }
 
+/// Base filename (without extension) for the persisted model weights.
 pub const MODEL_NAME: &str = "model";
+/// Save model weights into `artifact_dir` using the configured recorder.
 pub fn save_model<B: Backend>(artifact_dir: &Path, model: &impl Module<B>) {
     let path = artifact_dir.join(MODEL_NAME);
     let file_ext = <RecorderTy as FileRecorder<B>>::file_extension();
@@ -304,6 +339,7 @@ pub fn save_model<B: Backend>(artifact_dir: &Path, model: &impl Module<B>) {
         .expect("Failed to save the model");
 }
 
+/// Load model weights from `artifact_dir`, or `None` if absent.
 pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     artifact_dir: &Path,
     model_config: &ModelConfig,
@@ -325,6 +361,7 @@ pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     }
 }
 
+/// Initialise a fresh model from its config on `device`.
 pub fn init_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     model_config: &ModelConfig,
     device: &B::Device,
@@ -332,7 +369,9 @@ pub fn init_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     model_config.init(device)
 }
 
+/// Base filename (without extension) for the persisted optimizer state.
 pub const OPTIM_NAME: &str = "optim";
+/// Save optimizer state into `artifact_dir` using the configured recorder.
 pub fn save_optim<AutoB, AutoM, Optim>(artifact_dir: &Path, optim: &Optim)
 where
     AutoB: AutodiffBackend,
@@ -349,6 +388,7 @@ where
         .expect("Failed to save the optim");
 }
 
+/// Load optimizer state from `artifact_dir`, or `None` if absent.
 pub fn load_optim<AutoB, AutoM, OptimConfig>(
     artifact_dir: &Path,
     optim_config: &OptimConfig,
@@ -376,6 +416,7 @@ where
     }
 }
 
+/// Initialise a fresh optimizer from its config.
 pub fn init_optim<AutoB, AutoM, OptimConfig>(
     optim_config: &OptimConfig,
     _device: &AutoB::Device,

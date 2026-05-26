@@ -1,3 +1,8 @@
+//! Training loop for the sequential-MNIST classifier: builds the dataloaders,
+//! runs the train/validate epochs, and checkpoints the model and optimizer. The
+//! [`Wrap`] newtype adapts the example network to Burn's `TrainStep` /
+//! `InferenceStep` via a cross-entropy classification head on the last timestep.
+
 pub use crate::common::{
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
@@ -15,6 +20,9 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
+/// Run the full training routine: load/init the model and optimizer, then train
+/// for the configured number of epochs (validating and checkpointing along the
+/// way).
 pub fn train<AutoB>(
     training_config: TrainingConfig,
     model_config: MyMamba3NetworkConfig,
@@ -105,6 +113,8 @@ pub fn train<AutoB>(
 
 type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, MnistBatch<B>> + 'static>;
 
+/// Train for a single epoch, stepping the optimizer per batch and periodically
+/// validating + checkpointing; returns the updated model.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train<AutoB>(
     dataloader_train: Dataloader<AutoB>,
@@ -191,6 +201,8 @@ where
     training_model.0
 }
 
+/// Run validation over (up to `valid_loop_limit`) batches and report the
+/// average loss and accuracy.
 pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
     dataloader_valid: Dataloader<B>,
     valid_model: MyMamba3Network<B>,
@@ -275,6 +287,8 @@ impl<B: Backend + Mamba3BackendExt> InferenceStep for Wrap<B> {
 }
 
 impl<B: Backend + Mamba3BackendExt> Wrap<B> {
+    /// Forward the model and compute the cross-entropy classification loss from
+    /// the last timestep's logits.
     pub fn forward_classification(
         &self,
         input: Tensor<B, 3>,

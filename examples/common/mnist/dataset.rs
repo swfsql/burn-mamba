@@ -1,3 +1,8 @@
+//! Sequential-MNIST dataset: each 28×28 image is flattened into a length-784
+//! sequence of single-pixel "tokens", turning digit classification into a
+//! sequence-modelling task.  Handles download/caching of the raw IDX files and
+//! batching into Burn tensors.
+
 use crate::common::backend::FloatElement;
 use burn::data::dataloader::batcher::Batcher;
 use burn::prelude::*;
