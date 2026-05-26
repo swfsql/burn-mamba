@@ -47,6 +47,7 @@ pub struct Mamba1Cache<B: Backend> {
 }
 
 impl<B: Backend> Mamba1Cache<B> {
+    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bik);
         san(&self.ssm_bir);

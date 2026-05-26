@@ -1,3 +1,12 @@
+//! # Pathway-agnostic SSD algorithm selection (Mamba-3)
+//!
+//! [`Mamba3SsdPath`] picks the chunkwise SSD *algorithm* (Minimal / Serial /
+//! SerialRecalculated) and chunk length, independent of the double-vs-single
+//! *pathway* (which the supplied cache variant selects).  It converts into the
+//! per-pathway path types via `From` and is threaded by
+//! [`Mamba3::forward`](crate::mamba3::mamba3::Mamba3::forward) into whichever
+//! pathway the cache implies.
+
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
 

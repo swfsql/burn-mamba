@@ -121,6 +121,7 @@ pub struct Mamba2Cache<B: Backend> {
 }
 
 impl<B: Backend> Mamba2Cache<B> {
+    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bvk);
         san(&self.ssm_bhpr);

@@ -106,6 +106,7 @@ pub struct Mamba3DoubleSsdCache<B: Backend> {
 }
 
 impl<B: Backend> Mamba3DoubleSsdCache<B> {
+    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);

@@ -1,4 +1,16 @@
 //! # Mamba-3 Cache and Pathway Selection
+//!
+//! [`Mamba3Cache`] / [`Mamba3Caches`] are **enums** tagging which SSD pathway a
+//! cache belongs to (`DoubleSsd` | `SingleSsd`).  Supplying one of these to
+//! [`Mamba3::forward`](crate::mamba3::mamba3::Mamba3::forward) /
+//! [`Mamba3::step`](crate::mamba3::mamba3::Mamba3::step) is what selects the
+//! pathway at runtime; a missing cache defaults to `SingleSsd`.
+//!
+//! The two pathways' SSM accumulators differ **mid-sequence**, so the cache
+//! types are kept distinct to prevent silently mixing them inside a chunked
+//! pass.  They coincide at sequence boundaries, however — where caches are
+//! actually produced and consumed — so the `From` impls at the bottom convert
+//! between them by a lossless field-by-field move (see the note there).
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
@@ -35,6 +47,7 @@ pub enum Mamba3Cache<B: Backend> {
 }
 
 impl<B: Backend> Mamba3Caches<B> {
+    /// Unwrap to the double-SSD caches, or `None` if this is the single-SSD variant.
     pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCaches<B>> {
         match self {
             Self::DoubleSsd(caches) => Some(caches),
@@ -42,6 +55,7 @@ impl<B: Backend> Mamba3Caches<B> {
         }
     }
 
+    /// Unwrap to the single-SSD caches, or `None` if this is the double-SSD variant.
     pub fn single_ssd(self) -> Option<Mamba3SingleSsdCaches<B>> {
         match self {
             Self::DoubleSsd(_caches) => None,
@@ -49,6 +63,7 @@ impl<B: Backend> Mamba3Caches<B> {
         }
     }
 
+    /// Number of per-layer caches (independent of pathway).
     pub fn caches_len(&self) -> usize {
         match self {
             Self::DoubleSsd(caches) => caches.caches.len(),
@@ -56,6 +71,8 @@ impl<B: Backend> Mamba3Caches<B> {
         }
     }
 
+    /// Collect per-layer caches into a pathway-tagged bundle.  The pathway is
+    /// inferred from the first element (an empty vec implies single-SSD).
     pub fn from_vec(vec: Vec<Mamba3Cache<B>>) -> Self {
         // peek at first; empty implies single_ssd
         let is_double = matches!(vec.first(), Some(Mamba3Cache::DoubleSsd(_)));
@@ -80,6 +97,8 @@ impl<B: Backend> Mamba3Caches<B> {
         }
     }
 
+    /// Wrap each per-layer cache in `Some` so the loop can `take` it without
+    /// cloning (Burn tensors are reference-counted).
     pub fn into_options(self) -> Vec<Option<Mamba3Cache<B>>> {
         match self {
             Self::DoubleSsd(caches) => caches
@@ -97,6 +116,7 @@ impl<B: Backend> Mamba3Caches<B> {
         }
     }
 
+    /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
     pub fn from_options(options: Vec<Option<Mamba3Cache<B>>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)
@@ -104,6 +124,7 @@ impl<B: Backend> Mamba3Caches<B> {
 }
 
 impl<B: Backend> Mamba3Cache<B> {
+    /// Unwrap to the double-SSD cache, or `None` if this is the single-SSD variant.
     pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCache<B>> {
         match self {
             Self::DoubleSsd(cache) => Some(cache),
@@ -111,6 +132,7 @@ impl<B: Backend> Mamba3Cache<B> {
         }
     }
 
+    /// Unwrap to the single-SSD cache, or `None` if this is the double-SSD variant.
     pub fn single_ssd(self) -> Option<Mamba3SingleSsdCache<B>> {
         match self {
             Self::DoubleSsd(_cache) => None,
