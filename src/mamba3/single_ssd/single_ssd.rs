@@ -45,7 +45,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba3SingleSsdCache<B>>,
-        ssd_path: Mamba3SingleSsdPath,
+        ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<B, 3>, Mamba3SingleSsdCache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -279,7 +279,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
             initial_state_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
-        let (y_bnlmhp, final_state_bhpr) = ssd_path.run(ssd_input);
+        let (y_bnlmhp, final_state_bhpr) = ssd_input.run(ssd_path);
 
         san(&y_bnlmhp);
         san(&final_state_bhpr);

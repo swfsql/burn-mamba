@@ -1,68 +1,87 @@
-use crate::mamba3::Mamba3DoubleSsdPath;
-use crate::mamba3::Mamba3SingleSsdPath;
+use crate::mamba3::prelude::*;
+use burn::prelude::*;
 
-/// Algorithm selection for the double/single-pass SSD.
+/// Algorithm selection for the Mamba-3 chunkwise SSD.
 ///
-/// This selects the chunkwise SSD algorithm style.
+/// This selects the chunkwise SSD *algorithm*. The *pathway* (double- vs
+/// single-ssd) is selected separately, by the supplied cache variant (see
+/// [`crate::mamba3::cache::Mamba3Caches`]); [`Mamba3::forward`] threads this
+/// same selection into whichever pathway the cache implies, converting it into
+/// the per-pathway input bundle ([`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput`]
+/// or [`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput`]) and calling
+/// that bundle's `run`.
 ///
-/// The cache selection infers whether Double-SSD or Single-SSD is used.  
-/// If none is specified, the cache defaults to [`crate::mamba3::cache::Mamba3Caches::SingleSsd`],
-/// [`Self::SerialRecalculated`] ssd-path with the `chunk_len` unset
-/// (which fallbacks to [`crate::mamba3::single_ssd::ssd::ssd_path::Mamba3SingleSsdPath::optimal_default`]).
+/// Each variant carries an optional chunk length. Larger values increase the
+/// intra-chunk GEMM work and reduce the inter-chunk scan length; the optimal
+/// value is approximately `√(state_rank · per_head_dim)` (see
+/// [`Self::optimal_chunk_len`]). `None` falls back to that optimal value.
+///
+/// If no path is specified, the cache defaults to
+/// [`crate::mamba3::cache::Mamba3Caches::SingleSsd`] with [`Self::default`]
+/// (i.e. [`Self::SerialRecalculated`] with an unset chunk length).
 #[derive(Debug, Clone)]
 pub enum Mamba3SsdPath {
-    /// Minimal/segsum SSD.
+    /// Minimal/segsum SSD: mostly batched matmuls; backward via autodiff.
     ///
-    /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.  
-    /// See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_minimal`]/[`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_minimal`] for more info.
-    ///
-    /// For training, you may prefer using [`Self::SerialRecalculated`] instead.
+    /// See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_minimal`]
+    /// / [`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_minimal`].
+    /// For training, prefer [`Self::SerialRecalculated`].
     Minimal(Option<usize>),
 
-    /// (Hybrid) Serial SSD.
+    /// (Hybrid) serial SSD: a serial loop over the chunks plus batched matmuls;
+    /// backward via autodiff.
     ///
-    /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_serial`]/[`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_serial`] for more info.  
-    /// For the backward operation, this relies on autodiff.  
-    /// For a custom backwards that saves memory, see [`Self::SerialRecalculated`].
+    /// See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_serial`]
+    /// / [`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_serial`].
+    /// For a memory-saving custom backward, see [`Self::SerialRecalculated`].
     Serial(Option<usize>),
 
-    /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
+    /// (Hybrid) serial SSD with a custom, memory-efficient backward that
+    /// recomputes the forward intermediates instead of storing them.
     ///
-    /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_serial_recalculated`]/[`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_serial_recalculated`] for more info.  
-    /// Contains a custom backward operation that saves memory.  
-    /// For an autodiff backwards, see [`Self::Serial`].
+    /// See [`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_serial_recalculated`]
+    /// / [`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput::single_ssd_serial_recalculated`].
+    /// For a plain autodiff backward, see [`Self::Serial`].
     SerialRecalculated(Option<usize>),
 }
 
+impl Mamba3SsdPath {
+    /// Optimal chunk length, approximately `√(state_rank · per_head_dim)`,
+    /// rounded up to a multiple of 32 and capped at 512.
+    pub fn optimal_chunk_len(state_rank: usize, per_head_dim: usize) -> usize {
+        (state_rank * per_head_dim)
+            .isqrt()
+            .next_multiple_of(32) // rule-of-thumb: common plane dimension.
+            .min(512) // rule-of-thumb: ceiling at 512.
+    }
+
+    /// The chunk length carried by this variant, if any.
+    pub fn chunk_len(&self) -> Option<usize> {
+        match self {
+            Self::Minimal(chunk_len)
+            | Self::Serial(chunk_len)
+            | Self::SerialRecalculated(chunk_len) => *chunk_len,
+        }
+    }
+
+    /// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
+    /// when unset.
+    pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
+        self.chunk_len()
+            .unwrap_or_else(|| Self::optimal_chunk_len(state_rank, per_head_dim))
+    }
+
+    /// The recommended default path for a given block: [`Self::SerialRecalculated`]
+    /// with [`Self::optimal_chunk_len`] for the block's dimensions.
+    pub fn default_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
+        let chunk_len = Self::optimal_chunk_len(block.state_rank, block.per_head_dim());
+        Self::SerialRecalculated(Some(chunk_len))
+    }
+}
+
 impl Default for Mamba3SsdPath {
-    fn default() -> Mamba3SsdPath {
-        // The SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
-        Mamba3SsdPath::SerialRecalculated(None)
-    }
-}
-
-impl From<Mamba3DoubleSsdPath> for Mamba3SsdPath {
-    fn from(path: Mamba3DoubleSsdPath) -> Self {
-        match path {
-            Mamba3DoubleSsdPath::Minimal(chunk_len) => Mamba3SsdPath::Minimal(chunk_len),
-            Mamba3DoubleSsdPath::Serial(chunk_len) => Mamba3SsdPath::Serial(chunk_len),
-            Mamba3DoubleSsdPath::SerialRecalculated(chunk_len) => {
-                Mamba3SsdPath::SerialRecalculated(chunk_len)
-            }
-        }
-    }
-}
-
-impl From<Mamba3SingleSsdPath> for Mamba3SsdPath {
-    fn from(path: Mamba3SingleSsdPath) -> Self {
-        match path {
-            Mamba3SingleSsdPath::Minimal(chunk_len) => Mamba3SsdPath::Minimal(chunk_len),
-            Mamba3SingleSsdPath::Serial(chunk_len) => Mamba3SsdPath::Serial(chunk_len),
-            Mamba3SingleSsdPath::SerialRecalculated(chunk_len) => {
-                Mamba3SsdPath::SerialRecalculated(chunk_len)
-            }
-        }
+    fn default() -> Self {
+        // Defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        Self::SerialRecalculated(None)
     }
 }

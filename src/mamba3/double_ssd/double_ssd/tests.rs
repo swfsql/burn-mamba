@@ -286,14 +286,14 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
         angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
     };
 
-    let ssd_path = Mamba3DoubleSsdPath::Minimal(Some(4));
+    let ssd_path = Mamba3SsdPath::Minimal(Some(4));
     let init_cache = build_init_cache(&cfg, batch, random_init);
 
     let input_fwd = param_input(&input);
     let cache_fwd = init_cache.clone();
     let path_fwd = ssd_path.clone();
     let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
-        m.forward_double_ssd(x, Some(cache_fwd), path_fwd)
+        m.forward_double_ssd(x, Some(cache_fwd), &path_fwd)
     });
 
     let input_step = param_input(&input);
@@ -322,7 +322,7 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
         let (out_zero, _) = model.forward_double_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),
-            ssd_path.clone(),
+            &ssd_path,
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
         assert!(

@@ -174,7 +174,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         &self,
         input_bsm: Tensor<B, 3>,
         cache: Option<Mamba3DoubleSsdCache<B>>,
-        ssd_path: Mamba3DoubleSsdPath,
+        ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<B, 3>, Mamba3DoubleSsdCache<B>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -409,7 +409,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
-        let (y_gamma_bnlmhp, final_state_gamma_bhpr) = ssd_path.clone().run(input_gamma);
+        let (y_gamma_bnlmhp, final_state_gamma_bhpr) = input_gamma.run(ssd_path);
 
         let input_beta = Mamba3DoubleSsdInput {
             v_bnlmhp: v_beta_bnlmhp,
@@ -419,7 +419,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
             initial_state_bhpr: Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device),
             init_state_hpr: None,
         };
-        let (y_beta_bnlmhp, final_state_beta_bhpr) = ssd_path.run(input_beta);
+        let (y_beta_bnlmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
 
         let y_bnlmhp = y_gamma_bnlmhp + y_beta_bnlmhp;
         let final_state_bhpr = final_state_gamma_bhpr + final_state_beta_bhpr;

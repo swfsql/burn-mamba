@@ -1,57 +1,23 @@
-//! # Single-Pass SSD — Path Dispatcher
+//! # Single-Pass SSD — Input Bundle
 //!
-//! Sibling to [`crate::mamba3::double_ssd::ssd::ssd_path`]. Where the existing
-//! [`crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath`] runs the
-//! *standard* SSD twice (γ-term and β-term), this module's [`Mamba3SingleSsdPath`]
-//! runs **one** merged SSD pass that absorbs both contributions by scaling `K`
-//! with `scaleₜ = γₜ + (1−λₜ₊₁) Δₜ₊₁`. The same-step diagonal contribution differs
-//! (it must use `γₜ`, not `scaleₜ`) and is patched via an explicit correction term
-//! inside each variant.
+//! Sibling to [`crate::mamba3::double_ssd::ssd::ssd_path`]. Where the double-ssd
+//! pathway runs the *standard* SSD twice (γ-term and β-term), this module's
+//! [`Mamba3SingleSsdInput`] runs **one** merged SSD pass that absorbs both
+//! contributions by scaling `K` with `scaleₜ = γₜ + (1−λₜ₊₁) Δₜ₊₁`. The same-step
+//! diagonal contribution differs (it must use `γₜ`, not `scaleₜ`) and is patched
+//! via an explicit correction term inside each variant.
 //
 //! Reference kernels:
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
 //! - `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 //!
-//! The interface is MIMO-first (matches the existing burn-mamba SSD inputs),
-//! with `R = 1` collapsing to the SISO case.
+//! The interface is MIMO-first (matches the other burn-mamba SSD inputs),
+//! with `mimo_rank = 1` collapsing to the SISO case. The algorithm is selected
+//! by [`Mamba3SsdPath`], shared with the double-ssd pathway.
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
-
-/// Algorithm selection for the single-pass SSD.
-///
-/// Mirrors [`Mamba3SingleSsdPath`] but each variant computes the single-ssd
-/// recurrence with **one** chunkwise pass.
-#[derive(Debug, Clone)]
-pub enum Mamba3SingleSsdPath {
-    /// Minimal/segsum variant.
-    ///
-    /// Mostly batched matmuls; the backward pass relies on autodiff. The
-    /// algorithm is the merged-form analogue of [`Mamba3SingleSsdPath::Minimal`]:
-    /// strict lower-triangular intra-chunk (excludes same-step block),
-    /// a separate γ-scaled diagonal correction, and a state recurrence using
-    /// the `scaleₜ`-scaled K. See [`Mamba3SingleSsdInput::single_ssd_minimal`].
-    Minimal(Option<usize>),
-
-    /// (Hybrid) Serial variant — chunk-serial K1–K5 reformulation.
-    ///
-    /// Reuses K1–K4 from [`crate::mamba3::double_ssd::ssd::serial`] and supplies a new K5
-    /// that does strict-lower intra-chunk + per-column `scaleₜ` + γ-weighted
-    /// same-step diagonal correction. The state passing loop is sequential,
-    /// matching [`Mamba3SingleSsdPath::Serial`]. See
-    /// [`Mamba3SingleSsdInput::single_ssd_serial`].
-    Serial(Option<usize>),
-
-    /// (Hybrid) Serial variant with a custom, memory-efficient backward.
-    ///
-    /// Forward is identical to [`Self::Serial`] (shared K1–K5). On the Autodiff
-    /// backend the backward recomputes the forward intermediates instead of
-    /// saving them, trading compute for memory — the merged-form analogue of
-    /// [`Mamba3SingleSsdPath::SerialRecalculated`]. See
-    /// [`Mamba3SingleSsdInput::single_ssd_serial_recalculated`].
-    SerialRecalculated(Option<usize>),
-}
 
 /// MIMO-first input bundle for the merged-form SSD.
 ///
@@ -138,96 +104,22 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
     }
 }
 
-impl Mamba3SingleSsdPath {
-    /// Optimal chunk length — same heuristic as
-    /// [`crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath::optimal_default`].
-    pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
-        crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdPath::optimal_default(
-            state_rank,
-            per_head_dim,
-        )
-    }
-
-    /// Optimal Minimal variant.
-    pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::Minimal(Some(optim))
-    }
-
-    /// Optimal Minimal variant from a block.
-    pub fn core_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
-        Self::core_optimal(block.state_rank, block.per_head_dim())
-    }
-
-    /// Optimal Serial variant.
-    pub fn chunked_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::Serial(Some(optim))
-    }
-
-    /// Optimal Serial variant from a block.
-    pub fn chunked_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
-        Self::chunked_optimal(block.state_rank, block.per_head_dim())
-    }
-
-    /// Optimal SerialRecalculated variant.
-    pub fn chunked_recalculated_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::SerialRecalculated(Some(optim))
-    }
-
-    /// Optimal SerialRecalculated variant from a block.
-    pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
-        Self::chunked_recalculated_optimal(block.state_rank, block.per_head_dim())
-    }
-
-    pub fn chunk_len(&self) -> Option<usize> {
-        match self {
-            Mamba3SingleSsdPath::Minimal(chunk_len)
-            | Mamba3SingleSsdPath::Serial(chunk_len)
-            | Mamba3SingleSsdPath::SerialRecalculated(chunk_len) => *chunk_len,
-        }
-    }
-
-    pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
-        self.chunk_len()
-            .unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
-    }
-
-    /// Run the merged-form SSD on the given MIMO-first input.
+impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
+    /// Run the selected merged-form (single-ssd) algorithm on this MIMO-first input.
+    ///
+    /// Dispatches by [`Mamba3SsdPath`] variant to `single_ssd_minimal`,
+    /// `single_ssd_serial`, or `single_ssd_serial_recalculated`.
     ///
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the merged-form accumulator at the last token (to be stored in the
     ///   cache for streaming).
-    pub fn run<B: Backend + Mamba3SingleSsdBackendExt>(
-        &self,
-        input: Mamba3SingleSsdInput<B>,
-    ) -> (Tensor<B, 6>, Tensor<B, 4>) {
-        match self {
-            Mamba3SingleSsdPath::Minimal(_) => input.single_ssd_minimal(),
-            Mamba3SingleSsdPath::Serial(_) => input.single_ssd_serial(),
-            Mamba3SingleSsdPath::SerialRecalculated(_) => input.single_ssd_serial_recalculated(),
-        }
-    }
-}
-
-impl Default for Mamba3SingleSsdPath {
-    fn default() -> Mamba3SingleSsdPath {
-        // The SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
-        Mamba3SingleSsdPath::SerialRecalculated(None)
-    }
-}
-
-impl From<Mamba3SsdPath> for Mamba3SingleSsdPath {
-    fn from(path: Mamba3SsdPath) -> Self {
+    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<B, 6>, Tensor<B, 4>) {
         match path {
-            Mamba3SsdPath::Minimal(chunk_len) => Mamba3SingleSsdPath::Minimal(chunk_len),
-            Mamba3SsdPath::Serial(chunk_len) => Mamba3SingleSsdPath::Serial(chunk_len),
-            Mamba3SsdPath::SerialRecalculated(chunk_len) => {
-                Mamba3SingleSsdPath::SerialRecalculated(chunk_len)
-            }
+            Mamba3SsdPath::Minimal(_) => self.single_ssd_minimal(),
+            Mamba3SsdPath::Serial(_) => self.single_ssd_serial(),
+            Mamba3SsdPath::SerialRecalculated(_) => self.single_ssd_serial_recalculated(),
         }
     }
 }

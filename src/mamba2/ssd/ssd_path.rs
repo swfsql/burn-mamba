@@ -1,45 +1,45 @@
 use crate::mamba2::prelude::*;
 use burn::prelude::*;
 
-/// Ssd algorithm selection.
+/// Algorithm selection for the Mamba-2 chunkwise SSD.
 ///
-/// Each variant carries the chunk length Q for the SSD algorithm.  
-/// Larger values increase the intra-chunk GEMM work and reduce the
-/// inter-chunk scan length.  
-/// Optimal value is approximately `√(state_rank · per_head_dim)`.
+/// Each variant carries an optional chunk length. Larger values increase the
+/// intra-chunk GEMM work and reduce the inter-chunk scan length; the optimal
+/// value is approximately `√(state_rank · per_head_dim)` (see
+/// [`Self::optimal_chunk_len`]). `None` falls back to that optimal value.
 #[derive(Debug, Clone)]
 pub enum Mamba2SsdPath {
-    /// Minimal SSD.
+    /// Minimal SSD: mostly batched matmuls; backward via autodiff.
     ///
-    /// This algorithm mostly uses batched matmuls. For the backward operation, this relies on autodiff.  
-    /// See [`Mamba2SsdInput::ssd_minimal`] for more info.
+    /// See [`Mamba2SsdInput::ssd_minimal`]. For training, prefer
+    /// [`Self::SerialRecalculated`].
     ///
-    /// For training, you may prefer using [`Self::SerialRecalculated`] instead.
-    ///
-    /// Based on `/mamba_ssm/modules/ssd_minimal.py` from the `state-spaces/mamba` github reference.
+    /// Based on `/mamba_ssm/modules/ssd_minimal.py` from the `state-spaces/mamba`
+    /// github reference.
     Minimal(Option<usize>),
-    /// (Hybrid) Serial SSD.
+
+    /// (Hybrid) serial SSD: a serial loop over the chunks plus batched matmuls;
+    /// backward via autodiff.
     ///
-    /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba2SsdInput::ssd_serial`] for more info.  
-    /// For the backward operation, this relies on autodiff.  
-    /// For a custom backwards that saves memory, see [`Self::SerialRecalculated`].
+    /// See [`Mamba2SsdInput::ssd_serial`]. For a memory-saving custom backward,
+    /// see [`Self::SerialRecalculated`].
     ///
-    /// Based on 5 kernels on `/mamba_ssm/ops/triton/` from the `state-spaces/mamba` github reference:
+    /// Based on 5 kernels under `/mamba_ssm/ops/triton/` from the
+    /// `state-spaces/mamba` github reference:
     /// - `ssd_chunk_state.py` (K1, K3).
     /// - `ssd_bmm.py` (K2).
     /// - `ssd_state_passing.py` (K4).
     /// - `ssd_chunk_scan.py` (K5).
     Serial(Option<usize>),
-    /// (Hybrid) Serial SSD that triggers recalculations for the backward pass.
+
+    /// (Hybrid) serial SSD with a custom, memory-efficient backward that
+    /// recomputes the forward intermediates instead of storing them.
     ///
-    /// This algorithm uses a serial loop over the nchunks, besides batched matmuls.
-    /// See [`Mamba2SsdInput::ssd_serial_recalculated`] for more info.  
-    /// Contains a custom backward operation that saves memory.  
-    /// For an autodiff backwards, see [`Self::Serial`].
+    /// See [`Mamba2SsdInput::ssd_serial_recalculated`]. For a plain autodiff
+    /// backward, see [`Self::Serial`].
     ///
-    /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py` from the `state-spaces/mamba`
-    /// github reference.
+    /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py` from
+    /// the `state-spaces/mamba` github reference.
     SerialRecalculated(Option<usize>),
 }
 
@@ -94,94 +94,60 @@ impl<B: Backend> Mamba2SsdInput<B> {
 }
 
 impl Mamba2SsdPath {
-    /// Optimal chunk length is approximately `√(state_rank · per_head_dim)`.
-    pub fn optimal_default(state_rank: usize, per_head_dim: usize) -> usize {
+    /// Optimal chunk length, approximately `√(state_rank · per_head_dim)`,
+    /// rounded up to a multiple of 32 and capped at 512.
+    pub fn optimal_chunk_len(state_rank: usize, per_head_dim: usize) -> usize {
         (state_rank * per_head_dim)
             .isqrt()
             .next_multiple_of(32) // rule-of-thumb: common plane dimension.
             .min(512) // rule-of-thumb: ceiling at 512.
     }
 
-    /// Optimal Minimal variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn core_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::Minimal(Some(optim))
-    }
-
-    /// Optimal Minimal variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn core_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
-        Self::core_optimal(block.state_rank, block.per_head_dim())
-    }
-
-    /// Optimal Serial variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn chunked_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::Serial(Some(optim))
-    }
-
-    /// Optimal Serial variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn chunked_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
-        Self::chunked_optimal(block.state_rank, block.per_head_dim())
-    }
-
-    /// Optimal Serial variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn chunked_recalculated_optimal(state_rank: usize, per_head_dim: usize) -> Self {
-        let optim = Self::optimal_default(state_rank, per_head_dim);
-        Self::SerialRecalculated(Some(optim))
-    }
-
-    /// Optimal Serial Recalculated variant.
-    ///
-    /// See [`Self::optimal_default`] for more info.
-    pub fn chunked_recalculated_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
-        Self::chunked_recalculated_optimal(block.state_rank, block.per_head_dim())
-    }
-
+    /// The chunk length carried by this variant, if any.
     pub fn chunk_len(&self) -> Option<usize> {
         match self {
-            Mamba2SsdPath::Minimal(chunk_len)
-            | Mamba2SsdPath::Serial(chunk_len)
-            | Mamba2SsdPath::SerialRecalculated(chunk_len) => *chunk_len,
+            Self::Minimal(chunk_len)
+            | Self::Serial(chunk_len)
+            | Self::SerialRecalculated(chunk_len) => *chunk_len,
         }
     }
 
+    /// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
+    /// when unset.
     pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
         self.chunk_len()
-            .unwrap_or_else(|| Self::optimal_default(state_rank, per_head_dim))
+            .unwrap_or_else(|| Self::optimal_chunk_len(state_rank, per_head_dim))
     }
 
-    /// Run the SSD algorithm on the given input.
+    /// The recommended default path for a given block: [`Self::SerialRecalculated`]
+    /// with [`Self::optimal_chunk_len`] for the block's dimensions.
+    pub fn default_optimal_from_block<B: Backend>(block: &Mamba2<B>) -> Self {
+        let chunk_len = Self::optimal_chunk_len(block.state_rank, block.per_head_dim());
+        Self::SerialRecalculated(Some(chunk_len))
+    }
+}
+
+impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
+    /// Run the selected SSD algorithm on this input.
     ///
-    /// Dispatches to `ssd_minimal`, `ssd_serial`, or `ssd_serial_recalculated` based on the variant.
+    /// Dispatches by [`Mamba2SsdPath`] variant to `ssd_minimal`, `ssd_serial`,
+    /// or `ssd_serial_recalculated`.
     ///
     /// # Returns
     /// - `y_bnlhp`: `[batch, nchunks, chunk_len, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn run<B: Backend + Mamba2BackendExt>(
-        &self,
-        input: Mamba2SsdInput<B>,
-    ) -> (Tensor<B, 5>, Tensor<B, 4>) {
-        match self {
-            Mamba2SsdPath::Minimal(_) => input.ssd_minimal(),
-            Mamba2SsdPath::Serial(_) => input.ssd_serial(),
-            Mamba2SsdPath::SerialRecalculated(_) => input.ssd_serial_recalculated(),
+    pub fn run(self, path: &Mamba2SsdPath) -> (Tensor<B, 5>, Tensor<B, 4>) {
+        match path {
+            Mamba2SsdPath::Minimal(_) => self.ssd_minimal(),
+            Mamba2SsdPath::Serial(_) => self.ssd_serial(),
+            Mamba2SsdPath::SerialRecalculated(_) => self.ssd_serial_recalculated(),
         }
     }
 }
 
 impl Default for Mamba2SsdPath {
     fn default() -> Mamba2SsdPath {
-        // SSD Path defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        // Defaults to the SerialRecalculated algorithm with the optimal chunk length.
         Mamba2SsdPath::SerialRecalculated(None)
     }
 }

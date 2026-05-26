@@ -716,7 +716,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
         ssd_input.sanity();
-        let (y_bnlhp, final_state_bhpr) = ssd_path.run(ssd_input);
+        let (y_bnlhp, final_state_bhpr) = ssd_input.run(&ssd_path);
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             y_bnlhp.dims()

@@ -146,12 +146,12 @@ fn loss_from_outputs(
 }
 
 fn run_path(
-    path: Mamba3SingleSsdPath,
+    path: Mamba3SsdPath,
     inputs: &Inputs,
     y_head: Tensor<InnerB, 6>,
     s_head: Tensor<InnerB, 4>,
 ) -> PathRun {
-    let (y, state) = path.run(inputs.ssd_input());
+    let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();
     let loss = loss_from_outputs(y, state, y_head, s_head);
@@ -260,19 +260,19 @@ fn run_minimal_matches_serial(
     let inputs_rec = Inputs::from_inner(v, b, c, da, gamma, scale, init);
 
     let r_min = run_path(
-        Mamba3SingleSsdPath::Minimal(Some(chunk_len)),
+        Mamba3SsdPath::Minimal(Some(chunk_len)),
         &inputs_min,
         y_head.clone(),
         s_head.clone(),
     );
     let r_ser = run_path(
-        Mamba3SingleSsdPath::Serial(Some(chunk_len)),
+        Mamba3SsdPath::Serial(Some(chunk_len)),
         &inputs_ser,
         y_head.clone(),
         s_head.clone(),
     );
     let r_rec = run_path(
-        Mamba3SingleSsdPath::SerialRecalculated(Some(chunk_len)),
+        Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
         &inputs_rec,
         y_head,
         s_head,

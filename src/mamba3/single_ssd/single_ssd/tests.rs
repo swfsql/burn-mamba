@@ -348,7 +348,7 @@ fn guard_random_init_consumed(
     let (out_zero, _) = model.forward_single_ssd(
         Tensor::from_inner(input.clone()),
         Some(build_single_ssd_cache(cfg, batch, false)),
-        Mamba3SingleSsdPath::from(ssd_path.clone()),
+        ssd_path,
     );
     let d = max_abs_diff(random_out.clone(), out_zero.inner());
     assert!(
@@ -381,17 +381,17 @@ fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) 
 
     let input_a = param_input(&input);
     let c3c = c3;
-    let path_a = Mamba3DoubleSsdPath::from(ssd_path.clone());
+    let path_a = ssd_path.clone();
     let r_fwd_double_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
-        let (out, _) = m.forward_double_ssd(x, Some(c3c), path_a);
+        let (out, _) = m.forward_double_ssd(x, Some(c3c), &path_a);
         out
     });
 
     let input_b = param_input(&input);
     let cmc = cm;
-    let single_ssd_b = Mamba3SingleSsdPath::from(ssd_path.clone());
+    let single_ssd_b = ssd_path.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_b, &head, |m, x| {
-        let (out, _) = m.forward_single_ssd(x, Some(cmc), single_ssd_b);
+        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_b);
         out
     });
 
@@ -494,7 +494,7 @@ fn forward_match_recalc_mimo() {
 /// history so the single-ssd and recurrent forms coincide).
 fn run_forward_single_ssd_matches_step(
     cfg: Mamba3Config,
-    single_ssd_path: Mamba3SingleSsdPath,
+    single_ssd_path: Mamba3SsdPath,
     random_init: bool,
 ) {
     let device: Device = Default::default();
@@ -514,7 +514,7 @@ fn run_forward_single_ssd_matches_step(
     let cmc = cm.clone();
     let single_ssd_a = single_ssd_path.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
-        let (out, _) = m.forward_single_ssd(x, Some(cmc), single_ssd_a);
+        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_a);
         out
     });
 
@@ -562,7 +562,7 @@ fn run_forward_single_ssd_matches_step(
 fn forward_single_ssd_matches_step() {
     run_forward_single_ssd_matches_step(
         small_config(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
         false,
     );
 }
@@ -571,7 +571,7 @@ fn forward_single_ssd_matches_step() {
 fn forward_single_ssd_matches_step_random_init() {
     run_forward_single_ssd_matches_step(
         small_config(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
         true,
     );
 }
@@ -580,7 +580,7 @@ fn forward_single_ssd_matches_step_random_init() {
 fn forward_single_ssd_matches_step_mimo() {
     run_forward_single_ssd_matches_step(
         small_config_mimo(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
         false,
     );
 }
@@ -589,7 +589,7 @@ fn forward_single_ssd_matches_step_mimo() {
 fn forward_single_ssd_matches_step_mimo_random_init() {
     run_forward_single_ssd_matches_step(
         small_config_mimo(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
         true,
     );
 }
@@ -598,7 +598,7 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
 fn forward_single_ssd_matches_step_serial() {
     run_forward_single_ssd_matches_step(
         small_config(),
-        Mamba3SingleSsdPath::Serial(Some(4)),
+        Mamba3SsdPath::Serial(Some(4)),
         false,
     );
 }
@@ -607,7 +607,7 @@ fn forward_single_ssd_matches_step_serial() {
 fn forward_single_ssd_matches_step_serial_mimo() {
     run_forward_single_ssd_matches_step(
         small_config_mimo(),
-        Mamba3SingleSsdPath::Serial(Some(4)),
+        Mamba3SsdPath::Serial(Some(4)),
         false,
     );
 }
@@ -616,7 +616,7 @@ fn forward_single_ssd_matches_step_serial_mimo() {
 fn forward_single_ssd_matches_step_recalc() {
     run_forward_single_ssd_matches_step(
         small_config(),
-        Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
         false,
     );
 }
@@ -625,7 +625,7 @@ fn forward_single_ssd_matches_step_recalc() {
 fn forward_single_ssd_matches_step_recalc_mimo() {
     run_forward_single_ssd_matches_step(
         small_config_mimo(),
-        Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
         false,
     );
 }
@@ -639,7 +639,7 @@ fn forward_single_ssd_matches_step_recalc_mimo() {
 /// initial cache is actually consumed (not silently ignored).
 fn run_forward_single_ssd_split_matches_full(
     cfg: Mamba3Config,
-    single_ssd_path: Mamba3SingleSsdPath,
+    single_ssd_path: Mamba3SsdPath,
 ) {
     let device: Device = Default::default();
     let model = cfg.init::<B>(&device);
@@ -674,7 +674,7 @@ fn run_forward_single_ssd_split_matches_full(
     let cache_full = init_cache.clone();
     let single_ssd_f = single_ssd_path.clone();
     let r_full = run_with_grads_single_ssd(&model, &input_full, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_full), single_ssd_f)
+        m.forward_single_ssd(x, Some(cache_full), &single_ssd_f)
     });
 
     let input_split = param_input(&input);
@@ -684,8 +684,8 @@ fn run_forward_single_ssd_split_matches_full(
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
         let (out_prefix, mid) =
-            m.forward_single_ssd(prefix, Some(cache_split), single_ssd_s.clone());
-        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), single_ssd_s);
+            m.forward_single_ssd(prefix, Some(cache_split), &single_ssd_s);
+        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), &single_ssd_s);
         (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
     });
 
@@ -703,7 +703,7 @@ fn run_forward_single_ssd_split_matches_full(
         let (out_zero, _) = model.forward_single_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_single_ssd_cache(&cfg, batch, false)),
-            single_ssd_path.clone(),
+            &single_ssd_path,
         );
         let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
         assert!(
@@ -718,7 +718,7 @@ fn run_forward_single_ssd_split_matches_full(
 fn forward_single_ssd_split_matches_full() {
     run_forward_single_ssd_split_matches_full(
         small_config(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
     );
 }
 
@@ -726,20 +726,20 @@ fn forward_single_ssd_split_matches_full() {
 fn forward_single_ssd_split_matches_full_mimo() {
     run_forward_single_ssd_split_matches_full(
         small_config_mimo(),
-        Mamba3SingleSsdPath::Minimal(Some(4)),
+        Mamba3SsdPath::Minimal(Some(4)),
     );
 }
 
 #[test]
 fn forward_single_ssd_split_matches_full_serial() {
-    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SingleSsdPath::Serial(Some(4)));
+    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SsdPath::Serial(Some(4)));
 }
 
 #[test]
 fn forward_single_ssd_split_matches_full_serial_mimo() {
     run_forward_single_ssd_split_matches_full(
         small_config_mimo(),
-        Mamba3SingleSsdPath::Serial(Some(4)),
+        Mamba3SsdPath::Serial(Some(4)),
     );
 }
 
@@ -747,7 +747,7 @@ fn forward_single_ssd_split_matches_full_serial_mimo() {
 fn forward_single_ssd_split_matches_full_recalc() {
     run_forward_single_ssd_split_matches_full(
         small_config(),
-        Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
     );
 }
 
@@ -755,7 +755,7 @@ fn forward_single_ssd_split_matches_full_recalc() {
 fn forward_single_ssd_split_matches_full_recalc_mimo() {
     run_forward_single_ssd_split_matches_full(
         small_config_mimo(),
-        Mamba3SingleSsdPath::SerialRecalculated(Some(4)),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
     );
 }
 
@@ -884,8 +884,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let init_v = Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device);
     let init_angle = Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device);
 
-    let path_double = Mamba3DoubleSsdPath::from(ssd_path.clone());
-    let path_single = Mamba3SingleSsdPath::from(ssd_path);
+    let path_double = ssd_path.clone();
+    let path_single = ssd_path;
 
     // ── Run A: double → (convert) → single ───────────────────────────────
     let input_a = param_input(&input);
@@ -905,9 +905,9 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), pd_a);
+        let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), &pd_a);
         let mid_single = Mamba3SingleSsdCache::from(mid_double);
-        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), ps_a);
+        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), &ps_a);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         (
             out,
@@ -931,9 +931,9 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), ps_b);
+        let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), &ps_b);
         let mid_double = Mamba3DoubleSsdCache::from(mid_single);
-        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), pd_b);
+        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), &pd_b);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         (
             out,

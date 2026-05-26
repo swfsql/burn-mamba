@@ -159,7 +159,7 @@ fn run_path(
     y_head: Tensor<InnerB, 5>,
     s_head: Tensor<InnerB, 4>,
 ) -> PathRun {
-    let (y, state) = path.run(inputs.ssd_input());
+    let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();
 
