@@ -1,37 +1,54 @@
+//! # Naive bidirectional Mamba-2 layer stack
+//!
+//! For non-autoregressive tasks.  Layers are consumed in **pairs**: each pair
+//! runs a straight (→) pass and a reversed (←) pass (via `flip` on the sequence
+//! axis, then flip back) and merges the two with an [`OutputMerge`].  The block
+//! itself is unmodified — only how its two passes are scheduled and combined is
+//! bidirectional.  Pairing is driven by a [`BidiSchedule`].
+
 use crate::mamba2::bidi::naive::{OutputMerge, OutputMergeConfig};
 use crate::mamba2::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
 
+/// A stack of bidirectional Mamba-2 layer pairs with optional virtual-layer
+/// scheduling.
 #[derive(Module, Debug)]
 pub struct Mamba2BidiLayers<B: Backend> {
+    /// Number of real (weight-bearing) layers; must be even (used in pairs).
     pub n_real_layers: usize,
+    /// Optional `(n_virtual_layers, schedule)` for weight-sharing.  `module(skip)`
+    /// so Burn does not treat it as a trainable parameter.
     #[module(skip)]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
-    /// # Shape
-    /// - `[n_real_layers]`
+    /// The weight-bearing layer instances, length `n_real_layers`.
     pub real_layers: Vec<Mamba2Layer<B>>,
+    /// When `true`, the first virtual pair's residual is scaled to zero.
     pub ignore_first_residual: bool,
+    /// When `true`, the last virtual pair's residual is scaled to zero.
     pub ignore_last_residual: bool,
-    /// # Shape
-    /// - `[n_real_layers / 2]`
+    /// One direction-merge per pair, length `n_real_layers / 2`.
     pub outputs_merge: Vec<OutputMerge<B>>,
 }
 
+/// Configuration / factory for [`Mamba2BidiLayers`].
 #[derive(Config, Debug)]
 pub struct Mamba2BidiLayersConfig {
+    /// Number of distinct weight sets to allocate (must be even).
     pub n_real_layers: usize,
+    /// Optional virtual-layer scheduling.  See [`Mamba2BidiLayers`].
     #[config(default = "None")]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
+    /// Configuration shared by all Mamba-2 blocks in the stack.
     pub mamba_block: Mamba2Config,
+    /// See [`Mamba2BidiLayers::ignore_first_residual`].
     #[config(default = false)]
     pub ignore_first_residual: bool,
+    /// See [`Mamba2BidiLayers::ignore_last_residual`].
     #[config(default = false)]
     pub ignore_last_residual: bool,
-
-    /// # Shape
-    /// - `[n_real_layers / 2]`
+    /// One [`OutputMergeConfig`] per pair, length `n_real_layers / 2`.
     pub outputs_merge: Vec<OutputMergeConfig>,
 }
 
@@ -70,8 +87,6 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
         &self,
         mut x: Tensor<B, 3>,
         caches: Option<Mamba2Caches<B>>,
-        // straight_caches: Option<Mamba2Caches<B>>,
-        // reverse_caches: Option<Mamba2Caches<B>>,
         ssd_path: Mamba2SsdPath,
     ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
         let n_virtual_layers = self
@@ -177,22 +192,35 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayers<B> {
     }
 }
 
+/// A single bidirectional pair: a straight (→) and a reversed (←) Pre-LN block
+/// whose outputs are merged, then added to the (scaled) residual.
 #[derive(Module, Debug)]
 pub struct Mamba2BidiLayerPair<B: Backend> {
+    /// Pre-norm for the straight pass.
     pub straight_norm: RmsNorm<B>,
+    /// Pre-norm for the reversed pass.
     pub reverse_norm: RmsNorm<B>,
+    /// The Mamba-2 block run left-to-right.
     pub straight_block: Mamba2<B>,
+    /// The Mamba-2 block run right-to-left (over the flipped sequence).
     pub reverse_block: Mamba2<B>,
+    /// Merge strategy combining the two directions.
     pub output_merge: OutputMerge<B>,
+    /// Residual scale (0.0 suppresses the skip connection, else 1.0).
     pub residual_scale: f32,
 }
 
+/// Configuration / factory for [`Mamba2BidiLayerPair`].
 #[derive(Config, Debug)]
 pub struct Mamba2BidiLayerPairConfig {
+    /// Configuration for the straight-direction block.
     pub straight_block: Mamba2Config,
+    /// Configuration for the reverse-direction block.
     pub reverse_block: Mamba2Config,
+    /// See [`Mamba2BidiLayerPair::residual_scale`].
     #[config(default = 1.0)]
     pub residual_scale: f32,
+    /// How to merge the two directions.
     pub output_merge: OutputMergeConfig,
 }
 
@@ -244,7 +272,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayerPair<B> {
         let (x, straight_cache) = self
             .straight_block
             .forward(x, straight_cache, ssd_path.clone());
-        debug_assert_eq!([batch, sequence, d_model], x.dims());
+        assert_eq!([batch, sequence, d_model], x.dims());
 
         // reverse reads inputs as:
         // t₀        x₃<
@@ -252,7 +280,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2BidiLayerPair<B> {
         // t₂   x₁<x₂<x₃<
         // t₃ x₀<x₁<x₂<x₃<
         let (x_rev, reverse_cache) = self.reverse_block.forward(x_rev, reverse_cache, ssd_path);
-        debug_assert_eq!([batch, sequence, d_model], x_rev.dims());
+        assert_eq!([batch, sequence, d_model], x_rev.dims());
 
         // re-align the reversed read:
         // t₀ x₀<x₁<x₂<x₃<

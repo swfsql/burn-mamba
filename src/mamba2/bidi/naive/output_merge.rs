@@ -1,24 +1,33 @@
+//! Strategies for merging the straight (→) and reverse (←) passes of a
+//! bidirectional Mamba-2 layer pair into a single `[batch, sequence, d_model]`
+//! output.
+
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 
-/// Used when a Module is expected.
+/// A zero-parameter placeholder used where the `Module` derive expects a value
+/// (the `Mean` merge carries no weights).
 #[derive(Module, Clone, Debug)]
 pub struct NoOp;
 
+/// How the two directions of a bidirectional pair are combined.
 #[allow(clippy::large_enum_variant)]
 #[derive(Module, Debug)]
 pub enum OutputMerge<B: Backend> {
+    /// Element-wise average of the two directions (no parameters).
     Mean(NoOp),
-    /// # Shape
-    /// - `[2 * d_model, d_model]`
+    /// Concatenate along the feature axis and project back down with a learnable
+    /// `[2 · d_model, d_model]` linear layer.
     CatLinear(Linear<B>),
 }
 
-/// # Shapes
-///   - Input straight `[batch_size, sequence_len, d_model]`
-///   - Input reverse `[batch_size, sequence_len, d_model]`
-///   - Output `[batch_size, sequence_len, d_model]`
 impl<B: Backend> OutputMerge<B> {
+    /// Merge the two directional outputs.
+    ///
+    /// # Shapes
+    ///   - Input straight `[batch, sequence, d_model]`
+    ///   - Input reverse `[batch, sequence, d_model]`
+    ///   - Output `[batch, sequence, d_model]`
     pub fn forward(&self, straight: Tensor<B, 3>, reverse: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, sequence_len, d_model] = straight.dims();
         assert_eq!(straight.dims(), reverse.dims());
@@ -35,20 +44,26 @@ impl<B: Backend> OutputMerge<B> {
     }
 }
 
+/// Configuration / factory for [`OutputMerge`].
 #[derive(Config, Debug)]
 pub enum OutputMergeConfig {
+    /// Build an [`OutputMerge::Mean`].
     Mean,
+    /// Build an [`OutputMerge::CatLinear`].
     CatLinear,
 }
 
 impl OutputMergeConfig {
+    /// A vector of `n_real_layers / 2` [`Self::Mean`] configs (one per pair).
     pub fn mean(n_real_layers: usize) -> Vec<Self> {
         vec![Self::Mean; n_real_layers / 2]
     }
+    /// A vector of `n_real_layers / 2` [`Self::CatLinear`] configs (one per pair).
     pub fn cat_linear(n_real_layers: usize) -> Vec<Self> {
         vec![Self::CatLinear; n_real_layers / 2]
     }
 
+    /// Allocate the merge module on `device` for the given `d_model`.
     pub fn init<B: Backend>(&self, d_model: usize, device: &B::Device) -> OutputMerge<B> {
         match self {
             OutputMergeConfig::Mean => OutputMerge::Mean(NoOp),

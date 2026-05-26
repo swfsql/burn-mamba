@@ -1,3 +1,18 @@
+//! # Virtual-layer → real-weight scheduling
+//!
+//! A `{Model}Layers` stack can run `n_virtual_layers` logical passes over only
+//! `n_real_layers` weight sets (e.g. 48 logical from 12 real); each virtual
+//! layer keeps its own cache but shares parameters.  A [`Schedule`] maps a
+//! virtual layer index to the real weight index to use.
+//!
+//! For **bidirectional** stacks, [`BidiSchedule`] additionally interleaves the
+//! two directions: even virtual indices run the straight (→) pass and odd
+//! indices run the reverse (←) pass.
+//!
+//! Each variant is documented with a worked virtual→real mapping example.
+
+/// How a unidirectional layer stack maps virtual layer indices to real
+/// (weight-bearing) layer indices.
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Schedule {
     /// Fills virtual positions by wrapping around the real schedule in a looping fashion.
@@ -25,6 +40,8 @@ pub enum Schedule {
 }
 
 impl Schedule {
+    /// Map `virtual_idx` (in `0..virtual_len`) to a real layer index in
+    /// `0..real_len` according to this schedule.
     pub fn real_idx(&self, virtual_idx: usize, virtual_len: usize, real_len: usize) -> usize {
         match self {
             Schedule::Cyclic => virtual_idx % real_len,
@@ -34,6 +51,9 @@ impl Schedule {
     }
 }
 
+/// How a bidirectional layer stack maps virtual layer indices to real layer
+/// indices, interleaving the straight (→, even indices) and reverse (←, odd
+/// indices) directions.
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BidiSchedule {
     /// Use even virtual positions for straight-direction (→), and odd virtual positions for
@@ -79,6 +99,10 @@ pub enum BidiSchedule {
 }
 
 impl BidiSchedule {
+    /// Map `virtual_idx` (in `0..virtual_len`) to a real layer index in
+    /// `0..real_len`.  Even/odd `virtual_idx` selects the straight/reverse
+    /// direction; the outer index `virtual_idx / 2` is what the schedule cycles
+    /// or stretches over.
     pub fn real_idx(&self, virtual_idx: usize, virtual_len: usize, real_len: usize) -> usize {
         let virtual_outer_idx = virtual_idx / 2;
         let virtual_outer_len = virtual_len / 2;
