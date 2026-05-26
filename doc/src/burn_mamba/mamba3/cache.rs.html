@@ -142,4 +142,61 @@
 <a href=#142 id=142 data-nosnippet>142</a>        Mamba3Cache::SingleSsd(cache)
 <a href=#143 id=143 data-nosnippet>143</a>    }
 <a href=#144 id=144 data-nosnippet>144</a>}
+<a href=#145 id=145 data-nosnippet>145</a>
+<a href=#146 id=146 data-nosnippet>146</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#147 id=147 data-nosnippet>147</a>// Conversions between the two pathway caches
+<a href=#148 id=148 data-nosnippet>148</a>// ---------------------------------------------------------------------------
+<a href=#149 id=149 data-nosnippet>149</a>//
+<a href=#150 id=150 data-nosnippet>150</a>// At a cache boundary (the last token of a `forward` / `step` call) the
+<a href=#151 id=151 data-nosnippet>151</a>// look-ahead term `(1 − λₜ₊₁)·Δₜ₊₁` vanishes, so `scaleₜ = γₜ` for the final
+<a href=#152 id=152 data-nosnippet>152</a>// position. Substituting that into the single-ssd accumulator
+<a href=#153 id=153 data-nosnippet>153</a>// `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` makes it coincide *exactly* with the
+<a href=#154 id=154 data-nosnippet>154</a>// double-ssd state `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁⊗xₜ₋₁ + γₜ Bₜ⊗xₜ` — the deferred β
+<a href=#155 id=155 data-nosnippet>155</a>// contribution of the next token is reconstructed on the following call from
+<a href=#156 id=156 data-nosnippet>156</a>// the saved `k_state`/`v_state`, identically in both forms. The remaining
+<a href=#157 id=157 data-nosnippet>157</a>// three fields (previous-token K/V history and cumulative RoPE angle) carry the
+<a href=#158 id=158 data-nosnippet>158</a>// same meaning in both caches. Hence the conversion is a field-by-field move.
+<a href=#159 id=159 data-nosnippet>159</a>//
+<a href=#160 id=160 data-nosnippet>160</a>// The accumulators differ only *mid-sequence*; since caches are only ever
+<a href=#161 id=161 data-nosnippet>161</a>// produced and consumed at boundaries, the move is lossless there. The distinct
+<a href=#162 id=162 data-nosnippet>162</a>// types still prevent silently mixing the two accumulators inside a single
+<a href=#163 id=163 data-nosnippet>163</a>// chunked pass.
+<a href=#164 id=164 data-nosnippet>164</a>
+<a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">impl</span>&lt;B: Backend&gt; From&lt;Mamba3SingleSsdCache&lt;B&gt;&gt; <span class="kw">for </span>Mamba3DoubleSsdCache&lt;B&gt; {
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">fn </span>from(cache: Mamba3SingleSsdCache&lt;B&gt;) -&gt; <span class="self">Self </span>{
+<a href=#167 id=167 data-nosnippet>167</a>        Mamba3DoubleSsdCache {
+<a href=#168 id=168 data-nosnippet>168</a>            ssm_bhpr: cache.ssm_bhpr,
+<a href=#169 id=169 data-nosnippet>169</a>            k_state_bmhr: cache.k_state_bmhr,
+<a href=#170 id=170 data-nosnippet>170</a>            v_state_bhp: cache.v_state_bhp,
+<a href=#171 id=171 data-nosnippet>171</a>            cum_angle_bha: cache.cum_angle_bha,
+<a href=#172 id=172 data-nosnippet>172</a>        }
+<a href=#173 id=173 data-nosnippet>173</a>    }
+<a href=#174 id=174 data-nosnippet>174</a>}
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a><span class="kw">impl</span>&lt;B: Backend&gt; From&lt;Mamba3DoubleSsdCache&lt;B&gt;&gt; <span class="kw">for </span>Mamba3SingleSsdCache&lt;B&gt; {
+<a href=#177 id=177 data-nosnippet>177</a>    <span class="kw">fn </span>from(cache: Mamba3DoubleSsdCache&lt;B&gt;) -&gt; <span class="self">Self </span>{
+<a href=#178 id=178 data-nosnippet>178</a>        Mamba3SingleSsdCache {
+<a href=#179 id=179 data-nosnippet>179</a>            ssm_bhpr: cache.ssm_bhpr,
+<a href=#180 id=180 data-nosnippet>180</a>            k_state_bmhr: cache.k_state_bmhr,
+<a href=#181 id=181 data-nosnippet>181</a>            v_state_bhp: cache.v_state_bhp,
+<a href=#182 id=182 data-nosnippet>182</a>            cum_angle_bha: cache.cum_angle_bha,
+<a href=#183 id=183 data-nosnippet>183</a>        }
+<a href=#184 id=184 data-nosnippet>184</a>    }
+<a href=#185 id=185 data-nosnippet>185</a>}
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a><span class="kw">impl</span>&lt;B: Backend&gt; From&lt;Mamba3SingleSsdCaches&lt;B&gt;&gt; <span class="kw">for </span>Mamba3DoubleSsdCaches&lt;B&gt; {
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">fn </span>from(caches: Mamba3SingleSsdCaches&lt;B&gt;) -&gt; <span class="self">Self </span>{
+<a href=#189 id=189 data-nosnippet>189</a>        Mamba3DoubleSsdCaches {
+<a href=#190 id=190 data-nosnippet>190</a>            caches: caches.caches.into_iter().map(Into::into).collect(),
+<a href=#191 id=191 data-nosnippet>191</a>        }
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>}
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a><span class="kw">impl</span>&lt;B: Backend&gt; From&lt;Mamba3DoubleSsdCaches&lt;B&gt;&gt; <span class="kw">for </span>Mamba3SingleSsdCaches&lt;B&gt; {
+<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">fn </span>from(caches: Mamba3DoubleSsdCaches&lt;B&gt;) -&gt; <span class="self">Self </span>{
+<a href=#197 id=197 data-nosnippet>197</a>        Mamba3SingleSsdCaches {
+<a href=#198 id=198 data-nosnippet>198</a>            caches: caches.caches.into_iter().map(Into::into).collect(),
+<a href=#199 id=199 data-nosnippet>199</a>        }
+<a href=#200 id=200 data-nosnippet>200</a>    }
+<a href=#201 id=201 data-nosnippet>201</a>}
 </code></pre></div></section></main></body></html>

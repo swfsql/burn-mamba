@@ -644,17 +644,12 @@
 <a href=#644 id=644 data-nosnippet>644</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_double_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
 <a href=#645 id=645 data-nosnippet>645</a>                    (out_bsm, cache.into())
 <a href=#646 id=646 data-nosnippet>646</a>                }
-<a href=#647 id=647 data-nosnippet>647</a>                Mamba3Cache::SingleSsd(_cache) =&gt; {
-<a href=#648 id=648 data-nosnippet>648</a>                    <span class="comment">// currently not changed from the double_ssd
-<a href=#649 id=649 data-nosnippet>649</a>                    </span><span class="macro">todo!</span>(<span class="string">"step method for single_ssd form is not yet implemented"</span>)
-<a href=#650 id=650 data-nosnippet>650</a>
-<a href=#651 id=651 data-nosnippet>651</a>                    <span class="comment">// Hint:
-<a href=#652 id=652 data-nosnippet>652</a>                    // Token-by-token decoding always uses the recurrent form (double-ssd cache).
-<a href=#653 id=653 data-nosnippet>653</a>                    // When running a step that uses a single-ssd cache, the single-ssd cache
-<a href=#654 id=654 data-nosnippet>654</a>                    // would first need converting into the double-ssd form.
-<a href=#655 id=655 data-nosnippet>655</a>                </span>}
-<a href=#656 id=656 data-nosnippet>656</a>            }
-<a href=#657 id=657 data-nosnippet>657</a>        }
-<a href=#658 id=658 data-nosnippet>658</a>    }
-<a href=#659 id=659 data-nosnippet>659</a>}
+<a href=#647 id=647 data-nosnippet>647</a>                Mamba3Cache::SingleSsd(cache) =&gt; {
+<a href=#648 id=648 data-nosnippet>648</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_single_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
+<a href=#649 id=649 data-nosnippet>649</a>                    (out_bsm, cache.into())
+<a href=#650 id=650 data-nosnippet>650</a>                }
+<a href=#651 id=651 data-nosnippet>651</a>            }
+<a href=#652 id=652 data-nosnippet>652</a>        }
+<a href=#653 id=653 data-nosnippet>653</a>    }
+<a href=#654 id=654 data-nosnippet>654</a>}
 </code></pre></div></section></main></body></html>
