@@ -24,17 +24,10 @@ use burn::backend::autodiff::{
     ops::{Backward, Ops, OpsKind},
 };
 use burn::prelude::*;
-use burn::backend::{TensorPrimitive, tensor::FloatTensor};
-use burn::backend::{Backend, BackendTypes, DispatchTensor};
-use burn::backend::ops::FloatTensorOps;
+use burn::backend::tensor::FloatTensor;
+use burn::backend::{Backend, BackendTypes};
 
-
-impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> 
-// where 
-//     B: BackendTypes<FloatTensorPrimitive = DispatchTensor>
-// where 
-//     B: BackendTypes<FloatTensorPrimitive = DispatchTensor>
-{
+impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.
     ///
     /// The two output tensors are concatenated into a single 1-dimensional tracked tensor
@@ -129,27 +122,28 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     shape_final_state_bhpr,
                 } = ops.state;
 
-                // ── Reconstruct saved tensors ──────────────────────────────
-                use crate::utils::primitive::mk;
+                // ── Reconstruct saved tensors as rank-tagged primitives ────
+                use crate::utils::fprim::F;
 
-                let x_bnlhp = mk::<_, 5>(x_bnlhp).reshape(shape_x_bnlhp);
+                let x_bnlhp = F::<B, 5>::new(x_bnlhp).reshape(shape_x_bnlhp);
                 let dt_discretized_bhnl =
-                    mk::<_, 4>(dt_discretized_bhnl).reshape(shape_dt_discretized_bhnl);
-                let b_bnlhr = mk::<_, 5>(b_bnlhr).reshape(shape_b_bnlhr);
-                let c_bnlhr = mk::<_, 5>(c_bnlhr).reshape(shape_c_bnlhr);
-                let d_h = mk::<_, 1>(d_h).reshape(shape_d_h);
+                    F::<B, 4>::new(dt_discretized_bhnl).reshape(shape_dt_discretized_bhnl);
+                let b_bnlhr = F::<B, 5>::new(b_bnlhr).reshape(shape_b_bnlhr);
+                let c_bnlhr = F::<B, 5>::new(c_bnlhr).reshape(shape_c_bnlhr);
+                let d_h = F::<B, 1>::new(d_h).reshape(shape_d_h);
                 let initial_state_bhpr =
-                    mk::<_, 4>(initial_state_bhpr).reshape(shape_initial_state_bhpr);
-                let a_decay_h = mk::<_, 1>(a_decay_h).reshape(shape_a_decay_h);
+                    F::<B, 4>::new(initial_state_bhpr).reshape(shape_initial_state_bhpr);
+                let a_decay_h = F::<B, 1>::new(a_decay_h).reshape(shape_a_decay_h);
 
                 // ── Split incoming combined gradient ───────────────────────
-                let (d_y_bnlhp, d_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair(
-                    d_combined,
-                    flat_len_y_BNLHP,
-                    flat_len_final_state_BHPR,
-                    shape_y_bnlhp,
-                    shape_final_state_bhpr,
-                );
+                let (d_y_bnlhp, d_final_state_bhpr) =
+                    crate::utils::combined_grad::unflatten_pair::<B, 5, 4>(
+                        d_combined,
+                        flat_len_y_BNLHP,
+                        flat_len_final_state_BHPR,
+                        shape_y_bnlhp,
+                        shape_final_state_bhpr,
+                    );
 
                 // ── Core gradient computation ──────────────────────────────
                 let CombinedGrads {
@@ -162,8 +156,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_a_decay_h,
                     ..
                 } = combined_backward::combined_backward(
-                    d_y_bnlhp,
-                    d_final_state_bhpr,
+                    F::<B, 5>::new(d_y_bnlhp),
+                    F::<B, 4>::new(d_final_state_bhpr),
                     //
                     x_bnlhp,
                     dt_discretized_bhnl,
@@ -175,43 +169,26 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 );
 
                 // ── Register gradients ─────────────────────────────────────
-                // TODO: request Node to be re-exported.
-                //
-                // use burn::cubecl::stub::Arc;
-                // use burn::backend::autodiff::Node;
-                // let reg = |node: Option<Arc<_>>, grad: Tensor<_>| {
-                //     if let Some(n) = node {
-                //         grads.register::<B>(n.id, grad.into_primitive().tensor());
-                //     }
-                // };
-                // let () = reg(node_x_bnlhp, d_x_bnlhp);
-                // let () = reg(node_dt_discretized_bhnl, d_dt_discretized_bhnl);
-                // let () = reg(node_b_bnlhr, d_b_bnlhr);
-                // let () = reg(node_c_bnlhr, d_c_bnlhr);
-                // let () = reg(node_d_h, d_d_h);
-                // let () = reg(node_initial_state_bhpr, d_initial_state_bhpr);
-                // let () = reg(node_da_cumsum_bhnl, d_da_cumsum_bhnl);
-
                 if let Some(n) = node_x_bnlhp {
-                    grads.register::<B>(n.id, d_x_bnlhp);
+                    grads.register::<B>(n.id, d_x_bnlhp.inner());
                 }
                 if let Some(n) = node_dt_discretized_bhnl {
-                    grads.register::<B>(n.id, d_dt_discretized_bhnl.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_dt_discretized_bhnl.inner());
                 }
                 if let Some(n) = node_b_bnlhr {
-                    grads.register::<B>(n.id, d_b_bnlhr.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_b_bnlhr.inner());
                 }
                 if let Some(n) = node_c_bnlhr {
-                    grads.register::<B>(n.id, d_c_bnlhr.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_c_bnlhr.inner());
                 }
                 if let Some(n) = node_d_h {
-                    grads.register::<B>(n.id, d_d_h.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_d_h.inner());
                 }
                 if let Some(n) = node_initial_state_bhpr {
-                    grads.register::<B>(n.id, d_initial_state_bhpr.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_initial_state_bhpr.inner());
                 }
                 if let Some(n) = node_a_decay_h {
-                    grads.register::<B>(n.id, d_a_decay_h.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_a_decay_h.inner());
                 }
             }
         } // end impl Backward

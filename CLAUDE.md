@@ -178,6 +178,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   └── utils
 │       ├── backend_macros.rs          # macros emitting per-backend BackendExt impls + autodiff marker traits
 │       ├── combined_grad.rs           # flatten/unflatten (y, final_state) into one tracked tensor for custom backward
+│       ├── fprim.rs                    # F<B,D>: rank-tagged FloatTensor-primitive wrapper mirroring the Tensor API (custom-backward math)
 │       ├── gqa.rs                     # gqa_expand_to_heads: replicate per-group B/C across heads_per_group
 │       ├── log_sigmoid.rs             # numerically-stable log-sigmoid (custom, incl. fp16)
 │       ├── loss

@@ -11,8 +11,9 @@
 
 use burn::prelude::*;
 use burn::backend::Backend;
-use burn::backend::{DispatchTensor, Dispatch};
 use burn::backend::BackendTypes;
+use burn::backend::TensorMetadata;
+use burn::backend::ops::FloatTensorOps;
 use burn::backend::tensor::FloatTensor;
 use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
@@ -41,9 +42,9 @@ pub fn unflatten_pair<B: Backend, const DA: usize, const DB: usize>(
     shape_y: [usize; DA],
     shape_s: [usize; DB],
 ) -> (<B as BackendTypes>::FloatTensorPrimitive, <B as BackendTypes>::FloatTensorPrimitive) {
-    let flat_y = B::float_slice(combined.clone(), s![0..flat_y_len]);
+    let flat_y = B::float_slice(combined.clone(), &[s![0..flat_y_len]]);
     let y = B::float_reshape(flat_y, Shape::new(shape_y));
-    let flat_s = B::float_slice(combined, s![flat_y_len..flat_y_len + flat_s_len]);
+    let flat_s = B::float_slice(combined, &[s![flat_y_len..flat_y_len + flat_s_len]]);
     let s = B::float_reshape(flat_s, Shape::new(shape_s));
     (y, s)
 }
@@ -57,9 +58,10 @@ pub fn autodiff_unflatten_pair<B: Backend, C: CheckpointStrategy, const DA: usiz
     shape_y: [usize; DA],
     shape_s: [usize; DB],
 ) -> (FloatTensor<Autodiff<B, C>>, FloatTensor<Autodiff<B, C>>) {
-    let flat_y = Autodiff::<B, C>::float_slice(combined.clone(), s![0..flat_y_len]);
+    let flat_y = Autodiff::<B, C>::float_slice(combined.clone(), &[s![0..flat_y_len]]);
     let y = Autodiff::<B, C>::float_reshape(flat_y, Shape::new(shape_y));
-    let flat_s = Autodiff::<B, C>::float_slice(combined, s![flat_y_len..flat_y_len + flat_s_len]);
+    let flat_s =
+        Autodiff::<B, C>::float_slice(combined, &[s![flat_y_len..flat_y_len + flat_s_len]]);
     let s = Autodiff::<B, C>::float_reshape(flat_s, Shape::new(shape_s));
     (y, s)
 }

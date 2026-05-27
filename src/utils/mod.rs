@@ -17,6 +17,9 @@ pub mod backend_macros;
 /// Flatten/unflatten `(y, final_state)` into one tracked tensor for the custom
 /// backward.
 pub mod combined_grad;
+/// Rank-tagged `FloatTensor` primitive wrapper mirroring the `Tensor` method
+/// API, used by the custom-backward gradient math.
+pub(crate) mod fprim;
 /// Group→head expansion of B/C (GQA-style sharing).
 pub mod gqa;
 /// Numerically-stable log-sigmoid (fp16-aware).
