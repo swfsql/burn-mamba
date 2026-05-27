@@ -19,6 +19,7 @@ use burn::{
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
+use burn::backend::Backend;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
@@ -26,7 +27,7 @@ use burn_mamba::prelude::*;
 pub fn train<AutoB>(
     training_config: TrainingConfig,
     model_config: MyMamba3NetworkConfig,
-    training_device: AutoB::Device,
+    training_device: Device,
     app_args: &AppArgs,
 ) where
     AutoB: AutodiffBackend + Mamba3BackendExt,
@@ -111,7 +112,7 @@ pub fn train<AutoB>(
     println!("Training finished.");
 }
 
-type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, MnistBatch<B>> + 'static>;
+type Dataloader = std::sync::Arc<dyn DataLoader<B, MnistBatch> + 'static>;
 
 /// Train for a single epoch, stepping the optimizer per batch and periodically
 /// validating + checkpointing; returns the updated model.
@@ -203,9 +204,9 @@ where
 
 /// Run validation over (up to `valid_loop_limit`) batches and report the
 /// average loss and accuracy.
-pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
-    dataloader_valid: Dataloader<B>,
-    valid_model: MyMamba3Network<B>,
+pub fn epoch_valid(
+    dataloader_valid: Dataloader,
+    valid_model: MyMamba3Network,
     training_config: &TrainingConfig,
     model_config: &MyMamba3NetworkConfig,
     epoch: usize,
@@ -220,8 +221,8 @@ pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
         lr: Some(training_config.lr.get_lr(0)),
     };
 
-    let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
-    let mut acc_metric = burn::train::metric::AccuracyMetric::<B>::new();
+    let mut loss_metric = burn::train::metric::LossMetric::new();
+    let mut acc_metric = burn::train::metric::AccuracyMetric::new();
 
     let valid_model = Wrap(valid_model, model_config.clone());
 
@@ -252,7 +253,7 @@ pub fn epoch_valid<B: Backend + Mamba3BackendExt>(
 }
 
 /// Wrapper over [`MyMamba3Network`] for custom implementations.
-pub struct Wrap<B: Backend>(pub MyMamba3Network<B>, pub MyMamba3NetworkConfig);
+pub struct Wrap(pub MyMamba3Network, pub MyMamba3NetworkConfig);
 
 impl<AutoB: AutodiffBackend + Mamba3BackendExt> TrainStep for Wrap<AutoB> {
     type Input = MnistBatch<AutoB>;
@@ -266,9 +267,9 @@ impl<AutoB: AutodiffBackend + Mamba3BackendExt> TrainStep for Wrap<AutoB> {
     }
 }
 
-impl<B: Backend + Mamba3BackendExt> InferenceStep for Wrap<B> {
-    type Input = MnistBatch<B>;
-    type Output = ClassificationOutput<B>;
+impl InferenceStep for Wrap {
+    type Input = MnistBatch;
+    type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
         let input = batch.images_z_score(); // values mean=0, stddev=1
@@ -286,14 +287,14 @@ impl<B: Backend + Mamba3BackendExt> InferenceStep for Wrap<B> {
     }
 }
 
-impl<B: Backend + Mamba3BackendExt> Wrap<B> {
+impl Wrap {
     /// Forward the model and compute the cross-entropy classification loss from
     /// the last timestep's logits.
     pub fn forward_classification(
         &self,
-        input: Tensor<B, 3>,
-        targets: Tensor<B, 1, Int>,
-    ) -> ClassificationOutput<B> {
+        input: Tensor<3>,
+        targets: Tensor<1, Int>,
+    ) -> ClassificationOutput {
         let model = &self.0;
         let _config = &self.1;
         let [batch_size, sequence_size, input_size] = input.dims();

@@ -17,11 +17,12 @@ use burn::backend::autodiff::{
     ops::{Backward, Ops, OpsKind},
 };
 use burn::prelude::*;
-use burn::tensor::{TensorPrimitive, ops::FloatTensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
 use ssd::serial_recalculated::{
     Mamba3SingleSsdBackendExt,
     combined_backward::{self, CombinedSingleSsdGrads},
 };
+use burn::backend::Backend;
 
 impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3SingleSsdBackendExt
     for Autodiff<B, C>
@@ -86,7 +87,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     node_initial_state_bhpr,
                 ] = ops.parents;
 
-                let d_combined: Tensor<B, 1> =
+                let d_combined: Tensor<1> =
                     Tensor::from_primitive(TensorPrimitive::Float(grads.consume::<B>(&ops.node)));
 
                 let State {
@@ -172,7 +173,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
             }
         }
 
-        use burn::tensor::TensorMetadata;
+        use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] =
             v_bnlmhp.primitive.shape().dims();
         let [.., state_rank] = b_bnlmhr.primitive.shape().dims::<6>();

@@ -7,6 +7,7 @@
 use crate::utils::log_sigmoid::log_sigmoid;
 use burn::module::Module;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Configuration to create a [`BinaryCrossEntropyLoss`] using the [`BinaryCrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]
@@ -28,7 +29,7 @@ impl BinaryCrossEntropyLossConfig {
 /// Calculate the binary cross entropy loss from the input logits and the targets.
 ///
 /// Should be created using [BinaryCrossEntropyLossConfig]
-#[derive(Module, Clone, Debug)]
+#[derive(Module, Debug)]
 pub struct BinaryCrossEntropyLoss {
     /// Treat the inputs as logits
     pub logits: bool,
@@ -48,9 +49,9 @@ impl BinaryCrossEntropyLoss {
     /// - targets: `[batch_size, num_classes]`
     pub fn forward<const D: usize, B: Backend>(
         &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>,
-    ) -> Tensor<B, 1> {
+        logits: Tensor<D>,
+        targets: Tensor<D>,
+    ) -> Tensor<1> {
         let loss = if self.logits {
             // Numerically stable by combining `log(sigmoid(x))` with `log_sigmoid(x)`
             (targets.neg() + 1.) * logits.clone() - log_sigmoid(logits)

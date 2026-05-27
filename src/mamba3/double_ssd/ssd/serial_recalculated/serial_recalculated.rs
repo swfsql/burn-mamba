@@ -13,10 +13,12 @@ use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::double_ssd::ssd;
 use crate::utils::primitive::mk;
 use burn::prelude::*;
-use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
+use burn::tensor::{Tensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
 use ssd::serial;
+use burn::backend::Backend;
 
-impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
+impl Mamba3DoubleSsdInput {
     /// MIMO-first Serial SSD with recalculated backward.
     ///
     /// Delegates the full K1-K5 computation to [`Mamba3DoubleSsdBackendExt::double_ssd_serial_recalculated`]
@@ -27,21 +29,21 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn double_ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn double_ssd_serial_recalculated(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         assert!(
             input.init_state_hpr.is_none(),
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
-        let (y_bnlmhp, final_state_bhpr) =
-            <B as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
-                input.v_bnlmhp.into_primitive().tensor(),
-                input.da_bnlh.into_primitive().tensor(),
-                input.b_bnlmhr.into_primitive().tensor(),
-                input.c_bnlmhr.into_primitive().tensor(),
-                input.initial_state_bhpr.into_primitive().tensor(),
-            );
+        let (y_bnlmhp, final_state_bhpr) = todo!();
+            // <B as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
+            //     input.v_bnlmhp.into_primitive().tensor(),
+            //     input.da_bnlh.into_primitive().tensor(),
+            //     input.b_bnlmhr.into_primitive().tensor(),
+            //     input.c_bnlmhr.into_primitive().tensor(),
+            //     input.initial_state_bhpr.into_primitive().tensor(),
+            // );
         let y_bnlmhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlmhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
         (y_bnlmhp, final_state_bhpr)
@@ -54,7 +56,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
 /// Backends that support a custom memory-efficient backward (specifically the
 /// Autodiff wrapper) override this to recompute forward intermediates during
 /// the backward pass instead of saving them.
-pub trait Mamba3DoubleSsdBackendExt: burn::tensor::backend::Backend {
+pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// Memory-efficient MIMO serial SSD.
     ///
     /// # Arguments

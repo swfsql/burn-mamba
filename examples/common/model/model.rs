@@ -5,9 +5,10 @@
 
 use crate::common::model::ModelConfigExt;
 use burn::nn::{Linear, LinearConfig};
-use burn::prelude::*;
+use burn::prelude::*
 use burn_mamba::prelude::*;
 use burn_mamba::schedule::Schedule;
+use burn::backend::Backend;
 
 /// Mamba-2 example network and config builders.
 pub mod mamba2 {
@@ -62,20 +63,20 @@ pub mod mamba2 {
 
     /// `in_proj` → Mamba-2 layer stack → `out_proj`.
     #[derive(Module, Debug)]
-    pub struct MyMamba2Network<B: Backend> {
+    pub struct MyMamba2Network {
         /// Linear projection from `input_size` to `d_model`.
-        pub in_proj: Linear<B>,
+        pub in_proj: Linear,
         /// The Mamba-2 layer stack.
-        pub layers: Mamba2Layers<B>,
+        pub layers: Mamba2Layers,
         /// Linear projection from `d_model` to `output_size`.
-        pub out_proj: Linear<B>,
+        pub out_proj: Linear,
     }
 
-    impl<B: Backend> ModelConfigExt<B> for MyMamba2NetworkConfig {
-        type Model = MyMamba2Network<B>;
+    impl ModelConfigExt for MyMamba2NetworkConfig {
+        type Model = MyMamba2Network;
 
         /// Returns the initialized model.
-        fn init(&self, device: &B::Device) -> Self::Model {
+        fn init(&self, device: &Device) -> Self::Model {
             let d_model = self.layers.mamba_block.d_model;
             let in_proj = LinearConfig::new(self.input_size, d_model)
                 .with_bias(true)
@@ -92,7 +93,7 @@ pub mod mamba2 {
         }
     }
 
-    impl<B: Backend + Mamba2BackendExt> MyMamba2Network<B> {
+    impl MyMamba2Network {
         /// `in_proj` → layers → `out_proj` over a full sequence.
         ///
         /// # Shapes
@@ -100,10 +101,10 @@ pub mod mamba2 {
         ///   - Output `[batch, sequence, output_size]`
         pub fn forward(
             &self,
-            x: Tensor<B, 3>,
-            caches: Option<Mamba2Caches<B>>,
+            x: Tensor<3>,
+            caches: Option<Mamba2Caches>,
             ssd_path: Mamba2SsdPath,
-        ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
+        ) -> (Tensor<3>, Mamba2Caches) {
             let [batch_size, sequence_len, _input_dim] = x.dims();
             let [_input_dim, d_model] = self.in_proj.weight.dims();
             let [_d_model, output_dim] = self.out_proj.weight.dims();
@@ -182,20 +183,20 @@ pub mod mamba3 {
 
     /// `in_proj` → Mamba-3 layer stack → `out_proj`.
     #[derive(Module, Debug)]
-    pub struct MyMamba3Network<B: Backend> {
+    pub struct MyMamba3Network {
         /// Linear projection from `input_size` to `d_model`.
-        pub in_proj: Linear<B>,
+        pub in_proj: Linear,
         /// The Mamba-3 layer stack.
-        pub layers: Mamba3Layers<B>,
+        pub layers: Mamba3Layers,
         /// Linear projection from `d_model` to `output_size`.
-        pub out_proj: Linear<B>,
+        pub out_proj: Linear,
     }
 
-    impl<B: Backend> ModelConfigExt<B> for MyMamba3NetworkConfig {
-        type Model = MyMamba3Network<B>;
+    impl ModelConfigExt for MyMamba3NetworkConfig {
+        type Model = MyMamba3Network;
 
         /// Returns the initialized model.
-        fn init(&self, device: &B::Device) -> Self::Model {
+        fn init(&self, device: &Device) -> Self::Model {
             let d_model = self.layers.mamba_block.d_model;
             let in_proj = LinearConfig::new(self.input_size, d_model)
                 .with_bias(true)
@@ -212,7 +213,7 @@ pub mod mamba3 {
         }
     }
 
-    impl<B: Backend + Mamba3BackendExt> MyMamba3Network<B> {
+    impl MyMamba3Network {
         /// `in_proj` → layers → `out_proj` over a full sequence.
         ///
         /// # Shapes
@@ -220,10 +221,10 @@ pub mod mamba3 {
         ///   - Output `[batch, sequence, output_size]`
         pub fn forward(
             &self,
-            x: Tensor<B, 3>,
-            caches: Option<Mamba3Caches<B>>,
+            x: Tensor<3>,
+            caches: Option<Mamba3Caches>,
             ssd_path: Mamba3SsdPath,
-        ) -> (Tensor<B, 3>, Mamba3Caches<B>) {
+        ) -> (Tensor<3>, Mamba3Caches) {
             let [batch_size, sequence_len, _input_dim] = x.dims();
             let [_input_dim, d_model] = self.in_proj.weight.dims();
             let [_d_model, output_dim] = self.out_proj.weight.dims();

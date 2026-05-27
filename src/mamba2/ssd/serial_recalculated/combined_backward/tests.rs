@@ -32,29 +32,29 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     let state_rank = 6;
 
     // ─── Random inputs (small, gentle distributions) ─────────────────
-    let x_bnlhp = Tensor::<B, 5>::random(
+    let x_bnlhp = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let dt_bnlh = Tensor::<B, 4>::random(
+    let dt_bnlh = Tensor::<4>::random(
         [batch, nchunks, chunk_len, nheads],
         Distribution::Uniform(0.05, 0.3),
         &device,
     );
-    let a_decay_h = Tensor::<B, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), &device);
-    let b_bnlhr = Tensor::<B, 5>::random(
+    let a_decay_h = Tensor::<1>::random([nheads], Distribution::Uniform(-1.0, -0.5), &device);
+    let b_bnlhr = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let c_bnlhr = Tensor::<B, 5>::random(
+    let c_bnlhr = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let d_h = Tensor::<B, 1>::random([nheads], Distribution::Normal(0.0, 0.1), &device);
-    let initial_state_bhpr = Tensor::<B, 4>::random(
+    let d_h = Tensor::<1>::random([nheads], Distribution::Normal(0.0, 0.1), &device);
+    let initial_state_bhpr = Tensor::<4>::random(
         [batch, nheads, per_head_dim, state_rank],
         Distribution::Normal(0.0, 0.1),
         &device,
@@ -95,12 +95,12 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     let out_x_bnlhp = y_bnlhp - skip_bnlhp;
 
     // ─── Random upstream gradients ────────────────────────────────────
-    let d_y_bnlhp = Tensor::<B, 5>::random(
+    let d_y_bnlhp = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let d_final_bhpr = Tensor::<B, 4>::random(
+    let d_final_bhpr = Tensor::<4>::random(
         [batch, nheads, per_head_dim, state_rank],
         Distribution::Normal(0.0, 1.0),
         &device,
@@ -120,7 +120,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     );
 
     // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
-    let einsum_bhnl: Tensor<B, 4> = (out_x_bnlhp * d_y_bnlhp)
+    let einsum_bhnl: Tensor<4> = (out_x_bnlhp * d_y_bnlhp)
         .sum_dim(4) // einsum_bnlh1
         .squeeze_dim::<4>(4) // einsum_bnlh
         .permute([0, 3, 1, 2]); // einsum_bhnl

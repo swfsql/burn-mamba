@@ -27,8 +27,9 @@ use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
+impl Mamba3 {
     /// Process a full input sequence using the **single-ssd form (single-pass)**
     /// trapezoidal algorithm.
     ///
@@ -43,10 +44,10 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
     #[allow(non_snake_case)]
     pub fn forward_single_ssd(
         &self,
-        input_bsm: Tensor<B, 3>,
-        cache: Option<Mamba3SingleSsdCache<B>>,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
-    ) -> (Tensor<B, 3>, Mamba3SingleSsdCache<B>) {
+    ) -> (Tensor<3>, Mamba3SingleSsdCache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
@@ -179,14 +180,14 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
 
         let rotate_pairwise = mimo_rank == 1;
         let rope_dim = self.rope_dim;
-        let b_bsmhr = apply_rope_partial::<B, 5>(
+        let b_bsmhr = apply_rope_partial::<5>(
             b_bsmhr,
             cum_angles_bsmha.clone(),
             rope_dim,
             rotate_pairwise,
         );
         let c_bsmhr =
-            apply_rope_partial::<B, 5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+            apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -331,10 +332,10 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
                 .permute([1, 0, 2])
                 .unsqueeze_dims::<5>(&[0, 1])
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-            let y_bshp: Tensor<B, 4> = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(2).squeeze_dim(2);
+            let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(2).squeeze_dim(2);
             y_bshp.reshape([batch, sequence, d_inner])
         } else {
-            let y_bshp: Tensor<B, 4> = y_bsmhp.squeeze_dim(2);
+            let y_bshp: Tensor<4> = y_bsmhp.squeeze_dim(2);
             let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
             let y_combined_bshp = match &self.out_norm {
                 Some(norm) => norm.forward(y_bshp, z_bshp),
@@ -366,7 +367,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba3<B> {
+    impl Mamba3 {
         /// Process a **single token** using the pure recurrent form.
         ///
         /// For SISO (mimo_rank=1):
@@ -388,9 +389,9 @@ mod step {
         #[allow(non_snake_case)]
         pub fn step_single_ssd(
             &self,
-            input_bd: Tensor<B, 2>,
-            cache: Option<Mamba3SingleSsdCache<B>>,
-        ) -> (Tensor<B, 2>, Mamba3SingleSsdCache<B>) {
+            input_bd: Tensor<2>,
+            cache: Option<Mamba3SingleSsdCache>,
+        ) -> (Tensor<2>, Mamba3SingleSsdCache) {
             // Token-by-token decoding always uses the recurrent (double-ssd)
             // form. A single-ssd cache holds the trapezoid state at a sequence
             // boundary, where the single- and double-ssd accumulators coincide

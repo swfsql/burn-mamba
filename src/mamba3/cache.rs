@@ -15,6 +15,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// A pathway-tagged bundle of per-layer caches, so a single dispatch entry can
 /// accept / return either cache family.
@@ -24,11 +25,11 @@ use burn::prelude::*;
 ///
 /// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
 #[derive(Debug)]
-pub enum Mamba3Caches<B: Backend> {
+pub enum Mamba3Caches {
     /// Caches for the double-ssd pathway.
-    DoubleSsd(Mamba3DoubleSsdCaches<B>),
+    DoubleSsd(Mamba3DoubleSsdCaches),
     /// Caches for the single-ssd pathway.
-    SingleSsd(Mamba3SingleSsdCaches<B>),
+    SingleSsd(Mamba3SingleSsdCaches),
 }
 
 /// A pathway-tagged bundle of per-block cache, so a single dispatch entry can
@@ -39,16 +40,16 @@ pub enum Mamba3Caches<B: Backend> {
 ///
 /// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
 #[derive(Debug)]
-pub enum Mamba3Cache<B: Backend> {
+pub enum Mamba3Cache {
     /// Caches for double-ssd pathway.
-    DoubleSsd(Mamba3DoubleSsdCache<B>),
+    DoubleSsd(Mamba3DoubleSsdCache),
     /// Caches for single-ssd pathway.
-    SingleSsd(Mamba3SingleSsdCache<B>),
+    SingleSsd(Mamba3SingleSsdCache),
 }
 
-impl<B: Backend> Mamba3Caches<B> {
+impl Mamba3Caches {
     /// Unwrap to the double-SSD caches, or `None` if this is the single-SSD variant.
-    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCaches<B>> {
+    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCaches> {
         match self {
             Self::DoubleSsd(caches) => Some(caches),
             Self::SingleSsd(_caches) => None,
@@ -56,7 +57,7 @@ impl<B: Backend> Mamba3Caches<B> {
     }
 
     /// Unwrap to the single-SSD caches, or `None` if this is the double-SSD variant.
-    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCaches<B>> {
+    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCaches> {
         match self {
             Self::DoubleSsd(_caches) => None,
             Self::SingleSsd(caches) => Some(caches),
@@ -73,7 +74,7 @@ impl<B: Backend> Mamba3Caches<B> {
 
     /// Collect per-layer caches into a pathway-tagged bundle.  The pathway is
     /// inferred from the first element (an empty vec implies single-SSD).
-    pub fn from_vec(vec: Vec<Mamba3Cache<B>>) -> Self {
+    pub fn from_vec(vec: Vec<Mamba3Cache>) -> Self {
         // peek at first; empty implies single_ssd
         let is_double = matches!(vec.first(), Some(Mamba3Cache::DoubleSsd(_)));
         if is_double {
@@ -99,7 +100,7 @@ impl<B: Backend> Mamba3Caches<B> {
 
     /// Wrap each per-layer cache in `Some` so the loop can `take` it without
     /// cloning (Burn tensors are reference-counted).
-    pub fn into_options(self) -> Vec<Option<Mamba3Cache<B>>> {
+    pub fn into_options(self) -> Vec<Option<Mamba3Cache>> {
         match self {
             Self::DoubleSsd(caches) => caches
                 .caches
@@ -117,15 +118,15 @@ impl<B: Backend> Mamba3Caches<B> {
     }
 
     /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
-    pub fn from_options(options: Vec<Option<Mamba3Cache<B>>>) -> Self {
+    pub fn from_options(options: Vec<Option<Mamba3Cache>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)
     }
 }
 
-impl<B: Backend> Mamba3Cache<B> {
+impl Mamba3Cache {
     /// Unwrap to the double-SSD cache, or `None` if this is the single-SSD variant.
-    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCache<B>> {
+    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCache> {
         match self {
             Self::DoubleSsd(cache) => Some(cache),
             Self::SingleSsd(_cache) => None,
@@ -133,7 +134,7 @@ impl<B: Backend> Mamba3Cache<B> {
     }
 
     /// Unwrap to the single-SSD cache, or `None` if this is the double-SSD variant.
-    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCache<B>> {
+    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCache> {
         match self {
             Self::DoubleSsd(_cache) => None,
             Self::SingleSsd(cache) => Some(cache),
@@ -141,26 +142,26 @@ impl<B: Backend> Mamba3Cache<B> {
     }
 }
 
-impl<B: Backend> From<Mamba3DoubleSsdCaches<B>> for Mamba3Caches<B> {
-    fn from(caches: Mamba3DoubleSsdCaches<B>) -> Self {
+impl From<Mamba3DoubleSsdCaches> for Mamba3Caches {
+    fn from(caches: Mamba3DoubleSsdCaches) -> Self {
         Mamba3Caches::DoubleSsd(caches)
     }
 }
 
-impl<B: Backend> From<Mamba3SingleSsdCaches<B>> for Mamba3Caches<B> {
-    fn from(caches: Mamba3SingleSsdCaches<B>) -> Self {
+impl From<Mamba3SingleSsdCaches> for Mamba3Caches {
+    fn from(caches: Mamba3SingleSsdCaches) -> Self {
         Mamba3Caches::SingleSsd(caches)
     }
 }
 
-impl<B: Backend> From<Mamba3DoubleSsdCache<B>> for Mamba3Cache<B> {
-    fn from(cache: Mamba3DoubleSsdCache<B>) -> Self {
+impl From<Mamba3DoubleSsdCache> for Mamba3Cache {
+    fn from(cache: Mamba3DoubleSsdCache) -> Self {
         Mamba3Cache::DoubleSsd(cache)
     }
 }
 
-impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3Cache<B> {
-    fn from(cache: Mamba3SingleSsdCache<B>) -> Self {
+impl From<Mamba3SingleSsdCache> for Mamba3Cache {
+    fn from(cache: Mamba3SingleSsdCache) -> Self {
         Mamba3Cache::SingleSsd(cache)
     }
 }
@@ -184,8 +185,8 @@ impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3Cache<B> {
 // types still prevent silently mixing the two accumulators inside a single
 // chunked pass.
 
-impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3DoubleSsdCache<B> {
-    fn from(cache: Mamba3SingleSsdCache<B>) -> Self {
+impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
+    fn from(cache: Mamba3SingleSsdCache) -> Self {
         Mamba3DoubleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
             k_state_bmhr: cache.k_state_bmhr,
@@ -195,8 +196,8 @@ impl<B: Backend> From<Mamba3SingleSsdCache<B>> for Mamba3DoubleSsdCache<B> {
     }
 }
 
-impl<B: Backend> From<Mamba3DoubleSsdCache<B>> for Mamba3SingleSsdCache<B> {
-    fn from(cache: Mamba3DoubleSsdCache<B>) -> Self {
+impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
+    fn from(cache: Mamba3DoubleSsdCache) -> Self {
         Mamba3SingleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
             k_state_bmhr: cache.k_state_bmhr,
@@ -206,16 +207,16 @@ impl<B: Backend> From<Mamba3DoubleSsdCache<B>> for Mamba3SingleSsdCache<B> {
     }
 }
 
-impl<B: Backend> From<Mamba3SingleSsdCaches<B>> for Mamba3DoubleSsdCaches<B> {
-    fn from(caches: Mamba3SingleSsdCaches<B>) -> Self {
+impl From<Mamba3SingleSsdCaches> for Mamba3DoubleSsdCaches {
+    fn from(caches: Mamba3SingleSsdCaches) -> Self {
         Mamba3DoubleSsdCaches {
             caches: caches.caches.into_iter().map(Into::into).collect(),
         }
     }
 }
 
-impl<B: Backend> From<Mamba3DoubleSsdCaches<B>> for Mamba3SingleSsdCaches<B> {
-    fn from(caches: Mamba3DoubleSsdCaches<B>) -> Self {
+impl From<Mamba3DoubleSsdCaches> for Mamba3SingleSsdCaches {
+    fn from(caches: Mamba3DoubleSsdCaches) -> Self {
         Mamba3SingleSsdCaches {
             caches: caches.caches.into_iter().map(Into::into).collect(),
         }

@@ -21,8 +21,9 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::utils::segsum::segsum;
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend> Mamba3DoubleSsdInput<B> {
+impl Mamba3DoubleSsdInput {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
     ///
     /// Implements the four-step decomposition for the MIMO (double-ssd) trapezoidal recurrence.
@@ -35,7 +36,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
     /// - output.0 `y_bnlrhp`:       `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn double_ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn double_ssd_minimal(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
@@ -80,7 +81,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
 
             // Build MIMO causal mask from segsum on base dimension, then interleave-expand.
             // l_base_bhnll[i,j] = exp(cumA[i] - cumA[j]) if i >= j, else 0
-            let l_base_bhnll = segsum::<B, 4, 5>(a_bhnl.clone()).exp();
+            let l_base_bhnll = segsum::<4, 5>(a_bhnl.clone()).exp();
 
             // Interleave-expand
             // L_mimo[i, j] = L_base[i//m, j//m]  (same decay for all ranks at a given time)
@@ -172,7 +173,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
             let state_bNhpr = Tensor::cat(vec![initial_state_b1hpr, state_bnhpr], 1);
 
             // Per-chunk cumulative decay (last position of each chunk)
-            let a_cumsum_last_bhn: Tensor<B, 3> = a_cumsum_bhnl
+            let a_cumsum_last_bhn: Tensor<3> = a_cumsum_bhnl
                 .clone()
                 .slice(s![.., .., .., -1]) // a_cumsum_last_bhn1
                 .squeeze_dim(3); // a_cumsum_last_bhn
@@ -183,7 +184,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
             ); // [batch, nheads, 1+nchunks]
 
             // Inter-chunk decay matrix via segsum: [batch, nheads, 1+nchunks, 1+nchunks]
-            let decay_chunk_bhNN = segsum::<B, 3, 4>(a_chunk_pad_bhN).exp();
+            let decay_chunk_bhNN = segsum::<3, 4>(a_chunk_pad_bhN).exp();
 
             // Flatten (per_head_dim, state_rank) for matmul
             let flat = per_head_dim * state_rank;
@@ -201,7 +202,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
                 .clone()
                 .slice(s![.., .., 0..nchunks, .., ..]) // new_state_bhnpr
                 .permute([0, 2, 1, 3, 4]); // new_state_bnhpr
-            let last_state_bhpr: Tensor<B, 4> = new_state_bhNpr
+            let last_state_bhpr: Tensor<4> = new_state_bhNpr
                 .slice(s![.., .., nchunks, .., ..]) // new_state_bh1pr
                 .squeeze_dim(2); // last_state_bhpr
 

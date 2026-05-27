@@ -13,7 +13,7 @@ use burn::prelude::*;
 
 /// Element-wise max absolute difference between two same-shape tensors,
 /// returned as `f32` (already pulled to host via `into_scalar()`).
-pub fn max_abs_diff<B: Backend, const D: usize>(a: Tensor<B, D>, b: Tensor<B, D>) -> f32 {
+pub fn max_abs_diff<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> f32 {
     use burn::tensor::ElementConversion;
     (a - b).abs().max().into_scalar().elem()
 }

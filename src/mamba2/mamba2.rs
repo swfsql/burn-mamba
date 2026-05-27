@@ -7,7 +7,7 @@
 //! ## The SSD Model
 //!
 //! The SSD layer is a multi-head selective SSM.  Each head processes a
-//! sequence of `per_head_dim`-dimensional inputs `X ∈ ℝ^{sequence×per_head_dim}` through the recurrence
+//! sequence of `per_head_dim`-dimensinal inputs `X ∈ ℝ^{sequence×per_head_dim}` through the recurrence
 //! (Eq. 1–2 of the paper):
 //!
 //! ```text
@@ -95,6 +95,7 @@ use burn::{
     nn::conv::{Conv1d, Conv1dConfig},
     nn::{Initializer, Linear, LinearConfig},
 };
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba2  (the SSM block)
@@ -110,7 +111,7 @@ use burn::{
 /// - [`Self::step`]    — pure recurrent form for token-by-token decoding
 ///   (O(`nheads`·`per_head_dim`·`state_rank`) per step)
 #[derive(Module, Debug)]
-pub struct Mamba2<B: Backend> {
+pub struct Mamba2 {
     /// Input projection: maps `d_model → d_inner + conv_dim + nheads`.
     ///
     /// The output is split into three parts:
@@ -118,7 +119,7 @@ pub struct Mamba2<B: Backend> {
     /// - `xbc    [batch, sequence, conv_dim]` — input to the causal convolution, which
     ///   is then split into (x, B, C) after activation
     /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) discretisation step Δ
-    pub in_proj: Linear<B>,
+    pub in_proj: Linear,
 
     /// Causal depthwise Conv1d applied to the `xbc` projection.
     ///
@@ -131,7 +132,7 @@ pub struct Mamba2<B: Backend> {
     /// The convolution provides a local `conv_kernel`-token context window
     /// before the SSM, which helps the model capture short-range dependencies
     /// that the SSM's recurrent form handles less efficiently.
-    pub conv1d: Conv1d<B>,
+    pub conv1d: Conv1d,
 
     /// Per-head bias for the discretisation step size Δ.
     ///
@@ -140,7 +141,7 @@ pub struct Mamba2<B: Backend> {
     /// At inference time, `Δₜ = softplus(dt_rawₜ + dt_bias)`.
     /// Initialised such that the corresponding initial `Δ` values are
     /// log-uniformly distributed in `[dt_min, dt_max]`.
-    pub dt_bias_h: Param<Tensor<B, 1>>,
+    pub dt_bias_h: Param<Tensor<1>>,
 
     /// Hard clamp applied to Δ after softplus:  `Δ ∈ [dt_limit.0, dt_limit.1]`.
     ///
@@ -159,7 +160,7 @@ pub struct Mamba2<B: Backend> {
     /// Storing the *log* of the magnitude and negating ensures A < 0
     /// (decaying system) unconditionally and avoids any sign-constraint
     /// during gradient descent.
-    pub a_log_h: Param<Tensor<B, 1>>,
+    pub a_log_h: Param<Tensor<1>>,
 
     /// Per-head skip (D) coefficient.
     ///
@@ -167,7 +168,7 @@ pub struct Mamba2<B: Backend> {
     ///
     /// Adds a direct path from the (post-convolution, pre-SSM) input to the
     /// output:  `yₜ += D · xₜ`.  Initialised to ones.
-    pub d_h: Param<Tensor<B, 1>>,
+    pub d_h: Param<Tensor<1>>,
 
     /// Gated RMSNorm applied to the SSM output, conditioned on the gate `z`.
     ///
@@ -176,10 +177,10 @@ pub struct Mamba2<B: Backend> {
     /// This combines the multiplicative gate (from `z`) and a normalisation
     /// step into a single fused operation, matching the architecture in §5.2
     /// of the paper.
-    pub norm: RmsNormGated<B>,
+    pub norm: RmsNormGated,
 
     /// Output projection: maps `d_inner → d_model`.
-    pub out_proj: Linear<B>,
+    pub out_proj: Linear,
 
     /// Optional learnable initial hidden state `h₀`.
     ///
@@ -189,7 +190,7 @@ pub struct Mamba2<B: Backend> {
     /// When `Some`, the stored tensor is used as the initial condition for
     /// *every* forward call (not per-batch; it is broadcast over the batch
     /// dimension).
-    pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
+    pub init_state_hpr: Option<Param<Tensor<3>>>,
 
     /// `state_rank` — the number of latent dimensions in the SSM hidden
     /// state `h ∈ ℝ^{state_rank×per_head_dim}` per head.
@@ -206,7 +207,7 @@ pub struct Mamba2<B: Backend> {
     pub ngroups: usize,
 }
 
-impl<B: Backend> Mamba2<B> {
+impl Mamba2 {
     /// `d_inner = expand · d_model`.  Inferred from the norm's weight shape.
     pub fn d_inner(&self) -> usize {
         let [d_inner] = self.norm.gamma.dims();
@@ -366,7 +367,7 @@ impl Mamba2Config {
     // -----------------------------------------------------------------------
 
     /// Allocate and initialise all Mamba-2 block parameters on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2<B> {
+    pub fn init(&self, device: &Device) -> Mamba2 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let conv_dim = self.conv_dim();
@@ -399,7 +400,7 @@ impl Mamba2Config {
         let in_proj = LinearConfig::new(self.d_model, d_in_proj_out)
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(self.d_model))
-            .init::<B>(device);
+            .init(device);
 
         // ── conv1d ───────────────────────────────────────────────────────────
         // Causal depthwise convolution.  Left-padding is applied manually in
@@ -410,7 +411,7 @@ impl Mamba2Config {
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
             .with_initializer(uniform_init(self.conv_kernel))
-            .init::<B>(device);
+            .init(device);
 
         // ── dt_bias ──────────────────────────────────────────────────────────
         // We want the initial Δ values (after softplus) to be log-uniformly
@@ -418,7 +419,7 @@ impl Mamba2Config {
         // softplus(x) = ln(1 + exp(x))) is used to back-solve for the bias:
         //   dt_bias = softplus⁻¹(dt) = dt + ln(1 - exp(-dt)) ≈ dt + ln(dt)
         // which simplifies to `dt + log(exp(dt) - 1)` in the formula below.
-        let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
+        let expm1 = |t: Tensor<1>| t.exp() - 1.;
         let dt_h = Tensor::random(
             [nheads],
             burn::tensor::Distribution::Uniform(self.dt_min.ln(), self.dt_max.ln()),
@@ -451,7 +452,7 @@ impl Mamba2Config {
 
         // ── D (skip connection) ───────────────────────────────────────────────
         // Initialised to ones, adding a direct residual path from input to output.
-        let d_h = Initializer::Ones.init::<B, 1, _>([nheads], device);
+        let d_h = Initializer::Ones.init::<1, _>([nheads], device);
 
         // ── norm (gated RMSNorm) and out_proj ─────────────────────────────────
         let norm = RmsNormGatedConfig::new(d_inner)
@@ -464,7 +465,7 @@ impl Mamba2Config {
 
         // ── learnable initial state (optional) ────────────────────────────────
         let init_state_hpr = self.has_learnable_init_state.then(|| {
-            Initializer::Zeros.init::<B, 3, _>([nheads, self.per_head_dim, self.state_rank], device)
+            Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, self.state_rank], device)
         });
 
         Mamba2 {
@@ -487,7 +488,7 @@ impl Mamba2Config {
 // Mamba2::forward  (chunkwise SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
-impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
+impl Mamba2 {
     /// Process a full input sequence using the chunkwise SSD algorithm.
     ///
     /// This is the primary training and prefill path.  The computation is
@@ -523,10 +524,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
     #[allow(non_snake_case)]
     pub fn forward(
         &self,
-        input_bsm: Tensor<B, 3>,
-        cache: Option<Mamba2Cache<B>>,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba2Cache>,
         ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Cache<B>) {
+    ) -> (Tensor<3>, Mamba2Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
@@ -708,8 +709,8 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
 
         // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
         // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
-        let b_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(b_bnlgr, 3, nheads);
-        let c_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<_, 5, 6>(c_bnlgr, 3, nheads);
+        let b_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
+        let c_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
         let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
@@ -771,7 +772,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba2<B> {
+    impl Mamba2 {
         /// Process a **single token** using the pure recurrent SSM form.
         ///
         /// This is the O(nheads·per_head_dim·state_rank)-per-token decoding path.  It runs one tick of
@@ -797,9 +798,9 @@ mod step {
         #[allow(non_snake_case)]
         pub fn step(
             &self,
-            input_bm: Tensor<B, 2>,
-            cache: Option<Mamba2Cache<B>>,
-        ) -> (Tensor<B, 2>, Mamba2Cache<B>) {
+            input_bm: Tensor<2>,
+            cache: Option<Mamba2Cache>,
+        ) -> (Tensor<2>, Mamba2Cache) {
             let [batch, d_model] = input_bm.dims();
             let d_inner = self.d_inner();
             let ngroups = self.ngroups;

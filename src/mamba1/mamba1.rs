@@ -48,35 +48,36 @@ use burn::{
     nn::conv::{Conv1d, Conv1dConfig},
     nn::{Initializer, Linear, LinearConfig, PaddingConfig1d},
 };
+use burn::backend::Backend;
 
 /// The Mamba-1 selective SSM block.
 #[derive(Module, Debug)]
-pub struct Mamba1<B: Backend> {
+pub struct Mamba1 {
     /// Input channel: d_model.
     /// Output channel: 2 * d_inner.
-    pub in_proj: Linear<B>,
+    pub in_proj: Linear,
 
     /// Input channel: d_inner.
     /// Output channel: d_inner.
-    pub conv1d: Conv1d<B>,
+    pub conv1d: Conv1d,
 
     /// Input channel: d_inner.
     /// Output channel: dt_rank + 2 * state_rank.
-    pub x_proj: Linear<B>,
+    pub x_proj: Linear,
 
     /// Input channel: dt_rank.
     /// Output channel: d_inner.
-    pub dt_proj: Linear<B>,
+    pub dt_proj: Linear,
 
     /// Dims: `[d_inner, state_rank]`.
-    pub a_log: Param<Tensor<B, 2>>,
+    pub a_log: Param<Tensor<2>>,
 
     /// Dims: `[d_inner]`.
-    pub d: Param<Tensor<B, 1>>,
+    pub d: Param<Tensor<1>>,
 
     /// Input channel: d_inner.
     /// Output channel: d_model.
-    pub out_proj: Linear<B>,
+    pub out_proj: Linear,
 }
 
 /// Configuration / factory for [`Mamba1`].
@@ -136,7 +137,7 @@ pub struct Mamba1Config {
 
 impl Mamba1Config {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1<B> {
+    pub fn init(&self, device: &Device) -> Mamba1 {
         let d_inner = self.d_inner();
         assert_ne!(self.state_rank, 0);
         assert!(self.d_model + self.state_rank > 0);
@@ -153,7 +154,7 @@ impl Mamba1Config {
 
         let dt_proj = {
             use burn::tensor::Distribution;
-            let weight: Tensor<B, 2> = {
+            let weight: Tensor<2> = {
                 let dt_init_std = (dt_rank as f64).powf(-0.5) * self.dt_scale;
                 Tensor::random(
                     [dt_rank, d_inner],
@@ -162,11 +163,11 @@ impl Mamba1Config {
                 )
             };
             assert_eq!([dt_rank, d_inner], weight.dims());
-            let bias: Tensor<B, 1> = {
+            let bias: Tensor<1> = {
                 // note: this placeholder impl may lose precision for very small values,
                 // and a Taylor series could approximate it: e^x - 1 = x + x^2/2! + x^3/3! + ⋯
                 // but with the clamp at dt_init_floor, this isn't necessary
-                let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
+                let expm1 = |t: Tensor<1>| t.exp() - 1.;
                 let dt = Tensor::random([d_inner], Distribution::Uniform(0.0, 1.0), device)
                     * (f64::ln(self.dt_max) - f64::ln(self.dt_min))
                     + f64::ln(self.dt_min);
@@ -182,8 +183,8 @@ impl Mamba1Config {
         };
 
         let a_log = {
-            let a_row: Tensor<B, 1> =
-                Tensor::<B, 1, Int>::arange(1..self.state_rank as i64 + 1, device).float();
+            let a_row: Tensor<1> =
+                Tensor::<1, Int>::arange(1..self.state_rank as i64 + 1, device).float();
             assert_eq!([self.state_rank], a_row.dims());
             let a_row = a_row.unsqueeze();
             assert_eq!([1, self.state_rank], a_row.dims());
@@ -237,7 +238,7 @@ impl Mamba1Config {
     }
 }
 
-impl<B: Backend> Mamba1<B> {
+impl Mamba1 {
     /// See also [`Self::step`].
     ///
     /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]: an optional `cache`
@@ -250,9 +251,9 @@ impl<B: Backend> Mamba1<B> {
     ///   - Output `[batch, sequence, d_model]`
     pub fn forward(
         &self,
-        x: Tensor<B, 3>,
-        cache: Option<Mamba1Cache<B>>,
-    ) -> (Tensor<B, 3>, Mamba1Cache<B>) {
+        x: Tensor<3>,
+        cache: Option<Mamba1Cache>,
+    ) -> (Tensor<3>, Mamba1Cache) {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
         let [_, _, conv_kernel] = self.conv1d.weight.dims();
@@ -340,7 +341,7 @@ impl<B: Backend> Mamba1<B> {
     ///   - Input init_ssm `[batch, d_inner, state_rank]`
     ///   - Output `[batch, sequence, d_inner]`
     ///   - Output (final state) `[batch, d_inner, state_rank]`
-    pub fn ssm(&self, u: Tensor<B, 3>, init_ssm: Tensor<B, 3>) -> (Tensor<B, 3>, Tensor<B, 3>) {
+    pub fn ssm(&self, u: Tensor<3>, init_ssm: Tensor<3>) -> (Tensor<3>, Tensor<3>) {
         let [batch, sequence, d_inner] = u.dims();
         let [_d_inner, state_rank] = self.a_log.dims();
         let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
@@ -397,14 +398,14 @@ impl<B: Backend> Mamba1<B> {
     ///   - Output `[batch, sequence, d_inner]`
     ///   - Output (final state) `[batch, d_inner, state_rank]`
     pub fn selective_scan(
-        delta: Tensor<B, 3>,
-        a: Tensor<B, 2>,
-        b: Tensor<B, 3>,
-        c: Tensor<B, 3>,
-        d: Tensor<B, 1>,
-        u: Tensor<B, 3>,
-        init_ssm: Tensor<B, 3>,
-    ) -> (Tensor<B, 3>, Tensor<B, 3>) {
+        delta: Tensor<3>,
+        a: Tensor<2>,
+        b: Tensor<3>,
+        c: Tensor<3>,
+        d: Tensor<1>,
+        u: Tensor<3>,
+        init_ssm: Tensor<3>,
+    ) -> (Tensor<3>, Tensor<3>) {
         let [sequence, batch, d_inner] = delta.dims();
         let [_d_inner, state_rank] = a.dims();
         let outer_shape = [sequence, batch, d_inner, state_rank];
@@ -468,7 +469,7 @@ impl<B: Backend> Mamba1<B> {
 
         let inner_shape = [batch, d_inner, state_rank];
         assert_eq!(inner_shape, init_ssm.dims());
-        let mut xs: Tensor<B, 3> = init_ssm;
+        let mut xs: Tensor<3> = init_ssm;
         let mut ys = Vec::with_capacity(sequence); // inner shape: [batch, d_inner]
         for ((delta_a, delta_bu), c) in delta_a
             .into_iter()
@@ -507,15 +508,15 @@ impl<B: Backend> Mamba1<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba1<B> {
+    impl Mamba1 {
         /// # Shapes
         ///   - Input `[batch, d_model]`
         ///   - Output `[batch, d_model]`
         pub fn step(
             &self,
-            x: Tensor<B, 2>,
-            mut cache: Mamba1Cache<B>,
-        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
+            x: Tensor<2>,
+            mut cache: Mamba1Cache,
+        ) -> (Tensor<2>, Mamba1Cache) {
             let [batch, d_inner, conv_kernel] = cache.conv_bik.dims();
             let [_batch, d_model] = x.dims();
 
@@ -592,9 +593,9 @@ mod step {
         ///   - Output `[batch, d_inner]`
         pub fn ssm_step(
             &self,
-            u: Tensor<B, 2>,
-            cache: Mamba1Cache<B>,
-        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
+            u: Tensor<2>,
+            cache: Mamba1Cache,
+        ) -> (Tensor<2>, Mamba1Cache) {
             let [batch, d_inner, state_rank] = cache.ssm_bir.dims();
             let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
 
@@ -641,14 +642,14 @@ mod step {
         ///   - Input u `[batch, d_inner]`
         ///   - Output `[batch, d_inner]`
         pub fn selective_scan_step(
-            delta: Tensor<B, 2>,
-            a: Tensor<B, 2>,
-            b: Tensor<B, 2>,
-            c: Tensor<B, 2>,
-            d: Tensor<B, 1>,
-            u: Tensor<B, 2>,
-            mut cache: Mamba1Cache<B>,
-        ) -> (Tensor<B, 2>, Mamba1Cache<B>) {
+            delta: Tensor<2>,
+            a: Tensor<2>,
+            b: Tensor<2>,
+            c: Tensor<2>,
+            d: Tensor<1>,
+            u: Tensor<2>,
+            mut cache: Mamba1Cache,
+        ) -> (Tensor<2>, Mamba1Cache) {
             let [batch, d_inner, state_rank] = cache.ssm_bir.dims();
             let outer_shape = [batch, d_inner, state_rank];
 

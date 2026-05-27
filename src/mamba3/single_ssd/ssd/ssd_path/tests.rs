@@ -23,40 +23,40 @@ fn random_input(
     random_init: bool,
     device: &Device,
 ) -> (
-    Tensor<InnerB, 6>, // v
-    Tensor<InnerB, 6>, // b
-    Tensor<InnerB, 6>, // c
-    Tensor<InnerB, 4>, // da
-    Tensor<InnerB, 4>, // gamma
-    Tensor<InnerB, 4>, // scale
-    Tensor<InnerB, 4>, // initial_state
+    Tensor<6>, // v
+    Tensor<6>, // b
+    Tensor<6>, // c
+    Tensor<4>, // da
+    Tensor<4>, // gamma
+    Tensor<4>, // scale
+    Tensor<4>, // initial_state
 ) {
-    let v = Tensor::<InnerB, 6>::random(
+    let v = Tensor::<6>::random(
         [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let b = Tensor::<InnerB, 6>::random(
+    let b = Tensor::<6>::random(
         [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let c = Tensor::<InnerB, 6>::random(
+    let c = Tensor::<6>::random(
         [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let da = Tensor::<InnerB, 4>::random(
+    let da = Tensor::<4>::random(
         [batch, nchunks, chunk_len, nheads],
         Distribution::Normal(-0.5, 0.1),
         device,
     );
-    let gamma = Tensor::<InnerB, 4>::random(
+    let gamma = Tensor::<4>::random(
         [batch, nchunks, chunk_len, nheads],
         Distribution::Uniform(0.05, 0.5),
         device,
     );
-    let scale = Tensor::<InnerB, 4>::random(
+    let scale = Tensor::<4>::random(
         [batch, nchunks, chunk_len, nheads],
         Distribution::Uniform(0.05, 0.5),
         device,
@@ -64,37 +64,37 @@ fn random_input(
     // Random (general case) or zero (fresh-start) initial merged-form state
     // per `random_init`, covering the whole {zero, random} dimension.
     let initial_state = if random_init {
-        Tensor::<InnerB, 4>::random(
+        Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             Distribution::Normal(0.0, 0.1),
             device,
         )
     } else {
-        Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], device)
+        Tensor::<4>::zeros([batch, nheads, per_head_dim, state_rank], device)
     };
     (v, b, c, da, gamma, scale, initial_state)
 }
 
 struct Inputs {
-    v: Param<Tensor<B, 6>>,
-    b: Param<Tensor<B, 6>>,
-    c: Param<Tensor<B, 6>>,
-    da: Param<Tensor<B, 4>>,
-    gamma: Param<Tensor<B, 4>>,
-    scale: Param<Tensor<B, 4>>,
-    initial_state: Param<Tensor<B, 4>>,
+    v: Param<Tensor<6>>,
+    b: Param<Tensor<6>>,
+    c: Param<Tensor<6>>,
+    da: Param<Tensor<4>>,
+    gamma: Param<Tensor<4>>,
+    scale: Param<Tensor<4>>,
+    initial_state: Param<Tensor<4>>,
 }
 
 impl Inputs {
     #[allow(clippy::too_many_arguments)]
     fn from_inner(
-        v: Tensor<InnerB, 6>,
-        b: Tensor<InnerB, 6>,
-        c: Tensor<InnerB, 6>,
-        da: Tensor<InnerB, 4>,
-        gamma: Tensor<InnerB, 4>,
-        scale: Tensor<InnerB, 4>,
-        initial_state: Tensor<InnerB, 4>,
+        v: Tensor<6>,
+        b: Tensor<6>,
+        c: Tensor<6>,
+        da: Tensor<4>,
+        gamma: Tensor<4>,
+        scale: Tensor<4>,
+        initial_state: Tensor<4>,
     ) -> Self {
         Self {
             v: Param::from_tensor(Tensor::from_inner(v)),
@@ -107,7 +107,7 @@ impl Inputs {
         }
     }
 
-    fn ssd_input(&self) -> Mamba3SingleSsdInput<B> {
+    fn ssd_input(&self) -> Mamba3SingleSsdInput {
         Mamba3SingleSsdInput {
             v_bnlmhp: self.v.val(),
             b_bnlmhr: self.b.val(),
@@ -123,23 +123,23 @@ impl Inputs {
 }
 
 struct PathRun {
-    y: Tensor<InnerB, 6>,
-    state: Tensor<InnerB, 4>,
-    d_v: Tensor<InnerB, 6>,
-    d_b: Tensor<InnerB, 6>,
-    d_c: Tensor<InnerB, 6>,
-    d_da: Tensor<InnerB, 4>,
-    d_gamma: Tensor<InnerB, 4>,
-    d_scale: Tensor<InnerB, 4>,
-    d_init_state: Tensor<InnerB, 4>,
+    y: Tensor<6>,
+    state: Tensor<4>,
+    d_v: Tensor<6>,
+    d_b: Tensor<6>,
+    d_c: Tensor<6>,
+    d_da: Tensor<4>,
+    d_gamma: Tensor<4>,
+    d_scale: Tensor<4>,
+    d_init_state: Tensor<4>,
 }
 
 fn loss_from_outputs(
-    y_bnlmhp: Tensor<B, 6>,
-    final_state_bhpr: Tensor<B, 4>,
-    y_head: Tensor<InnerB, 6>,
-    s_head: Tensor<InnerB, 4>,
-) -> Tensor<B, 1> {
+    y_bnlmhp: Tensor<6>,
+    final_state_bhpr: Tensor<4>,
+    y_head: Tensor<6>,
+    s_head: Tensor<4>,
+) -> Tensor<1> {
     let y_head = Tensor::from_inner(y_head);
     let s_head = Tensor::from_inner(s_head);
     (y_bnlmhp * y_head).sum() + (final_state_bhpr * s_head).sum()
@@ -148,8 +148,8 @@ fn loss_from_outputs(
 fn run_path(
     path: Mamba3SsdPath,
     inputs: &Inputs,
-    y_head: Tensor<InnerB, 6>,
-    s_head: Tensor<InnerB, 4>,
+    y_head: Tensor<6>,
+    s_head: Tensor<4>,
 ) -> PathRun {
     let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
@@ -228,12 +228,12 @@ fn run_minimal_matches_serial(
         &device,
     );
 
-    let y_head = Tensor::<InnerB, 6>::random(
+    let y_head = Tensor::<6>::random(
         [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let s_head = Tensor::<InnerB, 4>::random(
+    let s_head = Tensor::<4>::random(
         [batch, nheads, per_head_dim, state_rank],
         Distribution::Normal(0.0, 1.0),
         &device,

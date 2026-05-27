@@ -53,8 +53,8 @@ macro_rules! decl_ssd_autodiff_backend_ext {
         /// extension trait (so the custom memory-efficient backward is available).
         #[cfg(feature = "autodiff")]
         pub trait $autodiff_trait:
-            burn::tensor::backend::Backend
-            + burn::tensor::backend::AutodiffBackend
+            burn::backend::Backend
+            + burn::backend::AutodiffBackend
             + $ext_trait
             $(+ $extra_bound)*
         {
@@ -66,7 +66,8 @@ macro_rules! decl_ssd_autodiff_backend_ext {
         impl<B> $autodiff_trait
             for burn::backend::Autodiff<B>
             where
-                B: burn::tensor::backend::Backend + $ext_trait $(+ $extra_bound)*
+                B: burn::backend::Backend + $ext_trait $(+ $extra_bound)*,
+                B: burn::backend::BackendTypes<FloatTensorPrimitive = burn::backend::DispatchTensor>,
         {
         }
     };

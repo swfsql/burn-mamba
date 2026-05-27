@@ -29,47 +29,47 @@ fn random_input(
     random_init: bool,
     device: &Device,
 ) -> (
-    Tensor<InnerB, 5>,
-    Tensor<InnerB, 4>,
-    Tensor<InnerB, 1>,
-    Tensor<InnerB, 5>,
-    Tensor<InnerB, 5>,
-    Tensor<InnerB, 1>,
-    Tensor<InnerB, 4>,
+    Tensor<5>,
+    Tensor<4>,
+    Tensor<1>,
+    Tensor<5>,
+    Tensor<5>,
+    Tensor<1>,
+    Tensor<4>,
 ) {
-    let x = Tensor::<InnerB, 5>::random(
+    let x = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let dt = Tensor::<InnerB, 4>::random(
+    let dt = Tensor::<4>::random(
         [batch, nchunks, chunk_len, nheads],
         Distribution::Uniform(0.05, 0.3),
         device,
     );
-    let a_decay = Tensor::<InnerB, 1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
-    let b = Tensor::<InnerB, 5>::random(
+    let a_decay = Tensor::<1>::random([nheads], Distribution::Uniform(-1.0, -0.5), device);
+    let b = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let c = Tensor::<InnerB, 5>::random(
+    let c = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, state_rank],
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    let d = Tensor::<InnerB, 1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
+    let d = Tensor::<1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
     // The initial SSM state is random (the general case) or zero (the
     // standard fresh-start case) per `random_init`. All paths must agree on
     // both, so the comparison spans the whole {zero, random} dimension.
     let initial_state = if random_init {
-        Tensor::<InnerB, 4>::random(
+        Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             Distribution::Normal(0.0, 0.1),
             device,
         )
     } else {
-        Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], device)
+        Tensor::<4>::zeros([batch, nheads, per_head_dim, state_rank], device)
     };
     (x, dt, a_decay, b, c, d, initial_state)
 }
@@ -78,25 +78,25 @@ fn random_input(
 /// with `require_grad`. One `Inputs` is built per path, sharing the same
 /// underlying inner values but its own autodiff graph.
 struct Inputs {
-    x: Param<Tensor<B, 5>>,
-    dt: Param<Tensor<B, 4>>,
-    a_decay: Param<Tensor<B, 1>>,
-    b: Param<Tensor<B, 5>>,
-    c: Param<Tensor<B, 5>>,
-    d: Param<Tensor<B, 1>>,
-    initial_state: Param<Tensor<B, 4>>,
+    x: Param<Tensor<5>>,
+    dt: Param<Tensor<4>>,
+    a_decay: Param<Tensor<1>>,
+    b: Param<Tensor<5>>,
+    c: Param<Tensor<5>>,
+    d: Param<Tensor<1>>,
+    initial_state: Param<Tensor<4>>,
 }
 
 impl Inputs {
     #[allow(clippy::too_many_arguments)]
     fn from_inner(
-        x: Tensor<InnerB, 5>,
-        dt: Tensor<InnerB, 4>,
-        a_decay: Tensor<InnerB, 1>,
-        b: Tensor<InnerB, 5>,
-        c: Tensor<InnerB, 5>,
-        d: Tensor<InnerB, 1>,
-        initial_state: Tensor<InnerB, 4>,
+        x: Tensor<5>,
+        dt: Tensor<4>,
+        a_decay: Tensor<1>,
+        b: Tensor<5>,
+        c: Tensor<5>,
+        d: Tensor<1>,
+        initial_state: Tensor<4>,
     ) -> Self {
         Self {
             x: Param::from_tensor(Tensor::from_inner(x)),
@@ -109,7 +109,7 @@ impl Inputs {
         }
     }
 
-    fn ssd_input(&self) -> Mamba2SsdInput<B> {
+    fn ssd_input(&self) -> Mamba2SsdInput {
         Mamba2SsdInput {
             x_bnlhp: self.x.val(),
             dt_bnlh: self.dt.val(),
@@ -126,15 +126,15 @@ impl Inputs {
 
 /// Collected forward outputs and input gradients for a single SSD path run.
 struct PathRun {
-    y: Tensor<InnerB, 5>,
-    state: Tensor<InnerB, 4>,
-    d_x: Tensor<InnerB, 5>,
-    d_dt: Tensor<InnerB, 4>,
-    d_a_decay: Tensor<InnerB, 1>,
-    d_b: Tensor<InnerB, 5>,
-    d_c: Tensor<InnerB, 5>,
-    d_d: Tensor<InnerB, 1>,
-    d_init_state: Tensor<InnerB, 4>,
+    y: Tensor<5>,
+    state: Tensor<4>,
+    d_x: Tensor<5>,
+    d_dt: Tensor<4>,
+    d_a_decay: Tensor<1>,
+    d_b: Tensor<5>,
+    d_c: Tensor<5>,
+    d_d: Tensor<1>,
+    d_init_state: Tensor<4>,
 }
 
 /// Combine `y` and `final_state` into a single deterministic scalar loss
@@ -142,11 +142,11 @@ struct PathRun {
 /// that gradients for the y-branch and the state-branch are independent
 /// (a mistake in either path shows up in the parameter grads).
 fn loss_from_outputs(
-    y_bnlhp: Tensor<B, 5>,
-    final_state_bhpr: Tensor<B, 4>,
-    y_head: Tensor<InnerB, 5>,
-    s_head: Tensor<InnerB, 4>,
-) -> Tensor<B, 1> {
+    y_bnlhp: Tensor<5>,
+    final_state_bhpr: Tensor<4>,
+    y_head: Tensor<5>,
+    s_head: Tensor<4>,
+) -> Tensor<1> {
     let y_head = Tensor::from_inner(y_head);
     let s_head = Tensor::from_inner(s_head);
     (y_bnlhp * y_head).sum() + (final_state_bhpr * s_head).sum()
@@ -156,8 +156,8 @@ fn loss_from_outputs(
 fn run_path(
     path: Mamba2SsdPath,
     inputs: &Inputs,
-    y_head: Tensor<InnerB, 5>,
-    s_head: Tensor<InnerB, 4>,
+    y_head: Tensor<5>,
+    s_head: Tensor<4>,
 ) -> PathRun {
     let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
@@ -217,12 +217,12 @@ fn run_minimal_matches_serial(
     // Fixed (non-tracked) "downstream heads" for the loss. Two distinct
     // random tensors so y- and state-gradient paths are exercised
     // independently.
-    let y_head = Tensor::<InnerB, 5>::random(
+    let y_head = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let s_head = Tensor::<InnerB, 4>::random(
+    let s_head = Tensor::<4>::random(
         [batch, nheads, per_head_dim, state_rank],
         Distribution::Normal(0.0, 1.0),
         &device,

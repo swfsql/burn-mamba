@@ -7,10 +7,11 @@
 
 use crate::{DENY_INF, DENY_NAN};
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Panics if `t` contains a `NaN` (when [`crate::DENY_NAN`] is set) or an `Inf`
 /// (when [`crate::DENY_INF`] is set).  A no-op when both flags are `false`.
-pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
+pub fn sanity<const D: usize>(t: &Tensor<D>) {
     let mut has_nan = false;
     let mut has_inf = false;
 
@@ -33,7 +34,7 @@ pub fn sanity<B: Backend, const D: usize>(t: &Tensor<B, D>) {
 }
 
 /// Like [`sanity`] but checks only for `NaN` (ignores `Inf`).
-pub fn sanity_nan<B: Backend, const D: usize>(t: &Tensor<B, D>) {
+pub fn sanity_nan<const D: usize>(t: &Tensor<D>) {
     let mut has_nan = false;
 
     if DENY_NAN {

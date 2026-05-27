@@ -14,10 +14,12 @@ use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd;
 use crate::utils::primitive::mk;
 use burn::prelude::*;
-use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
+use burn::tensor::{Tensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
 use ssd::serial;
+use burn::backend::Backend;
 
-impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
+impl Mamba3SingleSsdInput {
     /// MIMO-first single-ssd form Serial SSD with recalculated backward.
     ///
     /// Delegates the full K1–K5 (single-ssd) computation to
@@ -28,7 +30,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn single_ssd_serial_recalculated(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn single_ssd_serial_recalculated(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         input.sanity();
         assert!(
@@ -36,16 +38,16 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
             "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
-        let (y_bnlmhp, final_state_bhpr) =
-            <B as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
-                input.v_bnlmhp.into_primitive().tensor(),
-                input.da_bnlh.into_primitive().tensor(),
-                input.b_bnlmhr.into_primitive().tensor(),
-                input.c_bnlmhr.into_primitive().tensor(),
-                input.gamma_bnlh.into_primitive().tensor(),
-                input.scale_bnlh.into_primitive().tensor(),
-                input.initial_state_bhpr.into_primitive().tensor(),
-            );
+        let (y_bnlmhp, final_state_bhpr) = todo!();
+            // <B as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
+            //     input.v_bnlmhp.into_primitive().tensor(),
+            //     input.da_bnlh.into_primitive().tensor(),
+            //     input.b_bnlmhr.into_primitive().tensor(),
+            //     input.c_bnlmhr.into_primitive().tensor(),
+            //     input.gamma_bnlh.into_primitive().tensor(),
+            //     input.scale_bnlh.into_primitive().tensor(),
+            //     input.initial_state_bhpr.into_primitive().tensor(),
+            // );
         let y_bnlmhp = Tensor::from_primitive(TensorPrimitive::Float(y_bnlmhp));
         let final_state_bhpr = Tensor::from_primitive(TensorPrimitive::Float(final_state_bhpr));
         (y_bnlmhp, final_state_bhpr)
@@ -60,7 +62,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
 /// support a custom memory-efficient backward (the Autodiff wrapper) override
 /// this to recompute forward intermediates during backward instead of saving
 /// them.
-pub trait Mamba3SingleSsdBackendExt: burn::tensor::backend::Backend {
+pub trait Mamba3SingleSsdBackendExt: Backend {
     /// Memory-efficient MIMO single-ssd form serial SSD.
     ///
     /// # Arguments

@@ -22,6 +22,7 @@ use burn::{
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
+use burn::backend::Backend;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
@@ -29,7 +30,7 @@ use burn_mamba::prelude::*;
 pub fn train<AutoB>(
     training_config: TrainingConfig,
     model_config: MyMamba2NetworkConfig,
-    training_device: AutoB::Device,
+    training_device: Device,
     app_args: &AppArgs,
 ) where
     AutoB: AutodiffBackend + Mamba2BackendExt,
@@ -120,7 +121,7 @@ pub fn train<AutoB>(
     println!("Training finished.");
 }
 
-type Dataloader<B> = std::sync::Arc<dyn DataLoader<B, SequenceBatch<B>> + 'static>;
+type Dataloader = std::sync::Arc<dyn DataLoader<B, SequenceBatch> + 'static>;
 
 /// Train for a single epoch, stepping the optimizer per batch and periodically
 /// validating + checkpointing; returns the updated model.
@@ -208,9 +209,9 @@ where
 
 /// Run validation over (up to `valid_loop_limit`) batches and report the
 /// average loss.
-pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
-    dataloader_valid: Dataloader<B>,
-    valid_model: MyMamba2Network<B>,
+pub fn epoch_valid(
+    dataloader_valid: Dataloader,
+    valid_model: MyMamba2Network,
     training_config: &TrainingConfig,
     model_config: &MyMamba2NetworkConfig,
     epoch: usize,
@@ -225,7 +226,7 @@ pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
         lr: Some(training_config.lr.get_lr(0)),
     };
 
-    let mut loss_metric = burn::train::metric::LossMetric::<B>::new();
+    let mut loss_metric = burn::train::metric::LossMetric::new();
 
     let valid_model = Wrap(valid_model, model_config.clone());
 
@@ -254,7 +255,7 @@ pub fn epoch_valid<B: Backend + Mamba2BackendExt>(
 }
 
 /// Wrapper over [`Mamba2Network`] for custom implementations.
-pub struct Wrap<B: Backend>(pub MyMamba2Network<B>, pub MyMamba2NetworkConfig);
+pub struct Wrap(pub MyMamba2Network, pub MyMamba2NetworkConfig);
 
 impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
     type Input = SequenceBatch<AutoB>;
@@ -268,9 +269,9 @@ impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
-    type Input = SequenceBatch<B>;
-    type Output = RegressionOutput<B>;
+impl InferenceStep for Wrap {
+    type Input = SequenceBatch;
+    type Output = RegressionOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
         let input = batch.sequences;
@@ -284,14 +285,14 @@ impl<B: Backend + Mamba2BackendExt> InferenceStep for Wrap<B> {
     }
 }
 
-impl<B: Backend + Mamba2BackendExt> Wrap<B> {
+impl Wrap {
     /// Forward the model and compute the MSE regression loss against the last
     /// timestep's prediction.
     pub fn forward_regression(
         &self,
-        input: Tensor<B, 3>,
-        targets: Tensor<B, 2>,
-    ) -> RegressionOutput<B> {
+        input: Tensor<3>,
+        targets: Tensor<2>,
+    ) -> RegressionOutput {
         let model = &self.0;
         let _model_config = &self.1;
         let [batch_size, sequence_size, _input_size] = input.dims();

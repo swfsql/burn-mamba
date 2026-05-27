@@ -9,6 +9,7 @@ use burn::record::{FileRecorder, Recorder};
 use burn::{optim::Optimizer, prelude::*, tensor::backend::AutodiffBackend};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use burn::backend::Backend;
 
 /// The `--help` text describing every flag and the train/infer/config flow.
 pub const HELP: &str = "\
@@ -200,7 +201,7 @@ impl AppArgs {
     pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
         &self,
         model_config: &ModelConfig,
-        device: &B::Device,
+        device: &Device,
     ) -> Option<ModelConfig::Model> {
         load_model(&self.artifacts_path, model_config, device)
     }
@@ -209,7 +210,7 @@ impl AppArgs {
     pub fn load_or_save_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
         &self,
         model_config: &ModelConfig,
-        device: &B::Device,
+        device: &Device,
     ) -> ModelConfig::Model {
         self.load_model(model_config, device).unwrap_or_else(|| {
             println!("Initializing new model");
@@ -232,7 +233,7 @@ impl AppArgs {
     pub fn load_optim<AutoB, AutoM, OptimConfig>(
         &self,
         optim_config: &OptimConfig,
-        device: &AutoB::Device,
+        device: &Device,
     ) -> Option<OptimConfig::Adaptor>
     where
         AutoB: AutodiffBackend,
@@ -246,7 +247,7 @@ impl AppArgs {
     pub fn load_or_save_optim<AutoB, AutoM, OptimConfig>(
         &self,
         optim_config: &OptimConfig,
-        device: &AutoB::Device,
+        device: &Device,
     ) -> OptimConfig::Adaptor
     where
         AutoB: AutodiffBackend,
@@ -340,10 +341,10 @@ pub fn save_model<B: Backend>(artifact_dir: &Path, model: &impl Module<B>) {
 }
 
 /// Load model weights from `artifact_dir`, or `None` if absent.
-pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
+pub fn load_model<ModelConfig: ModelConfigExt>(
     artifact_dir: &Path,
     model_config: &ModelConfig,
-    device: &B::Device,
+    device: &Device,
 ) -> Option<ModelConfig::Model> {
     let path = artifact_dir.join(MODEL_NAME);
     let file_ext = <RecorderTy as FileRecorder<B>>::file_extension();
@@ -364,7 +365,7 @@ pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
 /// Initialise a fresh model from its config on `device`.
 pub fn init_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
     model_config: &ModelConfig,
-    device: &B::Device,
+    device: &Device,
 ) -> ModelConfig::Model {
     model_config.init(device)
 }
@@ -392,7 +393,7 @@ where
 pub fn load_optim<AutoB, AutoM, OptimConfig>(
     artifact_dir: &Path,
     optim_config: &OptimConfig,
-    device: &AutoB::Device,
+    device: &Device,
 ) -> Option<OptimConfig::Adaptor>
 where
     AutoB: AutodiffBackend,
@@ -419,7 +420,7 @@ where
 /// Initialise a fresh optimizer from its config.
 pub fn init_optim<AutoB, AutoM, OptimConfig>(
     optim_config: &OptimConfig,
-    _device: &AutoB::Device,
+    _device: &Device,
 ) -> OptimConfig::Adaptor
 where
     AutoB: AutodiffBackend,

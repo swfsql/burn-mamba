@@ -7,10 +7,11 @@
 use crate::utils::div_eps;
 use burn::module::Module;
 use burn::nn::loss::Reduction;
-use burn::tensor::{DType, Tensor, backend::Backend, f16};
+use burn::tensor::{DType, Tensor, f16};
+use burn::backend::Backend;
 
 /// Calculate the mean squared error loss from the input logits and the targets.
-#[derive(Module, Clone, Debug)]
+#[derive(Module, Debug)]
 pub struct MseLoss;
 
 impl Default for MseLoss {
@@ -31,12 +32,12 @@ impl MseLoss {
     ///
     /// - logits: `[batch_size, num_targets]`
     /// - targets: `[batch_size, num_targets]`
-    pub fn forward<B: Backend>(
+    pub fn forward(
         &self,
-        logits: Tensor<B, 2>,
-        targets: Tensor<B, 2>,
+        logits: Tensor<2>,
+        targets: Tensor<2>,
         reduction: Reduction,
-    ) -> Tensor<B, 1> {
+    ) -> Tensor<1> {
         let [batch_size, _num_targets] = logits.dims();
         match logits.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
@@ -49,7 +50,7 @@ impl MseLoss {
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
-                let div_eps: f16 = f16::from_elem(div_eps::<B>()) * f16::from_f32(2.);
+                let div_eps: f16 = f16::from_elem(div_eps()) * f16::from_f32(2.);
                 // avoid calculating sub² directly (due to overflow e.g. on 256 * 256)
                 let sub = logits.sub(targets);
                 let max = sub.clone().no_grad().detach().abs().max();
@@ -84,9 +85,9 @@ impl MseLoss {
     /// Compute the criterion on the input tensor without reducing.
     pub fn forward_no_reduction<const D: usize, B: Backend>(
         &self,
-        logits: Tensor<B, D>,
-        targets: Tensor<B, D>,
-    ) -> Tensor<B, D> {
+        logits: Tensor<D>,
+        targets: Tensor<D>,
+    ) -> Tensor<D> {
         logits.sub(targets).square()
     }
 }

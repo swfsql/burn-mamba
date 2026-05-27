@@ -21,29 +21,29 @@ fn small_config() -> Mamba1Config {
 /// forward+backward run.  Each `check_grads_match` call compares these
 /// across two runs that should be mathematically equivalent.
 struct RunGrads {
-    out: Tensor<InnerB, 3>,
+    out: Tensor<3>,
     /// Final convolution window from the returned cache.
-    final_conv: Tensor<InnerB, 3>,
+    final_conv: Tensor<3>,
     /// Final SSM state from the returned cache.
-    final_ssm: Tensor<InnerB, 3>,
-    d_input: Tensor<InnerB, 3>,
-    d_in_proj_w: Tensor<InnerB, 2>,
-    d_conv1d_w: Tensor<InnerB, 3>,
-    d_x_proj_w: Tensor<InnerB, 2>,
-    d_dt_proj_w: Tensor<InnerB, 2>,
-    d_dt_proj_b: Tensor<InnerB, 1>,
-    d_a_log: Tensor<InnerB, 2>,
-    d_d: Tensor<InnerB, 1>,
-    d_out_proj_w: Tensor<InnerB, 2>,
+    final_ssm: Tensor<3>,
+    d_input: Tensor<3>,
+    d_in_proj_w: Tensor<2>,
+    d_conv1d_w: Tensor<3>,
+    d_x_proj_w: Tensor<2>,
+    d_dt_proj_w: Tensor<2>,
+    d_dt_proj_b: Tensor<1>,
+    d_a_log: Tensor<2>,
+    d_d: Tensor<1>,
+    d_out_proj_w: Tensor<2>,
 }
 
 /// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
 /// from the output **and** the final cache, so the backward pass exercises
 /// both the output and the state path.
 struct Heads {
-    out: Tensor<InnerB, 3>,
-    conv: Tensor<InnerB, 3>,
-    ssm: Tensor<InnerB, 3>,
+    out: Tensor<3>,
+    conv: Tensor<3>,
+    ssm: Tensor<3>,
 }
 
 /// Run a closure that produces an output tensor from a model and an input
@@ -52,9 +52,9 @@ struct Heads {
 /// gradients of the input and a representative set of model parameters.
 fn run_with_grads(
     model: &Mamba1<B>,
-    input: &Param<Tensor<B, 3>>,
+    input: &Param<Tensor<3>>,
     heads: &Heads,
-    forward: impl FnOnce(&Mamba1<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba1Cache<B>),
+    forward: impl FnOnce(&Mamba1<B>, Tensor<3>) -> (Tensor<3>, Mamba1Cache<B>),
 ) -> RunGrads {
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
@@ -158,7 +158,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
 /// Helper that builds a fresh `Param<Tensor>` from a stable inner tensor.
 /// A new Param is needed per run so that the autodiff leaf has a fresh
 /// node, isolating each backward pass to its own forward graph.
-fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
+fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
     Param::from_tensor(Tensor::from_inner(input.clone()))
 }
 
@@ -174,13 +174,13 @@ fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cac
     let (conv, ssm) = if random {
         let dist = Distribution::Normal(0.0, 1.0);
         (
-            Tensor::<InnerB, 3>::random([batch, d_inner, conv_kernel], dist, &device),
-            Tensor::<InnerB, 3>::random([batch, d_inner, state_rank], dist, &device),
+            Tensor::<3>::random([batch, d_inner, conv_kernel], dist, &device),
+            Tensor::<3>::random([batch, d_inner, state_rank], dist, &device),
         )
     } else {
         (
-            Tensor::<InnerB, 3>::zeros([batch, d_inner, conv_kernel], &device),
-            Tensor::<InnerB, 3>::zeros([batch, d_inner, state_rank], &device),
+            Tensor::<3>::zeros([batch, d_inner, conv_kernel], &device),
+            Tensor::<3>::zeros([batch, d_inner, state_rank], &device),
         )
     };
     Mamba1Cache {
@@ -216,11 +216,11 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     assert!(seq_len >= conv_kernel);
 
     let normal = Distribution::Normal(0.0, 1.0);
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
-        out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
-        conv: Tensor::<InnerB, 3>::random([batch, d_inner, conv_kernel], normal, &device),
-        ssm: Tensor::<InnerB, 3>::random([batch, d_inner, state_rank], normal, &device),
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        conv: Tensor::<3>::random([batch, d_inner, conv_kernel], normal, &device),
+        ssm: Tensor::<3>::random([batch, d_inner, state_rank], normal, &device),
     };
 
     let init_cache = build_init_cache(&cfg, batch, random_init);
@@ -235,7 +235,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let cache_step = init_cache;
     let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
         let mut cache = cache_step;
-        let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+        let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
             let (out_t, new_cache) = m.step(token, cache);

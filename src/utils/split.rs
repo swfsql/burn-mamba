@@ -1,6 +1,7 @@
 //! Typed-array variants of [`Tensor::split_with_sizes`].
 
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Like [`Tensor::split_with_sizes`] but returns a fixed-size array, enabling
 /// `let [a, b, c, ...] = split_into::<…, N>(t, [size_a, size_b, size_c, ...], dim);`
@@ -8,11 +9,11 @@ use burn::prelude::*;
 ///
 /// Panics if the underlying split does not produce exactly `N` parts (which
 /// would indicate that the requested sizes do not cover the dimension).
-pub fn split_into<B: Backend, const D: usize, const N: usize>(
-    t: Tensor<B, D>,
+pub fn split_into<const D: usize, const N: usize>(
+    t: Tensor<D>,
     sizes: [usize; N],
     dim: usize,
-) -> [Tensor<B, D>; N] {
+) -> [Tensor<D>; N] {
     let parts = t.split_with_sizes(sizes.to_vec(), dim);
     let got = parts.len();
     parts

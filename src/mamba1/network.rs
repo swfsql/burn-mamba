@@ -28,18 +28,19 @@ use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// A complete Mamba-1 language model.
 #[derive(Module, Debug)]
-pub struct Mamba1Network<B: Backend> {
+pub struct Mamba1Network {
     /// Token embedding table (`padded_vocab_size → d_model`).
-    pub embedding: Embedding<B>,
+    pub embedding: Embedding,
     /// The stack of Mamba-1 residual layers.
-    pub layers: Mamba1Layers<B>,
+    pub layers: Mamba1Layers,
     /// Final RMSNorm applied before the LM head.
-    pub norm_f: RmsNorm<B>,
+    pub norm_f: RmsNorm,
     /// If missing, re-utilizes a transposed `embedding` weight.
-    pub lm_head: Option<Linear<B>>,
+    pub lm_head: Option<Linear>,
 }
 
 /// Configuration / factory for [`Mamba1Network`].
@@ -71,7 +72,7 @@ pub struct Mamba1NetworkConfig {
 
 impl Mamba1NetworkConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba1Network<B> {
+    pub fn init(&self, device: &Device) -> Mamba1Network {
         let layers = Mamba1LayersConfig {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),
@@ -108,7 +109,7 @@ impl Mamba1NetworkConfig {
     }
 }
 
-impl<B: Backend> Mamba1Network<B> {
+impl Mamba1Network {
     /// See also [`Self::step`].
     ///
     /// Processes a full token sequence and returns next-token logits along with
@@ -119,9 +120,9 @@ impl<B: Backend> Mamba1Network<B> {
     ///   - Output `[batch, sequence, padded_vocab_size]`
     pub fn forward(
         &self,
-        x: Tensor<B, 2, Int>,
-        caches: Option<Mamba1Caches<B>>,
-    ) -> (Tensor<B, 3>, Mamba1Caches<B>) {
+        x: Tensor<2, Int>,
+        caches: Option<Mamba1Caches>,
+    ) -> (Tensor<3>, Mamba1Caches) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -148,9 +149,9 @@ impl<B: Backend> Mamba1Network<B> {
     ///   - Output `[batch, padded_vocab_size]`
     pub fn step(
         &self,
-        x: Tensor<B, 1, Int>,
-        caches: Option<Mamba1Caches<B>>,
-    ) -> (Tensor<B, 2>, Mamba1Caches<B>) {
+        x: Tensor<1, Int>,
+        caches: Option<Mamba1Caches>,
+    ) -> (Tensor<2>, Mamba1Caches) {
         let [batch] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -183,7 +184,7 @@ impl<B: Backend> Mamba1Network<B> {
     ///
     /// Uses the dedicated `lm_head` linear layer when available, or the
     /// transposed embedding weight matrix otherwise (weight tying).
-    fn apply_lm_head(&self, x: Tensor<B, 3>, d_model: usize, padded_vocab: usize) -> Tensor<B, 3> {
+    fn apply_lm_head(&self, x: Tensor<3>, d_model: usize, padded_vocab: usize) -> Tensor<3> {
         if let Some(lm_head) = &self.lm_head {
             lm_head.forward(x)
         } else {

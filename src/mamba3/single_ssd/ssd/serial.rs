@@ -34,8 +34,9 @@ pub use crate::mamba3::double_ssd::ssd::serial::{
 };
 use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend> Mamba3SingleSsdInput<B> {
+impl Mamba3SingleSsdInput {
     /// MIMO-first Single-SSD — chunk-serial (K1–K5) variant.
     ///
     /// Sequence of kernels (matches the double-ssd `ssd_serial`):
@@ -52,7 +53,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the single-ssd accumulator at the last token.
-    pub fn single_ssd_serial(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn single_ssd_serial(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         input.sanity();
         let [batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
@@ -80,21 +81,21 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
         // ── K2: CB matrix on unscaled B/C ─────────────────────────────────────
         // SingleSsd K5 applies the `scale` and `gamma` weights post-hoc, so K2 is
         // identical to the double-ssd K2.
-        let cb_bnhLMLM: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlmhr.clone(), input.b_bnlmhr.clone());
+        let cb_bnhLMLM: Tensor<5> = k2_ssd_bmm(input.c_bnlmhr.clone(), input.b_bnlmhr.clone());
 
         // ── K3: chunk state using K_scaled = scaleₜ · B ───────────────────────
         // The existing K3 computes `state = (V * decay)^T @ B_input`, so passing
         // `B_input = K_scaled` recovers the single-ssd per-chunk state.
         let scale_bnlh11 = input.scale_bnlh.clone().unsqueeze_dims::<6>(&[3, 5]);
         let k_scaled_bnlmhr = input.b_bnlmhr.clone() * scale_bnlh11;
-        let intra_chunk_state_bnhpr: Tensor<B, 5> = k3_ssd_chunk_state(
+        let intra_chunk_state_bnhpr: Tensor<5> = k3_ssd_chunk_state(
             input.v_bnlmhp.clone(),
             k_scaled_bnlmhr,
             da_cumsum_bhnl.clone(),
         );
 
         // ── K4: sequential state passing across chunks ────────────────────────
-        let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<B, 5>, Tensor<B, 4>) =
+        let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<5>, Tensor<4>) =
             k4_ssd_state_passing(
                 intra_chunk_state_bnhpr,
                 da_chunk_end_bhn,
@@ -151,16 +152,16 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
 /// # Returns
 /// - `y_bnlmhp`: `[B, N, L, M, H, P]`
 #[allow(clippy::too_many_arguments)]
-pub fn k5_single_ssd_chunk_scan<B: Backend>(
-    da_cumsum_bhnl: Tensor<B, 4>,
-    v_bnlmhp: Tensor<B, 6>,
-    c_bnlmhr: Tensor<B, 6>,
-    b_bnlmhr: Tensor<B, 6>,
-    cb_bnhLMLM: Tensor<B, 5>,
-    gamma_bnlh: Tensor<B, 4>,
-    scale_bnlh: Tensor<B, 4>,
-    chunk_input_state_bnhpr: Tensor<B, 5>,
-) -> Tensor<B, 6> {
+pub fn k5_single_ssd_chunk_scan(
+    da_cumsum_bhnl: Tensor<4>,
+    v_bnlmhp: Tensor<6>,
+    c_bnlmhr: Tensor<6>,
+    b_bnlmhr: Tensor<6>,
+    cb_bnhLMLM: Tensor<5>,
+    gamma_bnlh: Tensor<4>,
+    scale_bnlh: Tensor<4>,
+    chunk_input_state_bnhpr: Tensor<5>,
+) -> Tensor<6> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = c_bnlmhr.dims();
     let device = v_bnlmhp.device();
@@ -211,7 +212,7 @@ pub fn k5_single_ssd_chunk_scan<B: Backend>(
     // then interleave-expand to fused length so that MIMO same-time blocks
     // are zeroed out.
     let inf_upper_ll =
-        Tensor::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device).triu(0); // upper triangle INCLUDING diagonal
+        Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device).triu(0); // upper triangle INCLUDING diagonal
     let inf_upper_bnhll = inf_upper_ll
         .unsqueeze_dims::<5>(&[0, 1, 2])
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);

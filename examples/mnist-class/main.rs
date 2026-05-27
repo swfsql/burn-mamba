@@ -16,6 +16,7 @@ pub use common::{
     mnist::dataset,
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
+use burn::backend::Backend;
 
 /// The example's `model_config()`.
 pub mod model;

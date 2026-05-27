@@ -23,15 +23,16 @@
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend> Mamba2SsdInput<B> {
+impl Mamba2SsdInput {
     /// Forward pass for the Mamba-2 SSD module (serial-over-chunks form).
     ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_serial(self) -> (Tensor<5>, Tensor<4>) {
         let input = self;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
         let [.., state_rank] = input.b_bnlhr.dims();
@@ -61,7 +62,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
 
         // ── Kernel 1 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (da_cumsum_bhnl [used in K3+K5][*], da_chunk_end_bhn [used in K4][omitted][*])
-        let (da_cumsum_bhnl, da_chunk_end_bhn): (Tensor<B, 4>, Tensor<B, 3>) =
+        let (da_cumsum_bhnl, da_chunk_end_bhn): (Tensor<4>, Tensor<3>) =
             k1_ssd_chunk_cumsum(dt_discretized_bhnl.clone(), input.a_decay_h.clone());
         assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
@@ -70,7 +71,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
 
         // ── Kernel 2 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (cb_bnhll [used in K5][!])
-        let cb_bnhll: Tensor<B, 5> = k2_ssd_bmm(input.c_bnlhr.clone(), input.b_bnlhr.clone());
+        let cb_bnhll: Tensor<5> = k2_ssd_bmm(input.c_bnlhr.clone(), input.b_bnlhr.clone());
         assert_eq!(
             [batch, nchunks, nheads, chunk_len, chunk_len],
             cb_bnhll.dims()
@@ -79,7 +80,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
 
         // ── Kernel 3 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (intra_chunk_state_bnhpr [used in K4][!])
-        let intra_chunk_state_bnhpr: Tensor<B, 5> = k3_ssd_chunk_state(
+        let intra_chunk_state_bnhpr: Tensor<5> = k3_ssd_chunk_state(
             input.x_bnlhp.clone(),
             input.b_bnlhr.clone(),
             da_cumsum_bhnl.clone(),
@@ -93,7 +94,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
 
         // ── Kernel 4 ──────────────────────────────────────────────────────────────────
         // IO: (..) -> (chunk_input_state_bnhpr [used in K5][!], final_state_bhpr [final output])
-        let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<B, 5>, Tensor<B, 4>) =
+        let (chunk_input_state_bnhpr, final_state_bhpr): (Tensor<5>, Tensor<4>) =
             k4_ssd_state_passing(
                 intra_chunk_state_bnhpr.clone(),
                 da_chunk_end_bhn.clone(),
@@ -111,7 +112,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
         san(&final_state_bhpr);
 
         // ── Kernel 5 ──────────────────────────────────────────────────────────────────
-        let y_bnlhp: Tensor<B, 5> = k5_ssd_chunk_scan(
+        let y_bnlhp: Tensor<5> = k5_ssd_chunk_scan(
             da_cumsum_bhnl,
             dt_discretized_bhnl,
             input.x_bnlhp,
@@ -135,12 +136,12 @@ impl<B: Backend> Mamba2SsdInput<B> {
 /// Returns:
 /// - da_cumsum_bhnl `[used in K3+K5][*]` - intra-chunk cumsum.
 /// - da_chunk_end_bhn `[used in K4][omitted][*]` - last da_cumsum per chunk.
-pub fn k1_ssd_chunk_cumsum<B: Backend>(
-    dt_discretized_bhnl: Tensor<B, 4>,
-    a_decay_h: Tensor<B, 1>,
-) -> (Tensor<B, 4>, Tensor<B, 3>) {
+pub fn k1_ssd_chunk_cumsum(
+    dt_discretized_bhnl: Tensor<4>,
+    a_decay_h: Tensor<1>,
+) -> (Tensor<4>, Tensor<3>) {
     let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
-    let da_cumsum_bhnl: Tensor<B, 4> = {
+    let da_cumsum_bhnl: Tensor<4> = {
         let a_decay_bhnl = a_decay_h
             // - 1/6: unsqueeze-dims: (a_decay_h [*]) -> (a_decay_1h11)
             .unsqueeze_dims::<4>(&[0, 2, 3]) // a_decay_1h11
@@ -167,7 +168,7 @@ pub fn k1_ssd_chunk_cumsum<B: Backend>(
 ///
 /// Returns:
 /// - cb_bnhll `[used in K5][!]`.
-pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> Tensor<B, 5> {
+pub fn k2_ssd_bmm(c_bnlhr: Tensor<5>, b_bnlhr: Tensor<5>) -> Tensor<5> {
     let [batch, nchunks, chunk_len, nheads, _state_rank] = c_bnlhr.dims();
 
     // - 1/3: permute: (c_bnlhr [in][*]) -> (c_bnhlr)
@@ -175,7 +176,7 @@ pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> T
     // - 2: permute: (b_bnlhr [in][*]) -> (b_bnhrl)
     let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
     // - 3/3: matmul: (c_bnhlr, b_bnhrl) -> (cb_bnhll [out][!])
-    let cb_bnhll: Tensor<B, 5> = c_bnhlr.matmul(b_bnhrl);
+    let cb_bnhll: Tensor<5> = c_bnhlr.matmul(b_bnhrl);
     assert_eq!(
         [batch, nchunks, nheads, chunk_len, chunk_len],
         cb_bnhll.dims()
@@ -189,12 +190,12 @@ pub fn k2_ssd_bmm<B: Backend>(c_bnlhr: Tensor<B, 5>, b_bnlhr: Tensor<B, 5>) -> T
 /// Returns:
 /// - cb_bngll `[used in K5][!]` - state assuming zero initial state at each chunk boundary.
 /// - b_bar_scale_bhnl `[*]` - intermediary
-pub fn k3_ssd_chunk_state<B: Backend>(
-    x_bnlhp: Tensor<B, 5>,
-    b_bnlhr: Tensor<B, 5>,
-    da_cumsum_bhnl: Tensor<B, 4>,
-    dt_discretized_bhnl: Tensor<B, 4>,
-) -> Tensor<B, 5> {
+pub fn k3_ssd_chunk_state(
+    x_bnlhp: Tensor<5>,
+    b_bnlhr: Tensor<5>,
+    da_cumsum_bhnl: Tensor<4>,
+    dt_discretized_bhnl: Tensor<4>,
+) -> Tensor<5> {
     use burn::tensor::s;
 
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
@@ -259,7 +260,7 @@ pub fn k3_ssd_chunk_state<B: Backend>(
     );
 
     // - 15/15: matmul: (x_bnhpl, b_scaled_bnhlr [+]) -> (intra_chunk_state_bnhpr [out][!])
-    let intra_chunk_state_bnhpr: Tensor<B, 5> = x_bnhpl.matmul(b_scaled_bnhlr);
+    let intra_chunk_state_bnhpr: Tensor<5> = x_bnhpl.matmul(b_scaled_bnhlr);
     assert_eq!(
         [batch, nchunks, nheads, per_head_dim, state_rank],
         intra_chunk_state_bnhpr.dims()
@@ -272,11 +273,11 @@ pub fn k3_ssd_chunk_state<B: Backend>(
 /// Returns:
 /// - chunk_input_state_bnhpr `[used in K5][!]`.
 /// - final_state_bhpr `[final output]`.
-pub fn k4_ssd_state_passing<B: Backend>(
-    intra_chunk_state_bnhpr: Tensor<B, 5>,
-    da_chunk_end_bhn: Tensor<B, 3>,
-    initial_state_bhpr: Tensor<B, 4>,
-) -> (Tensor<B, 5>, Tensor<B, 4>) {
+pub fn k4_ssd_state_passing(
+    intra_chunk_state_bnhpr: Tensor<5>,
+    da_chunk_end_bhn: Tensor<3>,
+    initial_state_bhpr: Tensor<4>,
+) -> (Tensor<5>, Tensor<4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
     let flat_state_dim = per_head_dim * state_rank;
 
@@ -346,15 +347,15 @@ pub fn k4_ssd_state_passing<B: Backend>(
 ///
 /// Returns:
 /// - y_bnlhp `[final output]`
-pub fn k5_ssd_chunk_scan<B: Backend>(
-    da_cumsum_bhnl: Tensor<B, 4>,
-    dt_discretized_bhnl: Tensor<B, 4>,
-    x_bnlhp: Tensor<B, 5>,
-    c_bnlhr: Tensor<B, 5>,
-    cb_bnhll: Tensor<B, 5>,
-    chunk_input_state_bnhpr: Tensor<B, 5>,
-    d_h: Tensor<B, 1>,
-) -> Tensor<B, 5> {
+pub fn k5_ssd_chunk_scan(
+    da_cumsum_bhnl: Tensor<4>,
+    dt_discretized_bhnl: Tensor<4>,
+    x_bnlhp: Tensor<5>,
+    c_bnlhr: Tensor<5>,
+    cb_bnhll: Tensor<5>,
+    chunk_input_state_bnhpr: Tensor<5>,
+    d_h: Tensor<1>,
+) -> Tensor<5> {
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
     let device = x_bnlhp.device();
 
@@ -426,8 +427,8 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     // - 21.1: tril-mask: (0) -> (causal_mask_ll), expanded as a view to causal_mask_bnhll.
     // true above the main diagonal, false at diagonal and below.
     // Built at [L,L] and broadcast — the mask values do not depend on (b,n,h).
-    let causal_mask_bnhll: Tensor<B, 5, burn::prelude::Bool> =
-        Tensor::<B, 2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device)
+    let causal_mask_bnhll: Tensor<5, burn::prelude::Bool> =
+        Tensor::<2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device)
             .reshape([1, 1, 1, chunk_len, chunk_len])
             .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
     // - 21.2: mask-fill: (da_cumsum_diff_bnhll, causal_mask_bnhll) -> (da_cumsum_diff_masked_bnhll)
@@ -495,7 +496,7 @@ pub fn k5_ssd_chunk_scan<B: Backend>(
     let y_partial_bnlhp = y_partial_bnhlp.permute([0, 1, 3, 2, 4]);
     san(&y_partial_bnlhp);
     // - 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
-    let y_bnlhp: Tensor<B, 5> = y_partial_bnlhp + skip_bnlhp;
+    let y_bnlhp: Tensor<5> = y_partial_bnlhp + skip_bnlhp;
     san(&y_bnlhp);
 
     assert_eq!(

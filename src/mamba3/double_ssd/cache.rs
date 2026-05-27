@@ -19,6 +19,7 @@ use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba3DoubleSsdCaches  (one cache entry per layer)
@@ -26,9 +27,9 @@ use burn::prelude::*;
 
 /// A collection of per-layer caches for a complete Mamba-3 network.
 #[derive(Module, Debug)]
-pub struct Mamba3DoubleSsdCaches<B: Backend> {
+pub struct Mamba3DoubleSsdCaches {
     /// Per-layer caches.  Length equals the number of virtual layers.
-    pub caches: Vec<Mamba3DoubleSsdCache<B>>,
+    pub caches: Vec<Mamba3DoubleSsdCache>,
 }
 
 /// Configuration / factory for [`Mamba3DoubleSsdCaches`].
@@ -55,7 +56,7 @@ impl Mamba3DoubleSsdCachesConfig {
     }
 
     /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3DoubleSsdCaches<B> {
+    pub fn init(&self, device: &Device) -> Mamba3DoubleSsdCaches {
         let caches = (0..self.n_real_caches)
             .map(|_| self.cache.clone().init(device))
             .collect();
@@ -71,14 +72,14 @@ impl Mamba3DoubleSsdCachesConfig {
 ///
 /// All tensors are updated at every call to [`crate::mamba3::mamba3::Mamba3::step`].
 #[derive(Module, Debug)]
-pub struct Mamba3DoubleSsdCache<B: Backend> {
+pub struct Mamba3DoubleSsdCache {
     /// **SSM hidden state** `hₜ`.
     ///
     /// Updated via the (double-ssd) trapezoidal recurrence:
     /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Kₜ₋₁[m] ⊗ (Vₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
-    pub ssm_bhpr: Tensor<B, 4>,
+    pub ssm_bhpr: Tensor<4>,
 
     /// **Previous token's B per mimo rank** = `Bₜ₋₁[m]`.
     ///
@@ -86,14 +87,14 @@ pub struct Mamba3DoubleSsdCache<B: Backend> {
     /// For SISO (mimo_rank=1) this is shape `[batch, 1, nheads, state_rank]`.
     ///
     /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_bmhr: Tensor<B, 4>,
+    pub k_state_bmhr: Tensor<4>,
 
     /// **Previous token's x** = `xₜ₋₁`.
     ///
     /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term.
     ///
     /// Shape: `[batch, nheads, per_head_dim]`
-    pub v_state_bhp: Tensor<B, 3>,
+    pub v_state_bhp: Tensor<3>,
 
     /// **Cumulative data-dependent RoPE angle** up to the current position.
     ///
@@ -102,10 +103,10 @@ pub struct Mamba3DoubleSsdCache<B: Backend> {
     /// Starts at zero for fresh sequences; continued across calls for streaming.
     ///
     /// Shape: `[batch, nheads, num_rope_angles]`
-    pub cum_angle_bha: Tensor<B, 3>,
+    pub cum_angle_bha: Tensor<3>,
 }
 
-impl<B: Backend> Mamba3DoubleSsdCache<B> {
+impl Mamba3DoubleSsdCache {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
@@ -155,7 +156,7 @@ impl Mamba3DoubleSsdCacheConfig {
     }
 
     /// Allocate zero-initialised cache tensors on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3DoubleSsdCache<B> {
+    pub fn init(&self, device: &Device) -> Mamba3DoubleSsdCache {
         let ssm_bhpr = Tensor::zeros(
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,

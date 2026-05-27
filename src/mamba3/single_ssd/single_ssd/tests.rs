@@ -47,7 +47,7 @@ fn build_cross_caches(
     cfg: &Mamba3Config,
     batch: usize,
     random: bool,
-) -> (Mamba3DoubleSsdCache<B>, Mamba3SingleSsdCache<B>) {
+) -> (Mamba3DoubleSsdCache, Mamba3SingleSsdCache) {
     let device: Device = Default::default();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -56,18 +56,18 @@ fn build_cross_caches(
     let num_rope_angles = cfg.num_rope_angles();
     let dist = Distribution::Normal(0.0, 1.0);
     let ssm = if random {
-        Tensor::<InnerB, 4>::random([batch, nheads, per_head_dim, state_rank], dist, &device)
+        Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], dist, &device)
     } else {
-        Tensor::<InnerB, 4>::zeros([batch, nheads, per_head_dim, state_rank], &device)
+        Tensor::<4>::zeros([batch, nheads, per_head_dim, state_rank], &device)
     };
     let angle = if random {
-        Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], dist, &device)
+        Tensor::<3>::random([batch, nheads, num_rope_angles], dist, &device)
     } else {
-        Tensor::<InnerB, 3>::zeros([batch, nheads, num_rope_angles], &device)
+        Tensor::<3>::zeros([batch, nheads, num_rope_angles], &device)
     };
     // Zero previous-token history so the two cache forms agree logically.
-    let k = Tensor::<InnerB, 4>::zeros([batch, mimo_rank, nheads, state_rank], &device);
-    let v = Tensor::<InnerB, 3>::zeros([batch, nheads, per_head_dim], &device);
+    let k = Tensor::<4>::zeros([batch, mimo_rank, nheads, state_rank], &device);
+    let v = Tensor::<3>::zeros([batch, nheads, per_head_dim], &device);
     let c3 = Mamba3DoubleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm.clone()),
         k_state_bmhr: Tensor::from_inner(k.clone()),
@@ -91,7 +91,7 @@ fn build_single_ssd_cache(
     cfg: &Mamba3Config,
     batch: usize,
     random: bool,
-) -> Mamba3SingleSsdCache<B> {
+) -> Mamba3SingleSsdCache {
     let device: Device = Default::default();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -101,17 +101,17 @@ fn build_single_ssd_cache(
     let dist = Distribution::Normal(0.0, 1.0);
     let mk4 = |shape: [usize; 4]| {
         let t = if random {
-            Tensor::<InnerB, 4>::random(shape, dist, &device)
+            Tensor::<4>::random(shape, dist, &device)
         } else {
-            Tensor::<InnerB, 4>::zeros(shape, &device)
+            Tensor::<4>::zeros(shape, &device)
         };
         Tensor::from_inner(t)
     };
     let mk3 = |shape: [usize; 3]| {
         let t = if random {
-            Tensor::<InnerB, 3>::random(shape, dist, &device)
+            Tensor::<3>::random(shape, dist, &device)
         } else {
-            Tensor::<InnerB, 3>::zeros(shape, &device)
+            Tensor::<3>::zeros(shape, &device)
         };
         Tensor::from_inner(t)
     };
@@ -126,23 +126,23 @@ fn build_single_ssd_cache(
 /// Per-run gradient bundle (subset of params; mirrors the equivalent struct
 /// in `mamba3::tests` but kept local to avoid cross-module visibility).
 struct RunGrads {
-    out: Tensor<InnerB, 3>,
-    d_input: Tensor<InnerB, 3>,
-    d_in_proj_w: Tensor<InnerB, 2>,
-    d_dt_bias: Tensor<InnerB, 1>,
-    d_d: Tensor<InnerB, 1>,
-    d_b_norm_gamma: Tensor<InnerB, 1>,
-    d_c_norm_gamma: Tensor<InnerB, 1>,
-    d_b_bias: Tensor<InnerB, 3>,
-    d_c_bias: Tensor<InnerB, 3>,
-    d_out_proj_w: Tensor<InnerB, 2>,
+    out: Tensor<3>,
+    d_input: Tensor<3>,
+    d_in_proj_w: Tensor<2>,
+    d_dt_bias: Tensor<1>,
+    d_d: Tensor<1>,
+    d_b_norm_gamma: Tensor<1>,
+    d_c_norm_gamma: Tensor<1>,
+    d_b_bias: Tensor<3>,
+    d_c_bias: Tensor<3>,
+    d_out_proj_w: Tensor<2>,
 }
 
 fn run_with_grads(
-    model: &Mamba3<B>,
-    input: &Param<Tensor<B, 3>>,
-    head: &Tensor<InnerB, 3>,
-    forward: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> Tensor<B, 3>,
+    model: &Mamba3,
+    input: &Param<Tensor<3>>,
+    head: &Tensor<3>,
+    forward: impl FnOnce(&Mamba3, Tensor<3>) -> Tensor<3>,
 ) -> RunGrads {
     let out = forward(model, input.val());
     let out_inner = out.clone().inner();
@@ -206,37 +206,37 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
     );
 }
 
-fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
+fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
     Param::from_tensor(Tensor::from_inner(input.clone()))
 }
 
 /// Random downstream heads for the single-ssd form continuity loss (output plus
 /// every single-ssd cache field).
 struct Heads {
-    out: Tensor<InnerB, 3>,
-    ssm: Tensor<InnerB, 4>,
-    k: Tensor<InnerB, 4>,
-    v: Tensor<InnerB, 3>,
-    angle: Tensor<InnerB, 3>,
+    out: Tensor<3>,
+    ssm: Tensor<4>,
+    k: Tensor<4>,
+    v: Tensor<3>,
+    angle: Tensor<3>,
 }
 
 /// A [`RunGrads`] plus the final single-ssd cache fields, for the continuity test.
 struct SingleSsdRun {
     rg: RunGrads,
-    final_ssm: Tensor<InnerB, 4>,
-    final_k: Tensor<InnerB, 4>,
-    final_v: Tensor<InnerB, 3>,
-    final_angle: Tensor<InnerB, 3>,
+    final_ssm: Tensor<4>,
+    final_k: Tensor<4>,
+    final_v: Tensor<3>,
+    final_angle: Tensor<3>,
 }
 
 /// Like [`run_with_grads`] but the loss couples the output with every final
 /// single-ssd cache field, and the final cache is returned for comparison. Both
 /// runs being compared use `forward_single_ssd`, so the single-ssd cache semantics match.
 fn run_with_grads_single_ssd(
-    model: &Mamba3<B>,
-    input: &Param<Tensor<B, 3>>,
+    model: &Mamba3,
+    input: &Param<Tensor<3>>,
     heads: &Heads,
-    runner: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3SingleSsdCache<B>),
+    runner: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3SingleSsdCache),
 ) -> SingleSsdRun {
     let (out, cache) = runner(model, input.val());
     let out_inner = out.clone().inner();
@@ -334,12 +334,12 @@ fn check_single_ssd_match(
 /// ignored, which would make the parity comparisons pass trivially.
 fn guard_random_init_consumed(
     random_init: bool,
-    model: &Mamba3<B>,
+    model: &Mamba3,
     cfg: &Mamba3Config,
     batch: usize,
-    input: &Tensor<InnerB, 3>,
+    input: &Tensor<3>,
     ssd_path: &Mamba3SsdPath,
-    random_out: &Tensor<InnerB, 3>,
+    random_out: &Tensor<3>,
 ) {
     if !random_init {
         return;
@@ -374,8 +374,8 @@ fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) 
     let d_model = cfg.d_model;
     let normal = Distribution::Normal(0.0, 1.0);
 
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
-    let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
 
     let (c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
@@ -505,8 +505,8 @@ fn run_forward_single_ssd_matches_step(
     let d_model = cfg.d_model;
     let normal = Distribution::Normal(0.0, 1.0);
 
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
-    let head = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
 
     let (_c3, cm) = build_cross_caches(&cfg, batch, random_init);
 
@@ -521,8 +521,8 @@ fn run_forward_single_ssd_matches_step(
     let input_b = param_input(&input);
     let cmc = cm;
     let r_step = run_with_grads(&model, &input_b, &head, |m, x| {
-        let mut cache: Option<Mamba3SingleSsdCache<B>> = Some(cmc);
-        let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+        let mut cache: Option<Mamba3SingleSsdCache> = Some(cmc);
+        let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
             let (out_t, new_cache) = m.step_single_ssd(token, cache);
@@ -632,17 +632,17 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let num_rope_angles = cfg.num_rope_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
-        out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<InnerB, 4>::random(
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             normal,
             &device,
         ),
-        k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
     };
 
     let init_cache = build_single_ssd_cache(&cfg, batch, true);
@@ -735,18 +735,18 @@ fn forward_single_ssd_split_matches_full_recalc_mimo() {
 /// are returned alongside the (inner) output and final-cache values.
 #[allow(clippy::type_complexity)]
 fn run_cache_fields_with_grads(
-    model: &Mamba3<B>,
-    input: &Param<Tensor<B, 3>>,
+    model: &Mamba3,
+    input: &Param<Tensor<3>>,
     heads: &Heads,
     runner: impl FnOnce(
-        &Mamba3<B>,
-        Tensor<B, 3>,
+        &Mamba3,
+        Tensor<3>,
     ) -> (
-        Tensor<B, 3>, // out
-        Tensor<B, 4>, // ssm_bhpr
-        Tensor<B, 4>, // k_state_bmhr
-        Tensor<B, 3>, // v_state_bhp
-        Tensor<B, 3>, // cum_angle_bha
+        Tensor<3>, // out
+        Tensor<4>, // ssm_bhpr
+        Tensor<4>, // k_state_bmhr
+        Tensor<3>, // v_state_bhp
+        Tensor<3>, // cum_angle_bha
     ),
 ) -> SingleSsdRun {
     let (out, ssm, k, v, angle) = runner(model, input.val());
@@ -829,27 +829,27 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let num_rope_angles = cfg.num_rope_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
-        out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<InnerB, 4>::random(
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             normal,
             &device,
         ),
-        k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
     };
 
     // Shared, fully-random initial cache fields (including the previous-token
     // K/V history) — both runs start from the exact same logical state.
     let init_ssm =
-        Tensor::<InnerB, 4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
+        Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
     let init_k =
-        Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
-    let init_v = Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device);
-    let init_angle = Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device);
+        Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
+    let init_v = Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device);
+    let init_angle = Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device);
 
     let path_double = ssd_path.clone();
     let path_single = ssd_path;

@@ -13,11 +13,12 @@ use crate::mamba3::single_ssd::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// A stack of bidirectional Mamba-3 layer pairs with optional virtual-layer
 /// scheduling.
 #[derive(Module, Debug)]
-pub struct Mamba3BidiLayers<B: Backend> {
+pub struct Mamba3BidiLayers {
     /// Number of real (weight-bearing) layers; must be even (used in pairs).
     pub n_real_layers: usize,
     /// Optional `(n_virtual_layers, schedule)` for weight-sharing.  `module(skip)`
@@ -25,13 +26,13 @@ pub struct Mamba3BidiLayers<B: Backend> {
     #[module(skip)]
     pub n_virtual_layers: Option<(usize, BidiSchedule)>,
     /// The weight-bearing layer instances, length `n_real_layers`.
-    pub real_layers: Vec<Mamba3Layer<B>>,
+    pub real_layers: Vec<Mamba3Layer>,
     /// When `true`, the first virtual pair's residual is scaled to zero.
     pub ignore_first_residual: bool,
     /// When `true`, the last virtual pair's residual is scaled to zero.
     pub ignore_last_residual: bool,
     /// One direction-merge per pair, length `n_real_layers / 2`.
-    pub outputs_merge: Vec<OutputMerge<B>>,
+    pub outputs_merge: Vec<OutputMerge>,
 }
 
 /// Configuration / factory for [`Mamba3BidiLayers`].
@@ -56,7 +57,7 @@ pub struct Mamba3BidiLayersConfig {
 
 impl Mamba3BidiLayersConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3BidiLayers<B> {
+    pub fn init(&self, device: &Device) -> Mamba3BidiLayers {
         let d_model = self.mamba_block.d_model;
         let mut real_layers = Vec::with_capacity(self.n_real_layers);
         let mut outputs_merge = Vec::with_capacity(self.n_real_layers);
@@ -81,16 +82,16 @@ impl Mamba3BidiLayersConfig {
     }
 }
 
-impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
+impl Mamba3BidiLayers {
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
     ///   - Output `[batch, sequence, d_model]`
     pub fn forward(
         &self,
-        mut x: Tensor<B, 3>,
-        caches: Option<Mamba3Caches<B>>,
+        mut x: Tensor<3>,
+        caches: Option<Mamba3Caches>,
         ssd_path: Mamba3SsdPath,
-    ) -> (Tensor<B, 3>, Mamba3Caches<B>) {
+    ) -> (Tensor<3>, Mamba3Caches) {
         let n_virtual_layers = self
             .n_virtual_layers
             .as_ref()
@@ -123,7 +124,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
 
         // Wrap each cache slot into an `Option` so we can `take` it in the
         // loop without cloning (Burn tensors are reference-counted).
-        let mut caches: Vec<Option<Mamba3Cache<B>>> = caches.into_options();
+        let mut caches: Vec<Option<Mamba3Cache>> = caches.into_options();
 
         for i in 0..n_virtual_layers / 2 {
             // use real layers by reference (clone)
@@ -182,9 +183,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
     /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
     pub fn make_zero_caches_double_ssd_3d(
         &self,
-        x: &Tensor<B, 3>,
+        x: &Tensor<3>,
         n_virtual: usize,
-    ) -> Mamba3DoubleSsdCaches<B> {
+    ) -> Mamba3DoubleSsdCaches {
         use crate::mamba3::layer::*;
         make_zero_caches_double_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
@@ -192,9 +193,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
     /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
     pub fn make_zero_caches_double_ssd_2d(
         &self,
-        x: &Tensor<B, 2>,
+        x: &Tensor<2>,
         n_virtual: usize,
-    ) -> Mamba3DoubleSsdCaches<B> {
+    ) -> Mamba3DoubleSsdCaches {
         use crate::mamba3::layer::*;
         make_zero_caches_double_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
@@ -202,9 +203,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
     /// Build zero-initialised caches from a 3-dimensional input tensor `[batch, sequence, d_model]`.
     pub fn make_zero_caches_single_ssd_3d(
         &self,
-        x: &Tensor<B, 3>,
+        x: &Tensor<3>,
         n_virtual: usize,
-    ) -> Mamba3SingleSsdCaches<B> {
+    ) -> Mamba3SingleSsdCaches {
         use crate::mamba3::layer::*;
         make_zero_caches_single_ssd_3d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
@@ -212,9 +213,9 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
     /// Build zero-initialised caches from a 2-dimensional input tensor `[batch, d_model]`.
     pub fn make_zero_caches_single_ssd_2d(
         &self,
-        x: &Tensor<B, 2>,
+        x: &Tensor<2>,
         n_virtual: usize,
-    ) -> Mamba3SingleSsdCaches<B> {
+    ) -> Mamba3SingleSsdCaches {
         use crate::mamba3::layer::*;
         make_zero_caches_single_ssd_2d(&self.real_layers[0].mamba_block, x, n_virtual)
     }
@@ -223,17 +224,17 @@ impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayers<B> {
 /// A single bidirectional pair: a straight (→) and a reversed (←) Pre-LN block
 /// whose outputs are merged, then added to the (scaled) residual.
 #[derive(Module, Debug)]
-pub struct Mamba3BidiLayerPair<B: Backend> {
+pub struct Mamba3BidiLayerPair {
     /// Pre-norm for the straight pass.
-    pub straight_norm: RmsNorm<B>,
+    pub straight_norm: RmsNorm,
     /// Pre-norm for the reversed pass.
-    pub reverse_norm: RmsNorm<B>,
+    pub reverse_norm: RmsNorm,
     /// The Mamba-3 block run left-to-right.
-    pub straight_block: Mamba3<B>,
+    pub straight_block: Mamba3,
     /// The Mamba-3 block run right-to-left (over the flipped sequence).
-    pub reverse_block: Mamba3<B>,
+    pub reverse_block: Mamba3,
     /// Merge strategy combining the two directions.
-    pub output_merge: OutputMerge<B>,
+    pub output_merge: OutputMerge,
     /// Residual scale (0.0 suppresses the skip connection, else 1.0).
     pub residual_scale: f32,
 }
@@ -254,7 +255,7 @@ pub struct Mamba3BidiLayerPairConfig {
 
 impl Mamba3BidiLayerPairConfig {
     /// Returns the initialized model.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3BidiLayerPair<B> {
+    pub fn init(&self, device: &Device) -> Mamba3BidiLayerPair {
         let d_model = self.straight_block.d_model;
         Mamba3BidiLayerPair {
             straight_norm: RmsNormConfig::new(self.straight_block.d_model).init(device),
@@ -267,17 +268,17 @@ impl Mamba3BidiLayerPairConfig {
     }
 }
 
-impl<B: Backend + Mamba3BackendExt> Mamba3BidiLayerPair<B> {
+impl Mamba3BidiLayerPair {
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
     ///   - Output.0 `[batch, sequence, d_model]`
     pub fn forward(
         &self,
-        x: Tensor<B, 3>,
-        straight_cache: Option<Mamba3Cache<B>>,
-        reverse_cache: Option<Mamba3Cache<B>>,
+        x: Tensor<3>,
+        straight_cache: Option<Mamba3Cache>,
+        reverse_cache: Option<Mamba3Cache>,
         ssd_path: Mamba3SsdPath,
-    ) -> (Tensor<B, 3>, Mamba3Cache<B>, Mamba3Cache<B>) {
+    ) -> (Tensor<3>, Mamba3Cache, Mamba3Cache) {
         let [batch, sequence, d_model] = x.dims();
 
         let res = x.clone() * self.residual_scale;

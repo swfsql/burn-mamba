@@ -30,35 +30,35 @@ fn small_config_mimo() -> Mamba3Config {
 /// forward+backward run.  Each `check_grads_match` call compares these
 /// across two runs that should be mathematically equivalent.
 struct RunGrads {
-    out: Tensor<InnerB, 3>,
+    out: Tensor<3>,
     /// Final SSM hidden state from the returned cache.
-    final_ssm: Tensor<InnerB, 4>,
+    final_ssm: Tensor<4>,
     /// Final previous-token B state from the returned cache.
-    final_k: Tensor<InnerB, 4>,
+    final_k: Tensor<4>,
     /// Final previous-token x state from the returned cache.
-    final_v: Tensor<InnerB, 3>,
+    final_v: Tensor<3>,
     /// Final cumulative RoPE angle from the returned cache.
-    final_angle: Tensor<InnerB, 3>,
-    d_input: Tensor<InnerB, 3>,
-    d_in_proj_w: Tensor<InnerB, 2>,
-    d_dt_bias: Tensor<InnerB, 1>,
-    d_d: Tensor<InnerB, 1>,
-    d_b_norm_gamma: Tensor<InnerB, 1>,
-    d_c_norm_gamma: Tensor<InnerB, 1>,
-    d_b_bias: Tensor<InnerB, 3>,
-    d_c_bias: Tensor<InnerB, 3>,
-    d_out_proj_w: Tensor<InnerB, 2>,
+    final_angle: Tensor<3>,
+    d_input: Tensor<3>,
+    d_in_proj_w: Tensor<2>,
+    d_dt_bias: Tensor<1>,
+    d_d: Tensor<1>,
+    d_b_norm_gamma: Tensor<1>,
+    d_c_norm_gamma: Tensor<1>,
+    d_b_bias: Tensor<3>,
+    d_c_bias: Tensor<3>,
+    d_out_proj_w: Tensor<2>,
 }
 
 /// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
 /// from the output **and** every final cache field, so the backward pass
 /// exercises both the output and the state path.
 struct Heads {
-    out: Tensor<InnerB, 3>,
-    ssm: Tensor<InnerB, 4>,
-    k: Tensor<InnerB, 4>,
-    v: Tensor<InnerB, 3>,
-    angle: Tensor<InnerB, 3>,
+    out: Tensor<3>,
+    ssm: Tensor<4>,
+    k: Tensor<4>,
+    v: Tensor<3>,
+    angle: Tensor<3>,
 }
 
 /// Build the initial cache passed to both `forward` and the `step`
@@ -66,7 +66,7 @@ struct Heads {
 /// with `random = true` every field (SSM state, previous-token B/x, and
 /// cumulative RoPE angle) holds random values, exercising parity from an
 /// arbitrary initial state.
-fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache<B> {
+fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache {
     let device: Device = Default::default();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -76,17 +76,17 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     let dist = Distribution::Normal(0.0, 1.0);
     let mk4 = |shape: [usize; 4]| {
         let t = if random {
-            Tensor::<InnerB, 4>::random(shape, dist, &device)
+            Tensor::<4>::random(shape, dist, &device)
         } else {
-            Tensor::<InnerB, 4>::zeros(shape, &device)
+            Tensor::<4>::zeros(shape, &device)
         };
         Tensor::from_inner(t)
     };
     let mk3 = |shape: [usize; 3]| {
         let t = if random {
-            Tensor::<InnerB, 3>::random(shape, dist, &device)
+            Tensor::<3>::random(shape, dist, &device)
         } else {
-            Tensor::<InnerB, 3>::zeros(shape, &device)
+            Tensor::<3>::zeros(shape, &device)
         };
         Tensor::from_inner(t)
     };
@@ -130,10 +130,10 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
 /// scalar loss with a fixed (non-tracked) random "head" and return the
 /// gradients of the input and a representative set of model parameters.
 fn run_with_grads(
-    model: &Mamba3<B>,
-    input: &Param<Tensor<B, 3>>,
+    model: &Mamba3,
+    input: &Param<Tensor<3>>,
     heads: &Heads,
-    forward: impl FnOnce(&Mamba3<B>, Tensor<B, 3>) -> (Tensor<B, 3>, Mamba3DoubleSsdCache<B>),
+    forward: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3DoubleSsdCache),
 ) -> RunGrads {
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
@@ -245,7 +245,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
 /// Build a fresh `Param<Tensor>` from a stable inner tensor.
 /// A new Param is needed per run so that the autodiff leaf has a fresh
 /// node, isolating each backward pass to its own forward graph.
-fn param_input(input: &Tensor<InnerB, 3>) -> Param<Tensor<B, 3>> {
+fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
     Param::from_tensor(Tensor::from_inner(input.clone()))
 }
 
@@ -273,17 +273,17 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     let num_rope_angles = cfg.num_rope_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
-    let input = Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
-        out: Tensor::<InnerB, 3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<InnerB, 4>::random(
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             normal,
             &device,
         ),
-        k: Tensor::<InnerB, 4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<InnerB, 3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<InnerB, 3>::random([batch, nheads, num_rope_angles], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
     };
 
     let ssd_path = Mamba3SsdPath::Minimal(Some(4));
@@ -299,8 +299,8 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     let input_step = param_input(&input);
     let cache_step = init_cache;
     let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
-        let mut cache: Option<Mamba3DoubleSsdCache<B>> = Some(cache_step);
-        let mut outs: Vec<Tensor<B, 2>> = Vec::with_capacity(seq_len);
+        let mut cache: Option<Mamba3DoubleSsdCache> = Some(cache_step);
+        let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
             let (out_t, new_cache) = m.step_double_ssd(token, cache);

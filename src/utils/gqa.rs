@@ -6,6 +6,7 @@
 //! `heads_per_group = nheads / ngroups` heads of that group.
 
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Expand a tensor's `ngroups` dim at `group_dim` into an `nheads` dim, by
 /// replicating each group's slice across `heads_per_group = nheads / ngroups`
@@ -27,11 +28,11 @@ use burn::prelude::*;
 /// // result:  [batch, nchunks, chunk_len, nheads,  state_rank]
 /// let b_bnlhr = gqa_expand_to_heads::<_, 5, 6>(b_bnlgr, 3, nheads);
 /// ```
-pub fn gqa_expand_to_heads<B: Backend, const D: usize, const DP1: usize>(
-    t: Tensor<B, D>,
+pub fn gqa_expand_to_heads<const D: usize, const DP1: usize>(
+    t: Tensor<D>,
     group_dim: usize,
     nheads: usize,
-) -> Tensor<B, D> {
+) -> Tensor<D> {
     let dims = t.dims();
     let ngroups = dims[group_dim];
     assert!(

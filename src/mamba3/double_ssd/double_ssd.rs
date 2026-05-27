@@ -20,6 +20,7 @@ use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // RoPE utility
@@ -42,11 +43,11 @@ use burn::prelude::*;
 /// - `x`:      `[..., state_rank]` where `state_rank` is even
 /// - `angles`: `[..., state_rank / 2]`  (one angle per pair)
 /// - output:   same shape as `x`
-pub fn apply_rope<B: Backend, const D: usize>(
-    x: Tensor<B, D>,
-    angles: Tensor<B, D>,
+pub fn apply_rope<const D: usize>(
+    x: Tensor<D>,
+    angles: Tensor<D>,
     rotate_pairwise: bool,
-) -> Tensor<B, D> {
+) -> Tensor<D> {
     let dims = x.dims();
     let n = dims[D - 1];
     let n2 = n / 2;
@@ -103,15 +104,15 @@ pub fn apply_rope<B: Backend, const D: usize>(
 ///   always `state_rank/2`, i.e. element `n` is paired with element
 ///   `state_rank/2 + n`. With partial RoPE only the first `num_rope_angles`
 ///   pairs are rotated; the remaining elements in both halves pass through.
-pub(crate) fn apply_rope_partial<B: Backend, const D: usize>(
-    x: Tensor<B, D>,
-    angles: Tensor<B, D>,
+pub(crate) fn apply_rope_partial<const D: usize>(
+    x: Tensor<D>,
+    angles: Tensor<D>,
     rope_dim: usize,
     rotate_pairwise: bool,
-) -> Tensor<B, D> {
+) -> Tensor<D> {
     let state_rank = x.dims()[D - 1];
     if rope_dim == state_rank {
-        return apply_rope::<B, D>(x, angles, rotate_pairwise);
+        return apply_rope::<D>(x, angles, rotate_pairwise);
     }
 
     if rotate_pairwise {
@@ -120,7 +121,7 @@ pub(crate) fn apply_rope_partial<B: Backend, const D: usize>(
         // identity cos/sin for the tail pairs).
         let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
         let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
-        let x_rope_rotated = apply_rope::<B, D>(x_rope, angles, true);
+        let x_rope_rotated = apply_rope::<D>(x_rope, angles, true);
         return Tensor::cat(vec![x_rope_rotated, x_rest], D - 1);
     }
 
@@ -159,7 +160,7 @@ pub(crate) fn apply_rope_partial<B: Backend, const D: usize>(
 // Mamba3::forward  (chunkwise double-SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
-impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
+impl Mamba3 {
     /// Process a full input sequence using the (double-ssd) trapezoidal algorithm.
     ///
     /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
@@ -172,10 +173,10 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     #[allow(non_snake_case)]
     pub fn forward_double_ssd(
         &self,
-        input_bsm: Tensor<B, 3>,
-        cache: Option<Mamba3DoubleSsdCache<B>>,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3DoubleSsdCache>,
         ssd_path: &Mamba3SsdPath,
-    ) -> (Tensor<B, 3>, Mamba3DoubleSsdCache<B>) {
+    ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
@@ -309,14 +310,14 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
         // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
         let rotate_pairwise = mimo_rank == 1;
         let rope_dim = self.rope_dim;
-        let b_bsmhr = apply_rope_partial::<B, 5>(
+        let b_bsmhr = apply_rope_partial::<5>(
             b_bsmhr,
             cum_angles_bsmha.clone(),
             rope_dim,
             rotate_pairwise,
         );
         let c_bsmhr =
-            apply_rope_partial::<B, 5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+            apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -481,13 +482,13 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
                 .unsqueeze_dims::<5>(&[0, 1]) // mimo_o_11mhp
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_o_bsmhp
             // sum over mimo rank dim
-            let y_bshp: Tensor<B, 4> = (y_combined_bsmhp * mimo_o_bsmhp)
+            let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp)
                 .sum_dim(2) // y_bs1hp
                 .squeeze_dim(2); // y_bshp
             y_bshp.reshape([batch, sequence, d_inner])
         } else {
             // SISO: squeeze rank dim, apply gate (or gated norm) over per_head_dim.
-            let y_bshp: Tensor<B, 4> = y_bsmhp.squeeze_dim(2); // mimo_rank == 1
+            let y_bshp: Tensor<4> = y_bsmhp.squeeze_dim(2); // mimo_rank == 1
             let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
             let y_combined_bshp = match &self.out_norm {
                 Some(norm) => norm.forward(y_bshp, z_bshp),
@@ -526,7 +527,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba3<B> {
+    impl Mamba3 {
         /// Process a **single token** using the pure recurrent form.
         ///
         /// For SISO (mimo_rank=1):
@@ -548,9 +549,9 @@ mod step {
         #[allow(non_snake_case)]
         pub fn step_double_ssd(
             &self,
-            input_bd: Tensor<B, 2>,
-            cache: Option<Mamba3DoubleSsdCache<B>>,
-        ) -> (Tensor<B, 2>, Mamba3DoubleSsdCache<B>) {
+            input_bd: Tensor<2>,
+            cache: Option<Mamba3DoubleSsdCache>,
+        ) -> (Tensor<2>, Mamba3DoubleSsdCache) {
             let [batch, d_model] = input_bd.dims();
             let d_inner = self.d_inner();
             let nheads = self.nheads();
@@ -650,14 +651,14 @@ mod step {
             // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
             let rotate_pairwise = mimo_rank == 1;
             let rope_dim = self.rope_dim;
-            let b_bmhr = apply_rope_partial::<B, 4>(
+            let b_bmhr = apply_rope_partial::<4>(
                 b_bmhr,
                 new_cum_angle_bmha.clone(),
                 rope_dim,
                 rotate_pairwise,
             );
             let c_bmhr =
-                apply_rope_partial::<B, 4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
+                apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
 
             // ── Build MIMO value tensors ───────────────────────────────────────
             // Insert the mimo_rank axis at position 1 of `_bhp`.
@@ -750,13 +751,13 @@ mod step {
                     .permute([1, 0, 2]) // mimo_o_mhp
                     .unsqueeze_dim::<4>(0) // mimo_o_1mhp
                     .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_o_bmhp
-                let out_bhp: Tensor<B, 3> = (combined_bmhp * mimo_o_bmhp)
+                let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
                     .sum_dim(1) // out_b1hp
                     .squeeze_dim(1); // out_bhp
                 out_bhp.reshape([batch, d_inner]) // y_bi
             } else {
                 // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
-                let y_bhp: Tensor<B, 3> = out_m_bmhp.squeeze_dim(1);
+                let y_bhp: Tensor<3> = out_m_bmhp.squeeze_dim(1);
                 let combined = match &self.out_norm {
                     Some(norm) => norm.forward(y_bhp, z_bhp),
                     None => y_bhp * Silu::new().forward(z_bhp),

@@ -14,16 +14,17 @@ use burn::{
     prelude::*,
 };
 use burn_mamba::prelude::*;
+use burn::backend::Backend;
 
 /// Load the trained model and run inference on a fresh batch of sequences.
-pub fn infer<B: Backend + Mamba2BackendExt>(
+pub fn infer(
     model_config: MyMamba2NetworkConfig,
     batch_size: usize,
-    infer_device: B::Device,
+    infer_device: Device,
     app_args: &AppArgs,
 ) {
     // load model
-    let model: MyMamba2Network<B> = app_args
+    let model: MyMamba2Network = app_args
         .load_model(&model_config, &infer_device)
         .expect("failed to load model");
 

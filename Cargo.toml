@@ -37,12 +37,16 @@ _dev-has-backend = [] # signal if any backend was selected
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
-burn-flex = { version = "0.21.0", default-features = false, optional = true }
+# burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
+burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, optional = true }
 
 ### For the main branch. ###
-burn = { version = "0.21.0", default-features = false}
-burn-cubecl = { version = "0.21.0", default-features = false, optional = true}
-burn-fusion = { version = "0.21.0", default-features = false, optional = true}
+# burn = { version = "0.22.0-pre.1", default-features = false}
+# burn-cubecl = { version = "0.22.0-pre.1", default-features = false, optional = true}
+# burn-fusion = { version = "0.22.0-pre.1", default-features = false, optional = true}
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, features = ["extension"] }
+burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, optional = true}
+burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, optional = true}
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
@@ -59,8 +63,11 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 
 ### For the main branch. ###
-burn = { version = "0.21.0", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
-burn-dataset = { version = "0.21.0", features = ["network"] }
+# burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+# burn-dataset = { version = "0.22.0-pre.1", features = ["network"] }
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", features = ["network"] }
+
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }

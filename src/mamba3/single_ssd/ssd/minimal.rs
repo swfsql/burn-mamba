@@ -57,8 +57,9 @@
 use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::segsum::segsum;
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend> Mamba3SingleSsdInput<B> {
+impl Mamba3SingleSsdInput {
     /// MIMO-first single-SSD — segsum variant.
     ///
     /// See module documentation for the algorithm. Returns the chunked outputs
@@ -70,7 +71,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
     ///   - `y_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     ///   - `final_state_bhpr`:   `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
-    pub fn single_ssd_minimal(self) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn single_ssd_minimal(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         input.sanity();
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
@@ -141,8 +142,8 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
             // there). Replaces the existing `triu(1)` masking with `triu(0)`.
             let l_strict_base_bhnll = {
                 let x_cumsum = a_bhnl.clone().cumsum(3);
-                let row: Tensor<B, 5> = x_cumsum.clone().unsqueeze_dim(4); // [..., l, 1]
-                let col: Tensor<B, 5> = x_cumsum.unsqueeze_dim(3); // [..., 1, l]
+                let row: Tensor<5> = x_cumsum.clone().unsqueeze_dim(4); // [..., l, 1]
+                let col: Tensor<5> = x_cumsum.unsqueeze_dim(3); // [..., 1, l]
                 let diff = row - col; // [..., l, l]
                 let neg_inf_strict = Tensor::full_like(&diff, f32::NEG_INFINITY).triu(0);
                 (diff + neg_inf_strict).exp()
@@ -255,7 +256,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
 
             let state_bNhpr = Tensor::cat(vec![initial_state_b1hpr, state_bnhpr], 1);
 
-            let a_cumsum_last_bhn: Tensor<B, 3> = a_cumsum_bhnl
+            let a_cumsum_last_bhn: Tensor<3> = a_cumsum_bhnl
                 .clone()
                 .slice(s![.., .., .., -1])
                 .squeeze_dim(3);
@@ -263,7 +264,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
                 vec![Tensor::zeros([batch, nheads, 1], device), a_cumsum_last_bhn],
                 2,
             );
-            let decay_chunk_bhNN = segsum::<B, 3, 4>(a_chunk_pad_bhN).exp();
+            let decay_chunk_bhNN = segsum::<3, 4>(a_chunk_pad_bhN).exp();
 
             let flat = per_head_dim * state_rank;
             let state_bhNPR = state_bNhpr.clone().permute([0, 2, 1, 3, 4]).reshape([
@@ -281,7 +282,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
                 .clone()
                 .slice(s![.., .., 0..nchunks, .., ..])
                 .permute([0, 2, 1, 3, 4]);
-            let last_state_bhpr: Tensor<B, 4> = new_state_bhNpr
+            let last_state_bhpr: Tensor<4> = new_state_bhNpr
                 .slice(s![.., .., nchunks, .., ..])
                 .squeeze_dim(2);
 

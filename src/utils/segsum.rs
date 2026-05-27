@@ -6,6 +6,7 @@
 
 use crate::utils::sanity::sanity as san;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // segsum  (stable segment sum for the 1-SS mask)
@@ -32,7 +33,7 @@ use burn::prelude::*;
 ///
 /// The upper triangle is masked to -∞ so that `exp(segsum(...))` gives 0
 /// for non-causal positions (the strict upper triangle of L must be zero).
-pub fn segsum<B: Backend, const D: usize, const D2: usize>(x: Tensor<B, D>) -> Tensor<B, D2> {
+pub fn segsum<const D: usize, const D2: usize>(x: Tensor<D>) -> Tensor<D2> {
     assert_eq!(D + 1, D2);
 
     let x_cumsum = x.cumsum(D - 1);

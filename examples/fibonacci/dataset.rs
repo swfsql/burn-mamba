@@ -13,6 +13,7 @@ use num_traits::AsPrimitive;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use serde::{Deserialize, Serialize};
+use burn::backend::Backend;
 
 /// Number of sequences in the generated dataset.
 pub const NUM_SEQUENCES: usize = 1000;
@@ -95,19 +96,19 @@ pub struct SequenceBatcher {}
 
 /// A batch of sequences and their regression targets.
 #[derive(Clone, Debug)]
-pub struct SequenceBatch<B: Backend> {
+pub struct SequenceBatch {
     /// Input sequences, shape `[batch_size, seq_length, 1]`.
-    pub sequences: Tensor<B, 3>,
+    pub sequences: Tensor<3>,
     /// Targets, shape `[batch_size, 1]`.
-    pub targets: Tensor<B, 2>,
+    pub targets: Tensor<2>,
 }
 
-impl<B: Backend> Batcher<B, SequenceDatasetItem, SequenceBatch<B>> for SequenceBatcher {
-    fn batch(&self, items: Vec<SequenceDatasetItem>, device: &B::Device) -> SequenceBatch<B> {
-        let mut sequences: Vec<Tensor<B, 2>> = Vec::new();
+impl Batcher<B, SequenceDatasetItem, SequenceBatch> for SequenceBatcher {
+    fn batch(&self, items: Vec<SequenceDatasetItem>, device: &Device) -> SequenceBatch {
+        let mut sequences: Vec<Tensor<2>> = Vec::new();
 
         for item in items.iter() {
-            let seq_tensor = Tensor::<B, 1>::from_floats(item.sequence.as_slice(), device);
+            let seq_tensor = Tensor::<1>::from_floats(item.sequence.as_slice(), device);
             // Add feature dimension, the input_size is 1 implicitly. We can change the input_size here with some operations
             sequences.push(seq_tensor.unsqueeze_dims(&[-1]));
         }
@@ -115,7 +116,7 @@ impl<B: Backend> Batcher<B, SequenceDatasetItem, SequenceBatch<B>> for SequenceB
 
         let targets = items
             .iter()
-            .map(|item| Tensor::<B, 1>::from_floats([item.target], device))
+            .map(|item| Tensor::<1>::from_floats([item.target], device))
             .collect();
         let targets = Tensor::stack(targets, 0);
 

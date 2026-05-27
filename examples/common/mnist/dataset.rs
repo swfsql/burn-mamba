@@ -19,6 +19,7 @@ use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
+use burn::backend::Backend;
 
 // from the vision source
 // https://github.com/tracel-ai/burn/blob/fa4f9845a6b2279cd8de68bf7ca5a7eb76dec96d/crates/burn-dataset/src/vision/mnist.rs
@@ -250,21 +251,21 @@ impl MnistDataset {
 pub struct MnistBatcher {}
 
 #[derive(Clone, Debug)]
-pub struct MnistBatch<B: Backend> {
+pub struct MnistBatch {
     /// The input feature is the brightness, with values in between 0.0 and 255.0.
     ///
     /// See also [`Self::images_norm`] and [`Self::images_z_score`].
     ///
     /// # Shape
     /// [batch_size, HEIGHT, WIDTH, 1]
-    pub images: Tensor<B, 4>,
+    pub images: Tensor<4>,
     /// # Shape
     /// [batch_size]
-    pub targets: Tensor<B, 1, Int>,
+    pub targets: Tensor<1, Int>,
 }
 
-impl<B: Backend> Batcher<B, MnistFlatItem, MnistBatch<B>> for MnistBatcher {
-    fn batch(&self, items: Vec<MnistFlatItem>, device: &B::Device) -> MnistBatch<B> {
+impl Batcher<B, MnistFlatItem, MnistBatch> for MnistBatcher {
+    fn batch(&self, items: Vec<MnistFlatItem>, device: &Device) -> MnistBatch {
         let (items_image, items_label): (Vec<_>, Vec<_>) = items
             .into_iter()
             .map(|item| (item.image, item.label))
@@ -274,8 +275,8 @@ impl<B: Backend> Batcher<B, MnistFlatItem, MnistBatch<B>> for MnistBatcher {
             .map(|image: Vec<FloatElement>| {
                 TensorData::new(image, [1, HEIGHT, WIDTH, 1]).convert::<B::FloatElem>()
             })
-            .map(|data| Tensor::<B, 4>::from_data(data, device))
-            // .map(|tensor: Tensor<B, 2>| tensor.reshape([1, HEIGHT, WIDTH, 1]))
+            .map(|data| Tensor::<4>::from_data(data, device))
+            // .map(|tensor: Tensor<2>| tensor.reshape([1, HEIGHT, WIDTH, 1]))
             // .map(|tensor| ((tensor / 255) - mean) / stddev)
             .collect();
 
@@ -293,7 +294,7 @@ impl<B: Backend> Batcher<B, MnistFlatItem, MnistBatch<B>> for MnistBatcher {
     }
 }
 
-impl<B: Backend> MnistBatch<B> {
+impl MnistBatch {
     // values mean=0.1307,std=0.3081 are from the PyTorch MNIST example
     // https://github.com/pytorch/examples/blob/54f4572509891883a947411fd7239237dd2a39c3/mnist/main.py#L122
     pub const MEAN: f32 = 0.1307;
@@ -303,7 +304,7 @@ impl<B: Backend> MnistBatch<B> {
     ///
     /// # Shape
     /// [batch_size, HEIGHT, WIDTH, 1]
-    pub fn images_norm(&self) -> Tensor<B, 4> {
+    pub fn images_norm(&self) -> Tensor<4> {
         self.images.clone() / 255
     }
 
@@ -311,7 +312,7 @@ impl<B: Backend> MnistBatch<B> {
     ///
     /// # Shape
     /// [batch_size, HEIGHT, WIDTH, 1]
-    pub fn images_z_score(&self) -> Tensor<B, 4> {
+    pub fn images_z_score(&self) -> Tensor<4> {
         ((self.images.clone() / 255) - Self::MEAN) / Self::STDDEV
     }
 }

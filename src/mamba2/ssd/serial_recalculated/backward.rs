@@ -24,9 +24,17 @@ use burn::backend::autodiff::{
     ops::{Backward, Ops, OpsKind},
 };
 use burn::prelude::*;
-use burn::tensor::{TensorPrimitive, ops::FloatTensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
+use burn::backend::{Backend, BackendTypes, DispatchTensor};
+use burn::backend::ops::FloatTensorOps;
 
-impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
+
+impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> 
+// where 
+//     B: BackendTypes<FloatTensorPrimitive = DispatchTensor>
+// where 
+//     B: BackendTypes<FloatTensorPrimitive = DispatchTensor>
+{
     /// Memory-efficient combined forward+backward.
     ///
     /// The two output tensors are concatenated into a single 1-dimensional tracked tensor
@@ -49,13 +57,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
 
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
-            x_bnlhp: FloatTensor<B>,
-            dt_discretized_bhnl: FloatTensor<B>,
-            b_bnlhr: FloatTensor<B>,
-            c_bnlhr: FloatTensor<B>,
-            d_h: FloatTensor<B>,
-            initial_state_bhpr: FloatTensor<B>,
-            a_decay_h: FloatTensor<B>,
+            x_bnlhp: <B as BackendTypes>::FloatTensorPrimitive,
+            dt_discretized_bhnl: <B as BackendTypes>::FloatTensorPrimitive,
+            b_bnlhr: <B as BackendTypes>::FloatTensorPrimitive,
+            c_bnlhr: <B as BackendTypes>::FloatTensorPrimitive,
+            d_h: <B as BackendTypes>::FloatTensorPrimitive,
+            initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
+            a_decay_h: <B as BackendTypes>::FloatTensorPrimitive,
             // flat byte-sizes for splitting the combined gradient vector
             flat_len_y_BNLHP: usize,
             flat_len_final_state_BHPR: usize,
@@ -95,9 +103,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     node_a_decay_h,
                 ] = ops.parents;
 
-                // Retrieve the gradient of the combined 1-dimensional output.
-                let d_combined: Tensor<B, 1> =
-                    Tensor::from_primitive(TensorPrimitive::Float(grads.consume::<B>(&ops.node)));
+                let d_combined: <B as BackendTypes>::FloatTensorPrimitive = grads.consume::<B>(&ops.node);
 
                 let State {
                     x_bnlhp,
@@ -173,7 +179,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 //
                 // use burn::cubecl::stub::Arc;
                 // use burn::backend::autodiff::Node;
-                // let reg = |node: Option<Arc<_>>, grad: Tensor<B, _>| {
+                // let reg = |node: Option<Arc<_>>, grad: Tensor<_>| {
                 //     if let Some(n) = node {
                 //         grads.register::<B>(n.id, grad.into_primitive().tensor());
                 //     }
@@ -187,7 +193,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 // let () = reg(node_da_cumsum_bhnl, d_da_cumsum_bhnl);
 
                 if let Some(n) = node_x_bnlhp {
-                    grads.register::<B>(n.id, d_x_bnlhp.into_primitive().tensor());
+                    grads.register::<B>(n.id, d_x_bnlhp);
                 }
                 if let Some(n) = node_dt_discretized_bhnl {
                     grads.register::<B>(n.id, d_dt_discretized_bhnl.into_primitive().tensor());
@@ -213,7 +219,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // ── Shape extraction helpers ───────────────────────────────────────
         // Accessed via the AutodiffTensor wrappers (which own both .node
         // and .primitive).
-        use burn::tensor::TensorMetadata;
+        use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive.shape().dims();
         let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive.shape().dims();
 
@@ -258,9 +264,9 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
 
                 // prep.finish takes a single tensor, so pack both outputs into a
                 // single 1-D tensor; one Backward node then covers both.
-                let (combined, _, _) = crate::utils::combined_grad::flatten_pair(
-                    crate::utils::primitive::mk::<B, 5>(prim_y_bnlhp),
-                    crate::utils::primitive::mk::<B, 4>(prim_final_state_bhpr),
+                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                    prim_y_bnlhp,
+                    prim_final_state_bhpr,
                 );
 
                 let state = State {
@@ -279,14 +285,15 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     shape_y_bnlhp, shape_final_state_bhpr,
                 };
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
-                    prep.finish(state, combined.into_primitive().tensor());
+                    prep.finish(state, prim_combined);
 
                 // Split the tracked combined tensor back into the two outputs.
                 // The narrow/reshape ops are thin autodiff pass-throughs whose
                 // backwards accumulate into the combined gradient vector that
                 // `backward` above consumes.
-                let (tracked_y_bnlhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 5, 4>(
-                    crate::utils::primitive::mk(tracked_combined),
+                let (tracked_y_bnlhp, tracked_final_state_bhpr) =
+                    crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
+                    tracked_combined,
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
                     shape_y_bnlhp,
@@ -294,8 +301,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 );
 
                 (
-                    tracked_y_bnlhp.into_primitive().tensor(),
-                    tracked_final_state_bhpr.into_primitive().tensor(),
+                    tracked_y_bnlhp,
+                    tracked_final_state_bhpr,
                 )
             }
 
@@ -311,16 +318,16 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     a_decay_h.primitive,
                 );
 
-                let (combined, _, _) = crate::utils::combined_grad::flatten_pair(
-                    crate::utils::primitive::mk::<B, 5>(prim_y_bnlhp),
-                    crate::utils::primitive::mk::<B, 4>(prim_final_state_bhpr),
+                let (combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                    prim_y_bnlhp,
+                    prim_final_state_bhpr,
                 );
 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
-                    prep.finish(combined.into_primitive().tensor());
+                    prep.finish(combined);
 
-                let (tracked_y_bnlhp, tracked_final_state_bhpr) = crate::utils::combined_grad::unflatten_pair::<Autodiff<B, C>, 5, 4>(
-                    crate::utils::primitive::mk(tracked_combined),
+                let (tracked_y_bnlhp, tracked_final_state_bhpr) = crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
+                    tracked_combined,
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
                     shape_y_bnlhp,
@@ -328,8 +335,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 );
 
                 (
-                    tracked_y_bnlhp.into_primitive().tensor(),
-                    tracked_final_state_bhpr.into_primitive().tensor(),
+                    tracked_y_bnlhp,
+                    tracked_final_state_bhpr,
                 )
             }
         } // end match

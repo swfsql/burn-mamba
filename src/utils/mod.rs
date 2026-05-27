@@ -9,6 +9,7 @@
 use ElementConversion;
 use burn::prelude::*;
 use burn::tensor::{DType, Element};
+use burn::backend::Backend;
 
 /// Macros emitting per-backend `BackendExt` impls + autodiff marker traits.
 #[macro_use]
@@ -22,7 +23,7 @@ pub mod gqa;
 pub mod log_sigmoid;
 /// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
 pub mod loss;
-/// `FloatTensor` primitive ↔ `Tensor<B, D>` conversion helper.
+/// `FloatTensor` primitive ↔ `Tensor<D>` conversion helper.
 pub(crate) mod primitive;
 /// Root-mean-square normalisation (last-dim, fp16-safe); also the Mamba-3
 /// QK-Norm.
@@ -50,7 +51,7 @@ pub mod test_helpers;
 /// Used as a saturating upper bound (e.g. clamping) that works uniformly across
 /// f64/f32/f16/bf16 without overflowing the narrower formats.  Panics on
 /// non-float element types.
-pub fn stable_max<B: Backend>() -> B::FloatElem {
+pub fn stable_max() -> B::FloatElem {
     match <B::FloatElem as Element>::dtype() {
         DType::F64 => f64::MAX.elem(),
         DType::F32 | DType::Flex32 => f32::MAX.elem(),
@@ -84,7 +85,7 @@ pub fn stable_max<B: Backend>() -> B::FloatElem {
 /// comfortably above the denormal/underflow floor while staying negligible
 /// relative to typical activations, for each of f64/f32/f16/bf16.  The
 /// resulting constants are noted inline.  Panics on non-float element types.
-pub fn div_eps_f32<B: Backend>() -> f32 {
+pub fn div_eps_f32() -> f32 {
     match <B::FloatElem as Element>::dtype() {
         // 4.0693917e-16
         DType::F64 => {
@@ -132,6 +133,6 @@ pub fn div_eps_f32<B: Backend>() -> f32 {
 }
 
 /// [`div_eps_f32`] converted to the backend's native float element type.
-pub fn div_eps<B: Backend>() -> B::FloatElem {
-    div_eps_f32::<B>().elem()
+pub fn div_eps() -> B::FloatElem {
+    div_eps_f32().elem()
 }

@@ -17,6 +17,7 @@ use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::{DType, f16};
+use burn::backend::Backend;
 
 /// Configuration to create a [`RmsNorm`] layer.
 #[derive(Config, Debug)]
@@ -27,7 +28,7 @@ pub struct RmsNormConfig {
 
 impl RmsNormConfig {
     /// Initialize a new [`RmsNorm`] module.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNorm<B> {
+    pub fn init(&self, device: &Device) -> RmsNorm {
         let gamma = Initializer::Ones.init([self.d_model], device);
         RmsNorm { gamma }
     }
@@ -39,28 +40,28 @@ impl RmsNormConfig {
 /// Should be created using the [`RmsNormConfig`] configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
-pub struct RmsNorm<B: Backend> {
+pub struct RmsNorm {
     /// The learnable per-channel scale `γ`, shape `[d_model]`.
-    pub gamma: Param<Tensor<B, 1>>,
+    pub gamma: Param<Tensor<1>>,
 }
 
-impl<B: Backend> RmsNorm<B> {
+impl RmsNorm {
     /// Applies the forward pass on the input tensor.
     ///
     /// # Shapes
     /// - input `x`: `[..., d_model]`
     /// - output: `[..., d_model]`
-    pub fn forward<const D: usize>(&self, x: Tensor<B, D>) -> Tensor<B, D> {
+    pub fn forward<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
         let normalized = match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
-                let div_eps = div_eps::<B>();
+                let div_eps = div_eps();
                 let rms = (x.clone() * x.clone()).mean_dim(D - 1).sqrt();
                 let normalized = (x / (rms + div_eps)) * self.gamma.val().unsqueeze();
                 normalized
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
-                let div_eps: f16 = f16::from_elem(div_eps::<B>()) * f16::from_f32(2.);
+                let div_eps: f16 = f16::from_elem(div_eps()) * f16::from_f32(2.);
                 // avoid calculating x² directly (due to overflow e.g. on 256 * 256)
                 let max = x.clone().no_grad().detach().abs().max().expand(x.shape());
                 let x_ = x.clone() / (max.clone() + div_eps); // x_.abs() <= 1
@@ -90,7 +91,7 @@ impl<B: Backend> RmsNorm<B> {
     }
 }
 
-impl<B: Backend> ModuleDisplay for RmsNorm<B> {
+impl ModuleDisplay for RmsNorm {
     fn custom_settings(&self) -> Option<DisplaySettings> {
         DisplaySettings::new()
             .with_new_line_after_attribute(false)

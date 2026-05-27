@@ -15,6 +15,7 @@ use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::{DType, f16};
+use burn::backend::Backend;
 
 /// Configuration to create a [`RmsNormGated`] layer.
 #[derive(Config, Debug)]
@@ -28,7 +29,7 @@ pub struct RmsNormGatedConfig {
 
 impl RmsNormGatedConfig {
     /// Initialize a new [`RmsNormGated`] module.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNormGated<B> {
+    pub fn init(&self, device: &Device) -> RmsNormGated {
         let gamma = Initializer::Ones.init([self.d_model], device);
         RmsNormGated {
             gamma,
@@ -53,21 +54,21 @@ impl RmsNormGatedConfig {
 /// Should be created using the [`RmsNormGatedConfig`] configuration.
 #[derive(Module, Debug)]
 #[module(custom_display)]
-pub struct RmsNormGated<B: Backend> {
+pub struct RmsNormGated {
     /// The learnable per-channel scale `γ`, shape `[d_model]`.
-    pub gamma: Param<Tensor<B, 1>>,
+    pub gamma: Param<Tensor<1>>,
     /// Whether to normalize before applying the gating.
     pub norm_before_gate: bool,
 }
 
-impl<B: Backend> RmsNormGated<B> {
+impl RmsNormGated {
     /// Applies the forward pass on the input tensor with gating.
     ///
     /// # Shapes
     /// - input `x`: `[..., any, d_model]`
     /// - input `z`: `[..., any, d_model]`
     /// - output: `[..., any, d_model]`
-    pub fn forward<const D: usize>(&self, x: Tensor<B, D>, z: Tensor<B, D>) -> Tensor<B, D> {
+    pub fn forward<const D: usize>(&self, x: Tensor<D>, z: Tensor<D>) -> Tensor<D> {
         let silu = Silu::new();
 
         let x = if self.norm_before_gate {
@@ -80,7 +81,7 @@ impl<B: Backend> RmsNormGated<B> {
 
         let normalized = match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
-                let div_eps = div_eps::<B>();
+                let div_eps = div_eps();
 
                 let rms = (x.clone() * x.clone()).mean_dim(D - 1).sqrt();
                 let normalized = (x / (rms + div_eps)) * self.gamma.val().unsqueeze();
@@ -88,7 +89,7 @@ impl<B: Backend> RmsNormGated<B> {
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
-                let div_eps: f16 = f16::from_elem(div_eps::<B>()) * f16::from_f32(2.);
+                let div_eps: f16 = f16::from_elem(div_eps()) * f16::from_f32(2.);
 
                 // avoid calculating x² directly (due to overflow e.g. on 256 * 256)
                 let max = x.clone().no_grad().detach().abs().max().expand(x.shape());
@@ -126,7 +127,7 @@ impl<B: Backend> RmsNormGated<B> {
     }
 }
 
-impl<B: Backend> ModuleDisplay for RmsNormGated<B> {
+impl ModuleDisplay for RmsNormGated {
     fn custom_settings(&self) -> Option<DisplaySettings> {
         DisplaySettings::new()
             .with_new_line_after_attribute(false)

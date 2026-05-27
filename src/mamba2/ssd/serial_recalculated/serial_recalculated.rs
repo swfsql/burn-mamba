@@ -16,17 +16,18 @@
 use crate::mamba2::prelude::*;
 use crate::mamba2::ssd::serial;
 use crate::utils::primitive::mk;
-use burn::prelude::*;
-use burn::tensor::{Tensor, TensorPrimitive, ops::FloatTensor};
+use burn::tensor::{Tensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
+use burn::backend::{Backend, backend_extension, Dispatch};
 
-impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
+impl Mamba2SsdInput {
     /// Forward pass for the Mamba-2 SSD module (recompute-backward path).
     ///
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.
     #[allow(non_snake_case)]
-    pub fn ssd_serial_recalculated(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_serial_recalculated(self) -> (Tensor<5>, Tensor<4>) {
         let input = self;
         // Must use a backend-dependent method.
         //
@@ -52,7 +53,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
         // K1 is now computed inside the custom op (both forward and backward).
         // a_decay_h is passed directly; da_cumsum is no longer an autodiff-tracked
         // intermediate crossing the boundary.
-        let (y_bnlhp, final_state_bhpr) = <B as Mamba2BackendExt>::ssd_serial_recalculated(
+        let (y_bnlhp, final_state_bhpr) = Dispatch::ssd_serial_recalculated(
             input.x_bnlhp.into_primitive().tensor(),
             dt_discretized_bhnl.into_primitive().tensor(),
             input.b_bnlhr.into_primitive().tensor(),
@@ -68,7 +69,7 @@ impl<B: Backend + Mamba2BackendExt> Mamba2SsdInput<B> {
 }
 
 /// Extends the backend and wraps it for `burn`.
-pub trait Mamba2BackendExt: burn::tensor::backend::Backend {
+pub trait Mamba2BackendExt: Backend {
     /// Returns:
     /// - `y_bnlhp`.
     /// - `final_state_bhpr`.

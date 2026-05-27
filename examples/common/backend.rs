@@ -8,6 +8,7 @@
 
 use burn::prelude::*;
 use burn::tensor::backend::{AutodiffBackend, BackendTypes};
+use burn::backend::Backend;
 
 #[cfg(feature = "dev-f16")]
 mod ty {

@@ -9,6 +9,7 @@
 
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Algorithm selection for the Mamba-3 chunkwise SSD.
 ///
@@ -82,7 +83,7 @@ impl Mamba3SsdPath {
 
     /// The recommended default path for a given block: [`Self::SerialRecalculated`]
     /// with [`Self::optimal_chunk_len`] for the block's dimensions.
-    pub fn default_optimal_from_block<B: Backend>(block: &Mamba3<B>) -> Self {
+    pub fn default_optimal_from_block(block: &Mamba3) -> Self {
         let chunk_len = Self::optimal_chunk_len(block.state_rank, block.per_head_dim());
         Self::SerialRecalculated(Some(chunk_len))
     }

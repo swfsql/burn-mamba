@@ -21,8 +21,9 @@
 use crate::mamba2::prelude::*;
 use crate::utils::{sanity::sanity as san, segsum::segsum};
 use burn::prelude::*;
+use burn::backend::Backend;
 
-impl<B: Backend> Mamba2SsdInput<B> {
+impl Mamba2SsdInput {
     // -----------------------------------------------------------------------
     // chunked_selective_scan
     // -----------------------------------------------------------------------
@@ -92,7 +93,7 @@ impl<B: Backend> Mamba2SsdInput<B> {
     ///   Y = Y_diag + Y_off + D · X
     /// ```
     #[allow(non_snake_case)]
-    pub fn ssd_minimal(self) -> (Tensor<B, 5>, Tensor<B, 4>) {
+    pub fn ssd_minimal(self) -> (Tensor<5>, Tensor<4>) {
         let input = self;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = input.x_bnlhp.dims();
         let [.., state_rank] = input.b_bnlhr.dims();

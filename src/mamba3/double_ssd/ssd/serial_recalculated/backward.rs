@@ -17,11 +17,12 @@ use burn::backend::autodiff::{
     ops::{Backward, Ops, OpsKind},
 };
 use burn::prelude::*;
-use burn::tensor::{TensorPrimitive, ops::FloatTensor};
+use burn::backend::{TensorPrimitive, tensor::FloatTensor};
 use ssd::serial_recalculated::{
     Mamba3DoubleSsdBackendExt,
     combined_backward::{self, CombinedGrads},
 };
+use burn::backend::Backend;
 
 impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3DoubleSsdBackendExt
     for Autodiff<B, C>
@@ -84,7 +85,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                 ] = ops.parents;
 
                 // Upstream gradient of the combined 1-dimensional output.
-                let d_combined: Tensor<B, 1> =
+                let d_combined: Tensor<1> =
                     Tensor::from_primitive(TensorPrimitive::Float(grads.consume::<B>(&ops.node)));
 
                 let State {
@@ -160,7 +161,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         }
 
         // ── Shape extraction (via the AutodiffTensor wrappers) ─────────────
-        use burn::tensor::TensorMetadata;
+        use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] =
             v_bnlmhp.primitive.shape().dims();
         let [.., state_rank] = b_bnlmhr.primitive.shape().dims::<6>();

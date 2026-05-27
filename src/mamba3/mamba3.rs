@@ -132,6 +132,7 @@ use burn::{
     module::{Module, Param},
     nn::{Initializer, Linear, LinearConfig},
 };
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba3  (the SSM block)
@@ -146,7 +147,7 @@ use burn::{
 /// - [`Self::forward`] — chunkwise double-SSD algorithm for training / prefill
 /// - [`Self::step`]    — recurrent form for token-by-token decoding
 #[derive(Module, Debug)]
-pub struct Mamba3<B: Backend> {
+pub struct Mamba3 {
     /// Input projection.
     ///
     /// For SISO (R=1), maps:
@@ -155,11 +156,11 @@ pub struct Mamba3<B: Backend> {
     /// `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rope_angles`
     ///
     /// Output splits: `[z | x | B_raw | C_raw | dd_dt | dd_A | lambda_raw | theta_raw]`
-    pub in_proj: Linear<B>,
+    pub in_proj: Linear,
 
     /// Per-head bias for the discretisation step size Δ.
     /// Shape: `[nheads]`
-    pub dt_bias_h: Param<Tensor<B, 1>>,
+    pub dt_bias_h: Param<Tensor<1>>,
 
     /// Hard clamp applied to Δ after softplus.
     pub dt_limit: (f64, f64),
@@ -169,52 +170,52 @@ pub struct Mamba3<B: Backend> {
 
     /// Per-head skip (D) coefficient.
     /// Shape: `[nheads]`; initialised to ones.
-    pub d_h: Param<Tensor<B, 1>>,
+    pub d_h: Param<Tensor<1>>,
 
     /// RMSNorm applied to the B projection (QK-Norm, no gating).
     /// Normalises over the `state_rank` dimension.
-    pub b_norm: RmsNorm<B>,
+    pub b_norm: RmsNorm,
 
     /// RMSNorm applied to the C projection (QK-Norm, no gating).
     /// Normalises over the `state_rank` dimension.
-    pub c_norm: RmsNorm<B>,
+    pub c_norm: RmsNorm,
 
     /// Learnable per-head, per-rank bias for B, added after QK-norm.
     /// Shape: `[nheads, mimo_rank, state_rank]`; initialised to ones.
-    pub b_bias_hmr: Param<Tensor<B, 3>>,
+    pub b_bias_hmr: Param<Tensor<3>>,
 
     /// Learnable per-head, per-rank bias for C, added after QK-norm.
     /// Shape: `[nheads, mimo_rank, state_rank]`; initialised to ones.
-    pub c_bias_hmr: Param<Tensor<B, 3>>,
+    pub c_bias_hmr: Param<Tensor<3>>,
 
     /// MIMO up-projection for x (values).
     /// Shape: `[nheads, mimo_rank, per_head_dim]`.
     /// Only present when `mimo_rank > 1`.  When SISO, this is `None`.
-    pub mimo_x_hmp: Option<Param<Tensor<B, 3>>>,
+    pub mimo_x_hmp: Option<Param<Tensor<3>>>,
 
     /// MIMO up-projection for z (gate).
     /// Shape: `[nheads, mimo_rank, per_head_dim]`.
     /// Only present when `mimo_rank > 1`. When SISO, this is `None`.
-    pub mimo_z_hmp: Option<Param<Tensor<B, 3>>>,
+    pub mimo_z_hmp: Option<Param<Tensor<3>>>,
 
     /// MIMO down-projection for the output.
     /// Shape: `[nheads, mimo_rank, per_head_dim]`.
     /// Only present when `mimo_rank > 1`. When SISO, this is `None`.
-    pub mimo_o_hmp: Option<Param<Tensor<B, 3>>>,
+    pub mimo_o_hmp: Option<Param<Tensor<3>>>,
 
     /// Optional gated RMSNorm applied before the output projection.
     ///
     /// When `Some`, the SiLU gate at the block tail is replaced by
     /// `RmsNormGated(y, z)` which normalises `y` over `per_head_dim` and
     /// gates with `SiLU(z)`. Created when `has_outproj_norm = true`.
-    pub out_norm: Option<RmsNormGated<B>>,
+    pub out_norm: Option<RmsNormGated>,
 
     /// Output projection: maps `d_inner → d_model`.
-    pub out_proj: Linear<B>,
+    pub out_proj: Linear,
 
     /// Optional learnable initial hidden state `h₀`.
     /// Shape: `[nheads, per_head_dim, state_rank]`
-    pub init_state_hpr: Option<Param<Tensor<B, 3>>>,
+    pub init_state_hpr: Option<Param<Tensor<3>>>,
 
     /// State rank — the latent dimension of the SSM hidden state.
     ///
@@ -241,7 +242,7 @@ pub struct Mamba3<B: Backend> {
     pub mimo_rank: usize,
 }
 
-impl<B: Backend> Mamba3<B> {
+impl Mamba3 {
     /// `d_inner = expand · d_model`.
     pub fn d_inner(&self) -> usize {
         // Inferred from `out_proj`
@@ -393,7 +394,7 @@ impl Mamba3Config {
     }
 
     /// Allocate and initialise all Mamba-3 block parameters on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba3<B> {
+    pub fn init(&self, device: &Device) -> Mamba3 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
@@ -432,10 +433,10 @@ impl Mamba3Config {
         let in_proj = LinearConfig::new(self.d_model, self.d_in_proj())
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(self.d_model))
-            .init::<B>(device);
+            .init(device);
 
         // dt_bias: inverse-softplus initialisation
-        let expm1 = |t: Tensor<B, 1>| t.exp() - 1.;
+        let expm1 = |t: Tensor<1>| t.exp() - 1.;
         let dt_h = Tensor::random(
             [nheads],
             burn::tensor::Distribution::Uniform(self.dt_min.ln(), self.dt_max.ln()),
@@ -446,14 +447,14 @@ impl Mamba3Config {
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
         let dt_bias_h = Param::from_tensor(inv_dt_h);
 
-        let d_h = Initializer::Ones.init::<B, 1, _>([nheads], device);
+        let d_h = Initializer::Ones.init::<1, _>([nheads], device);
 
         let b_norm = RmsNormConfig::new(state_rank).init(device);
         let c_norm = RmsNormConfig::new(state_rank).init(device);
 
         // B/C biases: [nheads, mimo_rank, state_rank], init to ones
-        let b_bias_hmr = Initializer::Ones.init::<B, 3, _>([nheads, mimo_rank, state_rank], device);
-        let c_bias_hmr = Initializer::Ones.init::<B, 3, _>([nheads, mimo_rank, state_rank], device);
+        let b_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
+        let c_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
 
         // MIMO projections (only for mimo_rank > 1)
         let (mimo_x_hmp, mimo_z_hmp, mimo_o_hmp) = if mimo_rank > 1 {
@@ -488,7 +489,7 @@ impl Mamba3Config {
             .init(device);
 
         let init_state_hpr = self.has_learnable_init_state.then(|| {
-            Initializer::Zeros.init::<B, 3, _>([nheads, self.per_head_dim, state_rank], device)
+            Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, state_rank], device)
         });
 
         Mamba3 {
@@ -520,7 +521,7 @@ impl Mamba3Config {
 // Mamba3::forward  (chunkwise double-SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
-impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
+impl Mamba3 {
     /// Process a full input sequence using the trapezoidal double-SSD algorithm.
     ///
     /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
@@ -533,10 +534,10 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
     #[allow(non_snake_case)]
     pub fn forward(
         &self,
-        input_bsm: Tensor<B, 3>,
-        cache: Option<Mamba3Cache<B>>,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
         ssd_path: Mamba3SsdPath,
-    ) -> (Tensor<B, 3>, Mamba3Cache<B>) {
+    ) -> (Tensor<3>, Mamba3Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
@@ -587,7 +588,7 @@ impl<B: Backend + Mamba3BackendExt> Mamba3<B> {
 mod step {
     use super::*;
 
-    impl<B: Backend> Mamba3<B> {
+    impl Mamba3 {
         /// Process a **single token** using the pure recurrent form.
         ///
         /// For SISO (mimo_rank=1):
@@ -609,9 +610,9 @@ mod step {
         #[allow(non_snake_case)]
         pub fn step(
             &self,
-            input_bd: Tensor<B, 2>,
-            cache: Option<Mamba3Cache<B>>,
-        ) -> (Tensor<B, 2>, Mamba3Cache<B>) {
+            input_bd: Tensor<2>,
+            cache: Option<Mamba3Cache>,
+        ) -> (Tensor<2>, Mamba3Cache) {
             let [batch, _d_model] = input_bd.dims();
             let nheads = self.nheads();
             let ngroups = self.ngroups;

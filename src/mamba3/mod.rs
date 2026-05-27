@@ -32,7 +32,7 @@ pub mod ssd_path;
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
-use burn::tensor::backend::Backend;
+use burn::backend::Backend;
 
 /// Backend capability required to run Mamba-3.
 ///
@@ -41,7 +41,7 @@ use burn::tensor::backend::Backend;
 /// via the default implementations, and `Autodiff<B>` additionally gets the
 /// custom memory-efficient backward.
 pub trait Mamba3BackendExt:
-    burn::tensor::backend::Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
+    Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
 {
 }
 

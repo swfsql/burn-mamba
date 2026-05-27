@@ -49,6 +49,7 @@ use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba2Network
@@ -59,19 +60,19 @@ use burn::prelude::*;
 /// See the [`crate::mamba2::network`] for an overview of the
 /// architecture and the two execution modes.
 #[derive(Module, Debug)]
-pub struct Mamba2Network<B: Backend> {
+pub struct Mamba2Network {
     /// Token embedding table.
     ///
     /// Shape of weight matrix: `[padded_vocab_size, d_model]`.
     /// Maps integer token IDs to `d_model`-dimensional vectors.
-    pub embedding: Embedding<B>,
+    pub embedding: Embedding,
 
     /// The stack of Mamba-2 residual blocks.
-    pub layers: Mamba2Layers<B>,
+    pub layers: Mamba2Layers,
 
     /// Final layer normalisation applied after all Mamba-2 blocks and before
     /// the LM head.  This is the `norm_f` in the original implementation.
-    pub norm_f: RmsNorm<B>,
+    pub norm_f: RmsNorm,
 
     /// Optional separate LM head projection.
     ///
@@ -79,7 +80,7 @@ pub struct Mamba2Network<B: Backend> {
     ///   `[d_model, padded_vocab_size]`.
     /// - `None` — the embedding weights are reused (transposed).  This is the
     ///   "weight-tied" variant and is selected when `missing_lm_head = true`.
-    pub lm_head: Option<Linear<B>>,
+    pub lm_head: Option<Linear>,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +119,7 @@ pub struct Mamba2NetworkConfig {
 
 impl Mamba2NetworkConfig {
     /// Allocate and initialise the full network on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Network<B> {
+    pub fn init(&self, device: &Device) -> Mamba2Network {
         let padded_vocab_size = Self::padded_vocab(self.vocab_size, self.pad_vocab_size_multiple);
 
         let layers = Mamba2LayersConfig {
@@ -163,7 +164,7 @@ impl Mamba2NetworkConfig {
 // Inference implementations
 // ---------------------------------------------------------------------------
 
-impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
+impl Mamba2Network {
     // -----------------------------------------------------------------------
     // forward  (full sequence — training / prefill)
     // -----------------------------------------------------------------------
@@ -190,10 +191,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     ///   sequence, ready to be passed to the first [`Self::step`] call.
     pub fn forward(
         &self,
-        x: Tensor<B, 2, Int>,
-        caches: Option<Mamba2Caches<B>>,
+        x: Tensor<2, Int>,
+        caches: Option<Mamba2Caches>,
         ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<B, 3>, Mamba2Caches<B>) {
+    ) -> (Tensor<3>, Mamba2Caches) {
         let [batch, sequence] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -244,9 +245,9 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     /// - `caches` contains the updated state for the **next** step.
     pub fn step(
         &self,
-        x: Tensor<B, 1, Int>,
-        caches: Option<Mamba2Caches<B>>,
-    ) -> (Tensor<B, 2>, Mamba2Caches<B>) {
+        x: Tensor<1, Int>,
+        caches: Option<Mamba2Caches>,
+    ) -> (Tensor<2>, Mamba2Caches) {
         let [batch] = x.dims();
         let [padded_vocab, d_model] = self.embedding.weight.dims();
 
@@ -294,10 +295,10 @@ impl<B: Backend + Mamba2BackendExt> Mamba2Network<B> {
     /// transposed embedding weight matrix otherwise (weight tying).
     fn apply_lm_head(
         &self,
-        x_bsm: Tensor<B, 3>,
+        x_bsm: Tensor<3>,
         d_model: usize,
         padded_vocab: usize,
-    ) -> Tensor<B, 3> {
+    ) -> Tensor<3> {
         if let Some(lm_head) = &self.lm_head {
             lm_head.forward(x_bsm)
         } else {

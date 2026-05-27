@@ -6,11 +6,12 @@
 
 use burn::prelude::*;
 use burn::tensor::DType;
+use burn::backend::Backend;
 
 /// Applies the log-sigmoid function element-wise: `log(1 / (1 + e^−x))`.
 ///
 /// Panics on non-float element types.
-pub fn log_sigmoid<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
+pub fn log_sigmoid<const D: usize, B: Backend>(x: Tensor<D>) -> Tensor<D> {
     match x.dtype() {
         DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
             // log_sigmoid(x) = log(1 / (1 + exp(-x)))

@@ -38,6 +38,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
+#![allow(warnings)]
 
 /// Mamba-1: the original selective state space model.
 #[cfg(feature = "mamba1")]

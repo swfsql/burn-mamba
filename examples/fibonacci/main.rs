@@ -16,6 +16,7 @@ pub use common::{
     cli::AppArgs,
     training::{ConstantLr, Lr, TrainingConfig},
 };
+use burn::backend::Backend;
 
 /// The synthetic fibonacci-like dataset.
 pub mod dataset;

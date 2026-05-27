@@ -14,21 +14,22 @@ use crate::utils::gqa::gqa_expand_to_heads;
 use crate::utils::rms_norm::RmsNorm;
 use crate::utils::softplus::softplus;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Output of [`trapezoidal_coefficients`].
 ///
 /// All tensors share the rank `D` of the inputs.
-pub struct TrapezoidCoeffs<B: Backend, const D: usize> {
+pub struct TrapezoidCoeffs<const D: usize> {
     /// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
-    pub dt: Tensor<B, D>,
+    pub dt: Tensor<D>,
     /// `Δₜ · Aₜ` (negative; the log-decay).
-    pub da: Tensor<B, D>,
+    pub da: Tensor<D>,
     /// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
-    pub alpha: Tensor<B, D>,
+    pub alpha: Tensor<D>,
     /// `βₜ = (1 − λₜ) · Δₜ · αₜ` — left-endpoint weight.
-    pub beta: Tensor<B, D>,
+    pub beta: Tensor<D>,
     /// `γₜ = λₜ · Δₜ` — right-endpoint weight.
-    pub gamma: Tensor<B, D>,
+    pub gamma: Tensor<D>,
 }
 
 /// Compute the trapezoidal discretisation coefficients from the raw
@@ -37,14 +38,14 @@ pub struct TrapezoidCoeffs<B: Backend, const D: usize> {
 ///
 /// All four data tensors share rank `D` and have `nheads` as the last dim.
 /// `dt_bias_h` is broadcast to match.
-pub fn trapezoidal_coefficients<B: Backend, const D: usize>(
-    dd_dt: Tensor<B, D>,
-    dd_a_raw: Tensor<B, D>,
-    lambda_raw: Tensor<B, D>,
-    dt_bias_h: Tensor<B, 1>,
+pub fn trapezoidal_coefficients<const D: usize>(
+    dd_dt: Tensor<D>,
+    dd_a_raw: Tensor<D>,
+    lambda_raw: Tensor<D>,
+    dt_bias_h: Tensor<1>,
     dt_limit: (f64, f64),
     a_floor: f64,
-) -> TrapezoidCoeffs<B, D> {
+) -> TrapezoidCoeffs<D> {
     // Broadcast dt_bias_h [nheads] → [1, ..., 1, nheads] so the addition aligns
     // on the last dim regardless of leading shape.
     let dt_bias_broadcast = dt_bias_h.unsqueeze::<D>();
@@ -71,13 +72,13 @@ pub fn trapezoidal_coefficients<B: Backend, const D: usize>(
 /// the head dim, leaving the last dim untouched.
 ///
 /// `DP1 = D + 1` (required by [`gqa_expand_to_heads`]'s intermediate rank).
-pub fn qk_norm_expand_bias<B: Backend, const D: usize, const DP1: usize>(
-    raw_mgr: Tensor<B, D>,
-    norm: &RmsNorm<B>,
-    bias_hmr: Tensor<B, 3>,
+pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
+    raw_mgr: Tensor<D>,
+    norm: &RmsNorm,
+    bias_hmr: Tensor<3>,
     group_dim: usize,
     nheads: usize,
-) -> Tensor<B, D> {
+) -> Tensor<D> {
     // RmsNorm operates on the last dim only, so the leading shape passes through.
     let normed = norm.forward(raw_mgr);
     let expanded = gqa_expand_to_heads::<_, D, DP1>(normed, group_dim, nheads);
@@ -93,11 +94,11 @@ pub fn qk_norm_expand_bias<B: Backend, const D: usize, const DP1: usize>(
 /// broadcasting fills the inserted axis to size `mimo_rank`.
 ///
 /// `DP1 = D + 1`.
-pub fn build_v_with_mimo<B: Backend, const D: usize, const DP1: usize>(
-    x: Tensor<B, D>,
-    mimo_x_hmp: Option<&Tensor<B, 3>>,
+pub fn build_v_with_mimo<const D: usize, const DP1: usize>(
+    x: Tensor<D>,
+    mimo_x_hmp: Option<&Tensor<3>>,
     insert_dim: usize,
-) -> Tensor<B, DP1> {
+) -> Tensor<DP1> {
     let x_with_rank_axis = x.unsqueeze_dim::<DP1>(insert_dim);
     match mimo_x_hmp {
         None => x_with_rank_axis,

@@ -7,11 +7,12 @@
 
 use burn::prelude::*;
 use burn::tensor::DType;
+use burn::backend::Backend;
 
 /// Applies the softplus function element-wise: `log(1 + eˣ)`.
 ///
 /// Panics on non-float element types.
-pub fn softplus<const D: usize, B: Backend>(x: Tensor<B, D>) -> Tensor<B, D> {
+pub fn softplus<const D: usize>(x: Tensor<D>) -> Tensor<D> {
     match x.dtype() {
         DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
             // softplus = log(e^x + 1)

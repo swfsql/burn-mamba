@@ -11,6 +11,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// MIMO-first SSD input.
 ///
@@ -18,45 +19,45 @@ use burn::prelude::*;
 /// expanded to per-head (not per-group). V is already scaled by the (double-ssd) trapezoidal
 /// coefficient (γ or β). The combined log-decay `da = Δ·A` is pre-computed. D skip is handled
 /// by the caller.
-pub struct Mamba3DoubleSsdInput<B: Backend> {
+pub struct Mamba3DoubleSsdInput {
     /// Value tensor, already scaled by (double-ssd) trapezoidal coefficient (γ or β).
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
-    pub v_bnlmhp: Tensor<B, 6>,
+    pub v_bnlmhp: Tensor<6>,
 
     /// Pre-combined log-decay `Δ·A` (negative).
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, nheads]`
-    pub da_bnlh: Tensor<B, 4>,
+    pub da_bnlh: Tensor<4>,
 
     /// Key/B tensor: QK-normed, RoPE-applied, bias-added, expanded to per-head, per-rank.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub b_bnlmhr: Tensor<B, 6>,
+    pub b_bnlmhr: Tensor<6>,
 
     /// Query/C tensor: same processing as B.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub c_bnlmhr: Tensor<B, 6>,
+    pub c_bnlmhr: Tensor<6>,
 
     /// Initial SSM hidden state.
     ///
     /// # Shape
     /// - `[batch, nheads, per_head_dim, state_rank]`
-    pub initial_state_bhpr: Tensor<B, 4>,
+    pub initial_state_bhpr: Tensor<4>,
 
     /// Optional learnable initial state (broadcast over batch).
     ///
     /// # Shape
     /// - `[nheads, per_head_dim, state_rank]`
-    pub init_state_hpr: Option<Tensor<B, 3>>,
+    pub init_state_hpr: Option<Tensor<3>>,
 }
 
-impl<B: Backend> Mamba3DoubleSsdInput<B> {
+impl Mamba3DoubleSsdInput {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every input tensor.
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
@@ -71,7 +72,7 @@ impl<B: Backend> Mamba3DoubleSsdInput<B> {
     }
 }
 
-impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
+impl Mamba3DoubleSsdInput {
     /// Run the selected double-ssd algorithm on this MIMO-first input.
     ///
     /// Dispatches by [`Mamba3SsdPath`] variant to `double_ssd_minimal`,
@@ -80,7 +81,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> Mamba3DoubleSsdInput<B> {
     /// # Returns
     /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {
             Mamba3SsdPath::Minimal(_) => self.double_ssd_minimal(),
             Mamba3SsdPath::Serial(_) => self.double_ssd_serial(),

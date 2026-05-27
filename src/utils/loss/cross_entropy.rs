@@ -9,6 +9,7 @@
 use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};
+use burn::backend::Backend;
 
 /// Configuration to create a [`CrossEntropyLoss`] using the [`CrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]
@@ -44,7 +45,7 @@ impl CrossEntropyLossConfig {
 /// rather than integer class indices, and omits padding, per-class weights, and label smoothing.
 ///
 /// Should be created using [CrossEntropyLossConfig].
-#[derive(Module, Clone, Debug)]
+#[derive(Module, Debug)]
 pub struct CrossEntropyLoss {
     /// Treat the outputs as logits.
     pub output_logits: bool,
@@ -59,7 +60,7 @@ impl CrossEntropyLoss {
     ///
     /// - logits: `[batch_size, num_classes]`
     /// - targets: `[batch_size, num_classes]`
-    pub fn forward<B: Backend>(&self, logits: Tensor<B, 2>, targets: Tensor<B, 2>) -> Tensor<B, 1> {
+    pub fn forward(&self, logits: Tensor<2>, targets: Tensor<2>) -> Tensor<1> {
         let log_probs = if self.output_logits {
             // Numerically stable via log-softmax
             log_softmax(logits, 1)

@@ -3,6 +3,7 @@
 //! training loop build any model config into a module.
 
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// Bidirectional wrapper networks for the examples.
 pub mod bidi;
@@ -19,5 +20,5 @@ pub trait ModelConfigExt<B: Backend>: Config {
     /// The module type this config builds.
     type Model: Module<B>;
     /// Allocate and initialise the model on `device`.
-    fn init(&self, device: &B::Device) -> Self::Model;
+    fn init(&self, device: &Device) -> Self::Model;
 }

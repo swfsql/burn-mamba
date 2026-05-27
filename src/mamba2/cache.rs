@@ -29,6 +29,7 @@ use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba2Caches  (one cache entry per layer)
@@ -40,13 +41,13 @@ use burn::prelude::*;
 /// through every call to [`Mamba2Layers::step`].  Each element
 /// of `caches` corresponds to one (virtual) layer in the network.
 #[derive(Module, Debug)]
-pub struct Mamba2Caches<B: Backend> {
+pub struct Mamba2Caches {
     /// Per-layer caches.
     ///
     /// Length: `n_real_caches` (the number of *virtual* layers, which may
     /// exceed the number of *real* weight layers when weight-sharing / layer
     /// scheduling is in use).
-    pub caches: Vec<Mamba2Cache<B>>,
+    pub caches: Vec<Mamba2Cache>,
 }
 
 /// Configuration / factory for [`Mamba2Caches`].
@@ -76,7 +77,7 @@ impl Mamba2CachesConfig {
     }
 
     /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Caches<B> {
+    pub fn init(&self, device: &Device) -> Mamba2Caches {
         let caches = (0..self.n_real_caches)
             .map(|_| self.cache.clone().init(device))
             .collect();
@@ -94,7 +95,7 @@ impl Mamba2CachesConfig {
 /// Both tensors are updated in-place (via Burn's functional clone) at every
 /// call to [`Mamba2::step`].
 #[derive(Module, Debug)]
-pub struct Mamba2Cache<B: Backend> {
+pub struct Mamba2Cache {
     /// **Convolution rolling window.**
     ///
     /// Stores the last `conv_kernel` pre-activation feature vectors fed into
@@ -105,7 +106,7 @@ pub struct Mamba2Cache<B: Backend> {
     /// Shape: `[batch, conv_dim, conv_kernel]`
     ///   - `conv_dim  = d_inner + 2 · ngroups · state_rank`
     ///   - `conv_kernel` is typically 4
-    pub conv_bvk: Tensor<B, 3>,
+    pub conv_bvk: Tensor<3>,
 
     /// **SSM hidden state** `hₜ`.
     ///
@@ -117,10 +118,10 @@ pub struct Mamba2Cache<B: Backend> {
     /// of the mathematical `hₜ ∈ ℝ^{state_rank×per_head_dim}` but equivalent in content.
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
-    pub ssm_bhpr: Tensor<B, 4>,
+    pub ssm_bhpr: Tensor<4>,
 }
 
-impl<B: Backend> Mamba2Cache<B> {
+impl Mamba2Cache {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bvk);
@@ -178,7 +179,7 @@ impl Mamba2CacheConfig {
     ///   the standard default.  Learnable initial state (if configured) are
     ///   added on top of this inside [`Mamba2::forward`] /
     ///   [`Mamba2::step`].
-    pub fn init<B: Backend>(&self, device: &B::Device) -> Mamba2Cache<B> {
+    pub fn init(&self, device: &Device) -> Mamba2Cache {
         let conv_bvk = Tensor::zeros(
             Shape::new([self.batch, self.conv_dim, self.conv_kernel]),
             device,
@@ -191,25 +192,25 @@ impl Mamba2CacheConfig {
     }
 }
 
-impl<B: Backend> Mamba2Caches<B> {
+impl Mamba2Caches {
     /// Number of per-layer caches.
     pub fn caches_len(&self) -> usize {
         self.caches.len()
     }
 
     /// Wrap a vector of per-layer caches.
-    pub fn from_vec(vec: Vec<Mamba2Cache<B>>) -> Self {
+    pub fn from_vec(vec: Vec<Mamba2Cache>) -> Self {
         Self { caches: vec }
     }
 
     /// Wrap each per-layer cache in `Some` so the layer loop can `take` it
     /// without cloning (Burn tensors are reference-counted).
-    pub fn into_options(self) -> Vec<Option<Mamba2Cache<B>>> {
+    pub fn into_options(self) -> Vec<Option<Mamba2Cache>> {
         self.caches.into_iter().map(Some).collect()
     }
 
     /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
-    pub fn from_options(options: Vec<Option<Mamba2Cache<B>>>) -> Self {
+    pub fn from_options(options: Vec<Option<Mamba2Cache>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)
     }

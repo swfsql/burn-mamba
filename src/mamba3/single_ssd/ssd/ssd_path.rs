@@ -18,6 +18,7 @@
 use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
+use burn::backend::Backend;
 
 /// MIMO-first input bundle for the merged-form SSD.
 ///
@@ -28,12 +29,12 @@ use burn::prelude::*;
 /// supplied separately because the SSD itself does the K-scaling and γ-weighted
 /// diagonal correction internally. D-skip and Z-gating are handled by the
 /// caller.
-pub struct Mamba3SingleSsdInput<B: Backend> {
+pub struct Mamba3SingleSsdInput {
     /// Value tensor, MIMO-expanded but **not** trapezoidally scaled.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
-    pub v_bnlmhp: Tensor<B, 6>,
+    pub v_bnlmhp: Tensor<6>,
 
     /// K/B tensor: QK-normed, RoPE-applied, bias-added, expanded to per-head.
     /// Not pre-scaled — the SSD multiplies by `scaleₜ` internally for the
@@ -42,25 +43,25 @@ pub struct Mamba3SingleSsdInput<B: Backend> {
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub b_bnlmhr: Tensor<B, 6>,
+    pub b_bnlmhr: Tensor<6>,
 
     /// Q/C tensor: same processing as `b_bnlmhr`.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub c_bnlmhr: Tensor<B, 6>,
+    pub c_bnlmhr: Tensor<6>,
 
     /// Pre-combined log-decay `Δ·A` (negative).
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, nheads]`
-    pub da_bnlh: Tensor<B, 4>,
+    pub da_bnlh: Tensor<4>,
 
     /// `γₜ = λₜ · Δₜ` — used as the per-token diagonal multiplier.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, nheads]`
-    pub gamma_bnlh: Tensor<B, 4>,
+    pub gamma_bnlh: Tensor<4>,
 
     /// `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁` — K is multiplied by this for the
     /// lower-triangular and state recurrence paths. The shifted term is zero
@@ -68,7 +69,7 @@ pub struct Mamba3SingleSsdInput<B: Backend> {
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_len, nheads]`
-    pub scale_bnlh: Tensor<B, 4>,
+    pub scale_bnlh: Tensor<4>,
 
     /// Initial SSM hidden state (merged-form accumulator).
     ///
@@ -79,16 +80,16 @@ pub struct Mamba3SingleSsdInput<B: Backend> {
     ///
     /// # Shape
     /// - `[batch, nheads, per_head_dim, state_rank]`
-    pub initial_state_bhpr: Tensor<B, 4>,
+    pub initial_state_bhpr: Tensor<4>,
 
     /// Optional learnable initial state (broadcast over batch).
     ///
     /// # Shape
     /// - `[nheads, per_head_dim, state_rank]`
-    pub init_state_hpr: Option<Tensor<B, 3>>,
+    pub init_state_hpr: Option<Tensor<3>>,
 }
 
-impl<B: Backend> Mamba3SingleSsdInput<B> {
+impl Mamba3SingleSsdInput {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every input tensor.
     pub fn sanity(&self) {
         use crate::utils::sanity::sanity as san;
@@ -105,7 +106,7 @@ impl<B: Backend> Mamba3SingleSsdInput<B> {
     }
 }
 
-impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
+impl Mamba3SingleSsdInput {
     /// Run the selected merged-form (single-ssd) algorithm on this MIMO-first input.
     ///
     /// Dispatches by [`Mamba3SsdPath`] variant to `single_ssd_minimal`,
@@ -116,7 +117,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> Mamba3SingleSsdInput<B> {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the merged-form accumulator at the last token (to be stored in the
     ///   cache for streaming).
-    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<B, 6>, Tensor<B, 4>) {
+    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {
             Mamba3SsdPath::Minimal(_) => self.single_ssd_minimal(),
             Mamba3SsdPath::Serial(_) => self.single_ssd_serial(),
