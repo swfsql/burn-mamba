@@ -60,6 +60,13 @@ impl Mamba3 {
 
         assert!(sequence > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
+        // The single-pass kernel applies the abelian RoPE inline; the quaternion
+        // rotation is realised only by the double-ssd pathway (the block routes a
+        // Quaternion4D config to double-ssd by default).
+        assert!(
+            !self.rotation_is_quaternion,
+            "forward_single_ssd does not support RotationKind::Quaternion4D; use the double-ssd pathway"
+        );
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
@@ -67,12 +74,12 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], &device);
+            let rotation = RotationState::zeros_angle(batch, nheads, num_rope_angles, &device);
             Mamba3SingleSsdCache {
                 ssm_bhpr,
                 k_state_bmhr,
                 v_state_bhp,
-                cum_angle_bha,
+                rotation,
             }
         });
 
@@ -167,7 +174,8 @@ impl Mamba3 {
         let raw_angles_bsha =
             dt_bsh.clone().unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
         let cumsum_bsha = raw_angles_bsha.cumsum(1);
-        let cum_angles_bsha = cache.cum_angle_bha.clone().unsqueeze_dim::<4>(1) + cumsum_bsha;
+        let cum_angles_bsha =
+            cache.rotation.clone().angle().unsqueeze_dim::<4>(1) + cumsum_bsha;
         san(&cum_angles_bsha);
 
         let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
@@ -347,11 +355,11 @@ impl Mamba3 {
         // Wrapped to [−π, π] so the accumulator stays bounded across a continued
         // sequence (see [`wrap_angle`]); matches the double-ssd cache convention
         // so the two caches still inter-convert via field identity.
-        cache.cum_angle_bha = wrap_angle(
+        cache.rotation = RotationState::Angle(wrap_angle(
             cum_angles_bsha
                 .narrow(1, sequence - 1, 1)
                 .squeeze_dim::<3>(1),
-        );
+        ));
 
         (out_bsm, cache)
     }

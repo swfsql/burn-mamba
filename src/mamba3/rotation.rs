@@ -60,6 +60,7 @@
 //! the math; wiring it into the [`Mamba3`](crate::mamba3::mamba3::Mamba3) block
 //! is a separate, larger change (the SSD kernels themselves need no edits).
 
+use crate::mamba3::double_ssd::double_ssd::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -390,6 +391,157 @@ pub fn quat_cumprod(
     let cum = Tensor::cat(cums, 1); // [batch, sequence, nheads, J, 4]
     let final_carry = carry.squeeze_dim::<4>(1); // [batch, nheads, J, 4]
     (cum, final_carry)
+}
+
+// ---------------------------------------------------------------------------
+// Partial block rotation (rope_fraction support)
+// ---------------------------------------------------------------------------
+
+/// Apply a per-block quaternion rotation to the first `rope_width` entries of
+/// the `state_rank` axis (a multiple of 4); the remainder passes through. The
+/// quaternion analogue of [`apply_rope_partial`].
+///
+/// `q` has one quaternion per rotated block (`rope_width / 4` of them). `DB`
+/// must equal `D + 1`.
+pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
+    v: Tensor<D>,
+    q: Tensor<DB>,
+    rope_width: usize,
+) -> Tensor<D> {
+    let r = v.dims()[D - 1];
+    if rope_width == r {
+        rotate_state_rank_blocks::<D, DB>(v, q)
+    } else {
+        let head = v.clone().narrow(D - 1, 0, rope_width);
+        let tail = v.narrow(D - 1, rope_width, r - rope_width);
+        let head_rot = rotate_state_rank_blocks::<D, DB>(head, q);
+        Tensor::cat(vec![head_rot, tail], D - 1)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Forward / step rotation of B and C (shared by both SSD pathways)
+// ---------------------------------------------------------------------------
+
+/// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
+/// rotation, returning the rotated projections and the new cumulative
+/// [`RotationState`] to store in the cache.
+///
+/// Branches on [`RotationKind`]:
+/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
+///   angle `cumsum` continued from `prev`, then [`apply_rope_partial`]. Exactly
+///   the original Mamba-3 behaviour.
+/// - [`Quaternion4D`](RotationKind::Quaternion4D): per-step unit quaternion
+///   [`quat_from_scaled_axis`] (the in-projection generators scaled per-head by
+///   `Δ`), composed by [`quat_cumprod`] continuing the cached quaternion, then
+///   applied to `B`/`C` as `rotate(·, conj(Qₜ))` over the first `4·blocks`
+///   state-rank entries.
+///
+/// # Shapes
+/// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
+///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
+///   for Quaternion4D).
+/// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
+/// - `b_bsmhr` / `c_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
+pub fn rotate_bc_forward(
+    rot_bsa: Tensor<3>,
+    dt_bsh: Tensor<3>,
+    prev: RotationState,
+    b_bsmhr: Tensor<5>,
+    c_bsmhr: Tensor<5>,
+    kind: RotationKind,
+    rope_dim: usize,
+) -> (Tensor<5>, Tensor<5>, RotationState) {
+    let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
+    match kind {
+        RotationKind::Complex2D => {
+            let prev_angle_bha = prev.angle();
+            let num_rope_angles = prev_angle_bha.dims()[2];
+            let theta_scaled_bsa = rot_bsa.tanh() * std::f32::consts::PI;
+            let raw_angles_bsha =
+                dt_bsh.unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
+            let cum_angles_bsha = prev_angle_bha.unsqueeze_dim::<4>(1) + raw_angles_bsha.cumsum(1);
+            let cum_angles_bsmha = cum_angles_bsha
+                .clone()
+                .unsqueeze_dim::<5>(2)
+                .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
+            let rotate_pairwise = mimo_rank == 1;
+            let b = apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
+            let c = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+            let last = wrap_angle(cum_angles_bsha.narrow(1, sequence - 1, 1).squeeze_dim::<3>(1));
+            (b, c, RotationState::Angle(last))
+        }
+        RotationKind::Quaternion4D => {
+            let prev_q_bhj4 = prev.quaternion();
+            let blocks = prev_q_bhj4.dims()[2];
+            let rope_width = blocks * 4;
+            // Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
+            let g_bshj3 = rot_bsa.reshape([batch, sequence, blocks, 3]).unsqueeze_dim::<5>(2)
+                * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+            let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
+            let (cum_bshj4, final_bhj4) = quat_cumprod(q_step_bshj4, Some(prev_q_bhj4));
+            // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
+            // broadcast over the mimo_rank axis.
+            let conj_bsmhj4 = quat_conj(cum_bshj4)
+                .unsqueeze_dim::<6>(2)
+                .expand([batch, sequence, mimo_rank, nheads, blocks, 4]);
+            let b = rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4.clone(), rope_width);
+            let c = rotate_blocks_partial::<5, 6>(c_bsmhr, conj_bsmhj4, rope_width);
+            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
+        }
+    }
+}
+
+/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
+///
+/// # Shapes
+/// - `rot_ba`  : `[batch, num_rotation_channels]`.
+/// - `dt_bh`   : `[batch, nheads]`.
+/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
+pub fn rotate_bc_step(
+    rot_ba: Tensor<2>,
+    dt_bh: Tensor<2>,
+    prev: RotationState,
+    b_bmhr: Tensor<4>,
+    c_bmhr: Tensor<4>,
+    kind: RotationKind,
+    rope_dim: usize,
+) -> (Tensor<4>, Tensor<4>, RotationState) {
+    let [batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
+    match kind {
+        RotationKind::Complex2D => {
+            let prev_angle_bha = prev.angle();
+            let num_rope_angles = prev_angle_bha.dims()[2];
+            let theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
+            let raw_angle_bha =
+                dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
+            let new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
+            let new_cum_angle_bmha = new_cum_angle_bha
+                .clone()
+                .unsqueeze_dim::<4>(1)
+                .expand([batch, mimo_rank, nheads, num_rope_angles]);
+            let rotate_pairwise = mimo_rank == 1;
+            let b = apply_rope_partial::<4>(b_bmhr, new_cum_angle_bmha.clone(), rope_dim, rotate_pairwise);
+            let c = apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
+            (b, c, RotationState::Angle(new_cum_angle_bha))
+        }
+        RotationKind::Quaternion4D => {
+            let prev_q_bhj4 = prev.quaternion();
+            let blocks = prev_q_bhj4.dims()[2];
+            let rope_width = blocks * 4;
+            let g_bhj3 = rot_ba.reshape([batch, blocks, 3]).unsqueeze_dim::<4>(1)
+                * dt_bh.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3);
+            let q_step_bhj4 = quat_from_scaled_axis::<4>(g_bhj3);
+            // Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
+            let new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
+            let conj_bmhj4 = quat_conj(new_q_bhj4.clone())
+                .unsqueeze_dim::<5>(1)
+                .expand([batch, mimo_rank, nheads, blocks, 4]);
+            let b = rotate_blocks_partial::<4, 5>(b_bmhr, conj_bmhj4.clone(), rope_width);
+            let c = rotate_blocks_partial::<4, 5>(c_bmhr, conj_bmhj4, rope_width);
+            (b, c, RotationState::Quaternion(new_q_bhj4))
+        }
+    }
 }
 
 #[cfg(all(test, feature = "_dev-test"))]

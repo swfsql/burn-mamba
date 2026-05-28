@@ -454,18 +454,57 @@ fn config_rotation_channels_and_d_in_proj() {
     );
 }
 
-#[test]
-#[should_panic(expected = "not yet wired")]
-fn config_quaternion_block_init_is_guarded() {
+/// A Quaternion4D block's chunked `forward` must equal its recurrent `step`
+/// unrolling — the same parity guarantee the abelian path satisfies, now for the
+/// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
+/// `quat_mul`, feeding the unchanged double-ssd SSD core).
+fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
-    // Constructing a Quaternion4D block must fail fast until step 3 wires it.
-    let _ = Mamba3Config::new(64)
+    let model = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
+        .with_mimo_rank(mimo_rank)
+        .with_rope_fraction(rope_fraction)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
+
+    let (batch, seq) = (2, 5);
+    let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
+
+    // Chunked forward (fresh cache ⇒ double-ssd quaternion pathway).
+    let (out_fwd, _cache) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
+
+    // Recurrent step unrolling from a fresh cache.
+    let mut cache = None;
+    let mut outs: Vec<Tensor<3>> = Vec::with_capacity(seq);
+    for t in 0..seq {
+        let x_t = input.clone().narrow(1, t, 1).squeeze_dim::<2>(1); // [batch, d_model]
+        let (o, c) = model.step(x_t, cache);
+        outs.push(o.unsqueeze_dim::<3>(1));
+        cache = Some(c);
+    }
+    let out_step = Tensor::cat(outs, 1);
+
+    let d = max_abs_diff(out_fwd, out_step);
+    assert!(d < 1e-3, "quaternion forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}");
+}
+
+#[test]
+fn quaternion_block_forward_step_parity_full_rope() {
+    quaternion_forward_step_parity(1.0, 1);
+}
+
+#[test]
+fn quaternion_block_forward_step_parity_partial_rope() {
+    quaternion_forward_step_parity(0.5, 1);
+}
+
+#[test]
+fn quaternion_block_forward_step_parity_mimo() {
+    quaternion_forward_step_parity(1.0, 2);
 }
 
 // ---------------------------------------------------------------------------

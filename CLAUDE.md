@@ -140,7 +140,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   │       └── output_merge.rs    # OutputMerge (Mean | CatLinear)
 │   │   ├── cache.rs                   # Mamba3Cache / Mamba3Caches ENUMS dispatching DoubleSsd vs SingleSsd
 │   │   ├── double_ssd                 # double-pass trapezoidal decomposition (γ-SSD + β-SSD); VikramLex-style
-│   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/cum_angle (NO conv cache)
+│   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/rotation (RotationState: angle|quaternion; NO conv cache)
 │   │   │   ├── double_ssd.rs          # forward_double_ssd / step_double_ssd; apply_rope / apply_rope_partial / wrap_angle
 │   │   │   ├── double_ssd/tests.rs     # unit tests for double_ssd.rs (forward/step parity, grads)
 │   │   │   ├── mod.rs
@@ -160,8 +160,8 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── mamba3.rs                  # Mamba3 block + Mamba3Config; forward()/step() dispatch by cache variant
 │   │   ├── mod.rs                     # module + prelude; Mamba3BackendExt aggregating both ssd ext traits (macros)
 │   │   ├── network.rs                 # Mamba3Network (full LM; tied/untied LM head, vocab padding)
-│   │   ├── rotation.rs                # quaternion (k=4) non-abelian RoPE generalisation: RotationKind (config switch) / RotationState (cache accumulator variant) + quat algebra, scaled-axis materialise, cumprod scan + carry, B̄/C̄ rotation
-│   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, k=2↔production apply_rope, cross-chunk carry, abelian→cumsum collapse, non-commutativity, SO(4) orthogonality/homomorphism, scaled-axis materialise, config sizing + RotationState)
+│   │   ├── rotation.rs                # quaternion (k=4) non-abelian RoPE: RotationKind (config switch) / RotationState (cache accumulator) + quat algebra, scaled-axis materialise, cumprod scan + carry, B̄/C̄ rotation, and the rotate_bc_forward/step helpers wired into both forward/step
+│   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, k=2↔production apply_rope, cross-chunk carry, abelian→cumsum collapse, non-commutativity, SO(4) orthogonality/homomorphism, scaled-axis materialise, config sizing + RotationState, Quaternion4D block forward==step parity)
 │   │   ├── single_ssd                 # single-pass official-kernel trapezoidal form (≈½ training memory)
 │   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
 │   │   │   ├── mod.rs
@@ -394,14 +394,24 @@ low-bit-float (`f16`) precision.
 The RoPE above is the **abelian** (`SO(2)`/complex) rotation: angles compose by
 `cumsum` and are absorbed into B/C. `mamba3/rotation.rs` holds the non-abelian
 generalisation — a quaternion (`k = 4`, `SU(2) ⊂ SO(4)`) rotational state where
-the cumulative rotation needs an associative *scan* (with a cross-chunk carry)
-instead of a `cumsum`, but the B/C-factoring (hence the scalar-decay SSD core) is
-unchanged. The rotation algebra/scan and a `RotationKind` config switch
-(`Complex2D` default | `Quaternion4D`) + `RotationState` cache-accumulator
-variant are in place and tested; `Mamba3Config::d_in_proj` branches on the kind
-(`num_rotation_channels`). The block forward/step do **not** yet branch on the
-kind — constructing a `Quaternion4D` block currently asserts "not yet wired"
-(staged: the cache-field substitution + forward/step wiring is the next step).
+the cumulative rotation is an associative *scan* (with a cross-chunk carry)
+instead of a `cumsum`, while the B/C-factoring (hence the scalar-decay SSD core)
+is unchanged. It is selected by `Mamba3Config.rotation: RotationKind`
+(`Complex2D` default | `Quaternion4D`):
+
+- `d_in_proj` devotes `num_rotation_channels` to the rotation (`num_rope_angles`
+  angles for Complex2D, `3·num_quat_blocks` quaternion generators for
+  Quaternion4D); the cache accumulator field is a `RotationState`
+  (`Angle(Tensor<3>)` | `Quaternion(Tensor<4>)`).
+- forward/step branch on the kind via the shared `rotate_bc_forward` /
+  `rotate_bc_step` helpers (materialise per-step quaternion `quat_from_scaled_axis`
+  scaled by Δ → `quat_cumprod` continuing the cached carry → `rotate(·, conj(Q))`).
+- **Quaternion4D runs on the double-ssd pathway** (the verifiable reference): a
+  missing cache for a Quaternion4D block defaults to double-ssd, `step` round-trips
+  through it, and `forward_single_ssd` asserts Complex2D (its single-pass kernel
+  applies RoPE inline). The SSD kernels + custom backward are untouched.
+- Verified by `forward`==`step` parity for Quaternion4D (full/partial RoPE, MIMO),
+  alongside the standalone rotation-math tests.
 
 #### Two SSD pathways — the central Mamba-3 design point
 
@@ -447,9 +457,11 @@ axis; identity when SISO).
 #### Mamba-3 cache fields (both variants)
 
 `ssm_bhpr` (SSM hidden state), `k_state_bmhr` (previous-token B per rank, for the
-β term), `v_state_bhp` (previous-token x), `cum_angle_bha` (cumulative RoPE
-angle). The `ssm_bhpr` **semantics differ** between Double and Single (see
-above). No conv cache.
+β term), `v_state_bhp` (previous-token x), `rotation` (a [`RotationState`]:
+cumulative RoPE *angle* for `Complex2D`, or cumulative *quaternion* for
+`Quaternion4D`). The `ssm_bhpr` **semantics differ** between Double and Single
+(see above); the `rotation` field is identical in both and is moved by the `From`
+conversions. No conv cache.
 
 ### Virtual layer scheduling (`src/schedule.rs`)
 

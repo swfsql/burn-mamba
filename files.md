@@ -291,7 +291,8 @@ decoding too.
 ### `mamba3/double_ssd/cache.rs`
 - `struct Mamba3DoubleSsdCache` — `ssm_bhpr` (trapezoidal hidden state),
   `k_state_bmhr` (previous-token B per rank, for the β term), `v_state_bhp`
-  (previous-token x), `cum_angle_bha` (cumulative RoPE angle). **No conv cache**
+  (previous-token x), `rotation` (a `RotationState`: cumulative RoPE angle for
+  `Complex2D`, cumulative quaternion for `Quaternion4D`). **No conv cache**
   (Mamba-3 has no short convolution). `+ Caches`/`*Config` factories.
 
 ### `mamba3/double_ssd/ssd/ssd_path.rs`
@@ -362,14 +363,16 @@ form), ≈ half the training memory of double-ssd.
   axis, used as `B̄ = rotate(B, conj(Qcum))`).
 - Together these are the `materialise → scan → apply` pipeline (the engine the
   abelian RoPE specialises to `cumsum` + sin/cos).
-- Integration scaffolding (default-off): `RotationKind { Complex2D | Quaternion4D }`
+- Block integration (wired): `RotationKind { Complex2D | Quaternion4D }`
   (a `Mamba3Config` field, default `Complex2D` ⇒ unchanged) and `RotationState
-  { Angle(Tensor<3>) | Quaternion(Tensor<4>) }` (the cache accumulator variant,
-  a `#[derive(Module)]` enum). `Mamba3Config::d_in_proj` branches via
-  `num_rotation_channels` (`num_rope_angles` for Complex2D, `3·num_quat_blocks`
-  quaternion generators for Quaternion4D). Forward/step don't branch yet —
-  building a `Quaternion4D` block asserts "not yet wired" (next step: swap
-  `RotationState` in for the caches' `cum_angle_bha` + wire forward/step).
+  { Angle(Tensor<3>) | Quaternion(Tensor<4>) }` (the cache accumulator field on
+  both pathway caches, a `#[derive(Module)]` enum). `Mamba3Config::d_in_proj`
+  branches via `num_rotation_channels` (`num_rope_angles` for Complex2D,
+  `3·num_quat_blocks` quaternion generators for Quaternion4D). `forward`/`step`
+  branch on the kind via `rotate_bc_forward`/`rotate_bc_step`; `Quaternion4D`
+  runs on the double-ssd pathway (default cache for a Quaternion4D block is
+  double-ssd; `forward_single_ssd` asserts Complex2D). Verified by Quaternion4D
+  `forward`==`step` parity (full/partial RoPE, MIMO).
 - Key properties, proved by the tests: the RoPE *factoring*
   (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity** (so the
   scalar-decay SSD core is unchanged; only `cumsum`→scan changes), and the `k=2`

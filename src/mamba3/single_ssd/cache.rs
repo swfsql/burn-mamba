@@ -101,12 +101,13 @@ pub struct Mamba3SingleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim]`
     pub v_state_bhp: Tensor<3>,
 
-    /// **Cumulative data-dependent RoPE angle** up to the current position.
+    /// **Cumulative data-dependent rotation** up to the current position
+    /// ([`RotationState`]).
     ///
     /// Same role as in [`Mamba3Cache`]: continued across calls for streaming.
-    ///
-    /// Shape: `[batch, nheads, num_rope_angles]`
-    pub cum_angle_bha: Tensor<3>,
+    /// Carries the same value as the double-ssd cache's field (the `From` impls
+    /// move it across), so the two caches still inter-convert by field identity.
+    pub rotation: RotationState,
 }
 
 impl Mamba3SingleSsdCache {
@@ -115,7 +116,7 @@ impl Mamba3SingleSsdCache {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);
         san(&self.v_state_bhp);
-        san(&self.cum_angle_bha);
+        self.rotation.sanity();
     }
 }
 
@@ -143,6 +144,16 @@ pub struct Mamba3SingleSsdCacheConfig {
     /// Number of RoPE angle pairs
     /// (see [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rope_angles`]).
     pub num_rope_angles: usize,
+
+    /// Whether the block uses the quaternion rotation (see
+    /// [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation_is_quaternion`]).
+    #[config(default = false)]
+    pub rotation_is_quaternion: bool,
+
+    /// Number of quaternion blocks (`rope_dim / 4`); only used when
+    /// `rotation_is_quaternion`.
+    #[config(default = 1)]
+    pub num_quat_blocks: usize,
 }
 
 impl Mamba3SingleSsdCacheConfig {
@@ -155,10 +166,15 @@ impl Mamba3SingleSsdCacheConfig {
             nheads: block_config.nheads(),
             mimo_rank: block_config.mimo_rank,
             num_rope_angles: block_config.num_rope_angles(),
+            rotation_is_quaternion: matches!(
+                block_config.rotation,
+                crate::mamba3::rotation::RotationKind::Quaternion4D
+            ),
+            num_quat_blocks: block_config.num_quat_blocks(),
         }
     }
 
-    /// Allocate zero-initialised cache tensors on `device`.
+    /// Allocate zero/identity-initialised cache tensors on `device`.
     pub fn init(&self, device: &Device) -> Mamba3SingleSsdCache {
         let ssm_bhpr = Tensor::zeros(
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
@@ -169,12 +185,16 @@ impl Mamba3SingleSsdCacheConfig {
             device,
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let cum_angle_bha = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
+        let rotation = if self.rotation_is_quaternion {
+            RotationState::identity_quaternion(self.batch, self.nheads, self.num_quat_blocks, device)
+        } else {
+            RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
+        };
         Mamba3SingleSsdCache {
             ssm_bhpr,
             k_state_bmhr,
             v_state_bhp,
-            cum_angle_bha,
+            rotation,
         }
     }
 }

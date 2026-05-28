@@ -96,14 +96,15 @@ pub struct Mamba3DoubleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim]`
     pub v_state_bhp: Tensor<3>,
 
-    /// **Cumulative data-dependent RoPE angle** up to the current position.
+    /// **Cumulative data-dependent rotation** up to the current position
+    /// ([`RotationState`]): the abelian RoPE angle for
+    /// [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D) (each step
+    /// `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · tanh(θₜ) · π`), or the cumulative unit
+    /// quaternion for [`Quaternion4D`](crate::mamba3::rotation::RotationKind::Quaternion4D).
     ///
-    /// Each step updates: `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · tanh(θₜ) · π`
-    ///
-    /// Starts at zero for fresh sequences; continued across calls for streaming.
-    ///
-    /// Shape: `[batch, nheads, num_rope_angles]`
-    pub cum_angle_bha: Tensor<3>,
+    /// Starts at the identity for fresh sequences; continued across calls for
+    /// streaming.
+    pub rotation: RotationState,
 }
 
 impl Mamba3DoubleSsdCache {
@@ -112,7 +113,7 @@ impl Mamba3DoubleSsdCache {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);
         san(&self.v_state_bhp);
-        san(&self.cum_angle_bha);
+        self.rotation.sanity();
     }
 }
 
@@ -140,6 +141,18 @@ pub struct Mamba3DoubleSsdCacheConfig {
     /// Number of RoPE angle pairs = `rope_dim / 2` = `(state_rank * rope_fraction) / 2`
     /// (rounded down to even via `Mamba3Config::rope_dim`).
     pub num_rope_angles: usize,
+
+    /// Whether the block uses the quaternion rotation
+    /// ([`Quaternion4D`](crate::mamba3::rotation::RotationKind::Quaternion4D)),
+    /// which makes the accumulator a [`RotationState::Quaternion`] instead of an
+    /// [`RotationState::Angle`].
+    #[config(default = false)]
+    pub rotation_is_quaternion: bool,
+
+    /// Number of quaternion blocks (`rope_dim / 4`); only used when
+    /// `rotation_is_quaternion`.
+    #[config(default = 1)]
+    pub num_quat_blocks: usize,
 }
 
 impl Mamba3DoubleSsdCacheConfig {
@@ -152,10 +165,15 @@ impl Mamba3DoubleSsdCacheConfig {
             nheads: block_config.nheads(),
             mimo_rank: block_config.mimo_rank,
             num_rope_angles: block_config.num_rope_angles(),
+            rotation_is_quaternion: matches!(
+                block_config.rotation,
+                crate::mamba3::rotation::RotationKind::Quaternion4D
+            ),
+            num_quat_blocks: block_config.num_quat_blocks(),
         }
     }
 
-    /// Allocate zero-initialised cache tensors on `device`.
+    /// Allocate zero/identity-initialised cache tensors on `device`.
     pub fn init(&self, device: &Device) -> Mamba3DoubleSsdCache {
         let ssm_bhpr = Tensor::zeros(
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
@@ -166,12 +184,16 @@ impl Mamba3DoubleSsdCacheConfig {
             device,
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let cum_angle_bha = Tensor::zeros([self.batch, self.nheads, self.num_rope_angles], device);
+        let rotation = if self.rotation_is_quaternion {
+            RotationState::identity_quaternion(self.batch, self.nheads, self.num_quat_blocks, device)
+        } else {
+            RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
+        };
         Mamba3DoubleSsdCache {
             ssm_bhpr,
             k_state_bmhr,
             v_state_bhp,
-            cum_angle_bha,
+            rotation,
         }
     }
 }

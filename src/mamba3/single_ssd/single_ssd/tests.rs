@@ -1,6 +1,7 @@
 use super::*;
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3Config;
+use crate::mamba3::rotation::RotationState;
 use burn::module::Param;
 use burn::tensor::Distribution;
 
@@ -81,13 +82,13 @@ fn build_cross_caches(
         ssm_bhpr: Tensor::from_inner(ssm.clone()),
         k_state_bmhr: Tensor::from_inner(k.clone()),
         v_state_bhp: Tensor::from_inner(v.clone()),
-        cum_angle_bha: Tensor::from_inner(angle.clone()),
+        rotation: RotationState::Angle(Tensor::from_inner(angle.clone())),
     };
     let cm = Mamba3SingleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm),
         k_state_bmhr: Tensor::from_inner(k),
         v_state_bhp: Tensor::from_inner(v),
-        cum_angle_bha: Tensor::from_inner(angle),
+        rotation: RotationState::Angle(Tensor::from_inner(angle)),
     };
     (c3, cm)
 }
@@ -124,7 +125,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
         k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
         v_state_bhp: mk3([batch, nheads, per_head_dim]),
-        cum_angle_bha: mk3([batch, nheads, num_rope_angles]),
+        rotation: RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
     }
 }
 
@@ -248,7 +249,7 @@ fn run_with_grads_single_ssd(
     let ssm = cache.ssm_bhpr;
     let k = cache.k_state_bmhr;
     let v = cache.v_state_bhp;
-    let angle = cache.cum_angle_bha;
+    let angle = cache.rotation.angle();
     let final_ssm = ssm.clone().inner();
     let final_k = k.clone().inner();
     let final_v = v.clone().inner();
@@ -803,7 +804,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             ssm_bhpr: Tensor::from_inner(ssm_a),
             k_state_bmhr: Tensor::from_inner(k_a),
             v_state_bhp: Tensor::from_inner(v_a),
-            cum_angle_bha: Tensor::from_inner(ang_a),
+            rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -816,7 +817,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             last.ssm_bhpr,
             last.k_state_bmhr,
             last.v_state_bhp,
-            last.cum_angle_bha,
+            last.rotation.angle(),
         )
     });
 
@@ -829,7 +830,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             ssm_bhpr: Tensor::from_inner(ssm_b),
             k_state_bmhr: Tensor::from_inner(k_b),
             v_state_bhp: Tensor::from_inner(v_b),
-            cum_angle_bha: Tensor::from_inner(ang_b),
+            rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -842,7 +843,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             last.ssm_bhpr,
             last.k_state_bmhr,
             last.v_state_bhp,
-            last.cum_angle_bha,
+            last.rotation.angle(),
         )
     });
 

@@ -191,7 +191,7 @@ impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
             k_state_bmhr: cache.k_state_bmhr,
             v_state_bhp: cache.v_state_bhp,
-            cum_angle_bha: cache.cum_angle_bha,
+            rotation: cache.rotation,
         }
     }
 }
@@ -202,7 +202,7 @@ impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
             k_state_bmhr: cache.k_state_bmhr,
             v_state_bhp: cache.v_state_bhp,
-            cum_angle_bha: cache.cum_angle_bha,
+            rotation: cache.rotation,
         }
     }
 }

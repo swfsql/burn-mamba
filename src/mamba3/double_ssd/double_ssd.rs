@@ -17,6 +17,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
+use crate::mamba3::rotation::{rotate_bc_forward, rotate_bc_step, RotationState};
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::backend::Backend;
@@ -225,12 +226,16 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], &device);
+            let rotation = if self.rotation_is_quaternion {
+                RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, &device)
+            } else {
+                RotationState::zeros_angle(batch, nheads, num_rope_angles, &device)
+            };
             Mamba3DoubleSsdCache {
                 ssm_bhpr,
                 k_state_bmhr,
                 v_state_bhp,
-                cum_angle_bha,
+                rotation,
             }
         });
 
@@ -245,14 +250,14 @@ impl Mamba3 {
                 z_bsi, x_bsi,
                 b_raw_bsMGR, c_raw_bsMGR,
                 dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
-                theta_bsa
+                rot_bsa
         ] = crate::utils::split::split_into(
             proj_bsd,
             [
                 d_inner, d_inner,
                 bc_size, bc_size,
                 nheads, nheads, nheads,
-                num_rope_angles,
+                self.num_rotation_channels,
             ],
             2,
         );
@@ -312,36 +317,19 @@ impl Mamba3 {
             c_bsmhr.dims()
         );
 
-        // ── Step 5: Data-dependent cumulative RoPE angles ─────────────────────
-        let theta_scaled_bsa = theta_bsa.tanh() * std::f32::consts::PI;
-        let raw_angles_bsha =
-            dt_bsh.clone().unsqueeze_dim::<4>(3) // dt_bsh1
-            *
-            theta_scaled_bsa.unsqueeze_dim::<4>(2) // theta_scaled_bs1a
-            ;
-
-        let cumsum_bsha = raw_angles_bsha.cumsum(1);
-        let cum_angles_bsha = cache.cum_angle_bha.clone()
-            .unsqueeze_dim::<4>(1) // cum_angle_b1ha
-            + cumsum_bsha;
-        assert_eq!(
-            [batch, sequence, nheads, num_rope_angles],
-            cum_angles_bsha.dims()
+        // ── Step 5: Data-dependent positional rotation of B and C ─────────────
+        // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
+        // unit quaternion. The new cache accumulator is returned for Step (cache
+        // update) below. See [`rotate_bc_forward`].
+        let (b_bsmhr, c_bsmhr, new_rotation) = rotate_bc_forward(
+            rot_bsa,
+            dt_bsh.clone(),
+            cache.rotation.clone(),
+            b_bsmhr,
+            c_bsmhr,
+            self.rotation_kind(),
+            self.rope_dim,
         );
-        san(&cum_angles_bsha);
-
-        // Apply RoPE to B and C: angles broadcast over the mimo_rank dim.
-        let cum_angles_bsmha = cum_angles_bsha
-            .clone()
-            .unsqueeze_dim::<5>(2) // cum_angles_bs1ha
-            .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]); // cum_angles_bsmha
-        // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
-        // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
-        let rotate_pairwise = mimo_rank == 1;
-        let rope_dim = self.rope_dim;
-        let b_bsmhr =
-            apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
-        let c_bsmhr = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -535,13 +523,9 @@ impl Mamba3 {
             .narrow(1, sequence - 1, 1) // x_b1hp
             .squeeze_dim::<3>(1); // x_bhp
 
-        // cum_angle at last token, wrapped to [−π, π] so the accumulator stays
-        // bounded when this cache continues a longer sequence (see [`wrap_angle`]).
-        cache.cum_angle_bha = wrap_angle(
-            cum_angles_bsha
-                .narrow(1, sequence - 1, 1) // cum_angles_b1ha
-                .squeeze_dim::<3>(1), // cum_angles_bha
-        );
+        // Cumulative rotation at the last token (angle wrapped to [−π, π], or
+        // the cumulative quaternion), to continue a longer sequence.
+        cache.rotation = new_rotation;
 
         (out_bsm, cache)
     }
@@ -596,12 +580,16 @@ mod step {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
                 let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
                 let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-                let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], device);
+                let rotation = if self.rotation_is_quaternion {
+                    RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
+                } else {
+                    RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
+                };
                 Mamba3DoubleSsdCache {
                     ssm_bhpr,
                     k_state_bmhr,
                     v_state_bhp,
-                    cum_angle_bha,
+                    rotation,
                 }
             });
 
@@ -615,14 +603,14 @@ mod step {
                     z_bi, x_bi,
                     b_raw_bMGR, c_raw_bMGR,
                     dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
-                    theta_ba,
+                    rot_ba,
             ] = crate::utils::split::split_into(
                 proj_bd,
                 [
                     d_inner, d_inner,
                     bc_size, bc_size,
                     nheads, nheads, nheads,
-                    num_rope_angles,
+                    self.num_rotation_channels,
                 ],
                 1,
             );
@@ -664,29 +652,18 @@ mod step {
             );
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
 
-            // ── RoPE: update cumulative angle, rotate B and C ──────────────────
-            let theta_scaled_ba = theta_ba.tanh() * std::f32::consts::PI;
-            let raw_angle_bha = dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
-            // Wrap to [−π, π] so the accumulator stays bounded across decode steps.
-            let new_cum_angle_bha = wrap_angle(cache.cum_angle_bha.clone() + raw_angle_bha);
-
-            // Broadcast angles over mimo_rank
-            let new_cum_angle_bmha = new_cum_angle_bha
-                .clone()
-                .unsqueeze_dim::<4>(1) // new_cum_angle_b1ha
-                .expand([batch, mimo_rank, nheads, num_rope_angles]); // new_cum_angle_bmha
-            // SISO uses interleaved (pairwise) pairing; MIMO uses half-and-half.
-            // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
-            let rotate_pairwise = mimo_rank == 1;
-            let rope_dim = self.rope_dim;
-            let b_bmhr = apply_rope_partial::<4>(
+            // ── Update cumulative rotation, rotate B and C ─────────────────────
+            // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
+            // See [`rotate_bc_step`].
+            let (b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
+                rot_ba,
+                dt_bh.clone(),
+                cache.rotation.clone(),
                 b_bmhr,
-                new_cum_angle_bmha.clone(),
-                rope_dim,
-                rotate_pairwise,
+                c_bmhr,
+                self.rotation_kind(),
+                self.rope_dim,
             );
-            let c_bmhr =
-                apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
 
             // ── Build MIMO value tensors ───────────────────────────────────────
             // Insert the mimo_rank axis at position 1 of `_bhp`.
@@ -801,7 +778,7 @@ mod step {
             cache.ssm_bhpr = new_state_bhpr;
             cache.k_state_bmhr = b_bmhr;
             cache.v_state_bhp = x_bhp;
-            cache.cum_angle_bha = new_cum_angle_bha;
+            cache.rotation = new_rotation;
 
             (out_bm, cache)
         }

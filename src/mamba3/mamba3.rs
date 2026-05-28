@@ -241,6 +241,21 @@ pub struct Mamba3 {
     ///
     /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
+
+    /// Whether the block uses the quaternion rotation
+    /// ([`RotationKind::Quaternion4D`]) rather than the abelian RoPE
+    /// ([`RotationKind::Complex2D`]). Stored as a primitive (Module-constant);
+    /// reconstruct the enum via [`Self::rotation_kind`].
+    pub rotation_is_quaternion: bool,
+
+    /// Number of in-projection channels devoted to the rotation parameters
+    /// (`num_rope_angles` for `Complex2D`, `3·num_quat_blocks` for
+    /// `Quaternion4D`); the size of the last `in_proj` split segment.
+    pub num_rotation_channels: usize,
+
+    /// Number of quaternion blocks (`rope_dim / 4`); only used when
+    /// `rotation_is_quaternion`.
+    pub num_quat_blocks: usize,
 }
 
 impl Mamba3 {
@@ -261,6 +276,15 @@ impl Mamba3 {
     /// `per_head_dim = d_inner / nheads`.
     pub fn per_head_dim(&self) -> usize {
         self.d_inner() / self.nheads()
+    }
+
+    /// Reconstruct the [`RotationKind`] from the stored primitive flag.
+    pub fn rotation_kind(&self) -> RotationKind {
+        if self.rotation_is_quaternion {
+            RotationKind::Quaternion4D
+        } else {
+            RotationKind::Complex2D
+        }
     }
 }
 
@@ -478,15 +502,12 @@ impl Mamba3Config {
             "rope_fraction must be 0.0, 0.5 or 1.0"
         );
         assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
-        // Step 1 of the quaternion-rotation staging: the config switch and
-        // in-projection sizing are in place, but forward/step do not yet branch
-        // on the rotation kind (that is step 3). Fail fast rather than silently
-        // running the abelian path on a quaternion-sized projection.
-        assert!(
-            matches!(self.rotation, RotationKind::Complex2D),
-            "RotationKind::Quaternion4D is configured but not yet wired into \
-             forward/step (staged change — only the config + cache type exist so far)"
-        );
+        if matches!(self.rotation, RotationKind::Quaternion4D) {
+            assert!(
+                self.state_rank.is_multiple_of(4),
+                "Quaternion4D requires state_rank to be a multiple of 4"
+            );
+        }
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -579,6 +600,9 @@ impl Mamba3Config {
             rope_dim: self.rope_dim(),
             num_rope_angles,
             mimo_rank,
+            rotation_is_quaternion: matches!(self.rotation, RotationKind::Quaternion4D),
+            num_rotation_channels: self.num_rotation_channels(),
+            num_quat_blocks: self.num_quat_blocks(),
         }
     }
 }
@@ -618,20 +642,10 @@ impl Mamba3 {
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        // Implies single-ssd pathway if missing.
-        let cache = cache.unwrap_or_else(|| {
-            let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
-            let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], &device);
-            crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
-                ssm_bhpr,
-                k_state_bmhr,
-                v_state_bhp,
-                cum_angle_bha,
-            }
-            .into()
-        });
+        // Implies single-ssd pathway if missing — except for the quaternion
+        // rotation, which is realised only by the double-ssd pathway (see
+        // [`forward_single_ssd`]).
+        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
         // ── SSD Pathway Selection ─────────────────────────────────────────────
         match cache {
@@ -643,6 +657,42 @@ impl Mamba3 {
                 let (out_bsm, cache) = self.forward_single_ssd(input_bsm, Some(cache), &ssd_path);
                 (out_bsm, cache.into())
             }
+        }
+    }
+
+    /// Build the default per-call cache: single-ssd for the abelian rotation,
+    /// double-ssd for [`RotationKind::Quaternion4D`] (the only pathway that
+    /// realises the quaternion rotation). The rotation accumulator is the
+    /// matching [`RotationState`] variant.
+    fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
+        let nheads = self.nheads();
+        let per_head_dim = self.per_head_dim();
+        let state_rank = self.state_rank;
+        let mimo_rank = self.mimo_rank;
+        let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
+        let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
+        let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+        let rotation = if self.rotation_is_quaternion {
+            RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
+        } else {
+            RotationState::zeros_angle(batch, nheads, self.num_rope_angles, device)
+        };
+        if self.rotation_is_quaternion {
+            crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache {
+                ssm_bhpr,
+                k_state_bmhr,
+                v_state_bhp,
+                rotation,
+            }
+            .into()
+        } else {
+            crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
+                ssm_bhpr,
+                k_state_bmhr,
+                v_state_bhp,
+                rotation,
+            }
+            .into()
         }
     }
 }
@@ -691,20 +741,8 @@ mod step {
             assert_eq!(nheads % ngroups, 0);
 
             // ── Initialise cache if not provided ──────────────────────────────────
-            // Implies single-ssd pathway if missing.
-            let cache = cache.unwrap_or_else(|| {
-                let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-                let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
-                let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-                let cum_angle_bha = Tensor::zeros([batch, nheads, num_rope_angles], &device);
-                crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
-                    ssm_bhpr,
-                    k_state_bmhr,
-                    v_state_bhp,
-                    cum_angle_bha,
-                }
-                .into()
-            });
+            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
+            let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
             // ── SSD Pathway Selection ─────────────────────────────────────────────
             match cache {

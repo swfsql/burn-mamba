@@ -87,7 +87,11 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
         k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
         v_state_bhp: mk3([batch, nheads, per_head_dim]),
-        cum_angle_bha: mk3([batch, nheads, num_rope_angles]),
+        rotation: crate::mamba3::rotation::RotationState::Angle(mk3([
+            batch,
+            nheads,
+            num_rope_angles,
+        ])),
     }
 }
 
@@ -133,7 +137,7 @@ fn run_with_grads(
     let ssm = cache.ssm_bhpr;
     let k = cache.k_state_bmhr;
     let v = cache.v_state_bhp;
-    let angle = cache.cum_angle_bha;
+    let angle = cache.rotation.angle();
     let final_ssm = ssm.clone().inner();
     let final_k = k.clone().inner();
     let final_v = v.clone().inner();
