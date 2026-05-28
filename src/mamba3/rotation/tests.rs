@@ -507,6 +507,98 @@ fn quaternion_block_forward_step_parity_mimo() {
     quaternion_forward_step_parity(1.0, 2);
 }
 
+/// Chunked-prefill continuity for Quaternion4D: a single `forward` over the full
+/// sequence must equal a split `forward(prefix)` → `forward(suffix)` that threads
+/// the cache across the seam (exercises the cross-chunk quaternion carry at the
+/// block level).
+#[test]
+fn quaternion_split_prefill_matches_full() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let model = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(0.5)
+        .with_rotation(RotationKind::Quaternion4D)
+        .init(&device);
+
+    let (batch, seq, split) = (2, 6, 4);
+    let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
+
+    let (out_full, cache_full) =
+        model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
+
+    let prefix = input.clone().narrow(1, 0, split);
+    let suffix = input.narrow(1, split, seq - split);
+    let (out_pre, mid) = model.forward(prefix, None, Mamba3SsdPath::Minimal(None));
+    let (out_suf, cache_split) = model.forward(suffix, Some(mid), Mamba3SsdPath::Minimal(None));
+    let out_cat = Tensor::cat(vec![out_pre, out_suf], 1);
+
+    let d_out = max_abs_diff(out_full, out_cat);
+    assert!(d_out < 1e-3, "quaternion split-prefill output mismatch: {d_out:.6}");
+
+    // Final SSM state must also match (both pathways are double-ssd for quaternion).
+    let s_full = cache_full.double_ssd().unwrap().ssm_bhpr;
+    let s_split = cache_split.double_ssd().unwrap().ssm_bhpr;
+    let d_state = max_abs_diff(s_full, s_split);
+    assert!(d_state < 1e-3, "quaternion split-prefill final-state mismatch: {d_state:.6}");
+}
+
+/// Gradient parity for Quaternion4D: backprop through the chunked `forward` and
+/// through the recurrent `step` unrolling must agree (same function ⇒ same
+/// gradients), confirming the backward path through the quaternion scan matches
+/// the recurrent form.
+#[test]
+fn quaternion_forward_step_grad_parity() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let model = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(1.0)
+        .with_rotation(RotationKind::Quaternion4D)
+        .init(&device.clone().autodiff());
+
+    let (batch, seq) = (2, 4);
+    let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
+    let head = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
+
+    // Fresh autodiff leaves per path.
+    let p_fwd = Param::from_tensor(Tensor::from_inner(input.clone()));
+    let p_step = Param::from_tensor(Tensor::from_inner(input));
+
+    // Chunked forward.
+    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None));
+    let loss_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum();
+    let g_fwd = loss_fwd.backward();
+    let d_in_fwd = p_fwd.val().grad(&g_fwd).expect("grad input (forward)");
+    let d_w_fwd = model.in_proj.weight.val().grad(&g_fwd).expect("grad in_proj (forward)");
+
+    // Recurrent step unrolling.
+    let mut cache = None;
+    let mut outs: Vec<Tensor<3>> = Vec::with_capacity(seq);
+    for t in 0..seq {
+        let x_t = p_step.val().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (o, c) = model.step(x_t, cache);
+        outs.push(o.unsqueeze_dim::<3>(1));
+        cache = Some(c);
+    }
+    let out_step = Tensor::cat(outs, 1);
+    let loss_step = (out_step * Tensor::from_inner(head)).sum();
+    let g_step = loss_step.backward();
+    let d_in_step = p_step.val().grad(&g_step).expect("grad input (step)");
+    let d_w_step = model.in_proj.weight.val().grad(&g_step).expect("grad in_proj (step)");
+
+    let d_in = max_abs_diff(d_in_fwd, d_in_step);
+    let d_w = max_abs_diff(d_w_fwd, d_w_step);
+    assert!(d_in < 1e-2, "quaternion forward/step input-grad mismatch: {d_in:.6}");
+    assert!(d_w < 1e-2, "quaternion forward/step in_proj-grad mismatch: {d_w:.6}");
+}
+
 // ---------------------------------------------------------------------------
 // 9. Cache accumulator variant (step 2): RotationState
 // ---------------------------------------------------------------------------
