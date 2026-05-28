@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RotationKind","RotationState","RotationStateRecord","RotationStateRecordItem"],"fn":["quat_conj","quat_cumprod","quat_from_scaled_axis","quat_mul","quat_normalize","quat_to_rot4","rotate_bc_forward","rotate_bc_step","rotate_blocks_partial","rotate_state_rank_blocks"]};
