@@ -147,14 +147,14 @@ impl Mamba3 {
         let x_bshp = x_bsi.reshape([batch, sequence, nheads, per_head_dim]);
 
         // ── Step 4: QK-Norm on B and C ────────────────────────────────────────
-        let b_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+        let b_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
             b_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
             &self.b_norm,
             self.b_bias_hmr.val(),
             3,
             nheads,
         );
-        let c_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+        let c_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
             c_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
             &self.c_norm,
             self.c_bias_hmr.val(),
@@ -212,7 +212,7 @@ impl Mamba3 {
 
         // Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ)  → [batch, nheads, per_head_dim, state_rank]
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let v_prev_mimo_bmhp = helpers::build_v_with_mimo::<_, 3, 4>(
+        let v_prev_mimo_bmhp = helpers::build_v_with_mimo::<3, 4>(
             cache.v_state_bhp.clone(),
             mimo_x_hmp.as_ref(),
             1,
@@ -239,7 +239,7 @@ impl Mamba3 {
         let pad = sequence_padded - sequence;
 
         // V passed to SSD is raw x with MIMO_V applied (not γ-scaled).
-        let v_bshmp = helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+        let v_bshmp = helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
         // v_bshmp has axis order [b, s, m, h, p] (insert_dim=2 onto [b,s,h,p]).
 
         #[rustfmt::skip]
@@ -297,7 +297,7 @@ impl Mamba3 {
         // ── Step 9: D skip + gate + MIMO_O down-projection ────────────────────
         // D skip uses raw x ⊙ mimo_x (not γ-scaled, matching forward).
         let v_raw_bsmhp =
-            helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+            helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp;
 

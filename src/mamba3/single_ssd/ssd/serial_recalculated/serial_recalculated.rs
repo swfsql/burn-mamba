@@ -79,6 +79,7 @@ impl Mamba3SingleSsdInput {
     Flex:  cfg(feature = "backend-flex"),
     NdArray:  cfg(feature = "backend-ndarray"),
     LibTorch:  cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu")),
+    Autodiff:  cfg(feature = "autodiff"),
 )]
 pub trait Mamba3SingleSsdBackendExt: Backend {
     /// Memory-efficient MIMO single-ssd form serial SSD.

@@ -1,14 +1,7 @@
 use super::*;
-use burn::backend::{Autodiff, Flex};
 use burn::tensor::Distribution;
 
-/// Inner (non-autodiff) backend used for materialising values and
-/// extracted gradients.
-type InnerB = Flex;
-/// Autodiff-wrapped backend used to drive `.backward()`.
-type B = Autodiff<InnerB>;
-
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 fn small_config() -> Mamba2Config {
     Mamba2Config::new(32)
@@ -164,7 +157,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
             let d = (a.$field.clone() - b.$field.clone())
                 .abs()
                 .max()
-                .into_scalar();
+                .into_scalar::<f32>();
             eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
@@ -208,7 +201,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath, random_init: bool) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     // seq_len >= conv_kernel so the final conv window is fully determined by
@@ -345,7 +338,7 @@ fn step_matches_forward_norm_before_gate_random_init() {
 /// must agree — from a zero (`random_init = false`) or random initial cache.
 fn run_ssd_paths_agree(cfg: Mamba2Config, random_init: bool) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 8;

@@ -186,8 +186,7 @@ minimal impl) and are intentionally not analyzed here — see
 │       │   ├── cross_entropy.rs       # cross-entropy
 │       │   ├── mod.rs
 │       │   └── mse.rs                 # mean squared error
-│       ├── mod.rs                     # utils root: stable_max, div_eps (per-dtype epsilon)
-│       ├── primitive.rs               # FloatTensor primitive ↔ Tensor<B,D> conversion helper
+│       ├── mod.rs                     # utils root: div_eps (per-dtype epsilon, takes runtime DType)
 │       ├── rms_norm.rs                # RmsNorm (last-dim, fp16-safe); used as QK-Norm in Mamba-3
 │       ├── rms_norm_gated.rs          # RmsNormGated: norm + SiLU(z) gate (Mamba-2 out norm; Mamba-3 optional out norm)
 │       ├── sanity.rs                  # sanity(): optional NaN/Inf guards gated by DENY_NAN/DENY_INF
@@ -449,11 +448,11 @@ Mamba-3 QK-Norm), `rms_norm_gated`. The fp16 RMSNorm paths avoid computing `x²`
 directly (overflow) by normalising against `max(|x|)` first. Other helpers:
 `segsum` (1-semiseparable mask via log-space prefix-sum differences),
 `gqa` (group→head expansion), `split` (typed array split),
-`combined_grad`/`backend_macros`/`primitive` (custom-backward plumbing),
+`combined_grad`/`backend_macros`/`fprim` (custom-backward plumbing),
 `sanity` (NaN/Inf guards gated by the crate-level `DENY_NAN`/`DENY_INF`
 constants in `lib.rs`), `scheduler` (LR schedules), and `loss/` (bce,
-cross_entropy, mse). `div_eps`/`stable_max` (in `utils/mod.rs`) give per-dtype
-numerical constants.
+cross_entropy, mse). `div_eps` (in `utils/mod.rs`) gives a per-dtype
+numerical epsilon for safe division.
 
 ### Examples (`examples/`)
 

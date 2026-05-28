@@ -1,15 +1,8 @@
 use super::*;
-use burn::backend::{Autodiff, Flex};
 use burn::module::Param;
 use burn::tensor::Distribution;
 
-/// Inner (non-autodiff) backend used for materialising values and
-/// extracted gradients.
-type InnerB = Flex;
-/// Autodiff-wrapped backend used to drive `.backward()`.
-type B = Autodiff<InnerB>;
-
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32) // d_model = 32
@@ -216,7 +209,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
             let d = (a.$field.clone() - b.$field.clone())
                 .abs()
                 .max()
-                .into_scalar();
+                .into_scalar::<f32>();
             eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
@@ -261,7 +254,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 5;

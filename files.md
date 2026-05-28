@@ -414,18 +414,16 @@ Custom activations Burn either lacks or needs fp16-stable variants of.
   marker trait + blanket impl for `Autodiff<B>`. Cuts the per-family
   backend-ext boilerplate (Mamba-3 uses these; Mamba-2 hand-rolls the same).
 
-### `utils/primitive.rs`
-- `mk::<B, D>(FloatTensor<B>) -> Tensor<B, D>` — primitive→`Tensor` conversion
-  used at the autodiff boundary in the `serial_recalculated` impls.
-
 ### `utils/fprim.rs`
 - `F<B, const D>` — a rank-tagged newtype over a backend's `FloatTensor<B>`
   primitive that mirrors the slice of the high-level `Tensor` method API
   (`matmul`/`permute`/`reshape`/`squeeze_dim`/`unsqueeze_dim(s)`/`expand`/`exp`/
   `sum_dim`/`cumsum`/`slice`/`narrow`/`triu`/`mask_fill`/`stack`/`cat`/`zeros`/
   `full`, plus `+ - * neg`). Because Burn 0.22's `Tensor` is pinned to the global
-  `Dispatch` backend, a custom `Backward<B, _>` node (generic `B`) cannot build a
-  `Tensor`; this wrapper keeps the recompute-backward gradient math
+  `Dispatch` backend, both the trait default forward bodies
+  (`*/serial_recalculated/serial_recalculated.rs`, run under a generic `B`) and
+  the custom `Backward<B, _>` nodes cannot build a `Tensor`; this wrapper keeps
+  the forward K-kernels and the recompute-backward gradient math
   (`*/serial_recalculated/combined_backward.rs`) reading like the original tensor
   code while operating on `B::float_*` primitives.
 - `Mask<B>` + `san(&F)` — companion bool-mask wrapper for `mask_fill`, and the

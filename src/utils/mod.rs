@@ -6,10 +6,8 @@
 //! (`backend_macros` / `combined_grad` / `primitive`), runtime `sanity` guards,
 //! LR `scheduler`s, and the per-dtype numerical constants below.
 
-use ElementConversion;
-use burn::prelude::*;
-use burn::tensor::{DType, Element};
-use burn::backend::Backend;
+use burn::prelude::ToElement;
+use burn::tensor::DType;
 
 /// Macros emitting per-backend `BackendExt` impls + autodiff marker traits.
 #[macro_use]
@@ -26,8 +24,6 @@ pub mod gqa;
 pub mod log_sigmoid;
 /// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
 pub mod loss;
-/// `FloatTensor` primitive ↔ `Tensor<D>` conversion helper.
-pub(crate) mod primitive;
 /// Root-mean-square normalisation (last-dim, fp16-safe); also the Mamba-3
 /// QK-Norm.
 pub mod rms_norm;
@@ -49,47 +45,18 @@ pub mod split;
 #[cfg(test)]
 pub mod test_helpers;
 
-/// The largest finite value representable by the backend's float element type.
-///
-/// Used as a saturating upper bound (e.g. clamping) that works uniformly across
-/// f64/f32/f16/bf16 without overflowing the narrower formats.  Panics on
-/// non-float element types.
-pub fn stable_max() -> B::FloatElem {
-    match <B::FloatElem as Element>::dtype() {
-        DType::F64 => f64::MAX.elem(),
-        DType::F32 | DType::Flex32 => f32::MAX.elem(),
-        DType::F16 => burn::tensor::f16::MAX.elem(),
-        DType::BF16 => burn::tensor::bf16::MAX.elem(),
-        DType::I64
-        | DType::I32
-        | DType::I16
-        | DType::I8
-        | DType::U64
-        | DType::U32
-        | DType::U16
-        | DType::U8 => {
-            unreachable!()
-        }
-        DType::Bool(_) => {
-            unreachable!()
-        }
-        DType::QFloat(_) => {
-            unimplemented!()
-        }
-    }
-}
-
-/// A small per-dtype epsilon for safe division (`x / (y + eps)`), returned as
-/// `f32`.
+/// A small `dtype`-specific epsilon for safe division (`x / (y + eps)`),
+/// returned as `f32`.
 ///
 /// The value is chosen per float format as the geometric mean (average in
 /// log10 space) of two reference magnitudes: a scaled function of the format's
 /// minimum exponent and the format's machine epsilon.  This places `eps`
 /// comfortably above the denormal/underflow floor while staying negligible
 /// relative to typical activations, for each of f64/f32/f16/bf16.  The
-/// resulting constants are noted inline.  Panics on non-float element types.
-pub fn div_eps_f32() -> f32 {
-    match <B::FloatElem as Element>::dtype() {
+/// resulting constants are noted inline.  `dtype` is the runtime float dtype of
+/// the tensor being divided (e.g. `x.dtype()`).  Panics on non-float dtypes.
+pub fn div_eps(dtype: DType) -> f32 {
+    match dtype {
         // 4.0693917e-16
         DType::F64 => {
             let raw_exp = -(-f64::MIN_EXP as f32 * 2.3f32).powf(0.35f32);
@@ -133,9 +100,4 @@ pub fn div_eps_f32() -> f32 {
             unimplemented!()
         }
     }
-}
-
-/// [`div_eps_f32`] converted to the backend's native float element type.
-pub fn div_eps() -> B::FloatElem {
-    div_eps_f32().elem()
 }

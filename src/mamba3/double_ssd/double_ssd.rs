@@ -260,14 +260,14 @@ impl Mamba3 {
         // QK-Norm over state_rank, then expand ngroups→nheads, then add per-(head,
         // mimo-rank) bias [nheads, mimo_rank, state_rank]. Group dim is axis 3 of
         // `_bsmgr` (D = 5).
-        let b_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+        let b_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
             b_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
             &self.b_norm,
             self.b_bias_hmr.val(),
             3,
             nheads,
         );
-        let c_bsmhr = helpers::qk_norm_expand_bias::<_, 5, 6>(
+        let c_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
             c_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
             &self.c_norm,
             self.c_bias_hmr.val(),
@@ -398,9 +398,9 @@ impl Mamba3 {
         // Build V tensors — insert the mimo_rank axis at position 3 of `_bnlhp`.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
-            helpers::build_v_with_mimo::<_, 5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
+            helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
         let v_beta_bnlmhp =
-            helpers::build_v_with_mimo::<_, 5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
+            helpers::build_v_with_mimo::<5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
 
         let input_gamma = Mamba3DoubleSsdInput {
             v_bnlmhp: v_gamma_bnlmhp,
@@ -442,7 +442,7 @@ impl Mamba3 {
         // D skip uses raw x * mimo_x_hmp (not gamma-scaled)
         // Insert the mimo_rank axis at position 2 of `_bshp`.
         let v_raw_bsmhp =
-            helpers::build_v_with_mimo::<_, 4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+            helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
 
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
@@ -621,14 +621,14 @@ mod step {
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
             // Group dim is axis 2 of `_bmgr` (D = 4).
-            let b_bmhr = helpers::qk_norm_expand_bias::<_, 4, 5>(
+            let b_bmhr = helpers::qk_norm_expand_bias::<4, 5>(
                 b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
                 &self.b_norm,
                 self.b_bias_hmr.val(),
                 2,
                 nheads,
             );
-            let c_bmhr = helpers::qk_norm_expand_bias::<_, 4, 5>(
+            let c_bmhr = helpers::qk_norm_expand_bias::<4, 5>(
                 c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
                 &self.c_norm,
                 self.c_bias_hmr.val(),
@@ -664,8 +664,8 @@ mod step {
             // Insert the mimo_rank axis at position 1 of `_bhp`.
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let x_vals_bmhp =
-                helpers::build_v_with_mimo::<_, 3, 4>(x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
-            let xs_vals_bmhp = helpers::build_v_with_mimo::<_, 3, 4>(
+                helpers::build_v_with_mimo::<3, 4>(x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
+            let xs_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
                 cache.v_state_bhp.clone(),
                 mimo_x_hmp.as_ref(),
                 1,

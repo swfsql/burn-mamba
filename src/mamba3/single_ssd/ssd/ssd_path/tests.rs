@@ -1,11 +1,8 @@
 use super::*;
-use burn::backend::{Autodiff, Flex};
 use burn::module::Param;
 use burn::tensor::Distribution;
 
-type InnerB = Flex;
-type B = Autodiff<InnerB>;
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 /// Random inputs for the single-SSD. `da` is drawn from a
 /// negative-mean distribution so the implied per-token decay `exp(da)`

@@ -1,15 +1,8 @@
 use super::*;
-use burn::backend::{Autodiff, Flex};
 use burn::module::Param;
 use burn::tensor::Distribution;
 
-/// Inner (non-autodiff) backend used for materialising values and
-/// extracted gradients.
-type InnerB = Flex;
-/// Autodiff-wrapped backend used to drive `.backward()`.
-type B = Autodiff<InnerB>;
-
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 /// Build a randomised set of tensors on the inner backend (no grad
 /// tracking yet — `Param::from_tensor` is applied per-path below to

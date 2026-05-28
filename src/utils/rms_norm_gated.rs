@@ -81,7 +81,7 @@ impl RmsNormGated {
 
         let normalized = match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
-                let div_eps = div_eps();
+                let div_eps = div_eps(x.dtype());
 
                 let rms = (x.clone() * x.clone()).mean_dim(D - 1).sqrt();
                 let normalized = (x / (rms + div_eps)) * self.gamma.val().unsqueeze();
@@ -89,7 +89,7 @@ impl RmsNormGated {
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
-                let div_eps: f16 = f16::from_elem(div_eps()) * f16::from_f32(2.);
+                let div_eps: f16 = f16::from_elem(div_eps(x.dtype())) * f16::from_f32(2.);
 
                 // avoid calculating x² directly (due to overflow e.g. on 256 * 256)
                 let max = x.clone().no_grad().detach().abs().max().expand(x.shape());

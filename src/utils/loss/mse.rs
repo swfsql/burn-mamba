@@ -50,7 +50,7 @@ impl MseLoss {
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
-                let div_eps: f16 = f16::from_elem(div_eps()) * f16::from_f32(2.);
+                let div_eps: f16 = f16::from_elem(div_eps(logits.dtype())) * f16::from_f32(2.);
                 // avoid calculating sub² directly (due to overflow e.g. on 256 * 256)
                 let sub = logits.sub(targets);
                 let max = sub.clone().no_grad().detach().abs().max();
@@ -83,7 +83,7 @@ impl MseLoss {
     }
 
     /// Compute the criterion on the input tensor without reducing.
-    pub fn forward_no_reduction<const D: usize, B: Backend>(
+    pub fn forward_no_reduction<const D: usize>(
         &self,
         logits: Tensor<D>,
         targets: Tensor<D>,

@@ -81,7 +81,7 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
 ) -> Tensor<D> {
     // RmsNorm operates on the last dim only, so the leading shape passes through.
     let normed = norm.forward(raw_mgr);
-    let expanded = gqa_expand_to_heads::<_, D, DP1>(normed, group_dim, nheads);
+    let expanded = gqa_expand_to_heads::<D, DP1>(normed, group_dim, nheads);
     // Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
     let bias = bias_hmr.permute([1, 0, 2]).unsqueeze::<D>();
     expanded + bias

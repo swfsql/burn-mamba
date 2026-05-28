@@ -1,14 +1,7 @@
 use super::*;
-use burn::backend::{Autodiff, Flex};
 use burn::tensor::Distribution;
 
-/// Inner (non-autodiff) backend used for materialising values and
-/// extracted gradients.
-type InnerB = Flex;
-/// Autodiff-wrapped backend used to drive `.backward()`.
-type B = Autodiff<InnerB>;
-
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 fn small_config() -> Mamba1Config {
     Mamba1Config::new(32) // d_model = 32
@@ -51,10 +44,10 @@ struct Heads {
 /// scalar loss with a fixed (non-tracked) random "head" and return the
 /// gradients of the input and a representative set of model parameters.
 fn run_with_grads(
-    model: &Mamba1<B>,
+    model: &Mamba1,
     input: &Param<Tensor<3>>,
     heads: &Heads,
-    forward: impl FnOnce(&Mamba1<B>, Tensor<3>) -> (Tensor<3>, Mamba1Cache<B>),
+    forward: impl FnOnce(&Mamba1, Tensor<3>) -> (Tensor<3>, Mamba1Cache),
 ) -> RunGrads {
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
@@ -129,7 +122,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
             let d = (a.$field.clone() - b.$field.clone())
                 .abs()
                 .max()
-                .into_scalar();
+                .into_scalar::<f32>();
             eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
@@ -166,7 +159,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// `forward` and the `step` unrolling. With `random = false` the cache is
 /// zero (the standard fresh start); with `random = true` it holds random
 /// values, exercising forward/step parity from an arbitrary initial state.
-fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache<B> {
+fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache {
     let device: Device = Default::default();
     let d_inner = cfg.d_inner();
     let conv_kernel = cfg.conv_kernel;
@@ -202,7 +195,7 @@ fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cac
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     // seq_len >= d_conv so the final conv window is fully determined by the

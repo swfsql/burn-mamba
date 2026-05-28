@@ -1,13 +1,10 @@
 use super::*;
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3Config;
-use burn::backend::{Autodiff, Flex};
 use burn::module::Param;
 use burn::tensor::Distribution;
 
-type InnerB = Flex;
-type B = Autodiff<InnerB>;
-type Device = <InnerB as burn::tensor::backend::BackendTypes>::Device;
+type Device = burn::prelude::Device;
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -180,7 +177,7 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
             let d = (a.$field.clone() - b.$field.clone())
                 .abs()
                 .max()
-                .into_scalar();
+                .into_scalar::<f32>();
             eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
@@ -367,7 +364,7 @@ fn guard_random_init_consumed(
 /// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
 fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 5;
@@ -398,7 +395,7 @@ fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) 
     let diff = (r_fwd_double_ssd.out.clone() - r_fwd_single_ssd.out.clone())
         .abs()
         .max()
-        .into_scalar();
+        .into_scalar::<f32>();
     assert!(
         diff < 1e-4,
         "forward_double_ssd vs forward_single_ssd max absolute difference = {diff:.6} (expected < 1e-4)"
@@ -498,7 +495,7 @@ fn run_forward_single_ssd_matches_step(
     random_init: bool,
 ) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 5;
@@ -535,7 +532,7 @@ fn run_forward_single_ssd_matches_step(
     let diff = (r_fwd_single_ssd.out.clone() - r_step.out.clone())
         .abs()
         .max()
-        .into_scalar();
+        .into_scalar::<f32>();
     assert!(
         diff < 1e-4,
         "forward_single_ssd vs step max absolute difference = {diff:.6} (expected < 1e-4)"
@@ -619,7 +616,7 @@ fn forward_single_ssd_matches_step_recalc_mimo() {
 /// initial cache is actually consumed (not silently ignored).
 fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path: Mamba3SsdPath) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 6;
@@ -816,7 +813,7 @@ fn run_cache_fields_with_grads(
 /// non-trivial previous-token K/V history.
 fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let device: Device = Default::default();
-    let model = cfg.init::<B>(&device);
+    let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
     let seq_len = 6;

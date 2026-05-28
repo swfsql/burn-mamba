@@ -71,6 +71,7 @@ impl Mamba3DoubleSsdInput {
     Flex:  cfg(feature = "backend-flex"),
     NdArray:  cfg(feature = "backend-ndarray"),
     LibTorch:  cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu")),
+    Autodiff:  cfg(feature = "autodiff"),
 )]
 pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// Memory-efficient MIMO serial SSD.

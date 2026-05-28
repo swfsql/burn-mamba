@@ -1,9 +1,13 @@
 use super::*;
 use crate::mamba2::ssd::serial;
-use burn::backend::Flex;
+use crate::utils::fprim::F;
+use burn::backend::Dispatch;
+use burn::prelude::*;
 use burn::tensor::Distribution;
 
-type B = Flex;
+/// The primitive backend the high-level `Tensor` is pinned to; `combined_backward`
+/// runs generically over it here (dispatching to the feature-selected backend).
+type B = Dispatch;
 
 /// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
 ///
@@ -107,31 +111,34 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     );
 
     // ─── Run combined_backward (gets d_da_local + d_dt_orange) ───────
-    let grads = combined_backward(
-        d_y_bnlhp.clone(),
-        d_final_bhpr,
-        x_bnlhp,
-        dt_discretized_bhnl.clone(),
-        b_bnlhr,
-        c_bnlhr,
-        d_h,
-        initial_state_bhpr,
-        a_decay_h,
+    // `combined_backward` operates on `F<B>` primitives, so wrap the high-level
+    // `Tensor` inputs (and unwrap the `F` outputs back to `Tensor` below).
+    let grads = combined_backward::<B>(
+        F::new(d_y_bnlhp.clone().into_primitive()),
+        F::new(d_final_bhpr.into_primitive()),
+        F::new(x_bnlhp.into_primitive()),
+        F::new(dt_discretized_bhnl.clone().into_primitive()),
+        F::new(b_bnlhr.into_primitive()),
+        F::new(c_bnlhr.into_primitive()),
+        F::new(d_h.into_primitive()),
+        F::new(initial_state_bhpr.into_primitive()),
+        F::new(a_decay_h.into_primitive()),
     );
+    let d_da_local_bhnl = Tensor::<4>::from_primitive(grads.d_da_local_bhnl.inner());
+    let d_dt_orange_bhnl = Tensor::<4>::from_primitive(grads.d_dt_orange_bhnl.inner());
 
     // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
     let einsum_bhnl: Tensor<4> = (out_x_bnlhp * d_y_bnlhp)
         .sum_dim(4) // einsum_bnlh1
         .squeeze_dim::<4>(4) // einsum_bnlh
         .permute([0, 3, 1, 2]); // einsum_bhnl
-    let oracle_bhnl = einsum_bhnl - grads.d_dt_orange_bhnl * dt_discretized_bhnl;
+    let oracle_bhnl = einsum_bhnl - d_dt_orange_bhnl * dt_discretized_bhnl;
 
     // ─── Compare ─────────────────────────────────────────────────────
-    let diff: f32 = (grads.d_da_local_bhnl - oracle_bhnl)
+    let diff: f32 = (d_da_local_bhnl - oracle_bhnl)
         .abs()
         .max()
-        .into_scalar()
-        .elem();
+        .into_scalar::<f32>();
     assert!(
         diff < 1e-3,
         "d_da_local oracle identity violated; max abs diff = {diff}",
