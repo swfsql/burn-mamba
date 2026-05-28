@@ -280,8 +280,13 @@ decoding too.
   half-and-half/GPT-J (MIMO Tilelang).
 - `apply_rope_partial(x, angles, rope_dim, rotate_pairwise)` — rotates only the
   first `rope_dim` entries (partial RoPE, `rope_fraction=0.5`); falls back to
-  `apply_rope` when `rope_dim == state_rank`. Used by **both** pathways
+  `apply_rope` when `rope_dim == state_rank`, and is the **identity** when
+  `rope_dim == 0` (`rope_fraction=0`, RoPE disabled). Used by **both** pathways
   (single_ssd imports it from here).
+- `wrap_angle(angles)` — reduces angles mod `2π` into `[−π, π]` with a `detach`ed
+  offset (value-exact, gradient identity) before `sin`/`cos` and when storing the
+  `cum_angle` accumulator, preserving low-bit-float precision. Used by **both**
+  pathways.
 
 ### `mamba3/double_ssd/cache.rs`
 - `struct Mamba3DoubleSsdCache` — `ssm_bhpr` (trapezoidal hidden state),

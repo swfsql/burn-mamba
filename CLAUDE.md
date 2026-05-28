@@ -141,7 +141,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── cache.rs                   # Mamba3Cache / Mamba3Caches ENUMS dispatching DoubleSsd vs SingleSsd
 │   │   ├── double_ssd                 # double-pass trapezoidal decomposition (γ-SSD + β-SSD); VikramLex-style
 │   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/cum_angle (NO conv cache)
-│   │   │   ├── double_ssd.rs          # forward_double_ssd / step_double_ssd; apply_rope / apply_rope_partial
+│   │   │   ├── double_ssd.rs          # forward_double_ssd / step_double_ssd; apply_rope / apply_rope_partial / wrap_angle
 │   │   │   ├── double_ssd/tests.rs     # unit tests for double_ssd.rs (forward/step parity, grads)
 │   │   │   ├── mod.rs
 │   │   │   └── ssd                    # standard SSD kernels (reused by both γ and β passes)
@@ -376,7 +376,18 @@ Pairing convention depends on the path: **SISO (mimo_rank == 1)** uses
 interleaved/NeoX pairing `(0,1),(2,3),…` (`rotate_pairwise = true`); **MIMO**
 uses half-and-half/GPT-J pairing (`rotate_pairwise = false`). With
 `rope_fraction = 0.5` only the first `rope_dim` entries are rotated, the rest
-pass through (`apply_rope_partial`).
+pass through (`apply_rope_partial`). `rope_fraction = 0` disables RoPE
+(`rope_dim = 0` ⇒ `apply_rope_partial` is the identity); the angle projection /
+`cum_angle` data flow stay intact via a single dummy angle channel
+(`num_rope_angles` is floored at 1, since Burn has no zero-width tensors). For
+ablations only.
+
+Angles are reduced mod `2π` into `[−π, π]` by `wrap_angle` both before
+`sin`/`cos` and when storing the `cum_angle` accumulator. `sin`/`cos` are
+`2π`-periodic so this is value-exact, and the subtracted multiple of `2π` is
+`detach`ed so the backward pass is unchanged (gradient identity). This keeps the
+accumulator bounded across long sequences / many decode steps and preserves
+low-bit-float (`f16`) precision.
 
 #### Two SSD pathways — the central Mamba-3 design point
 

@@ -26,6 +26,26 @@ use burn::prelude::*;
 // RoPE utility
 // ---------------------------------------------------------------------------
 
+/// Reduce angles modulo `2π` into `[−π, π]`, leaving the autodiff graph intact.
+///
+/// `sin`/`cos` are `2π`-periodic, so subtracting an integer multiple of `2π` is
+/// value-exact. Keeping `|angle| ≤ π` preserves precision in low-bit floats —
+/// roughly half of `f16`'s representable values lie in `|x| ≤ 1`, and the
+/// periodic `sin`/`cos` only lose accuracy when the argument is allowed to drift
+/// to large magnitudes. The same applies to the cumulative angle accumulator,
+/// which would otherwise grow without bound across a long sequence / many decode
+/// steps.
+///
+/// The integer multiple `k` is `detach`ed, so it is a constant with respect to
+/// autodiff: `d/dx (x − k·2π) = 1`, i.e. the backward pass is identical to the
+/// un-wrapped angle. This mirrors the detached `max` rescaling in
+/// [`RmsNormGated`](crate::utils::rms_norm_gated::RmsNormGated).
+pub(crate) fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let k = (angles.clone().detach() * (1.0f32 / two_pi)).round();
+    angles - k * two_pi
+}
+
 /// Apply rotary position embeddings to `x` along its last dimension.
 ///
 /// Two pairing conventions are supported, selected by `rotate_pairwise`:
@@ -53,7 +73,7 @@ pub fn apply_rope<const D: usize>(
     let n2 = n / 2;
     let leading: usize = dims[..D - 1].iter().product();
 
-    let angles_flat = angles.reshape([leading, n2]);
+    let angles_flat = wrap_angle(angles.reshape([leading, n2]));
     let cos = angles_flat.clone().cos();
     let sin = angles_flat.sin();
 
@@ -153,6 +173,7 @@ pub(crate) fn apply_rope_partial<const D: usize>(
     let x_h2_pass = x_h2.narrow(D - 1, num_rope_angles, half - num_rope_angles);
 
     // angles: [..., num_rope_angles] — broadcasts element-wise against the rope-active slices.
+    let angles = wrap_angle(angles);
     let cos = angles.clone().cos();
     let sin = angles.sin();
     let x_h1_rot = cos.clone() * x_h1_rope.clone() - sin.clone() * x_h2_rope.clone();
@@ -514,10 +535,13 @@ impl Mamba3 {
             .narrow(1, sequence - 1, 1) // x_b1hp
             .squeeze_dim::<3>(1); // x_bhp
 
-        // cum_angle at last token
-        cache.cum_angle_bha = cum_angles_bsha
-            .narrow(1, sequence - 1, 1) // cum_angles_b1ha
-            .squeeze_dim::<3>(1); // cum_angles_bha
+        // cum_angle at last token, wrapped to [−π, π] so the accumulator stays
+        // bounded when this cache continues a longer sequence (see [`wrap_angle`]).
+        cache.cum_angle_bha = wrap_angle(
+            cum_angles_bsha
+                .narrow(1, sequence - 1, 1) // cum_angles_b1ha
+                .squeeze_dim::<3>(1), // cum_angles_bha
+        );
 
         (out_bsm, cache)
     }
@@ -643,7 +667,8 @@ mod step {
             // ── RoPE: update cumulative angle, rotate B and C ──────────────────
             let theta_scaled_ba = theta_ba.tanh() * std::f32::consts::PI;
             let raw_angle_bha = dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
-            let new_cum_angle_bha = cache.cum_angle_bha.clone() + raw_angle_bha;
+            // Wrap to [−π, π] so the accumulator stays bounded across decode steps.
+            let new_cum_angle_bha = wrap_angle(cache.cum_angle_bha.clone() + raw_angle_bha);
 
             // Broadcast angles over mimo_rank
             let new_cum_angle_bmha = new_cum_angle_bha

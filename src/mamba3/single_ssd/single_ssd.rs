@@ -19,7 +19,7 @@
 //!
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
-use crate::mamba3::double_ssd::double_ssd::apply_rope_partial;
+use crate::mamba3::double_ssd::double_ssd::{apply_rope_partial, wrap_angle};
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
@@ -344,9 +344,14 @@ impl Mamba3 {
         // ── Update remaining cache fields ─────────────────────────────────────
         cache.k_state_bmhr = b_last_bmhr;
         cache.v_state_bhp = x_last_bhp;
-        cache.cum_angle_bha = cum_angles_bsha
-            .narrow(1, sequence - 1, 1)
-            .squeeze_dim::<3>(1);
+        // Wrapped to [−π, π] so the accumulator stays bounded across a continued
+        // sequence (see [`wrap_angle`]); matches the double-ssd cache convention
+        // so the two caches still inter-convert via field identity.
+        cache.cum_angle_bha = wrap_angle(
+            cum_angles_bsha
+                .narrow(1, sequence - 1, 1)
+                .squeeze_dim::<3>(1),
+        );
 
         (out_bsm, cache)
     }
