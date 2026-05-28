@@ -327,17 +327,26 @@ fn step_matches_forward_norm_before_gate_random_init() {
     );
 }
 
-// ── SSD path agreement ───────────────────────────────────────────────────
+// ── Chunked-prefill continuity (split vs full) ──────────────────────────
 
-/// `Minimal`, `Serial`, and `SerialRecalculated` are chunkwise reformulations
-/// of the same SSD, so their block-level outputs, final caches, and gradients
-/// must agree — from a zero (`random_init = false`) or random initial cache.
-fn run_ssd_paths_agree(cfg: Mamba2Config, random_init: bool) {
+/// One longer `forward` over the whole sequence equals two consecutive
+/// `forward` calls (prefix then suffix) that thread the returned cache (conv
+/// window + SSM state) between them — outputs, final cache, and parameter
+/// gradients all agree. The initial cache is random, so the chaining starts
+/// from a non-trivial state.
+///
+/// `step_matches_forward_random_init` already subsumes this (parity from an
+/// arbitrary initial state implies a `forward`-produced cache continues
+/// correctly); this is a direct, explicit check. A single `Minimal` config
+/// suffices: the three ssd-paths are proven equivalent among themselves in
+/// `mamba2::ssd::ssd_path::tests`.
+fn run_split_matches_full(cfg: Mamba2Config) {
     let device: Device = Default::default();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
-    let seq_len = 8;
+    let seq_len = 6;
+    let split = 2;
     let d_model = cfg.d_model;
     let normal = Distribution::Normal(0.0, 1.0);
 
@@ -352,57 +361,32 @@ fn run_ssd_paths_agree(cfg: Mamba2Config, random_init: bool) {
         ),
     };
 
-    let init_cache = build_init_cache(&cfg, batch, random_init);
+    let ssd_path = Mamba2SsdPath::Minimal(Some(4));
+    let init_cache = build_init_cache(&cfg, batch, true);
 
-    let run = |path: Mamba2SsdPath| {
-        let input_p = param_input(&input);
-        let cache_p = init_cache.clone();
-        run_with_grads(&model, &input_p, &heads, |m, x| {
-            m.forward(x, Some(cache_p), path)
-        })
-    };
-    let r_min = run(Mamba2SsdPath::Minimal(Some(4)));
-    let r_ser = run(Mamba2SsdPath::Serial(Some(4)));
-    let r_rec = run(Mamba2SsdPath::SerialRecalculated(Some(4)));
+    let input_full = param_input(&input);
+    let cache_full = init_cache.clone();
+    let path_full = ssd_path.clone();
+    let r_full = run_with_grads(&model, &input_full, &heads, |m, x| {
+        m.forward(x, Some(cache_full), path_full)
+    });
 
-    assert_outputs_match("Minimal vs Serial", &r_min, &r_ser, 1e-4);
-    assert_outputs_match("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-4);
-    check_grads_match("Minimal vs Serial", &r_min, &r_ser, 1e-3);
-    check_grads_match("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-3);
+    let input_split = param_input(&input);
+    let cache_split = init_cache;
+    let path_split = ssd_path;
+    let r_split = run_with_grads(&model, &input_split, &heads, |m, x| {
+        let prefix = x.clone().narrow(1, 0, split);
+        let suffix = x.narrow(1, split, seq_len - split);
+        let (out_prefix, mid) = m.forward(prefix, Some(cache_split), path_split.clone());
+        let (out_suffix, last) = m.forward(suffix, Some(mid), path_split);
+        (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
+    });
 
-    // ── Guard: the random initial state must actually be consumed ─────
-    if random_init {
-        use crate::utils::test_helpers::max_abs_diff;
-        let (out_zero, _) = model.forward(
-            Tensor::from_inner(input.clone()),
-            Some(build_init_cache(&cfg, batch, false)),
-            Mamba2SsdPath::Minimal(Some(4)),
-        );
-        let d = max_abs_diff(r_min.out.clone(), out_zero.inner());
-        assert!(
-            d > 1e-3,
-            "random initial state appears ignored: random-init vs zero-init \
-             output max abs diff = {d:.6} (expected a clear difference)"
-        );
-    }
+    assert_outputs_match("split vs full", &r_full, &r_split, 1e-4);
+    check_grads_match("split vs full", &r_full, &r_split, 1e-3);
 }
 
 #[test]
-fn ssd_paths_agree() {
-    run_ssd_paths_agree(small_config(), false);
-}
-
-#[test]
-fn ssd_paths_agree_random_init() {
-    run_ssd_paths_agree(small_config(), true);
-}
-
-#[test]
-fn ssd_paths_agree_ngroups2() {
-    run_ssd_paths_agree(cfg_ngroups2(), false);
-}
-
-#[test]
-fn ssd_paths_agree_ngroups2_random_init() {
-    run_ssd_paths_agree(cfg_ngroups2(), true);
+fn split_matches_full() {
+    run_split_matches_full(small_config());
 }

@@ -112,6 +112,26 @@ fn run_with_grads(
     }
 }
 
+/// Compare the output and final cache (conv window + SSM state) of two runs.
+fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
+    use crate::utils::test_helpers::max_abs_diff;
+    let d_out = max_abs_diff(a.out.clone(), b.out.clone());
+    let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
+    let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
+    assert!(
+        d_out < tol,
+        "{label}: output max abs diff = {d_out:.6} (tol {tol})"
+    );
+    assert!(
+        d_conv < tol,
+        "{label}: final conv window max abs diff = {d_conv:.6} (tol {tol})"
+    );
+    assert!(
+        d_ssm < tol,
+        "{label}: final SSM state max abs diff = {d_ssm:.6} (tol {tol})"
+    );
+}
+
 /// Assert that every entry in `a` and `b` agrees to within `grad_tol`,
 /// printing every comparison so a failure dump shows the full picture
 /// (instead of stopping at the first mismatch).
@@ -238,26 +258,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
         (Tensor::stack(outs, 1), cache)
     });
 
-    // ── Forward + final-state agreement ──────────────────────────────
-    use crate::utils::test_helpers::max_abs_diff;
-    let val_tol = 1e-4;
-    let d_out = max_abs_diff(r_fwd.out.clone(), r_step.out.clone());
-    let d_conv_state = max_abs_diff(r_fwd.final_conv.clone(), r_step.final_conv.clone());
-    let d_ssm_state = max_abs_diff(r_fwd.final_ssm.clone(), r_step.final_ssm.clone());
-    assert!(
-        d_out < val_tol,
-        "step vs forward: output max abs diff = {d_out:.6}"
-    );
-    assert!(
-        d_conv_state < val_tol,
-        "step vs forward: final conv window max abs diff = {d_conv_state:.6}"
-    );
-    assert!(
-        d_ssm_state < val_tol,
-        "step vs forward: final SSM state max abs diff = {d_ssm_state:.6}"
-    );
-
-    // ── Gradient agreement ───────────────────────────────────────────
+    assert_outputs_match("step vs forward", &r_fwd, &r_step, 1e-4);
     // step() and forward() are different reductions of the same SSM, so
     // their per-parameter gradients should also agree, modulo float-
     // summation order noise.
@@ -268,6 +269,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     // from the random-init output. Otherwise the initial state is being
     // silently ignored and forward/step would match trivially.
     if random_init {
+        use crate::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),
@@ -366,4 +368,62 @@ fn step_matches_forward_custom_dt_rank() {
 #[test]
 fn step_matches_forward_custom_dt_rank_random_init() {
     run_step_matches_forward(cfg_custom_dt_rank(), true);
+}
+
+// ── Chunked-prefill continuity (split vs full) ──────────────────────────
+
+/// One longer `forward` over the whole sequence equals two consecutive
+/// `forward` calls (prefix then suffix) that thread the returned cache (conv
+/// window + SSM state) between them — outputs, final cache, and parameter
+/// gradients all agree. The initial cache is random, so the chaining starts
+/// from a non-trivial state.
+///
+/// `step_matches_forward_random_init` already subsumes this (parity from an
+/// arbitrary initial state implies a `forward`-produced cache continues
+/// correctly); this is a direct, explicit check.
+fn run_split_matches_full(cfg: Mamba1Config) {
+    let device: Device = Default::default();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 6;
+    let split = 2;
+    let d_model = cfg.d_model;
+    let d_inner = cfg.d_inner();
+    let conv_kernel = cfg.conv_kernel;
+    let state_rank = cfg.state_rank;
+    let normal = Distribution::Normal(0.0, 1.0);
+
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let heads = Heads {
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        conv: Tensor::<3>::random([batch, d_inner, conv_kernel], normal, &device),
+        ssm: Tensor::<3>::random([batch, d_inner, state_rank], normal, &device),
+    };
+
+    let init_cache = build_init_cache(&cfg, batch, true);
+
+    let input_full = param_input(&input);
+    let cache_full = init_cache.clone();
+    let r_full = run_with_grads(&model, &input_full, &heads, |m, x| {
+        m.forward(x, Some(cache_full))
+    });
+
+    let input_split = param_input(&input);
+    let cache_split = init_cache;
+    let r_split = run_with_grads(&model, &input_split, &heads, |m, x| {
+        let prefix = x.clone().narrow(1, 0, split);
+        let suffix = x.narrow(1, split, seq_len - split);
+        let (out_prefix, mid) = m.forward(prefix, Some(cache_split));
+        let (out_suffix, last) = m.forward(suffix, Some(mid));
+        (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
+    });
+
+    assert_outputs_match("split vs full", &r_full, &r_split, 1e-4);
+    check_grads_match("split vs full", &r_full, &r_split, 1e-3);
+}
+
+#[test]
+fn split_matches_full() {
+    run_split_matches_full(small_config());
 }

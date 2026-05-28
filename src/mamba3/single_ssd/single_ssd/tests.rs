@@ -466,34 +466,6 @@ fn forward_match_mimo_ngroups2_random_init() {
     forward_match(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), true);
 }
 
-#[test]
-fn forward_match_serial() {
-    forward_match(small_config(), Mamba3SsdPath::Serial(Some(4)), false);
-}
-
-#[test]
-fn forward_match_serial_mimo() {
-    forward_match(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)), false);
-}
-
-#[test]
-fn forward_match_recalc() {
-    forward_match(
-        small_config(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-        false,
-    );
-}
-
-#[test]
-fn forward_match_recalc_mimo() {
-    forward_match(
-        small_config_mimo(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-        false,
-    );
-}
-
 // ── rope_fraction = 0 (RoPE disabled / identity) ────────────────────────
 
 #[test]
@@ -609,34 +581,6 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
     run_forward_single_ssd_matches_step(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), true);
 }
 
-#[test]
-fn forward_single_ssd_matches_step_serial() {
-    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Serial(Some(4)), false);
-}
-
-#[test]
-fn forward_single_ssd_matches_step_serial_mimo() {
-    run_forward_single_ssd_matches_step(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)), false);
-}
-
-#[test]
-fn forward_single_ssd_matches_step_recalc() {
-    run_forward_single_ssd_matches_step(
-        small_config(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-        false,
-    );
-}
-
-#[test]
-fn forward_single_ssd_matches_step_recalc_mimo() {
-    run_forward_single_ssd_matches_step(
-        small_config_mimo(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-        false,
-    );
-}
-
 /// forward_single_ssd continuation from a **random** initial single-ssd cache:
 /// `forward_single_ssd(full, cache) ≡ forward_single_ssd(prefix, cache)` then
 /// `forward_single_ssd(suffix, mid_cache)`. Compares outputs, the final single-ssd cache,
@@ -721,32 +665,6 @@ fn forward_single_ssd_split_matches_full() {
 #[test]
 fn forward_single_ssd_split_matches_full_mimo() {
     run_forward_single_ssd_split_matches_full(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)));
-}
-
-#[test]
-fn forward_single_ssd_split_matches_full_serial() {
-    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SsdPath::Serial(Some(4)));
-}
-
-#[test]
-fn forward_single_ssd_split_matches_full_serial_mimo() {
-    run_forward_single_ssd_split_matches_full(small_config_mimo(), Mamba3SsdPath::Serial(Some(4)));
-}
-
-#[test]
-fn forward_single_ssd_split_matches_full_recalc() {
-    run_forward_single_ssd_split_matches_full(
-        small_config(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-    );
-}
-
-#[test]
-fn forward_single_ssd_split_matches_full_recalc_mimo() {
-    run_forward_single_ssd_split_matches_full(
-        small_config_mimo(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-    );
 }
 
 // ── Cross-pathway cache conversion parity ───────────────────────────────
@@ -955,17 +873,4 @@ fn cache_conversion_parity_ngroups2() {
 #[test]
 fn cache_conversion_parity_mimo_ngroups2() {
     run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
-}
-
-#[test]
-fn cache_conversion_parity_serial() {
-    run_cache_conversion_parity(small_config(), Mamba3SsdPath::Serial(Some(4)));
-}
-
-#[test]
-fn cache_conversion_parity_recalc_mimo() {
-    run_cache_conversion_parity(
-        small_config_mimo(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
-    );
 }

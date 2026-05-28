@@ -490,3 +490,70 @@ fn step_matches_forward_rope_half_outproj_norm_mimo() {
 fn step_matches_forward_rope_half_outproj_norm_mimo_random_init() {
     run_step_matches_forward(cfg_rope_half_outproj_norm_mimo(), true);
 }
+
+// ── Chunked-prefill continuity (split vs full) ──────────────────────────
+
+/// One longer `forward_double_ssd` over the whole sequence equals two
+/// consecutive `forward_double_ssd` calls (prefix then suffix) that thread the
+/// returned cache between them — outputs, every final cache field, and
+/// parameter gradients all agree. The initial cache is random, so the chaining
+/// starts from a non-trivial state.
+///
+/// `step_matches_forward_random_init` already subsumes this (parity from an
+/// arbitrary initial state implies a `forward`-produced cache continues
+/// correctly); this is a direct, explicit check on the double-ssd path. A
+/// single `Minimal` config suffices: the three ssd-paths are proven equivalent
+/// among themselves in `double_ssd::ssd::ssd_path::tests`.
+fn run_split_matches_full(cfg: Mamba3Config) {
+    let device: Device = Default::default();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 6;
+    let split = 2;
+    let d_model = cfg.d_model;
+    let nheads = cfg.nheads();
+    let per_head_dim = cfg.per_head_dim;
+    let state_rank = cfg.state_rank;
+    let mimo_rank = cfg.mimo_rank;
+    let num_rope_angles = cfg.num_rope_angles();
+    let normal = Distribution::Normal(0.0, 1.0);
+
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let heads = Heads {
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+    };
+
+    let ssd_path = Mamba3SsdPath::Minimal(Some(4));
+    let init_cache = build_init_cache(&cfg, batch, true);
+
+    let input_full = param_input(&input);
+    let cache_full = init_cache.clone();
+    let path_full = ssd_path.clone();
+    let r_full = run_with_grads(&model, &input_full, &heads, |m, x| {
+        m.forward_double_ssd(x, Some(cache_full), &path_full)
+    });
+
+    let input_split = param_input(&input);
+    let cache_split = init_cache;
+    let path_split = ssd_path;
+    let r_split = run_with_grads(&model, &input_split, &heads, |m, x| {
+        let prefix = x.clone().narrow(1, 0, split);
+        let suffix = x.narrow(1, split, seq_len - split);
+        let (out_prefix, mid) = m.forward_double_ssd(prefix, Some(cache_split), &path_split);
+        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid), &path_split);
+        (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
+    });
+
+    assert_outputs_match("double-ssd split vs full", &r_full, &r_split, 1e-4);
+    check_grads_match("double-ssd split vs full", &r_full, &r_split, 1e-3);
+}
+
+#[test]
+fn split_matches_full() {
+    run_split_matches_full(small_config());
+}
