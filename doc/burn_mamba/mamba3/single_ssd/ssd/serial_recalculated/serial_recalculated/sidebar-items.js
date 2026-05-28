@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"trait":["Mamba3SingleSsdAutodiffBackendExt","Mamba3SingleSsdBackendExt"]};
+window.SIDEBAR_ITEMS = {"fn":["k5_single_ssd_chunk_scan"],"trait":["Mamba3SingleSsdAutodiffBackendExt","Mamba3SingleSsdBackendExt"]};

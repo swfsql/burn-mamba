@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["flatten_pair","unflatten_pair"]};
+window.SIDEBAR_ITEMS = {"fn":["autodiff_unflatten_pair","flatten_pair","unflatten_pair"]};
