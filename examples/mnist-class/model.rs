@@ -6,7 +6,7 @@ pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba
 use burn_mamba::schedule::Schedule;
 
 /// This model configuration uses ~37K params (~153KB disk space in FP32).  
-/// Reaches ~85% validation accuracy after the first epoch.  
+/// Reaches ~85% validation accuracy at the first epoch.  
 /// With a batch_size=16 in FP32, this requires ~3.5GB vram during training.
 pub fn model_config() -> MyMamba3NetworkConfig {
     MyMamba3NetworkConfig::new()
@@ -23,13 +23,20 @@ pub fn model_config() -> MyMamba3NetworkConfig {
             )),
             mamba3_block_config(
                 //
-                32,  // d_model (intra- and inter-layer expressivity, high impact on disk size)
+                32, // d_model (intra- and inter-layer expressivity, high impact on disk size)
                 64, // state_rank (intra-layer and time-wise expressivity, average impact on disk size)
                 4, // nheads (intra-layer expressivity, no impact on disk size, high impact on vram)
                 1, // ngroups (intra-layer expressivity)
                 1, // mimo_rank (intra-layer expressivity)
-                1.0, // apply rope to 100% of the projections
-                4, // expand (intra-layer expressivity, small impact on disk size)
+                // Apply RoPE to 100% of the B/C projections.
+                //
+                // Ablation:
+                // With RoPE at 000% (disabled), acc reaches ~(10%, 20%, 25%) at baches (100, 200, 300).
+                // With RoPE at 100% ( enabled), acc reaches ~(10%, 45%, 50%) at baches (100, 200, 300).
+                //
+                // Note: disabling RoPE saves vram training requirements by 25%.
+                1., // apply RoPE to 100% of the B/C projections
+                4,  // expand (intra-layer expressivity, small impact on disk size)
             ),
         ))
         // the output is a 10-bins classification
