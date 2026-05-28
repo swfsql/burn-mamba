@@ -16,8 +16,9 @@
 
 #![allow(non_snake_case)]
 
-use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::{
-    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state_extended, k4_ssd_state_passing,
+use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::k3_ssd_chunk_state_extended;
+use crate::mamba3::double_ssd::ssd::serial_recalculated::{
+    k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
 };
 use crate::utils::fprim::{F, san};
 use burn::backend::Backend;

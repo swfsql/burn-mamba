@@ -17,6 +17,7 @@
 
 #![allow(non_snake_case)]
 
+use super::serial_recalculated::{k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing};
 use crate::utils::fprim::{F, Mask, san};
 use burn::backend::Backend;
 use burn::tensor::s;
@@ -52,69 +53,12 @@ pub struct CombinedGrads<B: Backend> {
     pub d_dt_orange_bhnl: F<B, 4>,
 }
 
-// ─── Primitive ports of the recomputed forward kernels (K1, K2, K4) ──────────
-// Mirror the high-level kernels in `crate::mamba2::ssd::serial`, expressed on
-// `B`'s primitives so the recompute backward can run under a generic backend.
+// ─── Recomputed forward kernels ──────────────────────────────────────────────
+// The recompute backward replays the forward's K1/K2/K4 (imported above from
+// [`super::serial_recalculated`]) plus the extended K3 below, which returns the
+// extra intermediates the gradient math needs.
 
-/// Primitive port of [`crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum`].
-fn k1_ssd_chunk_cumsum<B: Backend>(
-    dt_discretized_bhnl: F<B, 4>,
-    a_decay_h: F<B, 1>,
-) -> (F<B, 4>, F<B, 3>) {
-    let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
-    let da_cumsum_bhnl: F<B, 4> = {
-        let a_decay_bhnl = a_decay_h
-            .unsqueeze_dims::<4>(&[0, 2, 3])
-            .expand([batch, nheads, nchunks, chunk_len]);
-        (dt_discretized_bhnl * a_decay_bhnl).cumsum(3)
-    };
-    let da_chunk_end_bhn = da_cumsum_bhnl
-        .clone()
-        .slice(s![.., .., .., -1])
-        .squeeze_dim::<3>(3);
-    (da_cumsum_bhnl, da_chunk_end_bhn)
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k2_ssd_bmm`].
-fn k2_ssd_bmm<B: Backend>(c_bnlhr: F<B, 5>, b_bnlhr: F<B, 5>) -> F<B, 5> {
-    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
-    let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
-    c_bnhlr.matmul(b_bnhrl)
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k4_ssd_state_passing`].
-fn k4_ssd_state_passing<B: Backend>(
-    intra_chunk_state_bnhpr: F<B, 5>,
-    da_chunk_end_bhn: F<B, 3>,
-    initial_state_bhpr: F<B, 4>,
-) -> (F<B, 5>, F<B, 4>) {
-    let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
-
-    let mut running_state_bhpr = initial_state_bhpr;
-    let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
-    chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-
-    for i_chunk in 0..nchunks {
-        let intra_state_bhpr = intra_chunk_state_bnhpr
-            .clone()
-            .slice(s![.., i_chunk, .., .., ..])
-            .squeeze_dim::<4>(1);
-        let decay_bhpr = da_chunk_end_bhn
-            .clone()
-            .slice(s![.., .., i_chunk])
-            .exp()
-            .unsqueeze_dim::<4>(3)
-            .expand([batch, nheads, per_head_dim, state_rank]);
-        running_state_bhpr = (decay_bhpr * running_state_bhpr) + intra_state_bhpr;
-        chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-    }
-
-    let final_state_bhpr = chunk_input_state_vec_bhpr.pop().unwrap();
-    let chunk_input_state_bnhpr = F::stack(chunk_input_state_vec_bhpr, 1);
-    (chunk_input_state_bnhpr, final_state_bhpr)
-}
-
-/// Same as [`k3_ssd_chunk_state`](crate::mamba2::ssd::serial::k3_ssd_chunk_state)
+/// Same as [`k3_ssd_chunk_state`](super::serial_recalculated::k3_ssd_chunk_state)
 /// but also returns intermediates needed by the custom backward:
 /// - `intra_chunk_state_bnhpr` — chunk-end state assuming zero initial state
 /// - `b_bar_scale_bhnl` — the K3 scaling factor `dt · exp(cumA_last − cumA)`

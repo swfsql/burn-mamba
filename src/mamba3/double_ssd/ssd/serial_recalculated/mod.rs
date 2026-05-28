@@ -16,3 +16,9 @@ pub use serial_recalculated::Mamba3DoubleSsdBackendExt;
 
 #[cfg(feature = "autodiff")]
 pub use serial_recalculated::Mamba3DoubleSsdAutodiffBackendExt;
+
+// Primitive forward kernels reused by the recompute backward and by the
+// single-SSD pathway's backward (which shares the standard SSD kernels).
+pub(crate) use serial_recalculated::{
+    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
+};
