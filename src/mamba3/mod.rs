@@ -76,6 +76,7 @@ pub mod prelude {
     pub use cache::{Mamba3Cache, Mamba3Caches};
     pub use layer::{Mamba3Layer, Mamba3LayerConfig, Mamba3Layers, Mamba3LayersConfig};
     pub use mamba3::{Mamba3, Mamba3Config};
+    pub use rotation::{RotationKind, RotationState};
     pub use network::{Mamba3Network, Mamba3NetworkConfig};
     pub use ssd_path::Mamba3SsdPath;
 }

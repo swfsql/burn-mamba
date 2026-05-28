@@ -122,6 +122,7 @@
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
 use crate::mamba3::prelude::*;
+use crate::mamba3::rotation::RotationKind;
 use crate::utils::sanity::sanity as san;
 use crate::utils::{
     rms_norm::{RmsNorm, RmsNormConfig},
@@ -363,6 +364,18 @@ pub struct Mamba3Config {
     /// `is_outproj_norm` argument in `mamba3.py`.
     #[config(default = false)]
     pub has_outproj_norm: bool,
+
+    /// Which rotational-state algebra to use for the data-dependent positional
+    /// rotation of `B`/`C` (see [`RotationKind`]).
+    ///
+    /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D) — the
+    /// current Mamba-3 RoPE — for which the block is byte-for-byte unchanged.
+    /// [`Quaternion4D`](RotationKind::Quaternion4D) selects the non-abelian
+    /// quaternion rotation; its in-projection devotes `3 · num_quat_blocks`
+    /// channels to quaternion generators in place of the `num_rope_angles`
+    /// angle channels (see [`Self::num_rotation_channels`]).
+    #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
+    pub rotation: RotationKind,
 }
 
 impl Mamba3Config {
@@ -398,14 +411,43 @@ impl Mamba3Config {
         (self.rope_dim() / 2).max(1)
     }
 
+    /// Number of quaternion blocks for [`RotationKind::Quaternion4D`]: the
+    /// rotated width (`state_rank · rope_fraction`) rounded **down to a multiple
+    /// of 4**, divided by 4, and floored at 1 (Burn has no zero-width tensors —
+    /// mirrors [`Self::num_rope_angles`]).
+    pub fn num_quat_blocks(&self) -> usize {
+        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
+        d -= d % 4;
+        (d / 4).max(1)
+    }
+
+    /// Number of in-projection channels devoted to the rotation parameters,
+    /// per the configured [`RotationKind`]:
+    ///
+    /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle channels.
+    /// - [`Quaternion4D`](RotationKind::Quaternion4D): `3 · num_quat_blocks`
+    ///   quaternion-generator channels (an axis·angle generator per block, fed
+    ///   through [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)).
+    ///
+    /// Both are shared across heads and scaled per-head by `Δ`, exactly like the
+    /// abelian RoPE angles.
+    pub fn num_rotation_channels(&self) -> usize {
+        match self.rotation {
+            RotationKind::Complex2D => self.num_rope_angles(),
+            RotationKind::Quaternion4D => 3 * self.num_quat_blocks(),
+        }
+    }
+
     /// Total input projection output size.
     ///
-    /// `d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rope_angles`
+    /// `d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rotation_channels`
+    /// where the last term is [`Self::num_rotation_channels`] (`num_rope_angles`
+    /// for the default `Complex2D`, so the size is unchanged from before).
     pub fn d_in_proj(&self) -> usize {
         2 * self.d_inner()
             + 2 * self.ngroups * self.state_rank * self.mimo_rank
             + 3 * self.nheads()
-            + self.num_rope_angles()
+            + self.num_rotation_channels()
     }
 
     /// Allocate and initialise all Mamba-3 block parameters on `device`.
@@ -436,6 +478,15 @@ impl Mamba3Config {
             "rope_fraction must be 0.0, 0.5 or 1.0"
         );
         assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
+        // Step 1 of the quaternion-rotation staging: the config switch and
+        // in-projection sizing are in place, but forward/step do not yet branch
+        // on the rotation kind (that is step 3). Fail fast rather than silently
+        // running the abelian path on a quaternion-sized projection.
+        assert!(
+            matches!(self.rotation, RotationKind::Complex2D),
+            "RotationKind::Quaternion4D is configured but not yet wired into \
+             forward/step (staged change — only the config + cache type exist so far)"
+        );
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();

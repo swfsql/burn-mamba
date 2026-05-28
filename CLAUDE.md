@@ -160,8 +160,8 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── mamba3.rs                  # Mamba3 block + Mamba3Config; forward()/step() dispatch by cache variant
 │   │   ├── mod.rs                     # module + prelude; Mamba3BackendExt aggregating both ssd ext traits (macros)
 │   │   ├── network.rs                 # Mamba3Network (full LM; tied/untied LM head, vocab padding)
-│   │   ├── rotation.rs                # quaternion (k=4) rotational-state reference: non-abelian RoPE generalisation (quat algebra, cumprod scan + carry, B̄/C̄ rotation)
-│   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, cross-chunk carry, abelian→cumsum collapse, SO(4) orthogonality/homomorphism)
+│   │   ├── rotation.rs                # quaternion (k=4) non-abelian RoPE generalisation: RotationKind (config switch) / RotationState (cache accumulator variant) + quat algebra, scaled-axis materialise, cumprod scan + carry, B̄/C̄ rotation
+│   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, k=2↔production apply_rope, cross-chunk carry, abelian→cumsum collapse, non-commutativity, SO(4) orthogonality/homomorphism, scaled-axis materialise, config sizing + RotationState)
 │   │   ├── single_ssd                 # single-pass official-kernel trapezoidal form (≈½ training memory)
 │   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
 │   │   │   ├── mod.rs
@@ -392,12 +392,16 @@ accumulator bounded across long sequences / many decode steps and preserves
 low-bit-float (`f16`) precision.
 
 The RoPE above is the **abelian** (`SO(2)`/complex) rotation: angles compose by
-`cumsum` and are absorbed into B/C. `mamba3/rotation.rs` is a self-contained,
-tested **reference** for the non-abelian generalisation — a quaternion (`k = 4`,
-`SU(2) ⊂ SO(4)`) rotational state where the cumulative rotation needs an
-associative *scan* (with a cross-chunk carry) instead of a `cumsum`, but the
-B/C-factoring (hence the scalar-decay SSD core) is unchanged. It is **not** wired
-into the block — it documents/validates the math for a possible future pathway.
+`cumsum` and are absorbed into B/C. `mamba3/rotation.rs` holds the non-abelian
+generalisation — a quaternion (`k = 4`, `SU(2) ⊂ SO(4)`) rotational state where
+the cumulative rotation needs an associative *scan* (with a cross-chunk carry)
+instead of a `cumsum`, but the B/C-factoring (hence the scalar-decay SSD core) is
+unchanged. The rotation algebra/scan and a `RotationKind` config switch
+(`Complex2D` default | `Quaternion4D`) + `RotationState` cache-accumulator
+variant are in place and tested; `Mamba3Config::d_in_proj` branches on the kind
+(`num_rotation_channels`). The block forward/step do **not** yet branch on the
+kind — constructing a `Quaternion4D` block currently asserts "not yet wired"
+(staged: the cache-field substitution + forward/step wiring is the next step).
 
 #### Two SSD pathways — the central Mamba-3 design point
 

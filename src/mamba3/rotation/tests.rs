@@ -13,9 +13,10 @@
 //! collapse to a `cumsum` of angles (RoPE), and gradient parity.
 
 use super::*;
+use crate::mamba3::double_ssd::double_ssd::apply_rope;
+use crate::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;
-use crate::utils::test_helpers::max_abs_diff;
 
 type Device = burn::prelude::Device;
 
@@ -296,7 +297,210 @@ fn single_axis_collapses_to_cumsum() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Gradient parity: factored vs explicit agree on input gradients
+// 5. k=2 cross-check: the abelian restriction of the quaternion pathway
+//    reproduces the *production* RoPE (`apply_rope`, the current pathway).
+// ---------------------------------------------------------------------------
+
+/// A single quaternion's left-multiplication `L_q` is **isoclinic**: with
+/// `q = (cos φ, sin φ, 0, 0)` it rotates both the `(0,1)` and `(2,3)` planes of
+/// its 4-block by the same angle `φ`. The production `apply_rope` (interleaved)
+/// rotates each 2-pair `(0,1),(2,3),…` by its own angle.
+///
+/// So restricting the quaternion machinery to a single fixed axis (the abelian
+/// case) and locking each block's two RoPE pairs to a shared angle, the two
+/// pathways must agree **exactly** — and the non-abelian `quat_cumprod`
+/// collapses to RoPE's cumulative-angle `cumsum`.  This pins the new code to the
+/// battle-tested current implementation at `k = 2`.
+#[test]
+fn k2_quaternion_matches_production_rope() {
+    let device: Device = Default::default();
+    let (batch, sequence, nheads, blocks) = (2, 6, 2, 2); // state_rank = 4·blocks = 8
+    let state_rank = blocks * 4;
+
+    // Per-step, per-block single-axis angle increments aₜⱼ about the î axis.
+    let a_bshj = Tensor::<4>::random(
+        [batch, sequence, nheads, blocks],
+        Distribution::Normal(0.0, 0.6),
+        &device,
+    );
+
+    // ── Quaternion pathway (single-axis î): qₜ = (cos a, sin a, 0, 0) ────────
+    let a_bshj1 = a_bshj.clone().unsqueeze_dim::<5>(4); // [b,s,h,J,1]
+    let zeros = Tensor::<5>::zeros([batch, sequence, nheads, blocks, 1], &device);
+    let q = Tensor::cat(
+        vec![a_bshj1.clone().cos(), a_bshj1.sin(), zeros.clone(), zeros],
+        4,
+    ); // [b,s,h,J,4]
+    let (qcum, _final) = quat_cumprod(q, None);
+
+    let bvec = Tensor::<4>::random(
+        [batch, sequence, nheads, state_rank],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let b_quat = rotate_state_rank_blocks::<4, 5>(bvec.clone(), qcum);
+
+    // ── Production RoPE pathway ──────────────────────────────────────────────
+    // Cumulative per-block angle Φⱼ = cumsum(aⱼ) (single-axis quaternions
+    // commute, so the product's angle is the sum), duplicated across each
+    // block's two interleaved pairs: angles = [Φ⁰, Φ⁰, Φ¹, Φ¹, …].
+    let phi_bshj = a_bshj.cumsum(1);
+    let angles_bshr2 = phi_bshj
+        .unsqueeze_dim::<5>(4) // [b,s,h,J,1]
+        .expand([batch, sequence, nheads, blocks, 2]) // [b,s,h,J,2]
+        .reshape([batch, sequence, nheads, state_rank / 2]); // [b,s,h,r/2]
+    let b_rope = apply_rope::<4>(bvec, angles_bshr2, /* rotate_pairwise = */ true);
+
+    let d = max_abs_diff(b_quat, b_rope);
+    assert!(d < VAL_TOL, "k=2 quaternion vs production apply_rope: max abs diff = {d:.6} (tol {VAL_TOL})");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Non-commutativity is real and load-bearing (the expressivity beyond RoPE)
+// ---------------------------------------------------------------------------
+
+/// Two generic (multi-axis) quaternions do **not** commute, so swapping the
+/// order of two rotation steps changes the cumulative rotation — something no
+/// `cumsum`-of-angles (abelian RoPE) can represent. This is the structural
+/// source of the extra state-tracking power.
+#[test]
+fn rotation_order_matters_for_generic_quaternions() {
+    let device: Device = Default::default();
+    let a = quat_normalize(Tensor::<2>::random([8, 4], Distribution::Normal(0.0, 1.0), &device));
+    let b = quat_normalize(Tensor::<2>::random([8, 4], Distribution::Normal(0.0, 1.0), &device));
+    let ab = quat_mul(a.clone(), b.clone());
+    let ba = quat_mul(b, a);
+    // a⊗b and b⊗a should differ materially for random (non-coaxial) quaternions.
+    let d = max_abs_diff(ab, ba);
+    assert!(d > 1e-2, "expected non-commuting quaternions to differ, got {d:.6}");
+}
+
+// ---------------------------------------------------------------------------
+// 7. Data-dependent materialisation: quat_from_scaled_axis
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scaled_axis_is_unit_and_identity_at_zero() {
+    let device: Device = Default::default();
+    // Random generators → unit quaternions.
+    let g = Tensor::<2>::random([32, 3], Distribution::Normal(0.0, 1.0), &device);
+    let q = quat_from_scaled_axis(g);
+    let norm = (q.clone() * q).sum_dim(1).sqrt();
+    let d_unit = max_abs_diff(norm, Tensor::<2>::ones([32, 1], &device));
+    assert!(d_unit < VAL_TOL, "quat_from_scaled_axis not unit norm: {d_unit:.6}");
+
+    // Zero generator (e.g. Δ → 0) → identity quaternion (1, 0, 0, 0).
+    let zero = Tensor::<2>::zeros([4, 3], &device);
+    let q0 = quat_from_scaled_axis(zero);
+    let ident = Tensor::cat(
+        vec![Tensor::<2>::ones([4, 1], &device), Tensor::<2>::zeros([4, 3], &device)],
+        1,
+    );
+    let d_id = max_abs_diff(q0, ident);
+    assert!(d_id < VAL_TOL, "zero generator ≠ identity quaternion: {d_id:.6}");
+}
+
+#[test]
+fn scaled_axis_single_axis_matches_half_angle() {
+    // g = (2φ, 0, 0) ⇒ angle = 2φ, q = (cos φ, sin φ, 0, 0): the single-axis
+    // parameterisation used by the RoPE collapse / cross-check above.
+    let device: Device = Default::default();
+    let phi = Tensor::<2>::random([16, 1], Distribution::Normal(0.0, 0.7), &device);
+    let zeros = Tensor::<2>::zeros([16, 1], &device);
+    let g = Tensor::cat(vec![phi.clone() * 2.0, zeros.clone(), zeros.clone()], 1); // (2φ,0,0)
+    let q = quat_from_scaled_axis(g);
+    let expected = Tensor::cat(vec![phi.clone().cos(), phi.sin(), zeros.clone(), zeros], 1);
+    let d = max_abs_diff(q, expected);
+    assert!(d < VAL_TOL, "scaled-axis single-axis mismatch: {d:.6}");
+}
+
+// ---------------------------------------------------------------------------
+// 8. Config switch (step 1): RotationKind + in-projection sizing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn config_rotation_channels_and_d_in_proj() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    // state_rank=16, rope_fraction=0.5 ⇒ rope_dim=8, num_rope_angles=4,
+    // num_quat_blocks = (16·0.5 → 8, /4) = 2.
+    let base = Mamba3Config::new(64)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8);
+
+    // Default is the abelian pathway, and d_in_proj is unchanged from the
+    // legacy formula (num_rotation_channels == num_rope_angles).
+    assert_eq!(base.rotation, RotationKind::Complex2D);
+    assert_eq!(base.num_rotation_channels(), base.num_rope_angles());
+    let legacy = 2 * base.d_inner()
+        + 2 * base.ngroups * base.state_rank * base.mimo_rank
+        + 3 * base.nheads()
+        + base.num_rope_angles();
+    assert_eq!(base.d_in_proj(), legacy);
+
+    // Quaternion4D: rotation channels = 3 · num_quat_blocks, reflected in d_in_proj.
+    let q = base.clone().with_rotation(RotationKind::Quaternion4D);
+    assert_eq!(q.num_quat_blocks(), 2);
+    assert_eq!(q.num_rotation_channels(), 3 * 2);
+    let q_expected = 2 * q.d_inner()
+        + 2 * q.ngroups * q.state_rank * q.mimo_rank
+        + 3 * q.nheads()
+        + 3 * q.num_quat_blocks();
+    assert_eq!(q.d_in_proj(), q_expected);
+    // The two pathways differ only in the rotation-channel count.
+    assert_eq!(
+        q.d_in_proj() as i64 - base.d_in_proj() as i64,
+        3 * q.num_quat_blocks() as i64 - base.num_rope_angles() as i64
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet wired")]
+fn config_quaternion_block_init_is_guarded() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    let device: Device = Default::default();
+    // Constructing a Quaternion4D block must fail fast until step 3 wires it.
+    let _ = Mamba3Config::new(64)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rotation(RotationKind::Quaternion4D)
+        .init(&device);
+}
+
+// ---------------------------------------------------------------------------
+// 9. Cache accumulator variant (step 2): RotationState
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rotation_state_constructors_and_accessors() {
+    let device: Device = Default::default();
+
+    let a = RotationState::zeros_angle(2, 3, 4, &device);
+    a.sanity();
+    assert_eq!(a.clone().angle().dims(), [2, 3, 4]);
+
+    let q = RotationState::identity_quaternion(2, 3, 5, &device);
+    q.sanity();
+    let qt = q.quaternion();
+    assert_eq!(qt.dims(), [2, 3, 5, 4]);
+    // Identity quaternion: real part 1, vector part 0.
+    let w = qt.clone().narrow(3, 0, 1);
+    let xyz = qt.narrow(3, 1, 3);
+    assert!(max_abs_diff(w, Tensor::<4>::ones([2, 3, 5, 1], &device)) < VAL_TOL);
+    assert!(max_abs_diff(xyz, Tensor::<4>::zeros([2, 3, 5, 3], &device)) < VAL_TOL);
+}
+
+#[test]
+#[should_panic(expected = "expected Quaternion")]
+fn rotation_state_wrong_unwrap_panics() {
+    let device: Device = Default::default();
+    let a = RotationState::zeros_angle(1, 1, 1, &device);
+    let _ = a.quaternion();
+}
+
+// ---------------------------------------------------------------------------
+// 10. Gradient parity: factored vs explicit agree on input gradients
 // ---------------------------------------------------------------------------
 
 struct Params {

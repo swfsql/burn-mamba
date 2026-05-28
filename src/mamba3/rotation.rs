@@ -60,7 +60,108 @@
 //! the math; wiring it into the [`Mamba3`](crate::mamba3::mamba3::Mamba3) block
 //! is a separate, larger change (the SSD kernels themselves need no edits).
 
+use burn::module::Module;
 use burn::prelude::*;
+
+// ---------------------------------------------------------------------------
+// Rotation kind (config switch) and cache accumulator variant
+// ---------------------------------------------------------------------------
+
+/// Which rotational-state algebra the block uses for the data-dependent
+/// positional rotation of `B`/`C`.
+///
+/// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
+///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
+///   [`apply_rope`]. The default; behaviourally unchanged.
+/// - [`Quaternion4D`](RotationKind::Quaternion4D) — the non-abelian
+///   `SU(2) ⊂ SO(4)` quaternion rotation of this module: cumulative *product*
+///   via [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
+///   state-tracking; selects the [`RotationState::Quaternion`] cache accumulator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RotationKind {
+    /// Abelian complex (`SO(2)`) RoPE — the current default behaviour.
+    Complex2D,
+    /// Non-abelian quaternion (`SU(2)`) rotation.
+    Quaternion4D,
+}
+
+impl Default for RotationKind {
+    fn default() -> Self {
+        RotationKind::Complex2D
+    }
+}
+
+/// The cumulative-rotation accumulator carried between calls in a Mamba-3 cache
+/// — the variant matching the block's [`RotationKind`].
+///
+/// - [`Angle`](RotationState::Angle) — abelian per-pair cumulative RoPE angle,
+///   shape `[batch, nheads, num_rope_angles]` (today's `cum_angle`).
+/// - [`Quaternion`](RotationState::Quaternion) — per-block cumulative unit
+///   quaternion, shape `[batch, nheads, blocks, 4]`, produced by
+///   [`quat_cumprod`].
+///
+/// This is the cache-level counterpart of [`RotationKind`]. It is defined here
+/// (the rotation module owns the accumulator type); substituting it for the
+/// pathway caches' `cum_angle_bha` field happens together with the forward/step
+/// wiring that consumes it.
+#[derive(Module, Debug)]
+pub enum RotationState {
+    /// Abelian RoPE cumulative angle, shape `[batch, nheads, num_rope_angles]`.
+    Angle(Tensor<3>),
+    /// Quaternion cumulative rotation, shape `[batch, nheads, blocks, 4]`.
+    Quaternion(Tensor<4>),
+}
+
+impl RotationState {
+    /// Zero-initialised abelian angle accumulator `[batch, nheads, num_rope_angles]`.
+    pub fn zeros_angle(
+        batch: usize,
+        nheads: usize,
+        num_rope_angles: usize,
+        device: &Device,
+    ) -> Self {
+        RotationState::Angle(Tensor::zeros([batch, nheads, num_rope_angles], device))
+    }
+
+    /// Identity-initialised quaternion accumulator `[batch, nheads, blocks, 4]`
+    /// (every block is the identity quaternion `(1, 0, 0, 0)`).
+    pub fn identity_quaternion(
+        batch: usize,
+        nheads: usize,
+        blocks: usize,
+        device: &Device,
+    ) -> Self {
+        let w = Tensor::ones([batch, nheads, blocks, 1], device);
+        let xyz = Tensor::zeros([batch, nheads, blocks, 3], device);
+        RotationState::Quaternion(Tensor::cat(vec![w, xyz], 3))
+    }
+
+    /// Unwrap the abelian angle accumulator; panics if this is a quaternion.
+    pub fn angle(self) -> Tensor<3> {
+        match self {
+            RotationState::Angle(a) => a,
+            RotationState::Quaternion(_) => {
+                panic!("RotationState is Quaternion, expected Angle")
+            }
+        }
+    }
+
+    /// Unwrap the quaternion accumulator; panics if this is an angle.
+    pub fn quaternion(self) -> Tensor<4> {
+        match self {
+            RotationState::Quaternion(q) => q,
+            RotationState::Angle(_) => panic!("RotationState is Angle, expected Quaternion"),
+        }
+    }
+
+    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on the held tensor.
+    pub fn sanity(&self) {
+        match self {
+            RotationState::Angle(a) => crate::utils::sanity::sanity(a),
+            RotationState::Quaternion(q) => crate::utils::sanity::sanity(q),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Quaternion algebra on the trailing `(w, x, y, z)` axis
@@ -122,6 +223,31 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
     let norm = (q.clone() * q.clone()).sum_dim(n).sqrt().clamp_min(1e-12);
     q / norm
+}
+
+/// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
+/// (axis · angle) via the exponential map — the data-dependent "materialise
+/// `Rₜ`" step, analogous to RoPE's `Δₜ · π · tanh(θₜ)` angle.
+///
+/// With `‖g‖ = angle` and `ĝ = g / angle` the axis, returns the unit quaternion
+/// `q = (cos(angle/2), sin(angle/2)·ĝ)`.  A vanishing `g` maps to the identity
+/// `(1, 0, 0, 0)`, so scaling `g` by a small `Δₜ` (the discretisation step)
+/// yields a near-identity rotation — exactly the regime where a small step
+/// barely rotates the state.  The `sin(angle/2)/angle` factor is the numerically
+/// stable form of the (otherwise `0/0`) per-component scale near `g = 0`.
+///
+/// # Shapes
+/// - `g` : `[..., 3]`
+/// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
+pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
+    let n = D - 1;
+    let angle = (g.clone() * g.clone()).sum_dim(n).sqrt(); // [..., 1]
+    let half = angle.clone() * 0.5;
+    let w = half.clone().cos(); // [..., 1]
+    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation), guarded against 0/0.
+    let scale = half.sin() / angle.clamp_min(1e-12); // [..., 1]
+    let v = g * scale; // [..., 3]
+    quat_normalize(Tensor::cat(vec![w, v], n))
 }
 
 /// Materialise the `4×4` orthogonal matrix of left-multiplication by `q`.

@@ -353,15 +353,29 @@ form), ≈ half the training memory of double-ssd.
   per-step unit quaternions whose cumulative rotation lives in
   `SU(2) ⊂ SO(4)` (non-commuting → richer state-tracking, up to `NC¹`).
 - Public ops: `quat_mul`/`quat_conj`/`quat_normalize` (algebra on the trailing
-  `(w,x,y,z)` axis), `quat_to_rot4` (the `4×4` left-isoclinic matrix),
-  `quat_cumprod` (the **associative scan** that replaces RoPE's `cumsum`, with a
-  cross-chunk **carry** — the analogue of `cum_angle`), and
+  `(w,x,y,z)` axis), `quat_from_scaled_axis` (data-dependent **materialise**
+  step — axis·angle → unit quaternion via the exp map, the analogue of RoPE's
+  `Δ·π·tanh(θ)`; identity at `Δ→0`), `quat_to_rot4` (the `4×4` left-isoclinic
+  matrix), `quat_cumprod` (the **associative scan** that replaces RoPE's
+  `cumsum`, with a cross-chunk **carry** — the analogue of `cum_angle`), and
   `rotate_state_rank_blocks` (apply a per-block quaternion to a `state_rank`
   axis, used as `B̄ = rotate(B, conj(Qcum))`).
-- The key property — proved by the tests — is that the RoPE *factoring*
-  (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity**, so the
-  scalar-decay SSD core is unchanged; only `cumsum`→scan changes. NOT wired into
-  the `Mamba3` block — it is a tested math reference for that larger change.
+- Together these are the `materialise → scan → apply` pipeline (the engine the
+  abelian RoPE specialises to `cumsum` + sin/cos).
+- Integration scaffolding (default-off): `RotationKind { Complex2D | Quaternion4D }`
+  (a `Mamba3Config` field, default `Complex2D` ⇒ unchanged) and `RotationState
+  { Angle(Tensor<3>) | Quaternion(Tensor<4>) }` (the cache accumulator variant,
+  a `#[derive(Module)]` enum). `Mamba3Config::d_in_proj` branches via
+  `num_rotation_channels` (`num_rope_angles` for Complex2D, `3·num_quat_blocks`
+  quaternion generators for Quaternion4D). Forward/step don't branch yet —
+  building a `Quaternion4D` block asserts "not yet wired" (next step: swap
+  `RotationState` in for the caches' `cum_angle_bha` + wire forward/step).
+- Key properties, proved by the tests: the RoPE *factoring*
+  (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity** (so the
+  scalar-decay SSD core is unchanged; only `cumsum`→scan changes), and the `k=2`
+  single-axis restriction reproduces the **production** `apply_rope` exactly
+  (cross-validation against the current pathway). NOT wired into the `Mamba3`
+  block — it is a tested math reference for that larger change.
 
 ### `mamba3/layer.rs`
 - `struct Mamba3Layers` / `Mamba3Layer` — same shape as Mamba-2 (virtual
