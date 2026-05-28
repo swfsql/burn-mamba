@@ -345,6 +345,24 @@ form), ≈ half the training memory of double-ssd.
   `From<Mamba3SingleSsdPath>` (and the reverse `From`s live in each sub-path) let
   the top-level path convert to whichever pathway the cache selects.
 
+### `mamba3/rotation.rs`
+- Self-contained **reference + verification** of the quaternion (`k = 4`)
+  rotational state — the non-abelian generalisation of Mamba-3's data-dependent
+  RoPE. Mamba-3 ships the abelian `SO(2)` case (`double_ssd.rs::apply_rope`,
+  cumulative *angles* via `cumsum`); this module implements the next rung:
+  per-step unit quaternions whose cumulative rotation lives in
+  `SU(2) ⊂ SO(4)` (non-commuting → richer state-tracking, up to `NC¹`).
+- Public ops: `quat_mul`/`quat_conj`/`quat_normalize` (algebra on the trailing
+  `(w,x,y,z)` axis), `quat_to_rot4` (the `4×4` left-isoclinic matrix),
+  `quat_cumprod` (the **associative scan** that replaces RoPE's `cumsum`, with a
+  cross-chunk **carry** — the analogue of `cum_angle`), and
+  `rotate_state_rank_blocks` (apply a per-block quaternion to a `state_rank`
+  axis, used as `B̄ = rotate(B, conj(Qcum))`).
+- The key property — proved by the tests — is that the RoPE *factoring*
+  (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity**, so the
+  scalar-decay SSD core is unchanged; only `cumsum`→scan changes. NOT wired into
+  the `Mamba3` block — it is a tested math reference for that larger change.
+
 ### `mamba3/layer.rs`
 - `struct Mamba3Layers` / `Mamba3Layer` — same shape as Mamba-2 (virtual
   scheduling, `ignore_first/last_residual`, Pre-LN residual with

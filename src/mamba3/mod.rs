@@ -28,6 +28,7 @@ pub(crate) mod helpers;
 pub mod layer;
 pub mod mamba3;
 pub mod network;
+pub mod rotation;
 pub mod ssd_path;
 
 use crate::mamba3::double_ssd::prelude::*;
