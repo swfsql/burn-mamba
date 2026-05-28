@@ -6,7 +6,6 @@ use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 use burn_mamba::prelude::*;
 use burn_mamba::schedule::BidiSchedule;
-use burn::backend::Backend;
 
 /// Bidirectional Mamba-2 example network and config builders.
 pub mod mamba2 {

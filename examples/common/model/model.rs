@@ -5,10 +5,9 @@
 
 use crate::common::model::ModelConfigExt;
 use burn::nn::{Linear, LinearConfig};
-use burn::prelude::*
+use burn::prelude::*;
 use burn_mamba::prelude::*;
 use burn_mamba::schedule::Schedule;
-use burn::backend::Backend;
 
 /// Mamba-2 example network and config builders.
 pub mod mamba2 {

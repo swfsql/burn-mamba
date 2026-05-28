@@ -14,6 +14,13 @@ nheads]`, etc.). Dimension keys: `b`atch, `s`equence, `d`_model,
 
 Files not listed here are either trivial `mod.rs` re-export glue or test-only.
 
+As of Burn 0.22 the high-level `Tensor` (and therefore every `Module`) is pinned
+to the global `Dispatch` backend, so library types are **no longer
+backend-generic** — `struct Mamba2`, `Mamba2Cache`, … carry no `<B>`. The
+backend is chosen at runtime by the `Device`. The only items still generic over a
+backend `B` are the custom-backward internals (`F<B, D>` / `Mask<B>` primitive
+wrappers, the `Backward<B, _>` nodes, and the `Autodiff<B>` ext impls).
+
 ---
 
 ## Crate root
@@ -28,12 +35,15 @@ build warning. Defines two crate-wide sanity constants:
   so the checks are no-ops in release).
 
 ### `Cargo.toml`
-Manifest. Crate `0.23.0`, edition 2024, depends on `burn` `0.21.0`. The
+Manifest. Crate `0.24.0`, edition 2024, depends on `burn` `0.22.0-pre.1` (pinned
+to a git rev; the `extension` feature provides `#[backend_extension]`). The
 `[features]` section is the source of truth for backend selection
 (`backend-*`), the model toggles (`mamba1`/`2`/`3`, all default-on), `autodiff`
-(required by mamba2/3), and `cubecl`/`fusion`. Exactly one `backend-*` must be
-enabled (`_dev-has-backend` signal) or a compile error fires. A `TODO` notes the
-`dev-*`/`backend-*` features leaking into the lib for cubecl needs.
+(required by mamba2/3), and `cubecl`/`fusion`. With the Dispatch architecture,
+each `backend-*` feature simply enables the corresponding `burn/<backend>`;
+several may be compiled in at once (the old `_dev-has-backend` compile-error gate
+is gone — examples pick the runtime `Device` from the enabled feature). A `TODO`
+notes the `dev-*`/`backend-*` features leaking into the lib for cubecl needs.
 
 ---
 
@@ -46,7 +56,7 @@ Mamba-2/3.
 
 ### `mamba1/mamba1.rs`
 The core block. Read its module header for the file-local notation table.
-- `struct Mamba1<B>` — params: `in_proj` (`d_model → 2·d_inner`), depthwise
+- `struct Mamba1` — params: `in_proj` (`d_model → 2·d_inner`), depthwise
   causal `conv1d`, `x_proj` (`d_inner → dt_rank + 2·state_rank`), `dt_proj`
   (`dt_rank → d_inner`), `a_log [d_inner, state_rank]`, `d [d_inner]`, `out_proj`.
 - `struct Mamba1Config` — `d_model`, `state_rank` (16), `conv_kernel` (4),
@@ -65,23 +75,23 @@ Key characteristic: A is input-**independent** here (unlike Mamba-2's per-head
 scalar and Mamba-3's data-dependent A).
 
 ### `mamba1/cache.rs`
-- `struct Mamba1Cache<B>` — `conv_bik [b, i, k]` (conv window) + `ssm_bir [b, i, r]`
+- `struct Mamba1Cache` — `conv_bik [b, i, k]` (conv window) + `ssm_bir [b, i, r]`
   (SSM state), plain `Tensor`s (updated by reassignment). `sanity()` guards.
-- `struct Mamba1Caches<B>` — `Vec<Mamba1Cache>`, one per **virtual** layer;
+- `struct Mamba1Caches` — `Vec<Mamba1Cache>`, one per **virtual** layer;
   helpers `caches_len`/`from_vec`/`into_options`/`from_options`.
 - `*Config` factories (zero-init), `new_from_block_config` (`n_real_caches`).
 
 ### `mamba1/layer.rs`
-- `struct Mamba1Layers<B>` — the stack: `n_real_layers` weight sets,
+- `struct Mamba1Layers` — the stack: `n_real_layers` weight sets,
   `n_virtual_layers: Option<(usize, Schedule)>` (`module(skip)`), `real_layers`,
   `ignore_first/last_residual`. `forward`/`step` loop over virtual indices,
-  mapping each to a real layer via the schedule, each with its own cache. No
-  backend-ext bound (Mamba-1 has no SSD path), so `impl<B: Backend>`.
-- `struct Mamba1Layer<B>` — `RmsNorm` + `Mamba1` block. `forward`/`step` apply
+  mapping each to a real layer via the schedule, each with its own cache.
+  No SSD path (Mamba-1 has no backend-ext trait).
+- `struct Mamba1Layer` — `RmsNorm` + `Mamba1` block. `forward`/`step` apply
   Pre-LN residual `y = x·residual_scale + Block(norm(x))`, threading a cache.
 
 ### `mamba1/network.rs`
-- `struct Mamba1Network<B>` — `embedding` → `Mamba1Layers` → `norm_f` → optional
+- `struct Mamba1Network` — `embedding` → `Mamba1Layers` → `norm_f` → optional
   tied/untied `lm_head`. Targets the `state-spaces/mamba-130m` text models.
 - `forward(tokens, caches) -> (logits, caches)` and `step(token, caches)` (both
   take `Option<Mamba1Caches>` and return the updated caches); vocab padding to
@@ -98,7 +108,7 @@ scheduling is now shared with Mamba-1).
 ### `mamba2/mamba2.rs`
 The core SSD block. **Read its module header** for the full SSD math (recurrence
 ↔ 1-semiseparable attention duality) and its file-local notation table.
-- `struct Mamba2<B>` — `in_proj` (`d_model → d_inner + conv_dim + nheads`),
+- `struct Mamba2` — `in_proj` (`d_model → d_inner + conv_dim + nheads`),
   depthwise causal `conv1d` (over `conv_dim = d_inner + 2·ngroups·state_rank`),
   per-head `dt_bias_h`/`a_log_h`/`d_h`, gated `norm` (`RmsNormGated`),
   `out_proj`, optional learnable `init_state_hpr`, plus `state_rank`/`ngroups`.
@@ -112,24 +122,25 @@ The core SSD block. **Read its module header** for the full SSD math (recurrence
   zero-pad to a multiple of `chunk_len` → GQA-expand B/C → **run selected SSD
   path** → gated RMSNorm with `z` → out-proj. Zero-pad is exact (Δ=0⇒Ā=1,B̄=0).
 - `step(input, cache)` — pure recurrence `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ`,
-  `yₜ = Cₜᵀ hₜ + D xₜ`, with manual conv-window slide. Requires `Mamba2BackendExt`
-  only on `forward` (the SSD path); `step` is plain `Backend`.
+  `yₜ = Cₜᵀ hₜ + D xₜ`, with manual conv-window slide. Only `forward` touches the
+  SSD path (dispatched through `Mamba2BackendExt`, impl'd for `Dispatch`); `step`
+  is the plain recurrence.
 
 ### `mamba2/cache.rs`
-- `struct Mamba2Cache<B>` — `conv_bvk [b, v, k]` (rolling conv window) +
+- `struct Mamba2Cache` — `conv_bvk [b, v, k]` (rolling conv window) +
   `ssm_bhpr [b, h, p, r]` (O(p·r) compressed state — the SSM memory advantage
   over a growing KV-cache). `sanity()` guards.
-- `struct Mamba2Caches<B>` — `Vec`, one per **virtual** layer; helpers
+- `struct Mamba2Caches` — `Vec`, one per **virtual** layer; helpers
   `into_options`/`from_options` (take-without-clone threading).
 - `*Config` factories, `new_from_block_config`. Zero-init is correct (no prior
   tokens; `h₀=0`).
 
 ### `mamba2/layer.rs`
-- `struct Mamba2Layers<B>` — the stack: `n_real_layers` weight sets,
+- `struct Mamba2Layers` — the stack: `n_real_layers` weight sets,
   `n_virtual_layers: Option<(usize, Schedule)>` (`module(skip)`), `real_layers`,
   `ignore_first/last_residual`. `forward`/`step` loop over virtual indices,
   mapping each to a real layer via the schedule, each with its own cache.
-- `struct Mamba2Layer<B>` — single `RmsNorm` + `Mamba2`; Pre-LN residual with a
+- `struct Mamba2Layer` — single `RmsNorm` + `Mamba2`; Pre-LN residual with a
   `residual_scale` (0.0 suppresses first/last residual).
 
 ### `mamba2/network.rs`
@@ -142,7 +153,7 @@ The SSD selector and input bundle.
   — each carries an optional `chunk_len`. `Default = SerialRecalculated(None)`.
   Variant docs map to the reference Triton kernels (`ssd_minimal.py`, the 5
   K1–K5 kernels, `ssd_combined.py`).
-- `struct Mamba2SsdInput<B>` — pre-processed inputs: `x_bnlhp`, `dt_bnlh`,
+- `struct Mamba2SsdInput` — pre-processed inputs: `x_bnlhp`, `dt_bnlh`,
   `a_decay_h` (= A, negative), `b_bnlhr`/`c_bnlhr` (already GQA-expanded),
   `d_h`, `initial_state_bhpr`, optional `init_state_hpr`. `sanity()`.
 - `optimal_default(state_rank, per_head_dim)` ≈ `√(r·p)` rounded to a multiple of
@@ -201,7 +212,7 @@ cache variant.
 ### `mamba3/mamba3.rs`
 The core block + the pathway dispatcher. **Read its module header** for the full
 combined math (trapezoid + RoPE + MIMO) and the file-local notation table.
-- `struct Mamba3<B>` — `in_proj` (size = `d_in_proj`, see below), per-head
+- `struct Mamba3` — `in_proj` (size = `d_in_proj`, see below), per-head
   `dt_bias_h`/`d_h`, `b_norm`/`c_norm` (QK-Norm `RmsNorm` over `state_rank`),
   `b_bias_hmr`/`c_bias_hmr` (`[h, m, r]`, init 1), optional MIMO
   `mimo_x_hmp`/`mimo_z_hmp`/`mimo_o_hmp` (`Some` only when `mimo_rank>1`),
@@ -230,7 +241,7 @@ marker. The `backwards` submodule blanket-impls the aggregate for `Autodiff<B>`.
 ### `mamba3/helpers.rs`
 Rank-generic helpers shared by both pathways **and** both modes (forward at
 rank 5, step at rank 4):
-- `struct TrapezoidCoeffs<B, D>` + `trapezoidal_coefficients(...)` —
+- `struct TrapezoidCoeffs<D>` + `trapezoidal_coefficients(...)` —
   `Δ=softplus(dd_dt+dt_bias)`, `A=-softplus(dd_A)` clamped `≤ -a_floor`,
   `da=Δ·A`, `α=exp(da)`, `β=(1-λ)·Δ·α`, `γ=λ·Δ` with `λ=σ(λ_raw)`.
 - `qk_norm_expand_bias(...)` — RmsNorm(over `state_rank`) → GQA-expand
@@ -240,8 +251,8 @@ rank 5, step at rank 4):
 
 ### `mamba3/cache.rs`
 The pathway-tagged cache **enums** — the heart of the dual-pathway design.
-- `enum Mamba3Cache<B> { DoubleSsd(Mamba3DoubleSsdCache), SingleSsd(Mamba3SingleSsdCache) }`
-  (per layer) and `enum Mamba3Caches<B> { ... }` (per network).
+- `enum Mamba3Cache { DoubleSsd(Mamba3DoubleSsdCache), SingleSsd(Mamba3SingleSsdCache) }`
+  (per layer) and `enum Mamba3Caches { ... }` (per network).
 - Conversions `From`/`Into` both ways, `double_ssd()`/`single_ssd()` extractors,
   `into_options`/`from_options`/`from_vec` (peeks the first element; **empty ⇒
   SingleSsd**). The enum lets one dispatch entry accept/return either family.
@@ -273,14 +284,14 @@ decoding too.
   (single_ssd imports it from here).
 
 ### `mamba3/double_ssd/cache.rs`
-- `struct Mamba3DoubleSsdCache<B>` — `ssm_bhpr` (trapezoidal hidden state),
+- `struct Mamba3DoubleSsdCache` — `ssm_bhpr` (trapezoidal hidden state),
   `k_state_bmhr` (previous-token B per rank, for the β term), `v_state_bhp`
   (previous-token x), `cum_angle_bha` (cumulative RoPE angle). **No conv cache**
   (Mamba-3 has no short convolution). `+ Caches`/`*Config` factories.
 
 ### `mamba3/double_ssd/ssd/ssd_path.rs`
 - `enum Mamba3DoubleSsdPath` — same three variants as Mamba-2, `From<Mamba3SsdPath>`.
-- `struct Mamba3DoubleSsdInput<B>` — **MIMO-first** SSD input: `v_bnlmhp`
+- `struct Mamba3DoubleSsdInput` — **MIMO-first** SSD input: `v_bnlmhp`
   (already × γ or β), `da_bnlh` (= Δ·A), `b_bnlmhr`/`c_bnlmhr` (QK-normed,
   RoPE-applied, bias-added, per-head, per-rank), `initial_state_bhpr`, optional
   `init_state_hpr`. `run()` dispatches to `double_ssd_minimal/serial/serial_recalculated`.
@@ -306,7 +317,7 @@ form), ≈ half the training memory of double-ssd.
   because the two accumulators coincide at the per-token boundary.
 
 ### `mamba3/single_ssd/cache.rs`
-- `struct Mamba3SingleSsdCache<B>` — same four fields as the double cache, **but
+- `struct Mamba3SingleSsdCache` — same four fields as the double cache, **but
   `ssm_bhpr` carries different semantics**: the single-ssd accumulator
   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ`, giving correct output everywhere except the
   diagonal (patched by the in-kernel γ correction). The distinct type **prevents
@@ -316,7 +327,7 @@ form), ≈ half the training memory of double-ssd.
   `+ Caches`/`*Config`.
 
 ### `mamba3/single_ssd/ssd/ssd_path.rs`
-- `enum Mamba3SingleSsdPath` + `struct Mamba3SingleSsdInput<B>` — like the
+- `enum Mamba3SingleSsdPath` + `struct Mamba3SingleSsdInput` — like the
   double input but feeds **raw `v`** plus `gamma_bnlh` and `scale_bnlh` (the
   kernel applies the scaling internally, rather than the caller pre-scaling V).
   Defines `Mamba3SingleSsdBackendExt`. Same `minimal/serial/serial_recalculated`
@@ -330,7 +341,7 @@ form), ≈ half the training memory of double-ssd.
   the top-level path convert to whichever pathway the cache selects.
 
 ### `mamba3/layer.rs`
-- `struct Mamba3Layers<B>` / `Mamba3Layer<B>` — same shape as Mamba-2 (virtual
+- `struct Mamba3Layers` / `Mamba3Layer` — same shape as Mamba-2 (virtual
   scheduling, `ignore_first/last_residual`, Pre-LN residual with
   `residual_scale`). Plus four free `make_zero_caches_{double,single}_ssd_{2d,3d}`
   helpers used to lazily allocate caches matching the chosen pathway.
@@ -364,9 +375,11 @@ Virtual-layer → real-weight index mapping (no tensors; pure index arithmetic).
 ## Utilities (`src/utils/`)
 
 ### `utils/mod.rs`
-Per-dtype numerical constants used by the norms: `stable_max::<B>()` and
-`div_eps::<B>()` / `div_eps_f32::<B>()` (a dtype-tuned epsilon between the raw
-underflow bound and machine epsilon). Declares all util submodules.
+Per-dtype numerical helper used by the norms: `div_eps(dtype: DType) -> f32` (a
+dtype-tuned epsilon between the raw underflow bound and machine epsilon, matched
+on the runtime `DType`). Declares all util submodules. (Burn 0.22 dropped
+`B::FloatElem`, so the old `<B>`-generic `div_eps`/`div_eps_f32`/`stable_max`
+were replaced by this single `DType`-taking function.)
 
 ### `utils/rms_norm.rs` & `utils/rms_norm_gated.rs`
 - `RmsNorm` — last-dim RMS normalisation with a learnable `gamma` (init 1). Used
@@ -390,13 +403,13 @@ Custom activations Burn either lacks or needs fp16-stable variants of.
   gives the strict-causal lower-triangular `L`. The backbone of `ssd_minimal`.
 
 ### `utils/gqa.rs`
-- `gqa_expand_to_heads::<_, D, DP1>(t, group_dim, nheads)` — replicates each
+- `gqa_expand_to_heads::<D, DP1>(t, group_dim, nheads)` — replicates each
   group's B/C slice across `heads_per_group = nheads/ngroups`. `DP1 = D+1` is a
   caller-supplied const (Rust can't yet express the constraint). Panics if
   `nheads % ngroups != 0`.
 
 ### `utils/split.rs`
-- `split_into::<_, D, N>(t, [sizes; N], dim) -> [Tensor; N]` — array-typed
+- `split_into::<D, N>(t, [sizes; N], dim) -> [Tensor; N]` — array-typed
   `split_with_sizes`, enabling `let [z, x, b, c, ...] = split_into(...)`
   destructuring instead of `parts.next().unwrap()` chains. Used by every
   in-projection split.
@@ -452,38 +465,55 @@ the example training loops.
 
 ## Examples (`examples/`)
 
-### `examples/common/backend.rs`
-Compile-time backend + dtype selection from feature flags: `MainBackend` /
-`MainAutoBackend` type aliases, the `FloatElement`/`IntElement` (fp16 under
-`dev-f16`), and the `MainDevice` trait (`main_device()`, `set_dtype()`). Emits a
-`compile_error!` if no backend feature is set.
+The examples are **Dispatch-only**: no module carries a backend type generic.
+The backend is selected at runtime by constructing a `Device`; autodiff and dtype
+are device properties (`device.clone().autodiff()`,
+`device.configure((FloatDType::F16, IntDType::I32))`).
+
+### `examples/common/device.rs`
+Runtime device + dtype selection (replaces the old compile-time `backend.rs`):
+- `select_device() -> Device` — cfg-picks `Device::flex()`/`cpu()`/`cuda(..)`/…
+  from the enabled `backend-*` feature (panics if none enabled).
+- `configure_dtype(&mut Device)` — installs fp16/i32 device defaults under
+  `dev-f16`; a no-op otherwise.
+- `RecorderTy` — the on-disk record format (`NamedMpkFileRecorder`,
+  half-precision under `dev-f16`, full otherwise).
+- `FloatElement` — the host scalar matching the runtime float dtype
+  (`burn::tensor::f16` under `dev-f16`, else `f32`); used for `to_vec` reads.
 
 ### `examples/common/cli.rs`
 `struct AppArgs` + parsing (training/inference flags, artifact dir, config
-load/save). Manages the train→infer flow and config persistence. The `HELP`
-const is the CLI help text.
+load/save). Manages the train→infer flow and config persistence (model/optim
+save/load via `RecorderTy`, all non-generic over the backend). The `HELP` const
+is the CLI help text.
 
-### `examples/common/model/model.rs`
-The example networks: `MyMamba2Network` / `MyMamba3Network` (`in_proj` →
-`{2,3}Layers` → `out_proj`) with `*NetworkConfig`, plus the `*_block_config` /
-`*_layers_config` builder helpers. Implement `ModelConfigExt` (from
-`model/mod.rs`).
+### `examples/common/model/{mod,model,bidi}.rs`
+- `mod.rs` — the `ModelConfigExt` trait (`init(&Device) -> Self::Model`; no
+  backend generic).
+- `model.rs` — the example networks `MyMamba2Network` / `MyMamba3Network`
+  (`in_proj` → `{2,3}Layers` → `out_proj`) with `*NetworkConfig`, plus the
+  `*_block_config` / `*_layers_config` builder helpers.
+- `bidi.rs` — bidirectional variants (`MyMamba{2,3}BidiNetwork`) wrapping the
+  `…BidiLayers`.
 
-### `examples/common/model/bidi.rs`
-Bidirectional variants (`MyMamba{2,3}BidiNetwork`) wrapping the `…BidiLayers`.
-
-### `examples/common/{training.rs, optim.rs}` and `examples/common/mnist/`
-Generic training loop (`TrainingConfig`, LR-scheduler glue), optimizer config
-(`OptimConfigExt`), and the sequential-MNIST dataset loader.
+### `examples/common/training.rs` and `examples/common/mnist/`
+`TrainingConfig` (epochs/batch/LR/seed + `AdamWConfig`) and the
+`optimizer_config(dtype)` helper (AdamW defaults with a dtype-sized epsilon); the
+sequential-MNIST dataset loader (`MnistDataset`/`MnistBatcher`, pixels as a
+length-784 sequence). The training dataloader is built with
+`.set_device(autodiff_device)` so batches match the model's (autodiff) backend;
+the validation loader uses the inner device.
 
 ### `examples/fibonacci/`
 Smallest demo: a tiny **Mamba-2** model on a fibonacci-like synthetic sequence.
-`main.rs` (`launch::<B, AutoB>` bounded on `Mamba2BackendExt`), `model.rs`
-(`model_config()`), `dataset.rs`, `training.rs`, `inference.rs` (autoregressive
-generation via `step`).
+`main.rs` (`launch(app_args)`: picks the `Device`, derives the autodiff device,
+wires configs + train/infer), `model.rs` (`model_config()`), `dataset.rs`,
+`training.rs`, `inference.rs` (next-value prediction; reads values as
+`FloatElement`). Runs end-to-end on fp32 and `dev-f16` (the latter goes NaN —
+accepted fp16 instability).
 
 ### `examples/mnist-class/`
-Sequential-MNIST digit classifier using **Mamba-3** (`Mamba3BackendExt` bound,
-cosine-annealing LR). `main.rs` / `model.rs` / `training.rs`; **inference is a
+Sequential-MNIST digit classifier using **Mamba-3** (cosine-annealing LR).
+`main.rs` (`launch(app_args)`) / `model.rs` / `training.rs`; **inference is a
 stub** ("not yet implemented").
 

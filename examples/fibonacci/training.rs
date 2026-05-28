@@ -17,48 +17,45 @@ use burn::{
     module::AutodiffModule,
     nn::loss::Reduction,
     optim::{AdamW, Optimizer, adaptor::OptimizerAdaptor},
-    tensor::backend::AutodiffBackend,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
-use burn::backend::Backend;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
 /// way).
-pub fn train<AutoB>(
+pub fn train(
     training_config: TrainingConfig,
     model_config: MyMamba2NetworkConfig,
     training_device: Device,
     app_args: &AppArgs,
-) where
-    AutoB: AutodiffBackend + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
-{
-    AutoB::seed(&training_device, training_config.seed);
+) {
+    training_device.seed(training_config.seed);
 
     // load (or init and save) model and optim
-    let model: MyMamba2Network<AutoB> =
-        app_args.load_or_save_model(&model_config, &training_device);
+    let model: MyMamba2Network = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &training_device);
+    let mut optim = app_args.load_or_save_optim::<MyMamba2Network>(&training_config.optimizer);
 
     let mut model = Wrap(model, model_config.clone());
 
     // Create the batcher
     let batcher = SequenceBatcher::default();
 
-    // Create the dataloaders
+    // Create the dataloaders. Training batches must live on the autodiff device
+    // (to match the model weights); validation runs on the inner backend.
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
+        .set_device(training_device.clone())
         .build(SequenceDataset::new(NUM_SEQUENCES, SEQ_LENGTH, NOISE_LEVEL));
     let dataloader_valid = DataLoaderBuilder::new(batcher)
         .batch_size(training_config.batch_size)
         .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
+        .set_device(training_device.clone().inner())
         // 20% size of training
         .build(SequenceDataset::new(
             NUM_SEQUENCES / 5,
@@ -77,7 +74,7 @@ pub fn train<AutoB>(
     };
 
     println!("running small initial validation...");
-    epoch_valid::<AutoB::InnerBackend>(
+    epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
         model.0.valid(),
         &training_config,
@@ -89,7 +86,7 @@ pub fn train<AutoB>(
     println!("Starting training...");
     // Iterate over our training for X epochs
     for epoch in 1..training_config.num_epochs + 1 {
-        model.0 = epoch_train::<AutoB>(
+        model.0 = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
             model.0,
@@ -109,7 +106,7 @@ pub fn train<AutoB>(
 
         let valid_loop_limit = Some(10);
         println!("running validation (batch iteration limit: {valid_loop_limit:?})");
-        epoch_valid::<AutoB::InnerBackend>(
+        epoch_valid(
             std::sync::Arc::clone(&dataloader_valid),
             model.0.valid(),
             &training_config,
@@ -121,30 +118,26 @@ pub fn train<AutoB>(
     println!("Training finished.");
 }
 
-type Dataloader = std::sync::Arc<dyn DataLoader<B, SequenceBatch> + 'static>;
+type Dataloader = std::sync::Arc<dyn DataLoader<SequenceBatch> + 'static>;
 
 /// Train for a single epoch, stepping the optimizer per batch and periodically
 /// validating + checkpointing; returns the updated model.
 #[allow(clippy::too_many_arguments)]
-pub fn epoch_train<AutoB>(
-    dataloader_train: Dataloader<AutoB>,
-    dataloader_valid: Dataloader<AutoB::InnerBackend>,
-    training_model: MyMamba2Network<AutoB>,
+pub fn epoch_train(
+    dataloader_train: Dataloader,
+    dataloader_valid: Dataloader,
+    training_model: MyMamba2Network,
     training_config: &TrainingConfig,
     model_config: &MyMamba2NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network<AutoB>, AutoB>,
+    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba2Network<AutoB>
-where
-    AutoB: AutodiffBackend + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
-{
+) -> MyMamba2Network {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
-    let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
+    let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
     let mut training_model = Wrap(training_model, model_config.clone());
@@ -185,7 +178,7 @@ where
             app_args.save_optim(optim);
 
             println!("running validation (batch iteration limit: {valid_loop_limit:?})");
-            epoch_valid::<AutoB::InnerBackend>(
+            epoch_valid(
                 std::sync::Arc::clone(&dataloader_valid),
                 training_model.0.valid(),
                 training_config,
@@ -248,18 +241,14 @@ pub fn epoch_valid(
         training_config.num_epochs,
         loss_metric.running_value().current(),
     );
-
-    // let device = valid_model.0.in_proj.weight.device();
-    // let () = B::sync(&device).unwrap();
-    // let () = B::memory_cleanup(&device);
 }
 
-/// Wrapper over [`Mamba2Network`] for custom implementations.
+/// Wrapper over [`MyMamba2Network`] for custom implementations.
 pub struct Wrap(pub MyMamba2Network, pub MyMamba2NetworkConfig);
 
-impl<AutoB: AutodiffBackend + Mamba2BackendExt> TrainStep for Wrap<AutoB> {
-    type Input = SequenceBatch<AutoB>;
-    type Output = RegressionOutput<AutoB>;
+impl TrainStep for Wrap {
+    type Input = SequenceBatch;
+    type Output = RegressionOutput;
 
     fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
         let pre_metrics = InferenceStep::step(self, batch);
@@ -280,8 +269,7 @@ impl InferenceStep for Wrap {
         assert_eq!([batch_size, 1], targets.dims());
         assert!(sequence_size >= 1);
 
-        let pre_metrics = self.forward_regression(input, targets);
-        pre_metrics
+        self.forward_regression(input, targets)
     }
 }
 

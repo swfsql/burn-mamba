@@ -1,21 +1,23 @@
 //! Shared infrastructure for the burn-mamba examples.
 //!
 //! Each concrete example (`fibonacci`, `mnist-class`) wires together the pieces
-//! here: compile-time [`backend`]/dtype selection, CLI + artifact handling
-//! ([`cli`]), the generic [`training`] loop and [`optim`]izer wrapper, the
-//! example [`model`] networks, and the sequential-[`mnist`] dataset.
+//! here: runtime [`device`] selection, CLI + artifact handling ([`cli`]), the
+//! example [`model`] networks, the generic [`training`] config, and the
+//! sequential-[`mnist`] dataset.
+//!
+//! With the new Dispatch-based architecture, no module here carries a backend
+//! type generic — `Tensor`/`Device`/`Module` are pinned to the global
+//! `Dispatch` backend, and the device chooses the concrete runtime backend.
 
 #![allow(dead_code)]
 
-/// Compile-time backend + float/int dtype selection from feature flags.
-pub mod backend;
-/// Argument parsing, artifact directory management, and the train/infer flow.
+/// CLI parsing, artifact directory management, and the train/infer flow.
 pub mod cli;
+/// Runtime [`Device`] selection + optional dtype configuration.
+pub mod device;
 /// Sequential-MNIST dataset loading and batching.
 pub mod mnist;
 /// The example networks (`MyMamba2Network` / `MyMamba3Network`) and builders.
 pub mod model;
-/// Optimizer configuration wrapper.
-pub mod optim;
-/// The generic training loop and its configuration.
+/// The shared training configuration.
 pub mod training;

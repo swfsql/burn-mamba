@@ -65,28 +65,27 @@ minimal impl) and are intentionally not analyzed here — see
 │   ├── README.md                      # how the examples are structured + CLI usage
 │   ├── common                         # infrastructure shared by all examples
 │   │   ├── README.md
-│   │   ├── backend.rs                 # runtime backend + float/int dtype selection from feature flags (MainBackend, MainDevice)
 │   │   ├── cli.rs                     # arg parsing (AppArgs), artifact dir mgmt, config load/save, train/infer flow
+│   │   ├── device.rs                  # runtime Device selection from backend-* flags; dtype config (dev-f16); RecorderTy/FloatElement
 │   │   ├── mnist
 │   │   │   ├── dataset.rs             # sequential-MNIST dataset loading/batching (pixels as a sequence)
 │   │   │   └── mod.rs
-│   │   ├── mod.rs                     # re-exports; ModelConfigExt trait (Config → Module factory)
+│   │   ├── mod.rs                     # re-exports the shared submodules
 │   │   ├── model
 │   │   │   ├── bidi.rs                # bidirectional wrapper networks (Mamba2/3 BidiLayers) for examples
-│   │   │   ├── mod.rs                 # ModelConfigExt; re-exports of the example networks
+│   │   │   ├── mod.rs                 # ModelConfigExt (Config → Module factory); re-exports of the example networks
 │   │   │   └── model.rs               # MyMamba2Network / MyMamba3Network (in_proj → Layers → out_proj) + config helpers
-│   │   ├── optim.rs                   # optimizer config wrapper (OptimConfigExt)
-│   │   └── training.rs                # generic training loop, TrainingConfig, LR scheduler glue
+│   │   └── training.rs                # TrainingConfig + optimizer_config(dtype) helper
 │   ├── fibonacci                      # smallest example: Mamba-2 on a fibonacci-like synthetic sequence
 │   │   ├── README.md
 │   │   ├── dataset.rs                 # synthetic fibonacci-like sequence generator
 │   │   ├── inference.rs               # autoregressive generation via step()
-│   │   ├── main.rs                    # launch(): wires backend, configs, train/infer (Mamba2BackendExt bound)
+│   │   ├── main.rs                    # launch(): picks Device, autodiff device, wires configs + train/infer
 │   │   ├── model.rs                   # example model_config() for the fibonacci task
 │   │   └── training.rs                # training entry for the fibonacci task
 │   └── mnist-class                    # sequential-MNIST digit classifier: Mamba-3
 │       ├── README.md
-│       ├── main.rs                    # launch(): Mamba3BackendExt bound, cosine-annealing LR; inference is a stub
+│       ├── main.rs                    # launch(): picks Device + autodiff device, cosine-annealing LR; inference is a stub
 │       ├── model.rs                   # model_config() for the classifier
 │       └── training.rs                # training entry (classification head on last timestep)
 ├── refs                               # EXTERNAL references (not analyzed)
@@ -456,16 +455,28 @@ numerical epsilon for safe division.
 
 ### Examples (`examples/`)
 
-`examples/common/` holds shared infra: `backend.rs` (compile-time backend +
-dtype selection from features), `cli.rs` (`AppArgs`, artifact dir, config
-load/save, train→infer flow), `training.rs`/`optim.rs` (generic loop + optimizer
-config), `model/` (`MyMamba2Network` / `MyMamba3Network` = `in_proj` → `Layers`
+The examples are **Dispatch-only**: no module carries a backend type generic.
+The backend is chosen at runtime by constructing a [`Device`] (`Device::flex()`,
+`Device::cuda(..)`, …) — each `backend-*` feature just enables the matching burn
+backend, and several can be compiled in at once. Autodiff is a device property
+(`device.clone().autodiff()` for training); dtype is a device property too
+(`device.configure((FloatDType::F16, IntDType::I32))`, used by `dev-f16`).
+
+`examples/common/` holds shared infra: `device.rs` (`select_device()` from the
+enabled `backend-*` flag, `configure_dtype()` for `dev-f16`, the `RecorderTy`
+record format, and the `FloatElement` host scalar matching the runtime dtype),
+`cli.rs` (`AppArgs`, artifact dir, config load/save, train→infer flow),
+`training.rs` (`TrainingConfig` + `optimizer_config(dtype)`), `model/`
+(`ModelConfigExt`; `MyMamba2Network` / `MyMamba3Network` = `in_proj` → `Layers`
 → `out_proj`, plus the `*_block_config`/`*_layers_config` builders and the
 bidirectional wrappers), and `mnist/` (sequential-MNIST dataset). Each concrete
 example (`fibonacci/`, `mnist-class/`) supplies its own
 `main.rs` (`launch()`), `model.rs` (`model_config()`), `training.rs`, and—where
 relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo;
 `mnist-class` is a Mamba-3 sequential-MNIST classifier (inference is a stub).
+The training dataloader must be built with `.set_device(autodiff_device)` so its
+batches live on the same (autodiff) backend as the model weights; the validation
+loader uses the inner device.
 
 ---
 

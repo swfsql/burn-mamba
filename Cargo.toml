@@ -11,29 +11,29 @@ mamba3 = ["autodiff"]
 autodiff = ["burn/autodiff"]
 cubecl = ["dep:burn-cubecl", "burn/cubecl"]
 fusion = ["burn/fusion", "dep:burn-fusion"]
-# backend selection
-backend-ndarray = ["burn/ndarray", "_dev-has-backend"]
+# Backend selection. With the Dispatch architecture each feature simply enables
+# the corresponding burn backend; multiple may be compiled in simultaneously.
+# At runtime, `examples/common/device.rs` picks the Device for the first
+# enabled backend.
+backend-ndarray = ["burn/ndarray"]
 backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
-backend-flex = ["burn/flex", "_dev-has-backend"]
-backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon", "_dev-has-backend"]
-backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-has-backend"]
-backend-tch-cpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-backend-tch-gpu = ["burn/tch", "burn/std", "_dev-has-backend"]
-backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-has-backend"]
-backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-has-backend"]
-backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-has-backend"]
-backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-has-backend"]
-backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-has-backend"]
-backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-has-backend"]
+backend-flex = ["burn/flex"]
+backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon"]
+backend-cpu = ["burn/cpu", "burn/std", "cubecl"]
+backend-tch-cpu = ["burn/tch", "burn/std"]
+backend-tch-gpu = ["burn/tch", "burn/std"]
+backend-wgpu = ["burn/wgpu", "burn/std", "cubecl"]
+backend-metal = ["burn/metal", "burn/std", "cubecl"]
+backend-vulkan = ["burn/vulkan", "burn/std", "cubecl"]
+backend-cuda = ["burn/cuda", "burn/std", "cubecl"]
+backend-rocm = ["burn/rocm", "burn/std", "cubecl"]
+backend-remote = ["burn/remote", "burn/std", "cubecl"]
 # misc features for tests or examples
 dev-f16 = []
 dev-simd = ["burn/simd", "burn/std"]
 dev-autotune = ["burn/autotune"]
-_dev-has-backend = [] # signal if any backend was selected
-# TODO: the `dev-*`/`backend-*` features were initially meant to only refer to testing/examples, but now they
-# leak into the library for the cubecl needs. Try to solve this.
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
@@ -63,9 +63,9 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 
 ### For the main branch. ###
-# burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+# burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}
 # burn-dataset = { version = "0.22.0-pre.1", features = ["network"] }
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, features = ["autodiff", "train", "dataset", "std"]}
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}
 burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058", features = ["network"] }
 
 ### For local development. ###

@@ -60,13 +60,15 @@ Each generation in this crate builds on the last:
 
 ```toml
 [dependencies]
-burn = "0.21.0"
+# burn = "0.21.0"
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058" }
 # pin to a specific revision:
 burn-mamba = { git = "https://github.com/swfsql/burn-mamba.git", rev = "abc..." }
 ```
 
-Exactly one `backend-*` feature must be enabled (the same backend selection Burn
-uses); otherwise compilation fails with an explicit error.
+Enable at least one `backend-*` feature to pick a runtime backend (the same
+backend selection Burn uses). Several may be enabled at once; the running program
+chooses the backend by constructing the matching `Device`.
 
 <details>
 <summary><b>Feature flags</b></summary>
@@ -95,17 +97,19 @@ the returned cache:
 use burn::prelude::*;
 use burn_mamba::prelude::*;
 
-// `B` is any Burn backend. Mamba-2/3 also require the family's backend extension.
-fn demo<B: Backend + Mamba2BackendExt>(device: &B::Device) {
+// The backend is chosen at runtime by the `Device`; tensors and modules are not
+// backend-generic. Construct a device for the enabled backend, e.g.
+// `Device::flex()` / `Device::cuda(0)` (or `device.autodiff()` for training).
+fn demo(device: &Device) {
     // A single Mamba-2 SSM block with d_model = 256.
-    let block = Mamba2Config::new(256).init::<B>(device);
+    let block = Mamba2Config::new(256).init(device);
 
     // forward: parallel over the full sequence — [batch, sequence, d_model].
-    let x = Tensor::<B, 3>::zeros([2, 64, 256], device);
+    let x = Tensor::<3>::zeros([2, 64, 256], device);
     let (y, cache) = block.forward(x, None, Mamba2SsdPath::default());
 
     // step: one token at a time, constant memory — [batch, d_model].
-    let x_t = Tensor::<B, 2>::zeros([2, 256], device);
+    let x_t = Tensor::<2>::zeros([2, 256], device);
     let (y_t, _next_cache) = block.step(x_t, Some(cache));
 
     let _ = (y, y_t);

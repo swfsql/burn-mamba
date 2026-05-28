@@ -3,17 +3,14 @@
 //! target is the next value. Used to give the fibonacci example a learnable
 //! recurrence to fit.
 
-pub use crate::common::backend::FloatElement;
 use burn::data::{
     dataloader::batcher::Batcher,
     dataset::{Dataset, InMemDataset},
 };
 use burn::prelude::*;
-use num_traits::AsPrimitive;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use serde::{Deserialize, Serialize};
-use burn::backend::Backend;
 
 /// Number of sequences in the generated dataset.
 pub const NUM_SEQUENCES: usize = 1000;
@@ -26,30 +23,23 @@ pub const NOISE_LEVEL: f32 = 0.1;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequenceDatasetItem {
     /// The input sequence.
-    pub sequence: Vec<FloatElement>,
+    pub sequence: Vec<f32>,
     /// The value following the sequence (the regression target).
-    pub target: FloatElement,
+    pub target: f32,
 }
 
 impl SequenceDatasetItem {
     pub fn new(seq_length: usize, noise_level: f32) -> Self {
         // Start with two random numbers between 0 and 1
-
-        // TODO: half has rand_distr feature, but burn can't forward it.
-        // Either ask for a feature forward, or explicitly add half as a dependency.
         let lower = rand::rng().random::<f32>();
-        #[cfg(feature = "dev-f16")]
-        let lower = burn::tensor::f16::from_f32(lower);
         let upper = rand::rng().random::<f32>();
-        #[cfg(feature = "dev-f16")]
-        let upper = burn::tensor::f16::from_f32(upper);
         let mut seq = vec![lower, upper];
 
         // Generate sequence
         for _i in 0..seq_length {
             // Next number is sum of previous two plus noise
             let normal = Normal::new(0.0, noise_level).unwrap();
-            let normal: FloatElement = normal.sample(&mut rand::rng()).as_();
+            let normal: f32 = normal.sample(&mut rand::rng());
             let next_val = seq[seq.len() - 2] + seq[seq.len() - 1] + normal;
             seq.push(next_val);
         }
@@ -103,7 +93,7 @@ pub struct SequenceBatch {
     pub targets: Tensor<2>,
 }
 
-impl Batcher<B, SequenceDatasetItem, SequenceBatch> for SequenceBatcher {
+impl Batcher<SequenceDatasetItem, SequenceBatch> for SequenceBatcher {
     fn batch(&self, items: Vec<SequenceDatasetItem>, device: &Device) -> SequenceBatch {
         let mut sequences: Vec<Tensor<2>> = Vec::new();
 

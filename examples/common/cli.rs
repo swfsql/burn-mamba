@@ -3,13 +3,14 @@
 //! config, model weights, and optimizer state.  See [`HELP`] for the full
 //! command-line behaviour.
 
-use crate::common::{backend::RecorderTy, model::ModelConfigExt, optim::OptimConfigExt};
-use burn::module::AutodiffModule;
+use crate::common::device::RecorderTy;
+use crate::common::model::ModelConfigExt;
+use burn::optim::AdamWConfig;
+use burn::optim::adaptor::OptimizerAdaptor;
 use burn::record::{FileRecorder, Recorder};
-use burn::{optim::Optimizer, prelude::*, tensor::backend::AutodiffBackend};
+use burn::{module::AutodiffModule, optim::Optimizer, prelude::*};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use burn::backend::Backend;
 
 /// The `--help` text describing every flag and the train/infer/config flow.
 pub const HELP: &str = "\
@@ -174,13 +175,11 @@ impl AppArgs {
     }
 
     /// Load the model config (from `--model-config` or the artifacts dir).
-    pub fn load_model_config<B: Backend, ModelConfig: ModelConfigExt<B>>(
-        &self,
-    ) -> Option<ModelConfig> {
+    pub fn load_model_config<ModelConfig: ModelConfigExt>(&self) -> Option<ModelConfig> {
         self.model_config
             .as_ref()
             .map(|path| {
-                load_model_config::<B, ModelConfig>(path)
+                load_model_config::<ModelConfig>(path)
                     .expect("Failed to find the model config file {path:?}")
             })
             .or({
@@ -188,17 +187,17 @@ impl AppArgs {
                     .artifacts_path
                     .join(MODEL_CONFIG_NAME)
                     .with_added_extension("json");
-                load_model_config::<B, ModelConfig>(&path)
+                load_model_config::<ModelConfig>(&path)
             })
     }
 
     /// Save the model weights into the artifacts directory.
-    pub fn save_model<B: Backend>(&self, model: &impl Module<B>) {
+    pub fn save_model(&self, model: &impl Module) {
         save_model(&self.artifacts_path, model)
     }
 
     /// Load model weights from the artifacts directory, if present.
-    pub fn load_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
+    pub fn load_model<ModelConfig: ModelConfigExt>(
         &self,
         model_config: &ModelConfig,
         device: &Device,
@@ -207,56 +206,43 @@ impl AppArgs {
     }
 
     /// Load the model if saved, otherwise initialise a new one and save it.
-    pub fn load_or_save_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
+    pub fn load_or_save_model<ModelConfig: ModelConfigExt>(
         &self,
         model_config: &ModelConfig,
         device: &Device,
     ) -> ModelConfig::Model {
         self.load_model(model_config, device).unwrap_or_else(|| {
             println!("Initializing new model");
-            let model_init = init_model(model_config, device);
+            let model_init = model_config.init(device);
             self.save_model(&model_init);
             model_init
         })
     }
 
     /// Save the optimizer state into the artifacts directory.
-    pub fn save_optim<AutoB, AutoM>(&self, optim: &impl Optimizer<AutoM, AutoB>)
-    where
-        AutoB: AutodiffBackend,
-        AutoM: AutodiffModule<AutoB>,
-    {
+    pub fn save_optim<M: AutodiffModule>(
+        &self,
+        optim: &OptimizerAdaptor<burn::optim::AdamW, M>,
+    ) {
         save_optim(&self.artifacts_path, optim)
     }
 
     /// Load optimizer state from the artifacts directory, if present.
-    pub fn load_optim<AutoB, AutoM, OptimConfig>(
+    pub fn load_optim<M: AutodiffModule>(
         &self,
-        optim_config: &OptimConfig,
-        device: &Device,
-    ) -> Option<OptimConfig::Adaptor>
-    where
-        AutoB: AutodiffBackend,
-        AutoM: AutodiffModule<AutoB>,
-        OptimConfig: OptimConfigExt<AutoB, AutoM>,
-    {
-        load_optim(&self.artifacts_path, optim_config, device)
+        optim_config: &AdamWConfig,
+    ) -> Option<OptimizerAdaptor<burn::optim::AdamW, M>> {
+        load_optim(&self.artifacts_path, optim_config)
     }
 
     /// Load the optimizer if saved, otherwise initialise a new one and save it.
-    pub fn load_or_save_optim<AutoB, AutoM, OptimConfig>(
+    pub fn load_or_save_optim<M: AutodiffModule>(
         &self,
-        optim_config: &OptimConfig,
-        device: &Device,
-    ) -> OptimConfig::Adaptor
-    where
-        AutoB: AutodiffBackend,
-        AutoM: AutodiffModule<AutoB>,
-        OptimConfig: OptimConfigExt<AutoB, AutoM>,
-    {
-        self.load_optim(optim_config, device).unwrap_or_else(|| {
+        optim_config: &AdamWConfig,
+    ) -> OptimizerAdaptor<burn::optim::AdamW, M> {
+        self.load_optim::<M>(optim_config).unwrap_or_else(|| {
             println!("Initializing new optim");
-            let optim_init = init_optim(optim_config, device);
+            let optim_init = optim_config.init::<M>();
             self.save_optim(&optim_init);
             optim_init
         })
@@ -315,7 +301,7 @@ pub fn save_model_config(path: &Path, model_config: &impl Config) {
 }
 
 /// Load a model config from `path`, or `None` if the file is absent.
-pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option<ModelConfig> {
+pub fn load_model_config<ModelConfig: Config>(path: &Path) -> Option<ModelConfig> {
     let exists = std::fs::exists(path).expect("failed to check {path:?}");
     if exists {
         println!("Loading model config from {path:?}");
@@ -329,9 +315,9 @@ pub fn load_model_config<B: Backend, ModelConfig: Config>(path: &Path) -> Option
 /// Base filename (without extension) for the persisted model weights.
 pub const MODEL_NAME: &str = "model";
 /// Save model weights into `artifact_dir` using the configured recorder.
-pub fn save_model<B: Backend>(artifact_dir: &Path, model: &impl Module<B>) {
+pub fn save_model(artifact_dir: &Path, model: &impl Module) {
     let path = artifact_dir.join(MODEL_NAME);
-    let file_ext = <RecorderTy as FileRecorder<B>>::file_extension();
+    let file_ext = <RecorderTy as FileRecorder>::file_extension();
     let path_ext = path.with_added_extension(file_ext);
     println!("Saving model to {path_ext:?}");
     model
@@ -347,12 +333,12 @@ pub fn load_model<ModelConfig: ModelConfigExt>(
     device: &Device,
 ) -> Option<ModelConfig::Model> {
     let path = artifact_dir.join(MODEL_NAME);
-    let file_ext = <RecorderTy as FileRecorder<B>>::file_extension();
+    let file_ext = <RecorderTy as FileRecorder>::file_extension();
     let path_ext = path.with_added_extension(file_ext);
     let exists = std::fs::exists(&path_ext).expect("failed to check {path:?}");
     if exists {
         println!("Loading model from {path_ext:?}");
-        let model_init = init_model(model_config, device);
+        let model_init = model_config.init(device);
         let model = model_init
             .load_file(path, &RecorderTy::new(), device) // ext added automatically
             .expect("Failed to load the initial model");
@@ -362,25 +348,15 @@ pub fn load_model<ModelConfig: ModelConfigExt>(
     }
 }
 
-/// Initialise a fresh model from its config on `device`.
-pub fn init_model<B: Backend, ModelConfig: ModelConfigExt<B>>(
-    model_config: &ModelConfig,
-    device: &Device,
-) -> ModelConfig::Model {
-    model_config.init(device)
-}
-
 /// Base filename (without extension) for the persisted optimizer state.
 pub const OPTIM_NAME: &str = "optim";
 /// Save optimizer state into `artifact_dir` using the configured recorder.
-pub fn save_optim<AutoB, AutoM, Optim>(artifact_dir: &Path, optim: &Optim)
-where
-    AutoB: AutodiffBackend,
-    AutoM: AutodiffModule<AutoB>,
-    Optim: Optimizer<AutoM, AutoB>,
-{
+pub fn save_optim<M: AutodiffModule>(
+    artifact_dir: &Path,
+    optim: &OptimizerAdaptor<burn::optim::AdamW, M>,
+) {
     let path = artifact_dir.join(OPTIM_NAME);
-    let file_ext = <RecorderTy as FileRecorder<AutoB>>::file_extension();
+    let file_ext = <RecorderTy as FileRecorder>::file_extension();
     let path_ext = path.with_added_extension(file_ext);
     println!("Saving optim to {path_ext:?}");
     let record = optim.to_record();
@@ -390,42 +366,23 @@ where
 }
 
 /// Load optimizer state from `artifact_dir`, or `None` if absent.
-pub fn load_optim<AutoB, AutoM, OptimConfig>(
+pub fn load_optim<M: AutodiffModule>(
     artifact_dir: &Path,
-    optim_config: &OptimConfig,
-    device: &Device,
-) -> Option<OptimConfig::Adaptor>
-where
-    AutoB: AutodiffBackend,
-    AutoM: AutodiffModule<AutoB>,
-    OptimConfig: OptimConfigExt<AutoB, AutoM>,
-{
+    optim_config: &AdamWConfig,
+) -> Option<OptimizerAdaptor<burn::optim::AdamW, M>> {
     let path = artifact_dir.join(OPTIM_NAME);
-    let file_ext = <RecorderTy as FileRecorder<AutoB>>::file_extension();
+    let file_ext = <RecorderTy as FileRecorder>::file_extension();
     let path_ext = path.with_added_extension(file_ext);
     let exists = std::fs::exists(&path_ext).expect("failed to check {path:?}");
     if exists {
         println!("Loading initial optim from {path_ext:?}");
-        let optim_init = init_optim(optim_config, device);
+        let optim_init = optim_config.init::<M>();
         let record = RecorderTy::new()
-            .load(path, device) // ext added automatically
+            .load(path, &Device::default()) // ext added automatically
             .expect("Failed to load the initial optim");
         let optim = optim_init.load_record(record);
         Some(optim)
     } else {
         None
     }
-}
-
-/// Initialise a fresh optimizer from its config.
-pub fn init_optim<AutoB, AutoM, OptimConfig>(
-    optim_config: &OptimConfig,
-    _device: &Device,
-) -> OptimConfig::Adaptor
-where
-    AutoB: AutodiffBackend,
-    AutoM: AutodiffModule<AutoB>,
-    OptimConfig: OptimConfigExt<AutoB, AutoM>,
-{
-    optim_config.init()
 }

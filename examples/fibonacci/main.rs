@@ -2,21 +2,16 @@
 //!
 //! The smallest end-to-end demo: a tiny Mamba-2 model trained on a
 //! fibonacci-like synthetic sequence, then used for autoregressive generation.
-//! Exercises the full train → save → infer flow on the `backend-flex` (fp32)
-//! backend.
+//! Exercises the full train → save → infer flow on the runtime-selected backend
+//! (defaults to `backend-flex`, fp32).
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
 
-use burn::prelude::*;
-use burn::tensor::backend::AutodiffBackend;
-use burn_mamba::prelude::Mamba2BackendExt;
 pub use common::{
-    backend::{MainAutoBackend, MainBackend, MainDevice},
     cli::AppArgs,
     training::{ConstantLr, Lr, TrainingConfig},
 };
-use burn::backend::Backend;
 
 /// The synthetic fibonacci-like dataset.
 pub mod dataset;
@@ -31,25 +26,28 @@ pub mod training;
 #[path = "../common/mod.rs"]
 pub mod common;
 
-/// Wire up backend, configs, and the train/infer flow for the fibonacci task.
-pub fn launch<B, AutoB>(app_args: &AppArgs)
-where
-    B: Backend + MainDevice + Mamba2BackendExt,
-    AutoB: AutodiffBackend + MainDevice + Mamba2BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba2BackendExt,
-{
+/// Wire up the device, configs, and the train/infer flow for the fibonacci task.
+pub fn launch(app_args: &AppArgs) {
     assert!(
         app_args.extra_args.is_empty(),
         "no extra arguments required"
     );
     app_args.create_artifact_dir();
 
+    // pick the device from the enabled `backend-*` cargo feature, and
+    // optionally install fp16/i32 dtype defaults (when `dev-f16` is on).
+    let mut device = common::device::select_device();
+    common::device::configure_dtype(&mut device);
+    // training needs an autodiff-enabled device; inference uses the plain one.
+    let autodiff_device = device.clone().autodiff();
+    let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
+
     // setup training and model configs
     let batch_size = 32;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         TrainingConfig::new(
-            common::training::optimizer_config::<AutoB>()
+            common::training::optimizer_config(dtype)
                 // fast training, where momentum isn't really required
                 .with_beta_1(0.0)
                 .with_beta_2(0.95),
@@ -61,7 +59,7 @@ where
         // note: Sgd works well with lr=1e-4
         .with_lr(Lr::Constant(ConstantLr::new().with_lr(3e-2)))
     });
-    let model_config = app_args.load_model_config::<AutoB, _>().unwrap_or_else(|| {
+    let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model::model_config()
     });
@@ -70,23 +68,17 @@ where
     app_args.save_model_config(&model_config);
 
     if app_args.training {
-        let training_device = AutoB::main_device();
-        AutoB::set_dtype(&training_device);
-        training::train::<AutoB>(
+        training::train(
             training_config,
             model_config.clone(),
-            training_device,
+            autodiff_device,
             app_args,
         );
     }
 
     if app_args.inference {
-        let infer_device = B::main_device();
-        if !app_args.training {
-            B::set_dtype(&infer_device);
-        }
         let batch_size = 10;
-        inference::infer::<B>(model_config, batch_size, infer_device, app_args);
+        inference::infer(model_config, batch_size, device, app_args);
     }
 
     if !app_args.inference && !app_args.training {
@@ -97,5 +89,5 @@ where
 
 fn main() {
     let app_args = AppArgs::parse().unwrap();
-    launch::<MainBackend, MainAutoBackend>(&app_args);
+    launch(&app_args);
 }

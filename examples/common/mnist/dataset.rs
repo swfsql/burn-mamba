@@ -3,7 +3,6 @@
 //! sequence-modelling task.  Handles download/caching of the raw IDX files and
 //! batching into Burn tensors.
 
-use crate::common::backend::FloatElement;
 use burn::data::dataloader::batcher::Batcher;
 use burn::prelude::*;
 use burn_dataset::{
@@ -12,14 +11,12 @@ use burn_dataset::{
     transform::{Mapper, MapperDataset},
 };
 use flate2::read::GzDecoder;
-use num_traits::AsPrimitive;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, create_dir_all},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
-use burn::backend::Backend;
 
 // from the vision source
 // https://github.com/tracel-ai/burn/blob/fa4f9845a6b2279cd8de68bf7ca5a7eb76dec96d/crates/burn-dataset/src/vision/mnist.rs
@@ -45,9 +42,9 @@ pub struct MnistFlatItem {
     ///
     /// # Shape
     /// [WIDTH * HEIGHT]
-    pub image: Vec<FloatElement>,
+    pub image: Vec<f32>,
 
-    /// Label of the image.  
+    /// Label of the image.
     /// Each value is in between 0 and 9.
     pub label: u8,
 }
@@ -67,13 +64,10 @@ impl Mapper<MnistFlatItemRaw, MnistFlatItem> for BytesToFlatImage {
         debug_assert_eq!(item.image_bytes.len(), WIDTH * HEIGHT);
 
         // Convert the image to a flat array of floats.
-        let image: Vec<FloatElement> = item
+        let image: Vec<f32> = item
             .image_bytes
             .iter()
-            .map(|brightness| {
-                let float_element: FloatElement = (*brightness).as_();
-                float_element
-            })
+            .map(|brightness| *brightness as f32)
             .collect();
 
         MnistFlatItem {
@@ -264,7 +258,7 @@ pub struct MnistBatch {
     pub targets: Tensor<1, Int>,
 }
 
-impl Batcher<B, MnistFlatItem, MnistBatch> for MnistBatcher {
+impl Batcher<MnistFlatItem, MnistBatch> for MnistBatcher {
     fn batch(&self, items: Vec<MnistFlatItem>, device: &Device) -> MnistBatch {
         let (items_image, items_label): (Vec<_>, Vec<_>) = items
             .into_iter()
@@ -272,19 +266,14 @@ impl Batcher<B, MnistFlatItem, MnistBatch> for MnistBatcher {
             .unzip();
         let images = items_image
             .into_iter()
-            .map(|image: Vec<FloatElement>| {
-                TensorData::new(image, [1, HEIGHT, WIDTH, 1]).convert::<B::FloatElem>()
+            .map(|image: Vec<f32>| {
+                Tensor::<1>::from_floats(image.as_slice(), device).reshape([1, HEIGHT, WIDTH, 1])
             })
-            .map(|data| Tensor::<4>::from_data(data, device))
-            // .map(|tensor: Tensor<2>| tensor.reshape([1, HEIGHT, WIDTH, 1]))
-            // .map(|tensor| ((tensor / 255) - mean) / stddev)
             .collect();
 
         let targets = items_label
             .into_iter()
-            .map(|label: u8| {
-                Tensor::<B, 1, Int>::from_data([(label as i64).elem::<B::IntElem>()], device)
-            })
+            .map(|label: u8| Tensor::<1, Int>::from_ints([label as i64], device))
             .collect();
 
         let images = Tensor::cat(images, 0);

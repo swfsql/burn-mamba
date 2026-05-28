@@ -14,48 +14,45 @@ use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
     module::AutodiffModule,
     optim::{AdamW, Optimizer, adaptor::OptimizerAdaptor},
-    tensor::backend::AutodiffBackend,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
-use burn::backend::Backend;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
 /// way).
-pub fn train<AutoB>(
+pub fn train(
     training_config: TrainingConfig,
     model_config: MyMamba3NetworkConfig,
     training_device: Device,
     app_args: &AppArgs,
-) where
-    AutoB: AutodiffBackend + Mamba3BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba3BackendExt,
-{
-    AutoB::seed(&training_device, training_config.seed);
+) {
+    training_device.seed(training_config.seed);
 
     // load (or init and save) model and optim
-    let model: MyMamba3Network<AutoB> =
-        app_args.load_or_save_model(&model_config, &training_device);
+    let model: MyMamba3Network = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &training_device);
+    let mut optim = app_args.load_or_save_optim::<MyMamba3Network>(&training_config.optimizer);
 
     let mut model = Wrap(model, model_config.clone());
 
     // Create the batcher
     let batcher = MnistBatcher::default();
 
-    // Create the dataloaders
+    // Create the dataloaders. Training batches must live on the autodiff device
+    // (to match the model weights); validation runs on the inner backend.
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
+        .set_device(training_device.clone())
         .build(MnistDataset::train());
     let dataloader_valid = DataLoaderBuilder::new(batcher)
         .batch_size(training_config.batch_size)
         .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
+        .set_device(training_device.clone().inner())
         .build(MnistDataset::test());
 
     let training_num_items = dataloader_train.num_items();
@@ -69,7 +66,7 @@ pub fn train<AutoB>(
     };
 
     println!("running small initial validation...");
-    epoch_valid::<AutoB::InnerBackend>(
+    epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
         model.0.valid(),
         &training_config,
@@ -81,7 +78,7 @@ pub fn train<AutoB>(
     println!("Starting training...");
     // Iterate over our training for X epochs
     for epoch in 1..training_config.num_epochs + 1 {
-        model.0 = epoch_train::<AutoB>(
+        model.0 = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
             model.0,
@@ -100,7 +97,7 @@ pub fn train<AutoB>(
         app_args.save_optim(&optim);
 
         println!("running full validation...");
-        epoch_valid::<AutoB::InnerBackend>(
+        epoch_valid(
             std::sync::Arc::clone(&dataloader_valid),
             model.0.valid(),
             &training_config,
@@ -112,31 +109,27 @@ pub fn train<AutoB>(
     println!("Training finished.");
 }
 
-type Dataloader = std::sync::Arc<dyn DataLoader<B, MnistBatch> + 'static>;
+type Dataloader = std::sync::Arc<dyn DataLoader<MnistBatch> + 'static>;
 
 /// Train for a single epoch, stepping the optimizer per batch and periodically
 /// validating + checkpointing; returns the updated model.
 #[allow(clippy::too_many_arguments)]
-pub fn epoch_train<AutoB>(
-    dataloader_train: Dataloader<AutoB>,
-    dataloader_valid: Dataloader<AutoB::InnerBackend>,
-    training_model: MyMamba3Network<AutoB>,
+pub fn epoch_train(
+    dataloader_train: Dataloader,
+    dataloader_valid: Dataloader,
+    training_model: MyMamba3Network,
     training_config: &TrainingConfig,
     model_config: &MyMamba3NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba3Network<AutoB>, AutoB>,
+    optim: &mut OptimizerAdaptor<AdamW, MyMamba3Network>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba3Network<AutoB>
-where
-    AutoB: AutodiffBackend + Mamba3BackendExt,
-    <AutoB as AutodiffBackend>::InnerBackend: Mamba3BackendExt,
-{
+) -> MyMamba3Network {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
-    let mut loss_metric = burn::train::metric::LossMetric::<AutoB>::new();
-    let mut acc_metric = burn::train::metric::AccuracyMetric::<AutoB>::new();
+    let mut loss_metric = burn::train::metric::LossMetric::new();
+    let mut acc_metric = burn::train::metric::AccuracyMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
     let mut training_model = Wrap(training_model, model_config.clone());
@@ -179,7 +172,7 @@ where
             app_args.save_optim(optim);
 
             println!("running validation (batch iteration limit: {valid_loop_limit:?})");
-            epoch_valid::<AutoB::InnerBackend>(
+            epoch_valid(
                 std::sync::Arc::clone(&dataloader_valid),
                 training_model.0.valid(),
                 training_config,
@@ -246,18 +239,14 @@ pub fn epoch_valid(
         loss_metric.running_value().current(),
         acc_metric.running_value().current(),
     );
-
-    // let device = valid_model.0.in_proj.weight.device();
-    // let () = B::sync(&device).unwrap();
-    // let () = B::memory_cleanup(&device);
 }
 
 /// Wrapper over [`MyMamba3Network`] for custom implementations.
 pub struct Wrap(pub MyMamba3Network, pub MyMamba3NetworkConfig);
 
-impl<AutoB: AutodiffBackend + Mamba3BackendExt> TrainStep for Wrap<AutoB> {
-    type Input = MnistBatch<AutoB>;
-    type Output = ClassificationOutput<AutoB>;
+impl TrainStep for Wrap {
+    type Input = MnistBatch;
+    type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
         let pre_metrics = InferenceStep::step(self, batch);
@@ -282,8 +271,7 @@ impl InferenceStep for Wrap {
         assert_eq!(input_size, 1);
         let targets = batch.targets;
 
-        let pre_metrics = self.forward_classification(input, targets);
-        pre_metrics
+        self.forward_classification(input, targets)
     }
 }
 

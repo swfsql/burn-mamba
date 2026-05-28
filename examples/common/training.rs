@@ -1,30 +1,12 @@
 //! Shared training configuration for the examples.
 //!
 //! [`TrainingConfig`] holds the common hyperparameters (epochs, batch size, LR
-//! schedule, seed); [`TrainingConfigExt`] ties a config to its optimizer config
-//! so the generic loop stays model-agnostic.  [`optimizer_config`] builds the
-//! AdamW defaults shared by the examples (per-dtype epsilon, grad clipping,
-//! cautious weight decay).
+//! schedule, seed) plus the optimizer config.  [`optimizer_config`] builds the
+//! AdamW defaults shared by the examples (epsilon, grad clipping, cautious
+//! weight decay).
 
-use crate::common::{model::ModelConfigExt, optim::OptimConfigExt};
-use burn::{
-    module::AutodiffModule, optim::AdamWConfig, prelude::*, tensor::backend::AutodiffBackend,
-};
+use burn::{optim::AdamWConfig, prelude::*};
 pub use burn_mamba::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
-
-/// A training config that can hand the loop its optimizer config.
-pub trait TrainingConfigExt<AutoB, AutoM, ModelConfig>
-where
-    Self: Config,
-    AutoB: AutodiffBackend,
-    AutoM: AutodiffModule<AutoB>,
-    ModelConfig: ModelConfigExt<AutoB, Model = AutoM>,
-{
-    /// The optimizer config type.
-    type OptimConfig: OptimConfigExt<AutoB, AutoM>;
-    /// Borrow the optimizer config.
-    fn optim(&self) -> &Self::OptimConfig;
-}
 
 /// Common training hyperparameters shared by the examples.
 #[derive(Config, Debug)]
@@ -48,23 +30,12 @@ pub struct TrainingConfig {
     pub seed: u64,
 }
 
-impl<AutoB, AutoM, ModelConfig> TrainingConfigExt<AutoB, AutoM, ModelConfig> for TrainingConfig
-where
-    AutoB: AutodiffBackend,
-    AutoM: AutodiffModule<AutoB>,
-    ModelConfig: ModelConfigExt<AutoB, Model = AutoM>,
-{
-    type OptimConfig = AdamWConfig;
-    fn optim(&self) -> &Self::OptimConfig {
-        &self.optimizer
-    }
-}
-
 /// The AdamW defaults shared by the examples: per-dtype epsilon, gradient
-/// clipping at 1.0, and cautious weight decay.
-pub fn optimizer_config<AutoB: AutodiffBackend>() -> AdamWConfig {
+/// clipping at 1.0, and cautious weight decay. `dtype` should be the device's
+/// default float dtype (epsilon is sized to it).
+pub fn optimizer_config(dtype: burn::tensor::DType) -> AdamWConfig {
     AdamWConfig::new()
-        .with_epsilon(burn_mamba::utils::div_eps_f32::<AutoB>())
+        .with_epsilon(burn_mamba::utils::div_eps(dtype))
         .with_grad_clipping(Some(burn::grad_clipping::GradientClippingConfig::Value(
             1.0,
         )))

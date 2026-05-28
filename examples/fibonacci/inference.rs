@@ -2,10 +2,8 @@
 //! the next value of held-out sequences, printing predictions against targets.
 
 use crate::AppArgs;
-pub use crate::common::{
-    backend::FloatElement,
-    model::{MyMamba2Network, MyMamba2NetworkConfig},
-};
+pub use crate::common::device::FloatElement;
+pub use crate::common::model::{MyMamba2Network, MyMamba2NetworkConfig};
 use crate::dataset::{
     NOISE_LEVEL, SEQ_LENGTH, SequenceBatcher, SequenceDataset, SequenceDatasetItem,
 };
@@ -14,7 +12,6 @@ use burn::{
     prelude::*,
 };
 use burn_mamba::prelude::*;
-use burn::backend::Backend;
 
 /// Load the trained model and run inference on a fresh batch of sequences.
 pub fn infer(
@@ -45,7 +42,9 @@ pub fn infer(
     let targets = batch.targets;
     assert_eq!([batch_size, 1], targets.dims());
 
-    // Display the predicted vs expected values
+    // Display the predicted vs expected values. Values are read back as
+    // `FloatElement`, which matches the device's runtime float dtype (fp16
+    // under `dev-f16`, fp32 otherwise).
     let show = 10;
     let last_predicted = last_predicted.squeeze_dims::<1>(&[1, 2]).narrow(0, 0, show);
     let expected = targets.squeeze_dim::<1>(1).narrow(0, 0, show);
