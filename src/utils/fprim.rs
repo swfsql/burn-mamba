@@ -18,9 +18,10 @@
 //! runtime-shaped primitive ops.
 
 use burn::backend::Backend;
-use burn::backend::ops::{BoolTensorOps, FloatTensorOps};
-use burn::backend::tensor::{BoolTensor, Device, FloatTensor};
-use burn::backend::{FloatDType, Scalar, Shape, Slice, SliceArg, TensorData, TensorMetadata};
+use burn::backend::get_device_settings;
+use burn::backend::ops::{BoolTensorOps, FloatTensorOps, IntTensorOps};
+use burn::backend::tensor::{BoolTensor, Device, FloatTensor, IntTensor};
+use burn::backend::{FloatDType, Scalar, Shape, Slice, SliceArg, TensorMetadata};
 
 /// A backend float-tensor primitive tagged with a compile-time rank `D`.
 ///
@@ -309,11 +310,17 @@ impl<B: Backend> Mask<B> {
     }
 }
 
-/// Build a `[rows, cols]` triangular boolean mask on the host.
+/// Build a `[rows, cols]` triangular boolean mask on-device.
 ///
-/// Following `tri_mask` in Burn: with `matrix = row - col + offset`, the result
-/// is `matrix < 0` when `lower` (the `tril_mask`/lower-triangle region) and
-/// `matrix > 0` otherwise (the `triu_mask`/upper-triangle region).
+/// Mirrors `tri_mask` in Burn: with `matrix = row - col`, the result is
+/// `matrix < -offset` when `lower` (the `tril_mask`/lower-triangle region) and
+/// `matrix > -offset` otherwise (the `triu_mask`/upper-triangle region) — i.e.
+/// the original `row - col + offset ≷ 0` test with `offset` folded into the
+/// comparison threshold.
+///
+/// Built from on-device `arange`/comparison rather than uploaded host `bool`
+/// data: cubecl backends reject a `Bool(Native)` `bool_from_data`, and the
+/// comparison output here adopts the device's configured bool store.
 fn tri_bool<B: Backend>(
     rows: usize,
     cols: usize,
@@ -321,14 +328,25 @@ fn tri_bool<B: Backend>(
     lower: bool,
     device: &Device<B>,
 ) -> BoolTensor<B> {
-    let mut data = Vec::with_capacity(rows * cols);
-    for r in 0..rows {
-        for c in 0..cols {
-            let m = r as i64 - c as i64 + offset;
-            data.push(if lower { m < 0 } else { m > 0 });
-        }
+    let settings = get_device_settings::<B>(device);
+    let shape = Shape::new([rows, cols]);
+
+    let rows_i: IntTensor<B> = B::int_reshape(
+        B::int_arange(0..rows as i64, device, settings.int_dtype),
+        Shape::new([rows, 1]),
+    );
+    let cols_i: IntTensor<B> = B::int_reshape(
+        B::int_arange(0..cols as i64, device, settings.int_dtype),
+        Shape::new([1, cols]),
+    );
+    // matrix_rc = row - col (broadcast to [rows, cols]).
+    let matrix = B::int_sub(B::int_expand(rows_i, shape.clone()), B::int_expand(cols_i, shape));
+    let threshold = Scalar::from(-offset);
+    if lower {
+        B::int_lower_elem(matrix, threshold, settings.bool_dtype)
+    } else {
+        B::int_greater_elem(matrix, threshold, settings.bool_dtype)
     }
-    B::bool_from_data(TensorData::new(data, [rows, cols]), device)
 }
 
 /// Primitive analogue of [`crate::utils::sanity::sanity`] for [`F`].

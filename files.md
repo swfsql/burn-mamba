@@ -35,7 +35,7 @@ build warning. Defines two crate-wide sanity constants:
   so the checks are no-ops in release).
 
 ### `Cargo.toml`
-Manifest. Crate `0.24.0`, edition 2024, depends on `burn` `0.22.0-pre.1` (pinned
+Manifest. Edition 2024, depends on `burn` `0.22.0-pre.1` (pinned
 to a git rev; the `extension` feature provides `#[backend_extension]`). The
 `[features]` section is the source of truth for backend selection
 (`backend-*`), the model toggles (`mamba1`/`2`/`3`, all default-on), `autodiff`
@@ -471,9 +471,11 @@ are device properties (`device.clone().autodiff()`,
 `device.configure((FloatDType::F16, IntDType::I32))`).
 
 ### `examples/common/device.rs`
-Runtime device + dtype selection (replaces the old compile-time `backend.rs`):
-- `select_device() -> Device` — cfg-picks `Device::flex()`/`cpu()`/`cuda(..)`/…
-  from the enabled `backend-*` feature (panics if none enabled).
+Runtime dtype selection + record format (replaces the old compile-time
+`backend.rs`). The backend itself is picked by `Device::default()` directly in
+each `main.rs` — it resolves to the enabled `backend-*` feature (each enables the
+matching `burn/<backend>`), honouring the `BURN_DEVICE` env override and a
+built-in priority list when several are compiled in. This module provides:
 - `configure_dtype(&mut Device)` — installs fp16/i32 device defaults under
   `dev-f16`; a no-op otherwise.
 - `RecorderTy` — the on-disk record format (`NamedMpkFileRecorder`,

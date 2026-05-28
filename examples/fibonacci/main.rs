@@ -34,9 +34,10 @@ pub fn launch(app_args: &AppArgs) {
     );
     app_args.create_artifact_dir();
 
-    // pick the device from the enabled `backend-*` cargo feature, and
-    // optionally install fp16/i32 dtype defaults (when `dev-f16` is on).
-    let mut device = common::device::select_device();
+    // `Device::default()` resolves to the enabled `backend-*` feature (honouring
+    // the `BURN_DEVICE` env override); `configure_dtype` installs fp16/i32 when
+    // `dev-f16` is on.
+    let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
     // training needs an autodiff-enabled device; inference uses the plain one.
     let autodiff_device = device.clone().autodiff();

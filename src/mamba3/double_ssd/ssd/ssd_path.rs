@@ -94,5 +94,5 @@ impl Mamba3DoubleSsdInput {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(all(test, feature = "backend-flex"))]
+#[cfg(all(test, feature = "_dev-test"))]
 mod tests;

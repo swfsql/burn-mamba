@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.24.0"
+version = "0.25.0"
 edition = "2024"
 
 [features]
@@ -13,24 +13,29 @@ cubecl = ["dep:burn-cubecl", "burn/cubecl"]
 fusion = ["burn/fusion", "dep:burn-fusion"]
 # Backend selection. With the Dispatch architecture each feature simply enables
 # the corresponding burn backend; multiple may be compiled in simultaneously.
-# At runtime, `examples/common/device.rs` picks the Device for the first
-# enabled backend.
-backend-ndarray = ["burn/ndarray"]
+# At runtime the examples (and tests) use `Device::default()`, which resolves to
+# an enabled backend (honouring the `BURN_DEVICE` env override). Each backend
+# also turns on the internal `_dev-test` marker so the tensor test suite compiles
+# under whichever backend is present.
+backend-ndarray = ["burn/ndarray", "_dev-test"]
 backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
-backend-flex = ["burn/flex"]
+backend-flex = ["burn/flex", "_dev-test"]
 backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon"]
-backend-cpu = ["burn/cpu", "burn/std", "cubecl"]
-backend-tch-cpu = ["burn/tch", "burn/std"]
-backend-tch-gpu = ["burn/tch", "burn/std"]
-backend-wgpu = ["burn/wgpu", "burn/std", "cubecl"]
-backend-metal = ["burn/metal", "burn/std", "cubecl"]
-backend-vulkan = ["burn/vulkan", "burn/std", "cubecl"]
-backend-cuda = ["burn/cuda", "burn/std", "cubecl"]
-backend-rocm = ["burn/rocm", "burn/std", "cubecl"]
-backend-remote = ["burn/remote", "burn/std", "cubecl"]
+backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-test"]
+backend-tch-cpu = ["burn/tch", "burn/std", "_dev-test"]
+backend-tch-gpu = ["burn/tch", "burn/std", "_dev-test"]
+backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-test"]
+backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-test"]
+backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-test"]
+backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-test"]
+backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-test"]
+backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-test"]
 # misc features for tests or examples
+# `_dev-test` (internal): enabled by every `backend-*` so the tensor test suite
+# compiles whenever a backend is present. Not meant to be enabled directly.
+_dev-test = []
 dev-f16 = []
 dev-simd = ["burn/simd", "burn/std"]
 dev-autotune = ["burn/autotune"]

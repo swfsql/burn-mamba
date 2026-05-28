@@ -20,7 +20,9 @@ runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 # Type-check (no backend needed for the lib surface, but tests/examples need one)
 cargo check
 
-# Run tests (flex is the preferred test/check backend)
+# Run tests (any backend works; flex is the convenient default for CPU checks).
+# The tensor tests compile whenever a backend is enabled and pick it at runtime
+# via `Device::default()`, so e.g. `--features backend-cuda` runs them on CUDA.
 cargo test --features "backend-flex"
 
 # Build docs
@@ -37,8 +39,11 @@ cargo run --example mnist-class --features "backend-cuda" -- --training --infere
   checks/tests), `backend-cpu`, `backend-wgpu`, `backend-metal`,
   `backend-vulkan`, `backend-cuda`, `backend-rocm`, `backend-tch-cpu`,
   `backend-tch-gpu`, `backend-remote`, `backend-ndarray` (+ BLAS variants,
-  deprecated). Exactly one backend feature must be enabled or compilation fails
-  with an explicit error (the `_dev-has-backend` signal).
+  deprecated). With the Dispatch architecture each flag just enables the matching
+  `burn/<backend>`; several may be compiled in at once and `Device::default()`
+  resolves which to use (honouring the `BURN_DEVICE` env override). Every
+  `backend-*` also turns on the internal `_dev-test` marker that gates the tensor
+  test modules, so the suite compiles under whichever backend is enabled.
 - The `mamba1`, `mamba2`, `mamba3`, and `autodiff` features are on by default.
   `mamba2`/`mamba3` imply `autodiff` (needed for their custom backward).
 - `cubecl` / `fusion` enable the memory-saving custom backward on those backend
@@ -462,9 +467,11 @@ backend, and several can be compiled in at once. Autodiff is a device property
 (`device.clone().autodiff()` for training); dtype is a device property too
 (`device.configure((FloatDType::F16, IntDType::I32))`, used by `dev-f16`).
 
-`examples/common/` holds shared infra: `device.rs` (`select_device()` from the
-enabled `backend-*` flag, `configure_dtype()` for `dev-f16`, the `RecorderTy`
-record format, and the `FloatElement` host scalar matching the runtime dtype),
+`examples/common/` holds shared infra: `device.rs` (the examples pick the
+backend with `Device::default()`, which resolves to the enabled `backend-*` flag
+— honouring the `BURN_DEVICE` env override; plus `configure_dtype()` for
+`dev-f16`, the `RecorderTy` record format, and the `FloatElement` host scalar
+matching the runtime dtype),
 `cli.rs` (`AppArgs`, artifact dir, config load/save, train→infer flow),
 `training.rs` (`TrainingConfig` + `optimizer_config(dtype)`), `model/`
 (`ModelConfigExt`; `MyMamba2Network` / `MyMamba3Network` = `in_proj` → `Layers`

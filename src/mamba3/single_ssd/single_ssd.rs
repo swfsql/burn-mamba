@@ -409,5 +409,5 @@ mod step {
 // Tests — forward_single_ssd parity with forward_double_ssd, step, and split-prefill
 // ---------------------------------------------------------------------------
 
-#[cfg(all(test, feature = "backend-flex"))]
+#[cfg(all(test, feature = "_dev-test"))]
 mod tests;

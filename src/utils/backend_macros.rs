@@ -26,14 +26,7 @@ macro_rules! impl_ssd_backend_ext_for_burn_backends {
         impl<F, I> $trait_name for burn::backend::RemoteBackend<F, I> {}
 
         #[cfg(feature = "cubecl")]
-        impl<R, F, I, BT> $trait_name for burn_cubecl::CubeBackend<R, F, I, BT>
-        where
-            R: burn_cubecl::CubeRuntime,
-            F: burn_cubecl::FloatElement,
-            I: burn_cubecl::IntElement,
-            BT: burn_cubecl::element::BoolElement,
-        {
-        }
+        impl<R> $trait_name for burn_cubecl::CubeBackend<R> where R: burn_cubecl::CubeRuntime {}
 
         // Fusion delegates to the inner backend's default impl.
         #[cfg(feature = "fusion")]

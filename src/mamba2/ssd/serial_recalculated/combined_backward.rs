@@ -591,6 +591,5 @@ pub fn combined_backward<B: Backend>(
     }
 }
 
-#[cfg(test)]
-#[cfg(feature = "backend-flex")]
+#[cfg(all(test, feature = "_dev-test"))]
 mod tests;
