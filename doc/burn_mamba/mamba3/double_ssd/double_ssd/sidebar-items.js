@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["apply_rope","apply_rope_partial"],"mod":["step"]};
+window.SIDEBAR_ITEMS = {"fn":["apply_rope","apply_rope_partial","wrap_angle"],"mod":["step"]};
