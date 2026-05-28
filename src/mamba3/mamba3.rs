@@ -338,8 +338,15 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
-    /// Fraction of `state_rank` to which RoPE is applied (must be `0.5` or `1.0`).
+    /// Fraction of `state_rank` to which RoPE is applied (must be `0.0`, `0.5`,
+    /// or `1.0`).
     ///
+    /// - `0.0`: RoPE disabled — no B/C dimension is rotated
+    ///   ([`apply_rope_partial`](crate::mamba3::double_ssd::double_ssd::apply_rope_partial)
+    ///   becomes the identity). Intended for ablations only. The angle
+    ///   projection and cumulative-angle data flow are kept intact (with a
+    ///   single dummy angle channel, see [`Self::num_rope_angles`]) so the rest
+    ///   of the block is structurally unchanged.
     /// - `0.5` (default): partial RoPE — only `state_rank / 2` dimensions are
     ///   rotated; the rest pass through unchanged.
     /// - `1.0`: full RoPE — every B/C dimension is rotated.
@@ -368,8 +375,10 @@ impl Mamba3Config {
         self.d_inner() / self.per_head_dim
     }
 
-    /// Effective RoPE dimension: `2 · num_rope_angles`. Equals `state_rank`
-    /// for full RoPE, and `state_rank / 2` for `rope_fraction = 0.5`.
+    /// Effective RoPE dimension: the number of B/C channels actually rotated.
+    /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
+    /// `rope_fraction = 0.5`, and `0` when RoPE is disabled
+    /// (`rope_fraction = 0`), in which case the rotation is the identity.
     pub fn rope_dim(&self) -> usize {
         let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
         if !d.is_multiple_of(2) {
@@ -378,9 +387,15 @@ impl Mamba3Config {
         d
     }
 
-    /// Number of RoPE rotation angles projected per head: `rope_dim / 2`.
+    /// Number of RoPE rotation angles projected per head: `rope_dim / 2`, but
+    /// **at least 1**.
+    ///
+    /// When RoPE is disabled (`rope_fraction = 0` ⇒ `rope_dim = 0`) the floor of
+    /// 1 keeps a single angle channel alive: Burn has no zero-width tensors, and
+    /// retaining one channel lets the angle projection / cumulative-angle data
+    /// flow stay intact while the rotation itself short-circuits to the identity.
     pub fn num_rope_angles(&self) -> usize {
-        self.rope_dim() / 2
+        (self.rope_dim() / 2).max(1)
     }
 
     /// Total input projection output size.
@@ -417,8 +432,8 @@ impl Mamba3Config {
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(
-            self.rope_fraction == 0.5 || self.rope_fraction == 1.0,
-            "rope_fraction must be 0.5 or 1.0"
+            self.rope_fraction == 0.0 || self.rope_fraction == 0.5 || self.rope_fraction == 1.0,
+            "rope_fraction must be 0.0, 0.5 or 1.0"
         );
         assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
 

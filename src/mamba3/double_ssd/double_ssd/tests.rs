@@ -343,6 +343,16 @@ fn cfg_rope_half() -> Mamba3Config {
 fn cfg_rope_half_mimo() -> Mamba3Config {
     cfg_rope_half().with_mimo_rank(2)
 }
+fn cfg_rope_zero() -> Mamba3Config {
+    Mamba3Config::new(32)
+        .with_state_rank(8)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(0.0)
+}
+fn cfg_rope_zero_mimo() -> Mamba3Config {
+    cfg_rope_zero().with_mimo_rank(2)
+}
 fn cfg_outproj_norm() -> Mamba3Config {
     Mamba3Config::new(32)
         .with_state_rank(8)
@@ -423,6 +433,28 @@ fn step_matches_forward_rope_half_mimo() {
 #[test]
 fn step_matches_forward_rope_half_mimo_random_init() {
     run_step_matches_forward(cfg_rope_half_mimo(), true);
+}
+
+// ── rope_fraction = 0 (RoPE disabled / identity) ────────────────────────
+
+#[test]
+fn step_matches_forward_rope_zero() {
+    run_step_matches_forward(cfg_rope_zero(), false);
+}
+
+#[test]
+fn step_matches_forward_rope_zero_random_init() {
+    run_step_matches_forward(cfg_rope_zero(), true);
+}
+
+#[test]
+fn step_matches_forward_rope_zero_mimo() {
+    run_step_matches_forward(cfg_rope_zero_mimo(), false);
+}
+
+#[test]
+fn step_matches_forward_rope_zero_mimo_random_init() {
+    run_step_matches_forward(cfg_rope_zero_mimo(), true);
 }
 
 // ── has_outproj_norm = true (gated RMSNorm) ─────────────────────────────

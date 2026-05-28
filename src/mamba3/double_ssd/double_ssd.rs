@@ -90,7 +90,8 @@ pub fn apply_rope<const D: usize>(
 
 /// Apply RoPE to only the rotation-active entries of the last dimension; the
 /// remainder passes through unchanged. Falls back to [`apply_rope`] when
-/// `rope_dim == state_rank` (full RoPE).
+/// `rope_dim == state_rank` (full RoPE), and is the **identity** when
+/// `rope_dim == 0` (RoPE disabled, `rope_fraction = 0`) — `angles` is ignored.
 ///
 /// Pairing scheme (must match the reference kernels — see Section
 /// "Data-Dependent RoPE" in the paper, and `mamba3_siso_fwd.py` /
@@ -110,6 +111,13 @@ pub(crate) fn apply_rope_partial<const D: usize>(
     rope_dim: usize,
     rotate_pairwise: bool,
 ) -> Tensor<D> {
+    if rope_dim == 0 {
+        // RoPE disabled (rope_fraction = 0): identity. The upstream angle data
+        // flow is still computed and cached, but no rotation is applied. This
+        // also avoids zero-width narrows below (Burn has no zero-width tensors).
+        return x;
+    }
+
     let state_rank = x.dims()[D - 1];
     if rope_dim == state_rank {
         return apply_rope::<D>(x, angles, rotate_pairwise);

@@ -33,6 +33,18 @@ fn cfg_mimo_ngroups2() -> Mamba3Config {
     cfg_ngroups2().with_mimo_rank(2)
 }
 
+fn cfg_rope_zero() -> Mamba3Config {
+    Mamba3Config::new(32)
+        .with_state_rank(8)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(0.0)
+}
+
+fn cfg_rope_zero_mimo() -> Mamba3Config {
+    cfg_rope_zero().with_mimo_rank(2)
+}
+
 /// Build a matched pair of initial caches for cross-algorithm parity
 /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
 /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
@@ -482,6 +494,23 @@ fn forward_match_recalc_mimo() {
     );
 }
 
+// ── rope_fraction = 0 (RoPE disabled / identity) ────────────────────────
+
+#[test]
+fn forward_match_rope_zero() {
+    forward_match(cfg_rope_zero(), Mamba3SsdPath::Minimal(Some(4)), false);
+}
+
+#[test]
+fn forward_match_rope_zero_random_init() {
+    forward_match(cfg_rope_zero(), Mamba3SsdPath::Minimal(Some(4)), true);
+}
+
+#[test]
+fn forward_match_rope_zero_mimo() {
+    forward_match(cfg_rope_zero_mimo(), Mamba3SsdPath::Minimal(Some(4)), false);
+}
+
 /// forward_single_ssd ≡ token-by-token step on values and gradients, from the same
 /// initial state (random when `random_init = true`, with zero previous-token
 /// history so the single-ssd and recurrent forms coincide).
@@ -559,6 +588,11 @@ fn forward_single_ssd_matches_step() {
 #[test]
 fn forward_single_ssd_matches_step_random_init() {
     run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Minimal(Some(4)), true);
+}
+
+#[test]
+fn forward_single_ssd_matches_step_rope_zero() {
+    run_forward_single_ssd_matches_step(cfg_rope_zero(), Mamba3SsdPath::Minimal(Some(4)), false);
 }
 
 #[test]
