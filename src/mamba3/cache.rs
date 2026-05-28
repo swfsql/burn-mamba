@@ -14,8 +14,8 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// A pathway-tagged bundle of per-layer caches, so a single dispatch entry can
 /// accept / return either cache family.

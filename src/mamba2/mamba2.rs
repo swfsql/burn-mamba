@@ -89,13 +89,13 @@ use crate::utils::{
     silu::Silu,
     softplus::softplus,
 };
+use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
     nn::conv::{Conv1d, Conv1dConfig},
     nn::{Initializer, Linear, LinearConfig},
 };
-use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba2  (the SSM block)

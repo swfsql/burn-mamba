@@ -6,10 +6,10 @@
 //! and `target_logits` control whether each side is normalised (log-softmax /
 //! softmax) before the loss.
 
+use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};
-use burn::backend::Backend;
 
 /// Configuration to create a [`CrossEntropyLoss`] using the [`CrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]

@@ -16,11 +16,11 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::utils::fprim::{F, san};
+use burn::backend::tensor::FloatTensor;
+use burn::backend::*;
+use burn::backend::{Backend, Dispatch, backend_extension};
 use burn::tensor::Tensor;
 use burn::tensor::s;
-use burn::backend::tensor::FloatTensor;
-use burn::backend::{Backend, backend_extension, Dispatch};
-use burn::backend::*;
 
 impl Mamba3DoubleSsdInput {
     /// MIMO-first Serial SSD with recalculated backward.
@@ -310,10 +310,11 @@ fn k5_ssd_chunk_scan<B: Backend>(
     // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of
     // target in time). Built as interleaved expansion of the standard
     // 2-dimensional upper-triangle mask.
-    let neg_inf_base_bnhll = F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype)
-        .triu(1) // [chunk_len, chunk_len]: -inf above diagonal
-        .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111ll
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // neg_inf_base_bnhll
+    let neg_inf_base_bnhll =
+        F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype)
+            .triu(1) // [chunk_len, chunk_len]: -inf above diagonal
+            .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111ll
+            .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // neg_inf_base_bnhll
     let neg_inf_bnhLMLM = neg_inf_base_bnhll
         .unsqueeze_dim::<6>(4) // neg_inf_base_bnhl1l
         .expand([batch, nchunks, nheads, chunk_len, mimo_rank, chunk_len]) // neg_inf_base_bnhlml

@@ -5,10 +5,10 @@
 //! multiplying it back in after the reduction.
 
 use crate::utils::div_eps;
+use burn::backend::Backend;
 use burn::module::Module;
 use burn::nn::loss::Reduction;
 use burn::tensor::{DType, Tensor, f16};
-use burn::backend::Backend;
 
 /// Calculate the mean squared error loss from the input logits and the targets.
 #[derive(Module, Debug)]

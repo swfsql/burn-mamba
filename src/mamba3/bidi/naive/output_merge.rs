@@ -2,9 +2,9 @@
 //! bidirectional Mamba-3 layer pair into a single `[batch, sequence, d_model]`
 //! output.
 
+use burn::backend::Backend;
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
-use burn::backend::Backend;
 
 /// A zero-parameter placeholder used where the `Module` derive expects a value
 /// (the `Mean` merge carries no weights).

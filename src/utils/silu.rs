@@ -3,8 +3,8 @@
 //! Implemented as `x / (1 + exp(−x))`, which is fp16-aware (no separate
 //! `sigmoid` op) and used for the gating branches throughout the Mamba blocks.
 
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// SiLU activation module: `silu(x) = x · sigmoid(x) = x / (1 + exp(−x))`.
 #[derive(Module, Debug, Default)]

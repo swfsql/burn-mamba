@@ -20,8 +20,8 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::utils::segsum::segsum;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.

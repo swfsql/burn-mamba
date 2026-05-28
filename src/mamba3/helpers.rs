@@ -13,8 +13,8 @@
 use crate::utils::gqa::gqa_expand_to_heads;
 use crate::utils::rms_norm::RmsNorm;
 use crate::utils::softplus::softplus;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// Output of [`trapezoidal_coefficients`].
 ///

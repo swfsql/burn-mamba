@@ -23,9 +23,9 @@ use burn::backend::autodiff::{
     grads::Gradients,
     ops::{Backward, Ops, OpsKind},
 };
-use burn::prelude::*;
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, BackendTypes};
+use burn::prelude::*;
 
 impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.
@@ -96,7 +96,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     node_a_decay_h,
                 ] = ops.parents;
 
-                let d_combined: <B as BackendTypes>::FloatTensorPrimitive = grads.consume::<B>(&ops.node);
+                let d_combined: <B as BackendTypes>::FloatTensorPrimitive =
+                    grads.consume::<B>(&ops.node);
 
                 let State {
                     x_bnlhp,

@@ -219,8 +219,10 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     initial_state_bhpr.primitive.clone(),
                 );
 
-                let (prim_combined, _, _) =
-                    crate::utils::combined_grad::flatten_pair::<B>(prim_y_bnlmhp, prim_final_state_bhpr);
+                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                    prim_y_bnlmhp,
+                    prim_final_state_bhpr,
+                );
 
                 let state = State {
                     v_bnlmhp: v_bnlmhp.primitive.clone(),
@@ -242,7 +244,8 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     shape_y_bnlmhp,
                     shape_final_state_bhpr,
                 };
-                let tracked_combined: FloatTensor<Autodiff<B, C>> = prep.finish(state, prim_combined);
+                let tracked_combined: FloatTensor<Autodiff<B, C>> =
+                    prep.finish(state, prim_combined);
 
                 let (tracked_y_bnlmhp, tracked_final_state_bhpr) =
                     crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 6, 4>(
@@ -267,8 +270,10 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     initial_state_bhpr.primitive,
                 );
 
-                let (prim_combined, _, _) =
-                    crate::utils::combined_grad::flatten_pair::<B>(prim_y_bnlmhp, prim_final_state_bhpr);
+                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                    prim_y_bnlmhp,
+                    prim_final_state_bhpr,
+                );
 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> = prep.finish(prim_combined);
 

@@ -16,10 +16,10 @@
 use burn::prelude::*;
 use burn::record::NamedMpkFileRecorder;
 
-#[cfg(feature = "dev-f16")]
-pub use burn::record::HalfPrecisionSettings as RecorderPrecision;
 #[cfg(not(feature = "dev-f16"))]
 pub use burn::record::FullPrecisionSettings as RecorderPrecision;
+#[cfg(feature = "dev-f16")]
+pub use burn::record::HalfPrecisionSettings as RecorderPrecision;
 
 /// On-disk record format for model and optimizer state.
 pub type RecorderTy = NamedMpkFileRecorder<RecorderPrecision>;

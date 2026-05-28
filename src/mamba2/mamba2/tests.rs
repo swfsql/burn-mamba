@@ -214,11 +214,7 @@ fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath, random_i
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
-        conv: Tensor::<3>::random(
-            [batch, cfg.conv_dim(), cfg.conv_kernel],
-            normal,
-            &device,
-        ),
+        conv: Tensor::<3>::random([batch, cfg.conv_dim(), cfg.conv_kernel], normal, &device),
         ssm: Tensor::<4>::random(
             [batch, cfg.nheads(), cfg.per_head_dim, cfg.state_rank],
             normal,
@@ -348,11 +344,7 @@ fn run_ssd_paths_agree(cfg: Mamba2Config, random_init: bool) {
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
-        conv: Tensor::<3>::random(
-            [batch, cfg.conv_dim(), cfg.conv_kernel],
-            normal,
-            &device,
-        ),
+        conv: Tensor::<3>::random([batch, cfg.conv_dim(), cfg.conv_kernel], normal, &device),
         ssm: Tensor::<4>::random(
             [batch, cfg.nheads(), cfg.per_head_dim, cfg.state_rank],
             normal,

@@ -21,10 +21,10 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::{
 };
 use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::fprim::{F, san};
-use burn::tensor::Tensor;
 use burn::backend::tensor::FloatTensor;
-use burn::backend::{Backend, backend_extension, Dispatch};
 use burn::backend::*;
+use burn::backend::{Backend, Dispatch, backend_extension};
+use burn::tensor::Tensor;
 
 impl Mamba3SingleSsdInput {
     /// MIMO-first single-ssd form Serial SSD with recalculated backward.
@@ -236,16 +236,17 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
 
     // Strict-upper -inf mask on the base time grid (`t1 <= t2` → -inf), then
     // interleave-expand to fused length so MIMO same-time blocks are zeroed.
-    let inf_upper_bnhLMLM = F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype)
-        .triu(0) // upper triangle INCLUDING diagonal
-        .unsqueeze_dims::<5>(&[0, 1, 2])
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len])
-        .unsqueeze_dim::<6>(4)
-        .expand([batch, nchunks, nheads, chunk_len, mimo_rank, chunk_len])
-        .reshape([batch, nchunks, nheads, fused, chunk_len])
-        .unsqueeze_dim::<6>(5)
-        .expand([batch, nchunks, nheads, fused, chunk_len, mimo_rank])
-        .reshape([batch, nchunks, nheads, fused, fused]);
+    let inf_upper_bnhLMLM =
+        F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype)
+            .triu(0) // upper triangle INCLUDING diagonal
+            .unsqueeze_dims::<5>(&[0, 1, 2])
+            .expand([batch, nchunks, nheads, chunk_len, chunk_len])
+            .unsqueeze_dim::<6>(4)
+            .expand([batch, nchunks, nheads, chunk_len, mimo_rank, chunk_len])
+            .reshape([batch, nchunks, nheads, fused, chunk_len])
+            .unsqueeze_dim::<6>(5)
+            .expand([batch, nchunks, nheads, fused, chunk_len, mimo_rank])
+            .reshape([batch, nchunks, nheads, fused, fused]);
     let decay_strict_bnhLMLM = (diff_bnhLMLM + inf_upper_bnhLMLM).exp();
 
     // Per-column scale: `scale[t2]` lives on the source axis (column).

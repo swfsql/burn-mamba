@@ -17,8 +17,8 @@
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// MIMO-first input bundle for the merged-form SSD.
 ///

@@ -12,8 +12,8 @@ use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// A stack of bidirectional Mamba-3 layer pairs with optional virtual-layer
 /// scheduling.

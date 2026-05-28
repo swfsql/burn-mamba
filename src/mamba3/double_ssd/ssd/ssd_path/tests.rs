@@ -22,13 +22,7 @@ fn random_input(
     state_rank: usize,
     random_init: bool,
     device: &Device,
-) -> (
-    Tensor<6>,
-    Tensor<4>,
-    Tensor<6>,
-    Tensor<6>,
-    Tensor<4>,
-) {
+) -> (Tensor<6>, Tensor<4>, Tensor<6>, Tensor<6>, Tensor<4>) {
     let v = Tensor::<6>::random(
         [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim],
         Distribution::Normal(0.0, 1.0),
@@ -131,12 +125,7 @@ fn loss_from_outputs(
 }
 
 /// Run a single SSD path and extract the gradients of all 5 inputs.
-fn run_path(
-    path: Mamba3SsdPath,
-    inputs: &Inputs,
-    y_head: Tensor<6>,
-    s_head: Tensor<4>,
-) -> PathRun {
+fn run_path(path: Mamba3SsdPath, inputs: &Inputs, y_head: Tensor<6>, s_head: Tensor<4>) -> PathRun {
     let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();

@@ -276,11 +276,7 @@ impl InferenceStep for Wrap {
 impl Wrap {
     /// Forward the model and compute the MSE regression loss against the last
     /// timestep's prediction.
-    pub fn forward_regression(
-        &self,
-        input: Tensor<3>,
-        targets: Tensor<2>,
-    ) -> RegressionOutput {
+    pub fn forward_regression(&self, input: Tensor<3>, targets: Tensor<2>) -> RegressionOutput {
         let model = &self.0;
         let _model_config = &self.1;
         let [batch_size, sequence_size, _input_size] = input.dims();

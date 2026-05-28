@@ -1,7 +1,7 @@
 //! Typed-array variants of [`Tensor::split_with_sizes`].
 
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// Like [`Tensor::split_with_sizes`] but returns a fixed-size array, enabling
 /// `let [a, b, c, ...] = split_into::<…, N>(t, [size_a, size_b, size_c, ...], dim);`

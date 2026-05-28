@@ -403,8 +403,7 @@ pub fn combined_backward<B: Backend>(
     vec_d_da_end_bh.reverse();
 
     // ── Stack per-chunk slices back into batched tensors ──────────────────
-    let d_x_orange_bnlhp: F<B, 5> =
-        F::stack::<5>(vec_orange_d_x_bhlp, 1).permute([0, 1, 3, 2, 4]);
+    let d_x_orange_bnlhp: F<B, 5> = F::stack::<5>(vec_orange_d_x_bhlp, 1).permute([0, 1, 3, 2, 4]);
     let d_dt_orange_bhnl: F<B, 4> = F::stack(vec_orange_d_dt_bhl, 2);
     let d_da_orange_bhnl: F<B, 4> = F::stack(vec_orange_d_da_bhl, 2);
     let d_cb_bnhll: F<B, 5> = F::stack(vec_d_cb_bhll, 1);
@@ -491,8 +490,7 @@ pub fn combined_backward<B: Backend>(
         .squeeze_dim::<3>(3); // _bhn
     let d_da_cumsum_k3_bhnl = {
         let zeros = F::<B, 4>::zeros([batch, nheads, nchunks, chunk_len - 1], &device, dtype);
-        d_da_cumsum_sub_bhnl
-            + F::cat(vec![zeros, d_da_cumsum_last_bhn.unsqueeze_dim::<4>(3)], 3)
+        d_da_cumsum_sub_bhnl + F::cat(vec![zeros, d_da_cumsum_last_bhn.unsqueeze_dim::<4>(3)], 3)
     };
     san(&d_da_cumsum_k3_bhnl);
 

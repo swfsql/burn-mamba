@@ -10,8 +10,8 @@ use crate::mamba2::bidi::naive::{OutputMerge, OutputMergeConfig};
 use crate::mamba2::prelude::*;
 use crate::schedule::BidiSchedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// A stack of bidirectional Mamba-2 layer pairs with optional virtual-layer
 /// scheduling.

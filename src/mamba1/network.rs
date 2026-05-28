@@ -26,9 +26,9 @@
 use crate::mamba1::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
+use burn::backend::Backend;
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
-use burn::backend::Backend;
 
 /// A complete Mamba-1 language model.
 #[derive(Module, Debug)]

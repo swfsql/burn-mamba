@@ -8,8 +8,8 @@
 //! pathway the cache implies.
 
 use crate::mamba3::prelude::*;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// Algorithm selection for the Mamba-3 chunkwise SSD.
 ///

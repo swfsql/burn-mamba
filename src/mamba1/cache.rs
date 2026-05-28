@@ -19,8 +19,8 @@
 
 use crate::mamba1::prelude::*;
 use crate::utils::sanity::sanity as san;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Mamba1Cache  (state for a single layer)

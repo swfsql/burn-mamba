@@ -127,12 +127,12 @@ use crate::utils::{
     rms_norm::{RmsNorm, RmsNormConfig},
     rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
 };
+use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
     nn::{Initializer, Linear, LinearConfig},
 };
-use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba3  (the SSM block)

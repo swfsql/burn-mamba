@@ -215,7 +215,10 @@ impl<B: Backend, const D: usize> F<B, D> {
 
     /// Concatenate same-rank tensors along `dim` (rank-preserving).
     pub fn cat(tensors: Vec<F<B, D>>, dim: usize) -> Self {
-        F(B::float_cat(tensors.into_iter().map(|t| t.0).collect(), dim))
+        F(B::float_cat(
+            tensors.into_iter().map(|t| t.0).collect(),
+            dim,
+        ))
     }
 
     /// Stack same-rank tensors along a fresh axis `dim`, yielding rank `D2 = D + 1`.
@@ -340,7 +343,10 @@ fn tri_bool<B: Backend>(
         Shape::new([1, cols]),
     );
     // matrix_rc = row - col (broadcast to [rows, cols]).
-    let matrix = B::int_sub(B::int_expand(rows_i, shape.clone()), B::int_expand(cols_i, shape));
+    let matrix = B::int_sub(
+        B::int_expand(rows_i, shape.clone()),
+        B::int_expand(cols_i, shape),
+    );
     let threshold = Scalar::from(-offset);
     if lower {
         B::int_lower_elem(matrix, threshold, settings.bool_dtype)

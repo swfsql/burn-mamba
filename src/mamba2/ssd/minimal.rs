@@ -20,8 +20,8 @@
 
 use crate::mamba2::prelude::*;
 use crate::utils::{sanity::sanity as san, segsum::segsum};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 impl Mamba2SsdInput {
     // -----------------------------------------------------------------------

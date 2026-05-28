@@ -19,8 +19,8 @@ use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // RoPE utility
@@ -310,14 +310,9 @@ impl Mamba3 {
         // Partial RoPE: rotate only the first `rope_dim` entries of B/C.
         let rotate_pairwise = mimo_rank == 1;
         let rope_dim = self.rope_dim;
-        let b_bsmhr = apply_rope_partial::<5>(
-            b_bsmhr,
-            cum_angles_bsmha.clone(),
-            rope_dim,
-            rotate_pairwise,
-        );
-        let c_bsmhr =
-            apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+        let b_bsmhr =
+            apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
+        let c_bsmhr = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 

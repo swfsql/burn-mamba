@@ -5,8 +5,8 @@
 //! This helper bridges the two by replicating each group's vector across the
 //! `heads_per_group = nheads / ngroups` heads of that group.
 
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// Expand a tensor's `ngroups` dim at `group_dim` into an `nheads` dim, by
 /// replicating each group's slice across `heads_per_group = nheads / ngroups`

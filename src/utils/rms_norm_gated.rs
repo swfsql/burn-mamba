@@ -11,11 +11,11 @@
 
 use crate::utils::div_eps;
 use crate::utils::silu::Silu;
+use burn::backend::Backend;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::{DType, f16};
-use burn::backend::Backend;
 
 /// Configuration to create a [`RmsNormGated`] layer.
 #[derive(Config, Debug)]

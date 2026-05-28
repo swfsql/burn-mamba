@@ -32,8 +32,8 @@
 use crate::mamba2::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Mamba2Layers  (the full layer stack)

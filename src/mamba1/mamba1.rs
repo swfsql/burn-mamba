@@ -42,13 +42,13 @@ use crate::mamba1::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use crate::utils::split::split_into;
+use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
     nn::conv::{Conv1d, Conv1dConfig},
     nn::{Initializer, Linear, LinearConfig, PaddingConfig1d},
 };
-use burn::backend::Backend;
 
 /// The Mamba-1 selective SSM block.
 #[derive(Module, Debug)]
@@ -249,11 +249,7 @@ impl Mamba1 {
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
     ///   - Output `[batch, sequence, d_model]`
-    pub fn forward(
-        &self,
-        x: Tensor<3>,
-        cache: Option<Mamba1Cache>,
-    ) -> (Tensor<3>, Mamba1Cache) {
+    pub fn forward(&self, x: Tensor<3>, cache: Option<Mamba1Cache>) -> (Tensor<3>, Mamba1Cache) {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
         let [_, _, conv_kernel] = self.conv1d.weight.dims();
@@ -512,11 +508,7 @@ mod step {
         /// # Shapes
         ///   - Input `[batch, d_model]`
         ///   - Output `[batch, d_model]`
-        pub fn step(
-            &self,
-            x: Tensor<2>,
-            mut cache: Mamba1Cache,
-        ) -> (Tensor<2>, Mamba1Cache) {
+        pub fn step(&self, x: Tensor<2>, mut cache: Mamba1Cache) -> (Tensor<2>, Mamba1Cache) {
             let [batch, d_inner, conv_kernel] = cache.conv_bik.dims();
             let [_batch, d_model] = x.dims();
 
@@ -591,11 +583,7 @@ mod step {
         /// # Shapes
         ///   - Input u `[batch, d_inner]`
         ///   - Output `[batch, d_inner]`
-        pub fn ssm_step(
-            &self,
-            u: Tensor<2>,
-            cache: Mamba1Cache,
-        ) -> (Tensor<2>, Mamba1Cache) {
+        pub fn ssm_step(&self, u: Tensor<2>, cache: Mamba1Cache) -> (Tensor<2>, Mamba1Cache) {
             let [batch, d_inner, state_rank] = cache.ssm_bir.dims();
             let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
 

@@ -269,11 +269,7 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            normal,
-            &device,
-        ),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
         angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),

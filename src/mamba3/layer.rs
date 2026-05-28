@@ -34,8 +34,8 @@ use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Mamba3Layers  (the full layer stack)

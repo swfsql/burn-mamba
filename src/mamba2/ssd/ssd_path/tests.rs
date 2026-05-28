@@ -146,12 +146,7 @@ fn loss_from_outputs(
 }
 
 /// Run a single SSD path and extract the gradients of all 7 inputs.
-fn run_path(
-    path: Mamba2SsdPath,
-    inputs: &Inputs,
-    y_head: Tensor<5>,
-    s_head: Tensor<4>,
-) -> PathRun {
+fn run_path(path: Mamba2SsdPath, inputs: &Inputs, y_head: Tensor<5>, s_head: Tensor<4>) -> PathRun {
     let (y, state) = inputs.ssd_input().run(&path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();

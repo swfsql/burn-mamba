@@ -17,9 +17,9 @@
 
 use crate::mamba3::prelude::*;
 use crate::utils::sanity::sanity as san;
+use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
-use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba3DoubleSsdCaches  (one cache entry per layer)

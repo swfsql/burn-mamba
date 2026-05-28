@@ -27,9 +27,9 @@
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
+use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
-use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba2Caches  (one cache entry per layer)

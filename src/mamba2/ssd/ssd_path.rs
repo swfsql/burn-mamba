@@ -7,8 +7,8 @@
 //! [`Mamba2SsdInput::run`] dispatches to the path-selected algorithm.
 
 use crate::mamba2::prelude::*;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// Algorithm selection for the Mamba-2 chunkwise SSD.
 ///

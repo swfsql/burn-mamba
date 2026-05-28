@@ -22,8 +22,8 @@
 
 use crate::mamba2::prelude::*;
 use crate::utils::sanity::sanity as san;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 impl Mamba2SsdInput {
     /// Forward pass for the Mamba-2 SSD module (serial-over-chunks form).

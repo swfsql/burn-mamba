@@ -56,8 +56,8 @@
 
 use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::segsum::segsum;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
     /// MIMO-first single-SSD — segsum variant.

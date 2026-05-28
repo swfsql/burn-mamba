@@ -10,8 +10,8 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 /// MIMO-first SSD input.
 ///

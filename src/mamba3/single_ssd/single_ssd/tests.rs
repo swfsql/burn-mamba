@@ -84,11 +84,7 @@ fn build_cross_caches(
 /// With `random = true` *every* field (including the previous-token K/V
 /// history) is random, exercising forward_single_ssd continuation from an arbitrary
 /// single-ssd form state.
-fn build_single_ssd_cache(
-    cfg: &Mamba3Config,
-    batch: usize,
-    random: bool,
-) -> Mamba3SingleSsdCache {
+fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3SingleSsdCache {
     let device: Device = Default::default();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -632,11 +628,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            normal,
-            &device,
-        ),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
         angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
@@ -829,11 +821,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
-        ssm: Tensor::<4>::random(
-            [batch, nheads, per_head_dim, state_rank],
-            normal,
-            &device,
-        ),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
         angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
@@ -841,10 +829,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 
     // Shared, fully-random initial cache fields (including the previous-token
     // K/V history) — both runs start from the exact same logical state.
-    let init_ssm =
-        Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
-    let init_k =
-        Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
+    let init_ssm = Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
+    let init_k = Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
     let init_v = Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device);
     let init_angle = Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device);
 

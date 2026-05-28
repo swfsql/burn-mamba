@@ -65,7 +65,10 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
     let decay_bhnLM = (da_cumsum_last_bhn1 - da_cumsum_bhnLM).exp();
     san(&decay_bhnLM);
 
-    let decay_bnLMh1 = decay_bhnLM.clone().permute([0, 2, 3, 1]).unsqueeze_dim::<5>(4);
+    let decay_bnLMh1 = decay_bhnLM
+        .clone()
+        .permute([0, 2, 3, 1])
+        .unsqueeze_dim::<5>(4);
     let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp;
     san(&decayed_v_bnLMhp);
 

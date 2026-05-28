@@ -20,8 +20,8 @@
 use crate::mamba1::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Mamba1Layers  (the full layer stack)
@@ -229,12 +229,7 @@ impl Mamba1Layers {
 
     /// Derive the cache shapes from the first real block's parameters and
     /// allocate `n_virtual` zero caches.
-    fn make_zero_caches(
-        &self,
-        batch: usize,
-        n_virtual: usize,
-        device: &Device,
-    ) -> Mamba1Caches {
+    fn make_zero_caches(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba1Caches {
         let block0 = &self.real_layers[0].mamba_block;
         let [d_inner, state_rank] = block0.a_log.dims();
         let [_, _, conv_kernel] = block0.conv1d.weight.dims();

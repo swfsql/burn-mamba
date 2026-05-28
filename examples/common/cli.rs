@@ -220,10 +220,7 @@ impl AppArgs {
     }
 
     /// Save the optimizer state into the artifacts directory.
-    pub fn save_optim<M: AutodiffModule>(
-        &self,
-        optim: &OptimizerAdaptor<burn::optim::AdamW, M>,
-    ) {
+    pub fn save_optim<M: AutodiffModule>(&self, optim: &OptimizerAdaptor<burn::optim::AdamW, M>) {
         save_optim(&self.artifacts_path, optim)
     }
 

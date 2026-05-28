@@ -5,8 +5,8 @@
 //! products) keeps it stable over long sequences.  See [`segsum`] for the math.
 
 use crate::utils::sanity::sanity as san;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // segsum  (stable segment sum for the 1-SS mask)

@@ -15,11 +15,11 @@
 
 use crate::mamba2::prelude::*;
 use crate::utils::fprim::{F, Mask, san};
+use burn::backend::tensor::FloatTensor;
+use burn::backend::*;
+use burn::backend::{Backend, Dispatch, backend_extension};
 use burn::tensor::Tensor;
 use burn::tensor::s;
-use burn::backend::tensor::FloatTensor;
-use burn::backend::{Backend, backend_extension, Dispatch};
-use burn::backend::*;
 
 impl Mamba2SsdInput {
     /// Forward pass for the Mamba-2 SSD module (recompute-backward path).

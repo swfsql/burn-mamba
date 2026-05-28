@@ -47,9 +47,9 @@
 use crate::mamba3::prelude::*;
 use crate::schedule::Schedule;
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
+use burn::backend::Backend;
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
-use burn::backend::Backend;
 
 // ---------------------------------------------------------------------------
 // Mamba3Network
@@ -295,12 +295,7 @@ impl Mamba3Network {
     ///
     /// Uses the dedicated `lm_head` linear layer when available, or the
     /// transposed embedding weight matrix otherwise (weight tying).
-    fn apply_lm_head(
-        &self,
-        x_bsm: Tensor<3>,
-        d_model: usize,
-        padded_vocab: usize,
-    ) -> Tensor<3> {
+    fn apply_lm_head(&self, x_bsm: Tensor<3>, d_model: usize, padded_vocab: usize) -> Tensor<3> {
         if let Some(lm_head) = &self.lm_head {
             lm_head.forward(x_bsm)
         } else {

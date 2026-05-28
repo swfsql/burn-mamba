@@ -26,8 +26,8 @@ use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
-use burn::prelude::*;
 use burn::backend::Backend;
+use burn::prelude::*;
 
 impl Mamba3 {
     /// Process a full input sequence using the **single-ssd form (single-pass)**
@@ -180,14 +180,9 @@ impl Mamba3 {
 
         let rotate_pairwise = mimo_rank == 1;
         let rope_dim = self.rope_dim;
-        let b_bsmhr = apply_rope_partial::<5>(
-            b_bsmhr,
-            cum_angles_bsmha.clone(),
-            rope_dim,
-            rotate_pairwise,
-        );
-        let c_bsmhr =
-            apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+        let b_bsmhr =
+            apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
+        let c_bsmhr = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -212,11 +207,8 @@ impl Mamba3 {
 
         // Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ)  → [batch, nheads, per_head_dim, state_rank]
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let v_prev_mimo_bmhp = helpers::build_v_with_mimo::<3, 4>(
-            cache.v_state_bhp.clone(),
-            mimo_x_hmp.as_ref(),
-            1,
-        ); // [batch, mimo_rank, nheads, per_head_dim]
+        let v_prev_mimo_bmhp =
+            helpers::build_v_with_mimo::<3, 4>(cache.v_state_bhp.clone(), mimo_x_hmp.as_ref(), 1); // [batch, mimo_rank, nheads, per_head_dim]
         let boundary_seed_bhpr = {
             // einsum: bmhr, bmhp -> bhpr  (contract over m)
             let k_prev_bhmr = cache.k_state_bmhr.clone().permute([0, 2, 1, 3]);

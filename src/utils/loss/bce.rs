@@ -5,9 +5,9 @@
 //! probabilities and the logs are clamped to avoid `−∞`.
 
 use crate::utils::log_sigmoid::log_sigmoid;
+use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
-use burn::backend::Backend;
 
 /// Configuration to create a [`BinaryCrossEntropyLoss`] using the [`BinaryCrossEntropyLossConfig::init`].
 #[derive(Config, Debug)]
