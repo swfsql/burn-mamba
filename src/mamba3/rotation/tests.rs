@@ -630,6 +630,32 @@ fn rotation_state_wrong_unwrap_panics() {
     let _ = a.quaternion();
 }
 
+/// The bidirectional wrapper must also run with the quaternion rotation: it
+/// defaults its caches to the double-ssd pathway when the block is Quaternion4D
+/// (a straight + reversed double-ssd pass), rather than panicking on a single-ssd
+/// cache.
+#[test]
+fn quaternion_bidi_forward_runs() {
+    use crate::mamba3::bidi::naive::{Mamba3BidiLayersConfig, OutputMergeConfig};
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let block = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(1.0)
+        .with_rotation(RotationKind::Quaternion4D);
+    let n_real = 2; // one bidirectional pair
+    let layers = Mamba3BidiLayersConfig::new(n_real, block, OutputMergeConfig::mean(n_real))
+        .init(&device);
+
+    let (batch, seq) = (2, 5);
+    let x = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
+    let (out, _caches) = layers.forward(x, None, Mamba3SsdPath::Minimal(None));
+    assert_eq!([batch, seq, 32], out.dims());
+}
+
 // ---------------------------------------------------------------------------
 // 10. Gradient parity: factored vs explicit agree on input gradients
 // ---------------------------------------------------------------------------
