@@ -19,7 +19,7 @@ the LM head.  This is the <code>norm_f</code> in the original implementation.</p
 <li><code>None</code> — the embedding weights are reused (transposed).  This is the
 “weight-tied” variant and is selected when <code>missing_lm_head = true</code>.</li>
 </ul>
-</div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2Network" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#167-317">Source</a><a href="#impl-Mamba2Network" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2Network.html" title="struct burn_mamba::mamba2::network::Mamba2Network">Mamba2Network</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#192-218">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
+</div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2Network" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#167-312">Source</a><a href="#impl-Mamba2Network" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2Network.html" title="struct burn_mamba::mamba2::network::Mamba2Network">Mamba2Network</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#192-218">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
     &amp;self,
     x: Tensor&lt;2, Int&gt;,
     caches: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba2Caches.html" title="struct burn_mamba::mamba2::cache::Mamba2Caches">Mamba2Caches</a>&gt;,
@@ -68,7 +68,7 @@ very first token, which starts from a zero hidden state)</li>
 <li><code>logits</code> has shape <code>[batch, padded_vocab_size]</code></li>
 <li><code>caches</code> contains the updated state for the <strong>next</strong> step.</li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.apply_lm_head" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#296-316">Source</a><h4 class="code-header">fn <a href="#method.apply_lm_head" class="fn">apply_lm_head</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.apply_lm_head" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/network.rs.html#296-311">Source</a><h4 class="code-header">fn <a href="#method.apply_lm_head" class="fn">apply_lm_head</a>(
     &amp;self,
     x_bsm: Tensor&lt;3&gt;,
     d_model: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,

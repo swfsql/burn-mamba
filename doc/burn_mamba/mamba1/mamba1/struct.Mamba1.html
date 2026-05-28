@@ -19,12 +19,12 @@ Output channel: d_inner.</p>
 </div><span id="structfield.d" class="structfield section-header"><a href="#structfield.d" class="anchor field">§</a><code>d: Param&lt;Tensor&lt;1&gt;&gt;</code></span><div class="docblock"><p>Dims: <code>[d_inner]</code>.</p>
 </div><span id="structfield.out_proj" class="structfield section-header"><a href="#structfield.out_proj" class="anchor field">§</a><code>out_proj: Linear</code></span><div class="docblock"><p>Input channel: d_inner.
 Output channel: d_model.</p>
-</div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#511-712">Source</a><a href="#impl-Mamba1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#515-585">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(&amp;self, x: Tensor&lt;2&gt;, cache: <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>) -&gt; (Tensor&lt;2&gt;, <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>)</h4></section></summary><div class="docblock"><h5 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h5>
+</div><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#507-700">Source</a><a href="#impl-Mamba1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#511-577">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(&amp;self, x: Tensor&lt;2&gt;, cache: <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>) -&gt; (Tensor&lt;2&gt;, <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>)</h4></section></summary><div class="docblock"><h5 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h5>
 <ul>
 <li>Input <code>[batch, d_model]</code></li>
 <li>Output <code>[batch, d_model]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#594-627">Source</a><h4 class="code-header">pub fn <a href="#method.ssm_step" class="fn">ssm_step</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#586-615">Source</a><h4 class="code-header">pub fn <a href="#method.ssm_step" class="fn">ssm_step</a>(
     &amp;self,
     u: Tensor&lt;2&gt;,
     cache: <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>,
@@ -36,7 +36,7 @@ recurrence by one step via <a href="struct.Mamba1.html#method.selective_scan_ste
 <li>Input u <code>[batch, d_inner]</code></li>
 <li>Output <code>[batch, d_inner]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#644-711">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan_step" class="fn">selective_scan_step</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#632-699">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan_step" class="fn">selective_scan_step</a>(
     delta: Tensor&lt;2&gt;,
     a: Tensor&lt;2&gt;,
     b: Tensor&lt;2&gt;,
@@ -61,7 +61,7 @@ recurrence by one step via <a href="struct.Mamba1.html#method.selective_scan_ste
 <li>Input u <code>[batch, d_inner]</code></li>
 <li>Output <code>[batch, d_inner]</code></li>
 </ul>
-</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#241-506">Source</a><a href="#impl-Mamba1-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#252-334">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
+</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#241-502">Source</a><a href="#impl-Mamba1-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#252-330">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
     &amp;self,
     x: Tensor&lt;3&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&gt;,
@@ -75,7 +75,7 @@ processed in segments (prefill then decode, or chunked prefill).</p>
 <li>Input <code>[batch, sequence, d_model]</code></li>
 <li>Output <code>[batch, sequence, d_model]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#344-381">Source</a><h4 class="code-header">pub fn <a href="#method.ssm" class="fn">ssm</a>(&amp;self, u: Tensor&lt;3&gt;, init_ssm: Tensor&lt;3&gt;) -&gt; (Tensor&lt;3&gt;, Tensor&lt;3&gt;)</h4></section></summary><div class="docblock"><p>Computes the selective-SSM parameters (Δ, A, B, C) from the conv output
+</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#340-377">Source</a><h4 class="code-header">pub fn <a href="#method.ssm" class="fn">ssm</a>(&amp;self, u: Tensor&lt;3&gt;, init_ssm: Tensor&lt;3&gt;) -&gt; (Tensor&lt;3&gt;, Tensor&lt;3&gt;)</h4></section></summary><div class="docblock"><p>Computes the selective-SSM parameters (Δ, A, B, C) from the conv output
 and runs the <a href="struct.Mamba1.html#method.selective_scan" title="associated function burn_mamba::mamba1::mamba1::Mamba1::selective_scan"><code>Self::selective_scan</code></a> recurrence over the full sequence.</p>
 <h5 id="shapes-4"><a class="doc-anchor" href="#shapes-4">§</a>Shapes</h5>
 <ul>
@@ -84,7 +84,7 @@ and runs the <a href="struct.Mamba1.html#method.selective_scan" title="associate
 <li>Output <code>[batch, sequence, d_inner]</code></li>
 <li>Output (final state) <code>[batch, d_inner, state_rank]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#400-505">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan" class="fn">selective_scan</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#396-501">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan" class="fn">selective_scan</a>(
     delta: Tensor&lt;3&gt;,
     a: Tensor&lt;2&gt;,
     b: Tensor&lt;3&gt;,

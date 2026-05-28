@@ -6,10 +6,10 @@
 <a href=#6 id=6 data-nosnippet>6</a>//! and `target_logits` control whether each side is normalised (log-softmax /
 <a href=#7 id=7 data-nosnippet>7</a>//! softmax) before the loss.
 <a href=#8 id=8 data-nosnippet>8</a>
-<a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">use </span>burn::module::Module;
-<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
-<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>burn::tensor::activation::{log_softmax, softmax};
-<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>burn::backend::Backend;
+<a href=#9 id=9 data-nosnippet>9</a></span><span class="kw">use </span>burn::backend::Backend;
+<a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>burn::module::Module;
+<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>burn::tensor::activation::{log_softmax, softmax};
 <a href=#13 id=13 data-nosnippet>13</a>
 <a href=#14 id=14 data-nosnippet>14</a><span class="doccomment">/// Configuration to create a [`CrossEntropyLoss`] using the [`CrossEntropyLossConfig::init`].
 <a href=#15 id=15 data-nosnippet>15</a></span><span class="attr">#[derive(Config, Debug)]
