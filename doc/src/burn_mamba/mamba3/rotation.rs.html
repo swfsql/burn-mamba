@@ -191,381 +191,414 @@
 <a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>bz = b.narrow(n, <span class="number">3</span>, <span class="number">1</span>);
 <a href=#192 id=192 data-nosnippet>192</a>
 <a href=#193 id=193 data-nosnippet>193</a>    <span class="comment">// Hamilton product (each term is shape [..., 1]).
-<a href=#194 id=194 data-nosnippet>194</a>    </span><span class="kw">let </span>w = aw.clone() * bw.clone() - ax.clone() * bx.clone() - ay.clone() * by.clone()
-<a href=#195 id=195 data-nosnippet>195</a>        - az.clone() * bz.clone();
-<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">let </span>x = aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
-<a href=#197 id=197 data-nosnippet>197</a>        - az.clone() * by.clone();
-<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">let </span>y = aw.clone() * by.clone() - ax.clone() * bz.clone() + ay.clone() * bw.clone()
-<a href=#199 id=199 data-nosnippet>199</a>        + az.clone() * bx.clone();
-<a href=#200 id=200 data-nosnippet>200</a>    <span class="kw">let </span>z = aw * bz + ax * by - ay * bx + az * bw;
-<a href=#201 id=201 data-nosnippet>201</a>
-<a href=#202 id=202 data-nosnippet>202</a>    Tensor::cat(<span class="macro">vec!</span>[w, x, y, z], n)
-<a href=#203 id=203 data-nosnippet>203</a>}
+<a href=#194 id=194 data-nosnippet>194</a>    </span><span class="kw">let </span>w = aw.clone() * bw.clone()
+<a href=#195 id=195 data-nosnippet>195</a>        - ax.clone() * bx.clone()
+<a href=#196 id=196 data-nosnippet>196</a>        - ay.clone() * by.clone()
+<a href=#197 id=197 data-nosnippet>197</a>        - az.clone() * bz.clone();
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">let </span>x = aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
+<a href=#199 id=199 data-nosnippet>199</a>        - az.clone() * by.clone();
+<a href=#200 id=200 data-nosnippet>200</a>    <span class="kw">let </span>y = aw.clone() * by.clone() - ax.clone() * bz.clone()
+<a href=#201 id=201 data-nosnippet>201</a>        + ay.clone() * bw.clone()
+<a href=#202 id=202 data-nosnippet>202</a>        + az.clone() * bx.clone();
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="kw">let </span>z = aw * bz + ax * by - ay * bx + az * bw;
 <a href=#204 id=204 data-nosnippet>204</a>
-<a href=#205 id=205 data-nosnippet>205</a><span class="doccomment">/// Quaternion conjugate `q* = (w, −x, −y, −z)` (shape `[..., 4]`).
-<a href=#206 id=206 data-nosnippet>206</a>///
-<a href=#207 id=207 data-nosnippet>207</a>/// For a **unit** quaternion `q* = q⁻¹`, and the corresponding rotation matrix
-<a href=#208 id=208 data-nosnippet>208</a>/// satisfies `Lₚ⋆ = Lₚᵀ = Lₚ⁻¹`.  Hence rotating by the *inverse* cumulative
-<a href=#209 id=209 data-nosnippet>209</a>/// rotation (`B̄ = Pᵀ B`) is `rotate_state_rank_blocks(B, conj(Q))`.
-<a href=#210 id=210 data-nosnippet>210</a></span><span class="kw">pub fn </span>quat_conj&lt;<span class="kw">const </span>D: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
-<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
-<a href=#212 id=212 data-nosnippet>212</a>    <span class="kw">let </span>w = q.clone().narrow(n, <span class="number">0</span>, <span class="number">1</span>);
-<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">let </span>xyz = q.narrow(n, <span class="number">1</span>, <span class="number">3</span>);
-<a href=#214 id=214 data-nosnippet>214</a>    Tensor::cat(<span class="macro">vec!</span>[w, -xyz], n)
-<a href=#215 id=215 data-nosnippet>215</a>}
-<a href=#216 id=216 data-nosnippet>216</a>
-<a href=#217 id=217 data-nosnippet>217</a><span class="doccomment">/// Normalise quaternions to unit norm along the last axis (shape `[..., 4]`).
-<a href=#218 id=218 data-nosnippet>218</a>///
-<a href=#219 id=219 data-nosnippet>219</a>/// The per-step rotation is materialised from a raw, unconstrained projection
-<a href=#220 id=220 data-nosnippet>220</a>/// and normalised here so it is a genuine unit quaternion (an element of
-<a href=#221 id=221 data-nosnippet>221</a>/// `SU(2)`), the analogue of `tanh(θ)·π` bounding the RoPE angle.  A tiny floor
-<a href=#222 id=222 data-nosnippet>222</a>/// guards the zero-quaternion.
-<a href=#223 id=223 data-nosnippet>223</a></span><span class="kw">pub fn </span>quat_normalize&lt;<span class="kw">const </span>D: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
-<a href=#224 id=224 data-nosnippet>224</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
-<a href=#225 id=225 data-nosnippet>225</a>    <span class="kw">let </span>norm = (q.clone() * q.clone()).sum_dim(n).sqrt().clamp_min(<span class="number">1e-12</span>);
-<a href=#226 id=226 data-nosnippet>226</a>    q / norm
-<a href=#227 id=227 data-nosnippet>227</a>}
-<a href=#228 id=228 data-nosnippet>228</a>
-<a href=#229 id=229 data-nosnippet>229</a><span class="doccomment">/// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
-<a href=#230 id=230 data-nosnippet>230</a>/// (axis · angle) via the exponential map — the data-dependent "materialise
-<a href=#231 id=231 data-nosnippet>231</a>/// `Rₜ`" step, analogous to RoPE's `Δₜ · π · tanh(θₜ)` angle.
-<a href=#232 id=232 data-nosnippet>232</a>///
-<a href=#233 id=233 data-nosnippet>233</a>/// With `‖g‖ = angle` and `ĝ = g / angle` the axis, returns the unit quaternion
-<a href=#234 id=234 data-nosnippet>234</a>/// `q = (cos(angle/2), sin(angle/2)·ĝ)`.  A vanishing `g` maps to the identity
-<a href=#235 id=235 data-nosnippet>235</a>/// `(1, 0, 0, 0)`, so scaling `g` by a small `Δₜ` (the discretisation step)
-<a href=#236 id=236 data-nosnippet>236</a>/// yields a near-identity rotation — exactly the regime where a small step
-<a href=#237 id=237 data-nosnippet>237</a>/// barely rotates the state.  The `sin(angle/2)/angle` factor is the numerically
-<a href=#238 id=238 data-nosnippet>238</a>/// stable form of the (otherwise `0/0`) per-component scale near `g = 0`.
-<a href=#239 id=239 data-nosnippet>239</a>///
-<a href=#240 id=240 data-nosnippet>240</a>/// # Shapes
-<a href=#241 id=241 data-nosnippet>241</a>/// - `g` : `[..., 3]`
-<a href=#242 id=242 data-nosnippet>242</a>/// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
-<a href=#243 id=243 data-nosnippet>243</a></span><span class="kw">pub fn </span>quat_from_scaled_axis&lt;<span class="kw">const </span>D: usize&gt;(g: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
-<a href=#244 id=244 data-nosnippet>244</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
-<a href=#245 id=245 data-nosnippet>245</a>    <span class="kw">let </span>angle = (g.clone() * g.clone()).sum_dim(n).sqrt(); <span class="comment">// [..., 1]
-<a href=#246 id=246 data-nosnippet>246</a>    </span><span class="kw">let </span>half = angle.clone() * <span class="number">0.5</span>;
-<a href=#247 id=247 data-nosnippet>247</a>    <span class="kw">let </span>w = half.clone().cos(); <span class="comment">// [..., 1]
-<a href=#248 id=248 data-nosnippet>248</a>    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation), guarded against 0/0.
-<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">let </span>scale = half.sin() / angle.clamp_min(<span class="number">1e-12</span>); <span class="comment">// [..., 1]
-<a href=#250 id=250 data-nosnippet>250</a>    </span><span class="kw">let </span>v = g * scale; <span class="comment">// [..., 3]
-<a href=#251 id=251 data-nosnippet>251</a>    </span>quat_normalize(Tensor::cat(<span class="macro">vec!</span>[w, v], n))
-<a href=#252 id=252 data-nosnippet>252</a>}
-<a href=#253 id=253 data-nosnippet>253</a>
-<a href=#254 id=254 data-nosnippet>254</a><span class="doccomment">/// Materialise the `4×4` orthogonal matrix of left-multiplication by `q`.
-<a href=#255 id=255 data-nosnippet>255</a>///
-<a href=#256 id=256 data-nosnippet>256</a>/// Maps `q` of shape `[..., 4]` to `[..., 4, 4]` such that, for `v` of shape
-<a href=#257 id=257 data-nosnippet>257</a>/// `[..., 4]`, `Lq · v == quat_mul(q, v)`.  Concretely (rows = output coords,
-<a href=#258 id=258 data-nosnippet>258</a>/// cols = input coords, all in `(w, x, y, z)` order):
-<a href=#259 id=259 data-nosnippet>259</a>///
-<a href=#260 id=260 data-nosnippet>260</a>/// ```text
-<a href=#261 id=261 data-nosnippet>261</a>///   ⎡ w  -x  -y  -z ⎤
-<a href=#262 id=262 data-nosnippet>262</a>///   ⎢ x   w  -z   y ⎥
-<a href=#263 id=263 data-nosnippet>263</a>///   ⎢ y   z   w  -x ⎥
-<a href=#264 id=264 data-nosnippet>264</a>///   ⎣ z  -y   x   w ⎦
-<a href=#265 id=265 data-nosnippet>265</a>/// ```
-<a href=#266 id=266 data-nosnippet>266</a>///
-<a href=#267 id=267 data-nosnippet>267</a>/// For a unit `q` this is orthogonal with `det = 1` (a left-isoclinic rotation).
-<a href=#268 id=268 data-nosnippet>268</a>/// Provided mainly for the generic / verification path; the cheap way to apply a
-<a href=#269 id=269 data-nosnippet>269</a>/// rotation is [`rotate_state_rank_blocks`] (a quaternion product, no `4×4`
-<a href=#270 id=270 data-nosnippet>270</a>/// materialisation).  `DR` must equal `D + 1`.
-<a href=#271 id=271 data-nosnippet>271</a></span><span class="kw">pub fn </span>quat_to_rot4&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DR: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;DR&gt; {
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="macro">assert_eq!</span>(D + <span class="number">1</span>, DR, <span class="string">"quat_to_rot4 maps rank D to rank D+1"</span>);
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>w = q.clone().narrow(n, <span class="number">0</span>, <span class="number">1</span>);
-<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>x = q.clone().narrow(n, <span class="number">1</span>, <span class="number">1</span>);
-<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>y = q.clone().narrow(n, <span class="number">2</span>, <span class="number">1</span>);
-<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>z = q.narrow(n, <span class="number">3</span>, <span class="number">1</span>);
-<a href=#278 id=278 data-nosnippet>278</a>
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="comment">// Each row is a [..., 4] tensor (the four column entries).
-<a href=#280 id=280 data-nosnippet>280</a>    </span><span class="kw">let </span>row0 = Tensor::cat(<span class="macro">vec!</span>[w.clone(), -x.clone(), -y.clone(), -z.clone()], n);
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="kw">let </span>row1 = Tensor::cat(<span class="macro">vec!</span>[x.clone(), w.clone(), -z.clone(), y.clone()], n);
-<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>row2 = Tensor::cat(<span class="macro">vec!</span>[y.clone(), z.clone(), w.clone(), -x.clone()], n);
-<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span>row3 = Tensor::cat(<span class="macro">vec!</span>[z, -y, x, w], n);
-<a href=#284 id=284 data-nosnippet>284</a>
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="comment">// Stack the rows along a freshly inserted row axis → [..., 4, 4].
-<a href=#286 id=286 data-nosnippet>286</a>    </span>Tensor::cat(
-<a href=#287 id=287 data-nosnippet>287</a>        <span class="macro">vec!</span>[
-<a href=#288 id=288 data-nosnippet>288</a>            row0.unsqueeze_dim::&lt;DR&gt;(n),
-<a href=#289 id=289 data-nosnippet>289</a>            row1.unsqueeze_dim::&lt;DR&gt;(n),
-<a href=#290 id=290 data-nosnippet>290</a>            row2.unsqueeze_dim::&lt;DR&gt;(n),
-<a href=#291 id=291 data-nosnippet>291</a>            row3.unsqueeze_dim::&lt;DR&gt;(n),
-<a href=#292 id=292 data-nosnippet>292</a>        ],
-<a href=#293 id=293 data-nosnippet>293</a>        n,
-<a href=#294 id=294 data-nosnippet>294</a>    )
-<a href=#295 id=295 data-nosnippet>295</a>}
-<a href=#296 id=296 data-nosnippet>296</a>
-<a href=#297 id=297 data-nosnippet>297</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#298 id=298 data-nosnippet>298</a>// Rotation application on the state_rank axis
-<a href=#299 id=299 data-nosnippet>299</a>// ---------------------------------------------------------------------------
-<a href=#300 id=300 data-nosnippet>300</a>
-<a href=#301 id=301 data-nosnippet>301</a></span><span class="doccomment">/// Apply a per-block quaternion rotation to the `state_rank` axis of `v`.
-<a href=#302 id=302 data-nosnippet>302</a>///
-<a href=#303 id=303 data-nosnippet>303</a>/// `v` has shape `[..., state_rank]` with `state_rank = 4·J`, viewed as `J`
-<a href=#304 id=304 data-nosnippet>304</a>/// independent quaternion blocks; `q` has shape `[..., J, 4]` (one unit
-<a href=#305 id=305 data-nosnippet>305</a>/// quaternion per block, same leading dims as `v`).  Returns `q ⊗ v` per block,
-<a href=#306 id=306 data-nosnippet>306</a>/// i.e. the rotation `L_q` applied within each `4`-block, reshaped back to
-<a href=#307 id=307 data-nosnippet>307</a>/// `[..., state_rank]`.
-<a href=#308 id=308 data-nosnippet>308</a>///
-<a href=#309 id=309 data-nosnippet>309</a>/// This is the generalisation of RoPE's per-pair `2×2` rotation to per-block
-<a href=#310 id=310 data-nosnippet>310</a>/// `4×4`.  To rotate by the *inverse* cumulative rotation when absorbing into
-<a href=#311 id=311 data-nosnippet>311</a>/// `B`/`C` (`B̄ = Pᵀ B`), pass `q = conj(Qcum)`:
-<a href=#312 id=312 data-nosnippet>312</a>/// `rotate_state_rank_blocks(b, conj(qcum))`.
-<a href=#313 id=313 data-nosnippet>313</a>///
-<a href=#314 id=314 data-nosnippet>314</a>/// `DB` must equal `D + 1` (the block-split inserts the `J` axis).
-<a href=#315 id=315 data-nosnippet>315</a></span><span class="kw">pub fn </span>rotate_state_rank_blocks&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DB: usize&gt;(
-<a href=#316 id=316 data-nosnippet>316</a>    v: Tensor&lt;D&gt;,
-<a href=#317 id=317 data-nosnippet>317</a>    q: Tensor&lt;DB&gt;,
-<a href=#318 id=318 data-nosnippet>318</a>) -&gt; Tensor&lt;D&gt; {
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="macro">assert_eq!</span>(D + <span class="number">1</span>, DB, <span class="string">"rotate_state_rank_blocks splits one axis into (J, 4)"</span>);
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">let </span>dims = v.dims();
-<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span>state_rank = dims[D - <span class="number">1</span>];
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="macro">assert_eq!</span>(state_rank % <span class="number">4</span>, <span class="number">0</span>, <span class="string">"state_rank must be a multiple of 4 (quaternion blocks)"</span>);
-<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span>blocks = state_rank / <span class="number">4</span>;
-<a href=#324 id=324 data-nosnippet>324</a>
-<a href=#325 id=325 data-nosnippet>325</a>    <span class="comment">// Build the block-split shape [..., J, 4] (rank DB) and the flat shape
-<a href=#326 id=326 data-nosnippet>326</a>    // [..., state_rank] (rank D) for the round trip.
-<a href=#327 id=327 data-nosnippet>327</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>split_shape = [<span class="number">0usize</span>; DB];
-<a href=#328 id=328 data-nosnippet>328</a>    split_shape[..D - <span class="number">1</span>].copy_from_slice(<span class="kw-2">&amp;</span>dims[..D - <span class="number">1</span>]);
-<a href=#329 id=329 data-nosnippet>329</a>    split_shape[DB - <span class="number">2</span>] = blocks;
-<a href=#330 id=330 data-nosnippet>330</a>    split_shape[DB - <span class="number">1</span>] = <span class="number">4</span>;
-<a href=#331 id=331 data-nosnippet>331</a>
-<a href=#332 id=332 data-nosnippet>332</a>    <span class="kw">let </span>v_blocks = v.reshape(split_shape); <span class="comment">// [..., J, 4]
-<a href=#333 id=333 data-nosnippet>333</a>    </span><span class="kw">let </span>rotated = quat_mul(q, v_blocks); <span class="comment">// L_q applied per block
-<a href=#334 id=334 data-nosnippet>334</a>    </span>rotated.reshape(dims) <span class="comment">// [..., state_rank]
-<a href=#335 id=335 data-nosnippet>335</a></span>}
-<a href=#336 id=336 data-nosnippet>336</a>
-<a href=#337 id=337 data-nosnippet>337</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#338 id=338 data-nosnippet>338</a>// Cumulative rotation scan (the associative, non-abelian replacement for cumsum)
-<a href=#339 id=339 data-nosnippet>339</a>// ---------------------------------------------------------------------------
-<a href=#340 id=340 data-nosnippet>340</a>
-<a href=#341 id=341 data-nosnippet>341</a></span><span class="doccomment">/// Cumulative (ordered, left-accumulating) quaternion product along the
-<a href=#342 id=342 data-nosnippet>342</a>/// sequence axis, with a cross-chunk carry.
-<a href=#343 id=343 data-nosnippet>343</a>///
-<a href=#344 id=344 data-nosnippet>344</a>/// This is the non-abelian analogue of the cumulative *sum of angles* used by
-<a href=#345 id=345 data-nosnippet>345</a>/// RoPE: where complex rotations compose by adding angles (a `cumsum`),
-<a href=#346 id=346 data-nosnippet>346</a>/// quaternions compose by multiplication, which is order-dependent, so a real
-<a href=#347 id=347 data-nosnippet>347</a>/// scan is required.
-<a href=#348 id=348 data-nosnippet>348</a>///
-<a href=#349 id=349 data-nosnippet>349</a>/// # Shapes
-<a href=#350 id=350 data-nosnippet>350</a>/// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-step **unit** quaternions
-<a href=#351 id=351 data-nosnippet>351</a>///   (block count `J = state_rank / 4`).
-<a href=#352 id=352 data-nosnippet>352</a>/// - `init`    : optional carry `[batch, nheads, J, 4]` — the cumulative
-<a href=#353 id=353 data-nosnippet>353</a>///   rotation at the end of the previous chunk (identity `(1,0,0,0)` for a fresh
-<a href=#354 id=354 data-nosnippet>354</a>///   start).
-<a href=#355 id=355 data-nosnippet>355</a>/// - returns `(cum, final_carry)` where `cum` is `[batch, sequence, nheads, J, 4]`
-<a href=#356 id=356 data-nosnippet>356</a>///   with `cum[:, t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ ⊗ init` (newest on the left, matching
-<a href=#357 id=357 data-nosnippet>357</a>///   `Pₜ = Rₜ ⋯ R₁`), and `final_carry` `[batch, nheads, J, 4]` is `cum[:, −1]`
-<a href=#358 id=358 data-nosnippet>358</a>///   to thread into the next chunk.
+<a href=#205 id=205 data-nosnippet>205</a>    Tensor::cat(<span class="macro">vec!</span>[w, x, y, z], n)
+<a href=#206 id=206 data-nosnippet>206</a>}
+<a href=#207 id=207 data-nosnippet>207</a>
+<a href=#208 id=208 data-nosnippet>208</a><span class="doccomment">/// Quaternion conjugate `q* = (w, −x, −y, −z)` (shape `[..., 4]`).
+<a href=#209 id=209 data-nosnippet>209</a>///
+<a href=#210 id=210 data-nosnippet>210</a>/// For a **unit** quaternion `q* = q⁻¹`, and the corresponding rotation matrix
+<a href=#211 id=211 data-nosnippet>211</a>/// satisfies `Lₚ⋆ = Lₚᵀ = Lₚ⁻¹`.  Hence rotating by the *inverse* cumulative
+<a href=#212 id=212 data-nosnippet>212</a>/// rotation (`B̄ = Pᵀ B`) is `rotate_state_rank_blocks(B, conj(Q))`.
+<a href=#213 id=213 data-nosnippet>213</a></span><span class="kw">pub fn </span>quat_conj&lt;<span class="kw">const </span>D: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">let </span>w = q.clone().narrow(n, <span class="number">0</span>, <span class="number">1</span>);
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">let </span>xyz = q.narrow(n, <span class="number">1</span>, <span class="number">3</span>);
+<a href=#217 id=217 data-nosnippet>217</a>    Tensor::cat(<span class="macro">vec!</span>[w, -xyz], n)
+<a href=#218 id=218 data-nosnippet>218</a>}
+<a href=#219 id=219 data-nosnippet>219</a>
+<a href=#220 id=220 data-nosnippet>220</a><span class="doccomment">/// Normalise quaternions to unit norm along the last axis (shape `[..., 4]`).
+<a href=#221 id=221 data-nosnippet>221</a>///
+<a href=#222 id=222 data-nosnippet>222</a>/// The per-step rotation is materialised from a raw, unconstrained projection
+<a href=#223 id=223 data-nosnippet>223</a>/// and normalised here so it is a genuine unit quaternion (an element of
+<a href=#224 id=224 data-nosnippet>224</a>/// `SU(2)`), the analogue of `tanh(θ)·π` bounding the RoPE angle.  A tiny floor
+<a href=#225 id=225 data-nosnippet>225</a>/// guards the zero-quaternion.
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">pub fn </span>quat_normalize&lt;<span class="kw">const </span>D: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
+<a href=#228 id=228 data-nosnippet>228</a>    <span class="kw">let </span>norm = (q.clone() * q.clone()).sum_dim(n).sqrt().clamp_min(<span class="number">1e-12</span>);
+<a href=#229 id=229 data-nosnippet>229</a>    q / norm
+<a href=#230 id=230 data-nosnippet>230</a>}
+<a href=#231 id=231 data-nosnippet>231</a>
+<a href=#232 id=232 data-nosnippet>232</a><span class="doccomment">/// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
+<a href=#233 id=233 data-nosnippet>233</a>/// (axis · angle) via the exponential map — the data-dependent "materialise
+<a href=#234 id=234 data-nosnippet>234</a>/// `Rₜ`" step, analogous to RoPE's `Δₜ · π · tanh(θₜ)` angle.
+<a href=#235 id=235 data-nosnippet>235</a>///
+<a href=#236 id=236 data-nosnippet>236</a>/// With `‖g‖ = angle` and `ĝ = g / angle` the axis, returns the unit quaternion
+<a href=#237 id=237 data-nosnippet>237</a>/// `q = (cos(angle/2), sin(angle/2)·ĝ)`.  A vanishing `g` maps to the identity
+<a href=#238 id=238 data-nosnippet>238</a>/// `(1, 0, 0, 0)`, so scaling `g` by a small `Δₜ` (the discretisation step)
+<a href=#239 id=239 data-nosnippet>239</a>/// yields a near-identity rotation — exactly the regime where a small step
+<a href=#240 id=240 data-nosnippet>240</a>/// barely rotates the state.  The `sin(angle/2)/angle` factor is the numerically
+<a href=#241 id=241 data-nosnippet>241</a>/// stable form of the (otherwise `0/0`) per-component scale near `g = 0`.
+<a href=#242 id=242 data-nosnippet>242</a>///
+<a href=#243 id=243 data-nosnippet>243</a>/// # Shapes
+<a href=#244 id=244 data-nosnippet>244</a>/// - `g` : `[..., 3]`
+<a href=#245 id=245 data-nosnippet>245</a>/// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
+<a href=#246 id=246 data-nosnippet>246</a></span><span class="kw">pub fn </span>quat_from_scaled_axis&lt;<span class="kw">const </span>D: usize&gt;(g: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
+<a href=#247 id=247 data-nosnippet>247</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="kw">let </span>angle = (g.clone() * g.clone()).sum_dim(n).sqrt(); <span class="comment">// [..., 1]
+<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">let </span>half = angle.clone() * <span class="number">0.5</span>;
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span>w = half.clone().cos(); <span class="comment">// [..., 1]
+<a href=#251 id=251 data-nosnippet>251</a>    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation), guarded against 0/0.
+<a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">let </span>scale = half.sin() / angle.clamp_min(<span class="number">1e-12</span>); <span class="comment">// [..., 1]
+<a href=#253 id=253 data-nosnippet>253</a>    </span><span class="kw">let </span>v = g * scale; <span class="comment">// [..., 3]
+<a href=#254 id=254 data-nosnippet>254</a>    </span>quat_normalize(Tensor::cat(<span class="macro">vec!</span>[w, v], n))
+<a href=#255 id=255 data-nosnippet>255</a>}
+<a href=#256 id=256 data-nosnippet>256</a>
+<a href=#257 id=257 data-nosnippet>257</a><span class="doccomment">/// Materialise the `4×4` orthogonal matrix of left-multiplication by `q`.
+<a href=#258 id=258 data-nosnippet>258</a>///
+<a href=#259 id=259 data-nosnippet>259</a>/// Maps `q` of shape `[..., 4]` to `[..., 4, 4]` such that, for `v` of shape
+<a href=#260 id=260 data-nosnippet>260</a>/// `[..., 4]`, `Lq · v == quat_mul(q, v)`.  Concretely (rows = output coords,
+<a href=#261 id=261 data-nosnippet>261</a>/// cols = input coords, all in `(w, x, y, z)` order):
+<a href=#262 id=262 data-nosnippet>262</a>///
+<a href=#263 id=263 data-nosnippet>263</a>/// ```text
+<a href=#264 id=264 data-nosnippet>264</a>///   ⎡ w  -x  -y  -z ⎤
+<a href=#265 id=265 data-nosnippet>265</a>///   ⎢ x   w  -z   y ⎥
+<a href=#266 id=266 data-nosnippet>266</a>///   ⎢ y   z   w  -x ⎥
+<a href=#267 id=267 data-nosnippet>267</a>///   ⎣ z  -y   x   w ⎦
+<a href=#268 id=268 data-nosnippet>268</a>/// ```
+<a href=#269 id=269 data-nosnippet>269</a>///
+<a href=#270 id=270 data-nosnippet>270</a>/// For a unit `q` this is orthogonal with `det = 1` (a left-isoclinic rotation).
+<a href=#271 id=271 data-nosnippet>271</a>/// Provided mainly for the generic / verification path; the cheap way to apply a
+<a href=#272 id=272 data-nosnippet>272</a>/// rotation is [`rotate_state_rank_blocks`] (a quaternion product, no `4×4`
+<a href=#273 id=273 data-nosnippet>273</a>/// materialisation).  `DR` must equal `D + 1`.
+<a href=#274 id=274 data-nosnippet>274</a></span><span class="kw">pub fn </span>quat_to_rot4&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DR: usize&gt;(q: Tensor&lt;D&gt;) -&gt; Tensor&lt;DR&gt; {
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="macro">assert_eq!</span>(D + <span class="number">1</span>, DR, <span class="string">"quat_to_rot4 maps rank D to rank D+1"</span>);
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>n = D - <span class="number">1</span>;
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>w = q.clone().narrow(n, <span class="number">0</span>, <span class="number">1</span>);
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>x = q.clone().narrow(n, <span class="number">1</span>, <span class="number">1</span>);
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>y = q.clone().narrow(n, <span class="number">2</span>, <span class="number">1</span>);
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>z = q.narrow(n, <span class="number">3</span>, <span class="number">1</span>);
+<a href=#281 id=281 data-nosnippet>281</a>
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="comment">// Each row is a [..., 4] tensor (the four column entries).
+<a href=#283 id=283 data-nosnippet>283</a>    </span><span class="kw">let </span>row0 = Tensor::cat(<span class="macro">vec!</span>[w.clone(), -x.clone(), -y.clone(), -z.clone()], n);
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">let </span>row1 = Tensor::cat(<span class="macro">vec!</span>[x.clone(), w.clone(), -z.clone(), y.clone()], n);
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="kw">let </span>row2 = Tensor::cat(<span class="macro">vec!</span>[y.clone(), z.clone(), w.clone(), -x.clone()], n);
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>row3 = Tensor::cat(<span class="macro">vec!</span>[z, -y, x, w], n);
+<a href=#287 id=287 data-nosnippet>287</a>
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="comment">// Stack the rows along a freshly inserted row axis → [..., 4, 4].
+<a href=#289 id=289 data-nosnippet>289</a>    </span>Tensor::cat(
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="macro">vec!</span>[
+<a href=#291 id=291 data-nosnippet>291</a>            row0.unsqueeze_dim::&lt;DR&gt;(n),
+<a href=#292 id=292 data-nosnippet>292</a>            row1.unsqueeze_dim::&lt;DR&gt;(n),
+<a href=#293 id=293 data-nosnippet>293</a>            row2.unsqueeze_dim::&lt;DR&gt;(n),
+<a href=#294 id=294 data-nosnippet>294</a>            row3.unsqueeze_dim::&lt;DR&gt;(n),
+<a href=#295 id=295 data-nosnippet>295</a>        ],
+<a href=#296 id=296 data-nosnippet>296</a>        n,
+<a href=#297 id=297 data-nosnippet>297</a>    )
+<a href=#298 id=298 data-nosnippet>298</a>}
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#301 id=301 data-nosnippet>301</a>// Rotation application on the state_rank axis
+<a href=#302 id=302 data-nosnippet>302</a>// ---------------------------------------------------------------------------
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a></span><span class="doccomment">/// Apply a per-block quaternion rotation to the `state_rank` axis of `v`.
+<a href=#305 id=305 data-nosnippet>305</a>///
+<a href=#306 id=306 data-nosnippet>306</a>/// `v` has shape `[..., state_rank]` with `state_rank = 4·J`, viewed as `J`
+<a href=#307 id=307 data-nosnippet>307</a>/// independent quaternion blocks; `q` has shape `[..., J, 4]` (one unit
+<a href=#308 id=308 data-nosnippet>308</a>/// quaternion per block, same leading dims as `v`).  Returns `q ⊗ v` per block,
+<a href=#309 id=309 data-nosnippet>309</a>/// i.e. the rotation `L_q` applied within each `4`-block, reshaped back to
+<a href=#310 id=310 data-nosnippet>310</a>/// `[..., state_rank]`.
+<a href=#311 id=311 data-nosnippet>311</a>///
+<a href=#312 id=312 data-nosnippet>312</a>/// This is the generalisation of RoPE's per-pair `2×2` rotation to per-block
+<a href=#313 id=313 data-nosnippet>313</a>/// `4×4`.  To rotate by the *inverse* cumulative rotation when absorbing into
+<a href=#314 id=314 data-nosnippet>314</a>/// `B`/`C` (`B̄ = Pᵀ B`), pass `q = conj(Qcum)`:
+<a href=#315 id=315 data-nosnippet>315</a>/// `rotate_state_rank_blocks(b, conj(qcum))`.
+<a href=#316 id=316 data-nosnippet>316</a>///
+<a href=#317 id=317 data-nosnippet>317</a>/// `DB` must equal `D + 1` (the block-split inserts the `J` axis).
+<a href=#318 id=318 data-nosnippet>318</a></span><span class="kw">pub fn </span>rotate_state_rank_blocks&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DB: usize&gt;(
+<a href=#319 id=319 data-nosnippet>319</a>    v: Tensor&lt;D&gt;,
+<a href=#320 id=320 data-nosnippet>320</a>    q: Tensor&lt;DB&gt;,
+<a href=#321 id=321 data-nosnippet>321</a>) -&gt; Tensor&lt;D&gt; {
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="macro">assert_eq!</span>(
+<a href=#323 id=323 data-nosnippet>323</a>        D + <span class="number">1</span>,
+<a href=#324 id=324 data-nosnippet>324</a>        DB,
+<a href=#325 id=325 data-nosnippet>325</a>        <span class="string">"rotate_state_rank_blocks splits one axis into (J, 4)"
+<a href=#326 id=326 data-nosnippet>326</a>    </span>);
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="kw">let </span>dims = v.dims();
+<a href=#328 id=328 data-nosnippet>328</a>    <span class="kw">let </span>state_rank = dims[D - <span class="number">1</span>];
+<a href=#329 id=329 data-nosnippet>329</a>    <span class="macro">assert_eq!</span>(
+<a href=#330 id=330 data-nosnippet>330</a>        state_rank % <span class="number">4</span>,
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="number">0</span>,
+<a href=#332 id=332 data-nosnippet>332</a>        <span class="string">"state_rank must be a multiple of 4 (quaternion blocks)"
+<a href=#333 id=333 data-nosnippet>333</a>    </span>);
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>blocks = state_rank / <span class="number">4</span>;
+<a href=#335 id=335 data-nosnippet>335</a>
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="comment">// Build the block-split shape [..., J, 4] (rank DB) and the flat shape
+<a href=#337 id=337 data-nosnippet>337</a>    // [..., state_rank] (rank D) for the round trip.
+<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>split_shape = [<span class="number">0usize</span>; DB];
+<a href=#339 id=339 data-nosnippet>339</a>    split_shape[..D - <span class="number">1</span>].copy_from_slice(<span class="kw-2">&amp;</span>dims[..D - <span class="number">1</span>]);
+<a href=#340 id=340 data-nosnippet>340</a>    split_shape[DB - <span class="number">2</span>] = blocks;
+<a href=#341 id=341 data-nosnippet>341</a>    split_shape[DB - <span class="number">1</span>] = <span class="number">4</span>;
+<a href=#342 id=342 data-nosnippet>342</a>
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">let </span>v_blocks = v.reshape(split_shape); <span class="comment">// [..., J, 4]
+<a href=#344 id=344 data-nosnippet>344</a>    </span><span class="kw">let </span>rotated = quat_mul(q, v_blocks); <span class="comment">// L_q applied per block
+<a href=#345 id=345 data-nosnippet>345</a>    </span>rotated.reshape(dims) <span class="comment">// [..., state_rank]
+<a href=#346 id=346 data-nosnippet>346</a></span>}
+<a href=#347 id=347 data-nosnippet>347</a>
+<a href=#348 id=348 data-nosnippet>348</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#349 id=349 data-nosnippet>349</a>// Cumulative rotation scan (the associative, non-abelian replacement for cumsum)
+<a href=#350 id=350 data-nosnippet>350</a>// ---------------------------------------------------------------------------
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a></span><span class="doccomment">/// Cumulative (ordered, left-accumulating) quaternion product along the
+<a href=#353 id=353 data-nosnippet>353</a>/// sequence axis, with a cross-chunk carry.
+<a href=#354 id=354 data-nosnippet>354</a>///
+<a href=#355 id=355 data-nosnippet>355</a>/// This is the non-abelian analogue of the cumulative *sum of angles* used by
+<a href=#356 id=356 data-nosnippet>356</a>/// RoPE: where complex rotations compose by adding angles (a `cumsum`),
+<a href=#357 id=357 data-nosnippet>357</a>/// quaternions compose by multiplication, which is order-dependent, so a real
+<a href=#358 id=358 data-nosnippet>358</a>/// scan is required.
 <a href=#359 id=359 data-nosnippet>359</a>///
-<a href=#360 id=360 data-nosnippet>360</a>/// Running this over a split sequence while threading `final_carry` is exactly
-<a href=#361 id=361 data-nosnippet>361</a>/// equal to running it over the whole sequence (asserted in the tests) — the
-<a href=#362 id=362 data-nosnippet>362</a>/// chunked-prefill / streaming guarantee, here for the rotation accumulator.
-<a href=#363 id=363 data-nosnippet>363</a>///
-<a href=#364 id=364 data-nosnippet>364</a>/// Implemented as a **Hillis–Steele** inclusive associative scan: the quaternion
-<a href=#365 id=365 data-nosnippet>365</a>/// product is associative (just not commutative), so a log-depth scan applies as
-<a href=#366 id=366 data-nosnippet>366</a>/// long as operand order is preserved (newest-on-left). Each doubling step is a
-<a href=#367 id=367 data-nosnippet>367</a>/// single full-tensor [`quat_mul`] plus a sequence shift, so the *sequential
-<a href=#368 id=368 data-nosnippet>368</a>/// dependency depth* is `O(log sequence)` rather than the `O(sequence)` of a
-<a href=#369 id=369 data-nosnippet>369</a>/// token-by-token loop — the same values, but a handful of large batched kernels
-<a href=#370 id=370 data-nosnippet>370</a>/// instead of thousands of serialized tiny ones (and a correspondingly shallow
-<a href=#371 id=371 data-nosnippet>371</a>/// autodiff graph). The sequential reference it replaces is kept as a test oracle
-<a href=#372 id=372 data-nosnippet>372</a>/// (`quat_cumprod_sequential` in the tests module) and asserted equal on values
-<a href=#373 id=373 data-nosnippet>373</a>/// **and** gradients.
-<a href=#374 id=374 data-nosnippet>374</a></span><span class="kw">pub fn </span>quat_cumprod(q_bshj4: Tensor&lt;<span class="number">5</span>&gt;, init: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="kw">let </span>[batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
-<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">let </span>device = q_bshj4.device();
-<a href=#377 id=377 data-nosnippet>377</a>
-<a href=#378 id=378 data-nosnippet>378</a>    <span class="comment">// Pure prefix product Pₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ by Hillis–Steele doubling.
-<a href=#379 id=379 data-nosnippet>379</a>    // Invariant after each step with offset `d`: a[t] holds the product of the
-<a href=#380 id=380 data-nosnippet>380</a>    // window [t .. max(t-2d+1, 0)] (newest on the left). After ⌈log₂ sequence⌉
-<a href=#381 id=381 data-nosnippet>381</a>    // doublings the window covers [t .. 0], i.e. a[t] = Pₜ.
-<a href=#382 id=382 data-nosnippet>382</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>a = q_bshj4;
-<a href=#383 id=383 data-nosnippet>383</a>    <span class="kw">let </span><span class="kw-2">mut </span>offset = <span class="number">1usize</span>;
-<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">while </span>offset &lt; sequence {
-<a href=#385 id=385 data-nosnippet>385</a>        <span class="comment">// shifted[t] = a[t-offset] for t ≥ offset, else the identity quaternion
-<a href=#386 id=386 data-nosnippet>386</a>        // (1,0,0,0) — so the first `offset` prefixes pass through unchanged
-<a href=#387 id=387 data-nosnippet>387</a>        // (a ⊗ identity = a).
-<a href=#388 id=388 data-nosnippet>388</a>        </span><span class="kw">let </span>ident = {
-<a href=#389 id=389 data-nosnippet>389</a>            <span class="kw">let </span>w = Tensor::ones([batch, offset, nheads, blocks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
-<a href=#390 id=390 data-nosnippet>390</a>            <span class="kw">let </span>xyz = Tensor::zeros([batch, offset, nheads, blocks, <span class="number">3</span>], <span class="kw-2">&amp;</span>device);
-<a href=#391 id=391 data-nosnippet>391</a>            Tensor::cat(<span class="macro">vec!</span>[w, xyz], <span class="number">4</span>)
-<a href=#392 id=392 data-nosnippet>392</a>        };
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>shifted = Tensor::cat(<span class="macro">vec!</span>[ident, a.clone()], <span class="number">1</span>).narrow(<span class="number">1</span>, <span class="number">0</span>, sequence);
-<a href=#394 id=394 data-nosnippet>394</a>        <span class="comment">// Recent block (a) on the left, older block (shifted) on the right.
-<a href=#395 id=395 data-nosnippet>395</a>        </span>a = quat_mul(a, shifted);
-<a href=#396 id=396 data-nosnippet>396</a>        offset <span class="kw-2">*</span>= <span class="number">2</span>;
-<a href=#397 id=397 data-nosnippet>397</a>    }
-<a href=#398 id=398 data-nosnippet>398</a>
-<a href=#399 id=399 data-nosnippet>399</a>    <span class="comment">// Fold the cross-chunk carry once: cumₜ = Pₜ ⊗ init. `init` (the previous
-<a href=#400 id=400 data-nosnippet>400</a>    // chunk's final cumulative rotation) is the oldest factor, hence on the
-<a href=#401 id=401 data-nosnippet>401</a>    // right; a missing carry is the identity and needs no multiply.
-<a href=#402 id=402 data-nosnippet>402</a>    </span><span class="kw">let </span>cum = <span class="kw">match </span>init {
-<a href=#403 id=403 data-nosnippet>403</a>        <span class="prelude-val">Some</span>(init_bhj4) =&gt; {
-<a href=#404 id=404 data-nosnippet>404</a>            <span class="macro">assert_eq!</span>([batch, nheads, blocks, <span class="number">4</span>], init_bhj4.dims());
-<a href=#405 id=405 data-nosnippet>405</a>            quat_mul(a, init_bhj4.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)) <span class="comment">// [batch, 1, nheads, J, 4] broadcasts over seq
-<a href=#406 id=406 data-nosnippet>406</a>        </span>}
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="prelude-val">None </span>=&gt; a,
-<a href=#408 id=408 data-nosnippet>408</a>    };
+<a href=#360 id=360 data-nosnippet>360</a>/// # Shapes
+<a href=#361 id=361 data-nosnippet>361</a>/// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-step **unit** quaternions
+<a href=#362 id=362 data-nosnippet>362</a>///   (block count `J = state_rank / 4`).
+<a href=#363 id=363 data-nosnippet>363</a>/// - `init`    : optional carry `[batch, nheads, J, 4]` — the cumulative
+<a href=#364 id=364 data-nosnippet>364</a>///   rotation at the end of the previous chunk (identity `(1,0,0,0)` for a fresh
+<a href=#365 id=365 data-nosnippet>365</a>///   start).
+<a href=#366 id=366 data-nosnippet>366</a>/// - returns `(cum, final_carry)` where `cum` is `[batch, sequence, nheads, J, 4]`
+<a href=#367 id=367 data-nosnippet>367</a>///   with `cum[:, t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ ⊗ init` (newest on the left, matching
+<a href=#368 id=368 data-nosnippet>368</a>///   `Pₜ = Rₜ ⋯ R₁`), and `final_carry` `[batch, nheads, J, 4]` is `cum[:, −1]`
+<a href=#369 id=369 data-nosnippet>369</a>///   to thread into the next chunk.
+<a href=#370 id=370 data-nosnippet>370</a>///
+<a href=#371 id=371 data-nosnippet>371</a>/// Running this over a split sequence while threading `final_carry` is exactly
+<a href=#372 id=372 data-nosnippet>372</a>/// equal to running it over the whole sequence (asserted in the tests) — the
+<a href=#373 id=373 data-nosnippet>373</a>/// chunked-prefill / streaming guarantee, here for the rotation accumulator.
+<a href=#374 id=374 data-nosnippet>374</a>///
+<a href=#375 id=375 data-nosnippet>375</a>/// Implemented as a **Hillis–Steele** inclusive associative scan: the quaternion
+<a href=#376 id=376 data-nosnippet>376</a>/// product is associative (just not commutative), so a log-depth scan applies as
+<a href=#377 id=377 data-nosnippet>377</a>/// long as operand order is preserved (newest-on-left). Each doubling step is a
+<a href=#378 id=378 data-nosnippet>378</a>/// single full-tensor [`quat_mul`] plus a sequence shift, so the *sequential
+<a href=#379 id=379 data-nosnippet>379</a>/// dependency depth* is `O(log sequence)` rather than the `O(sequence)` of a
+<a href=#380 id=380 data-nosnippet>380</a>/// token-by-token loop — the same values, but a handful of large batched kernels
+<a href=#381 id=381 data-nosnippet>381</a>/// instead of thousands of serialized tiny ones (and a correspondingly shallow
+<a href=#382 id=382 data-nosnippet>382</a>/// autodiff graph). The sequential reference it replaces is kept as a test oracle
+<a href=#383 id=383 data-nosnippet>383</a>/// (`quat_cumprod_sequential` in the tests module) and asserted equal on values
+<a href=#384 id=384 data-nosnippet>384</a>/// **and** gradients.
+<a href=#385 id=385 data-nosnippet>385</a></span><span class="kw">pub fn </span>quat_cumprod(q_bshj4: Tensor&lt;<span class="number">5</span>&gt;, init: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">let </span>[batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">let </span>device = q_bshj4.device();
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="comment">// Pure prefix product Pₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ by Hillis–Steele doubling.
+<a href=#390 id=390 data-nosnippet>390</a>    // Invariant after each step with offset `d`: a[t] holds the product of the
+<a href=#391 id=391 data-nosnippet>391</a>    // window [t .. max(t-2d+1, 0)] (newest on the left). After ⌈log₂ sequence⌉
+<a href=#392 id=392 data-nosnippet>392</a>    // doublings the window covers [t .. 0], i.e. a[t] = Pₜ.
+<a href=#393 id=393 data-nosnippet>393</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>a = q_bshj4;
+<a href=#394 id=394 data-nosnippet>394</a>    <span class="kw">let </span><span class="kw-2">mut </span>offset = <span class="number">1usize</span>;
+<a href=#395 id=395 data-nosnippet>395</a>    <span class="kw">while </span>offset &lt; sequence {
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="comment">// shifted[t] = a[t-offset] for t ≥ offset, else the identity quaternion
+<a href=#397 id=397 data-nosnippet>397</a>        // (1,0,0,0) — so the first `offset` prefixes pass through unchanged
+<a href=#398 id=398 data-nosnippet>398</a>        // (a ⊗ identity = a).
+<a href=#399 id=399 data-nosnippet>399</a>        </span><span class="kw">let </span>ident = {
+<a href=#400 id=400 data-nosnippet>400</a>            <span class="kw">let </span>w = Tensor::ones([batch, offset, nheads, blocks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">let </span>xyz = Tensor::zeros([batch, offset, nheads, blocks, <span class="number">3</span>], <span class="kw-2">&amp;</span>device);
+<a href=#402 id=402 data-nosnippet>402</a>            Tensor::cat(<span class="macro">vec!</span>[w, xyz], <span class="number">4</span>)
+<a href=#403 id=403 data-nosnippet>403</a>        };
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>shifted = Tensor::cat(<span class="macro">vec!</span>[ident, a.clone()], <span class="number">1</span>).narrow(<span class="number">1</span>, <span class="number">0</span>, sequence);
+<a href=#405 id=405 data-nosnippet>405</a>        <span class="comment">// Recent block (a) on the left, older block (shifted) on the right.
+<a href=#406 id=406 data-nosnippet>406</a>        </span>a = quat_mul(a, shifted);
+<a href=#407 id=407 data-nosnippet>407</a>        offset <span class="kw-2">*</span>= <span class="number">2</span>;
+<a href=#408 id=408 data-nosnippet>408</a>    }
 <a href=#409 id=409 data-nosnippet>409</a>
-<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">let </span>final_carry = cum.clone().narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>); <span class="comment">// [batch, nheads, J, 4]
-<a href=#411 id=411 data-nosnippet>411</a>    </span>(cum, final_carry)
-<a href=#412 id=412 data-nosnippet>412</a>}
-<a href=#413 id=413 data-nosnippet>413</a>
-<a href=#414 id=414 data-nosnippet>414</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#415 id=415 data-nosnippet>415</a>// Partial block rotation (rope_fraction support)
-<a href=#416 id=416 data-nosnippet>416</a>// ---------------------------------------------------------------------------
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a></span><span class="doccomment">/// Apply a per-block quaternion rotation to the first `rope_width` entries of
-<a href=#419 id=419 data-nosnippet>419</a>/// the `state_rank` axis (a multiple of 4); the remainder passes through. The
-<a href=#420 id=420 data-nosnippet>420</a>/// quaternion analogue of [`apply_rope_partial`].
-<a href=#421 id=421 data-nosnippet>421</a>///
-<a href=#422 id=422 data-nosnippet>422</a>/// `q` has one quaternion per rotated block (`rope_width / 4` of them). `DB`
-<a href=#423 id=423 data-nosnippet>423</a>/// must equal `D + 1`.
-<a href=#424 id=424 data-nosnippet>424</a></span><span class="kw">pub fn </span>rotate_blocks_partial&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DB: usize&gt;(
-<a href=#425 id=425 data-nosnippet>425</a>    v: Tensor&lt;D&gt;,
-<a href=#426 id=426 data-nosnippet>426</a>    q: Tensor&lt;DB&gt;,
-<a href=#427 id=427 data-nosnippet>427</a>    rope_width: usize,
-<a href=#428 id=428 data-nosnippet>428</a>) -&gt; Tensor&lt;D&gt; {
-<a href=#429 id=429 data-nosnippet>429</a>    <span class="kw">let </span>r = v.dims()[D - <span class="number">1</span>];
-<a href=#430 id=430 data-nosnippet>430</a>    <span class="kw">if </span>rope_width == r {
-<a href=#431 id=431 data-nosnippet>431</a>        rotate_state_rank_blocks::&lt;D, DB&gt;(v, q)
-<a href=#432 id=432 data-nosnippet>432</a>    } <span class="kw">else </span>{
-<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span>head = v.clone().narrow(D - <span class="number">1</span>, <span class="number">0</span>, rope_width);
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">let </span>tail = v.narrow(D - <span class="number">1</span>, rope_width, r - rope_width);
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>head_rot = rotate_state_rank_blocks::&lt;D, DB&gt;(head, q);
-<a href=#436 id=436 data-nosnippet>436</a>        Tensor::cat(<span class="macro">vec!</span>[head_rot, tail], D - <span class="number">1</span>)
-<a href=#437 id=437 data-nosnippet>437</a>    }
-<a href=#438 id=438 data-nosnippet>438</a>}
-<a href=#439 id=439 data-nosnippet>439</a>
-<a href=#440 id=440 data-nosnippet>440</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#441 id=441 data-nosnippet>441</a>// Forward / step rotation of B and C (shared by both SSD pathways)
-<a href=#442 id=442 data-nosnippet>442</a>// ---------------------------------------------------------------------------
-<a href=#443 id=443 data-nosnippet>443</a>
-<a href=#444 id=444 data-nosnippet>444</a></span><span class="doccomment">/// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
-<a href=#445 id=445 data-nosnippet>445</a>/// rotation, returning the rotated projections and the new cumulative
-<a href=#446 id=446 data-nosnippet>446</a>/// [`RotationState`] to store in the cache.
-<a href=#447 id=447 data-nosnippet>447</a>///
-<a href=#448 id=448 data-nosnippet>448</a>/// Branches on [`RotationKind`]:
-<a href=#449 id=449 data-nosnippet>449</a>/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
-<a href=#450 id=450 data-nosnippet>450</a>///   angle `cumsum` continued from `prev`, then [`apply_rope_partial`]. Exactly
-<a href=#451 id=451 data-nosnippet>451</a>///   the original Mamba-3 behaviour.
-<a href=#452 id=452 data-nosnippet>452</a>/// - [`Quaternion4D`](RotationKind::Quaternion4D): per-step unit quaternion
-<a href=#453 id=453 data-nosnippet>453</a>///   [`quat_from_scaled_axis`] (the in-projection generators scaled per-head by
-<a href=#454 id=454 data-nosnippet>454</a>///   `Δ`), composed by [`quat_cumprod`] continuing the cached quaternion, then
-<a href=#455 id=455 data-nosnippet>455</a>///   applied to `B`/`C` as `rotate(·, conj(Qₜ))` over the first `4·blocks`
-<a href=#456 id=456 data-nosnippet>456</a>///   state-rank entries.
-<a href=#457 id=457 data-nosnippet>457</a>///
-<a href=#458 id=458 data-nosnippet>458</a>/// # Shapes
-<a href=#459 id=459 data-nosnippet>459</a>/// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
-<a href=#460 id=460 data-nosnippet>460</a>///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
-<a href=#461 id=461 data-nosnippet>461</a>///   for Quaternion4D).
-<a href=#462 id=462 data-nosnippet>462</a>/// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
-<a href=#463 id=463 data-nosnippet>463</a>/// - `b_bsmhr` / `c_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
-<a href=#464 id=464 data-nosnippet>464</a></span><span class="kw">pub fn </span>rotate_bc_forward(
-<a href=#465 id=465 data-nosnippet>465</a>    rot_bsa: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#466 id=466 data-nosnippet>466</a>    dt_bsh: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#467 id=467 data-nosnippet>467</a>    prev: RotationState,
-<a href=#468 id=468 data-nosnippet>468</a>    b_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#469 id=469 data-nosnippet>469</a>    c_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#470 id=470 data-nosnippet>470</a>    kind: RotationKind,
-<a href=#471 id=471 data-nosnippet>471</a>    rope_dim: usize,
-<a href=#472 id=472 data-nosnippet>472</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">5</span>&gt;, RotationState) {
-<a href=#473 id=473 data-nosnippet>473</a>    <span class="kw">let </span>[batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
-<a href=#474 id=474 data-nosnippet>474</a>    <span class="kw">match </span>kind {
-<a href=#475 id=475 data-nosnippet>475</a>        RotationKind::Complex2D =&gt; {
-<a href=#476 id=476 data-nosnippet>476</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
-<a href=#477 id=477 data-nosnippet>477</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
-<a href=#478 id=478 data-nosnippet>478</a>            <span class="kw">let </span>theta_scaled_bsa = rot_bsa.tanh() * std::f32::consts::PI;
-<a href=#479 id=479 data-nosnippet>479</a>            <span class="kw">let </span>raw_angles_bsha =
-<a href=#480 id=480 data-nosnippet>480</a>                dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) * theta_scaled_bsa.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>);
-<a href=#481 id=481 data-nosnippet>481</a>            <span class="kw">let </span>cum_angles_bsha = prev_angle_bha.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) + raw_angles_bsha.cumsum(<span class="number">1</span>);
-<a href=#482 id=482 data-nosnippet>482</a>            <span class="kw">let </span>cum_angles_bsmha = cum_angles_bsha
-<a href=#483 id=483 data-nosnippet>483</a>                .clone()
-<a href=#484 id=484 data-nosnippet>484</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>)
-<a href=#485 id=485 data-nosnippet>485</a>                .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
-<a href=#486 id=486 data-nosnippet>486</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
-<a href=#487 id=487 data-nosnippet>487</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">5</span>&gt;(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
-<a href=#488 id=488 data-nosnippet>488</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">5</span>&gt;(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
-<a href=#489 id=489 data-nosnippet>489</a>            <span class="kw">let </span>last = wrap_angle(cum_angles_bsha.narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>));
-<a href=#490 id=490 data-nosnippet>490</a>            (b, c, RotationState::Angle(last))
-<a href=#491 id=491 data-nosnippet>491</a>        }
-<a href=#492 id=492 data-nosnippet>492</a>        RotationKind::Quaternion4D =&gt; {
-<a href=#493 id=493 data-nosnippet>493</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
-<a href=#494 id=494 data-nosnippet>494</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
-<a href=#495 id=495 data-nosnippet>495</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
-<a href=#496 id=496 data-nosnippet>496</a>            <span class="comment">// Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
-<a href=#497 id=497 data-nosnippet>497</a>            </span><span class="kw">let </span>g_bshj3 = rot_bsa.reshape([batch, sequence, blocks, <span class="number">3</span>]).unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>)
-<a href=#498 id=498 data-nosnippet>498</a>                * dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
-<a href=#499 id=499 data-nosnippet>499</a>            <span class="kw">let </span>q_step_bshj4 = quat_from_scaled_axis::&lt;<span class="number">5</span>&gt;(g_bshj3);
-<a href=#500 id=500 data-nosnippet>500</a>            <span class="comment">// Memory-efficient scan: a custom recompute backward (saves only the
-<a href=#501 id=501 data-nosnippet>501</a>            // leaf inputs) instead of retaining the scan's intermediates. Equal
-<a href=#502 id=502 data-nosnippet>502</a>            // to [`quat_cumprod`] on values and gradients (asserted in tests).
-<a href=#503 id=503 data-nosnippet>503</a>            </span><span class="kw">let </span>(cum_bshj4, final_bhj4) =
-<a href=#504 id=504 data-nosnippet>504</a>                <span class="kw">crate</span>::mamba3::quat_scan::quat_cumprod_recalculated(q_step_bshj4, <span class="prelude-val">Some</span>(prev_q_bhj4));
-<a href=#505 id=505 data-nosnippet>505</a>            <span class="comment">// B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
-<a href=#506 id=506 data-nosnippet>506</a>            // broadcast over the mimo_rank axis.
-<a href=#507 id=507 data-nosnippet>507</a>            </span><span class="kw">let </span>conj_bsmhj4 = quat_conj(cum_bshj4)
-<a href=#508 id=508 data-nosnippet>508</a>                .unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">2</span>)
-<a href=#509 id=509 data-nosnippet>509</a>                .expand([batch, sequence, mimo_rank, nheads, blocks, <span class="number">4</span>]);
-<a href=#510 id=510 data-nosnippet>510</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(b_bsmhr, conj_bsmhj4.clone(), rope_width);
-<a href=#511 id=511 data-nosnippet>511</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(c_bsmhr, conj_bsmhj4, rope_width);
-<a href=#512 id=512 data-nosnippet>512</a>            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
-<a href=#513 id=513 data-nosnippet>513</a>        }
-<a href=#514 id=514 data-nosnippet>514</a>    }
-<a href=#515 id=515 data-nosnippet>515</a>}
-<a href=#516 id=516 data-nosnippet>516</a>
-<a href=#517 id=517 data-nosnippet>517</a><span class="doccomment">/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
-<a href=#518 id=518 data-nosnippet>518</a>///
-<a href=#519 id=519 data-nosnippet>519</a>/// # Shapes
-<a href=#520 id=520 data-nosnippet>520</a>/// - `rot_ba`  : `[batch, num_rotation_channels]`.
-<a href=#521 id=521 data-nosnippet>521</a>/// - `dt_bh`   : `[batch, nheads]`.
-<a href=#522 id=522 data-nosnippet>522</a>/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
-<a href=#523 id=523 data-nosnippet>523</a></span><span class="kw">pub fn </span>rotate_bc_step(
-<a href=#524 id=524 data-nosnippet>524</a>    rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#525 id=525 data-nosnippet>525</a>    dt_bh: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#526 id=526 data-nosnippet>526</a>    prev: RotationState,
-<a href=#527 id=527 data-nosnippet>527</a>    b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#528 id=528 data-nosnippet>528</a>    c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#529 id=529 data-nosnippet>529</a>    kind: RotationKind,
-<a href=#530 id=530 data-nosnippet>530</a>    rope_dim: usize,
-<a href=#531 id=531 data-nosnippet>531</a>) -&gt; (Tensor&lt;<span class="number">4</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;, RotationState) {
-<a href=#532 id=532 data-nosnippet>532</a>    <span class="kw">let </span>[batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
-<a href=#533 id=533 data-nosnippet>533</a>    <span class="kw">match </span>kind {
-<a href=#534 id=534 data-nosnippet>534</a>        RotationKind::Complex2D =&gt; {
-<a href=#535 id=535 data-nosnippet>535</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
-<a href=#536 id=536 data-nosnippet>536</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
-<a href=#537 id=537 data-nosnippet>537</a>            <span class="kw">let </span>theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
-<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">let </span>raw_angle_bha =
-<a href=#539 id=539 data-nosnippet>539</a>                dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>) * theta_scaled_ba.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
-<a href=#540 id=540 data-nosnippet>540</a>            <span class="kw">let </span>new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
-<a href=#541 id=541 data-nosnippet>541</a>            <span class="kw">let </span>new_cum_angle_bmha = new_cum_angle_bha
-<a href=#542 id=542 data-nosnippet>542</a>                .clone()
-<a href=#543 id=543 data-nosnippet>543</a>                .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
-<a href=#544 id=544 data-nosnippet>544</a>                .expand([batch, mimo_rank, nheads, num_rope_angles]);
-<a href=#545 id=545 data-nosnippet>545</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
-<a href=#546 id=546 data-nosnippet>546</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">4</span>&gt;(b_bmhr, new_cum_angle_bmha.clone(), rope_dim, rotate_pairwise);
-<a href=#547 id=547 data-nosnippet>547</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">4</span>&gt;(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
-<a href=#548 id=548 data-nosnippet>548</a>            (b, c, RotationState::Angle(new_cum_angle_bha))
-<a href=#549 id=549 data-nosnippet>549</a>        }
-<a href=#550 id=550 data-nosnippet>550</a>        RotationKind::Quaternion4D =&gt; {
-<a href=#551 id=551 data-nosnippet>551</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
-<a href=#552 id=552 data-nosnippet>552</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
-<a href=#553 id=553 data-nosnippet>553</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
-<a href=#554 id=554 data-nosnippet>554</a>            <span class="kw">let </span>g_bhj3 = rot_ba.reshape([batch, blocks, <span class="number">3</span>]).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
-<a href=#555 id=555 data-nosnippet>555</a>                * dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
-<a href=#556 id=556 data-nosnippet>556</a>            <span class="kw">let </span>q_step_bhj4 = quat_from_scaled_axis::&lt;<span class="number">4</span>&gt;(g_bhj3);
-<a href=#557 id=557 data-nosnippet>557</a>            <span class="comment">// Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
-<a href=#558 id=558 data-nosnippet>558</a>            </span><span class="kw">let </span>new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
-<a href=#559 id=559 data-nosnippet>559</a>            <span class="kw">let </span>conj_bmhj4 = quat_conj(new_q_bhj4.clone())
-<a href=#560 id=560 data-nosnippet>560</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)
-<a href=#561 id=561 data-nosnippet>561</a>                .expand([batch, mimo_rank, nheads, blocks, <span class="number">4</span>]);
-<a href=#562 id=562 data-nosnippet>562</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(b_bmhr, conj_bmhj4.clone(), rope_width);
-<a href=#563 id=563 data-nosnippet>563</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(c_bmhr, conj_bmhj4, rope_width);
-<a href=#564 id=564 data-nosnippet>564</a>            (b, c, RotationState::Quaternion(new_q_bhj4))
-<a href=#565 id=565 data-nosnippet>565</a>        }
-<a href=#566 id=566 data-nosnippet>566</a>    }
-<a href=#567 id=567 data-nosnippet>567</a>}
-<a href=#568 id=568 data-nosnippet>568</a>
-<a href=#569 id=569 data-nosnippet>569</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#570 id=570 data-nosnippet>570</a></span><span class="kw">mod </span>tests;
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="comment">// Fold the cross-chunk carry once: cumₜ = Pₜ ⊗ init. `init` (the previous
+<a href=#411 id=411 data-nosnippet>411</a>    // chunk's final cumulative rotation) is the oldest factor, hence on the
+<a href=#412 id=412 data-nosnippet>412</a>    // right; a missing carry is the identity and needs no multiply.
+<a href=#413 id=413 data-nosnippet>413</a>    </span><span class="kw">let </span>cum = <span class="kw">match </span>init {
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="prelude-val">Some</span>(init_bhj4) =&gt; {
+<a href=#415 id=415 data-nosnippet>415</a>            <span class="macro">assert_eq!</span>([batch, nheads, blocks, <span class="number">4</span>], init_bhj4.dims());
+<a href=#416 id=416 data-nosnippet>416</a>            quat_mul(a, init_bhj4.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)) <span class="comment">// [batch, 1, nheads, J, 4] broadcasts over seq
+<a href=#417 id=417 data-nosnippet>417</a>        </span>}
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="prelude-val">None </span>=&gt; a,
+<a href=#419 id=419 data-nosnippet>419</a>    };
+<a href=#420 id=420 data-nosnippet>420</a>
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">let </span>final_carry = cum.clone().narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>); <span class="comment">// [batch, nheads, J, 4]
+<a href=#422 id=422 data-nosnippet>422</a>    </span>(cum, final_carry)
+<a href=#423 id=423 data-nosnippet>423</a>}
+<a href=#424 id=424 data-nosnippet>424</a>
+<a href=#425 id=425 data-nosnippet>425</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#426 id=426 data-nosnippet>426</a>// Partial block rotation (rope_fraction support)
+<a href=#427 id=427 data-nosnippet>427</a>// ---------------------------------------------------------------------------
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a></span><span class="doccomment">/// Apply a per-block quaternion rotation to the first `rope_width` entries of
+<a href=#430 id=430 data-nosnippet>430</a>/// the `state_rank` axis (a multiple of 4); the remainder passes through. The
+<a href=#431 id=431 data-nosnippet>431</a>/// quaternion analogue of [`apply_rope_partial`].
+<a href=#432 id=432 data-nosnippet>432</a>///
+<a href=#433 id=433 data-nosnippet>433</a>/// `q` has one quaternion per rotated block (`rope_width / 4` of them). `DB`
+<a href=#434 id=434 data-nosnippet>434</a>/// must equal `D + 1`.
+<a href=#435 id=435 data-nosnippet>435</a></span><span class="kw">pub fn </span>rotate_blocks_partial&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DB: usize&gt;(
+<a href=#436 id=436 data-nosnippet>436</a>    v: Tensor&lt;D&gt;,
+<a href=#437 id=437 data-nosnippet>437</a>    q: Tensor&lt;DB&gt;,
+<a href=#438 id=438 data-nosnippet>438</a>    rope_width: usize,
+<a href=#439 id=439 data-nosnippet>439</a>) -&gt; Tensor&lt;D&gt; {
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="kw">let </span>r = v.dims()[D - <span class="number">1</span>];
+<a href=#441 id=441 data-nosnippet>441</a>    <span class="kw">if </span>rope_width == r {
+<a href=#442 id=442 data-nosnippet>442</a>        rotate_state_rank_blocks::&lt;D, DB&gt;(v, q)
+<a href=#443 id=443 data-nosnippet>443</a>    } <span class="kw">else </span>{
+<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw">let </span>head = v.clone().narrow(D - <span class="number">1</span>, <span class="number">0</span>, rope_width);
+<a href=#445 id=445 data-nosnippet>445</a>        <span class="kw">let </span>tail = v.narrow(D - <span class="number">1</span>, rope_width, r - rope_width);
+<a href=#446 id=446 data-nosnippet>446</a>        <span class="kw">let </span>head_rot = rotate_state_rank_blocks::&lt;D, DB&gt;(head, q);
+<a href=#447 id=447 data-nosnippet>447</a>        Tensor::cat(<span class="macro">vec!</span>[head_rot, tail], D - <span class="number">1</span>)
+<a href=#448 id=448 data-nosnippet>448</a>    }
+<a href=#449 id=449 data-nosnippet>449</a>}
+<a href=#450 id=450 data-nosnippet>450</a>
+<a href=#451 id=451 data-nosnippet>451</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#452 id=452 data-nosnippet>452</a>// Forward / step rotation of B and C (shared by both SSD pathways)
+<a href=#453 id=453 data-nosnippet>453</a>// ---------------------------------------------------------------------------
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a></span><span class="doccomment">/// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
+<a href=#456 id=456 data-nosnippet>456</a>/// rotation, returning the rotated projections and the new cumulative
+<a href=#457 id=457 data-nosnippet>457</a>/// [`RotationState`] to store in the cache.
+<a href=#458 id=458 data-nosnippet>458</a>///
+<a href=#459 id=459 data-nosnippet>459</a>/// Branches on [`RotationKind`]:
+<a href=#460 id=460 data-nosnippet>460</a>/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
+<a href=#461 id=461 data-nosnippet>461</a>///   angle `cumsum` continued from `prev`, then [`apply_rope_partial`]. Exactly
+<a href=#462 id=462 data-nosnippet>462</a>///   the original Mamba-3 behaviour.
+<a href=#463 id=463 data-nosnippet>463</a>/// - [`Quaternion4D`](RotationKind::Quaternion4D): per-step unit quaternion
+<a href=#464 id=464 data-nosnippet>464</a>///   [`quat_from_scaled_axis`] (the in-projection generators scaled per-head by
+<a href=#465 id=465 data-nosnippet>465</a>///   `Δ`), composed by [`quat_cumprod`] continuing the cached quaternion, then
+<a href=#466 id=466 data-nosnippet>466</a>///   applied to `B`/`C` as `rotate(·, conj(Qₜ))` over the first `4·blocks`
+<a href=#467 id=467 data-nosnippet>467</a>///   state-rank entries.
+<a href=#468 id=468 data-nosnippet>468</a>///
+<a href=#469 id=469 data-nosnippet>469</a>/// # Shapes
+<a href=#470 id=470 data-nosnippet>470</a>/// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
+<a href=#471 id=471 data-nosnippet>471</a>///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
+<a href=#472 id=472 data-nosnippet>472</a>///   for Quaternion4D).
+<a href=#473 id=473 data-nosnippet>473</a>/// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
+<a href=#474 id=474 data-nosnippet>474</a>/// - `b_bsmhr` / `c_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
+<a href=#475 id=475 data-nosnippet>475</a></span><span class="kw">pub fn </span>rotate_bc_forward(
+<a href=#476 id=476 data-nosnippet>476</a>    rot_bsa: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#477 id=477 data-nosnippet>477</a>    dt_bsh: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#478 id=478 data-nosnippet>478</a>    prev: RotationState,
+<a href=#479 id=479 data-nosnippet>479</a>    b_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#480 id=480 data-nosnippet>480</a>    c_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#481 id=481 data-nosnippet>481</a>    kind: RotationKind,
+<a href=#482 id=482 data-nosnippet>482</a>    rope_dim: usize,
+<a href=#483 id=483 data-nosnippet>483</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">5</span>&gt;, RotationState) {
+<a href=#484 id=484 data-nosnippet>484</a>    <span class="kw">let </span>[batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
+<a href=#485 id=485 data-nosnippet>485</a>    <span class="kw">match </span>kind {
+<a href=#486 id=486 data-nosnippet>486</a>        RotationKind::Complex2D =&gt; {
+<a href=#487 id=487 data-nosnippet>487</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
+<a href=#488 id=488 data-nosnippet>488</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
+<a href=#489 id=489 data-nosnippet>489</a>            <span class="kw">let </span>theta_scaled_bsa = rot_bsa.tanh() * std::f32::consts::PI;
+<a href=#490 id=490 data-nosnippet>490</a>            <span class="kw">let </span>raw_angles_bsha =
+<a href=#491 id=491 data-nosnippet>491</a>                dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) * theta_scaled_bsa.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">2</span>);
+<a href=#492 id=492 data-nosnippet>492</a>            <span class="kw">let </span>cum_angles_bsha = prev_angle_bha.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) + raw_angles_bsha.cumsum(<span class="number">1</span>);
+<a href=#493 id=493 data-nosnippet>493</a>            <span class="kw">let </span>cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>).expand([
+<a href=#494 id=494 data-nosnippet>494</a>                batch,
+<a href=#495 id=495 data-nosnippet>495</a>                sequence,
+<a href=#496 id=496 data-nosnippet>496</a>                mimo_rank,
+<a href=#497 id=497 data-nosnippet>497</a>                nheads,
+<a href=#498 id=498 data-nosnippet>498</a>                num_rope_angles,
+<a href=#499 id=499 data-nosnippet>499</a>            ]);
+<a href=#500 id=500 data-nosnippet>500</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
+<a href=#501 id=501 data-nosnippet>501</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">5</span>&gt;(
+<a href=#502 id=502 data-nosnippet>502</a>                b_bsmhr,
+<a href=#503 id=503 data-nosnippet>503</a>                cum_angles_bsmha.clone(),
+<a href=#504 id=504 data-nosnippet>504</a>                rope_dim,
+<a href=#505 id=505 data-nosnippet>505</a>                rotate_pairwise,
+<a href=#506 id=506 data-nosnippet>506</a>            );
+<a href=#507 id=507 data-nosnippet>507</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">5</span>&gt;(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+<a href=#508 id=508 data-nosnippet>508</a>            <span class="kw">let </span>last = wrap_angle(
+<a href=#509 id=509 data-nosnippet>509</a>                cum_angles_bsha
+<a href=#510 id=510 data-nosnippet>510</a>                    .narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>)
+<a href=#511 id=511 data-nosnippet>511</a>                    .squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>),
+<a href=#512 id=512 data-nosnippet>512</a>            );
+<a href=#513 id=513 data-nosnippet>513</a>            (b, c, RotationState::Angle(last))
+<a href=#514 id=514 data-nosnippet>514</a>        }
+<a href=#515 id=515 data-nosnippet>515</a>        RotationKind::Quaternion4D =&gt; {
+<a href=#516 id=516 data-nosnippet>516</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
+<a href=#517 id=517 data-nosnippet>517</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
+<a href=#518 id=518 data-nosnippet>518</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
+<a href=#519 id=519 data-nosnippet>519</a>            <span class="comment">// Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
+<a href=#520 id=520 data-nosnippet>520</a>            </span><span class="kw">let </span>g_bshj3 = rot_bsa
+<a href=#521 id=521 data-nosnippet>521</a>                .reshape([batch, sequence, blocks, <span class="number">3</span>])
+<a href=#522 id=522 data-nosnippet>522</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>)
+<a href=#523 id=523 data-nosnippet>523</a>                * dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
+<a href=#524 id=524 data-nosnippet>524</a>            <span class="kw">let </span>q_step_bshj4 = quat_from_scaled_axis::&lt;<span class="number">5</span>&gt;(g_bshj3);
+<a href=#525 id=525 data-nosnippet>525</a>            <span class="comment">// Memory-efficient scan: a custom recompute backward (saves only the
+<a href=#526 id=526 data-nosnippet>526</a>            // leaf inputs) instead of retaining the scan's intermediates. Equal
+<a href=#527 id=527 data-nosnippet>527</a>            // to [`quat_cumprod`] on values and gradients (asserted in tests).
+<a href=#528 id=528 data-nosnippet>528</a>            </span><span class="kw">let </span>(cum_bshj4, final_bhj4) = <span class="kw">crate</span>::mamba3::quat_scan::quat_cumprod_recalculated(
+<a href=#529 id=529 data-nosnippet>529</a>                q_step_bshj4,
+<a href=#530 id=530 data-nosnippet>530</a>                <span class="prelude-val">Some</span>(prev_q_bhj4),
+<a href=#531 id=531 data-nosnippet>531</a>            );
+<a href=#532 id=532 data-nosnippet>532</a>            <span class="comment">// B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
+<a href=#533 id=533 data-nosnippet>533</a>            // broadcast over the mimo_rank axis.
+<a href=#534 id=534 data-nosnippet>534</a>            </span><span class="kw">let </span>conj_bsmhj4 = quat_conj(cum_bshj4)
+<a href=#535 id=535 data-nosnippet>535</a>                .unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">2</span>)
+<a href=#536 id=536 data-nosnippet>536</a>                .expand([batch, sequence, mimo_rank, nheads, blocks, <span class="number">4</span>]);
+<a href=#537 id=537 data-nosnippet>537</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(b_bsmhr, conj_bsmhj4.clone(), rope_width);
+<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(c_bsmhr, conj_bsmhj4, rope_width);
+<a href=#539 id=539 data-nosnippet>539</a>            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
+<a href=#540 id=540 data-nosnippet>540</a>        }
+<a href=#541 id=541 data-nosnippet>541</a>    }
+<a href=#542 id=542 data-nosnippet>542</a>}
+<a href=#543 id=543 data-nosnippet>543</a>
+<a href=#544 id=544 data-nosnippet>544</a><span class="doccomment">/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
+<a href=#545 id=545 data-nosnippet>545</a>///
+<a href=#546 id=546 data-nosnippet>546</a>/// # Shapes
+<a href=#547 id=547 data-nosnippet>547</a>/// - `rot_ba`  : `[batch, num_rotation_channels]`.
+<a href=#548 id=548 data-nosnippet>548</a>/// - `dt_bh`   : `[batch, nheads]`.
+<a href=#549 id=549 data-nosnippet>549</a>/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
+<a href=#550 id=550 data-nosnippet>550</a></span><span class="kw">pub fn </span>rotate_bc_step(
+<a href=#551 id=551 data-nosnippet>551</a>    rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#552 id=552 data-nosnippet>552</a>    dt_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#553 id=553 data-nosnippet>553</a>    prev: RotationState,
+<a href=#554 id=554 data-nosnippet>554</a>    b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#555 id=555 data-nosnippet>555</a>    c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#556 id=556 data-nosnippet>556</a>    kind: RotationKind,
+<a href=#557 id=557 data-nosnippet>557</a>    rope_dim: usize,
+<a href=#558 id=558 data-nosnippet>558</a>) -&gt; (Tensor&lt;<span class="number">4</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;, RotationState) {
+<a href=#559 id=559 data-nosnippet>559</a>    <span class="kw">let </span>[batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
+<a href=#560 id=560 data-nosnippet>560</a>    <span class="kw">match </span>kind {
+<a href=#561 id=561 data-nosnippet>561</a>        RotationKind::Complex2D =&gt; {
+<a href=#562 id=562 data-nosnippet>562</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
+<a href=#563 id=563 data-nosnippet>563</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
+<a href=#564 id=564 data-nosnippet>564</a>            <span class="kw">let </span>theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
+<a href=#565 id=565 data-nosnippet>565</a>            <span class="kw">let </span>raw_angle_bha = dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>) * theta_scaled_ba.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
+<a href=#566 id=566 data-nosnippet>566</a>            <span class="kw">let </span>new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="kw">let </span>new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>).expand([
+<a href=#568 id=568 data-nosnippet>568</a>                batch,
+<a href=#569 id=569 data-nosnippet>569</a>                mimo_rank,
+<a href=#570 id=570 data-nosnippet>570</a>                nheads,
+<a href=#571 id=571 data-nosnippet>571</a>                num_rope_angles,
+<a href=#572 id=572 data-nosnippet>572</a>            ]);
+<a href=#573 id=573 data-nosnippet>573</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
+<a href=#574 id=574 data-nosnippet>574</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">4</span>&gt;(
+<a href=#575 id=575 data-nosnippet>575</a>                b_bmhr,
+<a href=#576 id=576 data-nosnippet>576</a>                new_cum_angle_bmha.clone(),
+<a href=#577 id=577 data-nosnippet>577</a>                rope_dim,
+<a href=#578 id=578 data-nosnippet>578</a>                rotate_pairwise,
+<a href=#579 id=579 data-nosnippet>579</a>            );
+<a href=#580 id=580 data-nosnippet>580</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">4</span>&gt;(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
+<a href=#581 id=581 data-nosnippet>581</a>            (b, c, RotationState::Angle(new_cum_angle_bha))
+<a href=#582 id=582 data-nosnippet>582</a>        }
+<a href=#583 id=583 data-nosnippet>583</a>        RotationKind::Quaternion4D =&gt; {
+<a href=#584 id=584 data-nosnippet>584</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
+<a href=#585 id=585 data-nosnippet>585</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
+<a href=#586 id=586 data-nosnippet>586</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
+<a href=#587 id=587 data-nosnippet>587</a>            <span class="kw">let </span>g_bhj3 = rot_ba.reshape([batch, blocks, <span class="number">3</span>]).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
+<a href=#588 id=588 data-nosnippet>588</a>                * dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
+<a href=#589 id=589 data-nosnippet>589</a>            <span class="kw">let </span>q_step_bhj4 = quat_from_scaled_axis::&lt;<span class="number">4</span>&gt;(g_bhj3);
+<a href=#590 id=590 data-nosnippet>590</a>            <span class="comment">// Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
+<a href=#591 id=591 data-nosnippet>591</a>            </span><span class="kw">let </span>new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
+<a href=#592 id=592 data-nosnippet>592</a>            <span class="kw">let </span>conj_bmhj4 = quat_conj(new_q_bhj4.clone())
+<a href=#593 id=593 data-nosnippet>593</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)
+<a href=#594 id=594 data-nosnippet>594</a>                .expand([batch, mimo_rank, nheads, blocks, <span class="number">4</span>]);
+<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(b_bmhr, conj_bmhj4.clone(), rope_width);
+<a href=#596 id=596 data-nosnippet>596</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(c_bmhr, conj_bmhj4, rope_width);
+<a href=#597 id=597 data-nosnippet>597</a>            (b, c, RotationState::Quaternion(new_q_bhj4))
+<a href=#598 id=598 data-nosnippet>598</a>        }
+<a href=#599 id=599 data-nosnippet>599</a>    }
+<a href=#600 id=600 data-nosnippet>600</a>}
+<a href=#601 id=601 data-nosnippet>601</a>
+<a href=#602 id=602 data-nosnippet>602</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#603 id=603 data-nosnippet>603</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

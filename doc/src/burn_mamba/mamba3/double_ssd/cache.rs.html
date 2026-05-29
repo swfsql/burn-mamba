@@ -181,19 +181,22 @@
 <a href=#181 id=181 data-nosnippet>181</a>        );
 <a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim], device);
 <a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
-<a href=#184 id=184 data-nosnippet>184</a>            RotationKind::Quaternion4D =&gt; {
-<a href=#185 id=185 data-nosnippet>185</a>                RotationState::identity_quaternion(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_quat_blocks, device)
-<a href=#186 id=186 data-nosnippet>186</a>            }
-<a href=#187 id=187 data-nosnippet>187</a>            RotationKind::Complex2D =&gt; {
-<a href=#188 id=188 data-nosnippet>188</a>                RotationState::zeros_angle(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_rope_angles, device)
-<a href=#189 id=189 data-nosnippet>189</a>            }
-<a href=#190 id=190 data-nosnippet>190</a>        };
-<a href=#191 id=191 data-nosnippet>191</a>        Mamba3DoubleSsdCache {
-<a href=#192 id=192 data-nosnippet>192</a>            ssm_bhpr,
-<a href=#193 id=193 data-nosnippet>193</a>            k_state_bmhr,
-<a href=#194 id=194 data-nosnippet>194</a>            v_state_bhp,
-<a href=#195 id=195 data-nosnippet>195</a>            rotation,
-<a href=#196 id=196 data-nosnippet>196</a>        }
-<a href=#197 id=197 data-nosnippet>197</a>    }
-<a href=#198 id=198 data-nosnippet>198</a>}
+<a href=#184 id=184 data-nosnippet>184</a>            RotationKind::Quaternion4D =&gt; RotationState::identity_quaternion(
+<a href=#185 id=185 data-nosnippet>185</a>                <span class="self">self</span>.batch,
+<a href=#186 id=186 data-nosnippet>186</a>                <span class="self">self</span>.nheads,
+<a href=#187 id=187 data-nosnippet>187</a>                <span class="self">self</span>.num_quat_blocks,
+<a href=#188 id=188 data-nosnippet>188</a>                device,
+<a href=#189 id=189 data-nosnippet>189</a>            ),
+<a href=#190 id=190 data-nosnippet>190</a>            RotationKind::Complex2D =&gt; {
+<a href=#191 id=191 data-nosnippet>191</a>                RotationState::zeros_angle(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_rope_angles, device)
+<a href=#192 id=192 data-nosnippet>192</a>            }
+<a href=#193 id=193 data-nosnippet>193</a>        };
+<a href=#194 id=194 data-nosnippet>194</a>        Mamba3DoubleSsdCache {
+<a href=#195 id=195 data-nosnippet>195</a>            ssm_bhpr,
+<a href=#196 id=196 data-nosnippet>196</a>            k_state_bmhr,
+<a href=#197 id=197 data-nosnippet>197</a>            v_state_bhp,
+<a href=#198 id=198 data-nosnippet>198</a>            rotation,
+<a href=#199 id=199 data-nosnippet>199</a>        }
+<a href=#200 id=200 data-nosnippet>200</a>    }
+<a href=#201 id=201 data-nosnippet>201</a>}
 </code></pre></div></section></main></body></html>
