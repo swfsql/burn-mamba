@@ -251,7 +251,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
         let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
-            let (out_t, new_cache) = m.step(token, cache);
+            let (out_t, new_cache) = m.step(token, Some(cache));
             cache = new_cache;
             outs.push(out_t);
         }

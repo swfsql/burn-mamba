@@ -508,9 +508,21 @@ mod step {
         /// # Shapes
         ///   - Input `[batch, d_model]`
         ///   - Output `[batch, d_model]`
-        pub fn step(&self, x: Tensor<2>, mut cache: Mamba1Cache) -> (Tensor<2>, Mamba1Cache) {
-            let [batch, d_inner, conv_kernel] = cache.conv_bik.dims();
-            let [_batch, d_model] = x.dims();
+        pub fn step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
+            let [batch, d_model] = x.dims();
+            let [d_inner] = self.d.dims();
+            let [_, _, conv_kernel] = self.conv1d.weight.dims();
+            let [_d_inner, state_rank] = self.a_log.dims();
+            let device = x.device();
+
+            // Zero-initialise the cache (conv window + SSM state) when not
+            // provided, mirroring `forward` so `step` is `Option`-coherent with
+            // the Mamba-2/3 blocks.
+            let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
+                conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),
+                ssm_bir: Tensor::zeros([batch, d_inner, state_rank], &device),
+            });
+            cache.sanity();
 
             // layer 1 (in_proj): projects the input d_model into 2 * d_inner.
             let [xs_bi, res_bi] = {

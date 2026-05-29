@@ -175,7 +175,7 @@ impl Mamba1Layers {
             let residual_scale = self.residual_scale(i, n_virtual_layers);
 
             let cache = caches[i].take().unwrap();
-            let (x_, cache_) = layer.step(x, cache, residual_scale);
+            let (x_, cache_) = layer.step(x, Some(cache), residual_scale);
             x = x_;
             caches[i] = Some(cache_);
         }
@@ -319,7 +319,7 @@ impl Mamba1Layer {
     pub fn step(
         &self,
         x: Tensor<2>,
-        cache: Mamba1Cache,
+        cache: Option<Mamba1Cache>,
         residual_scale: f32,
     ) -> (Tensor<2>, Mamba1Cache) {
         let [batch, d_model] = x.dims();

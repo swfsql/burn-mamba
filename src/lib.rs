@@ -68,6 +68,10 @@ pub mod prelude {
 /// Shared activations, norms, losses, and custom-backward plumbing.
 pub mod utils;
 
+/// Family-generic Mamba abstraction: one `Layer`/`Layers`/`LatentNetwork`
+/// generic over the Mamba-x block, replacing the per-family copies.
+pub mod generic;
+
 /// When `true`, [`utils::sanity::sanity`] panics if it observes a `NaN`.
 ///
 /// Compiled-in guard (off by default) for debugging numerical issues; leaving
