@@ -191,11 +191,14 @@ pub fn quat_mul<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
     let bz = b.narrow(n, 3, 1);
 
     // Hamilton product (each term is shape [..., 1]).
-    let w = aw.clone() * bw.clone() - ax.clone() * bx.clone() - ay.clone() * by.clone()
+    let w = aw.clone() * bw.clone()
+        - ax.clone() * bx.clone()
+        - ay.clone() * by.clone()
         - az.clone() * bz.clone();
     let x = aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
         - az.clone() * by.clone();
-    let y = aw.clone() * by.clone() - ax.clone() * bz.clone() + ay.clone() * bw.clone()
+    let y = aw.clone() * by.clone() - ax.clone() * bz.clone()
+        + ay.clone() * bw.clone()
         + az.clone() * bx.clone();
     let z = aw * bz + ax * by - ay * bx + az * bw;
 
@@ -316,10 +319,18 @@ pub fn rotate_state_rank_blocks<const D: usize, const DB: usize>(
     v: Tensor<D>,
     q: Tensor<DB>,
 ) -> Tensor<D> {
-    assert_eq!(D + 1, DB, "rotate_state_rank_blocks splits one axis into (J, 4)");
+    assert_eq!(
+        D + 1,
+        DB,
+        "rotate_state_rank_blocks splits one axis into (J, 4)"
+    );
     let dims = v.dims();
     let state_rank = dims[D - 1];
-    assert_eq!(state_rank % 4, 0, "state_rank must be a multiple of 4 (quaternion blocks)");
+    assert_eq!(
+        state_rank % 4,
+        0,
+        "state_rank must be a multiple of 4 (quaternion blocks)"
+    );
     let blocks = state_rank / 4;
 
     // Build the block-split shape [..., J, 4] (rank DB) and the flat shape
@@ -479,14 +490,26 @@ pub fn rotate_bc_forward(
             let raw_angles_bsha =
                 dt_bsh.unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
             let cum_angles_bsha = prev_angle_bha.unsqueeze_dim::<4>(1) + raw_angles_bsha.cumsum(1);
-            let cum_angles_bsmha = cum_angles_bsha
-                .clone()
-                .unsqueeze_dim::<5>(2)
-                .expand([batch, sequence, mimo_rank, nheads, num_rope_angles]);
+            let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
+                batch,
+                sequence,
+                mimo_rank,
+                nheads,
+                num_rope_angles,
+            ]);
             let rotate_pairwise = mimo_rank == 1;
-            let b = apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
+            let b = apply_rope_partial::<5>(
+                b_bsmhr,
+                cum_angles_bsmha.clone(),
+                rope_dim,
+                rotate_pairwise,
+            );
             let c = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
-            let last = wrap_angle(cum_angles_bsha.narrow(1, sequence - 1, 1).squeeze_dim::<3>(1));
+            let last = wrap_angle(
+                cum_angles_bsha
+                    .narrow(1, sequence - 1, 1)
+                    .squeeze_dim::<3>(1),
+            );
             (b, c, RotationState::Angle(last))
         }
         RotationKind::Quaternion4D => {
@@ -494,14 +517,18 @@ pub fn rotate_bc_forward(
             let blocks = prev_q_bhj4.dims()[2];
             let rope_width = blocks * 4;
             // Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
-            let g_bshj3 = rot_bsa.reshape([batch, sequence, blocks, 3]).unsqueeze_dim::<5>(2)
+            let g_bshj3 = rot_bsa
+                .reshape([batch, sequence, blocks, 3])
+                .unsqueeze_dim::<5>(2)
                 * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
             let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
             // Memory-efficient scan: a custom recompute backward (saves only the
             // leaf inputs) instead of retaining the scan's intermediates. Equal
             // to [`quat_cumprod`] on values and gradients (asserted in tests).
-            let (cum_bshj4, final_bhj4) =
-                crate::mamba3::quat_scan::quat_cumprod_recalculated(q_step_bshj4, Some(prev_q_bhj4));
+            let (cum_bshj4, final_bhj4) = crate::mamba3::quat_scan::quat_cumprod_recalculated(
+                q_step_bshj4,
+                Some(prev_q_bhj4),
+            );
             // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
             // broadcast over the mimo_rank axis.
             let conj_bsmhj4 = quat_conj(cum_bshj4)
@@ -535,15 +562,21 @@ pub fn rotate_bc_step(
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
             let theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
-            let raw_angle_bha =
-                dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
+            let raw_angle_bha = dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
             let new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
-            let new_cum_angle_bmha = new_cum_angle_bha
-                .clone()
-                .unsqueeze_dim::<4>(1)
-                .expand([batch, mimo_rank, nheads, num_rope_angles]);
+            let new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::<4>(1).expand([
+                batch,
+                mimo_rank,
+                nheads,
+                num_rope_angles,
+            ]);
             let rotate_pairwise = mimo_rank == 1;
-            let b = apply_rope_partial::<4>(b_bmhr, new_cum_angle_bmha.clone(), rope_dim, rotate_pairwise);
+            let b = apply_rope_partial::<4>(
+                b_bmhr,
+                new_cum_angle_bmha.clone(),
+                rope_dim,
+                rotate_pairwise,
+            );
             let c = apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
             (b, c, RotationState::Angle(new_cum_angle_bha))
         }

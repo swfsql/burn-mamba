@@ -17,7 +17,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
-use crate::mamba3::rotation::{rotate_bc_forward, rotate_bc_step, RotationState};
+use crate::mamba3::rotation::{RotationState, rotate_bc_forward, rotate_bc_step};
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
 use burn::backend::Backend;
@@ -584,9 +584,12 @@ mod step {
                 let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
                 let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
                 let rotation = match self.rotation {
-                    RotationKind::Quaternion4D => {
-                        RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
-                    }
+                    RotationKind::Quaternion4D => RotationState::identity_quaternion(
+                        batch,
+                        nheads,
+                        self.num_quat_blocks,
+                        device,
+                    ),
                     RotationKind::Complex2D => {
                         RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
                     }

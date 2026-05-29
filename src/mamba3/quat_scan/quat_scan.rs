@@ -17,8 +17,8 @@
 #![allow(non_snake_case)]
 
 use crate::utils::fprim::F;
-use burn::backend::*;
 use burn::backend::tensor::{Device, FloatTensor};
+use burn::backend::*;
 use burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
 use burn::tensor::Tensor;
 
@@ -102,14 +102,27 @@ impl<B: Backend> Quat<B> {
     /// Broadcasts over the leading dims, so a `[b,1,h,j]` carry multiplies a
     /// `[b,s,h,j]` sequence.
     pub fn mul(self, other: Quat<B>) -> Quat<B> {
-        let Quat { w: aw, x: ax, y: ay, z: az } = self;
-        let Quat { w: bw, x: bx, y: by, z: bz } = other;
+        let Quat {
+            w: aw,
+            x: ax,
+            y: ay,
+            z: az,
+        } = self;
+        let Quat {
+            w: bw,
+            x: bx,
+            y: by,
+            z: bz,
+        } = other;
         Quat {
-            w: aw.clone() * bw.clone() - ax.clone() * bx.clone() - ay.clone() * by.clone()
+            w: aw.clone() * bw.clone()
+                - ax.clone() * bx.clone()
+                - ay.clone() * by.clone()
                 - az.clone() * bz.clone(),
             x: aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
                 - az.clone() * by.clone(),
-            y: aw.clone() * by.clone() - ax.clone() * bz.clone() + ay.clone() * bw.clone()
+            y: aw.clone() * by.clone() - ax.clone() * bz.clone()
+                + ay.clone() * bw.clone()
                 + az.clone() * bx.clone(),
             z: aw * bz + ax * by - ay * bx + az * bw,
         }
@@ -129,7 +142,8 @@ impl<B: Backend> Quat<B> {
     /// Hillis–Steile shift `shifted[t] = self[t-offset]` (identity before the
     /// start), with `offset = ident`'s sequence length.
     pub fn shift_prepend(self, ident: Quat<B>, sequence: usize) -> Quat<B> {
-        let shift = |head: F<B, 4>, tail: F<B, 4>| F::cat(vec![head, tail], 1).narrow(1, 0, sequence);
+        let shift =
+            |head: F<B, 4>, tail: F<B, 4>| F::cat(vec![head, tail], 1).narrow(1, 0, sequence);
         Quat {
             w: shift(ident.w, self.w),
             x: shift(ident.x, self.x),
@@ -209,10 +223,7 @@ pub trait Mamba3QuatScanBackendExt: Backend {
     /// - `init_bhj4` : `[batch, nheads, blocks, 4]` — the cross-chunk carry
     ///   (identity `(1,0,0,0)` for a fresh start).
     /// - returns `cum` : `[batch, sequence, nheads, blocks, 4]`.
-    fn quat_cumprod(
-        q_bshj4: FloatTensor<Self>,
-        init_bhj4: FloatTensor<Self>,
-    ) -> FloatTensor<Self> {
+    fn quat_cumprod(q_bshj4: FloatTensor<Self>, init_bhj4: FloatTensor<Self>) -> FloatTensor<Self> {
         let q = Quat::from_rank5(F::<Self, 5>::new(q_bshj4));
         // Carry as a 1-long sequence [batch, 1, nheads, blocks, 4] → SoA, broadcasts over seq.
         let init = Quat::from_rank5(F::<Self, 4>::new(init_bhj4).unsqueeze_dim::<5>(1));
@@ -264,10 +275,11 @@ pub fn quat_cumprod_recalculated(
         Tensor::cat(vec![w, xyz], 3)
     });
 
-    let cum_bshj4 = Tensor::<5>::from_primitive(<Dispatch as Mamba3QuatScanBackendExt>::quat_cumprod(
-        q_bshj4.into_primitive(),
-        init_bhj4.into_primitive(),
-    ));
+    let cum_bshj4 =
+        Tensor::<5>::from_primitive(<Dispatch as Mamba3QuatScanBackendExt>::quat_cumprod(
+            q_bshj4.into_primitive(),
+            init_bhj4.into_primitive(),
+        ));
 
     let final_carry_bhj4 = cum_bshj4
         .clone()

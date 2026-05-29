@@ -181,9 +181,12 @@ impl Mamba3DoubleSsdCacheConfig {
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
         let rotation = match self.rotation {
-            RotationKind::Quaternion4D => {
-                RotationState::identity_quaternion(self.batch, self.nheads, self.num_quat_blocks, device)
-            }
+            RotationKind::Quaternion4D => RotationState::identity_quaternion(
+                self.batch,
+                self.nheads,
+                self.num_quat_blocks,
+                device,
+            ),
             RotationKind::Complex2D => {
                 RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
             }

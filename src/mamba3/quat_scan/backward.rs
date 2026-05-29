@@ -92,10 +92,7 @@ fn quat_scan_backward<B: Backend>(
 impl<B: Backend + Mamba3QuatScanBackendExt, C: CheckpointStrategy> Mamba3QuatScanBackendExt
     for Autodiff<B, C>
 {
-    fn quat_cumprod(
-        q_bshj4: FloatTensor<Self>,
-        init_bhj4: FloatTensor<Self>,
-    ) -> FloatTensor<Self> {
+    fn quat_cumprod(q_bshj4: FloatTensor<Self>, init_bhj4: FloatTensor<Self>) -> FloatTensor<Self> {
         // ── Backward node definition ─────────────────────────────────────────
         #[derive(Debug)]
         struct QuatScanBackward;
@@ -122,7 +119,8 @@ impl<B: Backend + Mamba3QuatScanBackendExt, C: CheckpointStrategy> Mamba3QuatSca
 
                 // Upstream gradient of `cum` (already includes the final_carry
                 // slice's contribution, scattered in at the last position).
-                let d_cum: <B as BackendTypes>::FloatTensorPrimitive = grads.consume::<B>(&ops.node);
+                let d_cum: <B as BackendTypes>::FloatTensorPrimitive =
+                    grads.consume::<B>(&ops.node);
 
                 let State {
                     q_bshj4,
@@ -159,10 +157,8 @@ impl<B: Backend + Mamba3QuatScanBackendExt, C: CheckpointStrategy> Mamba3QuatSca
             .stateful()
         {
             OpsKind::Tracked(prep) => {
-                let prim_cum = B::quat_cumprod(
-                    q_bshj4.primitive.clone(),
-                    init_bhj4.primitive.clone(),
-                );
+                let prim_cum =
+                    B::quat_cumprod(q_bshj4.primitive.clone(), init_bhj4.primitive.clone());
                 let state = State {
                     q_bshj4: q_bshj4.primitive.clone(),
                     init_bhj4: init_bhj4.primitive.clone(),

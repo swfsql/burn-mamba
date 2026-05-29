@@ -69,7 +69,10 @@ pub fn train(
         lr: Some(training_config.lr.get_lr(0)),
     };
 
-    println!("running initial validation (chance ≈ {:.1}%)...", 100.0 / NUM_CLASSES as f32);
+    println!(
+        "running initial validation (chance ≈ {:.1}%)...",
+        100.0 / NUM_CLASSES as f32
+    );
     epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
         model.0.valid(),
@@ -234,7 +237,10 @@ pub fn epoch_valid(
         loss_metric.running_value().current(),
         acc_metric.running_value().current(),
     );
-    println!("  per-position acc: {}", format_per_position(&pos_correct, &pos_total));
+    println!(
+        "  per-position acc: {}",
+        format_per_position(&pos_correct, &pos_total)
+    );
 }
 
 /// Accumulate per-position correct/total counts from flattened logits/targets.
@@ -279,7 +285,11 @@ pub fn format_per_position(correct: &[u64], total: &[u64]) -> String {
         .iter()
         .zip(total)
         .map(|(c, t)| {
-            let pct = if *t == 0 { 0.0 } else { 100.0 * *c as f32 / *t as f32 };
+            let pct = if *t == 0 {
+                0.0
+            } else {
+                100.0 * *c as f32 / *t as f32
+            };
             format!("{pct:.0}%")
         })
         .collect::<Vec<_>>()

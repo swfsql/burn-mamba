@@ -56,5 +56,8 @@ pub fn infer(model_config: MyMamba3NetworkConfig, infer_device: Device, app_args
         overall * 100.0,
         100.0 / NUM_CLASSES as f32,
     );
-    println!("per-position acc: {}", format_per_position(&correct, &total));
+    println!(
+        "per-position acc: {}",
+        format_per_position(&correct, &total)
+    );
 }

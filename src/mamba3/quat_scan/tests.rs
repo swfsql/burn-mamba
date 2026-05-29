@@ -39,7 +39,10 @@ fn recalculated_matches_quat_cumprod_values() {
         let dc = max_abs_diff(cum_r, cum_s);
         let df = max_abs_diff(fin_r, fin_s);
         assert!(dc < VAL_TOL, "recalculated vs reference cum: {dc:.6}");
-        assert!(df < VAL_TOL, "recalculated vs reference final carry: {df:.6}");
+        assert!(
+            df < VAL_TOL,
+            "recalculated vs reference final carry: {df:.6}"
+        );
     }
 }
 
@@ -88,6 +91,12 @@ fn recalculated_matches_quat_cumprod_grads() {
     let (dq_s, di_s) = grad_for(false);
     let dq = max_abs_diff(dq_r, dq_s);
     let di = max_abs_diff(di_r, di_s);
-    assert!(dq < GRAD_TOL, "recalculated vs reference q-grad: {dq:.6} (tol {GRAD_TOL})");
-    assert!(di < GRAD_TOL, "recalculated vs reference init-grad: {di:.6} (tol {GRAD_TOL})");
+    assert!(
+        dq < GRAD_TOL,
+        "recalculated vs reference q-grad: {dq:.6} (tol {GRAD_TOL})"
+    );
+    assert!(
+        di < GRAD_TOL,
+        "recalculated vs reference init-grad: {di:.6} (tol {GRAD_TOL})"
+    );
 }

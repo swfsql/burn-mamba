@@ -146,18 +146,33 @@ fn random_inputs(
     let q_raw = Tensor::<5>::random([batch, sequence, nheads, blocks, 4], normal, device);
     let q = quat_normalize(q_raw);
     // Decay in (0, 1]: exp of a negative log-decay (matches Δ·A with A < 0).
-    let alpha = Tensor::<3>::random([batch, sequence, nheads], Distribution::Normal(-0.5, 0.1), device)
-        .exp()
-        .clamp(0.0, 1.0);
+    let alpha = Tensor::<3>::random(
+        [batch, sequence, nheads],
+        Distribution::Normal(-0.5, 0.1),
+        device,
+    )
+    .exp()
+    .clamp(0.0, 1.0);
     let x = Tensor::<3>::random([batch, sequence, nheads], normal, device);
     let b = Tensor::<4>::random([batch, sequence, nheads, state_rank], normal, device);
     let c = Tensor::<4>::random([batch, sequence, nheads, state_rank], normal, device);
     let init = if random_init {
-        Tensor::<3>::random([batch, nheads, state_rank], Distribution::Normal(0.0, 0.1), device)
+        Tensor::<3>::random(
+            [batch, nheads, state_rank],
+            Distribution::Normal(0.0, 0.1),
+            device,
+        )
     } else {
         Tensor::<3>::zeros([batch, nheads, state_rank], device)
     };
-    Inputs { q, alpha, x, b, c, init }
+    Inputs {
+        q,
+        alpha,
+        x,
+        b,
+        c,
+        init,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +200,10 @@ fn check_factored_matches_explicit(
     let y_fac = factored_recurrence(inp.q, inp.alpha, inp.x, inp.b, inp.c, inp.init);
 
     let d = max_abs_diff(y_exp, y_fac);
-    assert!(d < VAL_TOL, "factored vs explicit: y max abs diff = {d:.6} (tol {VAL_TOL})");
+    assert!(
+        d < VAL_TOL,
+        "factored vs explicit: y max abs diff = {d:.6} (tol {VAL_TOL})"
+    );
 }
 
 #[test]
@@ -208,11 +226,17 @@ fn factored_matches_explicit_multiblock() {
 #[test]
 fn rot4_is_orthogonal() {
     let device: Device = Default::default();
-    let q = quat_normalize(Tensor::<2>::random([16, 4], Distribution::Normal(0.0, 1.0), &device));
+    let q = quat_normalize(Tensor::<2>::random(
+        [16, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
     let r = quat_to_rot4::<2, 3>(q); // [16, 4, 4]
     let rt = r.clone().transpose();
     let prod = r.matmul(rt); // should be identity per batch
-    let eye = Tensor::<2>::eye(4, &device).unsqueeze_dim::<3>(0).expand([16, 4, 4]);
+    let eye = Tensor::<2>::eye(4, &device)
+        .unsqueeze_dim::<3>(0)
+        .expand([16, 4, 4]);
     let d = max_abs_diff(prod, eye);
     assert!(d < VAL_TOL, "L_q Lqᵀ ≠ I: max abs diff = {d:.6}");
 }
@@ -222,8 +246,16 @@ fn rot4_homomorphism() {
     // L_{a⊗b} == L_a · L_b, the property that makes the cumulative-product
     // scan equivalent to materialising and multiplying the 4×4 matrices.
     let device: Device = Default::default();
-    let a = quat_normalize(Tensor::<2>::random([16, 4], Distribution::Normal(0.0, 1.0), &device));
-    let b = quat_normalize(Tensor::<2>::random([16, 4], Distribution::Normal(0.0, 1.0), &device));
+    let a = quat_normalize(Tensor::<2>::random(
+        [16, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
+    let b = quat_normalize(Tensor::<2>::random(
+        [16, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
 
     let lhs = quat_to_rot4::<2, 3>(quat_mul(a.clone(), b.clone()));
     let rhs = quat_to_rot4::<2, 3>(a).matmul(quat_to_rot4::<2, 3>(b));
@@ -309,11 +341,14 @@ fn cumprod_parallel_matches_sequential_values() {
     ));
 
     // Fresh start and a continued (random unit) carry.
-    for init in [None, Some(quat_normalize(Tensor::<4>::random(
-        [batch, nheads, blocks, 4],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    )))] {
+    for init in [
+        None,
+        Some(quat_normalize(Tensor::<4>::random(
+            [batch, nheads, blocks, 4],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        ))),
+    ] {
         let (cum_par, fin_par) = quat_cumprod(q.clone(), init.clone());
         let (cum_seq, fin_seq) = quat_cumprod_sequential(q.clone(), init);
         let dc = max_abs_diff(cum_par, cum_seq);
@@ -354,7 +389,10 @@ fn cumprod_parallel_matches_sequential_grads() {
     };
 
     let d = max_abs_diff(grad_for(true), grad_for(false));
-    assert!(d < GRAD_TOL, "parallel vs sequential cum grad: {d:.6} (tol {GRAD_TOL})");
+    assert!(
+        d < GRAD_TOL,
+        "parallel vs sequential cum grad: {d:.6} (tol {GRAD_TOL})"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +414,10 @@ fn single_axis_collapses_to_cumsum() {
     );
     let half = theta_bsh1.clone() * 0.5;
     let zeros = Tensor::<5>::zeros([batch, sequence, nheads, blocks, 1], &device);
-    let q = Tensor::cat(vec![half.clone().cos(), half.sin(), zeros.clone(), zeros], 4);
+    let q = Tensor::cat(
+        vec![half.clone().cos(), half.sin(), zeros.clone(), zeros],
+        4,
+    );
 
     let (cum, _final) = quat_cumprod(q, None);
 
@@ -384,12 +425,20 @@ fn single_axis_collapses_to_cumsum() {
     let cum_half = (theta_bsh1 * 0.5).cumsum(1);
     let zeros2 = Tensor::<5>::zeros([batch, sequence, nheads, blocks, 1], &device);
     let expected = Tensor::cat(
-        vec![cum_half.clone().cos(), cum_half.sin(), zeros2.clone(), zeros2],
+        vec![
+            cum_half.clone().cos(),
+            cum_half.sin(),
+            zeros2.clone(),
+            zeros2,
+        ],
         4,
     );
 
     let d = max_abs_diff(cum, expected);
-    assert!(d < VAL_TOL, "single-axis cumprod ≠ half-angle cumsum: {d:.6}");
+    assert!(
+        d < VAL_TOL,
+        "single-axis cumprod ≠ half-angle cumsum: {d:.6}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +497,10 @@ fn k2_quaternion_matches_production_rope() {
     let b_rope = apply_rope::<4>(bvec, angles_bshr2, /* rotate_pairwise = */ true);
 
     let d = max_abs_diff(b_quat, b_rope);
-    assert!(d < VAL_TOL, "k=2 quaternion vs production apply_rope: max abs diff = {d:.6} (tol {VAL_TOL})");
+    assert!(
+        d < VAL_TOL,
+        "k=2 quaternion vs production apply_rope: max abs diff = {d:.6} (tol {VAL_TOL})"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -462,13 +514,24 @@ fn k2_quaternion_matches_production_rope() {
 #[test]
 fn rotation_order_matters_for_generic_quaternions() {
     let device: Device = Default::default();
-    let a = quat_normalize(Tensor::<2>::random([8, 4], Distribution::Normal(0.0, 1.0), &device));
-    let b = quat_normalize(Tensor::<2>::random([8, 4], Distribution::Normal(0.0, 1.0), &device));
+    let a = quat_normalize(Tensor::<2>::random(
+        [8, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
+    let b = quat_normalize(Tensor::<2>::random(
+        [8, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
     let ab = quat_mul(a.clone(), b.clone());
     let ba = quat_mul(b, a);
     // a⊗b and b⊗a should differ materially for random (non-coaxial) quaternions.
     let d = max_abs_diff(ab, ba);
-    assert!(d > 1e-2, "expected non-commuting quaternions to differ, got {d:.6}");
+    assert!(
+        d > 1e-2,
+        "expected non-commuting quaternions to differ, got {d:.6}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -483,17 +546,26 @@ fn scaled_axis_is_unit_and_identity_at_zero() {
     let q = quat_from_scaled_axis(g);
     let norm = (q.clone() * q).sum_dim(1).sqrt();
     let d_unit = max_abs_diff(norm, Tensor::<2>::ones([32, 1], &device));
-    assert!(d_unit < VAL_TOL, "quat_from_scaled_axis not unit norm: {d_unit:.6}");
+    assert!(
+        d_unit < VAL_TOL,
+        "quat_from_scaled_axis not unit norm: {d_unit:.6}"
+    );
 
     // Zero generator (e.g. Δ → 0) → identity quaternion (1, 0, 0, 0).
     let zero = Tensor::<2>::zeros([4, 3], &device);
     let q0 = quat_from_scaled_axis(zero);
     let ident = Tensor::cat(
-        vec![Tensor::<2>::ones([4, 1], &device), Tensor::<2>::zeros([4, 3], &device)],
+        vec![
+            Tensor::<2>::ones([4, 1], &device),
+            Tensor::<2>::zeros([4, 3], &device),
+        ],
         1,
     );
     let d_id = max_abs_diff(q0, ident);
-    assert!(d_id < VAL_TOL, "zero generator ≠ identity quaternion: {d_id:.6}");
+    assert!(
+        d_id < VAL_TOL,
+        "zero generator ≠ identity quaternion: {d_id:.6}"
+    );
 }
 
 #[test]
@@ -615,7 +687,10 @@ fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
     let out_step = Tensor::cat(outs, 1);
 
     let d = max_abs_diff(out_fwd, out_step);
-    assert!(d < 1e-3, "quaternion forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}");
+    assert!(
+        d < 1e-3,
+        "quaternion forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}"
+    );
 }
 
 #[test]
@@ -653,8 +728,7 @@ fn quaternion_split_prefill_matches_full() {
     let (batch, seq, split) = (2, 6, 4);
     let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
 
-    let (out_full, cache_full) =
-        model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (out_full, cache_full) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
 
     let prefix = input.clone().narrow(1, 0, split);
     let suffix = input.narrow(1, split, seq - split);
@@ -663,14 +737,20 @@ fn quaternion_split_prefill_matches_full() {
     let out_cat = Tensor::cat(vec![out_pre, out_suf], 1);
 
     let d_out = max_abs_diff(out_full, out_cat);
-    assert!(d_out < 1e-3, "quaternion split-prefill output mismatch: {d_out:.6}");
+    assert!(
+        d_out < 1e-3,
+        "quaternion split-prefill output mismatch: {d_out:.6}"
+    );
 
     // Final SSM state must also match. A fresh cache now defaults to the
     // single-ssd pathway for Quaternion4D too (forward_single_ssd supports it).
     let s_full = cache_full.single_ssd().unwrap().ssm_bhpr;
     let s_split = cache_split.single_ssd().unwrap().ssm_bhpr;
     let d_state = max_abs_diff(s_full, s_split);
-    assert!(d_state < 1e-3, "quaternion split-prefill final-state mismatch: {d_state:.6}");
+    assert!(
+        d_state < 1e-3,
+        "quaternion split-prefill final-state mismatch: {d_state:.6}"
+    );
 }
 
 /// Gradient parity for Quaternion4D: backprop through the chunked `forward` and
@@ -703,7 +783,12 @@ fn quaternion_forward_step_grad_parity() {
     let loss_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum();
     let g_fwd = loss_fwd.backward();
     let d_in_fwd = p_fwd.val().grad(&g_fwd).expect("grad input (forward)");
-    let d_w_fwd = model.in_proj.weight.val().grad(&g_fwd).expect("grad in_proj (forward)");
+    let d_w_fwd = model
+        .in_proj
+        .weight
+        .val()
+        .grad(&g_fwd)
+        .expect("grad in_proj (forward)");
 
     // Recurrent step unrolling.
     let mut cache = None;
@@ -718,12 +803,23 @@ fn quaternion_forward_step_grad_parity() {
     let loss_step = (out_step * Tensor::from_inner(head)).sum();
     let g_step = loss_step.backward();
     let d_in_step = p_step.val().grad(&g_step).expect("grad input (step)");
-    let d_w_step = model.in_proj.weight.val().grad(&g_step).expect("grad in_proj (step)");
+    let d_w_step = model
+        .in_proj
+        .weight
+        .val()
+        .grad(&g_step)
+        .expect("grad in_proj (step)");
 
     let d_in = max_abs_diff(d_in_fwd, d_in_step);
     let d_w = max_abs_diff(d_w_fwd, d_w_step);
-    assert!(d_in < 1e-2, "quaternion forward/step input-grad mismatch: {d_in:.6}");
-    assert!(d_w < 1e-2, "quaternion forward/step in_proj-grad mismatch: {d_w:.6}");
+    assert!(
+        d_in < 1e-2,
+        "quaternion forward/step input-grad mismatch: {d_in:.6}"
+    );
+    assert!(
+        d_w < 1e-2,
+        "quaternion forward/step in_proj-grad mismatch: {d_w:.6}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -774,8 +870,8 @@ fn quaternion_bidi_forward_runs() {
         .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D);
     let n_real = 2; // one bidirectional pair
-    let layers = Mamba3BidiLayersConfig::new(n_real, block, OutputMergeConfig::mean(n_real))
-        .init(&device);
+    let layers =
+        Mamba3BidiLayersConfig::new(n_real, block, OutputMergeConfig::mean(n_real)).init(&device);
 
     let (batch, seq) = (2, 5);
     let x = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
@@ -822,9 +918,23 @@ fn run_grads(p: &Params, head: Tensor<3>, factored: bool) -> Grads {
     // Normalise inside the graph so q_raw gets a gradient through the unit map.
     let q = quat_normalize(p.q_raw.val());
     let y = if factored {
-        factored_recurrence(q, p.alpha.val(), p.x.val(), p.b.val(), p.c.val(), p.init.val())
+        factored_recurrence(
+            q,
+            p.alpha.val(),
+            p.x.val(),
+            p.b.val(),
+            p.c.val(),
+            p.init.val(),
+        )
     } else {
-        explicit_recurrence(q, p.alpha.val(), p.x.val(), p.b.val(), p.c.val(), p.init.val())
+        explicit_recurrence(
+            q,
+            p.alpha.val(),
+            p.x.val(),
+            p.b.val(),
+            p.c.val(),
+            p.init.val(),
+        )
     };
     let loss = (y * Tensor::from_inner(head)).sum();
     let grads = loss.backward();
@@ -849,7 +959,11 @@ fn factored_matches_explicit_grads() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let head = Tensor::<3>::random([batch, sequence, nheads], Distribution::Normal(0.0, 1.0), &device);
+    let head = Tensor::<3>::random(
+        [batch, sequence, nheads],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let p_exp = Params::from_inner(&inp, q_raw.clone());
     let p_fac = Params::from_inner(&inp, q_raw);
@@ -865,6 +979,9 @@ fn factored_matches_explicit_grads() {
         ("init", max_abs_diff(g_exp.d_init, g_fac.d_init)),
     ];
     for (name, d) in pairs {
-        assert!(d < GRAD_TOL, "grad {name}: factored vs explicit max abs diff = {d:.6} (tol {GRAD_TOL})");
+        assert!(
+            d < GRAD_TOL,
+            "grad {name}: factored vs explicit max abs diff = {d:.6} (tol {GRAD_TOL})"
+        );
     }
 }

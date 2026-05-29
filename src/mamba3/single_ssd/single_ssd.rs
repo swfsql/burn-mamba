@@ -20,9 +20,9 @@
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
-use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
+use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::utils::sanity::sanity as san;
 use crate::utils::silu::Silu;
