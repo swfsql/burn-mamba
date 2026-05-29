@@ -142,15 +142,14 @@ pub struct Mamba3DoubleSsdCacheConfig {
     /// (rounded down to even via `Mamba3Config::rope_dim`).
     pub num_rope_angles: usize,
 
-    /// Whether the block uses the quaternion rotation
-    /// ([`Quaternion4D`](crate::mamba3::rotation::RotationKind::Quaternion4D)),
-    /// which makes the accumulator a [`RotationState::Quaternion`] instead of an
-    /// [`RotationState::Angle`].
-    #[config(default = false)]
-    pub rotation_is_quaternion: bool,
+    /// Which positional rotation the block uses ([`RotationKind`]); selects the
+    /// accumulator variant — [`RotationState::Quaternion`] for
+    /// [`RotationKind::Quaternion4D`], else [`RotationState::Angle`].
+    #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
+    pub rotation: RotationKind,
 
-    /// Number of quaternion blocks (`rope_dim / 4`); only used when
-    /// `rotation_is_quaternion`.
+    /// Number of quaternion blocks (`rope_dim / 4`); only used for
+    /// [`RotationKind::Quaternion4D`].
     #[config(default = 1)]
     pub num_quat_blocks: usize,
 }
@@ -165,10 +164,7 @@ impl Mamba3DoubleSsdCacheConfig {
             nheads: block_config.nheads(),
             mimo_rank: block_config.mimo_rank,
             num_rope_angles: block_config.num_rope_angles(),
-            rotation_is_quaternion: matches!(
-                block_config.rotation,
-                crate::mamba3::rotation::RotationKind::Quaternion4D
-            ),
+            rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
         }
     }
@@ -184,10 +180,13 @@ impl Mamba3DoubleSsdCacheConfig {
             device,
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let rotation = if self.rotation_is_quaternion {
-            RotationState::identity_quaternion(self.batch, self.nheads, self.num_quat_blocks, device)
-        } else {
-            RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
+        let rotation = match self.rotation {
+            RotationKind::Quaternion4D => {
+                RotationState::identity_quaternion(self.batch, self.nheads, self.num_quat_blocks, device)
+            }
+            RotationKind::Complex2D => {
+                RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
+            }
         };
         Mamba3DoubleSsdCache {
             ssm_bhpr,

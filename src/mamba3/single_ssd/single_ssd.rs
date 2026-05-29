@@ -67,10 +67,13 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let rotation = if self.rotation_is_quaternion {
-                RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, &device)
-            } else {
-                RotationState::zeros_angle(batch, nheads, num_rope_angles, &device)
+            let rotation = match self.rotation {
+                RotationKind::Quaternion4D => {
+                    RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, &device)
+                }
+                RotationKind::Complex2D => {
+                    RotationState::zeros_angle(batch, nheads, num_rope_angles, &device)
+                }
             };
             Mamba3SingleSsdCache {
                 ssm_bhpr,

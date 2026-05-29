@@ -329,7 +329,7 @@ pub fn make_zero_caches_double_ssd_3d(
             per_head_dim: mamba_block.per_head_dim(),
             nheads: mamba_block.nheads(),
             mimo_rank: mamba_block.mimo_rank,
-            rotation_is_quaternion: mamba_block.rotation_is_quaternion,
+            rotation: mamba_block.rotation,
             num_quat_blocks: mamba_block.num_quat_blocks,
         },
     )
@@ -354,7 +354,7 @@ pub fn make_zero_caches_double_ssd_2d(
             per_head_dim: mamba_block.per_head_dim(),
             nheads: mamba_block.nheads(),
             mimo_rank: mamba_block.mimo_rank,
-            rotation_is_quaternion: mamba_block.rotation_is_quaternion,
+            rotation: mamba_block.rotation,
             num_quat_blocks: mamba_block.num_quat_blocks,
         },
     )
@@ -379,7 +379,7 @@ pub fn make_zero_caches_single_ssd_3d(
             per_head_dim: mamba_block.per_head_dim(),
             nheads: mamba_block.nheads(),
             mimo_rank: mamba_block.mimo_rank,
-            rotation_is_quaternion: mamba_block.rotation_is_quaternion,
+            rotation: mamba_block.rotation,
             num_quat_blocks: mamba_block.num_quat_blocks,
         },
     )
@@ -404,7 +404,7 @@ pub fn make_zero_caches_single_ssd_2d(
             per_head_dim: mamba_block.per_head_dim(),
             nheads: mamba_block.nheads(),
             mimo_rank: mamba_block.mimo_rank,
-            rotation_is_quaternion: mamba_block.rotation_is_quaternion,
+            rotation: mamba_block.rotation,
             num_quat_blocks: mamba_block.num_quat_blocks,
         },
     )

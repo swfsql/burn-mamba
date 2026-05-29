@@ -242,19 +242,19 @@ pub struct Mamba3 {
     /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 
-    /// Whether the block uses the quaternion rotation
-    /// ([`RotationKind::Quaternion4D`]) rather than the abelian RoPE
-    /// ([`RotationKind::Complex2D`]). Stored as a primitive (Module-constant);
-    /// reconstruct the enum via [`Self::rotation_kind`].
-    pub rotation_is_quaternion: bool,
+    /// Which positional rotation the block applies to `B`/`C` ([`RotationKind`]).
+    /// A non-parameter constant — `#[module(skip)]` keeps it out of the record and
+    /// carries it through `load_record`/`to_device`/… unchanged.
+    #[module(skip)]
+    pub rotation: RotationKind,
 
     /// Number of in-projection channels devoted to the rotation parameters
     /// (`num_rope_angles` for `Complex2D`, `3·num_quat_blocks` for
     /// `Quaternion4D`); the size of the last `in_proj` split segment.
     pub num_rotation_channels: usize,
 
-    /// Number of quaternion blocks (`rope_dim / 4`); only used when
-    /// `rotation_is_quaternion`.
+    /// Number of quaternion blocks (`rope_dim / 4`); only used for
+    /// [`RotationKind::Quaternion4D`].
     pub num_quat_blocks: usize,
 }
 
@@ -278,13 +278,9 @@ impl Mamba3 {
         self.d_inner() / self.nheads()
     }
 
-    /// Reconstruct the [`RotationKind`] from the stored primitive flag.
+    /// The block's positional-rotation kind ([`RotationKind`]).
     pub fn rotation_kind(&self) -> RotationKind {
-        if self.rotation_is_quaternion {
-            RotationKind::Quaternion4D
-        } else {
-            RotationKind::Complex2D
-        }
+        self.rotation
     }
 }
 
@@ -600,7 +596,7 @@ impl Mamba3Config {
             rope_dim: self.rope_dim(),
             num_rope_angles,
             mimo_rank,
-            rotation_is_quaternion: matches!(self.rotation, RotationKind::Quaternion4D),
+            rotation: self.rotation,
             num_rotation_channels: self.num_rotation_channels(),
             num_quat_blocks: self.num_quat_blocks(),
         }
@@ -669,10 +665,13 @@ impl Mamba3 {
         let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
         let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
         let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-        let rotation = if self.rotation_is_quaternion {
-            RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
-        } else {
-            RotationState::zeros_angle(batch, nheads, self.num_rope_angles, device)
+        let rotation = match self.rotation {
+            RotationKind::Quaternion4D => {
+                RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
+            }
+            RotationKind::Complex2D => {
+                RotationState::zeros_angle(batch, nheads, self.num_rope_angles, device)
+            }
         };
         crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
             ssm_bhpr,

@@ -4,6 +4,7 @@
 
 pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
 use burn_mamba::schedule::Schedule;
+use burn_mamba::prelude::RotationKind;
 
 /// This model configuration uses ~37K params (~153KB disk space in FP32).  
 /// Reaches ~85% validation accuracy at the first epoch.  
@@ -31,13 +32,19 @@ pub fn model_config() -> MyMamba3NetworkConfig {
                 // Apply RoPE to 100% of the B/C projections.
                 //
                 // Ablation:
-                // With RoPE at 000% (disabled), acc reaches ~(10%, 20%, 25%) at baches (100, 200, 300).
-                // With RoPE at 100% ( enabled), acc reaches ~(10%, 45%, 50%) at baches (100, 200, 300).
-                //
-                // Note: disabling RoPE saves vram training requirements by 25%.
+                // 
+                // | RoPE Kind | RoPE | Memory |    Accuracy   |
+                // | --------- | ---- | ------ | ------------- |
+                // | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
+                // | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
+                // | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
+                // 
+                // The accuracy above is for batches 100, 200, 300.
                 1., // apply RoPE to 100% of the B/C projections
                 4,  // expand (intra-layer expressivity, small impact on disk size)
-            ),
+            )
+            .with_rotation(RotationKind::Complex2D), // Apply 2D rotations to B/C projections
+            
         ))
         // the output is a 10-bins classification
         // the output shape is [batch_size, sequence_len = HEIGHT * WIDTH, output_size = 10]

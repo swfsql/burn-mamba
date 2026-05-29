@@ -550,6 +550,36 @@ fn config_rotation_channels_and_d_in_proj() {
     );
 }
 
+/// The block stores its [`RotationKind`] as a `#[module(skip)]` field (a
+/// non-parameter constant). It must therefore be excluded from the record yet
+/// survive a `into_record` → `load_record` round-trip (carried from the module
+/// being loaded into), and the loaded block must still run the quaternion path.
+#[test]
+fn quaternion_rotation_field_survives_record_roundtrip() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use burn::module::Module;
+    let device: Device = Default::default();
+    let cfg = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rotation(RotationKind::Quaternion4D);
+
+    let block = cfg.init(&device);
+    assert_eq!(block.rotation_kind(), RotationKind::Quaternion4D);
+
+    // Round-trip the record into a freshly-initialised (same-config) block.
+    let record = block.clone().into_record();
+    let block2 = cfg.init(&device).load_record(record);
+    assert_eq!(block2.rotation_kind(), RotationKind::Quaternion4D);
+
+    // The loaded block still runs the quaternion forward.
+    let x = Tensor::<3>::random([2, 4, 32], Distribution::Normal(0.0, 1.0), &device);
+    let (out, _) = block2.forward(x, None, Mamba3SsdPath::Minimal(None));
+    assert_eq!([2, 4, 32], out.dims());
+}
+
 /// A Quaternion4D block's chunked `forward` must equal its recurrent `step`
 /// unrolling — the same parity guarantee the abelian path satisfies, now for the
 /// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
