@@ -3,7 +3,7 @@
 //! (`Complex2D` vs `Quaternion4D`); see [`model_config`].
 
 pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
-use crate::dataset::{NUM_CLASSES, NUM_GENERATORS};
+use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::RotationKind;
 
 /// Build the example model config for the chosen `rotation`.
@@ -21,9 +21,9 @@ use burn_mamba::prelude::RotationKind;
 /// demonstration of the capability, not a tuned benchmark.
 pub fn model_config(rotation: RotationKind) -> MyMamba3NetworkConfig {
     MyMamba3NetworkConfig::new()
-        // the input is a sequence of one-hot generators
-        // the input shape is [batch_size, sequence_len = SEQ_LENGTH, input_size = NUM_GENERATORS]
-        .with_input_size(NUM_GENERATORS)
+        // the input is a sequence of one-hot symbols (generators + reference token)
+        // the input shape is [batch_size, sequence_len = SEQ_LENGTH + 1, input_size = NUM_SYMBOLS]
+        .with_input_size(NUM_SYMBOLS)
         .with_layers(mamba3_layers_config(
             1,    // a single layer is sufficient
             None, // don't virtually extend the amount of layers

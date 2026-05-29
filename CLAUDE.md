@@ -95,7 +95,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   └── training.rs                # training entry (classification head on last timestep)
 │   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (tiny Mamba-3, uses common/ harness)
 │       ├── README.md
-│       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (one-hot generators → per-position running-product class)
+│       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (leading reference/anchor token + one-hot generators → per-position running-product class)
 │       ├── inference.rs               # loads trained model, reports per-token eval accuracy (the Complex2D vs Quaternion4D headline)
 │       ├── main.rs                    # launch(): parses --rotation (via extra_args) → model_config(rotation); wires Device + train/infer flow
 │       ├── model.rs                   # model_config(rotation): tiny MyMamba3Network config with .with_rotation()
@@ -526,10 +526,17 @@ example (`fibonacci/`, `mnist-class/`, `state-tracking/`) supplies its own
 relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo;
 `mnist-class` is a Mamba-3 sequential-MNIST classifier (inference is a stub).
 `state-tracking` is a tiny Mamba-3 classifier on the `A₅` word problem (a
-per-position 60-way running-product head), used to contrast the abelian
-`Complex2D` rotation against the non-abelian `Quaternion4D`; its `model_config`
-takes the rotation, which `launch()` parses from the harness `extra_args`
-(forwarded after the trailing `--`: `-- --rotation complex|quaternion`).
+per-position 60-way running-product head, with a leading reference/anchor token
+so the rotation's *relative* readout can recover the *absolute* product), used to
+contrast the abelian `Complex2D` rotation against the non-abelian `Quaternion4D`;
+its `model_config` takes the rotation, which `launch()` parses from the harness
+`extra_args` (forwarded after the trailing `--`: `-- --rotation complex|quaternion`).
+It is an honest *harness*, not a tuned benchmark: at this tiny single-layer scale
+both rotations track to a similar depth (memorising short prefixes — watch the
+per-position accuracy, not the per-token average), and the quaternion shows only
+a modest deep-position edge after extended training; a clean gap needs scale (see
+the example README). Uses a regularised constant-LR recipe so resuming via
+`--artifacts-path` continues the slow transition seamlessly.
 The training dataloader must be built with `.set_device(autodiff_device)` so its
 batches live on the same (autodiff) backend as the model weights; the validation
 loader uses the inner device.

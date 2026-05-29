@@ -1,17 +1,17 @@
 //! # State-tracking example — abelian RoPE vs. quaternion rotation
 //!
-//! A demo of the capability gap motivating the quaternion
+//! A demo of the capability *motivating* the quaternion
 //! (`RotationKind::Quaternion4D`) rotation: tracking composition in the
 //! **non-solvable** group `A₅` (the alternating group on 5 letters, the rotation
 //! group of the icosahedron).
 //!
-//! The model reads a sequence of `A₅` generators (one-hot) and must output, at
-//! **every position**, the cumulative product so far (a 60-way classification).
-//! By Barrington's theorem this word problem is `NC¹`-complete; a single-layer
-//! linear SSM with **abelian** (`SO(2)`/complex RoPE) state transitions is
-//! confined to the solvable/`TC⁰` regime and cannot track it, whereas the
-//! **non-abelian** `SU(2)` quaternion rotation can represent the icosahedral
-//! group `2I = SL(2,5)` (a double cover of `A₅`).
+//! The model reads a leading reference token then a sequence of `A₅` generators
+//! (one-hot) and must output, at **every position**, the cumulative product so
+//! far (a 60-way classification). By Barrington's theorem this word problem is
+//! `NC¹`-complete; a single-layer linear SSM with **abelian** (`SO(2)`/complex
+//! RoPE) state transitions is confined to the solvable/`TC⁰` regime and cannot
+//! *compose* it, whereas the **non-abelian** `SU(2)` quaternion rotation can
+//! represent the icosahedral group `2I = SL(2,5)` (a double cover of `A₅`).
 //!
 //! Unlike the other examples this one carries a downstream flag,
 //! `--rotation complex|quaternion` (default `complex`), forwarded after the
@@ -24,11 +24,19 @@
 //! cargo run --release --example state-tracking --features backend-flex -- --training --inference -- --rotation quaternion
 //! ```
 //!
-//! Compare the two final per-token accuracies: chance is `1/60 ≈ 1.7%`. The
-//! quaternion run climbs above the complex run, which tends to plateau. The
-//! defaults are deliberately **tiny** (fibonacci-scale) so the demo runs
-//! quickly on CPU; for a wider, cleaner gap, scale the model / sequence length /
-//! `num_epochs` up and run on GPU (`--features backend-cuda`).
+//! Watch the **per-position accuracy** printed at each validation pass (chance is
+//! `1/60 ≈ 1.7%`). Both rotations solve the shallow positions by *memorising*
+//! short prefixes; the abelian/non-abelian distinction only matters in the deep
+//! positions, where genuine `A₅` composition is required.
+//!
+//! **What to expect (read the README first).** At this deliberately **tiny**
+//! single-layer, fibonacci-scale model the gap is *modest*: both rotations track
+//! to a similar depth, and the quaternion shows only a small edge in the deepest
+//! positions, and only after extended training (resume with `--artifacts-path` to
+//! train further; a constant LR makes resuming seamless). A clean, dramatic gap
+//! requires more model capacity / scale than this demo uses — see the Mamba-3
+//! paper. This example is a faithful, runnable *harness* for the comparison, not
+//! a tuned benchmark.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -72,13 +80,19 @@ pub fn launch(app_args: &AppArgs) {
 
     // setup training and model configs
     let batch_size = 64;
+    let num_epochs = 120;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        TrainingConfig::new(common::training::optimizer_config(dtype))
-            .with_num_epochs(30)
+        // "Grokking" recipe: leaving the memorisation basin for the compositional
+        // solution needs real regularisation (weight decay) and many epochs. A
+        // *constant* LR is used on purpose so resuming (`--artifacts-path`) is a
+        // seamless continuation — a decaying schedule would restart from its peak
+        // each run (the iteration counter resets), perturbing the slow transition.
+        TrainingConfig::new(common::training::optimizer_config(dtype).with_weight_decay(0.1))
+            .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)
-            .with_lr(Lr::Constant(ConstantLr::new().with_lr(3e-3)))
+            .with_lr(Lr::Constant(ConstantLr::new().with_lr(1e-3)))
     });
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config (rotation={rotation:?})");

@@ -200,12 +200,16 @@ pub fn epoch_valid(
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::new();
+    // Per-position correct/total counts (the diagnostic that reveals how deep the
+    // model actually tracks — the headline gap is in the deep positions).
+    let mut pos_correct: Vec<u64> = Vec::new();
+    let mut pos_total: Vec<u64> = Vec::new();
 
     let valid_model = Wrap(valid_model, model_config.clone());
 
     // validation loop
     for (_b, batch) in dataloader_valid.iter().enumerate().take(valid_loop_limit) {
-        let [batch_size, _, _] = batch.inputs.dims();
+        let [batch_size, seq, _] = batch.inputs.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
         metric_meta.global_progress.items_processed += batch_size;
@@ -213,6 +217,13 @@ pub fn epoch_valid(
         let pre_metrics = InferenceStep::step(&valid_model, batch);
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
         acc_metric.update(&pre_metrics.adapt(), &metric_meta);
+        accumulate_per_position(
+            pre_metrics.output.clone(),
+            pre_metrics.targets.clone(),
+            seq,
+            &mut pos_correct,
+            &mut pos_total,
+        );
     }
 
     // Display the averaged validation metrics
@@ -223,6 +234,56 @@ pub fn epoch_valid(
         loss_metric.running_value().current(),
         acc_metric.running_value().current(),
     );
+    println!("  per-position acc: {}", format_per_position(&pos_correct, &pos_total));
+}
+
+/// Accumulate per-position correct/total counts from flattened logits/targets.
+///
+/// `logits_flat` is `[batch·seq, num_classes]` and `targets_flat` is `[batch·seq]`
+/// (the [`ClassificationOutput`] layout, row-major over `(batch, position)`); the
+/// running tallies are grown to `seq` on first use.
+pub fn accumulate_per_position(
+    logits_flat: Tensor<2>,
+    targets_flat: Tensor<1, Int>,
+    seq: usize,
+    correct: &mut Vec<u64>,
+    total: &mut Vec<u64>,
+) {
+    let [bseq, _classes] = logits_flat.dims();
+    let batch = bseq / seq;
+    let pred = logits_flat
+        .argmax(1)
+        .reshape([bseq])
+        .into_data()
+        .to_vec::<i32>()
+        .unwrap();
+    let tgt = targets_flat.into_data().to_vec::<i32>().unwrap();
+    if correct.len() < seq {
+        correct.resize(seq, 0);
+        total.resize(seq, 0);
+    }
+    for b in 0..batch {
+        for t in 0..seq {
+            let i = b * seq + t;
+            if pred[i] == tgt[i] {
+                correct[t] += 1;
+            }
+            total[t] += 1;
+        }
+    }
+}
+
+/// Format per-position accuracy tallies as `"100% 73% …"` (one entry per position).
+pub fn format_per_position(correct: &[u64], total: &[u64]) -> String {
+    correct
+        .iter()
+        .zip(total)
+        .map(|(c, t)| {
+            let pct = if *t == 0 { 0.0 } else { 100.0 * *c as f32 / *t as f32 };
+            format!("{pct:.0}%")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Wrapper over [`MyMamba3Network`] for custom implementations.
