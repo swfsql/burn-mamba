@@ -497,7 +497,11 @@ pub fn rotate_bc_forward(
             let g_bshj3 = rot_bsa.reshape([batch, sequence, blocks, 3]).unsqueeze_dim::<5>(2)
                 * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
             let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
-            let (cum_bshj4, final_bhj4) = quat_cumprod(q_step_bshj4, Some(prev_q_bhj4));
+            // Memory-efficient scan: a custom recompute backward (saves only the
+            // leaf inputs) instead of retaining the scan's intermediates. Equal
+            // to [`quat_cumprod`] on values and gradients (asserted in tests).
+            let (cum_bshj4, final_bhj4) =
+                crate::mamba3::quat_scan::quat_cumprod_recalculated(q_step_bshj4, Some(prev_q_bhj4));
             // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
             // broadcast over the mimo_rank axis.
             let conj_bsmhj4 = quat_conj(cum_bshj4)

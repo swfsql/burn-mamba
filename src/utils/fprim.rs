@@ -91,6 +91,11 @@ impl<B: Backend, const D: usize> F<B, D> {
         F(B::float_cumsum(self.0, dim))
     }
 
+    /// Reverse the order of elements along the given `axes` (rank-preserving).
+    pub fn flip(self, axes: &[usize]) -> Self {
+        F(B::float_flip(self.0, axes))
+    }
+
     /// Slice the tensor (rank-preserving), accepting the same `s![..]` args as
     /// the high-level API.
     pub fn slice<S: SliceArg>(self, slices: S) -> Self {

@@ -358,7 +358,10 @@ form), ≈ half the training memory of double-ssd.
   step — axis·angle → unit quaternion via the exp map, the analogue of RoPE's
   `Δ·π·tanh(θ)`; identity at `Δ→0`), `quat_to_rot4` (the `4×4` left-isoclinic
   matrix), `quat_cumprod` (the **associative scan** that replaces RoPE's
-  `cumsum`, with a cross-chunk **carry** — the analogue of `cum_angle`), and
+  `cumsum`, with a cross-chunk **carry** — the analogue of `cum_angle`;
+  implemented as a **Hillis–Steele** parallel scan, `O(log seq)` depth — the
+  `forward` path instead calls [`quat_scan`](#mamba3quat_scan)'s recompute-backward
+  variant), and
   `rotate_state_rank_blocks` (apply a per-block quaternion to a `state_rank`
   axis, used as `B̄ = rotate(B, conj(Qcum))`).
 - Together these are the `materialise → scan → apply` pipeline (the engine the
@@ -377,8 +380,27 @@ form), ≈ half the training memory of double-ssd.
   (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity** (so the
   scalar-decay SSD core is unchanged; only `cumsum`→scan changes), and the `k=2`
   single-axis restriction reproduces the **production** `apply_rope` exactly
-  (cross-validation against the current pathway). NOT wired into the `Mamba3`
-  block — it is a tested math reference for that larger change.
+  (cross-validation against the current pathway).
+
+### `mamba3/quat_scan/`
+- The **memory-efficient** quaternion cumulative-product scan: a custom
+  recompute backward for the Quaternion4D rotation scan, mirroring the SSD
+  `SerialRecalculated` design. The plain-autodiff Hillis–Steele scan in
+  `rotation.rs::quat_cumprod` is fast but retains `O(log seq)` *full-sequence*
+  intermediates for backward; this module recomputes them instead.
+- `quat_scan.rs`: `Mamba3QuatScanBackendExt` (a `#[backend_extension]` trait
+  whose default body runs the scan on `F<B,5>` primitives via `fquat_mul` /
+  `fquat_conj` / `fquat_prefix_product`), the per-backend impls, and the
+  high-level `quat_cumprod_recalculated(q, init) -> (cum, final_carry)` wrapper.
+  The node has a **single output** `cum`; `final_carry = cum[:, −1]` is a thin
+  autodiff slice, so its gradient folds into `cum`'s before the node runs (no
+  `combined_grad` two-output plumbing needed).
+- `backward.rs`: the `Autodiff<B>` custom `Backward<B, 2>` node — saves only the
+  two leaves (`q`, `init`), recomputes the prefix product `P`, and evaluates the
+  **exact unit-quaternion VJP** with parallel ops only: `S[t] = Σ_{s≥t} conj(Pₛ)
+  ⊗ d_cum[s]` (a reverse-cumsum), `G = P ⊗ S`, `d_q[t] = G[t] ⊗ conj(cum[t−1])`,
+  `d_init = S[0]`. No token loop, so the memory saving doesn't buy back a slow
+  backward. Tests assert it equals `quat_cumprod` on values **and** gradients.
 
 ### `mamba3/layer.rs`
 - `struct Mamba3Layers` / `Mamba3Layer` — same shape as Mamba-2 (virtual
