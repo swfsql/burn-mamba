@@ -142,59 +142,58 @@
 <a href=#142 id=142 data-nosnippet>142</a>    /// (rounded down to even via `Mamba3Config::rope_dim`).
 <a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub </span>num_rope_angles: usize,
 <a href=#144 id=144 data-nosnippet>144</a>
-<a href=#145 id=145 data-nosnippet>145</a>    <span class="doccomment">/// Whether the block uses the quaternion rotation
-<a href=#146 id=146 data-nosnippet>146</a>    /// ([`Quaternion4D`](crate::mamba3::rotation::RotationKind::Quaternion4D)),
-<a href=#147 id=147 data-nosnippet>147</a>    /// which makes the accumulator a [`RotationState::Quaternion`] instead of an
-<a href=#148 id=148 data-nosnippet>148</a>    /// [`RotationState::Angle`].
-<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
-<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub </span>rotation_is_quaternion: bool,
-<a href=#151 id=151 data-nosnippet>151</a>
-<a href=#152 id=152 data-nosnippet>152</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used when
-<a href=#153 id=153 data-nosnippet>153</a>    /// `rotation_is_quaternion`.
-<a href=#154 id=154 data-nosnippet>154</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
-<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="kw">pub </span>num_quat_blocks: usize,
-<a href=#156 id=156 data-nosnippet>156</a>}
-<a href=#157 id=157 data-nosnippet>157</a>
-<a href=#158 id=158 data-nosnippet>158</a><span class="kw">impl </span>Mamba3DoubleSsdCacheConfig {
-<a href=#159 id=159 data-nosnippet>159</a>    <span class="doccomment">/// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
-<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">pub fn </span>new_from_block_config(batch: usize, block_config: Mamba3Config) -&gt; <span class="self">Self </span>{
-<a href=#161 id=161 data-nosnippet>161</a>        <span class="self">Self </span>{
-<a href=#162 id=162 data-nosnippet>162</a>            batch,
-<a href=#163 id=163 data-nosnippet>163</a>            state_rank: block_config.state_rank,
-<a href=#164 id=164 data-nosnippet>164</a>            per_head_dim: block_config.per_head_dim,
-<a href=#165 id=165 data-nosnippet>165</a>            nheads: block_config.nheads(),
-<a href=#166 id=166 data-nosnippet>166</a>            mimo_rank: block_config.mimo_rank,
-<a href=#167 id=167 data-nosnippet>167</a>            num_rope_angles: block_config.num_rope_angles(),
-<a href=#168 id=168 data-nosnippet>168</a>            rotation_is_quaternion: <span class="macro">matches!</span>(
-<a href=#169 id=169 data-nosnippet>169</a>                block_config.rotation,
-<a href=#170 id=170 data-nosnippet>170</a>                <span class="kw">crate</span>::mamba3::rotation::RotationKind::Quaternion4D
-<a href=#171 id=171 data-nosnippet>171</a>            ),
-<a href=#172 id=172 data-nosnippet>172</a>            num_quat_blocks: block_config.num_quat_blocks(),
-<a href=#173 id=173 data-nosnippet>173</a>        }
-<a href=#174 id=174 data-nosnippet>174</a>    }
-<a href=#175 id=175 data-nosnippet>175</a>
-<a href=#176 id=176 data-nosnippet>176</a>    <span class="doccomment">/// Allocate zero/identity-initialised cache tensors on `device`.
-<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3DoubleSsdCache {
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
-<a href=#179 id=179 data-nosnippet>179</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim, <span class="self">self</span>.state_rank],
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="doccomment">/// Which positional rotation the block uses ([`RotationKind`]); selects the
+<a href=#146 id=146 data-nosnippet>146</a>    /// accumulator variant — [`RotationState::Quaternion`] for
+<a href=#147 id=147 data-nosnippet>147</a>    /// [`RotationKind::Quaternion4D`], else [`RotationState::Angle`].
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="attr">#[config(default = <span class="string">"crate::mamba3::rotation::RotationKind::Complex2D"</span>)]
+<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="kw">pub </span>rotation: RotationKind,
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used for
+<a href=#152 id=152 data-nosnippet>152</a>    /// [`RotationKind::Quaternion4D`].
+<a href=#153 id=153 data-nosnippet>153</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
+<a href=#154 id=154 data-nosnippet>154</a>    </span><span class="kw">pub </span>num_quat_blocks: usize,
+<a href=#155 id=155 data-nosnippet>155</a>}
+<a href=#156 id=156 data-nosnippet>156</a>
+<a href=#157 id=157 data-nosnippet>157</a><span class="kw">impl </span>Mamba3DoubleSsdCacheConfig {
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="doccomment">/// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
+<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">pub fn </span>new_from_block_config(batch: usize, block_config: Mamba3Config) -&gt; <span class="self">Self </span>{
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="self">Self </span>{
+<a href=#161 id=161 data-nosnippet>161</a>            batch,
+<a href=#162 id=162 data-nosnippet>162</a>            state_rank: block_config.state_rank,
+<a href=#163 id=163 data-nosnippet>163</a>            per_head_dim: block_config.per_head_dim,
+<a href=#164 id=164 data-nosnippet>164</a>            nheads: block_config.nheads(),
+<a href=#165 id=165 data-nosnippet>165</a>            mimo_rank: block_config.mimo_rank,
+<a href=#166 id=166 data-nosnippet>166</a>            num_rope_angles: block_config.num_rope_angles(),
+<a href=#167 id=167 data-nosnippet>167</a>            rotation: block_config.rotation,
+<a href=#168 id=168 data-nosnippet>168</a>            num_quat_blocks: block_config.num_quat_blocks(),
+<a href=#169 id=169 data-nosnippet>169</a>        }
+<a href=#170 id=170 data-nosnippet>170</a>    }
+<a href=#171 id=171 data-nosnippet>171</a>
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="doccomment">/// Allocate zero/identity-initialised cache tensors on `device`.
+<a href=#173 id=173 data-nosnippet>173</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3DoubleSsdCache {
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
+<a href=#175 id=175 data-nosnippet>175</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim, <span class="self">self</span>.state_rank],
+<a href=#176 id=176 data-nosnippet>176</a>            device,
+<a href=#177 id=177 data-nosnippet>177</a>        );
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros(
+<a href=#179 id=179 data-nosnippet>179</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.mimo_rank, <span class="self">self</span>.nheads, <span class="self">self</span>.state_rank],
 <a href=#180 id=180 data-nosnippet>180</a>            device,
 <a href=#181 id=181 data-nosnippet>181</a>        );
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros(
-<a href=#183 id=183 data-nosnippet>183</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.mimo_rank, <span class="self">self</span>.nheads, <span class="self">self</span>.state_rank],
-<a href=#184 id=184 data-nosnippet>184</a>            device,
-<a href=#185 id=185 data-nosnippet>185</a>        );
-<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim], device);
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">let </span>rotation = <span class="kw">if </span><span class="self">self</span>.rotation_is_quaternion {
-<a href=#188 id=188 data-nosnippet>188</a>            RotationState::identity_quaternion(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_quat_blocks, device)
-<a href=#189 id=189 data-nosnippet>189</a>        } <span class="kw">else </span>{
-<a href=#190 id=190 data-nosnippet>190</a>            RotationState::zeros_angle(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_rope_angles, device)
-<a href=#191 id=191 data-nosnippet>191</a>        };
-<a href=#192 id=192 data-nosnippet>192</a>        Mamba3DoubleSsdCache {
-<a href=#193 id=193 data-nosnippet>193</a>            ssm_bhpr,
-<a href=#194 id=194 data-nosnippet>194</a>            k_state_bmhr,
-<a href=#195 id=195 data-nosnippet>195</a>            v_state_bhp,
-<a href=#196 id=196 data-nosnippet>196</a>            rotation,
-<a href=#197 id=197 data-nosnippet>197</a>        }
-<a href=#198 id=198 data-nosnippet>198</a>    }
-<a href=#199 id=199 data-nosnippet>199</a>}
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim], device);
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
+<a href=#184 id=184 data-nosnippet>184</a>            RotationKind::Quaternion4D =&gt; {
+<a href=#185 id=185 data-nosnippet>185</a>                RotationState::identity_quaternion(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_quat_blocks, device)
+<a href=#186 id=186 data-nosnippet>186</a>            }
+<a href=#187 id=187 data-nosnippet>187</a>            RotationKind::Complex2D =&gt; {
+<a href=#188 id=188 data-nosnippet>188</a>                RotationState::zeros_angle(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_rope_angles, device)
+<a href=#189 id=189 data-nosnippet>189</a>            }
+<a href=#190 id=190 data-nosnippet>190</a>        };
+<a href=#191 id=191 data-nosnippet>191</a>        Mamba3DoubleSsdCache {
+<a href=#192 id=192 data-nosnippet>192</a>            ssm_bhpr,
+<a href=#193 id=193 data-nosnippet>193</a>            k_state_bmhr,
+<a href=#194 id=194 data-nosnippet>194</a>            v_state_bhp,
+<a href=#195 id=195 data-nosnippet>195</a>            rotation,
+<a href=#196 id=196 data-nosnippet>196</a>        }
+<a href=#197 id=197 data-nosnippet>197</a>    }
+<a href=#198 id=198 data-nosnippet>198</a>}
 </code></pre></div></section></main></body></html>

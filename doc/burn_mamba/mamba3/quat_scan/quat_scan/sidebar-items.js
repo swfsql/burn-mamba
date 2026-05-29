@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fquat_conj","fquat_mul","fquat_prefix_product","quat_cumprod_recalculated"],"trait":["Mamba3QuatScanBackendExt"]};
+window.SIDEBAR_ITEMS = {"fn":["quat_cumprod_recalculated","quat_prefix_product_soa"],"struct":["Quat"],"trait":["Mamba3QuatScanBackendExt"]};

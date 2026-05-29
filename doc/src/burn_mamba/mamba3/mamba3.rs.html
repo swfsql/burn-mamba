@@ -242,19 +242,19 @@
 <a href=#242 id=242 data-nosnippet>242</a>    /// Paper: `M`. Python: `mimo_rank`.
 <a href=#243 id=243 data-nosnippet>243</a>    </span><span class="kw">pub </span>mimo_rank: usize,
 <a href=#244 id=244 data-nosnippet>244</a>
-<a href=#245 id=245 data-nosnippet>245</a>    <span class="doccomment">/// Whether the block uses the quaternion rotation
-<a href=#246 id=246 data-nosnippet>246</a>    /// ([`RotationKind::Quaternion4D`]) rather than the abelian RoPE
-<a href=#247 id=247 data-nosnippet>247</a>    /// ([`RotationKind::Complex2D`]). Stored as a primitive (Module-constant);
-<a href=#248 id=248 data-nosnippet>248</a>    /// reconstruct the enum via [`Self::rotation_kind`].
-<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">pub </span>rotation_is_quaternion: bool,
+<a href=#245 id=245 data-nosnippet>245</a>    <span class="doccomment">/// Which positional rotation the block applies to `B`/`C` ([`RotationKind`]).
+<a href=#246 id=246 data-nosnippet>246</a>    /// A non-parameter constant — `#[module(skip)]` keeps it out of the record and
+<a href=#247 id=247 data-nosnippet>247</a>    /// carries it through `load_record`/`to_device`/… unchanged.
+<a href=#248 id=248 data-nosnippet>248</a>    </span><span class="attr">#[module(skip)]
+<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">pub </span>rotation: RotationKind,
 <a href=#250 id=250 data-nosnippet>250</a>
 <a href=#251 id=251 data-nosnippet>251</a>    <span class="doccomment">/// Number of in-projection channels devoted to the rotation parameters
 <a href=#252 id=252 data-nosnippet>252</a>    /// (`num_rope_angles` for `Complex2D`, `3·num_quat_blocks` for
 <a href=#253 id=253 data-nosnippet>253</a>    /// `Quaternion4D`); the size of the last `in_proj` split segment.
 <a href=#254 id=254 data-nosnippet>254</a>    </span><span class="kw">pub </span>num_rotation_channels: usize,
 <a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used when
-<a href=#257 id=257 data-nosnippet>257</a>    /// `rotation_is_quaternion`.
+<a href=#256 id=256 data-nosnippet>256</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used for
+<a href=#257 id=257 data-nosnippet>257</a>    /// [`RotationKind::Quaternion4D`].
 <a href=#258 id=258 data-nosnippet>258</a>    </span><span class="kw">pub </span>num_quat_blocks: usize,
 <a href=#259 id=259 data-nosnippet>259</a>}
 <a href=#260 id=260 data-nosnippet>260</a>
@@ -278,484 +278,470 @@
 <a href=#278 id=278 data-nosnippet>278</a>        <span class="self">self</span>.d_inner() / <span class="self">self</span>.nheads()
 <a href=#279 id=279 data-nosnippet>279</a>    }
 <a href=#280 id=280 data-nosnippet>280</a>
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// Reconstruct the [`RotationKind`] from the stored primitive flag.
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// The block's positional-rotation kind ([`RotationKind`]).
 <a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">pub fn </span>rotation_kind(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RotationKind {
-<a href=#283 id=283 data-nosnippet>283</a>        <span class="kw">if </span><span class="self">self</span>.rotation_is_quaternion {
-<a href=#284 id=284 data-nosnippet>284</a>            RotationKind::Quaternion4D
-<a href=#285 id=285 data-nosnippet>285</a>        } <span class="kw">else </span>{
-<a href=#286 id=286 data-nosnippet>286</a>            RotationKind::Complex2D
-<a href=#287 id=287 data-nosnippet>287</a>        }
-<a href=#288 id=288 data-nosnippet>288</a>    }
-<a href=#289 id=289 data-nosnippet>289</a>}
+<a href=#283 id=283 data-nosnippet>283</a>        <span class="self">self</span>.rotation
+<a href=#284 id=284 data-nosnippet>284</a>    }
+<a href=#285 id=285 data-nosnippet>285</a>}
+<a href=#286 id=286 data-nosnippet>286</a>
+<a href=#287 id=287 data-nosnippet>287</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#288 id=288 data-nosnippet>288</a>// Mamba3Config  (hyperparameters and factory)
+<a href=#289 id=289 data-nosnippet>289</a>// ---------------------------------------------------------------------------
 <a href=#290 id=290 data-nosnippet>290</a>
-<a href=#291 id=291 data-nosnippet>291</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#292 id=292 data-nosnippet>292</a>// Mamba3Config  (hyperparameters and factory)
-<a href=#293 id=293 data-nosnippet>293</a>// ---------------------------------------------------------------------------
-<a href=#294 id=294 data-nosnippet>294</a>
-<a href=#295 id=295 data-nosnippet>295</a></span><span class="doccomment">/// Hyperparameters for the Mamba-3 SSM block.
-<a href=#296 id=296 data-nosnippet>296</a></span><span class="attr">#[derive(Config, Debug)]
-<a href=#297 id=297 data-nosnippet>297</a></span><span class="kw">pub struct </span>Mamba3Config {
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="doccomment">/// Model (hidden) dimension.
-<a href=#299 id=299 data-nosnippet>299</a>    ///
-<a href=#300 id=300 data-nosnippet>300</a>    /// Paper: `D`. Python: `d_model`.
-<a href=#301 id=301 data-nosnippet>301</a>    </span><span class="kw">pub </span>d_model: usize,
-<a href=#302 id=302 data-nosnippet>302</a>
-<a href=#303 id=303 data-nosnippet>303</a>    <span class="doccomment">/// State rank — the latent dimension of the SSM hidden state.
-<a href=#304 id=304 data-nosnippet>304</a>    /// **Must be even** (required for RoPE pairing).
-<a href=#305 id=305 data-nosnippet>305</a>    ///
-<a href=#306 id=306 data-nosnippet>306</a>    /// Paper: `N`. Python: `d_state`.
-<a href=#307 id=307 data-nosnippet>307</a>    </span><span class="attr">#[config(default = <span class="number">128</span>)]
-<a href=#308 id=308 data-nosnippet>308</a>    </span><span class="kw">pub </span>state_rank: usize,
-<a href=#309 id=309 data-nosnippet>309</a>
-<a href=#310 id=310 data-nosnippet>310</a>    <span class="doccomment">/// Expansion factor for `d_inner = expand · d_model`.
-<a href=#311 id=311 data-nosnippet>311</a>    ///
-<a href=#312 id=312 data-nosnippet>312</a>    /// Paper: `E`. Python: `expand`.
-<a href=#313 id=313 data-nosnippet>313</a>    </span><span class="attr">#[config(default = <span class="number">2</span>)]
-<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">pub </span>expand: usize,
-<a href=#315 id=315 data-nosnippet>315</a>
-<a href=#316 id=316 data-nosnippet>316</a>    <span class="doccomment">/// Head dimension. `per_head_dim = d_inner / nheads`.
-<a href=#317 id=317 data-nosnippet>317</a>    ///
-<a href=#318 id=318 data-nosnippet>318</a>    /// Paper: `P`. Python: `headdim`.
-<a href=#319 id=319 data-nosnippet>319</a>    </span><span class="attr">#[config(default = <span class="number">64</span>)]
-<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">pub </span>per_head_dim: usize,
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="doccomment">/// Number of B/C groups. Must divide `nheads`.
-<a href=#323 id=323 data-nosnippet>323</a>    ///
-<a href=#324 id=324 data-nosnippet>324</a>    /// Paper: `G`. Python: `num_bc_heads`.
-<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
-<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub </span>ngroups: usize,
-<a href=#327 id=327 data-nosnippet>327</a>
-<a href=#328 id=328 data-nosnippet>328</a>    <span class="doccomment">/// MIMO rank. `1` = standard SISO Mamba-3.
+<a href=#291 id=291 data-nosnippet>291</a></span><span class="doccomment">/// Hyperparameters for the Mamba-3 SSM block.
+<a href=#292 id=292 data-nosnippet>292</a></span><span class="attr">#[derive(Config, Debug)]
+<a href=#293 id=293 data-nosnippet>293</a></span><span class="kw">pub struct </span>Mamba3Config {
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="doccomment">/// Model (hidden) dimension.
+<a href=#295 id=295 data-nosnippet>295</a>    ///
+<a href=#296 id=296 data-nosnippet>296</a>    /// Paper: `D`. Python: `d_model`.
+<a href=#297 id=297 data-nosnippet>297</a>    </span><span class="kw">pub </span>d_model: usize,
+<a href=#298 id=298 data-nosnippet>298</a>
+<a href=#299 id=299 data-nosnippet>299</a>    <span class="doccomment">/// State rank — the latent dimension of the SSM hidden state.
+<a href=#300 id=300 data-nosnippet>300</a>    /// **Must be even** (required for RoPE pairing).
+<a href=#301 id=301 data-nosnippet>301</a>    ///
+<a href=#302 id=302 data-nosnippet>302</a>    /// Paper: `N`. Python: `d_state`.
+<a href=#303 id=303 data-nosnippet>303</a>    </span><span class="attr">#[config(default = <span class="number">128</span>)]
+<a href=#304 id=304 data-nosnippet>304</a>    </span><span class="kw">pub </span>state_rank: usize,
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="doccomment">/// Expansion factor for `d_inner = expand · d_model`.
+<a href=#307 id=307 data-nosnippet>307</a>    ///
+<a href=#308 id=308 data-nosnippet>308</a>    /// Paper: `E`. Python: `expand`.
+<a href=#309 id=309 data-nosnippet>309</a>    </span><span class="attr">#[config(default = <span class="number">2</span>)]
+<a href=#310 id=310 data-nosnippet>310</a>    </span><span class="kw">pub </span>expand: usize,
+<a href=#311 id=311 data-nosnippet>311</a>
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="doccomment">/// Head dimension. `per_head_dim = d_inner / nheads`.
+<a href=#313 id=313 data-nosnippet>313</a>    ///
+<a href=#314 id=314 data-nosnippet>314</a>    /// Paper: `P`. Python: `headdim`.
+<a href=#315 id=315 data-nosnippet>315</a>    </span><span class="attr">#[config(default = <span class="number">64</span>)]
+<a href=#316 id=316 data-nosnippet>316</a>    </span><span class="kw">pub </span>per_head_dim: usize,
+<a href=#317 id=317 data-nosnippet>317</a>
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="doccomment">/// Number of B/C groups. Must divide `nheads`.
+<a href=#319 id=319 data-nosnippet>319</a>    ///
+<a href=#320 id=320 data-nosnippet>320</a>    /// Paper: `G`. Python: `num_bc_heads`.
+<a href=#321 id=321 data-nosnippet>321</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
+<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub </span>ngroups: usize,
+<a href=#323 id=323 data-nosnippet>323</a>
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="doccomment">/// MIMO rank. `1` = standard SISO Mamba-3.
+<a href=#325 id=325 data-nosnippet>325</a>    ///
+<a href=#326 id=326 data-nosnippet>326</a>    /// When `mimo_rank &gt; 1`, the B/C projections have `mimo_rank` parallel rank channels.
+<a href=#327 id=327 data-nosnippet>327</a>    /// Three extra weight matrices (`mimo_x_hmp`, `mimo_z_hmp`, `mimo_o_hmp`) provide
+<a href=#328 id=328 data-nosnippet>328</a>    /// element-wise up/down projections in head-space across ranks.
 <a href=#329 id=329 data-nosnippet>329</a>    ///
-<a href=#330 id=330 data-nosnippet>330</a>    /// When `mimo_rank &gt; 1`, the B/C projections have `mimo_rank` parallel rank channels.
-<a href=#331 id=331 data-nosnippet>331</a>    /// Three extra weight matrices (`mimo_x_hmp`, `mimo_z_hmp`, `mimo_o_hmp`) provide
-<a href=#332 id=332 data-nosnippet>332</a>    /// element-wise up/down projections in head-space across ranks.
-<a href=#333 id=333 data-nosnippet>333</a>    ///
-<a href=#334 id=334 data-nosnippet>334</a>    /// Paper: `M`. Python: `mimo_rank`.
-<a href=#335 id=335 data-nosnippet>335</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
-<a href=#336 id=336 data-nosnippet>336</a>    </span><span class="kw">pub </span>mimo_rank: usize,
+<a href=#330 id=330 data-nosnippet>330</a>    /// Paper: `M`. Python: `mimo_rank`.
+<a href=#331 id=331 data-nosnippet>331</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
+<a href=#332 id=332 data-nosnippet>332</a>    </span><span class="kw">pub </span>mimo_rank: usize,
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="doccomment">/// Minimum absolute value of A after clamping.
+<a href=#335 id=335 data-nosnippet>335</a>    </span><span class="attr">#[config(default = <span class="string">"1e-4"</span>)]
+<a href=#336 id=336 data-nosnippet>336</a>    </span><span class="kw">pub </span>a_floor: f64,
 <a href=#337 id=337 data-nosnippet>337</a>
-<a href=#338 id=338 data-nosnippet>338</a>    <span class="doccomment">/// Minimum absolute value of A after clamping.
-<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="attr">#[config(default = <span class="string">"1e-4"</span>)]
-<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="kw">pub </span>a_floor: f64,
+<a href=#338 id=338 data-nosnippet>338</a>    <span class="doccomment">/// Minimum value of the initial Δ distribution.
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="attr">#[config(default = <span class="number">1e-3</span>)]
+<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="kw">pub </span>dt_min: f64,
 <a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="doccomment">/// Minimum value of the initial Δ distribution.
-<a href=#343 id=343 data-nosnippet>343</a>    </span><span class="attr">#[config(default = <span class="number">1e-3</span>)]
-<a href=#344 id=344 data-nosnippet>344</a>    </span><span class="kw">pub </span>dt_min: f64,
+<a href=#342 id=342 data-nosnippet>342</a>    <span class="doccomment">/// Maximum value of the initial Δ distribution.
+<a href=#343 id=343 data-nosnippet>343</a>    </span><span class="attr">#[config(default = <span class="number">0.1</span>)]
+<a href=#344 id=344 data-nosnippet>344</a>    </span><span class="kw">pub </span>dt_max: f64,
 <a href=#345 id=345 data-nosnippet>345</a>
-<a href=#346 id=346 data-nosnippet>346</a>    <span class="doccomment">/// Maximum value of the initial Δ distribution.
-<a href=#347 id=347 data-nosnippet>347</a>    </span><span class="attr">#[config(default = <span class="number">0.1</span>)]
-<a href=#348 id=348 data-nosnippet>348</a>    </span><span class="kw">pub </span>dt_max: f64,
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="doccomment">/// Floor clamped onto sampled initial Δ values.
+<a href=#347 id=347 data-nosnippet>347</a>    </span><span class="attr">#[config(default = <span class="number">1e-4</span>)]
+<a href=#348 id=348 data-nosnippet>348</a>    </span><span class="kw">pub </span>dt_init_floor: f64,
 <a href=#349 id=349 data-nosnippet>349</a>
-<a href=#350 id=350 data-nosnippet>350</a>    <span class="doccomment">/// Floor clamped onto sampled initial Δ values.
-<a href=#351 id=351 data-nosnippet>351</a>    </span><span class="attr">#[config(default = <span class="number">1e-4</span>)]
-<a href=#352 id=352 data-nosnippet>352</a>    </span><span class="kw">pub </span>dt_init_floor: f64,
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="doccomment">/// Hard clamp limits for Δ at runtime.
+<a href=#351 id=351 data-nosnippet>351</a>    </span><span class="attr">#[config(default = <span class="string">"(0., 6.5504e+4)"</span>)]
+<a href=#352 id=352 data-nosnippet>352</a>    </span><span class="kw">pub </span>dt_limit: (f64, f64),
 <a href=#353 id=353 data-nosnippet>353</a>
-<a href=#354 id=354 data-nosnippet>354</a>    <span class="doccomment">/// Hard clamp limits for Δ at runtime.
-<a href=#355 id=355 data-nosnippet>355</a>    </span><span class="attr">#[config(default = <span class="string">"(0., 6.5504e+4)"</span>)]
-<a href=#356 id=356 data-nosnippet>356</a>    </span><span class="kw">pub </span>dt_limit: (f64, f64),
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="doccomment">/// Whether to add a bias term to the `in_proj` and `out_proj`.
+<a href=#355 id=355 data-nosnippet>355</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
+<a href=#356 id=356 data-nosnippet>356</a>    </span><span class="kw">pub </span>has_proj_bias: bool,
 <a href=#357 id=357 data-nosnippet>357</a>
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="doccomment">/// Whether to add a bias term to the `in_proj` and `out_proj`.
+<a href=#358 id=358 data-nosnippet>358</a>    <span class="doccomment">/// Whether to allocate a learnable initial SSM state `h₀`.
 <a href=#359 id=359 data-nosnippet>359</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
-<a href=#360 id=360 data-nosnippet>360</a>    </span><span class="kw">pub </span>has_proj_bias: bool,
+<a href=#360 id=360 data-nosnippet>360</a>    </span><span class="kw">pub </span>has_learnable_init_state: bool,
 <a href=#361 id=361 data-nosnippet>361</a>
-<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// Whether to allocate a learnable initial SSM state `h₀`.
-<a href=#363 id=363 data-nosnippet>363</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
-<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">pub </span>has_learnable_init_state: bool,
-<a href=#365 id=365 data-nosnippet>365</a>
-<a href=#366 id=366 data-nosnippet>366</a>    <span class="doccomment">/// Fraction of `state_rank` to which RoPE is applied (must be `0.0`, `0.5`,
-<a href=#367 id=367 data-nosnippet>367</a>    /// or `1.0`).
-<a href=#368 id=368 data-nosnippet>368</a>    ///
-<a href=#369 id=369 data-nosnippet>369</a>    /// - `0.0`: RoPE disabled — no B/C dimension is rotated
-<a href=#370 id=370 data-nosnippet>370</a>    ///   ([`apply_rope_partial`](crate::mamba3::double_ssd::double_ssd::apply_rope_partial)
-<a href=#371 id=371 data-nosnippet>371</a>    ///   becomes the identity). Intended for ablations only. The angle
-<a href=#372 id=372 data-nosnippet>372</a>    ///   projection and cumulative-angle data flow are kept intact (with a
-<a href=#373 id=373 data-nosnippet>373</a>    ///   single dummy angle channel, see [`Self::num_rope_angles`]) so the rest
-<a href=#374 id=374 data-nosnippet>374</a>    ///   of the block is structurally unchanged.
-<a href=#375 id=375 data-nosnippet>375</a>    /// - `0.5` (default): partial RoPE — only `state_rank / 2` dimensions are
-<a href=#376 id=376 data-nosnippet>376</a>    ///   rotated; the rest pass through unchanged.
-<a href=#377 id=377 data-nosnippet>377</a>    /// - `1.0`: full RoPE — every B/C dimension is rotated.
-<a href=#378 id=378 data-nosnippet>378</a>    ///
-<a href=#379 id=379 data-nosnippet>379</a>    /// Default matches the reference's `rope_fraction` argument in `mamba3.py`.
-<a href=#380 id=380 data-nosnippet>380</a>    </span><span class="attr">#[config(default = <span class="number">0.5</span>)]
-<a href=#381 id=381 data-nosnippet>381</a>    </span><span class="kw">pub </span>rope_fraction: f64,
-<a href=#382 id=382 data-nosnippet>382</a>
-<a href=#383 id=383 data-nosnippet>383</a>    <span class="doccomment">/// Whether to apply a gated RMSNorm before the output projection.
-<a href=#384 id=384 data-nosnippet>384</a>    ///
-<a href=#385 id=385 data-nosnippet>385</a>    /// When `true`, the SiLU gate at the end of the block is replaced by a
-<a href=#386 id=386 data-nosnippet>386</a>    /// per-head [`RmsNormGated`] (group size = `per_head_dim`) which both
-<a href=#387 id=387 data-nosnippet>387</a>    /// normalises `y` and gates it with `SiLU(z)`. Matches the reference's
-<a href=#388 id=388 data-nosnippet>388</a>    /// `is_outproj_norm` argument in `mamba3.py`.
-<a href=#389 id=389 data-nosnippet>389</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
-<a href=#390 id=390 data-nosnippet>390</a>    </span><span class="kw">pub </span>has_outproj_norm: bool,
-<a href=#391 id=391 data-nosnippet>391</a>
-<a href=#392 id=392 data-nosnippet>392</a>    <span class="doccomment">/// Which rotational-state algebra to use for the data-dependent positional
-<a href=#393 id=393 data-nosnippet>393</a>    /// rotation of `B`/`C` (see [`RotationKind`]).
-<a href=#394 id=394 data-nosnippet>394</a>    ///
-<a href=#395 id=395 data-nosnippet>395</a>    /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D) — the
-<a href=#396 id=396 data-nosnippet>396</a>    /// current Mamba-3 RoPE — for which the block is byte-for-byte unchanged.
-<a href=#397 id=397 data-nosnippet>397</a>    /// [`Quaternion4D`](RotationKind::Quaternion4D) selects the non-abelian
-<a href=#398 id=398 data-nosnippet>398</a>    /// quaternion rotation; its in-projection devotes `3 · num_quat_blocks`
-<a href=#399 id=399 data-nosnippet>399</a>    /// channels to quaternion generators in place of the `num_rope_angles`
-<a href=#400 id=400 data-nosnippet>400</a>    /// angle channels (see [`Self::num_rotation_channels`]).
-<a href=#401 id=401 data-nosnippet>401</a>    </span><span class="attr">#[config(default = <span class="string">"crate::mamba3::rotation::RotationKind::Complex2D"</span>)]
-<a href=#402 id=402 data-nosnippet>402</a>    </span><span class="kw">pub </span>rotation: RotationKind,
-<a href=#403 id=403 data-nosnippet>403</a>}
-<a href=#404 id=404 data-nosnippet>404</a>
-<a href=#405 id=405 data-nosnippet>405</a><span class="kw">impl </span>Mamba3Config {
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="doccomment">/// Inner (expanded) channel width: `expand · d_model`.
-<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="kw">pub fn </span>d_inner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="self">self</span>.expand * <span class="self">self</span>.d_model
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// Fraction of `state_rank` to which RoPE is applied (must be `0.0`, `0.5`,
+<a href=#363 id=363 data-nosnippet>363</a>    /// or `1.0`).
+<a href=#364 id=364 data-nosnippet>364</a>    ///
+<a href=#365 id=365 data-nosnippet>365</a>    /// - `0.0`: RoPE disabled — no B/C dimension is rotated
+<a href=#366 id=366 data-nosnippet>366</a>    ///   ([`apply_rope_partial`](crate::mamba3::double_ssd::double_ssd::apply_rope_partial)
+<a href=#367 id=367 data-nosnippet>367</a>    ///   becomes the identity). Intended for ablations only. The angle
+<a href=#368 id=368 data-nosnippet>368</a>    ///   projection and cumulative-angle data flow are kept intact (with a
+<a href=#369 id=369 data-nosnippet>369</a>    ///   single dummy angle channel, see [`Self::num_rope_angles`]) so the rest
+<a href=#370 id=370 data-nosnippet>370</a>    ///   of the block is structurally unchanged.
+<a href=#371 id=371 data-nosnippet>371</a>    /// - `0.5` (default): partial RoPE — only `state_rank / 2` dimensions are
+<a href=#372 id=372 data-nosnippet>372</a>    ///   rotated; the rest pass through unchanged.
+<a href=#373 id=373 data-nosnippet>373</a>    /// - `1.0`: full RoPE — every B/C dimension is rotated.
+<a href=#374 id=374 data-nosnippet>374</a>    ///
+<a href=#375 id=375 data-nosnippet>375</a>    /// Default matches the reference's `rope_fraction` argument in `mamba3.py`.
+<a href=#376 id=376 data-nosnippet>376</a>    </span><span class="attr">#[config(default = <span class="number">0.5</span>)]
+<a href=#377 id=377 data-nosnippet>377</a>    </span><span class="kw">pub </span>rope_fraction: f64,
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a>    <span class="doccomment">/// Whether to apply a gated RMSNorm before the output projection.
+<a href=#380 id=380 data-nosnippet>380</a>    ///
+<a href=#381 id=381 data-nosnippet>381</a>    /// When `true`, the SiLU gate at the end of the block is replaced by a
+<a href=#382 id=382 data-nosnippet>382</a>    /// per-head [`RmsNormGated`] (group size = `per_head_dim`) which both
+<a href=#383 id=383 data-nosnippet>383</a>    /// normalises `y` and gates it with `SiLU(z)`. Matches the reference's
+<a href=#384 id=384 data-nosnippet>384</a>    /// `is_outproj_norm` argument in `mamba3.py`.
+<a href=#385 id=385 data-nosnippet>385</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
+<a href=#386 id=386 data-nosnippet>386</a>    </span><span class="kw">pub </span>has_outproj_norm: bool,
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a>    <span class="doccomment">/// Which rotational-state algebra to use for the data-dependent positional
+<a href=#389 id=389 data-nosnippet>389</a>    /// rotation of `B`/`C` (see [`RotationKind`]).
+<a href=#390 id=390 data-nosnippet>390</a>    ///
+<a href=#391 id=391 data-nosnippet>391</a>    /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D) — the
+<a href=#392 id=392 data-nosnippet>392</a>    /// current Mamba-3 RoPE — for which the block is byte-for-byte unchanged.
+<a href=#393 id=393 data-nosnippet>393</a>    /// [`Quaternion4D`](RotationKind::Quaternion4D) selects the non-abelian
+<a href=#394 id=394 data-nosnippet>394</a>    /// quaternion rotation; its in-projection devotes `3 · num_quat_blocks`
+<a href=#395 id=395 data-nosnippet>395</a>    /// channels to quaternion generators in place of the `num_rope_angles`
+<a href=#396 id=396 data-nosnippet>396</a>    /// angle channels (see [`Self::num_rotation_channels`]).
+<a href=#397 id=397 data-nosnippet>397</a>    </span><span class="attr">#[config(default = <span class="string">"crate::mamba3::rotation::RotationKind::Complex2D"</span>)]
+<a href=#398 id=398 data-nosnippet>398</a>    </span><span class="kw">pub </span>rotation: RotationKind,
+<a href=#399 id=399 data-nosnippet>399</a>}
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a><span class="kw">impl </span>Mamba3Config {
+<a href=#402 id=402 data-nosnippet>402</a>    <span class="doccomment">/// Inner (expanded) channel width: `expand · d_model`.
+<a href=#403 id=403 data-nosnippet>403</a>    </span><span class="kw">pub fn </span>d_inner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="self">self</span>.expand * <span class="self">self</span>.d_model
+<a href=#405 id=405 data-nosnippet>405</a>    }
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="doccomment">/// Number of SSM heads: `d_inner / per_head_dim`.
+<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="kw">pub fn </span>nheads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#408 id=408 data-nosnippet>408</a>        <span class="self">self</span>.d_inner() / <span class="self">self</span>.per_head_dim
 <a href=#409 id=409 data-nosnippet>409</a>    }
-<a href=#410 id=410 data-nosnippet>410</a>    <span class="doccomment">/// Number of SSM heads: `d_inner / per_head_dim`.
-<a href=#411 id=411 data-nosnippet>411</a>    </span><span class="kw">pub fn </span>nheads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#412 id=412 data-nosnippet>412</a>        <span class="self">self</span>.d_inner() / <span class="self">self</span>.per_head_dim
-<a href=#413 id=413 data-nosnippet>413</a>    }
-<a href=#414 id=414 data-nosnippet>414</a>
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="doccomment">/// Effective RoPE dimension: the number of B/C channels actually rotated.
-<a href=#416 id=416 data-nosnippet>416</a>    /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
-<a href=#417 id=417 data-nosnippet>417</a>    /// `rope_fraction = 0.5`, and `0` when RoPE is disabled
-<a href=#418 id=418 data-nosnippet>418</a>    /// (`rope_fraction = 0`), in which case the rotation is the identity.
-<a href=#419 id=419 data-nosnippet>419</a>    </span><span class="kw">pub fn </span>rope_dim(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span><span class="kw-2">mut </span>d = (<span class="self">self</span>.state_rank <span class="kw">as </span>f64 * <span class="self">self</span>.rope_fraction) <span class="kw">as </span>usize;
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">if </span>!d.is_multiple_of(<span class="number">2</span>) {
-<a href=#422 id=422 data-nosnippet>422</a>            d -= <span class="number">1</span>;
-<a href=#423 id=423 data-nosnippet>423</a>        }
-<a href=#424 id=424 data-nosnippet>424</a>        d
-<a href=#425 id=425 data-nosnippet>425</a>    }
-<a href=#426 id=426 data-nosnippet>426</a>
-<a href=#427 id=427 data-nosnippet>427</a>    <span class="doccomment">/// Number of RoPE rotation angles projected per head: `rope_dim / 2`, but
-<a href=#428 id=428 data-nosnippet>428</a>    /// **at least 1**.
-<a href=#429 id=429 data-nosnippet>429</a>    ///
-<a href=#430 id=430 data-nosnippet>430</a>    /// When RoPE is disabled (`rope_fraction = 0` ⇒ `rope_dim = 0`) the floor of
-<a href=#431 id=431 data-nosnippet>431</a>    /// 1 keeps a single angle channel alive: Burn has no zero-width tensors, and
-<a href=#432 id=432 data-nosnippet>432</a>    /// retaining one channel lets the angle projection / cumulative-angle data
-<a href=#433 id=433 data-nosnippet>433</a>    /// flow stay intact while the rotation itself short-circuits to the identity.
-<a href=#434 id=434 data-nosnippet>434</a>    </span><span class="kw">pub fn </span>num_rope_angles(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#435 id=435 data-nosnippet>435</a>        (<span class="self">self</span>.rope_dim() / <span class="number">2</span>).max(<span class="number">1</span>)
-<a href=#436 id=436 data-nosnippet>436</a>    }
-<a href=#437 id=437 data-nosnippet>437</a>
-<a href=#438 id=438 data-nosnippet>438</a>    <span class="doccomment">/// Number of quaternion blocks for [`RotationKind::Quaternion4D`]: the
-<a href=#439 id=439 data-nosnippet>439</a>    /// rotated width (`state_rank · rope_fraction`) rounded **down to a multiple
-<a href=#440 id=440 data-nosnippet>440</a>    /// of 4**, divided by 4, and floored at 1 (Burn has no zero-width tensors —
-<a href=#441 id=441 data-nosnippet>441</a>    /// mirrors [`Self::num_rope_angles`]).
-<a href=#442 id=442 data-nosnippet>442</a>    </span><span class="kw">pub fn </span>num_quat_blocks(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#443 id=443 data-nosnippet>443</a>        <span class="kw">let </span><span class="kw-2">mut </span>d = (<span class="self">self</span>.state_rank <span class="kw">as </span>f64 * <span class="self">self</span>.rope_fraction) <span class="kw">as </span>usize;
-<a href=#444 id=444 data-nosnippet>444</a>        d -= d % <span class="number">4</span>;
-<a href=#445 id=445 data-nosnippet>445</a>        (d / <span class="number">4</span>).max(<span class="number">1</span>)
-<a href=#446 id=446 data-nosnippet>446</a>    }
-<a href=#447 id=447 data-nosnippet>447</a>
-<a href=#448 id=448 data-nosnippet>448</a>    <span class="doccomment">/// Number of in-projection channels devoted to the rotation parameters,
-<a href=#449 id=449 data-nosnippet>449</a>    /// per the configured [`RotationKind`]:
-<a href=#450 id=450 data-nosnippet>450</a>    ///
-<a href=#451 id=451 data-nosnippet>451</a>    /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle channels.
-<a href=#452 id=452 data-nosnippet>452</a>    /// - [`Quaternion4D`](RotationKind::Quaternion4D): `3 · num_quat_blocks`
-<a href=#453 id=453 data-nosnippet>453</a>    ///   quaternion-generator channels (an axis·angle generator per block, fed
-<a href=#454 id=454 data-nosnippet>454</a>    ///   through [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)).
-<a href=#455 id=455 data-nosnippet>455</a>    ///
-<a href=#456 id=456 data-nosnippet>456</a>    /// Both are shared across heads and scaled per-head by `Δ`, exactly like the
-<a href=#457 id=457 data-nosnippet>457</a>    /// abelian RoPE angles.
-<a href=#458 id=458 data-nosnippet>458</a>    </span><span class="kw">pub fn </span>num_rotation_channels(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#459 id=459 data-nosnippet>459</a>        <span class="kw">match </span><span class="self">self</span>.rotation {
-<a href=#460 id=460 data-nosnippet>460</a>            RotationKind::Complex2D =&gt; <span class="self">self</span>.num_rope_angles(),
-<a href=#461 id=461 data-nosnippet>461</a>            RotationKind::Quaternion4D =&gt; <span class="number">3 </span>* <span class="self">self</span>.num_quat_blocks(),
-<a href=#462 id=462 data-nosnippet>462</a>        }
-<a href=#463 id=463 data-nosnippet>463</a>    }
-<a href=#464 id=464 data-nosnippet>464</a>
-<a href=#465 id=465 data-nosnippet>465</a>    <span class="doccomment">/// Total input projection output size.
-<a href=#466 id=466 data-nosnippet>466</a>    ///
-<a href=#467 id=467 data-nosnippet>467</a>    /// `d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rotation_channels`
-<a href=#468 id=468 data-nosnippet>468</a>    /// where the last term is [`Self::num_rotation_channels`] (`num_rope_angles`
-<a href=#469 id=469 data-nosnippet>469</a>    /// for the default `Complex2D`, so the size is unchanged from before).
-<a href=#470 id=470 data-nosnippet>470</a>    </span><span class="kw">pub fn </span>d_in_proj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#471 id=471 data-nosnippet>471</a>        <span class="number">2 </span>* <span class="self">self</span>.d_inner()
-<a href=#472 id=472 data-nosnippet>472</a>            + <span class="number">2 </span>* <span class="self">self</span>.ngroups * <span class="self">self</span>.state_rank * <span class="self">self</span>.mimo_rank
-<a href=#473 id=473 data-nosnippet>473</a>            + <span class="number">3 </span>* <span class="self">self</span>.nheads()
-<a href=#474 id=474 data-nosnippet>474</a>            + <span class="self">self</span>.num_rotation_channels()
-<a href=#475 id=475 data-nosnippet>475</a>    }
-<a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a>    <span class="doccomment">/// Allocate and initialise all Mamba-3 block parameters on `device`.
-<a href=#478 id=478 data-nosnippet>478</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3 {
-<a href=#479 id=479 data-nosnippet>479</a>        <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
-<a href=#480 id=480 data-nosnippet>480</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#481 id=481 data-nosnippet>481</a>        <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
-<a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
-<a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles();
-<a href=#485 id=485 data-nosnippet>485</a>
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="macro">assert!</span>(
-<a href=#487 id=487 data-nosnippet>487</a>            state_rank.is_multiple_of(<span class="number">2</span>),
-<a href=#488 id=488 data-nosnippet>488</a>            <span class="string">"state_rank must be even for RoPE pairing"
-<a href=#489 id=489 data-nosnippet>489</a>        </span>);
-<a href=#490 id=490 data-nosnippet>490</a>        <span class="macro">assert!</span>(<span class="self">self</span>.per_head_dim &gt; <span class="number">0</span>, <span class="string">"per_head_dim must be positive"</span>);
-<a href=#491 id=491 data-nosnippet>491</a>        <span class="macro">assert_eq!</span>(
-<a href=#492 id=492 data-nosnippet>492</a>            nheads * <span class="self">self</span>.per_head_dim,
-<a href=#493 id=493 data-nosnippet>493</a>            d_inner,
-<a href=#494 id=494 data-nosnippet>494</a>            <span class="string">"d_inner must be divisible by per_head_dim"
-<a href=#495 id=495 data-nosnippet>495</a>        </span>);
-<a href=#496 id=496 data-nosnippet>496</a>        <span class="macro">assert_ne!</span>(ngroups, <span class="number">0</span>, <span class="string">"ngroups must be at least 1"</span>);
-<a href=#497 id=497 data-nosnippet>497</a>        <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>, <span class="string">"nheads must be divisible by ngroups"</span>);
-<a href=#498 id=498 data-nosnippet>498</a>        <span class="macro">assert!</span>(<span class="self">self</span>.a_floor &gt; <span class="number">0.0</span>, <span class="string">"a_floor must be positive"</span>);
-<a href=#499 id=499 data-nosnippet>499</a>        <span class="macro">assert!</span>(mimo_rank &gt;= <span class="number">1</span>, <span class="string">"mimo_rank must be at least 1"</span>);
-<a href=#500 id=500 data-nosnippet>500</a>        <span class="macro">assert!</span>(
-<a href=#501 id=501 data-nosnippet>501</a>            <span class="self">self</span>.rope_fraction == <span class="number">0.0 </span>|| <span class="self">self</span>.rope_fraction == <span class="number">0.5 </span>|| <span class="self">self</span>.rope_fraction == <span class="number">1.0</span>,
-<a href=#502 id=502 data-nosnippet>502</a>            <span class="string">"rope_fraction must be 0.0, 0.5 or 1.0"
-<a href=#503 id=503 data-nosnippet>503</a>        </span>);
-<a href=#504 id=504 data-nosnippet>504</a>        <span class="macro">assert!</span>(num_rope_angles &gt; <span class="number">0</span>, <span class="string">"num_rope_angles must be at least 1"</span>);
-<a href=#505 id=505 data-nosnippet>505</a>        <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.rotation, RotationKind::Quaternion4D) {
-<a href=#506 id=506 data-nosnippet>506</a>            <span class="macro">assert!</span>(
-<a href=#507 id=507 data-nosnippet>507</a>                <span class="self">self</span>.state_rank.is_multiple_of(<span class="number">4</span>),
-<a href=#508 id=508 data-nosnippet>508</a>                <span class="string">"Quaternion4D requires state_rank to be a multiple of 4"
-<a href=#509 id=509 data-nosnippet>509</a>            </span>);
-<a href=#510 id=510 data-nosnippet>510</a>        }
-<a href=#511 id=511 data-nosnippet>511</a>
-<a href=#512 id=512 data-nosnippet>512</a>        <span class="kw">let </span>uniform_init = |fan_in: usize| {
-<a href=#513 id=513 data-nosnippet>513</a>            <span class="kw">let </span>bound = <span class="number">1.0 </span>/ (fan_in <span class="kw">as </span>f64).sqrt();
-<a href=#514 id=514 data-nosnippet>514</a>            Initializer::Uniform {
-<a href=#515 id=515 data-nosnippet>515</a>                min: -bound,
-<a href=#516 id=516 data-nosnippet>516</a>                max: bound,
-<a href=#517 id=517 data-nosnippet>517</a>            }
-<a href=#518 id=518 data-nosnippet>518</a>        };
-<a href=#519 id=519 data-nosnippet>519</a>
-<a href=#520 id=520 data-nosnippet>520</a>        <span class="kw">let </span>in_proj = LinearConfig::new(<span class="self">self</span>.d_model, <span class="self">self</span>.d_in_proj())
-<a href=#521 id=521 data-nosnippet>521</a>            .with_bias(<span class="self">self</span>.has_proj_bias)
-<a href=#522 id=522 data-nosnippet>522</a>            .with_initializer(uniform_init(<span class="self">self</span>.d_model))
-<a href=#523 id=523 data-nosnippet>523</a>            .init(device);
-<a href=#524 id=524 data-nosnippet>524</a>
-<a href=#525 id=525 data-nosnippet>525</a>        <span class="comment">// dt_bias: inverse-softplus initialisation
-<a href=#526 id=526 data-nosnippet>526</a>        </span><span class="kw">let </span>expm1 = |t: Tensor&lt;<span class="number">1</span>&gt;| t.exp() - <span class="number">1.</span>;
-<a href=#527 id=527 data-nosnippet>527</a>        <span class="kw">let </span>dt_h = Tensor::random(
-<a href=#528 id=528 data-nosnippet>528</a>            [nheads],
-<a href=#529 id=529 data-nosnippet>529</a>            burn::tensor::Distribution::Uniform(<span class="self">self</span>.dt_min.ln(), <span class="self">self</span>.dt_max.ln()),
-<a href=#530 id=530 data-nosnippet>530</a>            device,
-<a href=#531 id=531 data-nosnippet>531</a>        )
-<a href=#532 id=532 data-nosnippet>532</a>        .exp();
-<a href=#533 id=533 data-nosnippet>533</a>        <span class="kw">let </span>dt_h = dt_h.clamp(<span class="self">self</span>.dt_init_floor, f64::INFINITY);
-<a href=#534 id=534 data-nosnippet>534</a>        <span class="kw">let </span>inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
-<a href=#535 id=535 data-nosnippet>535</a>        <span class="kw">let </span>dt_bias_h = Param::from_tensor(inv_dt_h);
-<a href=#536 id=536 data-nosnippet>536</a>
-<a href=#537 id=537 data-nosnippet>537</a>        <span class="kw">let </span>d_h = Initializer::Ones.init::&lt;<span class="number">1</span>, <span class="kw">_</span>&gt;([nheads], device);
-<a href=#538 id=538 data-nosnippet>538</a>
-<a href=#539 id=539 data-nosnippet>539</a>        <span class="kw">let </span>b_norm = RmsNormConfig::new(state_rank).init(device);
-<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">let </span>c_norm = RmsNormConfig::new(state_rank).init(device);
+<a href=#410 id=410 data-nosnippet>410</a>
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="doccomment">/// Effective RoPE dimension: the number of B/C channels actually rotated.
+<a href=#412 id=412 data-nosnippet>412</a>    /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
+<a href=#413 id=413 data-nosnippet>413</a>    /// `rope_fraction = 0.5`, and `0` when RoPE is disabled
+<a href=#414 id=414 data-nosnippet>414</a>    /// (`rope_fraction = 0`), in which case the rotation is the identity.
+<a href=#415 id=415 data-nosnippet>415</a>    </span><span class="kw">pub fn </span>rope_dim(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">let </span><span class="kw-2">mut </span>d = (<span class="self">self</span>.state_rank <span class="kw">as </span>f64 * <span class="self">self</span>.rope_fraction) <span class="kw">as </span>usize;
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">if </span>!d.is_multiple_of(<span class="number">2</span>) {
+<a href=#418 id=418 data-nosnippet>418</a>            d -= <span class="number">1</span>;
+<a href=#419 id=419 data-nosnippet>419</a>        }
+<a href=#420 id=420 data-nosnippet>420</a>        d
+<a href=#421 id=421 data-nosnippet>421</a>    }
+<a href=#422 id=422 data-nosnippet>422</a>
+<a href=#423 id=423 data-nosnippet>423</a>    <span class="doccomment">/// Number of RoPE rotation angles projected per head: `rope_dim / 2`, but
+<a href=#424 id=424 data-nosnippet>424</a>    /// **at least 1**.
+<a href=#425 id=425 data-nosnippet>425</a>    ///
+<a href=#426 id=426 data-nosnippet>426</a>    /// When RoPE is disabled (`rope_fraction = 0` ⇒ `rope_dim = 0`) the floor of
+<a href=#427 id=427 data-nosnippet>427</a>    /// 1 keeps a single angle channel alive: Burn has no zero-width tensors, and
+<a href=#428 id=428 data-nosnippet>428</a>    /// retaining one channel lets the angle projection / cumulative-angle data
+<a href=#429 id=429 data-nosnippet>429</a>    /// flow stay intact while the rotation itself short-circuits to the identity.
+<a href=#430 id=430 data-nosnippet>430</a>    </span><span class="kw">pub fn </span>num_rope_angles(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#431 id=431 data-nosnippet>431</a>        (<span class="self">self</span>.rope_dim() / <span class="number">2</span>).max(<span class="number">1</span>)
+<a href=#432 id=432 data-nosnippet>432</a>    }
+<a href=#433 id=433 data-nosnippet>433</a>
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// Number of quaternion blocks for [`RotationKind::Quaternion4D`]: the
+<a href=#435 id=435 data-nosnippet>435</a>    /// rotated width (`state_rank · rope_fraction`) rounded **down to a multiple
+<a href=#436 id=436 data-nosnippet>436</a>    /// of 4**, divided by 4, and floored at 1 (Burn has no zero-width tensors —
+<a href=#437 id=437 data-nosnippet>437</a>    /// mirrors [`Self::num_rope_angles`]).
+<a href=#438 id=438 data-nosnippet>438</a>    </span><span class="kw">pub fn </span>num_quat_blocks(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">let </span><span class="kw-2">mut </span>d = (<span class="self">self</span>.state_rank <span class="kw">as </span>f64 * <span class="self">self</span>.rope_fraction) <span class="kw">as </span>usize;
+<a href=#440 id=440 data-nosnippet>440</a>        d -= d % <span class="number">4</span>;
+<a href=#441 id=441 data-nosnippet>441</a>        (d / <span class="number">4</span>).max(<span class="number">1</span>)
+<a href=#442 id=442 data-nosnippet>442</a>    }
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a>    <span class="doccomment">/// Number of in-projection channels devoted to the rotation parameters,
+<a href=#445 id=445 data-nosnippet>445</a>    /// per the configured [`RotationKind`]:
+<a href=#446 id=446 data-nosnippet>446</a>    ///
+<a href=#447 id=447 data-nosnippet>447</a>    /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle channels.
+<a href=#448 id=448 data-nosnippet>448</a>    /// - [`Quaternion4D`](RotationKind::Quaternion4D): `3 · num_quat_blocks`
+<a href=#449 id=449 data-nosnippet>449</a>    ///   quaternion-generator channels (an axis·angle generator per block, fed
+<a href=#450 id=450 data-nosnippet>450</a>    ///   through [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)).
+<a href=#451 id=451 data-nosnippet>451</a>    ///
+<a href=#452 id=452 data-nosnippet>452</a>    /// Both are shared across heads and scaled per-head by `Δ`, exactly like the
+<a href=#453 id=453 data-nosnippet>453</a>    /// abelian RoPE angles.
+<a href=#454 id=454 data-nosnippet>454</a>    </span><span class="kw">pub fn </span>num_rotation_channels(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#455 id=455 data-nosnippet>455</a>        <span class="kw">match </span><span class="self">self</span>.rotation {
+<a href=#456 id=456 data-nosnippet>456</a>            RotationKind::Complex2D =&gt; <span class="self">self</span>.num_rope_angles(),
+<a href=#457 id=457 data-nosnippet>457</a>            RotationKind::Quaternion4D =&gt; <span class="number">3 </span>* <span class="self">self</span>.num_quat_blocks(),
+<a href=#458 id=458 data-nosnippet>458</a>        }
+<a href=#459 id=459 data-nosnippet>459</a>    }
+<a href=#460 id=460 data-nosnippet>460</a>
+<a href=#461 id=461 data-nosnippet>461</a>    <span class="doccomment">/// Total input projection output size.
+<a href=#462 id=462 data-nosnippet>462</a>    ///
+<a href=#463 id=463 data-nosnippet>463</a>    /// `d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rotation_channels`
+<a href=#464 id=464 data-nosnippet>464</a>    /// where the last term is [`Self::num_rotation_channels`] (`num_rope_angles`
+<a href=#465 id=465 data-nosnippet>465</a>    /// for the default `Complex2D`, so the size is unchanged from before).
+<a href=#466 id=466 data-nosnippet>466</a>    </span><span class="kw">pub fn </span>d_in_proj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#467 id=467 data-nosnippet>467</a>        <span class="number">2 </span>* <span class="self">self</span>.d_inner()
+<a href=#468 id=468 data-nosnippet>468</a>            + <span class="number">2 </span>* <span class="self">self</span>.ngroups * <span class="self">self</span>.state_rank * <span class="self">self</span>.mimo_rank
+<a href=#469 id=469 data-nosnippet>469</a>            + <span class="number">3 </span>* <span class="self">self</span>.nheads()
+<a href=#470 id=470 data-nosnippet>470</a>            + <span class="self">self</span>.num_rotation_channels()
+<a href=#471 id=471 data-nosnippet>471</a>    }
+<a href=#472 id=472 data-nosnippet>472</a>
+<a href=#473 id=473 data-nosnippet>473</a>    <span class="doccomment">/// Allocate and initialise all Mamba-3 block parameters on `device`.
+<a href=#474 id=474 data-nosnippet>474</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3 {
+<a href=#475 id=475 data-nosnippet>475</a>        <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#479 id=479 data-nosnippet>479</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#480 id=480 data-nosnippet>480</a>        <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles();
+<a href=#481 id=481 data-nosnippet>481</a>
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="macro">assert!</span>(
+<a href=#483 id=483 data-nosnippet>483</a>            state_rank.is_multiple_of(<span class="number">2</span>),
+<a href=#484 id=484 data-nosnippet>484</a>            <span class="string">"state_rank must be even for RoPE pairing"
+<a href=#485 id=485 data-nosnippet>485</a>        </span>);
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="macro">assert!</span>(<span class="self">self</span>.per_head_dim &gt; <span class="number">0</span>, <span class="string">"per_head_dim must be positive"</span>);
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="macro">assert_eq!</span>(
+<a href=#488 id=488 data-nosnippet>488</a>            nheads * <span class="self">self</span>.per_head_dim,
+<a href=#489 id=489 data-nosnippet>489</a>            d_inner,
+<a href=#490 id=490 data-nosnippet>490</a>            <span class="string">"d_inner must be divisible by per_head_dim"
+<a href=#491 id=491 data-nosnippet>491</a>        </span>);
+<a href=#492 id=492 data-nosnippet>492</a>        <span class="macro">assert_ne!</span>(ngroups, <span class="number">0</span>, <span class="string">"ngroups must be at least 1"</span>);
+<a href=#493 id=493 data-nosnippet>493</a>        <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>, <span class="string">"nheads must be divisible by ngroups"</span>);
+<a href=#494 id=494 data-nosnippet>494</a>        <span class="macro">assert!</span>(<span class="self">self</span>.a_floor &gt; <span class="number">0.0</span>, <span class="string">"a_floor must be positive"</span>);
+<a href=#495 id=495 data-nosnippet>495</a>        <span class="macro">assert!</span>(mimo_rank &gt;= <span class="number">1</span>, <span class="string">"mimo_rank must be at least 1"</span>);
+<a href=#496 id=496 data-nosnippet>496</a>        <span class="macro">assert!</span>(
+<a href=#497 id=497 data-nosnippet>497</a>            <span class="self">self</span>.rope_fraction == <span class="number">0.0 </span>|| <span class="self">self</span>.rope_fraction == <span class="number">0.5 </span>|| <span class="self">self</span>.rope_fraction == <span class="number">1.0</span>,
+<a href=#498 id=498 data-nosnippet>498</a>            <span class="string">"rope_fraction must be 0.0, 0.5 or 1.0"
+<a href=#499 id=499 data-nosnippet>499</a>        </span>);
+<a href=#500 id=500 data-nosnippet>500</a>        <span class="macro">assert!</span>(num_rope_angles &gt; <span class="number">0</span>, <span class="string">"num_rope_angles must be at least 1"</span>);
+<a href=#501 id=501 data-nosnippet>501</a>        <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.rotation, RotationKind::Quaternion4D) {
+<a href=#502 id=502 data-nosnippet>502</a>            <span class="macro">assert!</span>(
+<a href=#503 id=503 data-nosnippet>503</a>                <span class="self">self</span>.state_rank.is_multiple_of(<span class="number">4</span>),
+<a href=#504 id=504 data-nosnippet>504</a>                <span class="string">"Quaternion4D requires state_rank to be a multiple of 4"
+<a href=#505 id=505 data-nosnippet>505</a>            </span>);
+<a href=#506 id=506 data-nosnippet>506</a>        }
+<a href=#507 id=507 data-nosnippet>507</a>
+<a href=#508 id=508 data-nosnippet>508</a>        <span class="kw">let </span>uniform_init = |fan_in: usize| {
+<a href=#509 id=509 data-nosnippet>509</a>            <span class="kw">let </span>bound = <span class="number">1.0 </span>/ (fan_in <span class="kw">as </span>f64).sqrt();
+<a href=#510 id=510 data-nosnippet>510</a>            Initializer::Uniform {
+<a href=#511 id=511 data-nosnippet>511</a>                min: -bound,
+<a href=#512 id=512 data-nosnippet>512</a>                max: bound,
+<a href=#513 id=513 data-nosnippet>513</a>            }
+<a href=#514 id=514 data-nosnippet>514</a>        };
+<a href=#515 id=515 data-nosnippet>515</a>
+<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">let </span>in_proj = LinearConfig::new(<span class="self">self</span>.d_model, <span class="self">self</span>.d_in_proj())
+<a href=#517 id=517 data-nosnippet>517</a>            .with_bias(<span class="self">self</span>.has_proj_bias)
+<a href=#518 id=518 data-nosnippet>518</a>            .with_initializer(uniform_init(<span class="self">self</span>.d_model))
+<a href=#519 id=519 data-nosnippet>519</a>            .init(device);
+<a href=#520 id=520 data-nosnippet>520</a>
+<a href=#521 id=521 data-nosnippet>521</a>        <span class="comment">// dt_bias: inverse-softplus initialisation
+<a href=#522 id=522 data-nosnippet>522</a>        </span><span class="kw">let </span>expm1 = |t: Tensor&lt;<span class="number">1</span>&gt;| t.exp() - <span class="number">1.</span>;
+<a href=#523 id=523 data-nosnippet>523</a>        <span class="kw">let </span>dt_h = Tensor::random(
+<a href=#524 id=524 data-nosnippet>524</a>            [nheads],
+<a href=#525 id=525 data-nosnippet>525</a>            burn::tensor::Distribution::Uniform(<span class="self">self</span>.dt_min.ln(), <span class="self">self</span>.dt_max.ln()),
+<a href=#526 id=526 data-nosnippet>526</a>            device,
+<a href=#527 id=527 data-nosnippet>527</a>        )
+<a href=#528 id=528 data-nosnippet>528</a>        .exp();
+<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span>dt_h = dt_h.clamp(<span class="self">self</span>.dt_init_floor, f64::INFINITY);
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span>inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
+<a href=#531 id=531 data-nosnippet>531</a>        <span class="kw">let </span>dt_bias_h = Param::from_tensor(inv_dt_h);
+<a href=#532 id=532 data-nosnippet>532</a>
+<a href=#533 id=533 data-nosnippet>533</a>        <span class="kw">let </span>d_h = Initializer::Ones.init::&lt;<span class="number">1</span>, <span class="kw">_</span>&gt;([nheads], device);
+<a href=#534 id=534 data-nosnippet>534</a>
+<a href=#535 id=535 data-nosnippet>535</a>        <span class="kw">let </span>b_norm = RmsNormConfig::new(state_rank).init(device);
+<a href=#536 id=536 data-nosnippet>536</a>        <span class="kw">let </span>c_norm = RmsNormConfig::new(state_rank).init(device);
+<a href=#537 id=537 data-nosnippet>537</a>
+<a href=#538 id=538 data-nosnippet>538</a>        <span class="comment">// B/C biases: [nheads, mimo_rank, state_rank], init to ones
+<a href=#539 id=539 data-nosnippet>539</a>        </span><span class="kw">let </span>b_bias_hmr = Initializer::Ones.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, mimo_rank, state_rank], device);
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">let </span>c_bias_hmr = Initializer::Ones.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, mimo_rank, state_rank], device);
 <a href=#541 id=541 data-nosnippet>541</a>
-<a href=#542 id=542 data-nosnippet>542</a>        <span class="comment">// B/C biases: [nheads, mimo_rank, state_rank], init to ones
-<a href=#543 id=543 data-nosnippet>543</a>        </span><span class="kw">let </span>b_bias_hmr = Initializer::Ones.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, mimo_rank, state_rank], device);
-<a href=#544 id=544 data-nosnippet>544</a>        <span class="kw">let </span>c_bias_hmr = Initializer::Ones.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, mimo_rank, state_rank], device);
-<a href=#545 id=545 data-nosnippet>545</a>
-<a href=#546 id=546 data-nosnippet>546</a>        <span class="comment">// MIMO projections (only for mimo_rank &gt; 1)
-<a href=#547 id=547 data-nosnippet>547</a>        </span><span class="kw">let </span>(mimo_x_hmp, mimo_z_hmp, mimo_o_hmp) = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
-<a href=#548 id=548 data-nosnippet>548</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim;
-<a href=#549 id=549 data-nosnippet>549</a>            <span class="comment">// Init: mimo_x_hmp and mimo_o_hmp to 1/mimo_rank, mimo_z_hmp to 1
-<a href=#550 id=550 data-nosnippet>550</a>            </span><span class="kw">let </span>mx = Param::from_tensor(Tensor::full(
-<a href=#551 id=551 data-nosnippet>551</a>                [nheads, mimo_rank, per_head_dim],
-<a href=#552 id=552 data-nosnippet>552</a>                <span class="number">1.0 </span>/ mimo_rank <span class="kw">as </span>f64,
-<a href=#553 id=553 data-nosnippet>553</a>                device,
-<a href=#554 id=554 data-nosnippet>554</a>            ));
-<a href=#555 id=555 data-nosnippet>555</a>            <span class="kw">let </span>mz = Param::from_tensor(Tensor::ones([nheads, mimo_rank, per_head_dim], device));
-<a href=#556 id=556 data-nosnippet>556</a>            <span class="kw">let </span>mo = Param::from_tensor(Tensor::full(
-<a href=#557 id=557 data-nosnippet>557</a>                [nheads, mimo_rank, per_head_dim],
-<a href=#558 id=558 data-nosnippet>558</a>                <span class="number">1.0 </span>/ mimo_rank <span class="kw">as </span>f64,
-<a href=#559 id=559 data-nosnippet>559</a>                device,
-<a href=#560 id=560 data-nosnippet>560</a>            ));
-<a href=#561 id=561 data-nosnippet>561</a>            (<span class="prelude-val">Some</span>(mx), <span class="prelude-val">Some</span>(mz), <span class="prelude-val">Some</span>(mo))
-<a href=#562 id=562 data-nosnippet>562</a>        } <span class="kw">else </span>{
-<a href=#563 id=563 data-nosnippet>563</a>            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
-<a href=#564 id=564 data-nosnippet>564</a>        };
-<a href=#565 id=565 data-nosnippet>565</a>
-<a href=#566 id=566 data-nosnippet>566</a>        <span class="comment">// Gated RMSNorm applied per-head (group size = per_head_dim).
-<a href=#567 id=567 data-nosnippet>567</a>        </span><span class="kw">let </span>out_norm = <span class="self">self</span>.has_outproj_norm.then(|| {
-<a href=#568 id=568 data-nosnippet>568</a>            RmsNormGatedConfig::new(<span class="self">self</span>.per_head_dim)
-<a href=#569 id=569 data-nosnippet>569</a>                .with_norm_before_gate(<span class="bool-val">true</span>)
-<a href=#570 id=570 data-nosnippet>570</a>                .init(device)
-<a href=#571 id=571 data-nosnippet>571</a>        });
-<a href=#572 id=572 data-nosnippet>572</a>
-<a href=#573 id=573 data-nosnippet>573</a>        <span class="kw">let </span>out_proj = LinearConfig::new(d_inner, <span class="self">self</span>.d_model)
-<a href=#574 id=574 data-nosnippet>574</a>            .with_bias(<span class="self">self</span>.has_proj_bias)
-<a href=#575 id=575 data-nosnippet>575</a>            .with_initializer(uniform_init(d_inner))
-<a href=#576 id=576 data-nosnippet>576</a>            .init(device);
+<a href=#542 id=542 data-nosnippet>542</a>        <span class="comment">// MIMO projections (only for mimo_rank &gt; 1)
+<a href=#543 id=543 data-nosnippet>543</a>        </span><span class="kw">let </span>(mimo_x_hmp, mimo_z_hmp, mimo_o_hmp) = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
+<a href=#544 id=544 data-nosnippet>544</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim;
+<a href=#545 id=545 data-nosnippet>545</a>            <span class="comment">// Init: mimo_x_hmp and mimo_o_hmp to 1/mimo_rank, mimo_z_hmp to 1
+<a href=#546 id=546 data-nosnippet>546</a>            </span><span class="kw">let </span>mx = Param::from_tensor(Tensor::full(
+<a href=#547 id=547 data-nosnippet>547</a>                [nheads, mimo_rank, per_head_dim],
+<a href=#548 id=548 data-nosnippet>548</a>                <span class="number">1.0 </span>/ mimo_rank <span class="kw">as </span>f64,
+<a href=#549 id=549 data-nosnippet>549</a>                device,
+<a href=#550 id=550 data-nosnippet>550</a>            ));
+<a href=#551 id=551 data-nosnippet>551</a>            <span class="kw">let </span>mz = Param::from_tensor(Tensor::ones([nheads, mimo_rank, per_head_dim], device));
+<a href=#552 id=552 data-nosnippet>552</a>            <span class="kw">let </span>mo = Param::from_tensor(Tensor::full(
+<a href=#553 id=553 data-nosnippet>553</a>                [nheads, mimo_rank, per_head_dim],
+<a href=#554 id=554 data-nosnippet>554</a>                <span class="number">1.0 </span>/ mimo_rank <span class="kw">as </span>f64,
+<a href=#555 id=555 data-nosnippet>555</a>                device,
+<a href=#556 id=556 data-nosnippet>556</a>            ));
+<a href=#557 id=557 data-nosnippet>557</a>            (<span class="prelude-val">Some</span>(mx), <span class="prelude-val">Some</span>(mz), <span class="prelude-val">Some</span>(mo))
+<a href=#558 id=558 data-nosnippet>558</a>        } <span class="kw">else </span>{
+<a href=#559 id=559 data-nosnippet>559</a>            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+<a href=#560 id=560 data-nosnippet>560</a>        };
+<a href=#561 id=561 data-nosnippet>561</a>
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="comment">// Gated RMSNorm applied per-head (group size = per_head_dim).
+<a href=#563 id=563 data-nosnippet>563</a>        </span><span class="kw">let </span>out_norm = <span class="self">self</span>.has_outproj_norm.then(|| {
+<a href=#564 id=564 data-nosnippet>564</a>            RmsNormGatedConfig::new(<span class="self">self</span>.per_head_dim)
+<a href=#565 id=565 data-nosnippet>565</a>                .with_norm_before_gate(<span class="bool-val">true</span>)
+<a href=#566 id=566 data-nosnippet>566</a>                .init(device)
+<a href=#567 id=567 data-nosnippet>567</a>        });
+<a href=#568 id=568 data-nosnippet>568</a>
+<a href=#569 id=569 data-nosnippet>569</a>        <span class="kw">let </span>out_proj = LinearConfig::new(d_inner, <span class="self">self</span>.d_model)
+<a href=#570 id=570 data-nosnippet>570</a>            .with_bias(<span class="self">self</span>.has_proj_bias)
+<a href=#571 id=571 data-nosnippet>571</a>            .with_initializer(uniform_init(d_inner))
+<a href=#572 id=572 data-nosnippet>572</a>            .init(device);
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>        <span class="kw">let </span>init_state_hpr = <span class="self">self</span>.has_learnable_init_state.then(|| {
+<a href=#575 id=575 data-nosnippet>575</a>            Initializer::Zeros.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, <span class="self">self</span>.per_head_dim, state_rank], device)
+<a href=#576 id=576 data-nosnippet>576</a>        });
 <a href=#577 id=577 data-nosnippet>577</a>
-<a href=#578 id=578 data-nosnippet>578</a>        <span class="kw">let </span>init_state_hpr = <span class="self">self</span>.has_learnable_init_state.then(|| {
-<a href=#579 id=579 data-nosnippet>579</a>            Initializer::Zeros.init::&lt;<span class="number">3</span>, <span class="kw">_</span>&gt;([nheads, <span class="self">self</span>.per_head_dim, state_rank], device)
-<a href=#580 id=580 data-nosnippet>580</a>        });
-<a href=#581 id=581 data-nosnippet>581</a>
-<a href=#582 id=582 data-nosnippet>582</a>        Mamba3 {
-<a href=#583 id=583 data-nosnippet>583</a>            in_proj,
-<a href=#584 id=584 data-nosnippet>584</a>            dt_bias_h,
-<a href=#585 id=585 data-nosnippet>585</a>            dt_limit: <span class="self">self</span>.dt_limit,
-<a href=#586 id=586 data-nosnippet>586</a>            a_floor: <span class="self">self</span>.a_floor,
-<a href=#587 id=587 data-nosnippet>587</a>            d_h,
-<a href=#588 id=588 data-nosnippet>588</a>            b_norm,
-<a href=#589 id=589 data-nosnippet>589</a>            c_norm,
-<a href=#590 id=590 data-nosnippet>590</a>            b_bias_hmr,
-<a href=#591 id=591 data-nosnippet>591</a>            c_bias_hmr,
-<a href=#592 id=592 data-nosnippet>592</a>            mimo_x_hmp,
-<a href=#593 id=593 data-nosnippet>593</a>            mimo_z_hmp,
-<a href=#594 id=594 data-nosnippet>594</a>            mimo_o_hmp,
-<a href=#595 id=595 data-nosnippet>595</a>            out_norm,
-<a href=#596 id=596 data-nosnippet>596</a>            out_proj,
-<a href=#597 id=597 data-nosnippet>597</a>            init_state_hpr,
-<a href=#598 id=598 data-nosnippet>598</a>            state_rank,
-<a href=#599 id=599 data-nosnippet>599</a>            ngroups,
-<a href=#600 id=600 data-nosnippet>600</a>            rope_dim: <span class="self">self</span>.rope_dim(),
-<a href=#601 id=601 data-nosnippet>601</a>            num_rope_angles,
-<a href=#602 id=602 data-nosnippet>602</a>            mimo_rank,
-<a href=#603 id=603 data-nosnippet>603</a>            rotation_is_quaternion: <span class="macro">matches!</span>(<span class="self">self</span>.rotation, RotationKind::Quaternion4D),
-<a href=#604 id=604 data-nosnippet>604</a>            num_rotation_channels: <span class="self">self</span>.num_rotation_channels(),
-<a href=#605 id=605 data-nosnippet>605</a>            num_quat_blocks: <span class="self">self</span>.num_quat_blocks(),
-<a href=#606 id=606 data-nosnippet>606</a>        }
-<a href=#607 id=607 data-nosnippet>607</a>    }
-<a href=#608 id=608 data-nosnippet>608</a>}
+<a href=#578 id=578 data-nosnippet>578</a>        Mamba3 {
+<a href=#579 id=579 data-nosnippet>579</a>            in_proj,
+<a href=#580 id=580 data-nosnippet>580</a>            dt_bias_h,
+<a href=#581 id=581 data-nosnippet>581</a>            dt_limit: <span class="self">self</span>.dt_limit,
+<a href=#582 id=582 data-nosnippet>582</a>            a_floor: <span class="self">self</span>.a_floor,
+<a href=#583 id=583 data-nosnippet>583</a>            d_h,
+<a href=#584 id=584 data-nosnippet>584</a>            b_norm,
+<a href=#585 id=585 data-nosnippet>585</a>            c_norm,
+<a href=#586 id=586 data-nosnippet>586</a>            b_bias_hmr,
+<a href=#587 id=587 data-nosnippet>587</a>            c_bias_hmr,
+<a href=#588 id=588 data-nosnippet>588</a>            mimo_x_hmp,
+<a href=#589 id=589 data-nosnippet>589</a>            mimo_z_hmp,
+<a href=#590 id=590 data-nosnippet>590</a>            mimo_o_hmp,
+<a href=#591 id=591 data-nosnippet>591</a>            out_norm,
+<a href=#592 id=592 data-nosnippet>592</a>            out_proj,
+<a href=#593 id=593 data-nosnippet>593</a>            init_state_hpr,
+<a href=#594 id=594 data-nosnippet>594</a>            state_rank,
+<a href=#595 id=595 data-nosnippet>595</a>            ngroups,
+<a href=#596 id=596 data-nosnippet>596</a>            rope_dim: <span class="self">self</span>.rope_dim(),
+<a href=#597 id=597 data-nosnippet>597</a>            num_rope_angles,
+<a href=#598 id=598 data-nosnippet>598</a>            mimo_rank,
+<a href=#599 id=599 data-nosnippet>599</a>            rotation: <span class="self">self</span>.rotation,
+<a href=#600 id=600 data-nosnippet>600</a>            num_rotation_channels: <span class="self">self</span>.num_rotation_channels(),
+<a href=#601 id=601 data-nosnippet>601</a>            num_quat_blocks: <span class="self">self</span>.num_quat_blocks(),
+<a href=#602 id=602 data-nosnippet>602</a>        }
+<a href=#603 id=603 data-nosnippet>603</a>    }
+<a href=#604 id=604 data-nosnippet>604</a>}
+<a href=#605 id=605 data-nosnippet>605</a>
+<a href=#606 id=606 data-nosnippet>606</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#607 id=607 data-nosnippet>607</a>// Mamba3::forward  (chunkwise double-SSD — training / prefill)
+<a href=#608 id=608 data-nosnippet>608</a>// ---------------------------------------------------------------------------
 <a href=#609 id=609 data-nosnippet>609</a>
-<a href=#610 id=610 data-nosnippet>610</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#611 id=611 data-nosnippet>611</a>// Mamba3::forward  (chunkwise double-SSD — training / prefill)
-<a href=#612 id=612 data-nosnippet>612</a>// ---------------------------------------------------------------------------
-<a href=#613 id=613 data-nosnippet>613</a>
-<a href=#614 id=614 data-nosnippet>614</a></span><span class="kw">impl </span>Mamba3 {
-<a href=#615 id=615 data-nosnippet>615</a>    <span class="doccomment">/// Process a full input sequence using the trapezoidal double-SSD algorithm.
+<a href=#610 id=610 data-nosnippet>610</a></span><span class="kw">impl </span>Mamba3 {
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="doccomment">/// Process a full input sequence using the trapezoidal double-SSD algorithm.
+<a href=#612 id=612 data-nosnippet>612</a>    ///
+<a href=#613 id=613 data-nosnippet>613</a>    /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
+<a href=#614 id=614 data-nosnippet>614</a>    /// For MIMO (mimo_rank&gt;1), B/C have mimo_rank parallel rank channels.
+<a href=#615 id=615 data-nosnippet>615</a>    /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
 <a href=#616 id=616 data-nosnippet>616</a>    ///
-<a href=#617 id=617 data-nosnippet>617</a>    /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
-<a href=#618 id=618 data-nosnippet>618</a>    /// For MIMO (mimo_rank&gt;1), B/C have mimo_rank parallel rank channels.
-<a href=#619 id=619 data-nosnippet>619</a>    /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
-<a href=#620 id=620 data-nosnippet>620</a>    ///
-<a href=#621 id=621 data-nosnippet>621</a>    /// # Shapes
-<a href=#622 id=622 data-nosnippet>622</a>    /// - `input_bsm` : `[batch, sequence, d_model]`
-<a href=#623 id=623 data-nosnippet>623</a>    /// - output      : `[batch, sequence, d_model]`
-<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="attr">#[allow(non_snake_case)]
-<a href=#625 id=625 data-nosnippet>625</a>    </span><span class="kw">pub fn </span>forward(
-<a href=#626 id=626 data-nosnippet>626</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#627 id=627 data-nosnippet>627</a>        input_bsm: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#628 id=628 data-nosnippet>628</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
-<a href=#629 id=629 data-nosnippet>629</a>        ssd_path: Mamba3SsdPath,
-<a href=#630 id=630 data-nosnippet>630</a>    ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
-<a href=#631 id=631 data-nosnippet>631</a>        <span class="kw">let </span>[batch, sequence, _d_model] = input_bsm.dims();
-<a href=#632 id=632 data-nosnippet>632</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#633 id=633 data-nosnippet>633</a>        <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
-<a href=#634 id=634 data-nosnippet>634</a>        <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
-<a href=#635 id=635 data-nosnippet>635</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#636 id=636 data-nosnippet>636</a>        <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
-<a href=#637 id=637 data-nosnippet>637</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
-<a href=#638 id=638 data-nosnippet>638</a>        <span class="kw">let </span>device = input_bsm.device();
+<a href=#617 id=617 data-nosnippet>617</a>    /// # Shapes
+<a href=#618 id=618 data-nosnippet>618</a>    /// - `input_bsm` : `[batch, sequence, d_model]`
+<a href=#619 id=619 data-nosnippet>619</a>    /// - output      : `[batch, sequence, d_model]`
+<a href=#620 id=620 data-nosnippet>620</a>    </span><span class="attr">#[allow(non_snake_case)]
+<a href=#621 id=621 data-nosnippet>621</a>    </span><span class="kw">pub fn </span>forward(
+<a href=#622 id=622 data-nosnippet>622</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#623 id=623 data-nosnippet>623</a>        input_bsm: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#624 id=624 data-nosnippet>624</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
+<a href=#625 id=625 data-nosnippet>625</a>        ssd_path: Mamba3SsdPath,
+<a href=#626 id=626 data-nosnippet>626</a>    ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
+<a href=#627 id=627 data-nosnippet>627</a>        <span class="kw">let </span>[batch, sequence, _d_model] = input_bsm.dims();
+<a href=#628 id=628 data-nosnippet>628</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#629 id=629 data-nosnippet>629</a>        <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
+<a href=#630 id=630 data-nosnippet>630</a>        <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#632 id=632 data-nosnippet>632</a>        <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
+<a href=#633 id=633 data-nosnippet>633</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#634 id=634 data-nosnippet>634</a>        <span class="kw">let </span>device = input_bsm.device();
+<a href=#635 id=635 data-nosnippet>635</a>
+<a href=#636 id=636 data-nosnippet>636</a>        <span class="macro">assert!</span>(sequence &gt; <span class="number">0</span>, <span class="string">"sequence length must be at least 1"</span>);
+<a href=#637 id=637 data-nosnippet>637</a>        <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
+<a href=#638 id=638 data-nosnippet>638</a>        san(<span class="kw-2">&amp;</span>input_bsm);
 <a href=#639 id=639 data-nosnippet>639</a>
-<a href=#640 id=640 data-nosnippet>640</a>        <span class="macro">assert!</span>(sequence &gt; <span class="number">0</span>, <span class="string">"sequence length must be at least 1"</span>);
-<a href=#641 id=641 data-nosnippet>641</a>        <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
-<a href=#642 id=642 data-nosnippet>642</a>        san(<span class="kw-2">&amp;</span>input_bsm);
-<a href=#643 id=643 data-nosnippet>643</a>
-<a href=#644 id=644 data-nosnippet>644</a>        <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
-<a href=#645 id=645 data-nosnippet>645</a>        // Implies single-ssd pathway if missing — except for the quaternion
-<a href=#646 id=646 data-nosnippet>646</a>        // rotation, which is realised only by the double-ssd pathway (see
-<a href=#647 id=647 data-nosnippet>647</a>        // [`forward_single_ssd`]).
-<a href=#648 id=648 data-nosnippet>648</a>        </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
-<a href=#649 id=649 data-nosnippet>649</a>
-<a href=#650 id=650 data-nosnippet>650</a>        <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
-<a href=#651 id=651 data-nosnippet>651</a>        </span><span class="kw">match </span>cache {
-<a href=#652 id=652 data-nosnippet>652</a>            Mamba3Cache::DoubleSsd(cache) =&gt; {
-<a href=#653 id=653 data-nosnippet>653</a>                <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.forward_double_ssd(input_bsm, <span class="prelude-val">Some</span>(cache), <span class="kw-2">&amp;</span>ssd_path);
-<a href=#654 id=654 data-nosnippet>654</a>                (out_bsm, cache.into())
-<a href=#655 id=655 data-nosnippet>655</a>            }
-<a href=#656 id=656 data-nosnippet>656</a>            Mamba3Cache::SingleSsd(cache) =&gt; {
-<a href=#657 id=657 data-nosnippet>657</a>                <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.forward_single_ssd(input_bsm, <span class="prelude-val">Some</span>(cache), <span class="kw-2">&amp;</span>ssd_path);
-<a href=#658 id=658 data-nosnippet>658</a>                (out_bsm, cache.into())
-<a href=#659 id=659 data-nosnippet>659</a>            }
-<a href=#660 id=660 data-nosnippet>660</a>        }
-<a href=#661 id=661 data-nosnippet>661</a>    }
-<a href=#662 id=662 data-nosnippet>662</a>
-<a href=#663 id=663 data-nosnippet>663</a>    <span class="doccomment">/// Build the default per-call cache: single-ssd for the abelian rotation,
-<a href=#664 id=664 data-nosnippet>664</a>    /// double-ssd for [`RotationKind::Quaternion4D`] (the only pathway that
-<a href=#665 id=665 data-nosnippet>665</a>    /// realises the quaternion rotation). The rotation accumulator is the
-<a href=#666 id=666 data-nosnippet>666</a>    /// matching [`RotationState`] variant.
-<a href=#667 id=667 data-nosnippet>667</a>    </span><span class="kw">fn </span>zero_cache(<span class="kw-2">&amp;</span><span class="self">self</span>, batch: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3Cache {
-<a href=#668 id=668 data-nosnippet>668</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#669 id=669 data-nosnippet>669</a>        <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
-<a href=#670 id=670 data-nosnippet>670</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#671 id=671 data-nosnippet>671</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
-<a href=#672 id=672 data-nosnippet>672</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
-<a href=#673 id=673 data-nosnippet>673</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
-<a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-<a href=#675 id=675 data-nosnippet>675</a>        <span class="kw">let </span>rotation = <span class="kw">if </span><span class="self">self</span>.rotation_is_quaternion {
-<a href=#676 id=676 data-nosnippet>676</a>            RotationState::identity_quaternion(batch, nheads, <span class="self">self</span>.num_quat_blocks, device)
-<a href=#677 id=677 data-nosnippet>677</a>        } <span class="kw">else </span>{
-<a href=#678 id=678 data-nosnippet>678</a>            RotationState::zeros_angle(batch, nheads, <span class="self">self</span>.num_rope_angles, device)
-<a href=#679 id=679 data-nosnippet>679</a>        };
-<a href=#680 id=680 data-nosnippet>680</a>        <span class="kw">if </span><span class="self">self</span>.rotation_is_quaternion {
-<a href=#681 id=681 data-nosnippet>681</a>            <span class="kw">crate</span>::mamba3::double_ssd::cache::Mamba3DoubleSsdCache {
-<a href=#682 id=682 data-nosnippet>682</a>                ssm_bhpr,
-<a href=#683 id=683 data-nosnippet>683</a>                k_state_bmhr,
-<a href=#684 id=684 data-nosnippet>684</a>                v_state_bhp,
-<a href=#685 id=685 data-nosnippet>685</a>                rotation,
-<a href=#686 id=686 data-nosnippet>686</a>            }
-<a href=#687 id=687 data-nosnippet>687</a>            .into()
-<a href=#688 id=688 data-nosnippet>688</a>        } <span class="kw">else </span>{
-<a href=#689 id=689 data-nosnippet>689</a>            <span class="kw">crate</span>::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
-<a href=#690 id=690 data-nosnippet>690</a>                ssm_bhpr,
-<a href=#691 id=691 data-nosnippet>691</a>                k_state_bmhr,
-<a href=#692 id=692 data-nosnippet>692</a>                v_state_bhp,
-<a href=#693 id=693 data-nosnippet>693</a>                rotation,
-<a href=#694 id=694 data-nosnippet>694</a>            }
-<a href=#695 id=695 data-nosnippet>695</a>            .into()
-<a href=#696 id=696 data-nosnippet>696</a>        }
-<a href=#697 id=697 data-nosnippet>697</a>    }
-<a href=#698 id=698 data-nosnippet>698</a>}
-<a href=#699 id=699 data-nosnippet>699</a>
-<a href=#700 id=700 data-nosnippet>700</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#701 id=701 data-nosnippet>701</a>// Mamba3::step  (recurrent SSM — token-by-token decoding)
-<a href=#702 id=702 data-nosnippet>702</a>// ---------------------------------------------------------------------------
-<a href=#703 id=703 data-nosnippet>703</a>
-<a href=#704 id=704 data-nosnippet>704</a></span><span class="kw">mod </span>step {
-<a href=#705 id=705 data-nosnippet>705</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#706 id=706 data-nosnippet>706</a>
-<a href=#707 id=707 data-nosnippet>707</a>    <span class="kw">impl </span>Mamba3 {
-<a href=#708 id=708 data-nosnippet>708</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent form.
-<a href=#709 id=709 data-nosnippet>709</a>        ///
-<a href=#710 id=710 data-nosnippet>710</a>        /// For SISO (mimo_rank=1):
-<a href=#711 id=711 data-nosnippet>711</a>        /// ```text
-<a href=#712 id=712 data-nosnippet>712</a>        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
-<a href=#713 id=713 data-nosnippet>713</a>        ///   yₜ = Cₜᵀ hₜ + D xₜ
-<a href=#714 id=714 data-nosnippet>714</a>        /// ```
-<a href=#715 id=715 data-nosnippet>715</a>        ///
-<a href=#716 id=716 data-nosnippet>716</a>        /// For MIMO (mimo_rank&gt;1):
-<a href=#717 id=717 data-nosnippet>717</a>        /// ```text
-<a href=#718 id=718 data-nosnippet>718</a>        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
-<a href=#719 id=719 data-nosnippet>719</a>        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
-<a href=#720 id=720 data-nosnippet>720</a>        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
-<a href=#721 id=721 data-nosnippet>721</a>        /// ```
-<a href=#722 id=722 data-nosnippet>722</a>        ///
-<a href=#723 id=723 data-nosnippet>723</a>        /// # Shapes
-<a href=#724 id=724 data-nosnippet>724</a>        /// - `input_bd` : `[batch, d_model]`
-<a href=#725 id=725 data-nosnippet>725</a>        /// - output     : `[batch, d_model]`
-<a href=#726 id=726 data-nosnippet>726</a>        </span><span class="attr">#[allow(non_snake_case)]
-<a href=#727 id=727 data-nosnippet>727</a>        </span><span class="kw">pub fn </span>step(
-<a href=#728 id=728 data-nosnippet>728</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#729 id=729 data-nosnippet>729</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#730 id=730 data-nosnippet>730</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
-<a href=#731 id=731 data-nosnippet>731</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3Cache) {
-<a href=#732 id=732 data-nosnippet>732</a>            <span class="kw">let </span>[batch, _d_model] = input_bd.dims();
-<a href=#733 id=733 data-nosnippet>733</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#734 id=734 data-nosnippet>734</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
-<a href=#735 id=735 data-nosnippet>735</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
-<a href=#736 id=736 data-nosnippet>736</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#737 id=737 data-nosnippet>737</a>            <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
-<a href=#738 id=738 data-nosnippet>738</a>            <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
-<a href=#739 id=739 data-nosnippet>739</a>            <span class="kw">let </span>device = input_bd.device();
-<a href=#740 id=740 data-nosnippet>740</a>
-<a href=#741 id=741 data-nosnippet>741</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
-<a href=#742 id=742 data-nosnippet>742</a>
-<a href=#743 id=743 data-nosnippet>743</a>            <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
-<a href=#744 id=744 data-nosnippet>744</a>            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
-<a href=#745 id=745 data-nosnippet>745</a>            </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
-<a href=#746 id=746 data-nosnippet>746</a>
-<a href=#747 id=747 data-nosnippet>747</a>            <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
-<a href=#748 id=748 data-nosnippet>748</a>            </span><span class="kw">match </span>cache {
-<a href=#749 id=749 data-nosnippet>749</a>                Mamba3Cache::DoubleSsd(cache) =&gt; {
-<a href=#750 id=750 data-nosnippet>750</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_double_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
-<a href=#751 id=751 data-nosnippet>751</a>                    (out_bsm, cache.into())
-<a href=#752 id=752 data-nosnippet>752</a>                }
-<a href=#753 id=753 data-nosnippet>753</a>                Mamba3Cache::SingleSsd(cache) =&gt; {
-<a href=#754 id=754 data-nosnippet>754</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_single_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
-<a href=#755 id=755 data-nosnippet>755</a>                    (out_bsm, cache.into())
-<a href=#756 id=756 data-nosnippet>756</a>                }
-<a href=#757 id=757 data-nosnippet>757</a>            }
-<a href=#758 id=758 data-nosnippet>758</a>        }
-<a href=#759 id=759 data-nosnippet>759</a>    }
-<a href=#760 id=760 data-nosnippet>760</a>}
+<a href=#640 id=640 data-nosnippet>640</a>        <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
+<a href=#641 id=641 data-nosnippet>641</a>        // A missing cache implies the single-ssd pathway (both rotation kinds are
+<a href=#642 id=642 data-nosnippet>642</a>        // supported there; see [`forward_single_ssd`]).
+<a href=#643 id=643 data-nosnippet>643</a>        </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
+<a href=#644 id=644 data-nosnippet>644</a>
+<a href=#645 id=645 data-nosnippet>645</a>        <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
+<a href=#646 id=646 data-nosnippet>646</a>        </span><span class="kw">match </span>cache {
+<a href=#647 id=647 data-nosnippet>647</a>            Mamba3Cache::DoubleSsd(cache) =&gt; {
+<a href=#648 id=648 data-nosnippet>648</a>                <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.forward_double_ssd(input_bsm, <span class="prelude-val">Some</span>(cache), <span class="kw-2">&amp;</span>ssd_path);
+<a href=#649 id=649 data-nosnippet>649</a>                (out_bsm, cache.into())
+<a href=#650 id=650 data-nosnippet>650</a>            }
+<a href=#651 id=651 data-nosnippet>651</a>            Mamba3Cache::SingleSsd(cache) =&gt; {
+<a href=#652 id=652 data-nosnippet>652</a>                <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.forward_single_ssd(input_bsm, <span class="prelude-val">Some</span>(cache), <span class="kw-2">&amp;</span>ssd_path);
+<a href=#653 id=653 data-nosnippet>653</a>                (out_bsm, cache.into())
+<a href=#654 id=654 data-nosnippet>654</a>            }
+<a href=#655 id=655 data-nosnippet>655</a>        }
+<a href=#656 id=656 data-nosnippet>656</a>    }
+<a href=#657 id=657 data-nosnippet>657</a>
+<a href=#658 id=658 data-nosnippet>658</a>    <span class="doccomment">/// Build the default per-call cache (single-ssd pathway, for either rotation
+<a href=#659 id=659 data-nosnippet>659</a>    /// kind). The rotation accumulator is the matching [`RotationState`] variant.
+<a href=#660 id=660 data-nosnippet>660</a>    </span><span class="kw">fn </span>zero_cache(<span class="kw-2">&amp;</span><span class="self">self</span>, batch: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3Cache {
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#662 id=662 data-nosnippet>662</a>        <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#663 id=663 data-nosnippet>663</a>        <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#664 id=664 data-nosnippet>664</a>        <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#665 id=665 data-nosnippet>665</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
+<a href=#666 id=666 data-nosnippet>666</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
+<a href=#667 id=667 data-nosnippet>667</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+<a href=#668 id=668 data-nosnippet>668</a>        <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
+<a href=#669 id=669 data-nosnippet>669</a>            RotationKind::Quaternion4D =&gt; {
+<a href=#670 id=670 data-nosnippet>670</a>                RotationState::identity_quaternion(batch, nheads, <span class="self">self</span>.num_quat_blocks, device)
+<a href=#671 id=671 data-nosnippet>671</a>            }
+<a href=#672 id=672 data-nosnippet>672</a>            RotationKind::Complex2D =&gt; {
+<a href=#673 id=673 data-nosnippet>673</a>                RotationState::zeros_angle(batch, nheads, <span class="self">self</span>.num_rope_angles, device)
+<a href=#674 id=674 data-nosnippet>674</a>            }
+<a href=#675 id=675 data-nosnippet>675</a>        };
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="kw">crate</span>::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
+<a href=#677 id=677 data-nosnippet>677</a>            ssm_bhpr,
+<a href=#678 id=678 data-nosnippet>678</a>            k_state_bmhr,
+<a href=#679 id=679 data-nosnippet>679</a>            v_state_bhp,
+<a href=#680 id=680 data-nosnippet>680</a>            rotation,
+<a href=#681 id=681 data-nosnippet>681</a>        }
+<a href=#682 id=682 data-nosnippet>682</a>        .into()
+<a href=#683 id=683 data-nosnippet>683</a>    }
+<a href=#684 id=684 data-nosnippet>684</a>}
+<a href=#685 id=685 data-nosnippet>685</a>
+<a href=#686 id=686 data-nosnippet>686</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#687 id=687 data-nosnippet>687</a>// Mamba3::step  (recurrent SSM — token-by-token decoding)
+<a href=#688 id=688 data-nosnippet>688</a>// ---------------------------------------------------------------------------
+<a href=#689 id=689 data-nosnippet>689</a>
+<a href=#690 id=690 data-nosnippet>690</a></span><span class="kw">mod </span>step {
+<a href=#691 id=691 data-nosnippet>691</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#692 id=692 data-nosnippet>692</a>
+<a href=#693 id=693 data-nosnippet>693</a>    <span class="kw">impl </span>Mamba3 {
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent form.
+<a href=#695 id=695 data-nosnippet>695</a>        ///
+<a href=#696 id=696 data-nosnippet>696</a>        /// For SISO (mimo_rank=1):
+<a href=#697 id=697 data-nosnippet>697</a>        /// ```text
+<a href=#698 id=698 data-nosnippet>698</a>        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
+<a href=#699 id=699 data-nosnippet>699</a>        ///   yₜ = Cₜᵀ hₜ + D xₜ
+<a href=#700 id=700 data-nosnippet>700</a>        /// ```
+<a href=#701 id=701 data-nosnippet>701</a>        ///
+<a href=#702 id=702 data-nosnippet>702</a>        /// For MIMO (mimo_rank&gt;1):
+<a href=#703 id=703 data-nosnippet>703</a>        /// ```text
+<a href=#704 id=704 data-nosnippet>704</a>        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
+<a href=#705 id=705 data-nosnippet>705</a>        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
+<a href=#706 id=706 data-nosnippet>706</a>        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
+<a href=#707 id=707 data-nosnippet>707</a>        /// ```
+<a href=#708 id=708 data-nosnippet>708</a>        ///
+<a href=#709 id=709 data-nosnippet>709</a>        /// # Shapes
+<a href=#710 id=710 data-nosnippet>710</a>        /// - `input_bd` : `[batch, d_model]`
+<a href=#711 id=711 data-nosnippet>711</a>        /// - output     : `[batch, d_model]`
+<a href=#712 id=712 data-nosnippet>712</a>        </span><span class="attr">#[allow(non_snake_case)]
+<a href=#713 id=713 data-nosnippet>713</a>        </span><span class="kw">pub fn </span>step(
+<a href=#714 id=714 data-nosnippet>714</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#715 id=715 data-nosnippet>715</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#716 id=716 data-nosnippet>716</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
+<a href=#717 id=717 data-nosnippet>717</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3Cache) {
+<a href=#718 id=718 data-nosnippet>718</a>            <span class="kw">let </span>[batch, _d_model] = input_bd.dims();
+<a href=#719 id=719 data-nosnippet>719</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#720 id=720 data-nosnippet>720</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
+<a href=#721 id=721 data-nosnippet>721</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#722 id=722 data-nosnippet>722</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#723 id=723 data-nosnippet>723</a>            <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
+<a href=#724 id=724 data-nosnippet>724</a>            <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#725 id=725 data-nosnippet>725</a>            <span class="kw">let </span>device = input_bd.device();
+<a href=#726 id=726 data-nosnippet>726</a>
+<a href=#727 id=727 data-nosnippet>727</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
+<a href=#728 id=728 data-nosnippet>728</a>
+<a href=#729 id=729 data-nosnippet>729</a>            <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
+<a href=#730 id=730 data-nosnippet>730</a>            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
+<a href=#731 id=731 data-nosnippet>731</a>            </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
+<a href=#732 id=732 data-nosnippet>732</a>
+<a href=#733 id=733 data-nosnippet>733</a>            <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
+<a href=#734 id=734 data-nosnippet>734</a>            </span><span class="kw">match </span>cache {
+<a href=#735 id=735 data-nosnippet>735</a>                Mamba3Cache::DoubleSsd(cache) =&gt; {
+<a href=#736 id=736 data-nosnippet>736</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_double_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
+<a href=#737 id=737 data-nosnippet>737</a>                    (out_bsm, cache.into())
+<a href=#738 id=738 data-nosnippet>738</a>                }
+<a href=#739 id=739 data-nosnippet>739</a>                Mamba3Cache::SingleSsd(cache) =&gt; {
+<a href=#740 id=740 data-nosnippet>740</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_single_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
+<a href=#741 id=741 data-nosnippet>741</a>                    (out_bsm, cache.into())
+<a href=#742 id=742 data-nosnippet>742</a>                }
+<a href=#743 id=743 data-nosnippet>743</a>            }
+<a href=#744 id=744 data-nosnippet>744</a>        }
+<a href=#745 id=745 data-nosnippet>745</a>    }
+<a href=#746 id=746 data-nosnippet>746</a>}
 </code></pre></div></section></main></body></html>
