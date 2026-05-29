@@ -57,7 +57,7 @@ cargo run --example mnist-class --features "backend-cuda" -- --training --infere
 
 The structure lists the files within the project. `refs/` and `doc/` are **external
 reference material** (paper TeX, official Python implementation, third-party
-minimal impl) and are intentionally not analyzed here — see
+minimal impl, burn) and are intentionally not analyzed here — see
 [Extra References](#extra-references).
 
 ```text
@@ -101,9 +101,11 @@ minimal impl) and are intentionally not analyzed here — see
 │       ├── model.rs                   # model_config(rotation): tiny MyMamba3Network config with .with_rotation()
 │       └── training.rs                # train()/epoch_train/epoch_valid + Wrap (cross-entropy classification over every position)
 ├── refs                               # EXTERNAL references (not analyzed)
-│   │── VikramLex/mamba3-minimal       # unofficial Mamba-3 minimal impl (grain of salt) — basis of the double-ssd decomposition
+│   │── VikramLex/mamba3-minimal       # unofficial Mamba-3 minimal impl — basis of the double-ssd 
+decomposition
 │   │── mamba-3-paper                  # Mamba-3 paper TeX project
-│   └── state-spaces/mamba             # official Mamba-1/2/3 Python implementation (authoritative)
+│   │── state-spaces/mamba             # official Mamba-1/2/3 Python implementation (authoritative)
+│   └── burn                           # burn dependency source code
 ├── src
 │   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
 │   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
@@ -638,3 +640,4 @@ notation tables tailored to that file — consult them first when editing.
   MIMO kernels here are the reference for the single-ssd path.
 - **Mamba-3 minimal** (unofficial):
   `refs/VikramLex/mamba3-minimal/` — the basis of the double-ssd decomposition.
+- **Burn**: `refs/burn/`.
