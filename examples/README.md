@@ -4,6 +4,7 @@
 
 - `fibonacci`: Very small Mamba-2 model training on a fibonacci-like sequence.
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
+- `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
 
 #### Examples Structure
 

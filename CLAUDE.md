@@ -93,9 +93,13 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine-annealing LR; inference is a stub
 │   │   ├── model.rs                   # model_config() for the classifier
 │   │   └── training.rs                # training entry (classification head on last timestep)
-│   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (self-contained, tiny model, manual train loop)
+│   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (tiny Mamba-3, uses common/ harness)
 │       ├── README.md
-│       └── main.rs                    # A₅ enumerate/compose + dataset + Mamba3 net (in_proj→Mamba3Layers→out_proj) + manual AdamW loop; --rotation complex|quaternion
+│       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (one-hot generators → per-position running-product class)
+│       ├── inference.rs               # loads trained model, reports per-token eval accuracy (the Complex2D vs Quaternion4D headline)
+│       ├── main.rs                    # launch(): parses --rotation (via extra_args) → model_config(rotation); wires Device + train/infer flow
+│       ├── model.rs                   # model_config(rotation): tiny MyMamba3Network config with .with_rotation()
+│       └── training.rs                # train()/epoch_train/epoch_valid + Wrap (cross-entropy classification over every position)
 ├── refs                               # EXTERNAL references (not analyzed)
 │   │── VikramLex/mamba3-minimal       # unofficial Mamba-3 minimal impl (grain of salt) — basis of the double-ssd decomposition
 │   │── mamba-3-paper                  # Mamba-3 paper TeX project
@@ -517,14 +521,15 @@ matching the runtime dtype),
 (`ModelConfigExt`; `MyMamba2Network` / `MyMamba3Network` = `in_proj` → `Layers`
 → `out_proj`, plus the `*_block_config`/`*_layers_config` builders and the
 bidirectional wrappers), and `mnist/` (sequential-MNIST dataset). Each concrete
-example (`fibonacci/`, `mnist-class/`) supplies its own
+example (`fibonacci/`, `mnist-class/`, `state-tracking/`) supplies its own
 `main.rs` (`launch()`), `model.rs` (`model_config()`), `training.rs`, and—where
 relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo;
 `mnist-class` is a Mamba-3 sequential-MNIST classifier (inference is a stub).
-`state-tracking` is **self-contained** (does not use `common/`): a tiny Mamba-3
-classifier on the `A₅` word problem with a manual train loop, used to contrast
-the abelian `Complex2D` rotation against the non-abelian `Quaternion4D`
-(`--rotation complex|quaternion`).
+`state-tracking` is a tiny Mamba-3 classifier on the `A₅` word problem (a
+per-position 60-way running-product head), used to contrast the abelian
+`Complex2D` rotation against the non-abelian `Quaternion4D`; its `model_config`
+takes the rotation, which `launch()` parses from the harness `extra_args`
+(forwarded after the trailing `--`: `-- --rotation complex|quaternion`).
 The training dataloader must be built with `.set_device(autodiff_device)` so its
 batches live on the same (autodiff) backend as the model weights; the validation
 loader uses the inner device.

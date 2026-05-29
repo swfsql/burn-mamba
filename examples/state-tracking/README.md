@@ -1,6 +1,6 @@
 # State tracking on A₅ — abelian RoPE vs. quaternion rotation
 
-A self-contained demo of the capability gap that motivates the **quaternion**
+A demo of the capability gap that motivates the **quaternion**
 (`RotationKind::Quaternion4D`) rotation versus Mamba-3's default **abelian**
 (`RotationKind::Complex2D`, `SO(2)`/complex RoPE) rotation.
 
@@ -14,24 +14,37 @@ abelian (`SO(2)`) transitions is confined to the solvable / `TC⁰` regime and
 cannot track it; the non-abelian `SU(2)` quaternion rotation can represent the
 binary icosahedral group `2I = SL(2,5)` (a double cover of `A₅`), so it can.
 
-This example is intentionally minimal — one file, a hand-rolled training loop
-(no `burn::train::Learner`, no dataloader), and a **tiny** model
-(fibonacci-scale) so it runs quickly on CPU.
+This example uses the shared example harness (`common/`), like `fibonacci` and
+`mnist-class`: a `dataset.rs` (the `A₅` generator/running-product dataset), a
+`model.rs` (`model_config(rotation)` over the common `MyMamba3Network`), a
+`training.rs` (cross-entropy over **every** position), an `inference.rs`
+(per-token eval accuracy), and a `main.rs` (`launch()`). The model is
+deliberately **tiny** (fibonacci-scale) so it runs quickly on CPU.
 
 ## Run
 
 ```bash
-cargo run --release --example state-tracking --features backend-flex -- --rotation complex
-cargo run --release --example state-tracking --features backend-flex -- --rotation quaternion
+# train + report eval accuracy; --rotation is forwarded after the trailing --
+cargo run --release --example state-tracking --features backend-flex -- --training --inference -- --rotation complex
+cargo run --release --example state-tracking --features backend-flex -- --training --inference -- --rotation quaternion
 ```
 
-Flags: `--rotation complex|quaternion` (default `complex`), `--epochs N`
-(default `30`).
+`--rotation complex|quaternion` (default `complex`) selects the rotation baked
+into a fresh model config; it is forwarded after the trailing `--` via the
+harness's `extra_args`. All the standard harness flags apply (`--training`,
+`--inference`, `--artifacts-path`, `--training-config`, `--model-config`,
+`--remove-artifacts`); see `common/cli.rs` `HELP`. Note that once a model config
+is persisted into an artifacts directory it wins on reload, so `--rotation` only
+takes effect when a *new* config is created (e.g. the default fresh temp dir).
 
-Compare the two final per-token accuracies. The quaternion run climbs above the
-complex run, which tends to plateau. For a wider, cleaner gap, run on GPU
-(`--features backend-cuda`) and scale up the model / sequence length / epochs in
-`main.rs` — this is a demonstration of the capability, not a tuned benchmark.
+Epochs / batch size / LR live in the (persisted) `TrainingConfig`; edit the
+defaults in `main.rs` or supply a `--training-config`.
+
+Compare the two final per-token accuracies. The quaternion run climbs well above
+the complex run, which tends to plateau near chance. For a wider, cleaner gap,
+scale the model / sequence length / `num_epochs` up and run on GPU
+(`--features backend-cuda`) — this is a demonstration of the capability, not a
+tuned benchmark.
 
 ## See also
 
