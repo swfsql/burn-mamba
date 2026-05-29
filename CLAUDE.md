@@ -178,7 +178,7 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
 │   │   │   ├── mod.rs
 │   │   │   ├── single_ssd.rs          # forward_single_ssd (scale + boundary-β seed); step_single_ssd (via double-ssd cache round-trip)
-│   │   │   ├── single_ssd/tests.rs     # unit tests for single_ssd.rs (forward/step parity, grads)
+│   │   │   ├── single_ssd/tests.rs     # unit tests for single_ssd.rs (forward/step parity, grads; incl. Quaternion4D single==double==step)
 │   │   │   └── ssd
 │   │   │       ├── minimal.rs
 │   │   │       ├── mod.rs
@@ -418,12 +418,16 @@ is unchanged. It is selected by `Mamba3Config.rotation: RotationKind`
 - forward/step branch on the kind via the shared `rotate_bc_forward` /
   `rotate_bc_step` helpers (materialise per-step quaternion `quat_from_scaled_axis`
   scaled by Δ → `quat_cumprod` continuing the cached carry → `rotate(·, conj(Q))`).
-- **Quaternion4D runs on the double-ssd pathway** (the verifiable reference): a
-  missing cache for a Quaternion4D block defaults to double-ssd, `step` round-trips
-  through it, and `forward_single_ssd` asserts Complex2D (its single-pass kernel
-  applies RoPE inline). The SSD kernels + custom backward are untouched.
-- Verified by `forward`==`step` parity for Quaternion4D (full/partial RoPE, MIMO),
-  alongside the standalone rotation-math tests.
+- **Quaternion4D runs on BOTH SSD pathways.** The rotation is applied to B/C
+  *before* chunking (it is `chunk_len`-agnostic), and the SSD core only consumes
+  the rotated `B̄`/`C̄`, so both `forward_double_ssd` and `forward_single_ssd`
+  apply the rotation via the shared `rotate_bc_forward` and feed an unchanged SSD
+  core. A missing cache defaults to **single-ssd** for either rotation kind (≈½
+  the SSD memory of double-ssd); `step` round-trips through the double-ssd
+  recurrence. The SSD kernels + custom backward are untouched.
+- Verified by Quaternion4D `forward_single_ssd`==`forward_double_ssd`==`step`
+  parity (values+grads; full/partial RoPE, MIMO), `forward`==`step` parity, and
+  the standalone rotation-math tests.
 
 #### Two SSD pathways — the central Mamba-3 design point
 

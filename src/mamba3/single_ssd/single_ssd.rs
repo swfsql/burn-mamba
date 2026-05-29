@@ -19,8 +19,8 @@
 //!
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
-use crate::mamba3::double_ssd::double_ssd::{apply_rope_partial, wrap_angle};
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
@@ -60,13 +60,6 @@ impl Mamba3 {
 
         assert!(sequence > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
-        // The single-pass kernel applies the abelian RoPE inline; the quaternion
-        // rotation is realised only by the double-ssd pathway (the block routes a
-        // Quaternion4D config to double-ssd by default).
-        assert!(
-            !self.rotation_is_quaternion,
-            "forward_single_ssd does not support RotationKind::Quaternion4D; use the double-ssd pathway"
-        );
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
@@ -74,7 +67,11 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let rotation = RotationState::zeros_angle(batch, nheads, num_rope_angles, &device);
+            let rotation = if self.rotation_is_quaternion {
+                RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, &device)
+            } else {
+                RotationState::zeros_angle(batch, nheads, num_rope_angles, &device)
+            };
             Mamba3SingleSsdCache {
                 ssm_bhpr,
                 k_state_bmhr,
@@ -92,14 +89,14 @@ impl Mamba3 {
                 z_bsi, x_bsi,
                 b_raw_bsMGR, c_raw_bsMGR,
                 dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
-                theta_bsa
+                rot_bsa
         ] = crate::utils::split::split_into(
             proj_bsd,
             [
                 d_inner, d_inner,
                 bc_size, bc_size,
                 nheads, nheads, nheads,
-                num_rope_angles,
+                self.num_rotation_channels,
             ],
             2,
         );
@@ -169,28 +166,21 @@ impl Mamba3 {
             nheads,
         );
 
-        // ── Step 5: Data-dependent cumulative RoPE angles ─────────────────────
-        let theta_scaled_bsa = theta_bsa.tanh() * std::f32::consts::PI;
-        let raw_angles_bsha =
-            dt_bsh.clone().unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
-        let cumsum_bsha = raw_angles_bsha.cumsum(1);
-        let cum_angles_bsha =
-            cache.rotation.clone().angle().unsqueeze_dim::<4>(1) + cumsum_bsha;
-        san(&cum_angles_bsha);
-
-        let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
-            batch,
-            sequence,
-            mimo_rank,
-            nheads,
-            num_rope_angles,
-        ]);
-
-        let rotate_pairwise = mimo_rank == 1;
-        let rope_dim = self.rope_dim;
-        let b_bsmhr =
-            apply_rope_partial::<5>(b_bsmhr, cum_angles_bsmha.clone(), rope_dim, rotate_pairwise);
-        let c_bsmhr = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+        // ── Step 5: Data-dependent positional rotation of B and C ─────────────
+        // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
+        // unit quaternion. Shared with the double-ssd pathway via
+        // [`rotate_bc_forward`]; the single-pass SSD core below is
+        // rotation-agnostic — it only ever consumes the rotated B̄/C̄ (the RoPE
+        // factoring `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ` holds for either algebra).
+        let (b_bsmhr, c_bsmhr, new_rotation) = rotate_bc_forward(
+            rot_bsa,
+            dt_bsh.clone(),
+            cache.rotation.clone(),
+            b_bsmhr,
+            c_bsmhr,
+            self.rotation_kind(),
+            self.rope_dim,
+        );
         san(&b_bsmhr);
         san(&c_bsmhr);
 
@@ -352,14 +342,10 @@ impl Mamba3 {
         // ── Update remaining cache fields ─────────────────────────────────────
         cache.k_state_bmhr = b_last_bmhr;
         cache.v_state_bhp = x_last_bhp;
-        // Wrapped to [−π, π] so the accumulator stays bounded across a continued
-        // sequence (see [`wrap_angle`]); matches the double-ssd cache convention
-        // so the two caches still inter-convert via field identity.
-        cache.rotation = RotationState::Angle(wrap_angle(
-            cum_angles_bsha
-                .narrow(1, sequence - 1, 1)
-                .squeeze_dim::<3>(1),
-        ));
+        // The new cumulative rotation (Complex2D: angle wrapped to [−π, π];
+        // Quaternion4D: the cumulative quaternion), from [`rotate_bc_forward`] —
+        // matches the double-ssd cache convention so the two inter-convert.
+        cache.rotation = new_rotation;
 
         (out_bsm, cache)
     }

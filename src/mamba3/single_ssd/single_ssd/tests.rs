@@ -1,7 +1,7 @@
 use super::*;
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3Config;
-use crate::mamba3::rotation::RotationState;
+use crate::mamba3::rotation::{RotationKind, RotationState};
 use burn::module::Param;
 use burn::tensor::Distribution;
 
@@ -874,4 +874,132 @@ fn cache_conversion_parity_ngroups2() {
 #[test]
 fn cache_conversion_parity_mimo_ngroups2() {
     run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+// ── Quaternion4D on the single-ssd pathway ──────────────────────────────
+//
+// The single-pass SSD core is rotation-agnostic (it consumes the rotated
+// B̄/C̄), so once `forward_single_ssd` applies the quaternion rotation it must
+// match `forward_double_ssd` (the verified reference pathway) and the recurrent
+// `step`. Both runs start from a fresh (None) cache — each builds its own fresh
+// cache (identity quaternion, zero state/history), which are logically identical
+// across pathways, so no manual cross-cache construction is needed.
+
+fn cfg_quat() -> Mamba3Config {
+    Mamba3Config::new(32)
+        .with_state_rank(8) // multiple of 4 (required by Quaternion4D)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(1.0)
+        .with_rotation(RotationKind::Quaternion4D)
+}
+
+fn cfg_quat_mimo() -> Mamba3Config {
+    cfg_quat().with_mimo_rank(2)
+}
+
+fn cfg_quat_partial() -> Mamba3Config {
+    Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(0.5)
+        .with_rotation(RotationKind::Quaternion4D)
+}
+
+/// Quaternion4D: `forward_single_ssd ≡ forward_double_ssd` on values and
+/// gradients, both from a fresh cache.
+fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+    let device: Device = Default::default();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 5;
+    let d_model = cfg.d_model;
+    let normal = Distribution::Normal(0.0, 1.0);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+
+    let path_d = ssd_path.clone();
+    let r_double = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
+        m.forward_double_ssd(x, None, &path_d).0
+    });
+    let path_s = ssd_path;
+    let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
+        m.forward_single_ssd(x, None, &path_s).0
+    });
+
+    let diff = (r_double.out.clone() - r_single.out.clone())
+        .abs()
+        .max()
+        .into_scalar::<f32>();
+    assert!(
+        diff < 1e-4,
+        "quaternion forward_single_ssd vs forward_double_ssd max abs diff = {diff:.6}"
+    );
+    check_grads_match("quaternion single vs double", &r_double, &r_single, 1e-3);
+}
+
+/// Quaternion4D: `forward_single_ssd ≡ step_single_ssd` unrolling, both fresh.
+fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+    let device: Device = Default::default();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 5;
+    let d_model = cfg.d_model;
+    let normal = Distribution::Normal(0.0, 1.0);
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+
+    let path_s = ssd_path;
+    let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
+        m.forward_single_ssd(x, None, &path_s).0
+    });
+    let r_step = run_with_grads(&model, &param_input(&input), &head, |m, x| {
+        let mut cache: Option<Mamba3SingleSsdCache> = None;
+        let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
+        for t in 0..seq_len {
+            let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
+            let (out_t, new_cache) = m.step_single_ssd(token, cache);
+            cache = Some(new_cache);
+            outs.push(out_t);
+        }
+        Tensor::stack(outs, 1)
+    });
+
+    let diff = (r_single.out.clone() - r_step.out.clone())
+        .abs()
+        .max()
+        .into_scalar::<f32>();
+    assert!(
+        diff < 1e-4,
+        "quaternion forward_single_ssd vs step max abs diff = {diff:.6}"
+    );
+    check_grads_match("quaternion single vs step", &r_single, &r_step, 1e-3);
+}
+
+#[test]
+fn quaternion_single_matches_double_full_rope() {
+    quaternion_single_matches_double(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+#[test]
+fn quaternion_single_matches_double_partial_rope() {
+    quaternion_single_matches_double(cfg_quat_partial(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+#[test]
+fn quaternion_single_matches_double_mimo() {
+    quaternion_single_matches_double(cfg_quat_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+#[test]
+fn quaternion_single_matches_step_full_rope() {
+    quaternion_single_matches_step(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+#[test]
+fn quaternion_single_matches_step_mimo() {
+    quaternion_single_matches_step(cfg_quat_mimo(), Mamba3SsdPath::Minimal(Some(4)));
 }

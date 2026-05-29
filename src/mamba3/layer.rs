@@ -177,16 +177,11 @@ impl Mamba3Layers {
         let n_virtual_layers = self.n_virtual_count();
 
         // Lazily allocate zero caches the first time (e.g. during training or
-        // the first prefill call). The quaternion rotation is realised only by
-        // the double-ssd pathway, so default to it when the block uses it.
+        // the first prefill call). The single-ssd pathway supports both rotation
+        // kinds (see `Mamba3::forward_single_ssd`).
         let caches = caches.unwrap_or_else(|| {
-            if self.real_layers[0].mamba_block.rotation_is_quaternion {
-                self.make_zero_caches_double_ssd_3d(&x, n_virtual_layers)
-                    .into()
-            } else {
-                self.make_zero_caches_single_ssd_3d(&x, n_virtual_layers)
-                    .into()
-            }
+            self.make_zero_caches_single_ssd_3d(&x, n_virtual_layers)
+                .into()
         });
 
         assert_eq!(
@@ -245,16 +240,11 @@ impl Mamba3Layers {
     ) -> (Tensor<2>, Mamba3Caches) {
         let n_virtual_layers = self.n_virtual_count();
 
-        // Lazily allocate zero caches the first time. Quaternion rotation runs
-        // on the double-ssd pathway (see `forward`).
+        // Lazily allocate zero caches the first time. The single-ssd pathway
+        // supports both rotation kinds (see `Mamba3::forward_single_ssd`).
         let caches = caches.unwrap_or_else(|| {
-            if self.real_layers[0].mamba_block.rotation_is_quaternion {
-                self.make_zero_caches_double_ssd_2d(&x, n_virtual_layers)
-                    .into()
-            } else {
-                self.make_zero_caches_single_ssd_2d(&x, n_virtual_layers)
-                    .into()
-            }
+            self.make_zero_caches_single_ssd_2d(&x, n_virtual_layers)
+                .into()
         });
 
         assert_eq!(

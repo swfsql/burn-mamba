@@ -372,10 +372,13 @@ form), ≈ half the training memory of double-ssd.
   both pathway caches, a `#[derive(Module)]` enum). `Mamba3Config::d_in_proj`
   branches via `num_rotation_channels` (`num_rope_angles` for Complex2D,
   `3·num_quat_blocks` quaternion generators for Quaternion4D). `forward`/`step`
-  branch on the kind via `rotate_bc_forward`/`rotate_bc_step`; `Quaternion4D`
-  runs on the double-ssd pathway (default cache for a Quaternion4D block is
-  double-ssd; `forward_single_ssd` asserts Complex2D). Verified by Quaternion4D
-  `forward`==`step` parity (full/partial RoPE, MIMO).
+  branch on the kind via `rotate_bc_forward`/`rotate_bc_step`. `Quaternion4D`
+  runs on **both** SSD pathways: the rotation is applied to B/C before chunking
+  (`chunk_len`-agnostic) and the SSD core only sees the rotated `B̄`/`C̄`, so
+  `forward_single_ssd` (≈½ memory) and `forward_double_ssd` both call the shared
+  `rotate_bc_forward`; a missing cache defaults to single-ssd. Verified by
+  Quaternion4D `single==double==step` parity (values+grads; full/partial RoPE,
+  MIMO).
 - Key properties, proved by the tests: the RoPE *factoring*
   (`Cₜᵀ(Rₜ⋯Rᵢ₊₁)Bᵢ = C̄ₜᵀB̄ᵢ`) survives **non-commutativity** (so the
   scalar-decay SSD core is unchanged; only `cumsum`→scan changes), and the `k=2`

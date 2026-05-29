@@ -642,9 +642,8 @@ impl Mamba3 {
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        // Implies single-ssd pathway if missing — except for the quaternion
-        // rotation, which is realised only by the double-ssd pathway (see
-        // [`forward_single_ssd`]).
+        // A missing cache implies the single-ssd pathway (both rotation kinds are
+        // supported there; see [`forward_single_ssd`]).
         let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
         // ── SSD Pathway Selection ─────────────────────────────────────────────
@@ -660,10 +659,8 @@ impl Mamba3 {
         }
     }
 
-    /// Build the default per-call cache: single-ssd for the abelian rotation,
-    /// double-ssd for [`RotationKind::Quaternion4D`] (the only pathway that
-    /// realises the quaternion rotation). The rotation accumulator is the
-    /// matching [`RotationState`] variant.
+    /// Build the default per-call cache (single-ssd pathway, for either rotation
+    /// kind). The rotation accumulator is the matching [`RotationState`] variant.
     fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
         let nheads = self.nheads();
         let per_head_dim = self.per_head_dim();
@@ -677,23 +674,13 @@ impl Mamba3 {
         } else {
             RotationState::zeros_angle(batch, nheads, self.num_rope_angles, device)
         };
-        if self.rotation_is_quaternion {
-            crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache {
-                ssm_bhpr,
-                k_state_bmhr,
-                v_state_bhp,
-                rotation,
-            }
-            .into()
-        } else {
-            crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
-                ssm_bhpr,
-                k_state_bmhr,
-                v_state_bhp,
-                rotation,
-            }
-            .into()
+        crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
+            ssm_bhpr,
+            k_state_bmhr,
+            v_state_bhp,
+            rotation,
         }
+        .into()
     }
 }
 
