@@ -361,35 +361,53 @@ pub fn rotate_state_rank_blocks<const D: usize, const DB: usize>(
 /// equal to running it over the whole sequence (asserted in the tests) — the
 /// chunked-prefill / streaming guarantee, here for the rotation accumulator.
 ///
-/// Implemented as a readable sequential scan (the reference); an `O(log T)`
-/// associative parallel scan computes the same values.
-pub fn quat_cumprod(
-    q_bshj4: Tensor<5>,
-    init: Option<Tensor<4>>,
-) -> (Tensor<5>, Tensor<4>) {
+/// Implemented as a **Hillis–Steele** inclusive associative scan: the quaternion
+/// product is associative (just not commutative), so a log-depth scan applies as
+/// long as operand order is preserved (newest-on-left). Each doubling step is a
+/// single full-tensor [`quat_mul`] plus a sequence shift, so the *sequential
+/// dependency depth* is `O(log sequence)` rather than the `O(sequence)` of a
+/// token-by-token loop — the same values, but a handful of large batched kernels
+/// instead of thousands of serialized tiny ones (and a correspondingly shallow
+/// autodiff graph). The sequential reference it replaces is kept as a test oracle
+/// (`quat_cumprod_sequential` in the tests module) and asserted equal on values
+/// **and** gradients.
+pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, Tensor<4>) {
     let [batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
     let device = q_bshj4.device();
 
-    // Carry as [batch, nheads, J, 4]; default = identity quaternion (1,0,0,0).
-    let carry0 = init.unwrap_or_else(|| {
-        let w = Tensor::ones([batch, nheads, blocks, 1], &device);
-        let xyz = Tensor::zeros([batch, nheads, blocks, 3], &device);
-        Tensor::cat(vec![w, xyz], 3)
-    });
-    assert_eq!([batch, nheads, blocks, 4], carry0.dims());
-
-    // Promote the carry to a sequence slice [batch, 1, nheads, J, 4].
-    let mut carry = carry0.unsqueeze_dim::<5>(1);
-    let mut cums: Vec<Tensor<5>> = Vec::with_capacity(sequence);
-    for t in 0..sequence {
-        let q_t = q_bshj4.clone().narrow(1, t, 1); // [batch, 1, nheads, J, 4]
-        let cur = quat_mul(q_t, carry); // qₜ ⊗ (running product)
-        carry = cur.clone();
-        cums.push(cur);
+    // Pure prefix product Pₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ by Hillis–Steele doubling.
+    // Invariant after each step with offset `d`: a[t] holds the product of the
+    // window [t .. max(t-2d+1, 0)] (newest on the left). After ⌈log₂ sequence⌉
+    // doublings the window covers [t .. 0], i.e. a[t] = Pₜ.
+    let mut a = q_bshj4;
+    let mut offset = 1usize;
+    while offset < sequence {
+        // shifted[t] = a[t-offset] for t ≥ offset, else the identity quaternion
+        // (1,0,0,0) — so the first `offset` prefixes pass through unchanged
+        // (a ⊗ identity = a).
+        let ident = {
+            let w = Tensor::ones([batch, offset, nheads, blocks, 1], &device);
+            let xyz = Tensor::zeros([batch, offset, nheads, blocks, 3], &device);
+            Tensor::cat(vec![w, xyz], 4)
+        };
+        let shifted = Tensor::cat(vec![ident, a.clone()], 1).narrow(1, 0, sequence);
+        // Recent block (a) on the left, older block (shifted) on the right.
+        a = quat_mul(a, shifted);
+        offset *= 2;
     }
 
-    let cum = Tensor::cat(cums, 1); // [batch, sequence, nheads, J, 4]
-    let final_carry = carry.squeeze_dim::<4>(1); // [batch, nheads, J, 4]
+    // Fold the cross-chunk carry once: cumₜ = Pₜ ⊗ init. `init` (the previous
+    // chunk's final cumulative rotation) is the oldest factor, hence on the
+    // right; a missing carry is the identity and needs no multiply.
+    let cum = match init {
+        Some(init_bhj4) => {
+            assert_eq!([batch, nheads, blocks, 4], init_bhj4.dims());
+            quat_mul(a, init_bhj4.unsqueeze_dim::<5>(1)) // [batch, 1, nheads, J, 4] broadcasts over seq
+        }
+        None => a,
+    };
+
+    let final_carry = cum.clone().narrow(1, sequence - 1, 1).squeeze_dim::<4>(1); // [batch, nheads, J, 4]
     (cum, final_carry)
 }
 

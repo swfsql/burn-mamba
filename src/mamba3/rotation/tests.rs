@@ -262,6 +262,102 @@ fn cumprod_split_equals_full() {
 }
 
 // ---------------------------------------------------------------------------
+// 3b. Parallel scan == sequential oracle (values + grads)
+//
+// `quat_cumprod` is the Hillis–Steele log-depth scan; `quat_cumprod_sequential`
+// below is the readable token-by-token reference it replaced. They must agree
+// exactly (it is the same associative product, just a different evaluation
+// order), on both values and gradients — this pins the fast path to the oracle.
+// ---------------------------------------------------------------------------
+
+/// Sequential (O(sequence)) reference for [`quat_cumprod`]: a token-by-token
+/// running product `cumₜ = qₜ ⊗ cumₜ₋₁` seeded with the carry. Kept only as the
+/// test oracle for the parallel scan.
+fn quat_cumprod_sequential(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, Tensor<4>) {
+    let [batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
+    let device = q_bshj4.device();
+
+    let carry0 = init.unwrap_or_else(|| {
+        let w = Tensor::<4>::ones([batch, nheads, blocks, 1], &device);
+        let xyz = Tensor::<4>::zeros([batch, nheads, blocks, 3], &device);
+        Tensor::cat(vec![w, xyz], 3)
+    });
+    assert_eq!([batch, nheads, blocks, 4], carry0.dims());
+
+    let mut carry = carry0.unsqueeze_dim::<5>(1); // [batch, 1, nheads, J, 4]
+    let mut cums: Vec<Tensor<5>> = Vec::with_capacity(sequence);
+    for t in 0..sequence {
+        let q_t = q_bshj4.clone().narrow(1, t, 1);
+        let cur = quat_mul(q_t, carry); // qₜ ⊗ (running product)
+        carry = cur.clone();
+        cums.push(cur);
+    }
+    let cum = Tensor::cat(cums, 1);
+    let final_carry = carry.squeeze_dim::<4>(1);
+    (cum, final_carry)
+}
+
+#[test]
+fn cumprod_parallel_matches_sequential_values() {
+    let device: Device = Default::default();
+    // A non-power-of-two sequence exercises the identity-padded shift edges.
+    let (batch, sequence, nheads, blocks) = (2, 13, 3, 2);
+    let q = quat_normalize(Tensor::<5>::random(
+        [batch, sequence, nheads, blocks, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    ));
+
+    // Fresh start and a continued (random unit) carry.
+    for init in [None, Some(quat_normalize(Tensor::<4>::random(
+        [batch, nheads, blocks, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    )))] {
+        let (cum_par, fin_par) = quat_cumprod(q.clone(), init.clone());
+        let (cum_seq, fin_seq) = quat_cumprod_sequential(q.clone(), init);
+        let dc = max_abs_diff(cum_par, cum_seq);
+        let df = max_abs_diff(fin_par, fin_seq);
+        assert!(dc < VAL_TOL, "parallel vs sequential cum: {dc:.6}");
+        assert!(df < VAL_TOL, "parallel vs sequential final carry: {df:.6}");
+    }
+}
+
+#[test]
+fn cumprod_parallel_matches_sequential_grads() {
+    let device: Device = Default::default();
+    let (batch, sequence, nheads, blocks) = (2, 11, 2, 2);
+    let q_raw = Tensor::<5>::random(
+        [batch, sequence, nheads, blocks, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let head = Tensor::<5>::random(
+        [batch, sequence, nheads, blocks, 4],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // Backprop a scalar loss on `cum` through each scan; the input gradient on
+    // the (normalised) quaternion must match.
+    let grad_for = |parallel: bool| -> Tensor<5> {
+        let p = Param::from_tensor(Tensor::from_inner(q_raw.clone()));
+        let q = quat_normalize(p.val());
+        let (cum, _final) = if parallel {
+            quat_cumprod(q, None)
+        } else {
+            quat_cumprod_sequential(q, None)
+        };
+        let loss = (cum * Tensor::from_inner(head.clone())).sum();
+        let grads = loss.backward();
+        p.val().grad(&grads).expect("grad q_raw")
+    };
+
+    let d = max_abs_diff(grad_for(true), grad_for(false));
+    assert!(d < GRAD_TOL, "parallel vs sequential cum grad: {d:.6} (tol {GRAD_TOL})");
+}
+
+// ---------------------------------------------------------------------------
 // 4. Abelian collapse: single-axis quaternions ⇒ cumsum of half-angles (RoPE)
 // ---------------------------------------------------------------------------
 
