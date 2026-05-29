@@ -9,75 +9,165 @@
 //!
 //! The default body runs under a generic backend `B`, where the high-level
 //! [`Tensor`] (pinned to `Dispatch`) is unavailable, so the quaternion algebra
-//! goes through the rank-tagged [`F`] primitive wrapper. The same primitive
-//! helpers ([`fquat_mul`], [`fquat_conj`], [`fquat_prefix_product`]) are reused
-//! by the recompute backward.
+//! goes through the rank-tagged [`F`] primitive wrapper, held in a
+//! struct-of-arrays [`Quat`] (the four components as separate tensors) so the
+//! Hamilton product is narrow/cat-free on the hot path. The same [`Quat`] helper
+//! and [`quat_prefix_product_soa`] are reused by the recompute backward.
 
 #![allow(non_snake_case)]
 
 use crate::utils::fprim::F;
-use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
-use burn::backend::{Backend, Dispatch, backend_extension};
+use burn::backend::tensor::{Device, FloatTensor};
+use burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
 use burn::tensor::Tensor;
 
 // ---------------------------------------------------------------------------
-// Primitive quaternion algebra (rank-5: [batch, sequence, nheads, blocks, 4])
+// Primitive quaternion algebra — struct-of-arrays (SoA)
 // ---------------------------------------------------------------------------
+//
+// The scan's workhorse is the Hamilton product, run ~10× in the forward prefix
+// product and again in the backward. Holding a quaternion as one packed
+// `[…, 4]` tensor forces every product to `narrow` out the four components and
+// `cat` them back — fusion-breaking ops (strided reads + a concat kernel) on the
+// hottest path. Instead, [`Quat`] keeps the four components `(w, x, y, z)` as
+// separate `[batch, sequence, nheads, blocks]` tensors threaded through the
+// whole scan; the product is then pure (fusible) element-wise arithmetic with no
+// narrow/cat. Packing to/from the `[…, 4]` layout happens once, at the
+// boundaries ([`Quat::from_rank5`] / [`Quat::pack`]). This is also the layout a
+// future custom kernel would use (w,x,y,z in registers).
 
-/// Hamilton product `a ⊗ b` on the trailing `(w, x, y, z)` axis (axis 4), the
-/// primitive-`F` analogue of [`crate::mamba3::rotation::quat_mul`]. Broadcasts
-/// over the leading dims, so a `[b,1,h,j,4]` carry multiplies a `[b,s,h,j,4]`
-/// sequence.
-pub(crate) fn fquat_mul<B: Backend>(a: F<B, 5>, b: F<B, 5>) -> F<B, 5> {
-    let aw = a.clone().narrow(4, 0, 1);
-    let ax = a.clone().narrow(4, 1, 1);
-    let ay = a.clone().narrow(4, 2, 1);
-    let az = a.narrow(4, 3, 1);
-    let bw = b.clone().narrow(4, 0, 1);
-    let bx = b.clone().narrow(4, 1, 1);
-    let by = b.clone().narrow(4, 2, 1);
-    let bz = b.narrow(4, 3, 1);
-
-    let w = aw.clone() * bw.clone() - ax.clone() * bx.clone() - ay.clone() * by.clone()
-        - az.clone() * bz.clone();
-    let x = aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
-        - az.clone() * by.clone();
-    let y = aw.clone() * by.clone() - ax.clone() * bz.clone() + ay.clone() * bw.clone()
-        + az.clone() * bx.clone();
-    let z = aw * bz + ax * by - ay * bx + az * bw;
-
-    F::cat(vec![w, x, y, z], 4)
+/// A quaternion field in struct-of-arrays form: the four components
+/// `(w, x, y, z)` as separate rank-4 `[batch, sequence, nheads, blocks]` tensors
+/// (a leading seq-length of `1` broadcasts, e.g. the carry).
+pub(crate) struct Quat<B: Backend> {
+    /// Real part `w`.
+    pub w: F<B, 4>,
+    /// Imaginary `x`.
+    pub x: F<B, 4>,
+    /// Imaginary `y`.
+    pub y: F<B, 4>,
+    /// Imaginary `z`.
+    pub z: F<B, 4>,
 }
 
-/// Quaternion conjugate `q* = (w, −x, −y, −z)` on axis 4 (primitive-`F` analogue
-/// of [`crate::mamba3::rotation::quat_conj`]). For a unit quaternion `q* = q⁻¹`.
-pub(crate) fn fquat_conj<B: Backend>(q: F<B, 5>) -> F<B, 5> {
-    let w = q.clone().narrow(4, 0, 1);
-    let xyz = q.narrow(4, 1, 3);
-    F::cat(vec![w, -xyz], 4)
+impl<B: Backend> Clone for Quat<B> {
+    fn clone(&self) -> Self {
+        Quat {
+            w: self.w.clone(),
+            x: self.x.clone(),
+            y: self.y.clone(),
+            z: self.z.clone(),
+        }
+    }
+}
+
+impl<B: Backend> Quat<B> {
+    /// Unpack a packed `[batch, sequence, nheads, blocks, 4]` tensor into SoA
+    /// components (the only `narrow`s in the scan — done once at entry).
+    pub fn from_rank5(q_bshj4: F<B, 5>) -> Self {
+        let w = q_bshj4.clone().narrow(4, 0, 1).squeeze_dim::<4>(4);
+        let x = q_bshj4.clone().narrow(4, 1, 1).squeeze_dim::<4>(4);
+        let y = q_bshj4.clone().narrow(4, 2, 1).squeeze_dim::<4>(4);
+        let z = q_bshj4.narrow(4, 3, 1).squeeze_dim::<4>(4);
+        Quat { w, x, y, z }
+    }
+
+    /// Pack SoA components back into a `[batch, sequence, nheads, blocks, 4]`
+    /// tensor (the only `cat` in the scan — done once at exit).
+    pub fn pack(self) -> F<B, 5> {
+        F::cat(
+            vec![
+                self.w.unsqueeze_dim::<5>(4),
+                self.x.unsqueeze_dim::<5>(4),
+                self.y.unsqueeze_dim::<5>(4),
+                self.z.unsqueeze_dim::<5>(4),
+            ],
+            4,
+        )
+    }
+
+    /// Identity quaternion `(1, 0, 0, 0)` of the given component shape.
+    pub fn identity(shape: [usize; 4], device: &Device<B>, dtype: FloatDType) -> Self {
+        let zero = F::<B, 4>::zeros(shape, device, dtype);
+        Quat {
+            w: F::<B, 4>::full(shape, 1.0, device, dtype),
+            x: zero.clone(),
+            y: zero.clone(),
+            z: zero,
+        }
+    }
+
+    /// Hamilton product `self ⊗ other` (pure element-wise; no narrow/cat).
+    /// Broadcasts over the leading dims, so a `[b,1,h,j]` carry multiplies a
+    /// `[b,s,h,j]` sequence.
+    pub fn mul(self, other: Quat<B>) -> Quat<B> {
+        let Quat { w: aw, x: ax, y: ay, z: az } = self;
+        let Quat { w: bw, x: bx, y: by, z: bz } = other;
+        Quat {
+            w: aw.clone() * bw.clone() - ax.clone() * bx.clone() - ay.clone() * by.clone()
+                - az.clone() * bz.clone(),
+            x: aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
+                - az.clone() * by.clone(),
+            y: aw.clone() * by.clone() - ax.clone() * bz.clone() + ay.clone() * bw.clone()
+                + az.clone() * bx.clone(),
+            z: aw * bz + ax * by - ay * bx + az * bw,
+        }
+    }
+
+    /// Quaternion conjugate `(w, −x, −y, −z)`. For a unit quaternion `q* = q⁻¹`.
+    pub fn conj(self) -> Quat<B> {
+        Quat {
+            w: self.w,
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+        }
+    }
+
+    /// Prepend `ident` along the sequence axis and re-narrow to `sequence` — the
+    /// Hillis–Steile shift `shifted[t] = self[t-offset]` (identity before the
+    /// start), with `offset = ident`'s sequence length.
+    pub fn shift_prepend(self, ident: Quat<B>, sequence: usize) -> Quat<B> {
+        let shift = |head: F<B, 4>, tail: F<B, 4>| F::cat(vec![head, tail], 1).narrow(1, 0, sequence);
+        Quat {
+            w: shift(ident.w, self.w),
+            x: shift(ident.x, self.x),
+            y: shift(ident.y, self.y),
+            z: shift(ident.z, self.z),
+        }
+    }
+
+    /// Inclusive **suffix**-sum along the sequence axis (`out[t] = Σ_{s≥t} in[s]`),
+    /// per component — `flip → cumsum → flip`. Used by the backward's `S[t]`.
+    pub fn reverse_cumsum_seq(self) -> Quat<B> {
+        let rc = |t: F<B, 4>| t.flip(&[1]).cumsum(1).flip(&[1]);
+        Quat {
+            w: rc(self.w),
+            x: rc(self.x),
+            y: rc(self.y),
+            z: rc(self.z),
+        }
+    }
 }
 
 /// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the sequence
-/// axis (axis 1), via the same Hillis–Steele doubling as
-/// [`crate::mamba3::rotation::quat_cumprod`] — `O(log seq)` dependency depth.
+/// axis, via Hillis–Steele doubling — `O(log seq)` dependency depth, all on SoA
+/// [`Quat`] components (no per-step narrow/cat).
 ///
-/// The carry is folded in by the caller (one extra [`fquat_mul`]); keeping `P`
+/// The carry is folded in by the caller (one extra [`Quat::mul`]); keeping `P`
 /// separate is what the recompute backward needs (`G[t] = P[t] ⊗ S[t]`).
-pub(crate) fn fquat_prefix_product<B: Backend>(q_bshj4: F<B, 5>) -> F<B, 5> {
-    let [batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
-    let device = q_bshj4.device();
-    let dtype = q_bshj4.dtype();
+pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
+    let [batch, sequence, nheads, blocks] = q.w.dims();
+    let device = q.w.device();
+    let dtype = q.w.dtype();
 
-    let mut a = q_bshj4;
+    let mut a = q;
     let mut offset = 1usize;
     while offset < sequence {
-        // identity quaternion (1,0,0,0) for the first `offset` (shifted-past-start) slots.
-        let w = F::<B, 5>::full([batch, offset, nheads, blocks, 1], 1.0, &device, dtype);
-        let xyz = F::<B, 5>::zeros([batch, offset, nheads, blocks, 3], &device, dtype);
-        let ident = F::cat(vec![w, xyz], 4);
-        let shifted = F::cat(vec![ident, a.clone()], 1).narrow(1, 0, sequence);
-        a = fquat_mul::<B>(a, shifted); // recent (a) ⊗ older (shifted)
+        let ident = Quat::<B>::identity([batch, offset, nheads, blocks], &device, dtype);
+        let shifted = a.clone().shift_prepend(ident, sequence);
+        a = a.mul(shifted); // recent (a) ⊗ older (shifted)
         offset *= 2;
     }
     a
@@ -123,13 +213,13 @@ pub trait Mamba3QuatScanBackendExt: Backend {
         q_bshj4: FloatTensor<Self>,
         init_bhj4: FloatTensor<Self>,
     ) -> FloatTensor<Self> {
-        let q = F::<Self, 5>::new(q_bshj4);
-        let init = F::<Self, 4>::new(init_bhj4);
+        let q = Quat::from_rank5(F::<Self, 5>::new(q_bshj4));
+        // Carry as a 1-long sequence [batch, 1, nheads, blocks, 4] → SoA, broadcasts over seq.
+        let init = Quat::from_rank5(F::<Self, 4>::new(init_bhj4).unsqueeze_dim::<5>(1));
 
-        let p_bshj4 = fquat_prefix_product::<Self>(q);
-        let init5_b1hj4 = init.unsqueeze_dim::<5>(1); // [batch, 1, nheads, blocks, 4]
-        let cum_bshj4 = fquat_mul::<Self>(p_bshj4, init5_b1hj4); // broadcasts over seq
-        cum_bshj4.inner()
+        let p = quat_prefix_product_soa::<Self>(q);
+        let cum = p.mul(init); // cum[t] = Pₜ ⊗ init
+        cum.pack().inner()
     }
 }
 

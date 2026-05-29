@@ -169,8 +169,8 @@ minimal impl) and are intentionally not analyzed here — see
 │   │   ├── network.rs                 # Mamba3Network (full LM; tied/untied LM head, vocab padding)
 │   │   ├── quat_scan                  # memory-efficient quaternion cumprod scan: recompute custom backward (SerialRecalculated-style) for the Quaternion4D rotation scan
 │   │   │   ├── mod.rs
-│   │   │   ├── quat_scan.rs           # Mamba3QuatScanBackendExt (default body = Hillis-Steele scan on F primitives) + fquat_mul/conj/prefix_product + quat_cumprod_recalculated (high-level wrapper; final_carry = autodiff slice of cum)
-│   │   │   ├── backward.rs            # Autodiff custom Backward node: saves only q+init, recomputes prefix product, exact unit-quaternion VJP (G=P⊗S, S=reverse-cumsum of conj(P)⊗d_cum; d_q=G⊗conj(cum_prev), d_init=S[0])
+│   │   │   ├── quat_scan.rs           # Mamba3QuatScanBackendExt (default body = Hillis-Steele scan) + Quat struct-of-arrays (w,x,y,z separate tensors; narrow/cat-free Hamilton product) + quat_prefix_product_soa + quat_cumprod_recalculated (high-level wrapper; final_carry = autodiff slice of cum)
+│   │   │   ├── backward.rs            # Autodiff custom Backward node: saves only q+init, recomputes prefix product, exact unit-quaternion VJP (G=P⊗S, S=reverse-cumsum of conj(P)⊗d_cum; d_q=G⊗conj(cum_prev), d_init=S[0]); all on Quat SoA
 │   │   │   └── tests.rs               # recalculated == quat_cumprod on values+grads
 │   │   ├── rotation.rs                # quaternion (k=4) non-abelian RoPE: RotationKind (config switch) / RotationState (cache accumulator) + quat algebra, scaled-axis materialise, parallel (Hillis-Steele) cumprod scan + carry, B̄/C̄ rotation, and the rotate_bc_forward/step helpers (forward delegates the scan to quat_scan's recompute backward); wired into both forward/step
 │   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, k=2↔production apply_rope, cross-chunk carry, abelian→cumsum collapse, non-commutativity, SO(4) orthogonality/homomorphism, scaled-axis materialise, config sizing + RotationState, Quaternion4D block forward==step parity)

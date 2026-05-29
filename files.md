@@ -389,18 +389,22 @@ form), ≈ half the training memory of double-ssd.
   `rotation.rs::quat_cumprod` is fast but retains `O(log seq)` *full-sequence*
   intermediates for backward; this module recomputes them instead.
 - `quat_scan.rs`: `Mamba3QuatScanBackendExt` (a `#[backend_extension]` trait
-  whose default body runs the scan on `F<B,5>` primitives via `fquat_mul` /
-  `fquat_conj` / `fquat_prefix_product`), the per-backend impls, and the
-  high-level `quat_cumprod_recalculated(q, init) -> (cum, final_carry)` wrapper.
+  whose default body runs the scan via the `Quat` **struct-of-arrays** helper —
+  the four components `(w,x,y,z)` as separate tensors, so the Hamilton product is
+  fusible element-wise arithmetic with no per-step `narrow`/`cat`; pack/unpack to
+  the `[…,4]` layout happens once at the boundaries), `quat_prefix_product_soa`,
+  the per-backend impls, and the high-level
+  `quat_cumprod_recalculated(q, init) -> (cum, final_carry)` wrapper.
   The node has a **single output** `cum`; `final_carry = cum[:, −1]` is a thin
   autodiff slice, so its gradient folds into `cum`'s before the node runs (no
   `combined_grad` two-output plumbing needed).
 - `backward.rs`: the `Autodiff<B>` custom `Backward<B, 2>` node — saves only the
   two leaves (`q`, `init`), recomputes the prefix product `P`, and evaluates the
-  **exact unit-quaternion VJP** with parallel ops only: `S[t] = Σ_{s≥t} conj(Pₛ)
-  ⊗ d_cum[s]` (a reverse-cumsum), `G = P ⊗ S`, `d_q[t] = G[t] ⊗ conj(cum[t−1])`,
-  `d_init = S[0]`. No token loop, so the memory saving doesn't buy back a slow
-  backward. Tests assert it equals `quat_cumprod` on values **and** gradients.
+  **exact unit-quaternion VJP** with parallel ops only (all on the `Quat` SoA):
+  `S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s]` (a reverse-cumsum), `G = P ⊗ S`,
+  `d_q[t] = G[t] ⊗ conj(cum[t−1])`, `d_init = S[0]`. No token loop, so the memory
+  saving doesn't buy back a slow backward. Tests assert it equals `quat_cumprod`
+  on values **and** gradients.
 
 ### `mamba3/layer.rs`
 - `struct Mamba3Layers` / `Mamba3Layer` — same shape as Mamba-2 (virtual

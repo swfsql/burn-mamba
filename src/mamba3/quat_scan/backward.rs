@@ -38,7 +38,7 @@
 
 #![allow(non_snake_case)]
 
-use super::quat_scan::{Mamba3QuatScanBackendExt, fquat_conj, fquat_mul, fquat_prefix_product};
+use super::quat_scan::{Mamba3QuatScanBackendExt, Quat, quat_prefix_product_soa};
 use crate::utils::fprim::F;
 use burn::backend::autodiff::{
     Autodiff,
@@ -61,35 +61,30 @@ fn quat_scan_backward<B: Backend>(
     init_bhj4: F<B, 4>,
     d_cum_bshj4: F<B, 5>,
 ) -> (F<B, 5>, F<B, 4>) {
-    let [_batch, sequence, _nheads, _blocks, _four] = q_bshj4.dims();
+    // Unpack to struct-of-arrays once; all the heavy math is narrow/cat-free.
+    let q = Quat::from_rank5(q_bshj4);
+    let init = Quat::from_rank5(init_bhj4.unsqueeze_dim::<5>(1)); // [b,1,h,j] components
+    let d_cum = Quat::from_rank5(d_cum_bshj4);
+    let sequence = q.w.dims()[1];
 
     // Pₜ = qₜ ⊗ … ⊗ q₀ (prefix product, no carry) — recomputed, not stored.
-    let p_bshj4 = fquat_prefix_product::<B>(q_bshj4);
+    let p = quat_prefix_product_soa::<B>(q);
 
     // cum[t] = Pₜ ⊗ init (broadcast over the sequence axis).
-    let init5_b1hj4 = init_bhj4.unsqueeze_dim::<5>(1);
-    let cum_bshj4 = fquat_mul::<B>(p_bshj4.clone(), init5_b1hj4.clone());
+    let cum = p.clone().mul(init.clone());
 
-    // S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s] — suffix-sum via flip → cumsum → flip.
-    let term_bshj4 = fquat_mul::<B>(fquat_conj::<B>(p_bshj4.clone()), d_cum_bshj4);
-    let s_bshj4 = term_bshj4.flip(&[1]).cumsum(1).flip(&[1]);
+    // S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s] — suffix-sum (reverse cumsum) per component.
+    let s = p.clone().conj().mul(d_cum).reverse_cumsum_seq();
 
     // G[t] = Pₜ ⊗ S[t].
-    let g_bshj4 = fquat_mul::<B>(p_bshj4, s_bshj4.clone());
+    let g = p.mul(s.clone());
 
-    // cum_prev[t] = cum[t-1]; cum_prev[0] = init.
-    let cum_prev_bshj4 = if sequence == 1 {
-        init5_b1hj4
-    } else {
-        F::cat(
-            vec![init5_b1hj4, cum_bshj4.narrow(1, 0, sequence - 1)],
-            1,
-        )
-    };
+    // cum_prev[t] = cum[t-1]; cum_prev[0] = init (prepend init, drop the last).
+    let cum_prev = cum.shift_prepend(init, sequence);
 
     // d_q[t] = G[t] ⊗ conj(cum_prev[t]);  d_init = S[0].
-    let d_q_bshj4 = fquat_mul::<B>(g_bshj4, fquat_conj::<B>(cum_prev_bshj4));
-    let d_init_bhj4 = s_bshj4.narrow(1, 0, 1).squeeze_dim::<4>(1);
+    let d_q_bshj4 = g.mul(cum_prev.conj()).pack();
+    let d_init_bhj4 = s.pack().narrow(1, 0, 1).squeeze_dim::<4>(1);
 
     (d_q_bshj4, d_init_bhj4)
 }
