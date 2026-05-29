@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["quat_scan_backward"]};
