@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["make_zero_caches_double_ssd_2d","make_zero_caches_double_ssd_3d","make_zero_caches_single_ssd_2d","make_zero_caches_single_ssd_3d"],"struct":["Mamba3Layer","Mamba3LayerConfig","Mamba3LayerRecord","Mamba3LayerRecordItem","Mamba3Layers","Mamba3LayersConfig","Mamba3LayersRecord","Mamba3LayersRecordItem"]};

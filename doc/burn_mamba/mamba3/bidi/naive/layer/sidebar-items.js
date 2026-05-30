@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba3BidiLayerPair","Mamba3BidiLayerPairConfig","Mamba3BidiLayerPairRecord","Mamba3BidiLayerPairRecordItem","Mamba3BidiLayers","Mamba3BidiLayersConfig","Mamba3BidiLayersRecord","Mamba3BidiLayersRecordItem"]};
