@@ -91,6 +91,12 @@ minimal impl, burn) and are intentionally not analyzed here — see
 │   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine-annealing LR; inference is a stub
 │   │   ├── model.rs                   # model_config() for the classifier
 │   │   └── training.rs                # training entry (classification head on last timestep)
+│   ├── mnist-ae                       # sequential-MNIST autoencoder: symmetric bidi Mamba-3, latent bottleneck → MAE-style decoder
+│   │   ├── README.md
+│   │   ├── inference.rs               # reconstruct a few test images, print original vs reconstruction as ASCII art
+│   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine LR; parses `-- --latents N`
+│   │   ├── model.rs                   # AeModel/AeConfig: bidi encoder → mean-pool → z; z+posemb → bidi decoder; model_config(n_latent)
+│   │   └── training.rs                # Wrap + TrainStep/InferenceStep (BCE-from-logits reconstruction); train/epoch loops
 │   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (tiny Mamba-3, uses common/ harness)
 │       ├── README.md
 │       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (leading reference/anchor token + one-hot generators → per-position running-product class)
