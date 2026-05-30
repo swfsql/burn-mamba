@@ -15,7 +15,7 @@
 use crate::schedule::{BidiSchedule, Schedule};
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::config::Config;
-use burn::nn::{Linear, LinearConfig};
+use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
 
 // ===========================================================================
@@ -328,6 +328,121 @@ impl<C: MambaBlockConfig> LatentNetworkBuilder<C> {
 }
 
 // ===========================================================================
+// VocabNetwork<M>
+// ===========================================================================
+
+/// A complete autoregressive language model over a token vocabulary:
+/// `Embedding (vocab → d_model) → Layers<M> → norm_f → LM head (d_model →
+/// vocab)`.
+///
+/// This is the token-LM counterpart of [`LatentNetwork`]; both are built on the
+/// shared [`Layers`] core. The only differences are the I/O boundary (a token
+/// `Embedding` and a vocab logit head, instead of two latent `Linear`s) and a
+/// final pre-head [`RmsNorm`].
+///
+/// The LM head is **tied** (`lm_head = None`, the transposed embedding weight is
+/// reused) or **untied** (a dedicated `Linear`); the vocabulary is rounded up to
+/// a multiple for GPU alignment (see [`VocabNetworkBuilder`]).
+#[derive(Module, Debug)]
+pub struct VocabNetwork<M: Module> {
+    /// Token embedding table, weight shape `[padded_vocab, d_model]`.
+    pub embedding: Embedding,
+    /// The shared Mamba-x layer stack.
+    pub layers: Layers<M>,
+    /// Final RMSNorm applied before the LM head (`norm_f`).
+    pub norm_f: RmsNorm,
+    /// Optional dedicated LM head. `None` ⇒ weight-tied (reuse embedding`ᵀ`).
+    pub lm_head: Option<Linear>,
+}
+
+impl<M: MambaBlock> VocabNetwork<M>
+where
+    M::SsdPath: Clone,
+{
+    /// Full-sequence pass: token IDs `[batch, sequence]` → logits
+    /// `[batch, sequence, padded_vocab]`.
+    pub fn forward(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches) {
+        let x = self.embedding.forward(x);
+        let (x, caches) = self.layers.forward(x, caches, ssd_path);
+        let x = self.norm_f.forward(x);
+        (self.apply_lm_head(x), caches)
+    }
+
+    /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
+    pub fn step(&self, x: Tensor<1, Int>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+        // Embed the single token via a temporary unit sequence axis.
+        let x = self.embedding.forward(x.unsqueeze_dim::<2>(1)).squeeze_dim(1);
+        let (x, caches) = self.layers.step(x, caches);
+        let x = self.norm_f.forward(x);
+        // Reuse the 3-D head by lifting/lowering the sequence axis.
+        let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
+        (logits, caches)
+    }
+
+    /// Project `[batch, sequence, d_model]` → `[batch, sequence, padded_vocab]`
+    /// using the dedicated head, or the tied (transposed embedding) weight.
+    fn apply_lm_head(&self, x: Tensor<3>) -> Tensor<3> {
+        if let Some(lm_head) = &self.lm_head {
+            lm_head.forward(x)
+        } else {
+            // Weight tying: reuse embedding.weight^T ([d_model, padded_vocab]).
+            let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
+            Linear { weight, bias: None }.forward(x)
+        }
+    }
+}
+
+/// Plain factory for [`VocabNetwork`]. Mirrors [`LatentNetworkBuilder`] but adds
+/// vocab padding and the tied/untied LM-head choice.
+pub struct VocabNetworkBuilder<C> {
+    /// Unpadded vocabulary size (rounded up at init).
+    pub vocab_size: usize,
+    /// Round `vocab_size` up to a multiple of this (1 disables rounding).
+    pub pad_vocab_size_multiple: usize,
+    /// Builder for the layer stack.
+    pub layers: LayersBuilder<C>,
+    /// When `true`, tie the LM head to the (transposed) embedding weights.
+    pub missing_lm_head: bool,
+}
+
+impl<C: MambaBlockConfig> VocabNetworkBuilder<C> {
+    /// Round `vocab_size` up to the next multiple of `multiple`.
+    fn padded_vocab(vocab_size: usize, multiple: usize) -> usize {
+        if vocab_size.is_multiple_of(multiple) {
+            vocab_size
+        } else {
+            ((vocab_size / multiple) + 1) * multiple
+        }
+    }
+
+    /// Allocate and initialise the network on `device`.
+    pub fn init(&self, device: &Device) -> VocabNetwork<C::Block> {
+        let d_model = self.layers.mamba_block.d_model();
+        let padded_vocab = Self::padded_vocab(self.vocab_size, self.pad_vocab_size_multiple);
+        let lm_head = if self.missing_lm_head {
+            None
+        } else {
+            Some(
+                LinearConfig::new(d_model, padded_vocab)
+                    .with_bias(false)
+                    .init(device),
+            )
+        };
+        VocabNetwork {
+            embedding: EmbeddingConfig::new(padded_vocab, d_model).init(device),
+            layers: self.layers.init(device),
+            norm_f: RmsNormConfig::new(d_model).init(device),
+            lm_head,
+        }
+    }
+}
+
+// ===========================================================================
 // Per-family impls
 // ===========================================================================
 
@@ -412,8 +527,35 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::layer::{make_zero_caches_single_ssd_2d, make_zero_caches_single_ssd_3d};
     use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
+    use crate::mamba3::single_ssd::prelude::{
+        Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches, Mamba3SingleSsdCachesConfig,
+    };
+
+    /// Zero single-ssd caches sized from a `[batch, sequence, d_model]` input.
+    /// (A missing cache defaults to the single-ssd pathway — ≈½ the SSD memory
+    /// of double-ssd — for either rotation kind.)
+    fn zero_single_ssd_caches(
+        mamba_block: &Mamba3,
+        batch: usize,
+        n_virtual: usize,
+        device: &Device,
+    ) -> Mamba3SingleSsdCaches {
+        Mamba3SingleSsdCachesConfig::new(
+            n_virtual,
+            Mamba3SingleSsdCacheConfig {
+                batch,
+                state_rank: mamba_block.state_rank,
+                num_rope_angles: mamba_block.num_rope_angles,
+                per_head_dim: mamba_block.per_head_dim(),
+                nheads: mamba_block.nheads(),
+                mimo_rank: mamba_block.mimo_rank,
+                rotation: mamba_block.rotation,
+                num_quat_blocks: mamba_block.num_quat_blocks,
+            },
+        )
+        .init(device)
+    }
 
     impl CacheStack for Mamba3Caches {
         type Cache = Mamba3Cache;
@@ -445,10 +587,12 @@ mod impl_mamba3 {
             self.step(x, cache)
         }
         fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba3Caches {
-            make_zero_caches_single_ssd_3d(self, x, n_virtual).into()
+            let [batch, _seq, _d] = x.dims();
+            zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()
         }
         fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba3Caches {
-            make_zero_caches_single_ssd_2d(self, x, n_virtual).into()
+            let [batch, _d] = x.dims();
+            zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()
         }
     }
 
@@ -1069,6 +1213,236 @@ impl MambaLatentNetConfig {
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
+                }
+                .init(device),
+            ),
+        }
+    }
+}
+
+/// A runtime-selectable token language model: the same `Embedding → Layers →
+/// norm_f → LM head` shape over any Mamba-x family, chosen at runtime. The
+/// vocabulary counterpart of [`MambaLatentNet`].
+#[derive(Module, Debug)]
+pub enum MambaVocabNet {
+    /// Mamba-1 language model.
+    #[cfg(feature = "mamba1")]
+    Mamba1(VocabNetwork<crate::mamba1::prelude::Mamba1>),
+    /// Mamba-2 language model.
+    #[cfg(feature = "mamba2")]
+    Mamba2(VocabNetwork<crate::mamba2::prelude::Mamba2>),
+    /// Mamba-3 language model.
+    #[cfg(feature = "mamba3")]
+    Mamba3(VocabNetwork<crate::mamba3::prelude::Mamba3>),
+}
+
+impl MambaVocabNet {
+    /// Full-sequence pass: token IDs `[batch, sequence]` → logits
+    /// `[batch, sequence, padded_vocab]`. The `ssd_path`/`caches` family must
+    /// match the network; a mismatch is a caller error and panics.
+    pub fn forward(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                match ssd_path {
+                    MambaSsdPath::Mamba1 => {}
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-1 network"),
+                }
+                let (y, c) = net.forward(x, caches, ());
+                (y, MambaCaches::Mamba1(c))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba2(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-2 network"),
+                };
+                let (y, c) = net.forward(x, caches, path);
+                (y, MambaCaches::Mamba2(c))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba3(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-3 network"),
+                };
+                let (y, c) = net.forward(x, caches, path);
+                (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
+    /// Cache family must match the network.
+    pub fn step(&self, x: Tensor<1, Int>, caches: Option<MambaCaches>) -> (Tensor<2>, MambaCaches) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                let (y, c) = net.step(x, caches);
+                (y, MambaCaches::Mamba1(c))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let (y, c) = net.step(x, caches);
+                (y, MambaCaches::Mamba2(c))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let (y, c) = net.step(x, caches);
+                (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+}
+
+/// The serializable, documentation-friendly config for [`MambaVocabNet`]. Each
+/// variant is concrete (per-family), so `#[derive(Config)]` applies; `init`
+/// builds the matching network variant.
+#[derive(Config, Debug)]
+pub enum MambaVocabNetConfig {
+    /// Build a Mamba-1 language model.
+    #[cfg(feature = "mamba1")]
+    Mamba1 {
+        /// Number of real layers.
+        n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
+        /// Unpadded vocabulary size.
+        vocab_size: usize,
+        /// Round `vocab_size` up to a multiple of this (1 disables rounding).
+        pad_vocab_size_multiple: usize,
+        /// Shared block config.
+        mamba_block: crate::mamba1::prelude::Mamba1Config,
+        /// Tie the LM head to the (transposed) embedding weights when `true`.
+        missing_lm_head: bool,
+    },
+    /// Build a Mamba-2 language model.
+    #[cfg(feature = "mamba2")]
+    Mamba2 {
+        /// Number of real layers.
+        n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
+        /// Unpadded vocabulary size.
+        vocab_size: usize,
+        /// Round `vocab_size` up to a multiple of this (1 disables rounding).
+        pad_vocab_size_multiple: usize,
+        /// Shared block config.
+        mamba_block: crate::mamba2::prelude::Mamba2Config,
+        /// Tie the LM head to the (transposed) embedding weights when `true`.
+        missing_lm_head: bool,
+    },
+    /// Build a Mamba-3 language model.
+    #[cfg(feature = "mamba3")]
+    Mamba3 {
+        /// Number of real layers.
+        n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
+        /// Unpadded vocabulary size.
+        vocab_size: usize,
+        /// Round `vocab_size` up to a multiple of this (1 disables rounding).
+        pad_vocab_size_multiple: usize,
+        /// Shared block config.
+        mamba_block: crate::mamba3::prelude::Mamba3Config,
+        /// Tie the LM head to the (transposed) embedding weights when `true`.
+        missing_lm_head: bool,
+    },
+}
+
+impl MambaVocabNetConfig {
+    /// Allocate and initialise the selected language model on `device`.
+    pub fn init(&self, device: &Device) -> MambaVocabNet {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1 {
+                n_real_layers,
+                n_virtual_layers,
+                vocab_size,
+                pad_vocab_size_multiple,
+                mamba_block,
+                missing_lm_head,
+            } => MambaVocabNet::Mamba1(
+                VocabNetworkBuilder {
+                    vocab_size: *vocab_size,
+                    pad_vocab_size_multiple: *pad_vocab_size_multiple,
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                    missing_lm_head: *missing_lm_head,
+                }
+                .init(device),
+            ),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2 {
+                n_real_layers,
+                n_virtual_layers,
+                vocab_size,
+                pad_vocab_size_multiple,
+                mamba_block,
+                missing_lm_head,
+            } => MambaVocabNet::Mamba2(
+                VocabNetworkBuilder {
+                    vocab_size: *vocab_size,
+                    pad_vocab_size_multiple: *pad_vocab_size_multiple,
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                    missing_lm_head: *missing_lm_head,
+                }
+                .init(device),
+            ),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3 {
+                n_real_layers,
+                n_virtual_layers,
+                vocab_size,
+                pad_vocab_size_multiple,
+                mamba_block,
+                missing_lm_head,
+            } => MambaVocabNet::Mamba3(
+                VocabNetworkBuilder {
+                    vocab_size: *vocab_size,
+                    pad_vocab_size_multiple: *pad_vocab_size_multiple,
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                    missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
             ),

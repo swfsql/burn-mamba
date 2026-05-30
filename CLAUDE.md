@@ -77,9 +77,7 @@ minimal impl, burn) and are intentionally not analyzed here — see
 │   │   │   └── mod.rs
 │   │   ├── mod.rs                     # re-exports the shared submodules
 │   │   ├── model
-│   │   │   ├── bidi.rs                # bidirectional wrapper networks (Mamba2/3 BidiLayers) for examples
-│   │   │   ├── mod.rs                 # ModelConfigExt (Config → Module factory); re-exports of the example networks
-│   │   │   └── model.rs               # MyMamba2Network / MyMamba3Network (in_proj → Layers → out_proj) + config helpers
+│   │   │   └── mod.rs                 # ModelConfigExt glue only (Config → Module); networks are the lib-generic MambaLatentNet/MambaVocabNet
 │   │   └── training.rs                # TrainingConfig + optimizer_config(dtype) helper
 │   ├── fibonacci                      # smallest example: Mamba-2 on a fibonacci-like synthetic sequence
 │   │   ├── README.md
@@ -98,7 +96,7 @@ minimal impl, burn) and are intentionally not analyzed here — see
 │       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (leading reference/anchor token + one-hot generators → per-position running-product class)
 │       ├── inference.rs               # loads trained model, reports per-token eval accuracy (the Complex2D vs Quaternion4D headline)
 │       ├── main.rs                    # launch(): parses --rotation (via extra_args) → model_config(rotation); wires Device + train/infer flow
-│       ├── model.rs                   # model_config(rotation): tiny MyMamba3Network config with .with_rotation()
+│       ├── model.rs                   # model_config(rotation): tiny MambaLatentNetConfig::Mamba3 with .with_rotation()
 │       └── training.rs                # train()/epoch_train/epoch_valid + Wrap (cross-entropy classification over every position)
 ├── refs                               # EXTERNAL references (not analyzed)
 │   │── VikramLex/mamba3-minimal       # unofficial Mamba-3 minimal impl — basis of the double-ssd 
@@ -108,26 +106,17 @@ decomposition
 │   └── burn                           # burn dependency source code
 ├── src
 │   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
+│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi
 │   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
 │   │   ├── cache.rs                   # Mamba1Cache(s): conv window (bik) + SSM state (bir), and configs
-│   │   ├── layer.rs                   # Mamba1Layer / Mamba1Layers (Pre-LN residual + virtual layers)
 │   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
 │   │   ├── mamba1/tests.rs            # unit tests for mamba1.rs (forward/step parity, grads)
-│   │   ├── mod.rs                     # module + prelude re-exports
-│   │   └── network.rs                 # Mamba1Network (embedding → Mamba1Layers → norm → LM head; cache-threaded)
+│   │   └── mod.rs                     # module + prelude re-exports (block + cache only)
 │   ├── mamba2                         # Mamba-2: Structured State Space Duality (SSD)
-│   │   ├── bidi
-│   │   │   ├── mod.rs
-│   │   │   └── naive
-│   │   │       ├── layer.rs           # Mamba2BidiLayers / Mamba2BidiLayerPair (forward + reversed pass)
-│   │   │       ├── mod.rs
-│   │   │       └── output_merge.rs    # OutputMerge: Mean | CatLinear merge of the two directions
 │   │   ├── cache.rs                   # Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
-│   │   ├── layer.rs                   # Mamba2Layer / Mamba2Layers (Pre-LN residual + virtual layers)
 │   │   ├── mamba2.rs                  # Mamba2 block + Mamba2Config; chunkwise forward() and recurrent step()
 │   │   ├── mamba2/tests.rs            # unit tests for mamba2.rs (forward/step parity, grads)
 │   │   ├── mod.rs                     # module + prelude (incl. Mamba2BackendExt, SsdPath/SsdInput)
-│   │   ├── network.rs                 # Mamba2Network (full LM)
 │   │   └── ssd                        # chunkwise SSD algorithms (the heart of Mamba-2)
 │   │       ├── minimal.rs             # matmul/segsum SSD; autodiff backward
 │   │       ├── mod.rs                 # re-exports backend-ext traits + SsdInput/SsdPath
@@ -141,12 +130,6 @@ decomposition
 │   │       ├── ssd_path.rs            # Mamba2SsdPath enum, Mamba2SsdInput struct, run() dispatch, optimal chunk_len
 │   │       └── ssd_path/tests.rs      # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
 │   ├── mamba3                         # Mamba-3: trapezoidal SSD + data-dependent RoPE + MIMO
-│   │   ├── bidi
-│   │   │   ├── mod.rs
-│   │   │   └── naive
-│   │   │       ├── layer.rs           # Mamba3BidiLayers / Mamba3BidiLayerPair
-│   │   │       ├── mod.rs
-│   │   │       └── output_merge.rs    # OutputMerge (Mean | CatLinear)
 │   │   ├── cache.rs                   # Mamba3Cache / Mamba3Caches ENUMS dispatching DoubleSsd vs SingleSsd
 │   │   ├── double_ssd                 # double-pass trapezoidal decomposition (γ-SSD + β-SSD); VikramLex-style
 │   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/rotation (RotationState: angle|quaternion; NO conv cache)
@@ -165,10 +148,8 @@ decomposition
 │   │   │       ├── ssd_path.rs        # Mamba3DoubleSsdPath / Mamba3DoubleSsdInput (v_bnlmhp, da, b/c_bnlmhr, …)
 │   │   │       └── ssd_path/tests.rs  # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
 │   │   ├── helpers.rs                 # shared forward/step helpers: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
-│   │   ├── layer.rs                   # Mamba3Layer / Mamba3Layers (Pre-LN residual, virtual layers, zero-cache factories)
 │   │   ├── mamba3.rs                  # Mamba3 block + Mamba3Config; forward()/step() dispatch by cache variant
 │   │   ├── mod.rs                     # module + prelude; Mamba3BackendExt aggregating both ssd ext traits (macros)
-│   │   ├── network.rs                 # Mamba3Network (full LM; tied/untied LM head, vocab padding)
 │   │   ├── quat_scan                  # memory-efficient quaternion cumprod scan: recompute custom backward (SerialRecalculated-style) for the Quaternion4D rotation scan
 │   │   │   ├── mod.rs
 │   │   │   ├── quat_scan.rs           # Mamba3QuatScanBackendExt (default body = Hillis-Steele scan) + Quat struct-of-arrays (w,x,y,z separate tensors; narrow/cat-free Hamilton product) + quat_prefix_product_soa + quat_cumprod_recalculated (high-level wrapper; final_carry = autodiff slice of cum)
@@ -311,9 +292,10 @@ Original selective SSM. `mamba1.rs`: in-projection → causal depthwise `conv1d`
 `x_proj`/`dt_proj` selective projections → a **sequential `selective_scan`**
 (ZOH for A, Euler for B) → SiLU gate → out-projection. `step()` is the
 single-token recurrence sharing the same cache (`conv_bik` window + `ssm_bir`
-state). Like Mamba-2/3, `Mamba1Layers` provides the Pre-LN residual stack with
-virtual-layer scheduling, and `Mamba1Network::forward`/`step` thread a
-`Mamba1Caches`.
+state). Like Mamba-2/3, Mamba-1 gets its Pre-LN residual stack, language-model
+network, and bidirectional wrappers from the family-generic types in
+`src/generic.rs` (`Layers<Mamba1>` / `VocabNetwork<Mamba1>` / `BidiLayers<Mamba1>`,
+threading a `Mamba1Caches`).
 
 ### Mamba-2 (`src/mamba2/`)
 

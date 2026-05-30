@@ -67,15 +67,16 @@ pub mod prelude {
     // The family-generic, runtime-selectable unified API.
     pub use crate::generic::{
         MambaBidiLayers, MambaBidiLayersConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig,
-        MambaSsdPath,
+        MambaSsdPath, MambaVocabNet, MambaVocabNetConfig,
     };
 }
 
 /// Shared activations, norms, losses, and custom-backward plumbing.
 pub mod utils;
 
-/// Family-generic Mamba abstraction: one `Layer`/`Layers`/`LatentNetwork`
-/// generic over the Mamba-x block, replacing the per-family copies.
+/// Family-generic Mamba abstraction: one `Layer`/`Layers`/`LatentNetwork`/
+/// `VocabNetwork`/`BidiLayers` generic over the Mamba-x block, replacing the
+/// per-family copies.
 pub mod generic;
 
 /// When `true`, [`utils::sanity::sanity`] panics if it observes a `NaN`.

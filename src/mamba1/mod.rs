@@ -1,24 +1,20 @@
 //! # Mamba-1
 //!
 //! The original selective state space model.  Mamba-1 runs a **sequential
-//! selective scan** (no SSD, no backend-extension trait, no bidirectional
-//! wrappers); it does share the [`layer`]-stack virtual scheduling and the
-//! cache-threaded [`network`] with Mamba-2/3.  See [`mamba1`] for the block.
+//! selective scan** (no SSD, no backend-extension trait).  See [`mamba1`] for
+//! the block; the residual layer stack, the full language model, and the
+//! bidirectional wrappers are the family-generic types in [`crate::generic`]
+//! (e.g. `MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
 //!
-//! - [`mamba1`] / [`layer`] / [`network`] — the block, the residual layer
-//!   stack, and the full language model.
+//! - [`mamba1`] — the selective-SSM block.
 //! - [`cache`] — the conv-window + SSM-state carried between calls.
 
 pub mod cache;
-pub mod layer;
 pub mod mamba1;
-pub mod network;
 
 /// Public re-exports for Mamba-1.
 pub mod prelude {
     use super::*;
     pub use cache::{Mamba1Cache, Mamba1CacheConfig, Mamba1Caches, Mamba1CachesConfig};
-    pub use layer::{Mamba1Layer, Mamba1LayerConfig, Mamba1Layers, Mamba1LayersConfig};
     pub use mamba1::{Mamba1, Mamba1Config};
-    pub use network::{Mamba1Network, Mamba1NetworkConfig};
 }

@@ -106,8 +106,9 @@ impl Mamba1CacheConfig {
 /// A collection of per-layer caches for a complete Mamba-1 network.
 ///
 /// During autoregressive decoding a [`Mamba1Caches`] instance is threaded
-/// through every call to [`Mamba1Layers::step`].  Each element corresponds to
-/// one (virtual) layer in the network.
+/// through every layer-stack `step` call (the family-generic
+/// [`crate::generic::Layers`]).  Each element corresponds to one (virtual) layer
+/// in the network.
 #[derive(Module, Debug)]
 pub struct Mamba1Caches {
     /// Per-layer caches.

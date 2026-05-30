@@ -38,8 +38,9 @@ use burn::prelude::*;
 /// A collection of per-layer caches for a complete Mamba-2 network.
 ///
 /// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
-/// through every call to [`Mamba2Layers::step`].  Each element
-/// of `caches` corresponds to one (virtual) layer in the network.
+/// through every layer-stack `step` call (the family-generic
+/// [`crate::generic::Layers`]).  Each element of `caches` corresponds to one
+/// (virtual) layer in the network.
 #[derive(Module, Debug)]
 pub struct Mamba2Caches {
     /// Per-layer caches.
