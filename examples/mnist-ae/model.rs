@@ -2,8 +2,11 @@
 //! autoencoder over the 784-pixel MNIST sequence.
 //!
 //! Both halves are [`MambaBidiLayers`] stacks of pure real Mamba-3 layers
-//! (`Complex2D` rotation). The encoder reads the image both ways, mean-pools the
-//! sequence, and projects to a small **latent** `z` (the configurable
+//! (`Complex2D` rotation). The encoder reads the image both ways and, **in place
+//! of mean-pooling**, splices a single learnable [`ClassLatent::Middle`] token
+//! into the middle of the sequence; after the bidi stack (where every position
+//! has seen the whole image) that token's output is read back out as the image
+//! summary and projected to a small **latent** `z` (the configurable
 //! bottleneck). The decoder is the interesting part: it reconstructs the whole
 //! image in **one parallel pass, reading only from `z`** — at every output
 //! position its input is a learned positional embedding plus the broadcast
@@ -22,11 +25,13 @@
 
 use crate::common::mnist::dataset::{HEIGHT, WIDTH};
 use crate::common::model::ModelConfigExt;
-use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
+use burn::module::Param;
+use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 use burn_mamba::generic::OutputMergeConfig;
 use burn_mamba::prelude::{
-    Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath, RotationKind,
+    ClassLatent, Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath,
+    RotationKind,
 };
 
 /// A symmetric bidirectional MNIST autoencoder (see the module docs).
@@ -60,14 +65,21 @@ impl AeModel {
     ///
     /// `img`: `[batch, sequence, input_size]` → `z`: `[batch, n_latent]`.
     pub fn encode(&self, img_bsi: Tensor<3>) -> Tensor<2> {
-        let [batch, _sequence, _input_size] = img_bsi.dims();
+        let [batch, sequence, _input_size] = img_bsi.dims();
         let h_bsd = self.enc_in_proj.forward(img_bsi); // [batch, sequence, d_model]
-        let (h_bsd, _caches) = self.enc_layers.forward(h_bsd, None, Self::ssd_path());
-        // Mean-pool over the sequence: with a bidi encoder every position has seen
-        // the whole image, so the average is an order-agnostic image summary.
-        let pooled = h_bsd.mean_dim(1).squeeze_dim::<2>(1); // [batch, d_model]
-        let z_bl = self.enc_to_z.forward(pooled);
-        let [batch_z, _n_latent] = z.dims();
+        // The bidi stack splices a `Middle` class latent (lengthening the
+        // sequence by one): `enc_out` is `[batch, sequence + 1, d_model]`.
+        let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::ssd_path());
+        // Read the summary out of the class-latent position — with a bidi encoder
+        // that token has attended to the whole image, so it is an order-agnostic
+        // summary (a learned alternative to mean-pooling). Fall back to mean-pool
+        // if no class latent is configured.
+        let pooled_bd = match self.enc_layers.class_latent_output_indices(sequence).first() {
+            Some(&i) => enc_out.narrow(1, i, 1).squeeze_dim::<2>(1), // [batch, d_model]
+            None => enc_out.mean_dim(1).squeeze_dim::<2>(1),
+        };
+        let z_bl = self.enc_to_z.forward(pooled_bd);
+        let [batch_z, _n_latent] = z_bl.dims();
         assert_eq!(batch, batch_z);
         z_bl
     }
@@ -76,16 +88,16 @@ impl AeModel {
     ///
     /// `z`: `[batch, n_latent]` → logits: `[batch, sequence, input_size]`.
     pub fn decode(&self, z_bl: Tensor<2>) -> Tensor<3> {
-        let [batch, _n_latent] = z_bl.dims();
+        let [_batch, _n_latent] = z_bl.dims();
 
         // Per-position learned queries: positions 0..sequence, the same for every
         // sample (they carry *where*, not *what*).
-        let pos_1sd = self.dec_pos_sd.val().unsqueeze_dim(0).expand(); // [1, sequence, d_model]
+        let pos_1sd = self.dec_pos_sd.val().unsqueeze_dim::<3>(0); // [1, sequence, d_model]
 
         // Inject the latent at every position (broadcast add). This is the only
         // sample-specific signal the decoder sees.
         let seed_b1d = self.z_to_dec.forward(z_bl).unsqueeze_dim::<3>(1); // [batch, 1, d_model]
-        let d_bsd = pos_1sd + seed_b1d; // [batch, sequence, d_model]
+        let d_bsd = pos_1sd + seed_b1d; // broadcast → [batch, sequence, d_model]
 
         let (d_bsd, _caches) = self.dec_layers.forward(d_bsd, None, Self::ssd_path());
         let logits_bsi = self.dec_out.forward(d_bsd); // [batch, sequence, input_size]
@@ -120,6 +132,9 @@ pub struct AeConfig {
     pub n_dec_layers: usize,
     /// Shared Mamba-3 block config for both stacks.
     pub mamba_block: Mamba3Config,
+    /// Encoder class latents, spliced into the sequence.
+    #[config(default = "Vec::new()")]
+    pub enc_class_latents: Vec<ClassLatent>,
 }
 
 impl AeConfig {
@@ -131,25 +146,32 @@ impl AeConfig {
         );
         let d = self.d_model;
 
+        // The encoder carries the class latents (its summary readout); the
+        // decoder reconstructs at the original resolution, so it has none.
         let enc_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_enc_layers,
             mamba_block: self.mamba_block.clone(),
             outputs_merge: OutputMergeConfig::mean(self.n_enc_layers),
+            class_latents: self.enc_class_latents.clone(),
         }
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_dec_layers,
             mamba_block: self.mamba_block.clone(),
             outputs_merge: OutputMergeConfig::mean(self.n_dec_layers),
+            class_latents: Vec::new(),
         }
         .init(device);
+
+        // Learned per-position decoder query embedding, `[sequence, d_model]`.
+        let dec_pos_sd = Initializer::Normal { mean: 0.0, std: 0.02 }.init([self.sequence, d], device);
 
         AeModel {
             enc_in_proj: LinearConfig::new(self.input_size, d).init(device),
             enc_layers,
             enc_to_z: LinearConfig::new(d, self.n_latent).init(device),
             z_to_dec: LinearConfig::new(self.n_latent, d).init(device),
-            dec_pos_sd: EmbeddingConfig::new(self.sequence, d).init(device),
+            dec_pos_sd,
             dec_layers,
             dec_out: LinearConfig::new(d, self.input_size).init(device),
             sequence: self.sequence,
@@ -171,7 +193,8 @@ impl ModelConfigExt for AeConfig {
 /// `d_model = 32`, `expand = 2` (`d_inner = 64`), `per_head_dim = 32`
 /// (`nheads = 2`), `state_rank = 64`, two real bidi layers per half, full RoPE,
 /// `Complex2D` rotation. `n_latent` is the caller-chosen bottleneck width
-/// (`-- --latents N`, default 32).
+/// (`-- --latents N`, default 32). The encoder uses a single `Middle` class
+/// latent in place of mean-pooling.
 pub fn model_config(n_latent: usize) -> AeConfig {
     let d_model = 32;
     let mamba_block = Mamba3Config::new(d_model)
@@ -185,13 +208,14 @@ pub fn model_config(n_latent: usize) -> AeConfig {
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Complex2D);
 
-    AeConfig {
-        input_size: 1,
-        sequence: HEIGHT * WIDTH,
+    AeConfig::new(
+        1,
+        HEIGHT * WIDTH,
         d_model,
         n_latent,
-        n_enc_layers: 2,
-        n_dec_layers: 2,
+        2,
+        2,
         mamba_block,
-    }
+    )
+    .with_enc_class_latents(vec![ClassLatent::Middle])
 }

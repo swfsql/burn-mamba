@@ -42,6 +42,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         n_virtual_layers: Some((16, Schedule::Stretched)),
         mamba_block,
         output_size: 10,
+        class_tokens: Vec::new(),
     }
 }
 // notes:

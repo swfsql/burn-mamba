@@ -47,7 +47,7 @@ impl BinaryCrossEntropyLoss {
     /// Multi-label:
     /// - logits: `[batch_size, num_classes]`
     /// - targets: `[batch_size, num_classes]`
-    pub fn forward<const D: usize, B: Backend>(
+    pub fn forward<const D: usize>(
         &self,
         logits: Tensor<D>,
         targets: Tensor<D>,

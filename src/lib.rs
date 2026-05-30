@@ -66,8 +66,8 @@ pub mod prelude {
 
     // The family-generic, runtime-selectable unified API.
     pub use crate::generic::{
-        MambaBidiLayers, MambaBidiLayersConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig,
-        MambaSsdPath, MambaVocabNet, MambaVocabNetConfig,
+        ClassLatent, ClassToken, MambaBidiLayers, MambaBidiLayersConfig, MambaCaches,
+        MambaLatentNet, MambaLatentNetConfig, MambaSsdPath, MambaVocabNet, MambaVocabNetConfig,
     };
 }
 

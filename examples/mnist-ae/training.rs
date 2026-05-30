@@ -278,9 +278,7 @@ impl Wrap {
         let loss = BinaryCrossEntropyLossConfig::new()
             .with_logits(true)
             .init()
-            // `forward` carries an (otherwise unused) backend type param that
-            // can't be inferred; name the global Dispatch backend explicitly.
-            .forward::<2, burn::backend::Dispatch>(logits_flat.clone(), targets_flat.clone());
+            .forward::<2>(logits_flat.clone(), targets_flat.clone());
 
         RegressionOutput::new(loss, logits_flat, targets_flat)
     }

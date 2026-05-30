@@ -428,7 +428,22 @@ family (`layer.rs` / `network.rs` / `bidi/`), parameterised over the block type
   family-agnostic direction merge (average vs. `Linear([2·d_model→d_model])` over
   the concatenation).
 - Plain (non-serde) `LayersBuilder` / `LatentNetworkBuilder` / `VocabNetworkBuilder`
-  / `BidiLayersBuilder` factories construct them.
+  / `BidiLayersBuilder` factories construct them (each with `with_class_{tokens,latents}`).
+
+### Class tokens / latents
+Learnable `[CLS]`-style embeddings spliced into the sequence. `ClassToken`
+markers live on the networks (`LatentNetwork` at `input_size`, before `in_proj`;
+`VocabNetwork` at `d_model`, after the embedding); `ClassLatent` markers live on
+`Layer`/`Layers`/`BidiLayerPair`/`BidiLayers` (at `d_model`). Each container is
+independent, storing the markers as `#[module(skip)]` metadata plus one
+`Option<Param<Tensor<2>>>` of embeddings (`[num_markers, width]`, row `i` ↔
+marker `i`). The marker enum is `Start | Middle | End | Custom(index)`; the
+`ClassMarker` trait + `insert_class_markers` place them all relative to the
+original length `L` (Start@0, Middle@`L/2`, End@`L`, Custom@`index`, last; ties
+keep `Vec` order). `forward` returns the lengthened sequence and
+`class_{token,latent}_output_indices(L)` reports where each landed (used by
+`mnist-ae` to read a `Middle` latent in place of mean-pooling); `Middle`/`End`
+make `step()` panic.
 
 ### Unifying enums (runtime family selection)
 - `enum MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers` (`#[derive(Module)]`)

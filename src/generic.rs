@@ -15,7 +15,8 @@
 use crate::schedule::{BidiSchedule, Schedule};
 use crate::utils::rms_norm::{RmsNorm, RmsNormConfig};
 use burn::config::Config;
-use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
+use burn::module::Param;
+use burn::nn::{Embedding, EmbeddingConfig, Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 
 // ===========================================================================
@@ -74,19 +75,218 @@ pub trait MambaBlockConfig: Config {
 }
 
 // ===========================================================================
+// Class tokens / latents (learnable sequence-inserted tokens)
+// ===========================================================================
+//
+// A *class token* / *class latent* is a learnable embedding spliced into the
+// sequence — a transformer-`[CLS]`-style register the model can read/write
+// through. They are inserted at the input boundary of a container (a network's
+// input for [`ClassToken`], width = the input feature width; a layer's working
+// sequence for [`ClassLatent`], width = `d_model`), permanently lengthening the
+// sequence for everything downstream. A container can carry any number; the
+// markers below say *where* each one lands, while a single `Param<Tensor<2>>`
+// of shape `[num_markers, width]` holds the embeddings (row `i` ↔ marker `i`).
+//
+// Insertion order (all relative to the *original* length `L`): every `Start`
+// first (index 0), then `Middle` (index `L/2`, splitting the original
+// sequence), then `End` (index `L`), then `Custom(index)` (explicit index,
+// inserted last). Markers sharing an index keep their `Vec` order. Because
+// `Middle`/`End` materialise positions that a single-token `step()` cannot
+// reproduce, their presence makes `step()` panic; `Start`/`Custom` are a
+// forward-time concern and are simply not re-inserted during `step()`.
+
+/// Position marker for a learnable class **token** inserted into a *network's*
+/// input sequence (embedding width = the network input width / "d_input").
+#[derive(Config, Debug)]
+pub enum ClassToken {
+    /// Prepend before the whole sequence (index 0).
+    Start,
+    /// Insert at the middle of the original sequence (index `L/2`).  
+    /// Incompatible with `step()` calls.
+    Middle,
+    /// Append after the whole sequence (index `L`).  
+    /// Incompatible with `step()` calls.
+    End,
+    /// Insert at an explicit index into the original sequence.
+    Custom(usize),
+}
+
+/// Position marker for a learnable class **latent** inserted into a *layer's*
+/// working sequence (embedding width = `d_model`).
+#[derive(Config, Debug)]
+pub enum ClassLatent {
+    /// Prepend before the whole sequence (index 0).
+    Start,
+    /// Insert at the middle of the original sequence (index `L/2`).
+    /// Incompatible with `step()` calls.  
+    Middle,
+    /// Append after the whole sequence (index `L`).
+    /// Incompatible with `step()` calls.  
+    End,
+    /// Insert at an explicit index into the original sequence.
+    Custom(usize),
+}
+
+/// Shared behaviour of the [`ClassToken`] / [`ClassLatent`] position markers,
+/// letting one generic helper place either kind.
+pub trait ClassMarker: Clone {
+    /// Insertion index measured against the *original* sequence length `orig_len`.
+    fn insert_pos(&self, orig_len: usize) -> usize;
+    /// Tie-break rank among markers sharing an index (`Start`<`Middle`<`End`<`Custom`).
+    fn group_rank(&self) -> usize;
+    /// Whether this marker is incompatible with single-token `step()`
+    /// (`Middle`/`End` create positions a per-token recurrence cannot reproduce).
+    fn forbids_step(&self) -> bool;
+}
+
+macro_rules! impl_class_marker {
+    ($ty:ty) => {
+        impl ClassMarker for $ty {
+            fn insert_pos(&self, orig_len: usize) -> usize {
+                match self {
+                    Self::Start => 0,
+                    Self::Middle => orig_len / 2,
+                    Self::End => orig_len,
+                    Self::Custom(index) => *index,
+                }
+            }
+            fn group_rank(&self) -> usize {
+                match self {
+                    Self::Start => 0,
+                    Self::Middle => 1,
+                    Self::End => 2,
+                    Self::Custom(_) => 3,
+                }
+            }
+            fn forbids_step(&self) -> bool {
+                matches!(self, Self::Middle | Self::End)
+            }
+        }
+    };
+}
+impl_class_marker!(ClassToken);
+impl_class_marker!(ClassLatent);
+
+/// Insert the learnable class tokens `emb` (`[k, width]`, row `i` ↔ `markers[i]`)
+/// into `x` (`[batch, orig_len, width]`) per the `markers`, returning the
+/// lengthened sequence (`[batch, orig_len + k, width]`) and, for each marker in
+/// `Vec` order, its position in the output sequence.
+///
+/// `markers` empty ⇒ `x` is returned unchanged with an empty index vector.
+fn insert_class_markers<M: ClassMarker>(
+    x: Tensor<3>,
+    markers: &[M],
+    emb: Option<&Param<Tensor<2>>>,
+) -> (Tensor<3>, Vec<usize>) {
+    let [batch, orig_len, width] = x.dims();
+    let k = markers.len();
+    if k == 0 {
+        return (x, Vec::new());
+    }
+    let emb = emb.expect("class-token markers present but no embedding param").val();
+    assert_eq!(emb.dims(), [k, width], "one embedding row per class marker");
+
+    // Emit in (insert_pos, group_rank, vec order) order.
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_by_key(|&i| (markers[i].insert_pos(orig_len), markers[i].group_rank(), i));
+
+    let mut segments: Vec<Tensor<3>> = Vec::new();
+    let mut cursor = 0usize; // consumed prefix of the original sequence
+    let mut out_len = 0usize; // length emitted so far
+    let mut out_index = vec![0usize; k];
+    for &i in &order {
+        let p = markers[i].insert_pos(orig_len);
+        assert!(p <= orig_len, "class-token insert index {p} > sequence length {orig_len}");
+        if p > cursor {
+            segments.push(x.clone().narrow(1, cursor, p - cursor));
+            out_len += p - cursor;
+            cursor = p;
+        }
+        let row = emb
+            .clone()
+            .narrow(0, i, 1) // [1, width]
+            .unsqueeze_dim::<3>(0) // [1, 1, width]
+            .expand([batch, 1, width]);
+        segments.push(row);
+        out_index[i] = out_len;
+        out_len += 1;
+    }
+    if cursor < orig_len {
+        segments.push(x.narrow(1, cursor, orig_len - cursor));
+    }
+    let out = Tensor::cat(segments, 1);
+    assert_eq!(out.dims(), [batch, orig_len + k, width]);
+    (out, out_index)
+}
+
+/// The output-sequence position of each marker (in `Vec` order) for an input of
+/// length `orig_len`, without materialising any tensor. Mirrors the placement in
+/// [`insert_class_markers`] — useful for reading a class token back out.
+fn class_marker_output_indices<M: ClassMarker>(markers: &[M], orig_len: usize) -> Vec<usize> {
+    let k = markers.len();
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_by_key(|&i| (markers[i].insert_pos(orig_len), markers[i].group_rank(), i));
+    let mut cursor = 0usize;
+    let mut out_len = 0usize;
+    let mut out_index = vec![0usize; k];
+    for &i in &order {
+        let p = markers[i].insert_pos(orig_len).min(orig_len);
+        if p > cursor {
+            out_len += p - cursor;
+            cursor = p;
+        }
+        out_index[i] = out_len;
+        out_len += 1;
+    }
+    out_index
+}
+
+/// Build the embedding param for `n` class markers of the given `width`
+/// (`None` when there are none — Burn has no zero-width tensors).
+fn init_class_emb(n: usize, width: usize, device: &Device) -> Option<Param<Tensor<2>>> {
+    (n > 0).then(|| Initializer::Normal { mean: 0.0, std: 0.02 }.init([n, width], device))
+}
+
+/// Panic if any marker is incompatible with single-token `step()`.
+fn assert_step_compatible<M: ClassMarker>(markers: &[M], who: &str) {
+    assert!(
+        !markers.iter().any(|m| m.forbids_step()),
+        "{who}: Middle/End class tokens are not compatible with step()"
+    );
+}
+
+// ===========================================================================
 // Layer<M>
 // ===========================================================================
 
 /// A single Pre-LN residual block: `output = x·residual_scale + M(RMSNorm(x))`.
+///
+/// May carry its own [`ClassLatent`]s, spliced into the sequence at the start of
+/// `forward` (so the residual and the inner block both see the lengthened
+/// sequence). They are independent of any class latents on the enclosing
+/// [`Layers`].
 #[derive(Module, Debug)]
 pub struct Layer<M: Module> {
     /// Pre-norm applied before the inner block.
     pub norm: RmsNorm,
     /// The inner Mamba-x SSM block.
     pub mamba_block: M,
+    /// Positions of this layer's class latents (empty ⇒ none).
+    #[module(skip)]
+    pub class_latents: Vec<ClassLatent>,
+    /// The class-latent embeddings, `[num_class_latents, d_model]` (`None` ⇒ none).
+    pub class_latents_emb: Option<Param<Tensor<2>>>,
 }
 
 impl<M: MambaBlock> Layer<M> {
+    /// Splice this layer's class latents into `x` (no-op when there are none).
+    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
+        if self.class_latents_emb.is_none() {
+            return x;
+        }
+        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    }
+
     /// Full-sequence Pre-LN residual pass.
     pub fn forward(
         &self,
@@ -95,19 +295,23 @@ impl<M: MambaBlock> Layer<M> {
         ssd_path: M::SsdPath,
         residual_scale: f32,
     ) -> (Tensor<3>, M::Cache) {
+        let x = self.insert_latents(x);
         let res = x.clone() * residual_scale;
         let normed = self.norm.forward(x);
         let (out, cache) = self.mamba_block.block_forward(normed, cache, ssd_path);
         (out + res, cache)
     }
 
-    /// Single-token Pre-LN residual step.
+    /// Single-token Pre-LN residual step. Panics if this layer has any
+    /// `Middle`/`End` class latents (incompatible with per-token decoding);
+    /// `Start`/`Custom` latents are a forward-time concern and not re-inserted.
     pub fn step(
         &self,
         x: Tensor<2>,
         cache: Option<M::Cache>,
         residual_scale: f32,
     ) -> (Tensor<2>, M::Cache) {
+        assert_step_compatible(&self.class_latents, "Layer");
         let res = x.clone() * residual_scale;
         let normed = self.norm.forward(x);
         let (out, cache) = self.mamba_block.block_step(normed, cache);
@@ -134,12 +338,32 @@ pub struct Layers<M: Module> {
     pub ignore_first_residual: bool,
     /// Zero the last virtual layer's residual when `true`.
     pub ignore_last_residual: bool,
+    /// Positions of the stack-level class latents, spliced into the sequence
+    /// once before the first virtual layer (independent of any per-[`Layer`]
+    /// class latents). Empty ⇒ none.
+    #[module(skip)]
+    pub class_latents: Vec<ClassLatent>,
+    /// The stack-level class-latent embeddings, `[num_class_latents, d_model]`.
+    pub class_latents_emb: Option<Param<Tensor<2>>>,
 }
 
 impl<M: MambaBlock> Layers<M>
 where
     M::SsdPath: Clone,
 {
+    /// Output positions of the stack-level class latents for an `orig_len` input.
+    pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
+        class_marker_output_indices(&self.class_latents, orig_len)
+    }
+
+    /// Splice this layers' class latents into `x` (no-op when there are none).
+    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
+        if self.class_latents_emb.is_none() {
+            return x;
+        }
+        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    }
+
     fn n_virtual_count(&self) -> usize {
         self.n_virtual_layers
             .as_ref()
@@ -164,10 +388,11 @@ where
     /// Full-sequence pass through every (virtual) layer.
     pub fn forward(
         &self,
-        mut x: Tensor<3>,
+        x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
+        let mut x = self.insert_latents(x);
         let n = self.n_virtual_count();
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
@@ -185,8 +410,10 @@ where
         (x, M::Caches::from_slots(slots))
     }
 
-    /// Single-token step through every (virtual) layer.
+    /// Single-token step through every (virtual) layer. Panics if the stack has
+    /// any `Middle`/`End` class latents (incompatible with per-token decoding).
     pub fn step(&self, mut x: Tensor<2>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+        assert_step_compatible(&self.class_latents, "Layers");
         let n = self.n_virtual_count();
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
@@ -219,10 +446,12 @@ pub struct LayersBuilder<C> {
     pub ignore_first_residual: bool,
     /// Zero the last virtual layer's residual.
     pub ignore_last_residual: bool,
+    /// Stack-level class latents (spliced once before the first virtual layer).
+    pub class_latents: Vec<ClassLatent>,
 }
 
 impl<C: MambaBlockConfig> LayersBuilder<C> {
-    /// Builder with no virtual scheduling and residuals enabled.
+    /// Builder with no virtual scheduling, no class latents, residuals enabled.
     pub fn new(n_real_layers: usize, mamba_block: C) -> Self {
         Self {
             n_real_layers,
@@ -230,12 +459,20 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             mamba_block,
             ignore_first_residual: false,
             ignore_last_residual: false,
+            class_latents: Vec::new(),
         }
     }
 
     /// Set the optional virtual-layer scheduling.
     pub fn with_n_virtual_layers(mut self, n: Option<(usize, Schedule)>) -> Self {
         self.n_virtual_layers = n;
+        self
+    }
+
+    /// Set the stack-level class latents.
+    #[cfg(test)]
+    pub fn with_class_latents(mut self, class_latents: Vec<ClassLatent>) -> Self {
+        self.class_latents = class_latents;
         self
     }
 
@@ -246,6 +483,8 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             .map(|_| Layer {
                 norm: RmsNormConfig::new(d_model).init(device),
                 mamba_block: self.mamba_block.init_block(device),
+                class_latents: Vec::new(),
+                class_latents_emb: None,
             })
             .collect();
         Layers {
@@ -254,6 +493,8 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             real_layers,
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
+            class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
+            class_latents: self.class_latents.clone(),
         }
     }
 }
@@ -272,20 +513,41 @@ pub struct LatentNetwork<M: Module> {
     pub layers: Layers<M>,
     /// Linear projection `d_model → output_size`.
     pub out_proj: Linear,
+    /// Positions of the network's class tokens, spliced into the input sequence
+    /// (at `input_size` width) **before** `in_proj`. Empty ⇒ none.
+    #[module(skip)]
+    pub class_tokens: Vec<ClassToken>,
+    /// The class-token embeddings, `[num_class_tokens, input_size]`.
+    pub class_tokens_emb: Option<Param<Tensor<2>>>,
 }
 
 impl<M: MambaBlock> LatentNetwork<M>
 where
     M::SsdPath: Clone,
 {
+    /// Output positions of the class tokens for an `orig_len` input.
+    pub fn class_token_output_indices(&self, orig_len: usize) -> Vec<usize> {
+        class_marker_output_indices(&self.class_tokens, orig_len)
+    }
+
+    /// Splice this network's class latents into `x` (no-op when there are none).
+    fn insert_tokens(&self, x: Tensor<3>) -> Tensor<3> {
+        if self.class_tokens_emb.is_none() {
+            return x;
+        }
+        insert_class_markers(x, &self.class_tokens, self.class_tokens_emb.as_ref()).0
+    }
+
     /// `in_proj → layers → out_proj` over a full sequence
-    /// (`[batch, sequence, input_size]` → `[batch, sequence, output_size]`).
+    /// (`[batch, sequence, input_size]` → `[batch, sequence (+ class tokens),
+    /// output_size]`).
     pub fn forward(
         &self,
         x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
+        let mut x = self.insert_tokens(x);
         let x = self.in_proj.forward(x);
         let (x, caches) = self.layers.forward(x, caches, ssd_path);
         let x = self.out_proj.forward(x);
@@ -293,7 +555,9 @@ where
     }
 
     /// Single-token step (`[batch, input_size]` → `[batch, output_size]`).
+    /// Panics if the network has any `Middle`/`End` class tokens.
     pub fn step(&self, x: Tensor<2>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+        assert_step_compatible(&self.class_tokens, "LatentNetwork");
         let x = self.in_proj.forward(x);
         let (x, caches) = self.layers.step(x, caches);
         let x = self.out_proj.forward(x);
@@ -309,6 +573,8 @@ pub struct LatentNetworkBuilder<C> {
     pub layers: LayersBuilder<C>,
     /// Width of the output features produced by `out_proj`.
     pub output_size: usize,
+    /// Network-level class tokens (spliced into the input before `in_proj`).
+    pub class_tokens: Vec<ClassToken>,
 }
 
 impl<C: MambaBlockConfig> LatentNetworkBuilder<C> {
@@ -323,6 +589,8 @@ impl<C: MambaBlockConfig> LatentNetworkBuilder<C> {
             out_proj: LinearConfig::new(d_model, self.output_size)
                 .with_bias(true)
                 .init(device),
+            class_tokens_emb: init_class_emb(self.class_tokens.len(), self.input_size, device),
+            class_tokens: self.class_tokens.clone(),
         }
     }
 }
@@ -768,14 +1036,29 @@ pub struct BidiLayerPair<M: Module> {
     pub output_merge: OutputMerge,
     /// Residual scale (0.0 suppresses the skip connection, else 1.0).
     pub residual_scale: f32,
+    /// Positions of this pair's class latents, spliced in before either
+    /// direction runs (both directions, and the residual, see the lengthened
+    /// sequence). Empty ⇒ none.
+    #[module(skip)]
+    pub class_latents: Vec<ClassLatent>,
+    /// This pair's class-latent embeddings, `[num_class_latents, d_model]`.
+    pub class_latents_emb: Option<Param<Tensor<2>>>,
 }
 
 impl<M: MambaBlock> BidiLayerPair<M>
 where
     M::SsdPath: Clone,
 {
+    /// Splice this bidi-layer-pair's class latents into `x` (no-op when there are none).
+    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
+        if self.class_latents_emb.is_none() {
+            return x;
+        }
+        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    }
+    
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`, plus the two
-    /// updated direction caches.
+    /// updated direction caches. (`sequence` grows by the class-latent count.)
     pub fn forward(
         &self,
         x: Tensor<3>,
@@ -783,6 +1066,7 @@ where
         reverse_cache: Option<M::Cache>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Cache, M::Cache) {
+        let x = self.insert_latents(x);
         let [batch, sequence, d_model] = x.dims();
         let res = x.clone() * self.residual_scale;
 
@@ -823,19 +1107,40 @@ pub struct BidiLayers<M: Module> {
     pub ignore_last_residual: bool,
     /// One direction-merge per pair, length `n_real_layers / 2`.
     pub outputs_merge: Vec<OutputMerge>,
+    /// Positions of the stack-level class latents, spliced into the sequence
+    /// once before the first pair (independent of any per-pair class latents).
+    #[module(skip)]
+    pub class_latents: Vec<ClassLatent>,
+    /// The stack-level class-latent embeddings, `[num_class_latents, d_model]`.
+    pub class_latents_emb: Option<Param<Tensor<2>>>,
 }
 
 impl<M: MambaBlock + Clone> BidiLayers<M>
 where
     M::SsdPath: Clone,
 {
-    /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`.
+    /// Output positions of the stack-level class latents for an `orig_len` input.
+    pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
+        class_marker_output_indices(&self.class_latents, orig_len)
+    }
+
+    /// Splice this bidi-layers' class latents into `x` (no-op when there are none).
+    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
+        if self.class_latents_emb.is_none() {
+            return x;
+        }
+        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    }
+
+    /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`
+    /// (`sequence` grows by the stack-level class-latent count).
     pub fn forward(
         &self,
         mut x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
+        x = self.insert_latents(x);
         let n = self
             .n_virtual_layers
             .as_ref()
@@ -892,6 +1197,10 @@ where
                 reverse_block: reverse_layer.mamba_block.clone(),
                 output_merge: self.outputs_merge[i].clone(),
                 residual_scale,
+                // Stack-level class latents are spliced once above; the
+                // transient per-pair slot stays empty.
+                class_latents: Vec::new(),
+                class_latents_emb: None,
             };
 
             let (x_, sc, rc) =
@@ -919,6 +1228,8 @@ pub struct BidiLayersBuilder<C> {
     pub ignore_last_residual: bool,
     /// One merge config per pair, length `n_real_layers / 2`.
     pub outputs_merge: Vec<OutputMergeConfig>,
+    /// Stack-level class latents (spliced once before the first pair).
+    pub class_latents: Vec<ClassLatent>,
 }
 
 impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
@@ -929,6 +1240,8 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
             .map(|_| Layer {
                 norm: RmsNormConfig::new(d_model).init(device),
                 mamba_block: self.mamba_block.init_block(device),
+                class_latents: Vec::new(),
+                class_latents_emb: None,
             })
             .collect();
         let outputs_merge = (0..self.n_real_layers / 2)
@@ -941,6 +1254,8 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
             outputs_merge,
+            class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
+            class_latents: self.class_latents.clone(),
         }
     }
 }
@@ -1133,6 +1448,8 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Output feature width.
         output_size: usize,
+        /// Network-level class tokens, spliced into the input before `in_proj`.
+        class_tokens: Vec<ClassToken>,
     },
     /// Build a Mamba-2 latent network.
     #[cfg(feature = "mamba2")]
@@ -1147,6 +1464,8 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Output feature width.
         output_size: usize,
+        /// Network-level class tokens, spliced into the input before `in_proj`.
+        class_tokens: Vec<ClassToken>,
     },
     /// Build a Mamba-3 latent network.
     #[cfg(feature = "mamba3")]
@@ -1161,6 +1480,8 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Output feature width.
         output_size: usize,
+        /// Network-level class tokens, spliced into the input before `in_proj`.
+        class_tokens: Vec<ClassToken>,
     },
 }
 
@@ -1175,12 +1496,14 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                class_tokens,
             } => MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
+                    class_tokens: class_tokens.clone(),
                 }
                 .init(device),
             ),
@@ -1191,12 +1514,14 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                class_tokens,
             } => MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
+                    class_tokens: class_tokens.clone(),
                 }
                 .init(device),
             ),
@@ -1207,12 +1532,14 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                class_tokens,
             } => MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
+                    class_tokens: class_tokens.clone(),
                 }
                 .init(device),
             ),
@@ -1467,6 +1794,20 @@ pub enum MambaBidiLayers {
 }
 
 impl MambaBidiLayers {
+    /// Output positions of the stack-level class latents for an `orig_len`
+    /// input (so a caller can read a class latent back out of the lengthened
+    /// `forward` output — e.g. as a pooled summary).
+    pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(layers) => layers.class_latent_output_indices(orig_len),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(layers) => layers.class_latent_output_indices(orig_len),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(layers) => layers.class_latent_output_indices(orig_len),
+        }
+    }
+
     /// Full-sequence bidirectional pass. The `ssd_path` must match the stack's
     /// family; a mismatch is a caller error and panics.
     pub fn forward(
@@ -1539,6 +1880,9 @@ pub enum MambaBidiLayersConfig {
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
+        class_latents: Vec<ClassLatent>,
     },
     /// Build a Mamba-2 bidirectional stack.
     #[cfg(feature = "mamba2")]
@@ -1549,6 +1893,9 @@ pub enum MambaBidiLayersConfig {
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
+        class_latents: Vec<ClassLatent>,
     },
     /// Build a Mamba-3 bidirectional stack.
     #[cfg(feature = "mamba3")]
@@ -1559,6 +1906,9 @@ pub enum MambaBidiLayersConfig {
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
+        class_latents: Vec<ClassLatent>,
     },
 }
 
@@ -1571,6 +1921,7 @@ impl MambaBidiLayersConfig {
                 n_real_layers,
                 mamba_block,
                 outputs_merge,
+                class_latents,
             } => MambaBidiLayers::Mamba1(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -1579,6 +1930,7 @@ impl MambaBidiLayersConfig {
                     ignore_first_residual: false,
                     ignore_last_residual: false,
                     outputs_merge: outputs_merge.clone(),
+                    class_latents: class_latents.clone(),
                 }
                 .init(device),
             ),
@@ -1587,6 +1939,7 @@ impl MambaBidiLayersConfig {
                 n_real_layers,
                 mamba_block,
                 outputs_merge,
+                class_latents,
             } => MambaBidiLayers::Mamba2(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -1595,6 +1948,7 @@ impl MambaBidiLayersConfig {
                     ignore_first_residual: false,
                     ignore_last_residual: false,
                     outputs_merge: outputs_merge.clone(),
+                    class_latents: class_latents.clone(),
                 }
                 .init(device),
             ),
@@ -1603,6 +1957,7 @@ impl MambaBidiLayersConfig {
                 n_real_layers,
                 mamba_block,
                 outputs_merge,
+                class_latents,
             } => MambaBidiLayers::Mamba3(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -1611,6 +1966,7 @@ impl MambaBidiLayersConfig {
                     ignore_first_residual: false,
                     ignore_last_residual: false,
                     outputs_merge: outputs_merge.clone(),
+                    class_latents: class_latents.clone(),
                 }
                 .init(device),
             ),
@@ -1641,6 +1997,7 @@ mod tests {
             input_size: 3,
             layers: LayersBuilder::new(2, block),
             output_size: 2,
+            class_tokens: Vec::new(),
         }
         .init(&device);
 
@@ -1671,6 +2028,7 @@ mod tests {
             n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
+            class_tokens: Vec::new(),
         }
         .init(&device);
 
@@ -1712,6 +2070,7 @@ mod tests {
             n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
+            class_tokens: Vec::new(),
         }
         .init(&device);
 
@@ -1737,6 +2096,7 @@ mod tests {
             n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
+            class_tokens: Vec::new(),
         }
         .init(&device);
 
@@ -1771,6 +2131,7 @@ mod tests {
             ignore_first_residual: false,
             ignore_last_residual: false,
             outputs_merge: OutputMergeConfig::cat_linear(2),
+            class_latents: Vec::new(),
         }
         .init(&device);
         let (y, _c) = layers.forward(
@@ -1800,6 +2161,7 @@ mod tests {
             ignore_first_residual: false,
             ignore_last_residual: false,
             outputs_merge: OutputMergeConfig::mean(2),
+            class_latents: Vec::new(),
         }
         .init(&device);
         let (y, _c) = layers.forward(
@@ -1825,6 +2187,7 @@ mod tests {
             ignore_first_residual: false,
             ignore_last_residual: false,
             outputs_merge: OutputMergeConfig::cat_linear(2),
+            class_latents: Vec::new(),
         }
         .init(&device);
         let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, ());
@@ -1848,6 +2211,7 @@ mod tests {
             n_real_layers: 2,
             mamba_block: block,
             outputs_merge: OutputMergeConfig::mean(2),
+            class_latents: Vec::new(),
         }
         .init(&device);
         let (y, _c) = layers.forward(
@@ -1856,5 +2220,91 @@ mod tests {
             MambaSsdPath::mamba2_default(),
         );
         assert_eq!([2, 5, 16], y.dims());
+    }
+
+    // --- class tokens / latents -----------------------------------------
+
+    // Start/Middle/End class latents lengthen the sequence and land at the
+    // documented output positions.
+    #[cfg(feature = "mamba2")]
+    #[test]
+    fn class_latents_lengthen_and_index() {
+        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+        let device = Device::default();
+        let block = Mamba2Config::new(16)
+            .with_expand(2)
+            .with_per_head_dim(4)
+            .with_state_rank(8)
+            .with_ngroups(1)
+            .with_conv_kernel(4);
+        let layers = LayersBuilder::new(1, block)
+            .with_class_latents(vec![ClassLatent::Start, ClassLatent::Middle, ClassLatent::End])
+            .init(&device);
+
+        // L = 4 ⇒ Start→0, Middle→ floor(4/2)=2 (after the leading prefix), End→ end.
+        assert_eq!(layers.class_latent_output_indices(4), vec![0, 3, 6]);
+
+        let (y, _c) = layers.forward(
+            Tensor::<3>::zeros([2, 4, 16], &device),
+            None,
+            Mamba2SsdPath::default(),
+        );
+        assert_eq!([2, 7, 16], y.dims()); // 4 original + 3 class latents
+    }
+
+    // `Custom(index)` is inserted last at its explicit index.
+    #[cfg(feature = "mamba2")]
+    #[test]
+    fn class_latents_custom_index() {
+        let markers = vec![ClassLatent::Custom(1), ClassLatent::Custom(3)];
+        // L = 5: a token before original index 1 (output pos 1) and one before
+        // index 3 (output pos 4, shifted by the first insertion).
+        assert_eq!(class_marker_output_indices(&markers, 5), vec![1, 4]);
+    }
+
+    // A network's class tokens lengthen its output sequence too.
+    #[cfg(feature = "mamba2")]
+    #[test]
+    fn class_tokens_on_latent_network() {
+        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+        let device = Device::default();
+        let block = Mamba2Config::new(16)
+            .with_expand(2)
+            .with_per_head_dim(4)
+            .with_state_rank(8)
+            .with_ngroups(1)
+            .with_conv_kernel(4);
+        let net = LatentNetworkBuilder {
+            input_size: 3,
+            layers: LayersBuilder::new(2, block),
+            output_size: 2,
+            class_tokens: vec![ClassToken::End],
+        }
+        .init(&device);
+        let (y, _c) = net.forward(
+            Tensor::<3>::zeros([2, 5, 3], &device),
+            None,
+            Mamba2SsdPath::default(),
+        );
+        assert_eq!([2, 6, 2], y.dims()); // 5 + 1 class token
+    }
+
+    // `Middle`/`End` class latents are incompatible with single-token `step()`.
+    #[cfg(feature = "mamba2")]
+    #[test]
+    #[should_panic(expected = "not compatible with step")]
+    fn class_latents_step_panics() {
+        use crate::mamba2::prelude::Mamba2Config;
+        let device = Device::default();
+        let block = Mamba2Config::new(16)
+            .with_expand(2)
+            .with_per_head_dim(4)
+            .with_state_rank(8)
+            .with_ngroups(1)
+            .with_conv_kernel(4);
+        let layers = LayersBuilder::new(1, block)
+            .with_class_latents(vec![ClassLatent::Middle])
+            .init(&device);
+        let _ = layers.step(Tensor::<2>::zeros([2, 16], &device), None);
     }
 }

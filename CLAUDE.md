@@ -95,7 +95,7 @@ minimal impl, burn) and are intentionally not analyzed here — see
 │   │   ├── README.md
 │   │   ├── inference.rs               # reconstruct a few test images, print original vs reconstruction as ASCII art
 │   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine LR; parses `-- --latents N`
-│   │   ├── model.rs                   # AeModel/AeConfig: bidi encoder → mean-pool → z; z+posemb → bidi decoder; model_config(n_latent)
+│   │   ├── model.rs                   # AeModel/AeConfig: bidi encoder → read a Middle ClassLatent (in place of mean-pool) → z; z+posemb → bidi decoder; model_config(n_latent)
 │   │   └── training.rs                # Wrap + TrainStep/InferenceStep (BCE-from-logits reconstruction); train/epoch loops
 │   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (tiny Mamba-3, uses common/ harness)
 │       ├── README.md
@@ -112,7 +112,7 @@ decomposition
 │   └── burn                           # burn dependency source code
 ├── src
 │   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
-│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi
+│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi. Also the learnable class-token feature: ClassToken (networks, d_input) / ClassLatent (layers, d_model) markers (Start/Middle/End/Custom(idx)) + insert_class_markers helper (forward-only; Middle/End panic in step)
 │   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
 │   │   ├── cache.rs                   # Mamba1Cache(s): conv window (bik) + SSM state (bir), and configs
 │   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
@@ -492,6 +492,26 @@ and a reversed pass (← via `flip` on the sequence axis, then flip back), then
 merges with `OutputMerge` (`Mean` or `CatLinear`). `BidiLayers<M>` stacks
 pairs with `BidiSchedule`. Being generic over the core block `M`, it serves all
 three families (the `MambaBidiLayers`/`MambaBidiLayersConfig` enums dispatch).
+
+### Class tokens / latents (`src/generic.rs`)
+
+Learnable embeddings spliced into the sequence (transformer-`[CLS]`-style
+registers). A **`ClassToken`** lives on a *network* (`LatentNetwork` at
+`input_size`/"d_input", before `in_proj`; `VocabNetwork` at `d_model`, after the
+embedding); a **`ClassLatent`** lives on a *layer* container (`Layer`, `Layers`,
+`BidiLayerPair`, `BidiLayers`, all at `d_model`). Every container is independent
+and may carry any number; the markers (`Start` | `Middle` | `End` |
+`Custom(index)`) say *where* each lands, while a single `Param<Tensor<2>>`
+(`[num_markers, width]`, row `i` ↔ marker `i`) holds the embeddings. Insertion
+(relative to the original length `L`, via `insert_class_markers`): all `Start`
+first (index 0), then `Middle` (`L/2`), then `End` (`L`), then `Custom(index)`
+last; ties keep `Vec` order. The sequence permanently lengthens for everything
+downstream; `forward` returns the lengthened sequence (the caller reads tokens
+back out via `class_{token,latent}_output_indices`). Because `Middle`/`End`
+materialise positions a single-token recurrence can't reproduce, they make
+`step()` panic; `Start`/`Custom` are forward-time only. The plain builders get a
+`with_class_{tokens,latents}`; the example's `AeConfig` (a `#[derive(Config)]`
+struct) gets the auto-generated `with_class_latents` from its `Vec` field.
 
 ### Utilities (`src/utils/`)
 

@@ -39,5 +39,6 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         n_virtual_layers: None, // don't virtually extend the amount of layers
         mamba_block,
         output_size: NUM_CLASSES,
+        class_tokens: Vec::new(),
     }
 }

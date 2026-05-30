@@ -874,6 +874,7 @@ fn quaternion_bidi_forward_runs() {
         n_real_layers: n_real,
         mamba_block: block,
         outputs_merge: OutputMergeConfig::mean(n_real),
+        class_latents: Vec::new(),
     }
     .init(&device);
 

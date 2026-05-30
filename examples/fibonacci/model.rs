@@ -46,5 +46,6 @@ pub fn model_config() -> MambaLatentNetConfig {
         n_virtual_layers: None,
         mamba_block,
         output_size: 1,
+        class_tokens: Vec::new(),
     }
 }
