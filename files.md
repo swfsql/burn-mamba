@@ -442,8 +442,13 @@ marker `i`). The marker enum is `Start | Middle | End | Custom(index)`; the
 original length `L` (Start@0, Middle@`L/2`, End@`L`, Custom@`index`, last; ties
 keep `Vec` order). `forward` returns the lengthened sequence and
 `class_{token,latent}_output_indices(L)` reports where each landed (used by
-`mnist-ae` to read a `Middle` latent in place of mean-pooling); `Middle`/`End`
-make `step()` panic.
+`mnist-ae` to read a `Middle` latent in place of mean-pooling). `step` injects
+class tokens through optional position **cursors** (`Option<&mut usize>` for a
+single level, `Option<&mut Vec<usize>>` for the per-virtual-layer set `Layers`
+distributes to its inner `Layer`s): when a cursor reaches a class position the
+embedding is stepped first (advancing the cursor), then the user token, and only
+the user token is returned. `Start`/`Custom` are length-independent and inject in
+`step`; `Middle`/`End` need the full length and panic for the cursored level.
 
 ### Unifying enums (runtime family selection)
 - `enum MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers` (`#[derive(Module)]`)

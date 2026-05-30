@@ -255,6 +255,15 @@ fn assert_step_compatible<M: ClassMarker>(markers: &[M], who: &str) {
     );
 }
 
+/// The output-sequence position of each step-injectable marker (in `Vec` order),
+/// for use by `step`'s cursor. Asserts no `Middle`/`End` (those need the full
+/// length — `forward` only). `Start`/`Custom` positions are length-independent,
+/// so an unbounded `orig_len` resolves them exactly.
+fn class_step_injections<M: ClassMarker>(markers: &[M], who: &str) -> Vec<usize> {
+    assert_step_compatible(markers, who);
+    class_marker_output_indices(markers, usize::MAX)
+}
+
 // ===========================================================================
 // Layer<M>
 // ===========================================================================
@@ -302,20 +311,43 @@ impl<M: MambaBlock> Layer<M> {
         (out + res, cache)
     }
 
-    /// Single-token Pre-LN residual step. Panics if this layer has any
-    /// `Middle`/`End` class latents (incompatible with per-token decoding);
-    /// `Start`/`Custom` latents are a forward-time concern and not re-inserted.
+    /// Single-token Pre-LN residual step.
+    ///
+    /// `index` is the running cursor into this layer's *output* sequence. With
+    /// `Some`, whenever it lands on one of this layer's class-latent positions
+    /// those latents are stepped first (each advancing `index`, recursing with
+    /// `None`), then the user token (also advancing `index`); only the user
+    /// token's output and cache are returned. With `None` no class latents are
+    /// injected — and `Middle`/`End` latents panic (their positions need the full
+    /// sequence; use `forward`).
     pub fn step(
         &self,
         x: Tensor<2>,
         cache: Option<M::Cache>,
         residual_scale: f32,
+        index: Option<&mut usize>,
     ) -> (Tensor<2>, M::Cache) {
-        assert_step_compatible(&self.class_latents, "Layer");
-        let res = x.clone() * residual_scale;
-        let normed = self.norm.forward(x);
-        let (out, cache) = self.mamba_block.block_step(normed, cache);
-        (out + res, cache)
+        let Some(cursor) = index else {
+            // The actual one-token work (no class injection).
+            assert_step_compatible(&self.class_latents, "Layer");
+            let res = x.clone() * residual_scale;
+            let normed = self.norm.forward(x);
+            let (out, cache) = self.mamba_block.block_step(normed, cache);
+            return (out + res, cache);
+        };
+        let [batch, d_model] = x.dims();
+        let inj = class_step_injections(&self.class_latents, "Layer");
+        let emb = self.class_latents_emb.as_ref();
+        let mut cache = cache;
+        while let Some(i) = inj.iter().position(|&p| p == *cursor) {
+            let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
+            let (_discard, c) = self.step(row, cache, residual_scale, None);
+            cache = Some(c);
+            *cursor += 1;
+        }
+        let (out, cache) = self.step(x, cache, residual_scale, None);
+        *cursor += 1;
+        (out, cache)
     }
 }
 
@@ -410,21 +442,62 @@ where
         (x, M::Caches::from_slots(slots))
     }
 
-    /// Single-token step through every (virtual) layer. Panics if the stack has
-    /// any `Middle`/`End` class latents (incompatible with per-token decoding).
-    pub fn step(&self, mut x: Tensor<2>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+    /// Single-token step through every (virtual) layer.
+    ///
+    /// Two independent class-latent cursors:
+    /// - `own_index` — the stack-level [`Self::class_latents`] (spliced once
+    ///   before the first layer in `forward`). When it lands on one of those
+    ///   positions the stack latent(s) are stepped first (each a full stack pass,
+    ///   advancing `own_index`), then the user token.
+    /// - `layer_indices` — one cursor **per virtual layer**
+    ///   (`len == n_virtual_layers`), distributed as the per-[`Layer`] cursor so
+    ///   each layer injects its own class latents independently.
+    ///
+    /// A `None` cursor skips that level's injection; `Middle`/`End` latents panic
+    /// for the cursored level (their positions need the full sequence — use
+    /// `forward`).
+    pub fn step(
+        &self,
+        mut x: Tensor<2>,
+        caches: Option<M::Caches>,
+        own_index: Option<&mut usize>,
+        mut layer_indices: Option<&mut Vec<usize>>,
+    ) -> (Tensor<2>, M::Caches) {
+        // Stack-level class-latent injection (around full stack passes).
+        if let Some(cursor) = own_index {
+            let [batch, d_model] = x.dims();
+            let inj = class_step_injections(&self.class_latents, "Layers");
+            let emb = self.class_latents_emb.as_ref();
+            let mut caches = caches;
+            while let Some(i) = inj.iter().position(|&p| p == *cursor) {
+                let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
+                let (_discard, c) = self.step(row, caches, None, None);
+                caches = Some(c);
+                *cursor += 1;
+            }
+            let (out, caches) = self.step(x, caches, None, layer_indices);
+            *cursor += 1;
+            return (out, caches);
+        }
+
+        // The actual one-token work: thread the token through the stack, giving
+        // each virtual layer its own class-latent cursor from `layer_indices`.
         assert_step_compatible(&self.class_latents, "Layers");
         let n = self.n_virtual_count();
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+        if let Some(v) = layer_indices.as_deref() {
+            assert_eq!(v.len(), n, "one class-latent cursor per virtual layer");
+        }
 
         let mut slots = caches.into_slots();
         for i in 0..n {
             let layer = &self.real_layers[self.real_idx(i)];
             let rs = self.residual_scale(i, n);
             let cache = slots[i].take().unwrap();
-            let (x_, c_) = layer.step(x, Some(cache), rs);
+            let layer_cursor = layer_indices.as_deref_mut().map(|v| &mut v[i]);
+            let (x_, c_) = layer.step(x, Some(cache), rs, layer_cursor);
             x = x_;
             slots[i] = Some(c_);
         }
@@ -555,11 +628,49 @@ where
     }
 
     /// Single-token step (`[batch, input_size]` → `[batch, output_size]`).
-    /// Panics if the network has any `Middle`/`End` class tokens.
-    pub fn step(&self, x: Tensor<2>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+    ///
+    /// Three independent class cursors:
+    /// - `own_index` — the network's own [`Self::class_tokens`] (spliced before
+    ///   `in_proj`). When it lands on a class-token position those tokens are
+    ///   stepped first (each a full network pass, advancing `own_index`), then
+    ///   the user token; only the user token's output is returned.
+    /// - `layers_own_index` / `layer_indices` — forwarded straight to the inner
+    ///   [`Layers::step`] (stack-level latents, and the per-virtual-layer cursor
+    ///   vector respectively).
+    ///
+    /// A `None` cursor skips that level; `Middle`/`End` markers panic for the
+    /// cursored level (use `forward`).
+    pub fn step(
+        &self,
+        x: Tensor<2>,
+        caches: Option<M::Caches>,
+        own_index: Option<&mut usize>,
+        layers_own_index: Option<&mut usize>,
+        layer_indices: Option<&mut Vec<usize>>,
+    ) -> (Tensor<2>, M::Caches) {
+        // Network-level class-token injection (around full network passes). The
+        // injected class tokens use their own recurrence only (inner cursors are
+        // not advanced for them); the user token carries the inner cursors.
+        if let Some(cursor) = own_index {
+            let [batch, input_size] = x.dims();
+            let inj = class_step_injections(&self.class_tokens, "LatentNetwork");
+            let emb = self.class_tokens_emb.as_ref();
+            let mut caches = caches;
+            while let Some(i) = inj.iter().position(|&p| p == *cursor) {
+                let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, input_size]);
+                let (_discard, c) = self.step(row, caches, None, None, None);
+                caches = Some(c);
+                *cursor += 1;
+            }
+            let (out, caches) = self.step(x, caches, None, layers_own_index, layer_indices);
+            *cursor += 1;
+            return (out, caches);
+        }
+
+        // The actual one-token work: forward the inner cursors to the stack.
         assert_step_compatible(&self.class_tokens, "LatentNetwork");
         let x = self.in_proj.forward(x);
-        let (x, caches) = self.layers.step(x, caches);
+        let (x, caches) = self.layers.step(x, caches, layers_own_index, layer_indices);
         let x = self.out_proj.forward(x);
         (x, caches)
     }
@@ -642,10 +753,21 @@ where
     }
 
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
-    pub fn step(&self, x: Tensor<1, Int>, caches: Option<M::Caches>) -> (Tensor<2>, M::Caches) {
+    ///
+    /// The vocab network has no class tokens of its own (those would duplicate
+    /// the layers' class latents); it simply forwards the inner [`Layers`]
+    /// cursors — `layers_own_index` (stack-level latents) and `layer_indices`
+    /// (per-virtual-layer) — to [`Layers::step`].
+    pub fn step(
+        &self,
+        x: Tensor<1, Int>,
+        caches: Option<M::Caches>,
+        layers_own_index: Option<&mut usize>,
+        layer_indices: Option<&mut Vec<usize>>,
+    ) -> (Tensor<2>, M::Caches) {
         // Embed the single token via a temporary unit sequence axis.
         let x = self.embedding.forward(x.unsqueeze_dim::<2>(1)).squeeze_dim(1);
-        let (x, caches) = self.layers.step(x, caches);
+        let (x, caches) = self.layers.step(x, caches, layers_own_index, layer_indices);
         let x = self.norm_f.forward(x);
         // Reuse the 3-D head by lifting/lowering the sequence axis.
         let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
@@ -1393,8 +1515,18 @@ impl MambaLatentNet {
     }
 
     /// Single-token step. No path argument (decoding is recurrent for all
-    /// families). Cache family must match the network.
-    pub fn step(&self, x: Tensor<2>, caches: Option<MambaCaches>) -> (Tensor<2>, MambaCaches) {
+    /// families). Cache family must match the network. The three class cursors
+    /// (`own_index` for the network's class tokens, `layers_own_index` for the
+    /// stack-level class latents, `layer_indices` for the per-virtual-layer
+    /// vector) are threaded to the inner network — see [`LatentNetwork::step`].
+    pub fn step(
+        &self,
+        x: Tensor<2>,
+        caches: Option<MambaCaches>,
+        own_index: Option<&mut usize>,
+        layers_own_index: Option<&mut usize>,
+        layer_indices: Option<&mut Vec<usize>>,
+    ) -> (Tensor<2>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(net) => {
@@ -1403,7 +1535,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-1 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -1413,7 +1545,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-2 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -1423,7 +1555,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -1623,8 +1755,16 @@ impl MambaVocabNet {
     }
 
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
-    /// Cache family must match the network.
-    pub fn step(&self, x: Tensor<1, Int>, caches: Option<MambaCaches>) -> (Tensor<2>, MambaCaches) {
+    /// Cache family must match the network. The two inner [`Layers`] class
+    /// cursors (`layers_own_index`, `layer_indices`) are forwarded — see
+    /// [`VocabNetwork::step`].
+    pub fn step(
+        &self,
+        x: Tensor<1, Int>,
+        caches: Option<MambaCaches>,
+        layers_own_index: Option<&mut usize>,
+        layer_indices: Option<&mut Vec<usize>>,
+    ) -> (Tensor<2>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(net) => {
@@ -1633,7 +1773,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-1 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -1643,7 +1783,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-2 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -1653,7 +1793,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
-                let (y, c) = net.step(x, caches);
+                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -1979,332 +2119,4 @@ impl MambaBidiLayersConfig {
 // ===========================================================================
 
 #[cfg(all(test, feature = "_dev-test"))]
-mod tests {
-    use super::*;
-
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn latent_network_builder_mamba2() {
-        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let net = LatentNetworkBuilder {
-            input_size: 3,
-            layers: LayersBuilder::new(2, block),
-            output_size: 2,
-            class_tokens: Vec::new(),
-        }
-        .init(&device);
-
-        let (y, _c) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            None,
-            Mamba2SsdPath::default(),
-        );
-        assert_eq!([2, 5, 2], y.dims());
-        let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None);
-        assert_eq!([2, 2], yt.dims());
-    }
-
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn unified_net_config_mamba2() {
-        use crate::mamba2::prelude::Mamba2Config;
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let net = MambaLatentNetConfig::Mamba2 {
-            input_size: 3,
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            output_size: 2,
-            class_tokens: Vec::new(),
-        }
-        .init(&device);
-
-        // Explicit, family-tagged path.
-        let (y, caches) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            None,
-            MambaSsdPath::mamba2_default(),
-        );
-        assert_eq!([2, 5, 2], y.dims());
-
-        // Thread the returned caches back in (round-trips the enum cache).
-        let (y2, _c) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            Some(caches),
-            MambaSsdPath::mamba2_default(),
-        );
-        assert_eq!([2, 5, 2], y2.dims());
-
-        let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None);
-        assert_eq!([2, 2], yt.dims());
-    }
-
-    #[cfg(feature = "mamba3")]
-    #[test]
-    fn unified_net_config_mamba3() {
-        use crate::mamba3::prelude::Mamba3Config;
-        let device = Device::default();
-        let block = Mamba3Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_mimo_rank(1)
-            .with_rope_fraction(0.5);
-        let net = MambaLatentNetConfig::Mamba3 {
-            input_size: 3,
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            output_size: 2,
-            class_tokens: Vec::new(),
-        }
-        .init(&device);
-
-        let (y, _c) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            None,
-            MambaSsdPath::mamba3_default(),
-        );
-        assert_eq!([2, 5, 2], y.dims());
-        let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None);
-        assert_eq!([2, 2], yt.dims());
-    }
-
-    #[cfg(feature = "mamba1")]
-    #[test]
-    fn unified_net_config_mamba1() {
-        use crate::mamba1::prelude::Mamba1Config;
-        let device = Device::default();
-        let block = Mamba1Config::new(16).with_state_rank(8);
-        let net = MambaLatentNetConfig::Mamba1 {
-            input_size: 3,
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            output_size: 2,
-            class_tokens: Vec::new(),
-        }
-        .init(&device);
-
-        let (y, _c) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            None,
-            MambaSsdPath::Mamba1,
-        );
-        assert_eq!([2, 5, 2], y.dims());
-        let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None);
-        assert_eq!([2, 2], yt.dims());
-    }
-
-    // --- generic bidirectional stack ------------------------------------
-
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn bidi_layers_mamba2() {
-        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        // 2 real layers = 1 pair; CatLinear exercises the merge's params.
-        let layers = BidiLayersBuilder {
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            ignore_first_residual: false,
-            ignore_last_residual: false,
-            outputs_merge: OutputMergeConfig::cat_linear(2),
-            class_latents: Vec::new(),
-        }
-        .init(&device);
-        let (y, _c) = layers.forward(
-            Tensor::<3>::zeros([2, 5, 16], &device),
-            None,
-            Mamba2SsdPath::default(),
-        );
-        assert_eq!([2, 5, 16], y.dims());
-    }
-
-    #[cfg(feature = "mamba3")]
-    #[test]
-    fn bidi_layers_mamba3() {
-        use crate::mamba3::prelude::{Mamba3Config, Mamba3SsdPath};
-        let device = Device::default();
-        let block = Mamba3Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_mimo_rank(1)
-            .with_rope_fraction(0.5);
-        let layers = BidiLayersBuilder {
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            ignore_first_residual: false,
-            ignore_last_residual: false,
-            outputs_merge: OutputMergeConfig::mean(2),
-            class_latents: Vec::new(),
-        }
-        .init(&device);
-        let (y, _c) = layers.forward(
-            Tensor::<3>::zeros([2, 5, 16], &device),
-            None,
-            Mamba3SsdPath::default(),
-        );
-        assert_eq!([2, 5, 16], y.dims());
-    }
-
-    // Mamba-1 gains bidirectional support for free via the generic stack
-    // (historically bidi was Mamba-2/3-only).
-    #[cfg(feature = "mamba1")]
-    #[test]
-    fn bidi_layers_mamba1() {
-        use crate::mamba1::prelude::Mamba1Config;
-        let device = Device::default();
-        let block = Mamba1Config::new(16).with_state_rank(8);
-        let layers = BidiLayersBuilder {
-            n_real_layers: 2,
-            n_virtual_layers: None,
-            mamba_block: block,
-            ignore_first_residual: false,
-            ignore_last_residual: false,
-            outputs_merge: OutputMergeConfig::cat_linear(2),
-            class_latents: Vec::new(),
-        }
-        .init(&device);
-        let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, ());
-        assert_eq!([2, 5, 16], y.dims());
-    }
-
-    // --- unifying MambaBidiLayers enum ----------------------------------
-
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn unified_bidi_config_mamba2() {
-        use crate::mamba2::prelude::Mamba2Config;
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let layers = MambaBidiLayersConfig::Mamba2 {
-            n_real_layers: 2,
-            mamba_block: block,
-            outputs_merge: OutputMergeConfig::mean(2),
-            class_latents: Vec::new(),
-        }
-        .init(&device);
-        let (y, _c) = layers.forward(
-            Tensor::<3>::zeros([2, 5, 16], &device),
-            None,
-            MambaSsdPath::mamba2_default(),
-        );
-        assert_eq!([2, 5, 16], y.dims());
-    }
-
-    // --- class tokens / latents -----------------------------------------
-
-    // Start/Middle/End class latents lengthen the sequence and land at the
-    // documented output positions.
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn class_latents_lengthen_and_index() {
-        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let layers = LayersBuilder::new(1, block)
-            .with_class_latents(vec![ClassLatent::Start, ClassLatent::Middle, ClassLatent::End])
-            .init(&device);
-
-        // L = 4 ⇒ Start→0, Middle→ floor(4/2)=2 (after the leading prefix), End→ end.
-        assert_eq!(layers.class_latent_output_indices(4), vec![0, 3, 6]);
-
-        let (y, _c) = layers.forward(
-            Tensor::<3>::zeros([2, 4, 16], &device),
-            None,
-            Mamba2SsdPath::default(),
-        );
-        assert_eq!([2, 7, 16], y.dims()); // 4 original + 3 class latents
-    }
-
-    // `Custom(index)` is inserted last at its explicit index.
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn class_latents_custom_index() {
-        let markers = vec![ClassLatent::Custom(1), ClassLatent::Custom(3)];
-        // L = 5: a token before original index 1 (output pos 1) and one before
-        // index 3 (output pos 4, shifted by the first insertion).
-        assert_eq!(class_marker_output_indices(&markers, 5), vec![1, 4]);
-    }
-
-    // A network's class tokens lengthen its output sequence too.
-    #[cfg(feature = "mamba2")]
-    #[test]
-    fn class_tokens_on_latent_network() {
-        use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let net = LatentNetworkBuilder {
-            input_size: 3,
-            layers: LayersBuilder::new(2, block),
-            output_size: 2,
-            class_tokens: vec![ClassToken::End],
-        }
-        .init(&device);
-        let (y, _c) = net.forward(
-            Tensor::<3>::zeros([2, 5, 3], &device),
-            None,
-            Mamba2SsdPath::default(),
-        );
-        assert_eq!([2, 6, 2], y.dims()); // 5 + 1 class token
-    }
-
-    // `Middle`/`End` class latents are incompatible with single-token `step()`.
-    #[cfg(feature = "mamba2")]
-    #[test]
-    #[should_panic(expected = "not compatible with step")]
-    fn class_latents_step_panics() {
-        use crate::mamba2::prelude::Mamba2Config;
-        let device = Device::default();
-        let block = Mamba2Config::new(16)
-            .with_expand(2)
-            .with_per_head_dim(4)
-            .with_state_rank(8)
-            .with_ngroups(1)
-            .with_conv_kernel(4);
-        let layers = LayersBuilder::new(1, block)
-            .with_class_latents(vec![ClassLatent::Middle])
-            .init(&device);
-        let _ = layers.step(Tensor::<2>::zeros([2, 16], &device), None);
-    }
-}
+mod tests;

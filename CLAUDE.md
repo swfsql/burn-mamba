@@ -112,7 +112,8 @@ decomposition
 │   └── burn                           # burn dependency source code
 ├── src
 │   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
-│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi. Also the learnable class-token feature: ClassToken (networks, d_input) / ClassLatent (layers, d_model) markers (Start/Middle/End/Custom(idx)) + insert_class_markers helper (forward-only; Middle/End panic in step)
+│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi. Also the learnable class-token feature: ClassToken (networks, d_input) / ClassLatent (layers, d_model) markers (Start/Middle/End/Custom(idx)) + insert_class_markers helper; step injects Start/Custom via cursor args (Middle/End panic in step)
+│   ├── generic/tests.rs               # unit tests for generic.rs (builder/enum smoke tests; class-token insertion + step-injection forward-parity)
 │   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
 │   │   ├── cache.rs                   # Mamba1Cache(s): conv window (bik) + SSM state (bir), and configs
 │   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
@@ -507,11 +508,21 @@ and may carry any number; the markers (`Start` | `Middle` | `End` |
 first (index 0), then `Middle` (`L/2`), then `End` (`L`), then `Custom(index)`
 last; ties keep `Vec` order. The sequence permanently lengthens for everything
 downstream; `forward` returns the lengthened sequence (the caller reads tokens
-back out via `class_{token,latent}_output_indices`). Because `Middle`/`End`
-materialise positions a single-token recurrence can't reproduce, they make
-`step()` panic; `Start`/`Custom` are forward-time only. The plain builders get a
+back out via `class_{token,latent}_output_indices`). The plain builders get a
 `with_class_{tokens,latents}`; the example's `AeConfig` (a `#[derive(Config)]`
 struct) gets the auto-generated `with_class_latents` from its `Vec` field.
+
+`step` injects class tokens via optional position **cursors** (`Option<&mut
+usize>` / `Option<&mut Vec<usize>>`): whenever a cursor reaches a class
+position the embedding is stepped first (advancing the cursor), then the user
+token — only the user token's output/cache is returned. The cursor counts that
+level's output positions: `Layer` takes one cursor; `Layers` takes its own
+(stack-level) cursor **and** a per-virtual-layer `Vec` it distributes to each
+inner `Layer`; `LatentNetwork` adds a third for its own class tokens;
+`VocabNetwork` just forwards the two `Layers` cursors. `Start`/`Custom` are
+length-independent so they inject in `step`; `Middle`/`End` need the full length
+and panic for the cursored level (use `forward`). A trailing class token (after
+the last user token) is simply never reached by `step`.
 
 ### Utilities (`src/utils/`)
 
