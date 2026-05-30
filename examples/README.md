@@ -16,7 +16,7 @@ There are shared definitions in `common/mod.rs`, imported as an outside module b
 
 ##### Model Definition
 
-The overall model used throughout the examples is the `Mamba2Network`, defined in `common/model.rs`. It contains some input and output projections (linear layers) and a `Mamba2Layers`, which is defined in `burn-mamba`. Helpers for configuring that model is also defined alogside it.
+The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
 
 #### Backend Selection
 

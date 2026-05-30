@@ -211,27 +211,33 @@ This contains more information about the most important files in the project.
 
 ### Layer → Network hierarchy (all three families)
 
-Each model family follows the same composition, top to bottom:
+All three families share **one** set of generic composition types, defined in
+[`src/generic.rs`](#) and parameterised by the SSM core block `M` (`Mamba1` /
+`Mamba2` / `Mamba3`). Top to bottom:
 
 ```text
-{Model}Network    embedding → {Model}Layers → final RMSNorm → LM head → logits
-{Model}Layers     a stack of N (virtual) layers over M real weight sets
-{Model}Layer      Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
-{Model} (Block)   the SSM core itself (mamba1.rs / mamba2.rs / mamba3.rs)
+VocabNetwork<M>   embedding → Layers<M> → final RMSNorm → LM head → logits
+LatentNetwork<M>  in_proj → Layers<M> → out_proj            (continuous I/O)
+Layers<M>         a stack of N (virtual) layers over M real weight sets
+Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
+M (Block)         the SSM core itself (mamba1.rs / mamba2.rs / mamba3.rs)
 ```
 
-- `layer.rs` wraps the core block with an input RMSNorm and a residual add, and
-  the `{Model}Layers` stack owns **virtual-layer scheduling** (see
+- `Layer<M>` wraps the core block with an input RMSNorm and a residual add, and
+  the `Layers<M>` stack owns **virtual-layer scheduling** (see
   [Virtual layers](#virtual-layer-scheduling)) plus `ignore_first/last_residual`
   flags (zero out the first/last residual when composing with other module
-  types). All three families (Mamba-1, Mamba-2, Mamba-3) provide a `{Model}Layers`
-  stack with virtual-layer support; only the **bidirectional** wrappers
-  (`*/bidi/`) are Mamba-2/3-only (Mamba-1 has no `bidi/`).
-- `network.rs` assembles the LM: token `Embedding` → layer stack → `norm_f`
+  types). All three families route through the same `Layers<M>`; the
+  **bidirectional** wrapper `BidiLayers<M>` likewise serves every family
+  (Mamba-1 included now that the stack is generic).
+- `VocabNetwork<M>` assembles the token LM: `Embedding` → `Layers<M>` → `norm_f`
   (final RMSNorm) → LM head. The LM head can be **tied** to the (transposed)
   embedding weights (`missing_lm_head = true` ⇒ `lm_head: None`) or a separate
   `Linear`. Vocab size is rounded up to `pad_vocab_size_multiple` for GPU
-  alignment.
+  alignment. `LatentNetwork<M>` is the continuous-I/O sibling (linear `in_proj` /
+  `out_proj` instead of embedding / LM head) sharing the same `Layers<M>` core.
+  Runtime-dispatch enums `MambaVocabNet` / `MambaLatentNet` / `MambaBidiLayers`
+  (each with a `#[derive(Config)]` `*Config` enum) pick the family at construction.
 
 ### Dual execution modes
 
@@ -465,7 +471,7 @@ conversions. No conv cache.
 
 ### Virtual layer scheduling (`src/schedule.rs`)
 
-`{Model}Layers` can run `n_virtual_layers` logical passes over `n_real_layers`
+`Layers<M>` can run `n_virtual_layers` logical passes over `n_real_layers`
 weight sets (e.g. 48 logical from 12 real). Each virtual layer keeps its **own
 cache** but shares parameters. `Schedule` maps virtual→real index:
 `Cyclic` (wrap), `Stretched` (block-repeat), `Custom(Vec)`. For bidirectional
@@ -473,13 +479,13 @@ stacks, `BidiSchedule` pairs forward/backward layers: `StridedCyclic`,
 `StridedStretched`, `SymmetricCyclic`, `SymmetricStretched`, `Custom` (even
 virtual indices = straight →, odd = reverse ←).
 
-### Bidirectional support (`*/bidi/naive/`)
+### Bidirectional support (`BidiLayers<M>` in `src/generic.rs`)
 
-For non-autoregressive tasks. A `{Model}BidiLayerPair` runs a straight pass (→)
+For non-autoregressive tasks. A `BidiLayerPair<M>` runs a straight pass (→)
 and a reversed pass (← via `flip` on the sequence axis, then flip back), then
-merges with `OutputMerge` (`Mean` or `CatLinear`). `{Model}BidiLayers` stacks
-pairs with `BidiSchedule`. Both Mamba-2 (`src/mamba2/bidi/`) and Mamba-3
-(`src/mamba3/bidi/`) support it.
+merges with `OutputMerge` (`Mean` or `CatLinear`). `BidiLayers<M>` stacks
+pairs with `BidiSchedule`. Being generic over the core block `M`, it serves all
+three families (the `MambaBidiLayers`/`MambaBidiLayersConfig` enums dispatch).
 
 ### Utilities (`src/utils/`)
 
@@ -511,9 +517,9 @@ backend with `Device::default()`, which resolves to the enabled `backend-*` flag
 matching the runtime dtype),
 `cli.rs` (`AppArgs`, artifact dir, config load/save, train→infer flow),
 `training.rs` (`TrainingConfig` + `optimizer_config(dtype)`), `model/`
-(`ModelConfigExt`; `MyMamba2Network` / `MyMamba3Network` = `in_proj` → `Layers`
-→ `out_proj`, plus the `*_block_config`/`*_layers_config` builders and the
-bidirectional wrappers), and `mnist/` (sequential-MNIST dataset). Each concrete
+(`ModelConfigExt` glue from a config enum to a `Module`; the networks are the
+lib-generic `MambaLatentNet` / `MambaVocabNet`, so examples no longer define
+their own network types), and `mnist/` (sequential-MNIST dataset). Each concrete
 example (`fibonacci/`, `mnist-class/`, `state-tracking/`) supplies its own
 `main.rs` (`launch()`), `model.rs` (`model_config()`), `training.rs`, and—where
 relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo;

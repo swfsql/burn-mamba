@@ -18,7 +18,7 @@ principle it can.
 
 This example uses the shared example harness (`common/`), like `fibonacci` and
 `mnist-class`: `dataset.rs` (the A₅ generator/running-product dataset),
-`model.rs` (`model_config(rotation)` over the common `MyMamba3Network`),
+`model.rs` (`model_config(rotation)` returning a `MambaLatentNetConfig::Mamba3`),
 `training.rs` (cross-entropy over **every** position + a per-position accuracy
 readout), `inference.rs` (per-position eval accuracy), and `main.rs`.
 
