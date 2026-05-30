@@ -4,11 +4,7 @@
 //! `InferenceStep` via a cross-entropy classification head over **every**
 //! position (the running `A₅` product).
 
-pub use crate::common::{
-    cli::AppArgs,
-    model::{MyMamba3Network, MyMamba3NetworkConfig},
-    training::TrainingConfig,
-};
+pub use crate::common::{cli::AppArgs, training::TrainingConfig};
 use crate::dataset::{
     EVAL_SEED, NUM_CLASSES, NUM_EVAL, NUM_TRAIN, SEQ_LENGTH, StateTrackingBatch,
     StateTrackingBatcher, StateTrackingDataset, TRAIN_SEED,
@@ -28,16 +24,16 @@ use burn_mamba::prelude::*;
 /// way).
 pub fn train(
     training_config: TrainingConfig,
-    model_config: MyMamba3NetworkConfig,
+    model_config: MambaLatentNetConfig,
     training_device: Device,
     app_args: &AppArgs,
 ) {
     training_device.seed(training_config.seed);
 
     // load (or init and save) model and optim
-    let model: MyMamba3Network = app_args.load_or_save_model(&model_config, &training_device);
+    let model: MambaLatentNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim::<MyMamba3Network>(&training_config.optimizer);
+    let mut optim = app_args.load_or_save_optim::<MambaLatentNet>(&training_config.optimizer);
 
     let mut model = Wrap(model, model_config.clone());
 
@@ -122,14 +118,14 @@ type Dataloader = std::sync::Arc<dyn DataLoader<StateTrackingBatch> + 'static>;
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
-    training_model: MyMamba3Network,
+    training_model: MambaLatentNet,
     training_config: &TrainingConfig,
-    model_config: &MyMamba3NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba3Network>,
+    model_config: &MambaLatentNetConfig,
+    optim: &mut OptimizerAdaptor<AdamW, MambaLatentNet>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
-) -> MyMamba3Network {
+) -> MambaLatentNet {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::new();
@@ -186,9 +182,9 @@ pub fn epoch_train(
 /// average loss and per-token accuracy.
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
-    valid_model: MyMamba3Network,
+    valid_model: MambaLatentNet,
     training_config: &TrainingConfig,
-    model_config: &MyMamba3NetworkConfig,
+    model_config: &MambaLatentNetConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
 ) {
@@ -296,8 +292,8 @@ pub fn format_per_position(correct: &[u64], total: &[u64]) -> String {
         .join(" ")
 }
 
-/// Wrapper over [`MyMamba3Network`] for custom implementations.
-pub struct Wrap(pub MyMamba3Network, pub MyMamba3NetworkConfig);
+/// Wrapper over [`MambaLatentNet`] for custom implementations.
+pub struct Wrap(pub MambaLatentNet, pub MambaLatentNetConfig);
 
 impl TrainStep for Wrap {
     type Input = StateTrackingBatch;
@@ -333,7 +329,7 @@ impl Wrap {
         let [batch_size, sequence_size, _num_gen] = inputs.dims();
         assert_eq!([batch_size, sequence_size], targets.dims());
 
-        let ssd_path = Mamba3SsdPath::Minimal(None);
+        let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None));
         //
         let (output, _caches) = model.forward(inputs, None, ssd_path);
         assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());

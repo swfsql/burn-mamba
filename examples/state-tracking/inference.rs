@@ -4,7 +4,6 @@
 //! (`Quaternion4D`) rotations.
 
 use crate::AppArgs;
-pub use crate::common::model::{MyMamba3Network, MyMamba3NetworkConfig};
 use crate::dataset::{
     EVAL_SEED, NUM_CLASSES, NUM_EVAL, SEQ_LENGTH, StateTrackingBatcher, StateTrackingDataset,
     StateTrackingItem,
@@ -18,11 +17,14 @@ use burn_mamba::prelude::*;
 
 /// Load the trained model and report per-token (and per-position) accuracy on a
 /// fresh eval set.
-pub fn infer(model_config: MyMamba3NetworkConfig, infer_device: Device, app_args: &AppArgs) {
-    let rotation = model_config.layers.mamba_block.rotation;
+pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args: &AppArgs) {
+    let rotation = match &model_config {
+        MambaLatentNetConfig::Mamba3 { mamba_block, .. } => mamba_block.rotation,
+        _ => panic!("state-tracking expects a Mamba-3 model config"),
+    };
 
     // load model
-    let model: MyMamba3Network = app_args
+    let model: MambaLatentNet = app_args
         .load_model(&model_config, &infer_device)
         .expect("failed to load model");
 
@@ -34,7 +36,8 @@ pub fn infer(model_config: MyMamba3NetworkConfig, infer_device: Device, app_args
     let batch = batcher.batch(items, &infer_device);
     let [batch_size, sequence_size, _num_sym] = batch.inputs.dims();
 
-    let (output, _caches) = model.forward(batch.inputs, None, Mamba3SsdPath::Minimal(None));
+    let (output, _caches) =
+        model.forward(batch.inputs, None, MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)));
     assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
     // Per-position accuracy: early positions have few distinct input prefixes

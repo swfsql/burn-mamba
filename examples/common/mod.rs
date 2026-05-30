@@ -17,7 +17,8 @@ pub mod cli;
 pub mod device;
 /// Sequential-MNIST dataset loading and batching.
 pub mod mnist;
-/// The example networks (`MyMamba2Network` / `MyMamba3Network`) and builders.
+/// The [`ModelConfigExt`](model::ModelConfigExt) seam bridging example configs to
+/// the library's unified network types.
 pub mod model;
 /// The shared training configuration.
 pub mod training;

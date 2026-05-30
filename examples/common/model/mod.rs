@@ -1,17 +1,14 @@
-//! The example networks (`in_proj → Layers → out_proj`) plus the config
-//! builders, and the [`ModelConfigExt`] factory trait that lets the generic
-//! training loop build any model config into a module.
+//! The example model surface: just the [`ModelConfigExt`] factory trait (the
+//! seam the generic training loop uses to stay model-agnostic) plus its impl for
+//! the library's unified [`MambaLatentNetConfig`].
+//!
+//! The examples no longer define their own networks. They build directly from
+//! the library's family-generic types (`in_proj → Layers → out_proj`, exposed as
+//! the runtime-selectable [`MambaLatentNet`]); each example just picks the family
+//! variant in its `model_config()`.
 
 use burn::prelude::*;
-
-/// Bidirectional wrapper networks for the examples.
-pub mod bidi;
-mod model;
-
-pub use model::{
-    mamba2::{MyMamba2Network, MyMamba2NetworkConfig, mamba2_block_config, mamba2_layers_config},
-    mamba3::{MyMamba3Network, MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config},
-};
+use burn_mamba::prelude::{MambaLatentNet, MambaLatentNetConfig};
 
 /// A model config that can build its module on a device — the seam the generic
 /// training loop uses to stay model-agnostic.
@@ -20,4 +17,14 @@ pub trait ModelConfigExt: Config {
     type Model: Module;
     /// Allocate and initialise the model on `device`.
     fn init(&self, device: &Device) -> Self::Model;
+}
+
+impl ModelConfigExt for MambaLatentNetConfig {
+    type Model = MambaLatentNet;
+    fn init(&self, device: &Device) -> Self::Model {
+        // `self.init(..)` resolves to the inherent `MambaLatentNetConfig::init`
+        // (inherent methods win over trait methods in method-call syntax), so
+        // this delegates to the library builder rather than recursing.
+        self.init(device)
+    }
 }

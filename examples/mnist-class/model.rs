@@ -2,53 +2,47 @@
 //! classifier (2 real layers stretched to 16 virtual layers); see
 //! [`model_config`].
 
-pub use crate::common::model::{MyMamba3NetworkConfig, mamba3_block_config, mamba3_layers_config};
-use burn_mamba::prelude::RotationKind;
+use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, RotationKind};
 use burn_mamba::schedule::Schedule;
 
-/// This model configuration uses ~37K params (~153KB disk space in FP32).  
-/// Reaches ~85% validation accuracy at the first epoch.  
+/// This model configuration uses ~37K params (~153KB disk space in FP32).
+/// Reaches ~85% validation accuracy at the first epoch.
 /// With a batch_size=16 in FP32, this requires ~3.5GB vram during training.
-pub fn model_config() -> MyMamba3NetworkConfig {
-    MyMamba3NetworkConfig::new()
-        // the input is a sequence of a single-dimensioned values
-        // the input shape is [batch_size, sequence_len = HEIGHT * WIDTH, 1]
-        .with_input_size(1)
-        // to keep it simple, don't use any class token
-        // .with_class_tokens(Vec::new()) // TODO: merge fork
-        .with_layers(mamba3_layers_config(
-            2, // two layers backed by unique weights is sufficient
-            Some((
-                16,                  // allow more expressivity by virtually extending to 16 layers,
-                Schedule::Stretched, // by looping (8x) each layer in sequence
-            )),
-            mamba3_block_config(
-                //
-                32, // d_model (intra- and inter-layer expressivity, high impact on disk size)
-                64, // state_rank (intra-layer and time-wise expressivity, average impact on disk size)
-                4, // nheads (intra-layer expressivity, no impact on disk size, high impact on vram)
-                1, // ngroups (intra-layer expressivity)
-                1, // mimo_rank (intra-layer expressivity)
-                // Apply RoPE to 100% of the B/C projections.
-                //
-                // Ablation:
-                //
-                // | RoPE Kind | RoPE | Memory |    Accuracy   |
-                // | --------- | ---- | ------ | ------------- |
-                // | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
-                // | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
-                // | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
-                //
-                // The accuracy above is for batches 100, 200, 300.
-                1., // apply RoPE to 100% of the B/C projections
-                4,  // expand (intra-layer expressivity, small impact on disk size)
-            )
-            .with_rotation(RotationKind::Complex2D), // Apply 2D rotations to B/C projections
-        ))
-        // the output is a 10-bins classification
-        // the output shape is [batch_size, sequence_len = HEIGHT * WIDTH, output_size = 10]
-        // which is later narrowed to the last timestep [batch_size, sequence_len = 1, output_size = 10]
-        .with_output_size(10)
+pub fn model_config() -> MambaLatentNetConfig {
+    // A small Mamba-3 block:
+    //   d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
+    //   state_rank = 64 (time-wise expressivity, average impact on disk size)
+    //   nheads = 4, ngroups = 1, mimo_rank = 1, expand = 4
+    //   ⇒ d_inner = expand·d_model = 128, per_head_dim = d_inner/nheads = 32
+    //   rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
+    //
+    // RoPE-kind ablation (batches 100/200/300):
+    //   | RoPE Kind | RoPE | Memory |    Accuracy   |
+    //   | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
+    //   | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
+    //   | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
+    let mamba_block = Mamba3Config::new(32)
+        .with_state_rank(64)
+        .with_expand(4)
+        .with_per_head_dim(32)
+        .with_ngroups(1)
+        .with_mimo_rank(1)
+        .with_rope_fraction(1.0)
+        .with_has_proj_bias(true)
+        .with_has_outproj_norm(true)
+        .with_rotation(RotationKind::Complex2D); // 2D rotations on B/C
+
+    // input  [batch_size, sequence_len = HEIGHT * WIDTH, input_size = 1]
+    // output [batch_size, sequence_len = HEIGHT * WIDTH, output_size = 10]
+    // (later narrowed to the last timestep for the 10-bin classification)
+    MambaLatentNetConfig::Mamba3 {
+        input_size: 1,
+        // two real layers, virtually stretched (8×) to 16 for more expressivity
+        n_real_layers: 2,
+        n_virtual_layers: Some((16, Schedule::Stretched)),
+        mamba_block,
+        output_size: 10,
+    }
 }
 // notes:
 // - this small model requires quite a lot of vram because the whole 28*28 sequence for each image

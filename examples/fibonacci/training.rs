@@ -3,11 +3,7 @@
 //! [`Wrap`] newtype adapts the example network to Burn's `TrainStep` /
 //! `InferenceStep` via an MSE regression head on the last timestep.
 
-pub use crate::common::{
-    cli::AppArgs,
-    model::{MyMamba2Network, MyMamba2NetworkConfig},
-    training::TrainingConfig,
-};
+pub use crate::common::{cli::AppArgs, training::TrainingConfig};
 use crate::dataset::{
     NOISE_LEVEL, NUM_SEQUENCES, SEQ_LENGTH, SequenceBatch, SequenceBatcher, SequenceDataset,
 };
@@ -27,16 +23,16 @@ use burn_mamba::prelude::*;
 /// way).
 pub fn train(
     training_config: TrainingConfig,
-    model_config: MyMamba2NetworkConfig,
+    model_config: MambaLatentNetConfig,
     training_device: Device,
     app_args: &AppArgs,
 ) {
     training_device.seed(training_config.seed);
 
     // load (or init and save) model and optim
-    let model: MyMamba2Network = app_args.load_or_save_model(&model_config, &training_device);
+    let model: MambaLatentNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim::<MyMamba2Network>(&training_config.optimizer);
+    let mut optim = app_args.load_or_save_optim::<MambaLatentNet>(&training_config.optimizer);
 
     let mut model = Wrap(model, model_config.clone());
 
@@ -126,16 +122,16 @@ type Dataloader = std::sync::Arc<dyn DataLoader<SequenceBatch> + 'static>;
 pub fn epoch_train(
     dataloader_train: Dataloader,
     dataloader_valid: Dataloader,
-    training_model: MyMamba2Network,
+    training_model: MambaLatentNet,
     training_config: &TrainingConfig,
-    model_config: &MyMamba2NetworkConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MyMamba2Network>,
+    model_config: &MambaLatentNetConfig,
+    optim: &mut OptimizerAdaptor<AdamW, MambaLatentNet>,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
-) -> MyMamba2Network {
+) -> MambaLatentNet {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
@@ -204,9 +200,9 @@ pub fn epoch_train(
 /// average loss.
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
-    valid_model: MyMamba2Network,
+    valid_model: MambaLatentNet,
     training_config: &TrainingConfig,
-    model_config: &MyMamba2NetworkConfig,
+    model_config: &MambaLatentNetConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
 ) {
@@ -243,8 +239,8 @@ pub fn epoch_valid(
     );
 }
 
-/// Wrapper over [`MyMamba2Network`] for custom implementations.
-pub struct Wrap(pub MyMamba2Network, pub MyMamba2NetworkConfig);
+/// Wrapper over [`MambaLatentNet`] for custom implementations.
+pub struct Wrap(pub MambaLatentNet, pub MambaLatentNetConfig);
 
 impl TrainStep for Wrap {
     type Input = SequenceBatch;
@@ -283,9 +279,9 @@ impl Wrap {
         assert_eq!([batch_size, 1], targets.dims());
         assert!(sequence_size >= 1);
 
-        let ssd_path = Mamba2SsdPath::Minimal(None);
-        // let ssd_path = Mamba2SsdPath::Serial(None);
-        // let ssd_path = Mamba2SsdPath::SerialRecalculated(None); // saves vram
+        let ssd_path = MambaSsdPath::Mamba2(Mamba2SsdPath::Minimal(None));
+        // ::Mamba2(Mamba2SsdPath::Serial(None));
+        // ::Mamba2(Mamba2SsdPath::SerialRecalculated(None)); // saves vram
         //
         let (output, _caches) = model.forward(input.clone(), None, ssd_path);
 

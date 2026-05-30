@@ -3,7 +3,6 @@
 
 use crate::AppArgs;
 pub use crate::common::device::FloatElement;
-pub use crate::common::model::{MyMamba2Network, MyMamba2NetworkConfig};
 use crate::dataset::{
     NOISE_LEVEL, SEQ_LENGTH, SequenceBatcher, SequenceDataset, SequenceDatasetItem,
 };
@@ -15,13 +14,13 @@ use burn_mamba::prelude::*;
 
 /// Load the trained model and run inference on a fresh batch of sequences.
 pub fn infer(
-    model_config: MyMamba2NetworkConfig,
+    model_config: MambaLatentNetConfig,
     batch_size: usize,
     infer_device: Device,
     app_args: &AppArgs,
 ) {
     // load model
-    let model: MyMamba2Network = app_args
+    let model: MambaLatentNet = app_args
         .load_model(&model_config, &infer_device)
         .expect("failed to load model");
 
@@ -34,7 +33,7 @@ pub fn infer(
     let (predicted, _caches) = model.forward(
         batch.sequences,
         None,
-        Mamba2SsdPath::SerialRecalculated(None),
+        MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(None)),
     );
     assert_eq!([batch_size, SEQ_LENGTH + 1, 1], predicted.dims());
     let last_predicted = predicted.narrow(1, SEQ_LENGTH, 1);

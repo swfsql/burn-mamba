@@ -63,6 +63,12 @@ pub mod prelude {
 
     #[cfg(feature = "mamba3")]
     pub use crate::mamba3::{self, prelude::*};
+
+    // The family-generic, runtime-selectable unified API.
+    pub use crate::generic::{
+        MambaBidiLayers, MambaBidiLayersConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig,
+        MambaSsdPath,
+    };
 }
 
 /// Shared activations, norms, losses, and custom-backward plumbing.

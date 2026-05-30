@@ -1,7 +1,7 @@
 //! The model configuration for the fibonacci example — a deliberately tiny
 //! Mamba-2 network sized to the synthetic task (see [`model_config`]).
 
-pub use crate::common::model::{MyMamba2NetworkConfig, mamba2_block_config, mamba2_layers_config};
+use burn_mamba::prelude::{Mamba2Config, MambaLatentNetConfig};
 
 /// The Fibonacci-like sequence xₜ = xₜ₋₁ + xₜ₋₂ can be modeled as:
 ///
@@ -13,7 +13,7 @@ pub use crate::common::model::{MyMamba2NetworkConfig, mamba2_block_config, mamba
 /// And this can be well represented by a Mamba-2 model, which is defined as:
 ///
 /// ```ignore
-/// hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ
+/// hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ
 /// yₜ = Cₜ hₜ + D xₜ
 /// ```
 ///
@@ -22,26 +22,29 @@ pub use crate::common::model::{MyMamba2NetworkConfig, mamba2_block_config, mamba
 /// Counting the io projections, conv and norm layers -- none of which
 /// are needed for the simplest case -- this results in 35 params.
 /// Without those, 17 params should be the required minimum.
-pub fn model_config() -> MyMamba2NetworkConfig {
-    MyMamba2NetworkConfig::new()
-        // the input is a sequence of a single-dimensioned values
-        // the input shape is [batch_size, sequence_len = SEQ_LENGTH, input_size = 1]
-        .with_input_size(1)
-        .with_layers(mamba2_layers_config(
-            1,    // a single layer is sufficient
-            None, // don't virtually extend the amount of layers
-            mamba2_block_config(
-                //
-                1, // d_model: one feature is sufficient
-                2, // state_rank: two states are sufficient
-                1, // conv_kernel: input conv is not necessary
-                1, // nheads: a single head is sufficient
-                1, // ngroups: a single ngroups is sufficient
-                1, // expand: expansion is not necessary
-            ),
-        ))
-        // the output is a single-dimensioned value
-        // the output shape is [batch_size, sequence_len = SEQ_LENGTH, output_size = 1]
-        // which is later narrowed to the last timestep [batch_size, sequence_len = 1, output_size = 1]
-        .with_output_size(1)
+pub fn model_config() -> MambaLatentNetConfig {
+    // A tiny Mamba-2 block sized to the task:
+    //   d_model = 1 (one feature is sufficient)
+    //   state_rank = 2 (two states suffice for the order-2 recurrence)
+    //   conv_kernel = 1 (no input conv needed); expand = 1; nheads = 1
+    //   ⇒ d_inner = expand·d_model = 1, per_head_dim = d_inner/nheads = 1
+    let mamba_block = Mamba2Config::new(1)
+        .with_state_rank(2)
+        .with_conv_kernel(1)
+        .with_expand(1)
+        .with_per_head_dim(1)
+        .with_ngroups(1)
+        .with_has_proj_bias(true);
+
+    // the input/output are single-dimensioned values; one real layer suffices.
+    // input shape  [batch_size, sequence_len = SEQ_LENGTH, input_size = 1]
+    // output shape [batch_size, sequence_len = SEQ_LENGTH, output_size = 1]
+    // (later narrowed to the last timestep)
+    MambaLatentNetConfig::Mamba2 {
+        input_size: 1,
+        n_real_layers: 1,
+        n_virtual_layers: None,
+        mamba_block,
+        output_size: 1,
+    }
 }

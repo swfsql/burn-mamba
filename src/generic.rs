@@ -233,6 +233,12 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
         }
     }
 
+    /// Set the optional virtual-layer scheduling.
+    pub fn with_n_virtual_layers(mut self, n: Option<(usize, Schedule)>) -> Self {
+        self.n_virtual_layers = n;
+        self
+    }
+
     /// Allocate and initialise the stack on `device`.
     pub fn init(&self, device: &Device) -> Layers<C::Block> {
         let d_model = self.mamba_block.d_model();
@@ -977,6 +983,8 @@ pub enum MambaLatentNetConfig {
         input_size: usize,
         /// Number of real layers.
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Output feature width.
@@ -989,6 +997,8 @@ pub enum MambaLatentNetConfig {
         input_size: usize,
         /// Number of real layers.
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Output feature width.
@@ -1001,6 +1011,8 @@ pub enum MambaLatentNetConfig {
         input_size: usize,
         /// Number of real layers.
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling.
+        n_virtual_layers: Option<(usize, Schedule)>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Output feature width.
@@ -1016,12 +1028,14 @@ impl MambaLatentNetConfig {
             Self::Mamba1 {
                 input_size,
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
                 output_size,
             } => MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
-                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone()),
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
                 }
                 .init(device),
@@ -1030,12 +1044,14 @@ impl MambaLatentNetConfig {
             Self::Mamba2 {
                 input_size,
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
                 output_size,
             } => MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
-                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone()),
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
                 }
                 .init(device),
@@ -1044,12 +1060,14 @@ impl MambaLatentNetConfig {
             Self::Mamba3 {
                 input_size,
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
                 output_size,
             } => MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
-                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone()),
+                    layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
+                        .with_n_virtual_layers(n_virtual_layers.clone()),
                     output_size: *output_size,
                 }
                 .init(device),
@@ -1276,6 +1294,7 @@ mod tests {
         let net = MambaLatentNetConfig::Mamba2 {
             input_size: 3,
             n_real_layers: 2,
+            n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
         }
@@ -1316,6 +1335,7 @@ mod tests {
         let net = MambaLatentNetConfig::Mamba3 {
             input_size: 3,
             n_real_layers: 2,
+            n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
         }
@@ -1340,6 +1360,7 @@ mod tests {
         let net = MambaLatentNetConfig::Mamba1 {
             input_size: 3,
             n_real_layers: 2,
+            n_virtual_layers: None,
             mamba_block: block,
             output_size: 2,
         }
