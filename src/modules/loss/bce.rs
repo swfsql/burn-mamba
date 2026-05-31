@@ -5,7 +5,6 @@
 //! probabilities and the logs are clamped to avoid `−∞`.
 
 use crate::modules::log_sigmoid;
-use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
 

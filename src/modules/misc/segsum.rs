@@ -5,7 +5,6 @@
 //! products) keeps it stable over long sequences.  See [`segsum`] for the math.
 
 use crate::modules::sanity as san;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------

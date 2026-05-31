@@ -11,7 +11,6 @@
 
 use crate::modules::Silu;
 use crate::utils::div_eps;
-use burn::backend::Backend;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;

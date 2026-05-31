@@ -48,7 +48,6 @@ use burn::backend::autodiff::{
 };
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, BackendTypes};
-use burn::prelude::*;
 
 /// Recompute-based gradient of the quaternion cumulative product.
 ///

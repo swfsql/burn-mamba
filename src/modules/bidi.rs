@@ -1,11 +1,11 @@
 use crate::modules::{RmsNorm, RmsNormConfig};
 use crate::prelude::*;
+use crate::utils::BidiSchedule;
 use crate::utils::ClassLatent;
 use crate::utils::class::{class_marker_output_indices, init_class_emb, insert_class_markers};
-use crate::utils::{BidiSchedule, Schedule};
 use burn::config::Config;
 use burn::module::Param;
-use burn::nn::{Embedding, EmbeddingConfig, Initializer, Linear, LinearConfig};
+use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 
 // ===========================================================================

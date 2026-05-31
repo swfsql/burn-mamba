@@ -28,7 +28,6 @@ pub mod scheduler;
 pub mod test_helpers;
 
 pub use class::{ClassLatent, ClassToken};
-pub(crate) use fprim::{F, Mask};
 pub use schedule::{BidiSchedule, Schedule};
 pub use scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 

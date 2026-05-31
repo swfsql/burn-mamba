@@ -85,7 +85,6 @@
 use crate::mamba2::prelude::*;
 use crate::modules::sanity as san;
 use crate::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
-use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},

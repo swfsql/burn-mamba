@@ -19,7 +19,6 @@ use burn::backend::autodiff::{
 };
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, BackendTypes};
-use burn::prelude::*;
 use ssd::serial_recalculated::{
     Mamba3SingleSsdBackendExt,
     combined_backward::{self, CombinedSingleSsdGrads},

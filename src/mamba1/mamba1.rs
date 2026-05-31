@@ -42,7 +42,6 @@ use crate::mamba1::prelude::*;
 use crate::modules::Silu;
 use crate::modules::sanity as san;
 use crate::modules::split_into;
-use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},

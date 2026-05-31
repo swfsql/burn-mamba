@@ -8,9 +8,7 @@
 //!
 //! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
 
-use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::prelude::*;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 /// MIMO-first SSD input.

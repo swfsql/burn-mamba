@@ -17,7 +17,7 @@
 #![allow(non_snake_case)]
 
 use crate::utils::fprim::F;
-use burn::backend::tensor::{Device};
+use burn::backend::tensor::Device;
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
 use burn::tensor::Tensor;

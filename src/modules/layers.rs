@@ -1,14 +1,12 @@
-use crate::modules::{RmsNorm, RmsNormConfig};
+use crate::modules::RmsNormConfig;
 use crate::prelude::*;
 use crate::utils::ClassLatent;
+use crate::utils::Schedule;
 use crate::utils::class::{
     assert_step_compatible, class_marker_output_indices, class_step_injections, init_class_emb,
     insert_class_markers,
 };
-use crate::utils::{BidiSchedule, Schedule};
-use burn::config::Config;
 use burn::module::Param;
-use burn::nn::{Embedding, EmbeddingConfig, Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 
 /// A stack of [`Layer`]s with optional virtual-layer scheduling — one struct for

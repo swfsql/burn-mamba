@@ -20,7 +20,6 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {

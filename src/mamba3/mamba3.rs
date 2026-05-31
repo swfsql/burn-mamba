@@ -125,7 +125,6 @@ use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
 use crate::modules::sanity as san;
 use crate::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
-use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -624,10 +623,10 @@ impl Mamba3 {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
-        let per_head_dim = self.per_head_dim();
-        let state_rank = self.state_rank;
-        let num_rope_angles = self.num_rope_angles;
-        let mimo_rank = self.mimo_rank;
+        let _per_head_dim = self.per_head_dim();
+        let _state_rank = self.state_rank;
+        let _num_rope_angles = self.num_rope_angles;
+        let _mimo_rank = self.mimo_rank;
         let device = input_bsm.device();
 
         assert!(sequence > 0, "sequence length must be at least 1");
@@ -715,10 +714,10 @@ mod step {
             let [batch, _d_model] = input_bd.dims();
             let nheads = self.nheads();
             let ngroups = self.ngroups;
-            let per_head_dim = self.per_head_dim();
-            let state_rank = self.state_rank;
-            let num_rope_angles = self.num_rope_angles;
-            let mimo_rank = self.mimo_rank;
+            let _per_head_dim = self.per_head_dim();
+            let _state_rank = self.state_rank;
+            let _num_rope_angles = self.num_rope_angles;
+            let _mimo_rank = self.mimo_rank;
             let device = input_bd.device();
 
             assert_eq!(nheads % ngroups, 0);

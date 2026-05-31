@@ -13,7 +13,6 @@
 //! [`rms_norm_gated`]: crate::utils::rms_norm_gated
 
 use crate::utils::div_eps;
-use burn::backend::Backend;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;
 use burn::prelude::*;

@@ -1,15 +1,14 @@
 use crate::modules::LayersBuilder;
 use crate::modules::{RmsNorm, RmsNormConfig};
 use crate::prelude::*;
-use crate::utils::ClassLatent;
+use crate::utils::Schedule;
 use crate::utils::class::{
     assert_step_compatible, class_marker_output_indices, class_step_injections, init_class_emb,
     insert_class_markers,
 };
-use crate::utils::{BidiSchedule, Schedule};
 use burn::config::Config;
 use burn::module::Param;
-use burn::nn::{Embedding, EmbeddingConfig, Initializer, Linear, LinearConfig};
+use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
 use burn::prelude::*;
 
 // ===========================================================================
@@ -60,7 +59,7 @@ where
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
-        let mut x = self.insert_tokens(x);
+        let x = self.insert_tokens(x);
         let x = self.in_proj.forward(x);
         let (x, caches) = self.layers.forward(x, caches, ssd_path);
         let x = self.out_proj.forward(x);

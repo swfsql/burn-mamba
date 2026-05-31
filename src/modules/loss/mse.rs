@@ -5,7 +5,6 @@
 //! multiplying it back in after the reduction.
 
 use crate::utils::div_eps;
-use burn::backend::Backend;
 use burn::module::Module;
 use burn::nn::loss::Reduction;
 use burn::tensor::{DType, Tensor, f16};

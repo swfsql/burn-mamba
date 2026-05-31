@@ -20,7 +20,6 @@ use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{RotationState, rotate_bc_forward, rotate_bc_step};
 use crate::modules::Silu;
 use crate::modules::sanity as san;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------

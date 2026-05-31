@@ -19,7 +19,6 @@
 
 use burn::backend::Backend;
 use burn::backend::get_device_settings;
-use burn::backend::ops::{BoolTensorOps, FloatTensorOps, IntTensorOps};
 use burn::backend::tensor::{BoolTensor, Device, FloatTensor, IntTensor};
 use burn::backend::{FloatDType, Scalar, Shape, Slice, SliceArg, TensorMetadata};
 
@@ -27,7 +26,7 @@ use burn::backend::{FloatDType, Scalar, Shape, Slice, SliceArg, TensorMetadata};
 ///
 /// Mirrors the slice of [`Tensor`](burn::tensor::Tensor)'s method API needed by
 /// the custom backward gradient math, operating directly on `B`'s primitives.
-pub(crate) struct F<B: Backend, const D: usize>(pub FloatTensor<B>);
+pub struct F<B: Backend, const D: usize>(pub FloatTensor<B>);
 
 impl<B: Backend, const D: usize> Clone for F<B, D> {
     fn clone(&self) -> Self {
@@ -290,7 +289,7 @@ impl<B: Backend, const D: usize> core::ops::Neg for F<B, D> {
 ///
 /// Mirrors the slice of the bool-tensor API needed to build and broadcast the
 /// causal masks in the custom backward (construct → reshape → expand).
-pub(crate) struct Mask<B: Backend>(pub BoolTensor<B>);
+pub struct Mask<B: Backend>(pub BoolTensor<B>);
 
 impl<B: Backend> Clone for Mask<B> {
     fn clone(&self) -> Self {
@@ -366,7 +365,7 @@ fn tri_bool<B: Backend>(
 /// (when [`crate::DENY_INF`] is set).  A no-op — with no device read — when both
 /// flags are `false` (the default), so it can be sprinkled through the backward
 /// math at no release-build cost.
-pub(crate) fn san<B: Backend, const D: usize>(t: &F<B, D>) {
+pub fn san<B: Backend, const D: usize>(t: &F<B, D>) {
     if !crate::DENY_NAN && !crate::DENY_INF {
         return;
     }

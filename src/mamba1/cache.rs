@@ -19,7 +19,6 @@
 
 use crate::mamba1::prelude::*;
 use crate::modules::sanity as san;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------

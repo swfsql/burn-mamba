@@ -6,7 +6,6 @@
 //! and `target_logits` control whether each side is normalised (log-softmax /
 //! softmax) before the loss.
 
-use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};

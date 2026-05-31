@@ -26,7 +26,6 @@ use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::modules::Silu;
 use crate::modules::sanity as san;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 impl Mamba3 {

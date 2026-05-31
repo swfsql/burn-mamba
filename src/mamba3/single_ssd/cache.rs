@@ -20,7 +20,6 @@
 
 use crate::mamba3::prelude::*;
 use crate::modules::sanity as san;
-use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
 

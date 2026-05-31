@@ -1,14 +1,8 @@
-use crate::modules::{RmsNorm, RmsNormConfig};
+use crate::modules::RmsNorm;
 use crate::prelude::*;
 use crate::utils::ClassLatent;
-use crate::utils::class::{
-    assert_step_compatible, class_marker_output_indices, class_step_injections, init_class_emb,
-    insert_class_markers,
-};
-use crate::utils::{BidiSchedule, Schedule};
-use burn::config::Config;
+use crate::utils::class::{assert_step_compatible, class_step_injections, insert_class_markers};
 use burn::module::Param;
-use burn::nn::{Embedding, EmbeddingConfig, Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 
 /// A single Pre-LN residual block: `output = x·residual_scale + M(RMSNorm(x))`.

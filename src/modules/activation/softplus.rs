@@ -5,7 +5,6 @@
 //! identity `softplus(x) = max(x, 0) + log(1 + e^−|x|)` to avoid overflow in
 //! `eˣ`; the wider formats use `log1p(eˣ)` directly.
 
-use burn::backend::Backend;
 use burn::prelude::*;
 use burn::tensor::DType;
 
