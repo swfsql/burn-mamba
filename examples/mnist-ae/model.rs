@@ -2,7 +2,7 @@
 //! autoencoder over the 784-pixel MNIST sequence.
 //!
 //! Both halves are [`MambaBidiLayers`] stacks of pure real Mamba-3 layers
-//! (`Complex2D` rotation). The encoder reads the image both ways and, **in place
+//! (`Quaternion4D` rotation). The encoder reads the image both ways and, **in place
 //! of mean-pooling**, splices a single learnable [`ClassLatent::Middle`] token
 //! into the middle of the sequence; after the bidi stack (where every position
 //! has seen the whole image) that token's output is read back out as the image
@@ -123,8 +123,10 @@ impl AeModel {
 #[derive(Config, Debug)]
 pub struct AeConfig {
     /// Width of a pixel token (1 for grayscale MNIST).
+    #[config(default = 1)]
     pub input_size: usize,
-    /// Sequence length / canvas size (`HEIGHT * WIDTH`).
+    /// Sequence length (i.e. canvas size, `HEIGHT * WIDTH`).
+    #[config(default = "HEIGHT * WIDTH")]
     pub sequence: usize,
     /// Model width shared by both stacks (must equal `mamba_block.d_model`).
     pub d_model: usize,
@@ -154,15 +156,25 @@ impl AeConfig {
         // decoder reconstructs at the original resolution, so it has none.
         let enc_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_enc_layers,
+            n_virtual_layers: None,
             mamba_block: self.mamba_block.clone(),
-            outputs_merge: OutputMergeConfig::mean(self.n_enc_layers),
+            // first input (before flip) is non-bidi
+            ignore_first_residual: true,
+            // last output comes only from the state
+            ignore_last_residual: true,
+            outputs_merge: OutputMergeConfig::cat_linear(self.n_enc_layers),
             class_latents: self.enc_class_latents.clone(),
         }
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_dec_layers,
+            n_virtual_layers: None,
             mamba_block: self.mamba_block.clone(),
-            outputs_merge: OutputMergeConfig::mean(self.n_dec_layers),
+            // first input (before flip) is bidi
+            ignore_first_residual: false,
+            // last output comes only from the state
+            ignore_last_residual: true,
+            outputs_merge: OutputMergeConfig::cat_linear(self.n_dec_layers),
             class_latents: Vec::new(),
         }
         .init(device);
@@ -204,18 +216,18 @@ impl ModelConfigExt for AeConfig {
 /// (`-- --latents N`, default 32). The encoder uses a single `Middle` class
 /// latent in place of mean-pooling.
 pub fn model_config(n_latent: usize) -> AeConfig {
-    let d_model = 32;
+    let d_model = 64;
     let mamba_block = Mamba3Config::new(d_model)
-        .with_state_rank(64)
-        .with_expand(2)
-        .with_per_head_dim(32) // d_inner = 64, nheads = 64/32 = 2
+        .with_state_rank(128)
+        .with_expand(4)
+        .with_per_head_dim(32) // d_inner = 256, nheads = 256/32 = 8
         .with_ngroups(1)
-        .with_mimo_rank(1)
+        .with_mimo_rank(4)
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Complex2D);
+        .with_rotation(RotationKind::Quaternion4D);
 
-    AeConfig::new(1, HEIGHT * WIDTH, d_model, n_latent, 2, 2, mamba_block)
+    AeConfig::new(d_model, n_latent, 8, 16, mamba_block)
         .with_enc_class_latents(vec![ClassLatent::Middle])
 }

@@ -429,8 +429,11 @@ pub enum MambaBidiLayersConfig {
     Mamba1 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
+        ignore_first_residual: bool,
+        ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
         /// Stack-level class latents, spliced into the sequence before the
@@ -442,8 +445,11 @@ pub enum MambaBidiLayersConfig {
     Mamba2 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
+        ignore_first_residual: bool,
+        ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
         /// Stack-level class latents, spliced into the sequence before the
@@ -455,8 +461,11 @@ pub enum MambaBidiLayersConfig {
     Mamba3 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
+        ignore_first_residual: bool,
+        ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
         /// Stack-level class latents, spliced into the sequence before the
@@ -472,16 +481,19 @@ impl MambaBidiLayersConfig {
             #[cfg(feature = "mamba1")]
             Self::Mamba1 {
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
+                ignore_first_residual,
+                ignore_last_residual,
                 outputs_merge,
                 class_latents,
             } => MambaBidiLayers::Mamba1(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
-                    n_virtual_layers: None,
+                    n_virtual_layers: n_virtual_layers.clone(),
                     mamba_block: mamba_block.clone(),
-                    ignore_first_residual: false,
-                    ignore_last_residual: false,
+                    ignore_first_residual: *ignore_first_residual,
+                    ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                 }
@@ -490,16 +502,19 @@ impl MambaBidiLayersConfig {
             #[cfg(feature = "mamba2")]
             Self::Mamba2 {
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
+                ignore_first_residual,
+                ignore_last_residual,
                 outputs_merge,
                 class_latents,
             } => MambaBidiLayers::Mamba2(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
-                    n_virtual_layers: None,
+                    n_virtual_layers: n_virtual_layers.clone(),
                     mamba_block: mamba_block.clone(),
-                    ignore_first_residual: false,
-                    ignore_last_residual: false,
+                    ignore_first_residual: *ignore_first_residual,
+                    ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                 }
@@ -508,16 +523,19 @@ impl MambaBidiLayersConfig {
             #[cfg(feature = "mamba3")]
             Self::Mamba3 {
                 n_real_layers,
+                n_virtual_layers,
                 mamba_block,
+                ignore_first_residual,
+                ignore_last_residual,
                 outputs_merge,
                 class_latents,
             } => MambaBidiLayers::Mamba3(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
-                    n_virtual_layers: None,
+                    n_virtual_layers: n_virtual_layers.clone(),
                     mamba_block: mamba_block.clone(),
-                    ignore_first_residual: false,
-                    ignore_last_residual: false,
+                    ignore_first_residual: *ignore_first_residual,
+                    ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                 }
