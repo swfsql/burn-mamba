@@ -859,7 +859,8 @@ fn rotation_state_wrong_unwrap_panics() {
 /// cache.
 #[test]
 fn quaternion_bidi_forward_runs() {
-    use crate::generic::{MambaBidiLayersConfig, MambaSsdPath, OutputMergeConfig};
+    use crate::modules::bidi::OutputMergeConfig;
+    use crate::modules::{MambaBidiLayersConfig, MambaSsdPath};
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
@@ -872,7 +873,10 @@ fn quaternion_bidi_forward_runs() {
     let n_real = 2; // one bidirectional pair
     let layers = MambaBidiLayersConfig::Mamba3 {
         n_real_layers: n_real,
+        n_virtual_layers: None,
         mamba_block: block,
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
         class_latents: Vec::new(),
     }

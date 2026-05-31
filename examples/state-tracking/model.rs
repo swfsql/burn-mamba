@@ -3,7 +3,7 @@
 //! (`Complex2D` vs `Quaternion4D`); see [`model_config`].
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, RotationKind};
+use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
 
 /// Build the example model config for the chosen `rotation`.
 ///
@@ -40,5 +40,6 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         mamba_block,
         output_size: NUM_CLASSES,
         class_tokens: Vec::new(),
+        residuals: ResidualsConfig::Standard,
     }
 }

@@ -3,11 +3,13 @@
 //! class-token / class-latent insertion + step-injection machinery.
 
 use super::*;
+use crate::prelude::*;
+use crate::modules::*;
+use crate::modules::{bidi::*, network::*};
 
 #[cfg(feature = "mamba2")]
 #[test]
 fn latent_network_builder_mamba2() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -36,7 +38,7 @@ fn latent_network_builder_mamba2() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn unified_net_config_mamba2() {
-    use crate::mamba2::prelude::Mamba2Config;
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -51,6 +53,7 @@ fn unified_net_config_mamba2() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -77,7 +80,7 @@ fn unified_net_config_mamba2() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn unified_net_config_mamba3() {
-    use crate::mamba3::prelude::Mamba3Config;
+    
     let device = Device::default();
     let block = Mamba3Config::new(16)
         .with_expand(2)
@@ -93,6 +96,7 @@ fn unified_net_config_mamba3() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -109,7 +113,7 @@ fn unified_net_config_mamba3() {
 #[cfg(feature = "mamba1")]
 #[test]
 fn unified_net_config_mamba1() {
-    use crate::mamba1::prelude::Mamba1Config;
+    
     let device = Device::default();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let net = MambaLatentNetConfig::Mamba1 {
@@ -119,6 +123,7 @@ fn unified_net_config_mamba1() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -137,7 +142,7 @@ fn unified_net_config_mamba1() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn bidi_layers_mamba2() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -167,7 +172,7 @@ fn bidi_layers_mamba2() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_layers_mamba3() {
-    use crate::mamba3::prelude::{Mamba3Config, Mamba3SsdPath};
+    
     let device = Device::default();
     let block = Mamba3Config::new(16)
         .with_expand(2)
@@ -199,7 +204,7 @@ fn bidi_layers_mamba3() {
 #[cfg(feature = "mamba1")]
 #[test]
 fn bidi_layers_mamba1() {
-    use crate::mamba1::prelude::Mamba1Config;
+    
     let device = Device::default();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let layers = BidiLayersBuilder {
@@ -221,7 +226,7 @@ fn bidi_layers_mamba1() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn unified_bidi_config_mamba2() {
-    use crate::mamba2::prelude::Mamba2Config;
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -231,7 +236,10 @@ fn unified_bidi_config_mamba2() {
         .with_conv_kernel(4);
     let layers = MambaBidiLayersConfig::Mamba2 {
         n_real_layers: 2,
+        n_virtual_layers: None,
         mamba_block: block,
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
     }
@@ -251,7 +259,7 @@ fn unified_bidi_config_mamba2() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_lengthen_and_index() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -292,7 +300,7 @@ fn class_latents_custom_index() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_on_latent_network() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -320,7 +328,7 @@ fn class_tokens_on_latent_network() {
 #[test]
 #[should_panic(expected = "not compatible with step")]
 fn class_latents_step_panics() {
-    use crate::mamba2::prelude::Mamba2Config;
+    
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -342,7 +350,7 @@ fn class_latents_step_panics() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_step_matches_forward() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    
     use crate::utils::test_helpers::max_abs_diff;
     let device = Device::default();
     let block = Mamba2Config::new(16)
@@ -394,7 +402,7 @@ fn class_latents_step_matches_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn per_layer_class_latents_step_matches_forward() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    
     use crate::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 

@@ -1,4 +1,4 @@
-use crate::modules::RmsNormConfig;
+use crate::modules::{Residuals, ResidualsConfig, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::ClassLatent;
 use crate::utils::Schedule;
@@ -24,6 +24,8 @@ pub struct Layers<M: Module> {
     pub ignore_first_residual: bool,
     /// Zero the last virtual layer's residual when `true`.
     pub ignore_last_residual: bool,
+    /// How residuals are threaded between layers (plain additive vs Multi-Gate).
+    pub residuals: Residuals,
     /// Positions of the stack-level class latents, spliced into the sequence
     /// once before the first virtual layer (independent of any per-[`Layer`]
     /// class latents). Empty ⇒ none.
@@ -78,6 +80,19 @@ where
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
+        match &self.residuals {
+            Residuals::Standard(_) => self.forward_standard(x, caches, ssd_path),
+            Residuals::MultiGate(mg) => self.forward_multi_gate(x, caches, ssd_path, mg),
+        }
+    }
+
+    /// Plain additive (Pre-LN) residual pass: each layer adds its own skip.
+    fn forward_standard(
+        &self,
+        x: Tensor<3>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches) {
         let mut x = self.insert_latents(x);
         let n = self.n_virtual_count();
         let caches =
@@ -94,6 +109,55 @@ where
             slots[i] = Some(c_);
         }
         (x, M::Caches::from_slots(slots))
+    }
+
+    /// Multi-Gate Residual pass. `n_stream` streams (all seeded from `x`) flow up
+    /// the stack; each layer sees the AttnPool of the streams, and its output is
+    /// gated back into each stream. The layer's own additive skip is suppressed
+    /// (`residual_scale = 0`) — the streams *are* the residual path.
+    ///
+    /// Class latents are unsupported here (they would change the sequence length
+    /// the streams are aligned to); `ignore_first/last_residual` do not apply.
+    fn forward_multi_gate(
+        &self,
+        x: Tensor<3>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+        mg: &crate::modules::MultiGate,
+    ) -> (Tensor<3>, M::Caches) {
+        assert!(
+            self.class_latents_emb.is_none(),
+            "MultiGate residuals do not support stack-level class latents"
+        );
+        let [batch, sequence, d_model] = x.dims();
+        let n = self.n_virtual_count();
+        let caches =
+            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
+        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+
+        let mut slots = caches.into_slots();
+        let mut streams = x.clone().unsqueeze_dim::<4>(2).expand([
+            batch,
+            sequence,
+            mg.n_stream,
+            d_model,
+        ]);
+        let mut h = x;
+        for i in 0..n {
+            let real = self.real_idx(i);
+            let layer = &self.real_layers[real];
+            assert!(
+                layer.class_latents_emb.is_none(),
+                "MultiGate residuals do not support per-layer class latents"
+            );
+            let cache = slots[i].take().unwrap();
+            let (out, c_) = layer.forward(h, Some(cache), ssd_path.clone(), 0.0);
+            slots[i] = Some(c_);
+            let (new_h, new_streams) = mg.layers[real].forward(out, streams);
+            h = new_h;
+            streams = new_streams;
+        }
+        (h, M::Caches::from_slots(slots))
     }
 
     /// Single-token step through every (virtual) layer.
@@ -124,6 +188,9 @@ where
         own_index: Option<&mut usize>,
         mut layer_indices: Option<&mut Vec<usize>>,
     ) -> (Tensor<2>, M::Caches) {
+        if let Residuals::MultiGate(mg) = &self.residuals {
+            return self.step_multi_gate(x, caches, mg);
+        }
         let [batch, d_model] = x.dims();
         let n = self.n_virtual_count();
         let caches =
@@ -193,6 +260,44 @@ where
         let out = stream.pop().expect("the user token is always emitted");
         (out, M::Caches::from_slots(slots))
     }
+
+    /// Single-token Multi-Gate Residual step — the recurrent counterpart of
+    /// [`Self::forward_multi_gate`]. The streams are a per-token *depth*
+    /// construct (rebuilt from `x` each step, never carried between tokens), so
+    /// no extra state crosses steps and `forward`/`step` agree. Class latents are
+    /// unsupported.
+    fn step_multi_gate(
+        &self,
+        x: Tensor<2>,
+        caches: Option<M::Caches>,
+        mg: &crate::modules::MultiGate,
+    ) -> (Tensor<2>, M::Caches) {
+        assert_step_compatible(&self.class_latents, "Layers");
+        let [batch, d_model] = x.dims();
+        let n = self.n_virtual_count();
+        let caches =
+            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
+        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+
+        let mut slots = caches.into_slots();
+        let mut streams = x
+            .clone()
+            .unsqueeze_dim::<3>(1)
+            .expand([batch, mg.n_stream, d_model]);
+        let mut h = x;
+        for i in 0..n {
+            let real = self.real_idx(i);
+            let layer = &self.real_layers[real];
+            assert_step_compatible(&layer.class_latents, "Layer");
+            let cache = slots[i].take();
+            let (out, c_) = layer.step(h, cache, 0.0, None);
+            slots[i] = Some(c_);
+            let (new_h, new_streams) = mg.layers[real].step(out, streams);
+            h = new_h;
+            streams = new_streams;
+        }
+        (h, M::Caches::from_slots(slots))
+    }
 }
 
 /// Plain (non-serde) factory for [`Layers`]. The serializable surface is the
@@ -211,6 +316,8 @@ pub struct LayersBuilder<C> {
     pub ignore_last_residual: bool,
     /// Stack-level class latents (spliced once before the first virtual layer).
     pub class_latents: Vec<ClassLatent>,
+    /// Inter-layer residual scheme (defaults to plain additive).
+    pub residuals: ResidualsConfig,
 }
 
 impl<C: MambaBlockConfig> LayersBuilder<C> {
@@ -223,12 +330,19 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             ignore_first_residual: false,
             ignore_last_residual: false,
             class_latents: Vec::new(),
+            residuals: ResidualsConfig::Standard,
         }
     }
 
     /// Set the optional virtual-layer scheduling.
     pub fn with_n_virtual_layers(mut self, n: Option<(usize, Schedule)>) -> Self {
         self.n_virtual_layers = n;
+        self
+    }
+
+    /// Set the inter-layer residual scheme (plain additive vs Multi-Gate).
+    pub fn with_residuals(mut self, residuals: ResidualsConfig) -> Self {
+        self.residuals = residuals;
         self
     }
 
@@ -256,6 +370,7 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             real_layers,
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
+            residuals: self.residuals.init(d_model, self.n_real_layers, device),
             class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
             class_latents: self.class_latents.clone(),
         }

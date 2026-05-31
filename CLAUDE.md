@@ -69,7 +69,8 @@ src/
 ├─ modules/          family-generic composition + shared NN modules
 │  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
 │  ├─ layer.rs       Layer<M>: Pre-LN residual block
-│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
+│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets (Residuals enum)
+│  ├─ multi_gate.rs  Multi-Gate Residuals: multi-stream gated depth residuals (Standard|MultiGate)
 │  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait + MambaCaches enum
@@ -214,6 +215,13 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   lengthened sequence; the caller reads tokens via `class_*_output_indices`. `step`
   injects via position **cursors** (`Start`/`Custom` only; `Middle`/`End` need the full
   length and panic there).
+- **Multi-Gate Residuals** (`modules/multi_gate.rs`): a `Layers<M>.residuals: Residuals`
+  enum picks plain additive (`Standard`) vs `MultiGate` between layers. MGR keeps
+  `n_stream` parallel residual streams (seeded from the stack input): each layer reads
+  their attention-pooled aggregate and its output is gated back into every stream
+  (independent sigmoid gate). Point-wise over `(batch, sequence)` — streams evolve only
+  along depth — so the layer's own skip is suppressed, `step` carries no extra state, and
+  class latents are unsupported. The paper's competitive (softmax) gate is omitted.
 
 ---
 

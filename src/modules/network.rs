@@ -1,5 +1,5 @@
 use crate::modules::LayersBuilder;
-use crate::modules::{RmsNorm, RmsNormConfig};
+use crate::modules::{ResidualsConfig, RmsNorm, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::Schedule;
 use crate::utils::class::{
@@ -433,6 +433,8 @@ pub enum MambaLatentNetConfig {
         output_size: usize,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-2 latent network.
     #[cfg(feature = "mamba2")]
@@ -449,6 +451,8 @@ pub enum MambaLatentNetConfig {
         output_size: usize,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-3 latent network.
     #[cfg(feature = "mamba3")]
@@ -465,6 +469,8 @@ pub enum MambaLatentNetConfig {
         output_size: usize,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
 }
 
@@ -480,11 +486,13 @@ impl MambaLatentNetConfig {
                 mamba_block,
                 output_size,
                 class_tokens,
+                residuals,
             } => MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -498,11 +506,13 @@ impl MambaLatentNetConfig {
                 mamba_block,
                 output_size,
                 class_tokens,
+                residuals,
             } => MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -516,11 +526,13 @@ impl MambaLatentNetConfig {
                 mamba_block,
                 output_size,
                 class_tokens,
+                residuals,
             } => MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -671,6 +683,8 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-2 language model.
     #[cfg(feature = "mamba2")]
@@ -687,6 +701,8 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-3 language model.
     #[cfg(feature = "mamba3")]
@@ -703,6 +719,8 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Inter-layer residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
 }
 
@@ -718,12 +736,14 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                residuals,
             } => MambaVocabNet::Mamba1(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -736,12 +756,14 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                residuals,
             } => MambaVocabNet::Mamba2(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -754,12 +776,14 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                residuals,
             } => MambaVocabNet::Mamba3(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
-                        .with_n_virtual_layers(n_virtual_layers.clone()),
+                        .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_residuals(residuals.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),

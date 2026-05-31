@@ -15,6 +15,8 @@ pub mod layers;
 pub mod loss;
 /// Tensor helpers: `segsum`, `gqa`, typed `split`, and `sanity` guards.
 pub mod misc;
+/// Multi-Gate Residuals: multi-stream gated depth-wise residuals ([`Residuals`]).
+pub mod multi_gate;
 /// Family-generic networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
 pub mod network;
 /// RMS norms ([`RmsNorm`] QK-norm + [`RmsNormGated`]), fp16-safe.
@@ -34,6 +36,9 @@ pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};
 pub use cache::{CacheStack, MambaCaches};
 pub use layer::Layer;
 pub use layers::{Layers, LayersBuilder};
+pub use multi_gate::{
+    MultiGate, MultiGateResidual, MultiGateResidualConfig, Residuals, ResidualsConfig,
+};
 pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
 
 /// Per-family block interface the generic [`Layer`]/[`Layers`] delegate to.

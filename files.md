@@ -130,13 +130,21 @@ plus shared NN blocks.
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN residual `y = x·residual_scale + M(RMSNorm(x))`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
-  Option<(usize, Schedule)>`, `ignore_first/last_residual`; loops virtual→real per the
-  schedule, each with its own cache. `LayersBuilder`.
+  Option<(usize, Schedule)>`, `ignore_first/last_residual`, `residuals: Residuals`; loops
+  virtual→real per the schedule, each with its own cache. Dispatches `forward`/`step` to
+  `_standard` (plain additive) or `_multi_gate` (MGR; layer skip suppressed, no class
+  latents). `LayersBuilder` (`with_residuals`).
+- **`multi_gate.rs`** — Multi-Gate Residuals (paper: independent sigmoid gate only).
+  `MultiGateResidual` (per-layer `w_beta`/`w_alpha` queries + `b_beta` bias) mixes
+  `n_stream` streams toward the layer output (`σ` gate) then attention-pools them into the
+  next input (`softmax`); point-wise over `(b,s)` so `forward`==`step`. `MultiGate` =
+  one per real layer. `enum Residuals{Standard(NoOp)|MultiGate(_)}` + `ResidualsConfig`.
 - **`network.rs`** — `LatentNetwork<M>` (linear in/out) and `VocabNetwork<M>` (embedding →
   `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
-  cache/path**. `*Builder`s carry `with_class_{tokens,latents}`.
+  cache/path**. `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
+  variants carry a `residuals: ResidualsConfig` (plain additive vs Multi-Gate).
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`) and `BidiLayers<M>`
   (stacks pairs with a `BidiSchedule`); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`;
   runtime `MambaBidiLayers`. Forward-only.

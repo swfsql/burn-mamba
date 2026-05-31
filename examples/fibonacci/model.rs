@@ -1,7 +1,7 @@
 //! The model configuration for the fibonacci example — a deliberately tiny
 //! Mamba-2 network sized to the synthetic task (see [`model_config`]).
 
-use burn_mamba::prelude::{Mamba2Config, MambaLatentNetConfig};
+use burn_mamba::prelude::{Mamba2Config, MambaLatentNetConfig, ResidualsConfig};
 
 /// The Fibonacci-like sequence xₜ = xₜ₋₁ + xₜ₋₂ can be modeled as:
 ///
@@ -47,5 +47,6 @@ pub fn model_config() -> MambaLatentNetConfig {
         mamba_block,
         output_size: 1,
         class_tokens: Vec::new(),
+        residuals: ResidualsConfig::Standard,
     }
 }

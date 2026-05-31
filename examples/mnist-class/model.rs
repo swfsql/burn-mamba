@@ -2,7 +2,7 @@
 //! classifier (2 real layers stretched to 16 virtual layers); see
 //! [`model_config`].
 
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, RotationKind};
+use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
 use burn_mamba::utils::Schedule;
 
 /// This model configuration uses ~37K params (~153KB disk space in FP32).
@@ -43,6 +43,15 @@ pub fn model_config() -> MambaLatentNetConfig {
         mamba_block,
         output_size: 10,
         class_tokens: Vec::new(),
+        // Multi-Gate Residuals (independent sigmoid gate) over 4 streams: the
+        // 16 virtual layers update 4 parallel residual streams via gated mixing,
+        // pooled per layer by depth-wise attention. A slightly negative init bias
+        // biases the gates towards carry early in training (see the paper's
+        // depth-aware formula); 4 streams over 16 virtual layers is modest.
+        residuals: ResidualsConfig::MultiGate {
+            n_stream: 4,
+            init_bias: -1.0,
+        },
     }
 }
 // notes:
