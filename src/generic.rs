@@ -446,43 +446,31 @@ where
     ///
     /// Two independent class-latent cursors:
     /// - `own_index` — the stack-level [`Self::class_latents`] (spliced once
-    ///   before the first layer in `forward`). When it lands on one of those
-    ///   positions the stack latent(s) are stepped first (each a full stack pass,
-    ///   advancing `own_index`), then the user token.
+    ///   before the first layer in `forward`). When it lands on a stack position
+    ///   that latent enters the bottom of the stack as an extra input token.
     /// - `layer_indices` — one cursor **per virtual layer**
-    ///   (`len == n_virtual_layers`), distributed as the per-[`Layer`] cursor so
-    ///   each layer injects its own class latents independently.
+    ///   (`len == n_virtual_layers`), the per-[`Layer`] cursor so each layer
+    ///   splices its own class latents into the token stream it receives.
+    ///
+    /// Because a layer's class latents grow the sequence the *next* layer sees
+    /// (exactly as in `forward`), a single user step is a **cascade**: the bottom
+    /// input stream (any stack latents at `own_index`, then the user token) is
+    /// threaded up the stack, each layer expanding it with its own class latents
+    /// at `layer_indices[i]`. Every layer's recurrence therefore sees the same
+    /// token order as `forward`, so `forward` and `step` agree. Only the user
+    /// token's (fully propagated) output is returned — it is emitted last.
     ///
     /// A `None` cursor skips that level's injection; `Middle`/`End` latents panic
     /// for the cursored level (their positions need the full sequence — use
     /// `forward`).
     pub fn step(
         &self,
-        mut x: Tensor<2>,
+        x: Tensor<2>,
         caches: Option<M::Caches>,
         own_index: Option<&mut usize>,
         mut layer_indices: Option<&mut Vec<usize>>,
     ) -> (Tensor<2>, M::Caches) {
-        // Stack-level class-latent injection (around full stack passes).
-        if let Some(cursor) = own_index {
-            let [batch, d_model] = x.dims();
-            let inj = class_step_injections(&self.class_latents, "Layers");
-            let emb = self.class_latents_emb.as_ref();
-            let mut caches = caches;
-            while let Some(i) = inj.iter().position(|&p| p == *cursor) {
-                let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
-                let (_discard, c) = self.step(row, caches, None, None);
-                caches = Some(c);
-                *cursor += 1;
-            }
-            let (out, caches) = self.step(x, caches, None, layer_indices);
-            *cursor += 1;
-            return (out, caches);
-        }
-
-        // The actual one-token work: thread the token through the stack, giving
-        // each virtual layer its own class-latent cursor from `layer_indices`.
-        assert_step_compatible(&self.class_latents, "Layers");
+        let [batch, d_model] = x.dims();
         let n = self.n_virtual_count();
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
@@ -490,18 +478,66 @@ where
         if let Some(v) = layer_indices.as_deref() {
             assert_eq!(v.len(), n, "one class-latent cursor per virtual layer");
         }
-
         let mut slots = caches.into_slots();
-        for i in 0..n {
-            let layer = &self.real_layers[self.real_idx(i)];
-            let rs = self.residual_scale(i, n);
-            let cache = slots[i].take().unwrap();
-            let layer_cursor = layer_indices.as_deref_mut().map(|v| &mut v[i]);
-            let (x_, c_) = layer.step(x, Some(cache), rs, layer_cursor);
-            x = x_;
-            slots[i] = Some(c_);
+
+        // Bottom input stream for this user step: the stack-level class latents
+        // that fall at the cursor (fed through the whole stack like ordinary
+        // inputs), then the user token. Without a cursor, just the user token.
+        let mut stream: Vec<Tensor<2>> = Vec::new();
+        if let Some(own_cursor) = own_index {
+            let positions = class_step_injections(&self.class_latents, "Layers");
+            let emb = self.class_latents_emb.as_ref();
+            while let Some(i) = positions.iter().position(|&p| p == *own_cursor) {
+                stream.push(emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]));
+                *own_cursor += 1;
+            }
+            stream.push(x);
+            *own_cursor += 1;
+        } else {
+            assert_step_compatible(&self.class_latents, "Layers");
+            stream.push(x);
         }
-        (x, M::Caches::from_slots(slots))
+
+        // Propagate the stream up through each virtual layer, each layer splicing
+        // its own class latents into the stream it receives.
+        for pos in 0..n {
+            let layer = &self.real_layers[self.real_idx(pos)];
+            let rs = self.residual_scale(pos, n);
+            let mut layer_cursor = layer_indices.as_deref_mut().map(|v| &mut v[pos]);
+            let positions = if layer_cursor.is_some() {
+                class_step_injections(&layer.class_latents, "Layer")
+            } else {
+                assert_step_compatible(&layer.class_latents, "Layer");
+                Vec::new()
+            };
+            let emb = layer.class_latents_emb.as_ref();
+            let mut cache = slots[pos].take();
+            let mut next: Vec<Tensor<2>> = Vec::with_capacity(stream.len());
+            for token in stream {
+                // Splice this layer's class latents that fall before this token.
+                if let Some(cursor) = layer_cursor.as_deref_mut() {
+                    while let Some(i) = positions.iter().position(|&p| p == *cursor) {
+                        let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
+                        let (out, c) = layer.step(row, cache, rs, None);
+                        next.push(out);
+                        cache = Some(c);
+                        *cursor += 1;
+                    }
+                }
+                let (out, c) = layer.step(token, cache, rs, None);
+                next.push(out);
+                cache = Some(c);
+                if let Some(cursor) = layer_cursor.as_deref_mut() {
+                    *cursor += 1;
+                }
+            }
+            slots[pos] = cache;
+            stream = next;
+        }
+
+        // The user token entered last, so its fully-propagated output is last.
+        let out = stream.pop().expect("the user token is always emitted");
+        (out, M::Caches::from_slots(slots))
     }
 }
 
@@ -638,19 +674,23 @@ where
     ///   [`Layers::step`] (stack-level latents, and the per-virtual-layer cursor
     ///   vector respectively).
     ///
-    /// A `None` cursor skips that level; `Middle`/`End` markers panic for the
-    /// cursored level (use `forward`).
+    /// As in `forward`, the network's class tokens are part of the sequence that
+    /// enters the layers, so each is threaded through the layers (carrying the
+    /// inner cursors) just like the user token — only the user token's output is
+    /// returned. A `None` cursor skips that level; `Middle`/`End` markers panic
+    /// for the cursored level (use `forward`).
     pub fn step(
         &self,
         x: Tensor<2>,
         caches: Option<M::Caches>,
         own_index: Option<&mut usize>,
-        layers_own_index: Option<&mut usize>,
-        layer_indices: Option<&mut Vec<usize>>,
+        mut layers_own_index: Option<&mut usize>,
+        mut layer_indices: Option<&mut Vec<usize>>,
     ) -> (Tensor<2>, M::Caches) {
-        // Network-level class-token injection (around full network passes). The
-        // injected class tokens use their own recurrence only (inner cursors are
-        // not advanced for them); the user token carries the inner cursors.
+        // Network-level class-token injection. Each class token is run through a
+        // full network pass (carrying the inner cursors, so the layers splice
+        // their own latents around it exactly as in `forward`), then the user
+        // token; only the user token's output is returned.
         if let Some(cursor) = own_index {
             let [batch, input_size] = x.dims();
             let inj = class_step_injections(&self.class_tokens, "LatentNetwork");
@@ -658,7 +698,13 @@ where
             let mut caches = caches;
             while let Some(i) = inj.iter().position(|&p| p == *cursor) {
                 let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, input_size]);
-                let (_discard, c) = self.step(row, caches, None, None, None);
+                let (_discard, c) = self.step(
+                    row,
+                    caches,
+                    None,
+                    layers_own_index.as_deref_mut(),
+                    layer_indices.as_deref_mut(),
+                );
                 caches = Some(c);
                 *cursor += 1;
             }

@@ -332,7 +332,9 @@ fn class_latents_step_panics() {
 
 // Stepping with the stack-level cursor injects the class latents at exactly the
 // `forward` positions: the per-user-token step outputs match `forward`'s
-// user-position slices, and the cursor lands past every emitted token.
+// user-position slices, and the cursor lands past every emitted token. Two real
+// layers exercise the cascade — a stack class latent must propagate through both
+// layers' recurrences (as it does in `forward`), not be absorbed by the first.
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_step_matches_forward() {
@@ -345,7 +347,7 @@ fn class_latents_step_matches_forward() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let layers = LayersBuilder::new(1, block)
+    let layers = LayersBuilder::new(2, block)
         .with_class_latents(vec![ClassLatent::Start, ClassLatent::Custom(2)])
         .init(&device);
 
@@ -377,4 +379,131 @@ fn class_latents_step_matches_forward() {
     }
     // Start, u0, u1, Custom, u2, u3 ⇒ cursor advanced by 6.
     assert_eq!(cursor, 6);
+}
+
+// Per-layer class latents in a 3-layer stack — A: `Custom(2)`, B: none, C:
+// `Start` — with NO stack-level latents. A class latent grows the sequence the
+// *next* layer sees, so `step` can only match `forward` via the cascade (each
+// token a layer emits, its class latents included, must flow into the next
+// layer in order). Checks results, final state, AND gradients all agree between
+// a length-3 `forward` and 3 `step`s.
+#[cfg(feature = "mamba2")]
+#[test]
+fn per_layer_class_latents_step_matches_forward() {
+    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let adev = device.clone().autodiff();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+
+    // A,B,C; A=Custom(2), C=Start, B none. (Per-layer latents aren't builder-
+    // configurable, so set them directly on the real layers.)
+    let mut layers = LayersBuilder::new(3, block).init(&adev);
+    layers.real_layers[0].class_latents = vec![ClassLatent::Custom(2)];
+    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &adev);
+    layers.real_layers[2].class_latents = vec![ClassLatent::Start];
+    layers.real_layers[2].class_latents_emb = init_class_emb(1, d_model, &adev);
+
+    let (batch, seq) = (2usize, 3usize);
+    let dist = Distribution::Normal(0.0, 1.0);
+    // Stable values reused (as fresh autodiff leaves) by both runs.
+    let x_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
+    let out_head_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
+
+    // forward output is length seq + 2 (A adds one, C adds one); the user tokens
+    // land at [1, 2, 4]: C_cls@0, u0@1, u1@2, A_cls@3, u2@4.
+    let user_pos = [1usize, 2, 4];
+    let path = Mamba2SsdPath::Minimal(None);
+
+    // One run (forward or stepwise). Returns the user output + final per-layer
+    // state (inner tensors) and the gradients of the input and a few params.
+    type Run = (
+        Tensor<3>,             // user output
+        Vec<(Tensor<3>, Tensor<4>)>, // per-layer (conv, ssm) final state
+        Tensor<3>,             // d input
+        Tensor<2>,             // d layer-0 in_proj weight
+        Tensor<2>,             // d layer-A (Custom) class emb
+        Tensor<2>,             // d layer-C (Start) class emb
+    );
+    let run = |stepwise: bool| -> Run {
+        let x = Param::from_tensor(Tensor::from_inner(x_inner.clone()));
+        let (out_user, caches) = if stepwise {
+            let mut cursors = vec![0usize; 3];
+            let mut caches = None;
+            let mut outs = Vec::new();
+            for t in 0..seq {
+                let xt = x.val().narrow(1, t, 1).squeeze_dim::<2>(1);
+                let (yt, c) = layers.step(xt, caches, None, Some(&mut cursors));
+                caches = Some(c);
+                outs.push(yt.unsqueeze_dim::<3>(1));
+            }
+            (Tensor::cat(outs, 1), caches.unwrap())
+        } else {
+            let (out_full, caches) = layers.forward(x.val(), None, path.clone());
+            let parts: Vec<_> = user_pos.iter().map(|&p| out_full.clone().narrow(1, p, 1)).collect();
+            (Tensor::cat(parts, 1), caches)
+        };
+
+        // Loss couples the user output (via a fixed head) with the final state
+        // (sum of squares), so gradients run through both the output and state.
+        let out_head = Tensor::from_inner(out_head_inner.clone());
+        let mut loss = (out_user.clone() * out_head).sum();
+        for c in &caches.caches {
+            loss = loss + (c.conv_bvk.clone() * c.conv_bvk.clone()).sum();
+            loss = loss + (c.ssm_bhpr.clone() * c.ssm_bhpr.clone()).sum();
+        }
+        let grads = loss.backward();
+
+        let state: Vec<(Tensor<3>, Tensor<4>)> = caches
+            .caches
+            .iter()
+            .map(|c| (c.conv_bvk.clone().inner(), c.ssm_bhpr.clone().inner()))
+            .collect();
+        let d_emb = |i: usize| {
+            layers.real_layers[i]
+                .class_latents_emb
+                .as_ref()
+                .unwrap()
+                .val()
+                .grad(&grads)
+                .expect("class emb grad")
+        };
+        (
+            out_user.inner(),
+            state,
+            x.val().grad(&grads).expect("input grad"),
+            layers.real_layers[0]
+                .mamba_block
+                .in_proj
+                .weight
+                .val()
+                .grad(&grads)
+                .expect("in_proj grad"),
+            d_emb(0),
+            d_emb(2),
+        )
+    };
+
+    let f = run(false);
+    let s = run(true);
+
+    // Results + final state.
+    assert!(max_abs_diff(f.0, s.0) < 1e-4, "user outputs disagree");
+    for (i, ((cf, sf), (cs, ss))) in f.1.iter().zip(&s.1).enumerate() {
+        assert!(max_abs_diff(cf.clone(), cs.clone()) < 1e-4, "layer {i} conv state disagrees");
+        assert!(max_abs_diff(sf.clone(), ss.clone()) < 1e-4, "layer {i} ssm state disagrees");
+    }
+    // Gradients (input, a block weight, and both class-latent embeddings).
+    assert!(max_abs_diff(f.2, s.2) < 1e-3, "input grads disagree");
+    assert!(max_abs_diff(f.3, s.3) < 1e-3, "in_proj grads disagree");
+    assert!(max_abs_diff(f.4, s.4) < 1e-3, "Custom class-emb grads disagree");
+    assert!(max_abs_diff(f.5, s.5) < 1e-3, "Start class-emb grads disagree");
 }
