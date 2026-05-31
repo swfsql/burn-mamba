@@ -260,7 +260,11 @@ fn class_latents_lengthen_and_index() {
         .with_ngroups(1)
         .with_conv_kernel(4);
     let layers = LayersBuilder::new(1, block)
-        .with_class_latents(vec![ClassLatent::Start, ClassLatent::Middle, ClassLatent::End])
+        .with_class_latents(vec![
+            ClassLatent::Start,
+            ClassLatent::Middle,
+            ClassLatent::End,
+        ])
         .init(&device);
 
     // L = 4 ⇒ Start→0, Middle→ floor(4/2)=2 (after the leading prefix), End→ end.
@@ -426,12 +430,12 @@ fn per_layer_class_latents_step_matches_forward() {
     // One run (forward or stepwise). Returns the user output + final per-layer
     // state (inner tensors) and the gradients of the input and a few params.
     type Run = (
-        Tensor<3>,             // user output
+        Tensor<3>,                   // user output
         Vec<(Tensor<3>, Tensor<4>)>, // per-layer (conv, ssm) final state
-        Tensor<3>,             // d input
-        Tensor<2>,             // d layer-0 in_proj weight
-        Tensor<2>,             // d layer-A (Custom) class emb
-        Tensor<2>,             // d layer-C (Start) class emb
+        Tensor<3>,                   // d input
+        Tensor<2>,                   // d layer-0 in_proj weight
+        Tensor<2>,                   // d layer-A (Custom) class emb
+        Tensor<2>,                   // d layer-C (Start) class emb
     );
     let run = |stepwise: bool| -> Run {
         let x = Param::from_tensor(Tensor::from_inner(x_inner.clone()));
@@ -448,7 +452,10 @@ fn per_layer_class_latents_step_matches_forward() {
             (Tensor::cat(outs, 1), caches.unwrap())
         } else {
             let (out_full, caches) = layers.forward(x.val(), None, path.clone());
-            let parts: Vec<_> = user_pos.iter().map(|&p| out_full.clone().narrow(1, p, 1)).collect();
+            let parts: Vec<_> = user_pos
+                .iter()
+                .map(|&p| out_full.clone().narrow(1, p, 1))
+                .collect();
             (Tensor::cat(parts, 1), caches)
         };
 
@@ -498,12 +505,24 @@ fn per_layer_class_latents_step_matches_forward() {
     // Results + final state.
     assert!(max_abs_diff(f.0, s.0) < 1e-4, "user outputs disagree");
     for (i, ((cf, sf), (cs, ss))) in f.1.iter().zip(&s.1).enumerate() {
-        assert!(max_abs_diff(cf.clone(), cs.clone()) < 1e-4, "layer {i} conv state disagrees");
-        assert!(max_abs_diff(sf.clone(), ss.clone()) < 1e-4, "layer {i} ssm state disagrees");
+        assert!(
+            max_abs_diff(cf.clone(), cs.clone()) < 1e-4,
+            "layer {i} conv state disagrees"
+        );
+        assert!(
+            max_abs_diff(sf.clone(), ss.clone()) < 1e-4,
+            "layer {i} ssm state disagrees"
+        );
     }
     // Gradients (input, a block weight, and both class-latent embeddings).
     assert!(max_abs_diff(f.2, s.2) < 1e-3, "input grads disagree");
     assert!(max_abs_diff(f.3, s.3) < 1e-3, "in_proj grads disagree");
-    assert!(max_abs_diff(f.4, s.4) < 1e-3, "Custom class-emb grads disagree");
-    assert!(max_abs_diff(f.5, s.5) < 1e-3, "Start class-emb grads disagree");
+    assert!(
+        max_abs_diff(f.4, s.4) < 1e-3,
+        "Custom class-emb grads disagree"
+    );
+    assert!(
+        max_abs_diff(f.5, s.5) < 1e-3,
+        "Start class-emb grads disagree"
+    );
 }

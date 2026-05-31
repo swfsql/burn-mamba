@@ -39,9 +39,9 @@
 //! it are annotated with an explicit shape comment.
 
 use crate::mamba1::prelude::*;
-use crate::utils::sanity::sanity as san;
-use crate::utils::silu::Silu;
-use crate::utils::split::split_into;
+use crate::modules::Silu;
+use crate::modules::sanity as san;
+use crate::modules::split_into;
 use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{

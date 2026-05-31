@@ -33,7 +33,6 @@ pub use crate::mamba3::double_ssd::ssd::serial::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
 use crate::mamba3::single_ssd::prelude::*;
-use burn::backend::Backend;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {

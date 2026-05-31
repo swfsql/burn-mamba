@@ -360,7 +360,7 @@ fn tri_bool<B: Backend>(
     }
 }
 
-/// Primitive analogue of [`crate::utils::sanity::sanity`] for [`F`].
+/// Primitive analogue of [`crate::modules::sanity`] for [`F`].
 ///
 /// Panics if `t` contains a `NaN` (when [`crate::DENY_NAN`] is set) or an `Inf`
 /// (when [`crate::DENY_INF`] is set).  A no-op — with no device read — when both

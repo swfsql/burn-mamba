@@ -24,8 +24,8 @@ use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
-use crate::utils::sanity::sanity as san;
-use crate::utils::silu::Silu;
+use crate::modules::Silu;
+use crate::modules::sanity as san;
 use burn::backend::Backend;
 use burn::prelude::*;
 
@@ -93,7 +93,7 @@ impl Mamba3 {
                 b_raw_bsMGR, c_raw_bsMGR,
                 dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
                 rot_bsa
-        ] = crate::utils::split::split_into(
+        ] = crate::modules::split_into(
             proj_bsd,
             [
                 d_inner, d_inner,

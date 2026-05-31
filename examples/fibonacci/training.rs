@@ -289,7 +289,7 @@ impl Wrap {
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 1], last_output.dims());
 
-        let loss = burn_mamba::utils::loss::mse::MseLoss::new().forward(
+        let loss = burn_mamba::modules::loss::mse::MseLoss::new().forward(
             last_output.clone(),
             targets.clone(),
             Reduction::Mean,

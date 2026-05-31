@@ -25,7 +25,6 @@ use burn::backend::autodiff::{
 };
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, BackendTypes};
-use burn::prelude::*;
 
 impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.

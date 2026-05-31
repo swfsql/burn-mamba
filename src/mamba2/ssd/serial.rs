@@ -21,8 +21,7 @@
 #![allow(unused_variables)]
 
 use crate::mamba2::prelude::*;
-use crate::utils::sanity::sanity as san;
-use burn::backend::Backend;
+use crate::modules::sanity as san;
 use burn::prelude::*;
 
 impl Mamba2SsdInput {

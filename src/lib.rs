@@ -38,7 +38,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
-#![allow(warnings)]
+#![deny(warnings)]
 
 /// Mamba-1: the original selective state space model.
 #[cfg(feature = "mamba1")]
@@ -49,8 +49,6 @@ pub mod mamba2;
 /// Mamba-3: trapezoidal SSD with data-dependent RoPE and MIMO.
 #[cfg(feature = "mamba3")]
 pub mod mamba3;
-/// Virtual-layer → real-weight index scheduling shared by all families.
-pub mod schedule;
 
 /// Convenience re-exports: `use burn_mamba::prelude::*;` brings the enabled
 /// model families and their public types into scope.
@@ -65,19 +63,17 @@ pub mod prelude {
     pub use crate::mamba3::{self, prelude::*};
 
     // The family-generic, runtime-selectable unified API.
-    pub use crate::generic::{
-        ClassLatent, ClassToken, MambaBidiLayers, MambaBidiLayersConfig, MambaCaches,
-        MambaLatentNet, MambaLatentNetConfig, MambaSsdPath, MambaVocabNet, MambaVocabNetConfig,
+    pub use crate::modules::{
+        CacheStack, Layer, Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaBlock,
+        MambaBlockConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig, MambaSsdPath,
+        MambaVocabNet, MambaVocabNetConfig,
     };
+    pub use crate::utils::{ClassLatent, ClassToken};
 }
 
+pub mod modules;
 /// Shared activations, norms, losses, and custom-backward plumbing.
 pub mod utils;
-
-/// Family-generic Mamba abstraction: one `Layer`/`Layers`/`LatentNetwork`/
-/// `VocabNetwork`/`BidiLayers` generic over the Mamba-x block, replacing the
-/// per-family copies.
-pub mod generic;
 
 /// When `true`, [`utils::sanity::sanity`] panics if it observes a `NaN`.
 ///

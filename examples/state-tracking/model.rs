@@ -35,7 +35,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
     // output [batch_size, sequence_len = SEQ_LENGTH + 1, output_size = NUM_CLASSES]
     MambaLatentNetConfig::Mamba3 {
         input_size: NUM_SYMBOLS,
-        n_real_layers: 1,    // a single layer is sufficient
+        n_real_layers: 1,       // a single layer is sufficient
         n_virtual_layers: None, // don't virtually extend the amount of layers
         mamba_block,
         output_size: NUM_CLASSES,

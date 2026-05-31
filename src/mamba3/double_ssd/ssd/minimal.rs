@@ -19,8 +19,7 @@
 //! maintaining causal ordering across time steps.
 
 use crate::mamba3::double_ssd::prelude::*;
-use crate::utils::segsum::segsum;
-use burn::backend::Backend;
+use crate::modules::segsum;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {

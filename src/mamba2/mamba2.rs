@@ -83,12 +83,8 @@
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
 use crate::mamba2::prelude::*;
-use crate::utils::sanity::sanity as san;
-use crate::utils::{
-    rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
-    silu::Silu,
-    softplus::softplus,
-};
+use crate::modules::sanity as san;
+use crate::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
 use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{
@@ -575,7 +571,7 @@ impl Mamba2 {
             );
 
             let [z_gate_bsi, xbc_bsv, dt_raw_bsh] =
-                crate::utils::split::split_into(z_xbc_dt_bsd, [d_inner, conv_dim, nheads], 2);
+                crate::modules::split_into(z_xbc_dt_bsd, [d_inner, conv_dim, nheads], 2);
             (z_gate_bsi, xbc_bsv, dt_raw_bsh)
         };
         assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
@@ -640,7 +636,7 @@ impl Mamba2 {
         //
         // Note: in the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
-            let [x_bsi, b_bsGR, c_bsGR] = crate::utils::split::split_into(
+            let [x_bsi, b_bsGR, c_bsGR] = crate::modules::split_into(
                 xbc_bsv,
                 [d_inner, ngroups * state_rank, ngroups * state_rank],
                 2,
@@ -709,8 +705,8 @@ impl Mamba2 {
 
         // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
         // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
-        let b_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
-        let c_bnlhr = crate::utils::gqa::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
+        let b_bnlhr = crate::modules::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
+        let c_bnlhr = crate::modules::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
         let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
@@ -831,7 +827,7 @@ mod step {
                 assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
 
                 let [z_gate_bi, xbc_bv, dt_raw_bh] =
-                    crate::utils::split::split_into(z_xbc_dt_bd, [d_inner, conv_dim, nheads], 1);
+                    crate::modules::split_into(z_xbc_dt_bd, [d_inner, conv_dim, nheads], 1);
                 (z_gate_bi, xbc_bv, dt_raw_bh)
             };
             assert_eq!([batch, d_inner], z_gate_bi.dims());
@@ -884,7 +880,7 @@ mod step {
             // ── Split (x, B, C) ───────────────────────────────────────────────
             assert_eq!(d_inner, nheads * per_head_dim);
             let (x_bhp, b_bgr, c_bgr) = {
-                let [x_bi, b_bGR, c_bGR] = crate::utils::split::split_into(
+                let [x_bi, b_bGR, c_bGR] = crate::modules::split_into(
                     xbc_bv,
                     [d_inner, ngroups * state_rank, ngroups * state_rank],
                     1,

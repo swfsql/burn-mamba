@@ -9,8 +9,8 @@
 //! configurable epsilon); the fp16 path uses the same `max(|x|)`-rescaling
 //! trick as [`RmsNorm`](crate::utils::rms_norm::RmsNorm).
 
+use crate::modules::Silu;
 use crate::utils::div_eps;
-use crate::utils::silu::Silu;
 use burn::backend::Backend;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};
 use burn::nn::Initializer;

@@ -16,7 +16,7 @@
 //! and the learnable B/C biases).
 
 use crate::mamba3::prelude::*;
-use crate::utils::sanity::sanity as san;
+use crate::modules::sanity as san;
 use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;

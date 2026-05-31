@@ -36,8 +36,11 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
     let batch = batcher.batch(items, &infer_device);
     let [batch_size, sequence_size, _num_sym] = batch.inputs.dims();
 
-    let (output, _caches) =
-        model.forward(batch.inputs, None, MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)));
+    let (output, _caches) = model.forward(
+        batch.inputs,
+        None,
+        MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+    );
     assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
     // Per-position accuracy: early positions have few distinct input prefixes

@@ -60,7 +60,7 @@ pub struct Mamba3DoubleSsdInput {
 impl Mamba3DoubleSsdInput {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every input tensor.
     pub fn sanity(&self) {
-        use crate::utils::sanity::sanity as san;
+        use crate::modules::sanity as san;
         san(&self.v_bnlmhp);
         san(&self.da_bnlh);
         san(&self.b_bnlmhr);

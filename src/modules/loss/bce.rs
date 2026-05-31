@@ -4,7 +4,7 @@
 //! raw logits via [`log_sigmoid`]; otherwise the inputs are treated as
 //! probabilities and the logs are clamped to avoid `−∞`.
 
-use crate::utils::log_sigmoid::log_sigmoid;
+use crate::modules::log_sigmoid;
 use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;
@@ -47,11 +47,7 @@ impl BinaryCrossEntropyLoss {
     /// Multi-label:
     /// - logits: `[batch_size, num_classes]`
     /// - targets: `[batch_size, num_classes]`
-    pub fn forward<const D: usize>(
-        &self,
-        logits: Tensor<D>,
-        targets: Tensor<D>,
-    ) -> Tensor<1> {
+    pub fn forward<const D: usize>(&self, logits: Tensor<D>, targets: Tensor<D>) -> Tensor<1> {
         let loss = if self.logits {
             // Numerically stable by combining `log(sigmoid(x))` with `log_sigmoid(x)`
             (targets.neg() + 1.) * logits.clone() - log_sigmoid(logits)

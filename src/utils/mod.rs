@@ -12,38 +12,25 @@ use burn::tensor::DType;
 /// Macros emitting per-backend `BackendExt` impls + autodiff marker traits.
 #[macro_use]
 pub mod backend_macros;
+pub mod class;
 /// Flatten/unflatten `(y, final_state)` into one tracked tensor for the custom
 /// backward.
 pub mod combined_grad;
 /// Rank-tagged `FloatTensor` primitive wrapper mirroring the `Tensor` method
 /// API, used by the custom-backward gradient math.
 pub(crate) mod fprim;
-/// Group→head expansion of B/C (GQA-style sharing).
-pub mod gqa;
-/// Numerically-stable log-sigmoid (fp16-aware).
-pub mod log_sigmoid;
-/// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
-pub mod loss;
-/// Root-mean-square normalisation (last-dim, fp16-safe); also the Mamba-3
-/// QK-Norm.
-pub mod rms_norm;
-/// RMSNorm followed by a SiLU(z) gate (Mamba-2 output norm).
-pub mod rms_norm_gated;
-/// Optional `NaN`/`Inf` guards gated by [`crate::DENY_NAN`] / [`crate::DENY_INF`].
-pub mod sanity;
+/// Virtual-layer → real-weight index scheduling shared by all families.
+pub mod schedule;
 /// Learning-rate schedulers (cosine-annealing + warmup, constant).
 pub mod scheduler;
-/// Stable segment-sum → 1-semiseparable mask (log-space prefix-sum differences).
-pub mod segsum;
-/// SiLU activation (fp16-aware).
-pub mod silu;
-/// Softplus activation (fp16-aware).
-pub mod softplus;
-/// Typed-array variant of `split_with_sizes` for clean destructuring.
-pub mod split;
 /// `max_abs_diff` + gradient-comparison macros used across the test suites.
 #[cfg(test)]
 pub mod test_helpers;
+
+pub use class::{ClassLatent, ClassToken};
+pub(crate) use fprim::{F, Mask};
+pub use schedule::{BidiSchedule, Schedule};
+pub use scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 
 /// A small `dtype`-specific epsilon for safe division (`x / (y + eps)`),
 /// returned as `f32`.

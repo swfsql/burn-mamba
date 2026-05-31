@@ -28,7 +28,7 @@ use crate::common::model::ModelConfigExt;
 use burn::module::Param;
 use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
-use burn_mamba::generic::OutputMergeConfig;
+use burn_mamba::modules::bidi::OutputMergeConfig;
 use burn_mamba::prelude::{
     ClassLatent, Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath,
     RotationKind,
@@ -74,7 +74,11 @@ impl AeModel {
         // that token has attended to the whole image, so it is an order-agnostic
         // summary (a learned alternative to mean-pooling). Fall back to mean-pool
         // if no class latent is configured.
-        let pooled_bd = match self.enc_layers.class_latent_output_indices(sequence).first() {
+        let pooled_bd = match self
+            .enc_layers
+            .class_latent_output_indices(sequence)
+            .first()
+        {
             Some(&i) => enc_out.narrow(1, i, 1).squeeze_dim::<2>(1), // [batch, d_model]
             None => enc_out.mean_dim(1).squeeze_dim::<2>(1),
         };
@@ -164,7 +168,11 @@ impl AeConfig {
         .init(device);
 
         // Learned per-position decoder query embedding, `[sequence, d_model]`.
-        let dec_pos_sd = Initializer::Normal { mean: 0.0, std: 0.02 }.init([self.sequence, d], device);
+        let dec_pos_sd = Initializer::Normal {
+            mean: 0.0,
+            std: 0.02,
+        }
+        .init([self.sequence, d], device);
 
         AeModel {
             enc_in_proj: LinearConfig::new(self.input_size, d).init(device),
@@ -208,14 +216,6 @@ pub fn model_config(n_latent: usize) -> AeConfig {
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Complex2D);
 
-    AeConfig::new(
-        1,
-        HEIGHT * WIDTH,
-        d_model,
-        n_latent,
-        2,
-        2,
-        mamba_block,
-    )
-    .with_enc_class_latents(vec![ClassLatent::Middle])
+    AeConfig::new(1, HEIGHT * WIDTH, d_model, n_latent, 2, 2, mamba_block)
+        .with_enc_class_latents(vec![ClassLatent::Middle])
 }

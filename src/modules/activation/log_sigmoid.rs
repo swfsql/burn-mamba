@@ -18,7 +18,7 @@ pub fn log_sigmoid<const D: usize>(x: Tensor<D>) -> Tensor<D> {
         }
         DType::F16 => {
             // log_sigmoid(x) = -softplus(-x)
-            -crate::utils::softplus::softplus(x.neg())
+            -crate::modules::softplus(x.neg())
         }
         DType::I64
         | DType::I32

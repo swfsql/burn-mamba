@@ -10,9 +10,9 @@
 //! definition serves both the sequence-aware (`forward`) and single-token
 //! (`step`) code paths.
 
-use crate::utils::gqa::gqa_expand_to_heads;
-use crate::utils::rms_norm::RmsNorm;
-use crate::utils::softplus::softplus;
+use crate::modules::RmsNorm;
+use crate::modules::gqa_expand_to_heads;
+use crate::modules::softplus;
 use burn::backend::Backend;
 use burn::prelude::*;
 

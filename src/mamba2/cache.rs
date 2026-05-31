@@ -26,7 +26,7 @@
 //!    is always O(per_head_dim·state_rank).
 
 use crate::mamba2::prelude::*;
-use crate::utils::sanity::sanity as san;
+use crate::modules::sanity as san;
 use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;

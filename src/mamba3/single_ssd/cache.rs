@@ -19,7 +19,7 @@
 //! `forward_single_ssd` (or vice versa) mid-sequence — that would silently corrupt state.
 
 use crate::mamba3::prelude::*;
-use crate::utils::sanity::sanity as san;
+use crate::modules::sanity as san;
 use burn::backend::Backend;
 use burn::module::Module;
 use burn::prelude::*;

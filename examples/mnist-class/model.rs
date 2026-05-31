@@ -3,7 +3,7 @@
 //! [`model_config`].
 
 use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, RotationKind};
-use burn_mamba::schedule::Schedule;
+use burn_mamba::utils::Schedule;
 
 /// This model configuration uses ~37K params (~153KB disk space in FP32).
 /// Reaches ~85% validation accuracy at the first epoch.

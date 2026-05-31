@@ -158,8 +158,8 @@ impl RotationState {
     /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on the held tensor.
     pub fn sanity(&self) {
         match self {
-            RotationState::Angle(a) => crate::utils::sanity::sanity(a),
-            RotationState::Quaternion(q) => crate::utils::sanity::sanity(q),
+            RotationState::Angle(a) => crate::modules::sanity(a),
+            RotationState::Quaternion(q) => crate::modules::sanity(q),
         }
     }
 }

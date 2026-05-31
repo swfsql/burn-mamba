@@ -123,11 +123,8 @@
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
-use crate::utils::sanity::sanity as san;
-use crate::utils::{
-    rms_norm::{RmsNorm, RmsNormConfig},
-    rms_norm_gated::{RmsNormGated, RmsNormGatedConfig},
-};
+use crate::modules::sanity as san;
+use crate::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
 use burn::backend::Backend;
 use burn::prelude::*;
 use burn::{

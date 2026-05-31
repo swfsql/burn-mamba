@@ -4,7 +4,7 @@ version = "0.27.0"
 edition = "2024"
 
 [features]
-default = ["mamba1", "mamba2", "mamba3", "autodiff"]
+default = ["mamba1", "mamba2", "mamba3", "autodiff", "backend-flex"]
 mamba1 = []
 mamba2 = ["autodiff"]
 mamba3 = ["autodiff"]
@@ -27,6 +27,7 @@ backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-test"]
 backend-tch-cpu = ["burn/tch", "burn/std", "_dev-test"]
 backend-tch-gpu = ["burn/tch", "burn/std", "_dev-test"]
 backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-test"]
+backend-webgpu = ["burn/webgpu", "burn/std", "cubecl", "_dev-test"]
 backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-test"]
 backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-test"]
 backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-test"]

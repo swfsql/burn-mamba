@@ -55,8 +55,7 @@
 //! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 use crate::mamba3::single_ssd::prelude::*;
-use crate::utils::segsum::segsum;
-use burn::backend::Backend;
+use crate::modules::segsum;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
