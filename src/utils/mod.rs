@@ -12,6 +12,7 @@ use burn::tensor::DType;
 /// Macros emitting per-backend `BackendExt` impls + autodiff marker traits.
 #[macro_use]
 pub mod backend_macros;
+/// Learnable `[CLS]`-style class tokens/latents spliced into the sequence.
 pub mod class;
 /// Flatten/unflatten `(y, final_state)` into one tracked tensor for the custom
 /// backward.

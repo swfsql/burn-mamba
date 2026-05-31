@@ -1,15 +1,23 @@
 use burn::config::Config;
 use burn::prelude::*;
 
+/// Custom activations (fp16-stable `silu` / `softplus` / `log_sigmoid`).
 pub mod activation;
+/// Bidirectional layer stacks (straight + reversed passes, merged per pair).
 pub mod bidi;
+/// The per-network cache collection trait ([`CacheStack`]) + [`MambaCaches`].
 pub mod cache;
+/// A single Pre-LN residual layer wrapping one SSM block ([`Layer`]).
 pub mod layer;
+/// The (virtual-)layer stack over real weight sets ([`Layers`]).
 pub mod layers;
 /// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
 pub mod loss;
+/// Tensor helpers: `segsum`, `gqa`, typed `split`, and `sanity` guards.
 pub mod misc;
+/// Family-generic networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
 pub mod network;
+/// RMS norms ([`RmsNorm`] QK-norm + [`RmsNormGated`]), fp16-safe.
 pub mod norm;
 
 pub use activation::log_sigmoid::log_sigmoid;

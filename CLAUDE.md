@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## What This Project Is
 
@@ -10,332 +10,185 @@ A Rust library implementing [Mamba-1](https://arxiv.org/abs/2312.00752),
 architectures on top of the [Burn](https://github.com/tracel-ai/burn/) deep
 learning framework. The goal is a **minimal, readable reference
 implementation** that ports the official CUDA/Triton kernels down to standard
-Burn tensor ops — not a production-optimized one. There are no custom kernels;
-everything is expressed with Burn's portable tensor operations so the same code
-runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
+Burn tensor ops — not a production-optimized one. There are **no custom
+kernels**; everything is portable Burn tensor ops, so the same code runs on
+every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 
 ## Build & Test Commands
 
 ```bash
-# Type-check (no backend needed for the lib surface, but tests/examples need one)
-cargo check
-
-# Run tests (any backend works; flex is the convenient default for CPU checks).
-# The tensor tests compile whenever a backend is enabled and pick it at runtime
-# via `Device::default()`, so e.g. `--features backend-cuda` runs them on CUDA.
-cargo test --features "backend-flex"
-
-# Build docs
-cargo doc --all --no-deps
-
-# Run an example (fibonacci = small Mamba-2, flex backend, fp32)
+cargo check                                   # type-check the lib surface
+cargo test --features "backend-flex"          # run tests (any backend; flex = CPU default)
+cargo doc --all --no-deps                     # build docs
+# An example (flex backend); see examples/README.md for the full set:
 cargo run --example fibonacci --features "backend-flex" -- --training --inference
-
-# Run the MNIST example (sequential MNIST classifier, Mamba-3, CUDA; long-running)
-cargo run --example mnist-class --features "backend-cuda" -- --training --inference
 ```
 
 - **Feature flags select the backend**: `backend-flex` (preferred for
   checks/tests), `backend-cpu`, `backend-wgpu`, `backend-metal`,
-  `backend-vulkan`, `backend-cuda`, `backend-rocm`, `backend-tch-cpu`,
-  `backend-tch-gpu`, `backend-remote`, `backend-ndarray` (+ BLAS variants,
-  deprecated). With the Dispatch architecture each flag just enables the matching
-  `burn/<backend>`; several may be compiled in at once and `Device::default()`
-  resolves which to use (honouring the `BURN_DEVICE` env override). Every
-  `backend-*` also turns on the internal `_dev-test` marker that gates the tensor
-  test modules, so the suite compiles under whichever backend is enabled.
-- The `mamba1`, `mamba2`, `mamba3`, and `autodiff` features are on by default.
-  `mamba2`/`mamba3` imply `autodiff` (needed for their custom backward).
-- `cubecl` / `fusion` enable the memory-saving custom backward on those backend
-  families. `dev-f16`, `dev-simd`, `dev-autotune` are example/test conveniences.
-- `bacon.toml` configures [bacon](https://github.com/Canop/bacon) jobs (watch
-  check/test); `cubecl.toml` configures the CubeCL runtime.
-
----
+  `backend-vulkan`, `backend-cuda`, `backend-rocm`, `backend-tch-{cpu,gpu}`,
+  `backend-remote`, `backend-ndarray` (deprecated). Each flag just enables the
+  matching `burn/<backend>`; several may be compiled in at once and
+  `Device::default()` resolves which to use (honouring `BURN_DEVICE`). The
+  tensor tests compile under whichever backend is enabled and pick the device at
+  runtime.
+- `mamba1`/`mamba2`/`mamba3`/`autodiff` are on by default; `mamba2`/`mamba3`
+  imply `autodiff` (their custom backward needs it). `cubecl`/`fusion` enable the
+  memory-saving custom backward on those backend families. `dev-f16`,
+  `dev-simd`, `dev-autotune` are example/test conveniences.
+- `bacon.toml` configures [bacon](https://github.com/Canop/bacon) watch jobs;
+  `cubecl.toml` configures the CubeCL runtime.
 
 ## File Map
 
-The structure lists the files within the project. `refs/` and `doc/` are **external
-reference material** (paper TeX, official Python implementation, third-party
-minimal impl, burn) and are intentionally not analyzed here — see
-[Extra References](#extra-references).
+`refs/` and `doc/` are external reference material (paper TeX, official Python
+impl, a minimal third-party impl, Burn source) — see [Extra
+References](#extra-references); not listed here. `examples/` is documented by its
+own `examples/README.md`. Every leaf module also has a sibling `tests.rs` (or
+`*/tests.rs`) asserting forward/step parity, gradients, and cross-variant
+agreement; those are not listed individually.
 
 ```text
-.
-├── Cargo.toml                         # crate manifest: features (backends, mamba1/2/3, autodiff), deps
-├── README.md                          # public readme: usage, feature list, learning links, references
-├── cubecl.toml                        # CubeCL runtime config
-├── bacon.toml                         # bacon watch-runner jobs (check/test)
-├── examples
-│   ├── README.md                      # how the examples are structured + CLI usage
-│   ├── common                         # infrastructure shared by all examples
-│   │   ├── README.md
-│   │   ├── cli.rs                     # arg parsing (AppArgs), artifact dir mgmt, config load/save, train/infer flow
-│   │   ├── device.rs                  # runtime Device selection from backend-* flags; dtype config (dev-f16); RecorderTy/FloatElement
-│   │   ├── mnist
-│   │   │   ├── dataset.rs             # sequential-MNIST dataset loading/batching (pixels as a sequence)
-│   │   │   └── mod.rs
-│   │   ├── mod.rs                     # re-exports the shared submodules
-│   │   ├── model
-│   │   │   └── mod.rs                 # ModelConfigExt glue only (Config → Module); networks are the lib-generic MambaLatentNet/MambaVocabNet
-│   │   └── training.rs                # TrainingConfig + optimizer_config(dtype) helper
-│   ├── fibonacci                      # smallest example: Mamba-2 on a fibonacci-like synthetic sequence
-│   │   ├── README.md
-│   │   ├── dataset.rs                 # synthetic fibonacci-like sequence generator
-│   │   ├── inference.rs               # autoregressive generation via step()
-│   │   ├── main.rs                    # launch(): picks Device, autodiff device, wires configs + train/infer
-│   │   ├── model.rs                   # example model_config() for the fibonacci task
-│   │   └── training.rs                # training entry for the fibonacci task
-│   ├── mnist-class                    # sequential-MNIST digit classifier: Mamba-3
-│   │   ├── README.md
-│   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine-annealing LR; inference is a stub
-│   │   ├── model.rs                   # model_config() for the classifier
-│   │   └── training.rs                # training entry (classification head on last timestep)
-│   ├── mnist-ae                       # sequential-MNIST autoencoder: symmetric bidi Mamba-3, latent bottleneck → MAE-style decoder
-│   │   ├── README.md
-│   │   ├── inference.rs               # reconstruct a few test images, print original vs reconstruction as ASCII art
-│   │   ├── main.rs                    # launch(): picks Device + autodiff device, cosine LR; parses `-- --latents N`
-│   │   ├── model.rs                   # AeModel/AeConfig: bidi encoder → read a Middle ClassLatent (in place of mean-pool) → z; z+posemb → bidi decoder; model_config(n_latent)
-│   │   └── training.rs                # Wrap + TrainStep/InferenceStep (BCE-from-logits reconstruction); train/epoch loops
-│   └── state-tracking                 # A₅ word-problem: Complex2D vs Quaternion4D rotation (tiny Mamba-3, uses common/ harness)
-│       ├── README.md
-│       ├── dataset.rs                 # A₅ enumerate/compose + tiny RNG; StateTrackingDataset/Batcher (leading reference/anchor token + one-hot generators → per-position running-product class)
-│       ├── inference.rs               # loads trained model, reports per-token eval accuracy (the Complex2D vs Quaternion4D headline)
-│       ├── main.rs                    # launch(): parses --rotation (via extra_args) → model_config(rotation); wires Device + train/infer flow
-│       ├── model.rs                   # model_config(rotation): tiny MambaLatentNetConfig::Mamba3 with .with_rotation()
-│       └── training.rs                # train()/epoch_train/epoch_valid + Wrap (cross-entropy classification over every position)
-├── refs                               # EXTERNAL references (not analyzed)
-│   │── VikramLex/mamba3-minimal       # unofficial Mamba-3 minimal impl — basis of the double-ssd 
-decomposition
-│   │── mamba-3-paper                  # Mamba-3 paper TeX project
-│   │── state-spaces/mamba             # official Mamba-1/2/3 Python implementation (authoritative)
-│   └── burn                           # burn dependency source code
-├── src
-│   ├── lib.rs                         # crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
-│   ├── generic.rs                     # FAMILY-GENERIC abstraction: Layer/Layers/LatentNetwork/VocabNetwork/BidiLayers<M> + traits (MambaBlock/CacheStack/MambaBlockConfig); unifying enums MambaLatentNet/MambaVocabNet/MambaBidiLayers (+Config) and MambaSsdPath/MambaCaches — replaces all per-family layer/network/bidi. Also the learnable class-token feature: ClassToken (networks, d_input) / ClassLatent (layers, d_model) markers (Start/Middle/End/Custom(idx)) + insert_class_markers helper; step injects Start/Custom via cursor args (Middle/End panic in step)
-│   ├── generic/tests.rs               # unit tests for generic.rs (builder/enum smoke tests; class-token insertion + step-injection forward-parity)
-│   ├── mamba1                         # Mamba-1: original selective SSM (conv1d + sequential selective scan)
-│   │   ├── cache.rs                   # Mamba1Cache(s): conv window (bik) + SSM state (bir), and configs
-│   │   ├── mamba1.rs                  # Mamba1 block + Mamba1Config; forward() (selective_scan) and step()
-│   │   ├── mamba1/tests.rs            # unit tests for mamba1.rs (forward/step parity, grads)
-│   │   └── mod.rs                     # module + prelude re-exports (block + cache only)
-│   ├── mamba2                         # Mamba-2: Structured State Space Duality (SSD)
-│   │   ├── cache.rs                   # Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
-│   │   ├── mamba2.rs                  # Mamba2 block + Mamba2Config; chunkwise forward() and recurrent step()
-│   │   ├── mamba2/tests.rs            # unit tests for mamba2.rs (forward/step parity, grads)
-│   │   ├── mod.rs                     # module + prelude (incl. Mamba2BackendExt, SsdPath/SsdInput)
-│   │   └── ssd                        # chunkwise SSD algorithms (the heart of Mamba-2)
-│   │       ├── minimal.rs             # matmul/segsum SSD; autodiff backward
-│   │       ├── mod.rs                 # re-exports backend-ext traits + SsdInput/SsdPath
-│   │       ├── serial.rs              # serial-over-chunks hybrid SSD; autodiff backward
-│   │       ├── serial_recalculated
-│   │       │   ├── backward.rs        # registered custom Backward node (autodiff op)
-│   │       │   ├── combined_backward.rs # recompute-based gradient math (memory-efficient)
-│   │       │   ├── combined_backward/tests.rs # unit tests for combined_backward.rs (grad recompute)
-│   │       │   ├── mod.rs             # wiring + BackendExt trait exports
-│   │       │   └── serial_recalculated.rs # forward + Mamba2BackendExt impl
-│   │       ├── ssd_path.rs            # Mamba2SsdPath enum, Mamba2SsdInput struct, run() dispatch, optimal chunk_len
-│   │       └── ssd_path/tests.rs      # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
-│   ├── mamba3                         # Mamba-3: trapezoidal SSD + data-dependent RoPE + MIMO
-│   │   ├── cache.rs                   # Mamba3Cache / Mamba3Caches ENUMS dispatching DoubleSsd vs SingleSsd
-│   │   ├── double_ssd                 # double-pass trapezoidal decomposition (γ-SSD + β-SSD); VikramLex-style
-│   │   │   ├── cache.rs               # Mamba3DoubleSsdCache(s): ssm/k_state/v_state/rotation (RotationState: angle|quaternion; NO conv cache)
-│   │   │   ├── double_ssd.rs          # forward_double_ssd / step_double_ssd; apply_rope / apply_rope_partial / wrap_angle
-│   │   │   ├── double_ssd/tests.rs     # unit tests for double_ssd.rs (forward/step parity, grads)
-│   │   │   ├── mod.rs
-│   │   │   └── ssd                    # standard SSD kernels (reused by both γ and β passes)
-│   │   │       ├── minimal.rs         # matmul/segsum MIMO-first SSD; autodiff backward
-│   │   │       ├── mod.rs
-│   │   │       ├── serial.rs          # serial-over-chunks SSD; autodiff backward
-│   │   │       ├── serial_recalculated
-│   │   │       │   ├── backward.rs
-│   │   │       │   ├── combined_backward.rs
-│   │   │       │   ├── mod.rs
-│   │   │       │   └── serial_recalculated.rs
-│   │   │       ├── ssd_path.rs        # Mamba3DoubleSsdPath / Mamba3DoubleSsdInput (v_bnlmhp, da, b/c_bnlmhr, …)
-│   │   │       └── ssd_path/tests.rs  # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
-│   │   ├── helpers.rs                 # shared forward/step helpers: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
-│   │   ├── mamba3.rs                  # Mamba3 block + Mamba3Config; forward()/step() dispatch by cache variant
-│   │   ├── mod.rs                     # module + prelude; Mamba3BackendExt aggregating both ssd ext traits (macros)
-│   │   ├── quat_scan                  # memory-efficient quaternion cumprod scan: recompute custom backward (SerialRecalculated-style) for the Quaternion4D rotation scan
-│   │   │   ├── mod.rs
-│   │   │   ├── quat_scan.rs           # Mamba3QuatScanBackendExt (default body = Hillis-Steele scan) + Quat struct-of-arrays (w,x,y,z separate tensors; narrow/cat-free Hamilton product) + quat_prefix_product_soa + quat_cumprod_recalculated (high-level wrapper; final_carry = autodiff slice of cum)
-│   │   │   ├── backward.rs            # Autodiff custom Backward node: saves only q+init, recomputes prefix product, exact unit-quaternion VJP (G=P⊗S, S=reverse-cumsum of conj(P)⊗d_cum; d_q=G⊗conj(cum_prev), d_init=S[0]); all on Quat SoA
-│   │   │   └── tests.rs               # recalculated == quat_cumprod on values+grads
-│   │   ├── rotation.rs                # quaternion (k=4) non-abelian RoPE: RotationKind (config switch) / RotationState (cache accumulator) + quat algebra, scaled-axis materialise, parallel (Hillis-Steele) cumprod scan + carry, B̄/C̄ rotation, and the rotate_bc_forward/step helpers (forward delegates the scan to quat_scan's recompute backward); wired into both forward/step
-│   │   ├── rotation/tests.rs          # unit tests for rotation.rs (factored==explicit values+grads, k=2↔production apply_rope, cross-chunk carry, abelian→cumsum collapse, non-commutativity, SO(4) orthogonality/homomorphism, scaled-axis materialise, config sizing + RotationState, Quaternion4D block forward==step parity)
-│   │   ├── single_ssd                 # single-pass official-kernel trapezoidal form (≈½ training memory)
-│   │   │   ├── cache.rs               # Mamba3SingleSsdCache(s): same fields, DIFFERENT ssm semantics (h')
-│   │   │   ├── mod.rs
-│   │   │   ├── single_ssd.rs          # forward_single_ssd (scale + boundary-β seed); step_single_ssd (via double-ssd cache round-trip)
-│   │   │   ├── single_ssd/tests.rs     # unit tests for single_ssd.rs (forward/step parity, grads; incl. Quaternion4D single==double==step)
-│   │   │   └── ssd
-│   │   │       ├── minimal.rs
-│   │   │       ├── mod.rs
-│   │   │       ├── serial.rs
-│   │   │       ├── serial_recalculated
-│   │   │       │   ├── backward.rs
-│   │   │       │   ├── combined_backward.rs
-│   │   │       │   ├── mod.rs
-│   │   │       │   └── serial_recalculated.rs
-│   │   │       ├── ssd_path.rs        # Mamba3SingleSsdPath / Mamba3SingleSsdInput (adds gamma_bnlh, scale_bnlh)
-│   │   │       └── ssd_path/tests.rs  # unit tests for ssd_path.rs (Minimal/Serial/SerialRecalculated agree on values+grads)
-│   │   └── ssd_path.rs                # Mamba3SsdPath: pathway-agnostic algo selector; From<>/Into<> both sub-paths
-│   ├── schedule.rs                    # Schedule + BidiSchedule: virtual-layer → real-weight index mapping
-│   ├── schedule/tests.rs              # unit tests for schedule.rs (virtual→real index mapping)
-│   └── utils
-│       ├── backend_macros.rs          # macros emitting per-backend BackendExt impls + autodiff marker traits
-│       ├── combined_grad.rs           # flatten/unflatten (y, final_state) into one tracked tensor for custom backward
-│       ├── fprim.rs                    # F<B,D>: rank-tagged FloatTensor-primitive wrapper mirroring the Tensor API (custom-backward math)
-│       ├── gqa.rs                     # gqa_expand_to_heads: replicate per-group B/C across heads_per_group
-│       ├── log_sigmoid.rs             # numerically-stable log-sigmoid (custom, incl. fp16)
-│       ├── loss
-│       │   ├── bce.rs                 # binary cross-entropy
-│       │   ├── cross_entropy.rs       # cross-entropy
-│       │   ├── mod.rs
-│       │   └── mse.rs                 # mean squared error
-│       ├── mod.rs                     # utils root: div_eps (per-dtype epsilon, takes runtime DType)
-│       ├── rms_norm.rs                # RmsNorm (last-dim, fp16-safe); used as QK-Norm in Mamba-3
-│       ├── rms_norm_gated.rs          # RmsNormGated: norm + SiLU(z) gate (Mamba-2 out norm; Mamba-3 optional out norm)
-│       ├── sanity.rs                  # sanity(): optional NaN/Inf guards gated by DENY_NAN/DENY_INF
-│       ├── scheduler.rs               # LR schedulers (CosineAnnealing+warmup, Constant) — example use
-│       ├── scheduler/tests.rs         # unit tests for scheduler.rs (LR schedule values)
-│       ├── segsum.rs                  # stable segment-sum → 1-semiseparable mask (log-space prefix-sum diff)
-│       ├── silu.rs                    # SiLU activation (custom, fp16-aware)
-│       ├── softplus.rs                # softplus activation (custom, fp16-aware)
-│       ├── split.rs                   # split_into: array-typed split_with_sizes for clean destructuring
-│       └── test_helpers.rs            # max_abs_diff + grad-comparison macros used across tests
-└── files.md                           # more in-depth exploration over some of the files listed above
+src/
+├─ lib.rs            crate root: module decls, prelude, DENY_NAN/DENY_INF sanity flags
+├─ mamba1/           original selective SSM (conv1d + sequential selective scan)
+│  ├─ mamba1.rs      Mamba1 block + Config: forward()(selective_scan) / step()
+│  └─ cache.rs       Mamba1Cache(s): conv window (bik) + SSM state (bir)
+├─ mamba2/           SSD (Structured State Space Duality)
+│  ├─ mamba2.rs      Mamba2 block + Config: chunkwise forward() / recurrent step()
+│  ├─ cache.rs       Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
+│  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated (custom backward)
+├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
+│  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
+│  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
+│  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
+│  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<>/Into<> both sub-paths)
+│  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
+│  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h' semantics) + ssd/
+│  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra/scan
+│  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
+├─ modules/          family-generic composition + shared NN modules
+│  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
+│  ├─ layer.rs       Layer<M>: Pre-LN residual block
+│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
+│  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
+│  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
+│  ├─ cache.rs       CacheStack trait + MambaCaches enum
+│  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
+│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
+│  ├─ loss/          bce, cross_entropy, mse
+│  └─ misc/          gqa, segsum, split, sanity
+└─ utils/            lower-level plumbing
+   ├─ mod.rs         div_eps (per-dtype epsilon, takes runtime DType)
+   ├─ class/         ClassToken / ClassLatent insertion (CLS-style registers)
+   ├─ schedule/      Schedule + BidiSchedule (virtual→real index mapping)
+   ├─ scheduler/     LR schedulers (cosine-annealing + warmup, constant) — example use
+   ├─ backend_macros.rs  per-backend BackendExt impls + autodiff marker traits
+   ├─ combined_grad.rs   flatten/unflatten (y, final_state) for custom backward
+   ├─ fprim.rs           F<B,D>: rank-tagged FloatTensor-primitive wrapper
+   └─ test_helpers.rs    max_abs_diff + grad-comparison macros
 ```
 
-### Files.md
-
-This contains more information about the most important files in the project.
+`files.md` holds the per-file signature reference (the items each important file
+defines and the non-obvious decisions behind them).
 
 ---
 
-## Architecture (detailed)
+## Architecture
 
 ### Layer → Network hierarchy (all three families)
 
-All three families share **one** set of generic composition types, defined in
-[`src/generic.rs`](#) and parameterised by the SSM core block `M` (`Mamba1` /
-`Mamba2` / `Mamba3`). Top to bottom:
+All three families share **one** set of generic composition types in
+[`src/modules/`](#), parameterised by the SSM core block `M` (`Mamba1` /
+`Mamba2` / `Mamba3`):
 
 ```text
 VocabNetwork<M>   embedding → Layers<M> → final RMSNorm → LM head → logits
 LatentNetwork<M>  in_proj → Layers<M> → out_proj            (continuous I/O)
-Layers<M>         a stack of N (virtual) layers over M real weight sets
+Layers<M>         a stack of N (virtual) layers over R real weight sets
 Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
 M (Block)         the SSM core itself (mamba1.rs / mamba2.rs / mamba3.rs)
 ```
 
-- `Layer<M>` wraps the core block with an input RMSNorm and a residual add, and
-  the `Layers<M>` stack owns **virtual-layer scheduling** (see
-  [Virtual layers](#virtual-layer-scheduling)) plus `ignore_first/last_residual`
-  flags (zero out the first/last residual when composing with other module
-  types). All three families route through the same `Layers<M>`; the
-  **bidirectional** wrapper `BidiLayers<M>` likewise serves every family
-  (Mamba-1 included now that the stack is generic).
-- `VocabNetwork<M>` assembles the token LM: `Embedding` → `Layers<M>` → `norm_f`
-  (final RMSNorm) → LM head. The LM head can be **tied** to the (transposed)
-  embedding weights (`missing_lm_head = true` ⇒ `lm_head: None`) or a separate
-  `Linear`. Vocab size is rounded up to `pad_vocab_size_multiple` for GPU
-  alignment. `LatentNetwork<M>` is the continuous-I/O sibling (linear `in_proj` /
-  `out_proj` instead of embedding / LM head) sharing the same `Layers<M>` core.
+- `Layer<M>` (`layer.rs`) wraps the core block with an input RMSNorm + residual
+  add. `Layers<M>` (`layers.rs`) owns **virtual-layer scheduling** (see below)
+  plus `ignore_first/last_residual` flags. The **bidirectional** wrapper
+  `BidiLayers<M>` (`bidi.rs`) serves every family.
+- `VocabNetwork<M>` (`network.rs`): `Embedding` → `Layers<M>` → `norm_f` → LM
+  head, where the head is **tied** to the embeddingᵀ (`missing_lm_head`) or a
+  separate `Linear`; vocab is padded to `pad_vocab_size_multiple`.
+  `LatentNetwork<M>` is the continuous-I/O sibling (linear `in_proj`/`out_proj`).
   Runtime-dispatch enums `MambaVocabNet` / `MambaLatentNet` / `MambaBidiLayers`
-  (each with a `#[derive(Config)]` `*Config` enum) pick the family at construction.
+  (each with a `#[derive(Config)]` `*Config`) pick the family at construction.
 
 ### Dual execution modes
 
-Every block / layer / network exposes two methods:
-
-- **`forward()`** — parallel (chunkwise) mode for training and prompt prefill.
-  Linear in sequence but expressed as batched GEMMs that exploit tensor cores.
-- **`step()`** — recurrent mode for token-by-token decoding. O(state) per token,
+Every block / layer / network exposes:
+- **`forward()`** — parallel (chunkwise) mode for training and prompt prefill;
+  linear in sequence but expressed as batched GEMMs.
+- **`step()`** — recurrent mode for token-by-token decoding; O(state) per token,
   constant memory, no growing KV cache.
 
-`forward()` from any initial cache is mathematically equal to the recurrent
-`step()` unrolling from that same cache — this parity (outputs **and** final
-cache **and** gradients) is what the per-block test suites assert, and it
-subsumes the chunked-prefill (split-vs-full) guarantee.
+`forward()` from any initial cache is mathematically equal to recurrent `step()`
+unrolling from that same cache — parity on **outputs, final cache, and
+gradients** is what the per-block test suites assert (it subsumes the
+chunked-prefill split-vs-full guarantee).
 
 ### Caches
 
-A cache carries the streaming state between calls (prefill→decode, or chunked
+A cache carries streaming state between calls (prefill→decode, or chunked
 prefill). Mamba-1/2 caches hold a conv window + SSM state. **Mamba-3 has no conv
-cache** (the short convolution is removed); see the Mamba-3 section.
+cache** (the short convolution is removed).
 
 ### SSD algorithm selection (Mamba-2 & Mamba-3)
 
-The chunkwise scan in Mamba-2/3 is pluggable via an `…SsdPath` enum, each
-variant carrying an optional chunk length (`None` ⇒ optimal default
-≈ `√(state_rank · per_head_dim)`, rounded to a multiple of 32, capped at 512):
+The chunkwise scan is pluggable via an `…SsdPath` enum; each variant carries an
+optional chunk length (`None` ⇒ optimal default ≈ `√(state_rank·per_head_dim)`,
+rounded to a multiple of 32, capped at 512):
 
 | Variant | Algorithm | Backward |
 |---------|-----------|----------|
-| `Minimal(chunk)` | mostly batched matmuls + `segsum` mask | **autodiff** |
-| `Serial(chunk)` | serial loop over chunks + matmuls (mirrors the 5 Triton kernels K1–K5) | **autodiff** |
-| `SerialRecalculated(chunk)` | serial loop, **custom memory-efficient backward** (recompute; mirrors `ssd_combined.py`) | **custom** (saves ~⅓ training memory) |
+| `Minimal(chunk)` | batched matmuls + `segsum` mask | autodiff |
+| `Serial(chunk)` | serial loop over chunks + matmuls (mirrors Triton K1–K5) | autodiff |
+| `SerialRecalculated(chunk)` | serial loop, recompute backward (mirrors `ssd_combined.py`) | **custom** (~⅓ less training memory) |
 
-`Default` = `SerialRecalculated(None)`. `SsdPath::run(input)` dispatches to
-`ssd_minimal` / `ssd_serial` / `ssd_serial_recalculated`. All three are exact
-reformulations of the same SSD and must agree on values **and** gradients
-(asserted by the `ssd_path.rs` tests).
+`Default = SerialRecalculated(None)`. `SsdPath::run(input)` dispatches; all three
+are exact reformulations and must agree on values **and** gradients (asserted by
+the `ssd_path` tests).
 
-#### Backend extension traits
-
-Each SSD family defines a `…BackendExt` trait (e.g. `Mamba2BackendExt`,
-`Mamba3DoubleSsdBackendExt`, `Mamba3SingleSsdBackendExt`). The default trait
-body works for every plain Burn backend; only `Autodiff<B>` gets the custom
-backward, implemented in the `serial_recalculated/backward.rs` +
-`combined_backward.rs` pair. `utils/backend_macros.rs` emits the per-backend
-"use default impl" blocks (`impl_ssd_backend_ext_for_burn_backends!`) and the
-autodiff marker trait (`decl_ssd_autodiff_backend_ext!`). `Mamba3BackendExt`
-aggregates both the double- and single-ssd ext traits.
-
-The `serial_recalculated` custom backward must hand Burn a single tracked
-tensor; `utils/combined_grad.rs` flattens `(y, final_state)` into one 1-D tensor
-and splits it back afterwards.
+**Backend extension traits.** Each SSD family has a `…BackendExt` trait whose
+default body works for every plain Burn backend; only `Autodiff<B>` gets the
+custom backward (`serial_recalculated/backward.rs` + `combined_backward.rs`).
+`utils/backend_macros.rs` emits the per-backend default impls + the autodiff
+marker; `Mamba3BackendExt` aggregates the double- and single-ssd ext traits. The
+custom backward hands Burn one tracked tensor, so `utils/combined_grad.rs`
+flattens `(y, final_state)` and splits it back.
 
 ### Mamba-1 (`src/mamba1/`)
 
-Original selective SSM. `mamba1.rs`: in-projection → causal depthwise `conv1d`
-(left-padded from the conv cache window for strict causality) → SiLU → the
-`x_proj`/`dt_proj` selective projections → a **sequential `selective_scan`**
-(ZOH for A, Euler for B) → SiLU gate → out-projection. `step()` is the
-single-token recurrence sharing the same cache (`conv_bik` window + `ssm_bir`
-state). Like Mamba-2/3, Mamba-1 gets its Pre-LN residual stack, language-model
-network, and bidirectional wrappers from the family-generic types in
-`src/generic.rs` (`Layers<Mamba1>` / `VocabNetwork<Mamba1>` / `BidiLayers<Mamba1>`,
-threading a `Mamba1Caches`).
+Original selective SSM. `mamba1.rs`: in-proj → causal depthwise `conv1d`
+(left-padded from the cache for strict causality) → SiLU → `x_proj`/`dt_proj`
+selective projections → a **sequential `selective_scan`** (ZOH for A, Euler for
+B) → SiLU gate → out-proj. `step()` shares the cache (`conv_bik` window +
+`ssm_bir` state). The layer stack / network / bidi come from `src/modules/`.
 
 ### Mamba-2 (`src/mamba2/`)
 
 Structured State Space Duality. `mamba2.rs` is heavily documented (read its
-module header for the full SSD math). Pipeline in `forward()`:
-
-1. **In-projection** `d_model → [z | xbc | dt_raw]` (one linear, enables tensor
-   parallelism with a single all-reduce).
-2. **Causal depthwise Conv1d** + SiLU over `xbc` (left-padded from cache).
-3. **Split** `xbc → (x, B, C)`.
-4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)` (clamped); `Ā = exp(Δ·A)`,
-   `A = -exp(a_log)` per head; `B̄ = Δ·B` (Euler).
-5. **Zero-pad** sequence to a multiple of `chunk_len` (Δ=0 ⇒ Ā=1, B̄=0, so the
-   state passes through unchanged → final state is exact).
-6. **GQA-expand** B/C from `ngroups` to `nheads` (`utils/gqa.rs`), then run the
-   selected **SSD path**.
-7. **Gated RMSNorm** with the `z` gate; **out-projection**.
-
-`step()` runs the pure recurrence `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ`, `yₜ = Cₜᵀ hₜ + D xₜ`.
-Optional learnable initial state `init_state_hpr`.
+module header for the full SSD math). `forward()`: in-projection
+`d_model → [z | xbc | dt_raw]` → causal depthwise Conv1d + SiLU over `xbc` →
+split `(x, B, C)` → discretise (`Δ = softplus(dt_raw+dt_bias)`, `Ā = exp(Δ·A)`
+with `A = -exp(a_log)`, `B̄ = Δ·B`) → zero-pad to a multiple of `chunk_len`
+(exact: Δ=0 ⇒ Ā=1, B̄=0) → GQA-expand B/C → run the selected **SSD path** →
+gated RMSNorm with the `z` gate → out-proj. `step()` runs the recurrence
+`hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ`, `yₜ = Cₜᵀ hₜ + D xₜ`; optional learnable
+`init_state_hpr`.
 
 ### Mamba-3 (`src/mamba3/`)
 
-Mamba-3 extends Mamba-2 with three independent additions (each works alone or
-combined): **trapezoidal discretisation**, **data-dependent RoPE** on B/C, and
-**MIMO** (multiple-input multiple-output) rank expansion. Read the
-`mamba3.rs` module header for the full combined math.
+Extends Mamba-2 with three independent additions (each works alone or combined):
+**trapezoidal discretisation**, **data-dependent RoPE** on B/C, and **MIMO**
+rank expansion. Read the `mamba3.rs` module header for the full combined math.
 
 #### Differences from Mamba-2
 
@@ -343,22 +196,22 @@ combined): **trapezoidal discretisation**, **data-dependent RoPE** on B/C, and
 |--------|---------|---------|
 | Recurrence | 2-term `h = Ā h + B̄ x` | 3-term trapezoidal `h = α h + β B₋₁x₋₁ + γ Bₜxₜ` |
 | `A` | fixed per-head `a_log_h` | data-dependent `Aₜ = −softplus(dd_A)`, clamped `≤ −a_floor` |
-| `λ` (trapezoid split) | absent | per-head data-dependent `λ = σ(λ̂)` |
+| `λ` (trapezoid split) | — | per-head data-dependent `λ = σ(λ̂)` |
 | Short conv | present | **removed** (no conv cache) |
-| B/C norm | post-SSD gated RMSNorm | **QK-Norm** (`RmsNorm` over `state_rank`) applied **before** SSD |
+| B/C norm | post-SSD gated RMSNorm | **QK-Norm** (`RmsNorm` over `state_rank`) **before** SSD |
 | B/C bias | none | learnable `[nheads, mimo_rank, state_rank]`, init = 1 |
 | Positional | none | data-dependent cumulative RoPE on B/C |
 | MIMO | none | `mimo_rank > 1`: parallel B/C rank channels + `mimo_x/z/o` projections |
-| Out gate | gated RMSNorm | SiLU gate, or optional per-head gated RMSNorm (`has_outproj_norm`) |
+| Out gate | gated RMSNorm | SiLU gate, or optional per-head gated RMSNorm |
 
 #### Trapezoidal coefficients (`helpers::trapezoidal_coefficients`)
 
 ```text
-Δₜ = softplus(dd_dt + dt_bias)        (clamped to dt_limit)
-Aₜ = −softplus(dd_A)                  (clamped ≤ −a_floor)
-αₜ = exp(Δₜ·Aₜ)                       — decay
-βₜ = (1 − λₜ)·Δₜ·αₜ                   — left-endpoint weight (Bₜ₋₁xₜ₋₁)
-γₜ = λₜ·Δₜ                            — right-endpoint weight (Bₜxₜ)
+Δₜ = softplus(dd_dt + dt_bias)   (clamped to dt_limit)
+Aₜ = −softplus(dd_A)             (clamped ≤ −a_floor)
+αₜ = exp(Δₜ·Aₜ)                  decay
+βₜ = (1 − λₜ)·Δₜ·αₜ              left-endpoint weight  (Bₜ₋₁xₜ₋₁)
+γₜ = λₜ·Δₜ                       right-endpoint weight (Bₜxₜ)
 ```
 
 Setting `λ ≡ 1` collapses to the Mamba-2 (Euler) form.
@@ -366,216 +219,126 @@ Setting `λ ≡ 1` collapses to the Mamba-2 (Euler) form.
 #### In-projection layout
 
 ```text
-d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rope_angles
+d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rotation_channels
 split:      [ z | x | B_raw | C_raw | dd_dt | dd_A | λ_raw | θ ]
 ```
 
-`B_raw`/`C_raw` carry the `mimo_rank · ngroups · state_rank` channels each.
-`ngroups < nheads` shares B/C across heads (GQA-style).
+`B_raw`/`C_raw` carry `mimo_rank · ngroups · state_rank` channels each;
+`ngroups < nheads` shares B/C GQA-style.
 
-#### Data-dependent RoPE (`apply_rope` / `apply_rope_partial`, in `double_ssd.rs`)
+#### Data-dependent RoPE
 
-Angles are projected (`num_rope_angles = rope_dim/2`), squashed by
-`tanh(θ)·π`, scaled by Δ per head, then **cumulatively summed** along the
-sequence (continued from the cache's `cum_angle`):
+The default `Complex2D` (abelian `SO(2)`) rotation: angles are projected
+(`num_rope_angles = rope_dim/2`), squashed by `tanh(θ)·π`, scaled by Δ per head,
+and **cumulatively summed** along the sequence (continued from the cache):
+`cum_angle[t] = cum_angle[t−1] + Δₜ·π·tanh(θₜ)`. Pairing is interleaved/NeoX for
+SISO (`mimo_rank == 1`) and half-and-half/GPT-J for MIMO. `rope_fraction = 0.5`
+rotates only the first `rope_dim` entries (rest pass through); `0` disables RoPE
+(`num_rope_angles` floored at 1 since Burn has no zero-width tensors). Angles are
+reduced mod `2π` into `[−π, π]` by `wrap_angle` (value-exact, the subtracted
+multiple is `detach`ed so gradients are unchanged), keeping the accumulator
+bounded for long sequences and fp16-stable.
 
-```text
-cum_angle[t] = cum_angle[t-1] + Δₜ · π · tanh(θₜ)
-```
-
-Pairing convention depends on the path: **SISO (mimo_rank == 1)** uses
-interleaved/NeoX pairing `(0,1),(2,3),…` (`rotate_pairwise = true`); **MIMO**
-uses half-and-half/GPT-J pairing (`rotate_pairwise = false`). With
-`rope_fraction = 0.5` only the first `rope_dim` entries are rotated, the rest
-pass through (`apply_rope_partial`). `rope_fraction = 0` disables RoPE
-(`rope_dim = 0` ⇒ `apply_rope_partial` is the identity); the angle projection /
-`cum_angle` data flow stay intact via a single dummy angle channel
-(`num_rope_angles` is floored at 1, since Burn has no zero-width tensors). For
-ablations only.
-
-Angles are reduced mod `2π` into `[−π, π]` by `wrap_angle` both before
-`sin`/`cos` and when storing the `cum_angle` accumulator. `sin`/`cos` are
-`2π`-periodic so this is value-exact, and the subtracted multiple of `2π` is
-`detach`ed so the backward pass is unchanged (gradient identity). This keeps the
-accumulator bounded across long sequences / many decode steps and preserves
-low-bit-float (`f16`) precision.
-
-The RoPE above is the **abelian** (`SO(2)`/complex) rotation: angles compose by
-`cumsum` and are absorbed into B/C. `mamba3/rotation.rs` holds the non-abelian
-generalisation — a quaternion (`k = 4`, `SU(2) ⊂ SO(4)`) rotational state where
-the cumulative rotation is an associative *scan* (with a cross-chunk carry)
-instead of a `cumsum`, while the B/C-factoring (hence the scalar-decay SSD core)
-is unchanged. It is selected by `Mamba3Config.rotation: RotationKind`
-(`Complex2D` default | `Quaternion4D`):
-
-- `d_in_proj` devotes `num_rotation_channels` to the rotation (`num_rope_angles`
-  angles for Complex2D, `3·num_quat_blocks` quaternion generators for
-  Quaternion4D); the cache accumulator field is a `RotationState`
-  (`Angle(Tensor<3>)` | `Quaternion(Tensor<4>)`).
-- forward/step branch on the kind via the shared `rotate_bc_forward` /
-  `rotate_bc_step` helpers (materialise per-step quaternion `quat_from_scaled_axis`
-  scaled by Δ → `quat_cumprod` continuing the cached carry → `rotate(·, conj(Q))`).
-- **Quaternion4D runs on BOTH SSD pathways.** The rotation is applied to B/C
-  *before* chunking (it is `chunk_len`-agnostic), and the SSD core only consumes
-  the rotated `B̄`/`C̄`, so both `forward_double_ssd` and `forward_single_ssd`
-  apply the rotation via the shared `rotate_bc_forward` and feed an unchanged SSD
-  core. A missing cache defaults to **single-ssd** for either rotation kind (≈½
-  the SSD memory of double-ssd); `step` round-trips through the double-ssd
-  recurrence. The SSD kernels + custom backward are untouched.
-- Verified by Quaternion4D `forward_single_ssd`==`forward_double_ssd`==`step`
-  parity (values+grads; full/partial RoPE, MIMO), `forward`==`step` parity, and
-  the standalone rotation-math tests.
+`mamba3/rotation/` holds the **non-abelian** generalisation: a quaternion
+(`k = 4`, `SU(2) ⊂ SO(4)`) rotational state where the cumulative rotation is an
+associative *scan* (with a cross-chunk carry) instead of a `cumsum`, while the
+B/C-factoring (hence the scalar-decay SSD core) is unchanged. Selected by
+`Mamba3Config.rotation: RotationKind` (`Complex2D` default | `Quaternion4D`):
+the cache accumulator field is a `RotationState` (`Angle` | `Quaternion`); the
+in-projection devotes `num_rotation_channels` to it; forward/step branch via the
+shared `rotate_bc_forward`/`rotate_bc_step` helpers. **Quaternion4D runs on both
+SSD pathways** (rotation is applied to B/C before chunking, so the SSD core only
+sees rotated `B̄`/`C̄`); a missing cache defaults to single-ssd, and `step`
+round-trips through the double-ssd recurrence.
 
 #### Two SSD pathways — the central Mamba-3 design point
 
 The trapezoidal recurrence is realised by **two interchangeable algorithms**,
-selected at runtime by which **cache variant** is supplied. `Mamba3Cache` and
-`Mamba3Caches` are **enums** (`DoubleSsd | SingleSsd`); `Mamba3::forward`/`step`
-match on the variant and delegate. A missing cache defaults to **SingleSsd**.
+selected at runtime by which **cache variant** is supplied. `Mamba3Cache` /
+`Mamba3Caches` are **enums** (`DoubleSsd | SingleSsd`); `forward`/`step` match
+and delegate. A missing cache defaults to **SingleSsd**.
 
-- **Double-SSD** (`src/mamba3/double_ssd/`, VikramLex-style): splits the
-  trapezoid into two **standard** SSD calls that reuse the Mamba-2-like kernels:
-  - γ-SSM: `hᵞₜ = αₜ hᵞₜ₋₁ + γₜ Bₜ xₜ`   (current token)
-  - β-SSM: `hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋₁ xₜ₋₁` (previous token, "shift-before-chunking")
-  - `hₜ = hᵞₜ + hᵝₜ`. Simple and easy to verify, but ~2× the intra-chunk and
-    chunk-state memory. Both passes feed `da = Δ·A` so the SSD computes
-    `exp(Δ·A) = α`. `step()` runs this recurrence directly.
+- **Double-SSD** (`double_ssd/`, VikramLex-style): splits the trapezoid into two
+  **standard** SSD calls reusing the Mamba-2-like kernels — γ-SSM
+  (`hᵞₜ = αₜ hᵞₜ₋₁ + γₜ Bₜxₜ`, current token) + β-SSM
+  (`hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋₁xₜ₋₁`, previous token, "shift-before-chunking"),
+  summed. Simple/verifiable but ~2× intra-chunk + chunk-state memory; both passes
+  feed `da = Δ·A`. `step()` runs this recurrence directly.
+- **Single-SSD** (`single_ssd/`, official Triton-SISO / Tilelang-MIMO form): one
+  SSD call using `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` as key scale, a strict
+  lower-triangular intra-chunk mask, a same-step γ correction, and a **boundary β
+  seed** `(1−λ₀)·Δ₀·Kₜ₋₁⊗xₜ₋₁` folded into the initial state. ≈ half the training
+  memory. Its accumulator `h'` has **different semantics** mid-sequence (distinct
+  `Mamba3SingleSsdCache` type so the two can't be mixed in a chunked pass), but at
+  boundaries `scaleₜ = γₜ` so `h'` coincides with the double-ssd state — hence the
+  field-identity `From` conversions (`mamba3/cache.rs`). `step_single_ssd` decodes
+  by converting to the double-ssd cache, running `step_double_ssd`, converting back.
 
-- **Single-SSD** (`src/mamba3/single_ssd/`, official Triton-SISO /
-  Tilelang-MIMO form): one SSD call using `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` as the
-  key scale, a strict lower-triangular intra-chunk mask, a same-step γ
-  correction, and a **boundary β seed** `(1−λ₀)·Δ₀·Kₜ₋₁⊗xₜ₋₁` folded into the
-  initial state. ≈ half the training memory of double-ssd. Its cache's SSM
-  accumulator `h'` has **different semantics** than the double-ssd state
-  mid-sequence — hence a distinct `Mamba3SingleSsdCache` type so the two can't be
-  mixed inside a chunked pass. At sequence boundaries (where caches are stored)
-  `scaleₜ = γₜ`, so `h'` coincides with the double-ssd state; the two caches
-  therefore convert via field-identity `From` impls (`src/mamba3/cache.rs`).
-  `step_single_ssd` decodes by converting to the double-ssd cache, running
-  `step_double_ssd`, and converting back.
-
-`Mamba3SsdPath` (top-level) is pathway-agnostic; it converts to/from
+`Mamba3SsdPath` (top-level) is pathway-agnostic and converts to/from
 `Mamba3DoubleSsdPath` / `Mamba3SingleSsdPath` via `From`. The SSD inputs differ:
-double feeds pre-scaled `v_bnlmhp` (already × γ or β); single feeds raw `v` plus
-`gamma_bnlh` and `scale_bnlh` so the kernel applies them internally.
-
-#### Shared forward/step helpers (`helpers.rs`)
-
-Three rank-generic helpers used by both pathways and both modes:
-`trapezoidal_coefficients` (Δ/α/β/γ/da), `qk_norm_expand_bias`
-(QK-Norm → GQA-expand groups→heads → add `[nheads, mimo_rank, state_rank]`
-bias), and `build_v_with_mimo` (`v = x ⊙ mimo_x`, inserting the `mimo_rank`
-axis; identity when SISO).
+double feeds pre-scaled `v_bnlmhp` (× γ or β); single feeds raw `v` plus
+`gamma_bnlh` and `scale_bnlh` so the kernel applies them.
 
 #### Mamba-3 cache fields (both variants)
 
-`ssm_bhpr` (SSM hidden state), `k_state_bmhr` (previous-token B per rank, for the
-β term), `v_state_bhp` (previous-token x), `rotation` (a [`RotationState`]:
-cumulative RoPE *angle* for `Complex2D`, or cumulative *quaternion* for
-`Quaternion4D`). The `ssm_bhpr` **semantics differ** between Double and Single
-(see above); the `rotation` field is identical in both and is moved by the `From`
-conversions. No conv cache.
+`ssm_bhpr` (SSM hidden state — semantics differ Double vs Single, see above),
+`k_state_bmhr` (previous-token B per rank, for the β term), `v_state_bhp`
+(previous-token x), `rotation` (a `RotationState`: cumulative RoPE angle for
+`Complex2D`, cumulative quaternion for `Quaternion4D`; identical in both
+variants and moved by the `From` conversions). No conv cache.
 
-### Virtual layer scheduling (`src/schedule.rs`)
+### Virtual layer scheduling (`src/utils/schedule/`)
 
 `Layers<M>` can run `n_virtual_layers` logical passes over `n_real_layers`
 weight sets (e.g. 48 logical from 12 real). Each virtual layer keeps its **own
-cache** but shares parameters. `Schedule` maps virtual→real index:
-`Cyclic` (wrap), `Stretched` (block-repeat), `Custom(Vec)`. For bidirectional
-stacks, `BidiSchedule` pairs forward/backward layers: `StridedCyclic`,
-`StridedStretched`, `SymmetricCyclic`, `SymmetricStretched`, `Custom` (even
-virtual indices = straight →, odd = reverse ←).
+cache** but shares parameters. `Schedule` maps virtual→real: `Cyclic` (wrap),
+`Stretched` (block-repeat), `Custom(Vec)`. For bidi stacks, `BidiSchedule` pairs
+forward/backward layers (`StridedCyclic`, `StridedStretched`, `SymmetricCyclic`,
+`SymmetricStretched`, `Custom`; even virtual indices = →, odd = ←).
 
-### Bidirectional support (`BidiLayers<M>` in `src/generic.rs`)
+### Bidirectional support (`BidiLayers<M>` in `src/modules/bidi.rs`)
 
-For non-autoregressive tasks. A `BidiLayerPair<M>` runs a straight pass (→)
-and a reversed pass (← via `flip` on the sequence axis, then flip back), then
-merges with `OutputMerge` (`Mean` or `CatLinear`). `BidiLayers<M>` stacks
-pairs with `BidiSchedule`. Being generic over the core block `M`, it serves all
-three families (the `MambaBidiLayers`/`MambaBidiLayersConfig` enums dispatch).
+For non-autoregressive tasks. A `BidiLayerPair<M>` runs a straight (→) and a
+reversed (← via `flip` on the sequence axis, then flip back) pass, merged by
+`OutputMerge` (`Mean` or `CatLinear`). `BidiLayers<M>` stacks pairs with a
+`BidiSchedule`. Generic over `M`, so it serves all three families (the
+`MambaBidiLayers` enum dispatches).
 
-### Class tokens / latents (`src/generic.rs`)
+### Class tokens / latents (`src/utils/class/`)
 
-Learnable embeddings spliced into the sequence (transformer-`[CLS]`-style
-registers). A **`ClassToken`** lives on a *network* (`LatentNetwork` at
-`input_size`/"d_input", before `in_proj`; `VocabNetwork` at `d_model`, after the
-embedding); a **`ClassLatent`** lives on a *layer* container (`Layer`, `Layers`,
-`BidiLayerPair`, `BidiLayers`, all at `d_model`). Every container is independent
-and may carry any number; the markers (`Start` | `Middle` | `End` |
-`Custom(index)`) say *where* each lands, while a single `Param<Tensor<2>>`
+Learnable `[CLS]`-style embeddings spliced into the sequence. A **`ClassToken`**
+lives on a *network* (`LatentNetwork` at `input_size`, before `in_proj`;
+`VocabNetwork` at `d_model`, after the embedding); a **`ClassLatent`** lives on a
+*layer* container (`Layer` / `Layers` / `BidiLayerPair` / `BidiLayers`, at
+`d_model`). Each container is independent; markers (`Start | Middle | End |
+Custom(idx)`) say *where* each lands, while one `Param<Tensor<2>>`
 (`[num_markers, width]`, row `i` ↔ marker `i`) holds the embeddings. Insertion
-(relative to the original length `L`, via `insert_class_markers`): all `Start`
-first (index 0), then `Middle` (`L/2`), then `End` (`L`), then `Custom(index)`
-last; ties keep `Vec` order. The sequence permanently lengthens for everything
-downstream; `forward` returns the lengthened sequence (the caller reads tokens
-back out via `class_{token,latent}_output_indices`). The plain builders get a
-`with_class_{tokens,latents}`; the example's `AeConfig` (a `#[derive(Config)]`
-struct) gets the auto-generated `with_class_latents` from its `Vec` field.
+(relative to original length `L`): all `Start` (index 0), then `Middle` (`L/2`),
+`End` (`L`), `Custom(idx)` last; ties keep `Vec` order. The sequence permanently
+lengthens; `forward` returns the lengthened sequence and the caller reads tokens
+back via `class_{token,latent}_output_indices`.
 
 `step` injects class tokens via optional position **cursors** (`Option<&mut
-usize>` / `Option<&mut Vec<usize>>`): whenever a cursor reaches a class
-position the embedding is stepped first (advancing the cursor), then the user
-token — only the user token's output/cache is returned. The cursor counts that
-level's output positions: `Layer` takes one cursor; `Layers` takes its own
-(stack-level) cursor **and** a per-virtual-layer `Vec` it distributes to each
-inner `Layer`; `LatentNetwork` adds a third for its own class tokens;
-`VocabNetwork` just forwards the two `Layers` cursors. `Start`/`Custom` are
-length-independent so they inject in `step`; `Middle`/`End` need the full length
-and panic for the cursored level (use `forward`). A trailing class token (after
-the last user token) is simply never reached by `step`.
+usize>` / `Option<&mut Vec<usize>>`): when a cursor reaches a class position the
+embedding is stepped first (advancing the cursor), then the user token — only the
+user token's output/cache is returned. `Layer` takes one cursor; `Layers` takes
+a stack-level cursor **and** a per-virtual-layer `Vec`; `LatentNetwork` adds a
+third for its own class tokens; `VocabNetwork` forwards the two `Layers` cursors.
+`Start`/`Custom` are length-independent (inject in `step`); `Middle`/`End` need
+the full length and panic for the cursored level (use `forward`).
 
-### Utilities (`src/utils/`)
+### Shared modules (`src/modules/`) & utilities (`src/utils/`)
 
-Custom activations/norms exist because Burn either lacks them or needs an
-fp16-stable variant: `silu`, `softplus`, `log_sigmoid`, `rms_norm` (also used as
-Mamba-3 QK-Norm), `rms_norm_gated`. The fp16 RMSNorm paths avoid computing `x²`
-directly (overflow) by normalising against `max(|x|)` first. Other helpers:
-`segsum` (1-semiseparable mask via log-space prefix-sum differences),
-`gqa` (group→head expansion), `split` (typed array split),
-`combined_grad`/`backend_macros`/`fprim` (custom-backward plumbing),
-`sanity` (NaN/Inf guards gated by the crate-level `DENY_NAN`/`DENY_INF`
-constants in `lib.rs`), `scheduler` (LR schedules), and `loss/` (bce,
-cross_entropy, mse). `div_eps` (in `utils/mod.rs`) gives a per-dtype
-numerical epsilon for safe division.
-
-### Examples (`examples/`)
-
-The examples are **Dispatch-only**: no module carries a backend type generic.
-The backend is chosen at runtime by constructing a [`Device`] (`Device::flex()`,
-`Device::cuda(..)`, …) — each `backend-*` feature just enables the matching burn
-backend, and several can be compiled in at once. Autodiff is a device property
-(`device.clone().autodiff()` for training); dtype is a device property too
-(`device.configure((FloatDType::F16, IntDType::I32))`, used by `dev-f16`).
-
-`examples/common/` holds shared infra: `device.rs` (the examples pick the
-backend with `Device::default()`, which resolves to the enabled `backend-*` flag
-— honouring the `BURN_DEVICE` env override; plus `configure_dtype()` for
-`dev-f16`, the `RecorderTy` record format, and the `FloatElement` host scalar
-matching the runtime dtype),
-`cli.rs` (`AppArgs`, artifact dir, config load/save, train→infer flow),
-`training.rs` (`TrainingConfig` + `optimizer_config(dtype)`), `model/`
-(`ModelConfigExt` glue from a config enum to a `Module`; the networks are the
-lib-generic `MambaLatentNet` / `MambaVocabNet`, so examples no longer define
-their own network types), and `mnist/` (sequential-MNIST dataset). Each concrete
-example (`fibonacci/`, `mnist-class/`, `state-tracking/`) supplies its own
-`main.rs` (`launch()`), `model.rs` (`model_config()`), `training.rs`, and—where
-relevant—`dataset.rs`/`inference.rs`. `fibonacci` is the smallest Mamba-2 demo;
-`mnist-class` is a Mamba-3 sequential-MNIST classifier (inference is a stub).
-`state-tracking` is a tiny Mamba-3 classifier on the `A₅` word problem (a
-per-position 60-way running-product head, with a leading reference/anchor token
-so the rotation's *relative* readout can recover the *absolute* product), used to
-contrast the abelian `Complex2D` rotation against the non-abelian `Quaternion4D`;
-its `model_config` takes the rotation, which `launch()` parses from the harness
-`extra_args` (forwarded after the trailing `--`: `-- --rotation complex|quaternion`).
-It is an honest *harness*, not a tuned benchmark: at this tiny single-layer scale
-both rotations track to a similar depth (memorising short prefixes — watch the
-per-position accuracy, not the per-token average), and the quaternion shows only
-a modest deep-position edge after extended training; a clean gap needs scale (see
-the example README). Uses a regularised constant-LR recipe so resuming via
-`--artifacts-path` continues the slow transition seamlessly.
-The training dataloader must be built with `.set_device(autodiff_device)` so its
-batches live on the same (autodiff) backend as the model weights; the validation
-loader uses the inner device.
+`modules/` also holds the shared neural building blocks: custom activations
+(`silu`, `softplus`, `log_sigmoid`) and norms (`rms_norm` — also Mamba-3's
+QK-Norm — and `rms_norm_gated`), `loss/` (bce/cross_entropy/mse), and `misc/`
+(`segsum` 1-semiseparable mask, `gqa` group→head expansion, typed `split`,
+`sanity` guards). These exist because Burn lacks them or needs an fp16-stable
+variant (the fp16 RMSNorm paths normalise against `max(|x|)` to avoid `x²`
+overflow). `utils/` holds lower-level plumbing: `class/`, `schedule/`,
+`scheduler/`, `combined_grad`/`backend_macros`/`fprim` (custom-backward), and
+`div_eps` (per-dtype epsilon; `utils/mod.rs`). NaN/Inf guards are gated by the
+crate-level `DENY_NAN`/`DENY_INF` constants in `lib.rs`.
 
 ---
 
@@ -583,59 +346,48 @@ loader uses the inner device.
 
 - **No optimized kernels** — relies entirely on Burn's portable tensor ops, so
   the same code runs on every backend.
+- **Dispatch backend (Burn 0.22+)** — the high-level `Tensor` (and every
+  `Module`) is pinned to the global `Dispatch` backend, so library types are **no
+  longer backend-generic** (`struct Mamba2`, `Mamba2Cache`, … carry no `<B>`).
+  The backend is chosen at runtime via `Device`; autodiff and dtype are device
+  properties. Only the custom-backward internals stay generic over `B` (`F<B,D>`,
+  the `Backward<B,_>` nodes, the `Autodiff<B>` ext impls).
 - **Two Mamba-3 SSD pathways** — double-ssd (simple, verifiable) vs single-ssd
-  (official-kernel form, ~½ training memory). The cache type is what selects the
-  pathway; the SSM accumulators differ mid-sequence, but coincide at boundaries,
-  so the two caches inter-convert via field-identity `From` impls. `step()` runs
-  the recurrent (double-ssd) form for both; single-ssd decoding round-trips
-  through the double-ssd cache.
+  (official-kernel form, ~½ training memory). The cache type selects the pathway;
+  accumulators differ mid-sequence but coincide at boundaries, so caches
+  inter-convert via field-identity `From`. `step()` runs the double-ssd recurrence
+  for both.
 - **Three SSD algorithm variants** (`Minimal`/`Serial`/`SerialRecalculated`),
-  the last with a custom recompute backward for memory savings; all proven
-  equal on values + gradients by tests.
-- **Bidirectional support** in both Mamba-2 and Mamba-3.
-- **`#![warn(missing_docs)]`** is enabled at the crate root (`src/lib.rs`):
-  every public item (module, struct, enum, trait, fn, const, struct/config
-  field, enum variant) should carry a doc comment, and any gap surfaces as a
-  build warning. Keep the crate warning-clean — document public surface as you
-  add it.
-- **Burn 0.21+.0** — a recent version; APIs may differ from older online docs.
+  the last with a custom recompute backward; all proven equal on values +
+  gradients by tests.
+- **`#![warn(missing_docs)]`** (in `src/lib.rs`): every public item should carry
+  a doc comment, and any gap surfaces as a build warning. Keep the crate
+  warning-clean — document public surface as you add it.
+- **Burn 0.22+** — a recent version; APIs may differ from older online docs.
 - The root of the project is `/shared/claude/burn-mamba/`; do not read/write
   outside it.
-- Whenever source file is created/removed/updated, its entry should be
-  added/removed/updated from the [File Map](#file-map) and `files.md`.
-  [File Map](#file-map) should always list all source files, while `files.md`
-  refers only to the most important or impactful files. Some updates naturally
-  don't require any changes to their content.
+- Whenever a source file is created/removed/updated, update its entry in this
+  [File Map](#file-map) and in `files.md` ([File Map](#file-map) lists all source
+  files; `files.md` covers only the most important).
 
 ---
 
 ## Notation
 
-Tensor names carry a suffix encoding their shape, and the codebase is
-**deliberately verbose/pedantic** about this — it is *desired*, and is backed by
-frequent shape `assert`s and shape commentary. Conventions:
+Tensor names carry a shape suffix and the codebase is **deliberately
+verbose/pedantic** about this — it is desired, backed by frequent shape
+`assert`s. Conventions:
 
-- If a single operation produces a tensor whose name already carries the shape
-  suffix, no extra shape comment is needed (this also covers expansions, where
-  the shape is explicit in the code).
-- In commentary, a shape can be written underscore-style (`_bhl` instead of
-  `[batch, nheads, chunk_len]`). When explaining a specific dimension it is fine
-  to spell it out by name (`batch` instead of `b`) — verbosity is not a problem.
-- Only when a shape deserves special attention (usually when an upper-case
-  letter is involved) should a comment expand it explicitly to `[...]` form. The
-  `[]` form is also natural when describing indexing.
-- When context is clear, *paper* style (upper-case symbols `A, B, C, H, Y, L, …`)
-  may appear in **documentation/comments**, but **code must never** use the
-  reference nomenclature for actual identifiers — that would make the style
-  internally inconsistent.
-- **Lower-case** letters are the base dimensions (table below). **Upper-case**
-  letters denote a *relation* of the lower-case ones (offset, multiple, concat,
-  stacking): e.g. `X` may be `x+1`, `x−1`, `x*2`; `S` is the padded sequence;
-  `K` is `conv_kernel − 1`; `XY` may be `x+y` or `x*y`. Upper-case may also
-  refer to paper elements.
-
-Internal-code dimension keys (the "Paper"/"Python" columns map to the Mamba
-papers and `refs/state-spaces/mamba`):
+- A name whose suffix already encodes the shape needs no extra shape comment.
+  In commentary, a shape can be written underscore-style (`_bhl`) or spelled out
+  by name; expand to explicit `[...]` form only when it deserves attention
+  (usually when an upper-case letter is involved) or when describing indexing.
+- **Paper** style (upper-case `A, B, C, H, Y, L, …`) may appear in
+  documentation/comments, but **code identifiers must never** use it.
+- **Lower-case** letters are base dimensions (table below). **Upper-case** letters
+  denote a *relation* of them (offset/multiple/concat/stacking): e.g. `X` may be
+  `x±1` or `x*2`; `S` is the padded sequence; `K = conv_kernel − 1`; `XY` may be
+  `x+y` or `x*y`. Upper-case may also refer to paper elements.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|
@@ -648,9 +400,9 @@ papers and `refs/state-spaces/mamba`):
 | `r` | `state_rank` | `N` | `d_state` | 64, 128, 256 |
 | `m` | `mimo_rank` (Mamba-3) | `M` | `mimo_rank` | 1–8 |
 | `n` | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
-| `g` | `ngroups` | `G` | `ngroups` / `num_bc_heads` | 1 … `nheads` |
+| `g` | `ngroups` | `G` | `ngroups` | 1 … `nheads` |
 | `l` | `chunk_len` | `Q` | `chunk_size` | 64 … 256 |
-| `a` | `num_rope_angles` = `rope_dim`/2 (Mamba-3) | — | `num_rope_angles` | varies |
+| `a` | `num_rope_angles` = `rope_dim`/2 | — | `num_rope_angles` | varies |
 | `v` | `conv_dim` = `d_inner`+2·`ngroups`·`state_rank` (Mamba-2) | — | `conv_dim` | — |
 | `k` | `conv_kernel` (Mamba-1/2) | — | `d_conv` | 4 |
 
@@ -659,10 +411,10 @@ notation tables tailored to that file — consult them first when editing.
 
 ## Extra References
 
-- **Mamba-3 paper** (TeX project): `refs/mamba-3-paper/`.
-- **Official Mamba-1/2/3 implementation** (Python, authoritative; a clone of the
-  authors' GitHub): `refs/state-spaces/mamba/`. The Triton SISO and Tilelang
-  MIMO kernels here are the reference for the single-ssd path.
-- **Mamba-3 minimal** (unofficial):
-  `refs/VikramLex/mamba3-minimal/` — the basis of the double-ssd decomposition.
+External material under `refs/` (not analyzed here):
+- **Mamba-3 paper** (TeX): `refs/mamba-3-paper/`.
+- **Official Mamba-1/2/3 impl** (Python, authoritative): `refs/state-spaces/mamba/`
+  — the Triton SISO / Tilelang MIMO kernels are the reference for the single-ssd path.
+- **Mamba-3 minimal** (unofficial): `refs/VikramLex/mamba3-minimal/` — basis of
+  the double-ssd decomposition.
 - **Burn**: `refs/burn/`.

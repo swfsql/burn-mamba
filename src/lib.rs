@@ -23,8 +23,9 @@
 //! - [`mamba3`] — SSD extended with trapezoidal discretisation, data-dependent
 //!   RoPE on B/C, and MIMO rank expansion.
 //!
-//! Shared infrastructure lives in [`schedule`] (virtual-layer scheduling) and
-//! [`utils`] (activations, norms, losses, and the custom-backward plumbing).
+//! Shared infrastructure lives in [`modules`] (the family-generic layer/network
+//! composition, plus activations, norms and losses) and [`utils`] (virtual-layer
+//! scheduling, class tokens, and the custom-backward plumbing).
 //!
 //! ## Two execution modes
 //!
@@ -38,7 +39,7 @@
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
-#![allow(warnings)]
+// #![allow(warnings)]
 
 /// Mamba-1: the original selective state space model.
 #[cfg(feature = "mamba1")]
@@ -71,17 +72,19 @@ pub mod prelude {
     pub use crate::utils::{ClassLatent, ClassToken};
 }
 
+/// Family-generic composition (`Layer`/`Layers`/networks/bidi/caches) plus the
+/// shared neural modules (activations, norms, losses, tensor helpers).
 pub mod modules;
-/// Shared activations, norms, losses, and custom-backward plumbing.
+/// Virtual-layer/LR scheduling, class tokens, and custom-backward plumbing.
 pub mod utils;
 
-/// When `true`, [`utils::sanity::sanity`] panics if it observes a `NaN`.
+/// When `true`, [`modules::sanity`] panics if it observes a `NaN`.
 ///
 /// Compiled-in guard (off by default) for debugging numerical issues; leaving
 /// it `false` removes the check entirely.
 pub const DENY_NAN: bool = false;
 
-/// When `true`, [`utils::sanity::sanity`] panics if it observes an `Inf`.
+/// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
 ///
 /// Compiled-in guard (off by default), companion to [`DENY_NAN`].
 pub const DENY_INF: bool = false;
