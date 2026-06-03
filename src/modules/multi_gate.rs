@@ -86,6 +86,51 @@ impl MultiGateResidual {
         }
     }
 
+    /// The shared mix + pool, generic over the streams rank `R` (the *stream*
+    /// axis is `R-2`, the *feature* axis `R-1`). [`Self::forward`] (`R = 4`) and
+    /// [`Self::step`] (`R = 3`) only differ by that rank, so both lift their
+    /// `layer_output` to a singleton stream axis, call this, and drop it again.
+    /// All reductions keep their axis (size 1) for broadcasting, so scores/gates
+    /// are `[…, n_stream, 1]` throughout.
+    ///
+    /// - `layer_output`: `F_l` lifted to a unit stream axis, `[…, 1, d_model]`
+    /// - `streams`: the `n_stream` residual streams, `[…, n_stream, d_model]`
+    ///
+    /// Returns `(h, streams')` with `h` still carrying its unit stream axis
+    /// (`[…, 1, d_model]`) and `streams'` the same shape as `streams`.
+    fn mix_pool<const R: usize>(
+        &self,
+        layer_output: Tensor<R>,
+        streams: Tensor<R>,
+    ) -> (Tensor<R>, Tensor<R>) {
+        let dims = streams.dims();
+        let (stream_axis, feat_axis) = (R - 2, R - 1);
+        assert_eq!(dims[feat_axis], self.d_model, "stream width must equal d_model");
+        assert_eq!(dims[stream_axis], self.n_stream, "stream count must equal n_stream");
+        let scale = self.scale();
+
+        // `b_beta` reshaped to broadcast on the stream axis: `[1, …, n_stream, 1]`.
+        let mut bias_shape = [1usize; R];
+        bias_shape[stream_axis] = self.n_stream;
+        let b_beta = self.b_beta.val().reshape(bias_shape);
+        // The query vectors broadcast on the feature axis: `[1, …, 1, d_model]`.
+        let w_beta = self.w_beta.val().unsqueeze::<R>();
+        let w_alpha = self.w_alpha.val().unsqueeze::<R>();
+
+        // Mixer: independent per-stream sigmoid gate, `β`: `[…, n_stream, 1]`.
+        let normed_s = self.rms_norm(streams.clone());
+        let score_s = (normed_s * w_beta).sum_dim(feat_axis) * scale;
+        let beta = sigmoid(score_s + b_beta);
+        let new_streams = streams.clone() + beta * (layer_output - streams);
+
+        // Aggregator: depth-wise attention pooling (softmax over the stream axis).
+        let normed_ns = self.rms_norm(new_streams.clone());
+        let score_ns = (normed_ns * w_alpha).sum_dim(feat_axis) * scale;
+        let alpha = softmax(score_ns, stream_axis);
+        let new_h = (alpha * new_streams.clone()).sum_dim(stream_axis);
+        (new_h, new_streams)
+    }
+
     /// Full-sequence mix + pool.
     ///
     /// - `layer_output`: this layer's transform `F_l`, `[batch, sequence, d_model]`
@@ -98,31 +143,8 @@ impl MultiGateResidual {
         layer_output: Tensor<3>,
         streams: Tensor<4>,
     ) -> (Tensor<3>, Tensor<4>) {
-        let [batch, sequence, n_stream, d_model] = streams.dims();
-        assert_eq!(d_model, self.d_model, "stream width must equal d_model");
-        assert_eq!(n_stream, self.n_stream, "stream count must equal n_stream");
-        let scale = self.scale();
-
-        // Mixer: independent per-stream sigmoid gate.
-        let normed_s = self.rms_norm(streams.clone());
-        let score_s: Tensor<3> = (normed_s * self.w_beta.val().unsqueeze::<4>())
-            .sum_dim(3)
-            .squeeze_dim(3);
-        let logit = score_s * scale + self.b_beta.val().unsqueeze::<3>();
-        let beta = sigmoid(logit); // [batch, sequence, n_stream]
-        let delta = layer_output.unsqueeze_dim::<4>(2) - streams.clone();
-        let new_streams = streams + beta.unsqueeze_dim::<4>(3) * delta;
-
-        // Aggregator: depth-wise attention pooling (softmax over streams).
-        let normed_ns = self.rms_norm(new_streams.clone());
-        let score_ns: Tensor<3> = (normed_ns * self.w_alpha.val().unsqueeze::<4>())
-            .sum_dim(3)
-            .squeeze_dim(3);
-        let alpha = softmax(score_ns * scale, 2); // over streams
-        let new_h: Tensor<3> = (alpha.unsqueeze_dim::<4>(3) * new_streams.clone())
-            .sum_dim(2)
-            .squeeze_dim(2);
-        (new_h, new_streams)
+        let (new_h, new_streams) = self.mix_pool::<4>(layer_output.unsqueeze_dim(2), streams);
+        (new_h.squeeze_dim(2), new_streams)
     }
 
     /// Single-token mix + pool (the [`Self::forward`] math with the sequence axis
@@ -133,29 +155,8 @@ impl MultiGateResidual {
     ///
     /// Returns `(h, streams')`: `[batch, d_model]` and `[batch, n_stream, d_model]`.
     pub fn step(&self, layer_output: Tensor<2>, streams: Tensor<3>) -> (Tensor<2>, Tensor<3>) {
-        let [batch, n_stream, d_model] = streams.dims();
-        assert_eq!(d_model, self.d_model, "stream width must equal d_model");
-        assert_eq!(n_stream, self.n_stream, "stream count must equal n_stream");
-        let scale = self.scale();
-
-        let normed_s = self.rms_norm(streams.clone());
-        let score_s: Tensor<2> = (normed_s * self.w_beta.val().unsqueeze::<3>())
-            .sum_dim(2)
-            .squeeze_dim(2);
-        let logit = score_s * scale + self.b_beta.val().unsqueeze::<2>();
-        let beta = sigmoid(logit); // [batch, n_stream]
-        let delta = layer_output.unsqueeze_dim::<3>(1) - streams.clone();
-        let new_streams = streams + beta.unsqueeze_dim::<3>(2) * delta;
-
-        let normed_ns = self.rms_norm(new_streams.clone());
-        let score_ns: Tensor<2> = (normed_ns * self.w_alpha.val().unsqueeze::<3>())
-            .sum_dim(2)
-            .squeeze_dim(2);
-        let alpha = softmax(score_ns * scale, 1);
-        let new_h: Tensor<2> = (alpha.unsqueeze_dim::<3>(2) * new_streams.clone())
-            .sum_dim(1)
-            .squeeze_dim(1);
-        (new_h, new_streams)
+        let (new_h, new_streams) = self.mix_pool::<3>(layer_output.unsqueeze_dim(1), streams);
+        (new_h.squeeze_dim(1), new_streams)
     }
 }
 

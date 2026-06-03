@@ -60,7 +60,7 @@
 //! the math; wiring it into the [`Mamba3`](crate::mamba3::mamba3::Mamba3) block
 //! is a separate, larger change (the SSD kernels themselves need no edits).
 
-use crate::mamba3::double_ssd::double_ssd::{apply_rope_partial, wrap_angle};
+use crate::modules::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
 use burn::prelude::*;
 

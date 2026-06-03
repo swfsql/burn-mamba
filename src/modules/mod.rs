@@ -28,6 +28,7 @@ pub use activation::softplus::softplus;
 pub use misc::gqa::gqa_expand_to_heads;
 pub use misc::sanity::sanity;
 pub use misc::segsum::segsum;
+pub use misc::rope::{wrap_angle, apply_rope, apply_rope_partial};
 pub use misc::split::split_into;
 pub use norm::rms_norm::{RmsNorm, RmsNormConfig};
 pub use norm::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};

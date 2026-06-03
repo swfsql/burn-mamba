@@ -15,20 +15,19 @@ same code runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 ## Build & Test Commands
 
 ```bash
-cargo check                                   # type-check the lib surface
-cargo test --features "backend-flex"          # run tests (any backend; flex = CPU default)
-cargo doc --all --no-deps                     # build docs
-cargo run --example fibonacci --features "backend-flex" -- --training --inference
+cargo check                 # type-check the lib surface
+cargo test                  # run tests (any backend; flex = CPU default)
+cargo doc --all --no-deps   # build docs
+cargo run --example fibonacci -- --training --inference
 ```
 
 - **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,
-  rocm,tch-cpu,tch-gpu,remote,ndarray}` (flex preferred for checks/tests). Each just
-  enables the matching `burn/<backend>`; several may be compiled in at once and
-  `Device::default()` resolves which to use (honouring `BURN_DEVICE`).
+  rocm,tch-cpu,tch-gpu,remote,ndarray}` (flex preferred for checks/tests, enabled 
+  by default). Each just enables the matching `burn/<backend>`; several may be
+  compiled in at once and `Device::default()` resolves which to use (honouring `BURN_DEVICE`).
 - `mamba1`/`mamba2`/`mamba3`/`autodiff` are default-on; `mamba2`/`mamba3` imply
   `autodiff`. `cubecl`/`fusion` enable the memory-saving custom backward on those
   backend families. `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
-- `bacon.toml` = bacon watch jobs; `cubecl.toml` = CubeCL runtime.
 
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
@@ -39,6 +38,7 @@ cargo run --example fibonacci --features "backend-flex" -- --training --inferenc
 - **Never use either file as a changelog.** They describe the code as it *is now*;
   they must not record individual changes, migrations, "used to be / now", "verified
   by", dates, or PR history. If you catch changelog-style prose, delete it.
+- Always be **extremely succint** when adding content to either file.
 - `examples/` is documented by `examples/README.md`, not here.
 
 ## File Map
@@ -69,8 +69,8 @@ src/
 ├─ modules/          family-generic composition + shared NN modules
 │  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
 │  ├─ layer.rs       Layer<M>: Pre-LN residual block
-│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets (Residuals enum)
-│  ├─ multi_gate.rs  Multi-Gate Residuals: multi-stream gated depth residuals (Standard|MultiGate)
+│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
+│  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate)
 │  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait + MambaCaches enum
@@ -91,7 +91,7 @@ src/
 
 `files.md` is the per-file signature reference (what each important file defines +
 the non-obvious decisions). The detailed per-family math lives in the `mamba2.rs` /
-`mamba3.rs` module headers.
+`mamba3.rs` module headers. Always consider starting-off searching from `files.md`.
 
 ---
 
@@ -215,13 +215,9 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   lengthened sequence; the caller reads tokens via `class_*_output_indices`. `step`
   injects via position **cursors** (`Start`/`Custom` only; `Middle`/`End` need the full
   length and panic there).
-- **Multi-Gate Residuals** (`modules/multi_gate.rs`): a `Layers<M>.residuals: Residuals`
-  enum picks plain additive (`Standard`) vs `MultiGate` between layers. MGR keeps
-  `n_stream` parallel residual streams (seeded from the stack input): each layer reads
-  their attention-pooled aggregate and its output is gated back into every stream
-  (independent sigmoid gate). Point-wise over `(batch, sequence)` — streams evolve only
-  along depth — so the layer's own skip is suppressed, `step` carries no extra state, and
-  class latents are unsupported. The paper's competitive (softmax) gate is omitted.
+- **Multi-Gate Residuals** (`modules/multi_gate.rs`): `Layers<M>.residuals` picks plain
+  additive (`Standard`) vs `MultiGate` — `n_stream` streams gated/attention-pooled between
+  layers instead of one additive skip. See the module header.
 
 ---
 
@@ -241,8 +237,15 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
   as you add it.
 - The project root is `/shared/claude/burn-mamba/`; do not read/write outside it.
-- When a source file is added/removed/changed, update its entry in the
+- When a source file is added/removed/changed, prepare an update to its entry for the
   [File Map](#file-map) and `files.md` (per the maintenance rules above).
+  Important rule: this is reserved to the end of your workload, and if by then you
+  haven't yet read those files, **do not** read them. Your context then is still big
+  from the work and it is expensive to read big files then. Instead, just prepare a
+  `tmp.md` file containing what would be the new [File Map](#file-map) entry, and do
+  an overview containing the most important aspects about the created/removed/updated
+  files, while being succint. After a full context reset, manually triggered by me, we
+  actually update those files.
 
 ---
 
@@ -279,3 +282,8 @@ Under `refs/` (not analyzed here): **Mamba-3 paper** TeX (`refs/mamba-3-paper/`)
 **official Python impl** (authoritative; Triton SISO / Tilelang MIMO kernels are the
 single-ssd reference) (`refs/state-spaces/mamba/`); **Mamba-3 minimal** (basis of
 double-ssd) (`refs/VikramLex/mamba3-minimal/`); **Burn** (`refs/burn/`).
+
+## Custom Commands
+
+- `rg`: available.
+- `git`: forbidden.

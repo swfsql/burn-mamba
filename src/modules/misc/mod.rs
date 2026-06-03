@@ -6,3 +6,4 @@ pub mod sanity;
 pub mod segsum;
 /// Typed-array variant of `split_with_sizes` for clean destructuring.
 pub mod split;
+pub mod rope;

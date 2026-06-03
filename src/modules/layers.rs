@@ -74,20 +74,17 @@ where
     }
 
     /// Full-sequence pass through every (virtual) layer.
+    ///
+    /// With [`Residuals::Standard`] each layer adds its own Pre-LN skip. With
+    /// [`Residuals::MultiGate`] the layer's own skip is suppressed
+    /// (`residual_scale = 0`) and `n_stream` parallel streams — seeded from `x` —
+    /// carry the residual: each layer reads their attention-pooled aggregate as
+    /// input and its output is gated back into every stream (see [`MultiGate`]).
+    /// Class latents and `ignore_first/last_residual` apply to the Standard path
+    /// only (MultiGate forbids class latents, panicking if any are present).
+    ///
+    /// [`MultiGate`]: crate::modules::MultiGate
     pub fn forward(
-        &self,
-        x: Tensor<3>,
-        caches: Option<M::Caches>,
-        ssd_path: M::SsdPath,
-    ) -> (Tensor<3>, M::Caches) {
-        match &self.residuals {
-            Residuals::Standard(_) => self.forward_standard(x, caches, ssd_path),
-            Residuals::MultiGate(mg) => self.forward_multi_gate(x, caches, ssd_path, mg),
-        }
-    }
-
-    /// Plain additive (Pre-LN) residual pass: each layer adds its own skip.
-    fn forward_standard(
         &self,
         x: Tensor<3>,
         caches: Option<M::Caches>,
@@ -98,66 +95,57 @@ where
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
-
         let mut slots = caches.into_slots();
+
+        // MultiGate keeps `n_stream` parallel streams (seeded from the input);
+        // Standard threads the single tensor `x` directly (streams stays `None`).
+        let mut streams = self.multi_gate_streams_seed(&x);
+
         for i in 0..n {
-            let layer = &self.real_layers[self.real_idx(i)];
-            let rs = self.residual_scale(i, n);
+            let real = self.real_idx(i);
+            let layer = &self.real_layers[real];
             let cache = slots[i].take().unwrap();
-            let (x_, c_) = layer.forward(x, Some(cache), ssd_path.clone(), rs);
-            x = x_;
-            slots[i] = Some(c_);
+            match &self.residuals {
+                Residuals::Standard(_noop) => {
+                    let rs = self.residual_scale(i, n);
+                    let (x_, c_) = layer.forward(x, Some(cache), ssd_path.clone(), rs);
+                    x = x_;
+                    slots[i] = Some(c_);
+                }
+                Residuals::MultiGate(mg) => {
+                    assert!(
+                        layer.class_latents_emb.is_none(),
+                        "MultiGate residuals do not support per-layer class latents"
+                    );
+                    let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone(), 0.0);
+                    slots[i] = Some(c_);
+                    let (new_h, new_streams) =
+                        mg.layers[real].forward(out, streams.take().unwrap());
+                    x = new_h;
+                    streams = Some(new_streams);
+                }
+            }
         }
         (x, M::Caches::from_slots(slots))
     }
 
-    /// Multi-Gate Residual pass. `n_stream` streams (all seeded from `x`) flow up
-    /// the stack; each layer sees the AttnPool of the streams, and its output is
-    /// gated back into each stream. The layer's own additive skip is suppressed
-    /// (`residual_scale = 0`) — the streams *are* the residual path.
-    ///
-    /// Class latents are unsupported here (they would change the sequence length
-    /// the streams are aligned to); `ignore_first/last_residual` do not apply.
-    fn forward_multi_gate(
-        &self,
-        x: Tensor<3>,
-        caches: Option<M::Caches>,
-        ssd_path: M::SsdPath,
-        mg: &crate::modules::MultiGate,
-    ) -> (Tensor<3>, M::Caches) {
+    /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies
+    /// of `x` as `[batch, sequence, n_stream, d_model]` — or `None` for the
+    /// Standard path. Panics if MultiGate is paired with stack-level class latents.
+    fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
+        let Residuals::MultiGate(mg) = &self.residuals else {
+            return None;
+        };
         assert!(
             self.class_latents_emb.is_none(),
             "MultiGate residuals do not support stack-level class latents"
         );
         let [batch, sequence, d_model] = x.dims();
-        let n = self.n_virtual_count();
-        let caches =
-            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
-        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
-
-        let mut slots = caches.into_slots();
-        let mut streams = x.clone().unsqueeze_dim::<4>(2).expand([
-            batch,
-            sequence,
-            mg.n_stream,
-            d_model,
-        ]);
-        let mut h = x;
-        for i in 0..n {
-            let real = self.real_idx(i);
-            let layer = &self.real_layers[real];
-            assert!(
-                layer.class_latents_emb.is_none(),
-                "MultiGate residuals do not support per-layer class latents"
-            );
-            let cache = slots[i].take().unwrap();
-            let (out, c_) = layer.forward(h, Some(cache), ssd_path.clone(), 0.0);
-            slots[i] = Some(c_);
-            let (new_h, new_streams) = mg.layers[real].forward(out, streams);
-            h = new_h;
-            streams = new_streams;
-        }
-        (h, M::Caches::from_slots(slots))
+        Some(
+            x.clone()
+                .unsqueeze_dim::<4>(2)
+                .expand([batch, sequence, mg.n_stream, d_model]),
+        )
     }
 
     /// Single-token step through every (virtual) layer.

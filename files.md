@@ -131,14 +131,12 @@ plus shared NN blocks.
 - **`layer.rs`** — `Layer<M>`: Pre-LN residual `y = x·residual_scale + M(RMSNorm(x))`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
   Option<(usize, Schedule)>`, `ignore_first/last_residual`, `residuals: Residuals`; loops
-  virtual→real per the schedule, each with its own cache. Dispatches `forward`/`step` to
-  `_standard` (plain additive) or `_multi_gate` (MGR; layer skip suppressed, no class
-  latents). `LayersBuilder` (`with_residuals`).
-- **`multi_gate.rs`** — Multi-Gate Residuals (paper: independent sigmoid gate only).
-  `MultiGateResidual` (per-layer `w_beta`/`w_alpha` queries + `b_beta` bias) mixes
-  `n_stream` streams toward the layer output (`σ` gate) then attention-pools them into the
-  next input (`softmax`); point-wise over `(b,s)` so `forward`==`step`. `MultiGate` =
-  one per real layer. `enum Residuals{Standard(NoOp)|MultiGate(_)}` + `ResidualsConfig`.
+  virtual→real per the schedule, each with its own cache. `LayersBuilder`
+  (`with_residuals`).
+- **`multi_gate.rs`** — Multi-Gate Residuals: `enum Residuals{Standard|MultiGate}` (+
+  `ResidualsConfig`) for `Layers`. `MultiGateResidual` (one per layer) gates `n_stream`
+  streams toward the layer output then attention-pools them; point-wise over `(b,s)` so
+  `forward`==`step`. Independent sigmoid gate only. Math in the module header.
 - **`network.rs`** — `LatentNetwork<M>` (linear in/out) and `VocabNetwork<M>` (embedding →
   `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
