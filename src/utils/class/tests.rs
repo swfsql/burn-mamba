@@ -258,6 +258,37 @@ fn unified_bidi_config_mamba2() {
     assert_eq!([2, 5, 16], y.dims());
 }
 
+/// Smoke test for the bidi residual refactor (the pair returns its merged output
+/// and [`BidiLayers`] adds the skip): the residual-suppressed path
+/// (`ignore_first/last_residual`) runs and preserves the sequence shape.
+#[cfg(feature = "mamba2")]
+#[test]
+fn bidi_residual_skip_smoke() {
+    let device = Device::default();
+    let block = Mamba2Config::new(16)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = BidiLayersBuilder {
+        n_real_layers: 2,
+        n_virtual_layers: None,
+        mamba_block: block,
+        ignore_first_residual: true,
+        ignore_last_residual: true,
+        outputs_merge: OutputMergeConfig::cat_linear(2),
+        class_latents: Vec::new(),
+    }
+    .init(&device);
+    let (y, _c) = layers.forward(
+        Tensor::<3>::zeros([2, 5, 16], &device),
+        None,
+        Mamba2SsdPath::default(),
+    );
+    assert_eq!([2, 5, 16], y.dims());
+}
+
 // --- class tokens / latents -----------------------------------------
 
 // Start/Middle/End class latents lengthen the sequence and land at the

@@ -137,6 +137,10 @@ where
                     let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone());
                     slots[i] = Some(c_);
                     let s = streams.take().unwrap();
+                    // A skipped residual here is equivalent to forcing the MGR
+                    // mixer gate β ≡ 1 (`new_streams = out`): the carried streams
+                    // are dropped, and the aggregator over the resulting identical
+                    // streams collapses to `F_l`. Both branches shortcut that.
                     if last {
                         // Output depends purely on the last layer's transform.
                         x = out;
@@ -319,6 +323,8 @@ where
             let cache = slots[i].take();
             let (out, c_) = layer.step(h, cache, None);
             slots[i] = Some(c_);
+            // As in `forward`, a skipped residual is β ≡ 1 in the mixer
+            // (`new_streams = out`), the aggregator then collapsing to `F_l`.
             if self.ignore_last_residual && i + 1 == n {
                 // Output depends purely on the last layer's transform.
                 h = out;

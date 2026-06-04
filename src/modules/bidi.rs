@@ -81,7 +81,9 @@ impl OutputMergeConfig {
 }
 
 /// A single bidirectional pair: a straight (→) and a reversed (←) Pre-LN block
-/// whose outputs are merged, then added to the (scaled) residual.
+/// whose outputs are merged. The residual is **not** applied here — the
+/// enclosing [`BidiLayers`] adds it (or suppresses it on the first/last pair),
+/// mirroring the [`Layer`](crate::modules::Layer) / [`Layers`](crate::modules::Layers) split.
 #[derive(Module, Debug)]
 pub struct BidiLayerPair<M: Module> {
     /// Pre-norm for the straight pass.
@@ -94,8 +96,6 @@ pub struct BidiLayerPair<M: Module> {
     pub reverse_block: M,
     /// Merge strategy combining the two directions.
     pub output_merge: OutputMerge,
-    /// Residual scale (0.0 suppresses the skip connection, else 1.0).
-    pub residual_scale: f32,
     /// Positions of this pair's class latents, spliced in before either
     /// direction runs (both directions, and the residual, see the lengthened
     /// sequence). Empty ⇒ none.
@@ -119,6 +119,8 @@ where
 
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`, plus the two
     /// updated direction caches. (`sequence` grows by the class-latent count.)
+    /// Returns the merged directions **without** the residual — the enclosing
+    /// [`BidiLayers`] adds it.
     pub fn forward(
         &self,
         x: Tensor<3>,
@@ -128,7 +130,6 @@ where
     ) -> (Tensor<3>, M::Cache, M::Cache) {
         let x = self.insert_latents(x);
         let [batch, sequence, d_model] = x.dims();
-        let res = x.clone() * self.residual_scale;
 
         // x reads >x₀>x₁>…; x_rev (flipped) reads the sequence backwards.
         let x_rev = x.clone().flip([1]);
@@ -148,7 +149,7 @@ where
         // Re-align the reversed read, then merge.
         let x_rev = x_rev.flip([1]);
         let merged = self.output_merge.forward(x, x_rev);
-        (merged + res, straight_cache, reverse_cache)
+        (merged, straight_cache, reverse_cache)
     }
 }
 
@@ -244,13 +245,8 @@ where
             let straight_cache = slots[straight_i].take().unwrap();
             let reverse_cache = slots[reverse_i].take().unwrap();
 
-            let residual_scale = if (self.ignore_first_residual && i == 0)
-                || (self.ignore_last_residual && i + 1 == n / 2)
-            {
-                0.0
-            } else {
-                1.0
-            };
+            let skip = (self.ignore_first_residual && i == 0)
+                || (self.ignore_last_residual && i + 1 == n / 2);
 
             let pair = BidiLayerPair {
                 straight_norm: straight_layer.norm.clone(),
@@ -258,20 +254,21 @@ where
                 straight_block: straight_layer.mamba_block.clone(),
                 reverse_block: reverse_layer.mamba_block.clone(),
                 output_merge: self.outputs_merge[i].clone(),
-                residual_scale,
                 // Stack-level class latents are spliced once above; the
                 // transient per-pair slot stays empty.
                 class_latents: Vec::new(),
                 class_latents_emb: None,
             };
 
-            let (x_, sc, rc) = pair.forward(
-                x,
-                Some(straight_cache),
-                Some(reverse_cache),
-                ssd_path.clone(),
-            );
-            x = x_;
+            // The pair returns its merged output without the residual; add the
+            // input skip here, cloning the input only when it is actually used.
+            let residual = if skip { None } else { Some(x.clone()) };
+            let (merged, sc, rc) =
+                pair.forward(x, Some(straight_cache), Some(reverse_cache), ssd_path.clone());
+            x = match residual {
+                Some(r) => merged + r,
+                None => merged,
+            };
             slots[straight_i] = Some(sc);
             slots[reverse_i] = Some(rc);
         }
