@@ -128,24 +128,27 @@ plus shared NN blocks.
   `block_forward`/`block_step`, `zero_caches_{2d,3d}`; Mamba-1's `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
-- **`layer.rs`** — `Layer<M>`: Pre-LN residual `y = x·residual_scale + M(RMSNorm(x))`.
+- **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the residual and class-latent
+  insert are applied by `Layers`. `insert_latents` `pub(crate)`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
-  Option<(usize, Schedule)>`, `ignore_first/last_residual`, `residuals: Residuals`; loops
-  virtual→real per the schedule, each with its own cache. `LayersBuilder`
-  (`with_residuals`).
-- **`multi_gate.rs`** — Multi-Gate Residuals: `enum Residuals{Standard|MultiGate}` (+
-  `ResidualsConfig`) for `Layers`. `MultiGateResidual` (one per layer) gates `n_stream`
-  streams toward the layer output then attention-pools them; point-wise over `(b,s)` so
-  `forward`==`step`. Independent sigmoid gate only. Math in the module header.
+  Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
+  its own cache; owns the residual (`skip_residual`/`ignore_first/last_residual`).
+  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`).
+- **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
+  MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
+  layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
 - **`network.rs`** — `LatentNetwork<M>` (linear in/out) and `VocabNetwork<M>` (embedding →
   `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**. `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
-  variants carry a `residuals: ResidualsConfig` (plain additive vs Multi-Gate).
-- **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`) and `BidiLayers<M>`
-  (stacks pairs with a `BidiSchedule`); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`;
-  runtime `MambaBidiLayers`. Forward-only.
+  variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate) +
+  `ignore_first/last_residual`.
+- **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
+  `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
+  reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised
+  `Param` resamples); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`; runtime
+  `MambaBidiLayers`. Forward-only.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
   state**, not a `Module`).

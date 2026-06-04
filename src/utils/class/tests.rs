@@ -258,12 +258,12 @@ fn unified_bidi_config_mamba2() {
     assert_eq!([2, 5, 16], y.dims());
 }
 
-/// Smoke test for the bidi residual refactor (the pair returns its merged output
-/// and [`BidiLayers`] adds the skip): the residual-suppressed path
-/// (`ignore_first/last_residual`) runs and preserves the sequence shape.
+/// `BidiLayers::forward` determinism (see [`assert_bidi_deterministic`]).
 #[cfg(feature = "mamba2")]
 #[test]
-fn bidi_residual_skip_smoke() {
+fn bidi_forward_is_deterministic_mamba2() {
+    use burn::tensor::Distribution;
+
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -281,12 +281,84 @@ fn bidi_residual_skip_smoke() {
         class_latents: Vec::new(),
     }
     .init(&device);
-    let (y, _c) = layers.forward(
-        Tensor::<3>::zeros([2, 5, 16], &device),
-        None,
-        Mamba2SsdPath::default(),
+
+    let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
+    let (y1, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y2, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    assert_eq!([2, 5, 16], y1.dims());
+    assert_bidi_deterministic(y1, y2);
+}
+
+/// Mamba-1 counterpart of [`bidi_forward_is_deterministic_mamba2`].
+#[cfg(feature = "mamba1")]
+#[test]
+fn bidi_forward_is_deterministic_mamba1() {
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let block = Mamba1Config::new(16).with_state_rank(8);
+    let layers = BidiLayersBuilder {
+        n_real_layers: 2,
+        n_virtual_layers: None,
+        mamba_block: block,
+        ignore_first_residual: true,
+        ignore_last_residual: true,
+        outputs_merge: OutputMergeConfig::cat_linear(2),
+        class_latents: Vec::new(),
+    }
+    .init(&device);
+
+    let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
+    let (y1, _) = layers.forward(x.clone(), None, ());
+    let (y2, _) = layers.forward(x.clone(), None, ());
+    assert_eq!([2, 5, 16], y1.dims());
+    assert_bidi_deterministic(y1, y2);
+}
+
+/// Mamba-3 counterpart of [`bidi_forward_is_deterministic_mamba2`].
+#[cfg(feature = "mamba3")]
+#[test]
+fn bidi_forward_is_deterministic_mamba3() {
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let block = Mamba3Config::new(16)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_mimo_rank(1)
+        .with_rope_fraction(0.5);
+    let layers = BidiLayersBuilder {
+        n_real_layers: 2,
+        n_virtual_layers: None,
+        mamba_block: block,
+        ignore_first_residual: true,
+        ignore_last_residual: true,
+        outputs_merge: OutputMergeConfig::cat_linear(2),
+        class_latents: Vec::new(),
+    }
+    .init(&device);
+
+    let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
+    let (y1, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (y2, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    assert_eq!([2, 5, 16], y1.dims());
+    assert_bidi_deterministic(y1, y2);
+}
+
+/// Two identical bidi forward passes must match: `BidiLayers::forward` runs its
+/// real layers by reference rather than cloning them per call. Cloning a
+/// lazily-initialised Burn `Param` re-runs its random initializer, so a
+/// per-forward clone used to resample fresh weights every call — these tests
+/// guard against that regression across all three families. The configs also
+/// exercise the residual-suppressed (`ignore_first/last_residual`) path.
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+fn assert_bidi_deterministic(y1: Tensor<3>, y2: Tensor<3>) {
+    assert!(
+        crate::utils::test_helpers::max_abs_diff(y1, y2) < 1e-6,
+        "two identical bidi forward passes diverged (weights resampled per call?)"
     );
-    assert_eq!([2, 5, 16], y.dims());
 }
 
 // --- class tokens / latents -----------------------------------------

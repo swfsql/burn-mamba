@@ -129,28 +129,60 @@ where
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Cache, M::Cache) {
         let x = self.insert_latents(x);
-        let [batch, sequence, d_model] = x.dims();
-
-        // x reads >x₀>x₁>…; x_rev (flipped) reads the sequence backwards.
-        let x_rev = x.clone().flip([1]);
-        let x = self.straight_norm.forward(x);
-        let x_rev = self.reverse_norm.forward(x_rev);
-
-        let (x, straight_cache) =
-            self.straight_block
-                .block_forward(x, straight_cache, ssd_path.clone());
-        assert_eq!([batch, sequence, d_model], x.dims());
-
-        let (x_rev, reverse_cache) =
-            self.reverse_block
-                .block_forward(x_rev, reverse_cache, ssd_path);
-        assert_eq!([batch, sequence, d_model], x_rev.dims());
-
-        // Re-align the reversed read, then merge.
-        let x_rev = x_rev.flip([1]);
-        let merged = self.output_merge.forward(x, x_rev);
-        (merged, straight_cache, reverse_cache)
+        bidi_pair_forward(
+            &self.straight_norm,
+            &self.reverse_norm,
+            &self.straight_block,
+            &self.reverse_block,
+            &self.output_merge,
+            x,
+            straight_cache,
+            reverse_cache,
+            ssd_path,
+        )
     }
+}
+
+/// The straight + reverse + merge computation of a bidirectional pair, over
+/// **borrowed** sub-modules.
+///
+/// Taking references (rather than owning clones) is load-bearing: a Burn `Param`
+/// that is still lazily-initialised re-runs its random initialiser **on every
+/// clone**, so cloning a not-yet-materialised block per forward would resample
+/// fresh random weights each call. [`BidiLayers`] therefore calls this directly
+/// on its real layers instead of building a transient (cloned) [`BidiLayerPair`].
+#[allow(clippy::too_many_arguments)]
+fn bidi_pair_forward<M: MambaBlock>(
+    straight_norm: &RmsNorm,
+    reverse_norm: &RmsNorm,
+    straight_block: &M,
+    reverse_block: &M,
+    output_merge: &OutputMerge,
+    x: Tensor<3>,
+    straight_cache: Option<M::Cache>,
+    reverse_cache: Option<M::Cache>,
+    ssd_path: M::SsdPath,
+) -> (Tensor<3>, M::Cache, M::Cache)
+where
+    M::SsdPath: Clone,
+{
+    let [batch, sequence, d_model] = x.dims();
+
+    // x reads >x₀>x₁>…; x_rev (flipped) reads the sequence backwards.
+    let x_rev = x.clone().flip([1]);
+    let x = straight_norm.forward(x);
+    let x_rev = reverse_norm.forward(x_rev);
+
+    let (x, straight_cache) = straight_block.block_forward(x, straight_cache, ssd_path.clone());
+    assert_eq!([batch, sequence, d_model], x.dims());
+
+    let (x_rev, reverse_cache) = reverse_block.block_forward(x_rev, reverse_cache, ssd_path);
+    assert_eq!([batch, sequence, d_model], x_rev.dims());
+
+    // Re-align the reversed read, then merge.
+    let x_rev = x_rev.flip([1]);
+    let merged = output_merge.forward(x, x_rev);
+    (merged, straight_cache, reverse_cache)
 }
 
 /// A stack of bidirectional [`Layer`] pairs with optional virtual-layer
@@ -248,23 +280,25 @@ where
             let skip = (self.ignore_first_residual && i == 0)
                 || (self.ignore_last_residual && i + 1 == n / 2);
 
-            let pair = BidiLayerPair {
-                straight_norm: straight_layer.norm.clone(),
-                reverse_norm: reverse_layer.norm.clone(),
-                straight_block: straight_layer.mamba_block.clone(),
-                reverse_block: reverse_layer.mamba_block.clone(),
-                output_merge: self.outputs_merge[i].clone(),
-                // Stack-level class latents are spliced once above; the
-                // transient per-pair slot stays empty.
-                class_latents: Vec::new(),
-                class_latents_emb: None,
-            };
-
+            // Run the pair directly on the (borrowed) real layers — never clone a
+            // block, since cloning a lazily-initialised `Param` resamples its
+            // random weights (see [`bidi_pair_forward`]). Stack-level class
+            // latents were already spliced above; pairs carry none of their own.
+            //
             // The pair returns its merged output without the residual; add the
             // input skip here, cloning the input only when it is actually used.
             let residual = if skip { None } else { Some(x.clone()) };
-            let (merged, sc, rc) =
-                pair.forward(x, Some(straight_cache), Some(reverse_cache), ssd_path.clone());
+            let (merged, sc, rc) = bidi_pair_forward(
+                &straight_layer.norm,
+                &reverse_layer.norm,
+                &straight_layer.mamba_block,
+                &reverse_layer.mamba_block,
+                &self.outputs_merge[i],
+                x,
+                Some(straight_cache),
+                Some(reverse_cache),
+                ssd_path.clone(),
+            );
             x = match residual {
                 Some(r) => merged + r,
                 None => merged,

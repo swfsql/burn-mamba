@@ -68,7 +68,7 @@ src/
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 ├─ modules/          family-generic composition + shared NN modules
 │  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
-│  ├─ layer.rs       Layer<M>: Pre-LN residual block
+│  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)); residual added by Layers
 │  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
 │  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate)
 │  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
