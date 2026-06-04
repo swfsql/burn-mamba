@@ -73,8 +73,11 @@ fn gradients_flow() {
         .init(&device);
 
     let layer_output = Tensor::<3>::random([b, s, d], Distribution::Default, &device);
-    let streams =
-        Param::from_tensor(Tensor::<4>::random([b, s, n, d], Distribution::Default, &device));
+    let streams = Param::from_tensor(Tensor::<4>::random(
+        [b, s, n, d],
+        Distribution::Default,
+        &device,
+    ));
 
     let (h, new_streams) = m.forward(layer_output, streams.val());
     let loss = h.sum() + new_streams.sum();
@@ -114,7 +117,11 @@ fn layers_standard_ignore_residuals_parity() {
         .init(&device);
 
     let (batch, seq) = (2usize, 4usize);
-    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
@@ -158,7 +165,11 @@ fn layers_multi_gate_forward_step_parity() {
         .init(&device);
 
     let (batch, seq) = (2usize, 4usize);
-    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
@@ -205,7 +216,11 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         .init(&device);
 
     let (batch, seq) = (2usize, 4usize);
-    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
@@ -255,14 +270,22 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
 
     // One MGR per virtual layer (5), not per real layer (2).
     if let crate::modules::Residuals::MultiGate(mg) = &layers.residuals {
-        assert_eq!(mg.layers.len(), 5, "per-virtual ⇒ one MGR per virtual layer");
+        assert_eq!(
+            mg.layers.len(),
+            5,
+            "per-virtual ⇒ one MGR per virtual layer"
+        );
         assert!(mg.per_virtual);
     } else {
         panic!("expected MultiGate residuals");
     }
 
     let (batch, seq) = (2usize, 4usize);
-    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);

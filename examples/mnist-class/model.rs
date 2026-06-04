@@ -11,29 +11,29 @@ use burn_mamba::utils::Schedule;
 pub fn model_config() -> MambaLatentNetConfig {
     // A small Mamba-3 block:
     let mamba_block = Mamba3Config::new(
-            // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
-            32
-        )
-        // state_rank = 64 (time-wise expressivity, average impact on disk size)
-        .with_state_rank(64)
-        .with_expand(4)
-        // d_inner = expand·d_model = 128
-        // nheads = 4
-        // per_head_dim = d_inner/nheads = 32
-        .with_per_head_dim(32)
-        .with_ngroups(1)
-        .with_mimo_rank(1)
-        // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
-        // 
-        // RoPE-kind ablation (batches 100/200/300):
-        //   | RoPE Kind | RoPE | Memory |    Accuracy   |
-        //   | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
-        //   | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
-        //   | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
-        .with_rope_fraction(1.0)
-        .with_has_proj_bias(true)
-        .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Complex2D); // 2D rotations on B/C
+        // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
+        32,
+    )
+    // state_rank = 64 (time-wise expressivity, average impact on disk size)
+    .with_state_rank(64)
+    .with_expand(4)
+    // d_inner = expand·d_model = 128
+    // nheads = 4
+    // per_head_dim = d_inner/nheads = 32
+    .with_per_head_dim(32)
+    .with_ngroups(1)
+    .with_mimo_rank(1)
+    // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
+    //
+    // RoPE-kind ablation (batches 100/200/300):
+    //   | RoPE Kind | RoPE | Memory |    Accuracy   |
+    //   | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
+    //   | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
+    //   | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
+    .with_rope_fraction(1.0)
+    .with_has_proj_bias(true)
+    .with_has_outproj_norm(true)
+    .with_rotation(RotationKind::Complex2D); // 2D rotations on B/C
 
     MambaLatentNetConfig::Mamba3 {
         // input  [batch_size, sequence_len = HEIGHT * WIDTH, input_size = 1]

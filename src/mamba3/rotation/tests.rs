@@ -859,10 +859,10 @@ fn rotation_state_wrong_unwrap_panics() {
 /// cache.
 #[test]
 fn quaternion_bidi_forward_runs() {
-    use crate::modules::bidi::OutputMergeConfig;
-    use crate::modules::{MambaBidiLayersConfig, MambaSsdPath};
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::modules::bidi::OutputMergeConfig;
+    use crate::modules::{MambaBidiLayersConfig, MambaSsdPath};
     let device: Device = Default::default();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)

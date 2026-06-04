@@ -148,7 +148,12 @@ where
                     } else if first {
                         // Drop the input seed: restart the streams from `F_0`.
                         let [b, seq, d] = out.dims();
-                        streams = Some(out.clone().unsqueeze_dim::<4>(2).expand([b, seq, mg.n_stream, d]));
+                        streams = Some(out.clone().unsqueeze_dim::<4>(2).expand([
+                            b,
+                            seq,
+                            mg.n_stream,
+                            d,
+                        ]));
                         x = out;
                     } else {
                         let idx = mg.module_index(i, real);
@@ -331,7 +336,10 @@ where
             } else if self.ignore_first_residual && i == 0 {
                 // Drop the input seed: restart the streams from `F_0`.
                 let [b, d] = out.dims();
-                streams = out.clone().unsqueeze_dim::<3>(1).expand([b, mg.n_stream, d]);
+                streams = out
+                    .clone()
+                    .unsqueeze_dim::<3>(1)
+                    .expand([b, mg.n_stream, d]);
                 h = out;
             } else {
                 let idx = mg.module_index(i, real);

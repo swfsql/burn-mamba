@@ -120,8 +120,14 @@ impl MultiGateResidual {
     ) -> (Tensor<R>, Tensor<R>) {
         let dims = streams.dims();
         let (stream_axis, feat_axis) = (R - 2, R - 1);
-        assert_eq!(dims[feat_axis], self.d_model, "stream width must equal d_model");
-        assert_eq!(dims[stream_axis], self.n_stream, "stream count must equal n_stream");
+        assert_eq!(
+            dims[feat_axis], self.d_model,
+            "stream width must equal d_model"
+        );
+        assert_eq!(
+            dims[stream_axis], self.n_stream,
+            "stream count must equal n_stream"
+        );
 
         // `b_beta` reshaped to broadcast on the stream axis: `[1, …, n_stream, 1]`.
         let mut bias_shape = [1usize; R];
@@ -154,11 +160,7 @@ impl MultiGateResidual {
     ///
     /// Returns `(h, streams')`: the pooled input `h` for the next layer
     /// (`[batch, sequence, d_model]`) and the updated streams (same shape as in).
-    pub fn forward(
-        &self,
-        layer_output: Tensor<3>,
-        streams: Tensor<4>,
-    ) -> (Tensor<3>, Tensor<4>) {
+    pub fn forward(&self, layer_output: Tensor<3>, streams: Tensor<4>) -> (Tensor<3>, Tensor<4>) {
         let (new_h, new_streams) = self.mix_pool::<4>(layer_output.unsqueeze_dim(2), streams);
         (new_h.squeeze_dim(2), new_streams)
     }
@@ -224,7 +226,11 @@ impl MultiGate {
     /// position: the virtual index when each virtual layer owns its MGR
     /// ([`Self::per_virtual`]), otherwise the real index.
     pub fn module_index(&self, virtual_idx: usize, real_idx: usize) -> usize {
-        if self.per_virtual { virtual_idx } else { real_idx }
+        if self.per_virtual {
+            virtual_idx
+        } else {
+            real_idx
+        }
     }
 }
 
