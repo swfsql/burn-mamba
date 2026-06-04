@@ -185,15 +185,31 @@ impl MultiGateResidualConfig {
     }
 }
 
-/// A stack of [`MultiGateResidual`]s — one per *real* layer of the enclosing
-/// [`Layers`](crate::modules::Layers) (virtual layers reuse them by real index).
+/// A stack of [`MultiGateResidual`]s for the enclosing
+/// [`Layers`](crate::modules::Layers). When `per_virtual` is `false` there is one
+/// module **per real layer** (virtual layers reuse them by real index); when
+/// `true` there is one **per virtual layer** (each virtual pass owns its own).
 #[derive(Module, Debug)]
 pub struct MultiGate {
-    /// One MGR module per real layer.
+    /// The MGR modules: length `n_real_layers` (per-real) or `n_virtual_layers`
+    /// (per-virtual) — see [`Self::per_virtual`].
     pub layers: Vec<MultiGateResidual>,
     /// Number of parallel residual streams `n`.
     #[module(skip)]
     pub n_stream: usize,
+    /// `true` ⇒ one MGR per *virtual* layer (indexed by virtual position);
+    /// `false` ⇒ one per *real* layer (reused across virtual passes by real index).
+    #[module(skip)]
+    pub per_virtual: bool,
+}
+
+impl MultiGate {
+    /// Index into [`Self::layers`] for a given `(virtual_idx, real_idx)` layer
+    /// position: the virtual index when each virtual layer owns its MGR
+    /// ([`Self::per_virtual`]), otherwise the real index.
+    pub fn module_index(&self, virtual_idx: usize, real_idx: usize) -> usize {
+        if self.per_virtual { virtual_idx } else { real_idx }
+    }
 }
 
 /// How a [`Layers`](crate::modules::Layers) stack threads residuals between
@@ -219,19 +235,37 @@ pub enum ResidualsConfig {
         n_stream: usize,
         /// Initial gate bias (see [`MultiGateResidualConfig::init_bias`]).
         init_bias: f64,
+        /// `true` ⇒ one MGR per *virtual* layer; `false` ⇒ one per *real* layer
+        /// (reused across virtual passes). See [`MultiGate::per_virtual`].
+        per_virtual_layer: bool,
     },
 }
 
 impl ResidualsConfig {
-    /// Build the runtime [`Residuals`] for a stack of `n_real_layers` layers.
-    pub fn init(&self, d_model: usize, n_real_layers: usize, device: &Device) -> Residuals {
+    /// Build the runtime [`Residuals`] for a stack of `n_real_layers` real weight
+    /// sets unrolled over `n_virtual_layers` (virtual) passes. The MGR module
+    /// count follows `per_virtual_layer` (one per virtual layer vs one per real
+    /// layer).
+    pub fn init(
+        &self,
+        d_model: usize,
+        n_real_layers: usize,
+        n_virtual_layers: usize,
+        device: &Device,
+    ) -> Residuals {
         match self {
             ResidualsConfig::Standard => Residuals::Standard(NoOp),
             ResidualsConfig::MultiGate {
                 n_stream,
                 init_bias,
+                per_virtual_layer,
             } => {
-                let layers = (0..n_real_layers)
+                let count = if *per_virtual_layer {
+                    n_virtual_layers
+                } else {
+                    n_real_layers
+                };
+                let layers = (0..count)
                     .map(|_| {
                         MultiGateResidualConfig::new(d_model, *n_stream)
                             .with_init_bias(*init_bias)
@@ -241,6 +275,7 @@ impl ResidualsConfig {
                 Residuals::MultiGate(MultiGate {
                     layers,
                     n_stream: *n_stream,
+                    per_virtual: *per_virtual_layer,
                 })
             }
         }

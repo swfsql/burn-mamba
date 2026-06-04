@@ -40,6 +40,8 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         mamba_block,
         output_size: NUM_CLASSES,
         class_tokens: Vec::new(),
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,
     }
 }

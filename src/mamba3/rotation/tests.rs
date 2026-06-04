@@ -13,7 +13,7 @@
 //! collapse to a `cumsum` of angles (RoPE), and gradient parity.
 
 use super::*;
-use crate::mamba3::double_ssd::double_ssd::apply_rope;
+use crate::modules::apply_rope;
 use crate::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;

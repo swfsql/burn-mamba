@@ -53,6 +53,8 @@ fn unified_net_config_mamba2() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
@@ -96,6 +98,8 @@ fn unified_net_config_mamba3() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
@@ -123,6 +127,8 @@ fn unified_net_config_mamba1() {
         mamba_block: block,
         output_size: 2,
         class_tokens: Vec::new(),
+        ignore_first_residual: false,
+        ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);

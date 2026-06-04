@@ -67,23 +67,30 @@ where
         }
     }
 
-    fn residual_scale(&self, i: usize, n: usize) -> f32 {
-        let first = self.ignore_first_residual && i == 0;
-        let last = self.ignore_last_residual && i + 1 == n;
-        if first || last { 0.0 } else { 1.0 }
+    /// Whether (virtual) layer `i` of `n` suppresses its residual — the first
+    /// layer when `ignore_first_residual`, the last when `ignore_last_residual`.
+    fn skip_residual(&self, i: usize, n: usize) -> bool {
+        (self.ignore_first_residual && i == 0) || (self.ignore_last_residual && i + 1 == n)
     }
 
     /// Full-sequence pass through every (virtual) layer.
     ///
-    /// With [`Residuals::Standard`] each layer adds its own Pre-LN skip. With
-    /// [`Residuals::MultiGate`] the layer's own skip is suppressed
-    /// (`residual_scale = 0`) and `n_stream` parallel streams — seeded from `x` —
-    /// carry the residual: each layer reads their attention-pooled aggregate as
-    /// input and its output is gated back into every stream (see [`MultiGate`]).
-    /// Class latents and `ignore_first/last_residual` apply to the Standard path
-    /// only (MultiGate forbids class latents, panicking if any are present).
+    /// [`Layer`] returns only `F_l = Block(RMSNorm(·))`; the residual is added
+    /// here. With [`Residuals::Standard`] each layer adds the input skip (unless
+    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and
+    /// `n_stream` parallel streams — seeded from `x` — carry the residual: each
+    /// layer reads their attention-pooled aggregate as input and its output is
+    /// gated back into every stream (see [`MultiGate`]).
+    ///
+    /// `ignore_first/last_residual` apply to **both** paths: skipping the first
+    /// restarts the residual carry from the first layer's output (the input is
+    /// read but not carried); skipping the last makes the stack output the last
+    /// layer's transform `F_l` alone (no input-dependent carry). Class latents
+    /// apply to the Standard path only (MultiGate forbids them, panicking if any
+    /// are present).
     ///
     /// [`MultiGate`]: crate::modules::MultiGate
+    /// [`Layer`]: crate::modules::Layer
     pub fn forward(
         &self,
         x: Tensor<3>,
@@ -105,11 +112,21 @@ where
             let real = self.real_idx(i);
             let layer = &self.real_layers[real];
             let cache = slots[i].take().unwrap();
+            let first = self.ignore_first_residual && i == 0;
+            let last = self.ignore_last_residual && i + 1 == n;
             match &self.residuals {
                 Residuals::Standard(_noop) => {
-                    let rs = self.residual_scale(i, n);
-                    let (x_, c_) = layer.forward(x, Some(cache), ssd_path.clone(), rs);
-                    x = x_;
+                    // Splice this layer's class latents, then add the residual
+                    // (the lengthened input) here — unless suppressed, in which
+                    // case the input is moved straight in (no clone, no add).
+                    let x_l = layer.insert_latents(x);
+                    let (out, c_) = if first || last {
+                        layer.forward(x_l, Some(cache), ssd_path.clone())
+                    } else {
+                        let (out, c_) = layer.forward(x_l.clone(), Some(cache), ssd_path.clone());
+                        (out + x_l, c_)
+                    };
+                    x = out;
                     slots[i] = Some(c_);
                 }
                 Residuals::MultiGate(mg) => {
@@ -117,12 +134,24 @@ where
                         layer.class_latents_emb.is_none(),
                         "MultiGate residuals do not support per-layer class latents"
                     );
-                    let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone(), 0.0);
+                    let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone());
                     slots[i] = Some(c_);
-                    let (new_h, new_streams) =
-                        mg.layers[real].forward(out, streams.take().unwrap());
-                    x = new_h;
-                    streams = Some(new_streams);
+                    let s = streams.take().unwrap();
+                    if last {
+                        // Output depends purely on the last layer's transform.
+                        x = out;
+                        streams = Some(s);
+                    } else if first {
+                        // Drop the input seed: restart the streams from `F_0`.
+                        let [b, seq, d] = out.dims();
+                        streams = Some(out.clone().unsqueeze_dim::<4>(2).expand([b, seq, mg.n_stream, d]));
+                        x = out;
+                    } else {
+                        let idx = mg.module_index(i, real);
+                        let (new_h, new_streams) = mg.layers[idx].forward(out, s);
+                        x = new_h;
+                        streams = Some(new_streams);
+                    }
                 }
             }
         }
@@ -211,7 +240,7 @@ where
         // its own class latents into the stream it receives.
         for pos in 0..n {
             let layer = &self.real_layers[self.real_idx(pos)];
-            let rs = self.residual_scale(pos, n);
+            let skip = self.skip_residual(pos, n);
             let mut layer_cursor = layer_indices.as_deref_mut().map(|v| &mut v[pos]);
             let positions = if layer_cursor.is_some() {
                 class_step_injections(&layer.class_latents, "Layer")
@@ -222,18 +251,28 @@ where
             let emb = layer.class_latents_emb.as_ref();
             let mut cache = slots[pos].take();
             let mut next: Vec<Tensor<2>> = Vec::with_capacity(stream.len());
+            // One token through the layer, adding its residual here unless
+            // suppressed (then the token is moved straight in — no clone/add).
+            let run = |token: Tensor<2>, cache: Option<M::Cache>| {
+                if skip {
+                    layer.step(token, cache, None)
+                } else {
+                    let (out, c) = layer.step(token.clone(), cache, None);
+                    (out + token, c)
+                }
+            };
             for token in stream {
                 // Splice this layer's class latents that fall before this token.
                 if let Some(cursor) = layer_cursor.as_deref_mut() {
                     while let Some(i) = positions.iter().position(|&p| p == *cursor) {
                         let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
-                        let (out, c) = layer.step(row, cache, rs, None);
+                        let (out, c) = run(row, cache);
                         next.push(out);
                         cache = Some(c);
                         *cursor += 1;
                     }
                 }
-                let (out, c) = layer.step(token, cache, rs, None);
+                let (out, c) = run(token, cache);
                 next.push(out);
                 cache = Some(c);
                 if let Some(cursor) = layer_cursor.as_deref_mut() {
@@ -278,11 +317,22 @@ where
             let layer = &self.real_layers[real];
             assert_step_compatible(&layer.class_latents, "Layer");
             let cache = slots[i].take();
-            let (out, c_) = layer.step(h, cache, 0.0, None);
+            let (out, c_) = layer.step(h, cache, None);
             slots[i] = Some(c_);
-            let (new_h, new_streams) = mg.layers[real].step(out, streams);
-            h = new_h;
-            streams = new_streams;
+            if self.ignore_last_residual && i + 1 == n {
+                // Output depends purely on the last layer's transform.
+                h = out;
+            } else if self.ignore_first_residual && i == 0 {
+                // Drop the input seed: restart the streams from `F_0`.
+                let [b, d] = out.dims();
+                streams = out.clone().unsqueeze_dim::<3>(1).expand([b, mg.n_stream, d]);
+                h = out;
+            } else {
+                let idx = mg.module_index(i, real);
+                let (new_h, new_streams) = mg.layers[idx].step(out, streams);
+                h = new_h;
+                streams = new_streams;
+            }
         }
         (h, M::Caches::from_slots(slots))
     }
@@ -334,6 +384,18 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
         self
     }
 
+    /// Suppress the first virtual layer's residual (see [`Layers`]).
+    pub fn with_ignore_first_residual(mut self, ignore: bool) -> Self {
+        self.ignore_first_residual = ignore;
+        self
+    }
+
+    /// Suppress the last virtual layer's residual (see [`Layers`]).
+    pub fn with_ignore_last_residual(mut self, ignore: bool) -> Self {
+        self.ignore_last_residual = ignore;
+        self
+    }
+
     /// Set the stack-level class latents.
     #[cfg(test)]
     pub fn with_class_latents(mut self, class_latents: Vec<ClassLatent>) -> Self {
@@ -344,6 +406,11 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
     /// Allocate and initialise the stack on `device`.
     pub fn init(&self, device: &Device) -> Layers<C::Block> {
         let d_model = self.mamba_block.d_model();
+        let n_virtual = self
+            .n_virtual_layers
+            .as_ref()
+            .map(|(l, _)| *l)
+            .unwrap_or(self.n_real_layers);
         let real_layers = (0..self.n_real_layers)
             .map(|_| Layer {
                 norm: RmsNormConfig::new(d_model).init(device),
@@ -358,7 +425,9 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             real_layers,
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
-            residuals: self.residuals.init(d_model, self.n_real_layers, device),
+            residuals: self
+                .residuals
+                .init(d_model, self.n_real_layers, n_virtual, device),
             class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
             class_latents: self.class_latents.clone(),
         }

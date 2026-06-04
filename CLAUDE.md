@@ -16,7 +16,7 @@ same code runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 
 ```bash
 cargo check                 # type-check the lib surface
-cargo test                  # run tests (any backend; flex = CPU default)
+cargo test --lib            # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
 cargo run --example fibonacci -- --training --inference
 ```
@@ -256,8 +256,7 @@ Tensor names carry a shape suffix; the codebase is **deliberately verbose** abou
 comment; in commentary a shape may be underscore-style (`_bhl`) or expanded to
 `[...]`. **Paper** style (upper-case `A,B,C,H,Y,L,…`) may appear in comments but
 **never in code identifiers**. Lower-case = base dimensions (below); upper-case = a
-*relation* of them (offset/multiple/concat): `X` may be `x±1`/`x*2`, `S` = padded
-sequence, `K = conv_kernel − 1`.
+*relation* of them (offset/multiple/concat): `X` may be `x±1`/`x*2`/etc, `XY` may be `x+y`/`x*y`/etc.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|

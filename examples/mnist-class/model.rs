@@ -46,16 +46,22 @@ pub fn model_config() -> MambaLatentNetConfig {
         n_virtual_layers: Some((16, Schedule::Stretched)),
         mamba_block,
         class_tokens: Vec::new(),
-        residuals: ResidualsConfig::Standard,
-        // // Multi-Gate Residuals (independent sigmoid gate) over 4 streams: the
-        // // 16 virtual layers update 4 parallel residual streams via gated mixing,
-        // // pooled per layer by depth-wise attention. A slightly negative init bias
-        // // biases the gates towards carry early in training (see the paper's
-        // // depth-aware formula); 4 streams over 16 virtual layers is modest.
-        // residuals: ResidualsConfig::MultiGate {
-        //     n_stream: 4,
-        //     init_bias: -1.0,
-        // },
+        // the first input/last output could skip their residual here too
+        ignore_first_residual: false,
+        ignore_last_residual: false,
+        // residuals: ResidualsConfig::Standard,
+        // Multi-Gate Residuals (independent sigmoid gate) over 4 streams: the
+        // 16 virtual layers update 4 parallel residual streams via gated mixing,
+        // pooled per layer by depth-wise attention. A slightly negative init bias
+        // biases the gates towards carry early in training (see the paper's
+        // depth-aware formula); 4 streams over 16 virtual layers is modest.
+        residuals: ResidualsConfig::MultiGate {
+            n_stream: 4,
+            init_bias: -1.0,
+            // one MGR per real layer (the 2 weight sets), reused across the 16
+            // virtual passes; set `true` to give each virtual layer its own.
+            per_virtual_layer: false,
+        },
     }
 }
 // notes:

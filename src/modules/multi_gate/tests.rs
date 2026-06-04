@@ -86,6 +86,52 @@ fn gradients_flow() {
     assert!(m.b_beta.val().grad(&grads).is_some(), "grad b_beta");
 }
 
+/// The **Standard** residual path (the refactor where [`Layer`] returns its bare
+/// output and `Layers` adds the residual) must keep `forward == unrolled step`
+/// with both the first and last residuals suppressed, over virtual layers.
+///
+/// [`Layer`]: crate::modules::Layer
+#[cfg(feature = "mamba2")]
+#[test]
+fn layers_standard_ignore_residuals_parity() {
+    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    use crate::modules::{LayersBuilder, ResidualsConfig};
+    use crate::utils::Schedule;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = LayersBuilder::new(2, block)
+        .with_n_virtual_layers(Some((5, Schedule::Stretched)))
+        .with_residuals(ResidualsConfig::Standard)
+        .with_ignore_first_residual(true)
+        .with_ignore_last_residual(true)
+        .init(&device);
+
+    let (batch, seq) = (2usize, 4usize);
+    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
+
+    let mut caches = None;
+    for t in 0..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, caches, None, None);
+        caches = Some(c);
+        let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt, expected) < 1e-4,
+            "Standard (ignored residuals) step disagrees with forward at t={t}"
+        );
+    }
+}
+
 /// End-to-end wiring check: a `Layers` stack with Multi-Gate residuals must
 /// still satisfy the `forward == unrolled step` parity property (the streams are
 /// rebuilt per token in `step`, so each user position reproduces `forward`).
@@ -107,6 +153,7 @@ fn layers_multi_gate_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
+            per_virtual_layer: false,
         })
         .init(&device);
 
@@ -153,6 +200,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: -1.0,
+            per_virtual_layer: false,
         })
         .init(&device);
 
@@ -171,6 +219,63 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         assert!(
             max_abs_diff(yt, expected) < 1e-3,
             "MGR (virtual) step disagrees with forward at t={t}"
+        );
+    }
+}
+
+/// Parity check exercising the two MGR composition options together: a
+/// **per-virtual** MGR (one module for every virtual layer, not reused by real
+/// index) with the **first and last residuals skipped**. `forward` must still
+/// equal `step` unrolled token-by-token.
+#[cfg(feature = "mamba2")]
+#[test]
+fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
+    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    use crate::modules::{LayersBuilder, ResidualsConfig};
+    use crate::utils::Schedule;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let mut builder = LayersBuilder::new(2, block)
+        .with_n_virtual_layers(Some((5, Schedule::Stretched)))
+        .with_residuals(ResidualsConfig::MultiGate {
+            n_stream: 3,
+            init_bias: -1.0,
+            per_virtual_layer: true,
+        });
+    builder.ignore_first_residual = true;
+    builder.ignore_last_residual = true;
+    let layers = builder.init(&device);
+
+    // One MGR per virtual layer (5), not per real layer (2).
+    if let crate::modules::Residuals::MultiGate(mg) = &layers.residuals {
+        assert_eq!(mg.layers.len(), 5, "per-virtual ⇒ one MGR per virtual layer");
+        assert!(mg.per_virtual);
+    } else {
+        panic!("expected MultiGate residuals");
+    }
+
+    let (batch, seq) = (2usize, 4usize);
+    let x = Tensor::<3>::random([batch, seq, d_model], Distribution::Normal(0.0, 1.0), &device);
+
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
+
+    let mut caches = None;
+    for t in 0..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, caches, None, None);
+        caches = Some(c);
+        let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt, expected) < 1e-4,
+            "MGR (per-virtual, ignored residuals) step disagrees with forward at t={t}"
         );
     }
 }
