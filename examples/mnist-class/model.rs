@@ -58,9 +58,10 @@ pub fn model_config() -> MambaLatentNetConfig {
         residuals: ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: -1.0,
-            // one MGR per real layer (the 2 weight sets), reused across the 16
-            // virtual passes; set `true` to give each virtual layer its own.
-            per_virtual_layer: false,
+            // // one MGR per real layer (the 2 weight sets), reused across the 16
+            // // virtual passes; set `true` to give each virtual layer its own.
+            // per_virtual_layer: false,
+            per_virtual_layer: true,
         },
     }
 }
