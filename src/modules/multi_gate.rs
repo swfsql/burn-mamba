@@ -63,27 +63,42 @@ impl MultiGateResidual {
         (self.d_model as f32).powf(-0.5)
     }
 
-    /// Parameter-free RMS norm over the last dim (matches [`RmsNorm`] math with
-    /// `γ ≡ 1`; the fp16 path uses the same overflow-safe max-rescale).
+    /// The parameter-free RMS denominator `d(x) ∈ [‥, 1]` such that the RMSNorm
+    /// (matching [`RmsNorm`] math with `γ ≡ 1`) is `x / d(x)`. Returning the
+    /// denominator rather than the normalised tensor lets [`Self::normed_score`]
+    /// fold it out of the (feature-axis) score reduction, so the full-width
+    /// normalised tensor is never built. The fp16 path keeps the same
+    /// overflow-safe max-rescale, folded into the same scalar denominator.
     ///
     /// [`RmsNorm`]: crate::modules::RmsNorm
-    fn rms_norm<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
+    fn rms_denom<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
         match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
                 let eps = div_eps(x.dtype());
-                let rms = (x.clone() * x.clone()).mean_dim(D - 1).sqrt();
-                x / (rms + eps)
+                (x.clone() * x).mean_dim(D - 1).sqrt() + eps
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
                 let eps: f16 = f16::from_elem(div_eps(x.dtype())) * f16::from_f32(2.);
-                let max = x.clone().no_grad().detach().abs().max().expand(x.shape());
+                // Single global scalar `max`, reshaped to `[1; D]` so it
+                // broadcasts against the `[‥, 1]` partial RMS.
+                let max = x.clone().no_grad().detach().abs().max().reshape([1; D]);
                 let x_ = x.clone() / (max.clone() + eps); // x_.abs() <= 1
                 let rms_partial = (x.clone() * x_).mean_dim(D - 1).sqrt();
-                x / (rms_partial + eps) / max.sqrt()
+                (rms_partial + eps) * max.sqrt()
             }
-            _ => unreachable!("rms_norm expects a float dtype"),
+            _ => unreachable!("rms_denom expects a float dtype"),
         }
+    }
+
+    /// The RMSNorm-then-dot score `scale · Σ_feat(x · w) / (rms(x)+eps)`,
+    /// shape `[‥, 1]`. The RMS denominator is constant over the feature axis, so
+    /// it is folded out of the reduction (via [`Self::rms_denom`]) — equal to
+    /// `Σ_feat(rms_norm(x) · w) · scale` but without materialising the full-width
+    /// normalised tensor.
+    fn normed_score<const R: usize>(&self, x: Tensor<R>, w: Tensor<R>) -> Tensor<R> {
+        let dot = (x.clone() * w).sum_dim(R - 1);
+        dot * self.scale() / self.rms_denom(x)
     }
 
     /// The shared mix + pool, generic over the streams rank `R` (the *stream*
@@ -107,7 +122,6 @@ impl MultiGateResidual {
         let (stream_axis, feat_axis) = (R - 2, R - 1);
         assert_eq!(dims[feat_axis], self.d_model, "stream width must equal d_model");
         assert_eq!(dims[stream_axis], self.n_stream, "stream count must equal n_stream");
-        let scale = self.scale();
 
         // `b_beta` reshaped to broadcast on the stream axis: `[1, …, n_stream, 1]`.
         let mut bias_shape = [1usize; R];
@@ -118,14 +132,16 @@ impl MultiGateResidual {
         let w_alpha = self.w_alpha.val().unsqueeze::<R>();
 
         // Mixer: independent per-stream sigmoid gate, `β`: `[…, n_stream, 1]`.
-        let normed_s = self.rms_norm(streams.clone());
-        let score_s = (normed_s * w_beta).sum_dim(feat_axis) * scale;
-        let beta = sigmoid(score_s + b_beta);
-        let new_streams = streams.clone() + beta * (layer_output - streams);
+        let beta = sigmoid(self.normed_score(streams.clone(), w_beta) + b_beta);
+        // Lerp `(1−β)·streams + β·layer_output` (equal to the paper's
+        // `streams + β·(layer_output − streams)`) — written so no full-width
+        // intermediate is retained: `streams` is the already-saved input and
+        // `layer_output` is `[…, 1, d_model]`, so neither `mul` saves a new
+        // `[…, n_stream, d_model]` tensor and the `+` saves nothing.
+        let new_streams = streams * (-beta.clone() + 1.0) + layer_output * beta;
 
         // Aggregator: depth-wise attention pooling (softmax over the stream axis).
-        let normed_ns = self.rms_norm(new_streams.clone());
-        let score_ns = (normed_ns * w_alpha).sum_dim(feat_axis) * scale;
+        let score_ns = self.normed_score(new_streams.clone(), w_alpha);
         let alpha = softmax(score_ns, stream_axis);
         let new_h = (alpha * new_streams.clone()).sum_dim(stream_axis);
         (new_h, new_streams)
