@@ -8,6 +8,9 @@ use burn::module::Param;
 use burn::nn::{Linear, LinearConfig};
 use burn::prelude::*;
 
+#[cfg(test)]
+mod tests;
+
 // ===========================================================================
 // Bidirectional support (family-generic; forward-only, non-autoregressive)
 // ===========================================================================
@@ -328,12 +331,17 @@ where
             // latents were already spliced above; pairs carry none of their own.
             //
             // The pair returns its merged transform `F_l` without the residual.
+            // The merge is a per-real-pair weight set (`n_real_layers / 2` of
+            // them), so it is indexed by the *real* pair `straight_idx / 2` — not
+            // the virtual pair `i` — sharing weights under virtual scheduling just
+            // like the blocks (and matching the MGR real-pair index below). In the
+            // non-virtual case `straight_idx == i * 2`, so this is `i`.
             let (merged, sc, rc) = bidi_pair_forward(
                 &straight_layer.norm,
                 &reverse_layer.norm,
                 &straight_layer.mamba_block,
                 &reverse_layer.mamba_block,
-                &self.outputs_merge[i],
+                &self.outputs_merge[straight_idx / 2],
                 x,
                 Some(straight_cache),
                 Some(reverse_cache),
