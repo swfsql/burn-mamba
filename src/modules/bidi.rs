@@ -1,4 +1,4 @@
-use crate::modules::{RmsNorm, RmsNormConfig};
+use crate::modules::{Residuals, ResidualsConfig, RmsNorm, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::BidiSchedule;
 use crate::utils::ClassLatent;
@@ -202,6 +202,9 @@ pub struct BidiLayers<M: Module> {
     pub ignore_last_residual: bool,
     /// One direction-merge per pair, length `n_real_layers / 2`.
     pub outputs_merge: Vec<OutputMerge>,
+    /// How residuals are threaded between **pairs** (plain additive vs
+    /// Multi-Gate). The MGR unit is the pair: one module per real/virtual pair.
+    pub residuals: Residuals,
     /// Positions of the stack-level class latents, spliced into the sequence
     /// once before the first pair (independent of any per-pair class latents).
     #[module(skip)]
@@ -227,8 +230,36 @@ where
         insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
     }
 
+    /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies
+    /// of `x` as `[batch, sequence, n_stream, d_model]` — or `None` for the
+    /// Standard path. Panics if MultiGate is paired with stack-level class latents.
+    fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
+        let Residuals::MultiGate(mg) = &self.residuals else {
+            return None;
+        };
+        assert!(
+            self.class_latents_emb.is_none(),
+            "MultiGate residuals do not support stack-level class latents"
+        );
+        let [batch, sequence, d_model] = x.dims();
+        Some(
+            x.clone()
+                .unsqueeze_dim::<4>(2)
+                .expand([batch, sequence, mg.n_stream, d_model]),
+        )
+    }
+
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`
     /// (`sequence` grows by the stack-level class-latent count).
+    ///
+    /// Each pair returns its merged transform `F_l` (no residual). With
+    /// [`Residuals::Standard`] the input skip is added per pair (unless
+    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and
+    /// `n_stream` parallel streams — seeded from `x` — carry the residual between
+    /// pairs: each pair reads their attention-pooled aggregate as input and its
+    /// merged output is gated back into every stream (see [`MultiGate`]).
+    ///
+    /// [`MultiGate`]: crate::modules::MultiGate
     pub fn forward(
         &self,
         mut x: Tensor<3>,
@@ -260,6 +291,9 @@ where
         );
 
         let mut slots = caches.into_slots();
+        // MultiGate keeps `n_stream` parallel streams (seeded from the input);
+        // Standard threads the single tensor `x` directly (streams stays `None`).
+        let mut streams = self.multi_gate_streams_seed(&x);
         for i in 0..n / 2 {
             let (straight_i, reverse_i) = (i * 2, i * 2 + 1);
             let (straight_idx, reverse_idx) =
@@ -277,17 +311,23 @@ where
             let straight_cache = slots[straight_i].take().unwrap();
             let reverse_cache = slots[reverse_i].take().unwrap();
 
-            let skip = (self.ignore_first_residual && i == 0)
-                || (self.ignore_last_residual && i + 1 == n / 2);
+            let first = self.ignore_first_residual && i == 0;
+            let last = self.ignore_last_residual && i + 1 == n / 2;
+
+            // For the Standard path the residual is the (pre-pair) input skip;
+            // clone it before the pair consumes `x`, and only when it is used.
+            // MultiGate carries the residual in its streams, so clones nothing.
+            let residual = match &self.residuals {
+                Residuals::Standard(_) if !(first || last) => Some(x.clone()),
+                _ => None,
+            };
 
             // Run the pair directly on the (borrowed) real layers — never clone a
             // block, since cloning a lazily-initialised `Param` resamples its
             // random weights (see [`bidi_pair_forward`]). Stack-level class
             // latents were already spliced above; pairs carry none of their own.
             //
-            // The pair returns its merged output without the residual; add the
-            // input skip here, cloning the input only when it is actually used.
-            let residual = if skip { None } else { Some(x.clone()) };
+            // The pair returns its merged transform `F_l` without the residual.
             let (merged, sc, rc) = bidi_pair_forward(
                 &straight_layer.norm,
                 &reverse_layer.norm,
@@ -299,12 +339,45 @@ where
                 Some(reverse_cache),
                 ssd_path.clone(),
             );
-            x = match residual {
-                Some(r) => merged + r,
-                None => merged,
-            };
             slots[straight_i] = Some(sc);
             slots[reverse_i] = Some(rc);
+
+            match &self.residuals {
+                Residuals::Standard(_noop) => {
+                    // Add the input skip here (the pair already consumed `x`), or
+                    // output the bare transform when the residual is suppressed.
+                    x = match residual {
+                        Some(r) => merged + r,
+                        None => merged,
+                    };
+                }
+                Residuals::MultiGate(mg) => {
+                    let s = streams.take().unwrap();
+                    // A skipped residual is β ≡ 1 in the mixer (`new_streams =
+                    // F_l`), the aggregator then collapsing to `F_l` — both
+                    // branches shortcut that (mirrors `Layers::forward`). The MGR
+                    // unit is the pair: virtual pair `i`, real pair `straight_idx
+                    // / 2` (the straight index of a pair is even).
+                    if last {
+                        x = merged;
+                        streams = Some(s);
+                    } else if first {
+                        let [b, seq, d] = merged.dims();
+                        streams = Some(merged.clone().unsqueeze_dim::<4>(2).expand([
+                            b,
+                            seq,
+                            mg.n_stream,
+                            d,
+                        ]));
+                        x = merged;
+                    } else {
+                        let idx = mg.module_index(i, straight_idx / 2);
+                        let (new_h, new_streams) = mg.layers[idx].forward(merged, s);
+                        x = new_h;
+                        streams = Some(new_streams);
+                    }
+                }
+            }
         }
 
         (x, M::Caches::from_slots(slots))
@@ -327,6 +400,8 @@ pub struct BidiLayersBuilder<C> {
     pub outputs_merge: Vec<OutputMergeConfig>,
     /// Stack-level class latents (spliced once before the first pair).
     pub class_latents: Vec<ClassLatent>,
+    /// Inter-pair residual scheme (defaults to plain additive).
+    pub residuals: ResidualsConfig,
 }
 
 impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
@@ -344,6 +419,16 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
         let outputs_merge = (0..self.n_real_layers / 2)
             .map(|i| self.outputs_merge[i].init(d_model, device))
             .collect();
+        // The MGR unit is the pair, so size the modules by *pairs* (halved real
+        // and virtual layer counts).
+        let n_virtual = self
+            .n_virtual_layers
+            .as_ref()
+            .map(|(l, _)| *l)
+            .unwrap_or(self.n_real_layers);
+        let residuals =
+            self.residuals
+                .init(d_model, self.n_real_layers / 2, n_virtual / 2, device);
         BidiLayers {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),
@@ -351,6 +436,7 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
             ignore_first_residual: self.ignore_first_residual,
             ignore_last_residual: self.ignore_last_residual,
             outputs_merge,
+            residuals,
             class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
             class_latents: self.class_latents.clone(),
         }
@@ -470,6 +556,8 @@ pub enum MambaBidiLayersConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
         class_latents: Vec<ClassLatent>,
+        /// Inter-pair residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-2 bidirectional stack.
     #[cfg(feature = "mamba2")]
@@ -486,6 +574,8 @@ pub enum MambaBidiLayersConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
         class_latents: Vec<ClassLatent>,
+        /// Inter-pair residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
     /// Build a Mamba-3 bidirectional stack.
     #[cfg(feature = "mamba3")]
@@ -502,6 +592,8 @@ pub enum MambaBidiLayersConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first pair (e.g. a `Middle` summary latent in place of mean-pooling).
         class_latents: Vec<ClassLatent>,
+        /// Inter-pair residual scheme (plain additive vs Multi-Gate).
+        residuals: ResidualsConfig,
     },
 }
 
@@ -518,6 +610,7 @@ impl MambaBidiLayersConfig {
                 ignore_last_residual,
                 outputs_merge,
                 class_latents,
+                residuals,
             } => MambaBidiLayers::Mamba1(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -527,6 +620,7 @@ impl MambaBidiLayersConfig {
                     ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
+                    residuals: residuals.clone(),
                 }
                 .init(device),
             ),
@@ -539,6 +633,7 @@ impl MambaBidiLayersConfig {
                 ignore_last_residual,
                 outputs_merge,
                 class_latents,
+                residuals,
             } => MambaBidiLayers::Mamba2(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -548,6 +643,7 @@ impl MambaBidiLayersConfig {
                     ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
+                    residuals: residuals.clone(),
                 }
                 .init(device),
             ),
@@ -560,6 +656,7 @@ impl MambaBidiLayersConfig {
                 ignore_last_residual,
                 outputs_merge,
                 class_latents,
+                residuals,
             } => MambaBidiLayers::Mamba3(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -569,6 +666,7 @@ impl MambaBidiLayersConfig {
                     ignore_last_residual: *ignore_last_residual,
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
+                    residuals: residuals.clone(),
                 }
                 .init(device),
             ),

@@ -68,7 +68,7 @@ pub fn launch(app_args: &AppArgs) {
             .with_batch_size(batch_size)
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
-                CosineAnnealingLr::new(4 * iterations_per_epoch) // 4 epochs
+                CosineAnnealingLr::new(1 * iterations_per_epoch) // 1 epoch
                     .with_max_lr(1e-3)
                     .with_min_lr(1e-5)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch

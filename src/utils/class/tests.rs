@@ -161,6 +161,7 @@ fn bidi_layers_mamba2() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -190,6 +191,7 @@ fn bidi_layers_mamba3() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -215,6 +217,7 @@ fn bidi_layers_mamba1() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, ());
@@ -241,6 +244,7 @@ fn unified_bidi_config_mamba2() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -272,6 +276,7 @@ fn bidi_forward_is_deterministic_mamba2() {
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -298,6 +303,7 @@ fn bidi_forward_is_deterministic_mamba1() {
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -330,6 +336,7 @@ fn bidi_forward_is_deterministic_mamba3() {
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 

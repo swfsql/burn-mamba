@@ -302,3 +302,69 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         );
     }
 }
+
+/// A bidirectional stack threads its residuals **between pairs** (the MGR unit
+/// is the pair, not the single layer). This checks the wiring: the MGR module
+/// count follows the number of pairs (per-real here), forward produces the right
+/// shape, and gradients reach every MGR parameter.
+#[cfg(feature = "mamba2")]
+#[test]
+fn bidi_multi_gate_forward_and_grads() {
+    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    use crate::modules::ResidualsConfig;
+    use crate::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
+    use crate::modules::{Layer, Residuals};
+
+    let device = Device::default().autodiff();
+    let d_model = 16;
+    let n_real = 4; // 2 pairs
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = BidiLayersBuilder {
+        n_real_layers: n_real,
+        n_virtual_layers: None,
+        mamba_block: block,
+        ignore_first_residual: false,
+        ignore_last_residual: false,
+        outputs_merge: OutputMergeConfig::mean(n_real),
+        class_latents: Vec::new(),
+        residuals: ResidualsConfig::MultiGate {
+            n_stream: 3,
+            init_bias: -1.0,
+            per_virtual_layer: false,
+        },
+    }
+    .init(&device);
+
+    // One MGR module per pair (n_real / 2), not per real layer.
+    let Residuals::MultiGate(mg) = &layers.residuals else {
+        panic!("expected MultiGate residuals");
+    };
+    assert_eq!(mg.layers.len(), n_real / 2, "one MGR per pair");
+
+    let (batch, seq) = (2usize, 5usize);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default());
+    assert_eq!(y.dims(), [batch, seq, d_model]);
+
+    let grads = y.sum().backward();
+    for (li, l) in layers.real_layers.iter().enumerate() {
+        let Layer { norm, .. } = l;
+        assert!(
+            norm.gamma.val().grad(&grads).is_some(),
+            "grad did not reach real layer {li}'s pre-norm"
+        );
+    }
+    assert!(
+        mg.layers[0].w_beta.val().grad(&grads).is_some(),
+        "grad did not reach the MGR mixer query"
+    );
+}

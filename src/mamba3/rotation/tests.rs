@@ -879,6 +879,7 @@ fn quaternion_bidi_forward_runs() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
         class_latents: Vec::new(),
+        residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 

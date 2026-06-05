@@ -9,15 +9,13 @@ use burn_mamba::utils::Schedule;
 /// Reaches ~85% validation accuracy at the first epoch.
 /// With a batch_size=16 in FP32, this requires ~3.5GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
-    // A small Mamba-3 block:
-    let mamba_block = Mamba3Config::new(
-        // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
-        32,
-    )
+    // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
+    let d_model = 32;
+    let mamba_block = Mamba3Config::new(d_model)
     // state_rank = 64 (time-wise expressivity, average impact on disk size)
     .with_state_rank(64)
     .with_expand(4)
-    // d_inner = expand·d_model = 128
+    // d_inner = expand·d_model = 4·32 = 128
     // nheads = 4
     // per_head_dim = d_inner/nheads = 32
     .with_per_head_dim(32)
@@ -49,20 +47,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // the first input/last output could skip their residual here too
         ignore_first_residual: false,
         ignore_last_residual: false,
-        // residuals: ResidualsConfig::Standard,
-        // Multi-Gate Residuals (independent sigmoid gate) over 4 streams: the
-        // 16 virtual layers update 4 parallel residual streams via gated mixing,
-        // pooled per layer by depth-wise attention. A slightly negative init bias
-        // biases the gates towards carry early in training (see the paper's
-        // depth-aware formula); 4 streams over 16 virtual layers is modest.
-        residuals: ResidualsConfig::MultiGate {
-            n_stream: 4,
-            init_bias: -1.0,
-            // // one MGR per real layer (the 2 weight sets), reused across the 16
-            // // virtual passes; set `true` to give each virtual layer its own.
-            // per_virtual_layer: false,
-            per_virtual_layer: true,
-        },
+        residuals: ResidualsConfig::Standard,
     }
 }
 // notes:

@@ -164,6 +164,7 @@ impl AeConfig {
             ignore_last_residual: true,
             outputs_merge: OutputMergeConfig::cat_linear(self.n_enc_layers),
             class_latents: self.enc_class_latents.clone(),
+            residuals: burn_mamba::modules::ResidualsConfig::Standard,
         }
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
@@ -176,6 +177,7 @@ impl AeConfig {
             ignore_last_residual: true,
             outputs_merge: OutputMergeConfig::cat_linear(self.n_dec_layers),
             class_latents: Vec::new(),
+            residuals: burn_mamba::modules::ResidualsConfig::Standard,
         }
         .init(device);
 
@@ -218,16 +220,19 @@ impl ModelConfigExt for AeConfig {
 pub fn model_config(n_latent: usize) -> AeConfig {
     let d_model = 64;
     let mamba_block = Mamba3Config::new(d_model)
-        .with_state_rank(128)
-        .with_expand(4)
-        .with_per_head_dim(32) // d_inner = 256, nheads = 256/32 = 8
+        .with_state_rank(64)
+        .with_expand(1)
+        // d_inner = expand·d_model = 1·64 = 64
+        // per_head_dim = 16
+        // nheads = d_inner/per_head_dim = 64/16 = 4
+        .with_per_head_dim(16)
         .with_ngroups(1)
-        .with_mimo_rank(4)
+        .with_mimo_rank(1)
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Quaternion4D);
+        .with_rotation(RotationKind::Complex2D);
 
-    AeConfig::new(d_model, n_latent, 8, 16, mamba_block)
+    AeConfig::new(d_model, n_latent, 8, 14, mamba_block)
         .with_enc_class_latents(vec![ClassLatent::Middle])
 }
