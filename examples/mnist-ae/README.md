@@ -24,7 +24,7 @@ img[b,28,28,1] ─patchify→ [b,np,p²] ─in_proj+pos→ [b,np,d] ─enc(bidi)
 dec_in[b,np,d] = (1+scale(z))·pos + shift(z)  ─dec(bidi)→ [b,np,d] ─dec_out→ [b,np,p²] ─unpatchify→ logits[b,784]
 ```
 
-`Complex2D` rotation, binary cross-entropy reconstruction loss (pixels treated as
+`Quaternion4D` rotation, binary cross-entropy reconstruction loss (pixels treated as
 Bernoulli probabilities; the model emits raw logits).
 
 ## Tuning knobs
@@ -37,7 +37,7 @@ The example is built to be bisected if the loss stalls (each is a one-liner in
   additive-broadcast conditioning.
 - `enc_class_latents` (config, default empty ⇒ mean-pool): add `ClassLatent::Middle`
   for a learned pooled readout instead.
-- `--latents N` (default 128): the bottleneck width (try 256 for sharper recon).
+- `--latents N` (default 16): the bottleneck width (try 128 for sharper recon).
 - `d_model` / layer counts (`4, 4` → `6, 6`) in `model_config()`; `num_epochs` in
   `main.rs`.
 
@@ -47,14 +47,14 @@ mini-batches), and inference writes them into `<artifacts>/inference/`.
 
 ## Usage
 
-The latent width is chosen with `-- --latents N` (default 128) and baked into a
+The latent width is chosen with `-- --latents N` (default 16) and baked into a
 fresh model config (a persisted config wins on reload).
 
 ```bash
 # debug check in flex (fp32)
 cargo check --example mnist-ae --features "backend-flex"
 
-# train + reconstruct on CUDA (long-running), 128-latent bottleneck
+# train + reconstruct on CUDA (long-running), 16-latent bottleneck
 cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference
 ```
 

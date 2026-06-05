@@ -43,18 +43,19 @@ pub fn launch(app_args: &AppArgs) {
 
     // setup training and model configs
     let batch_size = 16;
+    let num_epochs = 3;
     let training_items = 60_000;
     let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         TrainingConfig::new(common::training::optimizer_config(dtype))
-            .with_num_epochs(5)
+            .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
-                CosineAnnealingLr::new(4 * iterations_per_epoch) // 4 epochs
+                CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
                     .with_max_lr(1e-4)
-                    .with_min_lr(1e-5)
+                    .with_min_lr(5e-5)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });

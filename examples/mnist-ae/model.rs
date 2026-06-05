@@ -38,6 +38,8 @@ use burn_mamba::prelude::{
     ClassLatent, Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath,
     RotationKind,
 };
+use burn_mamba::utils::BidiSchedule;
+
 
 /// How the decoder conditions its per-position queries on the latent `z`.
 ///
@@ -191,10 +193,15 @@ pub struct AeConfig {
     pub d_model: usize,
     /// The latent bottleneck width — the configurable "number of latents".
     pub n_latent: usize,
-    /// Number of real encoder layers (bidi pairs).
+    /// Number of real (weight-bearing) encoder layers (even — bidi pairs).
     pub n_enc_layers: usize,
-    /// Number of real decoder layers (bidi pairs).
+    /// Number of real (weight-bearing) decoder layers (even — bidi pairs).
     pub n_dec_layers: usize,
+    /// Virtual layers per stack — logical depth run over the real layers with
+    /// shared weights (must be even; `StridedStretched` schedule). The cheap way
+    /// to add depth/expressivity without adding parameters.
+    #[config(default = 6)]
+    pub n_virtual_layers: usize,
     /// Shared Mamba-3 block config for both stacks.
     pub mamba_block: Mamba3Config,
     /// Encoder class latents, spliced into the sequence (empty ⇒ mean-pool).
@@ -222,7 +229,7 @@ impl AeConfig {
         // decoder reconstructs at patch resolution, so it has none.
         let enc_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_enc_layers,
-            n_virtual_layers: None,
+            n_virtual_layers: Some((self.n_virtual_layers, BidiSchedule::StridedStretched)),
             mamba_block: self.mamba_block.clone(),
             // first input (before flip) is non-bidi
             ignore_first_residual: true,
@@ -235,7 +242,7 @@ impl AeConfig {
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_dec_layers,
-            n_virtual_layers: None,
+            n_virtual_layers: Some((self.n_virtual_layers, BidiSchedule::StridedStretched)),
             mamba_block: self.mamba_block.clone(),
             // first input (before flip) is bidi
             ignore_first_residual: false,
@@ -278,39 +285,37 @@ impl ModelConfigExt for AeConfig {
     }
 }
 
-/// The example model config: a ViT/MAE-style patch AE tuned for **fast**
-/// batch-convergence to a low reconstruction loss within the ~5GB VRAM budget.
+/// The example model config: a **tiny** ViT/MAE-style patch AE (~460KB on disk)
+/// with a **16-wide latent** bottleneck.
 ///
-/// Width is kept narrow (`d_model = 128`) because batch-convergence speed tracks
-/// parameter count — a wider `d_model = 256` quadrupled params and was ~4× slower
-/// to the same loss. Fidelity instead comes from the **fine patches** (`patch = 4`
-/// ⇒ a length-49 sequence of 16-pixel tokens; a 16px patch is far sharper to
-/// reconstruct than 49px), which cost wall-clock (more tokens) but not
-/// batch-convergence. The plateau at ~0.078 was the old 1-epoch LR schedule
-/// collapsing to its 1e-5 floor; the schedule now spans the whole run.
+/// The smallness comes from a narrow width (`d_model = 32`) and only **2 real**
+/// bidi layers per half; the expressivity that a tiny model would otherwise lack
+/// is bought back, parameter-free, with **6 virtual layers** (weight-shared over
+/// the 2 real, `StridedStretched`) and a **non-abelian `Quaternion4D`** rotation.
+/// `expand = 4` (`d_inner = 128`, `per_head_dim = 16` ⇒ `nheads = 8`),
+/// `state_rank = 64`, `patch = 4` (length-49 sequence), full RoPE, FiLM decoder
+/// conditioning.
 ///
-/// `expand = 2` (`d_inner = 256`), `per_head_dim = 32` (`nheads = 8`),
-/// `state_rank = 128`, four real bidi layers per half, full RoPE, `Complex2D`
-/// rotation, FiLM decoder conditioning. `n_latent` is the caller-chosen
-/// bottleneck width (`-- --latents N`, default 128).
-///
-/// Next dials if it plateaus above target (with VRAM headroom): wider latent
-/// (`--latents 256`), more layers (`6, 6`), or more epochs.
+/// `n_latent` is the caller-chosen bottleneck width (`-- --latents N`, default 16).
+/// Knobs to trade size for quality: `n_virtual_layers`, `d_model`/`expand`,
+/// `state_rank`, or `n_enc/dec_layers`.
 pub fn model_config(n_latent: usize) -> AeConfig {
-    let d_model = 128;
+    let d_model = 32;
     let mamba_block = Mamba3Config::new(d_model)
-        .with_state_rank(128)
-        .with_expand(2)
-        // d_inner = expand·d_model = 2·128 = 256
-        // per_head_dim = 32
-        // nheads = d_inner/per_head_dim = 256/32 = 8
-        .with_per_head_dim(32)
+        // state_rank = 64 (even, divisible by 4 for the quaternion blocks)
+        .with_state_rank(64)
+        .with_expand(4)
+        // d_inner = expand·d_model = 4·32 = 128
+        // per_head_dim = 16
+        // nheads = d_inner/per_head_dim = 128/16 = 8
+        .with_per_head_dim(16)
         .with_ngroups(1)
-        .with_mimo_rank(1)
+        .with_mimo_rank(2)
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Complex2D);
+        // Non-abelian quaternion rotation: more expressive per parameter.
+        .with_rotation(RotationKind::Quaternion4D);
 
-    AeConfig::new(d_model, n_latent, 4, 4, mamba_block).with_patch(4)
+    AeConfig::new(d_model, n_latent, 2, 2, mamba_block).with_patch(4)
 }

@@ -8,8 +8,8 @@
 //! `z`** (a learned positional query FiLM-modulated by `z`). See [`model`] for
 //! the architecture and the design rationale.
 //!
-//! The latent width is chosen with `-- --latents N` (default 128). `Complex2D`
-//! rotation, BCE reconstruction loss.
+//! The latent width is chosen with `-- --latents N` (default 4). `Quaternion4D`
+//! rotation, heavy virtual layers, BCE reconstruction loss.
 //!
 //! ## Run
 //!
@@ -75,7 +75,7 @@ pub fn launch(app_args: &AppArgs) {
                 // further progress.
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
                     .with_max_lr(1e-3)
-                    .with_min_lr(1e-5)
+                    .with_min_lr(5e-5)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });
@@ -106,7 +106,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 }
 
-/// Parse `--latents N` from the forwarded `extra_args` (defaults to 128).
+/// Parse `--latents N` from the forwarded `extra_args` (defaults to 16).
 fn parse_latents(extra_args: &[OsString]) -> usize {
     extra_args
         .iter()
@@ -117,7 +117,7 @@ fn parse_latents(extra_args: &[OsString]) -> usize {
                 .parse::<usize>()
                 .expect("--latents must be a positive integer")
         })
-        .unwrap_or(128)
+        .unwrap_or(16)
 }
 
 fn main() {
