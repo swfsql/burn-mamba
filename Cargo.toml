@@ -67,6 +67,7 @@ flate2 = "1.1.4"
 dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
+image = "0.25.10"
 
 ### For the main branch. ###
 # burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}

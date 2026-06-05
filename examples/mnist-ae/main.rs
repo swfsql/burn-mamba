@@ -8,7 +8,7 @@
 //! `z`** (a learned positional query FiLM-modulated by `z`). See [`model`] for
 //! the architecture and the design rationale.
 //!
-//! The latent width is chosen with `-- --latents N` (default 64). `Complex2D`
+//! The latent width is chosen with `-- --latents N` (default 128). `Complex2D`
 //! rotation, BCE reconstruction loss.
 //!
 //! ## Run
@@ -60,16 +60,20 @@ pub fn launch(app_args: &AppArgs) {
 
     // setup training and model configs
     let batch_size = 16;
+    let num_epochs = 3;
     let training_items = 60_000;
     let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         TrainingConfig::new(common::training::optimizer_config(dtype))
-            .with_num_epochs(5)
+            .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
-                CosineAnnealingLr::new(1 * iterations_per_epoch) // 1 epoch
+                // Span the cosine decay over the whole run — a 1-epoch period
+                // collapsed the LR to its 1e-5 floor after one epoch and stalled
+                // further progress.
+                CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
                     .with_max_lr(1e-3)
                     .with_min_lr(1e-5)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
@@ -102,7 +106,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 }
 
-/// Parse `--latents N` from the forwarded `extra_args` (defaults to 64).
+/// Parse `--latents N` from the forwarded `extra_args` (defaults to 128).
 fn parse_latents(extra_args: &[OsString]) -> usize {
     extra_args
         .iter()
@@ -113,7 +117,7 @@ fn parse_latents(extra_args: &[OsString]) -> usize {
                 .parse::<usize>()
                 .expect("--latents must be a positive integer")
         })
-        .unwrap_or(64)
+        .unwrap_or(128)
 }
 
 fn main() {

@@ -751,6 +751,7 @@ dependencies = [
  "burn-fusion",
  "dirs",
  "flate2",
+ "image",
  "num-traits",
  "pico-args",
  "rand 0.9.4",

@@ -13,6 +13,7 @@ use crate::model::{AeConfig, AeModel};
 use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
+    data::{dataloader::batcher::Batcher, dataset::Dataset},
     module::AutodiffModule,
     optim::{AdamW, Optimizer, adaptor::OptimizerAdaptor},
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
@@ -90,6 +91,7 @@ pub fn train(
             None,
             Some(10),
             app_args,
+            training_device.clone().inner(),
         );
 
         // save assets
@@ -111,6 +113,19 @@ pub fn train(
 
 type Dataloader = std::sync::Arc<dyn DataLoader<MnistBatch> + 'static>;
 
+/// Number of fixed test images sampled for the periodic reconstruction PNGs.
+const NUM_SAMPLES: usize = 8;
+
+/// Grab the first `n` test images (normalized to `[0, 1]`) plus their labels on
+/// `device` — a fixed set so the saved reconstructions are comparable over time.
+fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
+    let dataset = MnistDataset::test();
+    let items: Vec<_> = (0..n).filter_map(|i| dataset.get(i)).collect();
+    let labels: Vec<u8> = items.iter().map(|it| it.label).collect();
+    let images = MnistBatcher::default().batch(items, device).images_norm();
+    (images, labels)
+}
+
 /// Train for a single epoch, stepping the optimizer per batch and periodically
 /// validating + checkpointing; returns the updated model.
 #[allow(clippy::too_many_arguments)]
@@ -126,10 +141,15 @@ pub fn epoch_train(
     training_loop_limit: Option<usize>,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
+    valid_device: Device,
 ) -> AeModel {
     let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
+
+    // A fixed set of test images (on the validation backend) reconstructed at
+    // every small val check, to watch reconstruction quality improve.
+    let (sample_imgs, sample_labels) = sample_images(NUM_SAMPLES, &valid_device);
 
     let mut training_model = Wrap(training_model, model_config.clone());
 
@@ -169,14 +189,27 @@ pub fn epoch_train(
             app_args.save_optim(optim);
 
             println!("running validation (batch iteration limit: {valid_loop_limit:?})");
+            let valid_model = training_model.0.valid();
             epoch_valid(
                 std::sync::Arc::clone(&dataloader_valid),
-                training_model.0.valid(),
+                valid_model.clone(),
                 training_config,
                 model_config,
                 epoch,
                 valid_loop_limit,
             );
+
+            // Save original-vs-reconstruction PNGs into a fresh per-step dir.
+            let sample_dir = app_args
+                .artifacts_path
+                .join(format!("epoch-{epoch}-batch-{b}"));
+            crate::inference::save_reconstructions(
+                &valid_model,
+                sample_imgs.clone(),
+                &sample_labels,
+                &sample_dir,
+            );
+            println!("saved reconstruction samples to {sample_dir:?}");
         }
     }
 

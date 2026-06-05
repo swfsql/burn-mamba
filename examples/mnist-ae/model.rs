@@ -278,14 +278,24 @@ impl ModelConfigExt for AeConfig {
     }
 }
 
-/// The example model config: a small ViT/MAE-style patch AE sized to reach a
-/// usable reconstruction in well under one epoch while staying within ~5GB VRAM.
+/// The example model config: a ViT/MAE-style patch AE tuned for **fast**
+/// batch-convergence to a low reconstruction loss within the ~5GB VRAM budget.
 ///
-/// `patch = 7` ⇒ a length-16 patch sequence; `d_model = 128`, `expand = 2`
-/// (`d_inner = 256`), `per_head_dim = 32` (`nheads = 8`), `state_rank = 128`,
-/// four real bidi layers per half, full RoPE, `Complex2D` rotation, FiLM decoder
-/// conditioning. `n_latent` is the caller-chosen bottleneck width (`-- --latents
-/// N`, default 64).
+/// Width is kept narrow (`d_model = 128`) because batch-convergence speed tracks
+/// parameter count — a wider `d_model = 256` quadrupled params and was ~4× slower
+/// to the same loss. Fidelity instead comes from the **fine patches** (`patch = 4`
+/// ⇒ a length-49 sequence of 16-pixel tokens; a 16px patch is far sharper to
+/// reconstruct than 49px), which cost wall-clock (more tokens) but not
+/// batch-convergence. The plateau at ~0.078 was the old 1-epoch LR schedule
+/// collapsing to its 1e-5 floor; the schedule now spans the whole run.
+///
+/// `expand = 2` (`d_inner = 256`), `per_head_dim = 32` (`nheads = 8`),
+/// `state_rank = 128`, four real bidi layers per half, full RoPE, `Complex2D`
+/// rotation, FiLM decoder conditioning. `n_latent` is the caller-chosen
+/// bottleneck width (`-- --latents N`, default 128).
+///
+/// Next dials if it plateaus above target (with VRAM headroom): wider latent
+/// (`--latents 256`), more layers (`6, 6`), or more epochs.
 pub fn model_config(n_latent: usize) -> AeConfig {
     let d_model = 128;
     let mamba_block = Mamba3Config::new(d_model)
@@ -302,5 +312,5 @@ pub fn model_config(n_latent: usize) -> AeConfig {
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Complex2D);
 
-    AeConfig::new(d_model, n_latent, 4, 4, mamba_block)
+    AeConfig::new(d_model, n_latent, 4, 4, mamba_block).with_patch(4)
 }
