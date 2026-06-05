@@ -250,11 +250,7 @@ impl InferenceStep for Wrap {
     type Output = RegressionOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
-        let input = batch.images_norm(); // pixels in [0, 1] (Bernoulli targets)
-        let [batch_size, HEIGHT, WIDTH, 1] = input.dims() else {
-            panic!()
-        };
-        let input = input.reshape([batch_size, HEIGHT * WIDTH, 1]);
+        let input = batch.images_norm(); // [b, H, W, 1], pixels in [0, 1] (Bernoulli targets)
         self.forward_reconstruction(input)
     }
 }
@@ -262,18 +258,13 @@ impl InferenceStep for Wrap {
 impl Wrap {
     /// Forward the autoencoder and compute the binary cross-entropy
     /// reconstruction loss (from raw logits) against the normalized image.
-    pub fn forward_reconstruction(&self, input: Tensor<3>) -> RegressionOutput {
+    pub fn forward_reconstruction(&self, input_bhw1: Tensor<4>) -> RegressionOutput {
         let model = &self.0;
-        let [batch_size, sequence_size, input_size] = input.dims();
-        assert_eq!(sequence_size, HEIGHT * WIDTH);
-        assert_eq!(input_size, 1);
+        let [batch_size, height, width, _c] = input_bhw1.dims();
+        assert_eq!([height, width], [HEIGHT, WIDTH]);
 
-        let logits = model.forward(input.clone()); // [batch, seq, 1]
-        assert_eq!([batch_size, sequence_size, 1], logits.dims());
-
-        // Flatten the (single-channel) pixels for the loss / metric.
-        let logits_flat = logits.reshape([batch_size, sequence_size]);
-        let targets_flat = input.reshape([batch_size, sequence_size]);
+        let logits_flat = model.forward(input_bhw1.clone()); // [batch, H*W]
+        let targets_flat = input_bhw1.reshape([batch_size, HEIGHT * WIDTH]);
 
         let loss = BinaryCrossEntropyLossConfig::new()
             .with_logits(true)

@@ -32,10 +32,9 @@ pub fn infer(model_config: AeConfig, infer_device: Device, app_args: &AppArgs) {
 
     let input = batch.images_norm(); // [n, H, W, 1] in [0, 1]
     let [n, _h, _w, _c] = input.dims();
-    let input = input.reshape([n, HEIGHT * WIDTH, 1]);
 
-    let logits = model.forward(input.clone()); // [n, 784, 1]
-    let recon = burn::tensor::activation::sigmoid(logits).reshape([n, HEIGHT * WIDTH]);
+    let logits = model.forward(input.clone()); // [n, H*W]
+    let recon = burn::tensor::activation::sigmoid(logits); // [n, H*W]
     let original = input.reshape([n, HEIGHT * WIDTH]);
 
     let recon = to_host(recon);

@@ -1,14 +1,15 @@
 //! # MNIST autoencoder example
 //!
-//! A symmetric, fully **bidirectional** Mamba-3 autoencoder over MNIST read as a
-//! length-784 pixel sequence. The encoder compresses the image to a small latent
-//! `z` (the configurable bottleneck); the decoder reconstructs the whole image
-//! in one parallel pass **reading only from `z`** (a learned positional query
-//! plus the broadcast latent at every position — MAE-style). See [`model`] for
+//! A symmetric, fully **bidirectional** ViT/MAE-style **patch** autoencoder over
+//! MNIST (attention blocks replaced by Mamba-3). The 28×28 image is cut into
+//! `patch×patch` tiles (default 7×7 ⇒ a length-16 sequence); the encoder
+//! compresses it to a small latent `z` (the configurable bottleneck); the
+//! decoder reconstructs every patch in one parallel pass **reading only from
+//! `z`** (a learned positional query FiLM-modulated by `z`). See [`model`] for
 //! the architecture and the design rationale.
 //!
-//! The latent width is chosen with `-- --latents N` (default 32). Pure real
-//! layers, `Complex2D` rotation, BCE reconstruction loss.
+//! The latent width is chosen with `-- --latents N` (default 64). `Complex2D`
+//! rotation, BCE reconstruction loss.
 //!
 //! ## Run
 //!
@@ -16,8 +17,8 @@
 //! # quick type-check on flex (fp32)
 //! cargo check --example mnist-ae --features "backend-flex"
 //!
-//! # train + reconstruct on CUDA (long-running); 16-latent bottleneck
-//! cargo run --release --example mnist-ae --features "backend-cuda" -- --training --inference -- --latents 16
+//! # train + reconstruct on CUDA (long-running); 64-latent bottleneck
+//! cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference
 //! ```
 
 #![allow(clippy::let_and_return)]
@@ -101,7 +102,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 }
 
-/// Parse `--latents N` from the forwarded `extra_args` (defaults to 32).
+/// Parse `--latents N` from the forwarded `extra_args` (defaults to 64).
 fn parse_latents(extra_args: &[OsString]) -> usize {
     extra_args
         .iter()
@@ -112,7 +113,7 @@ fn parse_latents(extra_args: &[OsString]) -> usize {
                 .parse::<usize>()
                 .expect("--latents must be a positive integer")
         })
-        .unwrap_or(32)
+        .unwrap_or(64)
 }
 
 fn main() {
