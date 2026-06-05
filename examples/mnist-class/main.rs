@@ -2,7 +2,8 @@
 //!
 //! Classifies MNIST digits by reading each image as a length-784 sequence of
 //! single-pixel tokens with a Mamba-3 model (a classification head on the last
-//! timestep), trained with cosine-annealing LR. Inference is currently a stub.
+//! timestep), trained with cosine-annealing LR. Inference samples a few test
+//! digits and shows each digit beside its 10-bin class-probability chart.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -13,6 +14,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// Inference: classify a few test digits and show their class distributions.
+pub mod inference;
 /// The example's `model_config()`.
 pub mod model;
 /// Training entry point for the classifier.
@@ -64,12 +67,16 @@ pub fn launch(app_args: &AppArgs) {
     app_args.save_model_config(&model_config);
 
     if app_args.training {
-        training::train(training_config, model_config, autodiff_device, app_args);
+        training::train(
+            training_config,
+            model_config.clone(),
+            autodiff_device,
+            app_args,
+        );
     }
 
     if app_args.inference {
-        let _ = device;
-        println!("inference is not yet implemented");
+        inference::infer(model_config, device, app_args);
     }
 
     if !app_args.inference && !app_args.training {

@@ -2,6 +2,8 @@
 
 The dataset is mostly based on [burn-dataset/vision/mnist](https://github.com/tracel-ai/burn/blob/fa4f9845a6b2279cd8de68bf7ca5a7eb76dec96d/crates/burn-dataset/src/vision/mnist.rs) and [book/data](https://burn.dev/books/burn/basic-workflow/data.html#data). It is mnist as flat (sequential) pixels, with sequence length of 28 * 28 = 784. The model reads the pixel sequence and predicts the classification label at the last input.
 
+Inference samples a few test digits and, for each, prints the digit as ASCII art beside a text bar chart of the 10 class probabilities, and writes a PNG (the digit next to its probability bars; the true label and prediction are in the file name). Training also dumps these prediction PNGs into `<artifacts>/epoch-{e}-batch-{b}/` at every small validation check.
+
 ## Usage
 
 The dataset is first downloaded and stored in `${CACHEDIR}/burn-dataset/mnist/train/`. The files are the following:
