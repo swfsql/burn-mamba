@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Residuals","ResidualsConfig","ResidualsConfigSerde","ResidualsRecord","ResidualsRecordItem"],"struct":["MultiGate","MultiGateRecord","MultiGateRecordItem","MultiGateResidual","MultiGateResidualConfig","MultiGateResidualRecord","MultiGateResidualRecordItem"]};

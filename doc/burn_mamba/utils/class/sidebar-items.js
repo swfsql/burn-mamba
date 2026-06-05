@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ClassLatent","ClassLatentSerde","ClassToken","ClassTokenSerde"],"fn":["assert_step_compatible","class_marker_output_indices","class_step_injections","init_class_emb","insert_class_markers"],"macro":[["impl_class_marker",1]],"trait":["ClassMarker"]};

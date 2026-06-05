@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["div_eps"],"mod":["backend_macros","combined_grad","fprim","gqa","log_sigmoid","loss","rms_norm","rms_norm_gated","sanity","scheduler","segsum","silu","softplus","split"]};
+window.SIDEBAR_ITEMS = {"fn":["div_eps"],"mod":["backend_macros","class","combined_grad","fprim","schedule","scheduler"]};

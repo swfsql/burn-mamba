@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["log_sigmoid","silu","softplus"]};
