@@ -43,7 +43,7 @@ cargo run --example fibonacci -- --training --inference
 
 ## File Map
 
-`refs/` is external reference material (see [Extra References](#extra-references)).
+`../` contain external reference material (see [Extra References](#extra-references)).
 Every leaf module has a sibling `tests.rs` (forward/step parity, gradients,
 cross-variant agreement) — not listed individually.
 
@@ -277,10 +277,10 @@ comment; in commentary a shape may be underscore-style (`_bhl`) or expanded to
 
 ## Extra References
 
-Under `refs/` (not analyzed here): **Mamba-3 paper** TeX (`refs/mamba-3-paper/`);
+Under `../` (not analyzed here): **Mamba-3 paper** TeX (`../papers/mamba-3/`);
 **official Python impl** (authoritative; Triton SISO / Tilelang MIMO kernels are the
-single-ssd reference) (`refs/state-spaces/mamba/`); **Mamba-3 minimal** (basis of
-double-ssd) (`refs/VikramLex/mamba3-minimal/`); **Burn** (`refs/burn/`).
+single-ssd reference) (`../py/state-spaces/mamba/`); **Mamba-3 minimal** (basis of
+double-ssd) (`../py/VikramLex/mamba3-minimal/`); **Burn** (`../burn/`).
 
 ## Custom Commands
 

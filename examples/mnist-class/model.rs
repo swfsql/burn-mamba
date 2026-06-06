@@ -16,8 +16,8 @@ pub fn model_config() -> MambaLatentNetConfig {
     .with_state_rank(64)
     .with_expand(4)
     // d_inner = expand·d_model = 4·32 = 128
-    // nheads = 4
-    // per_head_dim = d_inner/nheads = 32
+    // per_head_dim = 32
+    // nheads = d_inner/per_head_dim = 128/32 = 4
     .with_per_head_dim(32)
     .with_ngroups(1)
     .with_mimo_rank(1)
