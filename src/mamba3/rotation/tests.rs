@@ -1052,3 +1052,353 @@ fn factored_matches_explicit_grads() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// TEMP DIAGNOSTIC: hunting the Quaternion4D forward NaN.
+//
+// In-flight training (midi-gen) hits a forward NaN where `g = (tanh(rot)·π)·dt`
+// reports max≈3.8e34 despite `rot≈2.2`, `dt≈0.29` — which the bound makes
+// impossible (|g| ≤ π·0.29 ≈ 0.9). These tests reproduce the exact arithmetic
+// in isolation to decide between (a) a source bug, (b) a stale binary, or
+// (c) UB in burn's tensor ops. Remove once resolved.
+// ---------------------------------------------------------------------------
+
+/// Tightest possible check: the literal `g` expression from
+/// [`rotate_bc_forward`]'s Quaternion4D branch must stay within `π·max(dt)`,
+/// even for absurd raw `rot` activations. If this fails, the bug is in the
+/// source/primitive; if it passes, the failing run used a different binary.
+#[test]
+fn g_generator_is_bounded() {
+    let device: Device = Default::default();
+    let (batch, sequence, blocks, nheads) = (1, 8, 64, 12);
+
+    for &rot_amp in &[1.0f32, 10.0, 50.0, 1e4, 1e30] {
+        let rot_bsa = Tensor::<3>::random(
+            [batch, sequence, blocks * 3],
+            Distribution::Uniform(-rot_amp as f64, rot_amp as f64),
+            &device,
+        );
+        let dt_bsh = Tensor::<3>::random(
+            [batch, sequence, nheads],
+            Distribution::Uniform(0.0, 0.3),
+            &device,
+        );
+
+        // Exact copy of the forward expression.
+        let g_bshj3 = (rot_bsa.tanh() * core::f32::consts::PI)
+            .reshape([batch, sequence, blocks, 3])
+            .unsqueeze_dim::<5>(2)
+            * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+
+        let gmax = g_bshj3.clone().abs().max().into_scalar::<f32>();
+        let nan = g_bshj3.is_nan().any().into_scalar::<bool>();
+        let bound = core::f32::consts::PI * 0.3 + 1e-3;
+        eprintln!("[g-bound] rot_amp={rot_amp:.0e} gmax={gmax:.3e} nan={nan} (bound {bound:.3e})");
+        assert!(!nan, "g is NaN at rot_amp={rot_amp}");
+        assert!(gmax <= bound, "g={gmax:.3e} exceeds π·dt bound at rot_amp={rot_amp}");
+    }
+}
+
+/// Confirms the failure *mechanism*: a finite-but-huge `g` overflows
+/// `quat_from_scaled_axis` (`‖g‖² → inf`, `cos(inf) → NaN`). This is what we'd
+/// see if the bound were somehow absent — used to validate the diagnosis.
+#[test]
+fn huge_g_overflows_quat_from_scaled_axis() {
+    let device: Device = Default::default();
+    // ‖g‖ ≈ 3.8e34 → ‖g‖² ≈ 1.4e69 > f32::MAX → inf → cos(inf)=NaN.
+    let g = Tensor::<2>::full([4, 3], 3.8e34, &device);
+    let q = quat_from_scaled_axis::<2>(g);
+    let nan = q.is_nan().any().into_scalar::<bool>();
+    eprintln!("[huge-g] q_nan={nan}");
+    assert!(nan, "expected NaN from cos(inf); if false, quat_from_scaled_axis is robust to huge g");
+}
+
+/// End-to-end: drive the real [`rotate_bc_forward`] with absurd `rot` and verify
+/// the rotated B/C come out finite (the bound must protect the full path).
+#[test]
+fn rotate_bc_forward_survives_huge_rot() {
+    let device: Device = Default::default();
+    let (batch, sequence, mimo_rank, nheads, blocks) = (1, 8, 1, 12, 64);
+    let state_rank = blocks * 4;
+
+    let rot_bsa = Tensor::<3>::random(
+        [batch, sequence, blocks * 3],
+        Distribution::Uniform(-1e30, 1e30),
+        &device,
+    );
+    let dt_bsh =
+        Tensor::<3>::random([batch, sequence, nheads], Distribution::Uniform(0.0, 0.3), &device);
+    let b = Tensor::<5>::random(
+        [batch, sequence, mimo_rank, nheads, state_rank],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let c = b.clone();
+
+    // Fresh identity carry.
+    let init_q = {
+        let w = Tensor::<4>::ones([batch, nheads, blocks, 1], &device);
+        let xyz = Tensor::<4>::zeros([batch, nheads, blocks, 3], &device);
+        Tensor::cat(vec![w, xyz], 3)
+    };
+    let (b_out, c_out, _) = rotate_bc_forward(
+        rot_bsa,
+        dt_bsh,
+        RotationState::Quaternion(init_q),
+        b,
+        c,
+        RotationKind::Quaternion4D,
+        state_rank,
+    );
+    let b_nan = b_out.is_nan().any().into_scalar::<bool>();
+    let c_nan = c_out.is_nan().any().into_scalar::<bool>();
+    eprintln!("[rotate-bc] b_nan={b_nan} c_nan={c_nan}");
+    assert!(!b_nan && !c_nan, "rotate_bc_forward produced NaN under huge rot");
+}
+
+/// Faithful repro of the real call site: `rot_bsa` is the **last slice of a
+/// `split_into`** over a wide projection (a non-contiguous view), not a fresh
+/// contiguous tensor. Mirrors midi-gen's AE config
+/// (d_inner=384, bc=1024, nheads=12, num_rotation_channels=192 → proj width 3044).
+/// If `split_with_sizes` mis-views the buffer, `tanh` reads garbage and `g`
+/// blows past the bound here.
+#[test]
+fn g_bounded_from_split_view() {
+    use crate::modules::split_into;
+    let device: Device = Default::default();
+    let (batch, sequence, blocks, nheads) = (1, 8, 64, 12);
+    let (d_inner, bc) = (384usize, 1024usize);
+    let num_rot = blocks * 3; // 192
+    let widths = [d_inner, d_inner, bc, bc, nheads, nheads, nheads, num_rot];
+    let total: usize = widths.iter().sum(); // 3044
+
+    // Wide projection with realistic-ish spread (some large activations).
+    let proj = Tensor::<3>::random(
+        [batch, sequence, total],
+        Distribution::Normal(0.0, 5.0),
+        &device,
+    );
+    let [_z, _x, _b, _c, dd_dt, _a, _lam, rot_bsa] = split_into(proj, widths, 2);
+
+    // dt path roughly as in single_ssd: softplus then clamp to [0, 1].
+    let dt_bsh = burn::tensor::activation::softplus(dd_dt, 1.0).clamp(0.0, 0.3);
+
+    let g_bshj3 = (rot_bsa.tanh() * core::f32::consts::PI)
+        .reshape([batch, sequence, blocks, 3])
+        .unsqueeze_dim::<5>(2)
+        * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+
+    let gmax = g_bshj3.clone().abs().max().into_scalar::<f32>();
+    let nan = g_bshj3.is_nan().any().into_scalar::<bool>();
+    eprintln!("[g-split] gmax={gmax:.3e} nan={nan} (bound 9.435e-1)");
+    assert!(!nan, "g NaN from split-view path");
+    assert!(gmax <= core::f32::consts::PI * 0.3 + 1e-3, "g={gmax:.3e} exceeds bound via split view");
+}
+
+/// Stress repro for the **non-deterministic** Quaternion4D `g` overflow (took 4
+/// training trials to surface). Runs the real split-view `g` computation many
+/// times; on a CPU backend this is deterministically bounded, so any breach here
+/// (esp. on CUDA) indicates a kernel-level race/UB rather than a math bug. Prints
+/// the worst `gmax` observed. Ignored by default (slow); run explicitly.
+#[test]
+// #[ignore]
+fn g_split_view_stress() {
+    use crate::modules::split_into;
+    let device: Device = Default::default();
+    let (batch, sequence, blocks, nheads) = (1, 16, 64, 12);
+    let (d_inner, bc) = (384usize, 1024usize);
+    let num_rot = blocks * 3;
+    let widths = [d_inner, d_inner, bc, bc, nheads, nheads, nheads, num_rot];
+    let total: usize = widths.iter().sum();
+    let bound = core::f32::consts::PI * 0.3 + 1e-2;
+
+    let iters = std::env::var("STRESS_ITERS").ok().and_then(|s| s.parse().ok()).unwrap_or(2000usize);
+    let mut worst = 0.0f32;
+    for i in 0..iters {
+        let proj = Tensor::<3>::random(
+            [batch, sequence, total],
+            Distribution::Normal(0.0, 5.0),
+            &device,
+        );
+        let [_z, _x, _b, _c, dd_dt, _a, _lam, rot_bsa] = split_into(proj, widths, 2);
+        let dt_bsh = burn::tensor::activation::softplus(dd_dt, 1.0).clamp(0.0, 0.3);
+        let g = (rot_bsa.tanh() * core::f32::consts::PI)
+            .reshape([batch, sequence, blocks, 3])
+            .unsqueeze_dim::<5>(2)
+            * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+        let gmax = g.clone().abs().max().into_scalar::<f32>();
+        let nan = g.is_nan().any().into_scalar::<bool>();
+        if gmax > worst { worst = gmax; }
+        if nan || gmax > bound {
+            panic!("[g-stress] BREACH at iter {i}: gmax={gmax:.3e} nan={nan} (bound {bound:.3e})");
+        }
+    }
+    eprintln!("[g-stress] {iters} iters OK, worst gmax={worst:.3e} (bound {bound:.3e})");
+}
+
+/// Full-block stress repro for the **non-deterministic, CUDA-only** Quaternion4D
+/// NaN. The isolated `g` repro ([`g_split_view_stress`]) is clean even on CUDA,
+/// so the corruption needs the full forward context: the AE-config Mamba3 block
+/// (matching midi-gen: d_model=384, state_rank=256, mimo_rank=4, ngroups=1,
+/// per_head_dim=32, Quaternion4D, dt_limit=(0,1)), the `SerialRecalculated` SSD
+/// path, and — critically — a **backward through the custom recompute scan**
+/// (`quat_cumprod_recalculated`), the one kernel path the forward-only repro
+/// never exercises.
+///
+/// Runs many forward+backward iterations and panics on the first non-finite
+/// output. Deterministically clean on CPU; a breach (esp. on CUDA) is the repro.
+/// Run explicitly (slow):
+///   `cargo test --features backend-cuda --lib quaternion_ae_forward_stress -- --nocapture --test-threads=1`
+/// `STRESS_ITERS` env overrides the iteration count (default 1000).
+#[test]
+#[ignore]
+fn quaternion_ae_forward_stress() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let model = Mamba3Config::new(384)
+        .with_state_rank(256)
+        .with_expand(1)
+        .with_per_head_dim(32)
+        .with_ngroups(1)
+        .with_mimo_rank(4)
+        .with_rope_fraction(1.0)
+        .with_has_proj_bias(true)
+        .with_has_outproj_norm(true)
+        .with_rotation(RotationKind::Quaternion4D)
+        .with_dt_limit((0.0, 1.0))
+        .init(&device.clone().autodiff());
+
+    let (batch, seq) = (16, 4); // midi-gen: 16 channels, short patches.
+    let iters = std::env::var("STRESS_ITERS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1000usize);
+
+    for i in 0..iters {
+        // Fresh autodiff leaf each step (params on the autodiff device are
+        // grad-tracked, so the graph + recompute backward run regardless).
+        let input = Tensor::from_inner(Tensor::<3>::random(
+            [batch, seq, 384],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        ));
+        let (out, _cache) =
+            model.forward(input, None, Mamba3SsdPath::SerialRecalculated(None));
+
+        let nan = out.clone().is_nan().any().into_scalar::<bool>();
+        if nan {
+            let mx = out.clone().abs().max().into_scalar::<f32>();
+            panic!("[ae-stress] non-finite forward output at iter {i} (max={mx:.3e})");
+        }
+
+        // Exercise the recompute backward of the quaternion scan.
+        let loss = (out.clone() * out).sum();
+        let _grads = loss.backward();
+
+        eprintln!("[ae-stress] iter {i} ok");
+    }
+    eprintln!("[ae-stress] {iters} iters OK (no NaN)");
+}
+
+/// **Most faithful** synthetic repro of midi-gen's Quaternion4D NaN. Adds the two
+/// ingredients the single-block stress lacked and that match the failure's
+/// signature (NaN at iter 2 = first patch consuming a non-trivial carried cache):
+///
+///   1. **Multi-layer `Layers<Mamba3>`** (default 14, like the AE's 6 enc + 8 dec)
+///      — depth + the VRAM/graph footprint that pushes toward the allocator cap.
+///   2. **Cross-patch detached cache carry** — the returned `Mamba3Caches` are
+///      `set_require_grad(false).detach()`'d and threaded into the next iteration,
+///      exactly as `midi-gen::utils::cache::unset_grad_and_detach` does.
+///
+/// Plus forward→backward each step (the recompute scan). Deterministically clean
+/// on CPU; a breach (esp. on CUDA, ideally with VRAM pushed near the cap via the
+/// env knobs below) is the repro we want for an upstream cubecl issue.
+///
+/// Run (push VRAM toward the 6 GB cap with the env knobs, then watch for a breach):
+///   `STRESS_ITERS=5000 STRESS_BATCH=16 STRESS_SEQ=64 STRESS_LAYERS=14 \
+///      cargo test --features backend-cuda --lib quaternion_ae_layers_cache_stress \
+///      -- --ignored --nocapture --test-threads=1`
+#[test]
+// #[ignore]
+fn quaternion_ae_layers_cache_stress() {
+    use crate::mamba3::cache::Mamba3Caches;
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::single_ssd::cache::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::modules::LayersBuilder;
+
+    let env = |k: &str, d: usize| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
+    let iters = env("STRESS_ITERS", 1000);
+    let batch = env("STRESS_BATCH", 16); // midi-gen: 16 channels × batch_size
+    let seq = env("STRESS_SEQ", 16);
+    let n_layer = env("STRESS_LAYERS", 14); // 6 encoder + 8 decoder
+
+    let device: Device = Default::default();
+    let d_model = 384;
+    let block = Mamba3Config::new(d_model)
+        .with_state_rank(256)
+        .with_expand(1)
+        .with_per_head_dim(32)
+        .with_ngroups(1)
+        .with_mimo_rank(4)
+        .with_rope_fraction(1.0)
+        .with_has_proj_bias(true)
+        .with_has_outproj_norm(true)
+        .with_rotation(RotationKind::Quaternion4D)
+        .with_dt_limit((0.0, 1.0));
+    let layers = LayersBuilder::<Mamba3Config>::new(n_layer, block).init(&device.clone().autodiff());
+
+    // Inline copy of midi-gen's `unset_grad_and_detach` (single-ssd path).
+    fn detach_caches(caches: Mamba3Caches) -> Mamba3Caches {
+        match caches {
+            Mamba3Caches::DoubleSsd(_) => unimplemented!("single-ssd path only"),
+            Mamba3Caches::SingleSsd(cs) => {
+                let detached = cs
+                    .caches
+                    .into_iter()
+                    .map(|c| Mamba3SingleSsdCache {
+                        ssm_bhpr: c.ssm_bhpr.set_require_grad(false).detach(),
+                        k_state_bmhr: c.k_state_bmhr.set_require_grad(false).detach(),
+                        v_state_bhp: c.v_state_bhp.set_require_grad(false).detach(),
+                        rotation: match c.rotation {
+                            RotationState::Angle(t) => {
+                                RotationState::Angle(t.set_require_grad(false).detach())
+                            }
+                            RotationState::Quaternion(t) => {
+                                RotationState::Quaternion(t.set_require_grad(false).detach())
+                            }
+                        },
+                    })
+                    .collect();
+                Mamba3Caches::SingleSsd(Mamba3SingleSsdCaches { caches: detached })
+            }
+        }
+    }
+
+    let mut caches: Option<Mamba3Caches> = None;
+    for i in 0..iters {
+        let x = Tensor::from_inner(Tensor::<3>::random(
+            [batch, seq, d_model],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        ));
+        let (out, new_caches) =
+            layers.forward(x, caches.take(), Mamba3SsdPath::SerialRecalculated(None));
+
+        let nan = out.clone().is_nan().any().into_scalar::<bool>();
+        if nan {
+            let mx = out.clone().abs().max().into_scalar::<f32>();
+            panic!("[ae-layers-stress] non-finite output at iter {i} (max={mx:.3e})");
+        }
+
+        let loss = (out.clone() * out).sum();
+        let _grads = loss.backward();
+
+        // Cross-patch carry: detach and thread forward (like midi-gen patches).
+        caches = Some(detach_caches(new_caches));
+
+        eprintln!("[ae-layers-stress] iter {i} ok");
+    }
+    eprintln!("[ae-layers-stress] {iters} iters OK (no NaN)");
+}

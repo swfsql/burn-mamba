@@ -28,6 +28,25 @@ use crate::modules::Silu;
 use crate::modules::sanity as san;
 use burn::prelude::*;
 
+// TEMP DIAGNOSTIC: log the max-abs of a tensor, to hunt the cross-patch
+// magnitude explosion behind the encoder NaN. Remove once fixed.
+// Gated behind `BURN_PROBE` (set to anything) so the per-call `into_scalar`
+// device sync only happens when explicitly hunting — keeps stress loops fast.
+#[allow(dead_code)]
+fn probes_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("BURN_PROBE").is_ok())
+}
+#[allow(dead_code)]
+fn dbg_max<const D: usize>(label: &str, t: &Tensor<D>) {
+    if !probes_on() {
+        return;
+    }
+    let m = t.clone().abs().max().into_scalar::<f32>();
+    eprintln!("[ssd-mag] {label}: {m:.3e}");
+}
+
 impl Mamba3 {
     /// Process a full input sequence using the **single-ssd form (single-pass)**
     /// trapezoidal algorithm.
@@ -60,6 +79,7 @@ impl Mamba3 {
         assert!(sequence > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
+        dbg_max("input", &input_bsm); // TEMP DIAGNOSTIC
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -84,6 +104,7 @@ impl Mamba3 {
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         let proj_bsd = self.in_proj.forward(input_bsm);
+        dbg_max("proj", &proj_bsd); // TEMP DIAGNOSTIC
         let bc_size = ngroups * state_rank * mimo_rank;
 
         #[rustfmt::skip]
@@ -106,6 +127,13 @@ impl Mamba3 {
         san(&z_bsi);
         san(&x_bsi);
         san(&dd_dt_bsh);
+        // TEMP DIAGNOSTIC: projection slices + carried SSM state magnitudes.
+        dbg_max("x", &x_bsi);
+        dbg_max("b_raw", &b_raw_bsMGR);
+        dbg_max("rot_raw", &rot_bsa);
+        dbg_max("cache.ssm", &cache.ssm_bhpr);
+        dbg_max("cache.k", &cache.k_state_bmhr);
+        dbg_max("cache.v", &cache.v_state_bhp);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
         let helpers::TrapezoidCoeffs {
@@ -167,6 +195,12 @@ impl Mamba3 {
             3,
             nheads,
         );
+
+        // TEMP DIAGNOSTIC: pre-rotation B/C (qk_norm output). If these fire, the
+        // NaN is in qk_norm / b_raw (i.e. magnitude), not the rotation.
+        san(&b_bsmhr);
+        san(&c_bsmhr);
+        dbg_max("b_norm", &b_bsmhr);
 
         // ── Step 5: Data-dependent positional rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
@@ -276,6 +310,8 @@ impl Mamba3 {
 
         san(&y_bnlmhp);
         san(&final_state_bhpr);
+        dbg_max("y", &y_bnlmhp); // TEMP DIAGNOSTIC
+        dbg_max("final_state", &final_state_bhpr); // TEMP DIAGNOSTIC
         cache.ssm_bhpr = final_state_bhpr;
 
         // ── Step 8: Unpad ─────────────────────────────────────────────────────

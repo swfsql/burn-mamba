@@ -535,7 +535,23 @@ pub fn rotate_bc_forward(
             (b, c, RotationState::Angle(last))
         }
         RotationKind::Quaternion4D => {
+            // TEMP DIAGNOSTIC: localize the Quaternion4D forward NaN. Gated behind
+            // `BURN_PROBE` so the per-call device sync is skipped in stress loops.
+            #[allow(dead_code)]
+            fn dbg_q<const D: usize>(label: &str, t: &Tensor<D>) {
+                use std::sync::OnceLock;
+                static ON: OnceLock<bool> = OnceLock::new();
+                if !*ON.get_or_init(|| std::env::var("BURN_PROBE").is_ok()) {
+                    return;
+                }
+                let m = t.clone().abs().max().into_scalar::<f32>();
+                let nan = t.clone().is_nan().any().into_scalar::<bool>();
+                eprintln!("[rot-q] {label}: max={m:.3e} nan={nan}");
+            }
             let prev_q_bhj4 = prev.quaternion();
+            dbg_q("prev_q", &prev_q_bhj4);
+            dbg_q("rot_in", &rot_bsa);
+            dbg_q("dt_in", &dt_bsh);
             let blocks = prev_q_bhj4.dims()[2];
             let rope_width = blocks * 4;
             // Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
@@ -551,7 +567,9 @@ pub fn rotate_bc_forward(
                 .reshape([batch, sequence, blocks, 3])
                 .unsqueeze_dim::<5>(2)
                 * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+            dbg_q("g", &g_bshj3); // TEMP DIAGNOSTIC
             let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
+            dbg_q("q_step", &q_step_bshj4); // TEMP DIAGNOSTIC
             // Memory-efficient scan: a custom recompute backward (saves only the
             // leaf inputs) instead of retaining the scan's intermediates. Equal
             // to [`quat_cumprod`] on values and gradients (asserted in tests).
@@ -559,6 +577,8 @@ pub fn rotate_bc_forward(
                 q_step_bshj4,
                 Some(prev_q_bhj4),
             );
+            dbg_q("cum", &cum_bshj4); // TEMP DIAGNOSTIC
+            dbg_q("final", &final_bhj4); // TEMP DIAGNOSTIC
             // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
             // broadcast over the mimo_rank axis.
             let conj_bsmhj4 = quat_conj(cum_bshj4)
