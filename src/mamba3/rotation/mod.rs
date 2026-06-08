@@ -539,7 +539,15 @@ pub fn rotate_bc_forward(
             let blocks = prev_q_bhj4.dims()[2];
             let rope_width = blocks * 4;
             // Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
-            let g_bshj3 = rot_bsa
+            //
+            // Bound the raw generator with `tanh·π` before scaling by Δ — the
+            // direct analogue of the Complex2D path (`rot.tanh()·π`). Without it
+            // the generator is unbounded, so a large in-projection activation makes
+            // `g = rot·Δ` overflow f32 to `inf`, and `quat_from_scaled_axis`'s
+            // `cos(∞)` then yields a forward NaN. The bound caps each per-step
+            // rotation to `±π·Δ` (cos/sin still give the periodicity within range);
+            // healthy `O(1)` generators stay in tanh's near-linear region.
+            let g_bshj3 = (rot_bsa.tanh() * core::f32::consts::PI)
                 .reshape([batch, sequence, blocks, 3])
                 .unsqueeze_dim::<5>(2)
                 * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
@@ -606,7 +614,10 @@ pub fn rotate_bc_step(
             let prev_q_bhj4 = prev.quaternion();
             let blocks = prev_q_bhj4.dims()[2];
             let rope_width = blocks * 4;
-            let g_bhj3 = rot_ba.reshape([batch, blocks, 3]).unsqueeze_dim::<4>(1)
+            // `tanh·π` bound, matching `rotate_bc_forward` (see the note there).
+            let g_bhj3 = (rot_ba.tanh() * core::f32::consts::PI)
+                .reshape([batch, blocks, 3])
+                .unsqueeze_dim::<4>(1)
                 * dt_bh.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3);
             let q_step_bhj4 = quat_from_scaled_axis::<4>(g_bhj3);
             // Single step: Qₜ = qₜ ⊗ Qₜ₋₁.

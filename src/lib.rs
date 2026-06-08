@@ -82,9 +82,9 @@ pub mod utils;
 ///
 /// Compiled-in guard (off by default) for debugging numerical issues; leaving
 /// it `false` removes the check entirely.
-pub const DENY_NAN: bool = false;
+pub const DENY_NAN: bool = true;
 
 /// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
 ///
 /// Compiled-in guard (off by default), companion to [`DENY_NAN`].
-pub const DENY_INF: bool = false;
+pub const DENY_INF: bool = true;
