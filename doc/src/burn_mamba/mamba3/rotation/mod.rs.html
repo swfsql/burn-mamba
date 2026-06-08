@@ -539,88 +539,99 @@
 <a href=#539 id=539 data-nosnippet>539</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
 <a href=#540 id=540 data-nosnippet>540</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
 <a href=#541 id=541 data-nosnippet>541</a>            <span class="comment">// Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
-<a href=#542 id=542 data-nosnippet>542</a>            </span><span class="kw">let </span>g_bshj3 = rot_bsa
-<a href=#543 id=543 data-nosnippet>543</a>                .reshape([batch, sequence, blocks, <span class="number">3</span>])
-<a href=#544 id=544 data-nosnippet>544</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>)
-<a href=#545 id=545 data-nosnippet>545</a>                * dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
-<a href=#546 id=546 data-nosnippet>546</a>            <span class="kw">let </span>q_step_bshj4 = quat_from_scaled_axis::&lt;<span class="number">5</span>&gt;(g_bshj3);
-<a href=#547 id=547 data-nosnippet>547</a>            <span class="comment">// Memory-efficient scan: a custom recompute backward (saves only the
-<a href=#548 id=548 data-nosnippet>548</a>            // leaf inputs) instead of retaining the scan's intermediates. Equal
-<a href=#549 id=549 data-nosnippet>549</a>            // to [`quat_cumprod`] on values and gradients (asserted in tests).
-<a href=#550 id=550 data-nosnippet>550</a>            </span><span class="kw">let </span>(cum_bshj4, final_bhj4) = <span class="kw">crate</span>::mamba3::quat_scan::quat_cumprod_recalculated(
-<a href=#551 id=551 data-nosnippet>551</a>                q_step_bshj4,
-<a href=#552 id=552 data-nosnippet>552</a>                <span class="prelude-val">Some</span>(prev_q_bhj4),
-<a href=#553 id=553 data-nosnippet>553</a>            );
-<a href=#554 id=554 data-nosnippet>554</a>            <span class="comment">// B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
-<a href=#555 id=555 data-nosnippet>555</a>            // broadcast over the mimo_rank axis.
-<a href=#556 id=556 data-nosnippet>556</a>            </span><span class="kw">let </span>conj_bsmhj4 = quat_conj(cum_bshj4)
-<a href=#557 id=557 data-nosnippet>557</a>                .unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">2</span>)
-<a href=#558 id=558 data-nosnippet>558</a>                .expand([batch, sequence, mimo_rank, nheads, blocks, <span class="number">4</span>]);
-<a href=#559 id=559 data-nosnippet>559</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(b_bsmhr, conj_bsmhj4.clone(), rope_width);
-<a href=#560 id=560 data-nosnippet>560</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(c_bsmhr, conj_bsmhj4, rope_width);
-<a href=#561 id=561 data-nosnippet>561</a>            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
-<a href=#562 id=562 data-nosnippet>562</a>        }
-<a href=#563 id=563 data-nosnippet>563</a>    }
-<a href=#564 id=564 data-nosnippet>564</a>}
-<a href=#565 id=565 data-nosnippet>565</a>
-<a href=#566 id=566 data-nosnippet>566</a><span class="doccomment">/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
-<a href=#567 id=567 data-nosnippet>567</a>///
-<a href=#568 id=568 data-nosnippet>568</a>/// # Shapes
-<a href=#569 id=569 data-nosnippet>569</a>/// - `rot_ba`  : `[batch, num_rotation_channels]`.
-<a href=#570 id=570 data-nosnippet>570</a>/// - `dt_bh`   : `[batch, nheads]`.
-<a href=#571 id=571 data-nosnippet>571</a>/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
-<a href=#572 id=572 data-nosnippet>572</a></span><span class="kw">pub fn </span>rotate_bc_step(
-<a href=#573 id=573 data-nosnippet>573</a>    rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#574 id=574 data-nosnippet>574</a>    dt_bh: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#575 id=575 data-nosnippet>575</a>    prev: RotationState,
-<a href=#576 id=576 data-nosnippet>576</a>    b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#577 id=577 data-nosnippet>577</a>    c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#578 id=578 data-nosnippet>578</a>    kind: RotationKind,
-<a href=#579 id=579 data-nosnippet>579</a>    rope_dim: usize,
-<a href=#580 id=580 data-nosnippet>580</a>) -&gt; (Tensor&lt;<span class="number">4</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;, RotationState) {
-<a href=#581 id=581 data-nosnippet>581</a>    <span class="kw">let </span>[batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
-<a href=#582 id=582 data-nosnippet>582</a>    <span class="kw">match </span>kind {
-<a href=#583 id=583 data-nosnippet>583</a>        RotationKind::Complex2D =&gt; {
-<a href=#584 id=584 data-nosnippet>584</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
-<a href=#585 id=585 data-nosnippet>585</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
-<a href=#586 id=586 data-nosnippet>586</a>            <span class="kw">let </span>theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
-<a href=#587 id=587 data-nosnippet>587</a>            <span class="kw">let </span>raw_angle_bha = dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>) * theta_scaled_ba.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
-<a href=#588 id=588 data-nosnippet>588</a>            <span class="kw">let </span>new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
-<a href=#589 id=589 data-nosnippet>589</a>            <span class="kw">let </span>new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>).expand([
-<a href=#590 id=590 data-nosnippet>590</a>                batch,
-<a href=#591 id=591 data-nosnippet>591</a>                mimo_rank,
-<a href=#592 id=592 data-nosnippet>592</a>                nheads,
-<a href=#593 id=593 data-nosnippet>593</a>                num_rope_angles,
-<a href=#594 id=594 data-nosnippet>594</a>            ]);
-<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
-<a href=#596 id=596 data-nosnippet>596</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">4</span>&gt;(
-<a href=#597 id=597 data-nosnippet>597</a>                b_bmhr,
-<a href=#598 id=598 data-nosnippet>598</a>                new_cum_angle_bmha.clone(),
-<a href=#599 id=599 data-nosnippet>599</a>                rope_dim,
-<a href=#600 id=600 data-nosnippet>600</a>                rotate_pairwise,
-<a href=#601 id=601 data-nosnippet>601</a>            );
-<a href=#602 id=602 data-nosnippet>602</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">4</span>&gt;(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
-<a href=#603 id=603 data-nosnippet>603</a>            (b, c, RotationState::Angle(new_cum_angle_bha))
-<a href=#604 id=604 data-nosnippet>604</a>        }
-<a href=#605 id=605 data-nosnippet>605</a>        RotationKind::Quaternion4D =&gt; {
-<a href=#606 id=606 data-nosnippet>606</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
-<a href=#607 id=607 data-nosnippet>607</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
-<a href=#608 id=608 data-nosnippet>608</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
-<a href=#609 id=609 data-nosnippet>609</a>            <span class="kw">let </span>g_bhj3 = rot_ba.reshape([batch, blocks, <span class="number">3</span>]).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
-<a href=#610 id=610 data-nosnippet>610</a>                * dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
-<a href=#611 id=611 data-nosnippet>611</a>            <span class="kw">let </span>q_step_bhj4 = quat_from_scaled_axis::&lt;<span class="number">4</span>&gt;(g_bhj3);
-<a href=#612 id=612 data-nosnippet>612</a>            <span class="comment">// Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
-<a href=#613 id=613 data-nosnippet>613</a>            </span><span class="kw">let </span>new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
-<a href=#614 id=614 data-nosnippet>614</a>            <span class="kw">let </span>conj_bmhj4 = quat_conj(new_q_bhj4.clone())
-<a href=#615 id=615 data-nosnippet>615</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)
-<a href=#616 id=616 data-nosnippet>616</a>                .expand([batch, mimo_rank, nheads, blocks, <span class="number">4</span>]);
-<a href=#617 id=617 data-nosnippet>617</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(b_bmhr, conj_bmhj4.clone(), rope_width);
-<a href=#618 id=618 data-nosnippet>618</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(c_bmhr, conj_bmhj4, rope_width);
-<a href=#619 id=619 data-nosnippet>619</a>            (b, c, RotationState::Quaternion(new_q_bhj4))
-<a href=#620 id=620 data-nosnippet>620</a>        }
-<a href=#621 id=621 data-nosnippet>621</a>    }
-<a href=#622 id=622 data-nosnippet>622</a>}
-<a href=#623 id=623 data-nosnippet>623</a>
-<a href=#624 id=624 data-nosnippet>624</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#625 id=625 data-nosnippet>625</a></span><span class="kw">mod </span>tests;
+<a href=#542 id=542 data-nosnippet>542</a>            //
+<a href=#543 id=543 data-nosnippet>543</a>            // Bound the raw generator with `tanh·π` before scaling by Δ — the
+<a href=#544 id=544 data-nosnippet>544</a>            // direct analogue of the Complex2D path (`rot.tanh()·π`). Without it
+<a href=#545 id=545 data-nosnippet>545</a>            // the generator is unbounded, so a large in-projection activation makes
+<a href=#546 id=546 data-nosnippet>546</a>            // `g = rot·Δ` overflow f32 to `inf`, and `quat_from_scaled_axis`'s
+<a href=#547 id=547 data-nosnippet>547</a>            // `cos(∞)` then yields a forward NaN. The bound caps each per-step
+<a href=#548 id=548 data-nosnippet>548</a>            // rotation to `±π·Δ` (cos/sin still give the periodicity within range);
+<a href=#549 id=549 data-nosnippet>549</a>            // healthy `O(1)` generators stay in tanh's near-linear region.
+<a href=#550 id=550 data-nosnippet>550</a>            </span><span class="kw">let </span>g_bshj3 = (rot_bsa.tanh() * core::f32::consts::PI)
+<a href=#551 id=551 data-nosnippet>551</a>                .reshape([batch, sequence, blocks, <span class="number">3</span>])
+<a href=#552 id=552 data-nosnippet>552</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>)
+<a href=#553 id=553 data-nosnippet>553</a>                * dt_bsh.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>).unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
+<a href=#554 id=554 data-nosnippet>554</a>            <span class="kw">let </span>q_step_bshj4 = quat_from_scaled_axis::&lt;<span class="number">5</span>&gt;(g_bshj3);
+<a href=#555 id=555 data-nosnippet>555</a>            <span class="comment">// Memory-efficient scan: a custom recompute backward (saves only the
+<a href=#556 id=556 data-nosnippet>556</a>            // leaf inputs) instead of retaining the scan's intermediates. Equal
+<a href=#557 id=557 data-nosnippet>557</a>            // to [`quat_cumprod`] on values and gradients (asserted in tests).
+<a href=#558 id=558 data-nosnippet>558</a>            </span><span class="kw">let </span>(cum_bshj4, final_bhj4) = <span class="kw">crate</span>::mamba3::quat_scan::quat_cumprod_recalculated(
+<a href=#559 id=559 data-nosnippet>559</a>                q_step_bshj4,
+<a href=#560 id=560 data-nosnippet>560</a>                <span class="prelude-val">Some</span>(prev_q_bhj4),
+<a href=#561 id=561 data-nosnippet>561</a>            );
+<a href=#562 id=562 data-nosnippet>562</a>            <span class="comment">// B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
+<a href=#563 id=563 data-nosnippet>563</a>            // broadcast over the mimo_rank axis.
+<a href=#564 id=564 data-nosnippet>564</a>            </span><span class="kw">let </span>conj_bsmhj4 = quat_conj(cum_bshj4)
+<a href=#565 id=565 data-nosnippet>565</a>                .unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">2</span>)
+<a href=#566 id=566 data-nosnippet>566</a>                .expand([batch, sequence, mimo_rank, nheads, blocks, <span class="number">4</span>]);
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(b_bsmhr, conj_bsmhj4.clone(), rope_width);
+<a href=#568 id=568 data-nosnippet>568</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(c_bsmhr, conj_bsmhj4, rope_width);
+<a href=#569 id=569 data-nosnippet>569</a>            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
+<a href=#570 id=570 data-nosnippet>570</a>        }
+<a href=#571 id=571 data-nosnippet>571</a>    }
+<a href=#572 id=572 data-nosnippet>572</a>}
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a><span class="doccomment">/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
+<a href=#575 id=575 data-nosnippet>575</a>///
+<a href=#576 id=576 data-nosnippet>576</a>/// # Shapes
+<a href=#577 id=577 data-nosnippet>577</a>/// - `rot_ba`  : `[batch, num_rotation_channels]`.
+<a href=#578 id=578 data-nosnippet>578</a>/// - `dt_bh`   : `[batch, nheads]`.
+<a href=#579 id=579 data-nosnippet>579</a>/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
+<a href=#580 id=580 data-nosnippet>580</a></span><span class="kw">pub fn </span>rotate_bc_step(
+<a href=#581 id=581 data-nosnippet>581</a>    rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#582 id=582 data-nosnippet>582</a>    dt_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#583 id=583 data-nosnippet>583</a>    prev: RotationState,
+<a href=#584 id=584 data-nosnippet>584</a>    b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#585 id=585 data-nosnippet>585</a>    c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#586 id=586 data-nosnippet>586</a>    kind: RotationKind,
+<a href=#587 id=587 data-nosnippet>587</a>    rope_dim: usize,
+<a href=#588 id=588 data-nosnippet>588</a>) -&gt; (Tensor&lt;<span class="number">4</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;, RotationState) {
+<a href=#589 id=589 data-nosnippet>589</a>    <span class="kw">let </span>[batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
+<a href=#590 id=590 data-nosnippet>590</a>    <span class="kw">match </span>kind {
+<a href=#591 id=591 data-nosnippet>591</a>        RotationKind::Complex2D =&gt; {
+<a href=#592 id=592 data-nosnippet>592</a>            <span class="kw">let </span>prev_angle_bha = prev.angle();
+<a href=#593 id=593 data-nosnippet>593</a>            <span class="kw">let </span>num_rope_angles = prev_angle_bha.dims()[<span class="number">2</span>];
+<a href=#594 id=594 data-nosnippet>594</a>            <span class="kw">let </span>theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
+<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">let </span>raw_angle_bha = dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>) * theta_scaled_ba.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
+<a href=#596 id=596 data-nosnippet>596</a>            <span class="kw">let </span>new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
+<a href=#597 id=597 data-nosnippet>597</a>            <span class="kw">let </span>new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>).expand([
+<a href=#598 id=598 data-nosnippet>598</a>                batch,
+<a href=#599 id=599 data-nosnippet>599</a>                mimo_rank,
+<a href=#600 id=600 data-nosnippet>600</a>                nheads,
+<a href=#601 id=601 data-nosnippet>601</a>                num_rope_angles,
+<a href=#602 id=602 data-nosnippet>602</a>            ]);
+<a href=#603 id=603 data-nosnippet>603</a>            <span class="kw">let </span>rotate_pairwise = mimo_rank == <span class="number">1</span>;
+<a href=#604 id=604 data-nosnippet>604</a>            <span class="kw">let </span>b = apply_rope_partial::&lt;<span class="number">4</span>&gt;(
+<a href=#605 id=605 data-nosnippet>605</a>                b_bmhr,
+<a href=#606 id=606 data-nosnippet>606</a>                new_cum_angle_bmha.clone(),
+<a href=#607 id=607 data-nosnippet>607</a>                rope_dim,
+<a href=#608 id=608 data-nosnippet>608</a>                rotate_pairwise,
+<a href=#609 id=609 data-nosnippet>609</a>            );
+<a href=#610 id=610 data-nosnippet>610</a>            <span class="kw">let </span>c = apply_rope_partial::&lt;<span class="number">4</span>&gt;(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
+<a href=#611 id=611 data-nosnippet>611</a>            (b, c, RotationState::Angle(new_cum_angle_bha))
+<a href=#612 id=612 data-nosnippet>612</a>        }
+<a href=#613 id=613 data-nosnippet>613</a>        RotationKind::Quaternion4D =&gt; {
+<a href=#614 id=614 data-nosnippet>614</a>            <span class="kw">let </span>prev_q_bhj4 = prev.quaternion();
+<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">let </span>blocks = prev_q_bhj4.dims()[<span class="number">2</span>];
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="kw">let </span>rope_width = blocks * <span class="number">4</span>;
+<a href=#617 id=617 data-nosnippet>617</a>            <span class="comment">// `tanh·π` bound, matching `rotate_bc_forward` (see the note there).
+<a href=#618 id=618 data-nosnippet>618</a>            </span><span class="kw">let </span>g_bhj3 = (rot_ba.tanh() * core::f32::consts::PI)
+<a href=#619 id=619 data-nosnippet>619</a>                .reshape([batch, blocks, <span class="number">3</span>])
+<a href=#620 id=620 data-nosnippet>620</a>                .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
+<a href=#621 id=621 data-nosnippet>621</a>                * dt_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>).unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>);
+<a href=#622 id=622 data-nosnippet>622</a>            <span class="kw">let </span>q_step_bhj4 = quat_from_scaled_axis::&lt;<span class="number">4</span>&gt;(g_bhj3);
+<a href=#623 id=623 data-nosnippet>623</a>            <span class="comment">// Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
+<a href=#624 id=624 data-nosnippet>624</a>            </span><span class="kw">let </span>new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
+<a href=#625 id=625 data-nosnippet>625</a>            <span class="kw">let </span>conj_bmhj4 = quat_conj(new_q_bhj4.clone())
+<a href=#626 id=626 data-nosnippet>626</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">1</span>)
+<a href=#627 id=627 data-nosnippet>627</a>                .expand([batch, mimo_rank, nheads, blocks, <span class="number">4</span>]);
+<a href=#628 id=628 data-nosnippet>628</a>            <span class="kw">let </span>b = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(b_bmhr, conj_bmhj4.clone(), rope_width);
+<a href=#629 id=629 data-nosnippet>629</a>            <span class="kw">let </span>c = rotate_blocks_partial::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(c_bmhr, conj_bmhj4, rope_width);
+<a href=#630 id=630 data-nosnippet>630</a>            (b, c, RotationState::Quaternion(new_q_bhj4))
+<a href=#631 id=631 data-nosnippet>631</a>        }
+<a href=#632 id=632 data-nosnippet>632</a>    }
+<a href=#633 id=633 data-nosnippet>633</a>}
+<a href=#634 id=634 data-nosnippet>634</a>
+<a href=#635 id=635 data-nosnippet>635</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#636 id=636 data-nosnippet>636</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
