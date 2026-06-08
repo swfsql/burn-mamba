@@ -60,7 +60,10 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
             "\n--- digit {i} (true label {}, predicted {pred}) ---",
             labels[i]
         );
-        println!("{}", render_digit_ascii(&digits_host[off..off + HEIGHT * WIDTH]));
+        println!(
+            "{}",
+            render_digit_ascii(&digits_host[off..off + HEIGHT * WIDTH])
+        );
         println!("{}", render_prediction(p, labels[i] as usize, pred));
     }
 
@@ -129,7 +132,11 @@ fn digit_with_bars_png(digit: &[f32], probs: &[f32], true_label: usize, pred: us
     // Digit panel.
     for row in 0..HEIGHT {
         for col in 0..WIDTH {
-            img.put_pixel(col as u32, row as u32, Luma([to_u8(digit[row * WIDTH + col])]));
+            img.put_pixel(
+                col as u32,
+                row as u32,
+                Luma([to_u8(digit[row * WIDTH + col])]),
+            );
         }
         for s in 0..SEP {
             img.put_pixel((WIDTH + s) as u32, row as u32, Luma([90])); // separator
@@ -215,7 +222,10 @@ fn render_prediction(probs: &[f32], true_label: usize, pred: usize) -> String {
             (false, true) => " (true)",
             (false, false) => "",
         };
-        out.push_str(&format!("  {c:>5}  {:>5.1}% |{bar:<20}|{mark}\n", p * 100.0));
+        out.push_str(&format!(
+            "  {c:>5}  {:>5.1}% |{bar:<20}|{mark}\n",
+            p * 100.0
+        ));
     }
     out
 }

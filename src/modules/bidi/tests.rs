@@ -3,8 +3,8 @@
 //! forward determinism. MultiGate-on-bidi wiring is covered by the
 //! `multi_gate` tests.
 
-use crate::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfig};
 use crate::modules::ResidualsConfig;
+use crate::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfig};
 use crate::utils::BidiSchedule;
 use burn::prelude::*;
 use burn::tensor::Distribution;
@@ -108,5 +108,8 @@ fn virtual_forward_is_deterministic() {
     let x = Tensor::<3>::random([2, 5, d_model], Distribution::Normal(0.0, 1.0), &device);
     let (y0, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
     let (y1, _) = layers.forward(x, None, Mamba2SsdPath::default());
-    assert!(max_abs_diff(y0, y1) < 1e-6, "bidi forward is nondeterministic");
+    assert!(
+        max_abs_diff(y0, y1) < 1e-6,
+        "bidi forward is nondeterministic"
+    );
 }

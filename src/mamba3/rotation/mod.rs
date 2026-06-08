@@ -225,7 +225,20 @@ pub fn quat_conj<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// guards the zero-quaternion.
 pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    let norm = (q.clone() * q.clone()).sum_dim(n).sqrt().clamp_min(1e-12);
+    // Clamp the sum-of-squares *before* `sqrt`: at a zero quaternion the forward
+    // `sqrt(0)=0` is fine, but `sqrt`'s backward is `1/(2·0)=∞`, and `∞·(2·0)=NaN`.
+    // Clamping pre-`sqrt` puts the degenerate point in `clamp_min`'s flat region,
+    // so its gradient is a finite 0 (and a genuine unit quaternion, sumsq=1, is
+    // untouched). The floor also keeps `norm` away from 0 for the division.
+    //
+    // The floor is the dtype-aware `div_eps` applied to the *sum-of-squares*
+    // (giving a norm floor of `√div_eps`). It must engage as a representable
+    // normal in the working dtype: in f16 a `div_eps²`-sized floor (~5e-7) would
+    // underflow below the min-normal (~6.1e-5) and silently no-op, so we floor
+    // the squared quantity at `div_eps` itself, which sits above each format's
+    // denormal floor by construction.
+    let eps = crate::utils::div_eps(q.dtype());
+    let norm = (q.clone() * q.clone()).sum_dim(n).clamp_min(eps).sqrt();
     q / norm
 }
 
@@ -245,11 +258,20 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
 pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    let angle = (g.clone() * g.clone()).sum_dim(n).sqrt(); // [..., 1]
+    // Clamp the sum-of-squares *before* `sqrt`: at `g = 0` the forward `sqrt(0)=0`
+    // is finite, but `sqrt`'s backward is `1/(2·0)=∞` and `∞·(2·0)=NaN`. Clamping
+    // pre-`sqrt` puts `g = 0` in `clamp_min`'s flat (zero-gradient) region, so the
+    // near-identity rotation gets a finite 0 gradient instead of a NaN. (This is
+    // the FiLM-triggered decoder-backward NaN: a per-position rotation generator
+    // hitting exactly zero.) The floor is the dtype-aware `div_eps` on the squared
+    // quantity — see [`quat_normalize`] for why it floors `sumsq`, not the norm.
+    let eps = crate::utils::div_eps(g.dtype());
+    let angle = (g.clone() * g.clone()).sum_dim(n).clamp_min(eps).sqrt(); // [..., 1]
     let half = angle.clone() * 0.5;
     let w = half.clone().cos(); // [..., 1]
-    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation), guarded against 0/0.
-    let scale = half.sin() / angle.clamp_min(1e-12); // [..., 1]
+    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation); `angle ≥ √div_eps`
+    // after the pre-`sqrt` clamp above, so the division is already guarded.
+    let scale = half.sin() / angle; // [..., 1]
     let v = g * scale; // [..., 3]
     quat_normalize(Tensor::cat(vec![w, v], n))
 }

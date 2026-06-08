@@ -434,9 +434,9 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
             .as_ref()
             .map(|(l, _)| *l)
             .unwrap_or(self.n_real_layers);
-        let residuals =
-            self.residuals
-                .init(d_model, self.n_real_layers / 2, n_virtual / 2, device);
+        let residuals = self
+            .residuals
+            .init(d_model, self.n_real_layers / 2, n_virtual / 2, device);
         BidiLayers {
             n_real_layers: self.n_real_layers,
             n_virtual_layers: self.n_virtual_layers.clone(),

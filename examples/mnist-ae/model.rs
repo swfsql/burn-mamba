@@ -40,7 +40,6 @@ use burn_mamba::prelude::{
 };
 use burn_mamba::utils::BidiSchedule;
 
-
 /// How the decoder conditions its per-position queries on the latent `z`.
 ///
 /// A plain `Copy` enum (no `Module`/`Config` derive) usable both as a

@@ -568,6 +568,62 @@ fn scaled_axis_is_unit_and_identity_at_zero() {
     );
 }
 
+/// True iff every element of `t` is finite (no NaN, no Inf).
+fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
+    !t.clone().is_nan().any().into_scalar::<bool>().to_bool()
+        && !t.is_inf().any().into_scalar::<bool>().to_bool()
+}
+
+/// Regression: a generator that is **exactly zero** (Δ → 0, or a zero rotation
+/// channel) must yield a *finite* gradient. The norm `angle = √(Σg²)` is finite
+/// in the forward (`√0 = 0`, the identity rotation), but an unguarded `sqrt`
+/// has backward `1/(2√x)·2g = ∞·0 = NaN` at the origin. The pre-`sqrt`
+/// `clamp_min(div_eps(dtype))` puts the origin in `clamp_min`'s flat region, so
+/// the gradient is a finite 0 there. (This is the FiLM-decoder NaN we hunted:
+/// the per-position rotation generator can land on exactly zero.)
+///
+/// The clamp floors the **sum-of-squares** at `div_eps`, which is a representable
+/// normal in every supported dtype (f64/f32/f16/bf16); a `div_eps²`-sized floor
+/// would underflow to a no-op in f16 and re-open the NaN.
+#[test]
+fn scaled_axis_zero_generator_grad_finite() {
+    let device: Device = Default::default();
+    // Row 0 is the exact zero generator; the rest are generic. Mixing the two
+    // checks both that the degenerate row is guarded and that the clamp does not
+    // disturb the ordinary rows (which still backprop normally).
+    let random = Tensor::<2>::random([7, 3], Distribution::Normal(0.0, 1.0), &device);
+    let raw = Tensor::cat(vec![Tensor::<2>::zeros([1, 3], &device), random], 0); // [8, 3]
+    let p = Param::from_tensor(Tensor::from_inner(raw));
+
+    let q = quat_from_scaled_axis(p.val());
+    let grads = q.sum().backward();
+    let dg = p.val().grad(&grads).expect("grad g");
+    assert!(
+        all_finite(dg),
+        "quat_from_scaled_axis gradient non-finite at a zero generator"
+    );
+}
+
+/// Regression companion to [`scaled_axis_zero_generator_grad_finite`] for
+/// [`quat_normalize`]: a zero quaternion (all four components 0) must backprop
+/// to a finite gradient. Same `sqrt`-at-origin mechanism, same pre-`sqrt`
+/// `clamp_min` fix; a unit quaternion (sum-of-squares 1) is left untouched.
+#[test]
+fn normalize_zero_quaternion_grad_finite() {
+    let device: Device = Default::default();
+    let random = Tensor::<2>::random([7, 4], Distribution::Normal(0.0, 1.0), &device);
+    let raw = Tensor::cat(vec![Tensor::<2>::zeros([1, 4], &device), random], 0); // [8, 4]
+    let p = Param::from_tensor(Tensor::from_inner(raw));
+
+    let q = quat_normalize(p.val());
+    let grads = q.sum().backward();
+    let dq = p.val().grad(&grads).expect("grad q");
+    assert!(
+        all_finite(dq),
+        "quat_normalize gradient non-finite at a zero quaternion"
+    );
+}
+
 #[test]
 fn scaled_axis_single_axis_matches_half_angle() {
     // g = (2φ, 0, 0) ⇒ angle = 2φ, q = (cos φ, sin φ, 0, 0): the single-axis

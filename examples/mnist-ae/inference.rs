@@ -106,7 +106,11 @@ fn side_by_side_png(orig: &[f32], recon: &[f32]) -> GrayImage {
     let mut img = GrayImage::new(native_w, HEIGHT as u32);
     for row in 0..HEIGHT {
         for col in 0..WIDTH {
-            img.put_pixel(col as u32, row as u32, Luma([to_u8(orig[row * WIDTH + col])]));
+            img.put_pixel(
+                col as u32,
+                row as u32,
+                Luma([to_u8(orig[row * WIDTH + col])]),
+            );
             let rcol = (WIDTH + SEP + col) as u32;
             img.put_pixel(rcol, row as u32, Luma([to_u8(recon[row * WIDTH + col])]));
         }
