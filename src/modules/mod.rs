@@ -62,6 +62,32 @@ pub trait MambaBlock: Module {
     /// Single-token recurrent step — decoding.
     fn block_step(&self, x: Tensor<2>, cache: Option<Self::Cache>) -> (Tensor<2>, Self::Cache);
 
+    /// Closed-form **stationary fixed point**: the limit of
+    /// [`Self::block_step`] outputs when the same constant token is stepped
+    /// forever. The limit forgets the starting state, so no cache is taken or
+    /// returned. The default implementation panics — only Mamba-3 currently
+    /// provides the closed form (see
+    /// [`Mamba3::step_infinite`](crate::mamba3::prelude::Mamba3::step_infinite)).
+    fn block_step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+        let _ = x;
+        unimplemented!("block_step_infinite: constant-input shortcuts are only implemented for Mamba-3")
+    }
+
+    /// Closed-form jump equivalent to `n` consecutive [`Self::block_step`]
+    /// calls on the same constant token: the last step's output and the final
+    /// cache, in O(1). The default implementation panics — only Mamba-3
+    /// currently provides it (see
+    /// [`Mamba3::step_n_approx`](crate::mamba3::prelude::Mamba3::step_n_approx)).
+    fn block_step_n_approx(
+        &self,
+        x: Tensor<2>,
+        n: usize,
+        cache: Option<Self::Cache>,
+    ) -> (Tensor<2>, Self::Cache) {
+        let _ = (x, n, cache);
+        unimplemented!("block_step_n_approx: constant-input shortcuts are only implemented for Mamba-3")
+    }
+
     /// Build `n_virtual` zero caches sized for a `[batch, sequence, d_model]` input.
     fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Self::Caches;
     /// Build `n_virtual` zero caches sized for a `[batch, d_model]` input.

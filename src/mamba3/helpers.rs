@@ -49,7 +49,13 @@ pub fn trapezoidal_coefficients<const D: usize>(
     // on the last dim regardless of leading shape.
     let dt_bias_broadcast = dt_bias_h.unsqueeze::<D>();
     let dt = softplus(dd_dt + dt_bias_broadcast).clamp(dt_limit.0, dt_limit.1);
-    let a = -softplus(dd_a_raw).clamp(f64::NEG_INFINITY, -a_floor);
+    // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
+    // applied to the (positive) softplus *before* negating: a method call
+    // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
+    // -a_floor)` would collapse the positive softplus to the constant
+    // `-a_floor` and yield `A ≡ +a_floor` — a *growing* state (`α > 1`) with a
+    // dead `dd_A` projection.
+    let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
     let lambda = burn::tensor::activation::sigmoid(lambda_raw);
     let alpha = da.clone().exp();

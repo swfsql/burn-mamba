@@ -181,6 +181,17 @@ mod impl_mamba3 {
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
         }
+        fn block_step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+            self.step_infinite(x)
+        }
+        fn block_step_n_approx(
+            &self,
+            x: Tensor<2>,
+            n: usize,
+            cache: Option<Mamba3Cache>,
+        ) -> (Tensor<2>, Mamba3Cache) {
+            self.step_n_approx(x, n, cache)
+        }
         fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba3Caches {
             let [batch, _seq, _d] = x.dims();
             zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()

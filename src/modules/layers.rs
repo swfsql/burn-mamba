@@ -297,6 +297,155 @@ where
         (out, M::Caches::from_slots(slots))
     }
 
+    /// Stationary fixed point of the whole stack under a constant token, with
+    /// **no caches** involved: under a constant input each layer's output
+    /// converges (its decay damps the transient, and the readout phase of the
+    /// rotation cancels), so the downstream layer's input converges too and
+    /// the limit composes **exactly**, layer by layer — even though every
+    /// layer's SSM state keeps rotating forever. Residual handling mirrors
+    /// [`Self::step`]; cursorless (class latents are not injected).
+    pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+        if let Residuals::MultiGate(mg) = &self.residuals {
+            return self.step_infinite_multi_gate(x, mg);
+        }
+        assert_step_compatible(&self.class_latents, "Layers");
+        let n = self.n_virtual_count();
+        let mut h = x;
+        for i in 0..n {
+            let layer = &self.real_layers[self.real_idx(i)];
+            h = if self.skip_residual(i, n) {
+                layer.step_infinite(h)
+            } else {
+                layer.step_infinite(h.clone()) + h
+            };
+        }
+        h
+    }
+
+    /// Multi-Gate counterpart of [`Self::step_infinite`]. The streams are a
+    /// per-token depth construct (as in [`Self::step_multi_gate`]), so applying
+    /// the mixers to the layers' fixed-point outputs *is* the fixed point of
+    /// the whole stack.
+    fn step_infinite_multi_gate(&self, x: Tensor<2>, mg: &crate::modules::MultiGate) -> Tensor<2> {
+        assert_step_compatible(&self.class_latents, "Layers");
+        let [batch, d_model] = x.dims();
+        let n = self.n_virtual_count();
+        let mut streams = x
+            .clone()
+            .unsqueeze_dim::<3>(1)
+            .expand([batch, mg.n_stream, d_model]);
+        let mut h = x;
+        for i in 0..n {
+            let real = self.real_idx(i);
+            let layer = &self.real_layers[real];
+            assert_step_compatible(&layer.class_latents, "Layer");
+            let out = layer.step_infinite(h);
+            if self.ignore_last_residual && i + 1 == n {
+                h = out;
+            } else if self.ignore_first_residual && i == 0 {
+                let [b, d] = out.dims();
+                streams = out
+                    .clone()
+                    .unsqueeze_dim::<3>(1)
+                    .expand([b, mg.n_stream, d]);
+                h = out;
+            } else {
+                let idx = mg.module_index(i, real);
+                let (new_h, new_streams) = mg.layers[idx].step(out, streams);
+                h = new_h;
+                streams = new_streams;
+            }
+        }
+        h
+    }
+
+    /// **Approximate** jump of `n_steps` consecutive constant-token
+    /// [`Self::step`] calls (cursorless), in O(1) per layer.
+    ///
+    /// Each (virtual) layer jumps in closed form with its input held constant
+    /// at the *previous layer's step-`n` output*. The first layer's jump is
+    /// exact; deeper layers ignore the upstream transient, an error that
+    /// decays geometrically in `n_steps` (the `n → ∞` limit is exact — see
+    /// [`Self::step_infinite`]). `n_steps = 1` is exactly one `step`.
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<2>,
+        n_steps: usize,
+        caches: Option<M::Caches>,
+    ) -> (Tensor<2>, M::Caches) {
+        if let Residuals::MultiGate(mg) = &self.residuals {
+            return self.step_n_approx_multi_gate(x, n_steps, caches, mg);
+        }
+        assert_step_compatible(&self.class_latents, "Layers");
+        let n = self.n_virtual_count();
+        let caches =
+            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
+        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+        let mut slots = caches.into_slots();
+
+        let mut h = x;
+        for i in 0..n {
+            let layer = &self.real_layers[self.real_idx(i)];
+            let cache = slots[i].take();
+            let (out, c) = if self.skip_residual(i, n) {
+                layer.step_n_approx(h, n_steps, cache)
+            } else {
+                let (out, c) = layer.step_n_approx(h.clone(), n_steps, cache);
+                (out + h, c)
+            };
+            h = out;
+            slots[i] = Some(c);
+        }
+        (h, M::Caches::from_slots(slots))
+    }
+
+    /// Multi-Gate counterpart of [`Self::step_n_approx`] (mirrors
+    /// [`Self::step_multi_gate`]; the mixers see each layer's step-`n` output).
+    fn step_n_approx_multi_gate(
+        &self,
+        x: Tensor<2>,
+        n_steps: usize,
+        caches: Option<M::Caches>,
+        mg: &crate::modules::MultiGate,
+    ) -> (Tensor<2>, M::Caches) {
+        assert_step_compatible(&self.class_latents, "Layers");
+        let [batch, d_model] = x.dims();
+        let n = self.n_virtual_count();
+        let caches =
+            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
+        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+
+        let mut slots = caches.into_slots();
+        let mut streams = x
+            .clone()
+            .unsqueeze_dim::<3>(1)
+            .expand([batch, mg.n_stream, d_model]);
+        let mut h = x;
+        for i in 0..n {
+            let real = self.real_idx(i);
+            let layer = &self.real_layers[real];
+            let cache = slots[i].take();
+            let (out, c_) = layer.step_n_approx(h, n_steps, cache);
+            slots[i] = Some(c_);
+            if self.ignore_last_residual && i + 1 == n {
+                h = out;
+            } else if self.ignore_first_residual && i == 0 {
+                let [b, d] = out.dims();
+                streams = out
+                    .clone()
+                    .unsqueeze_dim::<3>(1)
+                    .expand([b, mg.n_stream, d]);
+                h = out;
+            } else {
+                let idx = mg.module_index(i, real);
+                let (new_h, new_streams) = mg.layers[idx].step(out, streams);
+                h = new_h;
+                streams = new_streams;
+            }
+        }
+        (h, M::Caches::from_slots(slots))
+    }
+
     /// Single-token Multi-Gate Residual step — the recurrent counterpart of
     /// [`Self::forward_multi_gate`]. The streams are a per-token *depth*
     /// construct (rebuilt from `x` each step, never carried between tokens), so

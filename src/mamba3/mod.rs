@@ -28,6 +28,7 @@ pub mod mamba3;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
+mod step_constant;
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;

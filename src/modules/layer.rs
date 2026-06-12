@@ -90,4 +90,28 @@ impl<M: MambaBlock> Layer<M> {
         *cursor += 1;
         (out, cache)
     }
+
+    /// Stationary fixed point of the Pre-LN block under a constant token,
+    /// **without** the residual: the `step` counterpart of infinitely many
+    /// identical tokens (closed form, no cache — see
+    /// [`MambaBlock::block_step_infinite`]). Cursorless: class latents are not
+    /// injected (`Middle`/`End` latents panic, as in a `None`-cursor `step`).
+    pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+        assert_step_compatible(&self.class_latents, "Layer");
+        self.mamba_block.block_step_infinite(self.norm.forward(x))
+    }
+
+    /// Closed-form jump equivalent to `n` cursorless [`Self::step`] calls on
+    /// the same constant token, **without** the residual (see
+    /// [`MambaBlock::block_step_n_approx`]).
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<2>,
+        n: usize,
+        cache: Option<M::Cache>,
+    ) -> (Tensor<2>, M::Cache) {
+        assert_step_compatible(&self.class_latents, "Layer");
+        self.mamba_block
+            .block_step_n_approx(self.norm.forward(x), n, cache)
+    }
 }

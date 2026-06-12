@@ -377,67 +377,50 @@ impl Mamba3 {
 mod step {
     use super::*;
 
+    /// One token's in-projection unpacked into the step-shaped pieces shared by
+    /// [`Mamba3::step_double_ssd`] and the constant-input shortcuts
+    /// ([`Mamba3::step_n_approx`] / [`Mamba3::step_infinite`]): the gate/value
+    /// streams, the **pre-rotation** QK-normed B/C, the raw rotation channels,
+    /// and the trapezoid coefficients.
+    pub(crate) struct StepProjection {
+        /// Gate stream `[batch, d_inner]`.
+        pub z_bi: Tensor<2>,
+        /// Value stream `[batch, nheads, per_head_dim]`.
+        pub x_bhp: Tensor<3>,
+        /// QK-normed, GQA-expanded, biased B — **before** the positional rotation.
+        pub b_bmhr: Tensor<4>,
+        /// QK-normed, GQA-expanded, biased C — **before** the positional rotation.
+        pub c_bmhr: Tensor<4>,
+        /// Raw rotation channels `[batch, num_rotation_channels]`.
+        pub rot_ba: Tensor<2>,
+        /// `Δ` `[batch, nheads]`.
+        pub dt_bh: Tensor<2>,
+        /// `Δ·A` (negative; the log-decay) `[batch, nheads]`.
+        pub da_bh: Tensor<2>,
+        /// `α = exp(Δ·A)` `[batch, nheads]`.
+        pub alpha_bh: Tensor<2>,
+        /// `β = (1−λ)·Δ·α` `[batch, nheads]`.
+        pub beta_bh: Tensor<2>,
+        /// `γ = λ·Δ` `[batch, nheads]`.
+        pub gamma_bh: Tensor<2>,
+    }
+
     impl Mamba3 {
-        /// Process a **single token** using the pure recurrent form.
-        ///
-        /// For SISO (mimo_rank=1):
-        /// ```text
-        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
-        ///   yₜ = Cₜᵀ hₜ + D xₜ
-        /// ```
-        ///
-        /// For MIMO (mimo_rank>1):
-        /// ```text
-        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
-        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
-        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
-        /// ```
-        ///
-        /// # Shapes
-        /// - `input_bd` : `[batch, d_model]`
-        /// - output     : `[batch, d_model]`
+        /// In-projection → split → trapezoid coefficients → QK-norm for a
+        /// single token, **stopping before** the positional rotation (which
+        /// needs the cache's cumulative rotation).
         #[allow(non_snake_case)]
-        pub fn step_double_ssd(
-            &self,
-            input_bd: Tensor<2>,
-            cache: Option<Mamba3DoubleSsdCache>,
-        ) -> (Tensor<2>, Mamba3DoubleSsdCache) {
-            let [batch, d_model] = input_bd.dims();
+        pub(crate) fn step_project(&self, input_bd: Tensor<2>) -> StepProjection {
+            let [batch, _d_model] = input_bd.dims();
             let d_inner = self.d_inner();
             let nheads = self.nheads();
             let ngroups = self.ngroups;
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
-            let num_rope_angles = self.num_rope_angles;
             let mimo_rank = self.mimo_rank;
-            let device = &input_bd.device();
-            let ssm_shape = [batch, nheads, per_head_dim, state_rank];
 
             assert_eq!(nheads % ngroups, 0);
             san(&input_bd);
-
-            let mut cache = cache.unwrap_or_else(|| {
-                let ssm_bhpr = Tensor::zeros(ssm_shape, device);
-                let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
-                let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-                let rotation = match self.rotation {
-                    RotationKind::Quaternion4D => RotationState::identity_quaternion(
-                        batch,
-                        nheads,
-                        self.num_quat_blocks,
-                        device,
-                    ),
-                    RotationKind::Complex2D => {
-                        RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
-                    }
-                };
-                Mamba3DoubleSsdCache {
-                    ssm_bhpr,
-                    k_state_bmhr,
-                    v_state_bhp,
-                    rotation,
-                }
-            });
 
             // ── In-projection ─────────────────────────────────────────────────
             let proj_bd = self.in_proj.forward(input_bd);
@@ -468,7 +451,7 @@ mod step {
             // ── Discretisation + trapezoidal coefficients ─────────────────────
             let helpers::TrapezoidCoeffs {
                 dt: dt_bh,
-                da: _da_bh,
+                da: da_bh,
                 alpha: alpha_bh,
                 beta: beta_bh,
                 gamma: gamma_bh,
@@ -504,6 +487,176 @@ mod step {
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
             san(&b_bmhr);
             san(&c_bmhr);
+
+            StepProjection {
+                z_bi,
+                x_bhp,
+                b_bmhr,
+                c_bmhr,
+                rot_ba,
+                dt_bh,
+                da_bh,
+                alpha_bh,
+                beta_bh,
+                gamma_bh,
+            }
+        }
+
+        /// State→output contraction:
+        /// `out[b, m, h, p] = Σᵣ C[b, m, h, r] · state[b, h, p, r]`
+        /// (`einsum('bhpr,bmhr->bmhp', state, C)`).
+        pub(crate) fn step_readout(state_bhpr: Tensor<4>, c_bmhr: Tensor<4>) -> Tensor<4> {
+            let c_bhrm = c_bmhr.permute([0, 2, 3, 1]);
+            let out_bhpm = state_bhpr.matmul(c_bhrm);
+            out_bhpm.permute([0, 3, 1, 2])
+        }
+
+        /// Shared block tail: `D` skip, gate (or gated RMSNorm), MIMO rank
+        /// aggregation, and the output projection.
+        ///
+        /// `out_m_bmhp` is the raw SSM readout (see [`Mamba3::step_readout`]);
+        /// `x_vals_bmhp` the MIMO-expanded values; `z_bi` the gate stream.
+        pub(crate) fn step_finish(
+            &self,
+            out_m_bmhp: Tensor<4>,
+            x_vals_bmhp: Tensor<4>,
+            z_bi: Tensor<2>,
+        ) -> Tensor<2> {
+            let [batch, mimo_rank, nheads, per_head_dim] = x_vals_bmhp.dims();
+            let d_inner = self.d_inner();
+
+            // D skip
+            let d_bmhp = self
+                .d_h
+                .val()
+                .unsqueeze_dims::<4>(&[0, 1, 3]) // d_11h1
+                .expand([batch, mimo_rank, nheads, per_head_dim]); // d_bmhp
+            let out_m_bmhp = out_m_bmhp + d_bmhp * x_vals_bmhp;
+            san(&out_m_bmhp);
+
+            // ── Gate (or gated norm) and rank aggregation ─────────────────────
+            // When `out_norm` is set, the SiLU gate is replaced by a per-head
+            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
+            let z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
+            let y_bi = if mimo_rank > 1 {
+                let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
+                let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
+
+                // zₘ = z * mimo_z_hmp[m]
+                let z_bmhp = z_bhp
+                    .unsqueeze_dim::<4>(1) // z_b1hp
+                    .expand([batch, mimo_rank, nheads, per_head_dim]); // z_bmhp
+                // mimo_z_hmp
+                let mimo_z_bmhp = mimo_z_hmp
+                    .permute([1, 0, 2]) // mimo_z_mhp
+                    .unsqueeze_dim::<4>(0) // mimo_z_1mhp
+                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_z_bmhp
+                let z_bmhp = z_bmhp * mimo_z_bmhp;
+                san(&z_bmhp);
+
+                // Per-rank gate or gated norm.
+                let combined_bmhp = match &self.out_norm {
+                    Some(norm) => norm.forward(out_m_bmhp, z_bmhp),
+                    None => out_m_bmhp * Silu::new().forward(z_bmhp),
+                };
+                san(&combined_bmhp);
+
+                // Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
+                let mimo_o_bmhp = mimo_o_hmp
+                    .permute([1, 0, 2]) // mimo_o_mhp
+                    .unsqueeze_dim::<4>(0) // mimo_o_1mhp
+                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_o_bmhp
+                let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
+                    .sum_dim(1) // out_b1hp
+                    .squeeze_dim(1); // out_bhp
+                san(&out_bhp);
+                out_bhp.reshape([batch, d_inner]) // y_bi
+            } else {
+                // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
+                let y_bhp: Tensor<3> = out_m_bmhp.squeeze_dim(1);
+                let combined = match &self.out_norm {
+                    Some(norm) => norm.forward(y_bhp, z_bhp),
+                    None => y_bhp * Silu::new().forward(z_bhp),
+                };
+                san(&combined);
+                combined.reshape([batch, d_inner])
+            };
+
+            // ── Out-projection ────────────────────────────────────────────────
+            let out_bm = self.out_proj.forward(y_bi);
+            san(&out_bm);
+            out_bm
+        }
+
+        /// Process a **single token** using the pure recurrent form.
+        ///
+        /// For SISO (mimo_rank=1):
+        /// ```text
+        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
+        ///   yₜ = Cₜᵀ hₜ + D xₜ
+        /// ```
+        ///
+        /// For MIMO (mimo_rank>1):
+        /// ```text
+        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
+        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
+        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
+        /// ```
+        ///
+        /// # Shapes
+        /// - `input_bd` : `[batch, d_model]`
+        /// - output     : `[batch, d_model]`
+        #[allow(non_snake_case)]
+        pub fn step_double_ssd(
+            &self,
+            input_bd: Tensor<2>,
+            cache: Option<Mamba3DoubleSsdCache>,
+        ) -> (Tensor<2>, Mamba3DoubleSsdCache) {
+            let [batch, _d_model] = input_bd.dims();
+            let nheads = self.nheads();
+            let per_head_dim = self.per_head_dim();
+            let state_rank = self.state_rank;
+            let num_rope_angles = self.num_rope_angles;
+            let mimo_rank = self.mimo_rank;
+            let device = &input_bd.device();
+            let ssm_shape = [batch, nheads, per_head_dim, state_rank];
+
+            let mut cache = cache.unwrap_or_else(|| {
+                let ssm_bhpr = Tensor::zeros(ssm_shape, device);
+                let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
+                let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+                let rotation = match self.rotation {
+                    RotationKind::Quaternion4D => RotationState::identity_quaternion(
+                        batch,
+                        nheads,
+                        self.num_quat_blocks,
+                        device,
+                    ),
+                    RotationKind::Complex2D => {
+                        RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
+                    }
+                };
+                Mamba3DoubleSsdCache {
+                    ssm_bhpr,
+                    k_state_bmhr,
+                    v_state_bhp,
+                    rotation,
+                }
+            });
+
+            // ── In-projection → coefficients → QK-norm ────────────────────────
+            let StepProjection {
+                z_bi,
+                x_bhp,
+                b_bmhr,
+                c_bmhr,
+                rot_ba,
+                dt_bh,
+                da_bh: _,
+                alpha_bh,
+                beta_bh,
+                gamma_bh,
+            } = self.step_project(input_bd);
 
             // ── Update cumulative rotation, rotate B and C ─────────────────────
             // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
@@ -574,75 +727,11 @@ mod step {
 
             // ── Output ────────────────────────────────────────────────────────
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
-            // = einsum('bhpr,bmhr->bmhp', state, C)
-            let out_m_bmhp = {
-                let c_bhrm = c_bmhr.permute([0, 2, 3, 1]);
-                let out_bhpm = new_state_bhpr.clone().matmul(c_bhrm);
-                out_bhpm.permute([0, 3, 1, 2])
-            };
+            let out_m_bmhp = Self::step_readout(new_state_bhpr.clone(), c_bmhr);
             san(&out_m_bmhp);
 
-            // D skip
-            let d_bmhp = self
-                .d_h
-                .val()
-                .unsqueeze_dims::<4>(&[0, 1, 3]) // d_11h1
-                .expand([batch, mimo_rank, nheads, per_head_dim]); // d_bmhp
-            let out_m_bmhp = out_m_bmhp + d_bmhp * x_vals_bmhp;
-            san(&out_m_bmhp);
-
-            // ── Gate (or gated norm) and rank aggregation ─────────────────────
-            // When `out_norm` is set, the SiLU gate is replaced by a per-head
-            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
-            let z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
-            let y_bi = if mimo_rank > 1 {
-                let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-                let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-
-                // zₘ = z * mimo_z_hmp[m]
-                let z_bmhp = z_bhp
-                    .unsqueeze_dim::<4>(1) // z_b1hp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // z_bmhp
-                // mimo_z_hmp
-                let mimo_z_bmhp = mimo_z_hmp
-                    .permute([1, 0, 2]) // mimo_z_mhp
-                    .unsqueeze_dim::<4>(0) // mimo_z_1mhp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_z_bmhp
-                let z_bmhp = z_bmhp * mimo_z_bmhp;
-                san(&z_bmhp);
-
-                // Per-rank gate or gated norm.
-                let combined_bmhp = match &self.out_norm {
-                    Some(norm) => norm.forward(out_m_bmhp, z_bmhp),
-                    None => out_m_bmhp * Silu::new().forward(z_bmhp),
-                };
-                san(&combined_bmhp);
-
-                // Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
-                let mimo_o_bmhp = mimo_o_hmp
-                    .permute([1, 0, 2]) // mimo_o_mhp
-                    .unsqueeze_dim::<4>(0) // mimo_o_1mhp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_o_bmhp
-                let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
-                    .sum_dim(1) // out_b1hp
-                    .squeeze_dim(1); // out_bhp
-                san(&out_bhp);
-                out_bhp.reshape([batch, d_inner]) // y_bi
-            } else {
-                // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
-                let y_bhp: Tensor<3> = out_m_bmhp.squeeze_dim(1);
-                let combined = match &self.out_norm {
-                    Some(norm) => norm.forward(y_bhp, z_bhp),
-                    None => y_bhp * Silu::new().forward(z_bhp),
-                };
-                san(&combined);
-                combined.reshape([batch, d_inner])
-            };
-
-            // ── Out-projection ────────────────────────────────────────────────
-            let out_bm = self.out_proj.forward(y_bi);
-            assert_eq!([batch, d_model], out_bm.dims());
-            san(&out_bm);
+            // ── D skip, gate (or gated norm), rank aggregation, out-projection ─
+            let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, z_bi);
 
             // ── Update cache ──────────────────────────────────────────────────
             cache.ssm_bhpr = new_state_bhpr;
@@ -654,6 +743,8 @@ mod step {
         }
     }
 }
+
+pub(crate) use step::StepProjection;
 
 // ---------------------------------------------------------------------------
 // Tests

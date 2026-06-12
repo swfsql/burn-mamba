@@ -127,6 +127,31 @@ where
         let x = self.out_proj.forward(x);
         (x, caches)
     }
+
+    /// Stationary fixed point of the network under a constant input token:
+    /// `in_proj → `[`Layers::step_infinite`]` → out_proj`, no caches.
+    /// Cursorless (class tokens are not injected).
+    pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+        assert_step_compatible(&self.class_tokens, "LatentNetwork");
+        let x = self.in_proj.forward(x);
+        let x = self.layers.step_infinite(x);
+        self.out_proj.forward(x)
+    }
+
+    /// Approximate jump of `n` consecutive cursorless [`Self::step`] calls on
+    /// the same constant token — see [`Layers::step_n_approx`] for the
+    /// approximation contract.
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<2>,
+        n: usize,
+        caches: Option<M::Caches>,
+    ) -> (Tensor<2>, M::Caches) {
+        assert_step_compatible(&self.class_tokens, "LatentNetwork");
+        let x = self.in_proj.forward(x);
+        let (x, caches) = self.layers.step_n_approx(x, n, caches);
+        (self.out_proj.forward(x), caches)
+    }
 }
 
 /// Plain factory for [`LatentNetwork`].
@@ -226,6 +251,38 @@ where
         let (x, caches) = self.layers.step(x, caches, layers_own_index, layer_indices);
         let x = self.norm_f.forward(x);
         // Reuse the 3-D head by lifting/lowering the sequence axis.
+        let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
+        (logits, caches)
+    }
+
+    /// Stationary fixed point of the LM under a constant token: logits
+    /// `[batch, padded_vocab]` after infinitely many repeats of `x`, no caches
+    /// (see [`Layers::step_infinite`]).
+    pub fn step_infinite(&self, x: Tensor<1, Int>) -> Tensor<2> {
+        let x = self
+            .embedding
+            .forward(x.unsqueeze_dim::<2>(1))
+            .squeeze_dim(1);
+        let x = self.layers.step_infinite(x);
+        let x = self.norm_f.forward(x);
+        self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1)
+    }
+
+    /// Approximate jump of `n` consecutive [`Self::step`] calls on the same
+    /// constant token — see [`Layers::step_n_approx`] for the approximation
+    /// contract.
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<1, Int>,
+        n: usize,
+        caches: Option<M::Caches>,
+    ) -> (Tensor<2>, M::Caches) {
+        let x = self
+            .embedding
+            .forward(x.unsqueeze_dim::<2>(1))
+            .squeeze_dim(1);
+        let (x, caches) = self.layers.step_n_approx(x, n, caches);
+        let x = self.norm_f.forward(x);
         let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
         (logits, caches)
     }
@@ -407,6 +464,63 @@ impl MambaLatentNet {
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
                 let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
+                (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Stationary fixed point under a constant token (no caches) — see
+    /// [`LatentNetwork::step_infinite`]. Only the Mamba-3 family implements the
+    /// closed form; the other variants panic.
+    pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => net.step_infinite(x),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => net.step_infinite(x),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => net.step_infinite(x),
+        }
+    }
+
+    /// Approximate jump of `n` consecutive constant-token steps — see
+    /// [`LatentNetwork::step_n_approx`]. Cache family must match the network;
+    /// only the Mamba-3 family implements the closed form (others panic).
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<2>,
+        n: usize,
+        caches: Option<MambaCaches>,
+    ) -> (Tensor<2>, MambaCaches) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
+                (y, MambaCaches::Mamba1(c))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
+                (y, MambaCaches::Mamba2(c))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -687,6 +801,63 @@ impl MambaVocabNet {
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
                 let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
+                (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Stationary fixed point under a constant token (no caches) — see
+    /// [`VocabNetwork::step_infinite`]. Only the Mamba-3 family implements the
+    /// closed form; the other variants panic.
+    pub fn step_infinite(&self, x: Tensor<1, Int>) -> Tensor<2> {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => net.step_infinite(x),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => net.step_infinite(x),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => net.step_infinite(x),
+        }
+    }
+
+    /// Approximate jump of `n` consecutive constant-token steps — see
+    /// [`VocabNetwork::step_n_approx`]. Cache family must match the network;
+    /// only the Mamba-3 family implements the closed form (others panic).
+    pub fn step_n_approx(
+        &self,
+        x: Tensor<1, Int>,
+        n: usize,
+        caches: Option<MambaCaches>,
+    ) -> (Tensor<2>, MambaCaches) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
+                (y, MambaCaches::Mamba1(c))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
+                (y, MambaCaches::Mamba2(c))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let (y, c) = net.step_n_approx(x, n, caches);
                 (y, MambaCaches::Mamba3(c))
             }
         }
