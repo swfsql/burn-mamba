@@ -65,7 +65,10 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`mod.rs`** — `Mamba3BackendExt: Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt`,
   wired via `backend_macros`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
-  (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`.
+  (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`. Non-obvious: the
+  `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
+  softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
+  instead pins `A ≡ +a_floor` (data-independent growth).
 - **`cache.rs`** — the pathway-tagged `Mamba3Cache{DoubleSsd|SingleSsd}` / `Mamba3Caches`
   enums; extractors; `from_vec`/`from_options` (**empty ⇒ SingleSsd**). The cross-pathway
   `From` impls are field-identity, valid because at a boundary `scaleₜ=γₜ` so single-ssd
@@ -77,7 +80,10 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
   summed; ~2× SSD memory. `step_double_ssd` is reused (via cache conversion) for
-  single-ssd decoding. `apply_rope`/`apply_rope_partial` (rotate last-dim pairs;
+  single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
+  (in-proj → coeffs → QK-norm, pre-rotation), `step_readout` (state×C einsum) and
+  `step_finish` (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
+  `step_constant`. `apply_rope`/`apply_rope_partial` (rotate last-dim pairs;
   interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; identity when `rope_dim==0`) and
   `wrap_angle` are used by **both** pathways.
 - **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), `k_state_bmhr`
@@ -117,6 +123,18 @@ element-wise math, no per-step `narrow`/`cat`) + `quat_cumprod_recalculated(q,in
 `Backward<B,2>` saving only `q`+`init`, recomputing the prefix product, exact
 unit-quaternion VJP with parallel ops only.
 
+### `mamba3/step_constant/` (`mod.rs`)
+Constant-input closed forms on `Mamba3`: `step_n_approx` (one ordinary `step` —
+consuming the cache's previous-token trapezoid term — then a geometric-series jump
+for the remaining `n−1`) and `step_infinite` (stationary fixed-point output; no
+cache in/out — the state orbits, the cumulative rotation cancels in the readout,
+factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`). Per RoPE pair the jump series is
+`e^{i(Θ₁+(K−1)θ̂)}(1−α^K e^{−iKθ̂})/(1−α e^{−iθ̂})(β+γe^{iθ̂})`; per quaternion block
+the same in the abelian subalgebra of the constant per-step `q` (`quat_pow` =
+wrapped `exp(k·g/2)`); unrotated channels use the scalar series `(β+γ)(1−α^K)/(1−α)`.
+Denominators floored by `div_eps`; the returned cache keeps the supplied pathway
+variant. Exact per block; `_approx` = stacked composition only (see CLAUDE.md).
+
 ---
 
 ## Composition modules (`src/modules/`)
@@ -125,15 +143,19 @@ Generic over `M = Mamba1|Mamba2|Mamba3`; the single home for layer/network compo
 plus shared NN blocks.
 
 - **`mod.rs`** — `trait MambaBlock` (assoc. `Cache`/`Caches: CacheStack`/`SsdPath`,
-  `block_forward`/`block_step`, `zero_caches_{2d,3d}`; Mamba-1's `SsdPath=()`),
+  `block_forward`/`block_step`, `block_step_infinite`/`block_step_n_approx` with
+  panicking defaults — only Mamba-3 overrides, `zero_caches_{2d,3d}`; Mamba-1's
+  `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the residual and class-latent
-  insert are applied by `Layers`. `insert_latents` `pub(crate)`.
+  insert are applied by `Layers`. `insert_latents` `pub(crate)`. Cursorless
+  `step_infinite`/`step_n_approx` mirror `step`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
   Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
   its own cache; owns the residual (`skip_residual`/`ignore_first/last_residual`).
-  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`).
+  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`). Cursorless
+  `step_infinite`/`step_n_approx` mirror `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
   layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
@@ -141,7 +163,8 @@ plus shared NN blocks.
   `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
-  cache/path**. `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
+  cache/path**; `step_infinite`/`step_n_approx` mirror `step` (enums included;
+  Mamba-3 only, panic otherwise). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate) +
   `ignore_first/last_residual`.
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
