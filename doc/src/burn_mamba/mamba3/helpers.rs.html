@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/helpers.rs`."><title>helpers.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-74eb0058.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (f20a92ec0 2026-06-07)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>helpers.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Shared helpers used by both [`Mamba3::forward`](super::mamba3::Mamba3::forward)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/helpers.rs`."><title>helpers.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (b30f3df3b 2026-06-11)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>helpers.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Shared helpers used by both [`Mamba3::forward`](super::mamba3::Mamba3::forward)
 <a href=#2 id=2 data-nosnippet>2</a>//! and [`Mamba3::step`](super::mamba3::Mamba3::step). They isolate three blocks
 <a href=#3 id=3 data-nosnippet>3</a>//! that previously appeared in both methods at different ranks:
 <a href=#4 id=4 data-nosnippet>4</a>//!
@@ -49,65 +49,71 @@
 <a href=#49 id=49 data-nosnippet>49</a>    // on the last dim regardless of leading shape.
 <a href=#50 id=50 data-nosnippet>50</a>    </span><span class="kw">let </span>dt_bias_broadcast = dt_bias_h.unsqueeze::&lt;D&gt;();
 <a href=#51 id=51 data-nosnippet>51</a>    <span class="kw">let </span>dt = softplus(dd_dt + dt_bias_broadcast).clamp(dt_limit.<span class="number">0</span>, dt_limit.<span class="number">1</span>);
-<a href=#52 id=52 data-nosnippet>52</a>    <span class="kw">let </span>a = -softplus(dd_a_raw).clamp(f64::NEG_INFINITY, -a_floor);
-<a href=#53 id=53 data-nosnippet>53</a>    <span class="kw">let </span>da = dt.clone() * a;
-<a href=#54 id=54 data-nosnippet>54</a>    <span class="kw">let </span>lambda = burn::tensor::activation::sigmoid(lambda_raw);
-<a href=#55 id=55 data-nosnippet>55</a>    <span class="kw">let </span>alpha = da.clone().exp();
-<a href=#56 id=56 data-nosnippet>56</a>    <span class="kw">let </span>beta = (-lambda.clone() + <span class="number">1.0</span>) * dt.clone() * alpha.clone();
-<a href=#57 id=57 data-nosnippet>57</a>    <span class="kw">let </span>gamma = lambda * dt.clone();
-<a href=#58 id=58 data-nosnippet>58</a>    TrapezoidCoeffs {
-<a href=#59 id=59 data-nosnippet>59</a>        dt,
-<a href=#60 id=60 data-nosnippet>60</a>        da,
-<a href=#61 id=61 data-nosnippet>61</a>        alpha,
-<a href=#62 id=62 data-nosnippet>62</a>        beta,
-<a href=#63 id=63 data-nosnippet>63</a>        gamma,
-<a href=#64 id=64 data-nosnippet>64</a>    }
-<a href=#65 id=65 data-nosnippet>65</a>}
-<a href=#66 id=66 data-nosnippet>66</a>
-<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// QK-Norm → GQA-expand groups→heads → add per-(head, mimo-rank) bias.
-<a href=#68 id=68 data-nosnippet>68</a>///
-<a href=#69 id=69 data-nosnippet>69</a>/// The input is the raw B/C projection already reshaped to expose the group
-<a href=#70 id=70 data-nosnippet>70</a>/// dim, with last dim = `state_rank`. The output replaces the group dim with
-<a href=#71 id=71 data-nosnippet>71</a>/// the head dim, leaving the last dim untouched.
-<a href=#72 id=72 data-nosnippet>72</a>///
-<a href=#73 id=73 data-nosnippet>73</a>/// `DP1 = D + 1` (required by [`gqa_expand_to_heads`]'s intermediate rank).
-<a href=#74 id=74 data-nosnippet>74</a></span><span class="kw">pub fn </span>qk_norm_expand_bias&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
-<a href=#75 id=75 data-nosnippet>75</a>    raw_mgr: Tensor&lt;D&gt;,
-<a href=#76 id=76 data-nosnippet>76</a>    norm: <span class="kw-2">&amp;</span>RmsNorm,
-<a href=#77 id=77 data-nosnippet>77</a>    bias_hmr: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#78 id=78 data-nosnippet>78</a>    group_dim: usize,
-<a href=#79 id=79 data-nosnippet>79</a>    nheads: usize,
-<a href=#80 id=80 data-nosnippet>80</a>) -&gt; Tensor&lt;D&gt; {
-<a href=#81 id=81 data-nosnippet>81</a>    <span class="comment">// RmsNorm operates on the last dim only, so the leading shape passes through.
-<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">let </span>normed = norm.forward(raw_mgr);
-<a href=#83 id=83 data-nosnippet>83</a>    <span class="kw">let </span>expanded = gqa_expand_to_heads::&lt;D, DP1&gt;(normed, group_dim, nheads);
-<a href=#84 id=84 data-nosnippet>84</a>    <span class="comment">// Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
-<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">let </span>bias = bias_hmr.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;D&gt;();
-<a href=#86 id=86 data-nosnippet>86</a>    expanded + bias
-<a href=#87 id=87 data-nosnippet>87</a>}
-<a href=#88 id=88 data-nosnippet>88</a>
-<a href=#89 id=89 data-nosnippet>89</a><span class="doccomment">/// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
-<a href=#90 id=90 data-nosnippet>90</a>///
-<a href=#91 id=91 data-nosnippet>91</a>/// Inserts a `mimo_rank` axis at `insert_dim`. When `mimo_x_hmp` is `None`
-<a href=#92 id=92 data-nosnippet>92</a>/// (SISO), the inserted axis has size 1 and `x` is passed through; otherwise
-<a href=#93 id=93 data-nosnippet>93</a>/// broadcasting fills the inserted axis to size `mimo_rank`.
-<a href=#94 id=94 data-nosnippet>94</a>///
-<a href=#95 id=95 data-nosnippet>95</a>/// `DP1 = D + 1`.
-<a href=#96 id=96 data-nosnippet>96</a></span><span class="kw">pub fn </span>build_v_with_mimo&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
-<a href=#97 id=97 data-nosnippet>97</a>    x: Tensor&lt;D&gt;,
-<a href=#98 id=98 data-nosnippet>98</a>    mimo_x_hmp: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#99 id=99 data-nosnippet>99</a>    insert_dim: usize,
-<a href=#100 id=100 data-nosnippet>100</a>) -&gt; Tensor&lt;DP1&gt; {
-<a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">let </span>x_with_rank_axis = x.unsqueeze_dim::&lt;DP1&gt;(insert_dim);
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">match </span>mimo_x_hmp {
-<a href=#103 id=103 data-nosnippet>103</a>        <span class="prelude-val">None </span>=&gt; x_with_rank_axis,
-<a href=#104 id=104 data-nosnippet>104</a>        <span class="prelude-val">Some</span>(mimo_x_hmp) =&gt; {
-<a href=#105 id=105 data-nosnippet>105</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → permute to
-<a href=#106 id=106 data-nosnippet>106</a>            // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
-<a href=#107 id=107 data-nosnippet>107</a>            // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
-<a href=#108 id=108 data-nosnippet>108</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;DP1&gt;();
-<a href=#109 id=109 data-nosnippet>109</a>            x_with_rank_axis * mimo_x_broadcast
-<a href=#110 id=110 data-nosnippet>110</a>        }
-<a href=#111 id=111 data-nosnippet>111</a>    }
-<a href=#112 id=112 data-nosnippet>112</a>}
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="comment">// `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
+<a href=#53 id=53 data-nosnippet>53</a>    // applied to the (positive) softplus *before* negating: a method call
+<a href=#54 id=54 data-nosnippet>54</a>    // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
+<a href=#55 id=55 data-nosnippet>55</a>    // -a_floor)` would collapse the positive softplus to the constant
+<a href=#56 id=56 data-nosnippet>56</a>    // `-a_floor` and yield `A ≡ +a_floor` — a *growing* state (`α &gt; 1`) with a
+<a href=#57 id=57 data-nosnippet>57</a>    // dead `dd_A` projection.
+<a href=#58 id=58 data-nosnippet>58</a>    </span><span class="kw">let </span>a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
+<a href=#59 id=59 data-nosnippet>59</a>    <span class="kw">let </span>da = dt.clone() * a;
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">let </span>lambda = burn::tensor::activation::sigmoid(lambda_raw);
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">let </span>alpha = da.clone().exp();
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">let </span>beta = (-lambda.clone() + <span class="number">1.0</span>) * dt.clone() * alpha.clone();
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="kw">let </span>gamma = lambda * dt.clone();
+<a href=#64 id=64 data-nosnippet>64</a>    TrapezoidCoeffs {
+<a href=#65 id=65 data-nosnippet>65</a>        dt,
+<a href=#66 id=66 data-nosnippet>66</a>        da,
+<a href=#67 id=67 data-nosnippet>67</a>        alpha,
+<a href=#68 id=68 data-nosnippet>68</a>        beta,
+<a href=#69 id=69 data-nosnippet>69</a>        gamma,
+<a href=#70 id=70 data-nosnippet>70</a>    }
+<a href=#71 id=71 data-nosnippet>71</a>}
+<a href=#72 id=72 data-nosnippet>72</a>
+<a href=#73 id=73 data-nosnippet>73</a><span class="doccomment">/// QK-Norm → GQA-expand groups→heads → add per-(head, mimo-rank) bias.
+<a href=#74 id=74 data-nosnippet>74</a>///
+<a href=#75 id=75 data-nosnippet>75</a>/// The input is the raw B/C projection already reshaped to expose the group
+<a href=#76 id=76 data-nosnippet>76</a>/// dim, with last dim = `state_rank`. The output replaces the group dim with
+<a href=#77 id=77 data-nosnippet>77</a>/// the head dim, leaving the last dim untouched.
+<a href=#78 id=78 data-nosnippet>78</a>///
+<a href=#79 id=79 data-nosnippet>79</a>/// `DP1 = D + 1` (required by [`gqa_expand_to_heads`]'s intermediate rank).
+<a href=#80 id=80 data-nosnippet>80</a></span><span class="kw">pub fn </span>qk_norm_expand_bias&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
+<a href=#81 id=81 data-nosnippet>81</a>    raw_mgr: Tensor&lt;D&gt;,
+<a href=#82 id=82 data-nosnippet>82</a>    norm: <span class="kw-2">&amp;</span>RmsNorm,
+<a href=#83 id=83 data-nosnippet>83</a>    bias_hmr: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#84 id=84 data-nosnippet>84</a>    group_dim: usize,
+<a href=#85 id=85 data-nosnippet>85</a>    nheads: usize,
+<a href=#86 id=86 data-nosnippet>86</a>) -&gt; Tensor&lt;D&gt; {
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="comment">// RmsNorm operates on the last dim only, so the leading shape passes through.
+<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">let </span>normed = norm.forward(raw_mgr);
+<a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">let </span>expanded = gqa_expand_to_heads::&lt;D, DP1&gt;(normed, group_dim, nheads);
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="comment">// Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">let </span>bias = bias_hmr.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;D&gt;();
+<a href=#92 id=92 data-nosnippet>92</a>    expanded + bias
+<a href=#93 id=93 data-nosnippet>93</a>}
+<a href=#94 id=94 data-nosnippet>94</a>
+<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
+<a href=#96 id=96 data-nosnippet>96</a>///
+<a href=#97 id=97 data-nosnippet>97</a>/// Inserts a `mimo_rank` axis at `insert_dim`. When `mimo_x_hmp` is `None`
+<a href=#98 id=98 data-nosnippet>98</a>/// (SISO), the inserted axis has size 1 and `x` is passed through; otherwise
+<a href=#99 id=99 data-nosnippet>99</a>/// broadcasting fills the inserted axis to size `mimo_rank`.
+<a href=#100 id=100 data-nosnippet>100</a>///
+<a href=#101 id=101 data-nosnippet>101</a>/// `DP1 = D + 1`.
+<a href=#102 id=102 data-nosnippet>102</a></span><span class="kw">pub fn </span>build_v_with_mimo&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
+<a href=#103 id=103 data-nosnippet>103</a>    x: Tensor&lt;D&gt;,
+<a href=#104 id=104 data-nosnippet>104</a>    mimo_x_hmp: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#105 id=105 data-nosnippet>105</a>    insert_dim: usize,
+<a href=#106 id=106 data-nosnippet>106</a>) -&gt; Tensor&lt;DP1&gt; {
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">let </span>x_with_rank_axis = x.unsqueeze_dim::&lt;DP1&gt;(insert_dim);
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">match </span>mimo_x_hmp {
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="prelude-val">None </span>=&gt; x_with_rank_axis,
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="prelude-val">Some</span>(mimo_x_hmp) =&gt; {
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → permute to
+<a href=#112 id=112 data-nosnippet>112</a>            // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
+<a href=#113 id=113 data-nosnippet>113</a>            // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
+<a href=#114 id=114 data-nosnippet>114</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;DP1&gt;();
+<a href=#115 id=115 data-nosnippet>115</a>            x_with_rank_axis * mimo_x_broadcast
+<a href=#116 id=116 data-nosnippet>116</a>        }
+<a href=#117 id=117 data-nosnippet>117</a>    }
+<a href=#118 id=118 data-nosnippet>118</a>}
 </code></pre></div></section></main></body></html>

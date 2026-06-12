@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/double_ssd/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-74eb0058.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (f20a92ec0 2026-06-07)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/double_ssd/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 — Double-Pass SSD Forward
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/double_ssd/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (b30f3df3b 2026-06-11)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/double_ssd/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 — Double-Pass SSD Forward
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module provides the [`Mamba3::forward_double_ssd`] method:
 <a href=#4 id=4 data-nosnippet>4</a>//! The burn-mamba implementation of the [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal) decomposition:
@@ -377,263 +377,379 @@
 <a href=#377 id=377 data-nosnippet>377</a></span><span class="kw">mod </span>step {
 <a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
 <a href=#379 id=379 data-nosnippet>379</a>
-<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">impl </span>Mamba3 {
-<a href=#381 id=381 data-nosnippet>381</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent form.
-<a href=#382 id=382 data-nosnippet>382</a>        ///
-<a href=#383 id=383 data-nosnippet>383</a>        /// For SISO (mimo_rank=1):
-<a href=#384 id=384 data-nosnippet>384</a>        /// ```text
-<a href=#385 id=385 data-nosnippet>385</a>        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
-<a href=#386 id=386 data-nosnippet>386</a>        ///   yₜ = Cₜᵀ hₜ + D xₜ
-<a href=#387 id=387 data-nosnippet>387</a>        /// ```
-<a href=#388 id=388 data-nosnippet>388</a>        ///
-<a href=#389 id=389 data-nosnippet>389</a>        /// For MIMO (mimo_rank&gt;1):
-<a href=#390 id=390 data-nosnippet>390</a>        /// ```text
-<a href=#391 id=391 data-nosnippet>391</a>        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
-<a href=#392 id=392 data-nosnippet>392</a>        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
-<a href=#393 id=393 data-nosnippet>393</a>        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
-<a href=#394 id=394 data-nosnippet>394</a>        /// ```
-<a href=#395 id=395 data-nosnippet>395</a>        ///
-<a href=#396 id=396 data-nosnippet>396</a>        /// # Shapes
-<a href=#397 id=397 data-nosnippet>397</a>        /// - `input_bd` : `[batch, d_model]`
-<a href=#398 id=398 data-nosnippet>398</a>        /// - output     : `[batch, d_model]`
-<a href=#399 id=399 data-nosnippet>399</a>        </span><span class="attr">#[allow(non_snake_case)]
-<a href=#400 id=400 data-nosnippet>400</a>        </span><span class="kw">pub fn </span>step_double_ssd(
-<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#402 id=402 data-nosnippet>402</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#403 id=403 data-nosnippet>403</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3DoubleSsdCache&gt;,
-<a href=#404 id=404 data-nosnippet>404</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3DoubleSsdCache) {
-<a href=#405 id=405 data-nosnippet>405</a>            <span class="kw">let </span>[batch, d_model] = input_bd.dims();
-<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
-<a href=#407 id=407 data-nosnippet>407</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
-<a href=#408 id=408 data-nosnippet>408</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
-<a href=#409 id=409 data-nosnippet>409</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
-<a href=#411 id=411 data-nosnippet>411</a>            <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
-<a href=#412 id=412 data-nosnippet>412</a>            <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
-<a href=#413 id=413 data-nosnippet>413</a>            <span class="kw">let </span>device = <span class="kw-2">&amp;</span>input_bd.device();
-<a href=#414 id=414 data-nosnippet>414</a>            <span class="kw">let </span>ssm_shape = [batch, nheads, per_head_dim, state_rank];
-<a href=#415 id=415 data-nosnippet>415</a>
-<a href=#416 id=416 data-nosnippet>416</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = cache.unwrap_or_else(|| {
-<a href=#419 id=419 data-nosnippet>419</a>                <span class="kw">let </span>ssm_bhpr = Tensor::zeros(ssm_shape, device);
-<a href=#420 id=420 data-nosnippet>420</a>                <span class="kw">let </span>k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
-<a href=#421 id=421 data-nosnippet>421</a>                <span class="kw">let </span>v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-<a href=#422 id=422 data-nosnippet>422</a>                <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
-<a href=#423 id=423 data-nosnippet>423</a>                    RotationKind::Quaternion4D =&gt; RotationState::identity_quaternion(
-<a href=#424 id=424 data-nosnippet>424</a>                        batch,
-<a href=#425 id=425 data-nosnippet>425</a>                        nheads,
-<a href=#426 id=426 data-nosnippet>426</a>                        <span class="self">self</span>.num_quat_blocks,
-<a href=#427 id=427 data-nosnippet>427</a>                        device,
-<a href=#428 id=428 data-nosnippet>428</a>                    ),
-<a href=#429 id=429 data-nosnippet>429</a>                    RotationKind::Complex2D =&gt; {
-<a href=#430 id=430 data-nosnippet>430</a>                        RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
-<a href=#431 id=431 data-nosnippet>431</a>                    }
-<a href=#432 id=432 data-nosnippet>432</a>                };
-<a href=#433 id=433 data-nosnippet>433</a>                Mamba3DoubleSsdCache {
-<a href=#434 id=434 data-nosnippet>434</a>                    ssm_bhpr,
-<a href=#435 id=435 data-nosnippet>435</a>                    k_state_bmhr,
-<a href=#436 id=436 data-nosnippet>436</a>                    v_state_bhp,
-<a href=#437 id=437 data-nosnippet>437</a>                    rotation,
-<a href=#438 id=438 data-nosnippet>438</a>                }
-<a href=#439 id=439 data-nosnippet>439</a>            });
-<a href=#440 id=440 data-nosnippet>440</a>
-<a href=#441 id=441 data-nosnippet>441</a>            <span class="comment">// ── In-projection ─────────────────────────────────────────────────
-<a href=#442 id=442 data-nosnippet>442</a>            </span><span class="kw">let </span>proj_bd = <span class="self">self</span>.in_proj.forward(input_bd);
-<a href=#443 id=443 data-nosnippet>443</a>            <span class="kw">let </span>bc_size = ngroups * state_rank * mimo_rank;
-<a href=#444 id=444 data-nosnippet>444</a>            <span class="comment">// [batch, *] split along channel dim.
-<a href=#445 id=445 data-nosnippet>445</a>            // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
-<a href=#446 id=446 data-nosnippet>446</a>            </span><span class="attr">#[rustfmt::skip]
-<a href=#447 id=447 data-nosnippet>447</a>            </span><span class="kw">let </span>[
-<a href=#448 id=448 data-nosnippet>448</a>                    z_bi, x_bi,
-<a href=#449 id=449 data-nosnippet>449</a>                    b_raw_bMGR, c_raw_bMGR,
-<a href=#450 id=450 data-nosnippet>450</a>                    dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
-<a href=#451 id=451 data-nosnippet>451</a>                    rot_ba,
-<a href=#452 id=452 data-nosnippet>452</a>            ] = <span class="kw">crate</span>::modules::split_into(
-<a href=#453 id=453 data-nosnippet>453</a>                proj_bd,
-<a href=#454 id=454 data-nosnippet>454</a>                [
-<a href=#455 id=455 data-nosnippet>455</a>                    d_inner, d_inner,
-<a href=#456 id=456 data-nosnippet>456</a>                    bc_size, bc_size,
-<a href=#457 id=457 data-nosnippet>457</a>                    nheads, nheads, nheads,
-<a href=#458 id=458 data-nosnippet>458</a>                    <span class="self">self</span>.num_rotation_channels,
-<a href=#459 id=459 data-nosnippet>459</a>                ],
-<a href=#460 id=460 data-nosnippet>460</a>                <span class="number">1</span>,
-<a href=#461 id=461 data-nosnippet>461</a>            );
-<a href=#462 id=462 data-nosnippet>462</a>
-<a href=#463 id=463 data-nosnippet>463</a>            <span class="comment">// ── Reshape x ─────────────────────────────────────────────────────
-<a href=#464 id=464 data-nosnippet>464</a>            </span><span class="kw">let </span>x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);
-<a href=#465 id=465 data-nosnippet>465</a>
-<a href=#466 id=466 data-nosnippet>466</a>            <span class="comment">// ── Discretisation + trapezoidal coefficients ─────────────────────
-<a href=#467 id=467 data-nosnippet>467</a>            </span><span class="kw">let </span>helpers::TrapezoidCoeffs {
-<a href=#468 id=468 data-nosnippet>468</a>                dt: dt_bh,
-<a href=#469 id=469 data-nosnippet>469</a>                da: _da_bh,
-<a href=#470 id=470 data-nosnippet>470</a>                alpha: alpha_bh,
-<a href=#471 id=471 data-nosnippet>471</a>                beta: beta_bh,
-<a href=#472 id=472 data-nosnippet>472</a>                gamma: gamma_bh,
-<a href=#473 id=473 data-nosnippet>473</a>            } = helpers::trapezoidal_coefficients(
-<a href=#474 id=474 data-nosnippet>474</a>                dd_dt_bh,
-<a href=#475 id=475 data-nosnippet>475</a>                dd_a_raw_bh,
-<a href=#476 id=476 data-nosnippet>476</a>                lambda_raw_bh,
-<a href=#477 id=477 data-nosnippet>477</a>                <span class="self">self</span>.dt_bias_h.val(),
-<a href=#478 id=478 data-nosnippet>478</a>                <span class="self">self</span>.dt_limit,
-<a href=#479 id=479 data-nosnippet>479</a>                <span class="self">self</span>.a_floor,
-<a href=#480 id=480 data-nosnippet>480</a>            );
-<a href=#481 id=481 data-nosnippet>481</a>
-<a href=#482 id=482 data-nosnippet>482</a>            <span class="comment">// ── QK-Norm on B and C ────────────────────────────────────────────
-<a href=#483 id=483 data-nosnippet>483</a>            // Group dim is axis 2 of `_bmgr` (D = 4).
-<a href=#484 id=484 data-nosnippet>484</a>            </span><span class="kw">let </span>b_bmhr = helpers::qk_norm_expand_bias::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(
-<a href=#485 id=485 data-nosnippet>485</a>                b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
-<a href=#486 id=486 data-nosnippet>486</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.b_norm,
-<a href=#487 id=487 data-nosnippet>487</a>                <span class="self">self</span>.b_bias_hmr.val(),
-<a href=#488 id=488 data-nosnippet>488</a>                <span class="number">2</span>,
-<a href=#489 id=489 data-nosnippet>489</a>                nheads,
-<a href=#490 id=490 data-nosnippet>490</a>            );
-<a href=#491 id=491 data-nosnippet>491</a>            <span class="kw">let </span>c_bmhr = helpers::qk_norm_expand_bias::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(
-<a href=#492 id=492 data-nosnippet>492</a>                c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
-<a href=#493 id=493 data-nosnippet>493</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.c_norm,
-<a href=#494 id=494 data-nosnippet>494</a>                <span class="self">self</span>.c_bias_hmr.val(),
-<a href=#495 id=495 data-nosnippet>495</a>                <span class="number">2</span>,
-<a href=#496 id=496 data-nosnippet>496</a>                nheads,
-<a href=#497 id=497 data-nosnippet>497</a>            );
-<a href=#498 id=498 data-nosnippet>498</a>            <span class="macro">assert_eq!</span>([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
-<a href=#499 id=499 data-nosnippet>499</a>
-<a href=#500 id=500 data-nosnippet>500</a>            <span class="comment">// ── Update cumulative rotation, rotate B and C ─────────────────────
-<a href=#501 id=501 data-nosnippet>501</a>            // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
-<a href=#502 id=502 data-nosnippet>502</a>            // See [`rotate_bc_step`].
-<a href=#503 id=503 data-nosnippet>503</a>            </span><span class="kw">let </span>(b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
-<a href=#504 id=504 data-nosnippet>504</a>                rot_ba,
-<a href=#505 id=505 data-nosnippet>505</a>                dt_bh.clone(),
-<a href=#506 id=506 data-nosnippet>506</a>                cache.rotation.clone(),
-<a href=#507 id=507 data-nosnippet>507</a>                b_bmhr,
-<a href=#508 id=508 data-nosnippet>508</a>                c_bmhr,
-<a href=#509 id=509 data-nosnippet>509</a>                <span class="self">self</span>.rotation_kind(),
-<a href=#510 id=510 data-nosnippet>510</a>                <span class="self">self</span>.rope_dim,
-<a href=#511 id=511 data-nosnippet>511</a>            );
-<a href=#512 id=512 data-nosnippet>512</a>
-<a href=#513 id=513 data-nosnippet>513</a>            <span class="comment">// ── Build MIMO value tensors ───────────────────────────────────────
-<a href=#514 id=514 data-nosnippet>514</a>            // Insert the mimo_rank axis at position 1 of `_bhp`.
-<a href=#515 id=515 data-nosnippet>515</a>            </span><span class="kw">let </span>mimo_x_hmp = <span class="self">self</span>.mimo_x_hmp.as_ref().map(|p| p.val());
-<a href=#516 id=516 data-nosnippet>516</a>            <span class="kw">let </span>x_vals_bmhp =
-<a href=#517 id=517 data-nosnippet>517</a>                helpers::build_v_with_mimo::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(x_bhp.clone(), mimo_x_hmp.as_ref(), <span class="number">1</span>);
-<a href=#518 id=518 data-nosnippet>518</a>            <span class="kw">let </span>xs_vals_bmhp = helpers::build_v_with_mimo::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(
-<a href=#519 id=519 data-nosnippet>519</a>                cache.v_state_bhp.clone(),
-<a href=#520 id=520 data-nosnippet>520</a>                mimo_x_hmp.as_ref(),
-<a href=#521 id=521 data-nosnippet>521</a>                <span class="number">1</span>,
-<a href=#522 id=522 data-nosnippet>522</a>            );
-<a href=#523 id=523 data-nosnippet>523</a>
-<a href=#524 id=524 data-nosnippet>524</a>            <span class="comment">// ── SSM state update ───────────────────────────────────────────────
-<a href=#525 id=525 data-nosnippet>525</a>            // new_state[b, h, p, r] = alpha * state
-<a href=#526 id=526 data-nosnippet>526</a>            //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
-<a href=#527 id=527 data-nosnippet>527</a>            //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]
-<a href=#528 id=528 data-nosnippet>528</a>            //
-<a href=#529 id=529 data-nosnippet>529</a>            // For the outer product sum:
-<a href=#530 id=530 data-nosnippet>530</a>            //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
-<a href=#531 id=531 data-nosnippet>531</a>            //   = einsum('bmhp,bmhr-&gt;bhpr', coeff*x_vals, B)
-<a href=#532 id=532 data-nosnippet>532</a>            //   = matmul over m: [b, h, p, m] @ [b, h, m, r]
-<a href=#533 id=533 data-nosnippet>533</a>            // x_vals_bmhp * gamma_b1h1
-<a href=#534 id=534 data-nosnippet>534</a>            // Need gamma as [b, 1, h, 1] to broadcast over m and p:
-<a href=#535 id=535 data-nosnippet>535</a>            </span><span class="kw">let </span>gamma_b1h1 = gamma_bh.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">3</span>]);
-<a href=#536 id=536 data-nosnippet>536</a>            <span class="kw">let </span>beta_b1h1 = beta_bh.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">3</span>]);
-<a href=#537 id=537 data-nosnippet>537</a>
-<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">let </span>x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
-<a href=#539 id=539 data-nosnippet>539</a>            <span class="kw">let </span>x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>            <span class="comment">// einsum('bmhp,bmhr-&gt;bhpr', x_gamma, B_cur):
-<a href=#542 id=542 data-nosnippet>542</a>            </span><span class="kw">let </span>xbt_state_bhpr = {
-<a href=#543 id=543 data-nosnippet>543</a>                <span class="kw">let </span>b_bhmr = b_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
-<a href=#544 id=544 data-nosnippet>544</a>                <span class="kw">let </span>xg_bhpm = x_gamma_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
-<a href=#545 id=545 data-nosnippet>545</a>                xg_bhpm.matmul(b_bhmr)
-<a href=#546 id=546 data-nosnippet>546</a>            };
-<a href=#547 id=547 data-nosnippet>547</a>            <span class="kw">let </span>xbt_prev_bhpr = {
-<a href=#548 id=548 data-nosnippet>548</a>                <span class="kw">let </span>b_state_bhmr = cache.k_state_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
-<a href=#549 id=549 data-nosnippet>549</a>                <span class="kw">let </span>xb_bhpm = x_beta_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
-<a href=#550 id=550 data-nosnippet>550</a>                xb_bhpm.matmul(b_state_bhmr)
-<a href=#551 id=551 data-nosnippet>551</a>            };
-<a href=#552 id=552 data-nosnippet>552</a>
-<a href=#553 id=553 data-nosnippet>553</a>            <span class="kw">let </span>alpha_bh11 = alpha_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]);
-<a href=#554 id=554 data-nosnippet>554</a>            <span class="kw">let </span>new_state_bhpr =
-<a href=#555 id=555 data-nosnippet>555</a>                alpha_bh11 * cache.ssm_bhpr.clone() + xbt_state_bhpr + xbt_prev_bhpr;
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="doccomment">/// One token's in-projection unpacked into the step-shaped pieces shared by
+<a href=#381 id=381 data-nosnippet>381</a>    /// [`Mamba3::step_double_ssd`] and the constant-input shortcuts
+<a href=#382 id=382 data-nosnippet>382</a>    /// ([`Mamba3::step_n_approx`] / [`Mamba3::step_infinite`]): the gate/value
+<a href=#383 id=383 data-nosnippet>383</a>    /// streams, the **pre-rotation** QK-normed B/C, the raw rotation channels,
+<a href=#384 id=384 data-nosnippet>384</a>    /// and the trapezoid coefficients.
+<a href=#385 id=385 data-nosnippet>385</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>StepProjection {
+<a href=#386 id=386 data-nosnippet>386</a>        <span class="doccomment">/// Gate stream `[batch, d_inner]`.
+<a href=#387 id=387 data-nosnippet>387</a>        </span><span class="kw">pub </span>z_bi: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="doccomment">/// Value stream `[batch, nheads, per_head_dim]`.
+<a href=#389 id=389 data-nosnippet>389</a>        </span><span class="kw">pub </span>x_bhp: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased B — **before** the positional rotation.
+<a href=#391 id=391 data-nosnippet>391</a>        </span><span class="kw">pub </span>b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased C — **before** the positional rotation.
+<a href=#393 id=393 data-nosnippet>393</a>        </span><span class="kw">pub </span>c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="doccomment">/// Raw rotation channels `[batch, num_rotation_channels]`.
+<a href=#395 id=395 data-nosnippet>395</a>        </span><span class="kw">pub </span>rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="doccomment">/// `Δ` `[batch, nheads]`.
+<a href=#397 id=397 data-nosnippet>397</a>        </span><span class="kw">pub </span>dt_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#398 id=398 data-nosnippet>398</a>        <span class="doccomment">/// `Δ·A` (negative; the log-decay) `[batch, nheads]`.
+<a href=#399 id=399 data-nosnippet>399</a>        </span><span class="kw">pub </span>da_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="doccomment">/// `α = exp(Δ·A)` `[batch, nheads]`.
+<a href=#401 id=401 data-nosnippet>401</a>        </span><span class="kw">pub </span>alpha_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#402 id=402 data-nosnippet>402</a>        <span class="doccomment">/// `β = (1−λ)·Δ·α` `[batch, nheads]`.
+<a href=#403 id=403 data-nosnippet>403</a>        </span><span class="kw">pub </span>beta_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="doccomment">/// `γ = λ·Δ` `[batch, nheads]`.
+<a href=#405 id=405 data-nosnippet>405</a>        </span><span class="kw">pub </span>gamma_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">impl </span>Mamba3 {
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="doccomment">/// In-projection → split → trapezoid coefficients → QK-norm for a
+<a href=#410 id=410 data-nosnippet>410</a>        /// single token, **stopping before** the positional rotation (which
+<a href=#411 id=411 data-nosnippet>411</a>        /// needs the cache's cumulative rotation).
+<a href=#412 id=412 data-nosnippet>412</a>        </span><span class="attr">#[allow(non_snake_case)]
+<a href=#413 id=413 data-nosnippet>413</a>        </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>step_project(<span class="kw-2">&amp;</span><span class="self">self</span>, input_bd: Tensor&lt;<span class="number">2</span>&gt;) -&gt; StepProjection {
+<a href=#414 id=414 data-nosnippet>414</a>            <span class="kw">let </span>[batch, _d_model] = input_bd.dims();
+<a href=#415 id=415 data-nosnippet>415</a>            <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
+<a href=#416 id=416 data-nosnippet>416</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">let </span>ngroups = <span class="self">self</span>.ngroups;
+<a href=#418 id=418 data-nosnippet>418</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#419 id=419 data-nosnippet>419</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#420 id=420 data-nosnippet>420</a>            <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#421 id=421 data-nosnippet>421</a>
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
+<a href=#423 id=423 data-nosnippet>423</a>            san(<span class="kw-2">&amp;</span>input_bd);
+<a href=#424 id=424 data-nosnippet>424</a>
+<a href=#425 id=425 data-nosnippet>425</a>            <span class="comment">// ── In-projection ─────────────────────────────────────────────────
+<a href=#426 id=426 data-nosnippet>426</a>            </span><span class="kw">let </span>proj_bd = <span class="self">self</span>.in_proj.forward(input_bd);
+<a href=#427 id=427 data-nosnippet>427</a>            san(<span class="kw-2">&amp;</span>proj_bd);
+<a href=#428 id=428 data-nosnippet>428</a>            <span class="kw">let </span>bc_size = ngroups * state_rank * mimo_rank;
+<a href=#429 id=429 data-nosnippet>429</a>            <span class="comment">// [batch, *] split along channel dim.
+<a href=#430 id=430 data-nosnippet>430</a>            // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
+<a href=#431 id=431 data-nosnippet>431</a>            </span><span class="attr">#[rustfmt::skip]
+<a href=#432 id=432 data-nosnippet>432</a>            </span><span class="kw">let </span>[
+<a href=#433 id=433 data-nosnippet>433</a>                    z_bi, x_bi,
+<a href=#434 id=434 data-nosnippet>434</a>                    b_raw_bMGR, c_raw_bMGR,
+<a href=#435 id=435 data-nosnippet>435</a>                    dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
+<a href=#436 id=436 data-nosnippet>436</a>                    rot_ba,
+<a href=#437 id=437 data-nosnippet>437</a>            ] = <span class="kw">crate</span>::modules::split_into(
+<a href=#438 id=438 data-nosnippet>438</a>                proj_bd,
+<a href=#439 id=439 data-nosnippet>439</a>                [
+<a href=#440 id=440 data-nosnippet>440</a>                    d_inner, d_inner,
+<a href=#441 id=441 data-nosnippet>441</a>                    bc_size, bc_size,
+<a href=#442 id=442 data-nosnippet>442</a>                    nheads, nheads, nheads,
+<a href=#443 id=443 data-nosnippet>443</a>                    <span class="self">self</span>.num_rotation_channels,
+<a href=#444 id=444 data-nosnippet>444</a>                ],
+<a href=#445 id=445 data-nosnippet>445</a>                <span class="number">1</span>,
+<a href=#446 id=446 data-nosnippet>446</a>            );
+<a href=#447 id=447 data-nosnippet>447</a>
+<a href=#448 id=448 data-nosnippet>448</a>            <span class="comment">// ── Reshape x ─────────────────────────────────────────────────────
+<a href=#449 id=449 data-nosnippet>449</a>            </span><span class="kw">let </span>x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);
+<a href=#450 id=450 data-nosnippet>450</a>
+<a href=#451 id=451 data-nosnippet>451</a>            <span class="comment">// ── Discretisation + trapezoidal coefficients ─────────────────────
+<a href=#452 id=452 data-nosnippet>452</a>            </span><span class="kw">let </span>helpers::TrapezoidCoeffs {
+<a href=#453 id=453 data-nosnippet>453</a>                dt: dt_bh,
+<a href=#454 id=454 data-nosnippet>454</a>                da: da_bh,
+<a href=#455 id=455 data-nosnippet>455</a>                alpha: alpha_bh,
+<a href=#456 id=456 data-nosnippet>456</a>                beta: beta_bh,
+<a href=#457 id=457 data-nosnippet>457</a>                gamma: gamma_bh,
+<a href=#458 id=458 data-nosnippet>458</a>            } = helpers::trapezoidal_coefficients(
+<a href=#459 id=459 data-nosnippet>459</a>                dd_dt_bh,
+<a href=#460 id=460 data-nosnippet>460</a>                dd_a_raw_bh,
+<a href=#461 id=461 data-nosnippet>461</a>                lambda_raw_bh,
+<a href=#462 id=462 data-nosnippet>462</a>                <span class="self">self</span>.dt_bias_h.val(),
+<a href=#463 id=463 data-nosnippet>463</a>                <span class="self">self</span>.dt_limit,
+<a href=#464 id=464 data-nosnippet>464</a>                <span class="self">self</span>.a_floor,
+<a href=#465 id=465 data-nosnippet>465</a>            );
+<a href=#466 id=466 data-nosnippet>466</a>            san(<span class="kw-2">&amp;</span>dt_bh);
+<a href=#467 id=467 data-nosnippet>467</a>            san(<span class="kw-2">&amp;</span>alpha_bh);
+<a href=#468 id=468 data-nosnippet>468</a>            san(<span class="kw-2">&amp;</span>beta_bh);
+<a href=#469 id=469 data-nosnippet>469</a>            san(<span class="kw-2">&amp;</span>gamma_bh);
+<a href=#470 id=470 data-nosnippet>470</a>
+<a href=#471 id=471 data-nosnippet>471</a>            <span class="comment">// ── QK-Norm on B and C ────────────────────────────────────────────
+<a href=#472 id=472 data-nosnippet>472</a>            // Group dim is axis 2 of `_bmgr` (D = 4).
+<a href=#473 id=473 data-nosnippet>473</a>            </span><span class="kw">let </span>b_bmhr = helpers::qk_norm_expand_bias::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(
+<a href=#474 id=474 data-nosnippet>474</a>                b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+<a href=#475 id=475 data-nosnippet>475</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.b_norm,
+<a href=#476 id=476 data-nosnippet>476</a>                <span class="self">self</span>.b_bias_hmr.val(),
+<a href=#477 id=477 data-nosnippet>477</a>                <span class="number">2</span>,
+<a href=#478 id=478 data-nosnippet>478</a>                nheads,
+<a href=#479 id=479 data-nosnippet>479</a>            );
+<a href=#480 id=480 data-nosnippet>480</a>            <span class="kw">let </span>c_bmhr = helpers::qk_norm_expand_bias::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(
+<a href=#481 id=481 data-nosnippet>481</a>                c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+<a href=#482 id=482 data-nosnippet>482</a>                <span class="kw-2">&amp;</span><span class="self">self</span>.c_norm,
+<a href=#483 id=483 data-nosnippet>483</a>                <span class="self">self</span>.c_bias_hmr.val(),
+<a href=#484 id=484 data-nosnippet>484</a>                <span class="number">2</span>,
+<a href=#485 id=485 data-nosnippet>485</a>                nheads,
+<a href=#486 id=486 data-nosnippet>486</a>            );
+<a href=#487 id=487 data-nosnippet>487</a>            <span class="macro">assert_eq!</span>([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
+<a href=#488 id=488 data-nosnippet>488</a>            san(<span class="kw-2">&amp;</span>b_bmhr);
+<a href=#489 id=489 data-nosnippet>489</a>            san(<span class="kw-2">&amp;</span>c_bmhr);
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>            StepProjection {
+<a href=#492 id=492 data-nosnippet>492</a>                z_bi,
+<a href=#493 id=493 data-nosnippet>493</a>                x_bhp,
+<a href=#494 id=494 data-nosnippet>494</a>                b_bmhr,
+<a href=#495 id=495 data-nosnippet>495</a>                c_bmhr,
+<a href=#496 id=496 data-nosnippet>496</a>                rot_ba,
+<a href=#497 id=497 data-nosnippet>497</a>                dt_bh,
+<a href=#498 id=498 data-nosnippet>498</a>                da_bh,
+<a href=#499 id=499 data-nosnippet>499</a>                alpha_bh,
+<a href=#500 id=500 data-nosnippet>500</a>                beta_bh,
+<a href=#501 id=501 data-nosnippet>501</a>                gamma_bh,
+<a href=#502 id=502 data-nosnippet>502</a>            }
+<a href=#503 id=503 data-nosnippet>503</a>        }
+<a href=#504 id=504 data-nosnippet>504</a>
+<a href=#505 id=505 data-nosnippet>505</a>        <span class="doccomment">/// State→output contraction:
+<a href=#506 id=506 data-nosnippet>506</a>        /// `out[b, m, h, p] = Σᵣ C[b, m, h, r] · state[b, h, p, r]`
+<a href=#507 id=507 data-nosnippet>507</a>        /// (`einsum('bhpr,bmhr-&gt;bmhp', state, C)`).
+<a href=#508 id=508 data-nosnippet>508</a>        </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>step_readout(state_bhpr: Tensor&lt;<span class="number">4</span>&gt;, c_bmhr: Tensor&lt;<span class="number">4</span>&gt;) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
+<a href=#509 id=509 data-nosnippet>509</a>            <span class="kw">let </span>c_bhrm = c_bmhr.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
+<a href=#510 id=510 data-nosnippet>510</a>            <span class="kw">let </span>out_bhpm = state_bhpr.matmul(c_bhrm);
+<a href=#511 id=511 data-nosnippet>511</a>            out_bhpm.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>])
+<a href=#512 id=512 data-nosnippet>512</a>        }
+<a href=#513 id=513 data-nosnippet>513</a>
+<a href=#514 id=514 data-nosnippet>514</a>        <span class="doccomment">/// Shared block tail: `D` skip, gate (or gated RMSNorm), MIMO rank
+<a href=#515 id=515 data-nosnippet>515</a>        /// aggregation, and the output projection.
+<a href=#516 id=516 data-nosnippet>516</a>        ///
+<a href=#517 id=517 data-nosnippet>517</a>        /// `out_m_bmhp` is the raw SSM readout (see [`Mamba3::step_readout`]);
+<a href=#518 id=518 data-nosnippet>518</a>        /// `x_vals_bmhp` the MIMO-expanded values; `z_bi` the gate stream.
+<a href=#519 id=519 data-nosnippet>519</a>        </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>step_finish(
+<a href=#520 id=520 data-nosnippet>520</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#521 id=521 data-nosnippet>521</a>            out_m_bmhp: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#522 id=522 data-nosnippet>522</a>            x_vals_bmhp: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#523 id=523 data-nosnippet>523</a>            z_bi: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#524 id=524 data-nosnippet>524</a>        ) -&gt; Tensor&lt;<span class="number">2</span>&gt; {
+<a href=#525 id=525 data-nosnippet>525</a>            <span class="kw">let </span>[batch, mimo_rank, nheads, per_head_dim] = x_vals_bmhp.dims();
+<a href=#526 id=526 data-nosnippet>526</a>            <span class="kw">let </span>d_inner = <span class="self">self</span>.d_inner();
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a>            <span class="comment">// D skip
+<a href=#529 id=529 data-nosnippet>529</a>            </span><span class="kw">let </span>d_bmhp = <span class="self">self
+<a href=#530 id=530 data-nosnippet>530</a>                </span>.d_h
+<a href=#531 id=531 data-nosnippet>531</a>                .val()
+<a href=#532 id=532 data-nosnippet>532</a>                .unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// d_11h1
+<a href=#533 id=533 data-nosnippet>533</a>                </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// d_bmhp
+<a href=#534 id=534 data-nosnippet>534</a>            </span><span class="kw">let </span>out_m_bmhp = out_m_bmhp + d_bmhp * x_vals_bmhp;
+<a href=#535 id=535 data-nosnippet>535</a>            san(<span class="kw-2">&amp;</span>out_m_bmhp);
+<a href=#536 id=536 data-nosnippet>536</a>
+<a href=#537 id=537 data-nosnippet>537</a>            <span class="comment">// ── Gate (or gated norm) and rank aggregation ─────────────────────
+<a href=#538 id=538 data-nosnippet>538</a>            // When `out_norm` is set, the SiLU gate is replaced by a per-head
+<a href=#539 id=539 data-nosnippet>539</a>            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
+<a href=#540 id=540 data-nosnippet>540</a>            </span><span class="kw">let </span>z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
+<a href=#541 id=541 data-nosnippet>541</a>            <span class="kw">let </span>y_bi = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
+<a href=#542 id=542 data-nosnippet>542</a>                <span class="kw">let </span>mimo_z_hmp = <span class="self">self</span>.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
+<a href=#543 id=543 data-nosnippet>543</a>                <span class="kw">let </span>mimo_o_hmp = <span class="self">self</span>.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
+<a href=#544 id=544 data-nosnippet>544</a>
+<a href=#545 id=545 data-nosnippet>545</a>                <span class="comment">// zₘ = z * mimo_z_hmp[m]
+<a href=#546 id=546 data-nosnippet>546</a>                </span><span class="kw">let </span>z_bmhp = z_bhp
+<a href=#547 id=547 data-nosnippet>547</a>                    .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// z_b1hp
+<a href=#548 id=548 data-nosnippet>548</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// z_bmhp
+<a href=#549 id=549 data-nosnippet>549</a>                // mimo_z_hmp
+<a href=#550 id=550 data-nosnippet>550</a>                </span><span class="kw">let </span>mimo_z_bmhp = mimo_z_hmp
+<a href=#551 id=551 data-nosnippet>551</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_z_mhp
+<a href=#552 id=552 data-nosnippet>552</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_z_1mhp
+<a href=#553 id=553 data-nosnippet>553</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_z_bmhp
+<a href=#554 id=554 data-nosnippet>554</a>                </span><span class="kw">let </span>z_bmhp = z_bmhp * mimo_z_bmhp;
+<a href=#555 id=555 data-nosnippet>555</a>                san(<span class="kw-2">&amp;</span>z_bmhp);
 <a href=#556 id=556 data-nosnippet>556</a>
-<a href=#557 id=557 data-nosnippet>557</a>            <span class="comment">// ── Output ────────────────────────────────────────────────────────
-<a href=#558 id=558 data-nosnippet>558</a>            // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
-<a href=#559 id=559 data-nosnippet>559</a>            // = einsum('bhpr,bmhr-&gt;bmhp', state, C)
-<a href=#560 id=560 data-nosnippet>560</a>            </span><span class="kw">let </span>out_m_bmhp = {
-<a href=#561 id=561 data-nosnippet>561</a>                <span class="kw">let </span>c_bhrm = c_bmhr.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
-<a href=#562 id=562 data-nosnippet>562</a>                <span class="kw">let </span>out_bhpm = new_state_bhpr.clone().matmul(c_bhrm);
-<a href=#563 id=563 data-nosnippet>563</a>                out_bhpm.permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>])
-<a href=#564 id=564 data-nosnippet>564</a>            };
-<a href=#565 id=565 data-nosnippet>565</a>
-<a href=#566 id=566 data-nosnippet>566</a>            <span class="comment">// D skip
-<a href=#567 id=567 data-nosnippet>567</a>            </span><span class="kw">let </span>d_bmhp = <span class="self">self
-<a href=#568 id=568 data-nosnippet>568</a>                </span>.d_h
-<a href=#569 id=569 data-nosnippet>569</a>                .val()
-<a href=#570 id=570 data-nosnippet>570</a>                .unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// d_11h1
-<a href=#571 id=571 data-nosnippet>571</a>                </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// d_bmhp
-<a href=#572 id=572 data-nosnippet>572</a>            </span><span class="kw">let </span>out_m_bmhp = out_m_bmhp + d_bmhp * x_vals_bmhp;
-<a href=#573 id=573 data-nosnippet>573</a>
-<a href=#574 id=574 data-nosnippet>574</a>            <span class="comment">// ── Gate (or gated norm) and rank aggregation ─────────────────────
-<a href=#575 id=575 data-nosnippet>575</a>            // When `out_norm` is set, the SiLU gate is replaced by a per-head
-<a href=#576 id=576 data-nosnippet>576</a>            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
-<a href=#577 id=577 data-nosnippet>577</a>            </span><span class="kw">let </span>z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
-<a href=#578 id=578 data-nosnippet>578</a>            <span class="kw">let </span>y_bi = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
-<a href=#579 id=579 data-nosnippet>579</a>                <span class="kw">let </span>mimo_z_hmp = <span class="self">self</span>.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-<a href=#580 id=580 data-nosnippet>580</a>                <span class="kw">let </span>mimo_o_hmp = <span class="self">self</span>.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-<a href=#581 id=581 data-nosnippet>581</a>
-<a href=#582 id=582 data-nosnippet>582</a>                <span class="comment">// zₘ = z * mimo_z_hmp[m]
-<a href=#583 id=583 data-nosnippet>583</a>                </span><span class="kw">let </span>z_bmhp = z_bhp
-<a href=#584 id=584 data-nosnippet>584</a>                    .unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>) <span class="comment">// z_b1hp
-<a href=#585 id=585 data-nosnippet>585</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// z_bmhp
-<a href=#586 id=586 data-nosnippet>586</a>                // mimo_z_hmp
-<a href=#587 id=587 data-nosnippet>587</a>                </span><span class="kw">let </span>mimo_z_bmhp = mimo_z_hmp
-<a href=#588 id=588 data-nosnippet>588</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_z_mhp
-<a href=#589 id=589 data-nosnippet>589</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_z_1mhp
-<a href=#590 id=590 data-nosnippet>590</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_z_bmhp
-<a href=#591 id=591 data-nosnippet>591</a>                </span><span class="kw">let </span>z_bmhp = z_bmhp * mimo_z_bmhp;
-<a href=#592 id=592 data-nosnippet>592</a>
-<a href=#593 id=593 data-nosnippet>593</a>                <span class="comment">// Per-rank gate or gated norm.
-<a href=#594 id=594 data-nosnippet>594</a>                </span><span class="kw">let </span>combined_bmhp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
-<a href=#595 id=595 data-nosnippet>595</a>                    <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(out_m_bmhp, z_bmhp),
-<a href=#596 id=596 data-nosnippet>596</a>                    <span class="prelude-val">None </span>=&gt; out_m_bmhp * Silu::new().forward(z_bmhp),
-<a href=#597 id=597 data-nosnippet>597</a>                };
-<a href=#598 id=598 data-nosnippet>598</a>
-<a href=#599 id=599 data-nosnippet>599</a>                <span class="comment">// Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
-<a href=#600 id=600 data-nosnippet>600</a>                </span><span class="kw">let </span>mimo_o_bmhp = mimo_o_hmp
-<a href=#601 id=601 data-nosnippet>601</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_o_mhp
-<a href=#602 id=602 data-nosnippet>602</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_o_1mhp
-<a href=#603 id=603 data-nosnippet>603</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_o_bmhp
-<a href=#604 id=604 data-nosnippet>604</a>                </span><span class="kw">let </span>out_bhp: Tensor&lt;<span class="number">3</span>&gt; = (combined_bmhp * mimo_o_bmhp)
-<a href=#605 id=605 data-nosnippet>605</a>                    .sum_dim(<span class="number">1</span>) <span class="comment">// out_b1hp
-<a href=#606 id=606 data-nosnippet>606</a>                    </span>.squeeze_dim(<span class="number">1</span>); <span class="comment">// out_bhp
-<a href=#607 id=607 data-nosnippet>607</a>                </span>out_bhp.reshape([batch, d_inner]) <span class="comment">// y_bi
-<a href=#608 id=608 data-nosnippet>608</a>            </span>} <span class="kw">else </span>{
-<a href=#609 id=609 data-nosnippet>609</a>                <span class="comment">// SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
-<a href=#610 id=610 data-nosnippet>610</a>                </span><span class="kw">let </span>y_bhp: Tensor&lt;<span class="number">3</span>&gt; = out_m_bmhp.squeeze_dim(<span class="number">1</span>);
-<a href=#611 id=611 data-nosnippet>611</a>                <span class="kw">let </span>combined = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
-<a href=#612 id=612 data-nosnippet>612</a>                    <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bhp, z_bhp),
-<a href=#613 id=613 data-nosnippet>613</a>                    <span class="prelude-val">None </span>=&gt; y_bhp * Silu::new().forward(z_bhp),
-<a href=#614 id=614 data-nosnippet>614</a>                };
-<a href=#615 id=615 data-nosnippet>615</a>                combined.reshape([batch, d_inner])
-<a href=#616 id=616 data-nosnippet>616</a>            };
-<a href=#617 id=617 data-nosnippet>617</a>
-<a href=#618 id=618 data-nosnippet>618</a>            <span class="comment">// ── Out-projection ────────────────────────────────────────────────
-<a href=#619 id=619 data-nosnippet>619</a>            </span><span class="kw">let </span>out_bm = <span class="self">self</span>.out_proj.forward(y_bi);
-<a href=#620 id=620 data-nosnippet>620</a>            <span class="macro">assert_eq!</span>([batch, d_model], out_bm.dims());
-<a href=#621 id=621 data-nosnippet>621</a>
-<a href=#622 id=622 data-nosnippet>622</a>            <span class="comment">// ── Update cache ──────────────────────────────────────────────────
-<a href=#623 id=623 data-nosnippet>623</a>            </span>cache.ssm_bhpr = new_state_bhpr;
-<a href=#624 id=624 data-nosnippet>624</a>            cache.k_state_bmhr = b_bmhr;
-<a href=#625 id=625 data-nosnippet>625</a>            cache.v_state_bhp = x_bhp;
-<a href=#626 id=626 data-nosnippet>626</a>            cache.rotation = new_rotation;
-<a href=#627 id=627 data-nosnippet>627</a>
-<a href=#628 id=628 data-nosnippet>628</a>            (out_bm, cache)
-<a href=#629 id=629 data-nosnippet>629</a>        }
-<a href=#630 id=630 data-nosnippet>630</a>    }
-<a href=#631 id=631 data-nosnippet>631</a>}
-<a href=#632 id=632 data-nosnippet>632</a>
-<a href=#633 id=633 data-nosnippet>633</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#634 id=634 data-nosnippet>634</a>// Tests
-<a href=#635 id=635 data-nosnippet>635</a>// ---------------------------------------------------------------------------
-<a href=#636 id=636 data-nosnippet>636</a>
-<a href=#637 id=637 data-nosnippet>637</a></span><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#638 id=638 data-nosnippet>638</a></span><span class="kw">mod </span>tests;
+<a href=#557 id=557 data-nosnippet>557</a>                <span class="comment">// Per-rank gate or gated norm.
+<a href=#558 id=558 data-nosnippet>558</a>                </span><span class="kw">let </span>combined_bmhp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
+<a href=#559 id=559 data-nosnippet>559</a>                    <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(out_m_bmhp, z_bmhp),
+<a href=#560 id=560 data-nosnippet>560</a>                    <span class="prelude-val">None </span>=&gt; out_m_bmhp * Silu::new().forward(z_bmhp),
+<a href=#561 id=561 data-nosnippet>561</a>                };
+<a href=#562 id=562 data-nosnippet>562</a>                san(<span class="kw-2">&amp;</span>combined_bmhp);
+<a href=#563 id=563 data-nosnippet>563</a>
+<a href=#564 id=564 data-nosnippet>564</a>                <span class="comment">// Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
+<a href=#565 id=565 data-nosnippet>565</a>                </span><span class="kw">let </span>mimo_o_bmhp = mimo_o_hmp
+<a href=#566 id=566 data-nosnippet>566</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_o_mhp
+<a href=#567 id=567 data-nosnippet>567</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_o_1mhp
+<a href=#568 id=568 data-nosnippet>568</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_o_bmhp
+<a href=#569 id=569 data-nosnippet>569</a>                </span><span class="kw">let </span>out_bhp: Tensor&lt;<span class="number">3</span>&gt; = (combined_bmhp * mimo_o_bmhp)
+<a href=#570 id=570 data-nosnippet>570</a>                    .sum_dim(<span class="number">1</span>) <span class="comment">// out_b1hp
+<a href=#571 id=571 data-nosnippet>571</a>                    </span>.squeeze_dim(<span class="number">1</span>); <span class="comment">// out_bhp
+<a href=#572 id=572 data-nosnippet>572</a>                </span>san(<span class="kw-2">&amp;</span>out_bhp);
+<a href=#573 id=573 data-nosnippet>573</a>                out_bhp.reshape([batch, d_inner]) <span class="comment">// y_bi
+<a href=#574 id=574 data-nosnippet>574</a>            </span>} <span class="kw">else </span>{
+<a href=#575 id=575 data-nosnippet>575</a>                <span class="comment">// SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
+<a href=#576 id=576 data-nosnippet>576</a>                </span><span class="kw">let </span>y_bhp: Tensor&lt;<span class="number">3</span>&gt; = out_m_bmhp.squeeze_dim(<span class="number">1</span>);
+<a href=#577 id=577 data-nosnippet>577</a>                <span class="kw">let </span>combined = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
+<a href=#578 id=578 data-nosnippet>578</a>                    <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bhp, z_bhp),
+<a href=#579 id=579 data-nosnippet>579</a>                    <span class="prelude-val">None </span>=&gt; y_bhp * Silu::new().forward(z_bhp),
+<a href=#580 id=580 data-nosnippet>580</a>                };
+<a href=#581 id=581 data-nosnippet>581</a>                san(<span class="kw-2">&amp;</span>combined);
+<a href=#582 id=582 data-nosnippet>582</a>                combined.reshape([batch, d_inner])
+<a href=#583 id=583 data-nosnippet>583</a>            };
+<a href=#584 id=584 data-nosnippet>584</a>
+<a href=#585 id=585 data-nosnippet>585</a>            <span class="comment">// ── Out-projection ────────────────────────────────────────────────
+<a href=#586 id=586 data-nosnippet>586</a>            </span><span class="kw">let </span>out_bm = <span class="self">self</span>.out_proj.forward(y_bi);
+<a href=#587 id=587 data-nosnippet>587</a>            san(<span class="kw-2">&amp;</span>out_bm);
+<a href=#588 id=588 data-nosnippet>588</a>            out_bm
+<a href=#589 id=589 data-nosnippet>589</a>        }
+<a href=#590 id=590 data-nosnippet>590</a>
+<a href=#591 id=591 data-nosnippet>591</a>        <span class="doccomment">/// Process a **single token** using the pure recurrent form.
+<a href=#592 id=592 data-nosnippet>592</a>        ///
+<a href=#593 id=593 data-nosnippet>593</a>        /// For SISO (mimo_rank=1):
+<a href=#594 id=594 data-nosnippet>594</a>        /// ```text
+<a href=#595 id=595 data-nosnippet>595</a>        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
+<a href=#596 id=596 data-nosnippet>596</a>        ///   yₜ = Cₜᵀ hₜ + D xₜ
+<a href=#597 id=597 data-nosnippet>597</a>        /// ```
+<a href=#598 id=598 data-nosnippet>598</a>        ///
+<a href=#599 id=599 data-nosnippet>599</a>        /// For MIMO (mimo_rank&gt;1):
+<a href=#600 id=600 data-nosnippet>600</a>        /// ```text
+<a href=#601 id=601 data-nosnippet>601</a>        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
+<a href=#602 id=602 data-nosnippet>602</a>        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
+<a href=#603 id=603 data-nosnippet>603</a>        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
+<a href=#604 id=604 data-nosnippet>604</a>        /// ```
+<a href=#605 id=605 data-nosnippet>605</a>        ///
+<a href=#606 id=606 data-nosnippet>606</a>        /// # Shapes
+<a href=#607 id=607 data-nosnippet>607</a>        /// - `input_bd` : `[batch, d_model]`
+<a href=#608 id=608 data-nosnippet>608</a>        /// - output     : `[batch, d_model]`
+<a href=#609 id=609 data-nosnippet>609</a>        </span><span class="attr">#[allow(non_snake_case)]
+<a href=#610 id=610 data-nosnippet>610</a>        </span><span class="kw">pub fn </span>step_double_ssd(
+<a href=#611 id=611 data-nosnippet>611</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#612 id=612 data-nosnippet>612</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#613 id=613 data-nosnippet>613</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3DoubleSsdCache&gt;,
+<a href=#614 id=614 data-nosnippet>614</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3DoubleSsdCache) {
+<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">let </span>[batch, _d_model] = input_bd.dims();
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="kw">let </span>nheads = <span class="self">self</span>.nheads();
+<a href=#617 id=617 data-nosnippet>617</a>            <span class="kw">let </span>per_head_dim = <span class="self">self</span>.per_head_dim();
+<a href=#618 id=618 data-nosnippet>618</a>            <span class="kw">let </span>state_rank = <span class="self">self</span>.state_rank;
+<a href=#619 id=619 data-nosnippet>619</a>            <span class="kw">let </span>num_rope_angles = <span class="self">self</span>.num_rope_angles;
+<a href=#620 id=620 data-nosnippet>620</a>            <span class="kw">let </span>mimo_rank = <span class="self">self</span>.mimo_rank;
+<a href=#621 id=621 data-nosnippet>621</a>            <span class="kw">let </span>device = <span class="kw-2">&amp;</span>input_bd.device();
+<a href=#622 id=622 data-nosnippet>622</a>            <span class="kw">let </span>ssm_shape = [batch, nheads, per_head_dim, state_rank];
+<a href=#623 id=623 data-nosnippet>623</a>
+<a href=#624 id=624 data-nosnippet>624</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = cache.unwrap_or_else(|| {
+<a href=#625 id=625 data-nosnippet>625</a>                <span class="kw">let </span>ssm_bhpr = Tensor::zeros(ssm_shape, device);
+<a href=#626 id=626 data-nosnippet>626</a>                <span class="kw">let </span>k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
+<a href=#627 id=627 data-nosnippet>627</a>                <span class="kw">let </span>v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+<a href=#628 id=628 data-nosnippet>628</a>                <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
+<a href=#629 id=629 data-nosnippet>629</a>                    RotationKind::Quaternion4D =&gt; RotationState::identity_quaternion(
+<a href=#630 id=630 data-nosnippet>630</a>                        batch,
+<a href=#631 id=631 data-nosnippet>631</a>                        nheads,
+<a href=#632 id=632 data-nosnippet>632</a>                        <span class="self">self</span>.num_quat_blocks,
+<a href=#633 id=633 data-nosnippet>633</a>                        device,
+<a href=#634 id=634 data-nosnippet>634</a>                    ),
+<a href=#635 id=635 data-nosnippet>635</a>                    RotationKind::Complex2D =&gt; {
+<a href=#636 id=636 data-nosnippet>636</a>                        RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
+<a href=#637 id=637 data-nosnippet>637</a>                    }
+<a href=#638 id=638 data-nosnippet>638</a>                };
+<a href=#639 id=639 data-nosnippet>639</a>                Mamba3DoubleSsdCache {
+<a href=#640 id=640 data-nosnippet>640</a>                    ssm_bhpr,
+<a href=#641 id=641 data-nosnippet>641</a>                    k_state_bmhr,
+<a href=#642 id=642 data-nosnippet>642</a>                    v_state_bhp,
+<a href=#643 id=643 data-nosnippet>643</a>                    rotation,
+<a href=#644 id=644 data-nosnippet>644</a>                }
+<a href=#645 id=645 data-nosnippet>645</a>            });
+<a href=#646 id=646 data-nosnippet>646</a>
+<a href=#647 id=647 data-nosnippet>647</a>            <span class="comment">// ── In-projection → coefficients → QK-norm ────────────────────────
+<a href=#648 id=648 data-nosnippet>648</a>            </span><span class="kw">let </span>StepProjection {
+<a href=#649 id=649 data-nosnippet>649</a>                z_bi,
+<a href=#650 id=650 data-nosnippet>650</a>                x_bhp,
+<a href=#651 id=651 data-nosnippet>651</a>                b_bmhr,
+<a href=#652 id=652 data-nosnippet>652</a>                c_bmhr,
+<a href=#653 id=653 data-nosnippet>653</a>                rot_ba,
+<a href=#654 id=654 data-nosnippet>654</a>                dt_bh,
+<a href=#655 id=655 data-nosnippet>655</a>                da_bh: <span class="kw">_</span>,
+<a href=#656 id=656 data-nosnippet>656</a>                alpha_bh,
+<a href=#657 id=657 data-nosnippet>657</a>                beta_bh,
+<a href=#658 id=658 data-nosnippet>658</a>                gamma_bh,
+<a href=#659 id=659 data-nosnippet>659</a>            } = <span class="self">self</span>.step_project(input_bd);
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a>            <span class="comment">// ── Update cumulative rotation, rotate B and C ─────────────────────
+<a href=#662 id=662 data-nosnippet>662</a>            // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
+<a href=#663 id=663 data-nosnippet>663</a>            // See [`rotate_bc_step`].
+<a href=#664 id=664 data-nosnippet>664</a>            </span><span class="kw">let </span>(b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
+<a href=#665 id=665 data-nosnippet>665</a>                rot_ba,
+<a href=#666 id=666 data-nosnippet>666</a>                dt_bh.clone(),
+<a href=#667 id=667 data-nosnippet>667</a>                cache.rotation.clone(),
+<a href=#668 id=668 data-nosnippet>668</a>                b_bmhr,
+<a href=#669 id=669 data-nosnippet>669</a>                c_bmhr,
+<a href=#670 id=670 data-nosnippet>670</a>                <span class="self">self</span>.rotation_kind(),
+<a href=#671 id=671 data-nosnippet>671</a>                <span class="self">self</span>.rope_dim,
+<a href=#672 id=672 data-nosnippet>672</a>            );
+<a href=#673 id=673 data-nosnippet>673</a>            san(<span class="kw-2">&amp;</span>b_bmhr);
+<a href=#674 id=674 data-nosnippet>674</a>            san(<span class="kw-2">&amp;</span>c_bmhr);
+<a href=#675 id=675 data-nosnippet>675</a>            new_rotation.sanity();
+<a href=#676 id=676 data-nosnippet>676</a>
+<a href=#677 id=677 data-nosnippet>677</a>            <span class="comment">// ── Build MIMO value tensors ───────────────────────────────────────
+<a href=#678 id=678 data-nosnippet>678</a>            // Insert the mimo_rank axis at position 1 of `_bhp`.
+<a href=#679 id=679 data-nosnippet>679</a>            </span><span class="kw">let </span>mimo_x_hmp = <span class="self">self</span>.mimo_x_hmp.as_ref().map(|p| p.val());
+<a href=#680 id=680 data-nosnippet>680</a>            <span class="kw">let </span>x_vals_bmhp =
+<a href=#681 id=681 data-nosnippet>681</a>                helpers::build_v_with_mimo::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(x_bhp.clone(), mimo_x_hmp.as_ref(), <span class="number">1</span>);
+<a href=#682 id=682 data-nosnippet>682</a>            san(<span class="kw-2">&amp;</span>x_vals_bmhp);
+<a href=#683 id=683 data-nosnippet>683</a>            <span class="kw">let </span>xs_vals_bmhp = helpers::build_v_with_mimo::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(
+<a href=#684 id=684 data-nosnippet>684</a>                cache.v_state_bhp.clone(),
+<a href=#685 id=685 data-nosnippet>685</a>                mimo_x_hmp.as_ref(),
+<a href=#686 id=686 data-nosnippet>686</a>                <span class="number">1</span>,
+<a href=#687 id=687 data-nosnippet>687</a>            );
+<a href=#688 id=688 data-nosnippet>688</a>            san(<span class="kw-2">&amp;</span>xs_vals_bmhp);
+<a href=#689 id=689 data-nosnippet>689</a>
+<a href=#690 id=690 data-nosnippet>690</a>            <span class="comment">// ── SSM state update ───────────────────────────────────────────────
+<a href=#691 id=691 data-nosnippet>691</a>            // new_state[b, h, p, r] = alpha * state
+<a href=#692 id=692 data-nosnippet>692</a>            //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
+<a href=#693 id=693 data-nosnippet>693</a>            //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]
+<a href=#694 id=694 data-nosnippet>694</a>            //
+<a href=#695 id=695 data-nosnippet>695</a>            // For the outer product sum:
+<a href=#696 id=696 data-nosnippet>696</a>            //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
+<a href=#697 id=697 data-nosnippet>697</a>            //   = einsum('bmhp,bmhr-&gt;bhpr', coeff*x_vals, B)
+<a href=#698 id=698 data-nosnippet>698</a>            //   = matmul over m: [b, h, p, m] @ [b, h, m, r]
+<a href=#699 id=699 data-nosnippet>699</a>            // x_vals_bmhp * gamma_b1h1
+<a href=#700 id=700 data-nosnippet>700</a>            // Need gamma as [b, 1, h, 1] to broadcast over m and p:
+<a href=#701 id=701 data-nosnippet>701</a>            </span><span class="kw">let </span>gamma_b1h1 = gamma_bh.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">3</span>]);
+<a href=#702 id=702 data-nosnippet>702</a>            <span class="kw">let </span>beta_b1h1 = beta_bh.clone().unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">3</span>]);
+<a href=#703 id=703 data-nosnippet>703</a>
+<a href=#704 id=704 data-nosnippet>704</a>            <span class="kw">let </span>x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
+<a href=#705 id=705 data-nosnippet>705</a>            san(<span class="kw-2">&amp;</span>x_gamma_bmhp);
+<a href=#706 id=706 data-nosnippet>706</a>            <span class="kw">let </span>x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
+<a href=#707 id=707 data-nosnippet>707</a>            san(<span class="kw-2">&amp;</span>x_beta_bmhp);
+<a href=#708 id=708 data-nosnippet>708</a>
+<a href=#709 id=709 data-nosnippet>709</a>            <span class="comment">// einsum('bmhp,bmhr-&gt;bhpr', x_gamma, B_cur):
+<a href=#710 id=710 data-nosnippet>710</a>            </span><span class="kw">let </span>xbt_state_bhpr = {
+<a href=#711 id=711 data-nosnippet>711</a>                <span class="kw">let </span>b_bhmr = b_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#712 id=712 data-nosnippet>712</a>                <span class="kw">let </span>xg_bhpm = x_gamma_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
+<a href=#713 id=713 data-nosnippet>713</a>                xg_bhpm.matmul(b_bhmr)
+<a href=#714 id=714 data-nosnippet>714</a>            };
+<a href=#715 id=715 data-nosnippet>715</a>            san(<span class="kw-2">&amp;</span>xbt_state_bhpr);
+<a href=#716 id=716 data-nosnippet>716</a>            <span class="kw">let </span>xbt_prev_bhpr = {
+<a href=#717 id=717 data-nosnippet>717</a>                <span class="kw">let </span>b_state_bhmr = cache.k_state_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#718 id=718 data-nosnippet>718</a>                <span class="kw">let </span>xb_bhpm = x_beta_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
+<a href=#719 id=719 data-nosnippet>719</a>                xb_bhpm.matmul(b_state_bhmr)
+<a href=#720 id=720 data-nosnippet>720</a>            };
+<a href=#721 id=721 data-nosnippet>721</a>            san(<span class="kw-2">&amp;</span>xbt_prev_bhpr);
+<a href=#722 id=722 data-nosnippet>722</a>
+<a href=#723 id=723 data-nosnippet>723</a>            <span class="kw">let </span>alpha_bh11 = alpha_bh.unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">3</span>]);
+<a href=#724 id=724 data-nosnippet>724</a>            <span class="kw">let </span>new_state_bhpr =
+<a href=#725 id=725 data-nosnippet>725</a>                alpha_bh11 * cache.ssm_bhpr.clone() + xbt_state_bhpr + xbt_prev_bhpr;
+<a href=#726 id=726 data-nosnippet>726</a>            san(<span class="kw-2">&amp;</span>new_state_bhpr);
+<a href=#727 id=727 data-nosnippet>727</a>
+<a href=#728 id=728 data-nosnippet>728</a>            <span class="comment">// ── Output ────────────────────────────────────────────────────────
+<a href=#729 id=729 data-nosnippet>729</a>            // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
+<a href=#730 id=730 data-nosnippet>730</a>            </span><span class="kw">let </span>out_m_bmhp = <span class="self">Self</span>::step_readout(new_state_bhpr.clone(), c_bmhr);
+<a href=#731 id=731 data-nosnippet>731</a>            san(<span class="kw-2">&amp;</span>out_m_bmhp);
+<a href=#732 id=732 data-nosnippet>732</a>
+<a href=#733 id=733 data-nosnippet>733</a>            <span class="comment">// ── D skip, gate (or gated norm), rank aggregation, out-projection ─
+<a href=#734 id=734 data-nosnippet>734</a>            </span><span class="kw">let </span>out_bm = <span class="self">self</span>.step_finish(out_m_bmhp, x_vals_bmhp, z_bi);
+<a href=#735 id=735 data-nosnippet>735</a>
+<a href=#736 id=736 data-nosnippet>736</a>            <span class="comment">// ── Update cache ──────────────────────────────────────────────────
+<a href=#737 id=737 data-nosnippet>737</a>            </span>cache.ssm_bhpr = new_state_bhpr;
+<a href=#738 id=738 data-nosnippet>738</a>            cache.k_state_bmhr = b_bmhr;
+<a href=#739 id=739 data-nosnippet>739</a>            cache.v_state_bhp = x_bhp;
+<a href=#740 id=740 data-nosnippet>740</a>            cache.rotation = new_rotation;
+<a href=#741 id=741 data-nosnippet>741</a>
+<a href=#742 id=742 data-nosnippet>742</a>            (out_bm, cache)
+<a href=#743 id=743 data-nosnippet>743</a>        }
+<a href=#744 id=744 data-nosnippet>744</a>    }
+<a href=#745 id=745 data-nosnippet>745</a>}
+<a href=#746 id=746 data-nosnippet>746</a>
+<a href=#747 id=747 data-nosnippet>747</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>step::StepProjection;
+<a href=#748 id=748 data-nosnippet>748</a>
+<a href=#749 id=749 data-nosnippet>749</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#750 id=750 data-nosnippet>750</a>// Tests
+<a href=#751 id=751 data-nosnippet>751</a>// ---------------------------------------------------------------------------
+<a href=#752 id=752 data-nosnippet>752</a>
+<a href=#753 id=753 data-nosnippet>753</a></span><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#754 id=754 data-nosnippet>754</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

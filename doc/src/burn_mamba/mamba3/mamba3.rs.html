@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/mamba3.rs`."><title>mamba3.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-74eb0058.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (f20a92ec0 2026-06-07)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>mamba3.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/mamba3.rs`."><title>mamba3.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (b30f3df3b 2026-06-11)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fcd733ba.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>mamba3.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module implements the core **Mamba-3 layer** from the paper
 <a href=#4 id=4 data-nosnippet>4</a>//! *"The Mamba-3 Framework: Structured State Spaces with Trapezoidal
@@ -721,23 +721,24 @@
 <a href=#721 id=721 data-nosnippet>721</a>            <span class="kw">let </span>device = input_bd.device();
 <a href=#722 id=722 data-nosnippet>722</a>
 <a href=#723 id=723 data-nosnippet>723</a>            <span class="macro">assert_eq!</span>(nheads % ngroups, <span class="number">0</span>);
-<a href=#724 id=724 data-nosnippet>724</a>
-<a href=#725 id=725 data-nosnippet>725</a>            <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
-<a href=#726 id=726 data-nosnippet>726</a>            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
-<a href=#727 id=727 data-nosnippet>727</a>            </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
-<a href=#728 id=728 data-nosnippet>728</a>
-<a href=#729 id=729 data-nosnippet>729</a>            <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
-<a href=#730 id=730 data-nosnippet>730</a>            </span><span class="kw">match </span>cache {
-<a href=#731 id=731 data-nosnippet>731</a>                Mamba3Cache::DoubleSsd(cache) =&gt; {
-<a href=#732 id=732 data-nosnippet>732</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_double_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
-<a href=#733 id=733 data-nosnippet>733</a>                    (out_bsm, cache.into())
-<a href=#734 id=734 data-nosnippet>734</a>                }
-<a href=#735 id=735 data-nosnippet>735</a>                Mamba3Cache::SingleSsd(cache) =&gt; {
-<a href=#736 id=736 data-nosnippet>736</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_single_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
-<a href=#737 id=737 data-nosnippet>737</a>                    (out_bsm, cache.into())
-<a href=#738 id=738 data-nosnippet>738</a>                }
-<a href=#739 id=739 data-nosnippet>739</a>            }
-<a href=#740 id=740 data-nosnippet>740</a>        }
-<a href=#741 id=741 data-nosnippet>741</a>    }
-<a href=#742 id=742 data-nosnippet>742</a>}
+<a href=#724 id=724 data-nosnippet>724</a>            san(<span class="kw-2">&amp;</span>input_bd);
+<a href=#725 id=725 data-nosnippet>725</a>
+<a href=#726 id=726 data-nosnippet>726</a>            <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
+<a href=#727 id=727 data-nosnippet>727</a>            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
+<a href=#728 id=728 data-nosnippet>728</a>            </span><span class="kw">let </span>cache = cache.unwrap_or_else(|| <span class="self">self</span>.zero_cache(batch, <span class="kw-2">&amp;</span>device));
+<a href=#729 id=729 data-nosnippet>729</a>
+<a href=#730 id=730 data-nosnippet>730</a>            <span class="comment">// ── SSD Pathway Selection ─────────────────────────────────────────────
+<a href=#731 id=731 data-nosnippet>731</a>            </span><span class="kw">match </span>cache {
+<a href=#732 id=732 data-nosnippet>732</a>                Mamba3Cache::DoubleSsd(cache) =&gt; {
+<a href=#733 id=733 data-nosnippet>733</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_double_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
+<a href=#734 id=734 data-nosnippet>734</a>                    (out_bsm, cache.into())
+<a href=#735 id=735 data-nosnippet>735</a>                }
+<a href=#736 id=736 data-nosnippet>736</a>                Mamba3Cache::SingleSsd(cache) =&gt; {
+<a href=#737 id=737 data-nosnippet>737</a>                    <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.step_single_ssd(input_bd, <span class="prelude-val">Some</span>(cache));
+<a href=#738 id=738 data-nosnippet>738</a>                    (out_bsm, cache.into())
+<a href=#739 id=739 data-nosnippet>739</a>                }
+<a href=#740 id=740 data-nosnippet>740</a>            }
+<a href=#741 id=741 data-nosnippet>741</a>        }
+<a href=#742 id=742 data-nosnippet>742</a>    }
+<a href=#743 id=743 data-nosnippet>743</a>}
 </code></pre></div></section></main></body></html>
