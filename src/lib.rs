@@ -82,9 +82,15 @@ pub mod utils;
 ///
 /// Compiled-in guard (off by default) for debugging numerical issues; leaving
 /// it `false` removes the check entirely.
+#[cfg(feature = "check-nan")]
 pub const DENY_NAN: bool = true;
+#[cfg(not(feature = "check-nan"))]
+pub const DENY_NAN: bool = false;
 
 /// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
 ///
 /// Compiled-in guard (off by default), companion to [`DENY_NAN`].
+#[cfg(feature = "check-inf")]
 pub const DENY_INF: bool = true;
+#[cfg(not(feature = "check-inf"))]
+pub const DENY_INF: bool = false;

@@ -11,6 +11,8 @@ mamba3 = ["autodiff"]
 autodiff = ["burn/autodiff"]
 cubecl = ["dep:burn-cubecl", "burn/cubecl"]
 fusion = ["burn/fusion", "dep:burn-fusion"]
+check-inf = []
+check-nan = []
 # Backend selection. With the Dispatch architecture each feature simply enables
 # the corresponding burn backend; multiple may be compiled in simultaneously.
 # At runtime the examples (and tests) use `Device::default()`, which resolves to

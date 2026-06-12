@@ -721,6 +721,7 @@ mod step {
             let device = input_bd.device();
 
             assert_eq!(nheads % ngroups, 0);
+            san(&input_bd);
 
             // ── Initialise cache if not provided ──────────────────────────────────
             // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).

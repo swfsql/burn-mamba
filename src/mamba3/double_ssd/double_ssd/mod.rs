@@ -414,6 +414,7 @@ mod step {
             let ssm_shape = [batch, nheads, per_head_dim, state_rank];
 
             assert_eq!(nheads % ngroups, 0);
+            san(&input_bd);
 
             let mut cache = cache.unwrap_or_else(|| {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
@@ -440,6 +441,7 @@ mod step {
 
             // ── In-projection ─────────────────────────────────────────────────
             let proj_bd = self.in_proj.forward(input_bd);
+            san(&proj_bd);
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
@@ -478,6 +480,10 @@ mod step {
                 self.dt_limit,
                 self.a_floor,
             );
+            san(&dt_bh);
+            san(&alpha_bh);
+            san(&beta_bh);
+            san(&gamma_bh);
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
             // Group dim is axis 2 of `_bmgr` (D = 4).
@@ -496,6 +502,8 @@ mod step {
                 nheads,
             );
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
+            san(&b_bmhr);
+            san(&c_bmhr);
 
             // ── Update cumulative rotation, rotate B and C ─────────────────────
             // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
@@ -509,17 +517,22 @@ mod step {
                 self.rotation_kind(),
                 self.rope_dim,
             );
+            san(&b_bmhr);
+            san(&c_bmhr);
+            new_rotation.sanity();
 
             // ── Build MIMO value tensors ───────────────────────────────────────
             // Insert the mimo_rank axis at position 1 of `_bhp`.
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let x_vals_bmhp =
                 helpers::build_v_with_mimo::<3, 4>(x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
+            san(&x_vals_bmhp);
             let xs_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
                 cache.v_state_bhp.clone(),
                 mimo_x_hmp.as_ref(),
                 1,
             );
+            san(&xs_vals_bmhp);
 
             // ── SSM state update ───────────────────────────────────────────────
             // new_state[b, h, p, r] = alpha * state
@@ -536,7 +549,9 @@ mod step {
             let beta_b1h1 = beta_bh.clone().unsqueeze_dims::<4>(&[1, 3]);
 
             let x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
+            san(&x_gamma_bmhp);
             let x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
+            san(&x_beta_bmhp);
 
             // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
             let xbt_state_bhpr = {
@@ -544,15 +559,18 @@ mod step {
                 let xg_bhpm = x_gamma_bmhp.permute([0, 2, 3, 1]);
                 xg_bhpm.matmul(b_bhmr)
             };
+            san(&xbt_state_bhpr);
             let xbt_prev_bhpr = {
                 let b_state_bhmr = cache.k_state_bmhr.clone().permute([0, 2, 1, 3]);
                 let xb_bhpm = x_beta_bmhp.permute([0, 2, 3, 1]);
                 xb_bhpm.matmul(b_state_bhmr)
             };
+            san(&xbt_prev_bhpr);
 
             let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
             let new_state_bhpr =
                 alpha_bh11 * cache.ssm_bhpr.clone() + xbt_state_bhpr + xbt_prev_bhpr;
+            san(&new_state_bhpr);
 
             // ── Output ────────────────────────────────────────────────────────
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
@@ -562,6 +580,7 @@ mod step {
                 let out_bhpm = new_state_bhpr.clone().matmul(c_bhrm);
                 out_bhpm.permute([0, 3, 1, 2])
             };
+            san(&out_m_bmhp);
 
             // D skip
             let d_bmhp = self
@@ -570,6 +589,7 @@ mod step {
                 .unsqueeze_dims::<4>(&[0, 1, 3]) // d_11h1
                 .expand([batch, mimo_rank, nheads, per_head_dim]); // d_bmhp
             let out_m_bmhp = out_m_bmhp + d_bmhp * x_vals_bmhp;
+            san(&out_m_bmhp);
 
             // ── Gate (or gated norm) and rank aggregation ─────────────────────
             // When `out_norm` is set, the SiLU gate is replaced by a per-head
@@ -589,12 +609,14 @@ mod step {
                     .unsqueeze_dim::<4>(0) // mimo_z_1mhp
                     .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_z_bmhp
                 let z_bmhp = z_bmhp * mimo_z_bmhp;
+                san(&z_bmhp);
 
                 // Per-rank gate or gated norm.
                 let combined_bmhp = match &self.out_norm {
                     Some(norm) => norm.forward(out_m_bmhp, z_bmhp),
                     None => out_m_bmhp * Silu::new().forward(z_bmhp),
                 };
+                san(&combined_bmhp);
 
                 // Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
                 let mimo_o_bmhp = mimo_o_hmp
@@ -604,6 +626,7 @@ mod step {
                 let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
                     .sum_dim(1) // out_b1hp
                     .squeeze_dim(1); // out_bhp
+                san(&out_bhp);
                 out_bhp.reshape([batch, d_inner]) // y_bi
             } else {
                 // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
@@ -612,12 +635,14 @@ mod step {
                     Some(norm) => norm.forward(y_bhp, z_bhp),
                     None => y_bhp * Silu::new().forward(z_bhp),
                 };
+                san(&combined);
                 combined.reshape([batch, d_inner])
             };
 
             // ── Out-projection ────────────────────────────────────────────────
             let out_bm = self.out_proj.forward(y_bi);
             assert_eq!([batch, d_model], out_bm.dims());
+            san(&out_bm);
 
             // ── Update cache ──────────────────────────────────────────────────
             cache.ssm_bhpr = new_state_bhpr;
