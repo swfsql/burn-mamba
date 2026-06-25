@@ -114,18 +114,18 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     // `combined_backward` operates on `F<B>` primitives, so wrap the high-level
     // `Tensor` inputs (and unwrap the `F` outputs back to `Tensor` below).
     let grads = combined_backward::<B>(
-        F::new(d_y_bnlhp.clone().into_primitive()),
-        F::new(d_final_bhpr.into_primitive()),
-        F::new(x_bnlhp.into_primitive()),
-        F::new(dt_discretized_bhnl.clone().into_primitive()),
-        F::new(b_bnlhr.into_primitive()),
-        F::new(c_bnlhr.into_primitive()),
-        F::new(d_h.into_primitive()),
-        F::new(initial_state_bhpr.into_primitive()),
-        F::new(a_decay_h.into_primitive()),
+        F::new(d_y_bnlhp.clone().into_dispatch()),
+        F::new(d_final_bhpr.into_dispatch()),
+        F::new(x_bnlhp.into_dispatch()),
+        F::new(dt_discretized_bhnl.clone().into_dispatch()),
+        F::new(b_bnlhr.into_dispatch()),
+        F::new(c_bnlhr.into_dispatch()),
+        F::new(d_h.into_dispatch()),
+        F::new(initial_state_bhpr.into_dispatch()),
+        F::new(a_decay_h.into_dispatch()),
     );
-    let d_da_local_bhnl = Tensor::<4>::from_primitive(grads.d_da_local_bhnl.inner());
-    let d_dt_orange_bhnl = Tensor::<4>::from_primitive(grads.d_dt_orange_bhnl.inner());
+    let d_da_local_bhnl = Tensor::<4>::from_dispatch(grads.d_da_local_bhnl.inner());
+    let d_dt_orange_bhnl = Tensor::<4>::from_dispatch(grads.d_dt_orange_bhnl.inner());
 
     // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
     let einsum_bhnl: Tensor<4> = (out_x_bnlhp * d_y_bnlhp)

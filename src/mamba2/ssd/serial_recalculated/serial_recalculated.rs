@@ -55,16 +55,16 @@ impl Mamba2SsdInput {
         // a_decay_h is passed directly; da_cumsum is no longer an autodiff-tracked
         // intermediate crossing the boundary.
         let (y_bnlhp, final_state_bhpr) = <Dispatch as Mamba2BackendExt>::ssd_serial_recalculated(
-            input.x_bnlhp.into_primitive(),
-            dt_discretized_bhnl.into_primitive(),
-            input.b_bnlhr.into_primitive(),
-            input.c_bnlhr.into_primitive(),
-            input.d_h.into_primitive(),
-            input.initial_state_bhpr.into_primitive(),
-            input.a_decay_h.into_primitive(),
+            input.x_bnlhp.into_dispatch(),
+            dt_discretized_bhnl.into_dispatch(),
+            input.b_bnlhr.into_dispatch(),
+            input.c_bnlhr.into_dispatch(),
+            input.d_h.into_dispatch(),
+            input.initial_state_bhpr.into_dispatch(),
+            input.a_decay_h.into_dispatch(),
         );
-        let y_bnlhp = Tensor::from_primitive(y_bnlhp);
-        let final_state_bhpr = Tensor::from_primitive(final_state_bhpr);
+        let y_bnlhp = Tensor::from_dispatch(y_bnlhp);
+        let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
         (y_bnlhp, final_state_bhpr)
     }
 }

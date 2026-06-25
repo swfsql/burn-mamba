@@ -17,7 +17,7 @@
 #![allow(non_snake_case)]
 
 use crate::utils::fprim::F;
-use burn::backend::tensor::Device;
+use burn::backend::tensor::{Device, FloatTensor};
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
 use burn::tensor::Tensor;
@@ -276,9 +276,9 @@ pub fn quat_cumprod_recalculated(
     });
 
     let cum_bshj4 =
-        Tensor::<5>::from_primitive(<Dispatch as Mamba3QuatScanBackendExt>::quat_cumprod(
-            q_bshj4.into_primitive(),
-            init_bhj4.into_primitive(),
+        Tensor::<5>::from_dispatch(<Dispatch as Mamba3QuatScanBackendExt>::quat_cumprod(
+            q_bshj4.into_dispatch(),
+            init_bhj4.into_dispatch(),
         ));
 
     let final_carry_bhj4 = cum_bshj4

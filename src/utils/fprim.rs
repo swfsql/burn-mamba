@@ -52,7 +52,7 @@ impl<B: Backend, const D: usize> F<B, D> {
 
     /// Device the tensor lives on.
     pub fn device(&self) -> Device<B> {
-        B::float_device(&self.0)
+        self.0.device()
     }
 
     /// Float dtype of the tensor.
@@ -201,7 +201,7 @@ impl<B: Backend, const D: usize> F<B, D> {
         let dims = self.0.shape().dims::<D>();
         let rows = dims[D - 2];
         let cols = dims[D - 1];
-        let device = B::float_device(&self.0);
+        let device = &self.0.device();
 
         let mask2 = tri_bool::<B>(rows, cols, diagonal, false, &device);
         let mut lead = [1usize; D];

@@ -47,16 +47,16 @@ impl Mamba3SingleSsdInput {
 
         let (y_bnlmhp, final_state_bhpr) =
             <Dispatch as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
-                input.v_bnlmhp.into_primitive(),
-                input.da_bnlh.into_primitive(),
-                input.b_bnlmhr.into_primitive(),
-                input.c_bnlmhr.into_primitive(),
-                input.gamma_bnlh.into_primitive(),
-                input.scale_bnlh.into_primitive(),
-                input.initial_state_bhpr.into_primitive(),
+                input.v_bnlmhp.into_dispatch(),
+                input.da_bnlh.into_dispatch(),
+                input.b_bnlmhr.into_dispatch(),
+                input.c_bnlmhr.into_dispatch(),
+                input.gamma_bnlh.into_dispatch(),
+                input.scale_bnlh.into_dispatch(),
+                input.initial_state_bhpr.into_dispatch(),
             );
-        let y_bnlmhp = Tensor::from_primitive(y_bnlmhp);
-        let final_state_bhpr = Tensor::from_primitive(final_state_bhpr);
+        let y_bnlmhp = Tensor::from_dispatch(y_bnlmhp);
+        let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
         (y_bnlmhp, final_state_bhpr)
     }
 }
