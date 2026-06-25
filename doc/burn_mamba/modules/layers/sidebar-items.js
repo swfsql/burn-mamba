@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Layers","LayersBuilder","LayersRecord","LayersRecordItem"]};
+window.SIDEBAR_ITEMS = {"struct":["Layers","LayersBuilder"]};

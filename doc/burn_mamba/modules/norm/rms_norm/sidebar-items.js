@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["RmsNorm","RmsNormConfig","RmsNormRecord","RmsNormRecordItem"]};
+window.SIDEBAR_ITEMS = {"struct":["RmsNorm","RmsNormConfig"]};
