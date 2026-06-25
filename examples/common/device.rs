@@ -1,4 +1,4 @@
-//! Runtime dtype selection + record format for the examples.
+//! Runtime dtype selection for the examples.
 //!
 //! With the Dispatch architecture the backend is chosen at runtime by the
 //! [`Device`], so the examples just use [`Device::default`]: it resolves to the
@@ -8,21 +8,12 @@
 //! non-default dtype (used by `dev-f16` to switch the device to fp16/i32) —
 //! backend defaults are otherwise left untouched.
 //!
-//! The on-disk record format is [`RecorderTy`]. Its `PrecisionSettings` selects
-//! the precision the recorder stores tensors at (fp32 by default; fp16 when
-//! `dev-f16` is enabled). Tensors are cast on save/load as needed, independent
-//! of the runtime dtype installed on the device.
+//! Model and optimizer state is persisted with the burnpack
+//! [`store`](burn::store) format. The on-disk dtype follows whatever dtype the
+//! module currently holds (fp16 under `dev-f16`, fp32 otherwise), so there is no
+//! separate recorder precision to configure.
 
 use burn::prelude::*;
-use burn::record::NamedMpkFileRecorder;
-
-#[cfg(not(feature = "dev-f16"))]
-pub use burn::record::FullPrecisionSettings as RecorderPrecision;
-#[cfg(feature = "dev-f16")]
-pub use burn::record::HalfPrecisionSettings as RecorderPrecision;
-
-/// On-disk record format for model and optimizer state.
-pub type RecorderTy = NamedMpkFileRecorder<RecorderPrecision>;
 
 /// The host-side scalar type matching the device's default float dtype.
 ///

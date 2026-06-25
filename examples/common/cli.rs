@@ -3,12 +3,10 @@
 //! config, model weights, and optimizer state.  See [`HELP`] for the full
 //! command-line behaviour.
 
-use crate::common::device::RecorderTy;
 use crate::common::model::ModelConfigExt;
-use burn::optim::AdamWConfig;
-use burn::optim::adaptor::OptimizerAdaptor;
-use burn::record::{FileRecorder, Recorder};
-use burn::{module::AutodiffModule, optim::Optimizer, prelude::*};
+use burn::optim::{AdamWConfig, ModuleOptimizer};
+use burn::store::ModuleRecord;
+use burn::prelude::*;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -220,26 +218,20 @@ impl AppArgs {
     }
 
     /// Save the optimizer state into the artifacts directory.
-    pub fn save_optim<M: AutodiffModule>(&self, optim: &OptimizerAdaptor<burn::optim::AdamW, M>) {
+    pub fn save_optim(&self, optim: &ModuleOptimizer) {
         save_optim(&self.artifacts_path, optim)
     }
 
     /// Load optimizer state from the artifacts directory, if present.
-    pub fn load_optim<M: AutodiffModule>(
-        &self,
-        optim_config: &AdamWConfig,
-    ) -> Option<OptimizerAdaptor<burn::optim::AdamW, M>> {
+    pub fn load_optim(&self, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
         load_optim(&self.artifacts_path, optim_config)
     }
 
     /// Load the optimizer if saved, otherwise initialise a new one and save it.
-    pub fn load_or_save_optim<M: AutodiffModule>(
-        &self,
-        optim_config: &AdamWConfig,
-    ) -> OptimizerAdaptor<burn::optim::AdamW, M> {
-        self.load_optim::<M>(optim_config).unwrap_or_else(|| {
+    pub fn load_or_save_optim(&self, optim_config: &AdamWConfig) -> ModuleOptimizer {
+        self.load_optim(optim_config).unwrap_or_else(|| {
             println!("Initializing new optim");
-            let optim_init = optim_config.init::<M>();
+            let optim_init = optim_config.init();
             self.save_optim(&optim_init);
             optim_init
         })
@@ -257,9 +249,11 @@ pub fn create_artifact_dir(artifact_dir: &Path, delete: bool) {
     if delete {
         // enforce that the removal should not have errors,
         // including for when files didn't exist
-        println!("removing {artifact_dir:?}/{{model,optim}}");
-        std::fs::remove_file(artifact_dir.join("model")).expect("failed to remove the model");
-        std::fs::remove_file(artifact_dir.join("optim")).expect("failed to remove the optim");
+        println!("removing {artifact_dir:?}/{{model,optim}}.{RECORD_EXT}");
+        std::fs::remove_file(artifact_dir.join(MODEL_NAME).with_extension(RECORD_EXT))
+            .expect("failed to remove the model");
+        std::fs::remove_file(artifact_dir.join(OPTIM_NAME).with_extension(RECORD_EXT))
+            .expect("failed to remove the optim");
     }
     std::fs::create_dir_all(artifact_dir).ok();
 }
@@ -309,17 +303,23 @@ pub fn load_model_config<ModelConfig: Config>(path: &Path) -> Option<ModelConfig
     }
 }
 
+/// Canonical burnpack file extension appended to the model/optim records.
+///
+/// `ModuleRecord`/`ModuleOptimizer` save/load auto-append this when the path
+/// carries no extension, so spell it out here for the existence checks and the
+/// `--remove-artifacts` cleanup to match the files actually written.
+pub const RECORD_EXT: &str = "bpk";
+
 /// Base filename (without extension) for the persisted model weights.
 pub const MODEL_NAME: &str = "model";
-/// Save model weights into `artifact_dir` using the configured recorder.
+/// Save model weights into `artifact_dir` as a burnpack record.
 pub fn save_model(artifact_dir: &Path, model: &impl Module) {
-    let path = artifact_dir.join(MODEL_NAME);
-    let file_ext = <RecorderTy as FileRecorder>::file_extension();
-    let path_ext = path.with_added_extension(file_ext);
-    println!("Saving model to {path_ext:?}");
+    let path = artifact_dir.join(MODEL_NAME).with_extension(RECORD_EXT);
+    println!("Saving model to {path:?}");
     model
         .clone()
-        .save_file(path, &RecorderTy::new()) // ext added automatically
+        .into_record()
+        .save(path)
         .expect("Failed to save the model");
 }
 
@@ -329,55 +329,37 @@ pub fn load_model<ModelConfig: ModelConfigExt>(
     model_config: &ModelConfig,
     device: &Device,
 ) -> Option<ModelConfig::Model> {
-    let path = artifact_dir.join(MODEL_NAME);
-    let file_ext = <RecorderTy as FileRecorder>::file_extension();
-    let path_ext = path.with_added_extension(file_ext);
-    let exists = std::fs::exists(&path_ext).expect("failed to check {path:?}");
+    let path = artifact_dir.join(MODEL_NAME).with_extension(RECORD_EXT);
+    let exists = std::fs::exists(&path).expect("failed to check {path:?}");
     if exists {
-        println!("Loading model from {path_ext:?}");
-        let model_init = model_config.init(device);
-        let model = model_init
-            .load_file(path, &RecorderTy::new(), device) // ext added automatically
-            .expect("Failed to load the initial model");
+        println!("Loading model from {path:?}");
+        let record = ModuleRecord::load(path).expect("Failed to load the model record");
+        let model = model_config.init(device).load_record(record);
         Some(model)
     } else {
         None
     }
 }
 
-/// Base filename (without extension) for the persisted optimizer state.
+/// Base filename for the persisted optimizer state.
 pub const OPTIM_NAME: &str = "optim";
-/// Save optimizer state into `artifact_dir` using the configured recorder.
-pub fn save_optim<M: AutodiffModule>(
-    artifact_dir: &Path,
-    optim: &OptimizerAdaptor<burn::optim::AdamW, M>,
-) {
-    let path = artifact_dir.join(OPTIM_NAME);
-    let file_ext = <RecorderTy as FileRecorder>::file_extension();
-    let path_ext = path.with_added_extension(file_ext);
-    println!("Saving optim to {path_ext:?}");
-    let record = optim.to_record();
-    RecorderTy::new()
-        .record(record, path) // ext added automatically
-        .expect("Failed to save the optim");
+/// Save optimizer state into `artifact_dir` as a burnpack record.
+pub fn save_optim(artifact_dir: &Path, optim: &ModuleOptimizer) {
+    let path = artifact_dir.join(OPTIM_NAME).with_extension(RECORD_EXT);
+    println!("Saving optim to {path:?}");
+    optim.save(path).expect("Failed to save the optim");
 }
 
 /// Load optimizer state from `artifact_dir`, or `None` if absent.
-pub fn load_optim<M: AutodiffModule>(
-    artifact_dir: &Path,
-    optim_config: &AdamWConfig,
-) -> Option<OptimizerAdaptor<burn::optim::AdamW, M>> {
-    let path = artifact_dir.join(OPTIM_NAME);
-    let file_ext = <RecorderTy as FileRecorder>::file_extension();
-    let path_ext = path.with_added_extension(file_ext);
-    let exists = std::fs::exists(&path_ext).expect("failed to check {path:?}");
+pub fn load_optim(artifact_dir: &Path, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
+    let path = artifact_dir.join(OPTIM_NAME).with_extension(RECORD_EXT);
+    let exists = std::fs::exists(&path).expect("failed to check {path:?}");
     if exists {
-        println!("Loading initial optim from {path_ext:?}");
-        let optim_init = optim_config.init::<M>();
-        let record = RecorderTy::new()
-            .load(path, &Device::default()) // ext added automatically
+        println!("Loading initial optim from {path:?}");
+        let optim = optim_config
+            .init()
+            .load(path)
             .expect("Failed to load the initial optim");
-        let optim = optim_init.load_record(record);
         Some(optim)
     } else {
         None

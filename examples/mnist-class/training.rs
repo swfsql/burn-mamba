@@ -13,7 +13,7 @@ use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
     data::{dataloader::batcher::Batcher, dataset::Dataset},
     module::AutodiffModule,
-    optim::{AdamW, Optimizer, adaptor::OptimizerAdaptor},
+    optim::ModuleOptimizer,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
@@ -33,7 +33,7 @@ pub fn train(
     // load (or init and save) model and optim
     let model: MambaLatentNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim::<MambaLatentNet>(&training_config.optimizer);
+    let mut optim = app_args.load_or_save_optim(&training_config.optimizer);
 
     let mut model = Wrap(model, model_config.clone());
 
@@ -56,11 +56,9 @@ pub fn train(
         .build(MnistDataset::test());
 
     let training_num_items = dataloader_train.num_items();
-    let global_training_num_items = training_num_items * training_config.num_epochs;
 
     let mut metric_meta = burn::train::metric::MetricMetadata {
-        progress: Progress::new(0, training_num_items),
-        global_progress: Progress::new(0, global_training_num_items),
+        progress: Progress::new(0, training_num_items, None),
         iteration: Some(0),
         lr: Some(training_config.lr.get_lr(0)),
     };
@@ -134,7 +132,7 @@ pub fn epoch_train(
     training_model: MambaLatentNet,
     training_config: &TrainingConfig,
     model_config: &MambaLatentNetConfig,
-    optim: &mut OptimizerAdaptor<AdamW, MambaLatentNet>,
+    optim: &mut ModuleOptimizer,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
     training_loop_limit: Option<usize>,
@@ -163,7 +161,6 @@ pub fn epoch_train(
         let [batch_size, _, _, _] = batch.images.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
-        metric_meta.global_progress.items_processed += batch_size;
 
         let train_output = TrainStep::step(&training_model, batch);
         let pre_metrics = &train_output.item;
@@ -240,8 +237,7 @@ pub fn epoch_valid(
     let valid_loop_limit = valid_loop_limit.unwrap_or(usize::MAX);
     let valid_num_items = dataloader_valid.num_items();
     let mut metric_meta = burn::train::metric::MetricMetadata {
-        progress: Progress::new(0, valid_num_items),
-        global_progress: Progress::new(0, valid_num_items),
+        progress: Progress::new(0, valid_num_items, None),
         iteration: Some(0),
         lr: Some(training_config.lr.get_lr(0)),
     };
@@ -256,7 +252,6 @@ pub fn epoch_valid(
         let [batch_size, _, _, _] = batch.images.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
-        metric_meta.global_progress.items_processed += batch_size;
 
         let pre_metrics = InferenceStep::step(&valid_model, batch);
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
