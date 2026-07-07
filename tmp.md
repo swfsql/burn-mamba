@@ -3,24 +3,39 @@
 No `src/` files changed — the CLAUDE.md File Map needs **no** update.
 `examples/README.md` already updated in-place (grokking entry + `MambaVocabNet` mention).
 
-## If files.md covers the touched files, candidate entries
+## If files.md covers the touched files, candidate entries (FINAL)
 
-- `examples/grokking/` — new example: modular addition `(a+b) mod p` grokking with
-  state-PR diagnostics.
-  - `main.rs` launch + extra-args overrides (`--wd --lr --steps --train-fraction --chunked`)
-  - `dataset.rs` all `p²` pairs, `ChaCha8Rng` split disjoint by pair; `full(p)` diagnostic set
-  - `model.rs` `model_config(p)`: Mamba-2 `MambaVocabNetConfig`, d_model 64, expand 1,
-    1 head, state_rank 32, conv_kernel 1, untied head (rationale in doc comment)
-  - `training.rs` `GrokkingConfig` + full-batch AdamW loop (plain non-cautious decay),
-    CE on final position; `final_logits()` stepwise (default, ~7× faster at T=2,
-    parity-checked) vs chunked; `metrics.csv`/`pr.csv` logging
-  - `diagnostics.rs` participation ratio `PR(Σ)=(trΣ)²/tr(Σ²)` from the two traces:
-    N-side state PR per layer/head (pooled/final × centered/uncentered) read from
-    `ssm_bhpr` via step-mode caches; weight-side spectral PR (embedding, LM head);
-    exact p-point DFT embedding frequency-energy PR (`rfft` unusable: needs pow-2 length)
-- `examples/common/model/mod.rs` — added `impl ModelConfigExt for MambaVocabNetConfig`
-  (was `MambaLatentNetConfig`-only).
-- `Cargo.toml` — added dev-dependency `rand_chacha = "0.9.0"` (deterministic dataset splits).
+- `examples/grokking/` — new example: modular addition `(a+…) mod p` grokking with
+  PR diagnostics and grokking-intervention knobs.
+  - `main.rs` launch + extra-args overrides: task/schedule (`--wd --lr --steps
+    --train-fraction --p --k --chunked --no-diag --no-state-pr --step-offset`),
+    model size (`--d-model --expand --state-rank --n-layers`, fresh configs only),
+    penalties (`--pr-lambda` [negative = expansion reward] `--pr-target
+    <emb|emb-head|bc|all>` `--pr-sine-period` `--pr-start-step` `--l2-lambda`
+    `--noise-lambda`), optimizer (`--sgd <momentum>` = plain SGD probe path).
+  - `dataset.rs` k-summand mixed-radix enumeration (cap 2M), `ChaCha8Rng` split
+    disjoint by sequence; `diagnostic_set` (≤10k sample).
+  - `model.rs` `model_config(p, d_model, expand, state_rank, n_layers)`: Mamba-2
+    `MambaVocabNetConfig`, 1 head, conv_kernel 1, untied head.
+  - `training.rs` `GrokkingConfig` + full-batch loop: AdamW (plain decay) or SGD
+    (`sgd_momentum ≥ 0`; coupled `sgd_wd`, clip 1.0 hardcoded, always fresh-init);
+    CE on final position + optional loss terms `pr_lambda·PR` (sine "breathing"
+    via `pr_sine_period`, gate via `pr_start_step`), `l2_lambda·Σ‖W‖²`,
+    `noise_lambda·Σ⟨W,detach(ε)⟩`; `final_logits()` stepwise (default) vs chunked;
+    `step_offset` for resumed-run logging; `metrics/pr/weights.csv`.
+  - `diagnostics.rs` PR `(trΣ)²/tr(Σ²)` via two traces: N-side state PR from
+    `ssm_bhpr` (step-mode caches); weight-side spectral PRs (per in_proj slice,
+    emb/head, token-centered B-alphabet); exact p-point DFT emb-frequency PR;
+    differentiable `pr_tensor` + `weight_pr_penalty` / `weight_l2_penalty` /
+    `weight_noise_penalty` over `PrPenaltyTarget`-selected matrices.
+- `examples/common/cli.rs` — **optim-load workaround** (burn bug, info/optim-load.md):
+  `load_model` restores persisted `ParamId`s (`restore_param_ids`/`ParamIdStamper`,
+  by dotted path); `load_optim` now takes `model: &impl Module` and prunes
+  orphaned state entries before `from_bytes`. All 5 examples' call sites updated
+  (`load_or_save_optim(&cfg, &model)`).
+- `examples/common/model/mod.rs` — added `impl ModelConfigExt for MambaVocabNetConfig`.
+- `Cargo.toml` — dev-deps added: `rand_chacha = "0.9.0"`; `burn-pack` (same git rev,
+  std) for the ParamId workaround.
 
 ## Experiment status (not for files.md — session context)
 
@@ -430,3 +445,43 @@ gate) serves 1–3.
   heat (native SGD exploration or Adam+noise) saturates at the same
   data-dependent search wall; directed compression is the only thing that
   tunnels through it.
+- **SGD + PR λ0.03 at f=0.15 CROSSES THE WALL TOO — faster but unstable**
+  (grok-k2-f0.15-sgd-pr0.03 +exts to 32k): 6%@12k → 49%@16k → 70%@20k →
+  **peak 90.4%@24k**, then limit-cycle oscillation (60→79→90→60→53→77→43%,
+  train bouncing 77–100%, loss spiking 10×) — never consolidates. vs
+  AdamW+λ0.03: slower through the wall (5.9%@20k) but clean 98.8% endgame.
+  Two conclusions: (1) directed compression is the wall-crosser under BOTH
+  optimizers (optimizer-independent role of the map); (2) SGD's native heat
+  does NOT interfere with the map (no shared normalizer — unlike Adam-noise
+  which killed it), explaining the faster transit; but Adam's normalization
+  is what stabilizes the compressed ENDGAME (SGD+penalty at the PR floor
+  oscillates). Map: optimizer-independent; heat-map interference and
+  endgame stability: optimizer-specific.
+
+## CLOSING CONCLUSIONS (wrap-up, 2026-07-07)
+
+Headline (user's framing, adopted): **regardless of optimizer (AdamW or SGD),
+differentiable PR compression is an effective aid to generalization — not in
+isolation — and particularly in data-starved settings.** It requires a working
+exploration channel beside it (decoupled wd under AdamW, or SGD's native
+dynamics), a gradual dose (λ0.03-scale; instant crush finds wrong subspaces),
+and it is the only intervention found that crosses the f=0.15 data-starvation
+wall (AdamW: 98.8%@50k clean; SGD: faster transit, peak 90.4%@24k, unstable
+endgame).
+
+Supporting map (full evidence in sections above):
+1. Grokking delay = exploration × contraction reaching the circuit; two
+   separable barriers: (a) Adam-freeze (optimizer artifact; cured by ANY live
+   loss term or absent under SGD — plateau collapses to ~0 at ample data),
+   (b) genuine data-dependent search wall (optimizer-independent; f=0.25
+   ≈4k plateau, f=0.15 blocks heat entirely).
+2. Adam self-normalizes any live auxiliary gradient to lr-scale (dose-flat);
+   consequence: injected heat drowns directed signals sharing the normalizer
+   (map+noise interference) — while SGD heat and map coexist.
+3. Step-1 diagnostics (state PR as transition leading-indicator; transient
+   expansion scaffolding; weight-spectral compression as the loud channel)
+   stand as originally recorded.
+
+Loose ends left open: plateau-vs-fraction curve; AdamW-higher-lr control;
+hybrid schedules (λ taper / lr decay) for SGD endgame stability; Step-1
+report/plots from CSVs; frequency-resolved diagnostics; Mamba3 arm.
