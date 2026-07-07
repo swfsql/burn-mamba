@@ -419,6 +419,14 @@ gate) serves 1–3.
   live loss term (heat). At scarce data the search is genuinely hard and
   only directed compression helps (regime 2 unchanged).
 - Caveat: SGD lr 0.05 = 50× AdamW's lr (different effective temperature);
-  the claim is mechanistic, not a tuned-fairness comparison. Untested: SGD
-  at f=0.25/0.15 (does the search-limited regime reproduce under SGD?);
+  the claim is mechanistic, not a tuned-fairness comparison. Untested:
   AdamW at higher lr.
+- **SGD AT THE STARVED FRACTIONS: SEARCH BARRIER IS OPTIMIZER-INDEPENDENT.**
+  f=0.25 (grok-k2-f0.25-sgd): plateau RETURNS, ~4k at chance → 17.9%@6k →
+  65%@8k → 99.8%@10k — near-quantitatively the AdamW+noise shape (same ~4k
+  search). f=0.15 (grok-k2-f0.15-sgd, +ext to 20k): chance flat through
+  20k (0.61%) — exactly like AdamW+noise; only AdamW+directed-λ0.03 ever
+  crossed f=0.15 (2.3%@10k → 98.8%@50k). Both theory predictions confirmed:
+  heat (native SGD exploration or Adam+noise) saturates at the same
+  data-dependent search wall; directed compression is the only thing that
+  tunnels through it.
