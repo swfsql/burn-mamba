@@ -75,12 +75,37 @@ pub struct GrokkingConfig {
     pub state_diagnostics: bool,
     /// Coefficient of the differentiable weight-PR penalty
     /// (`loss += pr_lambda · Σ PR(W)` over `pr_target`); `0` disables it.
+    /// Negative values *reward* rank expansion (the sign-check control).
     /// The causal Step-2 arm: pure rank pressure in place of weight decay.
     #[config(default = 0.0)]
     pub pr_lambda: f64,
     /// Which weights the PR penalty targets.
     #[config(default = "PrPenaltyTarget::All")]
     pub pr_target: PrPenaltyTarget,
+    /// Period (in steps) of a sine modulation of the PR penalty: the effective
+    /// coefficient becomes `pr_lambda · sin(2π·step/period)` — "breathing"
+    /// that alternates compression (positive half-cycle) and expansion
+    /// (negative half-cycle). `0` keeps the coefficient constant.
+    #[config(default = 0)]
+    pub pr_sine_period: usize,
+    /// Offset added to the step numbers written to the console/csv logs, for
+    /// resumed runs (the loop itself always runs `1..=num_steps`; eval/save
+    /// cadence and the sine phase follow the raw loop step).
+    #[config(default = 0)]
+    pub step_offset: usize,
+}
+
+impl GrokkingConfig {
+    /// The effective PR-penalty coefficient at `step` (constant `pr_lambda`,
+    /// or the sine "breathing" when `pr_sine_period > 0`).
+    pub fn pr_lambda_at(&self, step: usize) -> f64 {
+        if self.pr_sine_period == 0 {
+            self.pr_lambda
+        } else {
+            let phase = 2.0 * std::f64::consts::PI * step as f64 / self.pr_sine_period as f64;
+            self.pr_lambda * phase.sin()
+        }
+    }
 }
 
 /// The SSD path used by chunkwise forwards: the recompute-backward serial
@@ -126,7 +151,7 @@ pub fn train(
 
     let mut model: MambaVocabNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&config.optimizer);
+    let mut optim = app_args.load_or_save_optim(&config.optimizer, &model);
 
     let (train_split, test_split) =
         dataset::build(config.p, config.k, config.train_fraction, config.split_seed);
@@ -171,9 +196,10 @@ pub fn train(
         // arms; the penalty value is printed separately at eval points.
         let ce_loss = ce.forward(logits_bc, targets_bp.clone());
         let loss_value = scalar_f32(ce_loss.clone());
-        let loss = if config.pr_lambda > 0.0 {
+        let pr_lambda = config.pr_lambda_at(step);
+        let loss = if pr_lambda != 0.0 {
             let penalty = diagnostics::weight_pr_penalty(&model, config.pr_target);
-            ce_loss + penalty.mul_scalar(config.pr_lambda)
+            ce_loss + penalty.mul_scalar(pr_lambda)
         } else {
             ce_loss
         };
@@ -184,21 +210,24 @@ pub fn train(
 
         let last = step == config.num_steps;
         if step.is_power_of_two() || step % config.eval_every == 0 || last {
+            // Resumed runs log continued step numbers; the loop/cadence/sine
+            // phase stay on the raw step.
+            let logged_step = step + config.step_offset;
             let valid_model = model.valid();
             let train_acc = accuracy(&valid_model, &eval_train.0, &eval_train.1, config.stepwise);
             let test_acc = accuracy(&valid_model, &eval_test.0, &eval_test.1, config.stepwise);
             println!(
-                "step {step:>6}/{}, loss {loss_value:.4e}, train acc {train_acc:.4}, \
+                "step {logged_step:>6}/{}, loss {loss_value:.4e}, train acc {train_acc:.4}, \
                  test acc {test_acc:.4}, lr {lr:.2e}, {:.1}s",
-                config.num_steps,
+                config.num_steps + config.step_offset,
                 started.elapsed().as_secs_f64(),
             );
-            if config.pr_lambda > 0.0 {
+            if config.pr_lambda != 0.0 {
                 let penalty =
                     scalar_f32(diagnostics::weight_pr_penalty(&valid_model, config.pr_target));
                 println!(
-                    "        pr penalty {penalty:.3} (λ {}, {:?})",
-                    config.pr_lambda, config.pr_target
+                    "        pr penalty {penalty:.3} (λ_eff {pr_lambda:.4}, {:?})",
+                    config.pr_target
                 );
             }
             if config.diagnostics {
@@ -209,13 +238,13 @@ pub fn train(
                 };
                 let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
                 println!("        {}", format_prs(&state_prs, &weight_prs));
-                append_metrics(&metrics_path, step, lr, loss_value, train_acc, test_acc, &weight_prs);
+                append_metrics(&metrics_path, logged_step, lr, loss_value, train_acc, test_acc, &weight_prs);
                 if !state_prs.is_empty() {
-                    append_pr(&pr_path, step, &state_prs);
+                    append_pr(&pr_path, logged_step, &state_prs);
                 }
-                append_weight_pr(&weights_path, step, &weight_prs);
+                append_weight_pr(&weights_path, logged_step, &weight_prs);
             } else {
-                append_metrics_bare(&metrics_path, step, lr, loss_value, train_acc, test_acc);
+                append_metrics_bare(&metrics_path, logged_step, lr, loss_value, train_acc, test_acc);
             }
         }
         if step % config.save_every == 0 || last {

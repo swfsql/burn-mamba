@@ -35,7 +35,7 @@ pub fn train(
     // load (or init and save) model and optim
     let model: AeModel = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&training_config.optimizer);
+    let mut optim = app_args.load_or_save_optim(&training_config.optimizer, &model);
 
     let mut model = Wrap(model, model_config.clone());
 

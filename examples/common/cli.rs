@@ -4,9 +4,11 @@
 //! command-line behaviour.
 
 use crate::common::model::ModelConfigExt;
+use burn::module::{ModuleMapper, ModuleVisitor, Param, ParamId};
 use burn::optim::{AdamWConfig, ModuleOptimizer};
 use burn::store::ModuleRecord;
 use burn::prelude::*;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -222,14 +224,25 @@ impl AppArgs {
         save_optim(&self.artifacts_path, optim)
     }
 
-    /// Load optimizer state from the artifacts directory, if present.
-    pub fn load_optim(&self, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
-        load_optim(&self.artifacts_path, optim_config)
+    /// Load optimizer state from the artifacts directory, if present. `model`
+    /// is the (already loaded) module the optimizer drives — its live
+    /// `ParamId`s prune orphaned state entries from the record (see the free
+    /// [`load_optim`]).
+    pub fn load_optim(
+        &self,
+        optim_config: &AdamWConfig,
+        model: &impl Module,
+    ) -> Option<ModuleOptimizer> {
+        load_optim(&self.artifacts_path, optim_config, model)
     }
 
     /// Load the optimizer if saved, otherwise initialise a new one and save it.
-    pub fn load_or_save_optim(&self, optim_config: &AdamWConfig) -> ModuleOptimizer {
-        self.load_optim(optim_config).unwrap_or_else(|| {
+    pub fn load_or_save_optim(
+        &self,
+        optim_config: &AdamWConfig,
+        model: &impl Module,
+    ) -> ModuleOptimizer {
+        self.load_optim(optim_config, model).unwrap_or_else(|| {
             println!("Initializing new optim");
             let optim_init = optim_config.init();
             self.save_optim(&optim_init);
@@ -324,6 +337,10 @@ pub fn save_model(artifact_dir: &Path, model: &impl Module) {
 }
 
 /// Load model weights from `artifact_dir`, or `None` if absent.
+///
+/// After applying the record, the persisted `ParamId`s are restored onto the
+/// model (see [`restore_param_ids`]) so the ParamId-keyed optimizer state
+/// stays associated across process relaunches.
 pub fn load_model<ModelConfig: ModelConfigExt>(
     artifact_dir: &Path,
     model_config: &ModelConfig,
@@ -333,12 +350,119 @@ pub fn load_model<ModelConfig: ModelConfigExt>(
     let exists = std::fs::exists(&path).expect("failed to check {path:?}");
     if exists {
         println!("Loading model from {path:?}");
-        let record = ModuleRecord::load(path).expect("Failed to load the model record");
+        let record = ModuleRecord::load(&path).expect("Failed to load the model record");
         let model = model_config.init(device).load_record(record);
+        let model = restore_param_ids(model, &path);
         Some(model)
     } else {
         None
     }
+}
+
+/// Restore each parameter's persisted `ParamId` onto a freshly-loaded model.
+///
+/// A burnpack record stores every tensor's originating `ParamId`
+/// ("training-state identity"), but burn's `load_record` discards them: the
+/// loaded module keeps the ids freshly minted by `init()`, re-keying the whole
+/// model on every process launch. Optimizer state, however, is keyed BY
+/// `ParamId` — so without this restore, every resume orphans the entire loaded
+/// optimizer state (silently resetting the Adam moments) and each checkpoint
+/// re-saves the dead entries alongside the new ones: the optim record grows by
+/// one full-model AdamW cohort (~2× model size) per relaunch. Stamping the
+/// saved ids back keeps the (model, optim) key space stable; [`load_optim`]
+/// then drops any entries that remain orphaned (cohorts from pre-fix resumes).
+fn restore_param_ids<M: Module>(model: M, record_path: &Path) -> M {
+    let ids = read_param_ids(record_path);
+    let mut stamper = ParamIdStamper {
+        path: Vec::new(),
+        ids,
+        missing: 0,
+    };
+    let model = model.map(&mut stamper);
+    if stamper.missing > 0 {
+        eprintln!(
+            "warning: restore_param_ids: {} params have no persisted id in {record_path:?} \
+             (their optimizer state starts fresh)",
+            stamper.missing
+        );
+    }
+    model
+}
+
+/// Read the `module path → persisted ParamId` map from a burnpack record file.
+/// Header/metadata only — no tensor data is read.
+fn read_param_ids(path: &Path) -> HashMap<String, ParamId> {
+    let reader = burn_pack::Reader::from_file(path)
+        .unwrap_or_else(|e| panic!("Failed to re-read the record {path:?} for ParamIds: {e:?}"));
+    reader
+        .into_tensors()
+        .unwrap_or_else(|e| panic!("Failed to list the record tensors of {path:?}: {e:?}"))
+        .into_iter()
+        .filter_map(|t| t.param_id.map(|id| (t.name, ParamId::from(id))))
+        .collect()
+}
+
+/// [`ModuleMapper`] that replaces each parameter's fresh (`init()`-minted)
+/// `ParamId` with the id persisted in the record, matched by module path.
+/// Values, param mappers, and `require_grad` are untouched. The traversal
+/// mirrors burn-core's record collector/mapper: every submodule name is pushed
+/// (no enum-variant skipping) and paths join with `.` — the map keys come from
+/// the same collector-written record, so the two stay symmetric.
+struct ParamIdStamper {
+    path: Vec<String>,
+    ids: HashMap<String, ParamId>,
+    missing: usize,
+}
+
+macro_rules! stamp_kind {
+    ($method:ident, $kind:ty) => {
+        fn $method<const D: usize>(
+            &mut self,
+            param: Param<Tensor<D, $kind>>,
+        ) -> Param<Tensor<D, $kind>> {
+            match self.ids.get(&self.path.join(".")) {
+                Some(&id) => {
+                    let (_fresh_id, value, mapper) = param.consume();
+                    Param::from_mapped_value(id, value, mapper)
+                }
+                None => {
+                    self.missing += 1;
+                    param
+                }
+            }
+        }
+    };
+}
+
+impl ModuleMapper for ParamIdStamper {
+    fn enter_module(&mut self, name: &str, _container_type: &str) {
+        self.path.push(name.to_string());
+    }
+    fn exit_module(&mut self, _name: &str, _container_type: &str) {
+        self.path.pop();
+    }
+    stamp_kind!(map_float, Float);
+    stamp_kind!(map_int, Int);
+    stamp_kind!(map_bool, Bool);
+}
+
+/// Collect the `ParamId` of every parameter in a module (the "live" id set).
+fn collect_param_ids(module: &impl Module) -> HashSet<ParamId> {
+    struct ParamIdCollector(HashSet<ParamId>);
+    impl ModuleVisitor for ParamIdCollector {
+        fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<D>>) {
+            self.0.insert(param.id);
+        }
+        fn visit_int<const D: usize>(&mut self, param: &Param<Tensor<D, Int>>) {
+            self.0.insert(param.id);
+        }
+        fn visit_bool<const D: usize>(&mut self, param: &Param<Tensor<D, Bool>>) {
+            self.0.insert(param.id);
+        }
+    }
+    let mut collector = ParamIdCollector(HashSet::new());
+    module.visit(&mut collector);
+    collector.0
 }
 
 /// Base filename for the persisted optimizer state.
@@ -351,17 +475,66 @@ pub fn save_optim(artifact_dir: &Path, optim: &ModuleOptimizer) {
 }
 
 /// Load optimizer state from `artifact_dir`, or `None` if absent.
-pub fn load_optim(artifact_dir: &Path, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
+///
+/// The record is filtered against `model`'s live `ParamId`s before loading:
+/// optimizer state is keyed by `ParamId` and burn never prunes entries whose
+/// parameter no longer exists — before [`restore_param_ids`], every relaunch
+/// re-keyed the whole model, so resumed runs accreted one dead full-model
+/// AdamW cohort (~2× model size) per restart. Dropping the orphans here heals
+/// those bloated records on the next load→checkpoint cycle and keeps the dead
+/// state from occupying device memory for the whole run.
+pub fn load_optim<M: Module>(
+    artifact_dir: &Path,
+    optim_config: &AdamWConfig,
+    model: &M,
+) -> Option<ModuleOptimizer> {
     let path = artifact_dir.join(OPTIM_NAME).with_extension(RECORD_EXT);
     let exists = std::fs::exists(&path).expect("failed to check {path:?}");
-    if exists {
-        println!("Loading initial optim from {path:?}");
-        let optim = optim_config
-            .init()
-            .load(path)
-            .expect("Failed to load the initial optim");
-        Some(optim)
-    } else {
-        None
+    if !exists {
+        return None;
     }
+    println!("Loading initial optim from {path:?}");
+    let live = collect_param_ids(model);
+    let reader = burn_pack::Reader::from_file(&path)
+        .unwrap_or_else(|e| panic!("Failed to read the optim record {path:?}: {e:?}"));
+    // Optimizer-record scalar keys are `"{param_id}.{field}"` (`__rank`, Adam `time`).
+    let scalar_is_live = |key: &str| {
+        key.split_once('.')
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+            .is_some_and(|id| live.contains(&ParamId::from(id)))
+    };
+    let scalars: Vec<(String, burn_pack::Scalar)> = reader
+        .scalars()
+        .iter()
+        .filter(|(key, _)| scalar_is_live(key))
+        .map(|(key, value)| (key.clone(), *value))
+        .collect();
+    let tensors = reader
+        .into_tensors()
+        .unwrap_or_else(|e| panic!("Failed to read the optim tensors of {path:?}: {e:?}"));
+    let total = tensors.len();
+    let tensors: Vec<_> = tensors
+        .into_iter()
+        .filter(|t| t.param_id.is_some_and(|id| live.contains(&ParamId::from(id))))
+        .collect();
+    if tensors.len() < total {
+        eprintln!(
+            "warning: load_optim: dropping {} of {total} optimizer-state tensors as orphaned \
+             (ParamIds absent from the model — dead cohorts from pre-fix relaunches); \
+             the next checkpoint re-saves the record pruned",
+            total - tensors.len()
+        );
+    }
+    let mut writer = burn_pack::Writer::new(tensors);
+    for (key, value) in &scalars {
+        writer = writer.with_scalar(key, *value);
+    }
+    let bytes = writer
+        .into_bytes()
+        .unwrap_or_else(|e| panic!("Failed to repack the optim record {path:?}: {e:?}"));
+    let optim = optim_config
+        .init()
+        .from_bytes(bytes)
+        .expect("Failed to load the initial optim");
+    Some(optim)
 }

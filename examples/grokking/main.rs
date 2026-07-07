@@ -122,10 +122,16 @@ struct Overrides {
     /// `--no-state-pr`: keep the weight-PR diagnostics but skip the (costly)
     /// state-PR stepping pass.
     no_state_pr: bool,
-    /// `--pr-lambda <f64>`: weight-PR penalty coefficient (0 = off).
+    /// `--pr-lambda <f64>`: weight-PR penalty coefficient (0 = off; negative
+    /// rewards expansion — spell negatives as `--pr-lambda=-0.01`).
     pr_lambda: Option<f64>,
     /// `--pr-target <emb|emb-head|bc|all>`: which weights the penalty targets.
     pr_target: Option<String>,
+    /// `--pr-sine-period <usize>`: sine-"breathing" period for the penalty
+    /// coefficient (0 = constant).
+    pr_sine_period: Option<usize>,
+    /// `--step-offset <usize>`: offset added to logged step numbers (resumes).
+    step_offset: Option<usize>,
     /// `--d-model <usize>`: model width (only applies when a fresh model
     /// config is created — a saved config in the artifacts dir wins).
     d_model: Option<usize>,
@@ -152,6 +158,8 @@ impl Overrides {
             no_state_pr: pargs.contains("--no-state-pr"),
             pr_lambda: pargs.opt_value_from_str("--pr-lambda").unwrap(),
             pr_target: pargs.opt_value_from_str("--pr-target").unwrap(),
+            pr_sine_period: pargs.opt_value_from_str("--pr-sine-period").unwrap(),
+            step_offset: pargs.opt_value_from_str("--step-offset").unwrap(),
             d_model: pargs.opt_value_from_str("--d-model").unwrap(),
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
@@ -201,6 +209,12 @@ impl Overrides {
                 "all" => PrPenaltyTarget::All,
                 other => panic!("unknown --pr-target {other:?} (emb|emb-head|bc|all)"),
             };
+        }
+        if let Some(pr_sine_period) = self.pr_sine_period {
+            config.pr_sine_period = pr_sine_period;
+        }
+        if let Some(step_offset) = self.step_offset {
+            config.step_offset = step_offset;
         }
     }
 }

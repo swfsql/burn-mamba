@@ -718,6 +718,7 @@ dependencies = [
  "burn-dataset",
  "burn-flex",
  "burn-fusion",
+ "burn-pack",
  "dirs",
  "flate2",
  "image",
