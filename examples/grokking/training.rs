@@ -93,16 +93,31 @@ pub struct GrokkingConfig {
     /// cadence and the sine phase follow the raw loop step).
     #[config(default = 0)]
     pub step_offset: usize,
+    /// Keep the PR penalty off until this (raw) step — let the model memorize
+    /// unimpeded first (the penalty's compression gradient fights the fit,
+    /// unlike weight decay). The sine phase also counts from here.
+    #[config(default = 0)]
+    pub pr_start_step: usize,
+    /// Coefficient of the plain L2 (Frobenius²) loss penalty over the same
+    /// `pr_target` matrices — the rank-specificity control for `pr_lambda`
+    /// (norm pressure through the loss, no rank preference). `0` disables.
+    #[config(default = 0.0)]
+    pub l2_lambda: f64,
 }
 
 impl GrokkingConfig {
     /// The effective PR-penalty coefficient at `step` (constant `pr_lambda`,
-    /// or the sine "breathing" when `pr_sine_period > 0`).
+    /// or the sine "breathing" when `pr_sine_period > 0`); `0` before
+    /// `pr_start_step`.
     pub fn pr_lambda_at(&self, step: usize) -> f64 {
+        if step < self.pr_start_step {
+            return 0.0;
+        }
         if self.pr_sine_period == 0 {
             self.pr_lambda
         } else {
-            let phase = 2.0 * std::f64::consts::PI * step as f64 / self.pr_sine_period as f64;
+            let gated_step = step - self.pr_start_step;
+            let phase = 2.0 * std::f64::consts::PI * gated_step as f64 / self.pr_sine_period as f64;
             self.pr_lambda * phase.sin()
         }
     }
@@ -197,12 +212,15 @@ pub fn train(
         let ce_loss = ce.forward(logits_bc, targets_bp.clone());
         let loss_value = scalar_f32(ce_loss.clone());
         let pr_lambda = config.pr_lambda_at(step);
-        let loss = if pr_lambda != 0.0 {
+        let mut loss = ce_loss;
+        if pr_lambda != 0.0 {
             let penalty = diagnostics::weight_pr_penalty(&model, config.pr_target);
-            ce_loss + penalty.mul_scalar(pr_lambda)
-        } else {
-            ce_loss
-        };
+            loss = loss + penalty.mul_scalar(pr_lambda);
+        }
+        if config.l2_lambda != 0.0 {
+            let penalty = diagnostics::weight_l2_penalty(&model, config.pr_target);
+            loss = loss + penalty.mul_scalar(config.l2_lambda);
+        }
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
         let lr = config.lr.get_lr(step);
@@ -228,6 +246,14 @@ pub fn train(
                 println!(
                     "        pr penalty {penalty:.3} (λ_eff {pr_lambda:.4}, {:?})",
                     config.pr_target
+                );
+            }
+            if config.l2_lambda != 0.0 {
+                let penalty =
+                    scalar_f32(diagnostics::weight_l2_penalty(&valid_model, config.pr_target));
+                println!(
+                    "        l2 penalty {penalty:.3} (λ {}, {:?})",
+                    config.l2_lambda, config.pr_target
                 );
             }
             if config.diagnostics {

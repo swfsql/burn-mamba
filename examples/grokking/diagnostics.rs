@@ -198,10 +198,31 @@ pub enum PrPenaltyTarget {
 /// rather than observed as a side effect. Being scale-invariant, it exerts
 /// pure rank pressure — no norm shrinkage at all.
 pub fn weight_pr_penalty(model: &MambaVocabNet, target: PrPenaltyTarget) -> Tensor<1> {
+    penalty_weights(model, target)
+        .into_iter()
+        .map(pr_tensor)
+        .reduce(|a, b| a + b)
+        .expect("at least one penalty target")
+}
+
+/// The rank-specificity control for [`weight_pr_penalty`]: a plain L2
+/// (Frobenius²) penalty `Σ ‖W‖²_F` over the *same* target matrices, through
+/// the same loss pathway. Pure norm pressure, no rank preference.
+pub fn weight_l2_penalty(model: &MambaVocabNet, target: PrPenaltyTarget) -> Tensor<1> {
+    penalty_weights(model, target)
+        .into_iter()
+        .map(|w| w.powf_scalar(2.0).sum())
+        .reduce(|a, b| a + b)
+        .expect("at least one penalty target")
+}
+
+/// The weight matrices selected by `target` (shared by the PR and L2
+/// penalties).
+fn penalty_weights(model: &MambaVocabNet, target: PrPenaltyTarget) -> Vec<Tensor<2>> {
     use PrPenaltyTarget::*;
     let net = match model {
         MambaVocabNet::Mamba2(net) => net,
-        _ => panic!("the weight-PR penalty expects a Mamba-2 network"),
+        _ => panic!("the weight penalties expect a Mamba-2 network"),
     };
     let mut weights: Vec<Tensor<2>> = Vec::new();
     if matches!(target, Emb | EmbHead | All) {
@@ -229,10 +250,6 @@ pub fn weight_pr_penalty(model: &MambaVocabNet, target: PrPenaltyTarget) -> Tens
         }
     }
     weights
-        .into_iter()
-        .map(pr_tensor)
-        .reduce(|a, b| a + b)
-        .expect("at least one penalty target")
 }
 
 /// Differentiable twin of [`pr`] for weight matrices: the spectral PR

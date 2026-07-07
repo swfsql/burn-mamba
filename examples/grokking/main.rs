@@ -132,6 +132,11 @@ struct Overrides {
     pr_sine_period: Option<usize>,
     /// `--step-offset <usize>`: offset added to logged step numbers (resumes).
     step_offset: Option<usize>,
+    /// `--pr-start-step <usize>`: keep the penalty off until this raw step.
+    pr_start_step: Option<usize>,
+    /// `--l2-lambda <f64>`: plain L2 loss penalty on the `pr_target` matrices
+    /// (rank-specificity control).
+    l2_lambda: Option<f64>,
     /// `--d-model <usize>`: model width (only applies when a fresh model
     /// config is created — a saved config in the artifacts dir wins).
     d_model: Option<usize>,
@@ -160,6 +165,8 @@ impl Overrides {
             pr_target: pargs.opt_value_from_str("--pr-target").unwrap(),
             pr_sine_period: pargs.opt_value_from_str("--pr-sine-period").unwrap(),
             step_offset: pargs.opt_value_from_str("--step-offset").unwrap(),
+            pr_start_step: pargs.opt_value_from_str("--pr-start-step").unwrap(),
+            l2_lambda: pargs.opt_value_from_str("--l2-lambda").unwrap(),
             d_model: pargs.opt_value_from_str("--d-model").unwrap(),
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
@@ -215,6 +222,12 @@ impl Overrides {
         }
         if let Some(step_offset) = self.step_offset {
             config.step_offset = step_offset;
+        }
+        if let Some(pr_start_step) = self.pr_start_step {
+            config.pr_start_step = pr_start_step;
+        }
+        if let Some(l2_lambda) = self.l2_lambda {
+            config.l2_lambda = l2_lambda;
         }
     }
 }
