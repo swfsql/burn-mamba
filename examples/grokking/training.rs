@@ -109,6 +109,18 @@ pub struct GrokkingConfig {
     /// the weights. `0` disables.
     #[config(default = 0.0)]
     pub noise_lambda: f64,
+    /// `>= 0`: replace AdamW with plain SGD at this momentum (0 = none) —
+    /// the probe for Adam's role in the noise catalysis (no per-parameter
+    /// moment normalization; auxiliary gradients keep their raw scale). The
+    /// SGD path uses `sgd_wd` as its (coupled) decay and is always freshly
+    /// initialized (no optimizer resume). `< 0` = AdamW.
+    #[config(default = -1.0)]
+    pub sgd_momentum: f64,
+    /// Coupled weight-decay penalty for the SGD path (`--wd` sets this too;
+    /// `AdamWConfig`'s own field is builder-only). Per-step shrink ≈
+    /// `lr · sgd_wd`.
+    #[config(default = 0.0)]
+    pub sgd_wd: f32,
 }
 
 impl GrokkingConfig {
@@ -172,7 +184,29 @@ pub fn train(
 
     let mut model: MambaVocabNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&config.optimizer, &model);
+    let mut optim = if config.sgd_momentum >= 0.0 {
+        let mut sgd = burn::optim::SgdConfig::new()
+            .with_weight_decay(Some(burn::optim::decay::WeightDecayConfig::new(
+                config.sgd_wd,
+            )))
+            // Same clipping as the AdamW arm — unclipped full-batch SGD with
+            // momentum NaNs on this task within ~2k steps.
+            .with_gradient_clipping(Some(burn::grad_clipping::GradientClippingConfig::Value(
+                1.0,
+            )));
+        if config.sgd_momentum > 0.0 {
+            sgd = sgd.with_momentum(Some(
+                burn::optim::momentum::MomentumConfig::new().with_momentum(config.sgd_momentum),
+            ));
+        }
+        println!(
+            "SGD probe: momentum {}, coupled wd {}",
+            config.sgd_momentum, config.sgd_wd
+        );
+        sgd.init()
+    } else {
+        app_args.load_or_save_optim(&config.optimizer, &model)
+    };
 
     let (train_split, test_split) =
         dataset::build(config.p, config.k, config.train_fraction, config.split_seed);

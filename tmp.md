@@ -393,4 +393,32 @@ gate) serves 1–3.
   classic S-curve, sharp knee ~38–42k). At 15% data, where wd+noise is
   chance-flat and wd-alone hopeless, directed compression completes the
   grok. The regime split is now fully demonstrated end-to-end.
-- Remaining queued: SGD probe; plateau-vs-fraction curve.
+- Remaining queued: plateau-vs-fraction curve.
+
+## SGD PROBE: THE PLATEAU IS AN ADAM(W) ARTIFACT (major reframe)
+
+- Machinery: `sgd_momentum` config (`--sgd <momentum>`; <0 = AdamW) +
+  `sgd_wd` (coupled decay; `--wd` fills both) + hardcoded clip Value(1.0) in
+  the SGD path (unclipped full-batch SGD+momentum NaNs by ~1–2k at any
+  workable lr; lr search: 0.1/1.0 NaN, 0.03 slow, **0.05+m0.9 works**).
+  Configs patched (+sgd_momentum:-1,+sgd_wd:0). SGD path always fresh-inits
+  the optimizer (no resume of momentum).
+- Coupled wd 0.02 (shrink-matched to AdamW) BLOCKS the SGD fit — raw CE
+  grads (~1e-4) drown under 0.02·w; SGD lacks Adam's rescaling. Same
+  self-normalization asymmetry, opposite side. wd 0.002 is right.
+- **SGD lr0.05/m0.9/wd0.002/clip1.0, f=0.5, NO auxiliary term: test 86.9%
+  @1k, 100.00% @2k** (grok-k2-sgdbase) — train/test rise together, NO
+  PLATEAU, matching the best AdamW combos. **SGD wd0 control**
+  (grok-k2-sgd-wd0-3k): memorizes (train 98.9% @3k), test chance — decay
+  still required.
+- **UNIFIED STORY**: grokking delay = time for exploration×contraction to
+  find the circuit. SGD keeps exploration natively (no moment normalization
+  ⇒ residual CE grads + momentum + big lr keep moving); + coupled decay ⇒
+  immediate grok. AdamW kills exploration post-memorization (normalization
+  freeze) while decoupled wd contracts ⇒ the classic plateau — cured by ANY
+  live loss term (heat). At scarce data the search is genuinely hard and
+  only directed compression helps (regime 2 unchanged).
+- Caveat: SGD lr 0.05 = 50× AdamW's lr (different effective temperature);
+  the claim is mechanistic, not a tuned-fairness comparison. Untested: SGD
+  at f=0.25/0.15 (does the search-limited regime reproduce under SGD?);
+  AdamW at higher lr.
