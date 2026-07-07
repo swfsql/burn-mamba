@@ -8,7 +8,7 @@
 //! variant in its `model_config()`.
 
 use burn::prelude::*;
-use burn_mamba::prelude::{MambaLatentNet, MambaLatentNetConfig};
+use burn_mamba::prelude::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
 
 /// A model config that can build its module on a device — the seam the generic
 /// training loop uses to stay model-agnostic.
@@ -25,6 +25,14 @@ impl ModelConfigExt for MambaLatentNetConfig {
         // `self.init(..)` resolves to the inherent `MambaLatentNetConfig::init`
         // (inherent methods win over trait methods in method-call syntax), so
         // this delegates to the library builder rather than recursing.
+        self.init(device)
+    }
+}
+
+impl ModelConfigExt for MambaVocabNetConfig {
+    type Model = MambaVocabNet;
+    fn init(&self, device: &Device) -> Self::Model {
+        // Same inherent-over-trait resolution as the latent impl above.
         self.init(device)
     }
 }
