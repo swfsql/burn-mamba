@@ -216,6 +216,23 @@ pub fn weight_l2_penalty(model: &MambaVocabNet, target: PrPenaltyTarget) -> Tens
         .expect("at least one penalty target")
 }
 
+/// The weight-independent-gradient control: `Σ ⟨W, ε⟩` with `ε ~ N(0,1)`
+/// resampled every call and detached — the gradient w.r.t. `W` is pure noise
+/// (unit RMS per element, scaled by the caller's coefficient), through the
+/// same loss/Adam pathway as the PR and L2 terms but carrying no information
+/// about `W`. Discriminates "any live auxiliary gradient catalyzes" from
+/// "the gradient must be a persistent function of the weights".
+pub fn weight_noise_penalty(model: &MambaVocabNet, target: PrPenaltyTarget) -> Tensor<1> {
+    penalty_weights(model, target)
+        .into_iter()
+        .map(|w| {
+            let noise = w.random_like(burn::tensor::Distribution::Normal(0.0, 1.0));
+            (w * noise.detach()).sum()
+        })
+        .reduce(|a, b| a + b)
+        .expect("at least one penalty target")
+}
+
 /// The weight matrices selected by `target` (shared by the PR and L2
 /// penalties).
 fn penalty_weights(model: &MambaVocabNet, target: PrPenaltyTarget) -> Vec<Tensor<2>> {

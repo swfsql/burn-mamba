@@ -137,6 +137,9 @@ struct Overrides {
     /// `--l2-lambda <f64>`: plain L2 loss penalty on the `pr_target` matrices
     /// (rank-specificity control).
     l2_lambda: Option<f64>,
+    /// `--noise-lambda <f64>`: weight-independent noise-gradient loss term
+    /// (per-element gradient RMS = value).
+    noise_lambda: Option<f64>,
     /// `--d-model <usize>`: model width (only applies when a fresh model
     /// config is created — a saved config in the artifacts dir wins).
     d_model: Option<usize>,
@@ -167,6 +170,7 @@ impl Overrides {
             step_offset: pargs.opt_value_from_str("--step-offset").unwrap(),
             pr_start_step: pargs.opt_value_from_str("--pr-start-step").unwrap(),
             l2_lambda: pargs.opt_value_from_str("--l2-lambda").unwrap(),
+            noise_lambda: pargs.opt_value_from_str("--noise-lambda").unwrap(),
             d_model: pargs.opt_value_from_str("--d-model").unwrap(),
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
@@ -228,6 +232,9 @@ impl Overrides {
         }
         if let Some(l2_lambda) = self.l2_lambda {
             config.l2_lambda = l2_lambda;
+        }
+        if let Some(noise_lambda) = self.noise_lambda {
+            config.noise_lambda = noise_lambda;
         }
     }
 }

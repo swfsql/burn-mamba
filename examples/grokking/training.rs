@@ -103,6 +103,12 @@ pub struct GrokkingConfig {
     /// (norm pressure through the loss, no rank preference). `0` disables.
     #[config(default = 0.0)]
     pub l2_lambda: f64,
+    /// Coefficient of the weight-independent-gradient control `Σ ⟨W, ε⟩`
+    /// (fresh `ε ~ N(0,1)` per step, detached): per-element auxiliary
+    /// gradient RMS = this coefficient, but carrying zero information about
+    /// the weights. `0` disables.
+    #[config(default = 0.0)]
+    pub noise_lambda: f64,
 }
 
 impl GrokkingConfig {
@@ -220,6 +226,10 @@ pub fn train(
         if config.l2_lambda != 0.0 {
             let penalty = diagnostics::weight_l2_penalty(&model, config.pr_target);
             loss = loss + penalty.mul_scalar(config.l2_lambda);
+        }
+        if config.noise_lambda != 0.0 {
+            let penalty = diagnostics::weight_noise_penalty(&model, config.pr_target);
+            loss = loss + penalty.mul_scalar(config.noise_lambda);
         }
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
