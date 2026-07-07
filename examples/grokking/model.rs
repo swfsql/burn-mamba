@@ -3,7 +3,8 @@
 
 use burn_mamba::prelude::{Mamba2Config, MambaVocabNetConfig, ResidualsConfig};
 
-/// A deliberately constrained Mamba-2 LM (~29k params at `p = 97`):
+/// A deliberately constrained Mamba-2 LM (~29k params at the
+/// `p = 97, d_model = 64, expand = 1, state_rank = 32, 1 layer` default):
 ///
 /// - **Mamba-2, not Mamba-3**: a real input-gated exponential accumulator with
 ///   no oscillatory (RoPE) channel, so periodic structure must live in the
@@ -23,18 +24,23 @@ use burn_mamba::prelude::{Mamba2Config, MambaVocabNetConfig, ResidualsConfig};
 ///   and generalization must share recurrence + gating + readout.
 /// - **Untied LM head**: separate embedding/unembedding, so the embedding
 ///   Fourier-spectrum diagnostic is not coupled to readout dynamics.
-pub fn model_config(p: usize) -> MambaVocabNetConfig {
-    let d_model = 64;
+pub fn model_config(
+    p: usize,
+    d_model: usize,
+    expand: usize,
+    state_rank: usize,
+    n_layers: usize,
+) -> MambaVocabNetConfig {
     let mamba_block = Mamba2Config::new(d_model)
-        .with_state_rank(32)
+        .with_state_rank(state_rank)
         .with_conv_kernel(1)
-        .with_expand(1)
-        // d_inner = expand·d_model = 64; one head:
-        .with_per_head_dim(64)
+        .with_expand(expand)
+        // one head:
+        .with_per_head_dim(expand * d_model)
         .with_ngroups(1);
 
     MambaVocabNetConfig::Mamba2 {
-        n_real_layers: 1,
+        n_real_layers: n_layers,
         n_virtual_layers: None,
         vocab_size: p,
         // keep logits exactly `p`-way (no padded classes in the softmax)

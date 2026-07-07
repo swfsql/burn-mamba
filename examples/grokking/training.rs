@@ -7,6 +7,8 @@
 
 pub use crate::common::cli::AppArgs;
 use crate::dataset::{self, Split};
+use crate::diagnostics::{self, StatePr, WeightPr};
+pub use crate::diagnostics::PrPenaltyTarget;
 use burn::module::AutodiffModule;
 use burn::optim::{AdamWConfig, GradientsParams};
 use burn::prelude::*;
@@ -26,7 +28,12 @@ pub struct GrokkingConfig {
     /// The modulus `p` (vocab size and class count).
     #[config(default = 97)]
     pub p: usize,
-    /// Fraction of the `p²` pairs used for training.
+    /// Number of summands `k` (sequence length). 2 = the literature-standard
+    /// pair task; > 2 forces all pre-final-token information through the
+    /// recurrent state (keep `pᵏ` full-batch-sized, e.g. `p = 11, k = 4`).
+    #[config(default = 2)]
+    pub k: usize,
+    /// Fraction of the `pᵏ` sequences used for training.
     #[config(default = 0.5)]
     pub train_fraction: f64,
     /// Seed for the deterministic train/test pair split.
@@ -50,10 +57,30 @@ pub struct GrokkingConfig {
     pub seed: u64,
     /// Run all forwards token-by-token via `step()` instead of the chunkwise
     /// `forward()` — mathematically identical (the library's parity contract),
-    /// ~7× faster at these tiny sequence lengths, and exposes the per-step
-    /// state caches (the capture point for the state-PR diagnostic).
+    /// ~7× faster at T = 2, and exposes the per-step state caches (the
+    /// capture point for the state-PR diagnostic). The chunkwise path uses
+    /// the recompute backward and needs less memory — prefer it for capacity
+    /// probes on bigger models.
     #[config(default = true)]
     pub stepwise: bool,
+    /// Compute and log the PR diagnostics at eval points. Turn off for
+    /// capacity probes (accuracy/loss logging remains); a full panel is
+    /// always available post-hoc via `--inference` on any checkpoint.
+    #[config(default = true)]
+    pub diagnostics: bool,
+    /// Also run the (costly: a stepping pass over the diagnostic set) state-PR
+    /// part of the diagnostics; weight PRs are always logged when
+    /// `diagnostics` is on.
+    #[config(default = true)]
+    pub state_diagnostics: bool,
+    /// Coefficient of the differentiable weight-PR penalty
+    /// (`loss += pr_lambda · Σ PR(W)` over `pr_target`); `0` disables it.
+    /// The causal Step-2 arm: pure rank pressure in place of weight decay.
+    #[config(default = 0.0)]
+    pub pr_lambda: f64,
+    /// Which weights the PR penalty targets.
+    #[config(default = "PrPenaltyTarget::All")]
+    pub pr_target: PrPenaltyTarget,
 }
 
 /// The SSD path used by chunkwise forwards: the recompute-backward serial
@@ -102,10 +129,11 @@ pub fn train(
     let mut optim = app_args.load_or_save_optim(&config.optimizer);
 
     let (train_split, test_split) =
-        dataset::build(config.p, config.train_fraction, config.split_seed);
+        dataset::build(config.p, config.k, config.train_fraction, config.split_seed);
     println!(
-        "p = {}, train pairs: {}, test pairs: {} (fraction {})",
+        "p = {}, k = {}, train seqs: {}, test seqs: {} (fraction {})",
         config.p,
+        config.k,
         train_split.len(),
         test_split.len(),
         config.train_fraction,
@@ -124,16 +152,31 @@ pub fn train(
         test_split.labels_tensor(&eval_device),
     );
 
+    // The PR diagnostic's eval set: all `pᵏ` sequences (or a deterministic
+    // 10k sample when the space is larger), on the plain device.
+    let diag_inputs = dataset::diagnostic_set(config.p, config.k, 10_000, config.split_seed)
+        .inputs_tensor(&eval_device);
+
     let ce = CrossEntropyLossConfig::new().init();
     let metrics_path = app_args.artifacts_path.join("metrics.csv");
-    println!("logging metrics to {metrics_path:?}");
+    let pr_path = app_args.artifacts_path.join("pr.csv");
+    let weights_path = app_args.artifacts_path.join("weights.csv");
+    println!("logging metrics to {metrics_path:?}, state PR to {pr_path:?}, weight PR to {weights_path:?}");
 
     println!("Starting training...");
     let started = std::time::Instant::now();
     for step in 1..=config.num_steps {
         let logits_bc = final_logits(&model, &x_bs, config.stepwise);
-        let loss = ce.forward(logits_bc, targets_bp.clone());
-        let loss_value = scalar_f32(loss.clone());
+        // `loss_value` (and the csv column) stays CE-only, comparable across
+        // arms; the penalty value is printed separately at eval points.
+        let ce_loss = ce.forward(logits_bc, targets_bp.clone());
+        let loss_value = scalar_f32(ce_loss.clone());
+        let loss = if config.pr_lambda > 0.0 {
+            let penalty = diagnostics::weight_pr_penalty(&model, config.pr_target);
+            ce_loss + penalty.mul_scalar(config.pr_lambda)
+        } else {
+            ce_loss
+        };
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
         let lr = config.lr.get_lr(step);
@@ -150,7 +193,30 @@ pub fn train(
                 config.num_steps,
                 started.elapsed().as_secs_f64(),
             );
-            append_metrics(&metrics_path, step, lr, loss_value, train_acc, test_acc);
+            if config.pr_lambda > 0.0 {
+                let penalty =
+                    scalar_f32(diagnostics::weight_pr_penalty(&valid_model, config.pr_target));
+                println!(
+                    "        pr penalty {penalty:.3} (λ {}, {:?})",
+                    config.pr_lambda, config.pr_target
+                );
+            }
+            if config.diagnostics {
+                let state_prs = if config.state_diagnostics {
+                    diagnostics::state_pr(&valid_model, &diag_inputs)
+                } else {
+                    Vec::new()
+                };
+                let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
+                println!("        {}", format_prs(&state_prs, &weight_prs));
+                append_metrics(&metrics_path, step, lr, loss_value, train_acc, test_acc, &weight_prs);
+                if !state_prs.is_empty() {
+                    append_pr(&pr_path, step, &state_prs);
+                }
+                append_weight_pr(&weights_path, step, &weight_prs);
+            } else {
+                append_metrics_bare(&metrics_path, step, lr, loss_value, train_acc, test_acc);
+            }
         }
         if step % config.save_every == 0 || last {
             app_args.save_model(&model);
@@ -191,6 +257,38 @@ fn scalar_f32(t: Tensor<1>) -> f32 {
     t.into_data().to_vec::<f32>().unwrap()[0]
 }
 
+/// Compact console form of the diagnostics (centered PRs are the primary
+/// read-outs).
+pub fn format_prs(state_prs: &[StatePr], weight_prs: &WeightPr) -> String {
+    let states: Vec<String> = state_prs
+        .iter()
+        .map(|r| {
+            format!(
+                "L{}H{} pooled {:.2}, final {:.2}",
+                r.layer, r.head, r.pooled_centered, r.final_centered
+            )
+        })
+        .collect();
+    let blocks: Vec<String> = weight_prs
+        .layers
+        .iter()
+        .map(|l| {
+            format!(
+                "L{} z {:.1}, x {:.1}, B {:.1}, C {:.1}, out {:.1}, B-alpha {:.1}",
+                l.layer, l.z, l.x, l.b, l.c, l.out, l.b_alphabet
+            )
+        })
+        .collect();
+    format!(
+        "state PR [{}] | weight PR emb {:.2}, head {:.2}, emb-freq {:.2} | block [{}]",
+        states.join("; "),
+        weight_prs.emb,
+        weight_prs.lm_head,
+        weight_prs.emb_freq,
+        blocks.join("; "),
+    )
+}
+
 /// Append one metrics row, creating the file with a header on first use.
 fn append_metrics(
     path: &std::path::Path,
@@ -199,6 +297,7 @@ fn append_metrics(
     train_loss: f32,
     train_acc: f64,
     test_acc: f64,
+    weight_prs: &WeightPr,
 ) {
     use std::io::Write as _;
     let needs_header = !path.exists();
@@ -208,7 +307,82 @@ fn append_metrics(
         .open(path)
         .expect("failed to open the metrics csv");
     if needs_header {
-        writeln!(file, "step,lr,train_loss,train_acc,test_acc").expect("failed csv header write");
+        writeln!(file, "step,lr,train_loss,train_acc,test_acc,emb_pr,head_pr,emb_freq_pr")
+            .expect("failed csv header write");
     }
-    writeln!(file, "{step},{lr},{train_loss},{train_acc},{test_acc}").expect("failed csv write");
+    writeln!(
+        file,
+        "{step},{lr},{train_loss},{train_acc},{test_acc},{},{},{}",
+        weight_prs.emb, weight_prs.lm_head, weight_prs.emb_freq,
+    )
+    .expect("failed csv write");
+}
+
+/// [`append_metrics`] without diagnostics: the weight-PR columns are written
+/// as `nan` so the file keeps one schema either way.
+fn append_metrics_bare(
+    path: &std::path::Path,
+    step: usize,
+    lr: f64,
+    train_loss: f32,
+    train_acc: f64,
+    test_acc: f64,
+) {
+    let nan = WeightPr {
+        emb: f64::NAN,
+        lm_head: f64::NAN,
+        emb_freq: f64::NAN,
+        layers: Vec::new(),
+    };
+    append_metrics(path, step, lr, train_loss, train_acc, test_acc, &nan);
+}
+
+/// Append the per-(layer, head) state-PR rows, creating the file with a
+/// header on first use.
+fn append_pr(path: &std::path::Path, step: usize, state_prs: &[StatePr]) {
+    use std::io::Write as _;
+    let needs_header = !path.exists();
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("failed to open the pr csv");
+    if needs_header {
+        writeln!(
+            file,
+            "step,layer,head,pooled_centered,pooled_uncentered,final_centered,final_uncentered"
+        )
+        .expect("failed csv header write");
+    }
+    for r in state_prs {
+        writeln!(
+            file,
+            "{step},{},{},{},{},{},{}",
+            r.layer, r.head, r.pooled_centered, r.pooled_uncentered, r.final_centered, r.final_uncentered,
+        )
+        .expect("failed csv write");
+    }
+}
+
+/// Append the per-layer block-weight PR rows, creating the file with a header
+/// on first use.
+fn append_weight_pr(path: &std::path::Path, step: usize, weight_prs: &WeightPr) {
+    use std::io::Write as _;
+    let needs_header = !path.exists();
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("failed to open the weights csv");
+    if needs_header {
+        writeln!(file, "step,layer,z,x,b,c,out,b_alphabet").expect("failed csv header write");
+    }
+    for l in &weight_prs.layers {
+        writeln!(
+            file,
+            "{step},{},{},{},{},{},{},{}",
+            l.layer, l.z, l.x, l.b, l.c, l.out, l.b_alphabet,
+        )
+        .expect("failed csv write");
+    }
 }

@@ -6,6 +6,7 @@
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 - `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
+- `grokking`: A small Mamba-2 LM on modular addition `(a + b) mod p` (the classic grokking task), instrumented with recurrent-state participation-ratio diagnostics (`pr.csv`/`metrics.csv`; sweep knobs `-- --wd --lr --steps --train-fraction --chunked`).
 
 #### Examples Structure
 
@@ -17,7 +18,7 @@ There are shared definitions in `common/mod.rs`, imported as an outside module b
 
 ##### Model Definition
 
-The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
+The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`grokking`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
 
 #### Backend Selection
 

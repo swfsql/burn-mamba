@@ -22,10 +22,12 @@
 
 pub use common::cli::AppArgs;
 use std::ffi::OsString;
-use training::{ConstantLr, GrokkingConfig, Lr};
+use training::{ConstantLr, GrokkingConfig, Lr, PrPenaltyTarget};
 
 /// The modular-addition dataset and its deterministic pair split.
 pub mod dataset;
+/// State/weight participation-ratio diagnostics.
+pub mod diagnostics;
 /// Post-training evaluation and sample predictions.
 pub mod inference;
 /// The example's `model_config()`.
@@ -65,7 +67,13 @@ pub fn launch(app_args: &AppArgs) {
     overrides.apply(&mut training_config);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
-        model::model_config(training_config.p)
+        model::model_config(
+            training_config.p,
+            overrides.d_model.unwrap_or(64),
+            overrides.expand.unwrap_or(1),
+            overrides.state_rank.unwrap_or(32),
+            overrides.n_layers.unwrap_or(1),
+        )
     });
     // save configs
     app_args.save_training_config(&training_config);
@@ -99,11 +107,34 @@ struct Overrides {
     lr: Option<f64>,
     /// `--steps <usize>`: full-batch optimizer steps.
     steps: Option<usize>,
-    /// `--train-fraction <f64>`: fraction of the `p²` pairs used for training.
+    /// `--train-fraction <f64>`: fraction of the `pᵏ` sequences used for training.
     train_fraction: Option<f64>,
-    /// `--chunked`: use the chunkwise `forward()` instead of the (default,
-    /// faster) token-by-token `step()` mode.
+    /// `--p <usize>`: the modulus (vocab size and class count).
+    p: Option<usize>,
+    /// `--k <usize>`: number of summands (sequence length).
+    k: Option<usize>,
+    /// `--chunked`: use the chunkwise `forward()` instead of the (default)
+    /// token-by-token `step()` mode (chunkwise = recompute backward, less
+    /// memory; stepwise = faster at tiny T, exposes states).
     chunked: bool,
+    /// `--no-diag`: skip the PR diagnostics at eval points (capacity probes).
+    no_diag: bool,
+    /// `--no-state-pr`: keep the weight-PR diagnostics but skip the (costly)
+    /// state-PR stepping pass.
+    no_state_pr: bool,
+    /// `--pr-lambda <f64>`: weight-PR penalty coefficient (0 = off).
+    pr_lambda: Option<f64>,
+    /// `--pr-target <emb|emb-head|bc|all>`: which weights the penalty targets.
+    pr_target: Option<String>,
+    /// `--d-model <usize>`: model width (only applies when a fresh model
+    /// config is created — a saved config in the artifacts dir wins).
+    d_model: Option<usize>,
+    /// `--expand <usize>`: `d_inner = expand·d_model` (fresh configs only).
+    expand: Option<usize>,
+    /// `--state-rank <usize>`: SSM state rank `N` (fresh configs only).
+    state_rank: Option<usize>,
+    /// `--n-layers <usize>`: number of layers (fresh configs only).
+    n_layers: Option<usize>,
 }
 
 impl Overrides {
@@ -114,7 +145,17 @@ impl Overrides {
             lr: pargs.opt_value_from_str("--lr").unwrap(),
             steps: pargs.opt_value_from_str("--steps").unwrap(),
             train_fraction: pargs.opt_value_from_str("--train-fraction").unwrap(),
+            p: pargs.opt_value_from_str("--p").unwrap(),
+            k: pargs.opt_value_from_str("--k").unwrap(),
             chunked: pargs.contains("--chunked"),
+            no_diag: pargs.contains("--no-diag"),
+            no_state_pr: pargs.contains("--no-state-pr"),
+            pr_lambda: pargs.opt_value_from_str("--pr-lambda").unwrap(),
+            pr_target: pargs.opt_value_from_str("--pr-target").unwrap(),
+            d_model: pargs.opt_value_from_str("--d-model").unwrap(),
+            expand: pargs.opt_value_from_str("--expand").unwrap(),
+            state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
+            n_layers: pargs.opt_value_from_str("--n-layers").unwrap(),
         };
         let remaining = pargs.finish();
         assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");
@@ -134,8 +175,32 @@ impl Overrides {
         if let Some(train_fraction) = self.train_fraction {
             config.train_fraction = train_fraction;
         }
+        if let Some(p) = self.p {
+            config.p = p;
+        }
+        if let Some(k) = self.k {
+            config.k = k;
+        }
         if self.chunked {
             config.stepwise = false;
+        }
+        if self.no_diag {
+            config.diagnostics = false;
+        }
+        if self.no_state_pr {
+            config.state_diagnostics = false;
+        }
+        if let Some(pr_lambda) = self.pr_lambda {
+            config.pr_lambda = pr_lambda;
+        }
+        if let Some(pr_target) = &self.pr_target {
+            config.pr_target = match pr_target.as_str() {
+                "emb" => PrPenaltyTarget::Emb,
+                "emb-head" => PrPenaltyTarget::EmbHead,
+                "bc" => PrPenaltyTarget::Bc,
+                "all" => PrPenaltyTarget::All,
+                other => panic!("unknown --pr-target {other:?} (emb|emb-head|bc|all)"),
+            };
         }
     }
 }
