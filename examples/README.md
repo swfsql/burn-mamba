@@ -6,7 +6,7 @@
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 - `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
-- `grokking`: A small Mamba-2 LM on modular addition `(a + b) mod p` (the classic grokking task), instrumented with recurrent-state participation-ratio diagnostics (`pr.csv`/`metrics.csv`; sweep knobs `-- --wd --lr --steps --train-fraction --chunked`).
+- `grokking`: A small Mamba-2 LM on k-summand modular addition (the classic grokking task), grown into an experimentation/ablation platform: participation-ratio diagnostics (state + weight spectra + embedding-frequency), differentiable rank/norm/noise loss terms with schedules, and an SGD probe path. Its README is a standalone report of the findings with reproduction commands for every claim.
 
 #### Examples Structure
 
