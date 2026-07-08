@@ -231,6 +231,20 @@ pub enum PrPenaltyTarget {
     All,
 }
 
+/// The differentiable **state**-PR penalty: batch-pooled *uncentered* PR
+/// summed over every (virtual layer, head) — the state-side counterpart of
+/// [`weight_pr_penalty`], fed by the training forward's attached moments
+/// (`final_logits_with_moments`). Like the weight version it is
+/// scale-invariant: pure rank pressure on the states' write directions, no
+/// norm shrinkage.
+pub fn state_pr_penalty(moments: &[StateMoments]) -> Tensor<1> {
+    moments
+        .iter()
+        .map(|m| m.clone().pool_batch().pr(false).sum())
+        .reduce(|a, b| a + b)
+        .expect("at least one layer of moments")
+}
+
 /// The differentiable weight-PR penalty: Σ [`pr_tensor`] over the weights
 /// selected by `target`. Added to the loss as `pr_lambda · penalty` this is
 /// the causal test of the Step-1 correlation: spectral compression applied as

@@ -121,6 +121,14 @@ pub struct GrokkingConfig {
     /// `lr · sgd_wd`.
     #[config(default = 0.0)]
     pub sgd_wd: f32,
+    /// Coefficient of the differentiable **state**-PR penalty:
+    /// `loss += state_pr_lambda · Σ_{layer,head} PR(states)` (batch-pooled,
+    /// uncentered), from the library's closed-form state moments on the
+    /// training forward — direct rank pressure on the circuit-sized quantity
+    /// the state-PR diagnostic measures. Requires the chunkwise path
+    /// (`--chunked`); `0` disables; negative rewards state-rank expansion.
+    #[config(default = 0.0)]
+    pub state_pr_lambda: f64,
 }
 
 impl GrokkingConfig {
@@ -152,6 +160,19 @@ pub fn ssd_path() -> MambaSsdPath {
 /// Final-position logits `[n, p]` for a batch of token sequences `[n, s]`,
 /// either chunkwise (`forward()`) or token-by-token (`step()`; identical by
 /// the library's parity contract).
+/// [`final_logits`] via the chunkwise path, additionally returning each
+/// (virtual) layer's **attached** state moments — the state-PR penalty input
+/// (gradients flow through the moments into the model).
+pub fn final_logits_with_moments(
+    model: &MambaVocabNet,
+    inputs_bs: &Tensor<2, Int>,
+) -> (Tensor<2>, Vec<StateMoments>) {
+    let [_b, s] = inputs_bs.dims();
+    let (logits_bsc, _caches, moments) =
+        model.forward_with_state_moments_grad(inputs_bs.clone(), None, ssd_path());
+    (logits_bsc.narrow(1, s - 1, 1).squeeze_dim::<2>(1), moments)
+}
+
 pub fn final_logits(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>, stepwise: bool) -> Tensor<2> {
     let [_b, s] = inputs_bs.dims();
     if stepwise {
@@ -181,6 +202,10 @@ pub fn train(
 ) {
     training_device.seed(config.seed);
     let eval_device = training_device.clone().inner();
+    assert!(
+        config.state_pr_lambda == 0.0 || !config.stepwise,
+        "state_pr_lambda needs the training forward's state moments — run with --chunked"
+    );
 
     let mut model: MambaVocabNet = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
@@ -246,7 +271,14 @@ pub fn train(
     println!("Starting training...");
     let started = std::time::Instant::now();
     for step in 1..=config.num_steps {
-        let logits_bc = final_logits(&model, &x_bs, config.stepwise);
+        // The state-PR penalty needs the training forward's attached moments,
+        // so it forces the chunkwise path (asserted above).
+        let (logits_bc, train_moments) = if config.state_pr_lambda != 0.0 {
+            let (logits, moments) = final_logits_with_moments(&model, &x_bs);
+            (logits, Some(moments))
+        } else {
+            (final_logits(&model, &x_bs, config.stepwise), None)
+        };
         // `loss_value` (and the csv column) stays CE-only, comparable across
         // arms; the penalty value is printed separately at eval points.
         let ce_loss = ce.forward(logits_bc, targets_bp.clone());
@@ -264,6 +296,10 @@ pub fn train(
         if config.noise_lambda != 0.0 {
             let penalty = diagnostics::weight_noise_penalty(&model, config.pr_target);
             loss = loss + penalty.mul_scalar(config.noise_lambda);
+        }
+        if let Some(moments) = train_moments {
+            let penalty = diagnostics::state_pr_penalty(&moments);
+            loss = loss + penalty.mul_scalar(config.state_pr_lambda);
         }
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
@@ -314,6 +350,15 @@ pub fn train(
                 };
                 let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
                 println!("        {}", format_prs(&state_prs, &weight_prs));
+                // The state-PR penalty value over the diagnostic set: exactly
+                // Σ pooled-uncentered over the entries just computed.
+                if config.state_pr_lambda != 0.0 && !state_prs.is_empty() {
+                    let total: f64 = state_prs.iter().map(|s| s.pooled_uncentered).sum();
+                    println!(
+                        "        state-pr penalty {total:.3} (λ {})",
+                        config.state_pr_lambda
+                    );
+                }
                 append_metrics(&metrics_path, logged_step, lr, loss_value, train_acc, test_acc, &weight_prs);
                 if !state_prs.is_empty() {
                     append_pr(&pr_path, logged_step, &state_prs);

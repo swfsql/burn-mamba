@@ -142,6 +142,9 @@ struct Overrides {
     noise_lambda: Option<f64>,
     /// `--sgd <f64>`: use plain SGD with this momentum instead of AdamW.
     sgd: Option<f64>,
+    /// `--state-pr-lambda <f64>`: state-PR penalty coefficient (0 = off;
+    /// requires `--chunked`; spell negatives as `--state-pr-lambda=-0.01`).
+    state_pr_lambda: Option<f64>,
     /// `--d-model <usize>`: model width (only applies when a fresh model
     /// config is created — a saved config in the artifacts dir wins).
     d_model: Option<usize>,
@@ -174,6 +177,7 @@ impl Overrides {
             l2_lambda: pargs.opt_value_from_str("--l2-lambda").unwrap(),
             noise_lambda: pargs.opt_value_from_str("--noise-lambda").unwrap(),
             sgd: pargs.opt_value_from_str("--sgd").unwrap(),
+            state_pr_lambda: pargs.opt_value_from_str("--state-pr-lambda").unwrap(),
             d_model: pargs.opt_value_from_str("--d-model").unwrap(),
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
@@ -242,6 +246,9 @@ impl Overrides {
         }
         if let Some(sgd) = self.sgd {
             config.sgd_momentum = sgd;
+        }
+        if let Some(state_pr_lambda) = self.state_pr_lambda {
+            config.state_pr_lambda = state_pr_lambda;
         }
     }
 }

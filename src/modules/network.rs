@@ -82,6 +82,22 @@ where
         (x, caches, moments)
     }
 
+    /// [`Self::forward_with_state_moments`] with the moments left attached to
+    /// the autodiff graph (see [`Layers::forward_with_state_moments_grad`]).
+    pub fn forward_with_state_moments_grad(
+        &self,
+        x: Tensor<3>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
+        let x = self.insert_tokens(x);
+        let x = self.in_proj.forward(x);
+        let (x, caches, moments) =
+            self.layers.forward_with_state_moments_grad(x, caches, ssd_path);
+        let x = self.out_proj.forward(x);
+        (x, caches, moments)
+    }
+
     /// Single-token step (`[batch, input_size]` → `[batch, output_size]`).
     ///
     /// Three independent class cursors:
@@ -257,6 +273,21 @@ where
     ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
         let x = self.embedding.forward(x);
         let (x, caches, moments) = self.layers.forward_with_state_moments(x, caches, ssd_path);
+        let x = self.norm_f.forward(x);
+        (self.apply_lm_head(x), caches, moments)
+    }
+
+    /// [`Self::forward_with_state_moments`] with the moments left attached to
+    /// the autodiff graph (see [`Layers::forward_with_state_moments_grad`]).
+    pub fn forward_with_state_moments_grad(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
+        let x = self.embedding.forward(x);
+        let (x, caches, moments) =
+            self.layers.forward_with_state_moments_grad(x, caches, ssd_path);
         let x = self.norm_f.forward(x);
         (self.apply_lm_head(x), caches, moments)
     }
@@ -454,8 +485,8 @@ impl MambaLatentNet {
     }
 
     /// [`Self::forward`], additionally returning each (virtual) layer's pooled
-    /// per-token SSM-state moments. Only the Mamba-2 family currently provides
-    /// the closed form (the other families panic — see
+    /// per-token SSM-state moments, detached. Only the Mamba-2 family
+    /// currently provides the closed form (the other families panic — see
     /// [`MambaBlock::block_forward_with_state_moments`]). Family-mismatched
     /// `caches`/`ssd_path` panic as in [`Self::forward`].
     pub fn forward_with_state_moments(
@@ -463,6 +494,28 @@ impl MambaLatentNet {
         x: Tensor<3>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        self.forward_with_state_moments_impl(x, caches, ssd_path, false)
+    }
+
+    /// [`Self::forward_with_state_moments`] with the moments left attached to
+    /// the autodiff graph (see
+    /// [`MambaBlock::block_forward_with_state_moments_grad`]).
+    pub fn forward_with_state_moments_grad(
+        &self,
+        x: Tensor<3>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        self.forward_with_state_moments_impl(x, caches, ssd_path, true)
+    }
+
+    fn forward_with_state_moments_impl(
+        &self,
+        x: Tensor<3>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+        attached: bool,
     ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -477,7 +530,11 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c, m) = net.forward_with_state_moments(x, caches, ());
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, ())
+                } else {
+                    net.forward_with_state_moments(x, caches, ())
+                };
                 (y, MambaCaches::Mamba1(c), m)
             }
             #[cfg(feature = "mamba2")]
@@ -492,7 +549,11 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, path)
+                } else {
+                    net.forward_with_state_moments(x, caches, path)
+                };
                 (y, MambaCaches::Mamba2(c), m)
             }
             #[cfg(feature = "mamba3")]
@@ -507,7 +568,11 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, path)
+                } else {
+                    net.forward_with_state_moments(x, caches, path)
+                };
                 (y, MambaCaches::Mamba3(c), m)
             }
         }
@@ -853,8 +918,8 @@ impl MambaVocabNet {
     }
 
     /// [`Self::forward`], additionally returning each (virtual) layer's pooled
-    /// per-token SSM-state moments. Only the Mamba-2 family currently provides
-    /// the closed form (the other families panic — see
+    /// per-token SSM-state moments, detached. Only the Mamba-2 family
+    /// currently provides the closed form (the other families panic — see
     /// [`MambaBlock::block_forward_with_state_moments`]). Family-mismatched
     /// `caches`/`ssd_path` panic as in [`Self::forward`].
     pub fn forward_with_state_moments(
@@ -862,6 +927,28 @@ impl MambaVocabNet {
         x: Tensor<2, Int>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        self.forward_with_state_moments_impl(x, caches, ssd_path, false)
+    }
+
+    /// [`Self::forward_with_state_moments`] with the moments left attached to
+    /// the autodiff graph (see
+    /// [`MambaBlock::block_forward_with_state_moments_grad`]).
+    pub fn forward_with_state_moments_grad(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        self.forward_with_state_moments_impl(x, caches, ssd_path, true)
+    }
+
+    fn forward_with_state_moments_impl(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+        attached: bool,
     ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -876,7 +963,11 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c, m) = net.forward_with_state_moments(x, caches, ());
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, ())
+                } else {
+                    net.forward_with_state_moments(x, caches, ())
+                };
                 (y, MambaCaches::Mamba1(c), m)
             }
             #[cfg(feature = "mamba2")]
@@ -891,7 +982,11 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, path)
+                } else {
+                    net.forward_with_state_moments(x, caches, path)
+                };
                 (y, MambaCaches::Mamba2(c), m)
             }
             #[cfg(feature = "mamba3")]
@@ -906,7 +1001,11 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                let (y, c, m) = if attached {
+                    net.forward_with_state_moments_grad(x, caches, path)
+                } else {
+                    net.forward_with_state_moments(x, caches, path)
+                };
                 (y, MambaCaches::Mamba3(c), m)
             }
         }

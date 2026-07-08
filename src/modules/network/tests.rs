@@ -67,3 +67,51 @@ fn vocab_forward_state_moments_match_step() {
         assert!(d1 < 1e-4 * scale, "layer {l}: m1 vs step {d1:.6} (scale {scale:.3})");
     }
 }
+
+/// The `_grad` cascade: a moments-only loss through
+/// `forward_with_state_moments_grad` must back-propagate into upstream
+/// parameters (the embedding — every layer's states depend on it), while
+/// leaving parameters that feed only `y` past the last state read
+/// (`norm_f.gamma`) untouched. A wiring mistake that detaches the moments
+/// (or leaks `y` into them) fails one of the two.
+#[test]
+fn vocab_forward_state_moments_grad_reaches_params() {
+    let device: Device = Default::default();
+    let block_cfg = Mamba2Config::new(32)
+        .with_state_rank(8)
+        .with_expand(2)
+        .with_per_head_dim(8);
+    let net = VocabNetworkBuilder {
+        vocab_size: 11,
+        pad_vocab_size_multiple: 8,
+        layers: LayersBuilder::new(2, block_cfg),
+        missing_lm_head: true,
+    }
+    .init(&device.clone().autodiff());
+
+    let tokens_bs = Tensor::<2, Int>::random(
+        [2, 5],
+        Distribution::Uniform(0.0, 11.0),
+        &device.clone().autodiff(),
+    );
+    let (_logits, _caches, moments) = net.forward_with_state_moments_grad(
+        tokens_bs,
+        None,
+        Mamba2SsdPath::SerialRecalculated(Some(4)),
+    );
+    let loss = moments
+        .into_iter()
+        .map(|m| m.m2_bhrr.sum() + m.m1_bhr.sum())
+        .reduce(|a, b| a + b)
+        .expect("two layers of moments");
+    let grads = loss.backward();
+
+    assert!(
+        net.embedding.weight.val().grad(&grads).is_some(),
+        "attached moments must reach the embedding"
+    );
+    assert!(
+        net.norm_f.gamma.val().grad(&grads).is_none(),
+        "a moments-only loss must not touch y-only parameters"
+    );
+}
