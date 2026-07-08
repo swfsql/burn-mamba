@@ -29,14 +29,19 @@ findings, and reproduction commands for every claim.
    returns (f = 0.25: ~4k steps under both AdamW+noise and plain SGD) and
    then blocks undirected exploration entirely (f = 0.15: chance for ≥20k
    steps under both).
-4. **Directed PR (rank) compression is the only intervention found that
-   crosses the starved-data wall** — under both optimizers. It is not
-   effective in isolation (it is a *slow* driver and needs a live
-   exploration channel beside it: decoupled wd under AdamW, or SGD's native
-   dynamics), it must be dosed gradually (λ ≈ 0.03; a hard crush finds the
-   wrong low-rank subspace), but at f = 0.15 it takes AdamW from
-   chance-forever to 98.8%, and SGD through the wall ~2× faster (with an
-   unstable endgame).
+4. **Directed PR (rank) compression crosses the starved-data wall where
+   matched undirected exploration provably fails** — under both optimizers.
+   It is a *scale-invariant, information-free structural prior*: not
+   effective in isolation (it is a slow driver and needs a live exploration
+   channel beside it: decoupled wd under AdamW, or SGD's native dynamics),
+   and it must be dosed gradually (λ ≈ 0.03; a gated hard crush compresses
+   the spectra 20× faster than wd and stays at chance — the *wrong* low-rank
+   subspace). At f = 0.15 it takes AdamW from chance-forever to 98.8%, and
+   SGD through the wall ~2× faster (with an unstable endgame). Prior work
+   has shifted/crossed the wall by other means (LRD's spectral decay region
+   expansion; knowledge distillation below the critical threshold) — the
+   deltas here are the matched-exploration controls, the wrong-subspace
+   dose result, and the heat–map interference (below).
 5. **The original state-PR diagnostic works as a progress measure** (an
    inflection leads/tracks every transition, 4-for-4 arms), but the strong
    hypothesis is rejected: the final generalizing circuit *re-compresses*
@@ -339,12 +344,80 @@ grokking --training -a tmp/sgdf15pr -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fr
 - Caveat: SGD ran at 50× AdamW's lr; these are mechanism claims, not a
   tuned-fairness comparison.
 
+## Related work & positioning
+
+A literature pass (July 2026) places the findings as follows.
+
+- **Rank pressure causality (§2)** — *rescoped as an isolation, not a
+  first*: DeMoss et al., "The Complexity Dynamics of Grokking"
+  ([2412.09810](https://arxiv.org/abs/2412.09810)) already show a
+  scale-invariant spectral-entropy penalty causing grokking — but inside a
+  stack with wd = 1 + weight noise, never isolated. The wd = 0 isolation
+  (control never leaves chance), the release test (pressure-as-motor, ~10×
+  slowdown on removal), and the sign-flip anti-generalization control appear
+  new. "Low-Rank Decay" ([2606.04405](https://arxiv.org/abs/2606.04405)) is
+  the nearest 2026 neighbor (spectral regularizer accelerating grokking and
+  expanding the data-fraction region in scale-invariant transformers) but
+  its nuclear-norm-like term carries *norm* pressure — PR's scale-invariance
+  is what dissociates rank from norm here; LRD lists exactly this causal
+  isolation as future work. Correlational base: Yunis et al. spectral
+  dynamics; spectral-entropy collapse as a leading indicator with a blocking
+  (necessity-direction) intervention
+  ([2604.13123](https://arxiv.org/abs/2604.13123)) — ours is the inducing
+  (sufficiency-direction) twin.
+- **Optimizer-freeze / noise catalysis (§3)** — the decomposition ("any live
+  auxiliary gradient un-freezes AdamW because Adam self-normalizes it to
+  lr-scale; hence dose-flat, information-free catalysis") appears
+  unarticulated; the pieces exist separately: softmax collapse
+  ([2501.04697](https://arxiv.org/abs/2501.04697)) — gradient death by
+  numerical absorption (a *different* freeze: it predicts stalls under any
+  optimizer, whereas our SGD arms show no plateau; still, a float64/StableMax
+  control is owed); variance-limited phase transition
+  ([2603.15492](https://arxiv.org/abs/2603.15492)) — Adam rectifies noise
+  anisotropically (their isotropic-noise-fails matches our heat-only cell);
+  Arrhenius/metastable-escape accounts
+  ([2606.17120](https://arxiv.org/abs/2606.17120)) — our dose-flatness and
+  the SGD no-plateau *dispute* the thermal-barrier picture for the f=0.5
+  plateau; informative auxiliary terms collapsing the plateau
+  ([2605.15787](https://arxiv.org/abs/2605.15787), KL-to-oracle) — our
+  detached-noise control shows the information content is unnecessary;
+  Grokfast ([2405.20233](https://arxiv.org/abs/2405.20233)), Slingshot, Muon
+  — adjacent acceleration results by other mechanisms.
+- **Heat–map interference (§4)** — new in grokking; the closest articulation
+  of "Adam's shared denominator distorts auxiliary-gradient composition" is
+  in continual learning ([2604.22407](https://arxiv.org/abs/2604.22407),
+  attenuate-then-adapt conflict — the mirror image of ours).
+- **Data wall (§4)** — well established as critical dataset size (Varma et
+  al. circuit efficiency,
+  [2309.02390](https://arxiv.org/abs/2309.02390); ungrokking/semi-grokking;
+  KD crossing below threshold,
+  [2511.04760](https://arxiv.org/abs/2511.04760)). The contribution is the
+  two-barrier *decomposition* (optimizer artifact vs optimizer-independent
+  search wall, verified across two optimizers).
+- **Diagnostics (§1)** — transient complexity rise-and-fall, effective-dim
+  tracking, and embedding DFT concentration are transformer-standard (Nanda
+  et al.; Liu et al.; DeMoss). New mainly via the substrate: recurrent-state
+  covariance PR in an SSM, and the re-compression to a ~rank-1.3 conveyor.
+- **SSM substrate** — no formal grokking-on-Mamba paper found; one informal
+  LessWrong write-up (Oct 2024) observed grokking in a minimal SSM. "First
+  systematic grokking study on an SSM" is defensible citing it.
+
+Suggested write-up spine (from the same review): lead with the two-barrier
+decomposition and noise-catalysis mechanism; present rank compression as the
+directed instantiation that crosses the second barrier.
+
 ## Open threads
 
-Plateau-length vs train-fraction curve (where does the ~4k search wall
-diverge?); AdamW at higher lr (does a hotter Adam shrink the plateau
-without auxiliary terms?); hybrid schedules (λ taper / lr decay) for the SGD
-endgame; frequency-resolved embedding diagnostics over training (which
-Fourier bins get selected, when — the DFT machinery is already in
-`diagnostics.rs`); mechanistic checks on saved endpoints (frequency/state
-ablations); a Mamba-3 arm (does the circuit move into the rotation angles?).
+Toward a shareable write-up, in rough blocking order: **3–5 seeds per
+headline cell**; **a transformer replication** of §3/§4 (the mechanism is
+claimed at the optimizer level — substrate-independence is a prediction);
+**direct m/v moment traces** through plateau and revival (currently
+inferred); **softmax-collapse controls** (float64 / StableMax); an **ε/β₂
+sweep** (the freeze should depend on Adam's ε floor); **fairness-matched
+SGD** (current SGD lr is 50× AdamW's); more task families (modular
+multiplication, k = 3, one non-modular). Then the earlier list:
+plateau-length vs train-fraction curve; AdamW at higher lr; hybrid schedules
+(λ taper / lr decay) for the SGD endgame; frequency-resolved embedding
+diagnostics (which Fourier bins get selected, when); endpoint
+frequency/state ablations; a Mamba-3 arm (does the circuit move into the
+rotation angles?).
