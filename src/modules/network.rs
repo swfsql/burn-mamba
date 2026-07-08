@@ -66,6 +66,22 @@ where
         (x, caches)
     }
 
+    /// [`Self::forward`], additionally returning each (virtual) layer's pooled
+    /// per-token SSM-state moments (see
+    /// [`Layers::forward_with_state_moments`]).
+    pub fn forward_with_state_moments(
+        &self,
+        x: Tensor<3>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
+        let x = self.insert_tokens(x);
+        let x = self.in_proj.forward(x);
+        let (x, caches, moments) = self.layers.forward_with_state_moments(x, caches, ssd_path);
+        let x = self.out_proj.forward(x);
+        (x, caches, moments)
+    }
+
     /// Single-token step (`[batch, input_size]` → `[batch, output_size]`).
     ///
     /// Three independent class cursors:
@@ -228,6 +244,21 @@ where
         let (x, caches) = self.layers.forward(x, caches, ssd_path);
         let x = self.norm_f.forward(x);
         (self.apply_lm_head(x), caches)
+    }
+
+    /// [`Self::forward`], additionally returning each (virtual) layer's pooled
+    /// per-token SSM-state moments (see
+    /// [`Layers::forward_with_state_moments`]).
+    pub fn forward_with_state_moments(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<M::Caches>,
+        ssd_path: M::SsdPath,
+    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
+        let x = self.embedding.forward(x);
+        let (x, caches, moments) = self.layers.forward_with_state_moments(x, caches, ssd_path);
+        let x = self.norm_f.forward(x);
+        (self.apply_lm_head(x), caches, moments)
     }
 
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
@@ -418,6 +449,66 @@ impl MambaLatentNet {
                 };
                 let (y, c) = net.forward(x, caches, path);
                 (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// [`Self::forward`], additionally returning each (virtual) layer's pooled
+    /// per-token SSM-state moments. Only the Mamba-2 family currently provides
+    /// the closed form (the other families panic — see
+    /// [`MambaBlock::block_forward_with_state_moments`]). Family-mismatched
+    /// `caches`/`ssd_path` panic as in [`Self::forward`].
+    pub fn forward_with_state_moments(
+        &self,
+        x: Tensor<3>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                match ssd_path {
+                    MambaSsdPath::Mamba1 => {}
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-1 network"),
+                }
+                let (y, c, m) = net.forward_with_state_moments(x, caches, ());
+                (y, MambaCaches::Mamba1(c), m)
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba2(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-2 network"),
+                };
+                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                (y, MambaCaches::Mamba2(c), m)
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba3(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-3 network"),
+                };
+                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                (y, MambaCaches::Mamba3(c), m)
             }
         }
     }
@@ -761,6 +852,66 @@ impl MambaVocabNet {
         }
     }
 
+    /// [`Self::forward`], additionally returning each (virtual) layer's pooled
+    /// per-token SSM-state moments. Only the Mamba-2 family currently provides
+    /// the closed form (the other families panic — see
+    /// [`MambaBlock::block_forward_with_state_moments`]). Family-mismatched
+    /// `caches`/`ssd_path` panic as in [`Self::forward`].
+    pub fn forward_with_state_moments(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+    ) -> (Tensor<3>, MambaCaches, Vec<StateMoments>) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                match ssd_path {
+                    MambaSsdPath::Mamba1 => {}
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-1 network"),
+                }
+                let (y, c, m) = net.forward_with_state_moments(x, caches, ());
+                (y, MambaCaches::Mamba1(c), m)
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba2(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-2 network"),
+                };
+                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                (y, MambaCaches::Mamba2(c), m)
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba3(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-3 network"),
+                };
+                let (y, c, m) = net.forward_with_state_moments(x, caches, path);
+                (y, MambaCaches::Mamba3(c), m)
+            }
+        }
+    }
+
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
     /// Cache family must match the network. The two inner [`Layers`] class
     /// cursors (`layers_own_index`, `layer_indices`) are forwarded — see
@@ -1022,3 +1173,6 @@ impl MambaVocabNetConfig {
         }
     }
 }
+
+#[cfg(all(test, feature = "_dev-test", feature = "mamba2"))]
+mod tests;

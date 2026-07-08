@@ -128,6 +128,46 @@ pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StateP
     out
 }
 
+/// Forward-path counterpart of [`state_pr`]: one chunkwise
+/// `forward_with_state_moments` call instead of `s` `step`s, so it stays
+/// cheap when stepwise evaluation is memory-heavy. Pooled PRs come from the
+/// library's closed-form per-layer state moments (exact — every per-token
+/// state is counted, none materialised); final-step PRs from the returned
+/// caches. Matches [`state_pr`] by the moments parity tests.
+pub fn state_pr_forward(
+    model: &MambaVocabNet,
+    inputs_bs: &Tensor<2, Int>,
+    ssd_path: MambaSsdPath,
+) -> Vec<StatePr> {
+    let (_logits, caches, moments) =
+        model.forward_with_state_moments(inputs_bs.clone(), None, ssd_path);
+    let final_states: Vec<Tensor<4>> = match &caches {
+        MambaCaches::Mamba2(c) => c.caches.iter().map(|l| l.ssm_bhpr.clone()).collect(),
+        _ => panic!("the state-PR diagnostic expects a Mamba-2 network"),
+    };
+
+    let mut out = Vec::new();
+    for (layer, (m, final_bhpr)) in moments.into_iter().zip(final_states).enumerate() {
+        let pooled = m.pool_batch();
+        let per_head = |t: Tensor<2>| t.into_data().to_vec::<f32>().unwrap();
+        let centered_h = per_head(pooled.pr(true));
+        let uncentered_h = per_head(pooled.pr(false));
+        let [b, nheads, p, r] = final_bhpr.dims();
+        for head in 0..nheads {
+            let final_sn = final_bhpr.clone().narrow(1, head, 1).reshape([b * p, r]);
+            out.push(StatePr {
+                layer,
+                head,
+                pooled_centered: centered_h[head] as f64,
+                pooled_uncentered: uncentered_h[head] as f64,
+                final_centered: pr(final_sn.clone(), true),
+                final_uncentered: pr(final_sn, false),
+            });
+        }
+    }
+    out
+}
+
 /// Weight-side PRs: embedding, LM head, the embedding's exact `p`-point
 /// Fourier-energy PR (only the first `p` rows — the vocab may be padded),
 /// and each block's per-slice weight PRs.

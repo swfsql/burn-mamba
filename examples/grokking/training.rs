@@ -301,10 +301,16 @@ pub fn train(
                 );
             }
             if config.diagnostics {
-                let state_prs = if config.state_diagnostics {
+                // Stepwise runs read the cache after every `step`; chunked
+                // runs get the same pooled PRs from the library's closed-form
+                // state moments in one `forward` (exact, states never
+                // materialised).
+                let state_prs = if !config.state_diagnostics {
+                    Vec::new()
+                } else if config.stepwise {
                     diagnostics::state_pr(&valid_model, &diag_inputs)
                 } else {
-                    Vec::new()
+                    diagnostics::state_pr_forward(&valid_model, &diag_inputs, ssd_path())
                 };
                 let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
                 println!("        {}", format_prs(&state_prs, &weight_prs));

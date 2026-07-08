@@ -390,3 +390,166 @@ fn run_split_matches_full(cfg: Mamba2Config) {
 fn split_matches_full() {
     run_split_matches_full(small_config());
 }
+
+// ── State moments (forward vs step accumulation) ────────────────────────
+
+/// `forward_with_state_moments` returns exactly the moments a token-by-token
+/// `step` loop reading `cache.ssm_bhpr` accumulates — from a random initial
+/// cache and across sequence padding (`seq_len` not a multiple of the chunk
+/// length) — and leaves the plain `forward` outputs and final cache untouched.
+/// Streamed continuation is also checked: two chained calls whose merged
+/// moments must equal the one-shot moments.
+#[test]
+fn forward_state_moments_match_step() {
+    use crate::utils::test_helpers::max_abs_diff;
+    let device: Device = Default::default();
+    let cfg = small_config();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 7; // chunk_len 4 ⇒ padded to 8: exercises the validity mask
+    let split = 3;
+    let ssd_path = Mamba2SsdPath::SerialRecalculated(Some(4));
+    let input = Tensor::<3>::random(
+        [batch, seq_len, cfg.d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let init_cache = build_init_cache(&cfg, batch, true);
+    let fwd_input = || Tensor::from_inner(input.clone());
+
+    let (out_m, cache_m, moments) =
+        model.forward_with_state_moments(fwd_input(), Some(init_cache.clone()), ssd_path.clone());
+
+    // The moments branch must not perturb the ordinary outputs.
+    let (out_plain, cache_plain) =
+        model.forward(fwd_input(), Some(init_cache.clone()), ssd_path.clone());
+    assert!(max_abs_diff(out_m, out_plain) < 1e-6);
+    assert!(max_abs_diff(cache_m.ssm_bhpr.clone(), cache_plain.ssm_bhpr) < 1e-6);
+
+    // Reference: accumulate `hₜᵀhₜ` / `Σₚ hₜ` from the step loop's cache.
+    let (nheads, state_rank) = (cfg.nheads(), cfg.state_rank);
+    let mut cache = Some(init_cache.clone());
+    let mut m2_bhrr = Tensor::<4>::from_inner(Tensor::zeros(
+        [batch, nheads, state_rank, state_rank],
+        &device,
+    ));
+    let mut m1_bhr = Tensor::<3>::from_inner(Tensor::zeros([batch, nheads, state_rank], &device));
+    for t in 0..seq_len {
+        let token = Tensor::from_inner(input.clone()).narrow(1, t, 1).squeeze_dim(1);
+        let (_out_t, new_cache) = model.step(token, cache);
+        let h_bhpr = new_cache.ssm_bhpr.clone();
+        m2_bhrr = m2_bhrr + h_bhpr.clone().permute([0, 1, 3, 2]).matmul(h_bhpr.clone());
+        m1_bhr = m1_bhr + h_bhpr.sum_dim(2).reshape([batch, nheads, state_rank]);
+        cache = Some(new_cache);
+    }
+
+    assert_eq!(moments.count, seq_len * cfg.per_head_dim);
+    let scale = max_abs_diff(m2_bhrr.clone(), m2_bhrr.zeros_like()).max(1.0);
+    let d2 = max_abs_diff(moments.m2_bhrr.clone(), m2_bhrr.clone());
+    let d1 = max_abs_diff(moments.m1_bhr.clone(), m1_bhr.clone());
+    assert!(d2 < 1e-4 * scale, "m2 vs step: {d2:.6} (scale {scale:.3})");
+    assert!(d1 < 1e-4 * scale, "m1 vs step: {d1:.6} (scale {scale:.3})");
+
+    // Streamed continuation: prefix + suffix moments merge to the one-shot.
+    let (_, mid_cache, m_prefix) = model.forward_with_state_moments(
+        fwd_input().narrow(1, 0, split),
+        Some(init_cache),
+        ssd_path.clone(),
+    );
+    let (_, _, m_suffix) = model.forward_with_state_moments(
+        fwd_input().narrow(1, split, seq_len - split),
+        Some(mid_cache),
+        ssd_path,
+    );
+    let merged = m_prefix.merge(m_suffix);
+    assert_eq!(merged.count, moments.count);
+    let d2 = max_abs_diff(merged.m2_bhrr, m2_bhrr);
+    let d1 = max_abs_diff(merged.m1_bhr, m1_bhr);
+    assert!(d2 < 1e-4 * scale, "merged m2 vs step: {d2:.6}");
+    assert!(d1 < 1e-4 * scale, "merged m1 vs step: {d1:.6}");
+}
+
+/// Gradient counterpart of [`forward_state_moments_match_step`]: a scalar
+/// loss over the **attached** closed-form moments
+/// (`forward_with_state_moments_grad`) must produce the same input and
+/// parameter gradients as the identical loss over moments accumulated from
+/// the real `step()` loop's `ssm_bhpr` caches — the moments' own autodiff
+/// subgraph vs the recurrent chain, through the shared upstream
+/// (in-proj → conv → discretisation). Runs on `SerialRecalculated` to show
+/// the moments subgraph coexists with the custom backward.
+#[test]
+fn forward_state_moments_grads_match_step() {
+    use crate::utils::test_helpers::max_abs_diff;
+    let device: Device = Default::default();
+    let cfg = small_config();
+    let model = cfg.init(&device.clone().autodiff());
+
+    let batch = 2;
+    let seq_len = 7; // chunk_len 4 ⇒ padding: the masked-`t` gradients covered
+    let ssd_path = Mamba2SsdPath::SerialRecalculated(Some(4));
+    let (nheads, state_rank) = (cfg.nheads(), cfg.state_rank);
+    let normal = Distribution::Normal(0.0, 1.0);
+    let input = Tensor::<3>::random([batch, seq_len, cfg.d_model], normal, &device);
+    let m2_head = Tensor::<4>::random([batch, nheads, state_rank, state_rank], normal, &device);
+    let m1_head = Tensor::<3>::random([batch, nheads, state_rank], normal, &device);
+    let init_cache = build_init_cache(&cfg, batch, true);
+    let loss_of = |m2: Tensor<4>, m1: Tensor<3>| {
+        (m2 * Tensor::from_inner(m2_head.clone())).sum()
+            + (m1 * Tensor::from_inner(m1_head.clone())).sum()
+    };
+
+    // Closed form: moments attached, `y` dropped — the loss is moments-only.
+    let input_fwd = param_input(&input);
+    let (_y, _cache, moments) =
+        model.forward_with_state_moments_grad(input_fwd.val(), Some(init_cache.clone()), ssd_path);
+    let grads_fwd = loss_of(moments.m2_bhrr, moments.m1_bhr).backward();
+
+    // Step loop, accumulating the (tracked) cache states.
+    let input_step = param_input(&input);
+    let mut cache = Some(init_cache);
+    let mut m2_bhrr = Tensor::<4>::from_inner(Tensor::zeros(
+        [batch, nheads, state_rank, state_rank],
+        &device,
+    ));
+    let mut m1_bhr = Tensor::<3>::from_inner(Tensor::zeros([batch, nheads, state_rank], &device));
+    for t in 0..seq_len {
+        let token = input_step.val().narrow(1, t, 1).squeeze_dim(1);
+        let (_out_t, new_cache) = model.step(token, cache);
+        let h_bhpr = new_cache.ssm_bhpr.clone();
+        m2_bhrr = m2_bhrr + h_bhpr.clone().permute([0, 1, 3, 2]).matmul(h_bhpr.clone());
+        m1_bhr = m1_bhr + h_bhpr.sum_dim(2).reshape([batch, nheads, state_rank]);
+        cache = Some(new_cache);
+    }
+    let grads_step = loss_of(m2_bhrr, m1_bhr).backward();
+
+    // Everything the states depend on: the input, `x`/`B`/`dt` (in-proj →
+    // conv → split) and the decay (dt_bias, a_log). `d_h`/norm/out-proj feed
+    // only `y`, so the moments loss must leave them untouched (checked last).
+    let mut failures: Vec<String> = Vec::new();
+    macro_rules! check {
+        ($fwd:expr, $step:expr, $name:expr) => {{
+            let g_fwd = $fwd.grad(&grads_fwd).expect("fwd grad");
+            let g_step = $step.grad(&grads_step).expect("step grad");
+            let scale = max_abs_diff(g_step.clone(), g_step.zeros_like()).max(1.0);
+            let d = max_abs_diff(g_fwd, g_step);
+            eprintln!("moments grads {:>16} | max abs diff = {d:>10.6} (scale {scale:.3})", $name);
+            if d >= 1e-3 * scale {
+                failures.push(format!("grad of {} max abs diff = {d:.6}", $name));
+            }
+        }};
+    }
+    check!(input_fwd.val(), input_step.val(), "input");
+    check!(model.in_proj.weight.val(), model.in_proj.weight.val(), "in_proj.weight");
+    check!(model.conv1d.weight.val(), model.conv1d.weight.val(), "conv1d.weight");
+    check!(model.dt_bias_h.val(), model.dt_bias_h.val(), "dt_bias_h");
+    check!(model.a_log_h.val(), model.a_log_h.val(), "a_log_h");
+    assert!(
+        failures.is_empty(),
+        "gradient mismatches:\n  {}",
+        failures.join("\n  ")
+    );
+
+    assert!(model.d_h.val().grad(&grads_fwd).is_none());
+    assert!(model.d_h.val().grad(&grads_step).is_none());
+}
