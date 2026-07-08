@@ -108,6 +108,26 @@ impl StateMoments {
             .clamp_min(1e-12);
         tr_bh.clone() * tr_bh / tr2_bh
     }
+
+    /// Raw uncentered state magnitude `tr Σ = trace(m2)/count` per
+    /// `(batch, head)` — the mean squared state magnitude `⟨‖h‖²⟩`, which is
+    /// [`Self::pr`]'s numerator scale. Reported alongside PR to tell a genuine
+    /// rank-1 state (`PR → 1`, magnitude healthy) apart from a state
+    /// collapsing toward zero (where `pr`'s `1e-12` denominator clamp drags
+    /// the ratio below its true floor of 1).
+    ///
+    /// # Shape
+    /// - output: `[batch, nheads]`
+    pub fn trace(&self) -> Tensor<2> {
+        let [batch, nheads, state_rank, _] = self.m2_bhrr.dims();
+        assert!(self.count > 0, "state moments hold no samples");
+        let eye_11rr = Tensor::<2>::eye(state_rank, &self.m2_bhrr.device()).unsqueeze::<4>();
+        (self.m2_bhrr.clone() * eye_11rr)
+            .sum_dim(3)
+            .sum_dim(2)
+            .reshape([batch, nheads])
+            / self.count as f32
+    }
 }
 
 #[cfg(all(test, feature = "_dev-test"))]

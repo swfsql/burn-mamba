@@ -35,6 +35,19 @@ fn pr_of_identity_covariance_is_full_rank() {
     }
 }
 
+/// `trace()` is the raw uncentered magnitude `⟨‖h‖²⟩ = trace(m2)/count` — the
+/// mean squared state magnitude, independent of any eigen-structure.
+#[test]
+fn trace_is_mean_squared_magnitude() {
+    let device: Device = Default::default();
+    let (samples, state_rank) = (12, 5);
+    let h_sr = Tensor::<2>::random([samples, state_rank], Distribution::Normal(0.0, 1.0), &device);
+    let moments = moments_from_samples(h_sr.clone());
+    let expected = (h_sr.powf_scalar(2.0).sum() / samples as f32).reshape([1, 1]);
+    let d = max_abs_diff(moments.trace(), expected);
+    assert!(d < 1e-5, "trace should equal mean squared magnitude, off by {d}");
+}
+
 /// All samples equal to one vector: uncentered `PR = 1` (a single direction).
 /// (The *centered* covariance of identical samples is a pure fp cancellation
 /// — numerically undefined — so only the uncentered ratio is asserted.)

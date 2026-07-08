@@ -39,6 +39,13 @@ pub struct StatePr {
     pub final_centered: f64,
     /// Final step only, uncentered.
     pub final_uncentered: f64,
+    /// Raw pooled state magnitude `tr Σ = ⟨‖h‖²⟩` (all steps, uncentered) —
+    /// PR's numerator scale. When this collapses toward 0 the clamped pooled
+    /// PR reads below 1 (magnitude collapse, not a clean rank-1 state); under
+    /// strong weight decay it falls regardless of the state penalty.
+    pub pooled_trace: f64,
+    /// Raw final-step state magnitude `tr Σ = ⟨‖h‖²⟩` (uncentered).
+    pub final_trace: f64,
 }
 
 /// Weight-side effective ranks (same PR formula on `WᵀW`'s spectrum — the
@@ -119,9 +126,11 @@ pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StateP
                 layer,
                 head,
                 pooled_centered: pr(pooled_sn.clone(), true),
-                pooled_uncentered: pr(pooled_sn, false),
+                pooled_uncentered: pr(pooled_sn.clone(), false),
                 final_centered: pr(final_sn.clone(), true),
-                final_uncentered: pr(final_sn, false),
+                final_uncentered: pr(final_sn.clone(), false),
+                pooled_trace: trace(pooled_sn),
+                final_trace: trace(final_sn),
             });
         }
     }
@@ -152,6 +161,7 @@ pub fn state_pr_forward(
         let per_head = |t: Tensor<2>| t.into_data().to_vec::<f32>().unwrap();
         let centered_h = per_head(pooled.pr(true));
         let uncentered_h = per_head(pooled.pr(false));
+        let trace_h = per_head(pooled.trace());
         let [b, nheads, p, r] = final_bhpr.dims();
         for head in 0..nheads {
             let final_sn = final_bhpr.clone().narrow(1, head, 1).reshape([b * p, r]);
@@ -161,7 +171,9 @@ pub fn state_pr_forward(
                 pooled_centered: centered_h[head] as f64,
                 pooled_uncentered: uncentered_h[head] as f64,
                 final_centered: pr(final_sn.clone(), true),
-                final_uncentered: pr(final_sn, false),
+                final_uncentered: pr(final_sn.clone(), false),
+                pooled_trace: trace_h[head] as f64,
+                final_trace: trace(final_sn),
             });
         }
     }
@@ -353,6 +365,13 @@ pub fn pr(h_sn: Tensor<2>, center: bool) -> f64 {
     let sigma_nn = h_sn.clone().transpose().matmul(h_sn) / samples as f32;
     let tr2 = scalar_f64(sigma_nn.powf_scalar(2.0).sum());
     (tr * tr) / tr2.max(f64::MIN_POSITIVE)
+}
+
+/// Raw uncentered magnitude `tr Σ = Σ_s ‖h_s‖² / S` of a sample cloud (rows =
+/// samples): the mean squared state magnitude, [`pr`]'s numerator scale.
+pub fn trace(h_sn: Tensor<2>) -> f64 {
+    let [samples, _n] = h_sn.dims();
+    scalar_f64(h_sn.powf_scalar(2.0).sum()) / samples as f64
 }
 
 /// Energy per non-DC frequency of the exact `p`-point DFT of `w_pd` along the
