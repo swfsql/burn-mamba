@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["minimal","serial","serial_recalculated","ssd_path"]};
+window.SIDEBAR_ITEMS = {"mod":["minimal","moments","serial","serial_recalculated","ssd_path"]};

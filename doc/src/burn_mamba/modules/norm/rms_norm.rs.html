@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/modules/norm/rms_norm.rs`."><title>rms_norm.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.98.0-nightly (f28ac764c 2026-06-23)" data-channel="nightly" data-search-js="search-fd9372ac.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/modules/norm/</div>rms_norm.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Root-mean-square normalisation over the last dimension.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/modules/norm/rms_norm.rs`."><title>rms_norm.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.99.0-nightly (14cae6813 2026-07-08)" data-channel="nightly" data-search-js="search-9944d736.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/modules/norm/</div>rms_norm.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Root-mean-square normalisation over the last dimension.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `RMSNorm(x) = x / rms(x) · γ` where `rms(x) = √(mean(x²))`.  Unlike
 <a href=#4 id=4 data-nosnippet>4</a>//! LayerNorm there is no mean-subtraction or bias — only a learnable per-channel
@@ -54,52 +54,63 @@
 <a href=#54 id=54 data-nosnippet>54</a>        <span class="kw">let </span>normalized = <span class="kw">match </span>x.dtype() {
 <a href=#55 id=55 data-nosnippet>55</a>            DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 =&gt; {
 <a href=#56 id=56 data-nosnippet>56</a>                <span class="kw">let </span>div_eps = div_eps(x.dtype());
-<a href=#57 id=57 data-nosnippet>57</a>                <span class="kw">let </span>rms = (x.clone() * x.clone()).mean_dim(D - <span class="number">1</span>).sqrt();
-<a href=#58 id=58 data-nosnippet>58</a>                <span class="kw">let </span>normalized = (x / (rms + div_eps)) * <span class="self">self</span>.gamma.val().unsqueeze();
-<a href=#59 id=59 data-nosnippet>59</a>                normalized
-<a href=#60 id=60 data-nosnippet>60</a>            }
-<a href=#61 id=61 data-nosnippet>61</a>            DType::F16 =&gt; {
-<a href=#62 id=62 data-nosnippet>62</a>                <span class="kw">use </span>burn::tensor::ElementConversion;
-<a href=#63 id=63 data-nosnippet>63</a>                <span class="kw">let </span>div_eps: f16 = f16::from_elem(div_eps(x.dtype())) * f16::from_f32(<span class="number">2.</span>);
-<a href=#64 id=64 data-nosnippet>64</a>                <span class="comment">// avoid calculating x² directly (due to overflow e.g. on 256 * 256)
-<a href=#65 id=65 data-nosnippet>65</a>                </span><span class="kw">let </span>max = x.clone().no_grad().detach().abs().max().expand(x.shape());
-<a href=#66 id=66 data-nosnippet>66</a>                <span class="kw">let </span>x_ = x.clone() / (max.clone() + div_eps); <span class="comment">// x_.abs() &lt;= 1
-<a href=#67 id=67 data-nosnippet>67</a>                </span><span class="kw">let </span>rms_partial = (x.clone() * x_).mean_dim(D - <span class="number">1</span>).sqrt(); <span class="comment">// √(x²) = √(x²/max) * √max
-<a href=#68 id=68 data-nosnippet>68</a>                </span><span class="kw">let </span>normalized =
-<a href=#69 id=69 data-nosnippet>69</a>                    (x / (rms_partial + div_eps)) / max.sqrt() * <span class="self">self</span>.gamma.val().unsqueeze();
-<a href=#70 id=70 data-nosnippet>70</a>                normalized
-<a href=#71 id=71 data-nosnippet>71</a>            }
-<a href=#72 id=72 data-nosnippet>72</a>            DType::I64
-<a href=#73 id=73 data-nosnippet>73</a>            | DType::I32
-<a href=#74 id=74 data-nosnippet>74</a>            | DType::I16
-<a href=#75 id=75 data-nosnippet>75</a>            | DType::I8
-<a href=#76 id=76 data-nosnippet>76</a>            | DType::U64
-<a href=#77 id=77 data-nosnippet>77</a>            | DType::U32
-<a href=#78 id=78 data-nosnippet>78</a>            | DType::U16
-<a href=#79 id=79 data-nosnippet>79</a>            | DType::U8 =&gt; {
-<a href=#80 id=80 data-nosnippet>80</a>                <span class="macro">unreachable!</span>()
-<a href=#81 id=81 data-nosnippet>81</a>            }
-<a href=#82 id=82 data-nosnippet>82</a>            DType::Bool(<span class="kw">_</span>) =&gt; {
-<a href=#83 id=83 data-nosnippet>83</a>                <span class="macro">unreachable!</span>()
-<a href=#84 id=84 data-nosnippet>84</a>            }
-<a href=#85 id=85 data-nosnippet>85</a>            DType::QFloat(<span class="kw">_</span>) =&gt; {
-<a href=#86 id=86 data-nosnippet>86</a>                <span class="macro">unimplemented!</span>()
-<a href=#87 id=87 data-nosnippet>87</a>            }
-<a href=#88 id=88 data-nosnippet>88</a>        };
-<a href=#89 id=89 data-nosnippet>89</a>        normalized
-<a href=#90 id=90 data-nosnippet>90</a>    }
-<a href=#91 id=91 data-nosnippet>91</a>}
-<a href=#92 id=92 data-nosnippet>92</a>
-<a href=#93 id=93 data-nosnippet>93</a><span class="kw">impl </span>ModuleDisplay <span class="kw">for </span>RmsNorm {
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">fn </span>custom_settings(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;DisplaySettings&gt; {
-<a href=#95 id=95 data-nosnippet>95</a>        DisplaySettings::new()
-<a href=#96 id=96 data-nosnippet>96</a>            .with_new_line_after_attribute(<span class="bool-val">false</span>)
-<a href=#97 id=97 data-nosnippet>97</a>            .optional()
+<a href=#57 id=57 data-nosnippet>57</a>                <span class="comment">// eps *inside* the root (as documented): guards both the forward
+<a href=#58 id=58 data-nosnippet>58</a>                // division and the `sqrt` node's `1/(2√·)` backward, which is
+<a href=#59 id=59 data-nosnippet>59</a>                // otherwise singular for a zero-norm slice — see
+<a href=#60 id=60 data-nosnippet>60</a>                // `tests::rms_norm_gradient_finite_on_collapsed_slice`.
+<a href=#61 id=61 data-nosnippet>61</a>                </span><span class="kw">let </span>rms = ((x.clone() * x.clone()).mean_dim(D - <span class="number">1</span>) + div_eps).sqrt();
+<a href=#62 id=62 data-nosnippet>62</a>                <span class="kw">let </span>normalized = (x / rms) * <span class="self">self</span>.gamma.val().unsqueeze();
+<a href=#63 id=63 data-nosnippet>63</a>                normalized
+<a href=#64 id=64 data-nosnippet>64</a>            }
+<a href=#65 id=65 data-nosnippet>65</a>            DType::F16 =&gt; {
+<a href=#66 id=66 data-nosnippet>66</a>                <span class="kw">use </span>burn::tensor::ElementConversion;
+<a href=#67 id=67 data-nosnippet>67</a>                <span class="kw">let </span>div_eps: f16 = f16::from_elem(div_eps(x.dtype())) * f16::from_f32(<span class="number">2.</span>);
+<a href=#68 id=68 data-nosnippet>68</a>                <span class="comment">// avoid calculating x² directly (due to overflow e.g. on 256 * 256)
+<a href=#69 id=69 data-nosnippet>69</a>                </span><span class="kw">let </span>max = x.clone().no_grad().detach().abs().max().expand(x.shape());
+<a href=#70 id=70 data-nosnippet>70</a>                <span class="kw">let </span>x_ = x.clone() / (max.clone() + div_eps); <span class="comment">// x_.abs() &lt;= 1
+<a href=#71 id=71 data-nosnippet>71</a>                // eps inside the root (matches the main branch): the `sqrt`
+<a href=#72 id=72 data-nosnippet>72</a>                // backward is otherwise singular for a zero-norm slice.
+<a href=#73 id=73 data-nosnippet>73</a>                </span><span class="kw">let </span>rms_partial = ((x.clone() * x_).mean_dim(D - <span class="number">1</span>) + div_eps).sqrt(); <span class="comment">// √(x²/max)
+<a href=#74 id=74 data-nosnippet>74</a>                // `max` is detached; floor it too so an all-zero tensor
+<a href=#75 id=75 data-nosnippet>75</a>                // (`max = 0`) gives a nonzero denominator, not `0/0`.
+<a href=#76 id=76 data-nosnippet>76</a>                </span><span class="kw">let </span>normalized =
+<a href=#77 id=77 data-nosnippet>77</a>                    (x / rms_partial) / (max + div_eps).sqrt() * <span class="self">self</span>.gamma.val().unsqueeze();
+<a href=#78 id=78 data-nosnippet>78</a>                normalized
+<a href=#79 id=79 data-nosnippet>79</a>            }
+<a href=#80 id=80 data-nosnippet>80</a>            DType::I64
+<a href=#81 id=81 data-nosnippet>81</a>            | DType::I32
+<a href=#82 id=82 data-nosnippet>82</a>            | DType::I16
+<a href=#83 id=83 data-nosnippet>83</a>            | DType::I8
+<a href=#84 id=84 data-nosnippet>84</a>            | DType::U64
+<a href=#85 id=85 data-nosnippet>85</a>            | DType::U32
+<a href=#86 id=86 data-nosnippet>86</a>            | DType::U16
+<a href=#87 id=87 data-nosnippet>87</a>            | DType::U8 =&gt; {
+<a href=#88 id=88 data-nosnippet>88</a>                <span class="macro">unreachable!</span>()
+<a href=#89 id=89 data-nosnippet>89</a>            }
+<a href=#90 id=90 data-nosnippet>90</a>            DType::Bool(<span class="kw">_</span>) =&gt; {
+<a href=#91 id=91 data-nosnippet>91</a>                <span class="macro">unreachable!</span>()
+<a href=#92 id=92 data-nosnippet>92</a>            }
+<a href=#93 id=93 data-nosnippet>93</a>            DType::QFloat(<span class="kw">_</span>) =&gt; {
+<a href=#94 id=94 data-nosnippet>94</a>                <span class="macro">unimplemented!</span>()
+<a href=#95 id=95 data-nosnippet>95</a>            }
+<a href=#96 id=96 data-nosnippet>96</a>        };
+<a href=#97 id=97 data-nosnippet>97</a>        normalized
 <a href=#98 id=98 data-nosnippet>98</a>    }
-<a href=#99 id=99 data-nosnippet>99</a>
-<a href=#100 id=100 data-nosnippet>100</a>    <span class="kw">fn </span>custom_content(<span class="kw-2">&amp;</span><span class="self">self</span>, content: Content) -&gt; <span class="prelude-ty">Option</span>&lt;Content&gt; {
-<a href=#101 id=101 data-nosnippet>101</a>        <span class="kw">let </span>[d_model] = <span class="self">self</span>.gamma.shape().dims();
-<a href=#102 id=102 data-nosnippet>102</a>        content.add(<span class="string">"d_model"</span>, <span class="kw-2">&amp;</span>d_model).optional()
-<a href=#103 id=103 data-nosnippet>103</a>    }
-<a href=#104 id=104 data-nosnippet>104</a>}
+<a href=#99 id=99 data-nosnippet>99</a>}
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a><span class="kw">impl </span>ModuleDisplay <span class="kw">for </span>RmsNorm {
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">fn </span>custom_settings(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;DisplaySettings&gt; {
+<a href=#103 id=103 data-nosnippet>103</a>        DisplaySettings::new()
+<a href=#104 id=104 data-nosnippet>104</a>            .with_new_line_after_attribute(<span class="bool-val">false</span>)
+<a href=#105 id=105 data-nosnippet>105</a>            .optional()
+<a href=#106 id=106 data-nosnippet>106</a>    }
+<a href=#107 id=107 data-nosnippet>107</a>
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">fn </span>custom_content(<span class="kw-2">&amp;</span><span class="self">self</span>, content: Content) -&gt; <span class="prelude-ty">Option</span>&lt;Content&gt; {
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span>[d_model] = <span class="self">self</span>.gamma.shape().dims();
+<a href=#110 id=110 data-nosnippet>110</a>        content.add(<span class="string">"d_model"</span>, <span class="kw-2">&amp;</span>d_model).optional()
+<a href=#111 id=111 data-nosnippet>111</a>    }
+<a href=#112 id=112 data-nosnippet>112</a>}
+<a href=#113 id=113 data-nosnippet>113</a>
+<a href=#114 id=114 data-nosnippet>114</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#115 id=115 data-nosnippet>115</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
