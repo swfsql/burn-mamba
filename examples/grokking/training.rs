@@ -9,7 +9,7 @@ pub use crate::common::cli::AppArgs;
 use crate::dataset::{self, Split};
 use crate::diagnostics::{self, StatePr, WeightPr};
 pub use crate::diagnostics::PrPenaltyTarget;
-use burn::module::AutodiffModule;
+use burn::module::{AutodiffModule, Module, ModuleVisitor, Param};
 use burn::optim::{AdamWConfig, GradientsParams};
 use burn::prelude::*;
 use burn_mamba::modules::loss::cross_entropy::CrossEntropyLossConfig;
@@ -303,6 +303,12 @@ pub fn train(
         }
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
+        if nonfinite_grad_count(&model, &grads) > 0.0 {
+            let logged_step = step + config.step_offset;
+            eprintln!("[grad-nan] non-finite gradient at step {logged_step}");
+            report_nonfinite_grads(&model, &x_bs, &targets_bp, &ce, &config, pr_lambda);
+            panic!("non-finite gradient at step {logged_step}");
+        }
         let lr = config.lr.get_lr(step);
         model = optim.step(lr, model, grads);
 
@@ -405,6 +411,114 @@ pub fn eval_accuracies(
 /// Read a single-element float tensor back to the host.
 fn scalar_f32(t: Tensor<1>) -> f32 {
     t.into_data().to_vec::<f32>().unwrap()[0]
+}
+
+/// `1` if a gradient tensor holds any NaN or Inf, else `0` — kept device-side
+/// so many can be summed with a single host sync.
+fn grad_bad_indicator<const D: usize>(g: Tensor<D>) -> Tensor<1> {
+    g.clone().is_nan().any().int().float() + g.is_inf().any().int().float()
+}
+
+/// Visitor that sums [`grad_bad_indicator`] over every parameter whose gradient
+/// is present in `grads` — one device-side scalar, so the per-step healthy path
+/// costs a single sync.
+struct GradBadCount<'a> {
+    grads: &'a GradientsParams,
+    acc: Option<Tensor<1>>,
+}
+
+impl ModuleVisitor for GradBadCount<'_> {
+    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<D>>) {
+        let Some(g) = self.grads.get::<D>(param.id) else {
+            return;
+        };
+        let bad = grad_bad_indicator(g);
+        self.acc = Some(match self.acc.take() {
+            Some(acc) => acc + bad,
+            None => bad,
+        });
+    }
+}
+
+/// Number of parameters with a non-finite (NaN/Inf) gradient in `grads`.
+fn nonfinite_grad_count(model: &MambaVocabNet, grads: &GradientsParams) -> f32 {
+    let mut v = GradBadCount { grads, acc: None };
+    model.visit(&mut v);
+    v.acc.map(scalar_f32).unwrap_or(0.0)
+}
+
+/// Visitor that records the first parameter (in visitation order) whose gradient
+/// is non-finite — its rank/shape and id, enough to locate the matrix. Only run
+/// on the failing step (per-parameter host syncs).
+struct FirstBadGrad<'a> {
+    grads: &'a GradientsParams,
+    found: Option<String>,
+}
+
+impl ModuleVisitor for FirstBadGrad<'_> {
+    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<D>>) {
+        if self.found.is_some() {
+            return;
+        }
+        let Some(g) = self.grads.get::<D>(param.id) else {
+            return;
+        };
+        let nan = scalar_f32(g.clone().is_nan().any().int().float()) > 0.0;
+        let inf = scalar_f32(g.is_inf().any().int().float()) > 0.0;
+        if nan || inf {
+            self.found = Some(format!(
+                "dims={:?} id={:?} (nan={nan}, inf={inf})",
+                param.val().dims(),
+                param.id
+            ));
+        }
+    }
+}
+
+fn first_bad_grad(model: &MambaVocabNet, grads: &GradientsParams) -> Option<String> {
+    let mut v = FirstBadGrad { grads, found: None };
+    model.visit(&mut v);
+    v.found
+}
+
+/// On a non-finite combined gradient, re-run each loss term's forward+backward
+/// in isolation and report which term(s) produce the non-finite gradient (and
+/// on which parameter) — the decisive CE / weight-PR / state-PR attribution.
+/// Recomputes fresh graphs per term (this runs once, at the failing step).
+fn report_nonfinite_grads(
+    model: &MambaVocabNet,
+    x_bs: &Tensor<2, Int>,
+    targets_bp: &Tensor<2>,
+    ce: &burn_mamba::modules::loss::cross_entropy::CrossEntropyLoss,
+    config: &GrokkingConfig,
+    pr_lambda: f64,
+) {
+    eprintln!("[grad-nan] combined gradient is non-finite; isolating per loss term:");
+
+    let report = |name: &str, loss: Tensor<1>| {
+        let grads = GradientsParams::from_grads(loss.backward(), model);
+        let count = nonfinite_grad_count(model, &grads);
+        let where_ = first_bad_grad(model, &grads).unwrap_or_else(|| "-".to_string());
+        eprintln!("[grad-nan]   {name:>10}: {count} bad-grad param(s); first: {where_}");
+    };
+
+    // CE term (does not need the moments path).
+    let ce_logits = final_logits(model, x_bs, config.stepwise);
+    report("ce", ce.forward(ce_logits, targets_bp.clone()));
+
+    if pr_lambda != 0.0 {
+        let p = diagnostics::weight_pr_penalty(model, config.pr_target);
+        report("weight-pr", p.mul_scalar(pr_lambda));
+    }
+    if config.l2_lambda != 0.0 {
+        let p = diagnostics::weight_l2_penalty(model, config.pr_target);
+        report("l2", p.mul_scalar(config.l2_lambda));
+    }
+    if config.state_pr_lambda != 0.0 {
+        let (_logits, moments) = final_logits_with_moments(model, x_bs);
+        let p = diagnostics::state_pr_penalty(&moments);
+        report("state-pr", p.mul_scalar(config.state_pr_lambda));
+    }
 }
 
 /// Compact console form of the diagnostics (centered PRs are the primary
