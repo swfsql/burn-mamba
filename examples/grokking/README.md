@@ -109,6 +109,7 @@ All commands below abbreviate the prefix to `grokking --training -a <dir> --`.
 | `--pr-start-step <step>` | keep the PR penalty off until this step (gate) |
 | `--l2-lambda <f64>` | plain `Σ‖W‖²_F` loss term on the same targets (norm control) |
 | `--noise-lambda <f64>` | `Σ⟨W, detach(ε)⟩`, fresh ε/step: pure-noise gradient of this RMS (information-free control) |
+| `--state-pr-lambda <f64>` | penalize the **recurrent state's** PR directly (Σ over layers/heads, batch-pooled); requires `--chunked` |
 | `--sgd <momentum>` | replace AdamW with plain SGD (coupled `--wd`, grad-clip 1.0 hardcoded, fresh optimizer each launch) |
 | `--step-offset <n>` | added to logged/CSV step numbers on resumed runs |
 
@@ -305,6 +306,21 @@ grokking --training -a tmp/f15pr -- --steps 10000 --step-offset 10000 --no-state
 - **Map + heat interfere under Adam**: adding noise to λ0.03 kills it
   (shared normalizer: `(m_PR+m_noise)/√(v_PR+v_noise)` buries the small
   persistent PR component under `v_noise`).
+- **A second directed key — state-rank compression — and the two stack.**
+  `--state-pr-lambda` penalizes the recurrent *state* PR directly (needs
+  `--chunked`; §1's re-compression target, not the weights). Alone at λ0.03 it
+  also crosses the wall (~90% @45k, comparable to weight-PR-alone); **combined**
+  with the weight-PR penalty (both λ0.03) it is superadditive on *speed* — ~90%
+  by ~30k and ~98% final, vs ~42–45k for either alone — while pinning the state
+  to rank-1 (state PR ≡ 1.00) throughout. Squeezing the state toward the
+  conveyor it re-compresses to anyway (§1) is a useful directed prior, not a
+  fight with the circuit.
+
+  ```bash
+  # weight-PR + state-PR stacked (both --chunked; state-PR requires it):
+  grokking --training -a tmp/f15both -- --train-fraction 0.15 --wd 1.0 \
+      --pr-lambda 0.03 --pr-target all --state-pr-lambda 0.03 --chunked --steps 50000
+  ```
 
 ### 5. SGD probes: no native plateau; the search wall reproduces
 
