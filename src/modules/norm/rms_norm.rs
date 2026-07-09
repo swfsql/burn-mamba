@@ -71,7 +71,10 @@ impl RmsNorm {
                 // eps inside the root (matches the main branch): the `sqrt`
                 // backward is otherwise singular for a zero-norm slice.
                 let rms_partial = ((x.clone() * x_).mean_dim(D - 1) + div_eps).sqrt(); // √(x²/max)
-                let normalized = (x / rms_partial) / max.sqrt() * self.gamma.val().unsqueeze();
+                // `max` is detached; floor it too so an all-zero tensor
+                // (`max = 0`) gives a nonzero denominator, not `0/0`.
+                let normalized =
+                    (x / rms_partial) / (max + div_eps).sqrt() * self.gamma.val().unsqueeze();
                 normalized
             }
             DType::I64
