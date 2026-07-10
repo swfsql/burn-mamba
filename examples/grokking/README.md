@@ -130,7 +130,7 @@ All commands below abbreviate the prefix to `grokking --training -a <dir> --`.
 
 Everything is the participation ratio `PR(Σ) = (tr Σ)²/tr(Σ²)` — the effective
 rank of a covariance/spectrum from two traces only; rotation- and
-scale-invariant, range 1…N (`diagnostics.rs`):
+scale-invariant, range 1…N (shared `common/diagnostics.rs`):
 
 - **State PR** (the original question): per layer/head, the recurrent states
   `ssm_bhpr` collected over (batch, step, channel) — "how many distinct write

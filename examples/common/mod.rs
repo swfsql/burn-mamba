@@ -15,6 +15,12 @@
 pub mod cli;
 /// Runtime [`Device`] selection + optional dtype configuration.
 pub mod device;
+/// Participation-ratio diagnostics (state, both axes; weight spectra) and the
+/// differentiable rank/norm/noise penalties, for `MambaVocabNet` tasks.
+pub mod diagnostics;
+/// Task-free plumbing of the full-batch grokking protocol: final-position
+/// logits, accuracy, grad-NaN guard, PR console/CSV formatting.
+pub mod protocol;
 /// Sequential-MNIST dataset loading and batching.
 pub mod mnist;
 /// The [`ModelConfigExt`](model::ModelConfigExt) seam bridging example configs to

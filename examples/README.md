@@ -4,7 +4,7 @@
 
 - `fibonacci`: Very small Mamba-2 model training on a fibonacci-like sequence.
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
-- `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
+- `state-tracking`: The `A₅` word problem in the grokking protocol (enumerated words, fraction split, final-product-only supervision, PR diagnostics/penalties), contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --quat`). Its README states the hypotheses; shares `common/diagnostics.rs` + `common/protocol.rs` with `grokking`.
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
 - `grokking`: A small Mamba-2 LM on k-summand modular addition (the classic grokking task), grown into an experimentation/ablation platform: participation-ratio diagnostics (state + weight spectra + embedding-frequency), differentiable rank/norm/noise loss terms with schedules, and an SGD probe path. Its README is a standalone report of the findings with reproduction commands for every claim.
 
@@ -14,7 +14,7 @@ Each example usually defines a model in `model.rs`, a dataset (if applicable) in
 
 The lauching procedure first triggers some basic command arguments parsing, which sets whether training and/or inference should run. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
 
-There are shared definitions in `common/mod.rs`, imported as an outside module by each example. Importantly, a common model definition and the backend selection is shared among all examples. Some dataset and helpers for training may be also defined under `common`.
+There are shared definitions in `common/mod.rs`, imported as an outside module by each example. Importantly, a common model definition and the backend selection is shared among all examples. Some dataset and helpers for training may be also defined under `common`; `common/diagnostics.rs` (participation-ratio diagnostics + rank penalties) and `common/protocol.rs` (full-batch grokking-protocol plumbing) are shared by the `grokking` and `state-tracking` examples.
 
 ##### Model Definition
 

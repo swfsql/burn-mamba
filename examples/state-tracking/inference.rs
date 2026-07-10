@@ -1,69 +1,97 @@
-//! Inference for the state-tracking example: loads the trained model and
-//! reports the per-token accuracy on a fresh evaluation set — the headline
-//! number contrasting the abelian (`Complex2D`) and non-abelian
-//! (`Quaternion4D`) rotations.
+//! Inference for the state-tracking example: loads the trained model, reports
+//! train/test accuracy on the training-time split, the per-position depth
+//! curve, the full PR diagnostics panel (both state axes), and a few sample
+//! held-out words.
 
-use crate::AppArgs;
-use crate::dataset::{
-    EVAL_SEED, NUM_CLASSES, NUM_EVAL, SEQ_LENGTH, StateTrackingBatcher, StateTrackingDataset,
-    StateTrackingItem,
+use crate::common::cli::AppArgs;
+use crate::common::protocol;
+use crate::dataset::{self, NUM_CLASSES, NUM_SYMBOLS};
+use crate::diagnostics;
+use crate::training::{
+    TrackingConfig, eval_accuracies, format_per_position, format_prs, per_position_accuracy,
 };
-use crate::training::{accumulate_per_position, format_per_position};
-use burn::{
-    data::{dataloader::batcher::Batcher, dataset::Dataset},
-    prelude::*,
-};
+use burn::prelude::*;
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-token (and per-position) accuracy on a
-/// fresh eval set.
-pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args: &AppArgs) {
-    let rotation = match &model_config {
-        MambaLatentNetConfig::Mamba3 { mamba_block, .. } => mamba_block.rotation,
-        _ => panic!("state-tracking expects a Mamba-3 model config"),
-    };
+/// Evaluate the trained model on the training-time split, print the depth
+/// curve and the diagnostics panel, and show a handful of held-out words.
+pub fn infer(
+    config: &TrackingConfig,
+    model_config: MambaVocabNetConfig,
+    device: Device,
+    app_args: &AppArgs,
+) {
+    let model: MambaVocabNet = app_args
+        .load_model(&model_config, &device)
+        .expect("no trained model in the artifacts directory; run with --training first");
+    let chunk = config.chunk_len();
 
-    // load model
-    let model: MambaLatentNet = app_args
-        .load_model(&model_config, &infer_device)
-        .expect("failed to load model");
-
-    let dataset = StateTrackingDataset::new(NUM_EVAL, SEQ_LENGTH, EVAL_SEED);
-    let items: Vec<StateTrackingItem> = dataset.iter().collect();
-
-    let batcher = StateTrackingBatcher::default();
-    // Put all items in one batch.
-    let batch = batcher.batch(items, &infer_device);
-    let [batch_size, sequence_size, _num_sym] = batch.inputs.dims();
-
-    let (output, _caches) = model.forward(
-        batch.inputs,
-        None,
-        MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
-    );
-    assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
-
-    // Per-position accuracy: early positions have few distinct input prefixes
-    // (≤ NUM_GENERATORS^t) so even an abelian model memorises them; the gap shows
-    // up in the deeper positions, where genuine A₅ composition is required.
-    let mut correct: Vec<u64> = Vec::new();
-    let mut total: Vec<u64> = Vec::new();
-    accumulate_per_position(
-        output.reshape([batch_size * sequence_size, NUM_CLASSES]),
-        batch.targets.reshape([batch_size * sequence_size]),
-        sequence_size,
-        &mut correct,
-        &mut total,
-    );
-
-    let overall = correct.iter().sum::<u64>() as f32 / total.iter().sum::<u64>() as f32;
-    println!(
-        "Eval per-token accuracy ({rotation:?}): {:.1}%  (chance ≈ {:.1}%)",
-        overall * 100.0,
-        100.0 / NUM_CLASSES as f32,
+    let (train_split, test_split) =
+        dataset::build(config.seq_len, config.train_fraction, config.split_seed);
+    let (train_acc, test_acc) = eval_accuracies(
+        &model,
+        &train_split,
+        &test_split,
+        &device,
+        config.stepwise,
+        chunk,
     );
     println!(
-        "per-position acc: {}",
-        format_per_position(&correct, &total)
+        "train acc {train_acc:.4} ({} words), test acc {test_acc:.4} ({} words), chance ≈ {:.4}",
+        train_split.len(),
+        test_split.len(),
+        1.0 / NUM_CLASSES as f64,
     );
+    let pos_acc = per_position_accuracy(
+        &model,
+        &test_split.inputs_tensor(&device),
+        &test_split.pos_targets_tensor(&device),
+        chunk,
+    );
+    println!("test per-position acc: {}", format_per_position(&pos_acc));
+
+    let diag_inputs = dataset::diagnostic_set(config.seq_len, 10_000, config.split_seed)
+        .inputs_tensor(&device);
+    let state_prs = diagnostics::state_pr(&model, &diag_inputs);
+    let weight_prs = diagnostics::weight_pr(&model, NUM_SYMBOLS);
+    println!("{}", format_prs(&state_prs, &weight_prs));
+    for s in diagnostics::state_pr_p_axis(&model, &diag_inputs) {
+        println!(
+            "state PR p-axis [L{}H{} pooled {:.2}/{:.2}c (m{:.1e}), final {:.2}/{:.2}c]",
+            s.layer,
+            s.head,
+            s.pooled_uncentered,
+            s.pooled_centered,
+            s.pooled_trace,
+            s.final_uncentered,
+            s.final_centered,
+        );
+    }
+
+    // A few held-out examples: the generator word and its final product.
+    let sample = test_split.head(8);
+    let logits_bv = protocol::final_logits(
+        &model,
+        &sample.inputs_tensor(&device),
+        config.stepwise,
+        chunk,
+    );
+    let [b, _vocab] = logits_bv.dims();
+    let preds = logits_bv
+        .narrow(1, dataset::CLASS_BASE, NUM_CLASSES)
+        .argmax(1)
+        .reshape([b])
+        .into_data()
+        .to_vec::<i32>()
+        .unwrap();
+    let s = sample.tokens();
+    for ((word, label), pred) in sample.seqs.chunks_exact(s).zip(&sample.labels).zip(&preds) {
+        // skip the anchor token when printing the word
+        let word_str: String = word[1..]
+            .iter()
+            .map(|g| char::from(b'a' + *g as u8))
+            .collect();
+        let mark = if pred == label { "✓" } else { "✗" };
+        println!("  {word_str} ↦ class {pred:>2} [expected {label:>2}] {mark}");
+    }
 }
