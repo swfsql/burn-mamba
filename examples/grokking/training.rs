@@ -152,9 +152,14 @@ impl GrokkingConfig {
 /// The SSD path used by chunkwise forwards: the recompute-backward serial
 /// algorithm (the memory-saving custom backward) with `chunk_len = 2` matching
 /// the two-token sequences (the default ≈32 chunk would zero-pad every
-/// sequence 16×).
-pub fn ssd_path() -> MambaSsdPath {
-    MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(Some(2)))
+/// sequence 16×). Family follows the model (`--mamba3`).
+pub fn ssd_path(model: &MambaVocabNet) -> MambaSsdPath {
+    match model {
+        MambaVocabNet::Mamba3(_) => {
+            MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(Some(2)))
+        }
+        _ => MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(Some(2))),
+    }
 }
 
 /// Final-position logits `[n, p]` for a batch of token sequences `[n, s]`,
@@ -169,7 +174,7 @@ pub fn final_logits_with_moments(
 ) -> (Tensor<2>, Vec<StateMoments>) {
     let [_b, s] = inputs_bs.dims();
     let (logits_bsc, _caches, moments) =
-        model.forward_with_state_moments_grad(inputs_bs.clone(), None, ssd_path());
+        model.forward_with_state_moments_grad(inputs_bs.clone(), None, ssd_path(model));
     (logits_bsc.narrow(1, s - 1, 1).squeeze_dim::<2>(1), moments)
 }
 
@@ -186,7 +191,7 @@ pub fn final_logits(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>, stepwise:
         }
         logits.expect("at least one token")
     } else {
-        let (logits_bsc, _caches) = model.forward(inputs_bs.clone(), None, ssd_path());
+        let (logits_bsc, _caches) = model.forward(inputs_bs.clone(), None, ssd_path(model));
         logits_bsc.narrow(1, s - 1, 1).squeeze_dim::<2>(1)
     }
 }
@@ -298,7 +303,8 @@ pub fn train(
             loss = loss + penalty.mul_scalar(config.noise_lambda);
         }
         if let Some(moments) = train_moments {
-            let penalty = diagnostics::state_pr_penalty(&moments);
+            let pairing = diagnostics::state_pairing_of(&model);
+            let penalty = diagnostics::state_pr_penalty(&moments, &pairing);
             loss = loss + penalty.mul_scalar(config.state_pr_lambda);
         }
 
@@ -352,7 +358,7 @@ pub fn train(
                 } else if config.stepwise {
                     diagnostics::state_pr(&valid_model, &diag_inputs)
                 } else {
-                    diagnostics::state_pr_forward(&valid_model, &diag_inputs, ssd_path())
+                    diagnostics::state_pr_forward(&valid_model, &diag_inputs, ssd_path(&valid_model))
                 };
                 let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
                 println!("        {}", format_prs(&state_prs, &weight_prs));
@@ -516,7 +522,8 @@ fn report_nonfinite_grads(
     }
     if config.state_pr_lambda != 0.0 {
         let (_logits, moments) = final_logits_with_moments(model, x_bs);
-        let p = diagnostics::state_pr_penalty(&moments);
+        let pairing = diagnostics::state_pairing_of(model);
+        let p = diagnostics::state_pr_penalty(&moments, &pairing);
         report("state-pr", p.mul_scalar(config.state_pr_lambda));
     }
 }
