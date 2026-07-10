@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RotPrim"],"fn":["chunk_cos_sin","chunk_decay","chunk_mask","chunk_states","chunk_writes","moments_phys_fwd","quat_conj_prim","quat_mul_prim","rotate_chunk"],"trait":["Mamba3MomentsBackendExt"]};

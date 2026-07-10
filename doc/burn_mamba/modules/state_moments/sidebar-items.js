@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["StateMoments"]};
+window.SIDEBAR_ITEMS = {"enum":["StatePairing"],"struct":["StateMoments"]};

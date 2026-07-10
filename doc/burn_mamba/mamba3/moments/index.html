@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Physical-frame state moments for Mamba-3 (serial chunkwise, exact)"><title>burn_mamba::mamba3::moments - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1ed95124.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.99.0-nightly (af3d95584 2026-07-09)" data-channel="nightly" data-search-js="search-9944d736.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module moments</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.29.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module moments</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#physical-frame-state-moments-for-mamba-3-serial-chunkwise-exact" title="Physical-frame state moments for Mamba-3 (serial chunkwise, exact)">Physical-frame state moments for Mamba-3 (serial chunkwise, exact)</a></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#traits" title="Traits">Traits</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>moments</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/moments.rs.html#1-423">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h3 id="physical-frame-state-moments-for-mamba-3-serial-chunkwise-exact"><a class="doc-anchor" href="#physical-frame-state-moments-for-mamba-3-serial-chunkwise-exact">§</a>Physical-frame state moments for Mamba-3 (serial chunkwise, exact)</h3>
+<p>The Mamba-3 state is <strong>complex</strong> (paper Props. <em>complex-to-real</em> /
+<em>rope-trick</em>): the real cache state <code>h̃ₜ</code> (<code>ssm_bhpr</code>) carries the rotations
+absorbed into B̃/C̃, and the <strong>physical</strong> state — what raw, un-rotated C
+reads — is the per-token de-rotation <code>cₜ = Dₜ†h̃ₜ</code> (see
+<a href="../rotation/enum.RotationSeq.html#method.derotate_states" title="method burn_mamba::mamba3::rotation::RotationSeq::derotate_states"><code>RotationSeq::derotate_states</code></a>). The shipped observable/penalty is the
+Hermitian PR of <code>M_phys = Σₜ cₜᴴcₜ</code>
+(<a href="../../modules/state_moments/struct.StateMoments.html#method.pr_complex" title="method burn_mamba::modules::state_moments::StateMoments::pr_complex"><code>StateMoments::pr_complex</code></a>).</p>
+<p>Unlike the Mamba-2 moments (<code>mamba2/ssd/moments.rs</code>), <strong>no closed form
+exists</strong>: in <code>M_phys[a,b]</code> the token index couples to the matrix entry
+through the relative phase <code>e^{i(φ_{t,b} − φ_{t,a})}</code>, so the per-token
+phases do not factor out of the Gram kernel — every exact factorisation
+reproduces the per-token state as an intermediate. Exact <code>M_phys</code> therefore
+costs materialised states, affordable <strong>chunk-locally</strong> in the
+<code>SerialRecalculated</code> discipline. Per chunk (serial over <code>n</code>, one small
+<code>(m2, m1)</code> accumulator pair carried):</p>
+<ol>
+<li>Chunk-local decay <code>dₜ = exp(a_cum[t])</code> and 1-semiseparable mask
+<code>L[t,j] = exp(a_cum[t] − a_cum[j])</code> (as SSD Step 1).</li>
+<li>One chunk of cache-frame states, folding the combined-injection channel
+axis <code>M</code> into the write index:
+<code>h̃[t] = dₜ·h₋ + Σ_{j≤t,m} L[t,j] · x̂[j,m] ⊗ b̂[j,m]</code> — a broadcast
+product plus one batched GEMM; the transients are
+<code>[batch, nheads, l, l·M, per_head_dim]</code> and one chunk of states
+<code>[batch, nheads, l, per_head_dim, state_rank]</code>.</li>
+<li>De-rotate the states’ <code>r</code> axis to the physical frame
+(<a href="../rotation/enum.RotationSeq.html#method.derotate_states" title="method burn_mamba::mamba3::rotation::RotationSeq::derotate_states"><code>RotationSeq::derotate_states</code></a> — θ-differentiable, which is what lets
+a PR penalty shape the rotation itself).</li>
+<li>Accumulate the plain real <code>m2</code>/<code>m1</code> sums, masked to <code>valid_len</code>.</li>
+</ol>
+<p>The <strong>combined injections</strong> realise the trapezoid as one scalar-decay
+system with a <code>2·mimo_rank</code> channel axis: <code>x̂ = concat_m(v_γ, v_β)</code>,
+<code>b̂ = concat_m(B̃, B̃_prev)</code> (the β stream shift-before-chunking, its first
+element from the cache’s <code>k_state</code>/<code>v_state</code>), shared log-decay <code>da</code>. The
+initial state is the cache’s <code>ssm_bhpr</code> (+ optional learnable <code>h₀</code>),
+counted exactly <strong>once</strong> — never the single-ssd kernel’s seed-augmented
+initial state, whose boundary-β term the β stream already carries.</p>
+<p>The chunk carry <code>h₋</code> is read from the <strong>unmasked</strong> last position (zero pads:
+<code>Δ = 0</code> ⇒ identity decay, zero write, so the state is carried through
+unchanged); the <code>valid_len</code> mask alone excludes pad garbage from the sums
+(pad rotation values are irrelevant — masked before accumulation).</p>
+<p>Plain autodiff over the serial loop retains every chunk’s states (the full
+per-token trajectory) — the study-scale mode. The at-scale execution model
+is a custom recompute backward in the <code>SerialRecalculated</code> pattern (module
+<code>backward</code>, milestone 3).</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="backward/index.html" title="mod burn_mamba::mamba3::moments::backward">backward</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Custom autodiff node for the physical-frame state moments</dd><dt><a class="mod" href="recalculated/index.html" title="mod burn_mamba::mamba3::moments::recalculated">recalculated</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Physical-frame moments with a custom, memory-efficient backward</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Mamba3MomentsInput.html" title="struct burn_mamba::mamba3::moments::Mamba3MomentsInput">Mamba3<wbr>Moments<wbr>Input</a></dt><dd>Inputs of the physical-frame state-moments computation — the combined
+(γ + β) injections of one chunked Mamba-3 <code>forward</code>, plus the per-token
+cumulative rotation. Built at either pathway’s pre-SSD seam; <code>C</code>/<code>D</code> are
+never read. See the module header for the math.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.Mamba3MomentsBackendExt.html" title="trait burn_mamba::mamba3::moments::Mamba3MomentsBackendExt">Mamba3<wbr>Moments<wbr>Backend<wbr>Ext</a></dt><dd>Extends the backend with the physical-frame state-moments computation.</dd></dl></section></div></main></body></html>
