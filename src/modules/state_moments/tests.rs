@@ -279,3 +279,315 @@ fn pool_batch_folds_batch_into_samples() {
     let d = max_abs_diff(pooled.m2_bhrr, expected_m2);
     assert!(d < 1e-4, "pool_batch must sum over the batch axis: {d}");
 }
+
+// ===========================================================================
+// pr_complex — Hermitian PR over the pairing's complex/quaternionic view
+// ===========================================================================
+
+/// Trace of a `[n, n]` matrix.
+fn tr_nn(m: Tensor<2>) -> Tensor<1> {
+    let [n, _] = m.dims();
+    (m * Tensor::<2>::eye(n, &Default::default())).sum()
+}
+
+/// Brute-force Hermitian PR straight from the split real samples: `x`/`y` the
+/// realified pair components `[samples, num_pairs]`, `u` the un-rotated real
+/// coordinates `[samples, tail]` (zero-width not supported — pass `None`).
+/// Computed entirely from the complex definition (`M = A + iS`, cross block
+/// `Σ c̄ u`, real block `Σ uuᵀ`), independent of the sub-block extraction in
+/// [`StateMoments::pr_complex`]. PR is scale-invariant, so the `1/samples`
+/// normalisation cancels and is skipped.
+fn brute_force_pr_complex(x_sa: Tensor<2>, y_sa: Tensor<2>, u_sk: Option<Tensor<2>>) -> f32 {
+    let a = x_sa.clone().transpose().matmul(x_sa.clone())
+        + y_sa.clone().transpose().matmul(y_sa.clone());
+    let s = x_sa.clone().transpose().matmul(y_sa.clone())
+        - y_sa.clone().transpose().matmul(x_sa.clone());
+    let mut tr = tr_nn(a.clone());
+    let mut tr2 = a.powf_scalar(2.0).sum() + s.powf_scalar(2.0).sum();
+    if let Some(u_sk) = u_sk {
+        let cross_re = x_sa.transpose().matmul(u_sk.clone());
+        let cross_im = y_sa.transpose().matmul(u_sk.clone());
+        let ublk = u_sk.clone().transpose().matmul(u_sk);
+        tr = tr + tr_nn(ublk.clone());
+        tr2 = tr2
+            + (cross_re.powf_scalar(2.0).sum() + cross_im.powf_scalar(2.0).sum()) * 2.0
+            + ublk.powf_scalar(2.0).sum();
+    }
+    let tr = tr.into_scalar::<f32>();
+    let tr2 = tr2.into_scalar::<f32>();
+    tr * tr / tr2
+}
+
+/// Realify `(x, y)` pair components into the interleaved (NeoX) layout
+/// `[x₀ y₀ x₁ y₁ … | tail]`.
+fn realify_interleaved(x_sa: Tensor<2>, y_sa: Tensor<2>, u_sk: Option<Tensor<2>>) -> Tensor<2> {
+    let [samples, np] = x_sa.dims();
+    let pairs = Tensor::cat(
+        vec![x_sa.unsqueeze_dim::<3>(2), y_sa.unsqueeze_dim::<3>(2)],
+        2,
+    )
+    .reshape([samples, 2 * np]);
+    match u_sk {
+        Some(u) => Tensor::cat(vec![pairs, u], 1),
+        None => pairs,
+    }
+}
+
+fn assert_pr_close(label: &str, got: Tensor<2>, want: f32, tol: f32) {
+    let got = got.into_data().to_vec::<f32>().unwrap()[0];
+    assert!(
+        (got - want).abs() < tol * want.abs().max(1.0),
+        "{label}: pr_complex {got:.5} vs brute force {want:.5}"
+    );
+}
+
+/// `Real` pairing is exactly [`StateMoments::pr`].
+#[test]
+fn pr_complex_real_pairing_equals_pr() {
+    let device: Device = Default::default();
+    let h_sr = Tensor::<2>::random([16, 6], Distribution::Normal(0.5, 1.0), &device);
+    let m = moments_from_samples(h_sr);
+    for center in [false, true] {
+        let d = max_abs_diff(m.pr_complex(&StatePairing::Real, center), m.pr(center));
+        assert!(d < 1e-6, "Real pairing must delegate to pr() (center {center}): {d}");
+    }
+}
+
+/// Interleaved complex pairing (with a real tail) vs the brute-force Hermitian
+/// PR, uncentered and centered (centered = uncentered of mean-subtracted
+/// samples, the same identity `pr` obeys).
+#[test]
+fn pr_complex_matches_brute_force_interleaved() {
+    let device: Device = Default::default();
+    let (samples, np, tail) = (24, 3, 2);
+    let x = Tensor::<2>::random([samples, np], Distribution::Normal(0.7, 1.0), &device);
+    let y = Tensor::<2>::random([samples, np], Distribution::Normal(-0.3, 1.0), &device);
+    let u = Tensor::<2>::random([samples, tail], Distribution::Normal(0.2, 1.0), &device);
+    let v_sr = realify_interleaved(x.clone(), y.clone(), Some(u.clone()));
+    let pairing = StatePairing::ComplexInterleaved { num_pairs: np };
+
+    let m = moments_from_samples(v_sr.clone());
+    let brute = brute_force_pr_complex(x.clone(), y.clone(), Some(u.clone()));
+    assert_pr_close("interleaved", m.pr_complex(&pairing, false), brute, 1e-3);
+
+    // Centered: subtract each component's mean, recompute both sides.
+    let xc = x.clone() - x.clone().mean_dim(0);
+    let yc = y.clone() - y.clone().mean_dim(0);
+    let uc = u.clone() - u.mean_dim(0);
+    let brute_c = brute_force_pr_complex(xc, yc, Some(uc));
+    assert_pr_close("interleaved centered", m.pr_complex(&pairing, true), brute_c, 1e-3);
+
+    // Fully-rotated variant (no tail).
+    let v_full = realify_interleaved(x.clone(), y.clone(), None);
+    let m_full = moments_from_samples(v_full);
+    let brute_full = brute_force_pr_complex(x, y, None);
+    let pairing_full = StatePairing::ComplexInterleaved { num_pairs: np };
+    assert_pr_close("interleaved full", m_full.pr_complex(&pairing_full, false), brute_full, 1e-3);
+}
+
+/// Half-and-half complex pairing with un-rotated leftovers in **both** halves
+/// (`num_pairs < state_rank/2` — the layout partial-RoPE MIMO produces).
+#[test]
+fn pr_complex_matches_brute_force_half_half() {
+    let device: Device = Default::default();
+    let (samples, np, leftover) = (24, 2, 2); // state_rank = 2·(np + leftover) = 8
+    let x = Tensor::<2>::random([samples, np], Distribution::Normal(0.4, 1.0), &device);
+    let y = Tensor::<2>::random([samples, np], Distribution::Normal(-0.6, 1.0), &device);
+    let u1 = Tensor::<2>::random([samples, leftover], Distribution::Normal(0.0, 1.0), &device);
+    let u2 = Tensor::<2>::random([samples, leftover], Distribution::Normal(0.3, 1.0), &device);
+    // Layout: [ x | u1 | y | u2 ] — pairs at (a, half + a), leftovers real.
+    let v_sr = Tensor::cat(vec![x.clone(), u1.clone(), y.clone(), u2.clone()], 1);
+    let pairing = StatePairing::ComplexHalfHalf { num_pairs: np };
+
+    let m = moments_from_samples(v_sr);
+    let brute = brute_force_pr_complex(x, y, Some(Tensor::cat(vec![u1, u2], 1)));
+    assert_pr_close("half-and-half", m.pr_complex(&pairing, false), brute, 1e-3);
+}
+
+/// Hamilton product on the trailing `(w, x, y, z)` axis — local test copy so
+/// this suite stays independent of the mamba3 rotation module.
+fn quat_mul_t<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
+    let n = D - 1;
+    let comp = |t: &Tensor<D>, i: usize| t.clone().narrow(n, i, 1);
+    let (aw, ax, ay, az) = (comp(&a, 0), comp(&a, 1), comp(&a, 2), comp(&a, 3));
+    let (bw, bx, by, bz) = (comp(&b, 0), comp(&b, 1), comp(&b, 2), comp(&b, 3));
+    let w = aw.clone() * bw.clone()
+        - ax.clone() * bx.clone()
+        - ay.clone() * by.clone()
+        - az.clone() * bz.clone();
+    let x = aw.clone() * bx.clone() + ax.clone() * bw.clone() + ay.clone() * bz.clone()
+        - az.clone() * by.clone();
+    let y = aw.clone() * by.clone() - ax.clone() * bz.clone()
+        + ay.clone() * bw.clone()
+        + az.clone() * bx.clone();
+    let z = aw * bz + ax * by - ay * bx + az * bw;
+    Tensor::cat(vec![w, x, y, z], n)
+}
+
+/// Quaternion pairing (with a real tail) vs the brute-force quaternionic
+/// Hermitian PR computed from the component matrices (`M_jk = Σ q̄ⱼqₖ`).
+#[test]
+fn pr_complex_matches_brute_force_quaternion() {
+    let device: Device = Default::default();
+    let (samples, j, tail) = (24, 2, 3); // state_rank = 4·2 + 3 = 11
+    let q_sj4 = Tensor::<3>::random([samples, j, 4], Distribution::Normal(0.2, 1.0), &device);
+    let u_sk = Tensor::<2>::random([samples, tail], Distribution::Normal(0.1, 1.0), &device);
+    let v_sr = Tensor::cat(vec![q_sj4.clone().reshape([samples, 4 * j]), u_sk.clone()], 1);
+    let pairing = StatePairing::QuaternionBlocks { num_blocks: j };
+
+    // Component matrices [samples, j].
+    let comp = |i: usize| q_sj4.clone().narrow(2, i, 1).reshape([samples, j]);
+    let (w, x, y, z) = (comp(0), comp(1), comp(2), comp(3));
+    let g = |a: &Tensor<2>, b: &Tensor<2>| a.clone().transpose().matmul(b.clone());
+    // M_jk = Σ q̄ⱼqₖ, components per the Hamilton product with conjugate left.
+    let mw = g(&w, &w) + g(&x, &x) + g(&y, &y) + g(&z, &z);
+    let mx = g(&w, &x) - g(&x, &w) - g(&y, &z) + g(&z, &y);
+    let my = g(&w, &y) + g(&x, &z) - g(&y, &w) - g(&z, &x);
+    let mz = g(&w, &z) - g(&x, &y) + g(&y, &x) - g(&z, &w);
+    let ublk = u_sk.clone().transpose().matmul(u_sk.clone());
+    let cross2 = g(&w, &u_sk).powf_scalar(2.0).sum()
+        + g(&x, &u_sk).powf_scalar(2.0).sum()
+        + g(&y, &u_sk).powf_scalar(2.0).sum()
+        + g(&z, &u_sk).powf_scalar(2.0).sum();
+    let tr = (tr_nn(mw.clone()) + tr_nn(ublk.clone())).into_scalar::<f32>();
+    let tr2 = (mw.powf_scalar(2.0).sum()
+        + mx.powf_scalar(2.0).sum()
+        + my.powf_scalar(2.0).sum()
+        + mz.powf_scalar(2.0).sum()
+        + cross2 * 2.0
+        + ublk.powf_scalar(2.0).sum())
+    .into_scalar::<f32>();
+    let brute = tr * tr / tr2;
+
+    let m = moments_from_samples(v_sr);
+    assert_pr_close("quaternion", m.pr_complex(&pairing, false), brute, 1e-3);
+}
+
+/// The motivating rank-honesty case: a rotating **single complex direction**
+/// (`c_s = e^{iφ_s}·c₀`, the conveyor a within-plane rotation produces) must
+/// read `PR_ℂ ≡ 1`, while the realified real PR reads ≈ 2 — the ×2 the
+/// Hermitian recombination exists to remove.
+#[test]
+fn pr_complex_rotating_conveyor_is_rank_one() {
+    let device: Device = Default::default();
+    let (samples, np) = (32, 3);
+    let phi_s1 = Tensor::<2>::random([samples, 1], Distribution::Uniform(-3.0, 3.0), &device);
+    let (cos, sin) = (phi_s1.clone().cos(), phi_s1.sin());
+    let r0 = Tensor::<2>::random([1, np], Distribution::Normal(0.0, 1.0), &device);
+    let i0 = Tensor::<2>::random([1, np], Distribution::Normal(0.0, 1.0), &device);
+    // c_s = e^{iφ_s} (r0 + i·i0):
+    let x = cos.clone() * r0.clone() - sin.clone() * i0.clone();
+    let y = sin * r0 + cos * i0;
+    let v_sr = realify_interleaved(x, y, None);
+    let m = moments_from_samples(v_sr);
+
+    let pairing = StatePairing::ComplexInterleaved { num_pairs: np };
+    let pr_c = m.pr_complex(&pairing, false).into_data().to_vec::<f32>().unwrap()[0];
+    assert!((pr_c - 1.0).abs() < 1e-3, "rotating conveyor: PR_ℂ should be 1, got {pr_c}");
+    let pr_r = m.pr(false).into_data().to_vec::<f32>().unwrap()[0];
+    assert!(pr_r > 1.5, "realified PR should read the ×2 artifact, got {pr_r}");
+}
+
+/// Quaternion twin: samples `q_s ⊗ v₀` (a common **left** unit-quaternion
+/// rotation — exactly how `rotate_state_rank_blocks` acts) span one
+/// quaternionic direction: `PR_ℍ ≡ 1` while the realified PR reads up to 4.
+#[test]
+fn pr_complex_quaternion_conveyor_is_rank_one() {
+    let device: Device = Default::default();
+    let (samples, j) = (32, 2);
+    // Random unit quaternions per sample (shared across blocks: a global frame
+    // rotation), applied to a fixed block vector v0.
+    let g = Tensor::<3>::random([samples, 1, 4], Distribution::Normal(0.0, 1.0), &device);
+    let norm = (g.clone() * g.clone()).sum_dim(2).sqrt();
+    let q_s14 = g / norm;
+    let v0_1j4 = Tensor::<3>::random([1, j, 4], Distribution::Normal(0.0, 1.0), &device);
+    let v_sj4 = quat_mul_t(
+        q_s14.expand([samples, j, 4]),
+        v0_1j4.expand([samples, j, 4]),
+    );
+    let m = moments_from_samples(v_sj4.reshape([samples, 4 * j]));
+
+    let pairing = StatePairing::QuaternionBlocks { num_blocks: j };
+    let pr_q = m.pr_complex(&pairing, false).into_data().to_vec::<f32>().unwrap()[0];
+    assert!((pr_q - 1.0).abs() < 1e-3, "quaternion conveyor: PR_ℍ should be 1, got {pr_q}");
+    let pr_r = m.pr(false).into_data().to_vec::<f32>().unwrap()[0];
+    assert!(pr_r > 2.0, "realified PR should read the ×4-class artifact, got {pr_r}");
+}
+
+/// `pr_complex` shares `pr`'s scale invariance and gradient finiteness as the
+/// state magnitude is driven toward zero (the weight-decay regime).
+#[test]
+fn pr_complex_scale_invariant_and_grad_finite() {
+    let device: Device = Default::default();
+    let (samples, state_rank) = (16, 8);
+    let pairing = StatePairing::ComplexInterleaved { num_pairs: 3 }; // tail of 2
+    let base = Tensor::<2>::random([samples, state_rank], Distribution::Normal(0.0, 1.0), &device);
+    let pr_ref = moments_from_samples(base.clone())
+        .pr_complex(&pairing, false)
+        .into_data()
+        .to_vec::<f32>()
+        .unwrap()[0];
+    for exp in [-2i32, -6, -10, -14, -16] {
+        let scaled = base.clone().mul_scalar(10f32.powi(exp));
+        let h = Param::from_tensor(Tensor::from_inner(scaled));
+        let hv = h.val();
+        let m2 = hv.clone().transpose().matmul(hv.clone()).reshape([1, 1, state_rank, state_rank]);
+        let m1 = hv.clone().sum_dim(0).reshape([1, 1, state_rank]);
+        let moments = StateMoments { m2_bhrr: m2, m1_bhr: m1, count: samples };
+        let pr_val = moments
+            .pr_complex(&pairing, false)
+            .into_data()
+            .to_vec::<f32>()
+            .unwrap()[0];
+        assert!(
+            (pr_val - pr_ref).abs() < 1e-2,
+            "PR_ℂ must be scale-invariant at 1e{exp}: {pr_val} vs {pr_ref}"
+        );
+        let grads = moments.pr_complex(&pairing, false).sum().backward();
+        let g = h.val().grad(&grads).expect("grad exists");
+        assert!(
+            g.into_data().to_vec::<f32>().unwrap().iter().all(|v| v.is_finite()),
+            "PR_ℂ gradient must stay finite at magnitude 1e{exp}"
+        );
+    }
+}
+
+/// `Mamba3::state_pairing()` mirrors the rotation the block applies: kind,
+/// SISO/MIMO layout, and rotated width.
+#[cfg(feature = "mamba3")]
+#[test]
+fn mamba3_state_pairing_mirrors_rotation() {
+    use crate::mamba3::prelude::{Mamba3Config, RotationKind};
+    let device: Device = Default::default();
+    let cfg = |mimo: usize, frac: f64, rot: RotationKind| {
+        Mamba3Config::new(16)
+            .with_state_rank(8)
+            .with_per_head_dim(8)
+            .with_mimo_rank(mimo)
+            .with_rope_fraction(frac)
+            .with_rotation(rot)
+            .init(&device)
+            .state_pairing()
+    };
+    assert_eq!(
+        cfg(1, 1.0, RotationKind::Complex2D),
+        StatePairing::ComplexInterleaved { num_pairs: 4 }
+    );
+    assert_eq!(
+        cfg(1, 0.5, RotationKind::Complex2D),
+        StatePairing::ComplexInterleaved { num_pairs: 2 }
+    );
+    assert_eq!(
+        cfg(2, 0.5, RotationKind::Complex2D),
+        StatePairing::ComplexHalfHalf { num_pairs: 2 }
+    );
+    assert_eq!(cfg(1, 0.0, RotationKind::Complex2D), StatePairing::Real);
+    assert_eq!(
+        cfg(1, 1.0, RotationKind::Quaternion4D),
+        StatePairing::QuaternionBlocks { num_blocks: 2 }
+    );
+    assert_eq!(
+        cfg(1, 0.5, RotationKind::Quaternion4D),
+        StatePairing::QuaternionBlocks { num_blocks: 1 }
+    );
+}

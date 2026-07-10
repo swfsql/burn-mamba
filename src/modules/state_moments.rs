@@ -15,12 +15,49 @@
 
 use burn::prelude::*;
 
+/// How the `state_rank` axis of a (realified) SSM state groups into complex /
+/// quaternionic coordinates — the realification layout the Mamba-3 rotation
+/// applies to B/C (and hence to the state). Consumed by
+/// [`StateMoments::pr_complex`].
+///
+/// Construct it with `Mamba3::state_pairing()` (the single source of truth,
+/// mirroring exactly what `rotate_bc_forward` applies) — never re-derive the
+/// layout by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatePairing {
+    /// No rotation pairing: every coordinate is real (`rope_fraction = 0`);
+    /// [`StateMoments::pr_complex`] then equals [`StateMoments::pr`].
+    Real,
+    /// Complex pairs, interleaved (NeoX-style; Mamba-3 SISO): coordinate `2a`
+    /// is the real and `2a + 1` the imaginary part of complex coordinate `a`,
+    /// for `a < num_pairs`; the tail `[2·num_pairs, state_rank)` stays real.
+    ComplexInterleaved {
+        /// Number of rotated complex pairs (`rope_dim / 2`).
+        num_pairs: usize,
+    },
+    /// Complex pairs, half-and-half (GPT-J-style; Mamba-3 MIMO): coordinate
+    /// `a` is the real and `state_rank/2 + a` the imaginary part, for
+    /// `a < num_pairs`; the remainder of **both** halves stays real.
+    ComplexHalfHalf {
+        /// Number of rotated complex pairs (`rope_dim / 2`).
+        num_pairs: usize,
+    },
+    /// Quaternion blocks (Mamba-3 `Quaternion4D`): coordinates `[4j, 4j + 4)`
+    /// form quaternion coordinate `j` (components ordered `w, x, y, z`), for
+    /// `j < num_blocks`; the tail stays real.
+    QuaternionBlocks {
+        /// Number of rotated quaternion blocks (`rope_width / 4`).
+        num_blocks: usize,
+    },
+}
+
 /// Raw (un-normalised) first/second moments of the per-token SSM states of
 /// one block's `forward` pass, pooled over tokens and `per_head_dim` rows.
 ///
-/// Produced by `forward_with_state_moments` (currently Mamba-2 only) without
-/// ever materialising the per-token states — see
-/// `Mamba2SsdInput::state_moments`.
+/// Produced by `forward_with_state_moments` — closed-form for Mamba-2
+/// (`Mamba2SsdInput::state_moments`, no state materialisation) and serial
+/// chunkwise for Mamba-3 (`Mamba3MomentsInput::state_moments_phys`, the
+/// per-token **physical-frame** states of the complex SSM).
 #[derive(Debug, Clone)]
 pub struct StateMoments {
     /// Second-moment (Gram) sum `Σₜ hₜᵀ hₜ` — the `ᵀ` contraction pools the
@@ -147,6 +184,171 @@ impl StateMoments {
             .sum_dim(2)
             .reshape([batch, nheads])
             .clamp_min(crate::utils::div_eps(dtype));
+        tr1_hat_bh.clone() * tr1_hat_bh / tr2_hat_bh
+    }
+
+    /// Participation ratio of the **Hermitian** sample covariance, treating the
+    /// `state_rank` axis as realified complex (or quaternionic) coordinates per
+    /// `pairing` — the Mamba-3 counterpart of [`Self::pr`].
+    ///
+    /// With the pairing's complex view `c = x + iy`, the Hermitian moment is
+    /// `M = A + iS` with `A = Σ(xxᵀ + yyᵀ)` and `S = Σ(xyᵀ − yxᵀ)` — both linear
+    /// recombinations of `m2_bhrr` sub-blocks, so centering `Σ` centers `M`
+    /// identically. `PR_ℂ = (tr M)² / tr(M²)`; the trace is real and equals the
+    /// full real trace (frame-invariant), while `tr(M²) = Σ|M_ab|²`
+    /// (`= ‖A‖²_F + ‖S‖²_F` for the fully-rotated complex case). One complex
+    /// (or quaternionic) direction counts as **one** — the ×2 (×4) realified
+    /// count is a representation artifact — so a rank-1 rotating conveyor reads
+    /// `PR_ℂ ≡ 1` where [`Self::pr`] reads up to the block size.
+    ///
+    /// Un-rotated coordinates (partial `rope_fraction`) stay a real block `U`
+    /// of the mixed Hermitian `[[M, X], [Xᴴ, U]]`; its trace and `Σ|·|²` join
+    /// the sums (`tr(·²)` gains `2‖X‖²_F + ‖U‖²_F`). Quaternionic pairing uses
+    /// the same formulas with `M_jk = Σ q̄ⱼqₖ` (diagonal real, 4-component
+    /// norms).
+    ///
+    /// Differentiable; numerics mirror [`Self::pr`] (detached trace
+    /// normalisation, `min_positive` / `div_eps` floors — see the comments
+    /// there for why).
+    ///
+    /// # Shape
+    /// - output: `[batch, nheads]`
+    pub fn pr_complex(&self, pairing: &StatePairing, center: bool) -> Tensor<2> {
+        let [batch, nheads, state_rank, _] = self.m2_bhrr.dims();
+        assert!(self.count > 0, "state moments hold no samples");
+        let device = self.m2_bhrr.device();
+        let samples = self.count as f32;
+
+        // Reorder the `r` axis into the canonical `[x-pairs | y-pairs | real]`
+        // layout (complex pairings only — quaternion blocks are already
+        // consecutive with a trailing real tail), so every block below is one
+        // contiguous `narrow`. `rotated` is the realified width of the
+        // rotated prefix in that canonical order.
+        enum Blocks {
+            Complex { num_pairs: usize },
+            Quaternion { num_blocks: usize },
+        }
+        let (reorder, blocks, rotated) = match *pairing {
+            StatePairing::Real => return self.pr(center),
+            StatePairing::ComplexInterleaved { num_pairs } => {
+                assert!(
+                    num_pairs > 0 && 2 * num_pairs <= state_rank,
+                    "interleaved pairing exceeds state_rank"
+                );
+                let mut idx: Vec<i64> = (0..num_pairs).map(|a| 2 * a as i64).collect();
+                idx.extend((0..num_pairs).map(|a| 2 * a as i64 + 1));
+                idx.extend((2 * num_pairs..state_rank).map(|k| k as i64));
+                (Some(idx), Blocks::Complex { num_pairs }, 2 * num_pairs)
+            }
+            StatePairing::ComplexHalfHalf { num_pairs } => {
+                let half = state_rank / 2;
+                assert!(
+                    num_pairs > 0 && num_pairs <= half,
+                    "half-and-half pairing exceeds state_rank / 2"
+                );
+                let mut idx: Vec<i64> = (0..num_pairs).map(|a| a as i64).collect();
+                idx.extend((0..num_pairs).map(|a| (half + a) as i64));
+                idx.extend((num_pairs..half).map(|k| k as i64));
+                idx.extend((half + num_pairs..state_rank).map(|k| k as i64));
+                (Some(idx), Blocks::Complex { num_pairs }, 2 * num_pairs)
+            }
+            StatePairing::QuaternionBlocks { num_blocks } => {
+                assert!(
+                    num_blocks > 0 && 4 * num_blocks <= state_rank,
+                    "quaternion pairing exceeds state_rank"
+                );
+                (None, Blocks::Quaternion { num_blocks }, 4 * num_blocks)
+            }
+        };
+
+        let sigma_bhrr = {
+            let m2_bhrr = self.m2_bhrr.clone() / samples;
+            let sigma = if center {
+                let mu_bhr = self.m1_bhr.clone() / samples;
+                let outer_bhrr =
+                    mu_bhr.clone().unsqueeze_dim::<4>(3) * mu_bhr.unsqueeze_dim::<4>(2);
+                m2_bhrr - outer_bhrr
+            } else {
+                m2_bhrr
+            };
+            match reorder {
+                Some(idx) => {
+                    let idx = Tensor::<1, Int>::from_ints(idx.as_slice(), &device);
+                    sigma.select(2, idx.clone()).select(3, idx)
+                }
+                None => sigma,
+            }
+        };
+
+        // Frobenius norm² of a `[batch, nheads, ·, ·]` block, per (batch, head).
+        let fro2_bh = |t: Tensor<4>| -> Tensor<2> {
+            t.powf_scalar(2.0)
+                .sum_dim(3)
+                .sum_dim(2)
+                .reshape([batch, nheads])
+        };
+
+        // The Hermitian trace equals the full real trace (the phases cancel on
+        // the diagonal), so the normaliser is exactly [`Self::pr`]'s.
+        let eye_11rr = Tensor::<2>::eye(state_rank, &device).unsqueeze::<4>();
+        let tr_bh = (sigma_bhrr.clone() * eye_11rr.clone())
+            .sum_dim(3)
+            .sum_dim(2)
+            .reshape([batch, nheads]);
+        let dtype = self.m2_bhrr.dtype();
+        let min_positive = dtype
+            .finfo()
+            .expect("state moments are a float dtype")
+            .min_positive;
+        let scale_bh = tr_bh.clamp_min(min_positive).detach();
+        let sigma_hat = sigma_bhrr / scale_bh.reshape([batch, nheads, 1, 1]);
+        let tr1_hat_bh = (sigma_hat.clone() * eye_11rr)
+            .sum_dim(3)
+            .sum_dim(2)
+            .reshape([batch, nheads]);
+
+        // tr(Σ̂²) of the mixed Hermitian [[M, X], [Xᴴ, U]] = Σ|M_ab|² + 2‖X‖² + ‖U‖².
+        let mut tr2_hat_bh = match blocks {
+            Blocks::Complex { num_pairs } => {
+                let np = num_pairs;
+                let xx = sigma_hat.clone().narrow(2, 0, np).narrow(3, 0, np);
+                let yy = sigma_hat.clone().narrow(2, np, np).narrow(3, np, np);
+                let xy = sigma_hat.clone().narrow(2, 0, np).narrow(3, np, np);
+                // A = Σ(xxᵀ + yyᵀ), S = Σ(xyᵀ − yxᵀ); Σ symmetric ⇒ (yx)_ab = (xy)_ba.
+                let a = xx + yy;
+                let s = xy.clone() - xy.transpose();
+                fro2_bh(a) + fro2_bh(s)
+            }
+            Blocks::Quaternion { num_blocks } => {
+                let j = num_blocks;
+                let q_bhjaja = sigma_hat
+                    .clone()
+                    .narrow(2, 0, 4 * j)
+                    .narrow(3, 0, 4 * j)
+                    .reshape([batch, nheads, j, 4, j, 4]);
+                // Component (α, β) sub-block Σ[(4j+α), (4k+β)] as [b, h, J, J].
+                let c = |alpha: usize, beta: usize| -> Tensor<4> {
+                    q_bhjaja
+                        .clone()
+                        .narrow(3, alpha, 1)
+                        .narrow(5, beta, 1)
+                        .reshape([batch, nheads, j, j])
+                };
+                // Components of M_jk = Σ q̄ⱼqₖ (Hamilton product, conjugate left).
+                let w = c(0, 0) + c(1, 1) + c(2, 2) + c(3, 3);
+                let x = c(0, 1) - c(1, 0) - c(2, 3) + c(3, 2);
+                let y = c(0, 2) + c(1, 3) - c(2, 0) - c(3, 1);
+                let z = c(0, 3) - c(1, 2) + c(2, 1) - c(3, 0);
+                fro2_bh(w) + fro2_bh(x) + fro2_bh(y) + fro2_bh(z)
+            }
+        };
+        if rotated < state_rank {
+            let tail = state_rank - rotated;
+            let cross = sigma_hat.clone().narrow(2, 0, rotated).narrow(3, rotated, tail);
+            let u = sigma_hat.narrow(2, rotated, tail).narrow(3, rotated, tail);
+            tr2_hat_bh = tr2_hat_bh + fro2_bh(cross) * 2.0 + fro2_bh(u);
+        }
+        let tr2_hat_bh = tr2_hat_bh.clamp_min(crate::utils::div_eps(dtype));
         tr1_hat_bh.clone() * tr1_hat_bh / tr2_hat_bh
     }
 

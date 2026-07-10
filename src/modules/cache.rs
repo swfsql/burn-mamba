@@ -194,6 +194,22 @@ mod impl_mamba3 {
         ) -> (Tensor<3>, Mamba3Cache) {
             self.forward(x, cache, ssd_path)
         }
+        fn block_forward_with_state_moments(
+            &self,
+            x: Tensor<3>,
+            cache: Option<Mamba3Cache>,
+            ssd_path: Mamba3SsdPath,
+        ) -> (Tensor<3>, Mamba3Cache, StateMoments) {
+            self.forward_with_state_moments(x, cache, ssd_path)
+        }
+        fn block_forward_with_state_moments_grad(
+            &self,
+            x: Tensor<3>,
+            cache: Option<Mamba3Cache>,
+            ssd_path: Mamba3SsdPath,
+        ) -> (Tensor<3>, Mamba3Cache, StateMoments) {
+            self.forward_with_state_moments_grad(x, cache, ssd_path)
+        }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
         }

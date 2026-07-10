@@ -278,6 +278,35 @@ impl Mamba3 {
     pub fn rotation_kind(&self) -> RotationKind {
         self.rotation
     }
+
+    /// How this block's rotation pairs the `state_rank` axis into complex /
+    /// quaternionic coordinates ([`StatePairing`]) — the single source of
+    /// truth for [`StateMoments::pr_complex`](crate::modules::StateMoments::pr_complex),
+    /// mirroring exactly what `rotate_bc_forward` applies: `Complex2D` rotates
+    /// the first `rope_dim` entries (interleaved pairs for SISO, half-and-half
+    /// for MIMO); `Quaternion4D` rotates the first `4·num_quat_blocks` entries
+    /// as consecutive blocks.
+    pub fn state_pairing(&self) -> crate::modules::StatePairing {
+        use crate::modules::StatePairing;
+        match self.rotation {
+            RotationKind::Complex2D => {
+                if self.rope_dim == 0 {
+                    StatePairing::Real
+                } else if self.mimo_rank == 1 {
+                    StatePairing::ComplexInterleaved {
+                        num_pairs: self.rope_dim / 2,
+                    }
+                } else {
+                    StatePairing::ComplexHalfHalf {
+                        num_pairs: self.rope_dim / 2,
+                    }
+                }
+            }
+            RotationKind::Quaternion4D => StatePairing::QuaternionBlocks {
+                num_blocks: self.num_quat_blocks,
+            },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +676,69 @@ impl Mamba3 {
             Mamba3Cache::SingleSsd(cache) => {
                 let (out_bsm, cache) = self.forward_single_ssd(input_bsm, Some(cache), &ssd_path);
                 (out_bsm, cache.into())
+            }
+        }
+    }
+
+    /// [`Self::forward`], additionally returning the exact pooled moments of
+    /// every per-token **physical-frame** SSM state (the complex state
+    /// de-rotated per token — see `mamba3/moments.rs`; the inputs of the
+    /// Hermitian state participation ratio
+    /// [`StateMoments::pr_complex`](crate::modules::StateMoments::pr_complex)
+    /// with [`Self::state_pairing`]). Matches what a token-by-token
+    /// [`Self::step`] loop reading the cache's physical state
+    /// (`rotation.derotate_state(ssm_bhpr, …)`) would accumulate.
+    ///
+    /// The moments branch is **detached** here (diagnostic use — no backward
+    /// nodes are recorded); for a differentiable loss term over the moments
+    /// use [`Self::forward_with_state_moments_grad`].
+    pub fn forward_with_state_moments(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        ssd_path: Mamba3SsdPath,
+    ) -> (Tensor<3>, Mamba3Cache, crate::modules::StateMoments) {
+        self.forward_with_state_moments_impl(input_bsm, cache, ssd_path, true)
+    }
+
+    /// [`Self::forward_with_state_moments`] with the moments branch left
+    /// **attached** to the autodiff graph, so a loss term over the moments
+    /// (e.g. a state-PR penalty) back-propagates into the block parameters —
+    /// including the rotation (the de-rotation is θ-differentiable).
+    ///
+    /// The moments run through their own custom recompute backward
+    /// (`Mamba3MomentsInput::state_moments_phys_recalculated`), an independent
+    /// subgraph off the pre-SSD tensors, so they compose with the SSD's own
+    /// `SerialRecalculated` custom backward untouched.
+    pub fn forward_with_state_moments_grad(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        ssd_path: Mamba3SsdPath,
+    ) -> (Tensor<3>, Mamba3Cache, crate::modules::StateMoments) {
+        self.forward_with_state_moments_impl(input_bsm, cache, ssd_path, false)
+    }
+
+    fn forward_with_state_moments_impl(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        ssd_path: Mamba3SsdPath,
+        detach: bool,
+    ) -> (Tensor<3>, Mamba3Cache, crate::modules::StateMoments) {
+        let [batch, _sequence, _d_model] = input_bsm.dims();
+        let device = input_bsm.device();
+        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
+        match cache {
+            Mamba3Cache::DoubleSsd(cache) => {
+                let (out_bsm, cache, moments) =
+                    self.forward_double_ssd_impl(input_bsm, Some(cache), &ssd_path, Some(detach));
+                (out_bsm, cache.into(), moments.expect("moments were requested"))
+            }
+            Mamba3Cache::SingleSsd(cache) => {
+                let (out_bsm, cache, moments) =
+                    self.forward_single_ssd_impl(input_bsm, Some(cache), &ssd_path, Some(detach));
+                (out_bsm, cache.into(), moments.expect("moments were requested"))
             }
         }
     }
