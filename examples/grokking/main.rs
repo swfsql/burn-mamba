@@ -75,7 +75,7 @@ pub fn launch(app_args: &AppArgs) {
             overrides.n_layers.unwrap_or(1),
             overrides.mamba3.then(|| model::Mamba3Arm {
                 quaternion: overrides.quat,
-                rope_fraction: overrides.rope_fraction.unwrap_or(0.5),
+                rope_fraction: overrides.rope_fraction.unwrap_or(1.0),
             }),
         )
     });
@@ -166,7 +166,7 @@ struct Overrides {
     /// instead of the default `Complex2D` (fresh configs only).
     quat: bool,
     /// `--rope-fraction <f64>`: with `--mamba3`, the rotated fraction of
-    /// `state_rank` (0.0 | 0.5 | 1.0; default 0.5; fresh configs only).
+    /// `state_rank` (0.0 | 0.5 | 1.0; default 1.0; fresh configs only).
     rope_fraction: Option<f64>,
 }
 

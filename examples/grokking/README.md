@@ -48,6 +48,14 @@ findings, and reproduction commands for every claim.
    the state to a near-rank-1 conveyor; the transient rank expansion is
    search scaffolding, not structure. The loud channel is the weight
    spectra (embedding / head / B/C slices).
+6. **The starved-data wall is substrate-dependent — and this task is too
+   easy for Mamba-3.** Under the same f = 0.15, wd-only protocol where
+   Mamba-2 sits at chance (now measured, §6), every Mamba-3 arm groks to
+   ~100% by 25–32k — even at `rope_fraction = 0`, with no rotation in the
+   dynamics at all. All grokked endpoints hold ≈ one 2-plane of state
+   (phase-coded in the embedding sum at rope 0, rotational at rope 1;
+   `PR_ℂ ≡ 1`), so the penalty has no barrier left to cross here: the task
+   retires for Mamba-3 in favor of state-tracking.
 
 ## Setup
 
@@ -61,7 +69,7 @@ findings, and reproduction commands for every claim.
   (`--n-layers 2`, 35k params): 1 layer is capacity-blocked at any width
   (d128/61k params stalls < 40% train), composition beats width. `--mamba3`
   swaps in a Mamba-3 block under the same constraints (SISO, 1 head, no conv
-  at all; 18.8k params) — the complex-state arm (see the Mamba-3 read-out
+  at all; ≈30k params) — the complex-state arm (see the Mamba-3 read-out
   section).
 - Optimizer: AdamW with **plain (non-cautious) decoupled decay** (cautious
   decay masks exactly the pressure grokking relies on), grad-clip 1.0,
@@ -105,7 +113,7 @@ All commands below abbreviate the prefix to `grokking --training -a <dir> --`.
 | `--lr <f64>`, `--steps`, `--train-fraction`, `--p`, `--k` | schedule / task |
 | `--d-model --expand --state-rank --n-layers` | model size (fresh configs only) |
 | `--mamba3` | build a Mamba-3 block instead of Mamba-2 (fresh configs only); diagnostics/penalty switch to `PR_ℂ(M_phys)` automatically |
-| `--quat`, `--rope-fraction <0\|0.5\|1.0>` | with `--mamba3`: `Quaternion4D` rotation / rotated fraction of `state_rank` (default `Complex2D`, 0.5; fresh configs only) |
+| `--quat`, `--rope-fraction <0\|0.5\|1.0>` | with `--mamba3`: `Quaternion4D` rotation / rotated fraction of `state_rank` (default `Complex2D`, 1.0; fresh configs only) |
 | `--chunked` | chunkwise `forward()` instead of stepwise |
 | `--no-diag` / `--no-state-pr` | skip all PR diagnostics / only the (costly) state-PR pass |
 | `--pr-lambda <f64>` | differentiable spectral-PR penalty coefficient; **negative = expansion reward** (spell `--pr-lambda=-0.01`) |
@@ -129,6 +137,12 @@ scale-invariant, range 1…N (`diagnostics.rs`):
   directions does the state use". On a Mamba-3 net this automatically becomes
   the **Hermitian `PR_ℂ` of the physical-frame state** (see [the Mamba-3
   read-out](#the-mamba-3-read-out-pr-over-a-complex-state) below).
+- **p-axis state PR** (the transposed observable; printed by `--inference`):
+  the same states read as samples of `per_head_dim`-vectors — how many
+  directions of the *channel* axis the state occupies. A rank-1-in-`r` state
+  (`h ≈ u ⊗ w`) can still hide a whole circuit in `u`; this reads its
+  dimension. The `p`-side Gram is invariant under `r`-side rotations, so it
+  is frame-free and family-uniform (always the plain real PR).
 - **Weight spectral PRs**: embedding, LM head, each `in_proj` slice
   (`z|x|B|C`), `out_proj`, and the token-centered **B-alphabet**
   (`PR(emb·W_B)`, DC removed).
@@ -142,7 +156,8 @@ scale-invariant, range 1…N (`diagnostics.rs`):
 ### The Mamba-3 read-out: PR over a complex state
 
 *(Instrument built and tested in the library; the model arm is `--mamba3`
-below — wiring smoke-tested, no experiment runs yet: see Open threads.)*
+below. The runs are in — see [§6](#6-mamba-3-groks-where-mamba-2-cannot--the-task-retires):
+the substrate dissolves the §4 wall, retiring this task for Mamba-3.)*
 
 Mamba-3 breaks the plain covariance read-out above, because its state is
 genuinely **complex**: the data-dependent RoPE realises `h ∈ ℂ^{p×r/2}` as a
@@ -198,7 +213,7 @@ agreement is part of the library's parity test suite. The weight-side
 diagnostics/penalties carry over too (both families lead `in_proj` with the
 same `[z|x|B|C|…]` column layout). The model arm is `--mamba3`
 (`--quat` / `--rope-fraction` select the rotation; same size constraints as
-the Mamba-2 model, SISO, no conv — 18.8k params at the p = 97 defaults):
+the Mamba-2 model, SISO, no conv — ≈30k params at the p = 97 defaults):
 
 ```bash
 # a Mamba-3 arm with the state-PR penalty (artifacts under tmp/mamba-3/)
@@ -237,10 +252,10 @@ for p = 97.
 Diagnostics-on arms (state PR logged to `pr.csv`):
 
 ```bash
-grokking --training -a tmp/wd1   -- --wd 1.0 --steps 50000    # groks ~10k
-grokking --training -a tmp/wd01  -- --wd 0.1 --steps 100000   # liftoff ~32k, 97.6% @100k
-grokking --training -a tmp/wd0   -- --steps 20000             # control: chance forever
-grokking --training -a tmp/k4wd1 -- --p 11 --k 4 --n-layers 2 --wd 1.0 --steps 12000
+grokking --training -a tmp/mamba-2/wd1   -- --wd 1.0 --steps 50000    # groks ~10k
+grokking --training -a tmp/mamba-2/wd01  -- --wd 0.1 --steps 100000   # liftoff ~32k, 97.6% @100k
+grokking --training -a tmp/mamba-2/wd0   -- --steps 20000             # control: chance forever
+grokking --training -a tmp/mamba-2/k4wd1 -- --p 11 --k 4 --n-layers 2 --wd 1.0 --steps 12000
 ```
 
 - A state-PR inflection led or tracked the transition in **4 of 4** grokking
@@ -267,10 +282,10 @@ pressure, zero norm pressure (PR is scale-invariant).
 
 ```bash
 # the causal arm (60k) + continuation (40k): 37% @60k → stall ~80% @100k
-grokking --training -a tmp/pr001 -- --pr-lambda 0.01 --pr-target all --no-state-pr --steps 60000
-grokking --training -a tmp/pr001 -- --steps 40000 --step-offset 60000 --pr-lambda 0.01 --pr-target all --no-state-pr
+grokking --training -a tmp/mamba-2/pr001 -- --pr-lambda 0.01 --pr-target all --no-state-pr --steps 60000
+grokking --training -a tmp/mamba-2/pr001 -- --steps 40000 --step-offset 60000 --pr-lambda 0.01 --pr-target all --no-state-pr
 # matched control (same seed/init, λ=0): chance through 60k+
-grokking --training -a tmp/ctrl  -- --no-state-pr --steps 60000
+grokking --training -a tmp/mamba-2/ctrl  -- --no-state-pr --steps 60000
 ```
 
 - λ = 0.01 at wd 0 **groks** (liftoff ~30k, 80% @100k) where the identical
@@ -343,15 +358,15 @@ Generality probes of the wd+noise recipe:
 
 ```bash
 # k4 composition: no boundary — test 95.5% @1k (baseline wd-alone: 99% @5.5k)
-grokking --training -a tmp/k4n -- --p 11 --k 4 --n-layers 2 --wd 1.0 --noise-lambda 0.0003 --steps 3000 --no-state-pr
+grokking --training -a tmp/mamba-2/k4n -- --p 11 --k 4 --n-layers 2 --wd 1.0 --noise-lambda 0.0003 --steps 3000 --no-state-pr
 
 # f=0.25: the plateau RETURNS (~4k at chance), then 79% @10k
-grokking --training -a tmp/f25n -- --train-fraction 0.25 --wd 1.0 --noise-lambda 0.0003 --steps 10000 --no-state-pr
+grokking --training -a tmp/mamba-2/f25n -- --train-fraction 0.25 --wd 1.0 --noise-lambda 0.0003 --steps 10000 --no-state-pr
 # wd 1.0 alone at f=0.25: chance through 10k
-grokking --training -a tmp/f25w -- --train-fraction 0.25 --wd 1.0 --steps 10000 --no-state-pr
+grokking --training -a tmp/mamba-2/f25w -- --train-fraction 0.25 --wd 1.0 --steps 10000 --no-state-pr
 
 # f=0.15: heat fails entirely (chance through 20k)
-grokking --training -a tmp/f15n -- --train-fraction 0.15 --wd 1.0 --noise-lambda 0.0003 --steps 20000 --no-state-pr
+grokking --training -a tmp/mamba-2/f15n -- --train-fraction 0.15 --wd 1.0 --noise-lambda 0.0003 --steps 20000 --no-state-pr
 ```
 
 At f = 0.15 (all wd 1.0, memorized by ≤2k, `--train-fraction 0.15`):
@@ -366,8 +381,8 @@ At f = 0.15 (all wd 1.0, memorized by ≤2k, `--train-fraction 0.15`):
 
 ```bash
 # the wall-crosser (extend in 10k blocks with --step-offset):
-grokking --training -a tmp/f15pr -- --train-fraction 0.15 --wd 1.0 --pr-lambda 0.03 --pr-target all --steps 10000 --no-state-pr
-grokking --training -a tmp/f15pr -- --steps 10000 --step-offset 10000 --no-state-pr   # …repeat to 50k
+grokking --training -a tmp/mamba-2/f15pr -- --train-fraction 0.15 --wd 1.0 --pr-lambda 0.03 --pr-target all --steps 10000 --no-state-pr
+grokking --training -a tmp/mamba-2/f15pr -- --steps 10000 --step-offset 10000 --no-state-pr   # …repeat to 50k
 ```
 
 - The grokking delay has **two components**: the Adam freeze (cured by heat;
@@ -392,7 +407,7 @@ grokking --training -a tmp/f15pr -- --steps 10000 --step-offset 10000 --no-state
 
   ```bash
   # weight-PR + state-PR stacked (both --chunked; state-PR requires it):
-  grokking --training -a tmp/f15both -- --train-fraction 0.15 --wd 1.0 \
+  grokking --training -a tmp/mamba-2/f15both -- --train-fraction 0.15 --wd 1.0 \
       --pr-lambda 0.03 --pr-target all --state-pr-lambda 0.03 --chunked --steps 50000
   ```
 
@@ -407,16 +422,16 @@ per-step 1e-3) *blocks the fit* — raw CE gradients (~1e-4) drown under
 
 ```bash
 # NO PLATEAU: test 86.9% @1k, 100.00% @2k — no auxiliary term at all
-grokking --training -a tmp/sgd -- --sgd 0.9 --lr 0.05 --wd 0.002 --steps 3000 --no-state-pr
+grokking --training -a tmp/mamba-2/sgd -- --sgd 0.9 --lr 0.05 --wd 0.002 --steps 3000 --no-state-pr
 # decay still required: wd 0 memorizes (98.9% train @3k), test at chance
-grokking --training -a tmp/sgd0 -- --sgd 0.9 --lr 0.05 --wd 0 --steps 3000 --no-state-pr
+grokking --training -a tmp/mamba-2/sgd0 -- --sgd 0.9 --lr 0.05 --wd 0 --steps 3000 --no-state-pr
 
 # the search wall is optimizer-independent:
-grokking --training -a tmp/sgdf25 -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.25 --steps 10000 --no-state-pr   # plateau ~4k → 99.8% @10k
-grokking --training -a tmp/sgdf15 -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.15 --steps 20000 --no-state-pr   # chance flat
+grokking --training -a tmp/mamba-2/sgdf25 -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.25 --steps 10000 --no-state-pr   # plateau ~4k → 99.8% @10k
+grokking --training -a tmp/mamba-2/sgdf15 -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.15 --steps 20000 --no-state-pr   # chance flat
 
 # directed compression crosses under SGD too — faster, but unstable endgame
-grokking --training -a tmp/sgdf15pr -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.15 \
+grokking --training -a tmp/mamba-2/sgdf15pr -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fraction 0.15 \
     --pr-lambda 0.03 --pr-target all --steps 20000 --no-state-pr   # 49% @16k, peak 90.4% @24k, then limit-cycles
 ```
 
@@ -433,6 +448,68 @@ grokking --training -a tmp/sgdf15pr -- --sgd 0.9 --lr 0.05 --wd 0.002 --train-fr
   liability mid-search and an asset at convergence.
 - Caveat: SGD ran at 50× AdamW's lr; these are mechanism claims, not a
   tuned-fairness comparison.
+
+### 6. Mamba-3 groks where Mamba-2 cannot — the task retires
+
+The Mamba-3 arms ran on the §4 wall protocol (p = 97, k = 2, f = 0.15,
+AdamW lr 1e-3, `--chunked`, ≈30k-param models either family), alongside the
+Mamba-2 control §4 had always inferred but never measured:
+
+```bash
+# Mamba-2, wd alone: chance through 25k — the wall, now measured directly
+grokking --training -a tmp/mamba-2/grok-k2-f0.15-wd1.0-alone -- \
+    --wd 1.0 --train-fraction 0.15 --chunked --steps 25000
+# Mamba-3 arms, same protocol (+ --mamba3 --rope-fraction <f> [--state-pr-lambda 0.03]):
+#   rope 0.0 (real 1D states, no rotation), wd alone   → grokked, ~100% @25k
+#   rope 1.0 (2D complex states),           wd alone   → grokked,  100% @32k
+#   rope 1.0 + state-PR λ0.03                          → grokked,  100% @31k (90% @26k)
+```
+
+**Every Mamba-3 arm walks through the f = 0.15 wall under weight decay
+alone** — including the rotation-free `rope_fraction = 0` arm, whose only
+remaining deltas vs Mamba-2 are the trapezoidal write (two independently
+data-weighted taps `β·B₋₁x₋₁ + γ·Bₜxₜ` — the right inductive shape for a
+weighted pair sum), the B/C biases, the pre-SSD QK-Norm (vs Mamba-2's
+post-hoc gated norm), and the removed conv. Which of those dissolves the
+barrier is unattributed (one-factor ablations were not run); what is
+settled is that the wall of §4 is **substrate-dependent**, not a property
+of the task/optimizer pair alone.
+
+The endpoint states, read with both PR axes (`--inference` panel):
+
+| arm | test acc | PR(r) | PR(p) | state `tr Σ` |
+|---|---|---|---|---|
+| Mamba-2, wd only (memorized) | 0.007 | 1.96 | **17.0** | ~1e-4 |
+| M3 rope 0.0, wd only | 0.999 | 1.00 | **2.3** | ~1e-1 |
+| M3 rope 1.0, wd only | 1.000 | 1.03 | **1.6** | ~1e-1 |
+| M3 rope 1.0 + state-PR | 1.000 | 1.00 | **1.2** | ~1e-1 |
+
+- Every grokked endpoint occupies ≈ **one 2-plane total**, differently
+  realised. At rope 0.0 there is no rotation anywhere in the dynamics; the
+  plane lives in the **p-axis** — the embedding puts tokens on a circle and
+  the state *sums* two on-circle vectors, whose direction encodes
+  `ω(a+b)/2` (phase as **data**, composed by vector addition). At rope 1.0
+  the p-axis empties toward 1 and the phase moves into the **r-plane
+  frame** (`PR_ℂ ≡ 1`: a rotational conveyor — phase composed by the
+  recurrence itself). The predictions of the read-out section resolved at
+  their lower bound: single plane, multi-frequency structure in the
+  embedding (emb-freq PR ~7–12), none in state rank.
+- Memorization looks nothing like this on the p-axis: the Mamba-2 control
+  spreads over ~17 channel directions at ~1000× smaller magnitude (the §1
+  r-side read of 1.96 is deceptively low). PR(p) separates
+  memorize/generalize far more loudly than PR(r) did.
+- The state-PR penalty is compatible and mildly accelerating (pins
+  `PR_ℂ = 1.00` from ~5k; ~1k-step head start), but with wd alone already
+  grokking there is **no barrier for it to cross** — penalty causality is
+  untestable here. No state-magnitude squeeze appears in any Mamba-3 arm
+  (rotations carry phase at unit modulus).
+
+**Consequence: the task retires for Mamba-3.** A substrate that groks the
+starved task under plain weight decay gives the structural priors nothing
+to do; the remaining planned cells (rope 0.0 + penalty, the Quaternion4D
+pair) are dropped. The successor substrate is group-composition
+state-tracking, where grokking should be required and the complex-vs-
+quaternion state comparison has a real generalization question.
 
 ## Related work & positioning
 
@@ -511,18 +588,14 @@ plateau-length vs train-fraction curve; AdamW at higher lr; hybrid schedules
 diagnostics (which Fourier bins get selected, when); endpoint
 frequency/state ablations.
 
-**Mamba-3 runs** — the measurement/penalty instrument and the model arm are
-both in place (see [the Mamba-3
-read-out](#the-mamba-3-read-out-pr-over-a-complex-state); `--mamba3`,
-smoke-tested); what's missing are the experiment runs. The question sharpens
-nicely on this substrate: mod-p addition *is* rotation composition, and Mamba-3's
-data-dependent angles can represent it natively — the grokked Fourier
-circuit may migrate from the write directions into θ. Concrete predictions
-to test: the Mamba-2 endpoint needs ≈ 2×#frequencies realified write
-directions, while a circuit living in the rotations could hold
-`PR_ℂ(M_phys)` between 1 (single-plane conveyor, all structure in θ) and
-#frequencies (one plane per frequency — rotation-*created* rank is charged,
-so multi-frequency memory cannot hide); and since the penalty is
-differentiable through the angles, pressing on `PR_ℂ` tests whether rank
-pressure actively pushes the circuit *into* the rotation — a cleaner
-low-rank prior than Mamba-2 can express.
+**Mamba-3 runs — executed and resolved (§6).** The predictions landed at
+their lower bound (`PR_ℂ(M_phys) ≡ 1`: single-plane circuit, phase in the
+rotation at rope 1.0, in the embedding-sum geometry at rope 0.0), but the
+substrate dissolves the §4 wall — wd alone groks every Mamba-3 arm — so
+penalty causality is untestable on this task and it retires for Mamba-3.
+Open follow-ups that *would* be informative elsewhere: one-factor
+attribution of what removed the barrier (trapezoid vs B/C bias vs QK-Norm
+vs no-conv, each a small config ablation); and the successor substrate,
+the **state-tracking example** (group composition needs the full state —
+grokking should be required there, with a real complex-vs-quaternion
+generalization question).
