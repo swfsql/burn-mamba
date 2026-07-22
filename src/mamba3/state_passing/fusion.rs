@@ -1,4 +1,4 @@
-//! Fusion registration for the fused state-passing backend operation.
+//! Fusion registration for the fused Mamba-3 K1 and K4 backend operations.
 
 use super::state_passing::Mamba3StatePassingBackendExt;
 use burn::backend::tensor::FloatTensor;
@@ -9,6 +9,44 @@ use burn_fusion::{
 };
 use burn_ir::{CustomOpIr, HandleContainer, OperationIr, OperationOutput, TensorIr};
 use core::marker::PhantomData;
+
+#[derive(Clone, Debug)]
+struct ChunkCumsumForward<B> {
+    desc: CustomOpIr,
+    backend: PhantomData<B>,
+}
+
+impl<B: FusionBackend + Mamba3StatePassingBackendExt> Operation<B::FusionRuntime>
+    for ChunkCumsumForward<B>
+{
+    fn execute(
+        &self,
+        handles: &mut HandleContainer<<B::FusionRuntime as FusionRuntime>::FusionHandle>,
+    ) {
+        let ([da], [prefix]) = self.desc.as_fixed();
+        let result = B::mamba3_chunk_cumsum(handles.get_float_tensor::<B>(da));
+        handles.register_float_tensor::<B>(&prefix.id, result);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ChunkCumsumBackward<B> {
+    desc: CustomOpIr,
+    backend: PhantomData<B>,
+}
+
+impl<B: FusionBackend + Mamba3StatePassingBackendExt> Operation<B::FusionRuntime>
+    for ChunkCumsumBackward<B>
+{
+    fn execute(
+        &self,
+        handles: &mut HandleContainer<<B::FusionRuntime as FusionRuntime>::FusionHandle>,
+    ) {
+        let ([d_prefix], [d_da]) = self.desc.as_fixed();
+        let result = B::mamba3_chunk_cumsum_backward(handles.get_float_tensor::<B>(d_prefix));
+        handles.register_float_tensor::<B>(&d_da.id, result);
+    }
+}
 
 #[derive(Clone, Debug)]
 struct StatePassingForward<B> {
@@ -59,6 +97,56 @@ impl<B: FusionBackend + Mamba3StatePassingBackendExt> Operation<B::FusionRuntime
 }
 
 impl<B: FusionBackend + Mamba3StatePassingBackendExt> Mamba3StatePassingBackendExt for Fusion<B> {
+    fn mamba3_chunk_cumsum(da_bnlh: FloatTensor<Self>) -> FloatTensor<Self> {
+        let [batch, nchunks, chunk_len, nheads] = da_bnlh.shape.dims::<4>();
+        let client = da_bnlh.client.clone();
+        let prefix = TensorIr::uninit(
+            client.create_empty_handle(),
+            Shape::new([batch, nheads, nchunks, chunk_len]),
+            da_bnlh.dtype,
+        );
+        let desc = CustomOpIr::new(
+            "mamba3_chunk_cumsum_forward",
+            &[da_bnlh.into_ir()],
+            &[prefix],
+        );
+        client
+            .register(
+                StreamId::current(),
+                OperationIr::Custom(desc.clone()),
+                ChunkCumsumForward::<B> {
+                    desc,
+                    backend: PhantomData,
+                },
+            )
+            .output()
+    }
+
+    fn mamba3_chunk_cumsum_backward(d_prefix_bhnl: FloatTensor<Self>) -> FloatTensor<Self> {
+        let [batch, nheads, nchunks, chunk_len] = d_prefix_bhnl.shape.dims::<4>();
+        let client = d_prefix_bhnl.client.clone();
+        let d_da = TensorIr::uninit(
+            client.create_empty_handle(),
+            Shape::new([batch, nchunks, chunk_len, nheads]),
+            d_prefix_bhnl.dtype,
+        );
+        let desc = CustomOpIr::new(
+            "mamba3_chunk_cumsum_backward",
+            &[d_prefix_bhnl.into_ir()],
+            &[d_da],
+        );
+        client
+            .register(
+                StreamId::current(),
+                OperationIr::Custom(desc.clone()),
+                ChunkCumsumBackward::<B> {
+                    desc,
+                    backend: PhantomData,
+                },
+            )
+            .output()
+    }
+
     fn mamba3_state_passing(
         intra_bnhpr: FloatTensor<Self>,
         decay_bhn: FloatTensor<Self>,

@@ -1,4 +1,4 @@
-//! CubeCL implementation of the Mamba-3 inter-chunk state recurrence.
+//! CubeCL implementation of the Mamba-3 K1 and K4 scans.
 
 use super::state_passing::Mamba3StatePassingBackendExt;
 use burn::backend::Shape;
@@ -10,6 +10,69 @@ use cubecl::prelude::*;
 use cubecl::{CubeCount, CubeDim, cube};
 
 const WORKGROUP: u32 = 256;
+
+#[cube(launch)]
+fn chunk_cumsum_forward_kernel<F: Float>(
+    da: &Tensor<F>,
+    prefix: &mut Tensor<F>,
+    #[define(F)] _dtype: StorageType,
+) {
+    let scan_pos = ABSOLUTE_POS as usize;
+    let batch = da.shape(0);
+    let nchunks = da.shape(1);
+    let chunk_len = da.shape(2);
+    let nheads = da.shape(3);
+    let scans = batch * nheads * nchunks;
+    if scan_pos >= scans {
+        terminate!();
+    }
+
+    let chunk = scan_pos % nchunks;
+    let bh = scan_pos / nchunks;
+    let head = bh % nheads;
+    let batch_pos = bh / nheads;
+    let mut running = F::new(0.0);
+    let mut offset = 0usize;
+    while offset < chunk_len {
+        let input_pos = ((batch_pos * nchunks + chunk) * chunk_len + offset) * nheads + head;
+        running += da[input_pos];
+        let output_pos = ((batch_pos * nheads + head) * nchunks + chunk) * chunk_len + offset;
+        prefix[output_pos] = running;
+        offset += 1;
+    }
+}
+
+#[cube(launch)]
+fn chunk_cumsum_backward_kernel<F: Float>(
+    d_prefix: &Tensor<F>,
+    d_da: &mut Tensor<F>,
+    #[define(F)] _dtype: StorageType,
+) {
+    let scan_pos = ABSOLUTE_POS as usize;
+    let batch = d_prefix.shape(0);
+    let nheads = d_prefix.shape(1);
+    let nchunks = d_prefix.shape(2);
+    let chunk_len = d_prefix.shape(3);
+    let scans = batch * nheads * nchunks;
+    if scan_pos >= scans {
+        terminate!();
+    }
+
+    let chunk = scan_pos % nchunks;
+    let bh = scan_pos / nchunks;
+    let head = bh % nheads;
+    let batch_pos = bh / nheads;
+    let mut running = F::new(0.0);
+    let mut remaining = chunk_len;
+    while remaining > 0 {
+        let offset = remaining - 1;
+        let input_pos = ((batch_pos * nheads + head) * nchunks + chunk) * chunk_len + offset;
+        running += d_prefix[input_pos];
+        let output_pos = ((batch_pos * nchunks + chunk) * chunk_len + offset) * nheads + head;
+        d_da[output_pos] = running;
+        remaining -= 1;
+    }
+}
 
 #[cube(launch)]
 fn state_passing_forward_kernel<F: Float>(
@@ -146,6 +209,46 @@ fn launch_geometry(elements: usize) -> (CubeCount, CubeDim) {
     (CubeCount::Static(cubes, 1, 1), dim)
 }
 
+fn chunk_cumsum_forward<R: CubeRuntime>(da: CubeTensor<R>) -> CubeTensor<R> {
+    let da = into_contiguous(da);
+    let batch = da.meta.shape()[0];
+    let nchunks = da.meta.shape()[1];
+    let chunk_len = da.meta.shape()[2];
+    let nheads = da.meta.shape()[3];
+    let prefix = empty(&da, Shape::new([batch, nheads, nchunks, chunk_len]));
+    let (cube_count, cube_dim) = launch_geometry(batch * nheads * nchunks);
+    let dtype = da.dtype;
+    chunk_cumsum_forward_kernel::launch::<R>(
+        &prefix.client,
+        cube_count,
+        cube_dim,
+        da.into_tensor_arg(),
+        prefix.clone().into_tensor_arg(),
+        dtype_to_storage_type(dtype),
+    );
+    prefix
+}
+
+fn chunk_cumsum_backward<R: CubeRuntime>(d_prefix: CubeTensor<R>) -> CubeTensor<R> {
+    let d_prefix = into_contiguous(d_prefix);
+    let batch = d_prefix.meta.shape()[0];
+    let nheads = d_prefix.meta.shape()[1];
+    let nchunks = d_prefix.meta.shape()[2];
+    let chunk_len = d_prefix.meta.shape()[3];
+    let d_da = empty(&d_prefix, Shape::new([batch, nchunks, chunk_len, nheads]));
+    let (cube_count, cube_dim) = launch_geometry(batch * nheads * nchunks);
+    let dtype = d_prefix.dtype;
+    chunk_cumsum_backward_kernel::launch::<R>(
+        &d_da.client,
+        cube_count,
+        cube_dim,
+        d_prefix.into_tensor_arg(),
+        d_da.clone().into_tensor_arg(),
+        dtype_to_storage_type(dtype),
+    );
+    d_da
+}
+
 fn state_passing_forward<R: CubeRuntime>(
     intra: CubeTensor<R>,
     decay: CubeTensor<R>,
@@ -231,6 +334,14 @@ fn state_passing_backward<R: CubeRuntime>(
 }
 
 impl<R: CubeRuntime> Mamba3StatePassingBackendExt for CubeBackend<R> {
+    fn mamba3_chunk_cumsum(da_bnlh: CubeTensor<R>) -> CubeTensor<R> {
+        chunk_cumsum_forward(da_bnlh)
+    }
+
+    fn mamba3_chunk_cumsum_backward(d_prefix_bhnl: CubeTensor<R>) -> CubeTensor<R> {
+        chunk_cumsum_backward(d_prefix_bhnl)
+    }
+
     fn mamba3_state_passing(
         intra_bnhpr: CubeTensor<R>,
         decay_bhn: CubeTensor<R>,

@@ -1,10 +1,27 @@
-//! Backend extension for the serial SSD inter-chunk recurrence.
+//! Backend extension for the serial SSD K1 and K4 scans.
 
 use crate::utils::fprim::F;
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
 use burn::backend::{Dispatch, backend_extension};
 use burn::tensor::Tensor;
+
+/// Primitive reference implementation of the per-chunk prefix sum.
+fn chunk_cumsum_forward<B: Backend>(da_bnlh: F<B, 4>) -> F<B, 4> {
+    let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
+    let prefix_bhnl = da_bnlh.permute([0, 3, 1, 2]).cumsum(3);
+    assert_eq!([batch, nheads, nchunks, chunk_len], prefix_bhnl.dims());
+    prefix_bhnl
+}
+
+/// Exact VJP of [`chunk_cumsum_forward`].
+fn chunk_cumsum_backward<B: Backend>(d_prefix_bhnl: F<B, 4>) -> F<B, 4> {
+    d_prefix_bhnl
+        .flip(&[3])
+        .cumsum(3)
+        .flip(&[3])
+        .permute([0, 2, 3, 1])
+}
 
 /// Primitive reference implementation of the forward recurrence.
 fn state_passing_forward<B: Backend>(
@@ -91,10 +108,10 @@ fn state_passing_backward<B: Backend>(
     )
 }
 
-/// Backend operation for `state[n+1] = decay[n] * state[n] + intra[n]`.
+/// Backend operations for the serial SSD scan primitives.
 ///
-/// The returned tensor contains the initial state at index zero and every
-/// post-chunk state after it: `[batch, nchunks + 1, heads, p, r]`.
+/// K4 returns the initial state at index zero and every post-chunk state after
+/// it: `[batch, nchunks + 1, heads, p, r]`.
 #[backend_extension(
     Cpu:  cfg(feature = "backend-cpu"),
     Cuda: cfg(feature = "backend-cuda"),
@@ -109,6 +126,16 @@ fn state_passing_backward<B: Backend>(
     Autodiff:  cfg(feature = "autodiff"),
 )]
 pub trait Mamba3StatePassingBackendExt: Backend {
+    /// Compute prefix sums independently inside every chunk.
+    fn mamba3_chunk_cumsum(da_bnlh: FloatTensor<Self>) -> FloatTensor<Self> {
+        chunk_cumsum_forward::<Self>(F::new(da_bnlh)).inner()
+    }
+
+    /// Run the suffix-sum VJP for the chunk cumulative sum.
+    fn mamba3_chunk_cumsum_backward(d_prefix_bhnl: FloatTensor<Self>) -> FloatTensor<Self> {
+        chunk_cumsum_backward::<Self>(F::new(d_prefix_bhnl)).inner()
+    }
+
     /// Run the forward recurrence and return all boundary states.
     fn mamba3_state_passing(
         intra_bnhpr: FloatTensor<Self>,
@@ -158,5 +185,12 @@ pub fn state_passing(
             decay_bhn.into_dispatch(),
             initial_bhpr.into_dispatch(),
         ),
+    )
+}
+
+/// Run the backend chunk-cumsum operation from high-level tensor code.
+pub fn chunk_cumsum(da_bnlh: Tensor<4>) -> Tensor<4> {
+    Tensor::from_dispatch(
+        <Dispatch as Mamba3StatePassingBackendExt>::mamba3_chunk_cumsum(da_bnlh.into_dispatch()),
     )
 }

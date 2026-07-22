@@ -1,8 +1,9 @@
-//! Inter-chunk state passing shared by the serial Mamba-3 SSD paths.
+//! Small scan primitives shared by the serial Mamba-3 SSD paths.
 //!
-//! The recurrence is exposed as a backend extension so CubeCL backends can run
-//! the whole chunk scan as one operation.  The autodiff implementation uses a
-//! single custom node with an exact reverse recurrence.
+//! The intra-chunk cumulative sum (K1) and inter-chunk state recurrence (K4)
+//! are exposed as backend extensions so CubeCL backends can run each scan as
+//! one operation. Their autodiff implementations use exact custom reverse
+//! scans.
 
 /// Backend extension, primitive reference implementation and high-level wrapper.
 pub mod state_passing;
@@ -19,7 +20,7 @@ mod cube;
 #[cfg(feature = "fusion")]
 mod fusion;
 
-pub use state_passing::{Mamba3StatePassingBackendExt, state_passing};
+pub use state_passing::{Mamba3StatePassingBackendExt, chunk_cumsum, state_passing};
 
 #[cfg(all(test, feature = "_dev-test"))]
 mod tests;

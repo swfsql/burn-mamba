@@ -21,7 +21,7 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
-use crate::mamba3::state_passing::state_passing;
+use crate::mamba3::state_passing::{chunk_cumsum, state_passing};
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
@@ -119,16 +119,34 @@ impl Mamba3DoubleSsdInput {
 /// - `da_cumsum_bhnl`: `[batch, nheads, nchunks, chunk_len]` — intra-chunk prefix sums
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — last prefix sum per chunk (total decay)
 pub fn k1_ssd_chunk_cumsum(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
+    if std::env::var("BURN_MAMBA_FUSED_CHUNK_CUMSUM").is_ok_and(|value| value == "0") {
+        return k1_ssd_chunk_cumsum_reference(da_bnlh);
+    }
+
     let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
-    // Permute to [batch, nheads, nchunks, chunk_len] for the cumsum along the last dim
-    let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);
-    let da_cumsum_bhnl = da_bhnl.cumsum(3);
+    let da_cumsum_bhnl = chunk_cumsum(da_bnlh);
     assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
 
     let da_chunk_end_bhn: Tensor<3> = da_cumsum_bhnl
         .clone()
         .slice(s![.., .., .., -1]) // da_cumsum_end_bhn1
         .squeeze_dim(3); // da_cumsum_end_bhn
+    assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
+
+    (da_cumsum_bhnl, da_chunk_end_bhn)
+}
+
+/// Original tensor-op K1, retained as an opt-in same-binary benchmark reference.
+fn k1_ssd_chunk_cumsum_reference(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
+    let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
+    let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);
+    let da_cumsum_bhnl = da_bhnl.cumsum(3);
+    assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
+
+    let da_chunk_end_bhn = da_cumsum_bhnl
+        .clone()
+        .slice(s![.., .., .., -1])
+        .squeeze_dim(3);
     assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
     (da_cumsum_bhnl, da_chunk_end_bhn)
