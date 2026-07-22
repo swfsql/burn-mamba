@@ -1,6 +1,6 @@
 //! Fusion registration for the fused rank-one single-SSD operation.
 
-use super::single_ssd_scan::Mamba3SingleSsdScanBackendExt;
+use super::{RECONSTRUCTION_INTERVAL, single_ssd_scan::Mamba3SingleSsdScanBackendExt};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, Shape};
 use burn_fusion::{
@@ -87,10 +87,15 @@ impl<B: FusionBackend + Mamba3SingleSsdScanBackendExt> Mamba3SingleSsdScanBacken
         let [batch, nchunks, chunk_len, _, nheads, per_head_dim] = v_bnl1hp.shape.dims::<6>();
         let state_rank = b_bnl1hr.shape.dims::<6>()[5];
         let tokens = nchunks * chunk_len;
+        let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
         let client = v_bnl1hp.client.clone();
         let packed = TensorIr::uninit(
             client.create_empty_handle(),
-            Shape::new([batch, nheads, per_head_dim * (tokens + state_rank)]),
+            Shape::new([
+                batch,
+                nheads,
+                per_head_dim * (tokens + checkpoint_count * state_rank),
+            ]),
             v_bnl1hp.dtype,
         );
         let desc = CustomOpIr::new(
@@ -125,8 +130,8 @@ impl<B: FusionBackend + Mamba3SingleSsdScanBackendExt> Mamba3SingleSsdScanBacken
         c_bnl1hr: FloatTensor<Self>,
         gamma_bnlh: FloatTensor<Self>,
         scale_bnlh: FloatTensor<Self>,
-        packed_bhp_t1r: FloatTensor<Self>,
-        d_packed_bhp_t1r: FloatTensor<Self>,
+        packed_bh_tnpr: FloatTensor<Self>,
+        d_packed_bh_tnpr: FloatTensor<Self>,
     ) -> (
         FloatTensor<Self>,
         FloatTensor<Self>,
@@ -168,8 +173,8 @@ impl<B: FusionBackend + Mamba3SingleSsdScanBackendExt> Mamba3SingleSsdScanBacken
                 c_bnl1hr.into_ir(),
                 gamma_bnlh.into_ir(),
                 scale_bnlh.into_ir(),
-                packed_bhp_t1r.into_ir(),
-                d_packed_bhp_t1r.into_ir(),
+                packed_bh_tnpr.into_ir(),
+                d_packed_bh_tnpr.into_ir(),
             ],
             &[d_v, d_da, d_b, d_c, d_gamma, d_scale, d_initial],
         );

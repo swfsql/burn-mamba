@@ -1,5 +1,6 @@
 //! Backend extension and primitive reference implementation for a fused M=1 SSD scan.
 
+use super::RECONSTRUCTION_INTERVAL;
 use crate::utils::fprim::F;
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
@@ -19,6 +20,7 @@ fn single_ssd_scan_forward<B: Backend>(
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnl1hp.dims();
     let [.., state_rank] = b_bnl1hr.dims();
     let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     assert_eq!(mimo_rank, 1, "fused single-SSD scan requires MIMO rank one");
     assert!(
         tokens > 0,
@@ -44,6 +46,7 @@ fn single_ssd_scan_forward<B: Backend>(
     let scale_bth = scale_bnlh.reshape([batch, tokens, nheads]);
     let mut state_bhpr = initial_bhpr;
     let mut outputs = Vec::with_capacity(tokens);
+    let mut checkpoints = Vec::with_capacity(checkpoint_count);
 
     for token in 0..tokens {
         let v_bhp = v_bthp.clone().narrow(1, token, 1).squeeze_dim::<3>(1);
@@ -72,13 +75,21 @@ fn single_ssd_scan_forward<B: Backend>(
         .squeeze_dim::<3>(3);
         outputs.push(y_bhp);
         state_bhpr = pre_bhpr + scale_bh11 * injection_bhpr;
+        if (token + 1).is_multiple_of(RECONSTRUCTION_INTERVAL) || token + 1 == tokens {
+            checkpoints.push(state_bhpr.clone());
+        }
     }
 
     let y_bhtp = F::stack::<4>(outputs, 2);
+    let checkpoints_bhnpr = F::stack::<5>(checkpoints, 2);
     F::cat(
         vec![
             y_bhtp.reshape([batch, nheads, tokens * per_head_dim]),
-            state_bhpr.reshape([batch, nheads, per_head_dim * state_rank]),
+            checkpoints_bhnpr.reshape([
+                batch,
+                nheads,
+                checkpoint_count * per_head_dim * state_rank,
+            ]),
         ],
         2,
     )
@@ -92,8 +103,8 @@ fn single_ssd_scan_backward<B: Backend>(
     c_bnl1hr: F<B, 6>,
     gamma_bnlh: F<B, 4>,
     scale_bnlh: F<B, 4>,
-    packed_bh_tpr: F<B, 3>,
-    d_packed_bh_tpr: F<B, 3>,
+    packed_bh_tnpr: F<B, 3>,
+    d_packed_bh_tnpr: F<B, 3>,
 ) -> (
     F<B, 6>,
     F<B, 4>,
@@ -106,22 +117,26 @@ fn single_ssd_scan_backward<B: Backend>(
     let [batch, nchunks, chunk_len, _, nheads, per_head_dim] = v_bnl1hp.dims();
     let [.., state_rank] = b_bnl1hr.dims();
     let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let v_bthp = v_bnl1hp.reshape([batch, tokens, nheads, per_head_dim]);
     let b_bthr = b_bnl1hr.reshape([batch, tokens, nheads, state_rank]);
     let c_bthr = c_bnl1hr.reshape([batch, tokens, nheads, state_rank]);
     let da_bth = da_bnlh.reshape([batch, tokens, nheads]);
     let gamma_bth = gamma_bnlh.reshape([batch, tokens, nheads]);
     let scale_bth = scale_bnlh.reshape([batch, tokens, nheads]);
-    let d_y_bhpt = d_packed_bh_tpr
+    let d_y_bhpt = d_packed_bh_tnpr
         .clone()
         .narrow(2, 0, tokens * per_head_dim)
         .reshape([batch, nheads, tokens, per_head_dim])
         .permute([0, 1, 3, 2]);
-    let mut state_post_bhpr = packed_bh_tpr
-        .narrow(2, tokens * per_head_dim, per_head_dim * state_rank)
+    let final_checkpoint_offset =
+        tokens * per_head_dim + (checkpoint_count - 1) * per_head_dim * state_rank;
+    let mut state_post_bhpr = packed_bh_tnpr
+        .clone()
+        .narrow(2, final_checkpoint_offset, per_head_dim * state_rank)
         .reshape([batch, nheads, per_head_dim, state_rank]);
-    let mut g_post_bhpr = d_packed_bh_tpr
-        .narrow(2, tokens * per_head_dim, per_head_dim * state_rank)
+    let mut g_post_bhpr = d_packed_bh_tnpr
+        .narrow(2, final_checkpoint_offset, per_head_dim * state_rank)
         .reshape([batch, nheads, per_head_dim, state_rank]);
     let mut d_v_rev = Vec::with_capacity(tokens);
     let mut d_b_rev = Vec::with_capacity(tokens);
@@ -131,6 +146,17 @@ fn single_ssd_scan_backward<B: Backend>(
     let mut d_scale_rev = Vec::with_capacity(tokens);
 
     for token in (0..tokens).rev() {
+        if (token + 1).is_multiple_of(RECONSTRUCTION_INTERVAL) || token + 1 == tokens {
+            let checkpoint = token / RECONSTRUCTION_INTERVAL;
+            state_post_bhpr = packed_bh_tnpr
+                .clone()
+                .narrow(
+                    2,
+                    tokens * per_head_dim + checkpoint * per_head_dim * state_rank,
+                    per_head_dim * state_rank,
+                )
+                .reshape([batch, nheads, per_head_dim, state_rank]);
+        }
         let v_bhp = v_bthp.clone().narrow(1, token, 1).squeeze_dim::<3>(1);
         let b_bhr = b_bthr.clone().narrow(1, token, 1).squeeze_dim::<3>(1);
         let c_bhr = c_bthr.clone().narrow(1, token, 1).squeeze_dim::<3>(1);
@@ -257,8 +283,8 @@ pub trait Mamba3SingleSsdScanBackendExt: Backend {
         c_bnl1hr: FloatTensor<Self>,
         gamma_bnlh: FloatTensor<Self>,
         scale_bnlh: FloatTensor<Self>,
-        packed_bh_tpr: FloatTensor<Self>,
-        d_packed_bh_tpr: FloatTensor<Self>,
+        packed_bh_tnpr: FloatTensor<Self>,
+        d_packed_bh_tnpr: FloatTensor<Self>,
     ) -> (
         FloatTensor<Self>,
         FloatTensor<Self>,
@@ -275,8 +301,8 @@ pub trait Mamba3SingleSsdScanBackendExt: Backend {
             F::new(c_bnl1hr),
             F::new(gamma_bnlh),
             F::new(scale_bnlh),
-            F::new(packed_bh_tpr),
-            F::new(d_packed_bh_tpr),
+            F::new(packed_bh_tnpr),
+            F::new(d_packed_bh_tnpr),
         );
         (
             grads.0.inner(),
@@ -317,6 +343,7 @@ pub fn single_ssd_scan(
     let [.., state_rank] = b_bnl1hr.dims();
     assert_eq!(mimo_rank, 1, "fused single-SSD scan requires MIMO rank one");
     let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let packed = Tensor::<3>::from_dispatch(
         <Dispatch as Mamba3SingleSsdScanBackendExt>::mamba3_single_ssd_scan(
             v_bnl1hp.into_dispatch(),
@@ -335,7 +362,11 @@ pub fn single_ssd_scan(
         .permute([0, 2, 1, 3])
         .reshape([batch, nchunks, chunk_len, 1, nheads, per_head_dim]);
     let final_state = packed
-        .narrow(2, tokens * per_head_dim, per_head_dim * state_rank)
+        .narrow(
+            2,
+            tokens * per_head_dim + (checkpoint_count - 1) * per_head_dim * state_rank,
+            per_head_dim * state_rank,
+        )
         .reshape([batch, nheads, per_head_dim, state_rank]);
     (y, final_state)
 }
@@ -355,6 +386,7 @@ pub(crate) fn single_ssd_scan_reference(
     let [batch, nchunks, chunk_len, _, nheads, per_head_dim] = v_bnl1hp.dims();
     let state_rank = b_bnl1hr.dims()[5];
     let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let packed = Tensor::<3>::from_dispatch(
         single_ssd_scan_forward::<Dispatch>(
             F::new(v_bnl1hp.into_dispatch()),
@@ -374,7 +406,11 @@ pub(crate) fn single_ssd_scan_reference(
         .permute([0, 2, 1, 3])
         .reshape([batch, nchunks, chunk_len, 1, nheads, per_head_dim]);
     let final_state = packed
-        .narrow(2, tokens * per_head_dim, per_head_dim * state_rank)
+        .narrow(
+            2,
+            tokens * per_head_dim + (checkpoint_count - 1) * per_head_dim * state_rank,
+            per_head_dim * state_rank,
+        )
         .reshape([batch, nheads, per_head_dim, state_rank]);
     (y, final_state)
 }

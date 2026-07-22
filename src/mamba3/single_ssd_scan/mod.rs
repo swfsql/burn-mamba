@@ -7,10 +7,13 @@
 //! `state = pre + scale * B * v`.
 //!
 //! Its custom backward reconstructs the preceding state while scanning in
-//! reverse, so it retains only the final state and an `O(tokens * state_rank)`
-//! reduction buffer instead of an `O(tokens * per_head_dim * state_rank)` state
-//! history. The operation is currently opt-in through
+//! reverse. Checkpoints every eight tokens cap inverse-decay reconstruction at
+//! a numerically stable interval, while an `O(tokens * state_rank)` reduction
+//! buffer and one-eighth checkpoint history replace the full state history.
+//! The operation is currently opt-in through
 //! `BURN_MAMBA_FUSED_SINGLE_SCAN=1` while target-GPU performance is evaluated.
+
+pub(super) const RECONSTRUCTION_INTERVAL: usize = 8;
 
 mod single_ssd_scan;
 

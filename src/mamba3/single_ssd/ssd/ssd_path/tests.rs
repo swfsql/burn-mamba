@@ -236,7 +236,7 @@ fn assert_path_runs_agree(label: &str, a: &PathRun, b: &PathRun, val_tol: f32, g
     check_inner!(d_gamma, "grad gamma", grad_tol);
     check_inner!(d_scale, "grad scale", grad_tol);
     check_inner!(d_init_state, "grad init_state", grad_tol);
-    if !failures.is_empty() {
+    if !failures.is_empty() && a.y.dims().iter().product::<usize>() <= 64 {
         eprintln!(
             "{label} reference y: {:?}",
             a.y.clone().into_data().to_vec::<f32>().unwrap()
@@ -422,11 +422,78 @@ fn fused_single_scan_matches_serial_values_and_gradients() {
     assert_path_runs_agree("Serial vs fused single scan", &reference, &scan, 1e-4, 1e-3);
 }
 
+/// Regression for the production failure observed on a 1,024-token sequence.
+/// Reconstructing state through every inverse decay amplifies fp32 cancellation
+/// until the custom backward emits infinities after the first optimizer step.
+#[cfg(not(feature = "backend-cpu"))]
+#[test]
+fn fused_single_scan_long_decay_matches_serial_and_stays_finite() {
+    let (batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank) =
+        (1, 16, 64, 1, 1, 1, 1);
+    let device: Device = Default::default();
+    let (v, b, c, da, gamma, scale, init) = random_input(
+        batch,
+        nchunks,
+        chunk_len,
+        mimo_rank,
+        nheads,
+        per_head_dim,
+        state_rank,
+        true,
+        &device,
+    );
+    let reference_inputs = Inputs::from_inner(
+        v.clone(),
+        b.clone(),
+        c.clone(),
+        da.clone(),
+        gamma.clone(),
+        scale.clone(),
+        init.clone(),
+    );
+    let scan_inputs = Inputs::from_inner(v, b, c, da, gamma, scale, init);
+    let y_head = Tensor::<6>::ones(
+        [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim],
+        &device,
+    );
+    let s_head = Tensor::<4>::ones([batch, nheads, per_head_dim, state_rank], &device);
+    let reference = run_path(
+        Mamba3SsdPath::Serial(Some(chunk_len)),
+        &reference_inputs,
+        y_head.clone(),
+        s_head.clone(),
+    );
+    let run = run_single_scan(&scan_inputs, y_head, s_head, false);
+
+    assert_path_runs_agree(
+        "Serial vs long fused single scan",
+        &reference,
+        &run,
+        1e-4,
+        1e-3,
+    );
+    let finite = |values: Vec<f32>| values.into_iter().all(f32::is_finite);
+    for (name, finite) in [
+        ("v", finite(run.d_v.into_data().to_vec().unwrap())),
+        ("b", finite(run.d_b.into_data().to_vec().unwrap())),
+        ("c", finite(run.d_c.into_data().to_vec().unwrap())),
+        ("da", finite(run.d_da.into_data().to_vec().unwrap())),
+        ("gamma", finite(run.d_gamma.into_data().to_vec().unwrap())),
+        ("scale", finite(run.d_scale.into_data().to_vec().unwrap())),
+        (
+            "initial_state",
+            finite(run.d_init_state.into_data().to_vec().unwrap()),
+        ),
+    ] {
+        assert!(finite, "fused scan gradient {name} must stay finite");
+    }
+}
+
 #[cfg(feature = "backend-cpu")]
 #[test]
 fn fused_single_scan_cube_matches_primitive_values_and_gradients() {
     let (batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank) =
-        (1, 2, 2, 1, 1, 2, 2);
+        (1, 3, 3, 1, 1, 2, 2);
     let device: Device = Default::default();
     let (v, b, c, da, gamma, scale, init) = random_input(
         batch,

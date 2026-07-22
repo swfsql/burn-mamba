@@ -1,6 +1,6 @@
 //! CubeCL kernels for the fused rank-one single-SSD recurrence.
 
-use super::single_ssd_scan::Mamba3SingleSsdScanBackendExt;
+use super::{RECONSTRUCTION_INTERVAL, single_ssd_scan::Mamba3SingleSsdScanBackendExt};
 use burn::backend::Shape;
 use burn::backend::cubecl::dtype_to_storage_type;
 use burn_cubecl::kernel::into_contiguous;
@@ -26,7 +26,10 @@ fn single_ssd_scan_forward_kernel<F: Float>(
 ) {
     let scan_pos = ABSOLUTE_POS as usize;
     let batch = v.shape(0);
-    let tokens = v.shape(1) * v.shape(2);
+    let nchunks = v.shape(1);
+    let chunk_len = v.shape(2);
+    let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let nheads = v.shape(4);
     let per_head_dim = v.shape(5);
     let scans = batch * nheads * per_head_dim;
@@ -60,19 +63,24 @@ fn single_ssd_scan_forward_kernel<F: Float>(
             y += c[bc_pos] * (pre + gamma_value * key * value);
             state[r] = pre + scale_value * key * value;
         }
-        let packed_pos = (batch_pos * nheads + head) * (per_head_dim * (tokens + state_rank))
+        let packed_pos = (batch_pos * nheads + head)
+            * (per_head_dim * (tokens + checkpoint_count * state_rank))
             + token * per_head_dim
             + p;
         packed[packed_pos] = y;
+        if (token + 1) % RECONSTRUCTION_INTERVAL == 0 || token + 1 == tokens {
+            let checkpoint = token / RECONSTRUCTION_INTERVAL;
+            for r in 0..state_rank {
+                let checkpoint_pos = (batch_pos * nheads + head)
+                    * (per_head_dim * (tokens + checkpoint_count * state_rank))
+                    + tokens * per_head_dim
+                    + checkpoint * per_head_dim * state_rank
+                    + p * state_rank
+                    + r;
+                packed[checkpoint_pos] = state[r];
+            }
+        }
         token += 1;
-    }
-
-    for r in 0..state_rank {
-        let packed_pos = (batch_pos * nheads + head) * (per_head_dim * (tokens + state_rank))
-            + tokens * per_head_dim
-            + p * state_rank
-            + r;
-        packed[packed_pos] = state[r];
     }
 }
 
@@ -94,7 +102,10 @@ fn single_ssd_scan_backward_value_kernel<F: Float>(
 ) {
     let scan_pos = ABSOLUTE_POS as usize;
     let batch = v.shape(0);
-    let tokens = v.shape(1) * v.shape(2);
+    let nchunks = v.shape(1);
+    let chunk_len = v.shape(2);
+    let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let nheads = v.shape(4);
     let per_head_dim = v.shape(5);
     let scans = batch * nheads * per_head_dim;
@@ -106,11 +117,16 @@ fn single_ssd_scan_backward_value_kernel<F: Float>(
     let bh = scan_pos / per_head_dim;
     let head = bh % nheads;
     let batch_pos = bh / nheads;
-    let packed_base = (batch_pos * nheads + head) * (per_head_dim * (tokens + state_rank));
+    let packed_base =
+        (batch_pos * nheads + head) * (per_head_dim * (tokens + checkpoint_count * state_rank));
     let mut state_post = Array::<F>::new(state_rank);
     let mut g_post = Array::<F>::new(state_rank);
     for r in 0..state_rank {
-        let state_pos = packed_base + tokens * per_head_dim + p * state_rank + r;
+        let state_pos = packed_base
+            + tokens * per_head_dim
+            + (checkpoint_count - 1) * per_head_dim * state_rank
+            + p * state_rank
+            + r;
         state_post[r] = packed[state_pos];
         g_post[r] = d_packed[state_pos];
     }
@@ -118,6 +134,17 @@ fn single_ssd_scan_backward_value_kernel<F: Float>(
     let mut remaining = tokens;
     while remaining > 0 {
         let token = remaining - 1;
+        if (token + 1) % RECONSTRUCTION_INTERVAL == 0 || token + 1 == tokens {
+            let checkpoint = token / RECONSTRUCTION_INTERVAL;
+            for r in 0..state_rank {
+                let state_pos = packed_base
+                    + tokens * per_head_dim
+                    + checkpoint * per_head_dim * state_rank
+                    + p * state_rank
+                    + r;
+                state_post[r] = packed[state_pos];
+            }
+        }
         let coef_pos = (batch_pos * tokens + token) * nheads + head;
         let v_pos = ((batch_pos * tokens + token) * nheads + head) * per_head_dim + p;
         let value = v[v_pos];
@@ -164,7 +191,10 @@ fn single_ssd_scan_backward_state_kernel<F: Float>(
 ) {
     let scan_pos = ABSOLUTE_POS as usize;
     let batch = v.shape(0);
-    let tokens = v.shape(1) * v.shape(2);
+    let nchunks = v.shape(1);
+    let chunk_len = v.shape(2);
+    let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let nheads = v.shape(4);
     let scans = batch * nheads * state_rank;
     if scan_pos >= scans {
@@ -175,11 +205,16 @@ fn single_ssd_scan_backward_state_kernel<F: Float>(
     let bh = scan_pos / state_rank;
     let head = bh % nheads;
     let batch_pos = bh / nheads;
+    let packed_base =
+        (batch_pos * nheads + head) * (per_head_dim * (tokens + checkpoint_count * state_rank));
     let mut state_post = Array::<F>::new(per_head_dim);
     let mut g_post = Array::<F>::new(per_head_dim);
     for p in 0..per_head_dim {
-        let packed_base = (batch_pos * nheads + head) * (per_head_dim * (tokens + state_rank));
-        let state_pos = packed_base + tokens * per_head_dim + p * state_rank + r;
+        let state_pos = packed_base
+            + tokens * per_head_dim
+            + (checkpoint_count - 1) * per_head_dim * state_rank
+            + p * state_rank
+            + r;
         state_post[p] = packed[state_pos];
         g_post[p] = d_packed[state_pos];
     }
@@ -187,6 +222,17 @@ fn single_ssd_scan_backward_state_kernel<F: Float>(
     let mut remaining = tokens;
     while remaining > 0 {
         let token = remaining - 1;
+        if (token + 1) % RECONSTRUCTION_INTERVAL == 0 || token + 1 == tokens {
+            let checkpoint = token / RECONSTRUCTION_INTERVAL;
+            for p in 0..per_head_dim {
+                let state_pos = packed_base
+                    + tokens * per_head_dim
+                    + checkpoint * per_head_dim * state_rank
+                    + p * state_rank
+                    + r;
+                state_post[p] = packed[state_pos];
+            }
+        }
         let coef_pos = (batch_pos * tokens + token) * nheads + head;
         let bc_pos = ((batch_pos * tokens + token) * nheads + head) * state_rank + r;
         let key = b[bc_pos];
@@ -201,7 +247,6 @@ fn single_ssd_scan_backward_state_kernel<F: Float>(
 
         for p in 0..per_head_dim {
             let v_pos = ((batch_pos * tokens + token) * nheads + head) * per_head_dim + p;
-            let packed_base = (batch_pos * nheads + head) * (per_head_dim * (tokens + state_rank));
             let value = v[v_pos];
             let dy = d_packed[packed_base + token * per_head_dim + p];
             let pre = state_post[p] - scale[coef_pos] * key * value;
@@ -296,9 +341,14 @@ fn single_ssd_scan_forward<R: CubeRuntime>(
     let [batch, nchunks, chunk_len, _, nheads, per_head_dim] = v.meta.shape().dims();
     let state_rank = b.meta.shape()[5];
     let tokens = nchunks * chunk_len;
+    let checkpoint_count = tokens.div_ceil(RECONSTRUCTION_INTERVAL);
     let packed = empty(
         &v,
-        Shape::new([batch, nheads, per_head_dim * (tokens + state_rank)]),
+        Shape::new([
+            batch,
+            nheads,
+            per_head_dim * (tokens + checkpoint_count * state_rank),
+        ]),
     );
     let (cube_count, cube_dim) = launch_geometry(batch * nheads * per_head_dim);
     let dtype = v.dtype;
@@ -445,8 +495,8 @@ impl<R: CubeRuntime> Mamba3SingleSsdScanBackendExt for CubeBackend<R> {
         c_bnl1hr: CubeTensor<R>,
         gamma_bnlh: CubeTensor<R>,
         scale_bnlh: CubeTensor<R>,
-        packed_bhp_t1r: CubeTensor<R>,
-        d_packed_bhp_t1r: CubeTensor<R>,
+        packed_bh_tnpr: CubeTensor<R>,
+        d_packed_bh_tnpr: CubeTensor<R>,
     ) -> (
         CubeTensor<R>,
         CubeTensor<R>,
@@ -463,8 +513,8 @@ impl<R: CubeRuntime> Mamba3SingleSsdScanBackendExt for CubeBackend<R> {
             c_bnl1hr,
             gamma_bnlh,
             scale_bnlh,
-            packed_bhp_t1r,
-            d_packed_bhp_t1r,
+            packed_bh_tnpr,
+            d_packed_bh_tnpr,
         )
     }
 }
