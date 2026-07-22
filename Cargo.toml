@@ -9,8 +9,8 @@ mamba1 = []
 mamba2 = ["autodiff"]
 mamba3 = ["autodiff"]
 autodiff = ["burn/autodiff"]
-cubecl = ["dep:burn-cubecl", "burn/cubecl"]
-fusion = ["burn/fusion", "dep:burn-fusion"]
+cubecl = ["dep:burn-cubecl", "dep:cubecl", "burn/cubecl"]
+fusion = ["burn/fusion", "dep:burn-fusion", "dep:burn-ir"]
 check-inf = []
 check-nan = []
 # Backend selection. With the Dispatch architecture each feature simply enables
@@ -55,6 +55,8 @@ burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd
 burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["extension"] }
 burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
 burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
+burn-ir = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
+cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "3beb9afaa0acf2d3f7b2dfff4ebf6dedfb316825", default-features = false, features = ["stdlib"], optional = true }
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }

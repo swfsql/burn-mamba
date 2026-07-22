@@ -10,7 +10,8 @@
 //! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
 //! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul (fused `L·M`).
 //! - **K3** [`k3_ssd_chunk_state`] — each chunk's end-state contribution.
-//! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan.
+//! - **K4** `k4_ssd_state_passing` — a fused inter-chunk scan (with a tensor-op
+//!   reference path for benchmarks).
 //! - **K5** [`k5_ssd_chunk_scan`] — combines intra- and inter-chunk parts into `y`.
 //!
 //! Produces identical values/gradients to [`super::minimal`]; SISO
@@ -20,13 +21,15 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::state_passing::{chunk_cumsum, state_passing};
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
     /// MIMO-first (Hybrid) Serial SSD.
     ///
-    /// Implements K1-K5 with a sequential loop (K4) for the inter-chunk scan instead
-    /// of the quadratic segsum approach in [`Self::double_ssd_minimal`].
+    /// Implements K1-K5 with a linear recurrence (K4) for the inter-chunk scan instead
+    /// of the quadratic segsum approach in [`Self::double_ssd_minimal`]. The recurrence
+    /// is fused into backend kernels on CubeCL devices.
     /// This is more memory-efficient for long sequences with many chunks.
     ///
     /// SISO (mimo_rank=1) is the special case where the fused length equals the chunk length.
@@ -116,16 +119,37 @@ impl Mamba3DoubleSsdInput {
 /// - `da_cumsum_bhnl`: `[batch, nheads, nchunks, chunk_len]` — intra-chunk prefix sums
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — last prefix sum per chunk (total decay)
 pub fn k1_ssd_chunk_cumsum(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
+    // K1 is intentionally opt-in: an RX 9070 XT same-binary A/B measured it
+    // within noise (-0.1%) of the backend cumsum. Keep the tested seam for
+    // future runtimes without changing the production default without a win.
+    if !std::env::var("BURN_MAMBA_FUSED_CHUNK_CUMSUM").is_ok_and(|value| value == "1") {
+        return k1_ssd_chunk_cumsum_reference(da_bnlh);
+    }
+
     let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
-    // Permute to [batch, nheads, nchunks, chunk_len] for the cumsum along the last dim
-    let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);
-    let da_cumsum_bhnl = da_bhnl.cumsum(3);
+    let da_cumsum_bhnl = chunk_cumsum(da_bnlh);
     assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
 
     let da_chunk_end_bhn: Tensor<3> = da_cumsum_bhnl
         .clone()
         .slice(s![.., .., .., -1]) // da_cumsum_end_bhn1
         .squeeze_dim(3); // da_cumsum_end_bhn
+    assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
+
+    (da_cumsum_bhnl, da_chunk_end_bhn)
+}
+
+/// Original tensor-op K1, retained as an opt-in same-binary benchmark reference.
+fn k1_ssd_chunk_cumsum_reference(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
+    let [batch, nchunks, chunk_len, nheads] = da_bnlh.dims();
+    let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);
+    let da_cumsum_bhnl = da_bhnl.cumsum(3);
+    assert_eq!([batch, nheads, nchunks, chunk_len], da_cumsum_bhnl.dims());
+
+    let da_chunk_end_bhn = da_cumsum_bhnl
+        .clone()
+        .slice(s![.., .., .., -1])
+        .squeeze_dim(3);
     assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
     (da_cumsum_bhnl, da_chunk_end_bhn)
@@ -220,10 +244,10 @@ pub fn k3_ssd_chunk_state(
 }
 
 // ---------------------------------------------------------------------------
-// K4 — inter-chunk state scan (sequential loop)
+// K4 — fused inter-chunk state scan
 // ---------------------------------------------------------------------------
 
-/// Propagate hidden state across chunk boundaries using a sequential scan.
+/// Propagate hidden state across chunk boundaries using a linear scan.
 ///
 /// This kernel is independent of MIMO rank — it operates on the `[nheads, per_head_dim, state_rank]` state
 /// which is already aggregated over ranks.
@@ -237,6 +261,44 @@ pub fn k3_ssd_chunk_state(
 /// - `chunk_input_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
 /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
 pub fn k4_ssd_state_passing(
+    intra_chunk_state_bnhpr: Tensor<5>,
+    da_chunk_end_bhn: Tensor<3>,
+    initial_state_bhpr: Tensor<4>,
+) -> (Tensor<5>, Tensor<4>) {
+    // Keep the former tensor-op implementation available for same-binary A/B
+    // benchmarks. Each benchmark is a separate process, so reading the switch
+    // here cannot race another path. The fused backend operation is the default.
+    if std::env::var("BURN_MAMBA_FUSED_STATE_PASSING").is_ok_and(|value| value == "0") {
+        return k4_ssd_state_passing_reference(
+            intra_chunk_state_bnhpr,
+            da_chunk_end_bhn,
+            initial_state_bhpr,
+        );
+    }
+
+    let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
+    assert_eq!(
+        [batch, nheads, per_head_dim, state_rank],
+        initial_state_bhpr.dims()
+    );
+    let decay_bhn = da_chunk_end_bhn.exp();
+    let states_bn1hpr = state_passing(intra_chunk_state_bnhpr, decay_bhn, initial_state_bhpr);
+    let chunk_input_state_bnhpr = states_bn1hpr.clone().narrow(1, 0, nchunks);
+    let final_state_bhpr = states_bn1hpr.narrow(1, nchunks, 1).squeeze_dim::<4>(1);
+    assert_eq!(
+        [batch, nheads, per_head_dim, state_rank],
+        final_state_bhpr.dims()
+    );
+    assert_eq!(
+        [batch, nchunks, nheads, per_head_dim, state_rank],
+        chunk_input_state_bnhpr.dims()
+    );
+
+    (chunk_input_state_bnhpr, final_state_bhpr)
+}
+
+/// Original high-level tensor-op K4, retained as an opt-in benchmark reference.
+fn k4_ssd_state_passing_reference(
     intra_chunk_state_bnhpr: Tensor<5>,
     da_chunk_end_bhn: Tensor<3>,
     initial_state_bhpr: Tensor<4>,
@@ -255,22 +317,21 @@ pub fn k4_ssd_state_passing(
     for i_chunk in 0..nchunks {
         let intra_state_bhpr: Tensor<4> = intra_chunk_state_bnhpr
             .clone()
-            .slice(s![.., i_chunk, .., .., ..]) // intra_chunk_state_b1hpr
-            .squeeze_dim(1); // intra_state_bhpr
-
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim(1);
         let decay_bhpr = da_chunk_end_bhn
             .clone()
-            .slice(s![.., .., i_chunk]) // da_chunk_end_bh1
-            .unsqueeze_dim::<4>(3) // da_chunk_end_bh
+            .slice(s![.., .., i_chunk])
+            .unsqueeze_dim::<4>(3)
             .exp()
-            .expand([batch, nheads, per_head_dim, state_rank]); // decay_bhpr
-
-        // SSM recurrence: h[n] = decay * h[n-1] + s[n]
+            .expand([batch, nheads, per_head_dim, state_rank]);
         running_state_bhpr = decay_bhpr * running_state_bhpr + intra_state_bhpr;
         chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
     }
 
-    let final_state_bhpr = chunk_input_state_vec_bhpr.pop().unwrap();
+    let final_state_bhpr = chunk_input_state_vec_bhpr
+        .pop()
+        .expect("nchunks is non-zero");
     assert_eq!(
         [batch, nheads, per_head_dim, state_rank],
         final_state_bhpr.dims()
