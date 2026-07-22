@@ -20,6 +20,7 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::state_passing::state_passing;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
@@ -242,41 +243,18 @@ pub fn k4_ssd_state_passing(
     initial_state_bhpr: Tensor<4>,
 ) -> (Tensor<5>, Tensor<4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
-
-    let mut running_state_bhpr = initial_state_bhpr;
     assert_eq!(
         [batch, nheads, per_head_dim, state_rank],
-        running_state_bhpr.dims()
+        initial_state_bhpr.dims()
     );
-
-    let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
-    chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-
-    for i_chunk in 0..nchunks {
-        let intra_state_bhpr: Tensor<4> = intra_chunk_state_bnhpr
-            .clone()
-            .slice(s![.., i_chunk, .., .., ..]) // intra_chunk_state_b1hpr
-            .squeeze_dim(1); // intra_state_bhpr
-
-        let decay_bhpr = da_chunk_end_bhn
-            .clone()
-            .slice(s![.., .., i_chunk]) // da_chunk_end_bh1
-            .unsqueeze_dim::<4>(3) // da_chunk_end_bh
-            .exp()
-            .expand([batch, nheads, per_head_dim, state_rank]); // decay_bhpr
-
-        // SSM recurrence: h[n] = decay * h[n-1] + s[n]
-        running_state_bhpr = decay_bhpr * running_state_bhpr + intra_state_bhpr;
-        chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-    }
-
-    let final_state_bhpr = chunk_input_state_vec_bhpr.pop().unwrap();
+    let decay_bhn = da_chunk_end_bhn.exp();
+    let states_bn1hpr = state_passing(intra_chunk_state_bnhpr, decay_bhn, initial_state_bhpr);
+    let chunk_input_state_bnhpr = states_bn1hpr.clone().narrow(1, 0, nchunks);
+    let final_state_bhpr = states_bn1hpr.narrow(1, nchunks, 1).squeeze_dim::<4>(1);
     assert_eq!(
         [batch, nheads, per_head_dim, state_rank],
         final_state_bhpr.dims()
     );
-
-    let chunk_input_state_bnhpr = Tensor::stack(chunk_input_state_vec_bhpr, 1);
     assert_eq!(
         [batch, nchunks, nheads, per_head_dim, state_rank],
         chunk_input_state_bnhpr.dims()

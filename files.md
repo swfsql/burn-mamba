@@ -166,6 +166,12 @@ element-wise math, no per-step `narrow`/`cat`) + `quat_cumprod_recalculated(q,in
 `Backward<B,2>` saving only `q`+`init`, recomputing the prefix product, exact
 unit-quaternion VJP with parallel ops only.
 
+### `mamba3/state_passing/`
+Shared serial-SSD K4 recurrence. **`state_passing.rs`** defines
+`Mamba3StatePassingBackendExt`, returns the complete `N+1` boundary-state stream,
+and provides the primitive reference path. **`backward.rs`** registers one exact
+reverse-recurrence `Backward<B,3>` node for `(intra, decay, initial)`.
+
 ### `mamba3/step_constant/` (`mod.rs`)
 Constant-input closed forms on `Mamba3`: `step_n_approx` (one ordinary `step` —
 consuming the cache's previous-token trapezoid term — then a geometric-series jump

@@ -29,6 +29,7 @@ pub mod moments;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
+pub mod state_passing;
 mod step_constant;
 
 use crate::mamba3::double_ssd::prelude::*;
@@ -42,7 +43,10 @@ use burn::backend::Backend;
 /// via the default implementations, and `Autodiff<B>` additionally gets the
 /// custom memory-efficient backward.
 pub trait Mamba3BackendExt:
-    Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
+    Backend
+    + Mamba3DoubleSsdBackendExt
+    + Mamba3SingleSsdBackendExt
+    + state_passing::Mamba3StatePassingBackendExt
 {
 }
 
@@ -60,8 +64,13 @@ pub mod backwards {
     use super::*;
     use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 
-    impl<B: Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt, C: CheckpointStrategy>
-        Mamba3BackendExt for Autodiff<B, C>
+    impl<
+        B: Backend
+            + Mamba3DoubleSsdBackendExt
+            + Mamba3SingleSsdBackendExt
+            + state_passing::Mamba3StatePassingBackendExt,
+        C: CheckpointStrategy,
+    > Mamba3BackendExt for Autodiff<B, C>
     {
     }
 }
@@ -79,4 +88,5 @@ pub mod prelude {
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationSeq, RotationState};
     pub use ssd_path::Mamba3SsdPath;
+    pub use state_passing::Mamba3StatePassingBackendExt;
 }
