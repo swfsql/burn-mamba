@@ -10,8 +10,8 @@
 //! reverse. Checkpoints every eight tokens cap inverse-decay reconstruction at
 //! a numerically stable interval, while an `O(tokens * state_rank)` reduction
 //! buffer and one-eighth checkpoint history replace the full state history.
-//! The operation is currently opt-in through
-//! `BURN_MAMBA_FUSED_SINGLE_SCAN=1` while target-GPU performance is evaluated.
+//! CubeCL backends use the operation by default; set
+//! `BURN_MAMBA_FUSED_SINGLE_SCAN=0` to select the five-stage tensor reference.
 
 pub(super) const RECONSTRUCTION_INTERVAL: usize = 8;
 

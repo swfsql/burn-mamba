@@ -74,8 +74,12 @@ impl Mamba3SingleSsdInput {
             "scale must align with da"
         );
 
+        // CubeCL backends use the measured rank-one scan by default. Keep the
+        // five-stage tensor path available for same-binary A/B and emergency
+        // fallback; non-CubeCL CPU backends retain their existing path.
+        #[cfg(feature = "cubecl")]
         if mimo_rank == 1
-            && std::env::var("BURN_MAMBA_FUSED_SINGLE_SCAN").is_ok_and(|value| value == "1")
+            && !std::env::var("BURN_MAMBA_FUSED_SINGLE_SCAN").is_ok_and(|value| value == "0")
         {
             return crate::mamba3::single_ssd_scan::single_ssd_scan(
                 input.v_bnlmhp,
