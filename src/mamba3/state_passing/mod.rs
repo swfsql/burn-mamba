@@ -11,6 +11,14 @@ pub mod state_passing;
 #[cfg(feature = "autodiff")]
 pub mod backward;
 
+/// Fused forward and backward kernels for raw CubeCL backends.
+#[cfg(feature = "cubecl")]
+mod cube;
+
+/// Fusion custom-operation registration around the CubeCL backend operation.
+#[cfg(feature = "fusion")]
+mod fusion;
+
 pub use state_passing::{Mamba3StatePassingBackendExt, state_passing};
 
 #[cfg(all(test, feature = "_dev-test"))]

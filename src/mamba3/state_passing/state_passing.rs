@@ -146,18 +146,6 @@ impl<F, I> Mamba3StatePassingBackendExt for burn::backend::libtorch::LibTorch<F,
 #[cfg(feature = "backend-remote")]
 impl<F, I> Mamba3StatePassingBackendExt for burn::backend::RemoteBackend<F, I> {}
 
-#[cfg(feature = "cubecl")]
-impl<R> Mamba3StatePassingBackendExt for burn_cubecl::CubeBackend<R> where
-    R: burn_cubecl::CubeRuntime
-{
-}
-
-#[cfg(feature = "fusion")]
-impl<B> Mamba3StatePassingBackendExt for burn_fusion::Fusion<B> where
-    B: burn_fusion::FusionBackend + Mamba3StatePassingBackendExt
-{
-}
-
 /// Run the backend state-passing operation from high-level tensor code.
 pub fn state_passing(
     intra_bnhpr: Tensor<5>,

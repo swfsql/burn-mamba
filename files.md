@@ -170,7 +170,9 @@ unit-quaternion VJP with parallel ops only.
 Shared serial-SSD K4 recurrence. **`state_passing.rs`** defines
 `Mamba3StatePassingBackendExt`, returns the complete `N+1` boundary-state stream,
 and provides the primitive reference path. **`backward.rs`** registers one exact
-reverse-recurrence `Backward<B,3>` node for `(intra, decay, initial)`.
+reverse-recurrence `Backward<B,3>` node for `(intra, decay, initial)`. **`cube.rs`**
+fuses forward K4 into one CubeCL launch and backward into recurrence + reduction
+launches; **`fusion.rs`** registers both as opaque Fusion custom operations.
 
 ### `mamba3/step_constant/` (`mod.rs`)
 Constant-input closed forms on `Mamba3`: `step_n_approx` (one ordinary `step` —
