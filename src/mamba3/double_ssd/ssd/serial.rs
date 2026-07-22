@@ -119,7 +119,10 @@ impl Mamba3DoubleSsdInput {
 /// - `da_cumsum_bhnl`: `[batch, nheads, nchunks, chunk_len]` — intra-chunk prefix sums
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — last prefix sum per chunk (total decay)
 pub fn k1_ssd_chunk_cumsum(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
-    if std::env::var("BURN_MAMBA_FUSED_CHUNK_CUMSUM").is_ok_and(|value| value == "0") {
+    // K1 is intentionally opt-in: an RX 9070 XT same-binary A/B measured it
+    // within noise (-0.1%) of the backend cumsum. Keep the tested seam for
+    // future runtimes without changing the production default without a win.
+    if !std::env::var("BURN_MAMBA_FUSED_CHUNK_CUMSUM").is_ok_and(|value| value == "1") {
         return k1_ssd_chunk_cumsum_reference(da_bnlh);
     }
 
