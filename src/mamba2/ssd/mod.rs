@@ -16,8 +16,6 @@
 
 /// Matmul/`segsum` SSD with plain autodiff backward.
 pub mod minimal;
-/// Closed-form per-token state moments (for state-PR diagnostics/penalties).
-pub mod moments;
 /// Serial-over-chunks SSD with plain autodiff backward.
 pub mod serial;
 /// Serial-over-chunks SSD with a custom recompute backward.

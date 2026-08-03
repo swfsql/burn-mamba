@@ -97,34 +97,8 @@ where
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
-        let (x, caches, _) = self.forward_impl(x, caches, ssd_path, false);
-        (x, caches)
-    }
-
-    /// [`Self::forward`], additionally returning each (virtual) layer's pooled
-    /// per-token SSM-state moments — one entry per virtual layer, indexed like
-    /// the cache slots (see
-    /// [`MambaBlock::block_forward_with_state_moments`]).
-    pub fn forward_with_state_moments(
-        &self,
-        x: Tensor<3>,
-        caches: Option<M::Caches>,
-        ssd_path: M::SsdPath,
-    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
-        let (x, caches, moments) = self.forward_impl(x, caches, ssd_path, true);
-        (x, caches, moments.expect("moments were requested"))
-    }
-
-    fn forward_impl(
-        &self,
-        x: Tensor<3>,
-        caches: Option<M::Caches>,
-        ssd_path: M::SsdPath,
-        with_moments: bool,
-    ) -> (Tensor<3>, M::Caches, Option<Vec<StateMoments>>) {
         let mut x = self.insert_latents(x);
         let n = self.n_virtual_count();
-        let mut moments = with_moments.then(|| Vec::with_capacity(n));
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
@@ -147,14 +121,9 @@ where
                     // case the input is moved straight in (no clone, no add).
                     let x_l = layer.insert_latents(x);
                     let (out, c_) = if first || last {
-                        layer.forward_maybe_moments(x_l, Some(cache), ssd_path.clone(), &mut moments)
+                        layer.forward(x_l, Some(cache), ssd_path.clone())
                     } else {
-                        let (out, c_) = layer.forward_maybe_moments(
-                            x_l.clone(),
-                            Some(cache),
-                            ssd_path.clone(),
-                            &mut moments,
-                        );
+                        let (out, c_) = layer.forward(x_l.clone(), Some(cache), ssd_path.clone());
                         (out + x_l, c_)
                     };
                     x = out;
@@ -165,8 +134,7 @@ where
                         layer.class_latents_emb.is_none(),
                         "MultiGate residuals do not support per-layer class latents"
                     );
-                    let (out, c_) =
-                        layer.forward_maybe_moments(x, Some(cache), ssd_path.clone(), &mut moments);
+                    let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone());
                     slots[i] = Some(c_);
                     let s = streams.take().unwrap();
                     // A skipped residual here is equivalent to forcing the MGR
@@ -196,7 +164,7 @@ where
                 }
             }
         }
-        (x, M::Caches::from_slots(slots), moments)
+        (x, M::Caches::from_slots(slots))
     }
 
     /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies

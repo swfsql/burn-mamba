@@ -84,7 +84,7 @@
 
 use crate::mamba2::prelude::*;
 use crate::modules::sanity as san;
-use crate::modules::{RmsNormGated, RmsNormGatedConfig, Silu, StateMoments, softplus};
+use crate::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -516,68 +516,13 @@ impl Mamba2 {
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - output      : `[batch, sequence, d_model]`
     /// - cache (out) : updated convolution window and SSM state
+    #[allow(non_snake_case)]
     pub fn forward(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba2Cache>,
         ssd_path: Mamba2SsdPath,
     ) -> (Tensor<3>, Mamba2Cache) {
-        let (out_bsm, cache, _) = self.forward_impl(input_bsm, cache, ssd_path, None);
-        (out_bsm, cache)
-    }
-
-    /// [`Self::forward`], additionally returning the exact pooled moments of
-    /// every per-token SSM state ([`StateMoments`] — the inputs of a state
-    /// participation ratio), computed in closed form from the chunkwise
-    /// tensors without materialising per-token states (see
-    /// [`Mamba2SsdInput::state_moments`]). Matches what a token-by-token
-    /// [`Self::step`] loop reading the cache would accumulate.
-    ///
-    /// The moments branch is **detached** here (diagnostic use — no backward
-    /// nodes are recorded); for a differentiable loss term over the moments
-    /// use [`Self::forward_with_state_moments_grad`].
-    pub fn forward_with_state_moments(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba2Cache>,
-        ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<3>, Mamba2Cache, StateMoments) {
-        let (out_bsm, cache, moments) =
-            self.forward_impl(input_bsm, cache, ssd_path, Some(true));
-        (out_bsm, cache, moments.expect("moments were requested"))
-    }
-
-    /// [`Self::forward_with_state_moments`] with the moments branch left
-    /// **attached** to the autodiff graph, so a loss term over the moments
-    /// (e.g. a state-PR penalty) back-propagates into the block parameters.
-    ///
-    /// The gradients flow through the moments' own recompute of SSD Steps 2–3
-    /// plus the closed-form reductions — a plain-autodiff subgraph off the
-    /// same pre-SSD tensors — independent of the `ssd_path` chosen for `y`,
-    /// so it composes with [`Mamba2SsdPath::SerialRecalculated`]'s custom
-    /// backward untouched. Costs the retained moment intermediates (a couple
-    /// of `[batch, nchunks, nheads, chunk_len, chunk_len]` tensors) for the
-    /// backward pass.
-    pub fn forward_with_state_moments_grad(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba2Cache>,
-        ssd_path: Mamba2SsdPath,
-    ) -> (Tensor<3>, Mamba2Cache, StateMoments) {
-        let (out_bsm, cache, moments) =
-            self.forward_impl(input_bsm, cache, ssd_path, Some(false));
-        (out_bsm, cache, moments.expect("moments were requested"))
-    }
-
-    #[allow(non_snake_case)]
-    fn forward_impl(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba2Cache>,
-        ssd_path: Mamba2SsdPath,
-        // `None` — no moments; `Some(detach)` — compute them, detached or not.
-        with_moments: Option<bool>,
-    ) -> (Tensor<3>, Mamba2Cache, Option<StateMoments>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let ngroups = self.ngroups;
@@ -774,16 +719,6 @@ impl Mamba2 {
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
         ssd_input.sanity();
-        // Closed-form per-token state moments (pathway-agnostic: reads the SSD
-        // inputs, not the selected algorithm). Detached for diagnostics,
-        // attached for a differentiable moments loss.
-        let moments = with_moments.map(|detach| {
-            if detach {
-                ssd_input.detached().state_moments(sequence)
-            } else {
-                ssd_input.state_moments(sequence)
-            }
-        });
         let (y_bnlhp, final_state_bhpr) = ssd_input.run(&ssd_path);
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
@@ -821,7 +756,7 @@ impl Mamba2 {
         assert_eq!([batch, sequence, _d_model], out_bsm.dims());
         san(&out_bsm);
 
-        (out_bsm, cache, moments)
+        (out_bsm, cache)
     }
 }
 
