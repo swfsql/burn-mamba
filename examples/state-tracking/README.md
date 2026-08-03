@@ -7,41 +7,20 @@ nothing to do); this example moves the same experimental machinery onto a
 task where the state has to do something a sum cannot: **compose a
 non-abelian group**.
 
-## The task, in plain words
+## The task
 
-The grokking task was a *combination table over categories*: tokens like
-`grape grape` in, category `banana` out, because `(2+2) mod 3 = 1`. This
-task is the same game with one change — the things being combined are not
-numbers on a clock but **shuffles of 5 cards**.
+The **word problem of `A₅`** (the alternating group on 5 letters — the
+rotation group of the icosahedron, the smallest *non-solvable* group): read
+an anchor token then a word of `A₅` generators (`a` = a 5-cycle, `b` = a
+3-cycle), and output the **final running product** — a 60-way classification
+read at the last position only (chance ≈ 1.7%).
 
-Picture 5 cards in a row and an alphabet of two moves: **`a`** slides every
-card one place over (the last wraps around — a 5-cycle), **`b`** rotates
-just the first three cards among themselves (a 3-cycle). An input like
-`a b b a …` (12 moves) means "perform these shuffles in order", and the one
-supervised question, at the last position, is: **what does the row look
-like now?** Exactly 60 arrangements are reachable; each is a category, so
-the answer is a 60-way classification (chance ≈ 1.7%).
-
-The essential difference from mod-p: clock steps **commute** — advance-2
-then advance-3 lands where advance-3 then advance-2 does — so a bag of
-tokens (a sum, a phase) answers it, and that is precisely the shortcut the
-grokked mod-p circuits used. Card shuffles **don't commute** (`ab ≠ ba`):
-no sum, count, or accumulated angle can answer. The model must *carry the
-current arrangement through the sequence*, updating it move by move —
-state tracking in the literal sense.
-
-Formally this is the **word problem of `A₅`** (the alternating group on 5
-letters, the rotation group of the icosahedron, the smallest *non-solvable*
-group), and by Barrington's theorem it is `NC¹`-complete — non-solvability
-is what closes every layered-counter shortcut: you compose, or you fail.
-The reason it is *this* group: an abelian rotation state (`Complex2D`,
-`SO(2)`) is a set of clock hands and can only add angles, while the
-non-abelian `SU(2)` quaternion rotation (`--quat`) can represent the
-**binary icosahedral group `2I = SL(2,5)`** — a double cover of `A₅` — so a
-quaternion state can *store the current arrangement as a 3D rotation* and
-update it by multiplication. That contrast, at otherwise identical
-configuration, is what this example exists to measure, with the grokking
-example's full instrument attached.
+By Barrington's theorem this is `NC¹`-complete. An abelian rotation
+(`Complex2D`, `SO(2)`) composes only commutatively; the non-abelian `SU(2)`
+quaternion rotation (`--quat`) can represent the **binary icosahedral group
+`2I = SL(2,5)`** — a double cover of `A₅` — so it can compose the task
+natively *inside the state*. That contrast is what this example exists to
+measure, with the grokking example's full instrument attached.
 
 ## The protocol (transposed from `grokking`)
 
@@ -59,16 +38,10 @@ for Mamba-3, weight spectra, the differentiable rank/norm/noise penalties;
   not fitted. Full-batch AdamW, plain decoupled weight decay, constant lr
   (grokking-literature setup; resume-friendly).
 - **Per-position accuracy as an eval-only depth probe** (`positions.csv`,
-  printed each eval). Because the model is causal, its output at position
-  `t` equals its final-position output on the length-`t` truncated word — so
-  this curve is exactly **accuracy on shorter (never-supervised) words**,
-  i.e. length generalization. Early positions reading ~0% is normal while
-  the head is calibrated to the trained length only; a genuine
-  rotation-conveyor circuit (`yₜ = Cₜᴴ Pₜ B₀ x₀`) is length-independent by
-  construction, so the curve snapping up **at all depths at once** is the
-  circuit-formation signature. (Supervising every position instead would
-  train all prefix lengths simultaneously — an easier, denser task that
-  hands early positions to memorization; deliberately not done here.)
+  printed each eval): position `t` has ≤ `2^t` reachable prefixes, so early
+  positions are solvable by memorization; genuine composition shows as the
+  curve holding up at depth. This replaces the old harness's per-position
+  *training* signal, which blurred exactly this distinction.
 - **PR diagnostics + penalties** at eval points: state PR (`PR_ℂ(M_phys)` —
   quaternionic blocks under `--quat`), the p-axis probe (via `--inference`),
   weight spectra, `--pr-lambda` / `--l2-lambda` / `--noise-lambda` /
@@ -84,15 +57,16 @@ vocabulary, symbols first (`[a, b, anchor | 60 element classes]`), so the
 weight diagnostics read the input-alphabet rows directly; the loss is CE
 over the full vocabulary with mass on the class region.
 
-Two design points that make the comparison valid:
+Two design points inherited from the old harness (they make the comparison
+valid):
 
 - **The anchor token.** The rotation acts on both `B` and `C`, so the SSD
   readout only ever sees *relative* rotations `Pₜ Pᵢ⁻¹`. A fixed anchor at
   position 0 (rotation learned to identity) makes the anchor's contribution
   `Cₜᵀ Pₜ B₀ x₀` carry the *absolute* product.
-- **The depth metric** (the truncation-equivalence probe above): the scalar
-  test accuracy only sees the trained length; the curve is what separates a
-  length-bound fit from the length-independent conveyor.
+- **The depth metric**, since averages hide the memorization frontier
+  (≈ `log₂(train words)` ≈ 11 at fraction 0.5 — deliberately close to
+  `seq_len`: the deepest positions are exactly where memorization runs out).
 
 ## Run
 
@@ -112,13 +86,13 @@ Resume mechanics are the grokking example's: relaunch with the same `-a`
 plus `--steps N --step-offset <done>`
 ([details](../grokking/README.md#resume-mechanics-multi-phase-runs)).
 
-## Hypotheses (pre-registered)
+## Hypotheses (runs pending)
 
 1. **Does it grok at all?** Unlike mod-p addition, the final product of a
    non-abelian group is not a sum of per-token contributions — no
    phase-coded embedding-sum shortcut exists (the grokking §6 escape hatch).
-   Expected: a real plateau for both arms, with the depth probe flat at ~0
-   off the trained length until (if) composition is found.
+   Expected: a real memorization plateau for both arms, with the depth probe
+   pinned at the memorization frontier until (if) composition is found.
 2. **The quaternion arm can represent the circuit; the complex arm cannot.**
    `2I ⊂ SU(2)`: a single quaternionic conveyor whose data-dependent
    rotation *is* the group element would solve the task with quaternionic
@@ -133,20 +107,11 @@ plus `--steps N --step-offset <done>`
    single-block conveyor, and to be unable to rescue the complex arm — the
    causal test that mod-p addition could no longer host.
 
-## Status (runs in progress, 2026-07-10)
+## Status
 
-Interim, single seed, `seq_len 12`, fraction 0.5, ≈26k params. Hypothesis 1
-already holds: a real plateau exists (train ≈ 0.14, both arms), escaped only
-with enough weight-decay heat — wd 1.0 chokes the circuit, wd 0.03 never
-escapes, **wd 0.1 escapes at ~13k**. The working quaternion recipe is a
-three-phase schedule on one lineage (`tmp/a5-l12-f0.5-wd0.1-quat`):
-wd 0.1 heat (0–20k) → wd 0.03 anneal (20–40k) → lr 3e-4 cool (40–60k),
-reaching **train 0.43 / test 0.38** and — hypothesis 2's signature, with no
-PR pressure applied — the state consolidating into a **single quaternion
-block** (`PR_ℂ` 2.9 → 1.2 while the state magnitude grows 14×; head rank
-≈ 2, a phase-plane read-out). The complex twin under the identical phase-1
-heat is **flat at train 0.14 / test 0.11 through 20k+** (extension to 40k
-running). Numbers will move; the CSVs in `tmp/` are the record.
+Harness rebuilt and smoke-tested on CUDA (both arms, penalty path,
+diagnostics, CSVs — `tmp/smoke-complex`, `tmp/smoke-quat`); experiment runs
+pending.
 
 ## See also
 
