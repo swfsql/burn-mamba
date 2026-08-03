@@ -67,7 +67,7 @@ pub mod prelude {
     pub use crate::modules::{
         CacheStack, Layer, Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaBlock,
         MambaBlockConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig, MambaSsdPath,
-        MambaVocabNet, MambaVocabNetConfig, ResidualsConfig, StateMoments, StatePairing,
+        MambaVocabNet, MambaVocabNetConfig, ResidualsConfig, StateMoments,
     };
     pub use crate::utils::{ClassLatent, ClassToken};
 }

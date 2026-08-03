@@ -59,10 +59,7 @@ findings, and reproduction commands for every claim.
   1 head, `state_rank 32`, `conv_kernel 1` (all pair interaction flows through
   the recurrent state), untied LM head — 29k params. `k = 4` needs 2 layers
   (`--n-layers 2`, 35k params): 1 layer is capacity-blocked at any width
-  (d128/61k params stalls < 40% train), composition beats width. `--mamba3`
-  swaps in a Mamba-3 block under the same constraints (SISO, 1 head, no conv
-  at all; 18.8k params) — the complex-state arm (see the Mamba-3 read-out
-  section).
+  (d128/61k params stalls < 40% train), composition beats width.
 - Optimizer: AdamW with **plain (non-cautious) decoupled decay** (cautious
   decay masks exactly the pressure grokking relies on), grad-clip 1.0,
   lr 1e-3 constant. `--sgd <momentum>` switches to plain SGD (see below).
@@ -104,8 +101,6 @@ All commands below abbreviate the prefix to `grokking --training -a <dir> --`.
 | `--wd <f32>` | AdamW decoupled decay; also fills `sgd_wd` (coupled) for the SGD path |
 | `--lr <f64>`, `--steps`, `--train-fraction`, `--p`, `--k` | schedule / task |
 | `--d-model --expand --state-rank --n-layers` | model size (fresh configs only) |
-| `--mamba3` | build a Mamba-3 block instead of Mamba-2 (fresh configs only); diagnostics/penalty switch to `PR_ℂ(M_phys)` automatically |
-| `--quat`, `--rope-fraction <0\|0.5\|1.0>` | with `--mamba3`: `Quaternion4D` rotation / rotated fraction of `state_rank` (default `Complex2D`, 0.5; fresh configs only) |
 | `--chunked` | chunkwise `forward()` instead of stepwise |
 | `--no-diag` / `--no-state-pr` | skip all PR diagnostics / only the (costly) state-PR pass |
 | `--pr-lambda <f64>` | differentiable spectral-PR penalty coefficient; **negative = expansion reward** (spell `--pr-lambda=-0.01`) |
@@ -114,7 +109,7 @@ All commands below abbreviate the prefix to `grokking --training -a <dir> --`.
 | `--pr-start-step <step>` | keep the PR penalty off until this step (gate) |
 | `--l2-lambda <f64>` | plain `Σ‖W‖²_F` loss term on the same targets (norm control) |
 | `--noise-lambda <f64>` | `Σ⟨W, detach(ε)⟩`, fresh ε/step: pure-noise gradient of this RMS (information-free control) |
-| `--state-pr-lambda <f64>` | penalize the **recurrent state's** PR directly (Σ over layers/heads, batch-pooled; `PR_ℂ(M_phys)` on a Mamba-3 net); requires `--chunked` |
+| `--state-pr-lambda <f64>` | penalize the **recurrent state's** PR directly (Σ over layers/heads, batch-pooled); requires `--chunked` |
 | `--sgd <momentum>` | replace AdamW with plain SGD (coupled `--wd`, grad-clip 1.0 hardcoded, fresh optimizer each launch) |
 | `--step-offset <n>` | added to logged/CSV step numbers on resumed runs |
 
@@ -126,9 +121,7 @@ scale-invariant, range 1…N (`diagnostics.rs`):
 
 - **State PR** (the original question): per layer/head, the recurrent states
   `ssm_bhpr` collected over (batch, step, channel) — "how many distinct write
-  directions does the state use". On a Mamba-3 net this automatically becomes
-  the **Hermitian `PR_ℂ` of the physical-frame state** (see [the Mamba-3
-  read-out](#the-mamba-3-read-out-pr-over-a-complex-state) below).
+  directions does the state use".
 - **Weight spectral PRs**: embedding, LM head, each `in_proj` slice
   (`z|x|B|C`), `out_proj`, and the token-centered **B-alphabet**
   (`PR(emb·W_B)`, DC removed).
@@ -138,73 +131,6 @@ scale-invariant, range 1…N (`diagnostics.rs`):
   power-of-two lengths).
 - The penalties are the differentiable twins (`pr_tensor` on `WᵀW`), so the
   penalized quantity is exactly the logged one.
-
-### The Mamba-3 read-out: PR over a complex state
-
-*(Instrument built and tested in the library; the model arm is `--mamba3`
-below — wiring smoke-tested, no experiment runs yet: see Open threads.)*
-
-Mamba-3 breaks the plain covariance read-out above, because its state is
-genuinely **complex**: the data-dependent RoPE realises `h ∈ ℂ^{p×r/2}` as a
-real `[p, r]` tensor in which each rotation plane is one complex coordinate's
-`(Re, Im)` pair, and the implementation carries a **cache-frame** state with
-the cumulative rotations absorbed into B̃/C̃ (the paper's "RoPE trick"). Two
-naive readings then fail, in dual ways:
-
-- the realified **real PR double-counts**: a single rotating complex
-  direction — precisely the conveyor §1's circuits end on — reads PR ≈ 2
-  (≈ 4 for the quaternionic rotation), a representation artifact, not
-  memory;
-- the **cache-frame moment charges frame drift**: a *static* physical state
-  under ongoing rotation spins in the cache frame, decohering its pooled
-  covariance toward the number of active planes — phantom rank with zero
-  change in what the model remembers.
-
-The shipped observable (and penalty) is therefore the **Hermitian PR of the
-physical-frame moment**, `PR_ℂ(M_phys)` with `M_phys = Σₜ cₜᴴcₜ`, where `cₜ`
-is the cache state **de-rotated per token** — the frame that raw, un-rotated
-C reads (`yₜ = C̃ₜᴴh̃ₜ = Cₜᴴcₜ`). Design points, each pinned by a library
-test:
-
-- **Rank-honest by construction.** Within-plane rotation is free (the
-  rotating conveyor reads `PR_ℂ ≡ 1`); rank *created* by rotating retained
-  writes apart is charged (a constant writer spread over k planes at
-  different rates → `PR_ℂ → k`) — that is genuine memory occupancy which no
-  per-token gauge can collapse; and `θ ≡ 0` degenerates **exactly** to the
-  Mamba-2 moment, so the Mamba-3 penalty is a strict generalization of the
-  one §4 proved out.
-- **No closed form exists.** The per-token phases couple the token index to
-  the moment's matrix entry, so the Mamba-2 trick (three chunk-level GEMMs,
-  no state materialisation) has no analogue; the library instead
-  materialises the states **one chunk at a time** (the same
-  recompute-and-discard discipline as the `SerialRecalculated` SSD path) and
-  de-rotates them, with a custom recompute backward so training-scale memory
-  stays flat. Gradients flow to the **rotation angles** too — the penalty
-  can shape the rotation itself, not just the write directions.
-- **One source of truth for the pairing.** Which realified coordinates form
-  a complex (or quaternionic) pair depends on the block's rotation config
-  (interleaved SISO vs half-and-half MIMO, partial `rope_fraction`,
-  `Quaternion4D`); the block exports it (`Mamba3::state_pairing()`) and the
-  PR recombines the same real moment sums `Σhhᵀ` under it —
-  `pr_complex(Real)` is byte-identical to `pr()`, so every Mamba-2 number in
-  this README is untouched by the extension.
-
-The example's diagnostics and the `--state-pr-lambda` penalty are
-pairing-aware (`diagnostics::state_pairing_of`): pointed at a Mamba-3 net
-they log and penalize `PR_ℂ(M_phys)` with no further wiring, on both the
-stepwise path (the cache state de-rotated by the cumulative rotation) and
-the chunkwise path (the library's per-token moments) — forward/step
-agreement is part of the library's parity test suite. The weight-side
-diagnostics/penalties carry over too (both families lead `in_proj` with the
-same `[z|x|B|C|…]` column layout). The model arm is `--mamba3`
-(`--quat` / `--rope-fraction` select the rotation; same size constraints as
-the Mamba-2 model, SISO, no conv — 18.8k params at the p = 97 defaults):
-
-```bash
-# a Mamba-3 arm with the state-PR penalty (artifacts under tmp/mamba-3/)
-grokking --training -a tmp/mamba-3/<run> -- --mamba3 --rope-fraction 1.0 --wd 1.0 \
-    --state-pr-lambda 0.03 --chunked --steps 20000
-```
 
 ### Resume mechanics (multi-phase runs)
 
@@ -509,20 +435,5 @@ multiplication, k = 3, one non-modular). Then the earlier list:
 plateau-length vs train-fraction curve; AdamW at higher lr; hybrid schedules
 (λ taper / lr decay) for the SGD endgame; frequency-resolved embedding
 diagnostics (which Fourier bins get selected, when); endpoint
-frequency/state ablations.
-
-**Mamba-3 runs** — the measurement/penalty instrument and the model arm are
-both in place (see [the Mamba-3
-read-out](#the-mamba-3-read-out-pr-over-a-complex-state); `--mamba3`,
-smoke-tested); what's missing are the experiment runs. The question sharpens
-nicely on this substrate: mod-p addition *is* rotation composition, and Mamba-3's
-data-dependent angles can represent it natively — the grokked Fourier
-circuit may migrate from the write directions into θ. Concrete predictions
-to test: the Mamba-2 endpoint needs ≈ 2×#frequencies realified write
-directions, while a circuit living in the rotations could hold
-`PR_ℂ(M_phys)` between 1 (single-plane conveyor, all structure in θ) and
-#frequencies (one plane per frequency — rotation-*created* rank is charged,
-so multi-frequency memory cannot hide); and since the penalty is
-differentiable through the angles, pressing on `PR_ℂ` tests whether rank
-pressure actively pushes the circuit *into* the rotation — a cleaner
-low-rank prior than Mamba-2 can express.
+frequency/state ablations; a Mamba-3 arm (does the circuit move into the
+rotation angles?).

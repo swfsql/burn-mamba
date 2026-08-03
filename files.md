@@ -39,10 +39,7 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`mamba2.rs`** — `Mamba2` + `Mamba2Config` (`state_rank` 128, `per_head_dim` 64,
   `ngroups` 1, `expand` 2). `forward` per CLAUDE.md; only `forward` touches the SSD
   path (via `Mamba2BackendExt`), `step` is the pure recurrence with a manual
-  conv-window slide. Optional learnable `init_state_hpr`. `forward` wraps private
-  `forward_impl(.., with_moments)`; `forward_with_state_moments(_grad)` adds the
-  detached-diagnostic / attached-penalty state moments (independent subgraph off
-  the pre-SSD tensors — composes with the custom SSD backward).
+  conv-window slide. Optional learnable `init_state_hpr`.
 - **`cache.rs`** — `Mamba2Cache` = `conv_bvk` window + `ssm_bhpr` (the O(p·r) compressed
   state — the memory win over a growing KV-cache). Zero-init correct (`h₀=0`).
 - **`ssd/ssd_path.rs`** — `Mamba2SsdPath{Minimal|Serial|SerialRecalculated}(Option<chunk>)`,
@@ -57,10 +54,6 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   memory). `serial_recalculated.rs` defines `Mamba2BackendExt` (default body = `ssd_serial`
   on primitives; asserts `init_state_hpr.is_none()`); `backward.rs` registers the
   `Autodiff<B>` node; `combined_backward.rs` is the recompute gradient math (7 inputs).
-- **`ssd/moments.rs`** — `Mamba2SsdInput::state_moments(valid_len)` + `::detached()`:
-  exact pooled per-token state moments in **closed form** (three chunk-level GEMMs
-  off the SSD decomposition; boundary states via Steps 2–3 ⇒ pathway-agnostic,
-  plain autodiff; validity mask excludes zero-pads). Derivation in the header.
 
 ## Mamba-3 (`src/mamba3/`)
 
@@ -68,9 +61,7 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   `mimo_rank` 1=SISO; `rope_fraction`; `rotation: RotationKind`; `a_floor`). Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`).
-  `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd);
-  `forward_with_state_moments(_grad)` likewise. `state_pairing()` exports the
-  rotation's realification layout (the single source of truth for `pr_complex`).
+  `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
 - **`mod.rs`** — `Mamba3BackendExt: Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt`,
   wired via `backend_macros`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
@@ -88,8 +79,7 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 ### `mamba3/double_ssd/`
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
-  summed; ~2× SSD memory. `forward_double_ssd` wraps `forward_double_ssd_impl(..,
-  with_moments)` (pre-SSD moments seam via `Mamba3::build_moments_input`). `step_double_ssd` is reused (via cache conversion) for
+  summed; ~2× SSD memory. `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
   (in-proj → coeffs → QK-norm, pre-rotation), `step_readout` (state×C einsum) and
   `step_finish` (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
@@ -108,41 +98,11 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁`, strict-lower-triangular intra-chunk mask + same-step γ
   correction (in-kernel), and a **boundary-β seed** folded into the initial state.
   `step_single_ssd` converts to a double-ssd cache, runs `step_double_ssd`, converts back.
-  Wraps `forward_single_ssd_impl(.., with_moments)` — the **primary** moments seam:
-  keeps `beta` from `trapezoidal_coefficients` and rebuilds the double-form injections
-  from the raw sequence-level tensors (never the kernel's `scale`/strict-mask form).
 - **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields but `ssm_bhpr` carries
   `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the diagonal, patched in-kernel). The
   distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
   + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel); `Mamba3SingleSsdBackendExt`; same trio.
-
-### `mamba3/moments/`
-Physical-frame state moments — the complex state de-rotated per token (`cₜ = Dₜ†h̃ₜ`,
-what raw C reads); shipped observable/penalty = the Hermitian `PR_ℂ(M_phys)`. No
-closed form exists (per-token phases couple `t` to the moment entry), hence serial
-chunk-local state materialisation. Design doc: repo-root `mamba3.md`.
-- **`moments.rs`** — `Mamba3MomentsInput { xhat/bhat_bnlMhr (M = 2·mimo combined γ+β
-  injections, β shift-before-chunking), da_bnlh, rotation: RotationSeq (padded),
-  initial_state_bhpr (the cache's — **never** the single-ssd seed-augmented one; the
-  β stream's first element carries the boundary write), init_state_hpr }`.
-  `state_moments_phys(valid_len)` (serial chunk loop: chunk-local `L`/decay →
-  folded-channel GEMM → de-rotate → masked sums; carry from the unmasked last
-  position; plain autodiff = study scale) and `state_moments_phys_recalculated`
-  (custom recompute backward — the at-scale model; learnable init folded outside
-  the node). `Mamba3::build_moments_input` = the shared pathway seam.
-- **`recalculated.rs`** — `Mamba3MomentsBackendExt`: one rank-erased method (angles
-  `[b,s,h,a]` or quats `[b,s,h,J,4]` + `quaternion/rope_dim/rotate_pairwise`
-  scalars); default body = the primitive forward (`F<B,D>`); shared helpers
-  (`chunk_decay`, `chunk_states`, `rotate_chunk` with a `transpose` flag,
-  `chunk_mask`, quat mul/conj).
-- **`backward.rs`** — `Backward<B,5>` node saving only leaf inputs; `(m2, m1)`
-  flattened via `combined_grad`. Reverse chunk loop re-materialises states;
-  analytic VJPs: moments `mask·(c(d_m2+d_m2ᵀ)+d_m1)`, rotation transpose + the
-  **angle/quaternion grads** (`d_θ = Σ_p(d_cₓc_y − d_c_ycₓ)`;
-  `d_Q = Σ_p d_c ⊗ conj(h̃)`), chunk-GEMM VJPs, and the `d_da` band-sum
-  (`rev_cumsum(scal + rowΣA) − rev_cumsum(colΣA)`); boundary carries recomputed by
-  a cheap chunk-level pass.
 
 ### `mamba3/rotation/` (`mod.rs`)
 The quaternion (`k=4`) **non-abelian** generalisation of RoPE (`SU(2) ⊂ SO(4)`).
@@ -152,10 +112,7 @@ with a cross-chunk carry), `rotate_state_rank_blocks` (`B̄ = rotate(B, conj(Qcu
 Wiring: `RotationKind{Complex2D|Quaternion4D}` (config) + `RotationState{Angle|Quaternion}`
 (cache); forward/step branch via `rotate_bc_forward`/`rotate_bc_step`; runs on both
 pathways. Tests: the RoPE factoring survives non-commutativity, and `k=2` reproduces
-the production `apply_rope`. Physical-frame views: `RotationSeq` (per-token cumulative
-rotation, the 4th `rotate_bc_forward` return; carries its pairing metadata) with
-`derotate_states`/`pad_to`/`detached`, and `RotationState::derotate_state` — both apply
-the **inverse** of the B/C absorption (`R(−θ)` / un-conjugated `Q`).
+the production `apply_rope`.
 
 ### `mamba3/quat_scan/`
 Memory-efficient cumprod scan (recompute backward, like SSD `SerialRecalculated`).
@@ -186,24 +143,19 @@ Generic over `M = Mamba1|Mamba2|Mamba3`; the single home for layer/network compo
 plus shared NN blocks.
 
 - **`mod.rs`** — `trait MambaBlock` (assoc. `Cache`/`Caches: CacheStack`/`SsdPath`,
-  `block_forward`/`block_step`, `block_forward_with_state_moments(_grad)` with
-  panicking defaults — Mamba-2/3 override (in `cache.rs`),
-  `block_step_infinite`/`block_step_n_approx` with
+  `block_forward`/`block_step`, `block_step_infinite`/`block_step_n_approx` with
   panicking defaults — only Mamba-3 overrides, `zero_caches_{2d,3d}`; Mamba-1's
   `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the residual and class-latent
   insert are applied by `Layers`. `insert_latents` `pub(crate)`. Cursorless
-  `step_infinite`/`step_n_approx` mirror `step`. `forward_with_state_moments(_grad)`
-  delegate to the block trait.
+  `step_infinite`/`step_n_approx` mirror `step`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
   Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
   its own cache; owns the residual (`skip_residual`/`ignore_first/last_residual`).
   `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`). Cursorless
   `step_infinite`/`step_n_approx` mirror `step` (incl. MultiGate; same residual/skip flags).
-  `forward` wraps `forward_impl(.., with_moments)`; `forward_with_state_moments(_grad)`
-  returns `Vec<StateMoments>` (one per **virtual** layer, cache-slot order).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
   layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
@@ -212,8 +164,7 @@ plus shared NN blocks.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**; `step_infinite`/`step_n_approx` mirror `step` (enums included;
-  Mamba-3 only, panic otherwise); `forward_with_state_moments(_grad)` on both
-  networks + runtime enums (Mamba-1 panics via the trait default). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
+  Mamba-3 only, panic otherwise). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate) +
   `ignore_first/last_residual`.
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
@@ -223,18 +174,7 @@ plus shared NN blocks.
   `MambaBidiLayers`. Forward-only.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
-  state**, not a `Module`). Home of the per-family `MambaBlock` impls (incl. the
-  Mamba-2/3 state-moments overrides).
-- **`state_moments.rs`** — `StateMoments { m2_bhrr, m1_bhr, count }`: raw sums ⇒
-  composable (`merge`, `pool_batch`); `pr(center)` = differentiable
-  `(trΣ)²/tr(Σ²)` per `(batch, head)` (detached trace normalisation + two floors —
-  the header comments are load-bearing); `trace()`. `pr_complex(&StatePairing,
-  center)` = the Hermitian PR: `M = A + iS` recombined from `m2` sub-blocks
-  (canonical reorder via `select`, then contiguous narrows; the trace is the full
-  real trace), mixed Hermitian block for partial rope, quaternionic 4-component
-  norms; `Real` delegates to `pr`. `StatePairing` describes the realification
-  layout and is constructed only by `Mamba3::state_pairing()`. Sample convention:
-  one `(token, p)` row in `ℝ^r`, matching a `step`-loop cache read.
+  state**, not a `Module`).
 - **`norm/`** — `RmsNorm` (also Mamba-3 QK-Norm) + `RmsNormGated` (RMSNorm × SiLU gate,
   `norm_before_gate` toggle). **fp16-safe**: normalise against `max(|x|)` to avoid `x²`
   overflow; epsilon from `div_eps`.
@@ -262,9 +202,8 @@ plus shared NN blocks.
 - **`combined_grad.rs`** — `flatten_pair`/`unflatten_pair`: `(y, final_state)` into one
   tracked tensor and back (`prep.finish` takes a single tensor).
 - **`fprim.rs`** — `F<B, const D>`: rank-tagged `FloatTensor<B>` newtype mirroring the
-  `Tensor` method API (incl. `cos`/`sin` for the moments de-rotation), so the
-  generic-`B` forward kernels and `Backward<B,_>` nodes (which can't build a
-  `Dispatch` `Tensor`) read like tensor code over `B::float_*`.
+  `Tensor` method API, so the generic-`B` forward kernels and `Backward<B,_>` nodes
+  (which can't build a `Dispatch` `Tensor`) read like tensor code over `B::float_*`.
   `Mask<B>` + `san(&F)` accompany it.
 - **`test_helpers.rs`** (test-only) — `max_abs_diff` + `check_grads_match_two_paths!`,
   shared by the SSD-path agreement tests.

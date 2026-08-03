@@ -73,10 +73,6 @@ pub fn launch(app_args: &AppArgs) {
             overrides.expand.unwrap_or(1),
             overrides.state_rank.unwrap_or(32),
             overrides.n_layers.unwrap_or(1),
-            overrides.mamba3.then(|| model::Mamba3Arm {
-                quaternion: overrides.quat,
-                rope_fraction: overrides.rope_fraction.unwrap_or(0.5),
-            }),
         )
     });
     // save configs
@@ -158,16 +154,6 @@ struct Overrides {
     state_rank: Option<usize>,
     /// `--n-layers <usize>`: number of layers (fresh configs only).
     n_layers: Option<usize>,
-    /// `--mamba3`: build a Mamba-3 block instead of Mamba-2 (fresh configs
-    /// only) — the complex-state arm; diagnostics/penalty switch to the
-    /// Hermitian `PR_ℂ(M_phys)` automatically.
-    mamba3: bool,
-    /// `--quat`: with `--mamba3`, use the non-abelian `Quaternion4D` rotation
-    /// instead of the default `Complex2D` (fresh configs only).
-    quat: bool,
-    /// `--rope-fraction <f64>`: with `--mamba3`, the rotated fraction of
-    /// `state_rank` (0.0 | 0.5 | 1.0; default 0.5; fresh configs only).
-    rope_fraction: Option<f64>,
 }
 
 impl Overrides {
@@ -196,9 +182,6 @@ impl Overrides {
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
             n_layers: pargs.opt_value_from_str("--n-layers").unwrap(),
-            mamba3: pargs.contains("--mamba3"),
-            quat: pargs.contains("--quat"),
-            rope_fraction: pargs.opt_value_from_str("--rope-fraction").unwrap(),
         };
         let remaining = pargs.finish();
         assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");

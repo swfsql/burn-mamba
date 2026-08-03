@@ -56,8 +56,7 @@ src/
 ├─ mamba2/           SSD (Structured State Space Duality)
 │  ├─ mamba2.rs      Mamba2 block + Config: chunkwise forward() / recurrent step()
 │  ├─ cache.rs       Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
-│  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated;
-│                    moments.rs closed-form per-token state moments
+│  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated
 ├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
 │  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
 │  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
@@ -65,10 +64,7 @@ src/
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
-│  ├─ moments/       physical-frame state moments M_phys: serial chunkwise de-rotated
-│  │                 states, custom recompute backward; fed by either pathway's seam
-│  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra;
-│  │                 RotationSeq / derotate_state physical-frame views
+│  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcuts: step_n_approx (O(1) n-step jump) + step_infinite (fixed point)
 ├─ modules/          family-generic composition + shared NN modules
@@ -77,7 +73,6 @@ src/
 │  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
 │  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate)
 │  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
-│  ├─ state_moments.rs  StateMoments sums (m2/m1/count) + pr / pr_complex(StatePairing)
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait + MambaCaches enum
 │  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
@@ -160,20 +155,6 @@ agree on values **and** gradients (asserted by `ssd_path` tests). Each family ha
 gets the custom backward. `backend_macros.rs` emits the per-backend impls;
 `combined_grad.rs` flattens `(y, final_state)` into the one tracked tensor Burn's
 `prep.finish` wants.
-
-### State moments / state-PR (Mamba-2 & Mamba-3)
-
-`forward_with_state_moments(_grad)` (blocks, cascading through Layer/Layers/
-networks/runtime enums) additionally returns `StateMoments` — exact pooled
-per-token SSM-state moments, matching a `step`-loop cache read — for state
-participation-ratio diagnostics/penalties (`pr`, `pr_complex`). Mamba-2:
-closed form off the chunkwise tensors (no state materialisation). Mamba-3: the
-state is **complex** (realified via the data-dependent rotation), so the
-observable is the **physical frame** — per-token de-rotated, what raw C reads
-— with the Hermitian `pr_complex(&Mamba3::state_pairing())`; no closed form
-exists, so `mamba3/moments/` materialises states chunk-locally with a custom
-recompute backward (gradients reach the rotation angles). `θ≡0` reduces it
-exactly to the Mamba-2 moment. Design doc: repo-root `mamba3.md`.
 
 ### The three families
 
