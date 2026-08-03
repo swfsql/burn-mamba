@@ -378,10 +378,10 @@ mod step {
     use super::*;
 
     /// One token's in-projection unpacked into the step-shaped pieces shared by
-    /// [`Mamba3::step_double_ssd`] and the constant-input shortcuts
-    /// ([`Mamba3::step_n_approx`] / [`Mamba3::step_infinite`]): the gate/value
-    /// streams, the **pre-rotation** QK-normed B/C, the raw rotation channels,
-    /// and the trapezoid coefficients.
+    /// [`Mamba3::step_double_ssd`] and the constant-input shortcut
+    /// [`Mamba3::step_infinite`]: the gate/value streams, the **pre-rotation**
+    /// QK-normed B/C, the raw rotation channels, and the trapezoid
+    /// coefficients.
     pub(crate) struct StepProjection {
         /// Gate stream `[batch, d_inner]`.
         pub z_bi: Tensor<2>,
@@ -395,8 +395,6 @@ mod step {
         pub rot_ba: Tensor<2>,
         /// `Δ` `[batch, nheads]`.
         pub dt_bh: Tensor<2>,
-        /// `Δ·A` (negative; the log-decay) `[batch, nheads]`.
-        pub da_bh: Tensor<2>,
         /// `α = exp(Δ·A)` `[batch, nheads]`.
         pub alpha_bh: Tensor<2>,
         /// `β = (1−λ)·Δ·α` `[batch, nheads]`.
@@ -451,7 +449,7 @@ mod step {
             // ── Discretisation + trapezoidal coefficients ─────────────────────
             let helpers::TrapezoidCoeffs {
                 dt: dt_bh,
-                da: da_bh,
+                da: _da_bh,
                 alpha: alpha_bh,
                 beta: beta_bh,
                 gamma: gamma_bh,
@@ -495,7 +493,6 @@ mod step {
                 c_bmhr,
                 rot_ba,
                 dt_bh,
-                da_bh,
                 alpha_bh,
                 beta_bh,
                 gamma_bh,
@@ -652,7 +649,6 @@ mod step {
                 c_bmhr,
                 rot_ba,
                 dt_bh,
-                da_bh: _,
                 alpha_bh,
                 beta_bh,
                 gamma_bh,

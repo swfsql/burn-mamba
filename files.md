@@ -124,16 +124,12 @@ element-wise math, no per-step `narrow`/`cat`) + `quat_cumprod_recalculated(q,in
 unit-quaternion VJP with parallel ops only.
 
 ### `mamba3/step_constant/` (`mod.rs`)
-Constant-input closed forms on `Mamba3`: `step_n_approx` (one ordinary `step` —
-consuming the cache's previous-token trapezoid term — then a geometric-series jump
-for the remaining `n−1`) and `step_infinite` (stationary fixed-point output; no
-cache in/out — the state orbits, the cumulative rotation cancels in the readout,
-factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`). Per RoPE pair the jump series is
-`e^{i(Θ₁+(K−1)θ̂)}(1−α^K e^{−iKθ̂})/(1−α e^{−iθ̂})(β+γe^{iθ̂})`; per quaternion block
-the same in the abelian subalgebra of the constant per-step `q` (`quat_pow` =
-wrapped `exp(k·g/2)`); unrotated channels use the scalar series `(β+γ)(1−α^K)/(1−α)`.
-Denominators floored by `div_eps`; the returned cache keeps the supplied pathway
-variant. Exact per block; `_approx` = stacked composition only (see CLAUDE.md).
+Constant-input closed form on `Mamba3`: `step_infinite` (stationary fixed-point
+output; no cache in/out — the state orbits, the cumulative rotation cancels in the
+readout, factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`). Per RoPE pair that factor is
+`(γ+βe^{−iθ̂})/(1−αe^{−iθ̂})`; per quaternion block the same in the abelian subalgebra
+of the constant per-step `q`; unrotated channels use the scalar series `(β+γ)/(1−α)`.
+Denominators floored by `div_eps`. Both rotation kinds, both SSD pathways.
 
 ---
 
@@ -143,19 +139,19 @@ Generic over `M = Mamba1|Mamba2|Mamba3`; the single home for layer/network compo
 plus shared NN blocks.
 
 - **`mod.rs`** — `trait MambaBlock` (assoc. `Cache`/`Caches: CacheStack`/`SsdPath`,
-  `block_forward`/`block_step`, `block_step_infinite`/`block_step_n_approx` with
-  panicking defaults — only Mamba-3 overrides, `zero_caches_{2d,3d}`; Mamba-1's
+  `block_forward`/`block_step`, `block_step_infinite` with a panicking default —
+  only Mamba-3 overrides, `zero_caches_{2d,3d}`; Mamba-1's
   `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the residual and class-latent
   insert are applied by `Layers`. `insert_latents` `pub(crate)`. Cursorless
-  `step_infinite`/`step_n_approx` mirror `step`.
+  `step_infinite` mirrors `step`.
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
   Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
   its own cache; owns the residual (`skip_residual`/`ignore_first/last_residual`).
   `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`). Cursorless
-  `step_infinite`/`step_n_approx` mirror `step` (incl. MultiGate; same residual/skip flags).
+  `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
   layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
@@ -163,7 +159,7 @@ plus shared NN blocks.
   `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
-  cache/path**; `step_infinite`/`step_n_approx` mirror `step` (enums included;
+  cache/path**; `step_infinite` mirrors `step` (enums included;
   Mamba-3 only, panic otherwise). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate) +
   `ignore_first/last_residual`.

@@ -66,7 +66,7 @@ src/
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
-│  └─ step_constant/ constant-input shortcuts: step_n_approx (O(1) n-step jump) + step_infinite (fixed point)
+│  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 ├─ modules/          family-generic composition + shared NN modules
 │  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
 │  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)); residual added by Layers
@@ -124,13 +124,10 @@ growing KV cache). `forward()` from any cache equals `step()` unrolled from that
 cache — parity on **outputs, final cache, and gradients** is what the test suites
 assert.
 
-Mamba-3 additionally exposes **`step_n_approx(x, n, cache)`** (closed-form jump
-equal to `n` consecutive `step`s of the same token — exact per block, the
-`_approx` refers to the stacked composition where deeper layers' inputs are held
-at their final value, error `O(αⁿ)`) and **`step_infinite(x)`** (the stationary
-fixed-point output; no cache — the state orbits, only the output converges; the
-limit composes exactly through `Layer`/`Layers`/networks and the runtime enums,
-which panic for Mamba-1/2).
+Mamba-3 additionally exposes **`step_infinite(x)`** (the stationary fixed-point
+output under a constant token; no cache — the state orbits, only the output
+converges; the limit composes exactly through `Layer`/`Layers`/networks and the
+runtime enums, which panic for Mamba-1/2).
 
 ### Caches
 
