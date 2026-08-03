@@ -268,7 +268,7 @@ pub fn train(
 
         let grads = GradientsParams::from_grads(loss.backward(), &model);
         let lr = config.lr.get_lr(step);
-        model = optim.step(lr, model, grads);
+        model = optim.step(lr.into(), model, grads);
 
         let last = step == config.num_steps;
         if step.is_power_of_two() || step % config.eval_every == 0 || last {

@@ -29,7 +29,10 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
         .expect("failed to load model");
 
     let dataset = StateTrackingDataset::new(NUM_EVAL, SEQ_LENGTH, EVAL_SEED);
-    let items: Vec<StateTrackingItem> = dataset.iter().collect();
+    let items: Vec<StateTrackingItem> = dataset
+        .iter()
+        .map(|item| item.expect("dataset item"))
+        .collect();
 
     let batcher = StateTrackingBatcher::default();
     // Put all items in one batch.

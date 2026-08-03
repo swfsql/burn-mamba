@@ -6,7 +6,7 @@
 use burn::data::dataloader::batcher::Batcher;
 use burn::prelude::*;
 use burn_dataset::{
-    Dataset, InMemDataset,
+    Dataset, DatasetError, InMemDataset,
     network::downloader::download_file_as_bytes,
     transform::{Mapper, MapperDataset},
 };
@@ -89,7 +89,7 @@ pub struct MnistDataset {
 }
 
 impl Dataset<MnistFlatItem> for MnistDataset {
-    fn get(&self, index: usize) -> Option<MnistFlatItem> {
+    fn get(&self, index: usize) -> Result<MnistFlatItem, DatasetError> {
         self.dataset.get(index)
     }
 

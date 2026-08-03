@@ -40,7 +40,7 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
 
     // Grab the first `NUM_SHOWN` test digits.
     let dataset = MnistDataset::test();
-    let items: Vec<_> = (0..NUM_SHOWN).filter_map(|i| dataset.get(i)).collect();
+    let items: Vec<_> = (0..NUM_SHOWN).filter_map(|i| dataset.get(i).ok()).collect();
     let labels: Vec<u8> = items.iter().map(|it| it.label).collect();
 
     let batcher = MnistBatcher::default();

@@ -21,7 +21,7 @@
 
 use burn::data::{
     dataloader::batcher::Batcher,
-    dataset::{Dataset, InMemDataset},
+    dataset::{Dataset, DatasetError, InMemDataset},
 };
 use burn::prelude::*;
 use burn::tensor::Int;
@@ -190,7 +190,7 @@ impl StateTrackingDataset {
 }
 
 impl Dataset<StateTrackingItem> for StateTrackingDataset {
-    fn get(&self, index: usize) -> Option<StateTrackingItem> {
+    fn get(&self, index: usize) -> Result<StateTrackingItem, DatasetError> {
         self.dataset.get(index)
     }
 

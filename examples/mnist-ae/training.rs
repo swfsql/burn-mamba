@@ -7,7 +7,7 @@
 pub use crate::common::{
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
-    training::TrainingConfig,
+    training::{TrainingConfig, metric_current},
 };
 use crate::model::{AeConfig, AeModel};
 use burn::prelude::*;
@@ -62,7 +62,7 @@ pub fn train(
     let mut metric_meta = MetricMetadata {
         progress: Progress::new(0, training_num_items, None),
         iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0)),
+        lr: Some(training_config.lr.get_lr(0).into()),
     };
 
     println!("running small initial validation...");
@@ -118,7 +118,7 @@ const NUM_SAMPLES: usize = 8;
 /// `device` — a fixed set so the saved reconstructions are comparable over time.
 fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
     let dataset = MnistDataset::test();
-    let items: Vec<_> = (0..n).filter_map(|i| dataset.get(i)).collect();
+    let items: Vec<_> = (0..n).filter_map(|i| dataset.get(i).ok()).collect();
     let labels: Vec<u8> = items.iter().map(|it| it.label).collect();
     let images = MnistBatcher::default().batch(items, device).images_norm();
     (images, labels)
@@ -154,6 +154,7 @@ pub fn epoch_train(
     // training loop
     for (mut b, batch) in dataloader_train
         .iter()
+        .map(|batch| batch.expect("dataloader batch"))
         .enumerate()
         .take(training_loop_limit)
     {
@@ -169,15 +170,15 @@ pub fn epoch_train(
         iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
 
         let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
-        training_model.0 = optim.step(lr, training_model.0, train_output.grads);
+        training_model.0 = optim.step(lr.into(), training_model.0, train_output.grads);
 
         println!(
             "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, lr {lr:0>6.2e}, it/s {:.2}",
             epoch,
             training_config.num_epochs,
             dataloader_train.num_items() / training_config.batch_size + 1,
-            loss_metric.value().current(),
-            iteration_speed_metric.value().current(),
+            metric_current(loss_metric.value()),
+            metric_current(iteration_speed_metric.value()),
         );
 
         if b % 100 == 0 {
@@ -214,7 +215,7 @@ pub fn epoch_train(
         "Epoch {}/{}, Avg Loss {:.4}",
         epoch,
         training_config.num_epochs,
-        loss_metric.running_value().current(),
+        metric_current(loss_metric.running_value()),
     );
 
     training_model.0
@@ -235,14 +236,19 @@ pub fn epoch_valid(
     let mut metric_meta = MetricMetadata {
         progress: Progress::new(0, valid_num_items, None),
         iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0)),
+        lr: Some(training_config.lr.get_lr(0).into()),
     };
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
 
     let valid_model = Wrap(valid_model, model_config.clone());
 
-    for (_b, batch) in dataloader_valid.iter().enumerate().take(valid_loop_limit) {
+    for (_b, batch) in dataloader_valid
+        .iter()
+        .map(|batch| batch.expect("dataloader batch"))
+        .enumerate()
+        .take(valid_loop_limit)
+    {
         let [batch_size, _, _, _] = batch.images.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
@@ -255,7 +261,7 @@ pub fn epoch_valid(
         "Epoch {}/{}, Avg Valid Loss {:.4}",
         epoch,
         training_config.num_epochs,
-        loss_metric.running_value().current(),
+        metric_current(loss_metric.running_value()),
     );
 }
 

@@ -3,7 +3,10 @@
 //! [`Wrap`] newtype adapts the example network to Burn's `TrainStep` /
 //! `InferenceStep` via an MSE regression head on the last timestep.
 
-pub use crate::common::{cli::AppArgs, training::TrainingConfig};
+pub use crate::common::{
+    cli::AppArgs,
+    training::{TrainingConfig, metric_current},
+};
 use crate::dataset::{
     NOISE_LEVEL, NUM_SEQUENCES, SEQ_LENGTH, SequenceBatch, SequenceBatcher, SequenceDataset,
 };
@@ -64,7 +67,7 @@ pub fn train(
     let mut metric_meta = MetricMetadata {
         progress: Progress::new(0, training_num_items, None),
         iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0)),
+        lr: Some(training_config.lr.get_lr(0).into()),
     };
 
     println!("running small initial validation...");
@@ -139,6 +142,7 @@ pub fn epoch_train(
     // training loop
     for (mut b, batch) in dataloader_train
         .iter()
+        .map(|batch| batch.expect("dataloader batch"))
         .enumerate()
         .take(training_loop_limit)
     {
@@ -154,15 +158,15 @@ pub fn epoch_train(
         iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
 
         let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
-        training_model.0 = optim.step(lr, training_model.0, train_output.grads);
+        training_model.0 = optim.step(lr.into(), training_model.0, train_output.grads);
 
         println!(
             "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, lr {lr:0>6.2e}, it/s {:.2}",
             epoch,
             training_config.num_epochs,
             dataloader_train.num_items() / training_config.batch_size + 1,
-            loss_metric.value().current(),
-            iteration_speed_metric.value().current(),
+            metric_current(loss_metric.value()),
+            metric_current(iteration_speed_metric.value()),
         );
 
         if b % 10 == 0 {
@@ -187,7 +191,7 @@ pub fn epoch_train(
         "Epoch {}/{}, Avg Loss {:.4}",
         epoch,
         training_config.num_epochs,
-        loss_metric.running_value().current(),
+        metric_current(loss_metric.running_value()),
     );
 
     training_model.0
@@ -208,7 +212,7 @@ pub fn epoch_valid(
     let mut metric_meta = burn::train::metric::MetricMetadata {
         progress: Progress::new(0, valid_num_items, None),
         iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0)),
+        lr: Some(training_config.lr.get_lr(0).into()),
     };
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
@@ -216,7 +220,12 @@ pub fn epoch_valid(
     let valid_model = Wrap(valid_model, model_config.clone());
 
     // validation loop
-    for (_b, batch) in dataloader_valid.iter().enumerate().take(valid_loop_limit) {
+    for (_b, batch) in dataloader_valid
+        .iter()
+        .map(|batch| batch.expect("dataloader batch"))
+        .enumerate()
+        .take(valid_loop_limit)
+    {
         let [batch_size, _, _] = batch.sequences.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
@@ -230,7 +239,7 @@ pub fn epoch_valid(
         "Epoch {}/{}, Avg Valid Loss {:.4}",
         epoch,
         training_config.num_epochs,
-        loss_metric.running_value().current(),
+        metric_current(loss_metric.running_value()),
     );
 }
 

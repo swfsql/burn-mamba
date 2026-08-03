@@ -25,7 +25,10 @@ pub fn infer(
         .expect("failed to load model");
 
     let dataset = SequenceDataset::new(batch_size, SEQ_LENGTH, NOISE_LEVEL);
-    let items: Vec<SequenceDatasetItem> = dataset.iter().collect();
+    let items: Vec<SequenceDatasetItem> = dataset
+        .iter()
+        .map(|item| item.expect("dataset item"))
+        .collect();
 
     let batcher = SequenceBatcher::default();
     // Put all items in one batch

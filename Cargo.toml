@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.29.0"
+version = "0.30.0"
 edition = "2024"
 
 [features]
@@ -45,19 +45,19 @@ dev-autotune = ["burn/autotune"]
 
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
-# burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
-burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true }
+burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
+# burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true }
 
 ### For the main branch. ###
-# burn = { version = "0.22.0-pre.1", default-features = false}
-# burn-cubecl = { version = "0.22.0-pre.1", default-features = false, optional = true}
-# burn-fusion = { version = "0.22.0-pre.1", default-features = false, optional = true}
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["extension"] }
-burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
-burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
+burn = { version = "0.22.0-pre.1", default-features = false, features = ["extension"]}
+burn-cubecl = { version = "0.22.0-pre.1", default-features = false, optional = true}
+burn-fusion = { version = "0.22.0-pre.1", default-features = false, optional = true}
+# burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["extension"] }
+# burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
+# burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, optional = true}
 
 ### For local development. ###
-# burn = { path = "../burn/crates/burn", default-features = false }
+# burn = { path = "../burn/crates/burn", default-features = false, features = ["extension"] }
 # burn-cubecl = { path = "../burn/crates/burn-cubecl", default-features = false, optional = true }
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
@@ -73,14 +73,14 @@ temp-dir = "0.1.16"
 image = "0.25.10"
 
 ### For the main branch. ###
-# burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}
-# burn-dataset = { version = "0.22.0-pre.1", features = ["network"] }
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}
-burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", features = ["network"] }
-# examples/common workaround for burn's param-id-on-load bug (see info/optim-load.md):
-# re-reads persisted ParamIds from records and GCs orphaned optimizer-state entries.
-burn-pack = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["std"] }
+burn = { version = "0.22.0-pre.1", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
+burn-dataset = { version = "0.22.0-pre.1", features = ["network"] }
+burn-pack = { version = "0.22.0-pre.1", default-features = false, features = ["std"] }
+# burn = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim"]}
+# burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", features = ["network"] }
+# burn-pack = { git = "https://github.com/tracel-ai/burn.git", rev = "d028234e2ccd75c5ca57d1c71ae74456e0e15c4f", default-features = false, features = ["std"] }
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
 # burn-dataset = { path = "../burn/crates/burn-dataset", default-features = false, features = ["network"] }
+# burn-pack = { path = "../burn/crates/burn-pack", default-features = false, features = ["std"] }

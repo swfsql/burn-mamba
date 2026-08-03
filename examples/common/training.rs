@@ -5,8 +5,15 @@
 //! AdamW defaults shared by the examples (epsilon, grad clipping, cautious
 //! weight decay).
 
-use burn::{optim::AdamWConfig, prelude::*};
+use burn::{optim::AdamWConfig, prelude::*, train::metric::NumericEntry};
 pub use burn_mamba::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
+
+/// Current value of a metric reading, or `NaN` when the metric has none yet
+/// (`Numeric::value` / `running_value` are `None` for metrics that only produce
+/// a value at epoch end).
+pub fn metric_current(entry: Option<NumericEntry>) -> f64 {
+    entry.map_or(f64::NAN, |entry| entry.current())
+}
 
 /// Common training hyperparameters shared by the examples.
 #[derive(Config, Debug)]
