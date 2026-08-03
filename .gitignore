@@ -1,2 +1,5 @@
 /target
+.claude/
+info/
 tmp/
+bacon.toml
