@@ -2,11 +2,9 @@
 //!
 //! When `logits = true` the loss is computed in a numerically stable way from
 //! raw logits via [`log_sigmoid`]; otherwise the inputs are treated as
-//! probabilities and the logs are floored by a dtype-aware epsilon (added
-//! *inside* the log) to avoid `−∞`.
+//! probabilities and the logs are clamped to avoid `−∞`.
 
 use crate::modules::log_sigmoid;
-use crate::utils::div_eps;
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -54,13 +52,9 @@ impl BinaryCrossEntropyLoss {
             (targets.neg() + 1.) * logits.clone() - log_sigmoid(logits)
         } else {
             // - (target * log(input) + (1 - target) * log(1 - input))
-            // eps *inside* each log (dtype-aware `div_eps`, so f16-safe) floors
-            // both the value and the `1/x` backward at a zero-probability class —
-            // unlike an outer clamp on the log output, which leaves `1/x` to blow
-            // up (and, at the former −100 floor, `≈e¹⁰⁰` overflows f32).
-            let eps = div_eps(logits.dtype());
-            (targets.clone() - 1) * (logits.clone().neg() + eps).log1p()
-                - targets * (logits + eps).log()
+            // https://github.com/tracel-ai/burn/issues/2739: clamp at -100.0 to avoid undefined values
+            (targets.clone() - 1) * logits.clone().neg().log1p().clamp_min(-100.0)
+                - targets * logits.log().clamp_min(-100.0)
         };
 
         loss.mean()

@@ -6,7 +6,6 @@
 //! and `target_logits` control whether each side is normalised (log-softmax /
 //! softmax) before the loss.
 
-use crate::utils::div_eps;
 use burn::module::Module;
 use burn::prelude::*;
 use burn::tensor::activation::{log_softmax, softmax};
@@ -65,11 +64,9 @@ impl CrossEntropyLoss {
             // Numerically stable via log-softmax
             log_softmax(logits, 1)
         } else {
-            // outputs are probabilities; eps *inside* the log (dtype-aware via
-            // `div_eps`, so f16-safe) floors both the value and the `1/x`
-            // backward for a zero-probability class (mirrors BCE's log(0)).
-            let eps = div_eps(logits.dtype());
-            (logits + eps).log()
+            // outputs are probabilities; clamp at -100.0 after log to avoid undefined values
+            // for zero-probability classes (mirrors the BCE treatment of log(0))
+            logits.log().clamp_min(-100.0)
         };
 
         let targets = if self.target_logits {

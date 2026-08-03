@@ -75,9 +75,7 @@ impl MultiGateResidual {
         match x.dtype() {
             DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
                 let eps = div_eps(x.dtype());
-                // eps *inside* the root (matches `RmsNorm`): the `sqrt` backward
-                // is otherwise singular for a zero-norm slice.
-                ((x.clone() * x).mean_dim(D - 1) + eps).sqrt()
+                (x.clone() * x).mean_dim(D - 1).sqrt() + eps
             }
             DType::F16 => {
                 use burn::tensor::ElementConversion;
@@ -86,12 +84,8 @@ impl MultiGateResidual {
                 // broadcasts against the `[‥, 1]` partial RMS.
                 let max = x.clone().no_grad().detach().abs().max().reshape([1; D]);
                 let x_ = x.clone() / (max.clone() + eps); // x_.abs() <= 1
-                // eps inside the root (matches `RmsNorm`'s F16 branch).
-                let rms_partial = ((x.clone() * x_).mean_dim(D - 1) + eps).sqrt();
-                // `max` is detached (no backward), but floor it too so an
-                // all-zero tensor (`max = 0`) yields a nonzero denominator
-                // rather than `0/0` in the caller — matching the F32 branch.
-                rms_partial * (max + eps).sqrt()
+                let rms_partial = (x.clone() * x_).mean_dim(D - 1).sqrt();
+                (rms_partial + eps) * max.sqrt()
             }
             _ => unreachable!("rms_denom expects a float dtype"),
         }
