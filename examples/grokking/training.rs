@@ -414,8 +414,8 @@ pub fn format_prs(state_prs: &[StatePr], weight_prs: &WeightPr) -> String {
         .iter()
         .map(|r| {
             format!(
-                "L{}H{} pooled {:.2} (m{:.1e}), final {:.2} (m{:.1e})",
-                r.layer, r.head, r.pooled_centered, r.pooled_trace, r.final_centered, r.final_trace
+                "L{}H{} pooled {:.2}, final {:.2}",
+                r.layer, r.head, r.pooled_centered, r.final_centered
             )
         })
         .collect();
@@ -500,15 +500,15 @@ fn append_pr(path: &std::path::Path, step: usize, state_prs: &[StatePr]) {
     if needs_header {
         writeln!(
             file,
-            "step,layer,head,pooled_centered,pooled_uncentered,final_centered,final_uncentered,pooled_trace,final_trace"
+            "step,layer,head,pooled_centered,pooled_uncentered,final_centered,final_uncentered"
         )
         .expect("failed csv header write");
     }
     for r in state_prs {
         writeln!(
             file,
-            "{step},{},{},{},{},{},{},{},{}",
-            r.layer, r.head, r.pooled_centered, r.pooled_uncentered, r.final_centered, r.final_uncentered, r.pooled_trace, r.final_trace,
+            "{step},{},{},{},{},{},{}",
+            r.layer, r.head, r.pooled_centered, r.pooled_uncentered, r.final_centered, r.final_uncentered,
         )
         .expect("failed csv write");
     }
