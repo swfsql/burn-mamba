@@ -144,12 +144,13 @@ fn mamba3_physical_states(
     }
 }
 
-/// Every layer's per-step state for `inputs_bs` `[n, s]`, stepped
-/// token-by-token on the plain backend — `ssm_bhpr` for Mamba-2, its
-/// **physical-frame** de-rotation for Mamba-3.
-/// `per_step[t][layer]`: `[batch, nheads, per_head_dim, state_rank]`.
-fn collect_states(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<Vec<Tensor<4>>> {
+/// Run `inputs_bs` `[n, s]` through the model token-by-token on the plain
+/// backend, reading every layer's per-step state — `ssm_bhpr` for Mamba-2,
+/// its **physical-frame** de-rotation for Mamba-3 — and return the N-side PR
+/// per (layer, head) (`PR_ℂ` for Mamba-3, per [`state_pairing_of`]).
+pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StatePr> {
     let [_n, s] = inputs_bs.dims();
+    let pairing = state_pairing_of(model);
     let mamba3_meta = match model {
         MambaVocabNet::Mamba3(net) => {
             let block = &net.layers.real_layers[0].mamba_block;
@@ -158,6 +159,7 @@ fn collect_states(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<Vec<
         _ => None,
     };
     let mut caches = None;
+    // per_step[t][layer]: `[batch, nheads, per_head_dim, state_rank]`
     let mut per_step: Vec<Vec<Tensor<4>>> = Vec::with_capacity(s);
     for t in 0..s {
         let x_b = inputs_bs.clone().narrow(1, t, 1).squeeze_dim::<1>(1);
@@ -173,16 +175,6 @@ fn collect_states(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<Vec<
         per_step.push(states);
         caches = Some(new_caches);
     }
-    per_step
-}
-
-/// Run `inputs_bs` `[n, s]` through the model token-by-token on the plain
-/// backend, reading every layer's per-step state — `ssm_bhpr` for Mamba-2,
-/// its **physical-frame** de-rotation for Mamba-3 — and return the N-side PR
-/// per (layer, head) (`PR_ℂ` for Mamba-3, per [`state_pairing_of`]).
-pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StatePr> {
-    let pairing = state_pairing_of(model);
-    let per_step = collect_states(model, inputs_bs);
 
     let n_layers = per_step[0].len();
     let [_b, nheads, _p, _r] = per_step[0][0].dims();
@@ -207,51 +199,6 @@ pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StateP
                 pooled_uncentered: pr_state(pooled_sn.clone(), &pairing, false),
                 final_centered: pr_state(final_sn.clone(), &pairing, true),
                 final_uncentered: pr_state(final_sn.clone(), &pairing, false),
-                pooled_trace: trace(pooled_sn),
-                final_trace: trace(final_sn),
-            });
-        }
-    }
-    out
-}
-
-/// The transposed observable of [`state_pr`]: per layer/head the same
-/// collected states are treated as samples of `per_head_dim`-vectors over
-/// (batch, step, state-rank channel `r`) — "how many directions of the
-/// **`p`-axis** does the state occupy". A rank-1-in-`r` state (`PR(r) ≈ 1`,
-/// `h ≈ u ⊗ w`) can still carry a full circuit in `u`; this reads its
-/// effective dimension. Always the plain real PR: the pairing structure lives
-/// on the `r` axis, and the `p`-side Gram `Σ_r h·hᵀ` is invariant under any
-/// `r`-side rotation (so cache vs physical frame is immaterial here).
-pub fn state_pr_p_axis(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StatePr> {
-    let per_step = collect_states(model, inputs_bs);
-
-    let n_layers = per_step[0].len();
-    let [_b, nheads, _p, _r] = per_step[0][0].dims();
-    let mut out = Vec::with_capacity(n_layers * nheads);
-    for layer in 0..n_layers {
-        for head in 0..nheads {
-            // Each step's samples: `r`-channels stacked over the batch, `[b·r, p]`.
-            let step_samples: Vec<Tensor<2>> = per_step
-                .iter()
-                .map(|states| {
-                    let bhpr = states[layer].clone();
-                    let [b, _h, p, r] = bhpr.dims();
-                    bhpr.narrow(1, head, 1)
-                        .reshape([b, p, r])
-                        .swap_dims(1, 2)
-                        .reshape([b * r, p])
-                })
-                .collect();
-            let final_sn = step_samples.last().expect("at least one step").clone();
-            let pooled_sn = Tensor::cat(step_samples, 0);
-            out.push(StatePr {
-                layer,
-                head,
-                pooled_centered: pr(pooled_sn.clone(), true),
-                pooled_uncentered: pr(pooled_sn.clone(), false),
-                final_centered: pr(final_sn.clone(), true),
-                final_uncentered: pr(final_sn.clone(), false),
                 pooled_trace: trace(pooled_sn),
                 final_trace: trace(final_sn),
             });

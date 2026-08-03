@@ -37,18 +37,6 @@ pub fn infer(
     let state_prs = diagnostics::state_pr(&model, &diag_inputs);
     let weight_prs = diagnostics::weight_pr(&model, config.p);
     println!("{}", format_prs(&state_prs, &weight_prs));
-    for s in diagnostics::state_pr_p_axis(&model, &diag_inputs) {
-        println!(
-            "state PR p-axis [L{}H{} pooled {:.2}/{:.2}c (m{:.1e}), final {:.2}/{:.2}c]",
-            s.layer,
-            s.head,
-            s.pooled_uncentered,
-            s.pooled_centered,
-            s.pooled_trace,
-            s.final_uncentered,
-            s.final_centered,
-        );
-    }
 
     // A few held-out examples.
     let sample = test_split.head(8);
