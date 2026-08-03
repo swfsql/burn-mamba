@@ -100,19 +100,5 @@
 <a href=#100 id=100 data-nosnippet>100</a>        assert_step_compatible(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="string">"Layer"</span>);
 <a href=#101 id=101 data-nosnippet>101</a>        <span class="self">self</span>.mamba_block.block_step_infinite(<span class="self">self</span>.norm.forward(x))
 <a href=#102 id=102 data-nosnippet>102</a>    }
-<a href=#103 id=103 data-nosnippet>103</a>
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Closed-form jump equivalent to `n` cursorless [`Self::step`] calls on
-<a href=#105 id=105 data-nosnippet>105</a>    /// the same constant token, **without** the residual (see
-<a href=#106 id=106 data-nosnippet>106</a>    /// [`MambaBlock::block_step_n_approx`]).
-<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">pub fn </span>step_n_approx(
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#109 id=109 data-nosnippet>109</a>        x: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#110 id=110 data-nosnippet>110</a>        n: usize,
-<a href=#111 id=111 data-nosnippet>111</a>        cache: <span class="prelude-ty">Option</span>&lt;M::Cache&gt;,
-<a href=#112 id=112 data-nosnippet>112</a>    ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, M::Cache) {
-<a href=#113 id=113 data-nosnippet>113</a>        assert_step_compatible(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="string">"Layer"</span>);
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="self">self</span>.mamba_block
-<a href=#115 id=115 data-nosnippet>115</a>            .block_step_n_approx(<span class="self">self</span>.norm.forward(x), n, cache)
-<a href=#116 id=116 data-nosnippet>116</a>    }
-<a href=#117 id=117 data-nosnippet>117</a>}
+<a href=#103 id=103 data-nosnippet>103</a>}
 </code></pre></div></section></main></body></html>
