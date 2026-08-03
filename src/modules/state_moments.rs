@@ -96,58 +96,17 @@ impl StateMoments {
 
         // tr Σ via an identity mask; tr(Σ²) = ‖Σ‖²_F (Σ is symmetric).
         let eye_11rr = Tensor::<2>::eye(state_rank, &device).unsqueeze::<4>();
-        let tr_bh = (sigma_bhrr.clone() * eye_11rr.clone())
+        let tr_bh = (sigma_bhrr.clone() * eye_11rr)
             .sum_dim(3)
             .sum_dim(2)
             .reshape([batch, nheads]);
-        // `PR = (tr Σ)² / tr(Σ²)`. Computed via the trace-normalised
-        // `Σ̂ = Σ / tr(Σ).detach()`, keeping **both** traces of `Σ̂`:
-        //
-        //     PR = tr(Σ̂)² / tr(Σ̂²).
-        //
-        // With `c = tr(Σ).detach()` a frozen scalar, the `c²` cancels between
-        // numerator and denominator, so this equals `tr(Σ)²/tr(Σ²)` **as a
-        // function of Σ** — identical value *and* exact gradient — while every
-        // differentiated intermediate stays O(1). Two subtleties that a naive
-        // rewrite gets wrong:
-        //   - Keep the numerator `tr(Σ̂)²`: it is numerically 1, but with the
-        //     normaliser detached its *gradient* w.r.t. Σ is not zero — it
-        //     carries PR's rank-reducing (trace-tangential) component.
-        //     Collapsing to `1/tr(Σ̂²)` drops it, leaving only the radial
-        //     (magnitude) direction, orthogonal to ∇PR — a penalty that no
-        //     longer reduces rank (see `pr_gradient_matches_direct_formula`).
-        //   - Differentiating *through* `tr(Σ)` instead (no detach) is
-        //     value/grad-correct but puts `tr(Σ²)²` in the backward, which
-        //     underflows fp32 to 0 (→ NaN gradient) once the state magnitude
-        //     `tr(Σ) ≲ 1e-11` — which weight decay drives it toward. The
-        //     detached O(1) form is finite at every representable magnitude
-        //     (see `pr_gradient_finite_as_magnitude_shrinks`).
-        //
-        // Two floors, for two quantities at very different scales. The
-        // normaliser `tr Σ` is a *magnitude* that weight decay drives down to —
-        // and below — `div_eps` (the crate's O(1)-calibrated negligibility
-        // threshold): flooring it there would corrupt PR across the live
-        // operating range, so it is floored only at the dtype's smallest
-        // positive normal (`finfo().min_positive`), firing solely for an
-        // all-zero state (`Σ ≡ 0`, e.g. a dead head — then `Σ̂ = 0/ε = 0`, no
-        // `0/0`). `tr(Σ̂²)` is scale-normalised (`∈ [1/r, 1]` for any nonzero Σ)
-        // and nears zero only for `Σ ≡ 0`, so `div_eps(dtype)` is the correct
-        // dtype-aware guard there (cf. `MseLoss`'s fp16 path).
-        let dtype = self.m2_bhrr.dtype();
-        let min_positive = dtype.finfo().expect("state moments are a float dtype").min_positive;
-        let scale_bh = tr_bh.clamp_min(min_positive).detach();
-        let sigma_hat = sigma_bhrr / scale_bh.reshape([batch, nheads, 1, 1]);
-        let tr1_hat_bh = (sigma_hat.clone() * eye_11rr)
-            .sum_dim(3)
-            .sum_dim(2)
-            .reshape([batch, nheads]);
-        let tr2_hat_bh = sigma_hat
+        let tr2_bh = sigma_bhrr
             .powf_scalar(2.0)
             .sum_dim(3)
             .sum_dim(2)
             .reshape([batch, nheads])
-            .clamp_min(crate::utils::div_eps(dtype));
-        tr1_hat_bh.clone() * tr1_hat_bh / tr2_hat_bh
+            .clamp_min(1e-12);
+        tr_bh.clone() * tr_bh / tr2_bh
     }
 
     /// Raw uncentered state magnitude `tr Σ = trace(m2)/count` per
