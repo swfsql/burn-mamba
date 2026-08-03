@@ -94,7 +94,33 @@ Two design points that make the comparison valid:
   test accuracy only sees the trained length; the curve is what separates a
   length-bound fit from the length-independent conveyor.
 
-## Run
+## Frontier mode (`--frontier`) — the primary face
+
+The paper's state-tracking-synthetics protocol (its Parity setup, one
+solvability rung up): **per-position CE** on the running product, every
+batch **freshly sampled** (one curriculum-drawn length per step — no split,
+no memorization, nothing to grok), a **length curriculum**
+(`--min-len 3`, max walking `--max-len-start 12 → --max-len-end 48` over the
+run), and **length-extrapolation eval** (`--eval-len 64`; the paper trains
+40→160 and evals at 256). `--batch-size 256` fresh words per step.
+
+With every position supervised, the per-position curve is a true
+**frontier**: the model tracks correctly to some depth and fails beyond it.
+The capability claim is then direct — the quaternion frontier should
+advance to full depth and extrapolate past the trained lengths, while the
+abelian arm's should stall shallow. `metrics.csv` maps `train_acc` → the
+in-range (`max_len_end`) per-token accuracy and `test_acc` → the
+extrapolation (`eval_len`) one; `positions.csv` holds the extrapolation
+frontier curve. Deliberately **single-layer** (one `SU(2)` layer suffices
+in principle; depth would blur the contrast). A same-harness abelian
+control (parity / mod-n, where `Complex2D` should *succeed*) is planned.
+
+```bash
+cargo run --release --example state-tracking --features backend-cuda,fusion -- \
+    --training -a examples/state-tracking/tmp/<run> -- --frontier --quat --wd 0.1 --steps 20000
+```
+
+## Run (grokking protocol)
 
 ```bash
 # the two arms (fresh dirs under tmp/):
@@ -145,8 +171,29 @@ reaching **train 0.43 / test 0.38** and — hypothesis 2's signature, with no
 PR pressure applied — the state consolidating into a **single quaternion
 block** (`PR_ℂ` 2.9 → 1.2 while the state magnitude grows 14×; head rank
 ≈ 2, a phase-plane read-out). The complex twin under the identical phase-1
-heat is **flat at train 0.14 / test 0.11 through 20k+** (extension to 40k
-running). Numbers will move; the CSVs in `tmp/` are the record.
+heat is **flat at train 0.14 / test 0.11 through 40k** — 3× the
+quaternion's escape budget, loss unmoved at 3.31, `PR_ℂ` diffuse (≈ 4) with
+decaying state magnitude: **hypothesis 2's head-to-head confirmed** at this
+setting, single seed. Remaining: the quaternion decode is unfinished at
+0.38 (refinement, not search — longer cooling, hypothesis 3's PR-pressure
+arm, and seeds are the follow-ups; deliberately **single-layer** throughout:
+one `SU(2)` layer should suffice for `2I`-composition, and depth would blur
+what the contrast demonstrates). The CSVs in `tmp/` are the record.
+
+**Frontier mode (2026-07-11, wd 0.1, 20k each, single seed).** The complex
+arm (`tmp/frontier-complex-wd0.1`) jumps to depth ≈ 5 within 2.5k steps and
+never advances again (a prefix-hash shortcut wall; `PR_ℂ` diffuse 4–5.7).
+The quaternion arm (`tmp/frontier-quat-wd0.1`) marches **monotonically** —
+20k frontier `100/100/100/87/66/35 @6`, still climbing, `PR_ℂ → 1.44`
+conveyor signature: the headline contrast, visible directly in the two
+`positions.csv`. A full-PR continuation (20k→40k, weight-PR `all` +
+state-PR, both λ 0.03) then behaved as **a finisher, not a driver**: in
+~4k steps it cashed in the nearly-built depths (solid 100% through depth 5,
+`PR_ℂ` 1.44 → 1.07, state magnitude ×15) and was flat for the remaining
+16k (depth 6 ≈ 0.73, depth 7 ≈ 0.37) — consistent with the escape-scaffold
+observation above: clamping rank removes the slack the march searches with.
+Hypothesis 3 is therefore refined: PR pressure *consolidates* an existing
+conveyor but does not extend the frontier.
 
 ## See also
 

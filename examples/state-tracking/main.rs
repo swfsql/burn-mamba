@@ -88,12 +88,21 @@ pub fn launch(app_args: &AppArgs) {
     app_args.save_model_config(&model_config);
 
     if app_args.training {
-        training::train(
-            training_config.clone(),
-            model_config.clone(),
-            autodiff_device,
-            app_args,
-        );
+        if training_config.frontier {
+            training::train_frontier(
+                training_config.clone(),
+                model_config.clone(),
+                autodiff_device,
+                app_args,
+            );
+        } else {
+            training::train(
+                training_config.clone(),
+                model_config.clone(),
+                autodiff_device,
+                app_args,
+            );
+        }
     }
 
     if app_args.inference {
@@ -148,6 +157,20 @@ struct Overrides {
     /// `--state-pr-lambda <f64>`: state-PR penalty coefficient (0 = off;
     /// needs the chunkwise path; spell negatives as `--state-pr-lambda=-0.01`).
     state_pr_lambda: Option<f64>,
+    /// `--frontier`: paper-protocol mode — per-position CE on fresh sampled
+    /// words with a length curriculum + extrapolation eval (no split).
+    frontier: bool,
+    /// `--batch-size <usize>`: frontier sampled words per step.
+    batch_size: Option<usize>,
+    /// `--min-len <usize>`: frontier minimum word length.
+    min_len: Option<usize>,
+    /// `--max-len-start <usize>`, `--max-len-end <usize>`: frontier length
+    /// curriculum endpoints.
+    max_len_start: Option<usize>,
+    /// (see `max_len_start`)
+    max_len_end: Option<usize>,
+    /// `--eval-len <usize>`: frontier extrapolation-eval word length.
+    eval_len: Option<usize>,
     /// `--d-model <usize>`: model width (fresh model configs only).
     d_model: Option<usize>,
     /// `--expand <usize>`: `d_inner = expand·d_model` (fresh configs only).
@@ -185,6 +208,12 @@ impl Overrides {
             l2_lambda: pargs.opt_value_from_str("--l2-lambda").unwrap(),
             noise_lambda: pargs.opt_value_from_str("--noise-lambda").unwrap(),
             state_pr_lambda: pargs.opt_value_from_str("--state-pr-lambda").unwrap(),
+            frontier: pargs.contains("--frontier"),
+            batch_size: pargs.opt_value_from_str("--batch-size").unwrap(),
+            min_len: pargs.opt_value_from_str("--min-len").unwrap(),
+            max_len_start: pargs.opt_value_from_str("--max-len-start").unwrap(),
+            max_len_end: pargs.opt_value_from_str("--max-len-end").unwrap(),
+            eval_len: pargs.opt_value_from_str("--eval-len").unwrap(),
             d_model: pargs.opt_value_from_str("--d-model").unwrap(),
             expand: pargs.opt_value_from_str("--expand").unwrap(),
             state_rank: pargs.opt_value_from_str("--state-rank").unwrap(),
@@ -251,6 +280,24 @@ impl Overrides {
         }
         if let Some(state_pr_lambda) = self.state_pr_lambda {
             config.state_pr_lambda = state_pr_lambda;
+        }
+        if self.frontier {
+            config.frontier = true;
+        }
+        if let Some(batch_size) = self.batch_size {
+            config.batch_size = batch_size;
+        }
+        if let Some(min_len) = self.min_len {
+            config.min_len = min_len;
+        }
+        if let Some(max_len_start) = self.max_len_start {
+            config.max_len_start = max_len_start;
+        }
+        if let Some(max_len_end) = self.max_len_end {
+            config.max_len_end = max_len_end;
+        }
+        if let Some(eval_len) = self.eval_len {
+            config.eval_len = eval_len;
         }
     }
 }

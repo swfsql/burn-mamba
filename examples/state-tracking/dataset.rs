@@ -127,8 +127,7 @@ impl Group {
     }
 
     /// Materialize word `index ∈ [0, g^seq_len)` (its base-`g` digits,
-    /// most-significant first) as anchor-led token ids plus the per-position
-    /// running-product classes, appended to the flat buffers.
+    /// most-significant first) via [`Group::push_digits`].
     fn push_word(
         &self,
         index: usize,
@@ -143,11 +142,23 @@ impl Group {
             digits[j] = rem % NUM_GENERATORS;
             rem /= NUM_GENERATORS;
         }
+        self.push_digits(&digits, seqs, pos_targets)
+    }
+
+    /// Materialize a generator word as anchor-led token ids plus the
+    /// per-position running-product classes, appended to the flat buffers;
+    /// returns the final-product class.
+    fn push_digits(
+        &self,
+        digits: &[usize],
+        seqs: &mut Vec<i32>,
+        pos_targets: &mut Vec<i32>,
+    ) -> i32 {
         seqs.push(ANCHOR_SYMBOL as i32);
         pos_targets.push(self.identity_class);
         let mut state = [0usize, 1, 2, 3, 4];
         let mut label = self.identity_class;
-        for &g in &digits {
+        for &g in digits {
             state = compose(&self.generators[g], &state); // Pₜ = g ∘ Pₜ₋₁
             label = self.index_of[&state] as i32;
             seqs.push(g as i32);
@@ -230,6 +241,18 @@ impl Split {
         }
         Tensor::<1>::from_floats(flat.as_slice(), device).reshape([self.len(), VOCAB_SIZE])
     }
+
+    /// Dense one-hot targets `[n · (seq_len + 1), VOCAB_SIZE]` over **every**
+    /// position (row-major over `(word, position)`) — the frontier mode's
+    /// per-position loss targets, mass at `CLASS_BASE + running class`.
+    pub fn pos_targets_onehot(&self, device: &Device) -> Tensor<2> {
+        let rows = self.pos_targets.len();
+        let mut flat = vec![0.0f32; rows * VOCAB_SIZE];
+        for (i, &class) in self.pos_targets.iter().enumerate() {
+            flat[i * VOCAB_SIZE + CLASS_BASE + class as usize] = 1.0;
+        }
+        Tensor::<1>::from_floats(flat.as_slice(), device).reshape([rows, VOCAB_SIZE])
+    }
 }
 
 /// `NUM_GENERATORS^seq_len`, asserting the enumeration cap.
@@ -270,6 +293,26 @@ pub fn build(seq_len: usize, train_fraction: f64, split_seed: u64) -> (Split, Sp
     }
     let [train, test] = splits;
     (train, test)
+}
+
+/// `num` freshly sampled random words of length `seq_len` (uniform i.i.d.
+/// generators, seeded) — the **frontier mode**'s data source: every batch is
+/// new, so memorization is impossible and no train/test split exists; the
+/// enumeration cap does not apply.
+pub fn sample_split(num: usize, seq_len: usize, seed: u64) -> Split {
+    use rand::Rng as _;
+    let group = Group::new();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut split = Split { seq_len, seqs: Vec::new(), labels: Vec::new(), pos_targets: Vec::new() };
+    let mut digits = vec![0usize; seq_len];
+    for _ in 0..num {
+        for d in digits.iter_mut() {
+            *d = rng.random_range(0..NUM_GENERATORS);
+        }
+        let label = group.push_digits(&digits, &mut split.seqs, &mut split.pos_targets);
+        split.labels.push(label);
+    }
+    split
 }
 
 /// The diagnostic eval set: all words when they fit in `max_n` (the PR
