@@ -97,13 +97,13 @@ where
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches) {
-        let (x, caches, _) = self.forward_impl(x, caches, ssd_path, None);
+        let (x, caches, _) = self.forward_impl(x, caches, ssd_path, false);
         (x, caches)
     }
 
     /// [`Self::forward`], additionally returning each (virtual) layer's pooled
-    /// per-token SSM-state moments, detached — one entry per virtual layer,
-    /// indexed like the cache slots (see
+    /// per-token SSM-state moments — one entry per virtual layer, indexed like
+    /// the cache slots (see
     /// [`MambaBlock::block_forward_with_state_moments`]).
     pub fn forward_with_state_moments(
         &self,
@@ -111,20 +111,7 @@ where
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
     ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
-        let (x, caches, moments) = self.forward_impl(x, caches, ssd_path, Some(true));
-        (x, caches, moments.expect("moments were requested"))
-    }
-
-    /// [`Self::forward_with_state_moments`] with every layer's moments left
-    /// attached to the autodiff graph (see
-    /// [`MambaBlock::block_forward_with_state_moments_grad`]).
-    pub fn forward_with_state_moments_grad(
-        &self,
-        x: Tensor<3>,
-        caches: Option<M::Caches>,
-        ssd_path: M::SsdPath,
-    ) -> (Tensor<3>, M::Caches, Vec<StateMoments>) {
-        let (x, caches, moments) = self.forward_impl(x, caches, ssd_path, Some(false));
+        let (x, caches, moments) = self.forward_impl(x, caches, ssd_path, true);
         (x, caches, moments.expect("moments were requested"))
     }
 
@@ -133,12 +120,11 @@ where
         x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
-        // `None` — no moments; `Some(detach)` — collect them, detached or not.
-        with_moments: Option<bool>,
+        with_moments: bool,
     ) -> (Tensor<3>, M::Caches, Option<Vec<StateMoments>>) {
         let mut x = self.insert_latents(x);
         let n = self.n_virtual_count();
-        let mut moments = with_moments.map(|detach| (Vec::with_capacity(n), detach));
+        let mut moments = with_moments.then(|| Vec::with_capacity(n));
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
@@ -210,7 +196,7 @@ where
                 }
             }
         }
-        (x, M::Caches::from_slots(slots), moments.map(|(collected, _)| collected))
+        (x, M::Caches::from_slots(slots), moments)
     }
 
     /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies

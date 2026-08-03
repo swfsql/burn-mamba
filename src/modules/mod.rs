@@ -81,23 +81,6 @@ pub trait MambaBlock: Module {
         )
     }
 
-    /// [`Self::block_forward_with_state_moments`] with the moments left
-    /// **attached** to the autodiff graph, for a differentiable loss term
-    /// over them (e.g. a state-PR penalty). The default implementation
-    /// panics — only Mamba-2 currently provides it (see
-    /// [`Mamba2::forward_with_state_moments_grad`](crate::mamba2::prelude::Mamba2::forward_with_state_moments_grad)).
-    fn block_forward_with_state_moments_grad(
-        &self,
-        x: Tensor<3>,
-        cache: Option<Self::Cache>,
-        ssd_path: Self::SsdPath,
-    ) -> (Tensor<3>, Self::Cache, StateMoments) {
-        let _ = (x, cache, ssd_path);
-        unimplemented!(
-            "block_forward_with_state_moments_grad: currently only implemented for Mamba-2"
-        )
-    }
-
     /// Single-token recurrent step — decoding.
     fn block_step(&self, x: Tensor<2>, cache: Option<Self::Cache>) -> (Tensor<2>, Self::Cache);
 

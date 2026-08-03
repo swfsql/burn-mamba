@@ -56,7 +56,7 @@ impl<M: MambaBlock> Layer<M> {
     }
 
     /// [`Self::forward`], additionally returning the block's pooled per-token
-    /// SSM-state moments, detached (see
+    /// SSM-state moments (see
     /// [`MambaBlock::block_forward_with_state_moments`]).
     pub fn forward_with_state_moments(
         &self,
@@ -69,38 +69,19 @@ impl<M: MambaBlock> Layer<M> {
             .block_forward_with_state_moments(normed, cache, ssd_path)
     }
 
-    /// [`Self::forward_with_state_moments`] with the moments left attached to
-    /// the autodiff graph (see
-    /// [`MambaBlock::block_forward_with_state_moments_grad`]).
-    pub fn forward_with_state_moments_grad(
-        &self,
-        x: Tensor<3>,
-        cache: Option<M::Cache>,
-        ssd_path: M::SsdPath,
-    ) -> (Tensor<3>, M::Cache, StateMoments) {
-        let normed = self.norm.forward(x);
-        self.mamba_block
-            .block_forward_with_state_moments_grad(normed, cache, ssd_path)
-    }
-
     /// [`Self::forward`] that pushes the block's state moments into `moments`
-    /// when collection is active (`Some(detach)` — detached or attached) —
-    /// the single code path the [`Layers`](crate::modules::Layers) loop
-    /// drives for all three modes.
+    /// when collection is active (`Some`) — the single code path the
+    /// [`Layers`](crate::modules::Layers) loop drives for both modes.
     pub(crate) fn forward_maybe_moments(
         &self,
         x: Tensor<3>,
         cache: Option<M::Cache>,
         ssd_path: M::SsdPath,
-        moments: &mut Option<(Vec<StateMoments>, bool)>,
+        moments: &mut Option<Vec<StateMoments>>,
     ) -> (Tensor<3>, M::Cache) {
         match moments {
-            Some((collected, detach)) => {
-                let (y, c, m) = if *detach {
-                    self.forward_with_state_moments(x, cache, ssd_path)
-                } else {
-                    self.forward_with_state_moments_grad(x, cache, ssd_path)
-                };
+            Some(collected) => {
+                let (y, c, m) = self.forward_with_state_moments(x, cache, ssd_path);
                 collected.push(m);
                 (y, c)
             }
