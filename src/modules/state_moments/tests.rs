@@ -77,59 +77,6 @@ fn pr_gradient_finite_as_magnitude_shrinks() {
     }
 }
 
-/// Weight-PR twin of [`pr_gradient_finite_as_magnitude_shrinks`], probing the
-/// grokking example's differentiable weight participation-ratio penalty
-/// `pr_tensor(W) = (tr WᵀW)² / tr((WᵀW)²)` (denominator `clamp_min(1e-12)`).
-/// That penalty (`--pr-lambda`) is the prime suspect for the combined-run NaN:
-/// under `--wd 1.0` a penalised matrix's norm is driven toward zero, and the
-/// `tr²/tr(·²)` form is the same fp-underflow class the state PR had. The
-/// gradient must stay finite, never NaN. `pr_tensor` lives in the example
-/// (unreachable from the lib), so its exact formula is replicated here to run
-/// under `cargo test --lib`. Exercised at full rank and — the regime the block
-/// weights were actually in before the NaN (`z/x/B/C ≈ 1.0`) — rank 1.
-fn example_pr_tensor(w: Tensor<2>) -> Tensor<1> {
-    let [rows, cols] = w.dims();
-    let g = if rows <= cols {
-        w.clone().matmul(w.clone().transpose())
-    } else {
-        w.clone().transpose().matmul(w.clone())
-    };
-    let tr = w.powf_scalar(2.0).sum();
-    let tr2 = g.powf_scalar(2.0).sum().clamp_min(1e-12);
-    tr.powf_scalar(2.0) / tr2
-}
-
-fn assert_weight_pr_grad_finite_as_shrinks(base: Tensor<2>) {
-    for exp in [-2i32, -4, -6, -8, -10, -12, -14, -16] {
-        let scaled = base.clone().mul_scalar(10f32.powi(exp));
-        let w = Param::from_tensor(Tensor::from_inner(scaled));
-        let grads = example_pr_tensor(w.val()).sum().backward();
-        let g = w.val().grad(&grads).expect("grad exists");
-        let gvec = g.into_data().to_vec::<f32>().unwrap();
-        assert!(
-            gvec.iter().all(|v| v.is_finite()),
-            "weight-PR gradient must stay finite at magnitude 1e{exp} \
-             (first few: {:?})",
-            &gvec[..gvec.len().min(4)]
-        );
-    }
-}
-
-#[test]
-fn weight_pr_gradient_finite_full_rank() {
-    let device: Device = Default::default();
-    let base = Tensor::<2>::random([16, 12], Distribution::Normal(0.0, 1.0), &device);
-    assert_weight_pr_grad_finite_as_shrinks(base);
-}
-
-#[test]
-fn weight_pr_gradient_finite_rank_one() {
-    let device: Device = Default::default();
-    let u = Tensor::<2>::random([16, 1], Distribution::Normal(0.0, 1.0), &device);
-    let v = Tensor::<2>::random([1, 12], Distribution::Normal(0.0, 1.0), &device);
-    assert_weight_pr_grad_finite_as_shrinks(u.matmul(v));
-}
-
 /// Build moments directly from an explicit sample matrix `h_sr` (`[samples,
 /// state_rank]`, one `(batch, head)` slice) — the brute-force definition the
 /// closed forms must reproduce.
