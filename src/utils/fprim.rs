@@ -80,16 +80,6 @@ impl<B: Backend, const D: usize> F<B, D> {
         F(B::float_exp(self.0))
     }
 
-    /// Element-wise `cos`.
-    pub fn cos(self) -> Self {
-        F(B::float_cos(self.0))
-    }
-
-    /// Element-wise `sin`.
-    pub fn sin(self) -> Self {
-        F(B::float_sin(self.0))
-    }
-
     /// Sum along `dim`, keeping it as a size-1 axis (rank-preserving).
     pub fn sum_dim(self, dim: usize) -> Self {
         F(B::float_sum_dim(self.0, dim))

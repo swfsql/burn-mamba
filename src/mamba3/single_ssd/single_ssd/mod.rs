@@ -24,8 +24,8 @@ use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
+use crate::modules::Silu;
 use crate::modules::sanity as san;
-use crate::modules::{Silu, StateMoments};
 use burn::prelude::*;
 
 impl Mamba3 {
@@ -47,26 +47,6 @@ impl Mamba3 {
         cache: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
-        let (out_bsm, cache, _) = self.forward_single_ssd_impl(input_bsm, cache, ssd_path, None);
-        (out_bsm, cache)
-    }
-
-    /// [`Self::forward_single_ssd`] optionally computing the physical-frame
-    /// state moments from the pre-SSD seam (`None` — no moments; `Some(detach)`
-    /// — compute them, detached or attached). The moments never touch the
-    /// single-pass kernel machinery: they rebuild the γ/β-scaled shifted
-    /// injections from the same sequence-level tensors (see
-    /// `Mamba3::build_moments_input`), with the initial state taken from the
-    /// cache's `ssm_bhpr` directly — **not** the kernel's boundary-β-seeded
-    /// initial state, whose seed the β stream's first element already carries.
-    #[allow(non_snake_case)]
-    pub(crate) fn forward_single_ssd_impl(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba3SingleSsdCache>,
-        ssd_path: &Mamba3SsdPath,
-        with_moments: Option<bool>,
-    ) -> (Tensor<3>, Mamba3SingleSsdCache, Option<StateMoments>) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
@@ -132,7 +112,7 @@ impl Mamba3 {
             dt: dt_bsh,
             da: da_bsh,
             alpha: _alpha_bsh,
-            beta: beta_bsh,
+            beta: _beta_bsh,
             gamma: gamma_bsh,
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
@@ -194,7 +174,7 @@ impl Mamba3 {
         // [`rotate_bc_forward`]; the single-pass SSD core below is
         // rotation-agnostic — it only ever consumes the rotated B̄/C̄ (the RoPE
         // factoring `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ` holds for either algebra).
-        let (b_bsmhr, c_bsmhr, new_rotation, rotation_seq) = rotate_bc_forward(
+        let (b_bsmhr, c_bsmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh.clone(),
             cache.rotation.clone(),
@@ -244,27 +224,6 @@ impl Mamba3 {
                     state_rank,
                 ]);
         san(&initial_state_bhpr);
-
-        // ── Physical-frame state moments (optional; pre-SSD seam) ─────────────
-        // Rebuilt from the raw sequence-level tensors (never from the kernel's
-        // composite `scale`/strict-mask form): the double-form combined
-        // injections with the cache's un-seeded `ssm_bhpr` as initial state.
-        let moments = with_moments.map(|detach| {
-            let input = self.build_moments_input(
-                x_bshp.clone(),
-                b_bsmhr.clone(),
-                gamma_bsh.clone(),
-                beta_bsh,
-                da_bsh.clone(),
-                cache.v_state_bhp.clone(),
-                cache.k_state_bmhr.clone(),
-                cache.ssm_bhpr.clone(),
-                rotation_seq,
-                ssd_path.chunk_len_or_optimal(state_rank, per_head_dim),
-            );
-            let input = if detach { input.detached() } else { input };
-            input.state_moments_phys_recalculated(sequence)
-        });
 
         // ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
@@ -390,7 +349,7 @@ impl Mamba3 {
         // matches the double-ssd cache convention so the two inter-convert.
         cache.rotation = new_rotation;
 
-        (out_bsm, cache, moments)
+        (out_bsm, cache)
     }
 }
 

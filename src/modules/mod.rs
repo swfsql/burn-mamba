@@ -43,7 +43,7 @@ pub use multi_gate::{
     MultiGate, MultiGateResidual, MultiGateResidualConfig, Residuals, ResidualsConfig,
 };
 pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
-pub use state_moments::{StateMoments, StatePairing};
+pub use state_moments::StateMoments;
 
 /// Per-family block interface the generic [`Layer`]/[`Layers`] delegate to.
 pub trait MambaBlock: Module {
@@ -65,12 +65,10 @@ pub trait MambaBlock: Module {
     /// [`Self::block_forward`], additionally returning the exact pooled
     /// moments of the block's per-token SSM states ([`StateMoments`] — the
     /// inputs of a state participation ratio), matching what a
-    /// [`Self::block_step`] loop reading the cache would accumulate (for
-    /// Mamba-3, the **physical-frame** states). The default implementation
-    /// panics — Mamba-2 provides the closed form
-    /// ([`Mamba2::forward_with_state_moments`](crate::mamba2::prelude::Mamba2::forward_with_state_moments))
-    /// and Mamba-3 the serial chunkwise de-rotated one
-    /// (`Mamba3::forward_with_state_moments`).
+    /// [`Self::block_step`] loop reading the cache would accumulate. The
+    /// default implementation panics — only Mamba-2 currently provides the
+    /// closed form (see
+    /// [`Mamba2::forward_with_state_moments`](crate::mamba2::prelude::Mamba2::forward_with_state_moments)).
     fn block_forward_with_state_moments(
         &self,
         x: Tensor<3>,
@@ -79,14 +77,14 @@ pub trait MambaBlock: Module {
     ) -> (Tensor<3>, Self::Cache, StateMoments) {
         let _ = (x, cache, ssd_path);
         unimplemented!(
-            "block_forward_with_state_moments: only implemented for Mamba-2 and Mamba-3"
+            "block_forward_with_state_moments: currently only implemented for Mamba-2"
         )
     }
 
     /// [`Self::block_forward_with_state_moments`] with the moments left
     /// **attached** to the autodiff graph, for a differentiable loss term
     /// over them (e.g. a state-PR penalty). The default implementation
-    /// panics — Mamba-2 and Mamba-3 provide it (see
+    /// panics — only Mamba-2 currently provides it (see
     /// [`Mamba2::forward_with_state_moments_grad`](crate::mamba2::prelude::Mamba2::forward_with_state_moments_grad)).
     fn block_forward_with_state_moments_grad(
         &self,
@@ -96,7 +94,7 @@ pub trait MambaBlock: Module {
     ) -> (Tensor<3>, Self::Cache, StateMoments) {
         let _ = (x, cache, ssd_path);
         unimplemented!(
-            "block_forward_with_state_moments_grad: only implemented for Mamba-2 and Mamba-3"
+            "block_forward_with_state_moments_grad: currently only implemented for Mamba-2"
         )
     }
 

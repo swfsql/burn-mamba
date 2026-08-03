@@ -162,186 +162,6 @@ impl RotationState {
             RotationState::Quaternion(q) => crate::modules::sanity(q),
         }
     }
-
-    /// The **physical-frame** view of a cache's SSM state: rotate the `r` axis
-    /// by the inverse of the rotation absorbed into B/C (negated cumulative
-    /// angle / un-conjugated cumulative quaternion), so the result is what
-    /// raw, un-rotated C reads — the step-side counterpart of
-    /// [`RotationSeq::derotate_states`], used by the stepwise diagnostics and
-    /// the forward↔step moments parity tests.
-    ///
-    /// `rope_dim` / `rotate_pairwise` select the [`Angle`](RotationState::Angle)
-    /// pairing (pass the block's `rope_dim` and `mimo_rank == 1`); the
-    /// quaternion width comes from the accumulator itself.
-    ///
-    /// # Shapes
-    /// - `ssm_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn derotate_state(
-        &self,
-        ssm_bhpr: Tensor<4>,
-        rope_dim: usize,
-        rotate_pairwise: bool,
-    ) -> Tensor<4> {
-        let [batch, nheads, per_head_dim, _state_rank] = ssm_bhpr.dims();
-        match self {
-            RotationState::Angle(cum_bha) => {
-                if rope_dim == 0 {
-                    return ssm_bhpr;
-                }
-                let num_angles = cum_bha.dims()[2];
-                let ang_bhpa = cum_bha
-                    .clone()
-                    .unsqueeze_dim::<4>(2)
-                    .expand([batch, nheads, per_head_dim, num_angles]);
-                apply_rope_partial::<4>(ssm_bhpr, -ang_bhpa, rope_dim, rotate_pairwise)
-            }
-            RotationState::Quaternion(q_bhj4) => {
-                let blocks = q_bhj4.dims()[2];
-                let q_bhpj4 = q_bhj4
-                    .clone()
-                    .unsqueeze_dim::<5>(2)
-                    .expand([batch, nheads, per_head_dim, blocks, 4]);
-                rotate_blocks_partial::<4, 5>(ssm_bhpr, q_bhpj4, blocks * 4)
-            }
-        }
-    }
-}
-
-/// Per-token cumulative rotation of one `forward` call — the sequence-resolved
-/// counterpart of the cache's final [`RotationState`], exported by
-/// [`rotate_bc_forward`] (it is already materialised there) for the
-/// physical-frame state moments: the per-token states must be de-rotated by
-/// the **inverse** of the rotation absorbed into B/C (see
-/// [`Self::derotate_states`]). Carries its own application metadata so a
-/// consumer cannot re-derive a mismatched pairing layout.
-#[derive(Debug, Clone)]
-pub enum RotationSeq {
-    /// Abelian cumulative RoPE angles.
-    Angle {
-        /// Cumulative angles `[batch, sequence, nheads, num_rope_angles]`
-        /// (un-wrapped — every consumer is `2π`-periodic).
-        cum_bsha: Tensor<4>,
-        /// Number of rotated B/C entries (`0` ⇒ the rotation is the identity).
-        rope_dim: usize,
-        /// Interleaved/NeoX (SISO) vs half-and-half/GPT-J (MIMO) pairing —
-        /// exactly the flag [`apply_rope_partial`] was called with.
-        rotate_pairwise: bool,
-    },
-    /// Quaternion cumulative rotation `[batch, sequence, nheads, blocks, 4]`;
-    /// rotates the first `4·blocks` state-rank entries as consecutive blocks.
-    Quaternion {
-        /// Cumulative unit quaternions (the `quat_cumprod` output).
-        cum_bshj4: Tensor<5>,
-    },
-}
-
-impl RotationSeq {
-    /// A value-identical copy detached from any autodiff graph.
-    pub fn detached(&self) -> Self {
-        match self {
-            RotationSeq::Angle {
-                cum_bsha,
-                rope_dim,
-                rotate_pairwise,
-            } => RotationSeq::Angle {
-                cum_bsha: cum_bsha.clone().detach(),
-                rope_dim: *rope_dim,
-                rotate_pairwise: *rotate_pairwise,
-            },
-            RotationSeq::Quaternion { cum_bshj4 } => RotationSeq::Quaternion {
-                cum_bshj4: cum_bshj4.clone().detach(),
-            },
-        }
-    }
-
-    /// Zero-pad the sequence axis to `padded_len` (the SSD chunk padding).
-    /// Pad values are never read un-masked: the moments mask excludes pad
-    /// positions before accumulation.
-    pub fn pad_to(self, padded_len: usize) -> Self {
-        match self {
-            RotationSeq::Angle {
-                cum_bsha,
-                rope_dim,
-                rotate_pairwise,
-            } => {
-                let [batch, sequence, nheads, num_angles] = cum_bsha.dims();
-                let cum_bsha = if sequence == padded_len {
-                    cum_bsha
-                } else {
-                    let pad = Tensor::zeros(
-                        [batch, padded_len - sequence, nheads, num_angles],
-                        &cum_bsha.device(),
-                    );
-                    Tensor::cat(vec![cum_bsha, pad], 1)
-                };
-                RotationSeq::Angle {
-                    cum_bsha,
-                    rope_dim,
-                    rotate_pairwise,
-                }
-            }
-            RotationSeq::Quaternion { cum_bshj4 } => {
-                let [batch, sequence, nheads, blocks, _four] = cum_bshj4.dims();
-                let cum_bshj4 = if sequence == padded_len {
-                    cum_bshj4
-                } else {
-                    let pad = Tensor::zeros(
-                        [batch, padded_len - sequence, nheads, blocks, 4],
-                        &cum_bshj4.device(),
-                    );
-                    Tensor::cat(vec![cum_bshj4, pad], 1)
-                };
-                RotationSeq::Quaternion { cum_bshj4 }
-            }
-        }
-    }
-
-    /// Rotate the `state_rank` axis of per-token cache-frame states **back to
-    /// the physical frame** — the inverse of the rotation [`rotate_bc_forward`]
-    /// absorbed into B/C, so the result `cₜ` is what raw, un-rotated C reads
-    /// (`yₜ = C̃ₜᵀh̃ₜ = Cₜᵀcₜ`):
-    ///
-    /// - [`Angle`](RotationSeq::Angle): B/C were rotated by `+θₜ`, so the state
-    ///   gets `R(−θₜ)` (negated angles).
-    /// - [`Quaternion`](RotationSeq::Quaternion): B/C were left-multiplied by
-    ///   `conj(Qₜ)`, so the state gets `Qₜ` **un-conjugated**.
-    ///
-    /// `start` is the offset of this chunk of states within the rotation's
-    /// sequence axis.
-    ///
-    /// # Shapes
-    /// - `states_blhpr`: `[batch, len, nheads, per_head_dim, state_rank]`
-    /// - output: same shape.
-    pub fn derotate_states(&self, states_blhpr: Tensor<5>, start: usize) -> Tensor<5> {
-        let [batch, len, nheads, per_head_dim, _state_rank] = states_blhpr.dims();
-        match self {
-            RotationSeq::Angle {
-                cum_bsha,
-                rope_dim,
-                rotate_pairwise,
-            } => {
-                if *rope_dim == 0 {
-                    return states_blhpr;
-                }
-                let num_angles = cum_bsha.dims()[3];
-                let ang_blhpa = cum_bsha
-                    .clone()
-                    .narrow(1, start, len)
-                    .unsqueeze_dim::<5>(3)
-                    .expand([batch, len, nheads, per_head_dim, num_angles]);
-                apply_rope_partial::<5>(states_blhpr, -ang_blhpa, *rope_dim, *rotate_pairwise)
-            }
-            RotationSeq::Quaternion { cum_bshj4 } => {
-                let blocks = cum_bshj4.dims()[3];
-                let q_blhpj4 = cum_bshj4
-                    .clone()
-                    .narrow(1, start, len)
-                    .unsqueeze_dim::<6>(3)
-                    .expand([batch, len, nheads, per_head_dim, blocks, 4]);
-                rotate_blocks_partial::<5, 6>(states_blhpr, q_blhpj4, blocks * 4)
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -655,10 +475,8 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
 // ---------------------------------------------------------------------------
 
 /// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
-/// rotation, returning the rotated projections, the new cumulative
-/// [`RotationState`] to store in the cache, and the per-token cumulative
-/// rotation ([`RotationSeq`] — already materialised here; consumed by the
-/// physical-frame state moments, dropped otherwise).
+/// rotation, returning the rotated projections and the new cumulative
+/// [`RotationState`] to store in the cache.
 ///
 /// Branches on [`RotationKind`]:
 /// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
@@ -684,7 +502,7 @@ pub fn rotate_bc_forward(
     c_bsmhr: Tensor<5>,
     kind: RotationKind,
     rope_dim: usize,
-) -> (Tensor<5>, Tensor<5>, RotationState, RotationSeq) {
+) -> (Tensor<5>, Tensor<5>, RotationState) {
     let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
     match kind {
         RotationKind::Complex2D => {
@@ -711,16 +529,10 @@ pub fn rotate_bc_forward(
             let c = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
             let last = wrap_angle(
                 cum_angles_bsha
-                    .clone()
                     .narrow(1, sequence - 1, 1)
                     .squeeze_dim::<3>(1),
             );
-            let seq = RotationSeq::Angle {
-                cum_bsha: cum_angles_bsha,
-                rope_dim,
-                rotate_pairwise,
-            };
-            (b, c, RotationState::Angle(last), seq)
+            (b, c, RotationState::Angle(last))
         }
         RotationKind::Quaternion4D => {
             let prev_q_bhj4 = prev.quaternion();
@@ -749,18 +561,12 @@ pub fn rotate_bc_forward(
             );
             // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
             // broadcast over the mimo_rank axis.
-            let conj_bsmhj4 = quat_conj(cum_bshj4.clone())
+            let conj_bsmhj4 = quat_conj(cum_bshj4)
                 .unsqueeze_dim::<6>(2)
                 .expand([batch, sequence, mimo_rank, nheads, blocks, 4]);
             let b = rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4.clone(), rope_width);
             let c = rotate_blocks_partial::<5, 6>(c_bsmhr, conj_bsmhj4, rope_width);
-            let seq = RotationSeq::Quaternion { cum_bshj4 };
-            (
-                b,
-                c,
-                RotationState::Quaternion(quat_normalize(final_bhj4)),
-                seq,
-            )
+            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
         }
     }
 }

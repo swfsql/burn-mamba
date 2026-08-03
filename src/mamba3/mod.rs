@@ -25,7 +25,6 @@ pub mod single_ssd;
 pub mod cache;
 pub(crate) mod helpers;
 pub mod mamba3;
-pub mod moments;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
@@ -75,8 +74,7 @@ pub mod prelude {
 
     pub use cache::{Mamba3Cache, Mamba3Caches};
     pub use mamba3::{Mamba3, Mamba3Config};
-    pub use moments::Mamba3MomentsInput;
     pub use quat_scan::Mamba3QuatScanBackendExt;
-    pub use rotation::{RotationKind, RotationSeq, RotationState};
+    pub use rotation::{RotationKind, RotationState};
     pub use ssd_path::Mamba3SsdPath;
 }
