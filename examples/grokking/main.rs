@@ -26,8 +26,8 @@ use training::{ConstantLr, GrokkingConfig, Lr, PrPenaltyTarget};
 
 /// The modular-addition dataset and its deterministic pair split.
 pub mod dataset;
-/// State/weight participation-ratio diagnostics (shared, `common/`).
-pub use common::diagnostics;
+/// State/weight participation-ratio diagnostics.
+pub mod diagnostics;
 /// Post-training evaluation and sample predictions.
 pub mod inference;
 /// The example's `model_config()`.

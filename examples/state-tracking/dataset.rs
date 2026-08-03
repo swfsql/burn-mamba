@@ -1,54 +1,60 @@
-//! The `A₅` word-problem dataset, in the **grokking protocol**: all
-//! `NUM_GENERATORS^SEQ_LEN` generator words are enumerated, deterministically
-//! split into train/test **by word** with a seeded `ChaCha8Rng` (stable across
-//! platforms and `rand` versions), and the supervised target is **only the
-//! final running product** — a `NUM_CLASSES`-way classification read at the
-//! last position, exactly like the modular-addition example (mod-p addition
-//! *is* this task on the cyclic group; here the group is the non-solvable
-//! `A₅`, the smallest group whose word problem is `NC¹`-complete by
-//! Barrington's theorem).
+//! The `A₅` state-tracking dataset.
 //!
-//! The per-position running products are still generated, but as an **eval
-//! probe** (how deep does composition hold), never as supervision.
+//! Each item is a leading **reference token** followed by a random sequence of
+//! `A₅` generators (a 5-cycle and a 3-cycle); the per-position target is the
+//! *running product* so far — the index of the cumulative permutation in the
+//! enumerated `A₅` (a 60-way classification at every step). Predicting it
+//! requires tracking composition in the non-solvable group `A₅`, which is the
+//! capability the quaternion rotation demonstrates (see the crate-level docs in
+//! `main.rs`).
 //!
-//! ## Vocabulary layout
+//! ## Why the reference token
 //!
-//! One shared vocabulary serves both sides: ids `0..NUM_GENERATORS` are the
-//! generator symbols, [`ANCHOR_SYMBOL`] is the leading anchor token, and the
-//! `A₅` element classes live at `CLASS_BASE..VOCAB_SIZE` (they never occur as
-//! inputs). Keeping the input symbols first lets the shared weight
-//! diagnostics read the input-alphabet embedding rows directly.
-//!
-//! ## Why the anchor token
-//!
-//! The Mamba-3 rotation rotates both `B` and `C`, so the SSD readout at
-//! position `t` for a key at position `i` sees only the **relative** rotation
+//! The Mamba-3 rotation rotates both `B` and `C`, so the SSD readout at position
+//! `t` for a key at position `i` sees only the **relative** rotation
 //! `Rₜ⋯Rᵢ₊₁ = Pₜ Pᵢ⁻¹` (RoPE-style), never the **absolute** running product
-//! `Pₜ = Rₜ⋯R₁` the task asks for. A fixed anchor symbol at position 0
-//! (rotation learned to identity, `P₀ = I`) anchors the readout: its
-//! contribution `Cₜᵀ Pₜ B₀ x₀` carries the absolute product.
+//! `Pₜ = Rₜ⋯R₁` that the task asks for. Prepending a fixed reference symbol at
+//! position 0 (whose rotation the model learns to be the identity, `P₀ = I`)
+//! anchors the readout: its contribution `Cₜᵀ Pₜ B₀ x₀` carries the absolute
+//! product. Without it both rotations are confined to relative information and
+//! collapse at the same shallow depth, hiding the quaternion's advantage.
 
+use burn::data::{
+    dataloader::batcher::Batcher,
+    dataset::{Dataset, InMemDataset},
+};
 use burn::prelude::*;
-use rand::SeedableRng;
-use rand::seq::SliceRandom;
-use rand_chacha::ChaCha8Rng;
+use burn::tensor::Int;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Number of generator symbols (a 5-cycle and a 3-cycle) that generate `A₅`.
+///
+/// Note on difficulty: with `g` generators the input-prefix space grows as
+/// `g^depth`, so an eval prefix is likely *already seen in training* up to a
+/// "memorisation frontier" of ≈ `log_g(NUM_TRAIN)`. Below that depth even the
+/// abelian model scores by memorising; the genuine abelian-vs-non-abelian gap
+/// only appears *beyond* it (where composition is required). At this tiny
+/// single-layer scale the gap is modest — see the README.
 pub const NUM_GENERATORS: usize = 2;
-/// Input alphabet size: the generators plus the leading anchor token.
+/// Input alphabet size: the generators plus one leading reference token.
 pub const NUM_SYMBOLS: usize = NUM_GENERATORS + 1;
-/// Token id of the anchor (BOS / identity-reference) symbol.
-pub const ANCHOR_SYMBOL: usize = NUM_GENERATORS;
+/// Input channel of the reference (BOS / identity-anchor) token.
+pub const REFERENCE_SYMBOL: usize = NUM_GENERATORS;
 /// Number of `A₅` elements, i.e. the number of output classes.
 pub const NUM_CLASSES: usize = 60;
-/// Vocabulary id of `A₅` class `c` is `CLASS_BASE + c`.
-pub const CLASS_BASE: usize = NUM_SYMBOLS;
-/// One shared vocabulary: input symbols first, then the element classes.
-pub const VOCAB_SIZE: usize = NUM_SYMBOLS + NUM_CLASSES;
+/// Number of generators per sequence; the full token sequence is one longer (the
+/// leading reference token), i.e. `SEQ_LENGTH + 1`.
+pub const SEQ_LENGTH: usize = 12;
+/// Number of training sequences.
+pub const NUM_TRAIN: usize = 512;
+/// Number of evaluation sequences.
+pub const NUM_EVAL: usize = 128;
 
-/// Hard cap on `NUM_GENERATORS^seq_len` — everything is enumerated in memory.
-const ENUMERATION_CAP: usize = 1 << 20;
+/// Dataset RNG seed for the training split.
+pub const TRAIN_SEED: u64 = 0xC0FFEE;
+/// Dataset RNG seed for the evaluation split (distinct from training).
+pub const EVAL_SEED: u64 = 0xBEEF;
 
 // ---------------------------------------------------------------------------
 // A₅ group: enumerate the 60 even permutations of {0,..,4} and compose them.
@@ -63,8 +69,8 @@ pub fn generators() -> [[usize; 5]; NUM_GENERATORS] {
     ]
 }
 
-/// `5!` permutations of `[0,1,2,3,4]`, keeping the even ones (sign `+1`),
-/// sorted so the class indices are stable across runs.
+/// `n!` permutations of `[0,1,2,3,4]`, keeping the even ones (sign `+1`), sorted
+/// so the class indices are stable across runs.
 pub fn even_permutations() -> Vec<[usize; 5]> {
     let mut perms = Vec::new();
     let mut p = [0usize, 1, 2, 3, 4];
@@ -108,188 +114,126 @@ fn compose(a: &[usize; 5], b: &[usize; 5]) -> [usize; 5] {
     r
 }
 
-/// Class indexer over [`even_permutations`], shared by the split builders.
-struct Group {
-    generators: [[usize; 5]; NUM_GENERATORS],
-    index_of: HashMap<[usize; 5], usize>,
-    identity_class: i32,
+/// Tiny deterministic RNG (SplitMix64) so the dataset is reproducible without
+/// pulling in an external dependency.
+struct Lcg(u64);
+impl Lcg {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next_u64() % n as u64) as usize
+    }
 }
 
-impl Group {
-    fn new() -> Self {
+// ---------------------------------------------------------------------------
+// Dataset / batcher
+// ---------------------------------------------------------------------------
+
+/// One generated sequence: the input symbol at each position and the matching
+/// per-position target class (the running product's `A₅` index). Position 0 is
+/// always the [`REFERENCE_SYMBOL`] (identity anchor); positions `1..=SEQ_LENGTH`
+/// are generators.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StateTrackingItem {
+    /// Input symbol at each position (`0..NUM_SYMBOLS`), length `SEQ_LENGTH + 1`.
+    pub symbols: Vec<usize>,
+    /// Target `A₅`-element class at each position, length `SEQ_LENGTH + 1`.
+    pub targets: Vec<i64>,
+}
+
+/// An in-memory dataset of randomly generated [`StateTrackingItem`]s.
+pub struct StateTrackingDataset {
+    dataset: InMemDataset<StateTrackingItem>,
+}
+
+impl StateTrackingDataset {
+    /// Generate `num_sequences` random sequences (a leading reference token then
+    /// `seq_length` generators) and their running-product targets, seeded
+    /// deterministically by `seed`.
+    pub fn new(num_sequences: usize, seq_length: usize, seed: u64) -> Self {
         let perms = even_permutations();
         assert_eq!(perms.len(), NUM_CLASSES, "A₅ has 60 elements");
         let index_of: HashMap<[usize; 5], usize> =
             perms.iter().enumerate().map(|(i, p)| (*p, i)).collect();
+        let generators = generators();
         let identity = [0usize, 1, 2, 3, 4];
-        let identity_class = index_of[&identity] as i32;
-        Group { generators: generators(), index_of, identity_class }
-    }
+        let identity_class = index_of[&identity] as i64;
 
-    /// Materialize word `index ∈ [0, g^seq_len)` (its base-`g` digits,
-    /// most-significant first) as anchor-led token ids plus the per-position
-    /// running-product classes, appended to the flat buffers.
-    fn push_word(
-        &self,
-        index: usize,
-        seq_len: usize,
-        seqs: &mut Vec<i32>,
-        pos_targets: &mut Vec<i32>,
-    ) -> i32 {
-        // digits, most-significant first (as the grokking dataset does)
-        let mut digits = vec![0usize; seq_len];
-        let mut rem = index;
-        for j in (0..seq_len).rev() {
-            digits[j] = rem % NUM_GENERATORS;
-            rem /= NUM_GENERATORS;
-        }
-        seqs.push(ANCHOR_SYMBOL as i32);
-        pos_targets.push(self.identity_class);
-        let mut state = [0usize, 1, 2, 3, 4];
-        let mut label = self.identity_class;
-        for &g in &digits {
-            state = compose(&self.generators[g], &state); // Pₜ = g ∘ Pₜ₋₁
-            label = self.index_of[&state] as i32;
-            seqs.push(g as i32);
-            pos_targets.push(label);
-        }
-        label
-    }
-}
+        let mut rng = Lcg(seed);
+        let items = (0..num_sequences)
+            .map(|_| {
+                let mut state = identity;
+                let mut symbols = Vec::with_capacity(seq_length + 1);
+                let mut targets = Vec::with_capacity(seq_length + 1);
+                // position 0: the reference token anchors the readout at identity.
+                symbols.push(REFERENCE_SYMBOL);
+                targets.push(identity_class);
+                for _ in 0..seq_length {
+                    let g = rng.below(NUM_GENERATORS);
+                    state = compose(&generators[g], &state); // Pₜ = g ∘ Pₜ₋₁
+                    symbols.push(g);
+                    targets.push(index_of[&state] as i64);
+                }
+                StateTrackingItem { symbols, targets }
+            })
+            .collect();
 
-// ---------------------------------------------------------------------------
-// Splits (full-batch tensors, as in the grokking example)
-// ---------------------------------------------------------------------------
-
-/// One side of the train/test split: `n` anchor-led token sequences, their
-/// final-product labels, and the per-position running products (eval probe).
-pub struct Split {
-    /// Generators per word; the token sequence is one longer (the anchor).
-    pub seq_len: usize,
-    /// Token ids, row-major flat `[n · (seq_len + 1)]`.
-    pub seqs: Vec<i32>,
-    /// Final running-product class (`0..NUM_CLASSES`), aligned with rows.
-    pub labels: Vec<i32>,
-    /// Running-product class at every position, flat `[n · (seq_len + 1)]`.
-    pub pos_targets: Vec<i32>,
-}
-
-impl Split {
-    /// Number of examples.
-    pub fn len(&self) -> usize {
-        self.labels.len()
-    }
-
-    /// Whether the split holds no examples.
-    pub fn is_empty(&self) -> bool {
-        self.labels.is_empty()
-    }
-
-    /// Tokens per sequence (`seq_len + 1`, the anchor included).
-    pub fn tokens(&self) -> usize {
-        self.seq_len + 1
-    }
-
-    /// The first `n` examples as their own split (for sample displays).
-    pub fn head(&self, n: usize) -> Split {
-        let n = n.min(self.len());
-        let s = self.tokens();
-        Split {
-            seq_len: self.seq_len,
-            seqs: self.seqs[..n * s].to_vec(),
-            labels: self.labels[..n].to_vec(),
-            pos_targets: self.pos_targets[..n * s].to_vec(),
+        Self {
+            dataset: InMemDataset::new(items),
         }
     }
+}
 
-    /// Token ids as an Int tensor `[n, seq_len + 1]`.
-    pub fn inputs_tensor(&self, device: &Device) -> Tensor<2, Int> {
-        Tensor::<1, Int>::from_ints(self.seqs.as_slice(), device)
-            .reshape([self.len(), self.tokens()])
+impl Dataset<StateTrackingItem> for StateTrackingDataset {
+    fn get(&self, index: usize) -> Option<StateTrackingItem> {
+        self.dataset.get(index)
     }
 
-    /// Final-product class labels as an Int tensor `[n]` (`0..NUM_CLASSES`).
-    pub fn labels_tensor(&self, device: &Device) -> Tensor<1, Int> {
-        Tensor::from_ints(self.labels.as_slice(), device)
+    fn len(&self) -> usize {
+        self.dataset.len()
     }
+}
 
-    /// Per-position running-product classes as an Int tensor
-    /// `[n, seq_len + 1]` (`0..NUM_CLASSES`) — the depth probe's targets.
-    pub fn pos_targets_tensor(&self, device: &Device) -> Tensor<2, Int> {
-        Tensor::<1, Int>::from_ints(self.pos_targets.as_slice(), device)
-            .reshape([self.len(), self.tokens()])
-    }
+/// Collates [`StateTrackingItem`]s into a [`StateTrackingBatch`], building the
+/// one-hot symbol inputs.
+#[derive(Clone, Debug, Default)]
+pub struct StateTrackingBatcher {}
 
-    /// One-hot float targets `[n, VOCAB_SIZE]` for the cross-entropy loss:
-    /// mass at vocab id `CLASS_BASE + label` (the class region; the model
-    /// learns to suppress the symbol logits).
-    pub fn targets_tensor(&self, device: &Device) -> Tensor<2> {
-        let mut flat = vec![0.0f32; self.len() * VOCAB_SIZE];
-        for (i, &label) in self.labels.iter().enumerate() {
-            flat[i * VOCAB_SIZE + CLASS_BASE + label as usize] = 1.0;
+/// A batch of one-hot symbol sequences and their per-position target classes.
+#[derive(Clone, Debug)]
+pub struct StateTrackingBatch {
+    /// One-hot input symbol at each position, `[batch, seq, NUM_SYMBOLS]`.
+    pub inputs: Tensor<3>,
+    /// Per-position target class, `[batch, seq]`.
+    pub targets: Tensor<2, Int>,
+}
+
+impl Batcher<StateTrackingItem, StateTrackingBatch> for StateTrackingBatcher {
+    fn batch(&self, items: Vec<StateTrackingItem>, device: &Device) -> StateTrackingBatch {
+        let mut inputs: Vec<Tensor<2>> = Vec::with_capacity(items.len());
+        let mut targets: Vec<Tensor<1, Int>> = Vec::with_capacity(items.len());
+
+        for item in items.iter() {
+            let seq = item.symbols.len();
+            // one-hot encode the symbol at each position → [seq, NUM_SYMBOLS]
+            let mut one_hot = vec![0.0f32; seq * NUM_SYMBOLS];
+            for (t, &s) in item.symbols.iter().enumerate() {
+                one_hot[t * NUM_SYMBOLS + s] = 1.0;
+            }
+            inputs.push(
+                Tensor::<1>::from_floats(one_hot.as_slice(), device).reshape([seq, NUM_SYMBOLS]),
+            );
+            targets.push(Tensor::<1, Int>::from_ints(item.targets.as_slice(), device));
         }
-        Tensor::<1>::from_floats(flat.as_slice(), device).reshape([self.len(), VOCAB_SIZE])
+
+        StateTrackingBatch {
+            inputs: Tensor::stack(inputs, 0),
+            targets: Tensor::stack(targets, 0),
+        }
     }
-}
-
-/// `NUM_GENERATORS^seq_len`, asserting the enumeration cap.
-fn space_size(seq_len: usize) -> usize {
-    let total = NUM_GENERATORS
-        .checked_pow(seq_len as u32)
-        .expect("g^seq_len overflows usize");
-    assert!(
-        total <= ENUMERATION_CAP,
-        "g^seq_len = {total} exceeds the enumeration cap ({ENUMERATION_CAP}); pick a smaller seq_len"
-    );
-    total
-}
-
-/// Enumerate all `NUM_GENERATORS^seq_len` words, shuffle them with
-/// `ChaCha8Rng(split_seed)`, and return `(train, test)` where train takes the
-/// first `round(train_fraction·total)` words (the splits are disjoint by word).
-pub fn build(seq_len: usize, train_fraction: f64, split_seed: u64) -> (Split, Split) {
-    let total = space_size(seq_len);
-    let mut indices: Vec<usize> = (0..total).collect();
-    let mut rng = ChaCha8Rng::seed_from_u64(split_seed);
-    indices.shuffle(&mut rng);
-
-    let n_train = (total as f64 * train_fraction).round() as usize;
-    assert!(
-        n_train >= 1 && n_train < total,
-        "train_fraction {train_fraction} must leave both splits non-empty"
-    );
-    let group = Group::new();
-    let mut splits = [
-        Split { seq_len, seqs: Vec::new(), labels: Vec::new(), pos_targets: Vec::new() },
-        Split { seq_len, seqs: Vec::new(), labels: Vec::new(), pos_targets: Vec::new() },
-    ];
-    for (i, &index) in indices.iter().enumerate() {
-        let split = &mut splits[usize::from(i >= n_train)];
-        let label = group.push_word(index, seq_len, &mut split.seqs, &mut split.pos_targets);
-        split.labels.push(label);
-    }
-    let [train, test] = splits;
-    (train, test)
-}
-
-/// The diagnostic eval set: all words when they fit in `max_n` (the PR
-/// estimator wants everything), otherwise a deterministic `ChaCha8Rng(seed)`
-/// sample of `max_n` distinct words.
-pub fn diagnostic_set(seq_len: usize, max_n: usize, seed: u64) -> Split {
-    let total = space_size(seq_len);
-    let group = Group::new();
-    let mut split = Split { seq_len, seqs: Vec::new(), labels: Vec::new(), pos_targets: Vec::new() };
-    let mut push = |index: usize| {
-        let label = group.push_word(index, seq_len, &mut split.seqs, &mut split.pos_targets);
-        split.labels.push(label);
-    };
-    if total <= max_n {
-        (0..total).for_each(&mut push);
-    } else {
-        let mut indices: Vec<usize> = (0..total).collect();
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        indices.shuffle(&mut rng);
-        indices.iter().take(max_n).for_each(|&i| push(i));
-    }
-    split
 }
