@@ -1,4 +1,2 @@
-# prevents vram leak
-# see: https://github.com/tracel-ai/burn/issues/4971
-[streaming]
-max_streams = 1
+#[streaming]
+#max_streams = 1

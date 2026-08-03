@@ -52,7 +52,7 @@ fresh model config (a persisted config wins on reload).
 
 ```bash
 # debug check in flex (fp32)
-cargo check --example mnist-ae --features "backend-flex"
+cargo check --example mnist-ae
 
 # train + reconstruct on CUDA (long-running), 16-latent bottleneck
 cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference

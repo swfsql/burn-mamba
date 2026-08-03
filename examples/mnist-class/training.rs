@@ -171,7 +171,7 @@ pub fn epoch_train(
         iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
 
         let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
-        training_model.0 = optim.step(lr.into(), training_model.0, train_output.grads);
+        training_model.0 = optim.step(lr, training_model.0, train_output.grads);
 
         println!(
             "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, Acc {:0>6.2}, lr {lr:0>6.2e}, it/s {:.2}",

@@ -19,7 +19,7 @@ Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cach
 
 ```bash
 # debug check in flex (fp32)
-cargo check --example mnist-class --features "backend-flex"
+cargo check --example mnist-class
 
 # training and running inference in wgpu (fp32)
 # note: the following requires ~7GB vram during training by default

@@ -5,9 +5,9 @@
 use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
 use burn_mamba::utils::Schedule;
 
-/// This model configuration uses ~37K params (~153KB disk space in FP32).
+/// This model configuration uses ~37K params (~154KB disk space in FP32).
 /// Reaches ~85% validation accuracy at the first epoch.
-/// With a batch_size=16 in FP32, this requires ~3.5GB vram during training.
+/// With a batch_size=16 in FP32, this requires ~3.6GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
     let d_model = 32;
@@ -24,10 +24,10 @@ pub fn model_config() -> MambaLatentNetConfig {
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
         //
         // RoPE-kind ablation (batches 100/200/300):
-        //   | RoPE Kind | RoPE | Memory |    Accuracy   |
-        //   | Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
-        //   | Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
-        //   | Complex4D | 100% |  4.3GB | 35%, 55%, 60% |
+        //   |    RoPE Kind | RoPE | Memory |    Accuracy   |
+        //   |    Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
+        //   |    Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
+        //   | Quaternion4D | 100% |  4.3GB | 35%, 55%, 60% |
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)

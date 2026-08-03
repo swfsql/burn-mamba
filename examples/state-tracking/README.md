@@ -65,8 +65,8 @@ even though the gap is modest):
 ## Run
 
 ```bash
-cargo run --release --example state-tracking --features backend-flex -- --training --inference -- --rotation complex
-cargo run --release --example state-tracking --features backend-flex -- --training --inference -- --rotation quaternion
+cargo run --release --example state-tracking -- --training --inference -- --rotation complex
+cargo run --release --example state-tracking -- --training --inference -- --rotation quaternion
 ```
 
 `--rotation complex|quaternion` (default `complex`) selects the rotation baked
@@ -84,7 +84,7 @@ saved weights/optimizer — the constant LR makes this a clean continuation:
 ```bash
 # first run prints e.g. `new artifacts directory: "/tmp/...-state-tracking-XXXX-0"`
 A=/tmp/...-state-tracking-XXXX-0
-cargo run --release --example state-tracking --features backend-flex -- --training --inference --artifacts-path $A
+cargo run --release --example state-tracking -- --training --inference --artifacts-path $A
 # repeat to keep training; the per-position curve deepens
 ```
 
