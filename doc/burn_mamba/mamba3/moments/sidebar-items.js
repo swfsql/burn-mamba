@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["backward","recalculated"],"struct":["Mamba3MomentsInput"],"trait":["Mamba3MomentsBackendExt"]};

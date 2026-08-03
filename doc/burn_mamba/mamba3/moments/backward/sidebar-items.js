@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["boundary_carries","d_quat_chunk","d_theta_chunk","moments_phys_bwd","rev_cumsum","scatter_last"],"struct":["MomentsGrads"]};
