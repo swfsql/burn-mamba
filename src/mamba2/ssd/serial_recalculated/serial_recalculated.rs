@@ -188,7 +188,7 @@ pub(crate) fn k1_ssd_chunk_cumsum<B: Backend>(
 ///
 /// Returns the intra-chunk `C·Bᵀ` block matrix `cb_bnhll`.
 pub(crate) fn k2_ssd_bmm<B: Backend>(c_bnlhr: F<B, 5>, b_bnlhr: F<B, 5>) -> F<B, 5> {
-    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
     let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
     c_bnhlr.matmul(b_bnhrl)
 }
@@ -208,7 +208,7 @@ pub(crate) fn k3_ssd_chunk_state<B: Backend>(
     let [.., state_rank] = b_bnlhr.dims();
 
     let x_bnhpl = x_bnlhp.permute([0, 1, 3, 4, 2]);
-    let b_bnhlr = b_bnlhr.permute([0, 1, 3, 2, 4]);
+    let b_bnhlr = b_bnlhr.swap_dims(2, 3);
 
     // K3 scaling factor: dt · exp(cumA_last − cumA)
     let da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
@@ -217,7 +217,7 @@ pub(crate) fn k3_ssd_chunk_state<B: Backend>(
     let b_bar_scale_bhnl = forward_decay_to_chunk_end_bhnl * dt_discretized_bhnl;
 
     let b_bar_scale_bnhlr = b_bar_scale_bhnl
-        .permute([0, 2, 1, 3]) // b_bar_scale_bnhl
+        .swap_dims(1, 2) // b_bar_scale_bnhl
         .unsqueeze_dim::<5>(4) // b_bar_scale_bnhl1
         .expand([batch, nchunks, nheads, chunk_len, state_rank]);
     let b_scaled_bnhlr = b_bnhlr * b_bar_scale_bnhlr;
@@ -283,10 +283,10 @@ fn k5_ssd_chunk_scan<B: Backend>(
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
     let device = x_bnlhp.device();
 
-    let da_cumsum_bnhl = da_cumsum_bhnl.permute([0, 2, 1, 3]);
-    let dt_bnhl = dt_discretized_bhnl.permute([0, 2, 1, 3]);
-    let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
-    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+    let da_cumsum_bnhl = da_cumsum_bhnl.swap_dims(1, 2);
+    let dt_bnhl = dt_discretized_bhnl.swap_dims(1, 2);
+    let x_bnhlp = x_bnlhp.clone().swap_dims(2, 3);
+    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
 
     // ── BLUE: exp(dA[l]) · C[l,:] @ state_in^T ─────────────────────────────
     let exp_da_cumsum_bnhlp = da_cumsum_bnhl
@@ -294,7 +294,7 @@ fn k5_ssd_chunk_scan<B: Backend>(
         .exp()
         .unsqueeze_dim::<5>(4) // exp_da_cumsum_bnhl1
         .expand([batch, nchunks, nheads, chunk_len, per_head_dim]);
-    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([0, 1, 2, 4, 3]);
+    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
     let blue_scaled_bnhlp = c_bnhlr.matmul(chunk_input_state_bnhrp) * exp_da_cumsum_bnhlp;
     san(&blue_scaled_bnhlp);
 
@@ -331,7 +331,7 @@ fn k5_ssd_chunk_scan<B: Backend>(
         * x_bnlhp;
 
     let y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
-    let y_partial_bnlhp = y_partial_bnhlp.permute([0, 1, 3, 2, 4]);
+    let y_partial_bnlhp = y_partial_bnhlp.swap_dims(2, 3);
     let y_bnlhp = y_partial_bnlhp + skip_bnlhp;
     assert_eq!(
         [batch, nchunks, chunk_len, nheads, per_head_dim],

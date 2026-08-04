@@ -261,7 +261,7 @@ where
             lm_head.forward(x)
         } else {
             // Weight tying: reuse embedding.weight^T ([d_model, padded_vocab]).
-            let weight = self.embedding.weight.clone().map(|w| w.permute([1, 0]));
+            let weight = self.embedding.weight.clone().map(|w| w.transpose());
             Linear { weight, bias: None }.forward(x)
         }
     }

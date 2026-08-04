@@ -211,7 +211,7 @@ impl Mamba3 {
             helpers::build_v_with_mimo::<3, 4>(cache.v_state_bhp.clone(), mimo_x_hmp.as_ref(), 1); // [batch, mimo_rank, nheads, per_head_dim]
         let boundary_seed_bhpr = {
             // einsum: bmhr, bmhp -> bhpr  (contract over m)
-            let k_prev_bhmr = cache.k_state_bmhr.clone().permute([0, 2, 1, 3]);
+            let k_prev_bhmr = cache.k_state_bmhr.clone().swap_dims(1, 2);
             let v_prev_bhpm = v_prev_mimo_bmhp.permute([0, 2, 3, 1]);
             v_prev_bhpm.matmul(k_prev_bhmr)
         };
@@ -309,7 +309,7 @@ impl Mamba3 {
                     per_head_dim,
                 ]);
                 let mimo_z_bsmhp = mimo_z_hmp
-                    .permute([1, 0, 2])
+                    .swap_dims(0, 1)
                     .unsqueeze_dims::<5>(&[0, 1])
                     .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
                 z_bsmhp * mimo_z_bsmhp
@@ -321,7 +321,7 @@ impl Mamba3 {
             };
 
             let mimo_o_bsmhp = mimo_o_hmp
-                .permute([1, 0, 2])
+                .swap_dims(0, 1)
                 .unsqueeze_dims::<5>(&[0, 1])
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
             let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(2).squeeze_dim(2);

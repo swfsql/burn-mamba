@@ -75,6 +75,11 @@ impl<B: Backend, const D: usize> F<B, D> {
         F(B::float_swap_dims(self.0, dim1, dim2))
     }
 
+    /// Swap the last two axes.
+    pub fn transpose(self) -> Self {
+        F(B::float_swap_dims(self.0, D - 2, D - 1))
+    }
+
     /// Element-wise `exp`.
     pub fn exp(self) -> Self {
         F(B::float_exp(self.0))

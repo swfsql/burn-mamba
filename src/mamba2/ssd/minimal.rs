@@ -156,8 +156,8 @@ impl Mamba2SsdInput {
         //   (c) temp2 · X[n]  (contract over chunk_len)              → Y_diag
         let y_diag_bnlhp = {
             // Permute for the matmul along chunk_len and state_rank.
-            let b_bnhlr = delta_b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
-            let c_bnhlr = c_bnlhr.clone().permute([0, 1, 3, 2, 4]);
+            let b_bnhlr = delta_b_bnlhr.clone().swap_dims(2, 3);
+            let c_bnhlr = c_bnlhr.clone().swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 b_bnhlr.dims()
@@ -169,7 +169,7 @@ impl Mamba2SsdInput {
 
             // (a) C[n] · B[n]ᵀ
             //     Contracts over state_rank.
-            let b_bnhrl = b_bnhlr.permute([0, 1, 2, 4, 3]);
+            let b_bnhrl = b_bnhlr.transpose();
             let cb_bnhll = c_bnhlr.matmul(b_bnhrl);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, chunk_len],
@@ -188,7 +188,7 @@ impl Mamba2SsdInput {
             san(&l_bhnll);
 
             // Permute both for the broadcast multiply.
-            let cb_bnlhl = cb_bnhll.permute([0, 1, 3, 2, 4]);
+            let cb_bnlhl = cb_bnhll.swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, chunk_len, nheads, chunk_len],
                 cb_bnlhl.dims()
@@ -205,13 +205,13 @@ impl Mamba2SsdInput {
 
             // (c) masked_CB · X → Y_diag.
             //     Contract over the last chunk_len dimension.
-            let masked_cb_bnhll = masked_cb_bnlhl.permute([0, 1, 3, 2, 4]);
+            let masked_cb_bnhll = masked_cb_bnlhl.swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, chunk_len],
                 masked_cb_bnhll.dims()
             );
 
-            let x_bnhlp = input.x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
+            let x_bnhlp = input.x_bnlhp.clone().swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, per_head_dim],
                 x_bnhlp.dims()
@@ -224,7 +224,7 @@ impl Mamba2SsdInput {
             );
             san(&y_diag_bnhlp);
 
-            y_diag_bnhlp.permute([0, 1, 3, 2, 4]) // y_diag_bnlhp
+            y_diag_bnhlp.swap_dims(2, 3) // y_diag_bnlhp
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
@@ -274,7 +274,7 @@ impl Mamba2SsdInput {
                 [batch, nchunks, nheads, per_head_dim, chunk_len],
                 decayed_x_bnhpl.dims()
             );
-            let b_bnhlr = delta_b_bnlhr.clone().permute([0, 1, 3, 2, 4]);
+            let b_bnhlr = delta_b_bnlhr.clone().swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 b_bnhlr.dims()
@@ -367,7 +367,7 @@ impl Mamba2SsdInput {
             let flat_state_dim = per_head_dim * state_rank; // f = per_head_dim·state_rank
             let state_bhNf = state_bNhpr
                 .clone()
-                .permute([0, 2, 1, 3, 4]) // state_bhNpr
+                .swap_dims(1, 2) // state_bhNpr
                 .reshape([batch, nheads, 1 + nchunks, flat_state_dim]); // state_bhNf
             assert_eq!(
                 [batch, nheads, 1 + nchunks, flat_state_dim],
@@ -399,7 +399,7 @@ impl Mamba2SsdInput {
                 .squeeze_dim(2);
 
             (
-                state_bhnpr.permute([0, 2, 1, 3, 4]), // state_bnhpr
+                state_bhnpr.swap_dims(1, 2), // state_bnhpr
                 final_state_bhpr,
             )
         };
@@ -438,13 +438,13 @@ impl Mamba2SsdInput {
             san(&state_decay_out_bhnl);
 
             // (a) C[n] · h[n-1]ᵀ
-            let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+            let c_bnhlr = c_bnlhr.swap_dims(2, 3);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, state_rank],
                 c_bnhlr.dims()
             );
 
-            let state_bnhrp = state_bnhpr.permute([0, 1, 2, 4, 3]);
+            let state_bnhrp = state_bnhpr.transpose();
             assert_eq!(
                 [batch, nchunks, nheads, state_rank, per_head_dim],
                 state_bnhrp.dims()
@@ -458,7 +458,7 @@ impl Mamba2SsdInput {
             san(&ch_bnhlp);
 
             // (b) Multiply by the intra-chunk cumulative decay.
-            let state_decay_out_bnhl1 = state_decay_out_bhnl.permute([0, 2, 1, 3]).unsqueeze_dim(4);
+            let state_decay_out_bnhl1 = state_decay_out_bhnl.swap_dims(1, 2).unsqueeze_dim(4);
             assert_eq!(
                 [batch, nchunks, nheads, chunk_len, 1],
                 state_decay_out_bnhl1.dims()
@@ -471,7 +471,7 @@ impl Mamba2SsdInput {
             );
             san(&y_off_bnhlp);
 
-            y_off_bnhlp.permute([0, 1, 3, 2, 4]) // y_off_bnlhp
+            y_off_bnhlp.swap_dims(2, 3) // y_off_bnlhp
         };
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],

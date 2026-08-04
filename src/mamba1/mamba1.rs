@@ -275,7 +275,7 @@ impl Mamba1 {
         // layer 2 (conv1d) — causal, with the cache window threaded as left context
         let xs_bsi = {
             assert!(conv_kernel > 0);
-            let conv_in_bis = xs_bsi.permute([0, 2, 1]);
+            let conv_in_bis = xs_bsi.transpose();
             assert_eq!([batch, d_inner, sequence], conv_in_bis.dims());
 
             // Left-pad with the last (conv_kernel - 1) columns of the cached
@@ -302,7 +302,7 @@ impl Mamba1 {
             assert_eq!([batch, d_inner, sequence], xs.dims());
 
             // restore original positioning as per before the layer 2
-            let xs = xs.permute([0, 2, 1]);
+            let xs = xs.transpose();
             assert_eq!([batch, sequence, d_inner], xs.dims());
 
             // activation
@@ -366,10 +366,10 @@ impl Mamba1 {
 
         let delta = burn::tensor::activation::softplus(delta, 1.);
 
-        let delta = delta.permute([1, 0, 2]);
+        let delta = delta.swap_dims(0, 1);
         assert_eq!([sequence, batch, d_inner], delta.dims());
 
-        let c = c.permute([1, 0, 2]);
+        let c = c.swap_dims(0, 1);
         assert_eq!([sequence, batch, state_rank], c.dims());
 
         Self::selective_scan(delta, a, b, c, self.d.val(), u, init_ssm)
@@ -422,7 +422,7 @@ impl Mamba1 {
             let delta_a = (delta.clone() * a).exp();
             assert_eq!(outer_shape, delta_a.dims());
 
-            let b = b.permute([1, 0, 2]);
+            let b = b.swap_dims(0, 1);
             assert_eq!([sequence, batch, state_rank], b.dims());
             let b = b.unsqueeze_dim(2);
             assert_eq!([sequence, batch, 1, state_rank], b.dims());
@@ -431,7 +431,7 @@ impl Mamba1 {
             let delta_b = delta * b;
             assert_eq!(outer_shape, delta_b.dims());
 
-            let u = u.clone().permute([1, 0, 2]);
+            let u = u.clone().swap_dims(0, 1);
             assert_eq!([sequence, batch, d_inner], u.dims());
             let u = u.unsqueeze_dim(3);
             assert_eq!([sequence, batch, d_inner, 1], u.dims());
@@ -547,7 +547,7 @@ mod step {
                 let conv1d = self.conv1d.weight.val();
                 // [channels_out, channels_in / groups, kernel_size]
                 assert_eq!([d_inner, 1, conv_kernel], conv1d.dims());
-                let conv1d = conv1d.permute([1, 0, 2]);
+                let conv1d = conv1d.swap_dims(0, 1);
                 assert_eq!([1, d_inner, conv_kernel], conv1d.dims());
                 let conv1d = conv1d.expand([batch, d_inner, conv_kernel]);
                 assert_eq!([batch, d_inner, conv_kernel], conv1d.dims());

@@ -22,7 +22,7 @@ use crate::mamba3::single_ssd::prelude::*;
 /// If none is specified, this defaults to [`Self::SingleSsd`].
 ///
 /// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Mamba3Caches {
     /// Caches for the double-ssd pathway.
     DoubleSsd(Mamba3DoubleSsdCaches),

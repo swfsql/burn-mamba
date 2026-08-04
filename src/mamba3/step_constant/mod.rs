@@ -139,13 +139,13 @@ impl Mamba3 {
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let x_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(x_bhp, mimo_x_hmp.as_ref(), 1);
         let gram_bhmm = {
-            let c_bhmr = c_bmhr.permute([0, 2, 1, 3]);
+            let c_bhmr = c_bmhr.swap_dims(1, 2);
             let b_bhrm = b_eff_bmhr.permute([0, 2, 3, 1]);
             c_bhmr.matmul(b_bhrm) // [batch, nheads, mimo_rank, mimo_rank']
         };
         let out_m_bmhp = {
-            let x_bhmp = x_vals_bmhp.clone().permute([0, 2, 1, 3]);
-            gram_bhmm.matmul(x_bhmp).permute([0, 2, 1, 3])
+            let x_bhmp = x_vals_bmhp.clone().swap_dims(1, 2);
+            gram_bhmm.matmul(x_bhmp).swap_dims(1, 2)
         };
         assert_eq!(
             [batch, mimo_rank, nheads, self.per_head_dim()],

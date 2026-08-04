@@ -589,7 +589,7 @@ impl Mamba2 {
         //
         // The right-most `conv_kernel` columns of the padded input become the
         // new convolution cache for the next call.
-        let xbc_bvs = xbc_bsv.permute([0, 2, 1]);
+        let xbc_bvs = xbc_bsv.transpose();
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
 
         // Build the causally-padded input: [cached tail | new input]
@@ -619,7 +619,7 @@ impl Mamba2 {
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
         san(&xbc_bvs);
 
-        let xbc_bsv = xbc_bvs.permute([0, 2, 1]);
+        let xbc_bsv = xbc_bvs.transpose();
         assert_eq!([batch, sequence, conv_dim], xbc_bsv.dims());
 
         // SiLU activation (element-wise).
@@ -857,7 +857,7 @@ mod step {
                 assert_eq!([conv_dim, 1, conv_kernel], conv1d_v1k.dims());
 
                 let conv1d_bvk = conv1d_v1k
-                    .permute([1, 0, 2]) // conv1d_1vk
+                    .swap_dims(0, 1) // conv1d_1vk
                     .expand([batch, conv_dim, conv_kernel]); // conv1d_bvk
                 assert_eq!([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
 

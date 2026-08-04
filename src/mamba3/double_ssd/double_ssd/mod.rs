@@ -313,7 +313,7 @@ impl Mamba3 {
                     .unsqueeze_dim::<5>(2) // z_bs1hp
                     .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // z_bsmhp
                 let mimo_z_bsmhp = mimo_z_hmp
-                    .permute([1, 0, 2]) // mimo_z_mhp
+                    .swap_dims(0, 1) // mimo_z_mhp
                     .unsqueeze_dims::<5>(&[0, 1]) // mimo_z_11mhp
                     .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_z_bsmhp
                 z_bsmhp * mimo_z_bsmhp
@@ -329,7 +329,7 @@ impl Mamba3 {
 
             // Down-project with mimoₒ_hmp: out = sumₘ mimoₒ_hmp[h, r, p] * yᵣ
             let mimo_o_bsmhp = mimo_o_hmp
-                .permute([1, 0, 2]) // mimo_o_mhp
+                .swap_dims(0, 1) // mimo_o_mhp
                 .unsqueeze_dims::<5>(&[0, 1]) // mimo_o_11mhp
                 .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_o_bsmhp
             // sum over mimo rank dim
@@ -545,7 +545,7 @@ mod step {
                     .expand([batch, mimo_rank, nheads, per_head_dim]); // z_bmhp
                 // mimo_z_hmp
                 let mimo_z_bmhp = mimo_z_hmp
-                    .permute([1, 0, 2]) // mimo_z_mhp
+                    .swap_dims(0, 1) // mimo_z_mhp
                     .unsqueeze_dim::<4>(0) // mimo_z_1mhp
                     .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_z_bmhp
                 let z_bmhp = z_bmhp * mimo_z_bmhp;
@@ -560,7 +560,7 @@ mod step {
 
                 // Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
                 let mimo_o_bmhp = mimo_o_hmp
-                    .permute([1, 0, 2]) // mimo_o_mhp
+                    .swap_dims(0, 1) // mimo_o_mhp
                     .unsqueeze_dim::<4>(0) // mimo_o_1mhp
                     .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_o_bmhp
                 let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
@@ -704,13 +704,13 @@ mod step {
 
             // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
             let xbt_state_bhpr = {
-                let b_bhmr = b_bmhr.clone().permute([0, 2, 1, 3]);
+                let b_bhmr = b_bmhr.clone().swap_dims(1, 2);
                 let xg_bhpm = x_gamma_bmhp.permute([0, 2, 3, 1]);
                 xg_bhpm.matmul(b_bhmr)
             };
             san(&xbt_state_bhpr);
             let xbt_prev_bhpr = {
-                let b_state_bhmr = cache.k_state_bmhr.clone().permute([0, 2, 1, 3]);
+                let b_state_bhmr = cache.k_state_bmhr.clone().swap_dims(1, 2);
                 let xb_bhpm = x_beta_bmhp.permute([0, 2, 3, 1]);
                 xb_bhpm.matmul(b_state_bhmr)
             };

@@ -130,7 +130,7 @@ impl Mamba3SingleSsdInput {
         // (block-diagonal in time t1 = t2 is excluded — handled by y_diag.)
         // =============================================================
         let y_lower_bnLMhp = {
-            let c_bnhLMr = c_bnLMhr.clone().permute([0, 1, 3, 2, 4]);
+            let c_bnhLMr = c_bnLMhr.clone().swap_dims(2, 3);
             let k_bnhrLM = k_scaled_bnLMhr.clone().permute([0, 1, 3, 4, 2]);
             // [batch, nchunks, nheads, chunk_len*mimo_rank, chunk_len*mimo_rank]
             let cb_bnhLMLM = c_bnhLMr.matmul(k_bnhrLM);
@@ -171,14 +171,14 @@ impl Mamba3SingleSsdInput {
                 ]);
 
             // (CB ⊙ L_strict) · V    (back in MIMO-fused layout)
-            let cb_bnLMhLM = cb_bnhLMLM.permute([0, 1, 3, 2, 4]);
+            let cb_bnLMhLM = cb_bnhLMLM.swap_dims(2, 3);
             let l_bnLMhLM = l_strict_bhnLMLM.permute([0, 2, 3, 1, 4]);
-            let masked_cb_bnhLMLM = (cb_bnLMhLM * l_bnLMhLM).permute([0, 1, 3, 2, 4]);
+            let masked_cb_bnhLMLM = (cb_bnLMhLM * l_bnLMhLM).swap_dims(2, 3);
 
-            let v_bnhLMp = v_bnLMhp.clone().permute([0, 1, 3, 2, 4]);
+            let v_bnhLMp = v_bnLMhp.clone().swap_dims(2, 3);
             let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
 
-            y_lower_bnhLMp.permute([0, 1, 3, 2, 4]) // y_lower_bnLMhp
+            y_lower_bnhLMp.swap_dims(2, 3) // y_lower_bnLMhp
         };
 
         // =============================================================
@@ -190,13 +190,13 @@ impl Mamba3SingleSsdInput {
             // C @ B^T contracts over state_rank, leaving mimo_rank on both sides.
             // c_bnlmhr  [b, n, l, m, h, r] -> c_bnlhmr  [b, n, l, h, m, r]
             // b_bnlmhr  [b, n, l, m, h, r] -> b_bnlhrm  [b, n, l, h, r, m]
-            let c_bnlhmr = input.c_bnlmhr.permute([0, 1, 2, 4, 3, 5]);
+            let c_bnlhmr = input.c_bnlmhr.swap_dims(3, 4);
             let b_bnlhrm = input.b_bnlmhr.permute([0, 1, 2, 4, 5, 3]);
             // qk_dot_bnlhmM [b, n, l, h, m_out, m_in]
             let qk_dot_bnlhmM = c_bnlhmr.matmul(b_bnlhrm);
 
             // V in [b, n, l, h, m_in, p] layout for the next matmul:
-            let v_bnlhmp = input.v_bnlmhp.permute([0, 1, 2, 4, 3, 5]);
+            let v_bnlhmp = input.v_bnlmhp.swap_dims(3, 4);
             // (qk_dot) · V → [b, n, l, h, m_out, p]
             let y_d_bnlhmp = qk_dot_bnlhmM.matmul(v_bnlhmp);
 
@@ -205,7 +205,7 @@ impl Mamba3SingleSsdInput {
             let y_d_bnlhmp_scaled = y_d_bnlhmp * gamma_bnlh11;
 
             // Back to [b, n, l, m, h, p]:
-            y_d_bnlhmp_scaled.permute([0, 1, 2, 4, 3, 5])
+            y_d_bnlhmp_scaled.swap_dims(3, 4)
         };
         // Reshape to fused layout for combination with y_lower / y_off.
         let y_diag_bnLMhp =
@@ -229,7 +229,7 @@ impl Mamba3SingleSsdInput {
             let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp.clone();
 
             let decayed_v_bnhpLM = decayed_v_bnLMhp.permute([0, 1, 3, 4, 2]);
-            let k_scaled_bnhLMr = k_scaled_bnLMhr.permute([0, 1, 3, 2, 4]);
+            let k_scaled_bnhLMr = k_scaled_bnLMhr.swap_dims(2, 3);
             decayed_v_bnhpLM.matmul(k_scaled_bnhLMr) // state_bnhpr
         };
 
@@ -266,7 +266,7 @@ impl Mamba3SingleSsdInput {
             let decay_chunk_bhNN = segsum::<3, 4>(a_chunk_pad_bhN).exp();
 
             let flat = per_head_dim * state_rank;
-            let state_bhNPR = state_bNhpr.clone().permute([0, 2, 1, 3, 4]).reshape([
+            let state_bhNPR = state_bNhpr.clone().swap_dims(1, 2).reshape([
                 batch,
                 nheads,
                 1 + nchunks,
@@ -280,7 +280,7 @@ impl Mamba3SingleSsdInput {
             let new_state_bnhpr = new_state_bhNpr
                 .clone()
                 .slice(s![.., .., 0..nchunks, .., ..])
-                .permute([0, 2, 1, 3, 4]);
+                .swap_dims(1, 2);
             let last_state_bhpr: Tensor<4> = new_state_bhNpr
                 .slice(s![.., .., nchunks, .., ..])
                 .squeeze_dim(2);
@@ -300,13 +300,13 @@ impl Mamba3SingleSsdInput {
                 .reshape([batch, nheads, nchunks, chunk_len * mimo_rank])
                 .exp();
 
-            let c_bnhLMr = c_bnLMhr.permute([0, 1, 3, 2, 4]);
-            let state_bnhrp = state_bnhpr.permute([0, 1, 2, 4, 3]);
+            let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+            let state_bnhrp = state_bnhpr.transpose();
             let ch_bnhLMp = c_bnhLMr.matmul(state_bnhrp);
 
-            let decay_bnhLM1 = state_decay_bhnLM.permute([0, 2, 1, 3]).unsqueeze_dim(4);
+            let decay_bnhLM1 = state_decay_bhnLM.swap_dims(1, 2).unsqueeze_dim(4);
             let y_off_bnhLMp = ch_bnhLMp * decay_bnhLM1;
-            y_off_bnhLMp.permute([0, 1, 3, 2, 4])
+            y_off_bnhLMp.swap_dims(2, 3)
         };
 
         // ── Combine and reshape ───────────────────────────────────────────────

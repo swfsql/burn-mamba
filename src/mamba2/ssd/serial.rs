@@ -170,8 +170,8 @@ pub fn k1_ssd_chunk_cumsum(
 pub fn k2_ssd_bmm(c_bnlhr: Tensor<5>, b_bnlhr: Tensor<5>) -> Tensor<5> {
     let [batch, nchunks, chunk_len, nheads, _state_rank] = c_bnlhr.dims();
 
-    // - 1/3: permute: (c_bnlhr [in][*]) -> (c_bnhlr)
-    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+    // - 1/3: swap_dims: (c_bnlhr [in][*]) -> (c_bnhlr)
+    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
     // - 2: permute: (b_bnlhr [in][*]) -> (b_bnhrl)
     let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
     // - 3/3: matmul: (c_bnhlr, b_bnhrl) -> (cb_bnhll [out][!])
@@ -200,15 +200,15 @@ pub fn k3_ssd_chunk_state(
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
     let [.., state_rank] = b_bnlhr.dims();
 
-    // permute b and x to prepare them for the matmul
+    // rearrange b and x to prepare them for the matmul
     // - 1/15: permute: (x_bnlhp [in][*]) -> (x_bnhpl)
     let x_bnhpl = x_bnlhp.clone().permute([0, 1, 3, 4, 2]);
     assert_eq!(
         [batch, nchunks, nheads, per_head_dim, chunk_len],
         x_bnhpl.dims()
     );
-    // - 2: permute: (b_bnlhr [in][*]) -> (b_bnhlr)
-    let b_bnhlr = b_bnlhr.permute([0, 1, 3, 2, 4]);
+    // - 2: swap_dims: (b_bnlhr [in][*]) -> (b_bnhlr)
+    let b_bnhlr = b_bnlhr.swap_dims(2, 3);
     assert_eq!(
         [batch, nchunks, nheads, chunk_len, state_rank],
         b_bnhlr.dims()
@@ -242,8 +242,8 @@ pub fn k3_ssd_chunk_state(
         };
         assert_eq!([batch, nheads, nchunks, chunk_len], b_bar_scale_bhnl.dims());
 
-        // - 11: permute: (b_bar_scale_bhnl [+]) -> (b_bar_scale_bnhl)
-        let b_bar_scale_bnhl = b_bar_scale_bhnl.permute([0, 2, 1, 3]);
+        // - 11: swap_dims: (b_bar_scale_bhnl [+]) -> (b_bar_scale_bnhl)
+        let b_bar_scale_bnhl = b_bar_scale_bhnl.swap_dims(1, 2);
         assert_eq!([batch, nchunks, nheads, chunk_len], b_bar_scale_bnhl.dims());
         let b_bar_scale_bnhlr = b_bar_scale_bnhl
             // - 12: unsqueeze: (b_bar_scale_bnhl) -> (b_bar_scale_bnhl1)
@@ -359,18 +359,18 @@ pub fn k5_ssd_chunk_scan(
     let device = x_bnlhp.device();
 
     // Rearrange inputs to the common [batch, nchunks, nheads, ...] ordering used below.
-    // - 1/36: permute: (da_cumsum_bhnl [*]) -> (da_cumsum_bnhl)
-    let da_cumsum_bnhl = da_cumsum_bhnl.permute([0, 2, 1, 3]);
+    // - 1/36: swap_dims: (da_cumsum_bhnl [*]) -> (da_cumsum_bnhl)
+    let da_cumsum_bnhl = da_cumsum_bhnl.swap_dims(1, 2);
     san(&da_cumsum_bnhl);
-    // - 2: permute: (dt_discretized_bhnl [*]) -> (dt_bnhl)
-    let dt_bnhl = dt_discretized_bhnl.permute([0, 2, 1, 3]);
+    // - 2: swap_dims: (dt_discretized_bhnl [*]) -> (dt_bnhl)
+    let dt_bnhl = dt_discretized_bhnl.swap_dims(1, 2);
     san(&dt_bnhl);
-    // - 3: permute: (x_bnlhp [*]) -> (x_bnhlp)
-    let x_bnhlp = x_bnlhp.clone().permute([0, 1, 3, 2, 4]);
+    // - 3: swap_dims: (x_bnlhp [*]) -> (x_bnhlp)
+    let x_bnhlp = x_bnlhp.clone().swap_dims(2, 3);
     san(&x_bnhlp);
 
-    // B/C are already per-head — only a permute is needed.
-    let c_bnhlr = c_bnlhr.permute([0, 1, 3, 2, 4]);
+    // B/C are already per-head — only a swap_dims is needed.
+    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
     san(&c_bnhlr);
     san(&cb_bnhll);
 
@@ -388,8 +388,8 @@ pub fn k5_ssd_chunk_scan(
         // - 13: expand: (exp_da_cumsum_bnhl1) -> (exp_da_cumsum_bnhlp)
         .expand([batch, nchunks, nheads, chunk_len, per_head_dim]);
     san(&exp_da_cumsum_bnhlp);
-    // - 14: permute: (chunk_input_state_bnhpr [!]) -> (chunk_input_state_bnhrp)
-    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([0, 1, 2, 4, 3]);
+    // - 14: transpose: (chunk_input_state_bnhpr [!]) -> (chunk_input_state_bnhrp)
+    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
     // - 15: matmul: (c_bnhlr, chunk_input_state_bnhrp) -> (blue_bnhlp)
     let blue_scaled_bnhlp = c_bnhlr
         .matmul(chunk_input_state_bnhrp)  // blue_bnhlp
@@ -491,8 +491,8 @@ pub fn k5_ssd_chunk_scan(
     // - 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
     let y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
     san(&y_partial_bnhlp);
-    // - 35: permute: (y_partial_bnhlp) -> (y_partial_bnlhp)
-    let y_partial_bnlhp = y_partial_bnhlp.permute([0, 1, 3, 2, 4]);
+    // - 35: swap_dims: (y_partial_bnhlp) -> (y_partial_bnlhp)
+    let y_partial_bnlhp = y_partial_bnhlp.swap_dims(2, 3);
     san(&y_partial_bnlhp);
     // - 36/36: add: (y_partial_bnlhp, skip_bnlhp) -> (y_bnlhp [out])
     let y_bnlhp: Tensor<5> = y_partial_bnlhp + skip_bnlhp;

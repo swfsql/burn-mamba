@@ -215,16 +215,16 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let exp_da_bnhLMp = da_cumsum_bhnLM
         .clone()
         .exp()
-        .permute([0, 2, 1, 3]) // bnhLM
+        .swap_dims(1, 2) // bnhLM
         .unsqueeze_dim::<5>(4) // bnhLM1
         .expand([batch, nchunks, nheads, fused, per_head_dim]);
-    let c_bnhLMr = c_bnLMhr.permute([0, 1, 3, 2, 4]);
-    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([0, 1, 2, 4, 3]);
+    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
     let ch_bnhLMp = c_bnhLMr.matmul(chunk_input_state_bnhrp);
     let y_off_bnhLMp = ch_bnhLMp * exp_da_bnhLMp;
 
     // ── Y_lower: strict lower-tri intra-chunk with scale and decay ──────────
-    let da_cumsum_bnhLM = da_cumsum_bhnLM.permute([0, 2, 1, 3]); // bnhLM
+    let da_cumsum_bnhLM = da_cumsum_bhnLM.swap_dims(1, 2); // bnhLM
     let target_da_cumsum_bnhLMLM = da_cumsum_bnhLM
         .clone()
         .unsqueeze_dim::<5>(4) // bnhLM1
@@ -251,7 +251,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
 
     // Per-column scale: `scale[t2]` lives on the source axis (column).
     let scale_bnhLM = scale_bnlh
-        .permute([0, 1, 3, 2]) // bnhl
+        .transpose() // bnhl
         .unsqueeze_dim::<5>(4) // bnhl1
         .expand([batch, nchunks, nheads, chunk_len, mimo_rank])
         .reshape([batch, nchunks, nheads, fused]);
@@ -261,24 +261,24 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
 
     let kernel_bnhLMLM = decay_strict_bnhLMLM * scale_col_bnhLMLM;
     let masked_cb_bnhLMLM = cb_bnhLMLM * kernel_bnhLMLM;
-    let v_bnhLMp = v_bnLMhp.permute([0, 1, 3, 2, 4]);
+    let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
     let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
 
     // ── Y_diag: γ-weighted same-step correction ─────────────────────────────
-    let c_bnlhmr = c_bnlmhr.permute([0, 1, 2, 4, 3, 5]);
+    let c_bnlhmr = c_bnlmhr.swap_dims(3, 4);
     let b_bnlhrm = b_bnlmhr.permute([0, 1, 2, 4, 5, 3]);
     let qk_dot_bnlhmM = c_bnlhmr.matmul(b_bnlhrm); // bnlhm_outm_in
-    let v_bnlhmp = v_bnlmhp.permute([0, 1, 2, 4, 3, 5]);
+    let v_bnlhmp = v_bnlmhp.swap_dims(3, 4);
     let y_d_bnlhmp = qk_dot_bnlhmM.matmul(v_bnlhmp); // bnlhm_outp
     let gamma_bnlh11 = gamma_bnlh.unsqueeze_dims::<6>(&[4, 5]);
     let y_d_bnlhmp_scaled = y_d_bnlhmp * gamma_bnlh11;
 
-    let y_diag_bnlmhp = y_d_bnlhmp_scaled.permute([0, 1, 2, 4, 3, 5]);
+    let y_diag_bnlmhp = y_d_bnlhmp_scaled.swap_dims(3, 4);
     let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
-    let y_diag_bnhLMp = y_diag_bnLMhp.permute([0, 1, 3, 2, 4]);
+    let y_diag_bnhLMp = y_diag_bnLMhp.swap_dims(2, 3);
 
     // ── Combine and reshape ─────────────────────────────────────────────────
     let y_bnhLMp = y_off_bnhLMp + y_lower_bnhLMp + y_diag_bnhLMp;
-    let y_bnLMhp = y_bnhLMp.permute([0, 1, 3, 2, 4]);
+    let y_bnLMhp = y_bnhLMp.swap_dims(2, 3);
     y_bnLMhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim])
 }

@@ -170,7 +170,7 @@ pub(crate) fn k2_ssd_bmm<B: Backend>(c_bnlmhr: F<B, 6>, b_bnlmhr: F<B, 6>) -> F<
     let [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank] = c_bnlmhr.dims();
     let c_bnLMhr = c_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
     let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-    let c_bnhLMr = c_bnLMhr.permute([0, 1, 3, 2, 4]);
+    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
     let b_bnhrLM = b_bnLMhr.permute([0, 1, 3, 4, 2]);
     c_bnhLMr.matmul(b_bnhrLM)
 }
@@ -202,7 +202,7 @@ pub(crate) fn k3_ssd_chunk_state<B: Backend>(
     let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp;
 
     let decayed_v_bnhpLM = decayed_v_bnLMhp.permute([0, 1, 3, 4, 2]);
-    let b_bnhLMr = b_bnLMhr.permute([0, 1, 3, 2, 4]);
+    let b_bnhLMr = b_bnLMhr.swap_dims(2, 3);
     let intra_chunk_state_bnhpr = decayed_v_bnhpLM.matmul(b_bnhLMr);
     assert_eq!(
         [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -276,16 +276,16 @@ fn k5_ssd_chunk_scan<B: Backend>(
     let exp_da_bnhLMp = da_cumsum_bhnLM
         .clone()
         .exp()
-        .permute([0, 2, 1, 3]) // exp_da_bnhLM
+        .swap_dims(1, 2) // exp_da_bnhLM
         .unsqueeze_dim::<5>(4) // exp_da_bnhLM1
         .expand([batch, nchunks, nheads, chunk_len * mimo_rank, per_head_dim]);
-    let c_bnhLMr = c_bnLMhr.permute([0, 1, 3, 2, 4]);
-    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([0, 1, 2, 4, 3]);
+    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
     let ch_bnhLMp = c_bnhLMr.matmul(chunk_input_state_bnhrp);
     let blue_bnhLMp = ch_bnhLMp * exp_da_bnhLMp;
 
     // ── ORANGE (Y_diag): MIMO causal decay matrix · CB @ V ────────────────────
-    let da_cumsum_bnhLM = da_cumsum_bhnLM.permute([0, 2, 1, 3]);
+    let da_cumsum_bnhLM = da_cumsum_bhnLM.swap_dims(1, 2);
     let target_da_cumsum_bnhLMLM = da_cumsum_bnhLM
         .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bnhLM1
@@ -338,12 +338,12 @@ fn k5_ssd_chunk_scan<B: Backend>(
 
     let decay_bnhLMLM = (diff_da_cumsum_bnhLMLM + neg_inf_bnhLMLM).exp();
 
-    let v_bnhLMp = v_bnLMhp.permute([0, 1, 3, 2, 4]);
+    let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
     let orange_bnhLMp = (cb_bnhLMLM * decay_bnhLMLM).matmul(v_bnhLMp);
 
     // ── Combine and reshape ────────────────────────────────────────────────────
     let y_bnlmhp = (blue_bnhLMp + orange_bnhLMp)
-        .permute([0, 1, 3, 2, 4]) // y_bnLMhp
+        .swap_dims(2, 3) // y_bnLMhp
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // y_bnlmhp
     y_bnlmhp
 }

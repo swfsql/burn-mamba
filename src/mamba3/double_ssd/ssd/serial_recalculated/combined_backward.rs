@@ -73,7 +73,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
     san(&decayed_v_bnLMhp);
 
     let decayed_v_bnhpLM = decayed_v_bnLMhp.clone().permute([0, 1, 3, 4, 2]);
-    let b_bnhLMr = b_bnLMhr.permute([0, 1, 3, 2, 4]);
+    let b_bnhLMr = b_bnLMhr.swap_dims(2, 3);
     let intra_chunk_state_bnhpr = decayed_v_bnhpLM.matmul(b_bnhLMr);
     san(&intra_chunk_state_bnhpr);
 
@@ -157,7 +157,7 @@ pub fn combined_backward<B: Backend>(
     // — matches the per-chunk slicing.
     let d_y_bnhLMp = d_y_bnlmhp
         .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]) // d_y_bnLMhp
-        .permute([0, 1, 3, 2, 4]); // d_y_bnhLMp
+        .swap_dims(2, 3); // d_y_bnhLMp
     san(&d_y_bnhLMp);
 
     // Reusable [chunk_len, chunk_len] -inf upper-triangular base mask for ORANGE.
@@ -187,14 +187,14 @@ pub fn combined_backward<B: Backend>(
             .slice(s![.., i_chunk, .., .., .., ..]) // v_b1lmhp
             .squeeze_dim::<5>(1) // v_blmhp
             .reshape([batch, chunk_len * mimo_rank, nheads, per_head_dim]) // v_bLMhp
-            .permute([0, 2, 1, 3]); // v_bhLMp
+            .swap_dims(1, 2); // v_bhLMp
 
         let c_bhLMr: F<B, 4> = c_bnlmhr
             .clone()
             .slice(s![.., i_chunk, .., .., .., ..]) // c_b1lmhr
             .squeeze_dim::<5>(1) // c_blmhr
             .reshape([batch, chunk_len * mimo_rank, nheads, state_rank]) // c_bLMhr
-            .permute([0, 2, 1, 3]); // c_bhLMr
+            .swap_dims(1, 2); // c_bhLMr
 
         let cb_bhLMLM: F<B, 4> = cb_bnhLMLM
             .clone()
@@ -231,12 +231,12 @@ pub fn combined_backward<B: Backend>(
         san(&d_ch_bhLMp);
 
         // d_chunk_input_state[p,r] = Σ_LM C[LM,r] · d_ch[LM,p]
-        //   C^T (bhrLM) @ d_ch (bhLMp)  → bhrp  → permute → bhpr
+        //   C^T (bhrLM) @ d_ch (bhLMp)  → bhrp  → transpose → bhpr
         let d_chunk_input_state_bhpr: F<B, 4> = c_bhLMr
             .clone()
-            .permute([0, 1, 3, 2]) // c_bhrLM
+            .transpose() // c_bhrLM
             .matmul(d_ch_bhLMp.clone()) // d_chunk_input_state_bhrp
-            .permute([0, 1, 3, 2]); // d_chunk_input_state_bhpr
+            .transpose(); // d_chunk_input_state_bhpr
         san(&d_chunk_input_state_bhpr);
 
         // d_C_blue[LM,r] = Σₚ d_ch[LM,p] · state[p,r]
@@ -246,10 +246,10 @@ pub fn combined_backward<B: Backend>(
         vec_blue_d_c_bhLMr.push(d_c_blue_bhLMr);
 
         // d_da from BLUE:
-        //   ch[LM,p] = Σᵣ C[LM,r] · state[p,r]      (= C @ state_rp after permute)
+        //   ch[LM,p] = Σᵣ C[LM,r] · state[p,r]      (= C @ state_rp after transpose)
         //   d_da[LM] = (Σₚ d_y[LM,p] · ch[LM,p]) · exp_da[LM]
         let ch_bhLMp: F<B, 4> = c_bhLMr.clone().matmul(
-            chunk_input_state_bhpr.clone().permute([0, 1, 3, 2]), // chunk_input_state_bhrp
+            chunk_input_state_bhpr.clone().transpose(), // chunk_input_state_bhrp
         ); // ch_bhLMp
         let d_da_blue_bhLM: F<B, 3> = (d_y_bhLMp.clone() * ch_bhLMp * exp_da_cumsum_bhLMp)
             .sum_dim(3) // d_da_blue_bhLM1
@@ -296,11 +296,11 @@ pub fn combined_backward<B: Backend>(
         let d_orange_bhLMp = d_y_bhLMp;
         let w_bhLMLM = cb_bhLMLM.clone() * decay_bhLMLM.clone();
         let d_w_bhLMLM: F<B, 4> = d_orange_bhLMp.clone().matmul(
-            v_bhLMp.clone().permute([0, 1, 3, 2]), // v_bhpLM
+            v_bhLMp.clone().transpose(), // v_bhpLM
         ); // d_w_bhLMₜLMₛ
         san(&d_w_bhLMLM);
         let d_v_orange_bhLMp: F<B, 4> = w_bhLMLM
-            .permute([0, 1, 3, 2]) // w_bhLMₛLMₜ
+            .transpose() // w_bhLMₛLMₜ
             .matmul(d_orange_bhLMp); // d_v_orange_bhLMₛp
         san(&d_v_orange_bhLMp);
         vec_orange_d_v_bhLMp.push(d_v_orange_bhLMp);
@@ -398,7 +398,7 @@ pub fn combined_backward<B: Backend>(
     //   decay_bnLMh1    = decay_bhnLM.permute([0,2,3,1]).unsqueeze(4)
     //   decayed_v_bnLMhp = decay_bnLMh1 · v_bnLMhp                      (elementwise)
     //   decayed_v_bnhpLM = decayed_v_bnLMhp.permute([0,1,3,4,2])
-    //   b_bnhLMr        = b_bnLMhr.permute([0,1,3,2,4])
+    //   b_bnhLMr        = b_bnLMhr.swap_dims(2, 3)
     //   intra_state    = decayed_v_bnhpLM @ b_bnhLMr
     // ═══════════════════════════════════════════════════════════════════════
     let v_bnLMhp =
@@ -409,14 +409,14 @@ pub fn combined_backward<B: Backend>(
         b_bnlmhr
             .clone()
             .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-    let b_bnhLMr = b_bnLMhr.clone().permute([0, 1, 3, 2, 4]);
+    let b_bnhLMr = b_bnLMhr.clone().swap_dims(2, 3);
     let decayed_v_bnhpLM = k3_decayed_v_bnLMhp.permute([0, 1, 3, 4, 2]);
 
     let d_decayed_v_bnhpLM: F<B, 5> = d_intra_chunk_state_bnhpr.clone().matmul(
-        b_bnhLMr.permute([0, 1, 2, 4, 3]), // b_bnhrLM
+        b_bnhLMr.transpose(), // b_bnhrLM
     ); // d_decayed_v_bnhpLM
     let d_b_k3_bnhLMr: F<B, 5> = decayed_v_bnhpLM
-        .permute([0, 1, 2, 4, 3]) // decayed_v_bnhLMp
+        .transpose() // decayed_v_bnhLMp
         .matmul(d_intra_chunk_state_bnhpr); // d_b_k3_bnhLMr
 
     let d_decayed_v_bnLMhp = d_decayed_v_bnhpLM.permute([0, 1, 4, 2, 3]);
@@ -458,7 +458,7 @@ pub fn combined_backward<B: Backend>(
     let d_da_cumsum_k3_bhnl = d_da_cumsum_k3_from_fused_bhnl + d_da_cumsum_k3_from_last_bhnl;
 
     // d_b_k3
-    let d_b_k3_bnLMhr = d_b_k3_bnhLMr.permute([0, 1, 3, 2, 4]);
+    let d_b_k3_bnLMhr = d_b_k3_bnhLMr.swap_dims(2, 3);
     let d_b_k3_bnlmhr: F<B, 6> =
         d_b_k3_bnLMhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
 
@@ -472,17 +472,17 @@ pub fn combined_backward<B: Backend>(
     let c_bnhLMr = c_bnlmhr
         .clone()
         .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]) // c_bnLMhr
-        .permute([0, 1, 3, 2, 4]); // c_bnhLMr
-    let b_for_k2_bnhLMr = b_bnLMhr.permute([0, 1, 3, 2, 4]);
+        .swap_dims(2, 3); // c_bnhLMr
+    let b_for_k2_bnhLMr = b_bnLMhr.swap_dims(2, 3);
 
     let d_c_k2_bnhLMr: F<B, 5> = d_cb_bnhLMLM.clone().matmul(b_for_k2_bnhLMr);
     let d_b_k2_bnhrLM: F<B, 5> = c_bnhLMr
-        .permute([0, 1, 2, 4, 3]) // c_bnhrLM
+        .transpose() // c_bnhrLM
         .matmul(d_cb_bnhLMLM); // d_b_k2_bnhrLM
 
     // Undo permutes and reshape back
     let d_c_k2_bnlmhr: F<B, 6> = d_c_k2_bnhLMr
-        .permute([0, 1, 3, 2, 4]) // d_c_k2_bnLMhr
+        .swap_dims(2, 3) // d_c_k2_bnLMhr
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]); // d_c_k2_bnlmhr
     let d_b_k2_bnlmhr: F<B, 6> = d_b_k2_bnhrLM
         .permute([0, 1, 4, 2, 3]) // d_b_k2_bnLMhr
@@ -490,10 +490,10 @@ pub fn combined_backward<B: Backend>(
 
     // ── Unstack d_c_blue / d_v_orange and reshape back ────────────────────
     let d_c_blue_bnlmhr: F<B, 6> = d_c_blue_bnhLMr
-        .permute([0, 1, 3, 2, 4]) // d_c_blue_bnLMhr
+        .swap_dims(2, 3) // d_c_blue_bnLMhr
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]); // d_c_blue_bnlmhr
     let d_v_orange_bnlrhp: F<B, 6> = d_v_orange_bnhLMp
-        .permute([0, 1, 3, 2, 4]) // d_v_orange_bnLMhp
+        .swap_dims(2, 3) // d_v_orange_bnLMhp
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // d_v_orange_bnlrhp
 
     // ═══════════════════════════════════════════════════════════════════════

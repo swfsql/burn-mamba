@@ -88,7 +88,7 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
     let normed = norm.forward(raw_mgr);
     let expanded = gqa_expand_to_heads::<D, DP1>(normed, group_dim, nheads);
     // Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
-    let bias = bias_hmr.permute([1, 0, 2]).unsqueeze::<D>();
+    let bias = bias_hmr.swap_dims(0, 1).unsqueeze::<D>();
     expanded + bias
 }
 
@@ -108,10 +108,10 @@ pub fn build_v_with_mimo<const D: usize, const DP1: usize>(
     match mimo_x_hmp {
         None => x_with_rank_axis,
         Some(mimo_x_hmp) => {
-            // mimo_x_hmp [nheads, mimo_rank, per_head_dim] → permute to
+            // mimo_x_hmp [nheads, mimo_rank, per_head_dim] → swap_dims to
             // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
             // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
-            let mimo_x_broadcast = mimo_x_hmp.clone().permute([1, 0, 2]).unsqueeze::<DP1>();
+            let mimo_x_broadcast = mimo_x_hmp.clone().swap_dims(0, 1).unsqueeze::<DP1>();
             x_with_rank_axis * mimo_x_broadcast
         }
     }
