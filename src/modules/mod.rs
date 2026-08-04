@@ -4,20 +4,24 @@ use burn::prelude::*;
 /// Custom activations (fp16-stable `silu` / `softplus` / `log_sigmoid`).
 pub mod activation;
 /// Bidirectional layer stacks (straight + reversed passes, merged per pair).
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod bidi;
 /// The per-network cache collection trait ([`CacheStack`]) + [`MambaCaches`].
 pub mod cache;
 /// A single Pre-LN residual layer wrapping one SSM block ([`Layer`]).
 pub mod layer;
 /// The (virtual-)layer stack over real weight sets ([`Layers`]).
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod layers;
 /// Loss functions (binary cross-entropy, cross-entropy, mean squared error).
 pub mod loss;
 /// Tensor helpers: `segsum`, `gqa`, typed `split`, and `sanity` guards.
 pub mod misc;
 /// Multi-Gate Residuals: multi-stream gated depth-wise residuals ([`Residuals`]).
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod multi_gate;
 /// Family-generic networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod network;
 /// RMS norms ([`RmsNorm`] QK-norm + [`RmsNormGated`]), fp16-safe.
 pub mod norm;
@@ -26,6 +30,7 @@ pub use activation::log_sigmoid::log_sigmoid;
 pub use activation::silu::Silu;
 pub use activation::softplus::softplus;
 pub use misc::gqa::gqa_expand_to_heads;
+#[cfg(feature = "mamba3")]
 pub use misc::rope::{apply_rope, apply_rope_partial, wrap_angle};
 pub use misc::sanity::sanity;
 pub use misc::segsum::segsum;
@@ -33,13 +38,17 @@ pub use misc::split::split_into;
 pub use norm::rms_norm::{RmsNorm, RmsNormConfig};
 pub use norm::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
 
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};
 pub use cache::{CacheStack, MambaCaches};
 pub use layer::Layer;
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use layers::{Layers, LayersBuilder};
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use multi_gate::{
     MultiGate, MultiGateResidual, MultiGateResidualConfig, Residuals, ResidualsConfig,
 };
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
 
 /// Per-family block interface the generic [`Layer`]/[`Layers`] delegate to.

@@ -16,6 +16,7 @@ pub mod backend_macros;
 pub mod class;
 /// Flatten/unflatten `(y, final_state)` into one tracked tensor for the custom
 /// backward.
+#[cfg(feature = "autodiff")]
 pub mod combined_grad;
 /// Rank-tagged `FloatTensor` primitive wrapper mirroring the `Tensor` method
 /// API, used by the custom-backward gradient math.

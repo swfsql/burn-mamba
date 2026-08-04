@@ -1,5 +1,6 @@
 /// Group→head expansion of B/C (GQA-style sharing).
 pub mod gqa;
+#[cfg(feature = "mamba3")]
 pub mod rope;
 /// Optional `NaN`/`Inf` guards gated by [`crate::DENY_NAN`] / [`crate::DENY_INF`].
 pub mod sanity;

@@ -64,10 +64,15 @@ pub mod prelude {
     pub use crate::mamba3::{self, prelude::*};
 
     // The family-generic, runtime-selectable unified API.
+    #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
     pub use crate::modules::{
-        CacheStack, Layer, Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaBlock,
-        MambaBlockConfig, MambaCaches, MambaLatentNet, MambaLatentNetConfig, MambaSsdPath,
+        Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
         MambaVocabNet, MambaVocabNetConfig, ResidualsConfig,
+    };
+    
+    pub use crate::modules::{
+        CacheStack, Layer, MambaBlock,
+        MambaBlockConfig, MambaCaches, MambaSsdPath,
     };
     pub use crate::utils::{ClassLatent, ClassToken};
 }

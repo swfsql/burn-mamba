@@ -24,7 +24,7 @@ pub trait CacheStack: Sized {
 /// This is plain runtime state (not a `Module`): caches are threaded through
 /// `forward`/`step`, never recorded or optimised. (`Mamba3Caches` is itself a
 /// non-`Module` enum, so a `Module` derive here would not even apply.)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MambaCaches {
     /// Mamba-1 caches.
     #[cfg(feature = "mamba1")]
