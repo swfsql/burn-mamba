@@ -156,8 +156,8 @@
 <a href=#156 id=156 data-nosnippet>156</a>        //   (c) temp2 · X[n]  (contract over chunk_len)              → Y_diag
 <a href=#157 id=157 data-nosnippet>157</a>        </span><span class="kw">let </span>y_diag_bnlhp = {
 <a href=#158 id=158 data-nosnippet>158</a>            <span class="comment">// Permute for the matmul along chunk_len and state_rank.
-<a href=#159 id=159 data-nosnippet>159</a>            </span><span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#160 id=160 data-nosnippet>160</a>            <span class="kw">let </span>c_bnhlr = c_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#159 id=159 data-nosnippet>159</a>            </span><span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().swap_dims(<span class="number">2</span>, <span class="number">3</span>);
+<a href=#160 id=160 data-nosnippet>160</a>            <span class="kw">let </span>c_bnhlr = c_bnlhr.clone().swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#161 id=161 data-nosnippet>161</a>            <span class="macro">assert_eq!</span>(
 <a href=#162 id=162 data-nosnippet>162</a>                [batch, nchunks, nheads, chunk_len, state_rank],
 <a href=#163 id=163 data-nosnippet>163</a>                b_bnhlr.dims()
@@ -169,7 +169,7 @@
 <a href=#169 id=169 data-nosnippet>169</a>
 <a href=#170 id=170 data-nosnippet>170</a>            <span class="comment">// (a) C[n] · B[n]ᵀ
 <a href=#171 id=171 data-nosnippet>171</a>            //     Contracts over state_rank.
-<a href=#172 id=172 data-nosnippet>172</a>            </span><span class="kw">let </span>b_bnhrl = b_bnhlr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]);
+<a href=#172 id=172 data-nosnippet>172</a>            </span><span class="kw">let </span>b_bnhrl = b_bnhlr.transpose();
 <a href=#173 id=173 data-nosnippet>173</a>            <span class="kw">let </span>cb_bnhll = c_bnhlr.matmul(b_bnhrl);
 <a href=#174 id=174 data-nosnippet>174</a>            <span class="macro">assert_eq!</span>(
 <a href=#175 id=175 data-nosnippet>175</a>                [batch, nchunks, nheads, chunk_len, chunk_len],
@@ -188,7 +188,7 @@
 <a href=#188 id=188 data-nosnippet>188</a>            san(<span class="kw-2">&amp;</span>l_bhnll);
 <a href=#189 id=189 data-nosnippet>189</a>
 <a href=#190 id=190 data-nosnippet>190</a>            <span class="comment">// Permute both for the broadcast multiply.
-<a href=#191 id=191 data-nosnippet>191</a>            </span><span class="kw">let </span>cb_bnlhl = cb_bnhll.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#191 id=191 data-nosnippet>191</a>            </span><span class="kw">let </span>cb_bnlhl = cb_bnhll.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#192 id=192 data-nosnippet>192</a>            <span class="macro">assert_eq!</span>(
 <a href=#193 id=193 data-nosnippet>193</a>                [batch, nchunks, chunk_len, nheads, chunk_len],
 <a href=#194 id=194 data-nosnippet>194</a>                cb_bnlhl.dims()
@@ -205,13 +205,13 @@
 <a href=#205 id=205 data-nosnippet>205</a>
 <a href=#206 id=206 data-nosnippet>206</a>            <span class="comment">// (c) masked_CB · X → Y_diag.
 <a href=#207 id=207 data-nosnippet>207</a>            //     Contract over the last chunk_len dimension.
-<a href=#208 id=208 data-nosnippet>208</a>            </span><span class="kw">let </span>masked_cb_bnhll = masked_cb_bnlhl.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#208 id=208 data-nosnippet>208</a>            </span><span class="kw">let </span>masked_cb_bnhll = masked_cb_bnlhl.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#209 id=209 data-nosnippet>209</a>            <span class="macro">assert_eq!</span>(
 <a href=#210 id=210 data-nosnippet>210</a>                [batch, nchunks, nheads, chunk_len, chunk_len],
 <a href=#211 id=211 data-nosnippet>211</a>                masked_cb_bnhll.dims()
 <a href=#212 id=212 data-nosnippet>212</a>            );
 <a href=#213 id=213 data-nosnippet>213</a>
-<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">let </span>x_bnhlp = input.x_bnlhp.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">let </span>x_bnhlp = input.x_bnlhp.clone().swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#215 id=215 data-nosnippet>215</a>            <span class="macro">assert_eq!</span>(
 <a href=#216 id=216 data-nosnippet>216</a>                [batch, nchunks, nheads, chunk_len, per_head_dim],
 <a href=#217 id=217 data-nosnippet>217</a>                x_bnhlp.dims()
@@ -224,7 +224,7 @@
 <a href=#224 id=224 data-nosnippet>224</a>            );
 <a href=#225 id=225 data-nosnippet>225</a>            san(<span class="kw-2">&amp;</span>y_diag_bnhlp);
 <a href=#226 id=226 data-nosnippet>226</a>
-<a href=#227 id=227 data-nosnippet>227</a>            y_diag_bnhlp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// y_diag_bnlhp
+<a href=#227 id=227 data-nosnippet>227</a>            y_diag_bnhlp.swap_dims(<span class="number">2</span>, <span class="number">3</span>) <span class="comment">// y_diag_bnlhp
 <a href=#228 id=228 data-nosnippet>228</a>        </span>};
 <a href=#229 id=229 data-nosnippet>229</a>        <span class="macro">assert_eq!</span>(
 <a href=#230 id=230 data-nosnippet>230</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
@@ -274,7 +274,7 @@
 <a href=#274 id=274 data-nosnippet>274</a>                [batch, nchunks, nheads, per_head_dim, chunk_len],
 <a href=#275 id=275 data-nosnippet>275</a>                decayed_x_bnhpl.dims()
 <a href=#276 id=276 data-nosnippet>276</a>            );
-<a href=#277 id=277 data-nosnippet>277</a>            <span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#277 id=277 data-nosnippet>277</a>            <span class="kw">let </span>b_bnhlr = delta_b_bnlhr.clone().swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#278 id=278 data-nosnippet>278</a>            <span class="macro">assert_eq!</span>(
 <a href=#279 id=279 data-nosnippet>279</a>                [batch, nchunks, nheads, chunk_len, state_rank],
 <a href=#280 id=280 data-nosnippet>280</a>                b_bnhlr.dims()
@@ -367,7 +367,7 @@
 <a href=#367 id=367 data-nosnippet>367</a>            </span><span class="kw">let </span>flat_state_dim = per_head_dim * state_rank; <span class="comment">// f = per_head_dim·state_rank
 <a href=#368 id=368 data-nosnippet>368</a>            </span><span class="kw">let </span>state_bhNf = state_bNhpr
 <a href=#369 id=369 data-nosnippet>369</a>                .clone()
-<a href=#370 id=370 data-nosnippet>370</a>                .permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>]) <span class="comment">// state_bhNpr
+<a href=#370 id=370 data-nosnippet>370</a>                .swap_dims(<span class="number">1</span>, <span class="number">2</span>) <span class="comment">// state_bhNpr
 <a href=#371 id=371 data-nosnippet>371</a>                </span>.reshape([batch, nheads, <span class="number">1 </span>+ nchunks, flat_state_dim]); <span class="comment">// state_bhNf
 <a href=#372 id=372 data-nosnippet>372</a>            </span><span class="macro">assert_eq!</span>(
 <a href=#373 id=373 data-nosnippet>373</a>                [batch, nheads, <span class="number">1 </span>+ nchunks, flat_state_dim],
@@ -399,7 +399,7 @@
 <a href=#399 id=399 data-nosnippet>399</a>                .squeeze_dim(<span class="number">2</span>);
 <a href=#400 id=400 data-nosnippet>400</a>
 <a href=#401 id=401 data-nosnippet>401</a>            (
-<a href=#402 id=402 data-nosnippet>402</a>                state_bhnpr.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>]), <span class="comment">// state_bnhpr
+<a href=#402 id=402 data-nosnippet>402</a>                state_bhnpr.swap_dims(<span class="number">1</span>, <span class="number">2</span>), <span class="comment">// state_bnhpr
 <a href=#403 id=403 data-nosnippet>403</a>                </span>final_state_bhpr,
 <a href=#404 id=404 data-nosnippet>404</a>            )
 <a href=#405 id=405 data-nosnippet>405</a>        };
@@ -438,13 +438,13 @@
 <a href=#438 id=438 data-nosnippet>438</a>            san(<span class="kw-2">&amp;</span>state_decay_out_bhnl);
 <a href=#439 id=439 data-nosnippet>439</a>
 <a href=#440 id=440 data-nosnippet>440</a>            <span class="comment">// (a) C[n] · h[n-1]ᵀ
-<a href=#441 id=441 data-nosnippet>441</a>            </span><span class="kw">let </span>c_bnhlr = c_bnlhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#441 id=441 data-nosnippet>441</a>            </span><span class="kw">let </span>c_bnhlr = c_bnlhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#442 id=442 data-nosnippet>442</a>            <span class="macro">assert_eq!</span>(
 <a href=#443 id=443 data-nosnippet>443</a>                [batch, nchunks, nheads, chunk_len, state_rank],
 <a href=#444 id=444 data-nosnippet>444</a>                c_bnhlr.dims()
 <a href=#445 id=445 data-nosnippet>445</a>            );
 <a href=#446 id=446 data-nosnippet>446</a>
-<a href=#447 id=447 data-nosnippet>447</a>            <span class="kw">let </span>state_bnhrp = state_bnhpr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]);
+<a href=#447 id=447 data-nosnippet>447</a>            <span class="kw">let </span>state_bnhrp = state_bnhpr.transpose();
 <a href=#448 id=448 data-nosnippet>448</a>            <span class="macro">assert_eq!</span>(
 <a href=#449 id=449 data-nosnippet>449</a>                [batch, nchunks, nheads, state_rank, per_head_dim],
 <a href=#450 id=450 data-nosnippet>450</a>                state_bnhrp.dims()
@@ -458,7 +458,7 @@
 <a href=#458 id=458 data-nosnippet>458</a>            san(<span class="kw-2">&amp;</span>ch_bnhlp);
 <a href=#459 id=459 data-nosnippet>459</a>
 <a href=#460 id=460 data-nosnippet>460</a>            <span class="comment">// (b) Multiply by the intra-chunk cumulative decay.
-<a href=#461 id=461 data-nosnippet>461</a>            </span><span class="kw">let </span>state_decay_out_bnhl1 = state_decay_out_bhnl.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]).unsqueeze_dim(<span class="number">4</span>);
+<a href=#461 id=461 data-nosnippet>461</a>            </span><span class="kw">let </span>state_decay_out_bnhl1 = state_decay_out_bhnl.swap_dims(<span class="number">1</span>, <span class="number">2</span>).unsqueeze_dim(<span class="number">4</span>);
 <a href=#462 id=462 data-nosnippet>462</a>            <span class="macro">assert_eq!</span>(
 <a href=#463 id=463 data-nosnippet>463</a>                [batch, nchunks, nheads, chunk_len, <span class="number">1</span>],
 <a href=#464 id=464 data-nosnippet>464</a>                state_decay_out_bnhl1.dims()
@@ -471,7 +471,7 @@
 <a href=#471 id=471 data-nosnippet>471</a>            );
 <a href=#472 id=472 data-nosnippet>472</a>            san(<span class="kw-2">&amp;</span>y_off_bnhlp);
 <a href=#473 id=473 data-nosnippet>473</a>
-<a href=#474 id=474 data-nosnippet>474</a>            y_off_bnhlp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// y_off_bnlhp
+<a href=#474 id=474 data-nosnippet>474</a>            y_off_bnhlp.swap_dims(<span class="number">2</span>, <span class="number">3</span>) <span class="comment">// y_off_bnlhp
 <a href=#475 id=475 data-nosnippet>475</a>        </span>};
 <a href=#476 id=476 data-nosnippet>476</a>        <span class="macro">assert_eq!</span>(
 <a href=#477 id=477 data-nosnippet>477</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],

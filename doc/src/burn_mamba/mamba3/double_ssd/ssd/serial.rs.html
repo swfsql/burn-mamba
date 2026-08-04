@@ -150,7 +150,7 @@
 <a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">let </span>c_bnLMhr = c_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
 <a href=#151 id=151 data-nosnippet>151</a>    <span class="kw">let </span>b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
 <a href=#152 id=152 data-nosnippet>152</a>
-<a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">let </span>c_bnhLMr = c_bnLMhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">let </span>c_bnhLMr = c_bnLMhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#154 id=154 data-nosnippet>154</a>    <span class="kw">let </span>b_bnhrLM = b_bnLMhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
 <a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">let </span>cb_bnhLMLM: Tensor&lt;<span class="number">5</span>&gt; = c_bnhLMr.matmul(b_bnhrLM);
 <a href=#156 id=156 data-nosnippet>156</a>    <span class="macro">assert_eq!</span>(
@@ -210,7 +210,7 @@
 <a href=#210 id=210 data-nosnippet>210</a>
 <a href=#211 id=211 data-nosnippet>211</a>    <span class="comment">// state = decayed_V^T @ B
 <a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">let </span>decayed_v_bnhpLM = decayed_v_bnLMhp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
-<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">let </span>b_bnhLMr = b_bnLMhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">let </span>b_bnhLMr = b_bnLMhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">let </span>intra_chunk_state_bnhpr: Tensor&lt;<span class="number">5</span>&gt; = decayed_v_bnhpLM.matmul(b_bnhLMr);
 <a href=#215 id=215 data-nosnippet>215</a>    <span class="macro">assert_eq!</span>(
 <a href=#216 id=216 data-nosnippet>216</a>        [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -331,12 +331,12 @@
 <a href=#331 id=331 data-nosnippet>331</a>    </span><span class="kw">let </span>exp_da_bnhLMp = da_cumsum_bhnLM
 <a href=#332 id=332 data-nosnippet>332</a>        .clone()
 <a href=#333 id=333 data-nosnippet>333</a>        .exp()
-<a href=#334 id=334 data-nosnippet>334</a>        .permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// exp_da_bnhLM
+<a href=#334 id=334 data-nosnippet>334</a>        .swap_dims(<span class="number">1</span>, <span class="number">2</span>) <span class="comment">// exp_da_bnhLM
 <a href=#335 id=335 data-nosnippet>335</a>        </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// // exp_da_bnhLM1
 <a href=#336 id=336 data-nosnippet>336</a>        </span>.expand([batch, nchunks, nheads, chunk_len * mimo_rank, per_head_dim]); <span class="comment">// exp_da_bnhLMp
 <a href=#337 id=337 data-nosnippet>337</a>
-<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="kw">let </span>c_bnhLMr = c_bnLMhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]);
+<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="kw">let </span>c_bnhLMr = c_bnLMhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="kw">let </span>chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
 <a href=#340 id=340 data-nosnippet>340</a>    <span class="kw">let </span>ch_bnhLMp = c_bnhLMr.matmul(chunk_input_state_bnhrp);
 <a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>blue_bnhLMp = ch_bnhLMp * exp_da_bnhLMp;
 <a href=#342 id=342 data-nosnippet>342</a>
@@ -344,7 +344,7 @@
 <a href=#344 id=344 data-nosnippet>344</a>    //
 <a href=#345 id=345 data-nosnippet>345</a>    // MIMO pairwise decay: diff[i,j] = cumA[i] - cumA[j]
 <a href=#346 id=346 data-nosnippet>346</a>    //                                = cumA_base[i//m] - cumA_base[j//m]
-<a href=#347 id=347 data-nosnippet>347</a>    </span><span class="kw">let </span>da_cumsum_bnhLM = da_cumsum_bhnLM.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#347 id=347 data-nosnippet>347</a>    </span><span class="kw">let </span>da_cumsum_bnhLM = da_cumsum_bhnLM.swap_dims(<span class="number">1</span>, <span class="number">2</span>);
 <a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">let </span>target_da_cumsum_bnhLMLM = da_cumsum_bnhLM
 <a href=#349 id=349 data-nosnippet>349</a>        .clone()
 <a href=#350 id=350 data-nosnippet>350</a>        .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// da_cumsum_bnhLM1
@@ -397,12 +397,12 @@
 <a href=#397 id=397 data-nosnippet>397</a>
 <a href=#398 id=398 data-nosnippet>398</a>    </span><span class="kw">let </span>decay_bnhLMLM = (diff_da_cumsum_bnhLMLM + neg_inf_bnhLMLM).exp();
 <a href=#399 id=399 data-nosnippet>399</a>
-<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">let </span>v_bnhLMp = v_bnLMhp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">let </span>v_bnhLMp = v_bnLMhp.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#401 id=401 data-nosnippet>401</a>    <span class="kw">let </span>orange_bnhLMp = (cb_bnhLMLM * decay_bnhLMLM).matmul(v_bnhLMp);
 <a href=#402 id=402 data-nosnippet>402</a>
 <a href=#403 id=403 data-nosnippet>403</a>    <span class="comment">// ── Combine and reshape ────────────────────────────────────────────────────
 <a href=#404 id=404 data-nosnippet>404</a>    </span><span class="kw">let </span>y_bnlmhp = (blue_bnhLMp + orange_bnhLMp)
-<a href=#405 id=405 data-nosnippet>405</a>        .permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]) <span class="comment">// y_bnLMhp
+<a href=#405 id=405 data-nosnippet>405</a>        .swap_dims(<span class="number">2</span>, <span class="number">3</span>) <span class="comment">// y_bnLMhp
 <a href=#406 id=406 data-nosnippet>406</a>        </span>.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); <span class="comment">// y_bnlmhp
 <a href=#407 id=407 data-nosnippet>407</a>
 <a href=#408 id=408 data-nosnippet>408</a>    </span>y_bnlmhp

@@ -88,7 +88,7 @@
 <a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">let </span>normed = norm.forward(raw_mgr);
 <a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">let </span>expanded = gqa_expand_to_heads::&lt;D, DP1&gt;(normed, group_dim, nheads);
 <a href=#90 id=90 data-nosnippet>90</a>    <span class="comment">// Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
-<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">let </span>bias = bias_hmr.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;D&gt;();
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">let </span>bias = bias_hmr.swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;D&gt;();
 <a href=#92 id=92 data-nosnippet>92</a>    expanded + bias
 <a href=#93 id=93 data-nosnippet>93</a>}
 <a href=#94 id=94 data-nosnippet>94</a>
@@ -108,10 +108,10 @@
 <a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">match </span>mimo_x_hmp {
 <a href=#109 id=109 data-nosnippet>109</a>        <span class="prelude-val">None </span>=&gt; x_with_rank_axis,
 <a href=#110 id=110 data-nosnippet>110</a>        <span class="prelude-val">Some</span>(mimo_x_hmp) =&gt; {
-<a href=#111 id=111 data-nosnippet>111</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → permute to
+<a href=#111 id=111 data-nosnippet>111</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → swap_dims to
 <a href=#112 id=112 data-nosnippet>112</a>            // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
 <a href=#113 id=113 data-nosnippet>113</a>            // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
-<a href=#114 id=114 data-nosnippet>114</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]).unsqueeze::&lt;DP1&gt;();
+<a href=#114 id=114 data-nosnippet>114</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;DP1&gt;();
 <a href=#115 id=115 data-nosnippet>115</a>            x_with_rank_axis * mimo_x_broadcast
 <a href=#116 id=116 data-nosnippet>116</a>        }
 <a href=#117 id=117 data-nosnippet>117</a>    }

@@ -275,7 +275,7 @@
 <a href=#275 id=275 data-nosnippet>275</a>        <span class="comment">// layer 2 (conv1d) — causal, with the cache window threaded as left context
 <a href=#276 id=276 data-nosnippet>276</a>        </span><span class="kw">let </span>xs_bsi = {
 <a href=#277 id=277 data-nosnippet>277</a>            <span class="macro">assert!</span>(conv_kernel &gt; <span class="number">0</span>);
-<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span>conv_in_bis = xs_bsi.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>]);
+<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">let </span>conv_in_bis = xs_bsi.transpose();
 <a href=#279 id=279 data-nosnippet>279</a>            <span class="macro">assert_eq!</span>([batch, d_inner, sequence], conv_in_bis.dims());
 <a href=#280 id=280 data-nosnippet>280</a>
 <a href=#281 id=281 data-nosnippet>281</a>            <span class="comment">// Left-pad with the last (conv_kernel - 1) columns of the cached
@@ -302,7 +302,7 @@
 <a href=#302 id=302 data-nosnippet>302</a>            <span class="macro">assert_eq!</span>([batch, d_inner, sequence], xs.dims());
 <a href=#303 id=303 data-nosnippet>303</a>
 <a href=#304 id=304 data-nosnippet>304</a>            <span class="comment">// restore original positioning as per before the layer 2
-<a href=#305 id=305 data-nosnippet>305</a>            </span><span class="kw">let </span>xs = xs.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>]);
+<a href=#305 id=305 data-nosnippet>305</a>            </span><span class="kw">let </span>xs = xs.transpose();
 <a href=#306 id=306 data-nosnippet>306</a>            <span class="macro">assert_eq!</span>([batch, sequence, d_inner], xs.dims());
 <a href=#307 id=307 data-nosnippet>307</a>
 <a href=#308 id=308 data-nosnippet>308</a>            <span class="comment">// activation
@@ -366,10 +366,10 @@
 <a href=#366 id=366 data-nosnippet>366</a>
 <a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">let </span>delta = burn::tensor::activation::softplus(delta, <span class="number">1.</span>);
 <a href=#368 id=368 data-nosnippet>368</a>
-<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>delta = delta.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]);
+<a href=#369 id=369 data-nosnippet>369</a>        <span class="kw">let </span>delta = delta.swap_dims(<span class="number">0</span>, <span class="number">1</span>);
 <a href=#370 id=370 data-nosnippet>370</a>        <span class="macro">assert_eq!</span>([sequence, batch, d_inner], delta.dims());
 <a href=#371 id=371 data-nosnippet>371</a>
-<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span>c = c.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]);
+<a href=#372 id=372 data-nosnippet>372</a>        <span class="kw">let </span>c = c.swap_dims(<span class="number">0</span>, <span class="number">1</span>);
 <a href=#373 id=373 data-nosnippet>373</a>        <span class="macro">assert_eq!</span>([sequence, batch, state_rank], c.dims());
 <a href=#374 id=374 data-nosnippet>374</a>
 <a href=#375 id=375 data-nosnippet>375</a>        <span class="self">Self</span>::selective_scan(delta, a, b, c, <span class="self">self</span>.d.val(), u, init_ssm)
@@ -422,7 +422,7 @@
 <a href=#422 id=422 data-nosnippet>422</a>            <span class="kw">let </span>delta_a = (delta.clone() * a).exp();
 <a href=#423 id=423 data-nosnippet>423</a>            <span class="macro">assert_eq!</span>(outer_shape, delta_a.dims());
 <a href=#424 id=424 data-nosnippet>424</a>
-<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">let </span>b = b.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]);
+<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">let </span>b = b.swap_dims(<span class="number">0</span>, <span class="number">1</span>);
 <a href=#426 id=426 data-nosnippet>426</a>            <span class="macro">assert_eq!</span>([sequence, batch, state_rank], b.dims());
 <a href=#427 id=427 data-nosnippet>427</a>            <span class="kw">let </span>b = b.unsqueeze_dim(<span class="number">2</span>);
 <a href=#428 id=428 data-nosnippet>428</a>            <span class="macro">assert_eq!</span>([sequence, batch, <span class="number">1</span>, state_rank], b.dims());
@@ -431,7 +431,7 @@
 <a href=#431 id=431 data-nosnippet>431</a>            <span class="kw">let </span>delta_b = delta * b;
 <a href=#432 id=432 data-nosnippet>432</a>            <span class="macro">assert_eq!</span>(outer_shape, delta_b.dims());
 <a href=#433 id=433 data-nosnippet>433</a>
-<a href=#434 id=434 data-nosnippet>434</a>            <span class="kw">let </span>u = u.clone().permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]);
+<a href=#434 id=434 data-nosnippet>434</a>            <span class="kw">let </span>u = u.clone().swap_dims(<span class="number">0</span>, <span class="number">1</span>);
 <a href=#435 id=435 data-nosnippet>435</a>            <span class="macro">assert_eq!</span>([sequence, batch, d_inner], u.dims());
 <a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">let </span>u = u.unsqueeze_dim(<span class="number">3</span>);
 <a href=#437 id=437 data-nosnippet>437</a>            <span class="macro">assert_eq!</span>([sequence, batch, d_inner, <span class="number">1</span>], u.dims());
@@ -547,7 +547,7 @@
 <a href=#547 id=547 data-nosnippet>547</a>                <span class="kw">let </span>conv1d = <span class="self">self</span>.conv1d.weight.val();
 <a href=#548 id=548 data-nosnippet>548</a>                <span class="comment">// [channels_out, channels_in / groups, kernel_size]
 <a href=#549 id=549 data-nosnippet>549</a>                </span><span class="macro">assert_eq!</span>([d_inner, <span class="number">1</span>, conv_kernel], conv1d.dims());
-<a href=#550 id=550 data-nosnippet>550</a>                <span class="kw">let </span>conv1d = conv1d.permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]);
+<a href=#550 id=550 data-nosnippet>550</a>                <span class="kw">let </span>conv1d = conv1d.swap_dims(<span class="number">0</span>, <span class="number">1</span>);
 <a href=#551 id=551 data-nosnippet>551</a>                <span class="macro">assert_eq!</span>([<span class="number">1</span>, d_inner, conv_kernel], conv1d.dims());
 <a href=#552 id=552 data-nosnippet>552</a>                <span class="kw">let </span>conv1d = conv1d.expand([batch, d_inner, conv_kernel]);
 <a href=#553 id=553 data-nosnippet>553</a>                <span class="macro">assert_eq!</span>([batch, d_inner, conv_kernel], conv1d.dims());

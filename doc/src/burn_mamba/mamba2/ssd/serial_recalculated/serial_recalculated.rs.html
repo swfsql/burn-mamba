@@ -188,7 +188,7 @@
 <a href=#188 id=188 data-nosnippet>188</a>///
 <a href=#189 id=189 data-nosnippet>189</a>/// Returns the intra-chunk `C·Bᵀ` block matrix `cb_bnhll`.
 <a href=#190 id=190 data-nosnippet>190</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>k2_ssd_bmm&lt;B: Backend&gt;(c_bnlhr: F&lt;B, <span class="number">5</span>&gt;, b_bnlhr: F&lt;B, <span class="number">5</span>&gt;) -&gt; F&lt;B, <span class="number">5</span>&gt; {
-<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>c_bnhlr = c_bnlhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>c_bnhlr = c_bnlhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>b_bnhrl = b_bnlhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
 <a href=#193 id=193 data-nosnippet>193</a>    c_bnhlr.matmul(b_bnhrl)
 <a href=#194 id=194 data-nosnippet>194</a>}
@@ -208,7 +208,7 @@
 <a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>[.., state_rank] = b_bnlhr.dims();
 <a href=#209 id=209 data-nosnippet>209</a>
 <a href=#210 id=210 data-nosnippet>210</a>    <span class="kw">let </span>x_bnhpl = x_bnlhp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
-<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">let </span>b_bnhlr = b_bnlhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">let </span>b_bnhlr = b_bnlhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#212 id=212 data-nosnippet>212</a>
 <a href=#213 id=213 data-nosnippet>213</a>    <span class="comment">// K3 scaling factor: dt · exp(cumA_last − cumA)
 <a href=#214 id=214 data-nosnippet>214</a>    </span><span class="kw">let </span>da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(<span class="macro">s!</span>[.., .., .., -<span class="number">1</span>]);
@@ -217,7 +217,7 @@
 <a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">let </span>b_bar_scale_bhnl = forward_decay_to_chunk_end_bhnl * dt_discretized_bhnl;
 <a href=#218 id=218 data-nosnippet>218</a>
 <a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">let </span>b_bar_scale_bnhlr = b_bar_scale_bhnl
-<a href=#220 id=220 data-nosnippet>220</a>        .permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]) <span class="comment">// b_bar_scale_bnhl
+<a href=#220 id=220 data-nosnippet>220</a>        .swap_dims(<span class="number">1</span>, <span class="number">2</span>) <span class="comment">// b_bar_scale_bnhl
 <a href=#221 id=221 data-nosnippet>221</a>        </span>.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// b_bar_scale_bnhl1
 <a href=#222 id=222 data-nosnippet>222</a>        </span>.expand([batch, nchunks, nheads, chunk_len, state_rank]);
 <a href=#223 id=223 data-nosnippet>223</a>    <span class="kw">let </span>b_scaled_bnhlr = b_bnhlr * b_bar_scale_bnhlr;
@@ -283,10 +283,10 @@
 <a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">let </span>[batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
 <a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">let </span>device = x_bnlhp.device();
 <a href=#285 id=285 data-nosnippet>285</a>
-<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>da_cumsum_bnhl = da_cumsum_bhnl.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
-<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>dt_bnhl = dt_discretized_bhnl.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">let </span>x_bnhlp = x_bnlhp.clone().permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#289 id=289 data-nosnippet>289</a>    <span class="kw">let </span>c_bnhlr = c_bnlhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>da_cumsum_bnhl = da_cumsum_bhnl.swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>dt_bnhl = dt_discretized_bhnl.swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">let </span>x_bnhlp = x_bnlhp.clone().swap_dims(<span class="number">2</span>, <span class="number">3</span>);
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="kw">let </span>c_bnhlr = c_bnlhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#290 id=290 data-nosnippet>290</a>
 <a href=#291 id=291 data-nosnippet>291</a>    <span class="comment">// ── BLUE: exp(dA[l]) · C[l,:] @ state_in^T ─────────────────────────────
 <a href=#292 id=292 data-nosnippet>292</a>    </span><span class="kw">let </span>exp_da_cumsum_bnhlp = da_cumsum_bnhl
@@ -294,7 +294,7 @@
 <a href=#294 id=294 data-nosnippet>294</a>        .exp()
 <a href=#295 id=295 data-nosnippet>295</a>        .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// exp_da_cumsum_bnhl1
 <a href=#296 id=296 data-nosnippet>296</a>        </span>.expand([batch, nchunks, nheads, chunk_len, per_head_dim]);
-<a href=#297 id=297 data-nosnippet>297</a>    <span class="kw">let </span>chunk_input_state_bnhrp = chunk_input_state_bnhpr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>, <span class="number">3</span>]);
+<a href=#297 id=297 data-nosnippet>297</a>    <span class="kw">let </span>chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
 <a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span>blue_scaled_bnhlp = c_bnhlr.matmul(chunk_input_state_bnhrp) * exp_da_cumsum_bnhlp;
 <a href=#299 id=299 data-nosnippet>299</a>    san(<span class="kw-2">&amp;</span>blue_scaled_bnhlp);
 <a href=#300 id=300 data-nosnippet>300</a>
@@ -331,7 +331,7 @@
 <a href=#331 id=331 data-nosnippet>331</a>        * x_bnlhp;
 <a href=#332 id=332 data-nosnippet>332</a>
 <a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">let </span>y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
-<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>y_partial_bnlhp = y_partial_bnhlp.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="kw">let </span>y_partial_bnlhp = y_partial_bnhlp.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#335 id=335 data-nosnippet>335</a>    <span class="kw">let </span>y_bnlhp = y_partial_bnlhp + skip_bnlhp;
 <a href=#336 id=336 data-nosnippet>336</a>    <span class="macro">assert_eq!</span>(
 <a href=#337 id=337 data-nosnippet>337</a>        [batch, nchunks, chunk_len, nheads, per_head_dim],

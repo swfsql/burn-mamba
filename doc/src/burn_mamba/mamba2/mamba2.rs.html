@@ -589,7 +589,7 @@
 <a href=#589 id=589 data-nosnippet>589</a>        //
 <a href=#590 id=590 data-nosnippet>590</a>        // The right-most `conv_kernel` columns of the padded input become the
 <a href=#591 id=591 data-nosnippet>591</a>        // new convolution cache for the next call.
-<a href=#592 id=592 data-nosnippet>592</a>        </span><span class="kw">let </span>xbc_bvs = xbc_bsv.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>]);
+<a href=#592 id=592 data-nosnippet>592</a>        </span><span class="kw">let </span>xbc_bvs = xbc_bsv.transpose();
 <a href=#593 id=593 data-nosnippet>593</a>        <span class="macro">assert_eq!</span>([batch, conv_dim, sequence], xbc_bvs.dims());
 <a href=#594 id=594 data-nosnippet>594</a>
 <a href=#595 id=595 data-nosnippet>595</a>        <span class="comment">// Build the causally-padded input: [cached tail | new input]
@@ -619,7 +619,7 @@
 <a href=#619 id=619 data-nosnippet>619</a>        <span class="macro">assert_eq!</span>([batch, conv_dim, sequence], xbc_bvs.dims());
 <a href=#620 id=620 data-nosnippet>620</a>        san(<span class="kw-2">&amp;</span>xbc_bvs);
 <a href=#621 id=621 data-nosnippet>621</a>
-<a href=#622 id=622 data-nosnippet>622</a>        <span class="kw">let </span>xbc_bsv = xbc_bvs.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>]);
+<a href=#622 id=622 data-nosnippet>622</a>        <span class="kw">let </span>xbc_bsv = xbc_bvs.transpose();
 <a href=#623 id=623 data-nosnippet>623</a>        <span class="macro">assert_eq!</span>([batch, sequence, conv_dim], xbc_bsv.dims());
 <a href=#624 id=624 data-nosnippet>624</a>
 <a href=#625 id=625 data-nosnippet>625</a>        <span class="comment">// SiLU activation (element-wise).
@@ -857,7 +857,7 @@
 <a href=#857 id=857 data-nosnippet>857</a>                </span><span class="macro">assert_eq!</span>([conv_dim, <span class="number">1</span>, conv_kernel], conv1d_v1k.dims());
 <a href=#858 id=858 data-nosnippet>858</a>
 <a href=#859 id=859 data-nosnippet>859</a>                <span class="kw">let </span>conv1d_bvk = conv1d_v1k
-<a href=#860 id=860 data-nosnippet>860</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// conv1d_1vk
+<a href=#860 id=860 data-nosnippet>860</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>) <span class="comment">// conv1d_1vk
 <a href=#861 id=861 data-nosnippet>861</a>                    </span>.expand([batch, conv_dim, conv_kernel]); <span class="comment">// conv1d_bvk
 <a href=#862 id=862 data-nosnippet>862</a>                </span><span class="macro">assert_eq!</span>([batch, conv_dim, conv_kernel], conv1d_bvk.dims());
 <a href=#863 id=863 data-nosnippet>863</a>

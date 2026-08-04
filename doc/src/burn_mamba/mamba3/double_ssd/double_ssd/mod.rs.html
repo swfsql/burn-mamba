@@ -313,7 +313,7 @@
 <a href=#313 id=313 data-nosnippet>313</a>                    .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>) <span class="comment">// z_bs1hp
 <a href=#314 id=314 data-nosnippet>314</a>                    </span>.expand([batch, sequence, mimo_rank, nheads, per_head_dim]); <span class="comment">// z_bsmhp
 <a href=#315 id=315 data-nosnippet>315</a>                </span><span class="kw">let </span>mimo_z_bsmhp = mimo_z_hmp
-<a href=#316 id=316 data-nosnippet>316</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_z_mhp
+<a href=#316 id=316 data-nosnippet>316</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>) <span class="comment">// mimo_z_mhp
 <a href=#317 id=317 data-nosnippet>317</a>                    </span>.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]) <span class="comment">// mimo_z_11mhp
 <a href=#318 id=318 data-nosnippet>318</a>                    </span>.expand([batch, sequence, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_z_bsmhp
 <a href=#319 id=319 data-nosnippet>319</a>                </span>z_bsmhp * mimo_z_bsmhp
@@ -329,7 +329,7 @@
 <a href=#329 id=329 data-nosnippet>329</a>
 <a href=#330 id=330 data-nosnippet>330</a>            <span class="comment">// Down-project with mimoₒ_hmp: out = sumₘ mimoₒ_hmp[h, r, p] * yᵣ
 <a href=#331 id=331 data-nosnippet>331</a>            </span><span class="kw">let </span>mimo_o_bsmhp = mimo_o_hmp
-<a href=#332 id=332 data-nosnippet>332</a>                .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_o_mhp
+<a href=#332 id=332 data-nosnippet>332</a>                .swap_dims(<span class="number">0</span>, <span class="number">1</span>) <span class="comment">// mimo_o_mhp
 <a href=#333 id=333 data-nosnippet>333</a>                </span>.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>]) <span class="comment">// mimo_o_11mhp
 <a href=#334 id=334 data-nosnippet>334</a>                </span>.expand([batch, sequence, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_o_bsmhp
 <a href=#335 id=335 data-nosnippet>335</a>            // sum over mimo rank dim
@@ -545,7 +545,7 @@
 <a href=#545 id=545 data-nosnippet>545</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// z_bmhp
 <a href=#546 id=546 data-nosnippet>546</a>                // mimo_z_hmp
 <a href=#547 id=547 data-nosnippet>547</a>                </span><span class="kw">let </span>mimo_z_bmhp = mimo_z_hmp
-<a href=#548 id=548 data-nosnippet>548</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_z_mhp
+<a href=#548 id=548 data-nosnippet>548</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>) <span class="comment">// mimo_z_mhp
 <a href=#549 id=549 data-nosnippet>549</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_z_1mhp
 <a href=#550 id=550 data-nosnippet>550</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_z_bmhp
 <a href=#551 id=551 data-nosnippet>551</a>                </span><span class="kw">let </span>z_bmhp = z_bmhp * mimo_z_bmhp;
@@ -560,7 +560,7 @@
 <a href=#560 id=560 data-nosnippet>560</a>
 <a href=#561 id=561 data-nosnippet>561</a>                <span class="comment">// Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
 <a href=#562 id=562 data-nosnippet>562</a>                </span><span class="kw">let </span>mimo_o_bmhp = mimo_o_hmp
-<a href=#563 id=563 data-nosnippet>563</a>                    .permute([<span class="number">1</span>, <span class="number">0</span>, <span class="number">2</span>]) <span class="comment">// mimo_o_mhp
+<a href=#563 id=563 data-nosnippet>563</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>) <span class="comment">// mimo_o_mhp
 <a href=#564 id=564 data-nosnippet>564</a>                    </span>.unsqueeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">0</span>) <span class="comment">// mimo_o_1mhp
 <a href=#565 id=565 data-nosnippet>565</a>                    </span>.expand([batch, mimo_rank, nheads, per_head_dim]); <span class="comment">// mimo_o_bmhp
 <a href=#566 id=566 data-nosnippet>566</a>                </span><span class="kw">let </span>out_bhp: Tensor&lt;<span class="number">3</span>&gt; = (combined_bmhp * mimo_o_bmhp)
@@ -704,13 +704,13 @@
 <a href=#704 id=704 data-nosnippet>704</a>
 <a href=#705 id=705 data-nosnippet>705</a>            <span class="comment">// einsum('bmhp,bmhr-&gt;bhpr', x_gamma, B_cur):
 <a href=#706 id=706 data-nosnippet>706</a>            </span><span class="kw">let </span>xbt_state_bhpr = {
-<a href=#707 id=707 data-nosnippet>707</a>                <span class="kw">let </span>b_bhmr = b_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#707 id=707 data-nosnippet>707</a>                <span class="kw">let </span>b_bhmr = b_bmhr.clone().swap_dims(<span class="number">1</span>, <span class="number">2</span>);
 <a href=#708 id=708 data-nosnippet>708</a>                <span class="kw">let </span>xg_bhpm = x_gamma_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
 <a href=#709 id=709 data-nosnippet>709</a>                xg_bhpm.matmul(b_bhmr)
 <a href=#710 id=710 data-nosnippet>710</a>            };
 <a href=#711 id=711 data-nosnippet>711</a>            san(<span class="kw-2">&amp;</span>xbt_state_bhpr);
 <a href=#712 id=712 data-nosnippet>712</a>            <span class="kw">let </span>xbt_prev_bhpr = {
-<a href=#713 id=713 data-nosnippet>713</a>                <span class="kw">let </span>b_state_bhmr = cache.k_state_bmhr.clone().permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">3</span>]);
+<a href=#713 id=713 data-nosnippet>713</a>                <span class="kw">let </span>b_state_bhmr = cache.k_state_bmhr.clone().swap_dims(<span class="number">1</span>, <span class="number">2</span>);
 <a href=#714 id=714 data-nosnippet>714</a>                <span class="kw">let </span>xb_bhpm = x_beta_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
 <a href=#715 id=715 data-nosnippet>715</a>                xb_bhpm.matmul(b_state_bhmr)
 <a href=#716 id=716 data-nosnippet>716</a>            };
