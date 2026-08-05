@@ -5,8 +5,9 @@
 //! 1. Trapezoidal discretisation: `dt`, `α`, `β`, `γ`, `da`.
 //! 2. QK-norm + GQA expansion + per-(head, mimo-rank) bias on B / C.
 //! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`.
+//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state.
 //!
-//! Each helper is generic over the rank `D` of the data tensors so a single
+//! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
 //! (`step`) code paths.
 
@@ -91,6 +92,30 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
     let bias = bias_hmr.swap_dims(0, 1).unsqueeze::<D>();
     expanded + bias
 }
+
+/// Rank-summed outer product `state[b, h, p, r] = Σₘ v[b, m, h, p] · k[b, m, h, r]`
+/// (`einsum('bmhp,bmhr->bhpr')`).
+///
+/// This is the per-token state contribution: each MIMO rank contributes an
+/// outer product `v[m] ⊗ k[m]` and the shared state accumulates their sum.
+///
+/// **No SISO shortcut here, deliberately.** At `mimo_rank == 1` the contracted
+/// dimension is 1, so this is a rank-1 GEMM and `v ⊗ k` could be written as a
+/// broadcast multiply instead. That is faster on CUDA (~1.2×) but *far* slower
+/// on the portable CPU backend, whose broadcast-elementwise path trails its
+/// matmul by more than an order of magnitude on these shapes — a net loss for a
+/// crate that runs one code path everywhere. The chunkwise
+/// [`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag) shortcut is a win
+/// on both, which is why it exists and this does not.
+pub fn mimo_outer_sum(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
+    // v_bmhp [b, m, h, p] -> v_bhpm [b, h, p, m]; k_bmhr [b, m, h, r] -> k_bhmr.
+    let v_bhpm = v_bmhp.permute([0, 2, 3, 1]);
+    let k_bhmr = k_bmhr.swap_dims(1, 2);
+    v_bhpm.matmul(k_bhmr)
+}
+
+#[cfg(all(test, feature = "_dev-test"))]
+mod tests;
 
 /// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
 ///

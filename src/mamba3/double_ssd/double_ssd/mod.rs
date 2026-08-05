@@ -502,6 +502,9 @@ mod step {
         /// State→output contraction:
         /// `out[b, m, h, p] = Σᵣ C[b, m, h, r] · state[b, h, p, r]`
         /// (`einsum('bhpr,bmhr->bmhp', state, C)`).
+        ///
+        /// No SISO shortcut — see [`mimo_outer_sum`](crate::mamba3::helpers::mimo_outer_sum)
+        /// for why the `mimo_rank == 1` broadcast form loses on the CPU backend.
         pub(crate) fn step_readout(state_bhpr: Tensor<4>, c_bmhr: Tensor<4>) -> Tensor<4> {
             let c_bhrm = c_bmhr.permute([0, 2, 3, 1]);
             let out_bhpm = state_bhpr.matmul(c_bhrm);
@@ -703,17 +706,9 @@ mod step {
             san(&x_beta_bmhp);
 
             // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
-            let xbt_state_bhpr = {
-                let b_bhmr = b_bmhr.clone().swap_dims(1, 2);
-                let xg_bhpm = x_gamma_bmhp.permute([0, 2, 3, 1]);
-                xg_bhpm.matmul(b_bhmr)
-            };
+            let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone());
             san(&xbt_state_bhpr);
-            let xbt_prev_bhpr = {
-                let b_state_bhmr = cache.k_state_bmhr.clone().swap_dims(1, 2);
-                let xb_bhpm = x_beta_bmhp.permute([0, 2, 3, 1]);
-                xb_bhpm.matmul(b_state_bhmr)
-            };
+            let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, cache.k_state_bmhr.clone());
             san(&xbt_prev_bhpr);
 
             let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);

@@ -209,12 +209,9 @@ impl Mamba3 {
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_prev_mimo_bmhp =
             helpers::build_v_with_mimo::<3, 4>(cache.v_state_bhp.clone(), mimo_x_hmp.as_ref(), 1); // [batch, mimo_rank, nheads, per_head_dim]
-        let boundary_seed_bhpr = {
-            // einsum: bmhr, bmhp -> bhpr  (contract over m)
-            let k_prev_bhmr = cache.k_state_bmhr.clone().swap_dims(1, 2);
-            let v_prev_bhpm = v_prev_mimo_bmhp.permute([0, 2, 3, 1]);
-            v_prev_bhpm.matmul(k_prev_bhmr)
-        };
+        // einsum: bmhp, bmhr -> bhpr  (contract over m)
+        let boundary_seed_bhpr =
+            helpers::mimo_outer_sum(v_prev_mimo_bmhp, cache.k_state_bmhr.clone());
         let initial_state_bhpr = cache.ssm_bhpr.clone()
             + boundary_seed_bhpr
                 * boundary_factor_bh.unsqueeze_dims::<4>(&[2, 3]).expand([

@@ -138,12 +138,18 @@ impl Mamba3 {
         // y_∞[m] = Σ_m' ⟨c[m], m·b[m']⟩ · x_vals[m']   (then D-skip/gate/out-proj).
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let x_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(x_bhp, mimo_x_hmp.as_ref(), 1);
-        let gram_bhmm = {
-            let c_bhmr = c_bmhr.swap_dims(1, 2);
-            let b_bhrm = b_eff_bmhr.permute([0, 2, 3, 1]);
-            c_bhmr.matmul(b_bhrm) // [batch, nheads, mimo_rank, mimo_rank']
-        };
-        let out_m_bmhp = {
+        let out_m_bmhp = if mimo_rank == 1 {
+            // SISO: the Gram matrix is the scalar ⟨c, m·b⟩ per (batch, nheads),
+            // so both matmuls degenerate — contract `state_rank` with a
+            // reduction and broadcast the result over `per_head_dim`.
+            let gram_bmh1: Tensor<4> = (c_bmhr * b_eff_bmhr).sum_dim(3);
+            x_vals_bmhp.clone() * gram_bmh1
+        } else {
+            let gram_bhmm = {
+                let c_bhmr = c_bmhr.swap_dims(1, 2);
+                let b_bhrm = b_eff_bmhr.permute([0, 2, 3, 1]);
+                c_bhmr.matmul(b_bhrm) // [batch, nheads, mimo_rank, mimo_rank']
+            };
             let x_bhmp = x_vals_bmhp.clone().swap_dims(1, 2);
             gram_bhmm.matmul(x_bhmp).swap_dims(1, 2)
         };

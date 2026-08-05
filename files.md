@@ -65,10 +65,12 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`mod.rs`** — `Mamba3BackendExt: Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt`,
   wired via `backend_macros`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
-  (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`. Non-obvious: the
+  (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`, `mimo_outer_sum`
+  (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed). Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
-  instead pins `A ≡ +a_floor` (data-independent growth).
+  instead pins `A ≡ +a_floor` (data-independent growth). `mimo_outer_sum` deliberately
+  keeps its matmul at `mimo_rank == 1` (doc comment gives the measurement).
 - **`cache.rs`** — the pathway-tagged `Mamba3Cache{DoubleSsd|SingleSsd}` / `Mamba3Caches`
   enums; extractors; `from_vec`/`from_options` (**empty ⇒ SingleSsd**). The cross-pathway
   `From` impls are field-identity, valid because at a boundary `scaleₜ=γₜ` so single-ssd
@@ -103,6 +105,12 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
   + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel); `Mamba3SingleSsdBackendExt`; same trio.
+- **`ssd/diag.rs`** — `y_diag_correction`, the same-step γ term all three algorithms add
+  back over the strict-lower mask; branches on `mimo_rank` (at 1 the `m×m` Gram is a
+  scalar, so both matmuls collapse to a reduction + broadcast). `serial_recalculated/diag.rs`
+  is the `F<B,D>` twin plus the analytic backward (`DiagGrads`, `d_gamma` whole not partial).
+  Both keep the two branches separately callable so the tests can compare them at `m=1`,
+  where dispatch makes the general one unreachable.
 
 ### `mamba3/rotation/` (`mod.rs`)
 The quaternion (`k=4`) **non-abelian** generalisation of RoPE (`SU(2) ⊂ SO(4)`).

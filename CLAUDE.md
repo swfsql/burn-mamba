@@ -64,6 +64,7 @@ src/
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
+│  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
 │  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
@@ -238,6 +239,11 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   generic over `B` (`F<B,D>`, the `Backward<B,_>` nodes, `Autodiff<B>` ext impls).
 - **Two Mamba-3 SSD pathways** — cache type selects double-ssd (simple) vs single-ssd
   (~½ memory); accumulators coincide at boundaries so caches inter-convert.
+- **SISO is `mimo_rank = 1`, not a separate implementation** — the fused `L·M` axis is
+  then `chunk_len`, so each kernel already *is* its SISO form. Only where `m` is a real
+  matmul dimension do scopes branch on it: RoPE pairing, `single_ssd/ssd/diag.rs`,
+  `step_infinite`'s Gram. Elsewhere the degenerate-GEMM rewrite loses on CPU backends
+  (see `helpers::mimo_outer_sum`).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
