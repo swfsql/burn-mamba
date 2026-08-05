@@ -10,6 +10,8 @@
 pub mod backward;
 /// Recompute-based gradient math (the memory-efficient backward).
 pub mod combined_backward;
+/// The same-step γ-correction on primitives — forward and analytic backward.
+pub mod diag;
 mod serial_recalculated;
 
 pub use serial_recalculated::Mamba3SingleSsdBackendExt;

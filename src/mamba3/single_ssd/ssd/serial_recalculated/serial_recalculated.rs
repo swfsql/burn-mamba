@@ -20,6 +20,7 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
 use crate::mamba3::single_ssd::prelude::*;
+use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
 use crate::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
@@ -265,15 +266,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
 
     // ── Y_diag: γ-weighted same-step correction ─────────────────────────────
-    let c_bnlhmr = c_bnlmhr.swap_dims(3, 4);
-    let b_bnlhrm = b_bnlmhr.permute([0, 1, 2, 4, 5, 3]);
-    let qk_dot_bnlhmM = c_bnlhmr.matmul(b_bnlhrm); // bnlhm_outm_in
-    let v_bnlhmp = v_bnlmhp.swap_dims(3, 4);
-    let y_d_bnlhmp = qk_dot_bnlhmM.matmul(v_bnlhmp); // bnlhm_outp
-    let gamma_bnlh11 = gamma_bnlh.unsqueeze_dims::<6>(&[4, 5]);
-    let y_d_bnlhmp_scaled = y_d_bnlhmp * gamma_bnlh11;
-
-    let y_diag_bnlmhp = y_d_bnlhmp_scaled.swap_dims(3, 4);
+    let y_diag_bnlmhp = y_diag_correction::<B>(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh);
     let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
     let y_diag_bnhLMp = y_diag_bnLMhp.swap_dims(2, 3);
 

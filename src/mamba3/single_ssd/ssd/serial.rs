@@ -33,6 +33,7 @@ pub use crate::mamba3::double_ssd::ssd::serial::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
 use crate::mamba3::single_ssd::prelude::*;
+use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
@@ -244,18 +245,11 @@ pub fn k5_single_ssd_chunk_scan(
     //
     // y_diag[t, m_out, h, p] = γ[t] · Σ_{m_in} (Σ_n C[t,m_out,n] · B[t,m_in,n]) · V[t,m_in,p]
     //
-    // Computed fresh (small same-step matmul) rather than extracting the
+    // Computed fresh (small same-step product) rather than extracting the
     // block-diagonal from `cb_bnhLMLM` (which would require a fiddly reshape).
-    let c_bnlhmr = c_bnlmhr.swap_dims(3, 4);
-    let b_bnlhrm = b_bnlmhr.permute([0, 1, 2, 4, 5, 3]);
-    let qk_dot_bnlhmM = c_bnlhmr.matmul(b_bnlhrm); // bnlhm_outm_in
-    let v_bnlhmp = v_bnlmhp.swap_dims(3, 4);
-    let y_d_bnlhmp = qk_dot_bnlhmM.matmul(v_bnlhmp); // bnlhm_outp
-    let gamma_bnlh11 = gamma_bnlh.unsqueeze_dims::<6>(&[4, 5]);
-    let y_d_bnlhmp_scaled = y_d_bnlhmp * gamma_bnlh11;
+    let y_diag_bnlmhp = y_diag_correction(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh);
 
     // Back to fused layout `[B, N, H, L·M, P]` to match y_lower / y_off.
-    let y_diag_bnlmhp = y_d_bnlhmp_scaled.swap_dims(3, 4);
     let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
     let y_diag_bnhLMp = y_diag_bnLMhp.swap_dims(2, 3);
 

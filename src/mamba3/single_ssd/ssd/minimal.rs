@@ -55,6 +55,7 @@
 //! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 use crate::mamba3::single_ssd::prelude::*;
+use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
 use crate::modules::segsum;
 use burn::prelude::*;
 
@@ -186,27 +187,12 @@ impl Mamba3SingleSsdInput {
         //
         // y_diag[t, m_out, h, p] = γₜ · Σ_{m_in} (C[t, m_out, h, ·] · B[t, m_in, h, ·]) · PsiV[t, m_in, h, p]
         // =============================================================
-        let y_diag_bnlmhp = {
-            // C @ B^T contracts over state_rank, leaving mimo_rank on both sides.
-            // c_bnlmhr  [b, n, l, m, h, r] -> c_bnlhmr  [b, n, l, h, m, r]
-            // b_bnlmhr  [b, n, l, m, h, r] -> b_bnlhrm  [b, n, l, h, r, m]
-            let c_bnlhmr = input.c_bnlmhr.swap_dims(3, 4);
-            let b_bnlhrm = input.b_bnlmhr.permute([0, 1, 2, 4, 5, 3]);
-            // qk_dot_bnlhmM [b, n, l, h, m_out, m_in]
-            let qk_dot_bnlhmM = c_bnlhmr.matmul(b_bnlhrm);
-
-            // V in [b, n, l, h, m_in, p] layout for the next matmul:
-            let v_bnlhmp = input.v_bnlmhp.swap_dims(3, 4);
-            // (qk_dot) · V → [b, n, l, h, m_out, p]
-            let y_d_bnlhmp = qk_dot_bnlhmM.matmul(v_bnlhmp);
-
-            // Multiply by γₜ (per (batch, nchunks, chunk_len, nheads)):
-            let gamma_bnlh11 = input.gamma_bnlh.clone().unsqueeze_dims::<6>(&[4, 5]);
-            let y_d_bnlhmp_scaled = y_d_bnlhmp * gamma_bnlh11;
-
-            // Back to [b, n, l, m, h, p]:
-            y_d_bnlhmp_scaled.swap_dims(3, 4)
-        };
+        let y_diag_bnlmhp = y_diag_correction(
+            input.v_bnlmhp,
+            input.b_bnlmhr,
+            input.c_bnlmhr,
+            input.gamma_bnlh,
+        );
         // Reshape to fused layout for combination with y_lower / y_off.
         let y_diag_bnLMhp =
             y_diag_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);

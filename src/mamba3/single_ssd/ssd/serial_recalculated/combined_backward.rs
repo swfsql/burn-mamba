@@ -20,6 +20,9 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::k3_s
 use crate::mamba3::double_ssd::ssd::serial_recalculated::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
 };
+use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::{
+    DiagGrads, y_diag_correction_backward,
+};
 use crate::utils::fprim::{F, san};
 use burn::backend::Backend;
 use burn::tensor::s;
@@ -143,59 +146,19 @@ pub fn combined_backward<B: Backend>(
     //   qk_dot[m_out, m_in] = Σ_r C[m_out, r] · B[m_in, r]
     //   y_diag[m_out, p]    = γ · Σ_{m_in} qk_dot[m_out, m_in] · V[m_in, p]
     // ═══════════════════════════════════════════════════════════════════════
-    let (d_v_diag_bnlmhp, d_c_diag_bnlmhr, d_b_diag_bnlmhr, d_gamma_bnlh) = {
-        let c_bnlhmr = c_bnlmhr.clone().swap_dims(3, 4); // [b,n,l,h,m_out,r]
-        let b_bnlhmr = b_bnlmhr.clone().swap_dims(3, 4); // [b,n,l,h,m_in,r]
-        let v_bnlhmp = v_bnlmhp.clone().swap_dims(3, 4); // [b,n,l,h,m_in,p]
-        let d_y_bnlhmp = d_y_bnlmhp.clone().swap_dims(3, 4); // [b,n,l,h,m_out,p]
-
-        // qk_dot[m_out, m_in] = Σ_r C[m_out,r] · B[m_in,r]
-        let qk_dot_bnlhmM = c_bnlhmr
-            .clone()
-            .matmul(b_bnlhmr.clone().transpose());
-        // y_d_unweighted[m_out, p] = Σ_{m_in} qk_dot · V[m_in, p]
-        let y_d_unw_bnlhmp = qk_dot_bnlhmM.clone().matmul(v_bnlhmp.clone());
-
-        // d_gamma[b,n,l,h] = Σ_{m_out,p} d_y · y_d_unweighted
-        let d_gamma_bnlh: F<B, 4> = (d_y_bnlhmp.clone() * y_d_unw_bnlhmp)
-            .sum_dim(5) // bnlhm1
-            .squeeze_dim::<5>(5) // bnlhm
-            .sum_dim(4) // bnlh1
-            .squeeze_dim::<4>(4); // bnlh
-        san(&d_gamma_bnlh);
-
-        // d_y_d_unweighted = γ · d_y  (γ broadcast over m_out, p)
-        let gamma_bnlh11 = gamma_bnlh.clone().unsqueeze_dims::<6>(&[4, 5]);
-        let d_y_d_unw_bnlhmp = d_y_bnlhmp * gamma_bnlh11;
-
-        // d_qk_dot[m_out, m_in] = Σ_p d_y_d_unweighted[m_out, p] · V[m_in, p]
-        let d_qk_dot_bnlhmM = d_y_d_unw_bnlhmp
-            .clone()
-            .matmul(v_bnlhmp.clone().transpose()); // [b,n,l,h,m_out,m_in]
-
-        // d_v_diag[m_in, p] = Σ_{m_out} qk_dot[m_out, m_in] · d_y_d_unweighted[m_out, p]
-        let d_v_diag_bnlhmp = qk_dot_bnlhmM
-            .transpose() // qk_dot^T: [b,n,l,h,m_in,m_out]
-            .matmul(d_y_d_unw_bnlhmp.clone()); // [b,n,l,h,m_in,p]
-
-        // d_C_diag[m_out, r] = Σ_{m_in} d_qk_dot[m_out, m_in] · B[m_in, r]
-        let d_c_diag_bnlhmr = d_qk_dot_bnlhmM.clone().matmul(b_bnlhmr); // [b,n,l,h,m_out,r]
-        // d_B_diag[m_in, r] = Σ_{m_out} d_qk_dot[m_out, m_in] · C[m_out, r]
-        let d_b_diag_bnlhmr = d_qk_dot_bnlhmM
-            .transpose() // d_qk_dot^T: [b,n,l,h,m_in,m_out]
-            .matmul(c_bnlhmr); // [b,n,l,h,m_in,r]
-
-        // Back to [b,n,l,m,h,*].
-        let d_v_diag_bnlmhp = d_v_diag_bnlhmp.swap_dims(3, 4);
-        let d_c_diag_bnlmhr = d_c_diag_bnlhmr.swap_dims(3, 4);
-        let d_b_diag_bnlmhr = d_b_diag_bnlhmr.swap_dims(3, 4);
-        (
-            d_v_diag_bnlmhp,
-            d_c_diag_bnlmhr,
-            d_b_diag_bnlmhr,
-            d_gamma_bnlh,
-        )
-    };
+    let DiagGrads {
+        d_v_bnlmhp: d_v_diag_bnlmhp,
+        d_c_bnlmhr: d_c_diag_bnlmhr,
+        d_b_bnlmhr: d_b_diag_bnlmhr,
+        d_gamma_bnlh,
+    } = y_diag_correction_backward(
+        d_y_bnlmhp.clone(),
+        v_bnlmhp.clone(),
+        b_bnlmhr.clone(),
+        c_bnlmhr.clone(),
+        gamma_bnlh.clone(),
+    );
+    san(&d_gamma_bnlh);
 
     // Reusable [chunk_len, chunk_len] -inf strict-upper mask (triu(0): on+above
     // diagonal → -inf) for the LOWER (strict lower-triangular) path.
