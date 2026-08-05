@@ -31,7 +31,11 @@ fn run_step_infinite_matches_unroll(label: &str, cfg: Mamba3Config, steps: usize
     let device: Device = Default::default();
     let model = cfg.init(&device);
     let batch = 2;
-    let x = Tensor::<2>::random([batch, cfg.d_model], Distribution::Normal(0.0, 1.0), &device);
+    let x = Tensor::<2>::random(
+        [batch, cfg.d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
 
     let mut cache = None;
     let mut out = None;
@@ -110,5 +114,8 @@ fn network_two_layers_constant_input() {
 
     let y_inf = net.step_infinite(x);
     let d_inf = max_abs_diff(out, y_inf);
-    assert!(d_inf < 1e-3, "two-layer step_infinite vs unroll: {d_inf:.6}");
+    assert!(
+        d_inf < 1e-3,
+        "two-layer step_infinite vs unroll: {d_inf:.6}"
+    );
 }

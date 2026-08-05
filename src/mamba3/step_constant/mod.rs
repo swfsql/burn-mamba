@@ -93,8 +93,8 @@ impl Mamba3 {
         let eps = div_eps(alpha_bh.dtype());
 
         // Rotation-free channels: (β + γ) / (1 − α).
-        let tail_bh = (beta_bh.clone() + gamma_bh.clone())
-            / (-alpha_bh.clone() + 1.0).clamp_min(eps);
+        let tail_bh =
+            (beta_bh.clone() + gamma_bh.clone()) / (-alpha_bh.clone() + 1.0).clamp_min(eps);
 
         // Per-pair/block readout factor  m = (γ + β P⁻¹)(1 − α P⁻¹)⁻¹  applied
         // to `b`; the cumulative rotation cancels against `Cₙ` (orthogonality).
@@ -111,14 +111,7 @@ impl Mamba3 {
                 let den_re = -a_bh1.clone() * cos + 1.0;
                 let den_im = a_bh1 * sin;
                 let (m_re, m_im) = complex_div(num_re, num_im, den_re, den_im);
-                mul_complex_partial(
-                    b_bmhr,
-                    m_re,
-                    m_im,
-                    tail_bh,
-                    self.rope_dim,
-                    mimo_rank == 1,
-                )
+                mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
             }
             RotationKind::Quaternion4D => {
                 let g_bhj3 = per_step_generator(rot_ba, dt_bh, self.num_quat_blocks);
@@ -322,10 +315,8 @@ fn mul_quat_partial(
     if rope_width == state_rank {
         rotate_state_rank_blocks::<4, 5>(x_bmhr, f_bmhj4)
     } else {
-        let head = rotate_state_rank_blocks::<4, 5>(
-            x_bmhr.clone().narrow(3, 0, rope_width),
-            f_bmhj4,
-        );
+        let head =
+            rotate_state_rank_blocks::<4, 5>(x_bmhr.clone().narrow(3, 0, rope_width), f_bmhj4);
         let tail = x_bmhr.narrow(3, rope_width, state_rank - rope_width) * tail_b1h1;
         Tensor::cat(vec![head, tail], 3)
     }

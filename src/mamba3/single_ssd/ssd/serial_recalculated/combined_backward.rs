@@ -296,9 +296,7 @@ pub fn combined_backward<B: Backend>(
         let w_bhLMLM = prod_bhLMLM.clone() * scale_col_bhLMLM.clone();
 
         // d_w = d_y · vᵀ
-        let d_w_bhLMLM: F<B, 4> = d_y_bhLMp
-            .clone()
-            .matmul(v_bhLMp.clone().transpose());
+        let d_w_bhLMLM: F<B, 4> = d_y_bhLMp.clone().matmul(v_bhLMp.clone().transpose());
         san(&d_w_bhLMLM);
 
         // d_v_lower = wᵀ · d_y

@@ -122,7 +122,11 @@ pub fn build(p: usize, k: usize, train_fraction: f64, split_seed: u64) -> (Split
     let mut train_seqs = Vec::with_capacity(n_train * k);
     let mut test_seqs = Vec::with_capacity((total - n_train) * k);
     for (i, &index) in indices.iter().enumerate() {
-        let out = if i < n_train { &mut train_seqs } else { &mut test_seqs };
+        let out = if i < n_train {
+            &mut train_seqs
+        } else {
+            &mut test_seqs
+        };
         push_digits(index, p, k, out);
     }
     (Split::new(p, k, train_seqs), Split::new(p, k, test_seqs))

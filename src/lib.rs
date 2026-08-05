@@ -69,10 +69,9 @@ pub mod prelude {
         Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
         MambaVocabNet, MambaVocabNetConfig, ResidualsConfig,
     };
-    
+
     pub use crate::modules::{
-        CacheStack, Layer, MambaBlock,
-        MambaBlockConfig, MambaCaches, MambaSsdPath,
+        CacheStack, Layer, MambaBlock, MambaBlockConfig, MambaCaches, MambaSsdPath,
     };
     pub use crate::utils::{ClassLatent, ClassToken};
 }

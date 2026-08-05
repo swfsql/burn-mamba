@@ -253,7 +253,6 @@ where
         self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1)
     }
 
-
     /// Project `[batch, sequence, d_model]` → `[batch, sequence, padded_vocab]`
     /// using the dedicated head, or the tied (transposed embedding) weight.
     fn apply_lm_head(&self, x: Tensor<3>) -> Tensor<3> {

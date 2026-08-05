@@ -18,8 +18,11 @@ fn rms_norm_gated_gradient_finite_on_collapsed_slice() {
 
     // The normalised input (SSD output) has one token collapsed to zero norm;
     // the gate `z` stays healthy.
-    let normal =
-        Tensor::<3>::random([batch, seq - 1, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let normal = Tensor::<3>::random(
+        [batch, seq - 1, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
     let collapsed = Tensor::<3>::zeros([batch, 1, d_model], &device);
     let base = Tensor::cat(vec![collapsed, normal], 1);
     let z = Tensor::from_inner(Tensor::<3>::random(

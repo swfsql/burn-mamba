@@ -79,7 +79,9 @@ pub trait MambaBlock: Module {
     /// [`Mamba3::step_infinite`](crate::mamba3::prelude::Mamba3::step_infinite)).
     fn block_step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
         let _ = x;
-        unimplemented!("block_step_infinite: constant-input shortcuts are only implemented for Mamba-3")
+        unimplemented!(
+            "block_step_infinite: constant-input shortcuts are only implemented for Mamba-3"
+        )
     }
 
     /// Build `n_virtual` zero caches sized for a `[batch, sequence, d_model]` input.

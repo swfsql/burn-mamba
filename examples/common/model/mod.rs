@@ -8,7 +8,9 @@
 //! variant in its `model_config()`.
 
 use burn::prelude::*;
-use burn_mamba::prelude::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
+use burn_mamba::prelude::{
+    MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
+};
 
 /// A model config that can build its module on a device — the seam the generic
 /// training loop uses to stay model-agnostic.

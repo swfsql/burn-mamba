@@ -7,8 +7,8 @@
 
 pub use crate::common::cli::AppArgs;
 use crate::dataset::{self, Split};
-use crate::diagnostics::{self, StatePr, WeightPr};
 pub use crate::diagnostics::PrPenaltyTarget;
+use crate::diagnostics::{self, StatePr, WeightPr};
 use burn::module::AutodiffModule;
 use burn::optim::{AdamWConfig, GradientsParams};
 use burn::prelude::*;
@@ -152,7 +152,11 @@ pub fn ssd_path() -> MambaSsdPath {
 /// Final-position logits `[n, p]` for a batch of token sequences `[n, s]`,
 /// either chunkwise (`forward()`) or token-by-token (`step()`; identical by
 /// the library's parity contract).
-pub fn final_logits(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>, stepwise: bool) -> Tensor<2> {
+pub fn final_logits(
+    model: &MambaVocabNet,
+    inputs_bs: &Tensor<2, Int>,
+    stepwise: bool,
+) -> Tensor<2> {
     let [_b, s] = inputs_bs.dims();
     if stepwise {
         let mut caches = None;
@@ -241,7 +245,9 @@ pub fn train(
     let metrics_path = app_args.artifacts_path.join("metrics.csv");
     let pr_path = app_args.artifacts_path.join("pr.csv");
     let weights_path = app_args.artifacts_path.join("weights.csv");
-    println!("logging metrics to {metrics_path:?}, state PR to {pr_path:?}, weight PR to {weights_path:?}");
+    println!(
+        "logging metrics to {metrics_path:?}, state PR to {pr_path:?}, weight PR to {weights_path:?}"
+    );
 
     println!("Starting training...");
     let started = std::time::Instant::now();
@@ -285,16 +291,20 @@ pub fn train(
                 started.elapsed().as_secs_f64(),
             );
             if config.pr_lambda != 0.0 {
-                let penalty =
-                    scalar_f32(diagnostics::weight_pr_penalty(&valid_model, config.pr_target));
+                let penalty = scalar_f32(diagnostics::weight_pr_penalty(
+                    &valid_model,
+                    config.pr_target,
+                ));
                 println!(
                     "        pr penalty {penalty:.3} (λ_eff {pr_lambda:.4}, {:?})",
                     config.pr_target
                 );
             }
             if config.l2_lambda != 0.0 {
-                let penalty =
-                    scalar_f32(diagnostics::weight_l2_penalty(&valid_model, config.pr_target));
+                let penalty = scalar_f32(diagnostics::weight_l2_penalty(
+                    &valid_model,
+                    config.pr_target,
+                ));
                 println!(
                     "        l2 penalty {penalty:.3} (λ {}, {:?})",
                     config.l2_lambda, config.pr_target
@@ -308,13 +318,28 @@ pub fn train(
                 };
                 let weight_prs = diagnostics::weight_pr(&valid_model, config.p);
                 println!("        {}", format_prs(&state_prs, &weight_prs));
-                append_metrics(&metrics_path, logged_step, lr, loss_value, train_acc, test_acc, &weight_prs);
+                append_metrics(
+                    &metrics_path,
+                    logged_step,
+                    lr,
+                    loss_value,
+                    train_acc,
+                    test_acc,
+                    &weight_prs,
+                );
                 if !state_prs.is_empty() {
                     append_pr(&pr_path, logged_step, &state_prs);
                 }
                 append_weight_pr(&weights_path, logged_step, &weight_prs);
             } else {
-                append_metrics_bare(&metrics_path, logged_step, lr, loss_value, train_acc, test_acc);
+                append_metrics_bare(
+                    &metrics_path,
+                    logged_step,
+                    lr,
+                    loss_value,
+                    train_acc,
+                    test_acc,
+                );
             }
         }
         if step % config.save_every == 0 || last {
@@ -346,8 +371,18 @@ pub fn eval_accuracies(
     device: &Device,
     stepwise: bool,
 ) -> (f64, f64) {
-    let train_acc = accuracy(model, &train.inputs_tensor(device), &train.labels_tensor(device), stepwise);
-    let test_acc = accuracy(model, &test.inputs_tensor(device), &test.labels_tensor(device), stepwise);
+    let train_acc = accuracy(
+        model,
+        &train.inputs_tensor(device),
+        &train.labels_tensor(device),
+        stepwise,
+    );
+    let test_acc = accuracy(
+        model,
+        &test.inputs_tensor(device),
+        &test.labels_tensor(device),
+        stepwise,
+    );
     (train_acc, test_acc)
 }
 
@@ -406,8 +441,11 @@ fn append_metrics(
         .open(path)
         .expect("failed to open the metrics csv");
     if needs_header {
-        writeln!(file, "step,lr,train_loss,train_acc,test_acc,emb_pr,head_pr,emb_freq_pr")
-            .expect("failed csv header write");
+        writeln!(
+            file,
+            "step,lr,train_loss,train_acc,test_acc,emb_pr,head_pr,emb_freq_pr"
+        )
+        .expect("failed csv header write");
     }
     writeln!(
         file,
@@ -457,7 +495,12 @@ fn append_pr(path: &std::path::Path, step: usize, state_prs: &[StatePr]) {
         writeln!(
             file,
             "{step},{},{},{},{},{},{}",
-            r.layer, r.head, r.pooled_centered, r.pooled_uncentered, r.final_centered, r.final_uncentered,
+            r.layer,
+            r.head,
+            r.pooled_centered,
+            r.pooled_uncentered,
+            r.final_centered,
+            r.final_uncentered,
         )
         .expect("failed csv write");
     }

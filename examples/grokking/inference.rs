@@ -60,6 +60,9 @@ pub fn infer(
             .collect::<Vec<_>>()
             .join(" + ");
         let mark = if pred == label { "✓" } else { "✗" };
-        println!("  {lhs} ≡ {pred:>2} (mod {})  [expected {label:>2}] {mark}", config.p);
+        println!(
+            "  {lhs} ≡ {pred:>2} (mod {})  [expected {label:>2}] {mark}",
+            config.p
+        );
     }
 }

@@ -252,12 +252,11 @@ impl Mamba3SingleSsdInput {
             let decay_chunk_bhNN = segsum::<3, 4>(a_chunk_pad_bhN).exp();
 
             let flat = per_head_dim * state_rank;
-            let state_bhNPR = state_bNhpr.clone().swap_dims(1, 2).reshape([
-                batch,
-                nheads,
-                1 + nchunks,
-                flat,
-            ]);
+            let state_bhNPR =
+                state_bNhpr
+                    .clone()
+                    .swap_dims(1, 2)
+                    .reshape([batch, nheads, 1 + nchunks, flat]);
 
             let new_state_bhNPR = decay_chunk_bhNN.matmul(state_bhNPR);
             let new_state_bhNpr =

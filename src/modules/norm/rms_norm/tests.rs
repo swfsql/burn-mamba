@@ -17,8 +17,11 @@ fn rms_norm_gradient_finite_on_collapsed_slice() {
     let norm = RmsNormConfig::new(d_model).init(&device.clone().autodiff());
 
     // A normal batch with one token collapsed to exactly zero norm.
-    let normal =
-        Tensor::<3>::random([batch, seq - 1, d_model], Distribution::Normal(0.0, 1.0), &device);
+    let normal = Tensor::<3>::random(
+        [batch, seq - 1, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
     let collapsed = Tensor::<3>::zeros([batch, 1, d_model], &device);
     let base = Tensor::cat(vec![collapsed, normal], 1);
 

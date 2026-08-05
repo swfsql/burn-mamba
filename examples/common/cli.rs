@@ -6,8 +6,8 @@
 use crate::common::model::ModelConfigExt;
 use burn::module::{ModuleMapper, ModuleVisitor, Param, ParamId};
 use burn::optim::{AdamWConfig, ModuleOptimizer};
-use burn::store::ModuleRecord;
 use burn::prelude::*;
+use burn::store::ModuleRecord;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -515,7 +515,10 @@ pub fn load_optim<M: Module>(
     let total = tensors.len();
     let tensors: Vec<_> = tensors
         .into_iter()
-        .filter(|t| t.param_id.is_some_and(|id| live.contains(&ParamId::from(id))))
+        .filter(|t| {
+            t.param_id
+                .is_some_and(|id| live.contains(&ParamId::from(id)))
+        })
         .collect();
     if tensors.len() < total {
         eprintln!(

@@ -173,7 +173,12 @@ pub fn weight_pr(model: &MambaVocabNet, p: usize) -> WeightPr {
         })
         .collect();
 
-    WeightPr { emb, lm_head, emb_freq, layers }
+    WeightPr {
+        emb,
+        lm_head,
+        emb_freq,
+        layers,
+    }
 }
 
 /// Which weight matrices the differentiable spectral-PR penalty

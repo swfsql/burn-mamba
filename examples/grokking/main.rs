@@ -180,7 +180,10 @@ impl Overrides {
             n_layers: pargs.opt_value_from_str("--n-layers").unwrap(),
         };
         let remaining = pargs.finish();
-        assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");
+        assert!(
+            remaining.is_empty(),
+            "unused extra arguments: {remaining:?}"
+        );
         overrides
     }
 
