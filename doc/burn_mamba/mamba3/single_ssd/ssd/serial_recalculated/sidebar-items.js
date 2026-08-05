@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["backward","combined_backward","serial_recalculated"],"trait":["Mamba3SingleSsdAutodiffBackendExt","Mamba3SingleSsdBackendExt"]};
+window.SIDEBAR_ITEMS = {"mod":["backward","combined_backward","diag","serial_recalculated"],"trait":["Mamba3SingleSsdAutodiffBackendExt","Mamba3SingleSsdBackendExt"]};

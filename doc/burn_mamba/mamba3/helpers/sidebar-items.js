@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["build_v_with_mimo","qk_norm_expand_bias","trapezoidal_coefficients"],"struct":["TrapezoidCoeffs"]};
+window.SIDEBAR_ITEMS = {"fn":["build_v_with_mimo","mimo_outer_sum","qk_norm_expand_bias","trapezoidal_coefficients"],"struct":["TrapezoidCoeffs"]};

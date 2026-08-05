@@ -10,10 +10,12 @@
 <a href=#10 id=10 data-nosnippet>10</a></span><span class="kw">pub mod </span>backward;
 <a href=#11 id=11 data-nosnippet>11</a><span class="doccomment">/// Recompute-based gradient math (the memory-efficient backward).
 <a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">pub mod </span>combined_backward;
-<a href=#13 id=13 data-nosnippet>13</a><span class="kw">mod </span>serial_recalculated;
-<a href=#14 id=14 data-nosnippet>14</a>
-<a href=#15 id=15 data-nosnippet>15</a><span class="kw">pub use </span>serial_recalculated::Mamba3SingleSsdBackendExt;
+<a href=#13 id=13 data-nosnippet>13</a><span class="doccomment">/// The same-step γ-correction on primitives — forward and analytic backward.
+<a href=#14 id=14 data-nosnippet>14</a></span><span class="kw">pub mod </span>diag;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">mod </span>serial_recalculated;
 <a href=#16 id=16 data-nosnippet>16</a>
-<a href=#17 id=17 data-nosnippet>17</a><span class="attr">#[cfg(feature = <span class="string">"autodiff"</span>)]
-<a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">pub use </span>serial_recalculated::Mamba3SingleSsdAutodiffBackendExt;
+<a href=#17 id=17 data-nosnippet>17</a><span class="kw">pub use </span>serial_recalculated::Mamba3SingleSsdBackendExt;
+<a href=#18 id=18 data-nosnippet>18</a>
+<a href=#19 id=19 data-nosnippet>19</a><span class="attr">#[cfg(feature = <span class="string">"autodiff"</span>)]
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">pub use </span>serial_recalculated::Mamba3SingleSsdAutodiffBackendExt;
 </code></pre></div></section></main></body></html>
