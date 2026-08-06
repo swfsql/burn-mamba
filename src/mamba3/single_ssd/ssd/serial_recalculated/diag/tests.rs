@@ -181,56 +181,67 @@ fn analytic_backward_matches_autodiff() {
             &device,
         );
 
-        let pv = Param::from_tensor(Tensor::from_inner(v.clone()));
-        let pb = Param::from_tensor(Tensor::from_inner(b.clone()));
-        let pc = Param::from_tensor(Tensor::from_inner(c.clone()));
-        let pgamma = Param::from_tensor(Tensor::from_inner(gamma.clone()));
-        let y = diag::y_diag_correction(pv.val(), pb.val(), pc.val(), pgamma.val());
-        let grads = (y * Tensor::from_inner(head.clone())).sum().backward();
+        // At `mimo_rank == 1` both branches are reachable; above it only the
+        // general one is. Forward and analytic backward must use the same one.
+        let specializations: &[bool] = if mimo_rank == 1 {
+            &[true, false]
+        } else {
+            &[true]
+        };
+        for &siso in specializations {
+            let pv = Param::from_tensor(Tensor::from_inner(v.clone()));
+            let pb = Param::from_tensor(Tensor::from_inner(b.clone()));
+            let pc = Param::from_tensor(Tensor::from_inner(c.clone()));
+            let pgamma = Param::from_tensor(Tensor::from_inner(gamma.clone()));
+            let y = diag::y_diag_correction(pv.val(), pb.val(), pc.val(), pgamma.val(), siso);
+            let grads = (y * Tensor::from_inner(head.clone())).sum().backward();
 
-        let analytic = y_diag_correction_backward::<Dispatch>(
-            to_prim(head),
-            to_prim(v),
-            to_prim(b),
-            to_prim(c),
-            to_prim(gamma),
-        );
-
-        let tol = 1e-4;
-        for (name, d) in [
-            (
-                "d_v",
-                max_abs_diff(
-                    pv.val().grad(&grads).unwrap(),
-                    to_tensor(analytic.d_v_bnlmhp),
-                ),
-            ),
-            (
-                "d_b",
-                max_abs_diff(
-                    pb.val().grad(&grads).unwrap(),
-                    to_tensor(analytic.d_b_bnlmhr),
-                ),
-            ),
-            (
-                "d_c",
-                max_abs_diff(
-                    pc.val().grad(&grads).unwrap(),
-                    to_tensor(analytic.d_c_bnlmhr),
-                ),
-            ),
-            (
-                "d_gamma",
-                max_abs_diff(
-                    pgamma.val().grad(&grads).unwrap(),
-                    to_tensor(analytic.d_gamma_bnlh),
-                ),
-            ),
-        ] {
-            assert!(
-                d < tol,
-                "mimo_rank={mimo_rank} {name}: analytic↔autodiff max abs diff {d} >= {tol}"
+            let analytic = y_diag_correction_backward::<Dispatch>(
+                to_prim(head.clone()),
+                to_prim(v.clone()),
+                to_prim(b.clone()),
+                to_prim(c.clone()),
+                to_prim(gamma.clone()),
+                siso,
             );
+
+            let tol = 1e-4;
+            for (name, d) in [
+                (
+                    "d_v",
+                    max_abs_diff(
+                        pv.val().grad(&grads).unwrap(),
+                        to_tensor(analytic.d_v_bnlmhp),
+                    ),
+                ),
+                (
+                    "d_b",
+                    max_abs_diff(
+                        pb.val().grad(&grads).unwrap(),
+                        to_tensor(analytic.d_b_bnlmhr),
+                    ),
+                ),
+                (
+                    "d_c",
+                    max_abs_diff(
+                        pc.val().grad(&grads).unwrap(),
+                        to_tensor(analytic.d_c_bnlmhr),
+                    ),
+                ),
+                (
+                    "d_gamma",
+                    max_abs_diff(
+                        pgamma.val().grad(&grads).unwrap(),
+                        to_tensor(analytic.d_gamma_bnlh),
+                    ),
+                ),
+            ] {
+                assert!(
+                    d < tol,
+                    "mimo_rank={mimo_rank} siso_specialization={siso} {name}: \
+                 analytic↔autodiff max abs diff {d} >= {tol}"
+                );
+            }
         }
     }
 }

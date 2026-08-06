@@ -52,16 +52,21 @@ fn mimo_outer_sum_matches_einsum() {
         let v_host: Vec<f32> = v.to_data().to_vec().unwrap();
         let k_host: Vec<f32> = k.to_data().to_vec().unwrap();
 
-        let got = mimo_outer_sum(v, k);
-        assert_eq!([batch, nheads, per_head_dim, state_rank], got.dims());
-
         let want = reference(&v_host, &k_host, [batch, mimo_rank, nheads, per_head_dim]);
-        let got_host: Vec<f32> = got.to_data().to_vec().unwrap();
-        for (i, (g, w)) in got_host.iter().zip(want.iter()).enumerate() {
-            assert!(
-                (g - w).abs() < 1e-5,
-                "mimo_rank={mimo_rank} idx={i}: {g} vs {w}"
-            );
+
+        // Both branches must reproduce the einsum: the broadcast SISO form is
+        // only reachable at `mimo_rank == 1`, the matmul form at any rank.
+        for siso in [true, false] {
+            let got = mimo_outer_sum(v.clone(), k.clone(), siso);
+            assert_eq!([batch, nheads, per_head_dim, state_rank], got.dims());
+
+            let got_host: Vec<f32> = got.to_data().to_vec().unwrap();
+            for (i, (g, w)) in got_host.iter().zip(want.iter()).enumerate() {
+                assert!(
+                    (g - w).abs() < 1e-5,
+                    "mimo_rank={mimo_rank} siso_specialization={siso} idx={i}: {g} vs {w}"
+                );
+            }
         }
     }
 }

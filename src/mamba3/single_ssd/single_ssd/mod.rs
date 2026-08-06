@@ -210,8 +210,11 @@ impl Mamba3 {
         let v_prev_mimo_bmhp =
             helpers::build_v_with_mimo::<3, 4>(cache.v_state_bhp.clone(), mimo_x_hmp.as_ref(), 1); // [batch, mimo_rank, nheads, per_head_dim]
         // einsum: bmhp, bmhr -> bhpr  (contract over m)
-        let boundary_seed_bhpr =
-            helpers::mimo_outer_sum(v_prev_mimo_bmhp, cache.k_state_bmhr.clone());
+        let boundary_seed_bhpr = helpers::mimo_outer_sum(
+            v_prev_mimo_bmhp,
+            cache.k_state_bmhr.clone(),
+            self.use_siso_decode_kernels(),
+        );
         let initial_state_bhpr = cache.ssm_bhpr.clone()
             + boundary_seed_bhpr
                 * boundary_factor_bh.unsqueeze_dims::<4>(&[2, 3]).expand([
@@ -268,6 +271,7 @@ impl Mamba3 {
             scale_bnlh,
             initial_state_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
+            siso_specialization: self.siso_specialization,
         };
         let (y_bnlmhp, final_state_bhpr) = ssd_input.run(ssd_path);
 

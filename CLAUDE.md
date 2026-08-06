@@ -19,6 +19,7 @@ cargo check                 # type-check the lib surface
 cargo test --lib            # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
 cargo run --example fibonacci -- --training --inference
+./bench.sh                  # benchmarks — run by the user, never by you
 ```
 
 - **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,
@@ -89,6 +90,8 @@ src/
    ├─ combined_grad.rs   flatten/unflatten (y, final_state) for custom backward
    ├─ fprim.rs           F<B,D>: rank-tagged FloatTensor-primitive wrapper
    └─ test_helpers.rs    max_abs_diff + grad-comparison macros
+benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
+bench.sh             runs them per backend, writes bench.md
 ```
 
 `files.md` is the per-file signature reference (what each important file defines +
@@ -241,9 +244,13 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   (~½ memory); accumulators coincide at boundaries so caches inter-convert.
 - **SISO is `mimo_rank = 1`, not a separate implementation** — the fused `L·M` axis is
   then `chunk_len`, so each kernel already *is* its SISO form. Only where `m` is a real
-  matmul dimension do scopes branch on it: RoPE pairing, `single_ssd/ssd/diag.rs`,
-  `step_infinite`'s Gram. Elsewhere the degenerate-GEMM rewrite loses on CPU backends
-  (see `helpers::mimo_outer_sum`).
+  matmul dimension do scopes branch on it: RoPE pairing (semantic), plus two
+  **performance-only** flags (identical values and gradients) whose backend preferences
+  differ — `Mamba3Config.siso_specialization` for the chunkwise γ-correction
+  (`single_ssd/ssd/diag.rs`; deletes thousands of tiny GEMMs, wins everywhere) and
+  `siso_specialization_decode` for the per-token sites (`helpers::mimo_outer_sum`,
+  `step_readout`, `step_infinite`'s Gram, via `Mamba3::use_siso_decode_kernels`; replaces
+  one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface

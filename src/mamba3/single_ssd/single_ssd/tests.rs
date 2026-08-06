@@ -1003,3 +1003,99 @@ fn quaternion_single_matches_step_full_rope() {
 fn quaternion_single_matches_step_mimo() {
     quaternion_single_matches_step(cfg_quat_mimo(), Mamba3SsdPath::Minimal(Some(4)));
 }
+
+// ── siso_specialization: performance switch, identical math ─────────────
+
+/// Flipping the `siso_specialization*` flags must not change anything the caller
+/// can observe on the single-SSD forward.
+///
+/// At `mimo_rank == 1` this path takes the specialized branches of the same-step
+/// γ-correction (`ssd::diag`, inside every SSD algorithm — including the
+/// recompute backward, which must pick the *same* branch as its forward; that is
+/// [`Mamba3Config::siso_specialization`]) and of the boundary-β seed
+/// (`helpers::mimo_outer_sum`, the per-token flag). Both are flipped together so
+/// the two sites are covered. The two models share their weights by
+/// construction; only the flags differ.
+fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+    assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
+    let device: Device = Default::default();
+    let specialized = cfg
+        .clone()
+        .with_siso_specialization(true)
+        .with_siso_specialization_decode(true)
+        .init(&device.clone().autodiff());
+    let general = Mamba3 {
+        siso_specialization: false,
+        siso_specialization_decode: false,
+        ..specialized.clone()
+    };
+
+    let batch = 2;
+    let seq_len = 8;
+    let d_model = cfg.d_model;
+    let nheads = cfg.nheads();
+    let per_head_dim = cfg.per_head_dim;
+    let state_rank = cfg.state_rank;
+    let mimo_rank = cfg.mimo_rank;
+    let num_rope_angles = cfg.num_rope_angles();
+    let normal = Distribution::Normal(0.0, 1.0);
+
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let heads = Heads {
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+    };
+
+    // A random initial cache so the boundary-β seed (the other specialized
+    // site on this path) is non-zero.
+    let init_cache = build_single_ssd_cache(&cfg, batch, true);
+
+    let input_spec = param_input(&input);
+    let cache_spec = init_cache.clone();
+    let path_spec = ssd_path.clone();
+    let r_spec = run_with_grads_single_ssd(&specialized, &input_spec, &heads, |m, x| {
+        m.forward_single_ssd(x, Some(cache_spec), &path_spec)
+    });
+
+    let input_gen = param_input(&input);
+    let cache_gen = init_cache;
+    let path_gen = ssd_path;
+    let r_gen = run_with_grads_single_ssd(&general, &input_gen, &heads, |m, x| {
+        m.forward_single_ssd(x, Some(cache_gen), &path_gen)
+    });
+
+    // Same tolerances as the other parity tests here — the branches differ only
+    // in summation order, while a real mismatch diverges by O(1).
+    check_single_ssd_match("siso vs general forward", &r_spec, &r_gen, 1e-4, 1e-3);
+}
+
+#[test]
+fn siso_specialization_forward_parity_minimal() {
+    run_siso_specialization_forward_parity(small_config(), Mamba3SsdPath::Minimal(Some(4)));
+}
+
+#[test]
+fn siso_specialization_forward_parity_serial() {
+    run_siso_specialization_forward_parity(small_config(), Mamba3SsdPath::Serial(Some(4)));
+}
+
+/// The recompute backward is the one that could disagree with its own forward:
+/// the branch choice has to be carried into the autodiff node's state.
+#[test]
+fn siso_specialization_forward_parity_serial_recalculated() {
+    run_siso_specialization_forward_parity(
+        small_config(),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
+    );
+}
+
+#[test]
+fn siso_specialization_forward_parity_rope_zero() {
+    run_siso_specialization_forward_parity(
+        cfg_rope_zero(),
+        Mamba3SsdPath::SerialRecalculated(Some(4)),
+    );
+}

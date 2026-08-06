@@ -36,15 +36,17 @@ pub struct DiagGrads<B: Backend> {
 
 /// The γ-weighted same-step correction `y_diag`, on primitives.
 ///
-/// Dispatches on `mimo_rank`; see [`super::super::diag::y_diag_correction`].
+/// Dispatches on `mimo_rank` and `siso_specialization`; see
+/// [`super::super::diag::y_diag_correction`].
 pub fn y_diag_correction<B: Backend>(
     v_bnlmhp: F<B, 6>,
     b_bnlmhr: F<B, 6>,
     c_bnlmhr: F<B, 6>,
     gamma_bnlh: F<B, 4>,
+    siso_specialization: bool,
 ) -> F<B, 6> {
     let [.., mimo_rank, _nheads, _per_head_dim] = v_bnlmhp.dims();
-    if mimo_rank == 1 {
+    if mimo_rank == 1 && siso_specialization {
         y_diag_correction_siso(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)
     } else {
         y_diag_correction_mimo(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)
@@ -83,16 +85,17 @@ pub(crate) fn y_diag_correction_mimo<B: Backend>(
 /// Analytic backward of [`y_diag_correction`].
 ///
 /// Has no recurrence, so it runs batched over all chunks at once. Dispatches on
-/// `mimo_rank` exactly like the forward.
+/// `mimo_rank` / `siso_specialization` exactly like the forward.
 pub fn y_diag_correction_backward<B: Backend>(
     d_y_bnlmhp: F<B, 6>,
     v_bnlmhp: F<B, 6>,
     b_bnlmhr: F<B, 6>,
     c_bnlmhr: F<B, 6>,
     gamma_bnlh: F<B, 4>,
+    siso_specialization: bool,
 ) -> DiagGrads<B> {
     let [.., mimo_rank, _nheads, _per_head_dim] = v_bnlmhp.dims();
-    if mimo_rank == 1 {
+    if mimo_rank == 1 && siso_specialization {
         y_diag_correction_backward_siso(d_y_bnlmhp, v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)
     } else {
         y_diag_correction_backward_mimo(d_y_bnlmhp, v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)

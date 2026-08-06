@@ -133,8 +133,9 @@ fn siso_matches_mimo_forward_and_grads() {
     }
 }
 
-/// The public entry point must pick the SISO branch at `mimo_rank == 1` and the
-/// MIMO branch above it — checked by agreement with the branch called directly.
+/// The public entry point must agree with the general branch called directly,
+/// whichever branch it picks: SISO at `mimo_rank == 1` with `siso_specialization`
+/// on, the MIMO branch otherwise.
 #[test]
 fn dispatch_agrees_with_both_branches() {
     let device = Device::default();
@@ -151,9 +152,21 @@ fn dispatch_agrees_with_both_branches() {
             state_rank,
             &device,
         );
-        let dispatched = y_diag_correction(v.clone(), b.clone(), c.clone(), gamma.clone());
-        let direct = y_diag_correction_mimo(v, b, c, gamma);
-        let d = max_abs_diff(dispatched, direct);
-        assert!(d < 1e-5, "mimo_rank={mimo_rank}: dispatch mismatch {d}");
+        for siso_specialization in [true, false] {
+            let dispatched = y_diag_correction(
+                v.clone(),
+                b.clone(),
+                c.clone(),
+                gamma.clone(),
+                siso_specialization,
+            );
+            let direct = y_diag_correction_mimo(v.clone(), b.clone(), c.clone(), gamma.clone());
+            let d = max_abs_diff(dispatched, direct);
+            assert!(
+                d < 1e-5,
+                "mimo_rank={mimo_rank} siso_specialization={siso_specialization}: \
+                 dispatch mismatch {d}"
+            );
+        }
     }
 }

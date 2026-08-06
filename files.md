@@ -62,15 +62,20 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`).
   `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
+  Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
+  values/grads): `siso_specialization` for the chunkwise γ-correction (threaded down as a
+  field of the SSD input bundle, into the ext trait and the `Backward` node's state) and
+  `siso_specialization_decode` for the per-token sites (`use_siso_decode_kernels()`).
+  Split because the first wins on every backend and the second only on GPU.
 - **`mod.rs`** — `Mamba3BackendExt: Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt`,
   wired via `backend_macros`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
   (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`, `mimo_outer_sum`
-  (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed). Non-obvious: the
+  (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso` broadcast vs `_mimo`
+  matmul, per `siso_specialization_decode`). Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
-  instead pins `A ≡ +a_floor` (data-independent growth). `mimo_outer_sum` deliberately
-  keeps its matmul at `mimo_rank == 1` (doc comment gives the measurement).
+  instead pins `A ≡ +a_floor` (data-independent growth).
 - **`cache.rs`** — the pathway-tagged `Mamba3Cache{DoubleSsd|SingleSsd}` / `Mamba3Caches`
   enums; extractors; `from_vec`/`from_options` (**empty ⇒ SingleSsd**). The cross-pathway
   `From` impls are field-identity, valid because at a boundary `scaleₜ=γₜ` so single-ssd
@@ -83,7 +88,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
   summed; ~2× SSD memory. `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
-  (in-proj → coeffs → QK-norm, pre-rotation), `step_readout` (state×C einsum) and
+  (in-proj → coeffs → QK-norm, pre-rotation), `step_readout` (state×C einsum, `_siso`/
+  `_mimo` branches) and
   `step_finish` (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
   `step_constant`. `apply_rope`/`apply_rope_partial` (rotate last-dim pairs;
   interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; identity when `rope_dim==0`) and
@@ -104,13 +110,15 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the diagonal, patched in-kernel). The
   distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
-  + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel); `Mamba3SingleSsdBackendExt`; same trio.
+  + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel, + `siso_specialization`);
+  `Mamba3SingleSsdBackendExt`; same trio.
 - **`ssd/diag.rs`** — `y_diag_correction`, the same-step γ term all three algorithms add
-  back over the strict-lower mask; branches on `mimo_rank` (at 1 the `m×m` Gram is a
-  scalar, so both matmuls collapse to a reduction + broadcast). `serial_recalculated/diag.rs`
-  is the `F<B,D>` twin plus the analytic backward (`DiagGrads`, `d_gamma` whole not partial).
-  Both keep the two branches separately callable so the tests can compare them at `m=1`,
-  where dispatch makes the general one unreachable.
+  back over the strict-lower mask; branches on `mimo_rank == 1 && siso_specialization` (at
+  1 the `m×m` Gram is a scalar, so both matmuls collapse to a reduction + broadcast).
+  `serial_recalculated/diag.rs` is the `F<B,D>` twin plus the analytic backward
+  (`DiagGrads`, `d_gamma` whole not partial); the flag reaches it through the ext-trait
+  method and the `Backward` node's `State`, so backward replays the forward's branch.
+  Both keep the two branches separately callable for the `m=1` comparison tests.
 
 ### `mamba3/rotation/` (`mod.rs`)
 The quaternion (`k=4`) **non-abelian** generalisation of RoPE (`SU(2) ⊂ SO(4)`).
@@ -211,3 +219,9 @@ plus shared NN blocks.
   `Mask<B>` + `san(&F)` accompany it.
 - **`test_helpers.rs`** (test-only) — `max_abs_diff` + `check_grads_match_two_paths!`,
   shared by the SSD-path agreement tests.
+
+## Benchmarks (`benches/layer.rs`, `bench.sh`)
+
+Criterion single-block benches (`forward`/`train`/`step`) over all three families.
+**Run by the user, not by an agent.** `bench.sh` drives one build per backend
+configuration and writes `bench.md`; both files carry their own rationale.

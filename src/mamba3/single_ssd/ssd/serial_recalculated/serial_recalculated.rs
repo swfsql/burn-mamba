@@ -55,6 +55,7 @@ impl Mamba3SingleSsdInput {
                 input.gamma_bnlh.into_dispatch(),
                 input.scale_bnlh.into_dispatch(),
                 input.initial_state_bhpr.into_dispatch(),
+                input.siso_specialization,
             );
         let y_bnlmhp = Tensor::from_dispatch(y_bnlmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -93,6 +94,9 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `gamma_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `γₜ = λₜ Δₜ`
     /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ = γₜ + (1−λₜ₊₁)Δₜ₊₁`
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+    /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
+    ///   γ-correction (performance-only; see
+    ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
     ///
     /// # Returns
     /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
@@ -105,6 +109,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         gamma_bnlh: FloatTensor<Self>,
         scale_bnlh: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
+        siso_specialization: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate the single-ssd form K1–K5 on primitives.
         let v_bnlmhp = F::<Self, 6>::new(v_bnlmhp);
@@ -149,6 +154,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
             gamma_bnlh,
             scale_bnlh,
             chunk_input_state_bnhpr,
+            siso_specialization,
         );
         san(&y_bnlmhp);
 
@@ -191,6 +197,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     gamma_bnlh: F<B, 4>,
     scale_bnlh: F<B, 4>,
     chunk_input_state_bnhpr: F<B, 5>,
+    siso_specialization: bool,
 ) -> F<B, 6> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = c_bnlmhr.dims();
@@ -266,7 +273,13 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
 
     // ── Y_diag: γ-weighted same-step correction ─────────────────────────────
-    let y_diag_bnlmhp = y_diag_correction::<B>(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh);
+    let y_diag_bnlmhp = y_diag_correction::<B>(
+        v_bnlmhp,
+        b_bnlmhr,
+        c_bnlmhr,
+        gamma_bnlh,
+        siso_specialization,
+    );
     let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
     let y_diag_bnhLMp = y_diag_bnLMhp.swap_dims(2, 3);
 

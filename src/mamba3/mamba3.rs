@@ -252,6 +252,21 @@ pub struct Mamba3 {
     /// Number of quaternion blocks (`rope_dim / 4`); only used for
     /// [`RotationKind::Quaternion4D`].
     pub num_quat_blocks: usize,
+
+    /// Whether the `mimo_rank == 1` specialized *chunkwise* kernel is enabled
+    /// (see [`Mamba3Config::siso_specialization`]).
+    ///
+    /// A performance knob, not a semantic one: both branches compute the same
+    /// values and gradients. A non-parameter constant — `#[module(skip)]` keeps
+    /// it out of the record.
+    #[module(skip)]
+    pub siso_specialization: bool,
+
+    /// Whether the `mimo_rank == 1` specialized *per-token* kernels are enabled
+    /// (see [`Mamba3Config::siso_specialization_decode`]). Same performance-only
+    /// nature, opposite backend preference.
+    #[module(skip)]
+    pub siso_specialization_decode: bool,
 }
 
 impl Mamba3 {
@@ -277,6 +292,19 @@ impl Mamba3 {
     /// The block's positional-rotation kind ([`RotationKind`]).
     pub fn rotation_kind(&self) -> RotationKind {
         self.rotation
+    }
+
+    /// Whether the specialized `mimo_rank == 1` **per-token** kernels should run:
+    /// the block is SISO **and** [`Mamba3Config::siso_specialization_decode`] is
+    /// enabled.
+    ///
+    /// The chunkwise counterpart is [`Mamba3Config::siso_specialization`], which
+    /// travels to its kernel as a field of the SSD input bundle rather than
+    /// through a method.
+    ///
+    /// Purely a performance choice — see [`Mamba3Config::siso_specialization_decode`].
+    pub fn use_siso_decode_kernels(&self) -> bool {
+        self.mimo_rank == 1 && self.siso_specialization_decode
     }
 }
 
@@ -392,6 +420,45 @@ pub struct Mamba3Config {
     /// angle channels (see [`Self::num_rotation_channels`]).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
+
+    /// Whether to use the specialized `mimo_rank == 1` (SISO) **chunkwise**
+    /// kernel: the same-step γ-correction
+    /// ([`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)),
+    /// forward *and* its analytic backward.
+    ///
+    /// At `mimo_rank == 1` the `m × m` Gram is a scalar, so the general form
+    /// issues a `1×r×1` and a `1×1×p` GEMM per `(batch, nchunks, chunk_len,
+    /// nheads)` — thousands of degenerate products. The SISO branch replaces all
+    /// of them with one elementwise multiply and a `state_rank` reduction over
+    /// the whole tensor, which is why deleting the tiny GEMMs helps everywhere:
+    /// ≈ neutral to ~9 % faster across the backends in `bench.md`. Leave it on.
+    ///
+    /// **Values and gradients are identical either way** — this only selects the
+    /// op mix. Ignored when `mimo_rank > 1`, where only the general branch
+    /// applies. See also [`Self::siso_specialization_decode`], the per-token
+    /// counterpart, whose trade-off is *not* the same.
+    #[config(default = true)]
+    pub siso_specialization: bool,
+
+    /// Whether to use the specialized `mimo_rank == 1` (SISO) **per-token**
+    /// kernels: the decode state update and readout
+    /// (`helpers::mimo_outer_sum`, `Mamba3::step_readout`), the single-SSD
+    /// boundary-β seed, and [`step_infinite`](Mamba3::step_infinite)'s Gram.
+    ///
+    /// **Set this to `false` on the CPU backends.** Unlike the chunkwise flag,
+    /// this one replaces a *single, already efficient* batched matmul with a
+    /// broadcast multiply, so the verdict flips with the backend: at
+    /// `benches/layer.rs`'s default size the `step` group is ~12 % faster on CUDA
+    /// and about **3× slower on flex**, whose broadcast-elementwise path trails
+    /// its matmul by more than an order of magnitude at these shapes. The default
+    /// (`true`) suits the GPU backends; a CPU deployment that decodes should turn
+    /// it off — and can do so while keeping [`Self::siso_specialization`] on,
+    /// which is the point of having two flags.
+    ///
+    /// **Values and gradients are identical either way.** Ignored when
+    /// `mimo_rank > 1`.
+    #[config(default = true)]
+    pub siso_specialization_decode: bool,
 }
 
 impl Mamba3Config {
@@ -595,6 +662,8 @@ impl Mamba3Config {
             rotation: self.rotation,
             num_rotation_channels: self.num_rotation_channels(),
             num_quat_blocks: self.num_quat_blocks(),
+            siso_specialization: self.siso_specialization,
+            siso_specialization_decode: self.siso_specialization_decode,
         }
     }
 }

@@ -116,6 +116,7 @@ impl Mamba3SingleSsdInput {
             input.gamma_bnlh,
             input.scale_bnlh,
             chunk_input_state_bnhpr,
+            input.siso_specialization,
         );
 
         (y_bnlmhp, final_state_bhpr)
@@ -161,6 +162,7 @@ pub fn k5_single_ssd_chunk_scan(
     gamma_bnlh: Tensor<4>,
     scale_bnlh: Tensor<4>,
     chunk_input_state_bnhpr: Tensor<5>,
+    siso_specialization: bool,
 ) -> Tensor<6> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = c_bnlmhr.dims();
@@ -247,7 +249,13 @@ pub fn k5_single_ssd_chunk_scan(
     //
     // Computed fresh (small same-step product) rather than extracting the
     // block-diagonal from `cb_bnhLMLM` (which would require a fiddly reshape).
-    let y_diag_bnlmhp = y_diag_correction(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh);
+    let y_diag_bnlmhp = y_diag_correction(
+        v_bnlmhp,
+        b_bnlmhr,
+        c_bnlmhr,
+        gamma_bnlh,
+        siso_specialization,
+    );
 
     // Back to fused layout `[B, N, H, L·M, P]` to match y_lower / y_off.
     let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);

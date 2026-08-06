@@ -85,6 +85,15 @@ pub struct Mamba3SingleSsdInput {
     /// # Shape
     /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<3>>,
+
+    /// Whether the specialized `mimo_rank == 1` γ-correction may be used
+    /// ([`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
+    /// — the chunkwise flag; the per-token sites have their own).
+    ///
+    /// Performance-only: both branches of
+    /// [`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)
+    /// compute the same values and gradients. No effect at `mimo_rank > 1`.
+    pub siso_specialization: bool,
 }
 
 impl Mamba3SingleSsdInput {

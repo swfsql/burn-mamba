@@ -42,6 +42,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
         gamma_bnlh: FloatTensor<Self>,
         scale_bnlh: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
+        siso_specialization: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         #[derive(Debug)]
         struct CombinedKernelsBackward;
@@ -55,6 +56,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
             gamma_bnlh: <B as BackendTypes>::FloatTensorPrimitive,
             scale_bnlh: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
+            siso_specialization: bool,
             flat_len_y_BNLMHP: usize,
             flat_len_final_state_BHPR: usize,
             shape_v_bnlmhp: [usize; 6],
@@ -98,6 +100,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnlh,
                     scale_bnlh,
                     initial_state_bhpr,
+                    siso_specialization,
                     flat_len_y_BNLMHP,
                     flat_len_final_state_BHPR,
                     shape_v_bnlmhp,
@@ -148,6 +151,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnlh,
                     scale_bnlh,
                     initial_state_bhpr,
+                    siso_specialization,
                 );
 
                 if let Some(n) = node_v_bnlmhp {
@@ -216,6 +220,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnlh.primitive.clone(),
                     scale_bnlh.primitive.clone(),
                     initial_state_bhpr.primitive.clone(),
+                    siso_specialization,
                 );
 
                 let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
@@ -231,6 +236,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnlh: gamma_bnlh.primitive.clone(),
                     scale_bnlh: scale_bnlh.primitive.clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive.clone(),
+                    siso_specialization,
                     flat_len_y_BNLMHP,
                     flat_len_final_state_BHPR,
                     shape_v_bnlmhp,
@@ -267,6 +273,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnlh.primitive,
                     scale_bnlh.primitive,
                     initial_state_bhpr.primitive,
+                    siso_specialization,
                 );
 
                 let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(

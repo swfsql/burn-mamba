@@ -503,9 +503,35 @@ mod step {
         /// `out[b, m, h, p] = Σᵣ C[b, m, h, r] · state[b, h, p, r]`
         /// (`einsum('bhpr,bmhr->bmhp', state, C)`).
         ///
-        /// No SISO shortcut — see [`mimo_outer_sum`](crate::mamba3::helpers::mimo_outer_sum)
-        /// for why the `mimo_rank == 1` broadcast form loses on the CPU backend.
-        pub(crate) fn step_readout(state_bhpr: Tensor<4>, c_bmhr: Tensor<4>) -> Tensor<4> {
+        /// At `mimo_rank == 1` the output axis of the GEMM is 1, so the matmul
+        /// is a matrix–vector product; [`step_readout_siso`](Mamba3::step_readout_siso)
+        /// writes it as a broadcast multiply plus a `state_rank` reduction.
+        /// Selected by
+        /// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)
+        /// — both branches compute the same values and gradients.
+        pub(crate) fn step_readout(
+            state_bhpr: Tensor<4>,
+            c_bmhr: Tensor<4>,
+            siso_specialization: bool,
+        ) -> Tensor<4> {
+            let [_batch, mimo_rank, _nheads, _state_rank] = c_bmhr.dims();
+            if mimo_rank == 1 && siso_specialization {
+                Self::step_readout_siso(state_bhpr, c_bmhr)
+            } else {
+                Self::step_readout_mimo(state_bhpr, c_bmhr)
+            }
+        }
+
+        /// SISO (`mimo_rank == 1`) state→output contraction: broadcast `C` over
+        /// `per_head_dim` and reduce `state_rank`.
+        pub(crate) fn step_readout_siso(state_bhpr: Tensor<4>, c_bmhr: Tensor<4>) -> Tensor<4> {
+            let c_bh1r: Tensor<4> = c_bmhr.squeeze_dim::<3>(1).unsqueeze_dim(2);
+            let out_bhp1: Tensor<4> = (state_bhpr * c_bh1r).sum_dim(3);
+            out_bhp1.squeeze_dim::<3>(3).unsqueeze_dim(1) // out_b1hp
+        }
+
+        /// General MIMO state→output contraction: one matmul over `state_rank`.
+        pub(crate) fn step_readout_mimo(state_bhpr: Tensor<4>, c_bmhr: Tensor<4>) -> Tensor<4> {
             let c_bhrm = c_bmhr.permute([0, 2, 3, 1]);
             let out_bhpm = state_bhpr.matmul(c_bhrm);
             out_bhpm.permute([0, 3, 1, 2])
@@ -706,9 +732,11 @@ mod step {
             san(&x_beta_bmhp);
 
             // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
-            let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone());
+            let siso = self.use_siso_decode_kernels();
+            let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
             san(&xbt_state_bhpr);
-            let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, cache.k_state_bmhr.clone());
+            let xbt_prev_bhpr =
+                helpers::mimo_outer_sum(x_beta_bmhp, cache.k_state_bmhr.clone(), siso);
             san(&xbt_prev_bhpr);
 
             let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
@@ -718,7 +746,7 @@ mod step {
 
             // ── Output ────────────────────────────────────────────────────────
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
-            let out_m_bmhp = Self::step_readout(new_state_bhpr.clone(), c_bmhr);
+            let out_m_bmhp = Self::step_readout(new_state_bhpr.clone(), c_bmhr, siso);
             san(&out_m_bmhp);
 
             // ── D skip, gate (or gated norm), rank aggregation, out-projection ─

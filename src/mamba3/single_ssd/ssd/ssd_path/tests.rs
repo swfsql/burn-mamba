@@ -104,7 +104,7 @@ impl Inputs {
         }
     }
 
-    fn ssd_input(&self) -> Mamba3SingleSsdInput {
+    fn ssd_input(&self, siso_specialization: bool) -> Mamba3SingleSsdInput {
         Mamba3SingleSsdInput {
             v_bnlmhp: self.v.val(),
             b_bnlmhr: self.b.val(),
@@ -115,6 +115,7 @@ impl Inputs {
             initial_state_bhpr: self.initial_state.val(),
             // Serial asserts this is None — see single_ssd_serial.
             init_state_hpr: None,
+            siso_specialization,
         }
     }
 }
@@ -142,8 +143,14 @@ fn loss_from_outputs(
     (y_bnlmhp * y_head).sum() + (final_state_bhpr * s_head).sum()
 }
 
-fn run_path(path: Mamba3SsdPath, inputs: &Inputs, y_head: Tensor<6>, s_head: Tensor<4>) -> PathRun {
-    let (y, state) = inputs.ssd_input().run(&path);
+fn run_path(
+    path: Mamba3SsdPath,
+    inputs: &Inputs,
+    y_head: Tensor<6>,
+    s_head: Tensor<4>,
+    siso_specialization: bool,
+) -> PathRun {
+    let (y, state) = inputs.ssd_input(siso_specialization).run(&path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();
     let loss = loss_from_outputs(y, state, y_head, s_head);
@@ -251,30 +258,56 @@ fn run_minimal_matches_serial(
     );
     let inputs_rec = Inputs::from_inner(v, b, c, da, gamma, scale, init);
 
-    let r_min = run_path(
-        Mamba3SsdPath::Minimal(Some(chunk_len)),
-        &inputs_min,
-        y_head.clone(),
-        s_head.clone(),
-    );
-    let r_ser = run_path(
-        Mamba3SsdPath::Serial(Some(chunk_len)),
-        &inputs_ser,
-        y_head.clone(),
-        s_head.clone(),
-    );
-    let r_rec = run_path(
-        Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
-        &inputs_rec,
-        y_head,
-        s_head,
-    );
+    // At `mimo_rank == 1` both γ-correction branches are reachable
+    // (`siso_specialization`); above it only the general one is. Running the
+    // whole agreement matrix under each also pins SISO ≡ MIMO end-to-end.
+    let specializations: &[bool] = if mimo_rank == 1 {
+        &[true, false]
+    } else {
+        &[true]
+    };
+    for &siso in specializations {
+        let r_min = run_path(
+            Mamba3SsdPath::Minimal(Some(chunk_len)),
+            &inputs_min,
+            y_head.clone(),
+            s_head.clone(),
+            siso,
+        );
+        let r_ser = run_path(
+            Mamba3SsdPath::Serial(Some(chunk_len)),
+            &inputs_ser,
+            y_head.clone(),
+            s_head.clone(),
+            siso,
+        );
+        let r_rec = run_path(
+            Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
+            &inputs_rec,
+            y_head.clone(),
+            s_head.clone(),
+            siso,
+        );
 
-    // Same algorithm, different schedule / backward: stricter on values
-    // (1e-4), moderate on gradients (1e-3) — same tolerances as the
-    // original-form SSD-path agreement tests.
-    assert_path_runs_agree("Minimal vs Serial", &r_min, &r_ser, 1e-4, 1e-3);
-    assert_path_runs_agree("Minimal vs SerialRecalculated", &r_min, &r_rec, 1e-4, 1e-3);
+        // Same algorithm, different schedule / backward: stricter on values
+        // (1e-4), moderate on gradients (1e-3) — same tolerances as the
+        // original-form SSD-path agreement tests.
+        let label = format!("siso_specialization={siso}");
+        assert_path_runs_agree(
+            &format!("{label}: Minimal vs Serial"),
+            &r_min,
+            &r_ser,
+            1e-4,
+            1e-3,
+        );
+        assert_path_runs_agree(
+            &format!("{label}: Minimal vs SerialRecalculated"),
+            &r_min,
+            &r_rec,
+            1e-4,
+            1e-3,
+        );
+    }
 }
 
 #[test]

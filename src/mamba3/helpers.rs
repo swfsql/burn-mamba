@@ -5,7 +5,8 @@
 //! 1. Trapezoidal discretisation: `dt`, `α`, `β`, `γ`, `da`.
 //! 2. QK-norm + GQA expansion + per-(head, mimo-rank) bias on B / C.
 //! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`.
-//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state.
+//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
+//!    (SISO-branched).
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
@@ -99,15 +100,39 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
 /// This is the per-token state contribution: each MIMO rank contributes an
 /// outer product `v[m] ⊗ k[m]` and the shared state accumulates their sum.
 ///
-/// **No SISO shortcut here, deliberately.** At `mimo_rank == 1` the contracted
-/// dimension is 1, so this is a rank-1 GEMM and `v ⊗ k` could be written as a
-/// broadcast multiply instead. That is faster on CUDA (~1.2×) but *far* slower
-/// on the portable CPU backend, whose broadcast-elementwise path trails its
-/// matmul by more than an order of magnitude on these shapes — a net loss for a
-/// crate that runs one code path everywhere. The chunkwise
-/// [`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag) shortcut is a win
-/// on both, which is why it exists and this does not.
-pub fn mimo_outer_sum(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
+/// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1 and
+/// the sum is a single outer product — [`mimo_outer_sum_siso`] writes it as a
+/// broadcast multiply instead. Which form wins is backend-dependent, and by a
+/// wide margin at these (tiny, decode-sized) shapes: the broadcast is the
+/// faster one on CUDA and *much* slower on the portable CPU backends, whose
+/// broadcast-elementwise path trails their matmul by more than an order of
+/// magnitude here. The choice is therefore
+/// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)'s
+/// — the per-token flag, *not* the chunkwise one, whose verdict is the opposite;
+/// both branches compute the same values and gradients.
+pub fn mimo_outer_sum(
+    v_bmhp: Tensor<4>,
+    k_bmhr: Tensor<4>,
+    siso_specialization: bool,
+) -> Tensor<4> {
+    let [_batch, mimo_rank, _nheads, _per_head_dim] = v_bmhp.dims();
+    if mimo_rank == 1 && siso_specialization {
+        mimo_outer_sum_siso(v_bmhp, k_bmhr)
+    } else {
+        mimo_outer_sum_mimo(v_bmhp, k_bmhr)
+    }
+}
+
+/// SISO (`mimo_rank == 1`) rank-summed outer product: the single `v ⊗ k` as a
+/// broadcast multiply of `[b, h, p, 1]` by `[b, h, 1, r]`.
+pub fn mimo_outer_sum_siso(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
+    let v_bhp1: Tensor<4> = v_bmhp.squeeze_dim::<3>(1).unsqueeze_dim(3);
+    let k_bh1r: Tensor<4> = k_bmhr.squeeze_dim::<3>(1).unsqueeze_dim(2);
+    v_bhp1 * k_bh1r
+}
+
+/// General MIMO rank-summed outer product: a matmul contracting `mimo_rank`.
+pub fn mimo_outer_sum_mimo(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
     // v_bmhp [b, m, h, p] -> v_bhpm [b, h, p, m]; k_bmhr [b, m, h, r] -> k_bhmr.
     let v_bhpm = v_bmhp.permute([0, 2, 3, 1]);
     let k_bhmr = k_bmhr.swap_dims(1, 2);

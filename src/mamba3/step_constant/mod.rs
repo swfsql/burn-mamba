@@ -131,7 +131,7 @@ impl Mamba3 {
         // y_∞[m] = Σ_m' ⟨c[m], m·b[m']⟩ · x_vals[m']   (then D-skip/gate/out-proj).
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let x_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(x_bhp, mimo_x_hmp.as_ref(), 1);
-        let out_m_bmhp = if mimo_rank == 1 {
+        let out_m_bmhp = if self.use_siso_decode_kernels() {
             // SISO: the Gram matrix is the scalar ⟨c, m·b⟩ per (batch, nheads),
             // so both matmuls degenerate — contract `state_rank` with a
             // reduction and broadcast the result over `per_head_dim`.

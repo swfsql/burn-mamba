@@ -195,6 +195,14 @@ For browser/wasm inference of the smallest pretrained Mamba-1/2 models from
 `huggingface.co/state-spaces`, see
 [`swfsql/burn-mamba-example`](https://github.com/swfsql/burn-mamba-example).
 
+## Benchmarks
+
+`./bench.sh` times a single block of each family — `forward` (prefill), `train`
+(forward + backward) and `step` (decode) — on flex, CUDA, and CUDA with fusion and
+autotuning, writing the comparison to [`bench.md`](bench.md). The cases and the
+knobs live in [`benches/layer.rs`](benches/layer.rs); `cargo bench` runs them for a
+single configuration.
+
 ## Documentation
 
 - **[API docs][docsurl]** — the rendered `rustdoc`; every public item is

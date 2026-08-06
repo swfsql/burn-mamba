@@ -192,6 +192,7 @@ impl Mamba3SingleSsdInput {
             input.b_bnlmhr,
             input.c_bnlmhr,
             input.gamma_bnlh,
+            input.siso_specialization,
         );
         // Reshape to fused layout for combination with y_lower / y_off.
         let y_diag_bnLMhp =

@@ -561,3 +561,102 @@ fn run_split_matches_full(cfg: Mamba3Config) {
 fn split_matches_full() {
     run_split_matches_full(small_config());
 }
+
+// ── siso_specialization: performance switch, identical math ─────────────
+
+/// Flipping the `siso_specialization*` flags must not change anything the caller
+/// can observe.
+///
+/// At `mimo_rank == 1` the decode path swaps two degenerate GEMMs
+/// ([`Mamba3::step_readout`], [`helpers::mimo_outer_sum`]) for a reduction plus
+/// broadcast multiplies — that is
+/// [`Mamba3Config::siso_specialization_decode`]'s doing. Both branches are
+/// unrolled here over several steps (so the specialized state feeds the next
+/// step) and compared on outputs, every final cache field, and every gradient.
+/// Both flags are flipped together, which is how a caller toggles them; the
+/// per-branch comparisons live in the kernel-level tests.
+/// The two models share their weights by construction — only the flags differ.
+fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
+    assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
+    let device: Device = Default::default();
+    let specialized = cfg
+        .clone()
+        .with_siso_specialization(true)
+        .with_siso_specialization_decode(true)
+        .init(&device.clone().autodiff());
+    let general = Mamba3 {
+        siso_specialization: false,
+        siso_specialization_decode: false,
+        ..specialized.clone()
+    };
+
+    let batch = 2;
+    let seq_len = 4;
+    let d_model = cfg.d_model;
+    let nheads = cfg.nheads();
+    let per_head_dim = cfg.per_head_dim;
+    let state_rank = cfg.state_rank;
+    let mimo_rank = cfg.mimo_rank;
+    let num_rope_angles = cfg.num_rope_angles();
+    let normal = Distribution::Normal(0.0, 1.0);
+
+    let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
+    let heads = Heads {
+        out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
+        ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
+        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
+        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+    };
+
+    let unroll = |m: &Mamba3, x: Tensor<3>, init: Mamba3DoubleSsdCache| {
+        let mut cache = Some(init);
+        let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
+        for t in 0..seq_len {
+            let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
+            let (out_t, new_cache) = m.step_double_ssd(token, cache);
+            cache = Some(new_cache);
+            outs.push(out_t);
+        }
+        (Tensor::stack(outs, 1), cache.unwrap())
+    };
+
+    let init_cache = build_init_cache(&cfg, batch, random_init);
+
+    let input_spec = param_input(&input);
+    let cache_spec = init_cache.clone();
+    let r_spec = run_with_grads(&specialized, &input_spec, &heads, |m, x| {
+        unroll(m, x, cache_spec)
+    });
+
+    let input_gen = param_input(&input);
+    let cache_gen = init_cache;
+    let r_gen = run_with_grads(&general, &input_gen, &heads, |m, x| unroll(m, x, cache_gen));
+
+    // Same tolerances as the other parity tests here. The two branches are the
+    // same math in a different summation order, so they are not bit-identical;
+    // a genuine mismatch (wrong axis, wrong broadcast) diverges by O(1), far
+    // above these bounds.
+    assert_outputs_match("siso vs general step", &r_spec, &r_gen, 1e-4);
+    check_grads_match("siso vs general step", &r_spec, &r_gen, 1e-3);
+}
+
+#[test]
+fn siso_specialization_step_parity() {
+    run_siso_specialization_step_parity(small_config(), false);
+}
+
+#[test]
+fn siso_specialization_step_parity_random_init() {
+    run_siso_specialization_step_parity(small_config(), true);
+}
+
+#[test]
+fn siso_specialization_step_parity_ngroups2() {
+    run_siso_specialization_step_parity(cfg_ngroups2(), true);
+}
+
+#[test]
+fn siso_specialization_step_parity_outproj_norm() {
+    run_siso_specialization_step_parity(cfg_outproj_norm(), true);
+}

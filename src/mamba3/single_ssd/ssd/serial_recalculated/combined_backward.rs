@@ -65,6 +65,8 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// - `d_final_bhpr` — upstream gradient of the final SSM state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bnlmhr`, `gamma_bnlh`, `scale_bnlh`,
 ///   `initial_state_bhpr` — the seven saved forward inputs
+/// - `siso_specialization` — the forward's γ-correction branch choice, replayed
+///   here so the backward matches it (performance-only; both agree)
 ///
 /// # Returns
 /// One [`CombinedSingleSsdGrads`] with gradients for all 7 inputs.
@@ -80,6 +82,7 @@ pub fn combined_backward<B: Backend>(
     gamma_bnlh: F<B, 4>,
     scale_bnlh: F<B, 4>,
     initial_state_bhpr: F<B, 4>,
+    siso_specialization: bool,
 ) -> CombinedSingleSsdGrads<B> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
@@ -157,6 +160,7 @@ pub fn combined_backward<B: Backend>(
         b_bnlmhr.clone(),
         c_bnlmhr.clone(),
         gamma_bnlh.clone(),
+        siso_specialization,
     );
     san(&d_gamma_bnlh);
 

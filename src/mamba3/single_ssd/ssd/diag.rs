@@ -22,7 +22,9 @@
 //! products, one per `(batch, nchunks, chunk_len, nheads)`.
 //! [`y_diag_correction_siso`] instead contracts `state_rank` with a reduction
 //! and folds the result (together with `γₜ`) in as a per-`(b, n, l, h)` scalar
-//! broadcast. Both branches compute the same quantity; only the op mix differs.
+//! broadcast. Both branches compute the same quantity; only the op mix differs,
+//! so [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
+//! can force the general branch at `mimo_rank == 1` to measure the difference.
 //!
 //! Reference kernels:
 //! - SISO: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
@@ -36,6 +38,10 @@ use burn::prelude::*;
 /// path ([`y_diag_correction_siso`]) or the general MIMO path
 /// ([`y_diag_correction_mimo`]) on `mimo_rank`.
 ///
+/// `siso_specialization` is
+/// [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization):
+/// `false` keeps the general branch even at `mimo_rank == 1`.
+///
 /// # Shapes
 /// - `v_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
 /// - `b_bnlmhr`, `c_bnlmhr`: `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
@@ -46,9 +52,10 @@ pub fn y_diag_correction(
     b_bnlmhr: Tensor<6>,
     c_bnlmhr: Tensor<6>,
     gamma_bnlh: Tensor<4>,
+    siso_specialization: bool,
 ) -> Tensor<6> {
     let [.., mimo_rank, _nheads, _per_head_dim] = v_bnlmhp.dims();
-    if mimo_rank == 1 {
+    if mimo_rank == 1 && siso_specialization {
         y_diag_correction_siso(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)
     } else {
         y_diag_correction_mimo(v_bnlmhp, b_bnlmhr, c_bnlmhr, gamma_bnlh)
