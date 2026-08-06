@@ -134,11 +134,9 @@ scale-invariant, range 1…N (`diagnostics.rs`):
 ### Resume mechanics (multi-phase runs)
 
 Relaunching with the same `-a` dir resumes model + optimizer. Notes:
-- `examples/common/cli.rs` works around a burn bug (persisted `ParamId`s are
-  dropped by `load_record`, which silently resets Adam moments and grows the
-  optim record each relaunch — see `info/optim-load.md`): ids are re-stamped
-  on load and orphaned optimizer entries pruned. Verified: CE continues
-  seamlessly across a relaunch.
+- Optimizer state is keyed by `ParamId`; `load_record` restores the ids
+  persisted in the model record, so the Adam moments carry over. Verified: CE
+  continues seamlessly across a relaunch.
 - Every launch **re-saves `training_config.json` with the CLI overrides
   applied** — a resume with different knobs silently overwrites the config
   provenance. Back up the dir first (`cp -r`) if you care about it.
