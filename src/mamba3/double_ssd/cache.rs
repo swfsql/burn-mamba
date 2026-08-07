@@ -141,7 +141,7 @@ pub struct Mamba3DoubleSsdCacheConfig {
     /// (rounded down to even via `Mamba3Config::rope_dim`).
     pub num_rope_angles: usize,
 
-    /// Which positional rotation the block uses ([`RotationKind`]); selects the
+    /// Which transition rotation the block uses ([`RotationKind`]); selects the
     /// accumulator variant — [`RotationState::Quaternion`] for
     /// [`RotationKind::Quaternion4D`], else [`RotationState::Angle`].
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]

@@ -168,7 +168,7 @@ impl Mamba3 {
             nheads,
         );
 
-        // ── Step 5: Data-dependent positional rotation of B and C ─────────────
+        // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
         // unit quaternion. Shared with the double-ssd pathway via
         // [`rotate_bc_forward`]; the single-pass SSD core below is

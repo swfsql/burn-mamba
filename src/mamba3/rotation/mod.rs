@@ -69,7 +69,7 @@ use burn::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Which rotational-state algebra the block uses for the data-dependent
-/// positional rotation of `B`/`C`.
+/// transition rotation absorbed into `B`/`C`.
 ///
 /// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
 ///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
@@ -474,7 +474,7 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
 // Forward / step rotation of B and C (shared by both SSD pathways)
 // ---------------------------------------------------------------------------
 
-/// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
+/// Rotate `B`/`C` for a **full sequence** by the data-dependent transition
 /// rotation, returning the rotated projections and the new cumulative
 /// [`RotationState`] to store in the cache.
 ///

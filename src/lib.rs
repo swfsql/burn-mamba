@@ -20,8 +20,8 @@
 //!   scan).
 //! - [`mamba2`] — Structured State Space Duality (SSD): the recurrence is recast
 //!   as a chunkwise, GEMM-friendly algorithm.
-//! - [`mamba3`] — SSD extended with trapezoidal discretisation, data-dependent
-//!   RoPE on B/C, and MIMO rank expansion.
+//! - [`mamba3`] — SSD extended with trapezoidal discretisation, a complex-valued
+//!   state transition (data-dependent RoPE on B/C), and MIMO rank expansion.
 //!
 //! Shared infrastructure lives in [`modules`] (the family-generic layer/network
 //! composition, plus activations, norms and losses) and [`utils`] (virtual-layer
@@ -47,7 +47,8 @@ pub mod mamba1;
 /// Mamba-2: Structured State Space Duality (SSD).
 #[cfg(feature = "mamba2")]
 pub mod mamba2;
-/// Mamba-3: trapezoidal SSD with data-dependent RoPE and MIMO.
+/// Mamba-3: trapezoidal SSD with a complex-valued state transition
+/// (data-dependent RoPE) and MIMO.
 #[cfg(feature = "mamba3")]
 pub mod mamba3;
 

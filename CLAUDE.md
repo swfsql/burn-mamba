@@ -177,7 +177,8 @@ notation tables; the essentials:
   `hₜ = Āₜhₜ₋₁ + B̄ₜxₜᵀ`, `yₜ = Cₜᵀhₜ + Dxₜ`.
 - **Mamba-3** — Mamba-2 plus three independent additions: **trapezoidal**
   discretisation (3-term `h = αh + βB₋₁x₋₁ + γBₜxₜ`, data-dependent `A`/`λ`; `λ≡1`
-  collapses to Mamba-2), **data-dependent RoPE** on B/C, and **MIMO** (`mimo_rank>1`).
+  collapses to Mamba-2), a **complex transition** (`A+iθ`) realised as
+  **data-dependent RoPE** on B/C, and **MIMO** (`mimo_rank>1`).
   B/C use **QK-Norm before** the SSD (not a post gated norm); no short conv. The
   in-projection splits `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`.
 
@@ -201,7 +202,14 @@ at runtime by which **cache variant** is supplied (`Mamba3Cache`/`Mamba3Caches` 
 `Mamba3SsdPath` is pathway-agnostic and `From`-converts to either. The inputs differ:
 double feeds pre-scaled `v_bnlmhp`; single feeds raw `v` + `gamma_bnlh` + `scale_bnlh`.
 
-### Mamba-3: rotation (RoPE)
+### Mamba-3: rotation (complex transition, a.k.a. "RoPE")
+
+**Not a positional encoding** — it is the imaginary part of the *state transition*
+(`hₜ = αₜRₜhₜ₋₁ + …`). Since `α` is scalar and `R` orthogonal, the cumulative rotation
+telescopes out of the state and is absorbed into B/C ("RoPE trick"), leaving the plain
+scalar-decay SSD core. The angles are data-dependent, not a fixed frequency schedule —
+that is what buys state-tracking (parity/mod-k), and why a step difference `θⱼ−θᵢ` is
+rotation accumulated, never a position. Same argument for `Quaternion4D` below.
 
 Default **`Complex2D`** (abelian `SO(2)`): angles projected, `tanh·π`-squashed,
 Δ-scaled per head, then **`cumsum`** along the sequence (continued from the cache),

@@ -156,7 +156,7 @@ impl Mamba3 {
             c_bsmhr.dims()
         );
 
-        // ── Step 5: Data-dependent positional rotation of B and C ─────────────
+        // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
         // unit quaternion. The new cache accumulator is returned for Step (cache
         // update) below. See [`rotate_bc_forward`].
@@ -387,9 +387,9 @@ mod step {
         pub z_bi: Tensor<2>,
         /// Value stream `[batch, nheads, per_head_dim]`.
         pub x_bhp: Tensor<3>,
-        /// QK-normed, GQA-expanded, biased B — **before** the positional rotation.
+        /// QK-normed, GQA-expanded, biased B — **before** the rotation.
         pub b_bmhr: Tensor<4>,
-        /// QK-normed, GQA-expanded, biased C — **before** the positional rotation.
+        /// QK-normed, GQA-expanded, biased C — **before** the rotation.
         pub c_bmhr: Tensor<4>,
         /// Raw rotation channels `[batch, num_rotation_channels]`.
         pub rot_ba: Tensor<2>,
@@ -405,7 +405,7 @@ mod step {
 
     impl Mamba3 {
         /// In-projection → split → trapezoid coefficients → QK-norm for a
-        /// single token, **stopping before** the positional rotation (which
+        /// single token, **stopping before** the rotation (which
         /// needs the cache's cumulative rotation).
         #[allow(non_snake_case)]
         pub(crate) fn step_project(&self, input_bd: Tensor<2>) -> StepProjection {

@@ -1,9 +1,11 @@
 //! # Mamba-3
 //!
 //! Mamba-3 extends Mamba-2 with three independent additions (each works alone
-//! or combined): **trapezoidal discretisation**, **data-dependent RoPE** on the
-//! B/C projections, and **MIMO** (multiple-input multiple-output) rank
-//! expansion.  See [`mamba3`] for the full combined math.
+//! or combined): **trapezoidal discretisation**, a **complex-valued state
+//! transition** — realised as **data-dependent RoPE** on the B/C projections,
+//! which is a re-factoring of the transition and *not* a positional encoding —
+//! and **MIMO** (multiple-input multiple-output) rank expansion.  See [`mamba3`]
+//! for the full combined math.
 //!
 //! ## Two SSD pathways
 //!

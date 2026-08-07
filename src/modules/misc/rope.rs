@@ -32,7 +32,11 @@ pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     angles - k * two_pi
 }
 
-/// Apply rotary position embeddings to `x` along its last dimension.
+/// Apply a rotary embedding (RoPE) to `x` along its last dimension.
+///
+/// Purely the mechanical pairwise rotation. In Mamba-3 the `angles` are the
+/// cumulative rotation of the *state transition* (see [`crate::mamba3::mamba3`]),
+/// not a position index.
 ///
 /// Two pairing conventions are supported, selected by `rotate_pairwise`:
 ///

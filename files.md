@@ -121,7 +121,9 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   Both keep the two branches separately callable for the `m=1` comparison tests.
 
 ### `mamba3/rotation/` (`mod.rs`)
-The quaternion (`k=4`) **non-abelian** generalisation of RoPE (`SU(2) ⊂ SO(4)`).
+"RoPE" here is the *transition's* imaginary part (`hₜ = αₜRₜhₜ₋₁`) factored onto B/C, not
+a positional code — see the `mamba3.rs` header. This module is the quaternion (`k=4`)
+**non-abelian** generalisation (`SU(2) ⊂ SO(4)`).
 Algebra (`quat_mul`/`conj`/`normalize`), `quat_from_scaled_axis` (data-dependent
 materialise via the exp map), `quat_cumprod` (associative **scan** replacing `cumsum`,
 with a cross-chunk carry), `rotate_state_rank_blocks` (`B̄ = rotate(B, conj(Qcum))`).

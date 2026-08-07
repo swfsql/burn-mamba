@@ -144,7 +144,7 @@ pub struct Mamba3SingleSsdCacheConfig {
     /// (see [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rope_angles`]).
     pub num_rope_angles: usize,
 
-    /// Which positional rotation the block uses (see
+    /// Which transition rotation the block uses (see
     /// [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation`]).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,

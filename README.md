@@ -37,8 +37,20 @@ Each generation in this crate builds on the last:
 - **Mamba-1** — the original selective SSM (a sequential selective scan).
 - **Mamba-2** — recasts the recurrence as **Structured State Space Duality
   (SSD)**, a chunkwise algorithm built from GEMMs.
-- **Mamba-3** — extends SSD with trapezoidal discretisation, data-dependent
-  rotary position embeddings, and multi-input/multi-output (MIMO) state.
+- **Mamba-3** — extends SSD with trapezoidal discretisation, a **complex-valued**
+  state transition (a data-dependent rotation alongside the scalar decay), and
+  multi-input/multi-output (MIMO) state.
+
+Despite the name, Mamba-3's *data-dependent RoPE* is not a positional encoding —
+it is the imaginary part of the state transition. A complex SSM is exactly a real
+SSM whose transition is a scalar decay times a block-diagonal of `2×2` rotations,
+and because those rotations are orthogonal (and, being `SO(2)`, commute) the
+cumulative rotation factors out of the recurrence and is absorbed into `B`/`C` —
+the "RoPE trick", which leaves the plain scalar-decay SSD kernel untouched. So it
+borrows RoPE's machinery and lands on the query/key side (by SSD duality), but the
+angles are data-dependent rather than a fixed frequency schedule, and the purpose
+is rotational state dynamics: that is what lets Mamba-3 track state (parity,
+mod-k) which a real, non-negative-eigenvalue SSM provably cannot.
 
 ## Highlights
 
@@ -146,8 +158,8 @@ API references:
 | | Mamba-1 | Mamba-2 | Mamba-3 |
 |---|---|---|---|
 | Core algorithm | sequential selective scan | chunkwise SSD | trapezoidal SSD |
-| State transition | diagonal | scalar (SSD) | scalar, data-dependent `A` |
-| Positional encoding | — | — | data-dependent RoPE on B/C |
+| State transition | diagonal | scalar (SSD) | complex: data-dependent scalar decay × rotation |
+| Rotational state (the "RoPE trick") | — | — | data-dependent rotation factored onto B/C |
 | MIMO state | — | — | optional (`mimo_rank > 1`) |
 | Short convolution | yes | yes | removed |
 | Pluggable SSD algorithms | — | yes | yes |
@@ -191,7 +203,7 @@ synthetic or canonical data:
 cargo run --example fibonacci --features "backend-flex" -- --training --inference
 ```
 
-For browser/wasm inference of the smallest pretrained Mamba-1/2 models from
+For browser/wasm inference of the smallest pretrained Mamba-1/2/3 models from
 `huggingface.co/state-spaces`, see
 [`swfsql/burn-mamba-example`](https://github.com/swfsql/burn-mamba-example).
 

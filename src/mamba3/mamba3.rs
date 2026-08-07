@@ -1,12 +1,12 @@
 //! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE
 //!
 //! This module implements the core **Mamba-3 layer** from the paper
-//! *"The Mamba-3 Framework: Structured State Spaces with Trapezoidal
-//! Discretization and Data-Dependent Rotary Embeddings"*.
+//! *"Mamba-3: Improved Sequence Modeling using State Space Principles"*.
 //!
 //! Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:
-//! (1) trapezoidal discretisation, (2) data-dependent rotary position embeddings
-//! (RoPE) on B and C, and (3) MIMO (multiple-input multiple-output) projection.
+//! (1) trapezoidal discretisation, (2) a **complex-valued state transition**,
+//! implemented as data-dependent rotary embeddings on B and C (the "RoPE
+//! trick"), and (3) MIMO (multiple-input multiple-output) projection.
 //! Each is shown in isolation below, then combined.
 //!
 //! ## 1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)
@@ -27,33 +27,55 @@
 //! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)` controlling the left/right split of the trapezoid.
 //! Setting `λ ≡ 1` collapses this to the Mamba-2 (Euler / right-endpoint) form.
 //!
-//! ## 2. Data-dependent RoPE (no trapezoid, no MIMO — Section "Data-Dependent RoPE")
+//! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
+//! — paper section *Complex-Valued SSMs*)
 //!
-//! Each Bₜ, Cₜ ∈ ℝᴺ (N = `state_rank`, even) is treated as N/2 complex pairs and
-//! rotated by a cumulative, data-dependent angle θₜ ∈ ℝ^{N/2}:
+//! Despite the name this is **not a positional encoding**: it is the *imaginary
+//! part of the state transition*. Mamba-3's `A` is complex (`A + iϑ`), and under
+//! discretisation a complex SSM of state `N/2` is exactly a real SSM of state `N`
+//! whose transition is the scalar decay `α` times a block-diagonal of `2×2`
+//! rotations (paper Prop. *Complex-to-Real SSM Equivalence*):
+//!
+//! ```text
+//!   ρₜ = R(Δₜ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}   — per-step rotation (data-dependent)
+//!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                — rotational state update
+//! ```
+//!
+//! `αₜ` is a scalar (so it commutes with `ρₜ`) and each `ρₜ` is orthogonal, so
+//! the *cumulative* rotation telescopes out of the recurrence and can be absorbed
+//! into B/C instead — the **"RoPE trick"** (paper Prop. *Complex SSM,
+//! Data-Dependent RoPE Equivalence*). That is the form implemented here: the
+//! rotation never touches the state (the cached `h` is the rotated-frame one) and
+//! the SSD core stays the plain scalar-decay kernel.
 //!
 //! ```text
 //!   θₜ = θₜ₋₁ + Δₜ · π · tanh(ϑₜ)        — cumulative angles (per-pair)
-//!   Rₜ = R(θₜ) ∈ SO(2)^{N/2}             — block-diagonal pairwise rotation
+//!   Rₜ = R(θₜ) = ρₜ ⋯ ρ₁ ∈ SO(2)^{N/2}   — block-diagonal cumulative rotation
 //!   B̃ₜ = Rₜ Bₜ,   C̃ₜ = Rₜ Cₜ              — rotated state-space projections
 //! ```
 //!
 //! The standard recurrence then runs with `B̃ₜ`/`C̃ₜ` in place of `Bₜ`/`Cₜ`:
 //!
 //! ```text
-//!   hₜ = Āₜ hₜ₋₁ + B̄̃ₜ xₜᵀ                (state update with RoPE)
-//!   yₜ = C̃ₜᵀ hₜ + D xₜ                   (output with RoPE)
+//!   hₜ = Āₜ hₜ₋₁ + B̄̃ₜ xₜᵀ                (scalar-decay state update)
+//!   yₜ = C̃ₜᵀ hₜ + D xₜ                   (output)
 //! ```
 //!
-//! Because each rotation `Rₜ` is orthogonal, the readout-vs-input similarity
-//! folds into the relative rotation between the two steps:
+//! Orthogonality makes the readout-vs-input similarity depend only on the
+//! rotation *accumulated between* the two steps:
 //!
 //! ```text
 //!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
 //! ```
 //!
-//! so the cumulative-angle difference encodes the (data-dependent) relative
-//! position between query step i and key step j.
+//! `θⱼ − θᵢ` is not a position: it is `Σ Δ·π·tanh(ϑ)` over the intervening
+//! steps — how far the transition itself rotated, driven by the inputs. It would
+//! reduce to vanilla RoPE's relative position only in the degenerate case of an
+//! input-independent, constant per-step angle (`θⱼ − θᵢ = (j−i)·θ`). Data
+//! dependence is the whole point: it gives the layer rotational state dynamics,
+//! hence state-tracking (parity, mod-k) that a real, non-negative-eigenvalue SSM
+//! provably cannot express. See [`crate::mamba3::rotation`], whose `Quaternion4D`
+//! carries the same argument to a non-abelian rotation group.
 //!
 //! ## 3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M > 1`)
 //!
@@ -238,7 +260,7 @@ pub struct Mamba3 {
     /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 
-    /// Which positional rotation the block applies to `B`/`C` ([`RotationKind`]).
+    /// Which transition rotation the block applies to `B`/`C` ([`RotationKind`]).
     /// A non-parameter constant — `#[module(skip)]` keeps it out of the record and
     /// carries it through `load_record`/`to_device`/… unchanged.
     #[module(skip)]
@@ -289,7 +311,7 @@ impl Mamba3 {
         self.d_inner() / self.nheads()
     }
 
-    /// The block's positional-rotation kind ([`RotationKind`]).
+    /// The block's rotation kind ([`RotationKind`]).
     pub fn rotation_kind(&self) -> RotationKind {
         self.rotation
     }
@@ -409,8 +431,9 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_outproj_norm: bool,
 
-    /// Which rotational-state algebra to use for the data-dependent positional
-    /// rotation of `B`/`C` (see [`RotationKind`]).
+    /// Which rotational-state algebra to use for the data-dependent rotation
+    /// carried by the state transition and absorbed into `B`/`C` (see
+    /// [`RotationKind`]).
     ///
     /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D) — the
     /// current Mamba-3 RoPE — for which the block is byte-for-byte unchanged.
