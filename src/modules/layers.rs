@@ -1,4 +1,4 @@
-use crate::modules::{Residuals, ResidualsConfig, RmsNormConfig};
+use crate::modules::{GatedMlpConfig, Residuals, ResidualsConfig, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::ClassLatent;
 use crate::utils::Schedule;
@@ -75,8 +75,9 @@ where
 
     /// Full-sequence pass through every (virtual) layer.
     ///
-    /// [`Layer`] returns only `F_l = Block(RMSNorm(·))`; the residual is added
-    /// here. With [`Residuals::Standard`] each layer adds the input skip (unless
+    /// [`Layer`] returns only its delta — `F_l = Block(RMSNorm(·))`, plus the
+    /// feed-forward sub-block's contribution when the layer has one; the outer
+    /// residual is added here. With [`Residuals::Standard`] each layer adds the input skip (unless
     /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and
     /// `n_stream` parallel streams — seeded from `x` — carry the residual: each
     /// layer reads their attention-pooled aggregate as input and its output is
@@ -432,6 +433,10 @@ pub struct LayersBuilder<C> {
     pub class_latents: Vec<ClassLatent>,
     /// Inter-layer residual scheme (defaults to plain additive).
     pub residuals: ResidualsConfig,
+    /// Optional SwiGLU feed-forward sub-block per layer, with its own pre-norm
+    /// and residual (`d_intermediate > 0` in the reference configs). `None` ⇒
+    /// mixer-only layers.
+    pub mlp: Option<GatedMlpConfig>,
 }
 
 impl<C: MambaBlockConfig> LayersBuilder<C> {
@@ -445,7 +450,15 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             ignore_last_residual: false,
             class_latents: Vec::new(),
             residuals: ResidualsConfig::Standard,
+            mlp: None,
         }
+    }
+
+    /// Interleave a SwiGLU feed-forward sub-block after each layer's mixer
+    /// (see [`Layer`](crate::modules::Layer)). `None` keeps layers mixer-only.
+    pub fn with_mlp(mut self, mlp: Option<GatedMlpConfig>) -> Self {
+        self.mlp = mlp;
+        self
     }
 
     /// Set the optional virtual-layer scheduling.
@@ -491,6 +504,12 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             .map(|_| Layer {
                 norm: RmsNormConfig::new(d_model).init(device),
                 mamba_block: self.mamba_block.init_block(device),
+                // `norm2` exists exactly when `mlp` does — `Layer` relies on it.
+                norm2: self
+                    .mlp
+                    .as_ref()
+                    .map(|_| RmsNormConfig::new(d_model).init(device)),
+                mlp: self.mlp.as_ref().map(|mlp| mlp.init(device)),
                 class_latents: Vec::new(),
                 class_latents_emb: None,
             })

@@ -51,5 +51,7 @@ pub fn model_config(
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,
+        // No feed-forward interleave: these examples are mixer-only.
+        mlp: None,
     }
 }

@@ -75,7 +75,9 @@ src/
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 ├─ modules/          family-generic composition + shared NN modules
 │  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
-│  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)); residual added by Layers
+│  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)) + optional norm2/mlp; returns
+│  │                 the layer's total delta, outer residual added by Layers
+│  ├─ mlp.rs         GatedMlp: SwiGLU feed-forward interleaved with the mixer
 │  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
 │  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate)
 │  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums

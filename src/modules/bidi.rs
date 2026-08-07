@@ -420,6 +420,9 @@ impl<C: MambaBlockConfig> BidiLayersBuilder<C> {
             .map(|_| Layer {
                 norm: RmsNormConfig::new(d_model).init(device),
                 mamba_block: self.mamba_block.init_block(device),
+                // The bidirectional stack has no feed-forward interleave.
+                norm2: None,
+                mlp: None,
                 class_latents: Vec::new(),
                 class_latents_emb: None,
             })

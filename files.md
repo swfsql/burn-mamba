@@ -160,14 +160,22 @@ plus shared NN blocks.
   `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
-- **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the residual and class-latent
+- **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
   insert are applied by `Layers`. `insert_latents` `pub(crate)`. Cursorless
-  `step_infinite` mirrors `step`.
+  `step_infinite` mirrors `step`. Optional `norm2`+`mlp` (allocated together) add a second
+  Pre-LN sub-block with a residual of its own; the methods therefore return the layer's
+  **total delta** `h₁ + mlp(norm2(x + h₁))`, so `Layers`' single add yields both residuals
+  — matching `mamba_ssm`'s `Block` when `d_intermediate > 0`. `mlp_residual` keeps the
+  mixer-only path clone-free.
+- **`mlp.rs`** — `GatedMlp` + `GatedMlpConfig`: SwiGLU `fc2(v ⊙ silu(g))` where
+  `[v|g] = fc1(x)` (value half **first** — the checkpoint's fused layout). `hidden` rounds
+  `d_intermediate` **up** to `multiple_of` (128). Rank-generic (point-wise).
 - **`layers.rs`** — `Layers<M>`: `n_real_layers` weight sets, `n_virtual_layers:
   Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
-  its own cache; owns the residual (`skip_residual`/`ignore_first/last_residual`).
-  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`). Cursorless
-  `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
+  its own cache; owns the outer residual (`skip_residual`/`ignore_first/last_residual` —
+  which govern only that outer add, not the feed-forward's inner one).
+  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`, `with_mlp`).
+  Cursorless `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
   layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
@@ -177,8 +185,8 @@ plus shared NN blocks.
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**; `step_infinite` mirrors `step` (enums included;
   Mamba-3 only, panic otherwise). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
-  variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate) +
-  `ignore_first/last_residual`.
+  variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
+  `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
   `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
   reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised

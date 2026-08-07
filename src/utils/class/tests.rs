@@ -55,6 +55,7 @@ fn unified_net_config_mamba2() {
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
+        mlp: None,
     }
     .init(&device);
 
@@ -99,6 +100,7 @@ fn unified_net_config_mamba3() {
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
+        mlp: None,
     }
     .init(&device);
 
@@ -127,6 +129,7 @@ fn unified_net_config_mamba1() {
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
+        mlp: None,
     }
     .init(&device);
 

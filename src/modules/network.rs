@@ -478,6 +478,10 @@ pub enum MambaLatentNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-2 latent network.
     #[cfg(feature = "mamba2")]
@@ -502,6 +506,10 @@ pub enum MambaLatentNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-3 latent network.
     #[cfg(feature = "mamba3")]
@@ -526,6 +534,10 @@ pub enum MambaLatentNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
 }
 
@@ -544,14 +556,16 @@ impl MambaLatentNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaLatentNet::Mamba1(
+                mlp,
+            } =>MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -568,14 +582,16 @@ impl MambaLatentNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaLatentNet::Mamba2(
+                mlp,
+            } =>MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -592,14 +608,16 @@ impl MambaLatentNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaLatentNet::Mamba3(
+                mlp,
+            } =>MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     class_tokens: class_tokens.clone(),
                 }
@@ -772,6 +790,10 @@ pub enum MambaVocabNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-2 language model.
     #[cfg(feature = "mamba2")]
@@ -796,6 +818,10 @@ pub enum MambaVocabNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-3 language model.
     #[cfg(feature = "mamba3")]
@@ -820,6 +846,10 @@ pub enum MambaVocabNetConfig {
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
+        /// the reference configs), with its own pre-norm and inner residual.
+        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        mlp: Option<crate::modules::GatedMlpConfig>,
     },
 }
 
@@ -838,7 +868,8 @@ impl MambaVocabNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaVocabNet::Mamba1(
+                mlp,
+            } =>MambaVocabNet::Mamba1(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -846,7 +877,8 @@ impl MambaVocabNetConfig {
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -862,7 +894,8 @@ impl MambaVocabNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaVocabNet::Mamba2(
+                mlp,
+            } =>MambaVocabNet::Mamba2(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -870,7 +903,8 @@ impl MambaVocabNetConfig {
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -886,7 +920,8 @@ impl MambaVocabNetConfig {
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
-            } => MambaVocabNet::Mamba3(
+                mlp,
+            } =>MambaVocabNet::Mamba3(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -894,7 +929,8 @@ impl MambaVocabNetConfig {
                         .with_n_virtual_layers(n_virtual_layers.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
-                        .with_ignore_last_residual(*ignore_last_residual),
+                        .with_ignore_last_residual(*ignore_last_residual)
+                        .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),

@@ -48,6 +48,8 @@ pub fn model_config() -> MambaLatentNetConfig {
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,
+        // No feed-forward interleave: these examples are mixer-only.
+        mlp: None,
     }
 }
 // notes:

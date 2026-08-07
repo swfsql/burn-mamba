@@ -17,6 +17,8 @@ pub mod layers;
 pub mod loss;
 /// Tensor helpers: `segsum`, `gqa`, typed `split`, and `sanity` guards.
 pub mod misc;
+/// The SwiGLU feed-forward block interleaved with the mixer ([`GatedMlp`]).
+pub mod mlp;
 /// Multi-Gate Residuals: multi-stream gated depth-wise residuals ([`Residuals`]).
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod multi_gate;
@@ -35,6 +37,7 @@ pub use misc::rope::{apply_rope, apply_rope_partial, wrap_angle};
 pub use misc::sanity::sanity;
 pub use misc::segsum::segsum;
 pub use misc::split::split_into;
+pub use mlp::{GatedMlp, GatedMlpConfig};
 pub use norm::rms_norm::{RmsNorm, RmsNormConfig};
 pub use norm::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
 
