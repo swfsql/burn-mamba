@@ -41,6 +41,10 @@ cargo run --example fibonacci -- --training --inference
   by", dates, or PR history. If you catch changelog-style prose, delete it.
 - Always be **extremely succint** when adding content to either file.
 - `examples/` is documented by `examples/README.md`, not here.
+- **Commit messages**: the user may ask for a commit message for the session. 
+  **Just write the message as text** (a title line + a short body) for the user to copy
+  — do NOT run `git commit` or any git command to create the commit.
+  End the message with the `Co-Authored-By:` trailer.
 
 ## File Map
 
