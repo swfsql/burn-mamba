@@ -69,7 +69,7 @@
 <a href=#69 id=69 data-nosnippet>69</a>// ---------------------------------------------------------------------------
 <a href=#70 id=70 data-nosnippet>70</a>
 <a href=#71 id=71 data-nosnippet>71</a></span><span class="doccomment">/// Which rotational-state algebra the block uses for the data-dependent
-<a href=#72 id=72 data-nosnippet>72</a>/// positional rotation of `B`/`C`.
+<a href=#72 id=72 data-nosnippet>72</a>/// transition rotation absorbed into `B`/`C`.
 <a href=#73 id=73 data-nosnippet>73</a>///
 <a href=#74 id=74 data-nosnippet>74</a>/// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
 <a href=#75 id=75 data-nosnippet>75</a>///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
@@ -474,7 +474,7 @@
 <a href=#474 id=474 data-nosnippet>474</a>// Forward / step rotation of B and C (shared by both SSD pathways)
 <a href=#475 id=475 data-nosnippet>475</a>// ---------------------------------------------------------------------------
 <a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a></span><span class="doccomment">/// Rotate `B`/`C` for a **full sequence** by the data-dependent positional
+<a href=#477 id=477 data-nosnippet>477</a></span><span class="doccomment">/// Rotate `B`/`C` for a **full sequence** by the data-dependent transition
 <a href=#478 id=478 data-nosnippet>478</a>/// rotation, returning the rotated projections and the new cumulative
 <a href=#479 id=479 data-nosnippet>479</a>/// [`RotationState`] to store in the cache.
 <a href=#480 id=480 data-nosnippet>480</a>///

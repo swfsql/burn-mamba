@@ -15,7 +15,7 @@
 </div><span id="structfield.mimo_rank" class="structfield section-header"><a href="#structfield.mimo_rank" class="anchor field">§</a><code>mimo_rank: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></code></span><div class="docblock"><p>MIMO rank. 1 = SISO.</p>
 </div><span id="structfield.num_rope_angles" class="structfield section-header"><a href="#structfield.num_rope_angles" class="anchor field">§</a><code>num_rope_angles: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></code></span><div class="docblock"><p>Number of RoPE angle pairs
 (see <a href="../../double_ssd/cache/struct.Mamba3DoubleSsdCacheConfig.html#structfield.num_rope_angles" title="field burn_mamba::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rope_angles"><code>crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rope_angles</code></a>).</p>
-</div><span id="structfield.rotation" class="structfield section-header"><a href="#structfield.rotation" class="anchor field">§</a><code>rotation: <a class="enum" href="../../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind">RotationKind</a></code></span><div class="docblock"><p>Which positional rotation the block uses (see
+</div><span id="structfield.rotation" class="structfield section-header"><a href="#structfield.rotation" class="anchor field">§</a><code>rotation: <a class="enum" href="../../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind">RotationKind</a></code></span><div class="docblock"><p>Which transition rotation the block uses (see
 <a href="../../double_ssd/cache/struct.Mamba3DoubleSsdCacheConfig.html#structfield.rotation" title="field burn_mamba::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation"><code>crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation</code></a>).</p>
 </div><span id="structfield.num_quat_blocks" class="structfield section-header"><a href="#structfield.num_quat_blocks" class="anchor field">§</a><code>num_quat_blocks: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></code></span><div class="docblock"><p>Number of quaternion blocks (<code>rope_dim / 4</code>); only used for
 <a href="../../rotation/enum.RotationKind.html#variant.Quaternion4D" title="variant burn_mamba::mamba3::rotation::RotationKind::Quaternion4D"><code>RotationKind::Quaternion4D</code></a>.</p>
@@ -43,7 +43,7 @@
 <li>Defaults to <code>1</code></li>
 </ul>
 <h6 id="rotation"><a class="doc-anchor" href="#rotation">§</a><code>rotation</code></h6>
-<p>Which positional rotation the block uses (see
+<p>Which transition rotation the block uses (see
 <a href="../../double_ssd/cache/struct.Mamba3DoubleSsdCacheConfig.html#structfield.rotation" title="field burn_mamba::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation"><code>crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation</code></a>).</p>
 <ul>
 <li>Defaults to <code>"crate::mamba3::rotation::RotationKind::Complex2D"</code></li>
@@ -70,7 +70,7 @@
 <li>Defaults to <code>1</code></li>
 </ul>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.with_rotation" class="method"><a class="src rightside" href="../../../../src/burn_mamba/mamba3/single_ssd/cache.rs.html#123">Source</a><h4 class="code-header">pub fn <a href="#method.with_rotation" class="fn">with_rotation</a>(self, rotation: <a class="enum" href="../../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind">RotationKind</a>) -&gt; Self</h4></section></summary><div class="docblock"><p>Sets the value for the field <a href="struct.Mamba3SingleSsdCacheConfig.html#structfield.rotation" title="field burn_mamba::mamba3::single_ssd::cache::Mamba3SingleSsdCacheConfig::rotation"><code>rotation</code></a>.</p>
-<p>Which positional rotation the block uses (see
+<p>Which transition rotation the block uses (see
 <a href="../../double_ssd/cache/struct.Mamba3DoubleSsdCacheConfig.html#structfield.rotation" title="field burn_mamba::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation"><code>crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation</code></a>).</p>
 <ul>
 <li>Defaults to <code>"crate::mamba3::rotation::RotationKind::Complex2D"</code></li>

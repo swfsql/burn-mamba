@@ -33,8 +33,8 @@ sequence of <code>per_head_dim</code>-dimensinal inputs <code>X ∈ ℝ^{sequenc
 <h3 id="relationship-to-the-other-families"><a class="doc-anchor" href="#relationship-to-the-other-families">§</a>Relationship to the other families</h3>
 <p><a href="../../mamba1/index.html" title="mod burn_mamba::mamba1"><code>Mamba-1</code></a> is the predecessor: a sequential selective scan
 with a diagonal (rather than scalar) state transition.  <a href="../../mamba3/index.html" title="mod burn_mamba::mamba3"><code>Mamba-3</code></a>
-extends the SSD layer below with trapezoidal discretisation, data-dependent
-RoPE on B/C, and MIMO rank expansion.</p>
+extends the SSD layer below with trapezoidal discretisation, a complex-valued
+state transition (data-dependent RoPE on B/C), and MIMO rank expansion.</p>
 <h3 id="notation--dimension-keys"><a class="doc-anchor" href="#notation--dimension-keys">§</a>Notation / Dimension Keys</h3>
 <p>Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.
 The letters used differ from the reference paper and the python implementation.

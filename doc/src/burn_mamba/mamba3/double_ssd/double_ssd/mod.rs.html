@@ -156,7 +156,7 @@
 <a href=#156 id=156 data-nosnippet>156</a>            c_bsmhr.dims()
 <a href=#157 id=157 data-nosnippet>157</a>        );
 <a href=#158 id=158 data-nosnippet>158</a>
-<a href=#159 id=159 data-nosnippet>159</a>        <span class="comment">// ── Step 5: Data-dependent positional rotation of B and C ─────────────
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="comment">// ── Step 5: Data-dependent transition rotation of B and C ─────────────
 <a href=#160 id=160 data-nosnippet>160</a>        // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
 <a href=#161 id=161 data-nosnippet>161</a>        // unit quaternion. The new cache accumulator is returned for Step (cache
 <a href=#162 id=162 data-nosnippet>162</a>        // update) below. See [`rotate_bc_forward`].
@@ -387,9 +387,9 @@
 <a href=#387 id=387 data-nosnippet>387</a>        </span><span class="kw">pub </span>z_bi: Tensor&lt;<span class="number">2</span>&gt;,
 <a href=#388 id=388 data-nosnippet>388</a>        <span class="doccomment">/// Value stream `[batch, nheads, per_head_dim]`.
 <a href=#389 id=389 data-nosnippet>389</a>        </span><span class="kw">pub </span>x_bhp: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#390 id=390 data-nosnippet>390</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased B — **before** the positional rotation.
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased B — **before** the rotation.
 <a href=#391 id=391 data-nosnippet>391</a>        </span><span class="kw">pub </span>b_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased C — **before** the positional rotation.
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="doccomment">/// QK-normed, GQA-expanded, biased C — **before** the rotation.
 <a href=#393 id=393 data-nosnippet>393</a>        </span><span class="kw">pub </span>c_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
 <a href=#394 id=394 data-nosnippet>394</a>        <span class="doccomment">/// Raw rotation channels `[batch, num_rotation_channels]`.
 <a href=#395 id=395 data-nosnippet>395</a>        </span><span class="kw">pub </span>rot_ba: Tensor&lt;<span class="number">2</span>&gt;,
@@ -405,7 +405,7 @@
 <a href=#405 id=405 data-nosnippet>405</a>
 <a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">impl </span>Mamba3 {
 <a href=#407 id=407 data-nosnippet>407</a>        <span class="doccomment">/// In-projection → split → trapezoid coefficients → QK-norm for a
-<a href=#408 id=408 data-nosnippet>408</a>        /// single token, **stopping before** the positional rotation (which
+<a href=#408 id=408 data-nosnippet>408</a>        /// single token, **stopping before** the rotation (which
 <a href=#409 id=409 data-nosnippet>409</a>        /// needs the cache's cumulative rotation).
 <a href=#410 id=410 data-nosnippet>410</a>        </span><span class="attr">#[allow(non_snake_case)]
 <a href=#411 id=411 data-nosnippet>411</a>        </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>step_project(<span class="kw-2">&amp;</span><span class="self">self</span>, input_bd: Tensor&lt;<span class="number">2</span>&gt;) -&gt; StepProjection {
