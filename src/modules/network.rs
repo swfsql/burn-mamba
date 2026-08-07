@@ -557,7 +557,7 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaLatentNet::Mamba1(
+            } => MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -583,7 +583,7 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaLatentNet::Mamba2(
+            } => MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -609,7 +609,7 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaLatentNet::Mamba3(
+            } => MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -869,7 +869,7 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaVocabNet::Mamba1(
+            } => MambaVocabNet::Mamba1(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -895,7 +895,7 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaVocabNet::Mamba2(
+            } => MambaVocabNet::Mamba2(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -921,7 +921,7 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } =>MambaVocabNet::Mamba3(
+            } => MambaVocabNet::Mamba3(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
