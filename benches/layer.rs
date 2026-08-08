@@ -34,12 +34,18 @@
 //! Benchmark flex from a build without `backend-cuda`; [`bench.sh`] does this.
 //!
 //! [`bench.sh`]: https://github.com/swfsql/burn-mamba/blob/main/bench.sh
+//! [`kernels.sh`]: https://github.com/swfsql/burn-mamba/blob/main/kernels.sh
 //!
 //! Every case runs [`warmup_iters`] untimed iterations first, so kernel
 //! compilation and autotuning are finished before criterion measures anything.
 //! Each measured *batch* then submits all its iterations and drains the device
 //! once at the end ([`timed`]) — an async backend is measured at steady state,
 //! not one submit-drain round trip at a time.
+//!
+//! The block, its input and that warm-up are built inside the closure criterion
+//! only calls for cases that pass its filter, so `-- mamba2` really does touch
+//! nothing else — which is also what lets [`kernels.sh`] attribute kernel
+//! launches to a single case.
 //!
 //! ## Sizing
 //!
@@ -278,26 +284,39 @@ fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mam
 
 /// `forward` on a plain device. `cache` is rebuilt per iteration (caches are
 /// consumed by the call); for the single-SSD default that is just `None`.
-fn run_forward<M: MambaBlock>(
+///
+/// The block, its input, and the warm-up are all built *inside* the closure,
+/// which criterion only calls when the case passes its filter — so `-- mamba2`
+/// neither allocates nor warms any other case, and one block is alive at a
+/// time. Anything hoisted out here would run on every invocation of the binary
+/// however narrow the filter, which is what makes a filtered run's kernel
+/// launches attributable to the case named (see `kernels.sh`).
+fn run_forward<M, B, C>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
-    block: &M,
-    x: &Tensor<3>,
-    path: M::SsdPath,
-    cache: impl Fn() -> Option<M::Cache>,
+    shape: Shape,
     device: &Device,
+    build: B,
+    cache: C,
+    path: M::SsdPath,
 ) where
+    M: MambaBlock,
     M::SsdPath: Clone,
+    B: Fn(&Device) -> M,
+    C: Fn(&Device) -> Option<M::Cache>,
 {
-    // Untimed: compile (and autotune) the kernels this case needs.
-    for _ in 0..warmup_iters() {
-        let (_y, _cache) = block.block_forward(x.clone(), cache(), path.clone());
-        sync(device);
-    }
     group.bench_function(name, |b| {
+        let block = build(device);
+        let x = input_3d(shape, device);
+
+        // Untimed: compile (and autotune) the kernels this case needs.
+        for _ in 0..warmup_iters() {
+            let (_y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+            sync(device);
+        }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), cache(), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
                 y
             })
         })
@@ -306,27 +325,33 @@ fn run_forward<M: MambaBlock>(
 
 /// `forward` + `backward` on an autodiff device: one training iteration minus
 /// the optimizer update.
-fn run_train<M: MambaBlock>(
+fn run_train<M, B, C>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
-    block: &M,
-    x: &Tensor<3>,
-    path: M::SsdPath,
-    cache: impl Fn() -> Option<M::Cache>,
+    shape: Shape,
     device: &Device,
+    build: B,
+    cache: C,
+    path: M::SsdPath,
 ) where
+    M: MambaBlock,
     M::SsdPath: Clone,
+    B: Fn(&Device) -> M,
+    C: Fn(&Device) -> Option<M::Cache>,
 {
-    // Untimed: the backward has kernels of its own to compile and tune.
-    for _ in 0..warmup_iters() {
-        let (y, _cache) = block.block_forward(x.clone(), cache(), path.clone());
-        let _grads = y.powf_scalar(2.0).mean().backward();
-        sync(device);
-    }
     group.bench_function(name, |b| {
+        let block = build(device);
+        let x = input_3d(shape, device);
+
+        // Untimed: the backward has kernels of its own to compile and tune.
+        for _ in 0..warmup_iters() {
+            let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+            let _grads = y.powf_scalar(2.0).mean().backward();
+            sync(device);
+        }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), cache(), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
                 y.powf_scalar(2.0).mean().backward()
             })
         })
@@ -335,23 +360,31 @@ fn run_train<M: MambaBlock>(
 
 /// One decode step, fed by the cache the previous iteration produced (so the
 /// recurrence really advances, as it would while generating).
-fn run_step<M: MambaBlock>(
+fn run_step<M, B, C>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
-    block: &M,
-    x: &Tensor<2>,
-    cache: Option<M::Cache>,
+    shape: Shape,
     device: &Device,
-) {
-    let mut cache = cache;
-    // Untimed: warm the decode kernels, advancing the cache as a real decode
-    // would (the steady state is what the measured iterations then see).
-    for _ in 0..warmup_iters() {
-        let (_y, next) = block.block_step(x.clone(), cache.take());
-        cache = Some(next);
-        sync(device);
-    }
+    build: B,
+    cache: C,
+) where
+    M: MambaBlock,
+    B: Fn(&Device) -> M,
+    C: Fn(&Device) -> Option<M::Cache>,
+{
     group.bench_function(name, |b| {
+        let block = build(device);
+        let x = input_2d(shape, device);
+        let mut cache = cache(device);
+
+        // Untimed: warm the decode kernels, advancing the cache as a real
+        // decode would (the steady state is what the measured iterations then
+        // see).
+        for _ in 0..warmup_iters() {
+            let (_y, next) = block.block_step(x.clone(), cache.take());
+            cache = Some(next);
+            sync(device);
+        }
         b.iter_custom(|iters| {
             timed(device, iters, || {
                 let (y, next) = block.block_step(x.clone(), cache.take());
@@ -386,44 +419,54 @@ fn bench_forward(c: &mut Criterion) {
     let shape = Shape::from_env();
     let device = Device::default();
     shape.announce(&device);
-    let x = input_3d(shape, &device);
 
     let mut group = c.benchmark_group("forward");
     configure(&mut group, shape.tokens());
 
-    let m1 = mamba1_config(shape).init(&device);
-    run_forward(&mut group, "mamba1", &m1, &x, (), || None, &device);
+    run_forward(
+        &mut group,
+        "mamba1",
+        shape,
+        &device,
+        |d| mamba1_config(shape).init(d),
+        |_| None,
+        (),
+    );
 
-    let m2 = mamba2_config(shape).init(&device);
-    let path2 = Mamba2SsdPath::default();
-    run_forward(&mut group, "mamba2", &m2, &x, path2, || None, &device);
+    run_forward(
+        &mut group,
+        "mamba2",
+        shape,
+        &device,
+        |d| mamba2_config(shape).init(d),
+        |_| None,
+        Mamba2SsdPath::default(),
+    );
 
     let path3 = Mamba3SsdPath::default();
     for (name, config) in mamba3_cases(shape) {
-        let block = config.init(&device);
         run_forward(
             &mut group,
             name,
-            &block,
-            &x,
-            path3.clone(),
-            || None,
+            shape,
             &device,
+            |d| config.init(d),
+            |_| None,
+            path3.clone(),
         );
     }
 
     // The other SSD pathway: same block, selected by handing it a double-SSD
     // cache instead of letting it default to single-SSD.
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
-    let block = config.init(&device);
     run_forward(
         &mut group,
         "mamba3/siso-double-ssd",
-        &block,
-        &x,
-        path3,
-        || Some(double_ssd_cache(&config, shape.batch, &device)),
+        shape,
         &device,
+        |d| config.init(d),
+        |d| Some(double_ssd_cache(&config, shape.batch, d)),
+        path3,
     );
 
     group.finish();
@@ -433,42 +476,52 @@ fn bench_train(c: &mut Criterion) {
     let shape = Shape::from_env();
     let device = Device::default().autodiff();
     shape.announce(&device);
-    let x = input_3d(shape, &device);
 
     let mut group = c.benchmark_group("train");
     configure(&mut group, shape.tokens());
 
-    let m1 = mamba1_config(shape).init(&device);
-    run_train(&mut group, "mamba1", &m1, &x, (), || None, &device);
+    run_train(
+        &mut group,
+        "mamba1",
+        shape,
+        &device,
+        |d| mamba1_config(shape).init(d),
+        |_| None,
+        (),
+    );
 
-    let m2 = mamba2_config(shape).init(&device);
-    let path2 = Mamba2SsdPath::default();
-    run_train(&mut group, "mamba2", &m2, &x, path2, || None, &device);
+    run_train(
+        &mut group,
+        "mamba2",
+        shape,
+        &device,
+        |d| mamba2_config(shape).init(d),
+        |_| None,
+        Mamba2SsdPath::default(),
+    );
 
     let path3 = Mamba3SsdPath::default();
     for (name, config) in mamba3_cases(shape) {
-        let block = config.init(&device);
         run_train(
             &mut group,
             name,
-            &block,
-            &x,
-            path3.clone(),
-            || None,
+            shape,
             &device,
+            |d| config.init(d),
+            |_| None,
+            path3.clone(),
         );
     }
 
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
-    let block = config.init(&device);
     run_train(
         &mut group,
         "mamba3/siso-double-ssd",
-        &block,
-        &x,
-        path3,
-        || Some(double_ssd_cache(&config, shape.batch, &device)),
+        shape,
         &device,
+        |d| config.init(d),
+        |d| Some(double_ssd_cache(&config, shape.batch, d)),
+        path3,
     );
 
     group.finish();
@@ -478,35 +531,50 @@ fn bench_step(c: &mut Criterion) {
     let shape = Shape::from_env();
     let device = Device::default();
     shape.announce(&device);
-    let x = input_2d(shape, &device);
 
     let mut group = c.benchmark_group("step");
     // One token per sequence in the batch, not `batch · sequence`.
     configure(&mut group, shape.batch as u64);
 
-    let m1 = mamba1_config(shape).init(&device);
-    run_step(&mut group, "mamba1", &m1, &x, None, &device);
+    run_step(
+        &mut group,
+        "mamba1",
+        shape,
+        &device,
+        |d| mamba1_config(shape).init(d),
+        |_| None,
+    );
 
-    let m2 = mamba2_config(shape).init(&device);
-    run_step(&mut group, "mamba2", &m2, &x, None, &device);
+    run_step(
+        &mut group,
+        "mamba2",
+        shape,
+        &device,
+        |d| mamba2_config(shape).init(d),
+        |_| None,
+    );
 
     for (name, config) in mamba3_cases(shape) {
-        let block = config.init(&device);
-        run_step(&mut group, name, &block, &x, None, &device);
+        run_step(
+            &mut group,
+            name,
+            shape,
+            &device,
+            |d| config.init(d),
+            |_| None,
+        );
     }
 
     // Decode on the double-SSD cache. (Single-SSD decoding round-trips through
     // this same recurrence, so the two differ only by the cache conversion.)
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
-    let block = config.init(&device);
-    let cache = double_ssd_cache(&config, shape.batch, &device);
     run_step(
         &mut group,
         "mamba3/siso-double-ssd",
-        &block,
-        &x,
-        Some(cache),
+        shape,
         &device,
+        |d| config.init(d),
+        |d| Some(double_ssd_cache(&config, shape.batch, d)),
     );
 
     group.finish();

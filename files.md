@@ -230,8 +230,13 @@ plus shared NN blocks.
 - **`test_helpers.rs`** (test-only) — `max_abs_diff` + `check_grads_match_two_paths!`,
   shared by the SSD-path agreement tests.
 
-## Benchmarks (`benches/layer.rs`, `bench.sh`)
+## Benchmarks (`benches/layer.rs`, `bench.sh`, `kernels.sh`)
 
 Criterion single-block benches (`forward`/`train`/`step`) over all three families.
-**Run by the user, not by an agent.** `bench.sh` drives one build per backend
-configuration and writes `bench.md`; both files carry their own rationale.
+**Run by the user, not by an agent.** Each case builds its block, input and warm-up
+*inside* the criterion closure, so a `--` filter really isolates one case.
+`bench.sh` drives one build per backend configuration and writes `bench.md`.
+`kernels.sh` reuses those builds to count kernel launches per case — cubecl's
+profiling logger at `basic` totals the launches between syncs, and a count is
+exact, so one `--test` iteration suffices — and writes `kernels.md`. All carry
+their own rationale.

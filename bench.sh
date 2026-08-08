@@ -36,6 +36,9 @@
 #   ./bench.sh step               # only cases matching the criterion filter
 #   BENCH_SEQ=1024 ./bench.sh     # any BENCH_* override the bench understands
 #   BENCH_SKIP=cuda,cuda-fusion ./bench.sh   # skip configurations by label
+#
+# A skipped configuration is left out of the report rather than carried over
+# from its previous log, which may have been taken at another filter or size.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -54,6 +57,12 @@ CONFIGS=(
     "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion"
 )
 
+# Only the configurations this invocation actually ran are reported: the log
+# directory may still hold a skipped label's log from an earlier run, taken at a
+# different filter or size, and silently mixing the two would be worse than
+# leaving the column out.
+RAN=()
+
 for entry in "${CONFIGS[@]}"; do
     IFS='|' read -r label features device target <<<"$entry"
 
@@ -67,15 +76,18 @@ for entry in "${CONFIGS[@]}"; do
         cargo bench ${features:+--features "$features"} --bench layer -- \
         --save-baseline "$label" ${FILTER:+"$FILTER"} \
         2>&1 | tee "$LOG_DIR/$label.log"
+
+    RAN+=("$label")
 done
 
 # --------------------------------------------------------------------------
 # Report: parse the criterion output of each run into one table per group.
 # --------------------------------------------------------------------------
-python3 - "$OUT" "$LOG_DIR" <<'PY'
+python3 - "$OUT" "$LOG_DIR" "${RAN[*]:-}" <<'PY'
 import re, sys, datetime, pathlib
 
 out_path, log_dir = sys.argv[1], pathlib.Path(sys.argv[2])
+ran = set(sys.argv[3].split())
 
 # (label, column heading) in report order.
 CONFIGS = [
@@ -111,6 +123,8 @@ def fmt(ms):
 
 results, config_lines, present = {}, {}, []
 for label, _ in CONFIGS:
+    if label not in ran:
+        continue
     log = log_dir / f"{label}.log"
     if not log.exists():
         continue
@@ -124,6 +138,8 @@ for label, _ in CONFIGS:
         results[(m.group("group"), m.group("case"), label)] = ms
 
 cols = [(label, head) for label, head in CONFIGS if label in present]
+if not cols:
+    sys.exit("no run logs found")
 
 lines = [
     "# Benchmark results",

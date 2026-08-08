@@ -20,6 +20,7 @@ cargo test --lib            # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
 cargo run --example fibonacci -- --training --inference
 ./bench.sh                  # benchmarks — run by the user, never by you
+./kernels.sh                # kernel-launch counts — deterministic, safe to run
 ```
 
 - **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,
@@ -98,6 +99,7 @@ src/
    └─ test_helpers.rs    max_abs_diff + grad-comparison macros
 benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
 bench.sh             runs them per backend, writes bench.md
+kernels.sh           counts kernel launches per case, writes kernels.md
 ```
 
 `files.md` is the per-file signature reference (what each important file defines +
