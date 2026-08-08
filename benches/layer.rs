@@ -26,12 +26,11 @@
 //! cargo bench -- --baseline flex                # report % change vs. that run
 //! ```
 //!
-//! `BURN_DEVICE` picks the backend when several are compiled in — but the
-//! `train` group only works on the **first** backend listed in the
-//! `#[backend_extension(…)]` attributes (Cuda before Flex). Burn's macro gives
-//! every concrete backend the same autodiff match arm, so the others reach
-//! `unreachable!("Autodiff backend mismatch")` in the custom-backward path.
-//! Benchmark flex from a build without `backend-cuda`; [`bench.sh`] does this.
+//! `BURN_DEVICE` picks the backend when several are compiled in, for every group
+//! — including `train`, whose custom backward dispatches through the
+//! `#[backend_extension(…)]` traits. So one build benches both flex and CUDA;
+//! only kernel fusion, being compile-time, needs a build of its own. [`bench.sh`]
+//! drives all three configurations that way.
 //!
 //! [`bench.sh`]: https://github.com/swfsql/burn-mamba/blob/main/bench.sh
 //! [`kernels.sh`]: https://github.com/swfsql/burn-mamba/blob/main/kernels.sh

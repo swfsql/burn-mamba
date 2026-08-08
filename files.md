@@ -235,7 +235,8 @@ plus shared NN blocks.
 Criterion single-block benches (`forward`/`train`/`step`) over all three families.
 **Run by the user, not by an agent.** Each case builds its block, input and warm-up
 *inside* the criterion closure, so a `--` filter really isolates one case.
-`bench.sh` drives one build per backend configuration and writes `bench.md`.
+`bench.sh` drives the backend configurations — flex and CUDA share one build,
+fusion needs its own — and writes `bench.md`.
 `kernels.sh` reuses those builds to count kernel launches per case — cubecl's
 profiling logger at `basic` totals the launches between syncs, and a count is
 exact, so one `--test` iteration suffices — and writes `kernels.md`. All carry

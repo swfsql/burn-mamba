@@ -5,30 +5,26 @@
 #
 # Configurations
 # --------------
-#   flex         default features                       (CPU)
-#   cuda         + backend-cuda                         (GPU, no fusion, no autotune)
-#   cuda-fusion  + backend-cuda,fusion,dev-autotune      (GPU, as deployed)
+#   flex         + backend-cuda, run with BURN_DEVICE=flex   (CPU)
+#   cuda         + backend-cuda                              (GPU, no fusion, no autotune)
+#   cuda-fusion  + backend-cuda,fusion,dev-autotune          (GPU, as deployed)
 #
-# Why one build per configuration
-# -------------------------------
-# 1. Fusion is compile-time. `burn_cuda::Cuda` is a *type alias*:
-#    `CubeBackend<CudaRuntime>` normally, `Fusion<CubeBackend<CudaRuntime>>` under
-#    the `fusion` feature. `DispatchDevice::Cuda` is hard-bound to that alias (there
-#    is no fusion *device* variant, unlike autodiff), so the fused build is
-#    necessarily a different binary. Autotune is likewise a compile-time cubecl
-#    feature — its runtime knobs set the tuning *level* and cache, never "off".
+# Two builds, three configurations
+# --------------------------------
+# `flex` and `cuda` share one build: several backends can be compiled in at once
+# and `BURN_DEVICE` chooses between them at runtime — in every group, including
+# the `train` one, whose custom backward dispatches through
+# `#[backend_extension]`.
 #
-# 2. The `train` group additionally forces flex into its own build. Burn's
-#    `#[backend_extension]` macro emits one autodiff arm per concrete backend, and
-#    for an all-float-tensor op every arm has the *same* pattern
-#    (`DispatchTensorKind::Autodiff(..)`) — so only the first cfg-enabled backend's
-#    arm is reachable, and it panics with `unreachable!("Autodiff backend
-#    mismatch")` on any other. Our attribute lists Cuda before Flex, so in a
-#    flex+cuda build only CUDA can run the custom-backward (`train`) path.
-#    Building flex without `backend-cuda` makes Flex the first backend again.
+# Fusion, however, is compile-time. `burn_cuda::Cuda` is a *type alias*:
+# `CubeBackend<CudaRuntime>` normally, `Fusion<CubeBackend<CudaRuntime>>` under
+# the `fusion` feature. `DispatchDevice::Cuda` is hard-bound to that alias (there
+# is no fusion *device* variant, unlike autodiff), so the fused build is
+# necessarily a different binary. Autotune is likewise a compile-time cubecl
+# feature — its runtime knobs set the tuning *level* and cache, never "off".
 #
-# Each configuration keeps its own `CARGO_TARGET_DIR`, so re-running this script
-# rebuilds nothing and the criterion baseline histories stay separate.
+# Each build keeps its own `CARGO_TARGET_DIR`, so re-running this script rebuilds
+# nothing and the criterion baseline histories stay separate.
 #
 # Usage
 # -----
@@ -51,11 +47,20 @@ SKIP="${BENCH_SKIP:-}"
 mkdir -p "$LOG_DIR"
 
 # label | extra cargo features (on top of the defaults) | BURN_DEVICE | target dir
+# The first two rows are the same build (same features, same target dir), so it
+# compiles once and is then run on two devices.
 CONFIGS=(
-    "flex||flex|target/bench-flex"
+    "flex|backend-cuda|flex|target/bench-cuda"
     "cuda|backend-cuda|cuda|target/bench-cuda"
     "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion"
 )
+
+# With both GPU rows skipped there is nothing left to share, so flex goes back to
+# a build of its own — a machine without CUDA can still run
+# `BENCH_SKIP=cuda,cuda-fusion ./bench.sh`.
+if [[ ",$SKIP," == *",cuda,"* && ",$SKIP," == *",cuda-fusion,"* ]]; then
+    CONFIGS[0]="flex||flex|target/bench-flex"
+fi
 
 # Only the configurations this invocation actually ran are reported: the log
 # directory may still hold a skipped label's log from an earlier run, taken at a
