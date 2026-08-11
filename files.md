@@ -163,8 +163,10 @@ plus shared NN blocks.
   `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
-  insert are applied by `Layers`. `insert_latents` `pub(crate)`. Cursorless
-  `step_infinite` mirrors `step`. Optional `norm2`+`mlp` (allocated together) add a second
+  insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
+  (a bare-`Layer` caller needs it too); `step` takes the same cursor and returns its last
+  emitted token (`step_one` is the injection-free body). Cursorless `step_infinite`
+  mirrors `step`. Optional `norm2`+`mlp` (allocated together) add a second
   Pre-LN sub-block with a residual of its own; the methods therefore return the layer's
   **total delta** `h₁ + mlp(norm2(x + h₁))`, so `Layers`' single add yields both residuals
   — matching `mamba_ssm`'s `Block` when `d_intermediate > 0`. `mlp_residual` keeps the
@@ -177,6 +179,9 @@ plus shared NN blocks.
   its own cache; owns the outer residual (`skip_residual`/`ignore_first/last_residual` —
   which govern only that outer add, not the feed-forward's inner one).
   `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`, `with_mlp`).
+  `forward`/`step` take `Option<&mut ClassCursors>` (stack-level + per-virtual-layer);
+  `step` cascades the stack latents and each layer's own up the stack in `forward`'s token
+  order, returning the last token emitted. MultiGate rejects class latents at both levels.
   Cursorless `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
@@ -186,14 +191,18 @@ plus shared NN blocks.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**; `step_infinite` mirrors `step` (enums included;
-  Mamba-3 only, panic otherwise). `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
+  Mamba-3 only, panic otherwise). Both take `Option<&mut ClassCursors>`, the network's own
+  class tokens riding the `network` cursor and the stack's the rest (each class token is a
+  full network pass; `step_one` is the one-token body).
+  `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
   `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
   `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
   reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised
   `Param` resamples); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`; runtime
-  `MambaBidiLayers`. Forward-only.
+  `MambaBidiLayers`. Forward-only, `forward` taking `Option<&mut ClassCursors>` (pairs take
+  a single-level `ClassCursor`).
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
   state**, not a `Module`).
@@ -203,7 +212,8 @@ plus shared NN blocks.
 - **`activation/`** — `Silu`, `softplus`, `log_sigmoid` (fp16-aware variants Burn lacks).
 - **`misc/`** — `gqa_expand_to_heads` (group→head replicate; `DP1=D+1` caller const),
   `segsum` (stable log-space 1-semiseparable mask; backbone of `ssd_minimal`),
-  `split_into` (array-typed `split_with_sizes` → `let [z,x,b,c,…]=…`), `sanity` guards.
+  `split_into` (array-typed `split_with_sizes` → `let [z,x,b,c,…]=…`), `sanity` guards,
+  `rope` (`wrap_angle`/`apply_rope{,_partial}`, Mamba-3 only).
 - **`loss/`** — bce, cross_entropy, mse (example training).
 
 ## Utilities (`src/utils/`)
@@ -212,10 +222,21 @@ plus shared NN blocks.
   of a scaled min-exponent and machine epsilon). Used by the norms.
 - **`class/`** — learnable `[CLS]`-style tokens/latents. `ClassToken` (networks),
   `ClassLatent` (layer containers); markers stored as `#[module(skip)]` + one
-  `Option<Param<Tensor<2>>>`. `ClassMarker` + `insert_class_markers` place
-  `Start|Middle|End|Custom` relative to length `L` (Start@0, Middle@L/2, End@L,
-  Custom@idx; ties keep `Vec` order). `step` injects via cursors (`Start`/`Custom` only;
-  `Middle`/`End` panic for the cursored level).
+  `Option<Param<Tensor<2>>>`. `ClassMarker` (`insert_pos`, `group_rank`, `needs_full_len`,
+  `closes_sequence`) places `Start|Middle|End|Custom` against length `L` (Start@0,
+  Middle@L/2, End@L, Custom@idx; ties keep `Vec` order). `Start`/`Middle`/`Custom` precede
+  the token at their index — so a `Custom(k ≥ L)` lands only if the caller streams past
+  `L`, still before the next token; `End` alone closes (`closes_sequence`), trailing the
+  last token, and is what a closing `step` returns.
+  `ClassCursor{offset, full_len}` is one level's placement state; `ClassCursors{full_len,
+  network, stack, per_layer}` the whole hierarchy (`new(full_len)`/`stream()`; `per_layer`
+  self-sizes; `fit`/`enter`/`leave` internal — the inner level's sequence is longer by the
+  markers this level splices in). `class_chunk_plan` is the single placement decision —
+  `(at, marker)` pairs for the next `chunk_len` user tokens, advancing the cursor — feeding
+  `insert_class_markers` (a `forward` chunk) and `class_row` (one `step` token), so both
+  calls place identically and a sequence splits anywhere. `assert_full_len_known` guards
+  `Middle`/`End`. `class_marker_output_indices` reports a position past the emitted
+  sequence for a marker that never lands.
 - **`schedule/`** — `Schedule{Cyclic|Stretched|Custom}` (`real_idx`) and
   `BidiSchedule{Strided*/Symmetric*/Custom}` (even virtual = →, odd = ←).
 - **`scheduler/`** — `Lr{CosineAnnealing|Constant}` (`get_lr(step)`; cosine + warmup).
@@ -223,7 +244,8 @@ plus shared NN blocks.
   blocks) + `decl_ssd_autodiff_backend_ext!` (autodiff marker + `Autodiff<B>` blanket).
 - **`combined_grad.rs`** — `flatten_pair`/`unflatten_pair`: `(y, final_state)` into one
   tracked tensor and back (`prep.finish` takes a single tensor).
-- **`fprim.rs`** — `F<B, const D>`: rank-tagged `FloatTensor<B>` newtype mirroring the
+- **`fprim.rs`** (`mamba2`/`mamba3` only) — `F<B, const D>`: rank-tagged `FloatTensor<B>`
+  newtype mirroring the
   `Tensor` method API, so the generic-`B` forward kernels and `Backward<B,_>` nodes
   (which can't build a `Dispatch` `Tensor`) read like tensor code over `B::float_*`.
   `Mask<B>` + `san(&F)` accompany it.

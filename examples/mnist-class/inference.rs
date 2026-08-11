@@ -111,7 +111,7 @@ fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
         .div_scalar(MnistBatch::STDDEV)
         .reshape([n, h * w, 1]);
     let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
-    let (output, _caches) = model.forward(zscored, None, ssd_path); // [n, seq, 10]
+    let (output, _caches) = model.forward(zscored, None, ssd_path, None); // [n, seq, 10]
     let seq = h * w;
     let last = output.narrow(1, seq - 1, 1).squeeze_dim::<2>(1); // [n, 10]
     burn::tensor::activation::softmax(last, 1)

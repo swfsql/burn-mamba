@@ -287,7 +287,7 @@ impl Wrap {
         // ::Mamba2(Mamba2SsdPath::Serial(None));
         // ::Mamba2(Mamba2SsdPath::SerialRecalculated(None)); // saves vram
         //
-        let (output, _caches) = model.forward(input.clone(), None, ssd_path);
+        let (output, _caches) = model.forward(input.clone(), None, ssd_path, None);
 
         assert_eq!([batch_size, sequence_size, 1], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);

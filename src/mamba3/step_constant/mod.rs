@@ -44,7 +44,6 @@
 //! accumulates near-undamped terms.
 
 use crate::mamba3::double_ssd::double_ssd::StepProjection;
-use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{

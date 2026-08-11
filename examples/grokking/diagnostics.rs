@@ -90,7 +90,7 @@ pub fn state_pr(model: &MambaVocabNet, inputs_bs: &Tensor<2, Int>) -> Vec<StateP
     let mut per_step: Vec<Vec<Tensor<4>>> = Vec::with_capacity(s);
     for t in 0..s {
         let x_b = inputs_bs.clone().narrow(1, t, 1).squeeze_dim::<1>(1);
-        let (_logits, new_caches) = model.step(x_b, caches, None, None);
+        let (_logits, new_caches) = model.step(x_b, caches, None);
         let states = match &new_caches {
             MambaCaches::Mamba2(c) => c.caches.iter().map(|l| l.ssm_bhpr.clone()).collect(),
             _ => panic!("the state-PR diagnostic expects a Mamba-2 network"),

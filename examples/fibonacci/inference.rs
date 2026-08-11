@@ -37,6 +37,7 @@ pub fn infer(
         batch.sequences,
         None,
         MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(None)),
+        None,
     );
     assert_eq!([batch_size, SEQ_LENGTH + 1, 1], predicted.dims());
     let last_predicted = predicted.narrow(1, SEQ_LENGTH, 1);

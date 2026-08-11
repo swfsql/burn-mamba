@@ -1,8 +1,8 @@
 use crate::modules::{Residuals, ResidualsConfig, RmsNorm, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::BidiSchedule;
-use crate::utils::ClassLatent;
 use crate::utils::class::{class_marker_output_indices, init_class_emb, insert_class_markers};
+use crate::utils::{ClassCursor, ClassCursors, ClassLatent};
 use burn::config::Config;
 use burn::module::Param;
 use burn::nn::{Linear, LinearConfig};
@@ -112,12 +112,19 @@ impl<M: MambaBlock> BidiLayerPair<M>
 where
     M::SsdPath: Clone,
 {
-    /// Splice this bidi-layer-pair's class latents into `x` (no-op when there are none).
-    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
-        if self.class_latents_emb.is_none() {
-            return x;
-        }
-        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    /// Splice this bidi-layer-pair's class latents into the chunk `x` (no-op
+    /// when there are none), advancing `class` past it. `None` ⇒ this chunk is
+    /// the whole sequence.
+    fn insert_latents(&self, x: Tensor<3>, class: Option<&mut ClassCursor>) -> Tensor<3> {
+        let mut whole = ClassCursor::whole(x.dims()[1]);
+        let cursor = class.unwrap_or(&mut whole);
+        insert_class_markers(
+            x,
+            &self.class_latents,
+            self.class_latents_emb.as_ref(),
+            cursor,
+            "BidiLayerPair",
+        )
     }
 
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`, plus the two
@@ -130,8 +137,9 @@ where
         straight_cache: Option<M::Cache>,
         reverse_cache: Option<M::Cache>,
         ssd_path: M::SsdPath,
+        class: Option<&mut ClassCursor>,
     ) -> (Tensor<3>, M::Cache, M::Cache) {
-        let x = self.insert_latents(x);
+        let x = self.insert_latents(x, class);
         bidi_pair_forward(
             &self.straight_norm,
             &self.reverse_norm,
@@ -221,16 +229,26 @@ where
     M::SsdPath: Clone,
 {
     /// Output positions of the stack-level class latents for an `orig_len` input.
+    ///
+    /// A marker that never lands (a `Custom` at or past the end) reports a
+    /// position past the emitted sequence — compare against its length.
     pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
         class_marker_output_indices(&self.class_latents, orig_len)
     }
 
-    /// Splice this bidi-layers' class latents into `x` (no-op when there are none).
-    fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
-        if self.class_latents_emb.is_none() {
-            return x;
-        }
-        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    /// Splice this stack's own class latents into the chunk `x` (no-op when
+    /// there are none), advancing the stack-level cursor.
+    fn insert_latents(&self, x: Tensor<3>, class: &mut ClassCursors) -> Tensor<3> {
+        let mut cursor = ClassCursor::at(class.stack, class.full_len);
+        let x = insert_class_markers(
+            x,
+            &self.class_latents,
+            self.class_latents_emb.as_ref(),
+            &mut cursor,
+            "BidiLayers",
+        );
+        class.stack = cursor.offset;
+        x
     }
 
     /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies
@@ -268,8 +286,11 @@ where
         mut x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, M::Caches) {
-        x = self.insert_latents(x);
+        // No cursors ⇒ this one call covers the whole sequence.
+        let mut whole = ClassCursors::new(x.dims()[1]);
+        x = self.insert_latents(x, class.unwrap_or(&mut whole));
         let n = self
             .n_virtual_layers
             .as_ref()
@@ -477,7 +498,8 @@ pub enum MambaBidiLayers {
 impl MambaBidiLayers {
     /// Output positions of the stack-level class latents for an `orig_len`
     /// input (so a caller can read a class latent back out of the lengthened
-    /// `forward` output — e.g. as a pooled summary).
+    /// `forward` output — e.g. as a pooled summary). A marker that never lands
+    /// (a `Custom` at or past the end) reports a position past that output.
     pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
         match self {
             #[cfg(feature = "mamba1")]
@@ -496,6 +518,7 @@ impl MambaBidiLayers {
         x: Tensor<3>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -510,7 +533,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 bidi stack"),
                 }
-                let (y, c) = layers.forward(x, caches, ());
+                let (y, c) = layers.forward(x, caches, (), class);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -525,7 +548,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 bidi stack"),
                 };
-                let (y, c) = layers.forward(x, caches, path);
+                let (y, c) = layers.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -540,7 +563,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 bidi stack"),
                 };
-                let (y, c) = layers.forward(x, caches, path);
+                let (y, c) = layers.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -557,10 +580,14 @@ pub enum MambaBidiLayersConfig {
     Mamba1 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling (pairs; must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
+        /// Suppress the first virtual pair's residual.
         ignore_first_residual: bool,
+        /// Suppress the last virtual pair's residual (the stack outputs that
+        /// pair's merged transform alone).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
@@ -575,10 +602,14 @@ pub enum MambaBidiLayersConfig {
     Mamba2 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling (pairs; must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
+        /// Suppress the first virtual pair's residual.
         ignore_first_residual: bool,
+        /// Suppress the last virtual pair's residual (the stack outputs that
+        /// pair's merged transform alone).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
@@ -593,10 +624,14 @@ pub enum MambaBidiLayersConfig {
     Mamba3 {
         /// Number of real layers (must be even — used in pairs).
         n_real_layers: usize,
+        /// Optional virtual-layer scheduling (pairs; must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
+        /// Suppress the first virtual pair's residual.
         ignore_first_residual: bool,
+        /// Suppress the last virtual pair's residual (the stack outputs that
+        /// pair's merged transform alone).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,

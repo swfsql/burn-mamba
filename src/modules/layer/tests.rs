@@ -55,7 +55,7 @@ fn layer_with_mlp_matches_the_two_residual_reference() {
     );
 
     // What the stack actually produces: one outer add over the layer's delta.
-    let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
 
     // The reference block, spelled out.
     let (h1, _c) = layer.mamba_block.block_forward(
@@ -92,12 +92,12 @@ fn mlp_layer_forward_step_parity() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (full, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (full, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
 
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, None, None);
+        let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = full.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(max_abs_diff(yt, expected) < 1e-4, "mismatch at t={t}");
@@ -123,7 +123,7 @@ fn mixer_only_layer_is_unchanged() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
 
     let (h1, _c) = layer.mamba_block.block_forward(
         layer.norm.forward(x.clone()),
@@ -148,7 +148,12 @@ fn mlp_without_norm2_panics() {
     layers.real_layers[0].norm2 = None;
 
     let x = Tensor::<3>::zeros([1, 3, d_model], &device);
-    let _ = layers.forward(x, None, crate::mamba3::prelude::Mamba3SsdPath::default());
+    let _ = layers.forward(
+        x,
+        None,
+        crate::mamba3::prelude::Mamba3SsdPath::default(),
+        None,
+    );
 }
 
 /// The feed-forward's pre-norm is a distinct parameter set from the mixer's, so

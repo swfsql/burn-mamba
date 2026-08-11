@@ -87,10 +87,11 @@ src/
 │  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
 │  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
 │  ├─ loss/          bce, cross_entropy, mse
-│  └─ misc/          gqa, segsum, split, sanity
+│  └─ misc/          gqa, segsum, split, sanity, rope
 └─ utils/            lower-level plumbing
    ├─ mod.rs         div_eps (per-dtype epsilon)
-   ├─ class/         ClassToken / ClassLatent insertion (CLS-style registers)
+   ├─ class/         ClassToken / ClassLatent placement (CLS-style registers) +
+   │                 ClassCursor(s): offsets + full-length hint, shared by forward/step
    ├─ schedule/      Schedule + BidiSchedule (virtual→real index mapping)
    ├─ scheduler/     LR schedulers (cosine + warmup, constant) — example use
    ├─ backend_macros.rs  per-backend BackendExt impls + autodiff marker traits
@@ -236,11 +237,19 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   reversed (← via `flip`) pass merged by `OutputMerge` (`Mean`|`CatLinear`);
   `BidiLayers<M>` stacks pairs. Generic over `M` → serves all families.
 - **Class tokens/latents** (`utils/class/`): learnable `[CLS]`-style embeddings spliced
-  into the sequence. `ClassToken` on a *network*, `ClassLatent` on a *layer container*;
-  markers (`Start|Middle|End|Custom`) say where each lands. `forward` returns the
-  lengthened sequence; the caller reads tokens via `class_*_output_indices`. `step`
-  injects via position **cursors** (`Start`/`Custom` only; `Middle`/`End` need the full
-  length and panic there).
+  into the sequence. `ClassToken` on a *network*, `ClassLatent` on a *layer container*.
+  `Start`(0)/`Middle`(`L/2`)/`Custom(k)` are emitted **before** the original token at that
+  index — uniformly, so a `Custom(k ≥ L)` never lands (unless the caller streams past `L`,
+  and even then it precedes the next token); `End` alone **closes** the sequence, trailing
+  its last token. Placement is streamed and identical for both calls: each takes an
+  optional `&mut ClassCursors` (one `full_len` hint + one cursor per level:
+  `network`/`stack`/`per_layer`), so a sequence splits into any number of `forward` chunks
+  and/or `step`s without moving a marker. A cursor past a marker skips it (`Start` fires
+  once); `Middle`/`End` panic without the hint. `step` returns the **last** token it
+  emitted (and the state after it) — the user token, unless an `End` follows it. `None`
+  keeps the defaults: `forward` = this call is the whole sequence, `step` = no injection.
+  Read markers back via `class_*_output_indices` (minus the level's pre-call cursor for a
+  chunk; a non-landing marker reports a position past the output).
 - **Multi-Gate Residuals** (`modules/multi_gate.rs`): `Layers<M>.residuals` picks plain
   additive (`Standard`) vs `MultiGate` — `n_stream` streams gated/attention-pooled between
   layers instead of one additive skip. See the module header.

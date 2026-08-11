@@ -29,9 +29,10 @@ fn latent_network_builder_mamba2() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         Mamba2SsdPath::default(),
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
-    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None, None, None);
+    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
     assert_eq!([2, 2], yt.dims());
 }
 
@@ -64,6 +65,7 @@ fn unified_net_config_mamba2() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         MambaSsdPath::mamba2_default(),
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
 
@@ -72,10 +74,11 @@ fn unified_net_config_mamba2() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         Some(caches),
         MambaSsdPath::mamba2_default(),
+        None,
     );
     assert_eq!([2, 5, 2], y2.dims());
 
-    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None, None, None);
+    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
     assert_eq!([2, 2], yt.dims());
 }
 
@@ -108,9 +111,10 @@ fn unified_net_config_mamba3() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         MambaSsdPath::mamba3_default(),
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
-    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None, None, None);
+    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
     assert_eq!([2, 2], yt.dims());
 }
 
@@ -137,9 +141,10 @@ fn unified_net_config_mamba1() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         MambaSsdPath::Mamba1,
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
-    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None, None, None);
+    let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
     assert_eq!([2, 2], yt.dims());
 }
 
@@ -171,6 +176,7 @@ fn bidi_layers_mamba2() {
         Tensor::<3>::zeros([2, 5, 16], &device),
         None,
         Mamba2SsdPath::default(),
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -201,6 +207,7 @@ fn bidi_layers_mamba3() {
         Tensor::<3>::zeros([2, 5, 16], &device),
         None,
         Mamba3SsdPath::default(),
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -223,7 +230,7 @@ fn bidi_layers_mamba1() {
         residuals: crate::modules::ResidualsConfig::Standard,
     }
     .init(&device);
-    let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, ());
+    let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, (), None);
     assert_eq!([2, 5, 16], y.dims());
 }
 
@@ -254,6 +261,7 @@ fn unified_bidi_config_mamba2() {
         Tensor::<3>::zeros([2, 5, 16], &device),
         None,
         MambaSsdPath::mamba2_default(),
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -284,8 +292,8 @@ fn bidi_forward_is_deterministic_mamba2() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
-    let (y2, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y1, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y2, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -311,8 +319,8 @@ fn bidi_forward_is_deterministic_mamba1() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, ());
-    let (y2, _) = layers.forward(x.clone(), None, ());
+    let (y1, _) = layers.forward(x.clone(), None, (), None);
+    let (y2, _) = layers.forward(x.clone(), None, (), None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -344,8 +352,8 @@ fn bidi_forward_is_deterministic_mamba3() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
-    let (y2, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (y1, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
+    let (y2, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -393,6 +401,7 @@ fn class_latents_lengthen_and_index() {
         Tensor::<3>::zeros([2, 4, 16], &device),
         None,
         Mamba2SsdPath::default(),
+        None,
     );
     assert_eq!([2, 7, 16], y.dims()); // 4 original + 3 class latents
 }
@@ -429,14 +438,15 @@ fn class_tokens_on_latent_network() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         Mamba2SsdPath::default(),
+        None,
     );
     assert_eq!([2, 6, 2], y.dims()); // 5 + 1 class token
 }
 
-// `Middle`/`End` class latents are incompatible with single-token `step()`.
+// `Middle`/`End` class latents cannot be placed without a full-length hint.
 #[cfg(feature = "mamba2")]
 #[test]
-#[should_panic(expected = "not compatible with step")]
+#[should_panic(expected = "need a full-length hint")]
 fn class_latents_step_panics() {
     let device = Device::default();
     let block = Mamba2Config::new(16)
@@ -448,7 +458,7 @@ fn class_latents_step_panics() {
     let layers = LayersBuilder::new(1, block)
         .with_class_latents(vec![ClassLatent::Middle])
         .init(&device);
-    let _ = layers.step(Tensor::<2>::zeros([2, 16], &device), None, None, None);
+    let _ = layers.step(Tensor::<2>::zeros([2, 16], &device), None, None);
 }
 
 // Stepping with the stack-level cursor injects the class latents at exactly the
@@ -479,17 +489,17 @@ fn class_latents_step_matches_forward() {
     );
 
     // forward → length seq + 2; class tokens at [0, 3], user tokens at [1,2,4,5].
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
     assert_eq!(y_fwd.dims(), [batch, seq + 2, 16]);
     let user_pos = [1usize, 2, 4, 5];
 
     // step the user tokens with the stack-level class cursor; the class latents
     // are injected automatically as the cursor reaches their positions.
-    let mut cursor = 0usize;
+    let mut class = ClassCursors::new(seq);
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, Some(&mut cursor), None);
+        let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, user_pos[t], 1).squeeze_dim::<2>(1);
         assert!(
@@ -497,8 +507,8 @@ fn class_latents_step_matches_forward() {
             "stepped user token {t} disagrees with forward"
         );
     }
-    // Start, u0, u1, Custom, u2, u3 ⇒ cursor advanced by 6.
-    assert_eq!(cursor, 6);
+    // Start, u0, u1, Custom, u2, u3 ⇒ the stack cursor advanced by 6.
+    assert_eq!(class.stack, 6);
 }
 
 // Per-layer class latents in a 3-layer stack — A: `Custom(2)`, B: none, C:
@@ -555,18 +565,18 @@ fn per_layer_class_latents_step_matches_forward() {
     let run = |stepwise: bool| -> Run {
         let x = Param::from_tensor(Tensor::from_inner(x_inner.clone()));
         let (out_user, caches) = if stepwise {
-            let mut cursors = vec![0usize; 3];
+            let mut cursors = ClassCursors::new(seq);
             let mut caches = None;
             let mut outs = Vec::new();
             for t in 0..seq {
                 let xt = x.val().narrow(1, t, 1).squeeze_dim::<2>(1);
-                let (yt, c) = layers.step(xt, caches, None, Some(&mut cursors));
+                let (yt, c) = layers.step(xt, caches, Some(&mut cursors));
                 caches = Some(c);
                 outs.push(yt.unsqueeze_dim::<3>(1));
             }
             (Tensor::cat(outs, 1), caches.unwrap())
         } else {
-            let (out_full, caches) = layers.forward(x.val(), None, path.clone());
+            let (out_full, caches) = layers.forward(x.val(), None, path.clone(), None);
             let parts: Vec<_> = user_pos
                 .iter()
                 .map(|&p| out_full.clone().narrow(1, p, 1))
@@ -640,4 +650,676 @@ fn per_layer_class_latents_step_matches_forward() {
         max_abs_diff(f.5, s.5) < 1e-3,
         "Start class-emb grads disagree"
     );
+}
+
+// --- streamed placement (chunked forward / cursored step) ------------------
+
+// The chunk planner is the one place placement is decided, so check it directly:
+// all four marker kinds, whole vs split, and an open-ended stream.
+#[test]
+fn class_chunk_plan_splits_a_sequence() {
+    let markers = vec![
+        ClassLatent::Start,
+        ClassLatent::Middle,
+        ClassLatent::End,
+        ClassLatent::Custom(1),
+    ];
+    // L = 6 ⇒ S u0 C u1 u2 M u3 u4 u5 E, i.e. positions [0, 5, 9, 2] in `Vec`
+    // order (Start, Middle, End, Custom).
+    assert_eq!(class_marker_output_indices(&markers, 6), vec![0, 5, 9, 2]);
+
+    // One call for the whole sequence: `(at, marker)`, `at` counting the chunk's
+    // own tokens placed before the marker.
+    let mut cursor = ClassCursor::whole(6);
+    assert_eq!(
+        class_chunk_plan(&markers, 6, &mut cursor, "test"),
+        vec![(0, 0), (1, 3), (3, 1), (6, 2)]
+    );
+    assert_eq!(cursor.offset, 10);
+
+    // Split 4 + 2: identical placement, `End` waiting for the closing chunk.
+    let mut cursor = ClassCursor::whole(6);
+    assert_eq!(
+        class_chunk_plan(&markers, 4, &mut cursor, "test"),
+        vec![(0, 0), (1, 3), (3, 1)]
+    );
+    assert_eq!(cursor.offset, 7);
+    assert_eq!(
+        class_chunk_plan(&markers, 2, &mut cursor, "test"),
+        vec![(2, 2)]
+    );
+    assert_eq!(cursor.offset, 10);
+
+    // `End` closes; `Custom` never does. At (or past) the end a `Custom` has no
+    // token to precede, so it waits — for a caller that keeps going, or forever.
+    let markers = vec![ClassLatent::End, ClassLatent::Custom(3)];
+    // L = 3 ⇒ u0 u1 u2 E, the Custom's slot (4) staying unemitted.
+    assert_eq!(class_marker_output_indices(&markers, 3), vec![3, 4]);
+    let mut cursor = ClassCursor::whole(3);
+    assert_eq!(
+        class_chunk_plan(&markers, 3, &mut cursor, "test"),
+        vec![(3, 0)]
+    );
+    assert_eq!(cursor.offset, 4);
+    // One token past the announced length and the `Custom` does land — still
+    // *before* that token, as `Custom` always does.
+    assert_eq!(
+        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        vec![(0, 1)]
+    );
+    assert_eq!(cursor.offset, 6);
+
+    // An open-ended stream (no hint): `Start`/`Custom` still place exactly, and
+    // nothing is ever treated as trailing.
+    let markers = vec![ClassLatent::Start, ClassLatent::Custom(1)];
+    let mut cursor = ClassCursor::default();
+    assert_eq!(
+        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        vec![(0, 0)]
+    );
+    assert_eq!(cursor.offset, 2);
+    assert_eq!(
+        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        vec![(0, 1)]
+    );
+    assert_eq!(cursor.offset, 4);
+}
+
+// Splitting one `forward` in two must place every class marker exactly where a
+// single call over the whole sequence does — the shared cursors decide, not the
+// chunk length. Stack latents at all four kinds of position plus a per-layer
+// latent, so `Start` (behind the second chunk's cursor), `Custom`/`Middle`
+// (interior) and `End` (only on the chunk that closes the sequence) are all
+// exercised, at both class levels. Outputs **and** final caches must agree.
+#[cfg(feature = "mamba2")]
+#[test]
+fn class_markers_split_forward_matches_single_forward() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let mut layers = LayersBuilder::new(2, block)
+        .with_class_latents(vec![
+            ClassLatent::Start,
+            ClassLatent::Middle,
+            ClassLatent::End,
+            ClassLatent::Custom(1),
+        ])
+        .init(&device);
+    // A per-layer latent as well (those aren't builder-configurable).
+    layers.real_layers[0].class_latents = vec![ClassLatent::Custom(2)];
+    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &device);
+
+    let (batch, seq, split) = (2usize, 6usize, 4usize);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let path = Mamba2SsdPath::default();
+
+    // One call over the whole sequence (what `None` cursors mean).
+    let (y_full, c_full) = layers.forward(x.clone(), None, path.clone(), None);
+    assert_eq!(y_full.dims(), [batch, seq + 5, d_model]);
+
+    // The same sequence in two chunks, sharing one cursor set.
+    let mut class = ClassCursors::new(seq);
+    let (y_a, caches) = layers.forward(
+        x.clone().narrow(1, 0, split),
+        None,
+        path.clone(),
+        Some(&mut class),
+    );
+    let (y_b, c_split) = layers.forward(
+        x.narrow(1, split, seq - split),
+        Some(caches),
+        path,
+        Some(&mut class),
+    );
+    // Chunk 1 carries Start, Custom and Middle; chunk 2 the trailing End.
+    assert_eq!(y_a.dims(), [batch, split + 4, d_model]);
+    assert_eq!(y_b.dims(), [batch, seq - split + 1, d_model]);
+
+    let y_split = Tensor::cat(vec![y_a, y_b], 1);
+    assert_eq!(y_split.dims(), y_full.dims());
+    assert!(
+        max_abs_diff(y_full, y_split) < 1e-4,
+        "chunked class placement disagrees with the single forward"
+    );
+    for (i, (f, s)) in c_full.caches.iter().zip(&c_split.caches).enumerate() {
+        assert!(
+            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            "layer {i} conv state disagrees"
+        );
+        assert!(
+            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            "layer {i} ssm state disagrees"
+        );
+    }
+    // Every marker landed exactly once: 4 stack latents, then 1 per-layer one.
+    assert_eq!(class.stack, seq + 4);
+    assert_eq!(class.per_layer, vec![seq + 5, seq + 5]);
+}
+
+// With a full-length hint `step` places `Middle`/`End` too: the interior latent
+// opens the step that carries the token it precedes, while the closing one is
+// stepped *after* the last user token — and being the sequence's true last
+// token, it is that step's returned output. Every step's output is `forward`'s
+// row for the last token it emitted, and the final caches must match too.
+#[cfg(feature = "mamba2")]
+#[test]
+fn class_markers_step_matches_forward_with_full_len() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = LayersBuilder::new(2, block)
+        .with_class_latents(vec![ClassLatent::Middle, ClassLatent::End])
+        .init(&device);
+
+    let (batch, seq) = (2usize, 4usize);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // forward ⇒ u0 u1 M u2 u3 E. Each step emits up to its last token: u0, u1,
+    // then (M, u2), then (u3, E) — so the closing latent, not u3, ends the run.
+    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    assert_eq!(y_fwd.dims(), [batch, seq + 2, d_model]);
+    let last_pos = [0usize, 1, 3, 5];
+
+    let mut class = ClassCursors::new(seq);
+    let mut caches = None;
+    for t in 0..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, caches, Some(&mut class));
+        caches = Some(c);
+        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt, expected) < 1e-4,
+            "step {t} disagrees with forward at its last emitted token"
+        );
+    }
+    assert_eq!(class.stack, seq + 2);
+
+    // The `End` latent was stepped after the last token, so the final state
+    // matches the one `forward` produced over the full lengthened sequence.
+    let c_step = caches.unwrap();
+    for (i, (f, s)) in c_fwd.caches.iter().zip(&c_step.caches).enumerate() {
+        assert!(
+            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            "layer {i} conv state disagrees"
+        );
+        assert!(
+            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            "layer {i} ssm state disagrees"
+        );
+    }
+}
+
+// A network's own class tokens stream the same way (they are spliced at input
+// width, before `in_proj`): two chunks must equal one call.
+#[cfg(feature = "mamba2")]
+#[test]
+fn class_tokens_split_forward_matches_single_forward() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let block = Mamba2Config::new(16)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let net = LatentNetworkBuilder {
+        input_size: 3,
+        layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::End]),
+        output_size: 2,
+        class_tokens: vec![ClassToken::Start, ClassToken::End],
+    }
+    .init(&device);
+
+    let (batch, seq, split) = (2usize, 5usize, 3usize);
+    let x = Tensor::<3>::random([batch, seq, 3], Distribution::Normal(0.0, 1.0), &device);
+    let path = Mamba2SsdPath::default();
+
+    // S u0 u1 u2 u3 u4 E, then the stack's own End latent after it.
+    let (y_full, _c) = net.forward(x.clone(), None, path.clone(), None);
+    assert_eq!(y_full.dims(), [batch, seq + 3, 2]);
+
+    let mut class = ClassCursors::new(seq);
+    let (y_a, caches) = net.forward(
+        x.clone().narrow(1, 0, split),
+        None,
+        path.clone(),
+        Some(&mut class),
+    );
+    let (y_b, _c) = net.forward(
+        x.narrow(1, split, seq - split),
+        Some(caches),
+        path,
+        Some(&mut class),
+    );
+    let y_split = Tensor::cat(vec![y_a, y_b], 1);
+    assert_eq!(y_split.dims(), y_full.dims());
+    assert!(
+        max_abs_diff(y_full, y_split) < 1e-4,
+        "chunked class-token placement disagrees with the single forward"
+    );
+    // 2 class tokens at the network level, and the stack's End latent above them.
+    assert_eq!(class.network, seq + 2);
+    assert_eq!(class.stack, seq + 3);
+}
+
+// `Middle`/`End` cannot be placed against an open-ended stream, in `forward`
+// either — the hint is what makes them well-defined.
+#[cfg(feature = "mamba2")]
+#[test]
+#[should_panic(expected = "need a full-length hint")]
+fn class_markers_without_full_len_panic_in_forward() {
+    let device = Device::default();
+    let block = Mamba2Config::new(16)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = LayersBuilder::new(1, block)
+        .with_class_latents(vec![ClassLatent::End])
+        .init(&device);
+    let mut class = ClassCursors::stream();
+    let _ = layers.forward(
+        Tensor::<3>::zeros([2, 4, 16], &device),
+        None,
+        Mamba2SsdPath::default(),
+        Some(&mut class),
+    );
+}
+
+// The two modes share one cursor set, so a prefill `forward` can hand over to
+// `step` mid-sequence: the markers left in the tail land on the steps that
+// follow, and the stepped user tokens still match the single forward.
+#[cfg(feature = "mamba2")]
+#[test]
+fn class_markers_forward_then_step() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = LayersBuilder::new(2, block)
+        .with_class_latents(vec![
+            ClassLatent::Start,
+            ClassLatent::Middle,
+            ClassLatent::End,
+        ])
+        .init(&device);
+
+    let (batch, seq, prefill) = (2usize, 4usize, 2usize);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // forward ⇒ S u0 u1 M u2 u3 E; the decoded steps end on u2 (M opens that
+    // step) and on E (which closes the sequence after u3).
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    assert_eq!(y_fwd.dims(), [batch, seq + 3, d_model]);
+    let last_pos = [1usize, 2, 4, 6];
+
+    // Prefill the first two tokens (Start comes along), then decode the rest.
+    let mut class = ClassCursors::new(seq);
+    let (y_pre, mut caches) = layers.forward(
+        x.clone().narrow(1, 0, prefill),
+        None,
+        Mamba2SsdPath::default(),
+        Some(&mut class),
+    );
+    assert_eq!(y_pre.dims(), [batch, prefill + 1, d_model]);
+    assert_eq!(class.stack, prefill + 1);
+
+    for t in prefill..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, Some(caches), Some(&mut class));
+        caches = c;
+        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt, expected) < 1e-4,
+            "step {t} disagrees with forward at its last emitted token"
+        );
+    }
+    // Middle opened the third step, End closed the last one.
+    assert_eq!(class.stack, seq + 3);
+}
+
+// A network's class tokens `step` too, at both ends: `Start` is stepped (as a
+// full network pass, so the stack splices its own latents around it) before the
+// first user token, `End` after the last one — and `End`, closing the sequence,
+// is what that final step returns.
+#[cfg(feature = "mamba2")]
+#[test]
+fn class_tokens_step_matches_forward_with_full_len() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let block = Mamba2Config::new(16)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let net = LatentNetworkBuilder {
+        input_size: 3,
+        layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::Start]),
+        output_size: 2,
+        class_tokens: vec![ClassToken::Start, ClassToken::End],
+    }
+    .init(&device);
+
+    let (batch, seq) = (2usize, 3usize);
+    let x = Tensor::<3>::random([batch, seq, 3], Distribution::Normal(0.0, 1.0), &device);
+
+    // forward ⇒ L S u0 u1 u2 E (the stack latent below the network's tokens);
+    // the steps end on u0, u1, then E (the closing token, after u2).
+    let (y_fwd, _c) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
+    let last_pos = [2usize, 3, 5];
+
+    let mut class = ClassCursors::new(seq);
+    let mut caches = None;
+    for t in 0..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = net.step(xt, caches, Some(&mut class));
+        caches = Some(c);
+        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt, expected) < 1e-4,
+            "step {t} disagrees with forward at its last emitted token"
+        );
+    }
+    assert_eq!(class.network, seq + 2);
+    assert_eq!(class.stack, seq + 3);
+}
+
+// `End` is the *only* marker that closes a sequence; `Custom` always precedes
+// the token it names, whatever the index. Two `End`s and a `Custom(L)` over
+// `L = 3` announced tokens, checked against the hand-built reference:
+//
+// ```text
+//   sequence   u0 u1 u2 E1 E2 [C u3]     ← C and u3 only if the caller goes on
+//   step 0     u0            → returns u0
+//   step 1     u1            → returns u1
+//   step 2     u2 E1 E2      → returns E2 (both closers ran; C did not)
+//   step 3     C u3          → returns u3 (past the announced L: C finally has
+//                               a token to precede, and still precedes it)
+// ```
+#[cfg(feature = "mamba2")]
+#[test]
+fn end_closes_the_sequence_custom_never_does() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let (batch, seq) = (2usize, 3usize);
+    let mut layers = LayersBuilder::new(2, block)
+        // Both `End`s sit at index `seq` and trail, in `Vec` order; `Custom`
+        // names the same index but has no token there to precede.
+        .with_class_latents(vec![
+            ClassLatent::End,
+            ClassLatent::End,
+            ClassLatent::Custom(seq),
+        ])
+        .init(&device);
+    let path = Mamba2SsdPath::default();
+    // One token more than the announced length, fed at the very end.
+    let x = Tensor::<3>::random(
+        [batch, seq + 1, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // The reference, spliced by hand: u0 u1 u2 E1 E2 C u3.
+    let emb = layers.class_latents_emb.as_ref().unwrap().val();
+    let cls = |i: usize| {
+        emb.clone()
+            .narrow(0, i, 1)
+            .unsqueeze_dim::<3>(0)
+            .expand([batch, 1, d_model])
+    };
+    let tok = |t: usize| x.clone().narrow(1, t, 1);
+    let reference = Tensor::cat(
+        vec![tok(0), tok(1), tok(2), cls(0), cls(1), cls(2), tok(3)],
+        1,
+    );
+
+    // `Custom(seq)` reports a position past the emitted sequence ⇒ it does not
+    // land, and `forward` over the announced tokens is `u0 u1 u2 E1 E2`.
+    assert_eq!(layers.class_latent_output_indices(seq), vec![3, 4, 5]);
+    let (y_marked, _c) = layers.forward(x.clone().narrow(1, 0, seq), None, path.clone(), None);
+    assert_eq!(y_marked.dims(), [batch, seq + 2, d_model]);
+
+    // Step all four tokens — the last one runs past the announced length.
+    let mut class = ClassCursors::new(seq);
+    let mut caches = None;
+    let mut got = Vec::new();
+    for t in 0..seq + 1 {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, caches, Some(&mut class));
+        got.push((yt, class.stack));
+        caches = Some(c);
+    }
+    // u0 u1 u2 E1 E2 C u3 — every marker landed exactly once, `Custom` last.
+    assert_eq!(class.stack, seq + 4);
+
+    // Same weights over the hand-built reference, markers cleared.
+    layers.class_latents = Vec::new();
+    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None);
+    assert!(
+        max_abs_diff(y_marked, y_ref.clone().narrow(1, 0, seq + 2)) < 1e-4,
+        "the markers did not land where the reference splices them"
+    );
+
+    let last = [0usize, 1, 4, 6]; // u0, u1, E2, u3
+    let dropped = [0usize, 1, 3, 5]; // (itself), (itself), E1, C
+    for (t, (yt, cursor)) in got.into_iter().enumerate() {
+        let want = y_ref.clone().narrow(1, last[t], 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt.clone(), want) < 1e-4,
+            "step {t} did not return its last emitted token"
+        );
+        if dropped[t] != last[t] {
+            let other = y_ref.clone().narrow(1, dropped[t], 1).squeeze_dim::<2>(1);
+            assert!(
+                max_abs_diff(yt, other) > 1e-3,
+                "step {t} returned a token it should have dropped"
+            );
+        }
+        assert_eq!(cursor, last[t] + 1, "step {t} left the cursor elsewhere");
+    }
+
+    // Every token of the reference ran through the recurrence.
+    let c_step = caches.unwrap();
+    for (i, (f, s)) in c_ref.caches.iter().zip(&c_step.caches).enumerate() {
+        assert!(
+            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            "layer {i} conv state disagrees"
+        );
+        assert!(
+            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            "layer {i} ssm state disagrees"
+        );
+    }
+}
+
+// What a `step` hands back, per marker kind — pinned against a **hand-built**
+// reference sequence instead of index arithmetic. The class rows are spliced
+// into the input by hand where the four kinds claim to land, and the same
+// weights (markers cleared, so nothing is inserted twice) are run over it:
+//
+// ```text
+//   markers   Start, Custom(1), Middle, End         L = 4 user tokens
+//   sequence  S u0 C u1 M u2 u3 E                   ← built explicitly below
+//   step 0    S u0   → returns u0, state after 2 reference tokens
+//   step 1    C u1   → returns u1, state after 4
+//   step 2    M u2   → returns u2, state after 6
+//   step 3    u3 E   → returns E (not u3!), state after 8
+// ```
+//
+// `Start`/`Middle`/`Custom(k<L)` open the step carrying the token they precede,
+// so the user token still ends it; `End` (like any `Custom(L)`) closes the
+// sequence and ends the step instead — it is then the token whose output comes
+// back, and the state is the one after it.
+#[cfg(feature = "mamba2")]
+#[test]
+fn step_output_and_state_follow_the_last_emitted_token() {
+    use crate::utils::test_helpers::max_abs_diff;
+    use burn::tensor::Distribution;
+
+    let device = Device::default();
+    let d_model = 16;
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let (batch, seq) = (2usize, 4usize);
+    let mut layers = LayersBuilder::new(2, block)
+        .with_class_latents(vec![
+            ClassLatent::Start,
+            ClassLatent::Middle,
+            ClassLatent::End,
+            ClassLatent::Custom(1),
+        ])
+        .init(&device);
+    let path = Mamba2SsdPath::default();
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // The reference sequence, spliced by hand: S u0 C u1 M u2 u3 E.
+    let emb = layers.class_latents_emb.as_ref().unwrap().val();
+    let cls = |i: usize| {
+        emb.clone()
+            .narrow(0, i, 1)
+            .unsqueeze_dim::<3>(0)
+            .expand([batch, 1, d_model])
+    };
+    let tok = |t: usize| x.clone().narrow(1, t, 1);
+    let reference = Tensor::cat(
+        vec![
+            cls(0), // Start
+            tok(0),
+            cls(3), // Custom(1)
+            tok(1),
+            cls(1), // Middle
+            tok(2),
+            tok(3),
+            cls(2), // End
+        ],
+        1,
+    );
+    assert_eq!(reference.dims(), [batch, seq + 4, d_model]);
+
+    let state = |c: &Mamba2Caches| -> Vec<(Tensor<3>, Tensor<4>)> {
+        c.caches
+            .iter()
+            .map(|c| (c.conv_bvk.clone(), c.ssm_bhpr.clone()))
+            .collect()
+    };
+    let assert_state = |a: &[(Tensor<3>, Tensor<4>)], b: &[(Tensor<3>, Tensor<4>)], who: &str| {
+        for (i, ((ca, sa), (cb, sb))) in a.iter().zip(b).enumerate() {
+            assert!(
+                max_abs_diff(ca.clone(), cb.clone()) < 1e-4,
+                "{who}: layer {i} conv state disagrees"
+            );
+            assert!(
+                max_abs_diff(sa.clone(), sb.clone()) < 1e-4,
+                "{who}: layer {i} ssm state disagrees"
+            );
+        }
+    };
+
+    // Step the four user tokens, keeping what each step handed back.
+    let mut class = ClassCursors::new(seq);
+    let mut caches = None;
+    let mut got = Vec::new();
+    for t in 0..seq {
+        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
+        let (yt, c) = layers.step(xt, caches, Some(&mut class));
+        got.push((yt, state(&c), class.stack));
+        caches = Some(c);
+    }
+
+    // The marked `forward` claims to *be* that reference sequence…
+    let (y_marked, c_marked) = layers.forward(x.clone(), None, path.clone(), None);
+    // …so drop the markers (same weights) and run the reference itself.
+    layers.class_latents = Vec::new();
+    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None);
+    assert!(
+        max_abs_diff(y_marked, y_ref.clone()) < 1e-4,
+        "the markers did not land where the reference splices them"
+    );
+    assert_state(&state(&c_marked), &state(&c_ref), "forward");
+
+    // Each step: the token it returned, the one it dropped, and its state.
+    let last = [1usize, 3, 5, 7]; // u0, u1, u2, End
+    let dropped = [0usize, 2, 4, 6]; // Start, Custom, Middle, u3
+    let consumed = [2usize, 4, 6, 8]; // reference tokens emitted by then
+    for (t, (yt, st, cursor)) in got.into_iter().enumerate() {
+        assert_eq!(cursor, consumed[t], "step {t} left the cursor elsewhere");
+        let want = y_ref.clone().narrow(1, last[t], 1).squeeze_dim::<2>(1);
+        let other = y_ref.clone().narrow(1, dropped[t], 1).squeeze_dim::<2>(1);
+        assert!(
+            max_abs_diff(yt.clone(), want) < 1e-4,
+            "step {t} did not return its last emitted token"
+        );
+        assert!(
+            max_abs_diff(yt, other) > 1e-3,
+            "step {t} returned the token it should have dropped"
+        );
+        // The state must be the reference's after exactly those tokens — so the
+        // closing `End` of step 3 really did run through the recurrence.
+        let (_y, c) = layers.forward(
+            reference.clone().narrow(1, 0, consumed[t]),
+            None,
+            path.clone(),
+            None,
+        );
+        assert_state(&st, &state(&c), &format!("step {t}"));
+    }
 }

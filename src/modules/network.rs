@@ -3,9 +3,10 @@ use crate::modules::{ResidualsConfig, RmsNorm, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::Schedule;
 use crate::utils::class::{
-    assert_step_compatible, class_marker_output_indices, class_step_injections, init_class_emb,
-    insert_class_markers,
+    assert_full_len_known, class_chunk_plan, class_marker_output_indices, class_row,
+    init_class_emb, insert_class_markers,
 };
+use crate::utils::{ClassCursor, ClassCursors};
 use burn::config::Config;
 use burn::module::Param;
 use burn::nn::{Embedding, EmbeddingConfig, Linear, LinearConfig};
@@ -38,101 +39,134 @@ where
     M::SsdPath: Clone,
 {
     /// Output positions of the class tokens for an `orig_len` input.
+    ///
+    /// A marker that never lands (a `Custom` at or past the end) reports a
+    /// position past the emitted sequence — compare against its length.
     pub fn class_token_output_indices(&self, orig_len: usize) -> Vec<usize> {
         class_marker_output_indices(&self.class_tokens, orig_len)
     }
 
-    /// Splice this network's class latents into `x` (no-op when there are none).
-    fn insert_tokens(&self, x: Tensor<3>) -> Tensor<3> {
-        if self.class_tokens_emb.is_none() {
-            return x;
-        }
-        insert_class_markers(x, &self.class_tokens, self.class_tokens_emb.as_ref()).0
+    /// Splice this network's class tokens into the chunk `x` (no-op when there
+    /// are none), advancing the network-level cursor.
+    fn insert_tokens(&self, x: Tensor<3>, class: &mut ClassCursors) -> Tensor<3> {
+        let mut cursor = ClassCursor::at(class.network, class.full_len);
+        let x = insert_class_markers(
+            x,
+            &self.class_tokens,
+            self.class_tokens_emb.as_ref(),
+            &mut cursor,
+            "LatentNetwork",
+        );
+        class.network = cursor.offset;
+        x
     }
 
     /// `in_proj → layers → out_proj` over a full sequence
     /// (`[batch, sequence, input_size]` → `[batch, sequence (+ class tokens),
     /// output_size]`).
+    ///
+    /// `class` places this network's class tokens *and* the inner stack's class
+    /// latents; `None` takes `x` for the whole sequence. Handing the same
+    /// [`ClassCursors`] to consecutive chunks places every marker exactly where
+    /// a single call over the concatenated sequence would.
     pub fn forward(
         &self,
         x: Tensor<3>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, M::Caches) {
-        let x = self.insert_tokens(x);
+        // No cursors ⇒ this one call covers the whole sequence.
+        let mut whole = ClassCursors::new(x.dims()[1]);
+        let class = class.unwrap_or(&mut whole);
+        let x = self.insert_tokens(x, class);
         let x = self.in_proj.forward(x);
-        let (x, caches) = self.layers.forward(x, caches, ssd_path);
+        // The stack's sequence is this one, lengthened by the class tokens.
+        let saved = class.enter(self.class_tokens.len());
+        let (x, caches) = self.layers.forward(x, caches, ssd_path, Some(&mut *class));
+        class.leave(saved);
         let x = self.out_proj.forward(x);
         (x, caches)
     }
 
     /// Single-token step (`[batch, input_size]` → `[batch, output_size]`).
     ///
-    /// Three independent class cursors:
-    /// - `own_index` — the network's own [`Self::class_tokens`] (spliced before
-    ///   `in_proj`). When it lands on a class-token position those tokens are
-    ///   stepped first (each a full network pass, advancing `own_index`), then
-    ///   the user token; only the user token's output is returned.
-    /// - `layers_own_index` / `layer_indices` — forwarded straight to the inner
-    ///   [`Layers::step`] (stack-level latents, and the per-virtual-layer cursor
-    ///   vector respectively).
+    /// `class` drives all three class levels at once: this network's own
+    /// [`Self::class_tokens`] (`class.network`) plus the inner [`Layers::step`]
+    /// cursors (`class.stack`, `class.per_layer`).
     ///
     /// As in `forward`, the network's class tokens are part of the sequence that
-    /// enters the layers, so each is threaded through the layers (carrying the
-    /// inner cursors) just like the user token — only the user token's output is
-    /// returned. A `None` cursor skips that level; `Middle`/`End` markers panic
-    /// for the cursored level (use `forward`).
+    /// enters the layers, so each is run through a full network pass (carrying
+    /// the inner cursors, so the layers splice their own latents around it
+    /// exactly as in `forward`). What comes back is the output of the **last**
+    /// token the step emitted: the user token, unless an `End` marker (at either
+    /// level) follows it, that marker being then the sequence's true last token.
+    /// `None` injects nothing anywhere; `Middle`/`End` markers then panic, as
+    /// they do without a [`ClassCursors::full_len`] hint.
     pub fn step(
         &self,
         x: Tensor<2>,
         caches: Option<M::Caches>,
-        own_index: Option<&mut usize>,
-        mut layers_own_index: Option<&mut usize>,
-        mut layer_indices: Option<&mut Vec<usize>>,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, M::Caches) {
-        // Network-level class-token injection. Each class token is run through a
-        // full network pass (carrying the inner cursors, so the layers splice
-        // their own latents around it exactly as in `forward`), then the user
-        // token; only the user token's output is returned.
-        if let Some(cursor) = own_index {
-            let [batch, input_size] = x.dims();
-            let inj = class_step_injections(&self.class_tokens, "LatentNetwork");
-            let emb = self.class_tokens_emb.as_ref();
-            let mut caches = caches;
-            while let Some(i) = inj.iter().position(|&p| p == *cursor) {
-                let row = emb
-                    .unwrap()
-                    .val()
-                    .narrow(0, i, 1)
-                    .expand([batch, input_size]);
-                let (_discard, c) = self.step(
-                    row,
-                    caches,
-                    None,
-                    layers_own_index.as_deref_mut(),
-                    layer_indices.as_deref_mut(),
-                );
-                caches = Some(c);
-                *cursor += 1;
-            }
-            let (out, caches) = self.step(x, caches, None, layers_own_index, layer_indices);
-            *cursor += 1;
-            return (out, caches);
+        let Some(class) = class else {
+            assert_full_len_known(&self.class_tokens, None, "LatentNetwork");
+            return self.step_one(x, caches, None);
+        };
+        let mut cursor = ClassCursor::at(class.network, class.full_len);
+        let plan = class_chunk_plan(&self.class_tokens, 1, &mut cursor, "LatentNetwork");
+        class.network = cursor.offset;
+        if plan.is_empty() {
+            return self.step_one(x, caches, Some(&mut *class));
         }
+        // `at == 0` ⇒ the class token precedes the user token, `at == 1` ⇒ it is
+        // an `End` closing the sequence, and follows it.
+        let [batch, input_size] = x.dims();
+        let row = |i: usize| class_row(self.class_tokens_emb.as_ref(), i, batch, input_size);
+        let (before, after): (Vec<_>, Vec<_>) = plan.into_iter().partition(|&(at, _)| at == 0);
+        let mut caches = caches;
+        for (_, i) in before {
+            let (_discard, c) = self.step_one(row(i), caches, Some(&mut *class));
+            caches = Some(c);
+        }
+        let (mut out, mut caches) = self.step_one(x, caches, Some(&mut *class));
+        for (_, i) in after {
+            // A closing `End` token *is* the sequence's last token — its output,
+            // not the user token's, is what this step produced.
+            let (o, c) = self.step_one(row(i), Some(caches), Some(&mut *class));
+            out = o;
+            caches = c;
+        }
+        (out, caches)
+    }
 
-        // The actual one-token work: forward the inner cursors to the stack.
-        assert_step_compatible(&self.class_tokens, "LatentNetwork");
+    /// One token through `in_proj → layers → out_proj`; the network's own class
+    /// tokens are placed by [`Self::step`], the inner cursors are forwarded.
+    fn step_one(
+        &self,
+        x: Tensor<2>,
+        caches: Option<M::Caches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Tensor<2>, M::Caches) {
         let x = self.in_proj.forward(x);
-        let (x, caches) = self.layers.step(x, caches, layers_own_index, layer_indices);
-        let x = self.out_proj.forward(x);
-        (x, caches)
+        let (x, caches) = match class {
+            // The stack's sequence is this one, lengthened by the class tokens.
+            Some(class) => {
+                let saved = class.enter(self.class_tokens.len());
+                let out = self.layers.step(x, caches, Some(&mut *class));
+                class.leave(saved);
+                out
+            }
+            None => self.layers.step(x, caches, None),
+        };
+        (self.out_proj.forward(x), caches)
     }
 
     /// Stationary fixed point of the network under a constant input token:
     /// `in_proj → `[`Layers::step_infinite`]` → out_proj`, no caches.
     /// Cursorless (class tokens are not injected).
     pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
-        assert_step_compatible(&self.class_tokens, "LatentNetwork");
+        assert_full_len_known(&self.class_tokens, None, "LatentNetwork");
         let x = self.in_proj.forward(x);
         let x = self.layers.step_infinite(x);
         self.out_proj.forward(x)
@@ -202,15 +236,17 @@ where
     M::SsdPath: Clone,
 {
     /// Full-sequence pass: token IDs `[batch, sequence]` → logits
-    /// `[batch, sequence, padded_vocab]`.
+    /// `[batch, sequence, padded_vocab]`. `class` places the inner stack's class
+    /// latents (`None` ⇒ `x` is the whole sequence) — see [`Layers::forward`].
     pub fn forward(
         &self,
         x: Tensor<2, Int>,
         caches: Option<M::Caches>,
         ssd_path: M::SsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, M::Caches) {
         let x = self.embedding.forward(x);
-        let (x, caches) = self.layers.forward(x, caches, ssd_path);
+        let (x, caches) = self.layers.forward(x, caches, ssd_path, class);
         let x = self.norm_f.forward(x);
         (self.apply_lm_head(x), caches)
     }
@@ -218,22 +254,20 @@ where
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
     ///
     /// The vocab network has no class tokens of its own (those would duplicate
-    /// the layers' class latents); it simply forwards the inner [`Layers`]
-    /// cursors — `layers_own_index` (stack-level latents) and `layer_indices`
-    /// (per-virtual-layer) — to [`Layers::step`].
+    /// the layers' class latents); it simply forwards `class` — the stack-level
+    /// and per-virtual-layer cursors — to [`Layers::step`].
     pub fn step(
         &self,
         x: Tensor<1, Int>,
         caches: Option<M::Caches>,
-        layers_own_index: Option<&mut usize>,
-        layer_indices: Option<&mut Vec<usize>>,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, M::Caches) {
         // Embed the single token via a temporary unit sequence axis.
         let x = self
             .embedding
             .forward(x.unsqueeze_dim::<2>(1))
             .squeeze_dim(1);
-        let (x, caches) = self.layers.step(x, caches, layers_own_index, layer_indices);
+        let (x, caches) = self.layers.step(x, caches, class);
         let x = self.norm_f.forward(x);
         // Reuse the 3-D head by lifting/lowering the sequence axis.
         let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
@@ -338,6 +372,7 @@ impl MambaLatentNet {
         x: Tensor<3>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -352,7 +387,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c) = net.forward(x, caches, ());
+                let (y, c) = net.forward(x, caches, (), class);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -367,7 +402,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c) = net.forward(x, caches, path);
+                let (y, c) = net.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -382,24 +417,21 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c) = net.forward(x, caches, path);
+                let (y, c) = net.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba3(c))
             }
         }
     }
 
     /// Single-token step. No path argument (decoding is recurrent for all
-    /// families). Cache family must match the network. The three class cursors
-    /// (`own_index` for the network's class tokens, `layers_own_index` for the
-    /// stack-level class latents, `layer_indices` for the per-virtual-layer
-    /// vector) are threaded to the inner network — see [`LatentNetwork::step`].
+    /// families). Cache family must match the network. `class` — the cursors of
+    /// all three class levels — is threaded to the inner network, see
+    /// [`LatentNetwork::step`].
     pub fn step(
         &self,
         x: Tensor<2>,
         caches: Option<MambaCaches>,
-        own_index: Option<&mut usize>,
-        layers_own_index: Option<&mut usize>,
-        layer_indices: Option<&mut Vec<usize>>,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -409,7 +441,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-1 network"),
                 });
-                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -419,7 +451,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-2 network"),
                 });
-                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -429,7 +461,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
-                let (y, c) = net.step(x, caches, own_index, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -652,6 +684,7 @@ impl MambaVocabNet {
         x: Tensor<2, Int>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -666,7 +699,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c) = net.forward(x, caches, ());
+                let (y, c) = net.forward(x, caches, (), class);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -681,7 +714,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c) = net.forward(x, caches, path);
+                let (y, c) = net.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -696,22 +729,20 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c) = net.forward(x, caches, path);
+                let (y, c) = net.forward(x, caches, path, class);
                 (y, MambaCaches::Mamba3(c))
             }
         }
     }
 
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
-    /// Cache family must match the network. The two inner [`Layers`] class
-    /// cursors (`layers_own_index`, `layer_indices`) are forwarded — see
-    /// [`VocabNetwork::step`].
+    /// Cache family must match the network. `class` — the inner [`Layers`]
+    /// cursors — is forwarded, see [`VocabNetwork::step`].
     pub fn step(
         &self,
         x: Tensor<1, Int>,
         caches: Option<MambaCaches>,
-        layers_own_index: Option<&mut usize>,
-        layer_indices: Option<&mut Vec<usize>>,
+        class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -721,7 +752,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-1 network"),
                 });
-                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -731,7 +762,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-2 network"),
                 });
-                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -741,7 +772,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("cache family does not match Mamba-3 network"),
                 });
-                let (y, c) = net.step(x, caches, layers_own_index, layer_indices);
+                let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba3(c))
             }
         }

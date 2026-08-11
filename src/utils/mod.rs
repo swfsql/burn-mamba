@@ -19,7 +19,8 @@ pub mod class;
 #[cfg(feature = "autodiff")]
 pub mod combined_grad;
 /// Rank-tagged `FloatTensor` primitive wrapper mirroring the `Tensor` method
-/// API, used by the custom-backward gradient math.
+/// API, used by the custom-backward gradient math (Mamba-2/3 only).
+#[cfg(any(feature = "mamba2", feature = "mamba3"))]
 pub(crate) mod fprim;
 /// Virtual-layer → real-weight index scheduling shared by all families.
 pub mod schedule;
@@ -29,7 +30,7 @@ pub mod scheduler;
 #[cfg(test)]
 pub mod test_helpers;
 
-pub use class::{ClassLatent, ClassToken};
+pub use class::{ClassCursor, ClassCursors, ClassLatent, ClassToken};
 pub use schedule::{BidiSchedule, Schedule};
 pub use scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 

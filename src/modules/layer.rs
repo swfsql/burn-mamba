@@ -1,7 +1,9 @@
 use crate::modules::{GatedMlp, RmsNorm};
 use crate::prelude::*;
-use crate::utils::ClassLatent;
-use crate::utils::class::{assert_step_compatible, class_step_injections, insert_class_markers};
+use crate::utils::class::{
+    assert_full_len_known, class_chunk_plan, class_row, insert_class_markers,
+};
+use crate::utils::{ClassCursor, ClassLatent};
 use burn::module::Param;
 use burn::prelude::*;
 
@@ -29,11 +31,11 @@ use burn::prelude::*;
 /// sub-block and always applies). Without an `mlp` the delta is just `h₁` and
 /// nothing changes for Mamba-1/2 or for Mamba-3 checkpoints that carry no MLP.
 ///
-/// May carry its own [`ClassLatent`]s. In `step` they are spliced via the
-/// `index` cursor; in `forward` the caller splices them first (via
-/// [`Self::insert_latents`]) so the residual it adds sees the same lengthened
-/// sequence. They are independent of any class latents on the enclosing
-/// [`Layers`].
+/// May carry its own [`ClassLatent`]s, placed from a [`ClassCursor`]: `step`
+/// splices them around the token it is given, while in `forward` the caller
+/// splices them first (via [`Self::insert_latents`]) so the residual it adds
+/// sees the same lengthened sequence. They are independent of any class latents
+/// on the enclosing [`Layers`].
 #[derive(Module, Debug)]
 pub struct Layer<M: Module> {
     /// Pre-norm applied before the inner block.
@@ -54,15 +56,23 @@ pub struct Layer<M: Module> {
 }
 
 impl<M: MambaBlock> Layer<M> {
-    /// Splice this layer's class latents into `x` (no-op when there are none).
-    /// Public to the crate so [`Layers`](crate::modules::Layers) can lengthen the
-    /// sequence itself (and add the matching residual) before calling
-    /// [`Self::forward`].
-    pub(crate) fn insert_latents(&self, x: Tensor<3>) -> Tensor<3> {
-        if self.class_latents_emb.is_none() {
-            return x;
-        }
-        insert_class_markers(x, &self.class_latents, self.class_latents_emb.as_ref()).0
+    /// Splice this layer's class latents into the chunk `x` (no-op when there
+    /// are none), advancing `class` past it.
+    ///
+    /// Public so [`Layers`] — and a caller driving a bare
+    /// [`Layer`] — can lengthen the sequence itself (and add the matching
+    /// residual) before calling [`Self::forward`]. `None` cursors ⇒ this chunk
+    /// is the whole sequence.
+    pub fn insert_latents(&self, x: Tensor<3>, class: Option<&mut ClassCursor>) -> Tensor<3> {
+        let mut whole = ClassCursor::whole(x.dims()[1]);
+        let cursor = class.unwrap_or(&mut whole);
+        insert_class_markers(
+            x,
+            &self.class_latents,
+            self.class_latents_emb.as_ref(),
+            cursor,
+            "Layer",
+        )
     }
 
     /// The layer input, kept only when the feed-forward sub-block needs it for
@@ -113,40 +123,57 @@ impl<M: MambaBlock> Layer<M> {
 
     /// Single-token Pre-LN block step **without** the residual.
     ///
-    /// `index` is the running cursor into this layer's *output* sequence. With
-    /// `Some`, whenever it lands on one of this layer's class-latent positions
-    /// those latents are stepped first (each advancing `index`, recursing with
-    /// `None`); only the user token's output and cache are returned. With `None`
-    /// no class latents are injected — and `Middle`/`End` latents panic (their
-    /// positions need the full sequence; use `forward`). The residual is the
-    /// caller's responsibility.
+    /// `class` is this layer's own class-latent cursor. With `Some`, every
+    /// latent whose position falls on this token is stepped around it — before
+    /// it (`Start`/`Middle`/`Custom`, which precede a token) or after it (`End`,
+    /// which closes the sequence) — each a step of its own. What comes back is
+    /// the **last** token the step emitted (see
+    /// [`ClassCursors`](crate::utils::ClassCursors)): the user token, unless an
+    /// `End` latent follows it, that latent being then the sequence's true last
+    /// token. With `None` no class latents are injected — and `Middle`/`End`
+    /// latents panic (their positions need the full sequence length). The
+    /// residual is the caller's responsibility.
     pub fn step(
         &self,
         x: Tensor<2>,
         cache: Option<M::Cache>,
-        index: Option<&mut usize>,
+        class: Option<&mut ClassCursor>,
     ) -> (Tensor<2>, M::Cache) {
-        let Some(cursor) = index else {
-            // The actual one-token work (no class injection, no outer residual).
-            assert_step_compatible(&self.class_latents, "Layer");
-            let residual = self.mlp_residual(&x);
-            let normed = self.norm.forward(x);
-            let (h1, cache) = self.mamba_block.block_step(normed, cache);
-            return (self.add_mlp_delta(residual, h1), cache);
+        let Some(cursor) = class else {
+            assert_full_len_known(&self.class_latents, None, "Layer");
+            return self.step_one(x, cache);
         };
-        let [batch, d_model] = x.dims();
-        let inj = class_step_injections(&self.class_latents, "Layer");
-        let emb = self.class_latents_emb.as_ref();
-        let mut cache = cache;
-        while let Some(i) = inj.iter().position(|&p| p == *cursor) {
-            let row = emb.unwrap().val().narrow(0, i, 1).expand([batch, d_model]);
-            let (_discard, c) = self.step(row, cache, None);
-            cache = Some(c);
-            *cursor += 1;
+        let plan = class_chunk_plan(&self.class_latents, 1, cursor, "Layer");
+        if plan.is_empty() {
+            return self.step_one(x, cache);
         }
-        let (out, cache) = self.step(x, cache, None);
-        *cursor += 1;
+        // `at == 0` ⇒ the latent precedes the user token, `at == 1` ⇒ it is an
+        // `End` closing the sequence, and follows it.
+        let [batch, d_model] = x.dims();
+        let row = |i: usize| class_row(self.class_latents_emb.as_ref(), i, batch, d_model);
+        let (before, after): (Vec<_>, Vec<_>) = plan.into_iter().partition(|&(at, _)| at == 0);
+        let mut cache = cache;
+        for (_, i) in before {
+            let (_discard, c) = self.step_one(row(i), cache);
+            cache = Some(c);
+        }
+        let (mut out, mut cache) = self.step_one(x, cache);
+        for (_, i) in after {
+            // A closing `End` *is* the sequence's last token — its output, not
+            // the user token's, is what this step produced.
+            let (o, c) = self.step_one(row(i), Some(cache));
+            out = o;
+            cache = c;
+        }
         (out, cache)
+    }
+
+    /// The actual one-token work: no class injection, no outer residual.
+    fn step_one(&self, x: Tensor<2>, cache: Option<M::Cache>) -> (Tensor<2>, M::Cache) {
+        let residual = self.mlp_residual(&x);
+        let normed = self.norm.forward(x);
+        let (h1, cache) = self.mamba_block.block_step(normed, cache);
+        (self.add_mlp_delta(residual, h1), cache)
     }
 
     /// Stationary fixed point of the Pre-LN block under a constant token,
@@ -157,7 +184,7 @@ impl<M: MambaBlock> Layer<M> {
     /// The feed-forward sub-block is point-wise, so it composes with the limit:
     /// once the mixer output settles, `x + h₁` is constant and so is `h₂`.
     pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
-        assert_step_compatible(&self.class_latents, "Layer");
+        assert_full_len_known(&self.class_latents, None, "Layer");
         let residual = self.mlp_residual(&x);
         let h1 = self.mamba_block.block_step_infinite(self.norm.forward(x));
         self.add_mlp_delta(residual, h1)

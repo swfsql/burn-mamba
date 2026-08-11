@@ -126,7 +126,7 @@ impl AeModel {
         let h_bsd = self.enc_in_proj.forward(patches_bsp); // [batch, npatch, d_model]
         let h_bsd = h_bsd + self.enc_pos.val().unsqueeze_dim::<3>(0); // + patch position
         // The bidi stack may splice class latents (lengthening the sequence).
-        let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::ssd_path());
+        let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::ssd_path(), None);
         // Read the summary out of the class-latent position if configured (with a
         // bidi encoder that token has seen the whole image), else mean-pool over
         // the patches — both are order-agnostic image summaries.
@@ -166,7 +166,9 @@ impl AeModel {
             }
         };
 
-        let (d_bsd, _caches) = self.dec_layers.forward(dec_in, None, Self::ssd_path());
+        let (d_bsd, _caches) = self
+            .dec_layers
+            .forward(dec_in, None, Self::ssd_path(), None);
         let patches_bsp = self.dec_out.forward(d_bsd); // [batch, npatch, patch²]
         unpatchify(patches_bsp, self.patch, HEIGHT, WIDTH) // [batch, HEIGHT*WIDTH]
     }

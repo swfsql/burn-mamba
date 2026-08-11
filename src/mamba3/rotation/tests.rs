@@ -941,8 +941,12 @@ fn quaternion_bidi_forward_runs() {
 
     let (batch, seq) = (2, 5);
     let x = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (out, _caches) =
-        layers.forward(x, None, MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)));
+    let (out, _caches) = layers.forward(
+        x,
+        None,
+        MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+        None,
+    );
     assert_eq!([batch, seq, 32], out.dims());
 }
 

@@ -123,13 +123,13 @@ fn layers_standard_ignore_residuals_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, None, None);
+        let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
@@ -171,13 +171,13 @@ fn layers_multi_gate_forward_step_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, None, None);
+        let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
@@ -222,13 +222,13 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default());
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, None, None);
+        let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
@@ -287,13 +287,13 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default());
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, None, None);
+        let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
@@ -352,7 +352,7 @@ fn bidi_multi_gate_forward_and_grads() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default());
+    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None);
     assert_eq!(y.dims(), [batch, seq, d_model]);
 
     let grads = y.sum().backward();

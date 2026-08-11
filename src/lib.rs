@@ -39,7 +39,6 @@
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
-#![allow(warnings)]
 
 /// Mamba-1: the original selective state space model.
 #[cfg(feature = "mamba1")]
@@ -89,6 +88,7 @@ pub mod utils;
 /// it `false` removes the check entirely.
 #[cfg(feature = "check-nan")]
 pub const DENY_NAN: bool = true;
+/// When `true`, [`modules::sanity`] panics if it observes a `NaN`.
 #[cfg(not(feature = "check-nan"))]
 pub const DENY_NAN: bool = false;
 
@@ -97,5 +97,6 @@ pub const DENY_NAN: bool = false;
 /// Compiled-in guard (off by default), companion to [`DENY_NAN`].
 #[cfg(feature = "check-inf")]
 pub const DENY_INF: bool = true;
+/// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
 #[cfg(not(feature = "check-inf"))]
 pub const DENY_INF: bool = false;

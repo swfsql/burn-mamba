@@ -106,7 +106,7 @@ fn network_two_layers_constant_input() {
     let mut caches = None;
     let mut out = None;
     for _ in 0..steps {
-        let (o, c) = net.step(x.clone(), caches, None, None, None);
+        let (o, c) = net.step(x.clone(), caches, None);
         out = Some(o);
         caches = Some(c);
     }

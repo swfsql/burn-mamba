@@ -43,6 +43,7 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
         batch.inputs,
         None,
         MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+        None,
     );
     assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 

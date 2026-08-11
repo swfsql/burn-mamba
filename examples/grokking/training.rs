@@ -163,13 +163,13 @@ pub fn final_logits(
         let mut logits = None;
         for t in 0..s {
             let x_b = inputs_bs.clone().narrow(1, t, 1).squeeze_dim::<1>(1);
-            let (logits_bc, new_caches) = model.step(x_b, caches, None, None);
+            let (logits_bc, new_caches) = model.step(x_b, caches, None);
             caches = Some(new_caches);
             logits = Some(logits_bc);
         }
         logits.expect("at least one token")
     } else {
-        let (logits_bsc, _caches) = model.forward(inputs_bs.clone(), None, ssd_path());
+        let (logits_bsc, _caches) = model.forward(inputs_bs.clone(), None, ssd_path(), None);
         logits_bsc.narrow(1, s - 1, 1).squeeze_dim::<2>(1)
     }
 }

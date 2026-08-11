@@ -325,7 +325,7 @@ impl Wrap {
 
         let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None)); // saves ~1/3 vram against Minimal
         //
-        let (output, _caches) = model.forward(input.clone(), None, ssd_path);
+        let (output, _caches) = model.forward(input.clone(), None, ssd_path, None);
         assert_eq!([batch_size, sequence_size, 10], output.dims());
         let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 10], last_output.dims());

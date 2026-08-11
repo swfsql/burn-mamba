@@ -335,7 +335,7 @@ impl Wrap {
 
         let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None));
         //
-        let (output, _caches) = model.forward(inputs, None, ssd_path);
+        let (output, _caches) = model.forward(inputs, None, ssd_path, None);
         assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
         // Score every position: flatten (batch, seq) into a single axis so the
