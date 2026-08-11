@@ -2,8 +2,8 @@
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span><span class="kw">crate</span>::prelude::<span class="kw-2">*</span>;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span><span class="kw">crate</span>::utils::Schedule;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span><span class="kw">crate</span>::utils::class::{
-<a href=#5 id=5 data-nosnippet>5</a>    assert_full_len_known, class_chunk_plan, class_marker_output_indices, class_row,
-<a href=#6 id=6 data-nosnippet>6</a>    init_class_emb, insert_class_markers,
+<a href=#5 id=5 data-nosnippet>5</a>    assert_full_len_known, class_chunk_plan, class_emb_width, class_marker_output_indices,
+<a href=#6 id=6 data-nosnippet>6</a>    class_prime_plan, class_row, init_class_emb, insert_class_markers,
 <a href=#7 id=7 data-nosnippet>7</a>};
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span><span class="kw">crate</span>::utils::{ClassCursor, ClassCursors, ClassLatent};
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>burn::module::Param;
@@ -261,329 +261,467 @@
 <a href=#261 id=261 data-nosnippet>261</a>        // the user token — `at == 0` before it, `at == 1` after (an `End` latent
 <a href=#262 id=262 data-nosnippet>262</a>        // closing the sequence, which then ends the stream).
 <a href=#263 id=263 data-nosnippet>263</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>stream: Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt; = Vec::with_capacity(<span class="number">1</span>);
-<a href=#264 id=264 data-nosnippet>264</a>        <span class="comment">// Full length of the stream the layers see, class latents included.
-<a href=#265 id=265 data-nosnippet>265</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>full = <span class="prelude-val">None</span>;
-<a href=#266 id=266 data-nosnippet>266</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(class) = class.as_deref_mut() {
-<a href=#267 id=267 data-nosnippet>267</a>            <span class="kw">let </span><span class="kw-2">mut </span>cursor = ClassCursor::at(class.stack, class.full_len);
-<a href=#268 id=268 data-nosnippet>268</a>            <span class="kw">let </span>plan = class_chunk_plan(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="number">1</span>, <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layers"</span>);
-<a href=#269 id=269 data-nosnippet>269</a>            class.stack = cursor.offset;
-<a href=#270 id=270 data-nosnippet>270</a>            full = class.full_len.map(|l| l + <span class="self">self</span>.class_latents.len());
-<a href=#271 id=271 data-nosnippet>271</a>            <span class="kw">let </span>row = |i: usize| class_row(<span class="self">self</span>.class_latents_emb.as_ref(), i, batch, d_model);
-<a href=#272 id=272 data-nosnippet>272</a>            stream.extend(
-<a href=#273 id=273 data-nosnippet>273</a>                plan.iter()
-<a href=#274 id=274 data-nosnippet>274</a>                    .filter(|&amp;&amp;(at, <span class="kw">_</span>)| at == <span class="number">0</span>)
-<a href=#275 id=275 data-nosnippet>275</a>                    .map(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, i)| row(i)),
-<a href=#276 id=276 data-nosnippet>276</a>            );
-<a href=#277 id=277 data-nosnippet>277</a>            stream.push(x);
-<a href=#278 id=278 data-nosnippet>278</a>            stream.extend(
-<a href=#279 id=279 data-nosnippet>279</a>                plan.iter()
-<a href=#280 id=280 data-nosnippet>280</a>                    .filter(|&amp;&amp;(at, <span class="kw">_</span>)| at == <span class="number">1</span>)
-<a href=#281 id=281 data-nosnippet>281</a>                    .map(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, i)| row(i)),
-<a href=#282 id=282 data-nosnippet>282</a>            );
-<a href=#283 id=283 data-nosnippet>283</a>        } <span class="kw">else </span>{
-<a href=#284 id=284 data-nosnippet>284</a>            assert_full_len_known(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layers"</span>);
-<a href=#285 id=285 data-nosnippet>285</a>            stream.push(x);
-<a href=#286 id=286 data-nosnippet>286</a>        }
-<a href=#287 id=287 data-nosnippet>287</a>
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// Propagate the stream up through each virtual layer, each layer splicing
-<a href=#289 id=289 data-nosnippet>289</a>        // its own class latents into the stream it receives.
-<a href=#290 id=290 data-nosnippet>290</a>        </span><span class="kw">for </span>pos <span class="kw">in </span><span class="number">0</span>..n {
-<a href=#291 id=291 data-nosnippet>291</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[<span class="self">self</span>.real_idx(pos)];
-<a href=#292 id=292 data-nosnippet>292</a>            <span class="kw">let </span>skip = <span class="self">self</span>.skip_residual(pos, n);
-<a href=#293 id=293 data-nosnippet>293</a>            <span class="kw">let </span>plan = <span class="kw">if let </span><span class="prelude-val">Some</span>(class) = class.as_deref_mut() {
-<a href=#294 id=294 data-nosnippet>294</a>                <span class="kw">let </span><span class="kw-2">mut </span>cursor = ClassCursor::at(class.per_layer[pos], full);
-<a href=#295 id=295 data-nosnippet>295</a>                <span class="kw">let </span>plan =
-<a href=#296 id=296 data-nosnippet>296</a>                    class_chunk_plan(<span class="kw-2">&amp;</span>layer.class_latents, stream.len(), <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layer"</span>);
-<a href=#297 id=297 data-nosnippet>297</a>                class.per_layer[pos] = cursor.offset;
-<a href=#298 id=298 data-nosnippet>298</a>                plan
-<a href=#299 id=299 data-nosnippet>299</a>            } <span class="kw">else </span>{
-<a href=#300 id=300 data-nosnippet>300</a>                assert_full_len_known(<span class="kw-2">&amp;</span>layer.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layer"</span>);
-<a href=#301 id=301 data-nosnippet>301</a>                Vec::new()
-<a href=#302 id=302 data-nosnippet>302</a>            };
-<a href=#303 id=303 data-nosnippet>303</a>            full = full.map(|l| l + layer.class_latents.len());
-<a href=#304 id=304 data-nosnippet>304</a>
-<a href=#305 id=305 data-nosnippet>305</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = slots[pos].take();
-<a href=#306 id=306 data-nosnippet>306</a>            <span class="kw">let </span><span class="kw-2">mut </span>next: Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt; = Vec::with_capacity(stream.len() + plan.len());
-<a href=#307 id=307 data-nosnippet>307</a>            <span class="comment">// One token through the layer, adding its residual here unless
-<a href=#308 id=308 data-nosnippet>308</a>            // suppressed (then the token is moved straight in — no clone/add).
-<a href=#309 id=309 data-nosnippet>309</a>            </span><span class="kw">let </span>run = |token: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;M::Cache&gt;| {
-<a href=#310 id=310 data-nosnippet>310</a>                <span class="kw">if </span>skip {
-<a href=#311 id=311 data-nosnippet>311</a>                    layer.step(token, cache, <span class="prelude-val">None</span>)
-<a href=#312 id=312 data-nosnippet>312</a>                } <span class="kw">else </span>{
-<a href=#313 id=313 data-nosnippet>313</a>                    <span class="kw">let </span>(out, c) = layer.step(token.clone(), cache, <span class="prelude-val">None</span>);
-<a href=#314 id=314 data-nosnippet>314</a>                    (out + token, c)
-<a href=#315 id=315 data-nosnippet>315</a>                }
-<a href=#316 id=316 data-nosnippet>316</a>            };
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">let </span>row = |i: usize| class_row(layer.class_latents_emb.as_ref(), i, batch, d_model);
-<a href=#318 id=318 data-nosnippet>318</a>            <span class="kw">let </span><span class="kw-2">mut </span>plan = plan.into_iter().peekable();
-<a href=#319 id=319 data-nosnippet>319</a>            <span class="kw">for </span>(t, token) <span class="kw">in </span>stream.into_iter().enumerate() {
-<a href=#320 id=320 data-nosnippet>320</a>                <span class="comment">// This layer's class latents that fall before this token.
-<a href=#321 id=321 data-nosnippet>321</a>                </span><span class="kw">while let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, i)) = plan.next_if(|<span class="kw-2">&amp;</span>(at, <span class="kw">_</span>)| at == t) {
-<a href=#322 id=322 data-nosnippet>322</a>                    <span class="kw">let </span>(out, c) = run(row(i), cache);
-<a href=#323 id=323 data-nosnippet>323</a>                    next.push(out);
-<a href=#324 id=324 data-nosnippet>324</a>                    cache = <span class="prelude-val">Some</span>(c);
-<a href=#325 id=325 data-nosnippet>325</a>                }
-<a href=#326 id=326 data-nosnippet>326</a>                <span class="kw">let </span>(out, c) = run(token, cache);
-<a href=#327 id=327 data-nosnippet>327</a>                next.push(out);
-<a href=#328 id=328 data-nosnippet>328</a>                cache = <span class="prelude-val">Some</span>(c);
-<a href=#329 id=329 data-nosnippet>329</a>            }
-<a href=#330 id=330 data-nosnippet>330</a>            <span class="comment">// …and the `End` latents closing the stream, after its last token.
-<a href=#331 id=331 data-nosnippet>331</a>            </span><span class="kw">for </span>(_at, i) <span class="kw">in </span>plan {
-<a href=#332 id=332 data-nosnippet>332</a>                <span class="kw">let </span>(out, c) = run(row(i), cache);
-<a href=#333 id=333 data-nosnippet>333</a>                next.push(out);
-<a href=#334 id=334 data-nosnippet>334</a>                cache = <span class="prelude-val">Some</span>(c);
-<a href=#335 id=335 data-nosnippet>335</a>            }
-<a href=#336 id=336 data-nosnippet>336</a>            slots[pos] = cache;
-<a href=#337 id=337 data-nosnippet>337</a>            stream = next;
-<a href=#338 id=338 data-nosnippet>338</a>        }
-<a href=#339 id=339 data-nosnippet>339</a>
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="comment">// The stream keeps `forward`'s token order, so its last element is the
-<a href=#341 id=341 data-nosnippet>341</a>        // latest token of the sequence — the user token, or an `End` after it.
-<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="kw">let </span>out = stream.pop().expect(<span class="string">"the user token is always emitted"</span>);
-<a href=#343 id=343 data-nosnippet>343</a>        (out, M::Caches::from_slots(slots))
-<a href=#344 id=344 data-nosnippet>344</a>    }
-<a href=#345 id=345 data-nosnippet>345</a>
-<a href=#346 id=346 data-nosnippet>346</a>    <span class="doccomment">/// Stationary fixed point of the whole stack under a constant token, with
-<a href=#347 id=347 data-nosnippet>347</a>    /// **no caches** involved: under a constant input each layer's output
-<a href=#348 id=348 data-nosnippet>348</a>    /// converges (its decay damps the transient, and the readout phase of the
-<a href=#349 id=349 data-nosnippet>349</a>    /// rotation cancels), so the downstream layer's input converges too and
-<a href=#350 id=350 data-nosnippet>350</a>    /// the limit composes **exactly**, layer by layer — even though every
-<a href=#351 id=351 data-nosnippet>351</a>    /// layer's SSM state keeps rotating forever. Residual handling mirrors
-<a href=#352 id=352 data-nosnippet>352</a>    /// [`Self::step`]; cursorless (class latents are not injected).
-<a href=#353 id=353 data-nosnippet>353</a>    </span><span class="kw">pub fn </span>step_infinite(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">2</span>&gt; {
-<a href=#354 id=354 data-nosnippet>354</a>        <span class="kw">if let </span>Residuals::MultiGate(mg) = <span class="kw-2">&amp;</span><span class="self">self</span>.residuals {
-<a href=#355 id=355 data-nosnippet>355</a>            <span class="kw">return </span><span class="self">self</span>.step_infinite_multi_gate(x, mg);
-<a href=#356 id=356 data-nosnippet>356</a>        }
-<a href=#357 id=357 data-nosnippet>357</a>        assert_full_len_known(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layers"</span>);
-<a href=#358 id=358 data-nosnippet>358</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
-<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
-<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
-<a href=#361 id=361 data-nosnippet>361</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[<span class="self">self</span>.real_idx(i)];
-<a href=#362 id=362 data-nosnippet>362</a>            h = <span class="kw">if </span><span class="self">self</span>.skip_residual(i, n) {
-<a href=#363 id=363 data-nosnippet>363</a>                layer.step_infinite(h)
-<a href=#364 id=364 data-nosnippet>364</a>            } <span class="kw">else </span>{
-<a href=#365 id=365 data-nosnippet>365</a>                layer.step_infinite(h.clone()) + h
-<a href=#366 id=366 data-nosnippet>366</a>            };
-<a href=#367 id=367 data-nosnippet>367</a>        }
-<a href=#368 id=368 data-nosnippet>368</a>        h
-<a href=#369 id=369 data-nosnippet>369</a>    }
-<a href=#370 id=370 data-nosnippet>370</a>
-<a href=#371 id=371 data-nosnippet>371</a>    <span class="doccomment">/// Multi-Gate carries the residual in its streams rather than in the token
-<a href=#372 id=372 data-nosnippet>372</a>    /// sequence, so it cannot host class latents at all — `forward` rejects them
-<a href=#373 id=373 data-nosnippet>373</a>    /// and so do the recurrent paths, at either level.
-<a href=#374 id=374 data-nosnippet>374</a>    </span><span class="kw">fn </span>assert_multi_gate_has_no_class_latents(<span class="kw-2">&amp;</span><span class="self">self</span>) {
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="macro">assert!</span>(
-<a href=#376 id=376 data-nosnippet>376</a>            <span class="self">self</span>.class_latents_emb.is_none(),
-<a href=#377 id=377 data-nosnippet>377</a>            <span class="string">"MultiGate residuals do not support stack-level class latents"
-<a href=#378 id=378 data-nosnippet>378</a>        </span>);
-<a href=#379 id=379 data-nosnippet>379</a>        <span class="macro">assert!</span>(
-<a href=#380 id=380 data-nosnippet>380</a>            <span class="self">self</span>.real_layers
-<a href=#381 id=381 data-nosnippet>381</a>                .iter()
-<a href=#382 id=382 data-nosnippet>382</a>                .all(|l| l.class_latents_emb.is_none()),
-<a href=#383 id=383 data-nosnippet>383</a>            <span class="string">"MultiGate residuals do not support per-layer class latents"
-<a href=#384 id=384 data-nosnippet>384</a>        </span>);
-<a href=#385 id=385 data-nosnippet>385</a>    }
-<a href=#386 id=386 data-nosnippet>386</a>
-<a href=#387 id=387 data-nosnippet>387</a>    <span class="doccomment">/// Multi-Gate counterpart of [`Self::step_infinite`]. The streams are a
-<a href=#388 id=388 data-nosnippet>388</a>    /// per-token depth construct (as in [`Self::step_multi_gate`]), so applying
-<a href=#389 id=389 data-nosnippet>389</a>    /// the mixers to the layers' fixed-point outputs *is* the fixed point of
-<a href=#390 id=390 data-nosnippet>390</a>    /// the whole stack.
-<a href=#391 id=391 data-nosnippet>391</a>    </span><span class="kw">fn </span>step_infinite_multi_gate(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, mg: <span class="kw-2">&amp;</span><span class="kw">crate</span>::modules::MultiGate) -&gt; Tensor&lt;<span class="number">2</span>&gt; {
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="self">self</span>.assert_multi_gate_has_no_class_latents();
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>[batch, d_model] = x.dims();
-<a href=#394 id=394 data-nosnippet>394</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
-<a href=#395 id=395 data-nosnippet>395</a>        <span class="kw">let </span><span class="kw-2">mut </span>streams = x
-<a href=#396 id=396 data-nosnippet>396</a>            .clone()
-<a href=#397 id=397 data-nosnippet>397</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
-<a href=#398 id=398 data-nosnippet>398</a>            .expand([batch, mg.n_stream, d_model]);
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
-<a href=#400 id=400 data-nosnippet>400</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
-<a href=#401 id=401 data-nosnippet>401</a>            <span class="kw">let </span>real = <span class="self">self</span>.real_idx(i);
-<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[real];
-<a href=#403 id=403 data-nosnippet>403</a>            <span class="kw">let </span>out = layer.step_infinite(h);
-<a href=#404 id=404 data-nosnippet>404</a>            <span class="kw">if </span><span class="self">self</span>.ignore_last_residual &amp;&amp; i + <span class="number">1 </span>== n {
-<a href=#405 id=405 data-nosnippet>405</a>                h = out;
-<a href=#406 id=406 data-nosnippet>406</a>            } <span class="kw">else if </span><span class="self">self</span>.ignore_first_residual &amp;&amp; i == <span class="number">0 </span>{
-<a href=#407 id=407 data-nosnippet>407</a>                <span class="kw">let </span>[b, d] = out.dims();
-<a href=#408 id=408 data-nosnippet>408</a>                streams = out
-<a href=#409 id=409 data-nosnippet>409</a>                    .clone()
-<a href=#410 id=410 data-nosnippet>410</a>                    .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
-<a href=#411 id=411 data-nosnippet>411</a>                    .expand([b, mg.n_stream, d]);
-<a href=#412 id=412 data-nosnippet>412</a>                h = out;
-<a href=#413 id=413 data-nosnippet>413</a>            } <span class="kw">else </span>{
-<a href=#414 id=414 data-nosnippet>414</a>                <span class="kw">let </span>idx = mg.module_index(i, real);
-<a href=#415 id=415 data-nosnippet>415</a>                <span class="kw">let </span>(new_h, new_streams) = mg.layers[idx].step(out, streams);
-<a href=#416 id=416 data-nosnippet>416</a>                h = new_h;
-<a href=#417 id=417 data-nosnippet>417</a>                streams = new_streams;
-<a href=#418 id=418 data-nosnippet>418</a>            }
-<a href=#419 id=419 data-nosnippet>419</a>        }
-<a href=#420 id=420 data-nosnippet>420</a>        h
-<a href=#421 id=421 data-nosnippet>421</a>    }
-<a href=#422 id=422 data-nosnippet>422</a>
-<a href=#423 id=423 data-nosnippet>423</a>    <span class="doccomment">/// Single-token Multi-Gate Residual step — the recurrent counterpart of
-<a href=#424 id=424 data-nosnippet>424</a>    /// [`Self::forward_multi_gate`]. The streams are a per-token *depth*
-<a href=#425 id=425 data-nosnippet>425</a>    /// construct (rebuilt from `x` each step, never carried between tokens), so
-<a href=#426 id=426 data-nosnippet>426</a>    /// no extra state crosses steps and `forward`/`step` agree. Class latents are
-<a href=#427 id=427 data-nosnippet>427</a>    /// unsupported.
-<a href=#428 id=428 data-nosnippet>428</a>    </span><span class="kw">fn </span>step_multi_gate(
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#430 id=430 data-nosnippet>430</a>        x: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#431 id=431 data-nosnippet>431</a>        caches: <span class="prelude-ty">Option</span>&lt;M::Caches&gt;,
-<a href=#432 id=432 data-nosnippet>432</a>        mg: <span class="kw-2">&amp;</span><span class="kw">crate</span>::modules::MultiGate,
-<a href=#433 id=433 data-nosnippet>433</a>    ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, M::Caches) {
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="self">self</span>.assert_multi_gate_has_no_class_latents();
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>[batch, d_model] = x.dims();
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
-<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">let </span>caches =
-<a href=#438 id=438 data-nosnippet>438</a>            caches.unwrap_or_else(|| <span class="self">self</span>.real_layers[<span class="number">0</span>].mamba_block.zero_caches_2d(<span class="kw-2">&amp;</span>x, n));
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="macro">assert_eq!</span>(caches.slot_count(), n, <span class="string">"one cache per virtual layer"</span>);
-<a href=#440 id=440 data-nosnippet>440</a>
-<a href=#441 id=441 data-nosnippet>441</a>        <span class="kw">let </span><span class="kw-2">mut </span>slots = caches.into_slots();
-<a href=#442 id=442 data-nosnippet>442</a>        <span class="kw">let </span><span class="kw-2">mut </span>streams = x
-<a href=#443 id=443 data-nosnippet>443</a>            .clone()
-<a href=#444 id=444 data-nosnippet>444</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
-<a href=#445 id=445 data-nosnippet>445</a>            .expand([batch, mg.n_stream, d_model]);
-<a href=#446 id=446 data-nosnippet>446</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
-<a href=#447 id=447 data-nosnippet>447</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
-<a href=#448 id=448 data-nosnippet>448</a>            <span class="kw">let </span>real = <span class="self">self</span>.real_idx(i);
-<a href=#449 id=449 data-nosnippet>449</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[real];
-<a href=#450 id=450 data-nosnippet>450</a>            <span class="kw">let </span>cache = slots[i].take();
-<a href=#451 id=451 data-nosnippet>451</a>            <span class="kw">let </span>(out, c_) = layer.step(h, cache, <span class="prelude-val">None</span>);
-<a href=#452 id=452 data-nosnippet>452</a>            slots[i] = <span class="prelude-val">Some</span>(c_);
-<a href=#453 id=453 data-nosnippet>453</a>            <span class="comment">// As in `forward`, a skipped residual is β ≡ 1 in the mixer
-<a href=#454 id=454 data-nosnippet>454</a>            // (`new_streams = out`), the aggregator then collapsing to `F_l`.
-<a href=#455 id=455 data-nosnippet>455</a>            </span><span class="kw">if </span><span class="self">self</span>.ignore_last_residual &amp;&amp; i + <span class="number">1 </span>== n {
-<a href=#456 id=456 data-nosnippet>456</a>                <span class="comment">// Output depends purely on the last layer's transform.
-<a href=#457 id=457 data-nosnippet>457</a>                </span>h = out;
-<a href=#458 id=458 data-nosnippet>458</a>            } <span class="kw">else if </span><span class="self">self</span>.ignore_first_residual &amp;&amp; i == <span class="number">0 </span>{
-<a href=#459 id=459 data-nosnippet>459</a>                <span class="comment">// Drop the input seed: restart the streams from `F_0`.
-<a href=#460 id=460 data-nosnippet>460</a>                </span><span class="kw">let </span>[b, d] = out.dims();
-<a href=#461 id=461 data-nosnippet>461</a>                streams = out
-<a href=#462 id=462 data-nosnippet>462</a>                    .clone()
-<a href=#463 id=463 data-nosnippet>463</a>                    .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
-<a href=#464 id=464 data-nosnippet>464</a>                    .expand([b, mg.n_stream, d]);
-<a href=#465 id=465 data-nosnippet>465</a>                h = out;
-<a href=#466 id=466 data-nosnippet>466</a>            } <span class="kw">else </span>{
-<a href=#467 id=467 data-nosnippet>467</a>                <span class="kw">let </span>idx = mg.module_index(i, real);
-<a href=#468 id=468 data-nosnippet>468</a>                <span class="kw">let </span>(new_h, new_streams) = mg.layers[idx].step(out, streams);
-<a href=#469 id=469 data-nosnippet>469</a>                h = new_h;
-<a href=#470 id=470 data-nosnippet>470</a>                streams = new_streams;
-<a href=#471 id=471 data-nosnippet>471</a>            }
-<a href=#472 id=472 data-nosnippet>472</a>        }
-<a href=#473 id=473 data-nosnippet>473</a>        (h, M::Caches::from_slots(slots))
-<a href=#474 id=474 data-nosnippet>474</a>    }
-<a href=#475 id=475 data-nosnippet>475</a>}
-<a href=#476 id=476 data-nosnippet>476</a>
-<a href=#477 id=477 data-nosnippet>477</a><span class="doccomment">/// Plain (non-serde) factory for [`Layers`]. The serializable surface is the
-<a href=#478 id=478 data-nosnippet>478</a>/// concrete `MambaLatentNetConfig` enum; this is just the generic builder it
-<a href=#479 id=479 data-nosnippet>479</a>/// delegates to.
-<a href=#480 id=480 data-nosnippet>480</a></span><span class="kw">pub struct </span>LayersBuilder&lt;C&gt; {
-<a href=#481 id=481 data-nosnippet>481</a>    <span class="doccomment">/// Number of real (weight-bearing) layers.
-<a href=#482 id=482 data-nosnippet>482</a>    </span><span class="kw">pub </span>n_real_layers: usize,
-<a href=#483 id=483 data-nosnippet>483</a>    <span class="doccomment">/// Optional virtual-layer scheduling.
-<a href=#484 id=484 data-nosnippet>484</a>    </span><span class="kw">pub </span>n_virtual_layers: <span class="prelude-ty">Option</span>&lt;(usize, Schedule)&gt;,
-<a href=#485 id=485 data-nosnippet>485</a>    <span class="doccomment">/// Shared block config.
-<a href=#486 id=486 data-nosnippet>486</a>    </span><span class="kw">pub </span>mamba_block: C,
-<a href=#487 id=487 data-nosnippet>487</a>    <span class="doccomment">/// Zero the first virtual layer's residual.
-<a href=#488 id=488 data-nosnippet>488</a>    </span><span class="kw">pub </span>ignore_first_residual: bool,
-<a href=#489 id=489 data-nosnippet>489</a>    <span class="doccomment">/// Zero the last virtual layer's residual.
-<a href=#490 id=490 data-nosnippet>490</a>    </span><span class="kw">pub </span>ignore_last_residual: bool,
-<a href=#491 id=491 data-nosnippet>491</a>    <span class="doccomment">/// Stack-level class latents (spliced once before the first virtual layer).
-<a href=#492 id=492 data-nosnippet>492</a>    </span><span class="kw">pub </span>class_latents: Vec&lt;ClassLatent&gt;,
-<a href=#493 id=493 data-nosnippet>493</a>    <span class="doccomment">/// Inter-layer residual scheme (defaults to plain additive).
-<a href=#494 id=494 data-nosnippet>494</a>    </span><span class="kw">pub </span>residuals: ResidualsConfig,
-<a href=#495 id=495 data-nosnippet>495</a>    <span class="doccomment">/// Optional SwiGLU feed-forward sub-block per layer, with its own pre-norm
-<a href=#496 id=496 data-nosnippet>496</a>    /// and residual (`d_intermediate &gt; 0` in the reference configs). `None` ⇒
-<a href=#497 id=497 data-nosnippet>497</a>    /// mixer-only layers.
-<a href=#498 id=498 data-nosnippet>498</a>    </span><span class="kw">pub </span>mlp: <span class="prelude-ty">Option</span>&lt;GatedMlpConfig&gt;,
-<a href=#499 id=499 data-nosnippet>499</a>}
-<a href=#500 id=500 data-nosnippet>500</a>
-<a href=#501 id=501 data-nosnippet>501</a><span class="kw">impl</span>&lt;C: MambaBlockConfig&gt; LayersBuilder&lt;C&gt; {
-<a href=#502 id=502 data-nosnippet>502</a>    <span class="doccomment">/// Builder with no virtual scheduling, no class latents, residuals enabled.
-<a href=#503 id=503 data-nosnippet>503</a>    </span><span class="kw">pub fn </span>new(n_real_layers: usize, mamba_block: C) -&gt; <span class="self">Self </span>{
-<a href=#504 id=504 data-nosnippet>504</a>        <span class="self">Self </span>{
-<a href=#505 id=505 data-nosnippet>505</a>            n_real_layers,
-<a href=#506 id=506 data-nosnippet>506</a>            n_virtual_layers: <span class="prelude-val">None</span>,
-<a href=#507 id=507 data-nosnippet>507</a>            mamba_block,
-<a href=#508 id=508 data-nosnippet>508</a>            ignore_first_residual: <span class="bool-val">false</span>,
-<a href=#509 id=509 data-nosnippet>509</a>            ignore_last_residual: <span class="bool-val">false</span>,
-<a href=#510 id=510 data-nosnippet>510</a>            class_latents: Vec::new(),
-<a href=#511 id=511 data-nosnippet>511</a>            residuals: ResidualsConfig::Standard,
-<a href=#512 id=512 data-nosnippet>512</a>            mlp: <span class="prelude-val">None</span>,
-<a href=#513 id=513 data-nosnippet>513</a>        }
-<a href=#514 id=514 data-nosnippet>514</a>    }
-<a href=#515 id=515 data-nosnippet>515</a>
-<a href=#516 id=516 data-nosnippet>516</a>    <span class="doccomment">/// Interleave a SwiGLU feed-forward sub-block after each layer's mixer
-<a href=#517 id=517 data-nosnippet>517</a>    /// (see [`Layer`](crate::modules::Layer)). `None` keeps layers mixer-only.
-<a href=#518 id=518 data-nosnippet>518</a>    </span><span class="kw">pub fn </span>with_mlp(<span class="kw-2">mut </span><span class="self">self</span>, mlp: <span class="prelude-ty">Option</span>&lt;GatedMlpConfig&gt;) -&gt; <span class="self">Self </span>{
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="self">self</span>.mlp = mlp;
-<a href=#520 id=520 data-nosnippet>520</a>        <span class="self">self
-<a href=#521 id=521 data-nosnippet>521</a>    </span>}
-<a href=#522 id=522 data-nosnippet>522</a>
-<a href=#523 id=523 data-nosnippet>523</a>    <span class="doccomment">/// Set the optional virtual-layer scheduling.
-<a href=#524 id=524 data-nosnippet>524</a>    </span><span class="kw">pub fn </span>with_n_virtual_layers(<span class="kw-2">mut </span><span class="self">self</span>, n: <span class="prelude-ty">Option</span>&lt;(usize, Schedule)&gt;) -&gt; <span class="self">Self </span>{
-<a href=#525 id=525 data-nosnippet>525</a>        <span class="self">self</span>.n_virtual_layers = n;
-<a href=#526 id=526 data-nosnippet>526</a>        <span class="self">self
-<a href=#527 id=527 data-nosnippet>527</a>    </span>}
-<a href=#528 id=528 data-nosnippet>528</a>
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="doccomment">/// Set the inter-layer residual scheme (plain additive vs Multi-Gate).
-<a href=#530 id=530 data-nosnippet>530</a>    </span><span class="kw">pub fn </span>with_residuals(<span class="kw-2">mut </span><span class="self">self</span>, residuals: ResidualsConfig) -&gt; <span class="self">Self </span>{
-<a href=#531 id=531 data-nosnippet>531</a>        <span class="self">self</span>.residuals = residuals;
-<a href=#532 id=532 data-nosnippet>532</a>        <span class="self">self
-<a href=#533 id=533 data-nosnippet>533</a>    </span>}
-<a href=#534 id=534 data-nosnippet>534</a>
-<a href=#535 id=535 data-nosnippet>535</a>    <span class="doccomment">/// Suppress the first virtual layer's residual (see [`Layers`]).
-<a href=#536 id=536 data-nosnippet>536</a>    </span><span class="kw">pub fn </span>with_ignore_first_residual(<span class="kw-2">mut </span><span class="self">self</span>, ignore: bool) -&gt; <span class="self">Self </span>{
-<a href=#537 id=537 data-nosnippet>537</a>        <span class="self">self</span>.ignore_first_residual = ignore;
-<a href=#538 id=538 data-nosnippet>538</a>        <span class="self">self
-<a href=#539 id=539 data-nosnippet>539</a>    </span>}
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>    <span class="doccomment">/// Suppress the last virtual layer's residual (see [`Layers`]).
-<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="kw">pub fn </span>with_ignore_last_residual(<span class="kw-2">mut </span><span class="self">self</span>, ignore: bool) -&gt; <span class="self">Self </span>{
-<a href=#543 id=543 data-nosnippet>543</a>        <span class="self">self</span>.ignore_last_residual = ignore;
-<a href=#544 id=544 data-nosnippet>544</a>        <span class="self">self
-<a href=#545 id=545 data-nosnippet>545</a>    </span>}
-<a href=#546 id=546 data-nosnippet>546</a>
-<a href=#547 id=547 data-nosnippet>547</a>    <span class="doccomment">/// Set the stack-level class latents.
-<a href=#548 id=548 data-nosnippet>548</a>    </span><span class="kw">pub fn </span>with_class_latents(<span class="kw-2">mut </span><span class="self">self</span>, class_latents: Vec&lt;ClassLatent&gt;) -&gt; <span class="self">Self </span>{
-<a href=#549 id=549 data-nosnippet>549</a>        <span class="self">self</span>.class_latents = class_latents;
-<a href=#550 id=550 data-nosnippet>550</a>        <span class="self">self
-<a href=#551 id=551 data-nosnippet>551</a>    </span>}
-<a href=#552 id=552 data-nosnippet>552</a>
-<a href=#553 id=553 data-nosnippet>553</a>    <span class="doccomment">/// Allocate and initialise the stack on `device`.
-<a href=#554 id=554 data-nosnippet>554</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Layers&lt;C::Block&gt; {
-<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">let </span>d_model = <span class="self">self</span>.mamba_block.d_model();
-<a href=#556 id=556 data-nosnippet>556</a>        <span class="kw">let </span>n_virtual = <span class="self">self
-<a href=#557 id=557 data-nosnippet>557</a>            </span>.n_virtual_layers
-<a href=#558 id=558 data-nosnippet>558</a>            .as_ref()
-<a href=#559 id=559 data-nosnippet>559</a>            .map(|(l, <span class="kw">_</span>)| <span class="kw-2">*</span>l)
-<a href=#560 id=560 data-nosnippet>560</a>            .unwrap_or(<span class="self">self</span>.n_real_layers);
-<a href=#561 id=561 data-nosnippet>561</a>        <span class="kw">let </span>real_layers = (<span class="number">0</span>..<span class="self">self</span>.n_real_layers)
-<a href=#562 id=562 data-nosnippet>562</a>            .map(|<span class="kw">_</span>| Layer {
-<a href=#563 id=563 data-nosnippet>563</a>                norm: RmsNormConfig::new(d_model).init(device),
-<a href=#564 id=564 data-nosnippet>564</a>                mamba_block: <span class="self">self</span>.mamba_block.init_block(device),
-<a href=#565 id=565 data-nosnippet>565</a>                <span class="comment">// `norm2` exists exactly when `mlp` does — `Layer` relies on it.
-<a href=#566 id=566 data-nosnippet>566</a>                </span>norm2: <span class="self">self
-<a href=#567 id=567 data-nosnippet>567</a>                    </span>.mlp
-<a href=#568 id=568 data-nosnippet>568</a>                    .as_ref()
-<a href=#569 id=569 data-nosnippet>569</a>                    .map(|<span class="kw">_</span>| RmsNormConfig::new(d_model).init(device)),
-<a href=#570 id=570 data-nosnippet>570</a>                mlp: <span class="self">self</span>.mlp.as_ref().map(|mlp| mlp.init(device)),
-<a href=#571 id=571 data-nosnippet>571</a>                class_latents: Vec::new(),
-<a href=#572 id=572 data-nosnippet>572</a>                class_latents_emb: <span class="prelude-val">None</span>,
-<a href=#573 id=573 data-nosnippet>573</a>            })
-<a href=#574 id=574 data-nosnippet>574</a>            .collect();
-<a href=#575 id=575 data-nosnippet>575</a>        Layers {
-<a href=#576 id=576 data-nosnippet>576</a>            n_real_layers: <span class="self">self</span>.n_real_layers,
-<a href=#577 id=577 data-nosnippet>577</a>            n_virtual_layers: <span class="self">self</span>.n_virtual_layers.clone(),
-<a href=#578 id=578 data-nosnippet>578</a>            real_layers,
-<a href=#579 id=579 data-nosnippet>579</a>            ignore_first_residual: <span class="self">self</span>.ignore_first_residual,
-<a href=#580 id=580 data-nosnippet>580</a>            ignore_last_residual: <span class="self">self</span>.ignore_last_residual,
-<a href=#581 id=581 data-nosnippet>581</a>            residuals: <span class="self">self
-<a href=#582 id=582 data-nosnippet>582</a>                </span>.residuals
-<a href=#583 id=583 data-nosnippet>583</a>                .init(d_model, <span class="self">self</span>.n_real_layers, n_virtual, device),
-<a href=#584 id=584 data-nosnippet>584</a>            class_latents_emb: init_class_emb(<span class="self">self</span>.class_latents.len(), d_model, device),
-<a href=#585 id=585 data-nosnippet>585</a>            class_latents: <span class="self">self</span>.class_latents.clone(),
-<a href=#586 id=586 data-nosnippet>586</a>        }
-<a href=#587 id=587 data-nosnippet>587</a>    }
-<a href=#588 id=588 data-nosnippet>588</a>}
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(class) = class.as_deref_mut() {
+<a href=#265 id=265 data-nosnippet>265</a>            <span class="kw">let </span><span class="kw-2">mut </span>cursor = ClassCursor::at(class.stack, class.full_len);
+<a href=#266 id=266 data-nosnippet>266</a>            <span class="kw">let </span>plan = class_chunk_plan(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="number">1</span>, <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layers"</span>);
+<a href=#267 id=267 data-nosnippet>267</a>            class.stack = cursor.offset;
+<a href=#268 id=268 data-nosnippet>268</a>            <span class="kw">let </span>row = |i: usize| class_row(<span class="self">self</span>.class_latents_emb.as_ref(), i, batch, d_model);
+<a href=#269 id=269 data-nosnippet>269</a>            stream.extend(
+<a href=#270 id=270 data-nosnippet>270</a>                plan.iter()
+<a href=#271 id=271 data-nosnippet>271</a>                    .filter(|&amp;&amp;(at, <span class="kw">_</span>)| at == <span class="number">0</span>)
+<a href=#272 id=272 data-nosnippet>272</a>                    .map(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, i)| row(i)),
+<a href=#273 id=273 data-nosnippet>273</a>            );
+<a href=#274 id=274 data-nosnippet>274</a>            stream.push(x);
+<a href=#275 id=275 data-nosnippet>275</a>            stream.extend(
+<a href=#276 id=276 data-nosnippet>276</a>                plan.iter()
+<a href=#277 id=277 data-nosnippet>277</a>                    .filter(|&amp;&amp;(at, <span class="kw">_</span>)| at == <span class="number">1</span>)
+<a href=#278 id=278 data-nosnippet>278</a>                    .map(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, i)| row(i)),
+<a href=#279 id=279 data-nosnippet>279</a>            );
+<a href=#280 id=280 data-nosnippet>280</a>        } <span class="kw">else </span>{
+<a href=#281 id=281 data-nosnippet>281</a>            assert_full_len_known(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layers"</span>);
+<a href=#282 id=282 data-nosnippet>282</a>            stream.push(x);
+<a href=#283 id=283 data-nosnippet>283</a>        }
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">let </span><span class="kw-2">mut </span>stream = <span class="self">self</span>.cascade(batch, stream, <span class="kw-2">&amp;mut </span>slots, class, <span class="bool-val">false</span>);
+<a href=#286 id=286 data-nosnippet>286</a>
+<a href=#287 id=287 data-nosnippet>287</a>        <span class="comment">// The stream keeps `forward`'s token order, so its last element is the
+<a href=#288 id=288 data-nosnippet>288</a>        // latest token of the sequence — the user token, or an `End` after it.
+<a href=#289 id=289 data-nosnippet>289</a>        </span><span class="kw">let </span>out = stream.pop().expect(<span class="string">"the user token is always emitted"</span>);
+<a href=#290 id=290 data-nosnippet>290</a>        (out, M::Caches::from_slots(slots))
+<a href=#291 id=291 data-nosnippet>291</a>    }
+<a href=#292 id=292 data-nosnippet>292</a>
+<a href=#293 id=293 data-nosnippet>293</a>    <span class="doccomment">/// Thread `stream` — the tokens entering the bottom layer — up through every
+<a href=#294 id=294 data-nosnippet>294</a>    /// (virtual) layer, each layer splicing its own class latents into what it
+<a href=#295 id=295 data-nosnippet>295</a>    /// receives, adding its residual, and handing the result to the next one.
+<a href=#296 id=296 data-nosnippet>296</a>    /// Returns what leaves the top layer, `slots` holding the advanced caches.
+<a href=#297 id=297 data-nosnippet>297</a>    ///
+<a href=#298 id=298 data-nosnippet>298</a>    /// The shared body of [`Self::step`] and [`Self::prime`], which differ in the
+<a href=#299 id=299 data-nosnippet>299</a>    /// stream they open with — a user token amid the stack latents, or nothing
+<a href=#300 id=300 data-nosnippet>300</a>    /// but stack latents — and in what a layer emits at the **end** of the stream
+<a href=#301 id=301 data-nosnippet>301</a>    /// it receives: an ordinary step leaves those latents for the token they
+<a href=#302 id=302 data-nosnippet>302</a>    /// precede (only a closing `End` trails one), while a `prime` (`prime =
+<a href=#303 id=303 data-nosnippet>303</a>    /// true`) emits what that next token was going to be preceded by, which is
+<a href=#304 id=304 data-nosnippet>304</a>    /// how the cascade carries on when the stream below it is empty. Everything
+<a href=#305 id=305 data-nosnippet>305</a>    /// else is common — which is what makes a `prime` and the `step` after it run
+<a href=#306 id=306 data-nosnippet>306</a>    /// the same sequence as that `step` alone.
+<a href=#307 id=307 data-nosnippet>307</a>    </span><span class="kw">fn </span>cascade(
+<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#309 id=309 data-nosnippet>309</a>        batch: usize,
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw-2">mut </span>stream: Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt;,
+<a href=#311 id=311 data-nosnippet>311</a>        slots: <span class="kw-2">&amp;mut </span>[<span class="prelude-ty">Option</span>&lt;M::Cache&gt;],
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="kw-2">mut </span>class: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>ClassCursors&gt;,
+<a href=#313 id=313 data-nosnippet>313</a>        prime: bool,
+<a href=#314 id=314 data-nosnippet>314</a>    ) -&gt; Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt; {
+<a href=#315 id=315 data-nosnippet>315</a>        <span class="comment">// Full length of the stream the layers see, this stack's latents
+<a href=#316 id=316 data-nosnippet>316</a>        // included; each layer then lengthens it further for the ones above it.
+<a href=#317 id=317 data-nosnippet>317</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>full = class
+<a href=#318 id=318 data-nosnippet>318</a>            .as_deref()
+<a href=#319 id=319 data-nosnippet>319</a>            .and_then(|c| c.full_len)
+<a href=#320 id=320 data-nosnippet>320</a>            .map(|l| l + <span class="self">self</span>.class_latents.len());
+<a href=#321 id=321 data-nosnippet>321</a>        <span class="kw">for </span>pos <span class="kw">in </span><span class="number">0</span>..slots.len() {
+<a href=#322 id=322 data-nosnippet>322</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[<span class="self">self</span>.real_idx(pos)];
+<a href=#323 id=323 data-nosnippet>323</a>            <span class="kw">let </span>skip = <span class="self">self</span>.skip_residual(pos, slots.len());
+<a href=#324 id=324 data-nosnippet>324</a>            <span class="kw">let </span>plan = <span class="kw">if let </span><span class="prelude-val">Some</span>(class) = class.as_deref_mut() {
+<a href=#325 id=325 data-nosnippet>325</a>                <span class="kw">let </span><span class="kw-2">mut </span>cursor = ClassCursor::at(class.per_layer[pos], full);
+<a href=#326 id=326 data-nosnippet>326</a>                <span class="kw">let </span>markers = <span class="kw-2">&amp;</span>layer.class_latents;
+<a href=#327 id=327 data-nosnippet>327</a>                <span class="kw">let </span>plan = <span class="kw">if </span>prime {
+<a href=#328 id=328 data-nosnippet>328</a>                    class_prime_plan(markers, stream.len(), <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layer"</span>)
+<a href=#329 id=329 data-nosnippet>329</a>                } <span class="kw">else </span>{
+<a href=#330 id=330 data-nosnippet>330</a>                    class_chunk_plan(markers, stream.len(), <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layer"</span>)
+<a href=#331 id=331 data-nosnippet>331</a>                };
+<a href=#332 id=332 data-nosnippet>332</a>                class.per_layer[pos] = cursor.offset;
+<a href=#333 id=333 data-nosnippet>333</a>                plan
+<a href=#334 id=334 data-nosnippet>334</a>            } <span class="kw">else </span>{
+<a href=#335 id=335 data-nosnippet>335</a>                assert_full_len_known(<span class="kw-2">&amp;</span>layer.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layer"</span>);
+<a href=#336 id=336 data-nosnippet>336</a>                Vec::new()
+<a href=#337 id=337 data-nosnippet>337</a>            };
+<a href=#338 id=338 data-nosnippet>338</a>            full = full.map(|l| l + layer.class_latents.len());
+<a href=#339 id=339 data-nosnippet>339</a>            <span class="kw">if </span>plan.is_empty() &amp;&amp; stream.is_empty() {
+<a href=#340 id=340 data-nosnippet>340</a>                <span class="kw">continue</span>; <span class="comment">// nothing reaches this layer, and it adds nothing
+<a href=#341 id=341 data-nosnippet>341</a>            </span>}
+<a href=#342 id=342 data-nosnippet>342</a>
+<a href=#343 id=343 data-nosnippet>343</a>            <span class="kw">let </span><span class="kw-2">mut </span>cache = slots[pos].take();
+<a href=#344 id=344 data-nosnippet>344</a>            <span class="kw">let </span><span class="kw-2">mut </span>next: Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt; = Vec::with_capacity(stream.len() + plan.len());
+<a href=#345 id=345 data-nosnippet>345</a>            <span class="comment">// One token through the layer, adding its residual here unless
+<a href=#346 id=346 data-nosnippet>346</a>            // suppressed (then the token is moved straight in — no clone/add).
+<a href=#347 id=347 data-nosnippet>347</a>            </span><span class="kw">let </span>run = |token: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;M::Cache&gt;| {
+<a href=#348 id=348 data-nosnippet>348</a>                <span class="kw">if </span>skip {
+<a href=#349 id=349 data-nosnippet>349</a>                    layer.step(token, cache, <span class="prelude-val">None</span>)
+<a href=#350 id=350 data-nosnippet>350</a>                } <span class="kw">else </span>{
+<a href=#351 id=351 data-nosnippet>351</a>                    <span class="kw">let </span>(out, c) = layer.step(token.clone(), cache, <span class="prelude-val">None</span>);
+<a href=#352 id=352 data-nosnippet>352</a>                    (out + token, c)
+<a href=#353 id=353 data-nosnippet>353</a>                }
+<a href=#354 id=354 data-nosnippet>354</a>            };
+<a href=#355 id=355 data-nosnippet>355</a>            <span class="kw">let </span>row = |i: usize| {
+<a href=#356 id=356 data-nosnippet>356</a>                <span class="kw">let </span>emb = layer.class_latents_emb.as_ref();
+<a href=#357 id=357 data-nosnippet>357</a>                class_row(emb, i, batch, class_emb_width(emb))
+<a href=#358 id=358 data-nosnippet>358</a>            };
+<a href=#359 id=359 data-nosnippet>359</a>            <span class="kw">let </span><span class="kw-2">mut </span>plan = plan.into_iter().peekable();
+<a href=#360 id=360 data-nosnippet>360</a>            <span class="kw">for </span>(t, token) <span class="kw">in </span>stream.into_iter().enumerate() {
+<a href=#361 id=361 data-nosnippet>361</a>                <span class="comment">// This layer's class latents that fall before this token.
+<a href=#362 id=362 data-nosnippet>362</a>                </span><span class="kw">while let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, i)) = plan.next_if(|<span class="kw-2">&amp;</span>(at, <span class="kw">_</span>)| at == t) {
+<a href=#363 id=363 data-nosnippet>363</a>                    <span class="kw">let </span>(out, c) = run(row(i), cache);
+<a href=#364 id=364 data-nosnippet>364</a>                    next.push(out);
+<a href=#365 id=365 data-nosnippet>365</a>                    cache = <span class="prelude-val">Some</span>(c);
+<a href=#366 id=366 data-nosnippet>366</a>                }
+<a href=#367 id=367 data-nosnippet>367</a>                <span class="kw">let </span>(out, c) = run(token, cache);
+<a href=#368 id=368 data-nosnippet>368</a>                next.push(out);
+<a href=#369 id=369 data-nosnippet>369</a>                cache = <span class="prelude-val">Some</span>(c);
+<a href=#370 id=370 data-nosnippet>370</a>            }
+<a href=#371 id=371 data-nosnippet>371</a>            <span class="comment">// …and the latents that follow the stream's last token: an `End`
+<a href=#372 id=372 data-nosnippet>372</a>            // closing the sequence, or (on a prime) the ones the token after it
+<a href=#373 id=373 data-nosnippet>373</a>            // is due to be preceded by.
+<a href=#374 id=374 data-nosnippet>374</a>            </span><span class="kw">for </span>(_at, i) <span class="kw">in </span>plan {
+<a href=#375 id=375 data-nosnippet>375</a>                <span class="kw">let </span>(out, c) = run(row(i), cache);
+<a href=#376 id=376 data-nosnippet>376</a>                next.push(out);
+<a href=#377 id=377 data-nosnippet>377</a>                cache = <span class="prelude-val">Some</span>(c);
+<a href=#378 id=378 data-nosnippet>378</a>            }
+<a href=#379 id=379 data-nosnippet>379</a>            slots[pos] = cache;
+<a href=#380 id=380 data-nosnippet>380</a>            stream = next;
+<a href=#381 id=381 data-nosnippet>381</a>        }
+<a href=#382 id=382 data-nosnippet>382</a>        stream
+<a href=#383 id=383 data-nosnippet>383</a>    }
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="doccomment">/// Step the class latents the stack has waiting for its next user token —
+<a href=#386 id=386 data-nosnippet>386</a>    /// with **no** user token, so nothing but class data is consumed.
+<a href=#387 id=387 data-nosnippet>387</a>    ///
+<a href=#388 id=388 data-nosnippet>388</a>    /// This is [`Self::step`]'s opening half on its own: the stack-level latents
+<a href=#389 id=389 data-nosnippet>389</a>    /// due now open the bottom stream (empty when none are), which then goes up
+<a href=#390 id=390 data-nosnippet>390</a>    /// the stack through the very cascade `step` runs, with every layer
+<a href=#391 id=391 data-nosnippet>391</a>    /// additionally flushing the latents *its* next token was going to be
+<a href=#392 id=392 data-nosnippet>392</a>    /// preceded by. A `prime` followed by a `step` therefore runs exactly the
+<a href=#393 id=393 data-nosnippet>393</a>    /// sequence that `step` alone would have.
+<a href=#394 id=394 data-nosnippet>394</a>    /// `End` latents are never primed: closing the sequence, they belong to the
+<a href=#395 id=395 data-nosnippet>395</a>    /// step carrying its last user token (which is why that step returns them).
+<a href=#396 id=396 data-nosnippet>396</a>    /// A cursor already at the announced end therefore primes nothing.
+<a href=#397 id=397 data-nosnippet>397</a>    ///
+<a href=#398 id=398 data-nosnippet>398</a>    /// Returns the fully propagated output of the **last** latent emitted, or
+<a href=#399 id=399 data-nosnippet>399</a>    /// `None` when none were waiting — the seedless-generation entry point:
+<a href=#400 id=400 data-nosnippet>400</a>    /// `prime` → sample → `step` → sample → … `batch` sizes the latent rows,
+<a href=#401 id=401 data-nosnippet>401</a>    /// which are the only inputs there are.
+<a href=#402 id=402 data-nosnippet>402</a>    ///
+<a href=#403 id=403 data-nosnippet>403</a>    /// The caches come back as they went in when nothing ran (`None` included);
+<a href=#404 id=404 data-nosnippet>404</a>    /// a partly primed stack is completed with zero caches for the layers that
+<a href=#405 id=405 data-nosnippet>405</a>    /// stepped nothing, which is exactly the state they hold. `None` cursors
+<a href=#406 id=406 data-nosnippet>406</a>    /// inject nothing at all (`Middle`/`End` latents then panic, as in `step`),
+<a href=#407 id=407 data-nosnippet>407</a>    /// and Multi-Gate residuals — which forbid class latents entirely — always
+<a href=#408 id=408 data-nosnippet>408</a>    /// prime to `None`.
+<a href=#409 id=409 data-nosnippet>409</a>    </span><span class="kw">pub fn </span>prime(
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#411 id=411 data-nosnippet>411</a>        batch: usize,
+<a href=#412 id=412 data-nosnippet>412</a>        caches: <span class="prelude-ty">Option</span>&lt;M::Caches&gt;,
+<a href=#413 id=413 data-nosnippet>413</a>        class: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>ClassCursors&gt;,
+<a href=#414 id=414 data-nosnippet>414</a>    ) -&gt; (<span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>&gt;&gt;, <span class="prelude-ty">Option</span>&lt;M::Caches&gt;) {
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">if let </span>Residuals::MultiGate(<span class="kw">_</span>) = <span class="kw-2">&amp;</span><span class="self">self</span>.residuals {
+<a href=#416 id=416 data-nosnippet>416</a>            <span class="self">self</span>.assert_multi_gate_has_no_class_latents();
+<a href=#417 id=417 data-nosnippet>417</a>            <span class="kw">return </span>(<span class="prelude-val">None</span>, caches);
+<a href=#418 id=418 data-nosnippet>418</a>        }
+<a href=#419 id=419 data-nosnippet>419</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(class) = class <span class="kw">else </span>{
+<a href=#421 id=421 data-nosnippet>421</a>            assert_full_len_known(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layers"</span>);
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="kw">for </span>layer <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.real_layers {
+<a href=#423 id=423 data-nosnippet>423</a>                assert_full_len_known(<span class="kw-2">&amp;</span>layer.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layer"</span>);
+<a href=#424 id=424 data-nosnippet>424</a>            }
+<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">return </span>(<span class="prelude-val">None</span>, caches);
+<a href=#426 id=426 data-nosnippet>426</a>        };
+<a href=#427 id=427 data-nosnippet>427</a>        class.fit(n);
+<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">let </span><span class="kw-2">mut </span>slots: Vec&lt;<span class="prelude-ty">Option</span>&lt;M::Cache&gt;&gt; = <span class="kw">match </span>caches {
+<a href=#429 id=429 data-nosnippet>429</a>            <span class="prelude-val">Some</span>(caches) =&gt; {
+<a href=#430 id=430 data-nosnippet>430</a>                <span class="macro">assert_eq!</span>(caches.slot_count(), n, <span class="string">"one cache per virtual layer"</span>);
+<a href=#431 id=431 data-nosnippet>431</a>                caches.into_slots()
+<a href=#432 id=432 data-nosnippet>432</a>            }
+<a href=#433 id=433 data-nosnippet>433</a>            <span class="comment">// Nothing may run at all, and there is no token to size zero caches
+<a href=#434 id=434 data-nosnippet>434</a>            // from until something does — so start the slots empty.
+<a href=#435 id=435 data-nosnippet>435</a>            </span><span class="prelude-val">None </span>=&gt; (<span class="number">0</span>..n).map(|<span class="kw">_</span>| <span class="prelude-val">None</span>).collect(),
+<a href=#436 id=436 data-nosnippet>436</a>        };
+<a href=#437 id=437 data-nosnippet>437</a>
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="comment">// Bottom input stream for this prime: the stack-level class latents due
+<a href=#439 id=439 data-nosnippet>439</a>        // now, with no user token to accompany them (so possibly none at all).
+<a href=#440 id=440 data-nosnippet>440</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>cursor = ClassCursor::at(class.stack, class.full_len);
+<a href=#441 id=441 data-nosnippet>441</a>        <span class="kw">let </span>plan = class_prime_plan(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="number">0</span>, <span class="kw-2">&amp;mut </span>cursor, <span class="string">"Layers"</span>);
+<a href=#442 id=442 data-nosnippet>442</a>        class.stack = cursor.offset;
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="kw">let </span>stream: Vec&lt;Tensor&lt;<span class="number">2</span>&gt;&gt; = <span class="kw">if </span>plan.is_empty() {
+<a href=#444 id=444 data-nosnippet>444</a>            Vec::new()
+<a href=#445 id=445 data-nosnippet>445</a>        } <span class="kw">else </span>{
+<a href=#446 id=446 data-nosnippet>446</a>            <span class="kw">let </span>emb = <span class="self">self</span>.class_latents_emb.as_ref();
+<a href=#447 id=447 data-nosnippet>447</a>            <span class="kw">let </span>width = class_emb_width(emb);
+<a href=#448 id=448 data-nosnippet>448</a>            plan.into_iter()
+<a href=#449 id=449 data-nosnippet>449</a>                .map(|(_at, i)| class_row(emb, i, batch, width))
+<a href=#450 id=450 data-nosnippet>450</a>                .collect()
+<a href=#451 id=451 data-nosnippet>451</a>        };
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">let </span><span class="kw-2">mut </span>stream = <span class="self">self</span>.cascade(batch, stream, <span class="kw-2">&amp;mut </span>slots, <span class="prelude-val">Some</span>(class), <span class="bool-val">true</span>);
+<a href=#453 id=453 data-nosnippet>453</a>
+<a href=#454 id=454 data-nosnippet>454</a>        <span class="comment">// A layer only ever hands up at least what it received, so the cascade
+<a href=#455 id=455 data-nosnippet>455</a>        // comes back empty exactly when nothing ran anywhere — and otherwise its
+<a href=#456 id=456 data-nosnippet>456</a>        // last token is both what this prime emitted and a `[batch, d_model]`
+<a href=#457 id=457 data-nosnippet>457</a>        // sample to size the zero caches below.
+<a href=#458 id=458 data-nosnippet>458</a>        </span><span class="kw">let </span>out = stream.pop();
+<a href=#459 id=459 data-nosnippet>459</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(sample) = out.as_ref() <span class="kw">else </span>{
+<a href=#460 id=460 data-nosnippet>460</a>            <span class="comment">// Not a single latent was due anywhere: no state moved, so the
+<a href=#461 id=461 data-nosnippet>461</a>            // caches go back exactly as they came (`None` included).
+<a href=#462 id=462 data-nosnippet>462</a>            </span><span class="kw">let </span>caches = slots
+<a href=#463 id=463 data-nosnippet>463</a>                .iter()
+<a href=#464 id=464 data-nosnippet>464</a>                .all(Option::is_some)
+<a href=#465 id=465 data-nosnippet>465</a>                .then(|| M::Caches::from_slots(slots));
+<a href=#466 id=466 data-nosnippet>466</a>            <span class="kw">return </span>(out, caches);
+<a href=#467 id=467 data-nosnippet>467</a>        };
+<a href=#468 id=468 data-nosnippet>468</a>        <span class="kw">if </span>slots.iter().any(Option::is_none) {
+<a href=#469 id=469 data-nosnippet>469</a>            <span class="comment">// The call started cacheless and only some layers ran; the others
+<a href=#470 id=470 data-nosnippet>470</a>            // hold the zero state they started from.
+<a href=#471 id=471 data-nosnippet>471</a>            </span><span class="kw">let </span>zeros = <span class="self">self</span>.real_layers[<span class="number">0</span>]
+<a href=#472 id=472 data-nosnippet>472</a>                .mamba_block
+<a href=#473 id=473 data-nosnippet>473</a>                .zero_caches_2d(sample, n)
+<a href=#474 id=474 data-nosnippet>474</a>                .into_slots();
+<a href=#475 id=475 data-nosnippet>475</a>            <span class="kw">for </span>(slot, zero) <span class="kw">in </span>slots.iter_mut().zip(zeros) {
+<a href=#476 id=476 data-nosnippet>476</a>                <span class="kw">if </span>slot.is_none() {
+<a href=#477 id=477 data-nosnippet>477</a>                    <span class="kw-2">*</span>slot = zero;
+<a href=#478 id=478 data-nosnippet>478</a>                }
+<a href=#479 id=479 data-nosnippet>479</a>            }
+<a href=#480 id=480 data-nosnippet>480</a>        }
+<a href=#481 id=481 data-nosnippet>481</a>        (out, <span class="prelude-val">Some</span>(M::Caches::from_slots(slots)))
+<a href=#482 id=482 data-nosnippet>482</a>    }
+<a href=#483 id=483 data-nosnippet>483</a>
+<a href=#484 id=484 data-nosnippet>484</a>    <span class="doccomment">/// Stationary fixed point of the whole stack under a constant token, with
+<a href=#485 id=485 data-nosnippet>485</a>    /// **no caches** involved: under a constant input each layer's output
+<a href=#486 id=486 data-nosnippet>486</a>    /// converges (its decay damps the transient, and the readout phase of the
+<a href=#487 id=487 data-nosnippet>487</a>    /// rotation cancels), so the downstream layer's input converges too and
+<a href=#488 id=488 data-nosnippet>488</a>    /// the limit composes **exactly**, layer by layer — even though every
+<a href=#489 id=489 data-nosnippet>489</a>    /// layer's SSM state keeps rotating forever. Residual handling mirrors
+<a href=#490 id=490 data-nosnippet>490</a>    /// [`Self::step`]; cursorless (class latents are not injected).
+<a href=#491 id=491 data-nosnippet>491</a>    </span><span class="kw">pub fn </span>step_infinite(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">2</span>&gt; {
+<a href=#492 id=492 data-nosnippet>492</a>        <span class="kw">if let </span>Residuals::MultiGate(mg) = <span class="kw-2">&amp;</span><span class="self">self</span>.residuals {
+<a href=#493 id=493 data-nosnippet>493</a>            <span class="kw">return </span><span class="self">self</span>.step_infinite_multi_gate(x, mg);
+<a href=#494 id=494 data-nosnippet>494</a>        }
+<a href=#495 id=495 data-nosnippet>495</a>        assert_full_len_known(<span class="kw-2">&amp;</span><span class="self">self</span>.class_latents, <span class="prelude-val">None</span>, <span class="string">"Layers"</span>);
+<a href=#496 id=496 data-nosnippet>496</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
+<a href=#497 id=497 data-nosnippet>497</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
+<a href=#498 id=498 data-nosnippet>498</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
+<a href=#499 id=499 data-nosnippet>499</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[<span class="self">self</span>.real_idx(i)];
+<a href=#500 id=500 data-nosnippet>500</a>            h = <span class="kw">if </span><span class="self">self</span>.skip_residual(i, n) {
+<a href=#501 id=501 data-nosnippet>501</a>                layer.step_infinite(h)
+<a href=#502 id=502 data-nosnippet>502</a>            } <span class="kw">else </span>{
+<a href=#503 id=503 data-nosnippet>503</a>                layer.step_infinite(h.clone()) + h
+<a href=#504 id=504 data-nosnippet>504</a>            };
+<a href=#505 id=505 data-nosnippet>505</a>        }
+<a href=#506 id=506 data-nosnippet>506</a>        h
+<a href=#507 id=507 data-nosnippet>507</a>    }
+<a href=#508 id=508 data-nosnippet>508</a>
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="doccomment">/// Multi-Gate carries the residual in its streams rather than in the token
+<a href=#510 id=510 data-nosnippet>510</a>    /// sequence, so it cannot host class latents at all — `forward` rejects them
+<a href=#511 id=511 data-nosnippet>511</a>    /// and so do the recurrent paths, at either level.
+<a href=#512 id=512 data-nosnippet>512</a>    </span><span class="kw">fn </span>assert_multi_gate_has_no_class_latents(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+<a href=#513 id=513 data-nosnippet>513</a>        <span class="macro">assert!</span>(
+<a href=#514 id=514 data-nosnippet>514</a>            <span class="self">self</span>.class_latents_emb.is_none(),
+<a href=#515 id=515 data-nosnippet>515</a>            <span class="string">"MultiGate residuals do not support stack-level class latents"
+<a href=#516 id=516 data-nosnippet>516</a>        </span>);
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="macro">assert!</span>(
+<a href=#518 id=518 data-nosnippet>518</a>            <span class="self">self</span>.real_layers
+<a href=#519 id=519 data-nosnippet>519</a>                .iter()
+<a href=#520 id=520 data-nosnippet>520</a>                .all(|l| l.class_latents_emb.is_none()),
+<a href=#521 id=521 data-nosnippet>521</a>            <span class="string">"MultiGate residuals do not support per-layer class latents"
+<a href=#522 id=522 data-nosnippet>522</a>        </span>);
+<a href=#523 id=523 data-nosnippet>523</a>    }
+<a href=#524 id=524 data-nosnippet>524</a>
+<a href=#525 id=525 data-nosnippet>525</a>    <span class="doccomment">/// Multi-Gate counterpart of [`Self::step_infinite`]. The streams are a
+<a href=#526 id=526 data-nosnippet>526</a>    /// per-token depth construct (as in [`Self::step_multi_gate`]), so applying
+<a href=#527 id=527 data-nosnippet>527</a>    /// the mixers to the layers' fixed-point outputs *is* the fixed point of
+<a href=#528 id=528 data-nosnippet>528</a>    /// the whole stack.
+<a href=#529 id=529 data-nosnippet>529</a>    </span><span class="kw">fn </span>step_infinite_multi_gate(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, mg: <span class="kw-2">&amp;</span><span class="kw">crate</span>::modules::MultiGate) -&gt; Tensor&lt;<span class="number">2</span>&gt; {
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="self">self</span>.assert_multi_gate_has_no_class_latents();
+<a href=#531 id=531 data-nosnippet>531</a>        <span class="kw">let </span>[batch, d_model] = x.dims();
+<a href=#532 id=532 data-nosnippet>532</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
+<a href=#533 id=533 data-nosnippet>533</a>        <span class="kw">let </span><span class="kw-2">mut </span>streams = x
+<a href=#534 id=534 data-nosnippet>534</a>            .clone()
+<a href=#535 id=535 data-nosnippet>535</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
+<a href=#536 id=536 data-nosnippet>536</a>            .expand([batch, mg.n_stream, d_model]);
+<a href=#537 id=537 data-nosnippet>537</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
+<a href=#538 id=538 data-nosnippet>538</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
+<a href=#539 id=539 data-nosnippet>539</a>            <span class="kw">let </span>real = <span class="self">self</span>.real_idx(i);
+<a href=#540 id=540 data-nosnippet>540</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[real];
+<a href=#541 id=541 data-nosnippet>541</a>            <span class="kw">let </span>out = layer.step_infinite(h);
+<a href=#542 id=542 data-nosnippet>542</a>            <span class="kw">if </span><span class="self">self</span>.ignore_last_residual &amp;&amp; i + <span class="number">1 </span>== n {
+<a href=#543 id=543 data-nosnippet>543</a>                h = out;
+<a href=#544 id=544 data-nosnippet>544</a>            } <span class="kw">else if </span><span class="self">self</span>.ignore_first_residual &amp;&amp; i == <span class="number">0 </span>{
+<a href=#545 id=545 data-nosnippet>545</a>                <span class="kw">let </span>[b, d] = out.dims();
+<a href=#546 id=546 data-nosnippet>546</a>                streams = out
+<a href=#547 id=547 data-nosnippet>547</a>                    .clone()
+<a href=#548 id=548 data-nosnippet>548</a>                    .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
+<a href=#549 id=549 data-nosnippet>549</a>                    .expand([b, mg.n_stream, d]);
+<a href=#550 id=550 data-nosnippet>550</a>                h = out;
+<a href=#551 id=551 data-nosnippet>551</a>            } <span class="kw">else </span>{
+<a href=#552 id=552 data-nosnippet>552</a>                <span class="kw">let </span>idx = mg.module_index(i, real);
+<a href=#553 id=553 data-nosnippet>553</a>                <span class="kw">let </span>(new_h, new_streams) = mg.layers[idx].step(out, streams);
+<a href=#554 id=554 data-nosnippet>554</a>                h = new_h;
+<a href=#555 id=555 data-nosnippet>555</a>                streams = new_streams;
+<a href=#556 id=556 data-nosnippet>556</a>            }
+<a href=#557 id=557 data-nosnippet>557</a>        }
+<a href=#558 id=558 data-nosnippet>558</a>        h
+<a href=#559 id=559 data-nosnippet>559</a>    }
+<a href=#560 id=560 data-nosnippet>560</a>
+<a href=#561 id=561 data-nosnippet>561</a>    <span class="doccomment">/// Single-token Multi-Gate Residual step — the recurrent counterpart of
+<a href=#562 id=562 data-nosnippet>562</a>    /// [`Self::forward_multi_gate`]. The streams are a per-token *depth*
+<a href=#563 id=563 data-nosnippet>563</a>    /// construct (rebuilt from `x` each step, never carried between tokens), so
+<a href=#564 id=564 data-nosnippet>564</a>    /// no extra state crosses steps and `forward`/`step` agree. Class latents are
+<a href=#565 id=565 data-nosnippet>565</a>    /// unsupported.
+<a href=#566 id=566 data-nosnippet>566</a>    </span><span class="kw">fn </span>step_multi_gate(
+<a href=#567 id=567 data-nosnippet>567</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#568 id=568 data-nosnippet>568</a>        x: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#569 id=569 data-nosnippet>569</a>        caches: <span class="prelude-ty">Option</span>&lt;M::Caches&gt;,
+<a href=#570 id=570 data-nosnippet>570</a>        mg: <span class="kw-2">&amp;</span><span class="kw">crate</span>::modules::MultiGate,
+<a href=#571 id=571 data-nosnippet>571</a>    ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, M::Caches) {
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="self">self</span>.assert_multi_gate_has_no_class_latents();
+<a href=#573 id=573 data-nosnippet>573</a>        <span class="kw">let </span>[batch, d_model] = x.dims();
+<a href=#574 id=574 data-nosnippet>574</a>        <span class="kw">let </span>n = <span class="self">self</span>.n_virtual_count();
+<a href=#575 id=575 data-nosnippet>575</a>        <span class="kw">let </span>caches =
+<a href=#576 id=576 data-nosnippet>576</a>            caches.unwrap_or_else(|| <span class="self">self</span>.real_layers[<span class="number">0</span>].mamba_block.zero_caches_2d(<span class="kw-2">&amp;</span>x, n));
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="macro">assert_eq!</span>(caches.slot_count(), n, <span class="string">"one cache per virtual layer"</span>);
+<a href=#578 id=578 data-nosnippet>578</a>
+<a href=#579 id=579 data-nosnippet>579</a>        <span class="kw">let </span><span class="kw-2">mut </span>slots = caches.into_slots();
+<a href=#580 id=580 data-nosnippet>580</a>        <span class="kw">let </span><span class="kw-2">mut </span>streams = x
+<a href=#581 id=581 data-nosnippet>581</a>            .clone()
+<a href=#582 id=582 data-nosnippet>582</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
+<a href=#583 id=583 data-nosnippet>583</a>            .expand([batch, mg.n_stream, d_model]);
+<a href=#584 id=584 data-nosnippet>584</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = x;
+<a href=#585 id=585 data-nosnippet>585</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..n {
+<a href=#586 id=586 data-nosnippet>586</a>            <span class="kw">let </span>real = <span class="self">self</span>.real_idx(i);
+<a href=#587 id=587 data-nosnippet>587</a>            <span class="kw">let </span>layer = <span class="kw-2">&amp;</span><span class="self">self</span>.real_layers[real];
+<a href=#588 id=588 data-nosnippet>588</a>            <span class="kw">let </span>cache = slots[i].take();
+<a href=#589 id=589 data-nosnippet>589</a>            <span class="kw">let </span>(out, c_) = layer.step(h, cache, <span class="prelude-val">None</span>);
+<a href=#590 id=590 data-nosnippet>590</a>            slots[i] = <span class="prelude-val">Some</span>(c_);
+<a href=#591 id=591 data-nosnippet>591</a>            <span class="comment">// As in `forward`, a skipped residual is β ≡ 1 in the mixer
+<a href=#592 id=592 data-nosnippet>592</a>            // (`new_streams = out`), the aggregator then collapsing to `F_l`.
+<a href=#593 id=593 data-nosnippet>593</a>            </span><span class="kw">if </span><span class="self">self</span>.ignore_last_residual &amp;&amp; i + <span class="number">1 </span>== n {
+<a href=#594 id=594 data-nosnippet>594</a>                <span class="comment">// Output depends purely on the last layer's transform.
+<a href=#595 id=595 data-nosnippet>595</a>                </span>h = out;
+<a href=#596 id=596 data-nosnippet>596</a>            } <span class="kw">else if </span><span class="self">self</span>.ignore_first_residual &amp;&amp; i == <span class="number">0 </span>{
+<a href=#597 id=597 data-nosnippet>597</a>                <span class="comment">// Drop the input seed: restart the streams from `F_0`.
+<a href=#598 id=598 data-nosnippet>598</a>                </span><span class="kw">let </span>[b, d] = out.dims();
+<a href=#599 id=599 data-nosnippet>599</a>                streams = out
+<a href=#600 id=600 data-nosnippet>600</a>                    .clone()
+<a href=#601 id=601 data-nosnippet>601</a>                    .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
+<a href=#602 id=602 data-nosnippet>602</a>                    .expand([b, mg.n_stream, d]);
+<a href=#603 id=603 data-nosnippet>603</a>                h = out;
+<a href=#604 id=604 data-nosnippet>604</a>            } <span class="kw">else </span>{
+<a href=#605 id=605 data-nosnippet>605</a>                <span class="kw">let </span>idx = mg.module_index(i, real);
+<a href=#606 id=606 data-nosnippet>606</a>                <span class="kw">let </span>(new_h, new_streams) = mg.layers[idx].step(out, streams);
+<a href=#607 id=607 data-nosnippet>607</a>                h = new_h;
+<a href=#608 id=608 data-nosnippet>608</a>                streams = new_streams;
+<a href=#609 id=609 data-nosnippet>609</a>            }
+<a href=#610 id=610 data-nosnippet>610</a>        }
+<a href=#611 id=611 data-nosnippet>611</a>        (h, M::Caches::from_slots(slots))
+<a href=#612 id=612 data-nosnippet>612</a>    }
+<a href=#613 id=613 data-nosnippet>613</a>}
+<a href=#614 id=614 data-nosnippet>614</a>
+<a href=#615 id=615 data-nosnippet>615</a><span class="doccomment">/// Plain (non-serde) factory for [`Layers`]. The serializable surface is the
+<a href=#616 id=616 data-nosnippet>616</a>/// concrete `MambaLatentNetConfig` enum; this is just the generic builder it
+<a href=#617 id=617 data-nosnippet>617</a>/// delegates to.
+<a href=#618 id=618 data-nosnippet>618</a></span><span class="kw">pub struct </span>LayersBuilder&lt;C&gt; {
+<a href=#619 id=619 data-nosnippet>619</a>    <span class="doccomment">/// Number of real (weight-bearing) layers.
+<a href=#620 id=620 data-nosnippet>620</a>    </span><span class="kw">pub </span>n_real_layers: usize,
+<a href=#621 id=621 data-nosnippet>621</a>    <span class="doccomment">/// Optional virtual-layer scheduling.
+<a href=#622 id=622 data-nosnippet>622</a>    </span><span class="kw">pub </span>n_virtual_layers: <span class="prelude-ty">Option</span>&lt;(usize, Schedule)&gt;,
+<a href=#623 id=623 data-nosnippet>623</a>    <span class="doccomment">/// Shared block config.
+<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="kw">pub </span>mamba_block: C,
+<a href=#625 id=625 data-nosnippet>625</a>    <span class="doccomment">/// Zero the first virtual layer's residual.
+<a href=#626 id=626 data-nosnippet>626</a>    </span><span class="kw">pub </span>ignore_first_residual: bool,
+<a href=#627 id=627 data-nosnippet>627</a>    <span class="doccomment">/// Zero the last virtual layer's residual.
+<a href=#628 id=628 data-nosnippet>628</a>    </span><span class="kw">pub </span>ignore_last_residual: bool,
+<a href=#629 id=629 data-nosnippet>629</a>    <span class="doccomment">/// Stack-level class latents (spliced once before the first virtual layer).
+<a href=#630 id=630 data-nosnippet>630</a>    </span><span class="kw">pub </span>class_latents: Vec&lt;ClassLatent&gt;,
+<a href=#631 id=631 data-nosnippet>631</a>    <span class="doccomment">/// Inter-layer residual scheme (defaults to plain additive).
+<a href=#632 id=632 data-nosnippet>632</a>    </span><span class="kw">pub </span>residuals: ResidualsConfig,
+<a href=#633 id=633 data-nosnippet>633</a>    <span class="doccomment">/// Optional SwiGLU feed-forward sub-block per layer, with its own pre-norm
+<a href=#634 id=634 data-nosnippet>634</a>    /// and residual (`d_intermediate &gt; 0` in the reference configs). `None` ⇒
+<a href=#635 id=635 data-nosnippet>635</a>    /// mixer-only layers.
+<a href=#636 id=636 data-nosnippet>636</a>    </span><span class="kw">pub </span>mlp: <span class="prelude-ty">Option</span>&lt;GatedMlpConfig&gt;,
+<a href=#637 id=637 data-nosnippet>637</a>}
+<a href=#638 id=638 data-nosnippet>638</a>
+<a href=#639 id=639 data-nosnippet>639</a><span class="kw">impl</span>&lt;C: MambaBlockConfig&gt; LayersBuilder&lt;C&gt; {
+<a href=#640 id=640 data-nosnippet>640</a>    <span class="doccomment">/// Builder with no virtual scheduling, no class latents, residuals enabled.
+<a href=#641 id=641 data-nosnippet>641</a>    </span><span class="kw">pub fn </span>new(n_real_layers: usize, mamba_block: C) -&gt; <span class="self">Self </span>{
+<a href=#642 id=642 data-nosnippet>642</a>        <span class="self">Self </span>{
+<a href=#643 id=643 data-nosnippet>643</a>            n_real_layers,
+<a href=#644 id=644 data-nosnippet>644</a>            n_virtual_layers: <span class="prelude-val">None</span>,
+<a href=#645 id=645 data-nosnippet>645</a>            mamba_block,
+<a href=#646 id=646 data-nosnippet>646</a>            ignore_first_residual: <span class="bool-val">false</span>,
+<a href=#647 id=647 data-nosnippet>647</a>            ignore_last_residual: <span class="bool-val">false</span>,
+<a href=#648 id=648 data-nosnippet>648</a>            class_latents: Vec::new(),
+<a href=#649 id=649 data-nosnippet>649</a>            residuals: ResidualsConfig::Standard,
+<a href=#650 id=650 data-nosnippet>650</a>            mlp: <span class="prelude-val">None</span>,
+<a href=#651 id=651 data-nosnippet>651</a>        }
+<a href=#652 id=652 data-nosnippet>652</a>    }
+<a href=#653 id=653 data-nosnippet>653</a>
+<a href=#654 id=654 data-nosnippet>654</a>    <span class="doccomment">/// Interleave a SwiGLU feed-forward sub-block after each layer's mixer
+<a href=#655 id=655 data-nosnippet>655</a>    /// (see [`Layer`](crate::modules::Layer)). `None` keeps layers mixer-only.
+<a href=#656 id=656 data-nosnippet>656</a>    </span><span class="kw">pub fn </span>with_mlp(<span class="kw-2">mut </span><span class="self">self</span>, mlp: <span class="prelude-ty">Option</span>&lt;GatedMlpConfig&gt;) -&gt; <span class="self">Self </span>{
+<a href=#657 id=657 data-nosnippet>657</a>        <span class="self">self</span>.mlp = mlp;
+<a href=#658 id=658 data-nosnippet>658</a>        <span class="self">self
+<a href=#659 id=659 data-nosnippet>659</a>    </span>}
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a>    <span class="doccomment">/// Set the optional virtual-layer scheduling.
+<a href=#662 id=662 data-nosnippet>662</a>    </span><span class="kw">pub fn </span>with_n_virtual_layers(<span class="kw-2">mut </span><span class="self">self</span>, n: <span class="prelude-ty">Option</span>&lt;(usize, Schedule)&gt;) -&gt; <span class="self">Self </span>{
+<a href=#663 id=663 data-nosnippet>663</a>        <span class="self">self</span>.n_virtual_layers = n;
+<a href=#664 id=664 data-nosnippet>664</a>        <span class="self">self
+<a href=#665 id=665 data-nosnippet>665</a>    </span>}
+<a href=#666 id=666 data-nosnippet>666</a>
+<a href=#667 id=667 data-nosnippet>667</a>    <span class="doccomment">/// Set the inter-layer residual scheme (plain additive vs Multi-Gate).
+<a href=#668 id=668 data-nosnippet>668</a>    </span><span class="kw">pub fn </span>with_residuals(<span class="kw-2">mut </span><span class="self">self</span>, residuals: ResidualsConfig) -&gt; <span class="self">Self </span>{
+<a href=#669 id=669 data-nosnippet>669</a>        <span class="self">self</span>.residuals = residuals;
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="self">self
+<a href=#671 id=671 data-nosnippet>671</a>    </span>}
+<a href=#672 id=672 data-nosnippet>672</a>
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="doccomment">/// Suppress the first virtual layer's residual (see [`Layers`]).
+<a href=#674 id=674 data-nosnippet>674</a>    </span><span class="kw">pub fn </span>with_ignore_first_residual(<span class="kw-2">mut </span><span class="self">self</span>, ignore: bool) -&gt; <span class="self">Self </span>{
+<a href=#675 id=675 data-nosnippet>675</a>        <span class="self">self</span>.ignore_first_residual = ignore;
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="self">self
+<a href=#677 id=677 data-nosnippet>677</a>    </span>}
+<a href=#678 id=678 data-nosnippet>678</a>
+<a href=#679 id=679 data-nosnippet>679</a>    <span class="doccomment">/// Suppress the last virtual layer's residual (see [`Layers`]).
+<a href=#680 id=680 data-nosnippet>680</a>    </span><span class="kw">pub fn </span>with_ignore_last_residual(<span class="kw-2">mut </span><span class="self">self</span>, ignore: bool) -&gt; <span class="self">Self </span>{
+<a href=#681 id=681 data-nosnippet>681</a>        <span class="self">self</span>.ignore_last_residual = ignore;
+<a href=#682 id=682 data-nosnippet>682</a>        <span class="self">self
+<a href=#683 id=683 data-nosnippet>683</a>    </span>}
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="doccomment">/// Set the stack-level class latents.
+<a href=#686 id=686 data-nosnippet>686</a>    </span><span class="kw">pub fn </span>with_class_latents(<span class="kw-2">mut </span><span class="self">self</span>, class_latents: Vec&lt;ClassLatent&gt;) -&gt; <span class="self">Self </span>{
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="self">self</span>.class_latents = class_latents;
+<a href=#688 id=688 data-nosnippet>688</a>        <span class="self">self
+<a href=#689 id=689 data-nosnippet>689</a>    </span>}
+<a href=#690 id=690 data-nosnippet>690</a>
+<a href=#691 id=691 data-nosnippet>691</a>    <span class="doccomment">/// Allocate and initialise the stack on `device`.
+<a href=#692 id=692 data-nosnippet>692</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Layers&lt;C::Block&gt; {
+<a href=#693 id=693 data-nosnippet>693</a>        <span class="kw">let </span>d_model = <span class="self">self</span>.mamba_block.d_model();
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="kw">let </span>n_virtual = <span class="self">self
+<a href=#695 id=695 data-nosnippet>695</a>            </span>.n_virtual_layers
+<a href=#696 id=696 data-nosnippet>696</a>            .as_ref()
+<a href=#697 id=697 data-nosnippet>697</a>            .map(|(l, <span class="kw">_</span>)| <span class="kw-2">*</span>l)
+<a href=#698 id=698 data-nosnippet>698</a>            .unwrap_or(<span class="self">self</span>.n_real_layers);
+<a href=#699 id=699 data-nosnippet>699</a>        <span class="kw">let </span>real_layers = (<span class="number">0</span>..<span class="self">self</span>.n_real_layers)
+<a href=#700 id=700 data-nosnippet>700</a>            .map(|<span class="kw">_</span>| Layer {
+<a href=#701 id=701 data-nosnippet>701</a>                norm: RmsNormConfig::new(d_model).init(device),
+<a href=#702 id=702 data-nosnippet>702</a>                mamba_block: <span class="self">self</span>.mamba_block.init_block(device),
+<a href=#703 id=703 data-nosnippet>703</a>                <span class="comment">// `norm2` exists exactly when `mlp` does — `Layer` relies on it.
+<a href=#704 id=704 data-nosnippet>704</a>                </span>norm2: <span class="self">self
+<a href=#705 id=705 data-nosnippet>705</a>                    </span>.mlp
+<a href=#706 id=706 data-nosnippet>706</a>                    .as_ref()
+<a href=#707 id=707 data-nosnippet>707</a>                    .map(|<span class="kw">_</span>| RmsNormConfig::new(d_model).init(device)),
+<a href=#708 id=708 data-nosnippet>708</a>                mlp: <span class="self">self</span>.mlp.as_ref().map(|mlp| mlp.init(device)),
+<a href=#709 id=709 data-nosnippet>709</a>                class_latents: Vec::new(),
+<a href=#710 id=710 data-nosnippet>710</a>                class_latents_emb: <span class="prelude-val">None</span>,
+<a href=#711 id=711 data-nosnippet>711</a>            })
+<a href=#712 id=712 data-nosnippet>712</a>            .collect();
+<a href=#713 id=713 data-nosnippet>713</a>        Layers {
+<a href=#714 id=714 data-nosnippet>714</a>            n_real_layers: <span class="self">self</span>.n_real_layers,
+<a href=#715 id=715 data-nosnippet>715</a>            n_virtual_layers: <span class="self">self</span>.n_virtual_layers.clone(),
+<a href=#716 id=716 data-nosnippet>716</a>            real_layers,
+<a href=#717 id=717 data-nosnippet>717</a>            ignore_first_residual: <span class="self">self</span>.ignore_first_residual,
+<a href=#718 id=718 data-nosnippet>718</a>            ignore_last_residual: <span class="self">self</span>.ignore_last_residual,
+<a href=#719 id=719 data-nosnippet>719</a>            residuals: <span class="self">self
+<a href=#720 id=720 data-nosnippet>720</a>                </span>.residuals
+<a href=#721 id=721 data-nosnippet>721</a>                .init(d_model, <span class="self">self</span>.n_real_layers, n_virtual, device),
+<a href=#722 id=722 data-nosnippet>722</a>            class_latents_emb: init_class_emb(<span class="self">self</span>.class_latents.len(), d_model, device),
+<a href=#723 id=723 data-nosnippet>723</a>            class_latents: <span class="self">self</span>.class_latents.clone(),
+<a href=#724 id=724 data-nosnippet>724</a>        }
+<a href=#725 id=725 data-nosnippet>725</a>    }
+<a href=#726 id=726 data-nosnippet>726</a>}
 </code></pre></div></section></main></body></html>
