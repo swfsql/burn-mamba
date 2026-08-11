@@ -1,7 +1,8 @@
 use crate::modules::{GatedMlp, RmsNorm};
 use crate::prelude::*;
 use crate::utils::class::{
-    assert_full_len_known, class_chunk_plan, class_row, insert_class_markers,
+    assert_full_len_known, class_chunk_plan, class_emb_width, class_prime_plan, class_row,
+    insert_class_markers,
 };
 use crate::utils::{ClassCursor, ClassLatent};
 use burn::module::Param;
@@ -34,8 +35,9 @@ use burn::prelude::*;
 /// May carry its own [`ClassLatent`]s, placed from a [`ClassCursor`]: `step`
 /// splices them around the token it is given, while in `forward` the caller
 /// splices them first (via [`Self::insert_latents`]) so the residual it adds
-/// sees the same lengthened sequence. They are independent of any class latents
-/// on the enclosing [`Layers`].
+/// sees the same lengthened sequence; [`Self::prime`] steps the ones waiting for
+/// the next token *without* that token. They are independent of any class
+/// latents on the enclosing [`Layers`].
 #[derive(Module, Debug)]
 pub struct Layer<M: Module> {
     /// Pre-norm applied before the inner block.
@@ -166,6 +168,49 @@ impl<M: MambaBlock> Layer<M> {
             cache = c;
         }
         (out, cache)
+    }
+
+    /// Step the class latents this layer has waiting for its next token — with
+    /// **no** token of its own, so nothing but class data is consumed.
+    ///
+    /// This is [`Self::step`]'s opening half on its own (see
+    /// [`ClassCursors`](crate::utils::ClassCursors)): the latents that would
+    /// have preceded the next token are stepped now, in the same order, so a
+    /// `prime` followed by a `step` runs exactly the sequence that `step` alone
+    /// would have. `End` latents are never primed — closing the sequence, they
+    /// belong to the step carrying its last token.
+    ///
+    /// Returns the **last** latent stepped, as the pair `(delta, latent)` — this
+    /// layer's own embedding row alongside the delta it produced, since the
+    /// caller has no other way to complete the residual (`delta + latent`, as it
+    /// does with the token it hands to [`Self::step`]). `None` ⇒ nothing was
+    /// waiting, and the cache comes back exactly as it went in (`None` included:
+    /// a layer that stepped nothing has the state it already had).
+    pub fn prime(
+        &self,
+        batch: usize,
+        cache: Option<M::Cache>,
+        class: Option<&mut ClassCursor>,
+    ) -> (Option<(Tensor<2>, Tensor<2>)>, Option<M::Cache>) {
+        let Some(cursor) = class else {
+            // No cursor ⇒ nothing is injected, exactly as in a `None` step.
+            assert_full_len_known(&self.class_latents, None, "Layer");
+            return (None, cache);
+        };
+        let plan = class_prime_plan(&self.class_latents, 0, cursor, "Layer");
+        if plan.is_empty() {
+            return (None, cache);
+        }
+        let width = class_emb_width(self.class_latents_emb.as_ref());
+        let mut cache = cache;
+        let mut last = None;
+        for (_at, i) in plan {
+            let row = class_row(self.class_latents_emb.as_ref(), i, batch, width);
+            let (out, c) = self.step_one(row.clone(), cache);
+            last = Some((out, row));
+            cache = Some(c);
+        }
+        (last, cache)
     }
 
     /// The actual one-token work: no class injection, no outer residual.

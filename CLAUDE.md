@@ -91,7 +91,8 @@ src/
 └─ utils/            lower-level plumbing
    ├─ mod.rs         div_eps (per-dtype epsilon)
    ├─ class/         ClassToken / ClassLatent placement (CLS-style registers) +
-   │                 ClassCursor(s): offsets + full-length hint, shared by forward/step
+   │                 ClassCursor(s): offsets + full-length hint, shared by
+   │                 forward/step/prime
    ├─ schedule/      Schedule + BidiSchedule (virtual→real index mapping)
    ├─ scheduler/     LR schedulers (cosine + warmup, constant) — example use
    ├─ backend_macros.rs  per-backend BackendExt impls + autodiff marker traits
@@ -136,6 +137,11 @@ prefill) and **`step()`** (recurrent: token-by-token decode, O(state)/token, no
 growing KV cache). `forward()` from any cache equals `step()` unrolled from that same
 cache — parity on **outputs, final cache, and gradients** is what the test suites
 assert.
+
+Layer containers and networks additionally expose **`prime()`** — `step()` without
+a user token: it emits the class tokens/latents waiting for the next one and
+returns the last of them (`None` if none were), for seedless generation. `prime`
+then `step` runs exactly what that `step` alone would.
 
 Mamba-3 additionally exposes **`step_infinite(x)`** (the stationary fixed-point
 output under a constant token; no cache — the state orbits, only the output
@@ -246,8 +252,11 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   `network`/`stack`/`per_layer`), so a sequence splits into any number of `forward` chunks
   and/or `step`s without moving a marker. A cursor past a marker skips it (`Start` fires
   once); `Middle`/`End` panic without the hint. `step` returns the **last** token it
-  emitted (and the state after it) — the user token, unless an `End` follows it. `None`
-  keeps the defaults: `forward` = this call is the whole sequence, `step` = no injection.
+  emitted (and the state after it) — the user token, unless an `End` follows it; `prime`
+  takes no user token at all and emits the markers preceding the next one, returning the
+  last of them (`End` is never primed — it closes the sequence, so the `step`/`forward`
+  carrying the last user token is what hands it back). `None` keeps the defaults:
+  `forward` = this call is the whole sequence, `step`/`prime` = no injection.
   Read markers back via `class_*_output_indices` (minus the level's pre-call cursor for a
   chunk; a non-landing marker reports a position past the output).
 - **Multi-Gate Residuals** (`modules/multi_gate.rs`): `Layers<M>.residuals` picks plain

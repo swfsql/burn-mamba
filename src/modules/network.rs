@@ -3,8 +3,8 @@ use crate::modules::{ResidualsConfig, RmsNorm, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::Schedule;
 use crate::utils::class::{
-    assert_full_len_known, class_chunk_plan, class_marker_output_indices, class_row,
-    init_class_emb, insert_class_markers,
+    assert_full_len_known, class_chunk_plan, class_emb_width, class_marker_output_indices,
+    class_prime_plan, class_row, init_class_emb, insert_class_markers,
 };
 use crate::utils::{ClassCursor, ClassCursors};
 use burn::config::Config;
@@ -140,6 +140,59 @@ where
         (out, caches)
     }
 
+    /// Step the class tokens/latents this network has waiting for its next user
+    /// token — with **no** user token, so no input data is needed.
+    ///
+    /// This is [`Self::step`]'s opening half on its own, at all three class
+    /// levels: the network's own class tokens due now each run a full pass (so
+    /// the layers splice their latents around them exactly as in `step`), and
+    /// whatever the stack still has waiting for its next token is flushed after
+    /// them ([`Layers::prime`]). A `prime` followed by a `step` therefore runs
+    /// the very sequence that `step` alone would have — `prime` → sample →
+    /// `step` → sample → … is the seedless-generation loop. `End` markers are
+    /// never primed: they close the sequence, so they belong to the step
+    /// carrying its last user token.
+    ///
+    /// Returns the output of the **last** marker emitted, or `None` when none
+    /// were waiting (the caches then come back untouched, `None` included).
+    /// `batch` sizes the marker rows, the only inputs there are.
+    pub fn prime(
+        &self,
+        batch: usize,
+        caches: Option<M::Caches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Option<Tensor<2>>, Option<M::Caches>) {
+        let Some(class) = class else {
+            // No cursors ⇒ nothing is injected, exactly as in a `None` step.
+            assert_full_len_known(&self.class_tokens, None, "LatentNetwork");
+            return self.layers.prime(batch, caches, None);
+        };
+        let mut cursor = ClassCursor::at(class.network, class.full_len);
+        let plan = class_prime_plan(&self.class_tokens, 0, &mut cursor, "LatentNetwork");
+        class.network = cursor.offset;
+
+        let mut caches = caches;
+        let mut out = None;
+        if !plan.is_empty() {
+            let width = class_emb_width(self.class_tokens_emb.as_ref());
+            for (_at, i) in plan {
+                let row = class_row(self.class_tokens_emb.as_ref(), i, batch, width);
+                let (y, c) = self.step_one(row, caches, Some(&mut *class));
+                out = Some(y);
+                caches = Some(c);
+            }
+        }
+        // The stack's own levels may still hold latents waiting for the next
+        // token to reach them — the class tokens above just went past.
+        let saved = class.enter(self.class_tokens.len());
+        let (y, caches) = self.layers.prime(batch, caches, Some(&mut *class));
+        class.leave(saved);
+        if let Some(y) = y {
+            out = Some(self.out_proj.forward(y));
+        }
+        (out, caches)
+    }
+
     /// One token through `in_proj → layers → out_proj`; the network's own class
     /// tokens are placed by [`Self::step`], the inner cursors are forwarded.
     fn step_one(
@@ -271,6 +324,27 @@ where
         let x = self.norm_f.forward(x);
         // Reuse the 3-D head by lifting/lowering the sequence axis.
         let logits = self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1);
+        (logits, caches)
+    }
+
+    /// Step the class latents the stack has waiting for its next token, with no
+    /// token of its own: logits `[batch, padded_vocab]` for the **last** latent
+    /// emitted, or `None` when none were waiting — the seedless-generation entry
+    /// point (`prime` → sample → `step` → …). Having no class tokens of its own,
+    /// the vocab network just forwards `class` to [`Layers::prime`], whose docs
+    /// carry the placement rules.
+    pub fn prime(
+        &self,
+        batch: usize,
+        caches: Option<M::Caches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Option<Tensor<2>>, Option<M::Caches>) {
+        let (x, caches) = self.layers.prime(batch, caches, class);
+        let logits = x.map(|x| {
+            let x = self.norm_f.forward(x);
+            // Reuse the 3-D head by lifting/lowering the sequence axis.
+            self.apply_lm_head(x.unsqueeze_dim(1)).squeeze_dim(1)
+        });
         (logits, caches)
     }
 
@@ -463,6 +537,49 @@ impl MambaLatentNet {
                 });
                 let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Class-only step: emits the class markers waiting for the next user token
+    /// without one, returning the last of them (`None` when none were waiting).
+    /// Cache family must match the network — see [`LatentNetwork::prime`].
+    pub fn prime(
+        &self,
+        batch: usize,
+        caches: Option<MambaCaches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Option<Tensor<2>>, Option<MambaCaches>) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba1))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba2))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba3))
             }
         }
     }
@@ -774,6 +891,49 @@ impl MambaVocabNet {
                 });
                 let (y, c) = net.step(x, caches, class);
                 (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Class-only step: emits the class latents waiting for the next token
+    /// without one, returning the logits of the last of them (`None` when none
+    /// were waiting). Cache family must match — see [`VocabNetwork::prime`].
+    pub fn prime(
+        &self,
+        batch: usize,
+        caches: Option<MambaCaches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Option<Tensor<2>>, Option<MambaCaches>) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba1(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-1 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba1))
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba2))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let (y, c) = net.prime(batch, caches, class);
+                (y, c.map(MambaCaches::Mamba3))
             }
         }
     }

@@ -67,6 +67,9 @@ mod-k) which a real, non-negative-eigenvalue SSM provably cannot.
 - **Virtual layers** — run many logical layers over a smaller set of shared
   weights via a configurable schedule.
 - **Bidirectional wrappers** (Mamba-2/3) for non-autoregressive tasks.
+- **Class tokens / latents** — learnable `[CLS]`-style registers spliced into the
+  sequence, landing identically however it is split into `forward()` chunks and
+  `step()`s, plus a `prime()` that steps them without a user token.
 
 ## Installation
 
@@ -147,6 +150,12 @@ runnable training and inference programs.
 A `forward()` over a sequence is exactly equal to unrolling `step()` token by
 token from the same initial cache — the parity property the test suite verifies
 on outputs, final cache, and gradients.
+
+Models carrying class tokens/latents gain a third recurrent entry point,
+`prime()`: it steps the class markers waiting for the next user token *without*
+one, returning the last of them — how a seedless generation loop starts, when
+there is nothing to hand `step()` yet. A `prime()` plus the `step()` after it
+runs exactly what that `step()` alone would have.
 
 API references:
 [`Mamba1`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba1/mamba1/struct.Mamba1.html) ·

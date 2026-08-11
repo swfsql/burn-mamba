@@ -41,6 +41,15 @@ mod tests;
 // being then the sequence's latest token. Markers emitted before the user token
 // only leave their mark on the state.
 //
+// `prime` is the call that reads *those* back. It emits the markers waiting for
+// the next user token — without one, so it needs no input data — and returns the
+// last of them (`None` when none were waiting). Being exactly `step`'s opening
+// half, `prime` followed by `step` emits what that `step` alone would have, in
+// the same order: seedless generation is `prime` → sample → `step` → sample → …
+// `End` is never primed — it *closes* the sequence, so it belongs to the call
+// carrying the last user token, which is why it is the one marker `step` (and
+// `forward`) already hands back.
+//
 // Placement is **streamed**, identically for `forward` (a chunk of the
 // sequence) and `step` (a single token): [`ClassCursors`] carries one
 // `full_len` hint — the length of the whole sequence the call is part of — plus
@@ -280,6 +289,35 @@ pub(crate) fn class_chunk_plan<M: ClassMarker>(
     cursor: &mut ClassCursor,
     who: &str,
 ) -> Vec<(usize, usize)> {
+    class_plan(markers, chunk_len, cursor, false, who)
+}
+
+/// [`class_chunk_plan`] for a **prime**: the chunk carries no user token of its
+/// own past the `chunk_len` tokens a lower level handed up (`0` at the level the
+/// call enters), and one more user token is still to come.
+///
+/// It therefore differs on the chunk's trailing edge only: the markers waiting
+/// there for that next token are emitted now (they precede it either way), while
+/// `End` — which trails the last token rather than preceding one — is left to
+/// the call that carries it. A cursor already at the announced end has no next
+/// token to emit anything for, so the plan is then empty.
+pub(crate) fn class_prime_plan<M: ClassMarker>(
+    markers: &[M],
+    chunk_len: usize,
+    cursor: &mut ClassCursor,
+    who: &str,
+) -> Vec<(usize, usize)> {
+    class_plan(markers, chunk_len, cursor, true, who)
+}
+
+/// The shared placement loop of [`class_chunk_plan`] / [`class_prime_plan`].
+fn class_plan<M: ClassMarker>(
+    markers: &[M],
+    chunk_len: usize,
+    cursor: &mut ClassCursor,
+    prime: bool,
+    who: &str,
+) -> Vec<(usize, usize)> {
     if markers.is_empty() {
         cursor.offset += chunk_len;
         return Vec::new();
@@ -294,8 +332,13 @@ pub(crate) fn class_chunk_plan<M: ClassMarker>(
     let start = cursor.offset;
     let consumed = start - positions.iter().filter(|&&p| p < start).count() + chunk_len;
     // Whether this chunk reaches the announced end, i.e. carries the last user
-    // token — the one and only place an `End` can go.
-    let closes = cursor.full_len == Some(consumed);
+    // token — the one and only place an `End` can go. A prime carries no token
+    // of its own, so it never closes anything.
+    let closes = !prime && cursor.full_len == Some(consumed);
+    // Whether a prime may flush the markers waiting at the chunk's end: only
+    // while a further user token is announced (or the stream is open-ended) is
+    // there one for them to precede.
+    let flush = prime && cursor.full_len != Some(consumed);
 
     let mut order: Vec<usize> = (0..markers.len()).collect();
     order.sort_by_key(|&i| positions[i]);
@@ -312,11 +355,16 @@ pub(crate) fn class_chunk_plan<M: ClassMarker>(
         if at + need > chunk_len {
             break; // the token it precedes is in a later chunk, as is it
         }
-        if at + need == chunk_len && !(closes && markers[i].closes_sequence()) {
+        if at + need == chunk_len {
             // Nothing left in this chunk to precede: only a closing `End` on the
-            // chunk that ends the sequence belongs here. A `Custom` waits for
-            // its token — for one at/past the end, forever.
-            break;
+            // chunk that ends the sequence belongs here — or, on a prime, the
+            // markers the next token is due to be preceded by. A `Custom` waits
+            // for its token — for one at/past the end, forever.
+            let closing = closes && markers[i].closes_sequence();
+            let pending = flush && !markers[i].closes_sequence();
+            if !closing && !pending {
+                break;
+            }
         }
         at += need;
         out = p + 1;
@@ -370,6 +418,15 @@ pub(crate) fn insert_class_markers<M: ClassMarker>(
         segments.push(x.narrow(1, taken, chunk_len - taken));
     }
     Tensor::cat(segments, 1)
+}
+
+/// Width of the class embeddings (`[num_markers, width]`) — what a `prime`
+/// sizes its rows by, having no token to read the width from. Only ever called
+/// where a marker is about to be emitted, so the param is present.
+pub(crate) fn class_emb_width(emb: Option<&Param<Tensor<2>>>) -> usize {
+    emb.expect("class-token markers present but no embedding param")
+        .val()
+        .dims()[1]
 }
 
 /// The embedding row of marker `i` as one broadcast token (`[batch, width]`) —

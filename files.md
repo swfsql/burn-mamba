@@ -165,7 +165,10 @@ plus shared NN blocks.
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
   insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
   (a bare-`Layer` caller needs it too); `step` takes the same cursor and returns its last
-  emitted token (`step_one` is the injection-free body). Cursorless `step_infinite`
+  emitted token (`step_one` is the injection-free body). `prime(batch, cache, cursor)`
+  steps the latents waiting for the next token without one, returning `Option<(delta,
+  latent)>` — the row comes back with the delta because the residual is the caller's — and
+  the cache untouched (`None` included) when none were waiting. Cursorless `step_infinite`
   mirrors `step`. Optional `norm2`+`mlp` (allocated together) add a second
   Pre-LN sub-block with a residual of its own; the methods therefore return the layer's
   **total delta** `h₁ + mlp(norm2(x + h₁))`, so `Layers`' single add yields both residuals
@@ -179,9 +182,15 @@ plus shared NN blocks.
   its own cache; owns the outer residual (`skip_residual`/`ignore_first/last_residual` —
   which govern only that outer add, not the feed-forward's inner one).
   `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`, `with_mlp`).
-  `forward`/`step` take `Option<&mut ClassCursors>` (stack-level + per-virtual-layer);
-  `step` cascades the stack latents and each layer's own up the stack in `forward`'s token
-  order, returning the last token emitted. MultiGate rejects class latents at both levels.
+  `forward`/`step`/`prime` take `Option<&mut ClassCursors>` (stack-level + per-virtual-
+  layer); `step` cascades the stack latents and each layer's own up the stack in
+  `forward`'s token order, returning the last token emitted. `prime(batch, caches,
+  cursors)` opens that same private `cascade` with a token-less stream (`prime = true`
+  switches each layer to `class_prime_plan`), returning `(Option<Tensor<2>>,
+  Option<Caches>)`: the last latent emitted, and caches untouched when nothing ran — a
+  partly primed cacheless stack is completed with zero caches for the layers that stepped
+  nothing (exactly the state they hold). MultiGate rejects class latents at both levels
+  (so it primes to `None`).
   Cursorless `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
@@ -193,7 +202,10 @@ plus shared NN blocks.
   cache/path**; `step_infinite` mirrors `step` (enums included;
   Mamba-3 only, panic otherwise). Both take `Option<&mut ClassCursors>`, the network's own
   class tokens riding the `network` cursor and the stack's the rest (each class token is a
-  full network pass; `step_one` is the one-token body).
+  full network pass; `step_one` is the one-token body). `prime` (enums included) covers
+  all three levels: the network's due class tokens each run a full pass, then
+  `Layers::prime` flushes whatever is still waiting above them; `VocabNetwork::prime`
+  returns the primed latent's logits.
   `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
   `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
@@ -234,7 +246,12 @@ plus shared NN blocks.
   markers this level splices in). `class_chunk_plan` is the single placement decision —
   `(at, marker)` pairs for the next `chunk_len` user tokens, advancing the cursor — feeding
   `insert_class_markers` (a `forward` chunk) and `class_row` (one `step` token), so both
-  calls place identically and a sequence splits anywhere. `assert_full_len_known` guards
+  calls place identically and a sequence splits anywhere. `class_prime_plan` is its
+  `prime` twin (same `class_plan` body): at the chunk's trailing edge it emits the markers
+  waiting for the *next* user token instead of leaving them, never `End`, and nothing once
+  the cursor is at the announced end — which is what keeps a `Custom(k ≥ L)` from trailing
+  (only a `step`, which *has* the token, may land it). `class_emb_width` sizes a prime's
+  rows, having no token to read the width from. `assert_full_len_known` guards
   `Middle`/`End`. `class_marker_output_indices` reports a position past the emitted
   sequence for a marker that never lands.
 - **`schedule/`** — `Schedule{Cyclic|Stretched|Custom}` (`real_idx`) and

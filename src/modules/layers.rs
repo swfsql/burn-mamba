@@ -2,8 +2,8 @@ use crate::modules::{GatedMlpConfig, Residuals, ResidualsConfig, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::Schedule;
 use crate::utils::class::{
-    assert_full_len_known, class_chunk_plan, class_marker_output_indices, class_row,
-    init_class_emb, insert_class_markers,
+    assert_full_len_known, class_chunk_plan, class_emb_width, class_marker_output_indices,
+    class_prime_plan, class_row, init_class_emb, insert_class_markers,
 };
 use crate::utils::{ClassCursor, ClassCursors, ClassLatent};
 use burn::module::Param;
@@ -261,13 +261,10 @@ where
         // the user token — `at == 0` before it, `at == 1` after (an `End` latent
         // closing the sequence, which then ends the stream).
         let mut stream: Vec<Tensor<2>> = Vec::with_capacity(1);
-        // Full length of the stream the layers see, class latents included.
-        let mut full = None;
         if let Some(class) = class.as_deref_mut() {
             let mut cursor = ClassCursor::at(class.stack, class.full_len);
             let plan = class_chunk_plan(&self.class_latents, 1, &mut cursor, "Layers");
             class.stack = cursor.offset;
-            full = class.full_len.map(|l| l + self.class_latents.len());
             let row = |i: usize| class_row(self.class_latents_emb.as_ref(), i, batch, d_model);
             stream.extend(
                 plan.iter()
@@ -285,15 +282,53 @@ where
             stream.push(x);
         }
 
-        // Propagate the stream up through each virtual layer, each layer splicing
-        // its own class latents into the stream it receives.
-        for pos in 0..n {
+        let mut stream = self.cascade(batch, stream, &mut slots, class, false);
+
+        // The stream keeps `forward`'s token order, so its last element is the
+        // latest token of the sequence — the user token, or an `End` after it.
+        let out = stream.pop().expect("the user token is always emitted");
+        (out, M::Caches::from_slots(slots))
+    }
+
+    /// Thread `stream` — the tokens entering the bottom layer — up through every
+    /// (virtual) layer, each layer splicing its own class latents into what it
+    /// receives, adding its residual, and handing the result to the next one.
+    /// Returns what leaves the top layer, `slots` holding the advanced caches.
+    ///
+    /// The shared body of [`Self::step`] and [`Self::prime`], which differ in the
+    /// stream they open with — a user token amid the stack latents, or nothing
+    /// but stack latents — and in what a layer emits at the **end** of the stream
+    /// it receives: an ordinary step leaves those latents for the token they
+    /// precede (only a closing `End` trails one), while a `prime` (`prime =
+    /// true`) emits what that next token was going to be preceded by, which is
+    /// how the cascade carries on when the stream below it is empty. Everything
+    /// else is common — which is what makes a `prime` and the `step` after it run
+    /// the same sequence as that `step` alone.
+    fn cascade(
+        &self,
+        batch: usize,
+        mut stream: Vec<Tensor<2>>,
+        slots: &mut [Option<M::Cache>],
+        mut class: Option<&mut ClassCursors>,
+        prime: bool,
+    ) -> Vec<Tensor<2>> {
+        // Full length of the stream the layers see, this stack's latents
+        // included; each layer then lengthens it further for the ones above it.
+        let mut full = class
+            .as_deref()
+            .and_then(|c| c.full_len)
+            .map(|l| l + self.class_latents.len());
+        for pos in 0..slots.len() {
             let layer = &self.real_layers[self.real_idx(pos)];
-            let skip = self.skip_residual(pos, n);
+            let skip = self.skip_residual(pos, slots.len());
             let plan = if let Some(class) = class.as_deref_mut() {
                 let mut cursor = ClassCursor::at(class.per_layer[pos], full);
-                let plan =
-                    class_chunk_plan(&layer.class_latents, stream.len(), &mut cursor, "Layer");
+                let markers = &layer.class_latents;
+                let plan = if prime {
+                    class_prime_plan(markers, stream.len(), &mut cursor, "Layer")
+                } else {
+                    class_chunk_plan(markers, stream.len(), &mut cursor, "Layer")
+                };
                 class.per_layer[pos] = cursor.offset;
                 plan
             } else {
@@ -301,6 +336,9 @@ where
                 Vec::new()
             };
             full = full.map(|l| l + layer.class_latents.len());
+            if plan.is_empty() && stream.is_empty() {
+                continue; // nothing reaches this layer, and it adds nothing
+            }
 
             let mut cache = slots[pos].take();
             let mut next: Vec<Tensor<2>> = Vec::with_capacity(stream.len() + plan.len());
@@ -314,7 +352,10 @@ where
                     (out + token, c)
                 }
             };
-            let row = |i: usize| class_row(layer.class_latents_emb.as_ref(), i, batch, d_model);
+            let row = |i: usize| {
+                let emb = layer.class_latents_emb.as_ref();
+                class_row(emb, i, batch, class_emb_width(emb))
+            };
             let mut plan = plan.into_iter().peekable();
             for (t, token) in stream.into_iter().enumerate() {
                 // This layer's class latents that fall before this token.
@@ -327,7 +368,9 @@ where
                 next.push(out);
                 cache = Some(c);
             }
-            // …and the `End` latents closing the stream, after its last token.
+            // …and the latents that follow the stream's last token: an `End`
+            // closing the sequence, or (on a prime) the ones the token after it
+            // is due to be preceded by.
             for (_at, i) in plan {
                 let (out, c) = run(row(i), cache);
                 next.push(out);
@@ -336,11 +379,106 @@ where
             slots[pos] = cache;
             stream = next;
         }
+        stream
+    }
 
-        // The stream keeps `forward`'s token order, so its last element is the
-        // latest token of the sequence — the user token, or an `End` after it.
-        let out = stream.pop().expect("the user token is always emitted");
-        (out, M::Caches::from_slots(slots))
+    /// Step the class latents the stack has waiting for its next user token —
+    /// with **no** user token, so nothing but class data is consumed.
+    ///
+    /// This is [`Self::step`]'s opening half on its own: the stack-level latents
+    /// due now open the bottom stream (empty when none are), which then goes up
+    /// the stack through the very cascade `step` runs, with every layer
+    /// additionally flushing the latents *its* next token was going to be
+    /// preceded by. A `prime` followed by a `step` therefore runs exactly the
+    /// sequence that `step` alone would have.
+    /// `End` latents are never primed: closing the sequence, they belong to the
+    /// step carrying its last user token (which is why that step returns them).
+    /// A cursor already at the announced end therefore primes nothing.
+    ///
+    /// Returns the fully propagated output of the **last** latent emitted, or
+    /// `None` when none were waiting — the seedless-generation entry point:
+    /// `prime` → sample → `step` → sample → … `batch` sizes the latent rows,
+    /// which are the only inputs there are.
+    ///
+    /// The caches come back as they went in when nothing ran (`None` included);
+    /// a partly primed stack is completed with zero caches for the layers that
+    /// stepped nothing, which is exactly the state they hold. `None` cursors
+    /// inject nothing at all (`Middle`/`End` latents then panic, as in `step`),
+    /// and Multi-Gate residuals — which forbid class latents entirely — always
+    /// prime to `None`.
+    pub fn prime(
+        &self,
+        batch: usize,
+        caches: Option<M::Caches>,
+        class: Option<&mut ClassCursors>,
+    ) -> (Option<Tensor<2>>, Option<M::Caches>) {
+        if let Residuals::MultiGate(_) = &self.residuals {
+            self.assert_multi_gate_has_no_class_latents();
+            return (None, caches);
+        }
+        let n = self.n_virtual_count();
+        let Some(class) = class else {
+            assert_full_len_known(&self.class_latents, None, "Layers");
+            for layer in &self.real_layers {
+                assert_full_len_known(&layer.class_latents, None, "Layer");
+            }
+            return (None, caches);
+        };
+        class.fit(n);
+        let mut slots: Vec<Option<M::Cache>> = match caches {
+            Some(caches) => {
+                assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+                caches.into_slots()
+            }
+            // Nothing may run at all, and there is no token to size zero caches
+            // from until something does — so start the slots empty.
+            None => (0..n).map(|_| None).collect(),
+        };
+
+        // Bottom input stream for this prime: the stack-level class latents due
+        // now, with no user token to accompany them (so possibly none at all).
+        let mut cursor = ClassCursor::at(class.stack, class.full_len);
+        let plan = class_prime_plan(&self.class_latents, 0, &mut cursor, "Layers");
+        class.stack = cursor.offset;
+        let stream: Vec<Tensor<2>> = if plan.is_empty() {
+            Vec::new()
+        } else {
+            let emb = self.class_latents_emb.as_ref();
+            let width = class_emb_width(emb);
+            plan.into_iter()
+                .map(|(_at, i)| class_row(emb, i, batch, width))
+                .collect()
+        };
+        let mut stream = self.cascade(batch, stream, &mut slots, Some(class), true);
+
+        // A layer only ever hands up at least what it received, so the cascade
+        // comes back empty exactly when nothing ran anywhere — and otherwise its
+        // last token is both what this prime emitted and a `[batch, d_model]`
+        // sample to size the zero caches below.
+        let out = stream.pop();
+        let Some(sample) = out.as_ref() else {
+            // Not a single latent was due anywhere: no state moved, so the
+            // caches go back exactly as they came (`None` included).
+            let caches = slots
+                .iter()
+                .all(Option::is_some)
+                .then(|| M::Caches::from_slots(slots));
+            return (out, caches);
+        };
+        if slots.iter().any(Option::is_none) {
+            // The call started cacheless and only some layers ran; the others
+            // hold the zero state they started from.
+            let zeros = self.real_layers[0]
+                .mamba_block
+                .zero_caches_2d(sample, n)
+                .into_slots();
+            for (slot, zero) in slots.iter_mut().zip(zeros) {
+                if slot.is_none() {
+                    *slot = zero;
+                }
+            }
+        }
+        (out, Some(M::Caches::from_slots(slots)))
     }
 
     /// Stationary fixed point of the whole stack under a constant token, with
