@@ -80,8 +80,9 @@ src/
 │  │                 the layer's total delta, outer residual added by Layers
 │  ├─ mlp.rs         GatedMlp: SwiGLU feed-forward interleaved with the mixer
 │  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
-│  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate)
-│  ├─ network.rs     LatentNetwork / VocabNetwork + MambaLatentNet / MambaVocabNet enums
+│  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate): accumulate then mix
+│  ├─ network.rs     LatentNetwork (optional final norm) / VocabNetwork +
+│  │                 MambaLatentNet / MambaVocabNet enums
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait + MambaCaches enum
 │  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
@@ -119,7 +120,7 @@ parameterised by the SSM core block `M` (`Mamba1`/`Mamba2`/`Mamba3`):
 
 ```text
 VocabNetwork<M>   embedding → Layers<M> → final RMSNorm → LM head → logits
-LatentNetwork<M>  in_proj → Layers<M> → out_proj            (continuous I/O)
+LatentNetwork<M>  in_proj → Layers<M> → [norm_f] → out_proj (continuous I/O)
 Layers<M>         a stack of N (virtual) layers over R real weight sets
 Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
 M (Block)         the SSM core (mamba1.rs / mamba2.rs / mamba3.rs)
@@ -260,8 +261,12 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   Read markers back via `class_*_output_indices` (minus the level's pre-call cursor for a
   chunk; a non-landing marker reports a position past the output).
 - **Multi-Gate Residuals** (`modules/multi_gate.rs`): `Layers<M>.residuals` picks plain
-  additive (`Standard`) vs `MultiGate` — `n_stream` streams gated/attention-pooled between
-  layers instead of one additive skip. See the module header.
+  additive (`Standard`) vs `MultiGate` — up to `n_stream` streams gated/attention-pooled
+  between layers instead of one additive skip. The input is stream 1 and the first
+  `n_stream−1` layers **append** their output as a new one; only then does gated mixing
+  start (seeding `n` copies is a symmetry that never breaks). Being a convex mean-pool, it
+  leaves an `O(1)` output where the additive skip grows with depth, so a latent head wants
+  `final_norm`. See the module header.
 
 ---
 

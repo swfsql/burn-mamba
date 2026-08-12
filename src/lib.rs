@@ -67,7 +67,7 @@ pub mod prelude {
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
     pub use crate::modules::{
         Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
-        MambaVocabNet, MambaVocabNetConfig, ResidualsConfig,
+        MambaVocabNet, MambaVocabNetConfig, MultiGateResidualConfig, ResidualsConfig,
     };
 
     pub use crate::modules::{

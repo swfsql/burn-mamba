@@ -89,10 +89,11 @@ where
     /// [`Layer`] returns only its delta — `F_l = Block(RMSNorm(·))`, plus the
     /// feed-forward sub-block's contribution when the layer has one; the outer
     /// residual is added here. With [`Residuals::Standard`] each layer adds the input skip (unless
-    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and
-    /// `n_stream` parallel streams — seeded from `x` — carry the residual: each
-    /// layer reads their attention-pooled aggregate as input and its output is
-    /// gated back into every stream (see [`MultiGate`]).
+    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and up to
+    /// `n_stream` parallel streams — seeded with `x` as the first one — carry the
+    /// residual: each layer reads their attention-pooled aggregate as input, and
+    /// its output either *becomes* a new stream (while fewer than `n_stream`
+    /// exist) or is gated into every stream (see [`MultiGate`]).
     ///
     /// `ignore_first/last_residual` apply to **both** paths: skipping the first
     /// restarts the residual carry from the first layer's output (the input is
@@ -130,8 +131,9 @@ where
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
         let mut slots = caches.into_slots();
 
-        // MultiGate keeps `n_stream` parallel streams (seeded from the input);
-        // Standard threads the single tensor `x` directly (streams stays `None`).
+        // MultiGate carries up to `n_stream` parallel streams (the input is the
+        // first, the early layers append the rest); Standard threads the single
+        // tensor `x` directly (streams stays `None`).
         let mut streams = self.multi_gate_streams_seed(&x);
 
         for i in 0..n {
@@ -166,27 +168,29 @@ where
                     let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone());
                     slots[i] = Some(c_);
                     let s = streams.take().unwrap();
-                    // A skipped residual here is equivalent to forcing the MGR
-                    // mixer gate β ≡ 1 (`new_streams = out`): the carried streams
-                    // are dropped, and the aggregator over the resulting identical
-                    // streams collapses to `F_l`. Both branches shortcut that.
+                    // A skipped residual here drops every carried stream, which
+                    // the MGR reaches by forcing the mixer gate to β ≡ 1
+                    // (`new_streams = out`), the aggregator over the resulting
+                    // identical streams collapsing to `F_l`. Both branches
+                    // shortcut that.
                     if last {
                         // Output depends purely on the last layer's transform.
                         x = out;
                         streams = Some(s);
                     } else if first {
-                        // Drop the input seed: restart the streams from `F_0`.
-                        let [b, seq, d] = out.dims();
-                        streams = Some(out.clone().unsqueeze_dim::<4>(2).expand([
-                            b,
-                            seq,
-                            mg.n_stream,
-                            d,
-                        ]));
+                        // Drop the input seed: restart the streams from `F_0`
+                        // alone (the accumulation phase refills them).
+                        streams = Some(out.clone().unsqueeze_dim::<4>(2));
                         x = out;
                     } else {
-                        let idx = mg.module_index(i, real);
-                        let (new_h, new_streams) = mg.layers[idx].forward(out, s);
+                        let mgr = &mg.layers[mg.module_index(i, real)];
+                        // Accumulate `F_l` as a new stream while there is room,
+                        // then switch to gated mixing (see `MultiGate`).
+                        let (new_h, new_streams) = if s.dims()[2] < mg.n_stream {
+                            mgr.accumulate(out, s)
+                        } else {
+                            mgr.forward(out, s)
+                        };
                         x = new_h;
                         streams = Some(new_streams);
                     }
@@ -196,23 +200,20 @@ where
         (x, M::Caches::from_slots(slots))
     }
 
-    /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies
-    /// of `x` as `[batch, sequence, n_stream, d_model]` — or `None` for the
-    /// Standard path. Panics if MultiGate is paired with stack-level class latents.
+    /// Seed the MultiGate streams from a full-sequence input — the **single**
+    /// stream `x` as `[batch, sequence, 1, d_model]` (the layers below
+    /// `n_stream` widen it, see [`MultiGate`](crate::modules::MultiGate)) — or
+    /// `None` for the Standard path. Panics if MultiGate is paired with
+    /// stack-level class latents.
     fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
-        let Residuals::MultiGate(mg) = &self.residuals else {
+        if !matches!(&self.residuals, Residuals::MultiGate(_)) {
             return None;
-        };
+        }
         assert!(
             self.class_latents_emb.is_none(),
             "MultiGate residuals do not support stack-level class latents"
         );
-        let [batch, sequence, d_model] = x.dims();
-        Some(
-            x.clone()
-                .unsqueeze_dim::<4>(2)
-                .expand([batch, sequence, mg.n_stream, d_model]),
-        )
+        Some(x.clone().unsqueeze_dim::<4>(2))
     }
 
     /// Single-token step through every (virtual) layer.
@@ -528,12 +529,8 @@ where
     /// the whole stack.
     fn step_infinite_multi_gate(&self, x: Tensor<2>, mg: &crate::modules::MultiGate) -> Tensor<2> {
         self.assert_multi_gate_has_no_class_latents();
-        let [batch, d_model] = x.dims();
         let n = self.n_virtual_count();
-        let mut streams = x
-            .clone()
-            .unsqueeze_dim::<3>(1)
-            .expand([batch, mg.n_stream, d_model]);
+        let mut streams = x.clone().unsqueeze_dim::<3>(1);
         let mut h = x;
         for i in 0..n {
             let real = self.real_idx(i);
@@ -542,15 +539,15 @@ where
             if self.ignore_last_residual && i + 1 == n {
                 h = out;
             } else if self.ignore_first_residual && i == 0 {
-                let [b, d] = out.dims();
-                streams = out
-                    .clone()
-                    .unsqueeze_dim::<3>(1)
-                    .expand([b, mg.n_stream, d]);
+                streams = out.clone().unsqueeze_dim::<3>(1);
                 h = out;
             } else {
-                let idx = mg.module_index(i, real);
-                let (new_h, new_streams) = mg.layers[idx].step(out, streams);
+                let mgr = &mg.layers[mg.module_index(i, real)];
+                let (new_h, new_streams) = if streams.dims()[1] < mg.n_stream {
+                    mgr.accumulate_step(out, streams)
+                } else {
+                    mgr.step(out, streams)
+                };
                 h = new_h;
                 streams = new_streams;
             }
@@ -570,17 +567,13 @@ where
         mg: &crate::modules::MultiGate,
     ) -> (Tensor<2>, M::Caches) {
         self.assert_multi_gate_has_no_class_latents();
-        let [batch, d_model] = x.dims();
         let n = self.n_virtual_count();
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
 
         let mut slots = caches.into_slots();
-        let mut streams = x
-            .clone()
-            .unsqueeze_dim::<3>(1)
-            .expand([batch, mg.n_stream, d_model]);
+        let mut streams = x.clone().unsqueeze_dim::<3>(1);
         let mut h = x;
         for i in 0..n {
             let real = self.real_idx(i);
@@ -594,16 +587,17 @@ where
                 // Output depends purely on the last layer's transform.
                 h = out;
             } else if self.ignore_first_residual && i == 0 {
-                // Drop the input seed: restart the streams from `F_0`.
-                let [b, d] = out.dims();
-                streams = out
-                    .clone()
-                    .unsqueeze_dim::<3>(1)
-                    .expand([b, mg.n_stream, d]);
+                // Drop the input seed: restart the streams from `F_0` alone.
+                streams = out.clone().unsqueeze_dim::<3>(1);
                 h = out;
             } else {
-                let idx = mg.module_index(i, real);
-                let (new_h, new_streams) = mg.layers[idx].step(out, streams);
+                let mgr = &mg.layers[mg.module_index(i, real)];
+                // Accumulate while there is room, then gate-mix (see `MultiGate`).
+                let (new_h, new_streams) = if streams.dims()[1] < mg.n_stream {
+                    mgr.accumulate_step(out, streams)
+                } else {
+                    mgr.step(out, streams)
+                };
                 h = new_h;
                 streams = new_streams;
             }

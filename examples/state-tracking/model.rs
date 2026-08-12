@@ -39,6 +39,8 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         n_virtual_layers: None, // don't virtually extend the amount of layers
         mamba_block,
         output_size: NUM_CLASSES,
+        // no final norm: the additive residual already leaves an O(1)-scaled output
+        final_norm: false,
         class_tokens: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,

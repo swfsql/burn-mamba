@@ -44,6 +44,8 @@ pub fn model_config() -> MambaLatentNetConfig {
         // output shape [batch_size, sequence_len = SEQ_LENGTH, output_size = 1]
         // (later narrowed to the last timestep)
         output_size: 1,
+        // no final norm: the additive residual already leaves an O(1)-scaled output
+        final_norm: false,
         // one real layer suffices
         n_real_layers: 1,
         n_virtual_layers: None,

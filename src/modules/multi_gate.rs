@@ -1,10 +1,19 @@
 //! Multi-Gate Residuals (MGR) — a depth-wise residual scheme replacing the plain
 //! additive skip of a [`Layers`](crate::modules::Layers) stack.
 //!
-//! Instead of one residual stream, MGR keeps **`n_stream` parallel streams**
-//! `sᵢ` (all seeded from the stack input). Between layers, one
-//! [`MultiGateResidual`] per layer does two convex, norm-bounded operations
-//! (paper §"Our Architecture"):
+//! Instead of one residual stream, MGR keeps up to **`n_stream` parallel
+//! streams** `sᵢ`. The stack input is stream 1; the streams then grow and are
+//! mixed in two phases (paper §"Our Architecture"), with one
+//! [`MultiGateResidual`] per layer:
+//!
+//! * **Accumulation** — while fewer than `n_stream` streams exist, the layer
+//!   output `F_l` is *appended* as a new stream ([`MultiGateResidual::accumulate`]). This is
+//!   what makes the streams **distinct**: after the first `n_stream−1` layers
+//!   they hold `[x, F₀, …, F_{n−2}]` (a bounded AttnRes over the early layers).
+//! * **Mixing** — from then on the stream count is capped and each stream is
+//!   interpolated towards `F_l` by its own gate ([`MultiGateResidual::forward`]).
+//!
+//! Both phases end in the same aggregator, and both are convex (norm-bounded):
 //!
 //! 1. **Mixer** (independent sigmoid gate) — each stream is interpolated towards
 //!    the current layer output `F_l` by a per-stream gate `βᵢ`:
@@ -19,6 +28,11 @@
 //! **independent** (sigmoid) gate is implemented; the paper's competitive
 //! (softmax) variant is omitted.
 //!
+//! Seeding every stream with a *copy* of the stack input instead would be a
+//! symmetry the model can never break — identical streams give identical
+//! scores, hence identical gates and gradients, collapsing MGR to a single
+//! lerped stream. The accumulation phase is what avoids that.
+//!
 //! MGR is purely **point-wise over `(batch, sequence)`** — the streams only
 //! evolve along *depth*, never along the sequence — so `forward` over a sequence
 //! equals `step` unrolled token-by-token, and `step` carries no extra state
@@ -26,10 +40,33 @@
 //!
 //! **Gate-bias initialisation.** Following Highway Networks, a negative
 //! `init_bias` biases the gates towards *carry* (small updates) at the start of
-//! training. The paper scales it with depth `L`:
-//! `b_init = ln( √(L/L_base)·(exp(−b_base)+1) − n )` (with `L_base = 21`,
-//! `b_base = −3`); here `init_bias` is taken directly so the caller may apply
-//! that formula. Default `0` (gates open at `σ(0)=0.5`).
+//! training. The paper scales it with the number of *mixing* layers `L`
+//! (total layers minus the `n−1` accumulating ones) — see
+//! [`MultiGateResidualConfig::depth_init_bias`]. `init_bias` is taken directly,
+//! so the caller applies that formula (or picks its own). Default `0` (gates
+//! open at `σ(0)=0.5`).
+//!
+//! That formula assumes one *shared* timescale for all `n` streams, which is a
+//! long-training-run choice: it buys stability by making every layer's
+//! contribution small (`σ(b) ∝ 1/√L`), and the streams then differ only by what
+//! they were seeded with. [`MultiGateResidualConfig::init_bias_step`] instead
+//! spreads the initial biases over the streams — an update-biased stream down to
+//! a carry-biased one — so the set covers several depth-timescales from step
+//! zero. `0` keeps the paper's uniform init.
+//!
+//! **Output scale.** Every step here is a convex combination, and the aggregator
+//! is a *mean* over the `n` streams, so the stack's output stays `O(1)` where a
+//! plain additive skip grows it with depth (`x + Σ F_l`) — measured at ~15×
+//! larger for a 16-layer stack. Nothing downstream is wrong with either, but a
+//! head initialised for one sees the other far off its range, and closing that
+//! gap by training `out_proj` alone takes many steps. A norm before the head
+//! makes it moot: [`VocabNetwork`] always has one, while on a [`LatentNetwork`]
+//! it is the opt-in [`final_norm`]. Prefer enabling it when pairing MGR with a
+//! latent head, or expect a slow start.
+//!
+//! [`VocabNetwork`]: crate::modules::network::VocabNetwork
+//! [`LatentNetwork`]: crate::modules::network::LatentNetwork
+//! [`final_norm`]: crate::modules::network::LatentNetwork::norm_f
 
 use crate::modules::bidi::NoOp;
 use crate::utils::div_eps;
@@ -124,24 +161,19 @@ impl MultiGateResidual {
         layer_output: Tensor<R>,
         streams: Tensor<R>,
     ) -> (Tensor<R>, Tensor<R>) {
-        let dims = streams.dims();
-        let (stream_axis, feat_axis) = (R - 2, R - 1);
+        let stream_axis = R - 2;
         assert_eq!(
-            dims[feat_axis], self.d_model,
-            "stream width must equal d_model"
-        );
-        assert_eq!(
-            dims[stream_axis], self.n_stream,
-            "stream count must equal n_stream"
+            streams.dims()[stream_axis],
+            self.n_stream,
+            "the mixing phase runs at the full stream count"
         );
 
         // `b_beta` reshaped to broadcast on the stream axis: `[1, …, n_stream, 1]`.
         let mut bias_shape = [1usize; R];
         bias_shape[stream_axis] = self.n_stream;
         let b_beta = self.b_beta.val().reshape(bias_shape);
-        // The query vectors broadcast on the feature axis: `[1, …, 1, d_model]`.
+        // The query vector broadcasts on the feature axis: `[1, …, 1, d_model]`.
         let w_beta = self.w_beta.val().unsqueeze::<R>();
-        let w_alpha = self.w_alpha.val().unsqueeze::<R>();
 
         // Mixer: independent per-stream sigmoid gate, `β`: `[…, n_stream, 1]`.
         let beta = sigmoid(self.normed_score(streams.clone(), w_beta) + b_beta);
@@ -152,11 +184,39 @@ impl MultiGateResidual {
         // `[…, n_stream, d_model]` tensor and the `+` saves nothing.
         let new_streams = streams * (-beta.clone() + 1.0) + layer_output * beta;
 
-        // Aggregator: depth-wise attention pooling (softmax over the stream axis).
-        let score_ns = self.normed_score(new_streams.clone(), w_alpha);
-        let alpha = softmax(score_ns, stream_axis);
-        let new_h = (alpha * new_streams.clone()).sum_dim(stream_axis);
-        (new_h, new_streams)
+        (self.attn_pool(new_streams.clone()), new_streams)
+    }
+
+    /// The accumulation-phase counterpart of [`Self::mix_pool`]: append
+    /// `layer_output` (`[…, 1, d_model]`) to `streams` (`[…, k, d_model]`,
+    /// `k < n_stream`) as a new stream, then pool as usual. Returns
+    /// `(h, streams')` with `streams'` one stream wider.
+    fn append_pool<const R: usize>(
+        &self,
+        layer_output: Tensor<R>,
+        streams: Tensor<R>,
+    ) -> (Tensor<R>, Tensor<R>) {
+        assert!(
+            streams.dims()[R - 2] < self.n_stream,
+            "the accumulation phase stops at `n_stream` streams"
+        );
+        let new_streams = Tensor::cat(vec![streams, layer_output], R - 2);
+        (self.attn_pool(new_streams.clone()), new_streams)
+    }
+
+    /// Aggregator: depth-wise attention pooling over any stream count `k ≥ 1`
+    /// (softmax over the stream axis `R-2`), keeping that axis at size 1 so the
+    /// result still broadcasts against the streams.
+    fn attn_pool<const R: usize>(&self, streams: Tensor<R>) -> Tensor<R> {
+        let (stream_axis, feat_axis) = (R - 2, R - 1);
+        assert_eq!(
+            streams.dims()[feat_axis],
+            self.d_model,
+            "stream width must equal d_model"
+        );
+        let w_alpha = self.w_alpha.val().unsqueeze::<R>();
+        let alpha = softmax(self.normed_score(streams.clone(), w_alpha), stream_axis);
+        (alpha * streams).sum_dim(stream_axis)
     }
 
     /// Full-sequence mix + pool.
@@ -182,6 +242,40 @@ impl MultiGateResidual {
         let (new_h, new_streams) = self.mix_pool::<3>(layer_output.unsqueeze_dim(1), streams);
         (new_h.squeeze_dim(1), new_streams)
     }
+
+    /// Accumulation phase of [`Self::forward`]: `layer_output` becomes a **new**
+    /// stream instead of being mixed into the existing ones (the mixer gate is
+    /// not used at all). Only valid while `streams` holds fewer than `n_stream`
+    /// streams.
+    ///
+    /// - `layer_output`: this layer's transform `F_l`, `[batch, sequence, d_model]`
+    /// - `streams`: `[batch, sequence, k, d_model]` with `k < n_stream`
+    ///
+    /// Returns `(h, streams')`, `streams'` being `[batch, sequence, k+1, d_model]`.
+    pub fn accumulate(
+        &self,
+        layer_output: Tensor<3>,
+        streams: Tensor<4>,
+    ) -> (Tensor<3>, Tensor<4>) {
+        let (new_h, new_streams) = self.append_pool::<4>(layer_output.unsqueeze_dim(2), streams);
+        (new_h.squeeze_dim(2), new_streams)
+    }
+
+    /// Single-token [`Self::accumulate`] (the sequence axis dropped), the
+    /// accumulation-phase counterpart of [`Self::step`].
+    ///
+    /// - `layer_output`: `[batch, d_model]`
+    /// - `streams`: `[batch, k, d_model]` with `k < n_stream`
+    ///
+    /// Returns `(h, streams')`: `[batch, d_model]` and `[batch, k+1, d_model]`.
+    pub fn accumulate_step(
+        &self,
+        layer_output: Tensor<2>,
+        streams: Tensor<3>,
+    ) -> (Tensor<2>, Tensor<3>) {
+        let (new_h, new_streams) = self.append_pool::<3>(layer_output.unsqueeze_dim(1), streams);
+        (new_h.squeeze_dim(1), new_streams)
+    }
 }
 
 /// Configuration for a single [`MultiGateResidual`].
@@ -191,18 +285,48 @@ pub struct MultiGateResidualConfig {
     pub d_model: usize,
     /// Number of parallel residual streams `n`.
     pub n_stream: usize,
-    /// Initial value for every entry of the gate bias `b⁽ᵝ⁾` (see module header).
+    /// Initial gate bias `b⁽ᵝ⁾` of the **first** stream (see module header).
     #[config(default = 0.0)]
     pub init_bias: f64,
+    /// Per-stream offset added on top of [`Self::init_bias`]: stream `i` starts
+    /// at `init_bias + i · init_bias_step`, so a negative step gives the streams
+    /// **different timescales** — an update-biased first stream down to a
+    /// carry-biased last one. `0` (the default) starts them all equal, which is
+    /// what the paper prescribes.
+    #[config(default = 0.0)]
+    pub init_bias_step: f64,
 }
 
 impl MultiGateResidualConfig {
-    /// Allocate one layer's MGR parameters (`w⁽ᵝ⁾`, `w⁽ᵅ⁾` zero; `b⁽ᵝ⁾` constant).
+    /// The paper's depth-adaptive gate bias for the independent (sigmoid) mixer:
+    /// `−ln( √(L/21)·(e³+1) − n )`, where `L = n_mixing_layers` is the number of
+    /// layers that actually *lerp* (the stack depth minus the `n−1` accumulating
+    /// ones) and `n = n_stream`.
+    ///
+    /// It keeps the total per-layer increment `O(1)` — `σ(b) ∝ 1/√L` — so the
+    /// gates start biased towards *carry*, as in Highway Networks. Panics when
+    /// the stack is too shallow for the stream count (`√(L/21)·(e³+1) ≤ n`,
+    /// i.e. no carry budget is left to distribute).
+    pub fn depth_init_bias(n_mixing_layers: usize, n_stream: usize) -> f64 {
+        const L_BASE: f64 = 21.0;
+        const B_BASE: f64 = -3.0;
+        let inner = (n_mixing_layers as f64 / L_BASE).sqrt() * ((-B_BASE).exp() + 1.0);
+        assert!(
+            inner > n_stream as f64,
+            "depth_init_bias: {n_mixing_layers} mixing layers are too few for \
+             {n_stream} streams (pick a smaller `n_stream` or set the bias directly)"
+        );
+        -(inner - n_stream as f64).ln()
+    }
+
+    /// Allocate one layer's MGR parameters (`w⁽ᵝ⁾`, `w⁽ᵅ⁾` zero; `b⁽ᵝ⁾` the
+    /// arithmetic ramp `init_bias + i · init_bias_step`).
     pub fn init(&self, device: &Device) -> MultiGateResidual {
+        let ramp = Tensor::<1, Int>::arange(0..self.n_stream as i64, device).float();
         MultiGateResidual {
             w_beta: Initializer::Zeros.init::<1, _>([self.d_model], device),
             w_alpha: Initializer::Zeros.init::<1, _>([self.d_model], device),
-            b_beta: Param::from_tensor(Tensor::full([self.n_stream], self.init_bias, device)),
+            b_beta: Param::from_tensor(ramp * self.init_bias_step + self.init_bias),
             d_model: self.d_model,
             n_stream: self.n_stream,
         }
@@ -261,8 +385,13 @@ pub enum ResidualsConfig {
     MultiGate {
         /// Number of parallel residual streams `n`.
         n_stream: usize,
-        /// Initial gate bias (see [`MultiGateResidualConfig::init_bias`]).
+        /// First stream's initial gate bias (see
+        /// [`MultiGateResidualConfig::init_bias`]).
         init_bias: f64,
+        /// Per-stream gate-bias offset (see
+        /// [`MultiGateResidualConfig::init_bias_step`]); `0` starts every
+        /// stream equal.
+        init_bias_step: f64,
         /// `true` ⇒ one MGR per *virtual* layer; `false` ⇒ one per *real* layer
         /// (reused across virtual passes). See [`MultiGate::per_virtual`].
         per_virtual_layer: bool,
@@ -286,6 +415,7 @@ impl ResidualsConfig {
             ResidualsConfig::MultiGate {
                 n_stream,
                 init_bias,
+                init_bias_step,
                 per_virtual_layer,
             } => {
                 let count = if *per_virtual_layer {
@@ -297,6 +427,7 @@ impl ResidualsConfig {
                     .map(|_| {
                         MultiGateResidualConfig::new(d_model, *n_stream)
                             .with_init_bias(*init_bias)
+                            .with_init_bias_step(*init_bias_step)
                             .init(device)
                     })
                     .collect();

@@ -96,6 +96,7 @@ fn network_two_layers_constant_input() {
         input_size: 8,
         layers: LayersBuilder::new(2, cfg),
         output_size: 8,
+        final_norm: false,
         class_tokens: Vec::new(),
     }
     .init(&device);

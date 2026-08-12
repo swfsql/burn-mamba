@@ -17,13 +17,23 @@ use burn::prelude::*;
 // ===========================================================================
 
 /// A feature/regression network on latents:
-/// `in_proj (input_size → d_model) → Layers<M> → out_proj (d_model → output_size)`.
+/// `in_proj (input_size → d_model) → Layers<M> → [norm_f] → out_proj (d_model →
+/// output_size)`.
 #[derive(Module, Debug)]
 pub struct LatentNetwork<M: Module> {
     /// Linear projection `input_size → d_model`.
     pub in_proj: Linear,
     /// The shared Mamba-x layer stack.
     pub layers: Layers<M>,
+    /// Optional final RMSNorm before [`Self::out_proj`] — the counterpart of
+    /// [`VocabNetwork::norm_f`], which is unconditional there.
+    ///
+    /// It makes the head's input scale-free, which matters whenever the stack's
+    /// output magnitude is not `O(1)`: a plain additive residual grows it with
+    /// depth, while [`Residuals::MultiGate`](crate::modules::Residuals) is a
+    /// convex mixture (mean-pooled over `n` streams) that *shrinks* it, so the
+    /// two schemes otherwise hand `out_proj` signals of very different scale.
+    pub norm_f: Option<RmsNorm>,
     /// Linear projection `d_model → output_size`.
     pub out_proj: Linear,
     /// Positions of the network's class tokens, spliced into the input sequence
@@ -85,7 +95,7 @@ where
         let saved = class.enter(self.class_tokens.len());
         let (x, caches) = self.layers.forward(x, caches, ssd_path, Some(&mut *class));
         class.leave(saved);
-        let x = self.out_proj.forward(x);
+        let x = self.head(x);
         (x, caches)
     }
 
@@ -188,7 +198,7 @@ where
         let (y, caches) = self.layers.prime(batch, caches, Some(&mut *class));
         class.leave(saved);
         if let Some(y) = y {
-            out = Some(self.out_proj.forward(y));
+            out = Some(self.head(y));
         }
         (out, caches)
     }
@@ -212,7 +222,7 @@ where
             }
             None => self.layers.step(x, caches, None),
         };
-        (self.out_proj.forward(x), caches)
+        (self.head(x), caches)
     }
 
     /// Stationary fixed point of the network under a constant input token:
@@ -222,6 +232,16 @@ where
         assert_full_len_known(&self.class_tokens, None, "LatentNetwork");
         let x = self.in_proj.forward(x);
         let x = self.layers.step_infinite(x);
+        self.head(x)
+    }
+
+    /// The output head: the optional [`Self::norm_f`], then [`Self::out_proj`].
+    /// Rank-generic, so every call path (sequence and single-token) shares it.
+    fn head<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
+        let x = match &self.norm_f {
+            Some(norm) => norm.forward(x),
+            None => x,
+        };
         self.out_proj.forward(x)
     }
 }
@@ -234,6 +254,8 @@ pub struct LatentNetworkBuilder<C> {
     pub layers: LayersBuilder<C>,
     /// Width of the output features produced by `out_proj`.
     pub output_size: usize,
+    /// Insert a final RMSNorm before `out_proj` (see [`LatentNetwork::norm_f`]).
+    pub final_norm: bool,
     /// Network-level class tokens (spliced into the input before `in_proj`).
     pub class_tokens: Vec<ClassToken>,
 }
@@ -247,6 +269,9 @@ impl<C: MambaBlockConfig> LatentNetworkBuilder<C> {
                 .with_bias(true)
                 .init(device),
             layers: self.layers.init(device),
+            norm_f: self
+                .final_norm
+                .then(|| RmsNormConfig::new(d_model).init(device)),
             out_proj: LinearConfig::new(d_model, self.output_size)
                 .with_bias(true)
                 .init(device),
@@ -617,6 +642,9 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Output feature width.
         output_size: usize,
+        /// Insert a final RMSNorm before `out_proj` (see
+        /// [`LatentNetwork::norm_f`]).
+        final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
@@ -645,6 +673,9 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Output feature width.
         output_size: usize,
+        /// Insert a final RMSNorm before `out_proj` (see
+        /// [`LatentNetwork::norm_f`]).
+        final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
@@ -673,6 +704,9 @@ pub enum MambaLatentNetConfig {
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Output feature width.
         output_size: usize,
+        /// Insert a final RMSNorm before `out_proj` (see
+        /// [`LatentNetwork::norm_f`]).
+        final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
@@ -701,6 +735,7 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                final_norm,
                 class_tokens,
                 ignore_first_residual,
                 ignore_last_residual,
@@ -716,6 +751,7 @@ impl MambaLatentNetConfig {
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
+                    final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
                 }
                 .init(device),
@@ -727,6 +763,7 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                final_norm,
                 class_tokens,
                 ignore_first_residual,
                 ignore_last_residual,
@@ -742,6 +779,7 @@ impl MambaLatentNetConfig {
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
+                    final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
                 }
                 .init(device),
@@ -753,6 +791,7 @@ impl MambaLatentNetConfig {
                 n_virtual_layers,
                 mamba_block,
                 output_size,
+                final_norm,
                 class_tokens,
                 ignore_first_residual,
                 ignore_last_residual,
@@ -768,6 +807,7 @@ impl MambaLatentNetConfig {
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
+                    final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
                 }
                 .init(device),

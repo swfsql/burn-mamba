@@ -193,10 +193,19 @@ plus shared NN blocks.
   (so it primes to `None`).
   Cursorless `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
-  MultiGate routes `n_stream` depth-streams (gated mix + attention-pool) per real/virtual
-  layer (`per_virtual_layer`); point-wise so `forward`==`step`. Math in the header.
-- **`network.rs`** — `LatentNetwork<M>` (linear in/out) and `VocabNetwork<M>` (embedding →
-  `norm_f` → tied/untied LM head, vocab padded). Both build on the same `Layers<M>`.
+  MultiGate routes up to `n_stream` depth-streams per real/virtual layer
+  (`per_virtual_layer`) in **two phases** — while fewer than `n_stream` exist the layer
+  output is *appended* as a new stream (`accumulate`/`accumulate_step`), after which they
+  are gate-mixed (`forward`/`step`); both end in the shared `attn_pool` (any stream count).
+  Seeding `n` copies of the input instead is an unbreakable symmetry (identical streams ⇒
+  identical gates and grads ⇒ one lerped stream). Point-wise, so `forward`==`step`.
+  `depth_init_bias(n_mixing_layers, n_stream)` is the paper's carry bias over the *mixing*
+  layers only; `init_bias_step` ramps it per stream (`0` = the paper's uniform init).
+  Math, and why a convex mean-pool wants a norm before the head, in the header.
+- **`network.rs`** — `LatentNetwork<M>` (linear in/out, **optional** pre-`out_proj`
+  `norm_f` via `final_norm` — shared readout `head()`) and `VocabNetwork<M>` (embedding →
+  unconditional `norm_f` → tied/untied LM head, vocab padded). Both build on the same
+  `Layers<M>`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**; `step_infinite` mirrors `step` (enums included;
@@ -208,13 +217,14 @@ plus shared NN blocks.
   returns the primed latent's logits.
   `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
-  `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
+  `final_norm`, `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
   `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
   reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised
   `Param` resamples); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`; runtime
   `MambaBidiLayers`. Forward-only, `forward` taking `Option<&mut ClassCursors>` (pairs take
-  a single-level `ClassCursor`).
+  a single-level `ClassCursor`). MultiGate threads its streams **per pair**, same
+  accumulate-then-mix schedule as `Layers`.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
   state**, not a `Module`).

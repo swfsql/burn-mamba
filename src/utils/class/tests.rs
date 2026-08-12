@@ -21,6 +21,7 @@ fn latent_network_builder_mamba2() {
         input_size: 3,
         layers: LayersBuilder::new(2, block),
         output_size: 2,
+        final_norm: false,
         class_tokens: Vec::new(),
     }
     .init(&device);
@@ -52,6 +53,7 @@ fn unified_net_config_mamba2() {
         n_virtual_layers: None,
         mamba_block: block,
         output_size: 2,
+        final_norm: false,
         class_tokens: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
@@ -99,6 +101,7 @@ fn unified_net_config_mamba3() {
         n_virtual_layers: None,
         mamba_block: block,
         output_size: 2,
+        final_norm: false,
         class_tokens: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
@@ -129,6 +132,7 @@ fn unified_net_config_mamba1() {
         n_virtual_layers: None,
         mamba_block: block,
         output_size: 2,
+        final_norm: false,
         class_tokens: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
@@ -431,6 +435,7 @@ fn class_tokens_on_latent_network() {
         input_size: 3,
         layers: LayersBuilder::new(2, block),
         output_size: 2,
+        final_norm: false,
         class_tokens: vec![ClassToken::End],
     }
     .init(&device);
@@ -983,6 +988,7 @@ fn prime_on_a_network_covers_every_class_level() {
         input_size: 3,
         layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::Start]),
         output_size: 2,
+        final_norm: false,
         class_tokens: vec![ClassToken::Start],
     }
     .init(&device);
@@ -1121,6 +1127,7 @@ fn prime_through_the_runtime_enums() {
         n_virtual_layers: None,
         mamba_block: block.clone(),
         output_size: 2,
+        final_norm: false,
         class_tokens: vec![ClassToken::Start],
         ignore_first_residual: false,
         ignore_last_residual: false,
@@ -1407,6 +1414,7 @@ fn class_tokens_split_forward_matches_single_forward() {
         input_size: 3,
         layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::End]),
         output_size: 2,
+        final_norm: false,
         class_tokens: vec![ClassToken::Start, ClassToken::End],
     }
     .init(&device);
@@ -1552,6 +1560,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
         input_size: 3,
         layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::Start]),
         output_size: 2,
+        final_norm: false,
         class_tokens: vec![ClassToken::Start, ClassToken::End],
     }
     .init(&device);

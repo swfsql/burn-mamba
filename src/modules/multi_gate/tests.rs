@@ -160,6 +160,7 @@ fn layers_multi_gate_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
+            init_bias_step: 0.0,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -211,6 +212,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: -1.0,
+            init_bias_step: 0.0,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -262,6 +264,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
+            init_bias_step: 0.0,
             per_virtual_layer: true,
         });
     builder.ignore_first_residual = true;
@@ -332,9 +335,12 @@ fn bidi_multi_gate_forward_and_grads() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
         class_latents: Vec::new(),
+        // Two streams over two pairs: the first pair accumulates (the input
+        // plus its own output), the second one mixes — one pair per phase.
         residuals: ResidualsConfig::MultiGate {
-            n_stream: 3,
+            n_stream: 2,
             init_bias: -1.0,
+            init_bias_step: 0.0,
             per_virtual_layer: false,
         },
     }
@@ -364,7 +370,169 @@ fn bidi_multi_gate_forward_and_grads() {
         );
     }
     assert!(
-        mg.layers[0].w_beta.val().grad(&grads).is_some(),
-        "grad did not reach the MGR mixer query"
+        mg.layers[0].w_alpha.val().grad(&grads).is_some(),
+        "grad did not reach the accumulating pair's aggregator query"
+    );
+    assert!(
+        mg.layers[1].w_beta.val().grad(&grads).is_some(),
+        "grad did not reach the mixing pair's mixer query"
+    );
+}
+
+/// The accumulation phase widens the stream set by one and pools over what is
+/// there — `k+1` streams out of `k`, and (at zero-init) their plain mean.
+#[test]
+fn accumulate_appends_a_stream() {
+    let device = Device::default();
+    let (b, s, n, d) = (2, 3, 4, 8);
+    let m = MultiGateResidualConfig::new(d, n).init(&device);
+
+    let layer_output = Tensor::<3>::random([b, s, d], Distribution::Default, &device);
+    let streams = Tensor::<4>::random([b, s, 2, d], Distribution::Default, &device);
+
+    let (h, new_streams) = m.accumulate(layer_output.clone(), streams.clone());
+    assert_eq!(new_streams.dims(), [b, s, 3, d], "one stream wider");
+    // The appended stream is the layer output itself (no gate, no mixing) and
+    // the carried ones are untouched.
+    let expected = Tensor::cat(vec![streams, layer_output.clone().unsqueeze_dim::<4>(2)], 2);
+    assert!(max_abs_diff(new_streams.clone(), expected) < 1e-6);
+    // Zero queries ⇒ uniform α ⇒ the pool is the mean over the wider set.
+    let mean = new_streams.mean_dim(2).squeeze_dim::<3>(2);
+    assert!(max_abs_diff(h, mean) < 1e-5);
+
+    // The single-token path agrees with the sequence one.
+    let (h_t, s_t) = m.accumulate_step(
+        layer_output.clone().narrow(1, 0, 1).squeeze_dim::<2>(1),
+        Tensor::<4>::zeros([b, 1, 2, d], &device).squeeze_dim::<3>(1),
+    );
+    assert_eq!(s_t.dims(), [b, 3, d]);
+    assert_eq!(h_t.dims(), [b, d]);
+}
+
+/// **The** MGR regression test: a stack must keep its streams *distinct*.
+///
+/// Seeding all `n_stream` streams with copies of the input is a symmetry the
+/// model can never break — identical streams score identically, so every gate
+/// and every gradient is identical and the stack collapses to a single lerped
+/// stream. This pins the paper's two-phase wiring instead: the first
+/// `n_stream−1` layers append their output as a new stream, the rest mix.
+///
+/// The reference below rebuilds the stack loop by hand (layer by layer, with
+/// the MGR's own primitives) and must match `Layers::forward` exactly, while the
+/// degenerate all-copies wiring must *not*.
+#[cfg(feature = "mamba2")]
+#[test]
+fn layers_multi_gate_streams_are_distinct() {
+    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
+    use crate::modules::{LayersBuilder, Residuals, ResidualsConfig};
+    use crate::utils::Schedule;
+
+    let device = Device::default();
+    let (d_model, n_stream, n_virtual) = (16, 3, 5);
+    let block = Mamba2Config::new(d_model)
+        .with_expand(2)
+        .with_per_head_dim(4)
+        .with_state_rank(8)
+        .with_ngroups(1)
+        .with_conv_kernel(4);
+    let layers = LayersBuilder::new(1, block)
+        .with_n_virtual_layers(Some((n_virtual, Schedule::Stretched)))
+        .with_residuals(ResidualsConfig::MultiGate {
+            n_stream,
+            init_bias: -1.0,
+            init_bias_step: 0.0,
+            per_virtual_layer: true,
+        })
+        .init(&device);
+    let Residuals::MultiGate(mg) = &layers.residuals else {
+        panic!("expected MultiGate residuals");
+    };
+
+    let (batch, seq) = (2usize, 4usize);
+    let x = Tensor::<3>::random(
+        [batch, seq, d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let (y, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+
+    // Reference: the input is stream 1; each layer appends its output until
+    // `n_stream` streams exist, and only then are they gate-mixed.
+    let layer = &layers.real_layers[0];
+    let mut streams = x.clone().unsqueeze_dim::<4>(2);
+    let mut h = x.clone();
+    for i in 0..n_virtual {
+        let (out, _c) = layer.forward(h, None, Mamba2SsdPath::default());
+        let (new_h, new_streams) = if streams.dims()[2] < n_stream {
+            mg.layers[i].accumulate(out, streams)
+        } else {
+            mg.layers[i].forward(out, streams)
+        };
+        h = new_h;
+        streams = new_streams;
+    }
+    assert_eq!(streams.dims(), [batch, seq, n_stream, d_model]);
+    assert!(
+        max_abs_diff(y.clone(), h) < 1e-5,
+        "the stack must run the accumulate-then-mix schedule"
+    );
+
+    // Degenerate wiring (every stream a copy of the input): all streams stay
+    // identical forever, so the whole stack is one lerped stream.
+    let mut h = x.clone();
+    for i in 0..n_virtual {
+        let (out, _c) = layer.forward(h.clone(), None, Mamba2SsdPath::default());
+        let copies = h
+            .unsqueeze_dim::<4>(2)
+            .expand([batch, seq, n_stream, d_model]);
+        let (new_h, new_streams) = mg.layers[i].forward(out, copies);
+        // Identical in, identical out: the streams never differentiate.
+        let first = new_streams.clone().narrow(2, 0, 1);
+        let last = new_streams.narrow(2, n_stream - 1, 1);
+        assert!(max_abs_diff(first, last) < 1e-6, "the symmetry is exact");
+        h = new_h;
+    }
+    assert!(
+        max_abs_diff(y, h) > 1e-3,
+        "the stack must not collapse to a single lerped stream"
+    );
+}
+
+/// `init_bias_step` ramps the per-stream gate bias, giving the streams distinct
+/// depth-timescales from step zero (`0` keeps the paper's uniform init).
+#[test]
+fn init_bias_step_ramps_the_gates() {
+    let device = Device::default();
+    let (n, d) = (4, 8);
+    let m = MultiGateResidualConfig::new(d, n)
+        .with_init_bias(-2.7)
+        .with_init_bias_step(0.9)
+        .init(&device);
+
+    let expected = Tensor::<1>::from_floats([-2.7, -1.8, -0.9, 0.0], &device);
+    assert!(max_abs_diff(m.b_beta.val(), expected) < 1e-5);
+
+    // Each stream therefore lerps by its own β — the first carries (β ≈ 0.06),
+    // the last updates (β = 0.5) — even before any training.
+    let (b, s) = (1, 1);
+    let streams = Tensor::<4>::zeros([b, s, n, d], &device);
+    let layer_output = Tensor::<3>::ones([b, s, d], &device);
+    let (_h, new_streams) = m.forward(layer_output, streams);
+    let betas: Vec<f32> = new_streams
+        .narrow(3, 0, 1)
+        .reshape([n])
+        .into_data()
+        .to_vec()
+        .unwrap();
+    for (i, w) in betas.windows(2).enumerate() {
+        assert!(
+            w[0] < w[1],
+            "stream {i} must lerp less than stream {}",
+            i + 1
+        );
+    }
+    assert!(
+        (betas[n - 1] - 0.5).abs() < 1e-4,
+        "last stream is σ(0) = 0.5"
     );
 }

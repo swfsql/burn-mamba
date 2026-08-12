@@ -251,23 +251,20 @@ where
         x
     }
 
-    /// Seed the MultiGate streams from a full-sequence input — `n_stream` copies
-    /// of `x` as `[batch, sequence, n_stream, d_model]` — or `None` for the
-    /// Standard path. Panics if MultiGate is paired with stack-level class latents.
+    /// Seed the MultiGate streams from a full-sequence input — the **single**
+    /// stream `x` as `[batch, sequence, 1, d_model]` (the first pairs widen it
+    /// to `n_stream`, see [`MultiGate`](crate::modules::MultiGate)) — or `None`
+    /// for the Standard path. Panics if MultiGate is paired with stack-level
+    /// class latents.
     fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
-        let Residuals::MultiGate(mg) = &self.residuals else {
+        if !matches!(&self.residuals, Residuals::MultiGate(_)) {
             return None;
-        };
+        }
         assert!(
             self.class_latents_emb.is_none(),
             "MultiGate residuals do not support stack-level class latents"
         );
-        let [batch, sequence, d_model] = x.dims();
-        Some(
-            x.clone()
-                .unsqueeze_dim::<4>(2)
-                .expand([batch, sequence, mg.n_stream, d_model]),
-        )
+        Some(x.clone().unsqueeze_dim::<4>(2))
     }
 
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`
@@ -275,10 +272,12 @@ where
     ///
     /// Each pair returns its merged transform `F_l` (no residual). With
     /// [`Residuals::Standard`] the input skip is added per pair (unless
-    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and
-    /// `n_stream` parallel streams — seeded from `x` — carry the residual between
-    /// pairs: each pair reads their attention-pooled aggregate as input and its
-    /// merged output is gated back into every stream (see [`MultiGate`]).
+    /// suppressed). With [`Residuals::MultiGate`] the skip is dropped and up to
+    /// `n_stream` parallel streams — seeded with `x` as the first one — carry the
+    /// residual between pairs: each pair reads their attention-pooled aggregate
+    /// as input, and its merged output either *becomes* a new stream (while
+    /// fewer than `n_stream` exist) or is gated into every stream (see
+    /// [`MultiGate`]).
     ///
     /// [`MultiGate`]: crate::modules::MultiGate
     pub fn forward(
@@ -315,8 +314,9 @@ where
         );
 
         let mut slots = caches.into_slots();
-        // MultiGate keeps `n_stream` parallel streams (seeded from the input);
-        // Standard threads the single tensor `x` directly (streams stays `None`).
+        // MultiGate carries up to `n_stream` parallel streams (the input is the
+        // first, the early pairs append the rest); Standard threads the single
+        // tensor `x` directly (streams stays `None`).
         let mut streams = self.multi_gate_streams_seed(&x);
         for i in 0..n / 2 {
             let (straight_i, reverse_i) = (i * 2, i * 2 + 1);
@@ -391,17 +391,19 @@ where
                         x = merged;
                         streams = Some(s);
                     } else if first {
-                        let [b, seq, d] = merged.dims();
-                        streams = Some(merged.clone().unsqueeze_dim::<4>(2).expand([
-                            b,
-                            seq,
-                            mg.n_stream,
-                            d,
-                        ]));
+                        // Drop the input seed: restart from `F_0` alone (the
+                        // accumulation phase refills the streams).
+                        streams = Some(merged.clone().unsqueeze_dim::<4>(2));
                         x = merged;
                     } else {
-                        let idx = mg.module_index(i, straight_idx / 2);
-                        let (new_h, new_streams) = mg.layers[idx].forward(merged, s);
+                        let mgr = &mg.layers[mg.module_index(i, straight_idx / 2)];
+                        // Accumulate `F_l` as a new stream while there is room,
+                        // then switch to gated mixing.
+                        let (new_h, new_streams) = if s.dims()[2] < mg.n_stream {
+                            mgr.accumulate(merged, s)
+                        } else {
+                            mgr.forward(merged, s)
+                        };
                         x = new_h;
                         streams = Some(new_streams);
                     }
