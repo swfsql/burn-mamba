@@ -5,6 +5,7 @@
 //! computed from raw logits).
 
 pub use crate::common::{
+    model::ModelConfigExt,
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
     training::{TrainingConfig, metric_current},
@@ -35,7 +36,12 @@ pub fn train(
     // load (or init and save) model and optim
     let model: AeModel = app_args.load_or_save_model(&model_config, &training_device);
     println!("Number of parameters: {}", model.num_params());
-    let mut optim = app_args.load_or_save_optim(&training_config.optimizer);
+    let muon_plan = ModelConfigExt::muon_plan(&model_config);
+    if training_config.optimizer.muon.is_some() {
+        // Which weights Muon took over (and where the fused ones split).
+        print!("{}", muon_plan.describe(&model));
+    }
+    let mut optim = app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
     let mut model = Wrap(model, model_config.clone());
 

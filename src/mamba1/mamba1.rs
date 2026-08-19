@@ -235,6 +235,33 @@ impl Mamba1Config {
         self.dt_rank
             .unwrap_or(self.d_model.div_ceil(self.state_rank))
     }
+
+    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    ///
+    /// `in_proj` is `[x | res]` and `x_proj` is `[dt_raw | B | C]`; the `dt_raw`
+    /// block and the whole of `dt_proj` stay on AdamW — they carry the Δ path,
+    /// whose careful initialisation (`dt_proj`) is a scale, not a feature map.
+    /// The conv weight is 3-D, so it is never listed. See [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        use crate::optim::{ProjSegment as Seg, ProjSpec};
+        let d_inner = self.d_inner();
+        vec![
+            ProjSpec::block(
+                "in_proj.weight",
+                vec![Seg::muon("x", d_inner), Seg::muon("res", d_inner)],
+            ),
+            ProjSpec::block(
+                "x_proj.weight",
+                vec![
+                    Seg::adamw("dt", self.dt_rank()),
+                    Seg::muon("b", self.state_rank),
+                    Seg::muon("c", self.state_rank),
+                ],
+            ),
+            ProjSpec::block_whole("out_proj.weight", self.d_model),
+        ]
+    }
 }
 
 impl Mamba1 {

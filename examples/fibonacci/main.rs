@@ -47,12 +47,12 @@ pub fn launch(app_args: &AppArgs) {
     let batch_size = 32;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        TrainingConfig::new(
+        TrainingConfig::new(common::training::OptimizerConfig::new(
             common::training::optimizer_config(dtype)
                 // fast training, where momentum isn't really required
                 .with_beta_1(0.0)
                 .with_beta_2(0.95),
-        )
+        ))
         .with_num_epochs(2)
         .with_batch_size(batch_size)
         .with_num_workers(2)

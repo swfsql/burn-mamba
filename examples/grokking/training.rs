@@ -209,7 +209,7 @@ pub fn train(
         );
         sgd.init()
     } else {
-        app_args.load_or_save_optim(&config.optimizer)
+        app_args.load_or_save_optim(config.optimizer.init())
     };
 
     let (train_split, test_split) =

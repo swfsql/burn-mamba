@@ -646,6 +646,34 @@ pub enum MambaBidiLayersConfig {
 }
 
 impl MambaBidiLayersConfig {
+    /// The [`MuonPlan`] for this stack: the block's fused
+    /// projections plus each pair's `CatLinear` merge (a plain hidden matrix;
+    /// `Mean` merges have no parameters). See [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_plan(&self) -> crate::optim::MuonPlan {
+        use crate::modules::MambaBlockConfig;
+        let (mut specs, d_model) = match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1 { mamba_block, .. } => (
+                mamba_block.muon_projections(),
+                MambaBlockConfig::d_model(mamba_block),
+            ),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2 { mamba_block, .. } => (
+                mamba_block.muon_projections(),
+                MambaBlockConfig::d_model(mamba_block),
+            ),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3 { mamba_block, .. } => (
+                mamba_block.muon_projections(),
+                MambaBlockConfig::d_model(mamba_block),
+            ),
+
+        };
+        specs.push(crate::optim::ProjSpec::path_whole("CatLinear.weight", d_model));
+        crate::optim::MuonPlan::new(specs)
+    }
+
     /// Allocate and initialise the selected bidirectional stack on `device`.
     pub fn init(&self, device: &Device) -> MambaBidiLayers {
         match self {

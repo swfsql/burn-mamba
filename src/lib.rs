@@ -74,11 +74,18 @@ pub mod prelude {
         CacheStack, Layer, MambaBlock, MambaBlockConfig, MambaCaches, MambaSsdPath,
     };
     pub use crate::utils::{ClassLatent, ClassToken};
+
+    #[cfg(feature = "optim")]
+    pub use crate::optim::{MuonPlan, ProjSegment, ProjSpec, muon_config};
 }
 
 /// Family-generic composition (`Layer`/`Layers`/networks/bidi/caches) plus the
 /// shared neural modules (activations, norms, losses, tensor helpers).
 pub mod modules;
+/// Muon parameter groups over the fused projections (which weights the
+/// optimizer may own, and where they split).
+#[cfg(feature = "optim")]
+pub mod optim;
 /// Virtual-layer/LR scheduling, class tokens, and custom-backward plumbing.
 pub mod utils;
 

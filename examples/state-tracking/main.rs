@@ -88,7 +88,9 @@ pub fn launch(app_args: &AppArgs) {
         // *constant* LR is used on purpose so resuming (`--artifacts-path`) is a
         // seamless continuation — a decaying schedule would restart from its peak
         // each run (the iteration counter resets), perturbing the slow transition.
-        TrainingConfig::new(common::training::optimizer_config(dtype).with_weight_decay(0.1))
+        TrainingConfig::new(common::training::OptimizerConfig::new(
+            common::training::optimizer_config(dtype).with_weight_decay(0.1),
+        ))
             .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)

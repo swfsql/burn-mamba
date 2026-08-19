@@ -4,6 +4,19 @@
 //! single-pixel tokens with a Mamba-3 model (a classification head on the last
 //! timestep), trained with cosine-annealing LR. Inference samples a few test
 //! digits and shows each digit beside its 10-bin class-probability chart.
+//!
+//! This example carries one downstream flag, `--muon`, forwarded after the
+//! trailing `--`: it moves the block's hidden weight matrices from AdamW to
+//! [Muon](burn_mamba::optim) for a fresh training config (the fused `in_proj` is
+//! split per sub-projection first). The choice is written into the artifacts'
+//! `training_config.json`, so resuming a run keeps it.
+//!
+//! ```bash
+//! # baseline (AdamW everywhere)
+//! cargo run --release --example mnist-class --features backend-flex -- --training
+//! # AdamW + Muon on the hidden matrices
+//! cargo run --release --example mnist-class --features backend-flex -- --training -- --muon
+//! ```
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -27,10 +40,10 @@ pub mod common;
 
 /// Wire up the device, configs, and the train/infer flow for the classifier.
 pub fn launch(app_args: &AppArgs) {
-    assert!(
-        app_args.extra_args.is_empty(),
-        "no extra arguments required"
-    );
+    // The only downstream argument: whether a *fresh* training config puts the
+    // hidden weight matrices on Muon. (A persisted training config wins on
+    // reload — see HELP.)
+    let muon = parse_muon(&app_args.extra_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -48,7 +61,16 @@ pub fn launch(app_args: &AppArgs) {
     let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        TrainingConfig::new(common::training::optimizer_config(dtype))
+        let optimizer = common::training::OptimizerConfig::adamw_only(dtype);
+        // Muon reuses AdamW's LR and weight decay (`MatchRmsAdamW` sizes its
+        // update to AdamW's RMS), so only the optimizer of the planned matrices
+        // changes between the two arms.
+        let optimizer = if muon {
+            optimizer.with_muon_defaults(ADAMW_WEIGHT_DECAY)
+        } else {
+            optimizer
+        };
+        TrainingConfig::new(optimizer)
             .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)
@@ -84,6 +106,18 @@ pub fn launch(app_args: &AppArgs) {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }
+}
+
+/// AdamW's default weight decay, mirrored into the Muon group so the two arms
+/// decay the same weights by the same amount.
+const ADAMW_WEIGHT_DECAY: f32 = 1e-4;
+
+/// Parse the `--muon` flag from the forwarded `extra_args`.
+fn parse_muon(extra_args: &[std::ffi::OsString]) -> bool {
+    for arg in extra_args {
+        assert!(arg == "--muon", "unknown extra argument: {arg:?}");
+    }
+    extra_args.iter().any(|a| a == "--muon")
 }
 
 fn main() {

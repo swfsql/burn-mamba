@@ -556,6 +556,35 @@ impl Mamba3Config {
             + self.num_rotation_channels()
     }
 
+    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    ///
+    /// `in_proj`'s segments mirror the `split_into` in the SSD pathways
+    /// (`[z | x | B | C | Δ | A | λ | rotation]`); the three per-head *scalar*
+    /// channels stay on AdamW. See [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        use crate::optim::{ProjSegment as Seg, ProjSpec};
+        let d_inner = self.d_inner();
+        let nheads = self.nheads();
+        let bc = self.ngroups * self.state_rank * self.mimo_rank;
+        vec![
+            ProjSpec::block(
+                "in_proj.weight",
+                vec![
+                    Seg::muon("z", d_inner),
+                    Seg::muon("x", d_inner),
+                    Seg::muon("b", bc),
+                    Seg::muon("c", bc),
+                    Seg::adamw("dt", nheads),
+                    Seg::adamw("a", nheads),
+                    Seg::adamw("lambda", nheads),
+                    Seg::muon("rotation", self.num_rotation_channels()),
+                ],
+            ),
+            ProjSpec::block_whole("out_proj.weight", self.d_model),
+        ]
+    }
+
     /// Allocate and initialise all Mamba-3 block parameters on `device`.
     pub fn init(&self, device: &Device) -> Mamba3 {
         let d_inner = self.d_inner();

@@ -357,6 +357,32 @@ impl Mamba2Config {
         self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 
+    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    ///
+    /// `in_proj` is `[z | xbc | dt]`; `xbc` is split further into its own
+    /// `x`/`B`/`C` maps (they only share the depthwise conv, not a linear map),
+    /// and the per-head dt channels stay on AdamW. The conv weight is 3-D, so it
+    /// is never listed. See [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        use crate::optim::{ProjSegment as Seg, ProjSpec};
+        let d_inner = self.d_inner();
+        let bc = self.ngroups * self.state_rank;
+        vec![
+            ProjSpec::block(
+                "in_proj.weight",
+                vec![
+                    Seg::muon("z", d_inner),
+                    Seg::muon("x", d_inner),
+                    Seg::muon("b", bc),
+                    Seg::muon("c", bc),
+                    Seg::adamw("dt", self.nheads()),
+                ],
+            ),
+            ProjSpec::block_whole("out_proj.weight", self.d_model),
+        ]
+    }
+
     // -----------------------------------------------------------------------
     // Initialisation
     // -----------------------------------------------------------------------

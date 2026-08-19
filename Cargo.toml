@@ -4,11 +4,14 @@ version = "0.33.0"
 edition = "2024"
 
 [features]
-default = ["mamba1", "mamba2", "mamba3", "autodiff", "backend-flex"]
+default = ["mamba1", "mamba2", "mamba3", "autodiff", "optim", "backend-flex"]
 mamba1 = []
 mamba2 = ["autodiff"]
 mamba3 = ["autodiff"]
 autodiff = ["burn/autodiff"]
+# Optimizer support (`crate::optim`): Muon parameter groups over the fused
+# projections. Pulls `burn-optim` (which implies `burn/autodiff`).
+optim = ["burn/optim", "burn/std", "autodiff"]
 cubecl = ["dep:burn-cubecl", "burn/cubecl"]
 fusion = ["burn/fusion", "dep:burn-fusion"]
 check-inf = []

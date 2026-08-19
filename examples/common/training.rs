@@ -1,11 +1,17 @@
 //! Shared training configuration for the examples.
 //!
 //! [`TrainingConfig`] holds the common hyperparameters (epochs, batch size, LR
-//! schedule, seed) plus the optimizer config.  [`optimizer_config`] builds the
+//! schedule, seed) plus the [`OptimizerConfig`].  [`optimizer_config`] builds the
 //! AdamW defaults shared by the examples (epsilon, grad clipping, cautious
-//! weight decay).
+//! weight decay); [`OptimizerConfig::muon`] optionally moves the hidden weight
+//! matrices to Muon (see `burn_mamba::optim`).
 
-use burn::{optim::AdamWConfig, prelude::*, train::metric::NumericEntry};
+use burn::{
+    optim::{AdamWConfig, ModuleOptimizer, MuonConfig},
+    prelude::*,
+    train::metric::NumericEntry,
+};
+use burn_mamba::optim::MuonPlan;
 pub use burn_mamba::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 
 /// Current value of a metric reading, or `NaN` when the metric has none yet
@@ -15,11 +21,47 @@ pub fn metric_current(entry: Option<NumericEntry>) -> f64 {
     entry.map_or(f64::NAN, |entry| entry.current())
 }
 
+/// How the examples optimize: AdamW everywhere, optionally with Muon on the
+/// hidden weight matrices.
+///
+/// `muon = None` is the plain-AdamW baseline. When set, the model config's
+/// [`MuonPlan`] decides which weights move over (and where the fused projections
+/// split) — everything else, 1-D and 3-D tensors included, keeps AdamW.
+#[derive(Config, Debug)]
+pub struct OptimizerConfig {
+    /// AdamW: the fallback optimizer, and the one used for every parameter when
+    /// `muon` is `None`.
+    pub adamw: AdamWConfig,
+    /// Muon for the planned hidden matrices. `None` ⇒ AdamW-only.
+    pub muon: Option<MuonConfig>,
+}
+
+impl OptimizerConfig {
+    /// AdamW-only (the baseline).
+    pub fn adamw_only(dtype: burn::tensor::DType) -> Self {
+        Self::new(optimizer_config(dtype))
+    }
+
+    /// AdamW + Muon on `plan`'s weights, sharing AdamW's weight decay and LR
+    /// (see [`burn_mamba::optim::muon_config`]).
+    pub fn with_muon_defaults(self, weight_decay: f32) -> Self {
+        self.with_muon(Some(burn_mamba::optim::muon_config(weight_decay)))
+    }
+
+    /// Build the module optimizer for a model whose Muon plan is `plan`.
+    pub fn init(&self, plan: &MuonPlan) -> ModuleOptimizer {
+        match &self.muon {
+            None => self.adamw.init(),
+            Some(muon) => plan.build(&self.adamw, muon),
+        }
+    }
+}
+
 /// Common training hyperparameters shared by the examples.
 #[derive(Config, Debug)]
 pub struct TrainingConfig {
-    /// The optimizer configuration (AdamW).
-    pub optimizer: AdamWConfig,
+    /// The optimizer configuration.
+    pub optimizer: OptimizerConfig,
     /// Number of training epochs.
     #[config(default = 1)]
     pub num_epochs: usize,

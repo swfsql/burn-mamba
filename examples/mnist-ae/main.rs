@@ -65,7 +65,7 @@ pub fn launch(app_args: &AppArgs) {
     let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        TrainingConfig::new(common::training::optimizer_config(dtype))
+        TrainingConfig::new(common::training::OptimizerConfig::adamw_only(dtype))
             .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)

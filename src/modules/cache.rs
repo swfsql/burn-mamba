@@ -116,6 +116,10 @@ mod impl_mamba2 {
         fn init_block(&self, device: &Device) -> Mamba2 {
             self.init(device)
         }
+        #[cfg(feature = "optim")]
+        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+            self.muon_projections()
+        }
     }
 }
 
@@ -202,6 +206,10 @@ mod impl_mamba3 {
         fn init_block(&self, device: &Device) -> Mamba3 {
             self.init(device)
         }
+        #[cfg(feature = "optim")]
+        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+            self.muon_projections()
+        }
     }
 }
 
@@ -274,6 +282,10 @@ mod impl_mamba1 {
         }
         fn init_block(&self, device: &Device) -> Mamba1 {
             self.init(device)
+        }
+        #[cfg(feature = "optim")]
+        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+            self.muon_projections()
         }
     }
 }

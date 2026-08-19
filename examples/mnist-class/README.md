@@ -28,3 +28,33 @@ cargo run --release --example mnist-class --features "backend-wgpu" -- --trainin
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.  
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
+
+## Optimizer: AdamW vs. AdamW + Muon
+
+This example carries one downstream flag, `--muon` (after the trailing `--`),
+which puts the block's hidden weight matrices on
+[Muon](https://kellerjordan.github.io/posts/muon/) instead of AdamW:
+
+```bash
+# baseline: AdamW on every parameter
+cargo run --release --example mnist-class --features "backend-wgpu" -- --training -a /tmp/mc-adamw
+# AdamW + Muon on the hidden matrices
+cargo run --release --example mnist-class --features "backend-wgpu" -- --training -a /tmp/mc-muon -- --muon
+```
+
+Everything else is identical: Muon uses the same LR schedule and weight decay
+(`AdjustLrFn::MatchRmsAdamW` sizes its orthogonalised update to AdamW's RMS), and
+every parameter the plan does not claim keeps its AdamW state. The flag is
+recorded in `<artifacts>/training_config.json`, so a resumed run keeps it — and a
+persisted config wins over the flag on reload.
+
+Which weights move (see `burn_mamba::optim`, and the `muon_plan()` on the model
+config): the block `out_proj`, and the Muon-owned segments of the fused
+`in_proj` — `z`, `x`, `B`, `C` and the rotation channels. The per-head Δ/`A`/`λ`
+channels of the same tensor stay on AdamW, as do every 1-D/3-D parameter, the
+network's own `in_proj`/`out_proj`, and any class-token table. For this config
+that is **~91% of the parameters** on Muon.
+
+The fused `in_proj` is **split per sub-projection before Muon sees it** — the
+model keeps its single fused GEMM, but the optimizer orthogonalises each
+sub-matrix on its own, as if they had been separate `Linear`s.

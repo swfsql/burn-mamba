@@ -279,6 +279,16 @@ impl AeConfig {
 
 impl ModelConfigExt for AeConfig {
     type Model = AeModel;
+    /// Both stacks share `mamba_block`, so one set of block specs covers the
+    /// encoder and the decoder (matched under `straight_block`/`reverse_block`),
+    /// plus each pair's `CatLinear` merge. The patch/latent/FiLM projections at
+    /// the model boundary stay on AdamW.
+    fn muon_plan(&self) -> burn_mamba::optim::MuonPlan {
+        use burn_mamba::optim::{MuonPlan, ProjSpec};
+        let mut specs = self.mamba_block.muon_projections();
+        specs.push(ProjSpec::path_whole("CatLinear.weight", self.d_model));
+        MuonPlan::new(specs)
+    }
     fn init(&self, device: &Device) -> Self::Model {
         // Inherent `init` wins over this trait method in call syntax, so this
         // delegates rather than recursing.

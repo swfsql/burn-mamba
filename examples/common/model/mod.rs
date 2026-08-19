@@ -8,6 +8,7 @@
 //! variant in its `model_config()`.
 
 use burn::prelude::*;
+use burn_mamba::optim::MuonPlan;
 use burn_mamba::prelude::{
     MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
 };
@@ -19,10 +20,18 @@ pub trait ModelConfigExt: Config {
     type Model: Module;
     /// Allocate and initialise the model on `device`.
     fn init(&self, device: &Device) -> Self::Model;
+    /// Which of the model's weights Muon may own, and where the fused
+    /// projections split (see `burn_mamba::optim`). Consumed by
+    /// [`OptimizerConfig::init`](crate::common::training::OptimizerConfig::init);
+    /// irrelevant when the training config leaves `muon` unset.
+    fn muon_plan(&self) -> MuonPlan;
 }
 
 impl ModelConfigExt for MambaLatentNetConfig {
     type Model = MambaLatentNet;
+    fn muon_plan(&self) -> MuonPlan {
+        self.muon_plan()
+    }
     fn init(&self, device: &Device) -> Self::Model {
         // `self.init(..)` resolves to the inherent `MambaLatentNetConfig::init`
         // (inherent methods win over trait methods in method-call syntax), so
@@ -33,6 +42,9 @@ impl ModelConfigExt for MambaLatentNetConfig {
 
 impl ModelConfigExt for MambaVocabNetConfig {
     type Model = MambaVocabNet;
+    fn muon_plan(&self) -> MuonPlan {
+        self.muon_plan()
+    }
     fn init(&self, device: &Device) -> Self::Model {
         // Same inherent-over-trait resolution as the latent impl above.
         self.init(device)

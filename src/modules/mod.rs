@@ -102,6 +102,11 @@ pub trait MambaBlockConfig: Config {
     fn d_model(&self) -> usize;
     /// Allocate and initialise the block on `device`.
     fn init_block(&self, device: &Device) -> Self::Block;
+
+    /// The block's 2-D weights Muon may own, and where their fused columns
+    /// split. See [`crate::optim`] for what is (and is not) listed.
+    #[cfg(feature = "optim")]
+    fn muon_projections(&self) -> Vec<crate::optim::ProjSpec>;
 }
 
 // ===========================================================================

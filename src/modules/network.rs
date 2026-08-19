@@ -725,6 +725,32 @@ pub enum MambaLatentNetConfig {
 }
 
 impl MambaLatentNetConfig {
+    /// The [`MuonPlan`] for this network: the block's
+    /// (and the optional MLP's) fused projections.
+    ///
+    /// The network's own boundary weights — `in_proj`/`out_proj` (or the
+    /// embedding and LM head) and any class-token table — are deliberately left
+    /// out; see [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_plan(&self) -> crate::optim::MuonPlan {
+        let (specs, mlp) = match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+
+        };
+        crate::optim::MuonPlan::new(specs).with_mlp(mlp.as_ref())
+    }
+
     /// Allocate and initialise the selected network on `device`.
     pub fn init(&self, device: &Device) -> MambaLatentNet {
         match self {
@@ -1085,6 +1111,32 @@ pub enum MambaVocabNetConfig {
 }
 
 impl MambaVocabNetConfig {
+    /// The [`MuonPlan`] for this network: the block's
+    /// (and the optional MLP's) fused projections.
+    ///
+    /// The network's own boundary weights — `in_proj`/`out_proj` (or the
+    /// embedding and LM head) and any class-token table — are deliberately left
+    /// out; see [`crate::optim`].
+    #[cfg(feature = "optim")]
+    pub fn muon_plan(&self) -> crate::optim::MuonPlan {
+        let (specs, mlp) = match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3 {
+                mamba_block, mlp, ..
+            } => (mamba_block.muon_projections(), mlp.clone()),
+
+        };
+        crate::optim::MuonPlan::new(specs).with_mlp(mlp.as_ref())
+    }
+
     /// Allocate and initialise the selected language model on `device`.
     pub fn init(&self, device: &Device) -> MambaVocabNet {
         match self {

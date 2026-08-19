@@ -20,6 +20,18 @@ There are shared definitions in `common/mod.rs`, imported as an outside module b
 
 The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`grokking`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
 
+##### Optimizer
+
+`common/training.rs` defines `OptimizerConfig { adamw, muon }`, held by
+`TrainingConfig`. `muon = None` (the default) is plain AdamW on every parameter.
+Setting `muon` moves the hidden weight matrices to
+[Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
+`muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_mamba::optim`): Muon
+only ever gets rank-2 hidden matrices, and each fused projection (`in_proj`,
+`fc1`, …) is split into its independent sub-projections first, so the
+orthogonalisation is per linear map rather than per allocation. The `mnist-class`
+example exposes this as a `-- --muon` flag; see its README.
+
 #### Backend Selection
 
 A single backend must be enabled, and features are used to select it -- e.g. `backend-flex`. See `burn-mamba/Cargo.toml` > `[features]` section for the backend list. Some extra "dev" features are also available for selection, them being the float precision selection (default f32 vs `dev-f16`) and whether fusion and/or autotune should be enabled.  

@@ -4,7 +4,7 @@
 //! command-line behaviour.
 
 use crate::common::model::ModelConfigExt;
-use burn::optim::{AdamWConfig, ModuleOptimizer};
+use burn::optim::ModuleOptimizer;
 use burn::prelude::*;
 use burn::store::ModuleRecord;
 use std::ffi::OsString;
@@ -222,19 +222,24 @@ impl AppArgs {
         save_optim(&self.artifacts_path, optim)
     }
 
-    /// Load optimizer state from the artifacts directory, if present.
-    pub fn load_optim(&self, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
-        load_optim(&self.artifacts_path, optim_config)
+    /// Load optimizer state from the artifacts directory into `optim`, if
+    /// present. `optim` must already carry the parameter groups the state was
+    /// saved with (see [`burn_mamba::optim::MuonPlan`]).
+    pub fn load_optim(&self, optim: ModuleOptimizer) -> Option<ModuleOptimizer> {
+        load_optim(&self.artifacts_path, optim)
     }
 
-    /// Load the optimizer if saved, otherwise initialise a new one and save it.
-    pub fn load_or_save_optim(&self, optim_config: &AdamWConfig) -> ModuleOptimizer {
-        self.load_optim(optim_config).unwrap_or_else(|| {
-            println!("Initializing new optim");
-            let optim_init = optim_config.init();
-            self.save_optim(&optim_init);
-            optim_init
-        })
+    /// Load the optimizer state into `optim` if saved, otherwise save `optim` as
+    /// the initial state.
+    pub fn load_or_save_optim(&self, optim: ModuleOptimizer) -> ModuleOptimizer {
+        match self.load_optim(optim.clone()) {
+            Some(loaded) => loaded,
+            None => {
+                println!("Initializing new optim");
+                self.save_optim(&optim);
+                optim
+            }
+        }
     }
 }
 
@@ -357,16 +362,13 @@ pub fn save_optim(artifact_dir: &Path, optim: &ModuleOptimizer) {
 ///
 /// Optimizer state is keyed by `ParamId`; [`load_model`] preserves the
 /// persisted ids, so the loaded state lands on the resumed model's parameters.
-pub fn load_optim(artifact_dir: &Path, optim_config: &AdamWConfig) -> Option<ModuleOptimizer> {
+pub fn load_optim(artifact_dir: &Path, optim: ModuleOptimizer) -> Option<ModuleOptimizer> {
     let path = artifact_dir.join(OPTIM_NAME).with_extension(RECORD_EXT);
     let exists = std::fs::exists(&path).expect("failed to check {path:?}");
     if !exists {
         return None;
     }
     println!("Loading initial optim from {path:?}");
-    let optim = optim_config
-        .init()
-        .load(&path)
-        .expect("Failed to load the initial optim");
+    let optim = optim.load(&path).expect("Failed to load the initial optim");
     Some(optim)
 }
