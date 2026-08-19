@@ -386,11 +386,22 @@ pub(crate) fn insert_class_markers<M: ClassMarker>(
     cursor: &mut ClassCursor,
     who: &str,
 ) -> Tensor<3> {
-    let [batch, chunk_len, width] = x.dims();
+    let [_batch, chunk_len, width] = x.dims();
     let plan = class_chunk_plan(markers, chunk_len, cursor, who);
     if plan.is_empty() {
         return x;
     }
+    splice_class_rows(x, &plan, &class_emb_table(markers, emb, width))
+}
+
+/// The class-marker embedding table (`[markers.len(), width]`), checked against
+/// the markers it places and the feature width it is spliced into. Only called
+/// where a marker is about to be emitted, so the param is present.
+pub(crate) fn class_emb_table<M: ClassMarker>(
+    markers: &[M],
+    emb: Option<&Param<Tensor<2>>>,
+    width: usize,
+) -> Tensor<2> {
     let emb = emb
         .expect("class-token markers present but no embedding param")
         .val();
@@ -399,20 +410,48 @@ pub(crate) fn insert_class_markers<M: ClassMarker>(
         [markers.len(), width],
         "one embedding row per class marker"
     );
+    emb
+}
 
-    let mut segments: Vec<Tensor<3>> = Vec::with_capacity(2 * plan.len() + 1);
+/// The tensor half of [`insert_class_markers`]: splice the rows a
+/// [`class_chunk_plan`] selected into `x` along its **sequence axis 1**,
+/// broadcasting each row over every other axis.
+///
+/// Rank-generic so the same placement lands in a plain `[batch, sequence,
+/// width]` chunk and in the Multi-Gate residual streams `[batch, sequence,
+/// n_stream, width]` — a class marker must enter *every* stream, that being
+/// where the residual is carried.
+pub(crate) fn splice_class_rows<const D: usize>(
+    x: Tensor<D>,
+    plan: &[(usize, usize)],
+    emb: &Tensor<2>,
+) -> Tensor<D> {
+    if plan.is_empty() {
+        return x;
+    }
+    let dims = x.dims();
+    let chunk_len = dims[1];
+    // One marker row broadcast to a single sequence position: `[1, ‥, 1, width]`
+    // expanded over the batch (and, for the streams, the stream axis).
+    let mut row_shape = [1usize; D];
+    row_shape[D - 1] = dims[D - 1];
+    let mut row_dims = dims;
+    row_dims[1] = 1;
+    let row = |i: usize| {
+        emb.clone()
+            .narrow(0, i, 1)
+            .reshape(row_shape)
+            .expand(row_dims)
+    };
+
+    let mut segments: Vec<Tensor<D>> = Vec::with_capacity(2 * plan.len() + 1);
     let mut taken = 0usize; // chunk tokens emitted so far
-    for (at, i) in plan {
+    for &(at, i) in plan {
         if at > taken {
             segments.push(x.clone().narrow(1, taken, at - taken));
             taken = at;
         }
-        segments.push(
-            emb.clone()
-                .narrow(0, i, 1) // [1, width]
-                .unsqueeze_dim::<3>(0) // [1, 1, width]
-                .expand([batch, 1, width]),
-        );
+        segments.push(row(i));
     }
     if taken < chunk_len {
         segments.push(x.narrow(1, taken, chunk_len - taken));

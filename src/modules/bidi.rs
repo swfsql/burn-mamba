@@ -254,17 +254,10 @@ where
     /// Seed the MultiGate streams from a full-sequence input — the **single**
     /// stream `x` as `[batch, sequence, 1, d_model]` (the first pairs widen it
     /// to `n_stream`, see [`MultiGate`](crate::modules::MultiGate)) — or `None`
-    /// for the Standard path. Panics if MultiGate is paired with stack-level
-    /// class latents.
+    /// for the Standard path. `x` already carries the stack-level class latents
+    /// (spliced before the seed), so they seed the streams like any other token.
     fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
-        if !matches!(&self.residuals, Residuals::MultiGate(_)) {
-            return None;
-        }
-        assert!(
-            self.class_latents_emb.is_none(),
-            "MultiGate residuals do not support stack-level class latents"
-        );
-        Some(x.clone().unsqueeze_dim::<4>(2))
+        matches!(&self.residuals, Residuals::MultiGate(_)).then(|| x.clone().unsqueeze_dim::<4>(2))
     }
 
     /// `[batch, sequence, d_model]` → `[batch, sequence, d_model]`

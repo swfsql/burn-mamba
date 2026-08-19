@@ -170,8 +170,10 @@ plus shared NN blocks.
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
   insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
-  (a bare-`Layer` caller needs it too); `step` takes the same cursor and returns its last
-  emitted token (`step_one` is the injection-free body). `prime(batch, cache, cursor)`
+  (a bare-`Layer` caller needs it too — `Layers` splices its layers' latents itself, since
+  under MultiGate the rows must also enter the streams); `step` takes the same cursor and
+  returns its last emitted token (`step_one`, the injection-free body, is `pub(crate)` for
+  the cascade, which has already placed the markers `step`'s cursorless guard rejects). `prime(batch, cache, cursor)`
   steps the latents waiting for the next token without one, returning `Option<(delta,
   latent)>` — the row comes back with the delta because the residual is the caller's — and
   the cache untouched (`None` included) when none were waiting. Cursorless `step_infinite`
@@ -195,8 +197,10 @@ plus shared NN blocks.
   switches each layer to `class_prime_plan`), returning `(Option<Tensor<2>>,
   Option<Caches>)`: the last latent emitted, and caches untouched when nothing ran — a
   partly primed cacheless stack is completed with zero caches for the layers that stepped
-  nothing (exactly the state they hold). MultiGate rejects class latents at both levels
-  (so it primes to `None`).
+  nothing (exactly the state they hold). MultiGate hosts class latents at both levels: the
+  `cascade` carries one `[b, k, d]` stream set per token and splices a latent into every
+  stream, as `forward` does into its `[b, s, k, d]`. Cascade tokens go through
+  `Layer::step_one`, not the cursorless `Layer::step`, so per-layer `Middle`/`End` place.
   Cursorless `step_infinite` mirrors `step` (incl. MultiGate; same residual/skip flags).
 - **`multi_gate.rs`** — `Residuals{Standard|MultiGate}` (+`ResidualsConfig`) for `Layers`:
   MultiGate routes up to `n_stream` depth-streams per real/virtual layer
@@ -205,6 +209,8 @@ plus shared NN blocks.
   are gate-mixed (`forward`/`step`); both end in the shared `attn_pool` (any stream count).
   Seeding `n` copies of the input instead is an unbreakable symmetry (identical streams ⇒
   identical gates and grads ⇒ one lerped stream). Point-wise, so `forward`==`step`.
+  A class marker enters the token stream *and* all `k` streams; identical streams score
+  alike, so the convex pool hands the row on unchanged — as the additive skip would.
   `depth_init_bias(n_mixing_layers, n_stream)` is the paper's carry bias over the *mixing*
   layers only; `init_bias_step` ramps it per stream (`0` = the paper's uniform init).
   Math, and why a convex mean-pool wants a norm before the head, in the header.
@@ -232,7 +238,8 @@ plus shared NN blocks.
   `Param` resamples); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`; runtime
   `MambaBidiLayers`. Forward-only, `forward` taking `Option<&mut ClassCursors>` (pairs take
   a single-level `ClassCursor`). MultiGate threads its streams **per pair**, same
-  accumulate-then-mix schedule as `Layers`. `muon_plan()` adds the per-pair
+  accumulate-then-mix schedule as `Layers` (stack latents are spliced before the seed, so
+  they ride along). `muon_plan()` adds the per-pair
   `CatLinear.weight` merge to the block specs.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
@@ -294,7 +301,10 @@ splitting happens in the optimizer, leaving the forward's single fused GEMM alon
   markers this level splices in). `class_chunk_plan` is the single placement decision —
   `(at, marker)` pairs for the next `chunk_len` user tokens, advancing the cursor — feeding
   `insert_class_markers` (a `forward` chunk) and `class_row` (one `step` token), so both
-  calls place identically and a sequence splits anywhere. `class_prime_plan` is its
+  calls place identically and a sequence splits anywhere. `insert_class_markers`' tensor
+  half is `splice_class_rows<D>` (sequence axis 1, row broadcast over the rest) —
+  rank-generic so one placement serves `[b, s, d]` and the MultiGate streams
+  `[b, s, k, d]`; `class_emb_table` is the checked `[markers, width]` table it reads. `class_prime_plan` is its
   `prime` twin (same `class_plan` body): at the chunk's trailing edge it emits the markers
   waiting for the *next* user token instead of leaving them, never `End`, and nothing once
   the cursor is at the announced end — which is what keeps a `Custom(k ≥ L)` from trailing

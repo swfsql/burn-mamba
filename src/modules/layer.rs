@@ -61,10 +61,12 @@ impl<M: MambaBlock> Layer<M> {
     /// Splice this layer's class latents into the chunk `x` (no-op when there
     /// are none), advancing `class` past it.
     ///
-    /// Public so [`Layers`] — and a caller driving a bare
-    /// [`Layer`] — can lengthen the sequence itself (and add the matching
-    /// residual) before calling [`Self::forward`]. `None` cursors ⇒ this chunk
-    /// is the whole sequence.
+    /// Public so a caller driving a bare [`Layer`] can lengthen the sequence
+    /// itself (and add the matching residual) before calling [`Self::forward`].
+    /// `None` cursors ⇒ this chunk is the whole sequence. [`Layers`] splices its
+    /// layers' latents itself, since under
+    /// [`MultiGate`](crate::modules::MultiGate) residuals the same rows must
+    /// also enter the carried streams.
     pub fn insert_latents(&self, x: Tensor<3>, class: Option<&mut ClassCursor>) -> Tensor<3> {
         let mut whole = ClassCursor::whole(x.dims()[1]);
         let cursor = class.unwrap_or(&mut whole);
@@ -214,7 +216,12 @@ impl<M: MambaBlock> Layer<M> {
     }
 
     /// The actual one-token work: no class injection, no outer residual.
-    fn step_one(&self, x: Tensor<2>, cache: Option<M::Cache>) -> (Tensor<2>, M::Cache) {
+    ///
+    /// `pub(crate)` for [`Layers`]'s cascade, which places this layer's class
+    /// latents from the stack-wide [`ClassCursors`](crate::utils::ClassCursors)
+    /// itself and so must bypass [`Self::step`]'s cursorless guard (that guard
+    /// rejects `Middle`/`End`, which the cascade has already resolved).
+    pub(crate) fn step_one(&self, x: Tensor<2>, cache: Option<M::Cache>) -> (Tensor<2>, M::Cache) {
         let residual = self.mlp_residual(&x);
         let normed = self.norm.forward(x);
         let (h1, cache) = self.mamba_block.block_step(normed, cache);

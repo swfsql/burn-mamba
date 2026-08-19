@@ -2,8 +2,9 @@ use crate::modules::{GatedMlpConfig, Residuals, ResidualsConfig, RmsNormConfig};
 use crate::prelude::*;
 use crate::utils::Schedule;
 use crate::utils::class::{
-    assert_full_len_known, class_chunk_plan, class_emb_width, class_marker_output_indices,
-    class_prime_plan, class_row, init_class_emb, insert_class_markers,
+    assert_full_len_known, class_chunk_plan, class_emb_table, class_emb_width,
+    class_marker_output_indices, class_prime_plan, class_row, init_class_emb,
+    insert_class_markers, splice_class_rows,
 };
 use crate::utils::{ClassCursor, ClassCursors, ClassLatent};
 use burn::module::Param;
@@ -98,14 +99,16 @@ where
     /// `ignore_first/last_residual` apply to **both** paths: skipping the first
     /// restarts the residual carry from the first layer's output (the input is
     /// read but not carried); skipping the last makes the stack output the last
-    /// layer's transform `F_l` alone (no input-dependent carry). Class latents
-    /// apply to the Standard path only (MultiGate forbids them, panicking if any
-    /// are present).
+    /// layer's transform `F_l` alone (no input-dependent carry).
     ///
     /// `class` places the stack-level and the per-layer class latents; `None`
     /// takes `x` for the whole sequence (so every latent lands in this call).
     /// Passing the same [`ClassCursors`] to consecutive chunks splits the
     /// sequence without moving a single latent — see [`ClassCursors`].
+    /// Both residual paths host them: a per-layer latent is spliced into the
+    /// token sequence and, under MultiGate, into every carried stream too (the
+    /// aggregator over the resulting identical streams reproduces the row, so
+    /// the layer above reads it back exactly as the additive skip hands it on).
     ///
     /// [`MultiGate`]: crate::modules::MultiGate
     /// [`Layer`]: crate::modules::Layer
@@ -142,15 +145,32 @@ where
             let cache = slots[i].take().unwrap();
             let first = self.ignore_first_residual && i == 0;
             let last = self.ignore_last_residual && i + 1 == n;
+
+            // Splice this layer's class latents into the sequence — and, under
+            // MultiGate, into every carried stream, that being where the
+            // residual lives. A row present in all `k` streams is reproduced
+            // exactly by the (convex, all-scores-equal) aggregator, so the layer
+            // above reads the latent back just as the Standard skip hands it on.
+            let mut cursor = ClassCursor::at(class.per_layer[i], full);
+            let plan = class_chunk_plan(&layer.class_latents, x.dims()[1], &mut cursor, "Layer");
+            class.per_layer[i] = cursor.offset;
+            full = full.map(|l| l + layer.class_latents.len());
+            if !plan.is_empty() {
+                let emb = class_emb_table(
+                    &layer.class_latents,
+                    layer.class_latents_emb.as_ref(),
+                    x.dims()[2],
+                );
+                x = splice_class_rows(x, &plan, &emb);
+                streams = streams.map(|s| splice_class_rows(s, &plan, &emb));
+            }
+
             match &self.residuals {
                 Residuals::Standard(_noop) => {
-                    // Splice this layer's class latents, then add the residual
-                    // (the lengthened input) here — unless suppressed, in which
-                    // case the input is moved straight in (no clone, no add).
-                    let mut cursor = ClassCursor::at(class.per_layer[i], full);
-                    let x_l = layer.insert_latents(x, Some(&mut cursor));
-                    class.per_layer[i] = cursor.offset;
-                    full = full.map(|l| l + layer.class_latents.len());
+                    // Add the residual (the lengthened input) here — unless
+                    // suppressed, in which case the input is moved straight in
+                    // (no clone, no add).
+                    let x_l = x;
                     let (out, c_) = if first || last {
                         layer.forward(x_l, Some(cache), ssd_path.clone())
                     } else {
@@ -161,10 +181,6 @@ where
                     slots[i] = Some(c_);
                 }
                 Residuals::MultiGate(mg) => {
-                    assert!(
-                        layer.class_latents_emb.is_none(),
-                        "MultiGate residuals do not support per-layer class latents"
-                    );
                     let (out, c_) = layer.forward(x, Some(cache), ssd_path.clone());
                     slots[i] = Some(c_);
                     let s = streams.take().unwrap();
@@ -203,17 +219,10 @@ where
     /// Seed the MultiGate streams from a full-sequence input — the **single**
     /// stream `x` as `[batch, sequence, 1, d_model]` (the layers below
     /// `n_stream` widen it, see [`MultiGate`](crate::modules::MultiGate)) — or
-    /// `None` for the Standard path. Panics if MultiGate is paired with
-    /// stack-level class latents.
+    /// `None` for the Standard path. `x` already carries the stack-level class
+    /// latents, so they seed the streams like any other token.
     fn multi_gate_streams_seed(&self, x: &Tensor<3>) -> Option<Tensor<4>> {
-        if !matches!(&self.residuals, Residuals::MultiGate(_)) {
-            return None;
-        }
-        assert!(
-            self.class_latents_emb.is_none(),
-            "MultiGate residuals do not support stack-level class latents"
-        );
-        Some(x.clone().unsqueeze_dim::<4>(2))
+        matches!(&self.residuals, Residuals::MultiGate(_)).then(|| x.clone().unsqueeze_dim::<4>(2))
     }
 
     /// Single-token step through every (virtual) layer.
@@ -244,9 +253,6 @@ where
         caches: Option<M::Caches>,
         mut class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, M::Caches) {
-        if let Residuals::MultiGate(mg) = &self.residuals {
-            return self.step_multi_gate(x, caches, mg);
-        }
         let [batch, d_model] = x.dims();
         let n = self.n_virtual_count();
         let caches =
@@ -305,6 +311,12 @@ where
     /// how the cascade carries on when the stream below it is empty. Everything
     /// else is common — which is what makes a `prime` and the `step` after it run
     /// the same sequence as that `step` alone.
+    ///
+    /// Under [`Residuals::MultiGate`] the residual is not in the token but in
+    /// that token's own depth-streams, so each element of `stream` is carried
+    /// alongside its `[batch, k, d_model]` stream set — rebuilt per token, never
+    /// crossing steps, exactly as the `[batch, sequence, k, d_model]` streams of
+    /// [`Self::forward`] are a per-position construct.
     fn cascade(
         &self,
         batch: usize,
@@ -313,15 +325,37 @@ where
         mut class: Option<&mut ClassCursors>,
         prime: bool,
     ) -> Vec<Tensor<2>> {
+        let n = slots.len();
+        let mg = match &self.residuals {
+            Residuals::Standard(_noop) => None,
+            Residuals::MultiGate(mg) => Some(mg),
+        };
+        // MultiGate: one stream set per token, seeded (like `forward`'s) with
+        // the token itself as the single stream. Empty for the Standard path.
+        let mut carried: Vec<Tensor<3>> = match mg {
+            None => Vec::new(),
+            Some(_) => stream
+                .iter()
+                .map(|t| t.clone().unsqueeze_dim::<3>(1))
+                .collect(),
+        };
+        // Stream count entering the current layer. It follows the depth alone
+        // (`forward`'s `s.dims()[2]`), so it is tracked even across layers no
+        // token reaches — a class latent first appearing at layer `pos` must be
+        // seeded with exactly the `k` streams that depth carries.
+        let mut k = 1usize;
+
         // Full length of the stream the layers see, this stack's latents
         // included; each layer then lengthens it further for the ones above it.
         let mut full = class
             .as_deref()
             .and_then(|c| c.full_len)
             .map(|l| l + self.class_latents.len());
-        for pos in 0..slots.len() {
-            let layer = &self.real_layers[self.real_idx(pos)];
-            let skip = self.skip_residual(pos, slots.len());
+        for pos in 0..n {
+            let real = self.real_idx(pos);
+            let layer = &self.real_layers[real];
+            let first = self.ignore_first_residual && pos == 0;
+            let last = self.ignore_last_residual && pos + 1 == n;
             let plan = if let Some(class) = class.as_deref_mut() {
                 let mut cursor = ClassCursor::at(class.per_layer[pos], full);
                 let markers = &layer.class_latents;
@@ -333,52 +367,110 @@ where
                 class.per_layer[pos] = cursor.offset;
                 plan
             } else {
+                // No cursors ⇒ nothing is injected, so `Middle`/`End` — whose
+                // positions only exist against the whole sequence — cannot be
+                // placed at all. (With cursors the plan above places every kind,
+                // which is why the tokens below go through `Layer::step_one`
+                // rather than the cursorless `Layer::step`.)
                 assert_full_len_known(&layer.class_latents, None, "Layer");
                 Vec::new()
             };
             full = full.map(|l| l + layer.class_latents.len());
+            // The stream count this layer leaves behind — mirroring `forward`:
+            // a suppressed last residual leaves the streams untouched, a
+            // suppressed first restarts them from `F_0`, and otherwise the
+            // accumulation phase appends one until `n_stream` is reached.
+            let k_next = match mg {
+                None => 1,
+                Some(_) if last => k,
+                Some(_) if first => 1,
+                Some(mg) => (k + 1).min(mg.n_stream),
+            };
             if plan.is_empty() && stream.is_empty() {
+                k = k_next;
                 continue; // nothing reaches this layer, and it adds nothing
             }
 
             let mut cache = slots[pos].take();
-            let mut next: Vec<Tensor<2>> = Vec::with_capacity(stream.len() + plan.len());
-            // One token through the layer, adding its residual here unless
-            // suppressed (then the token is moved straight in — no clone/add).
-            let run = |token: Tensor<2>, cache: Option<M::Cache>| {
-                if skip {
-                    layer.step(token, cache, None)
+            let emitted = stream.len() + plan.len();
+            let mut next: Vec<Tensor<2>> = Vec::with_capacity(emitted);
+            let mut next_carried: Vec<Tensor<3>> = Vec::with_capacity(mg.map_or(0, |_| emitted));
+            // One token through the layer, then its residual: the plain additive
+            // skip (unless suppressed — the token is then moved straight in, no
+            // clone/add), or the Multi-Gate mix into that token's own streams.
+            let advance = |token: Tensor<2>,
+                           tok_streams: Option<Tensor<3>>,
+                           cache: Option<M::Cache>|
+             -> (Tensor<2>, Option<Tensor<3>>, M::Cache) {
+                let Some(mg) = mg else {
+                    return if first || last {
+                        let (out, c) = layer.step_one(token, cache);
+                        (out, None, c)
+                    } else {
+                        let (out, c) = layer.step_one(token.clone(), cache);
+                        (out + token, None, c)
+                    };
+                };
+                let s = tok_streams.expect("MultiGate carries one stream set per token");
+                let (out, c) = layer.step_one(token, cache);
+                // As in `forward`, a skipped residual is β ≡ 1 in the mixer
+                // (`new_streams = F_l`), the aggregator then collapsing to `F_l`.
+                if last {
+                    (out, Some(s), c) // output depends purely on `F_l`
+                } else if first {
+                    // Drop the input seed: restart the streams from `F_0` alone.
+                    (out.clone(), Some(out.unsqueeze_dim::<3>(1)), c)
                 } else {
-                    let (out, c) = layer.step(token.clone(), cache, None);
-                    (out + token, c)
+                    let mgr = &mg.layers[mg.module_index(pos, real)];
+                    let (h, s) = if s.dims()[1] < mg.n_stream {
+                        mgr.accumulate_step(out, s)
+                    } else {
+                        mgr.step(out, s)
+                    };
+                    (h, Some(s), c)
                 }
             };
+            // A class latent enters the token sequence *and* every stream (see
+            // `forward`): identical streams score alike, so the aggregator
+            // reproduces the row and the layer above reads it back unchanged.
             let row = |i: usize| {
                 let emb = layer.class_latents_emb.as_ref();
-                class_row(emb, i, batch, class_emb_width(emb))
+                let width = class_emb_width(emb);
+                let r = class_row(emb, i, batch, width);
+                let s = mg.map(|_| r.clone().unsqueeze_dim::<3>(1).expand([batch, k, width]));
+                (r, s)
             };
+            let mut push = |(out, s): (Tensor<2>, Option<Tensor<3>>)| {
+                next.push(out);
+                next_carried.extend(s);
+            };
+            let mut tokens_streams = carried.into_iter();
             let mut plan = plan.into_iter().peekable();
             for (t, token) in stream.into_iter().enumerate() {
                 // This layer's class latents that fall before this token.
                 while let Some((_, i)) = plan.next_if(|&(at, _)| at == t) {
-                    let (out, c) = run(row(i), cache);
-                    next.push(out);
+                    let (r, rs) = row(i);
+                    let (out, s, c) = advance(r, rs, cache);
+                    push((out, s));
                     cache = Some(c);
                 }
-                let (out, c) = run(token, cache);
-                next.push(out);
+                let (out, s, c) = advance(token, tokens_streams.next(), cache);
+                push((out, s));
                 cache = Some(c);
             }
             // …and the latents that follow the stream's last token: an `End`
             // closing the sequence, or (on a prime) the ones the token after it
             // is due to be preceded by.
             for (_at, i) in plan {
-                let (out, c) = run(row(i), cache);
-                next.push(out);
+                let (r, rs) = row(i);
+                let (out, s, c) = advance(r, rs, cache);
+                push((out, s));
                 cache = Some(c);
             }
             slots[pos] = cache;
             stream = next;
+            carried = next_carried;
+            k = k_next;
         }
         stream
     }
@@ -404,19 +496,13 @@ where
     /// The caches come back as they went in when nothing ran (`None` included);
     /// a partly primed stack is completed with zero caches for the layers that
     /// stepped nothing, which is exactly the state they hold. `None` cursors
-    /// inject nothing at all (`Middle`/`End` latents then panic, as in `step`),
-    /// and Multi-Gate residuals — which forbid class latents entirely — always
-    /// prime to `None`.
+    /// inject nothing at all (`Middle`/`End` latents then panic, as in `step`).
     pub fn prime(
         &self,
         batch: usize,
         caches: Option<M::Caches>,
         class: Option<&mut ClassCursors>,
     ) -> (Option<Tensor<2>>, Option<M::Caches>) {
-        if let Residuals::MultiGate(_) = &self.residuals {
-            self.assert_multi_gate_has_no_class_latents();
-            return (None, caches);
-        }
         let n = self.n_virtual_count();
         let Some(class) = class else {
             assert_full_len_known(&self.class_latents, None, "Layers");
@@ -507,28 +593,12 @@ where
         h
     }
 
-    /// Multi-Gate carries the residual in its streams rather than in the token
-    /// sequence, so it cannot host class latents at all — `forward` rejects them
-    /// and so do the recurrent paths, at either level.
-    fn assert_multi_gate_has_no_class_latents(&self) {
-        assert!(
-            self.class_latents_emb.is_none(),
-            "MultiGate residuals do not support stack-level class latents"
-        );
-        assert!(
-            self.real_layers
-                .iter()
-                .all(|l| l.class_latents_emb.is_none()),
-            "MultiGate residuals do not support per-layer class latents"
-        );
-    }
-
     /// Multi-Gate counterpart of [`Self::step_infinite`]. The streams are a
     /// per-token depth construct (as in [`Self::step_multi_gate`]), so applying
     /// the mixers to the layers' fixed-point outputs *is* the fixed point of
     /// the whole stack.
     fn step_infinite_multi_gate(&self, x: Tensor<2>, mg: &crate::modules::MultiGate) -> Tensor<2> {
-        self.assert_multi_gate_has_no_class_latents();
+        assert_full_len_known(&self.class_latents, None, "Layers");
         let n = self.n_virtual_count();
         let mut streams = x.clone().unsqueeze_dim::<3>(1);
         let mut h = x;
@@ -555,55 +625,6 @@ where
         h
     }
 
-    /// Single-token Multi-Gate Residual step — the recurrent counterpart of
-    /// [`Self::forward_multi_gate`]. The streams are a per-token *depth*
-    /// construct (rebuilt from `x` each step, never carried between tokens), so
-    /// no extra state crosses steps and `forward`/`step` agree. Class latents are
-    /// unsupported.
-    fn step_multi_gate(
-        &self,
-        x: Tensor<2>,
-        caches: Option<M::Caches>,
-        mg: &crate::modules::MultiGate,
-    ) -> (Tensor<2>, M::Caches) {
-        self.assert_multi_gate_has_no_class_latents();
-        let n = self.n_virtual_count();
-        let caches =
-            caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_2d(&x, n));
-        assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
-
-        let mut slots = caches.into_slots();
-        let mut streams = x.clone().unsqueeze_dim::<3>(1);
-        let mut h = x;
-        for i in 0..n {
-            let real = self.real_idx(i);
-            let layer = &self.real_layers[real];
-            let cache = slots[i].take();
-            let (out, c_) = layer.step(h, cache, None);
-            slots[i] = Some(c_);
-            // As in `forward`, a skipped residual is β ≡ 1 in the mixer
-            // (`new_streams = out`), the aggregator then collapsing to `F_l`.
-            if self.ignore_last_residual && i + 1 == n {
-                // Output depends purely on the last layer's transform.
-                h = out;
-            } else if self.ignore_first_residual && i == 0 {
-                // Drop the input seed: restart the streams from `F_0` alone.
-                streams = out.clone().unsqueeze_dim::<3>(1);
-                h = out;
-            } else {
-                let mgr = &mg.layers[mg.module_index(i, real)];
-                // Accumulate while there is room, then gate-mix (see `MultiGate`).
-                let (new_h, new_streams) = if streams.dims()[1] < mg.n_stream {
-                    mgr.accumulate_step(out, streams)
-                } else {
-                    mgr.step(out, streams)
-                };
-                h = new_h;
-                streams = new_streams;
-            }
-        }
-        (h, M::Caches::from_slots(slots))
-    }
 }
 
 /// Plain (non-serde) factory for [`Layers`]. The serializable surface is the

@@ -38,6 +38,17 @@
 //! equals `step` unrolled token-by-token, and `step` carries no extra state
 //! (each token rebuilds its own depth-streams).
 //!
+//! **Class tokens / latents.** A class marker spliced into the sequence enters
+//! the token stream *and* every residual stream at that position (`k` copies of
+//! the one embedding row). Identical streams score alike, so the aggregator —
+//! a convex combination — reproduces the row exactly: the marker reaches the
+//! layer above just as the plain additive skip would have handed it on. Markers
+//! spliced *below* the stack (a network's [`ClassToken`]s, the stack's own
+//! [`ClassLatent`]s) simply seed the streams like any other token.
+//!
+//! [`ClassToken`]: crate::utils::ClassToken
+//! [`ClassLatent`]: crate::utils::ClassLatent
+//!
 //! **Gate-bias initialisation.** Following Highway Networks, a negative
 //! `init_bias` biases the gates towards *carry* (small updates) at the start of
 //! training. The paper scales it with the number of *mixing* layers `L`

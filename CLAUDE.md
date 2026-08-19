@@ -272,7 +272,9 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   `n_stream−1` layers **append** their output as a new one; only then does gated mixing
   start (seeding `n` copies is a symmetry that never breaks). Being a convex mean-pool, it
   leaves an `O(1)` output where the additive skip grows with depth, so a latent head wants
-  `final_norm`. See the module header.
+  `final_norm`. Class markers ride along at every level: one is spliced into the token
+  sequence **and** into all `k` streams, which the aggregator then reproduces exactly.
+  See the module header.
 
 ---
 
