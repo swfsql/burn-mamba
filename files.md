@@ -31,6 +31,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   Mamba-2/3). `forward`: in_proj → causal conv (left-padded from `cache.conv_bik`) →
   SiLU → sequential `selective_scan` (ZOH A, Euler B) → SiLU gate → out_proj.
   `step` shares the cache. A init from `arange(1..=state_rank).log()`.
+  `muon_projections()` (feature `optim`) names the Muon-eligible weights and their
+  column seams: `in_proj [x|res]`, `x_proj [dt*|B|C]`, `out_proj` (`*` = AdamW's).
 - **`cache.rs`** — `Mamba1Cache` (`conv_bik` window + `ssm_bir` state) / `Mamba1Caches`
   (`Vec`, one per virtual layer; `into_options`/`from_options`, zero-init factories).
 
@@ -40,6 +42,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   `ngroups` 1, `expand` 2). `forward` per CLAUDE.md; only `forward` touches the SSD
   path (via `Mamba2BackendExt`), `step` is the pure recurrence with a manual
   conv-window slide. Optional learnable `init_state_hpr`.
+  `muon_projections()`: `in_proj [z|x|B|C|dt*]` (`xbc` split further — the conv is
+  shared, the linear map is not), `out_proj`.
 - **`cache.rs`** — `Mamba2Cache` = `conv_bvk` window + `ssm_bhpr` (the O(p·r) compressed
   state — the memory win over a growing KV-cache). Zero-init correct (`h₀=0`).
 - **`ssd/ssd_path.rs`** — `Mamba2SsdPath{Minimal|Serial|SerialRecalculated}(Option<chunk>)`,
@@ -60,7 +64,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** for RoPE pairing;
   `mimo_rank` 1=SISO; `rope_fraction`; `rotation: RotationKind`; `a_floor`). Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
-  `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`).
+  `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
+  mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.
   `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
   Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
   values/grads): `siso_specialization` for the chunkwise γ-correction (threaded down as a
@@ -160,7 +165,8 @@ plus shared NN blocks.
   `block_forward`/`block_step`, `block_step_infinite` with a panicking default —
   only Mamba-3 overrides, `zero_caches_{2d,3d}`; Mamba-1's
   `SsdPath=()`),
-  `trait MambaBlockConfig` (`d_model()`+`init_block`), and `enum MambaSsdPath`
+  `trait MambaBlockConfig` (`d_model()`+`init_block`+`muon_projections()`), and
+  `enum MambaSsdPath`
   (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
   insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
@@ -217,14 +223,17 @@ plus shared NN blocks.
   returns the primed latent's logits.
   `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
   variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
-  `final_norm`, `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`.
+  `final_norm`, `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`, and
+  build a `MuonPlan` via `muon_plan()` (block + MLP weights; the boundary
+  embedding/head/projections are deliberately absent).
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
   `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
   reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised
   `Param` resamples); `OutputMerge{Mean(NoOp)|CatLinear(Linear)}`; runtime
   `MambaBidiLayers`. Forward-only, `forward` taking `Option<&mut ClassCursors>` (pairs take
   a single-level `ClassCursor`). MultiGate threads its streams **per pair**, same
-  accumulate-then-mix schedule as `Layers`.
+  accumulate-then-mix schedule as `Layers`. `muon_plan()` adds the per-pair
+  `CatLinear.weight` merge to the block specs.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
   `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
   state**, not a `Module`).
@@ -237,6 +246,35 @@ plus shared NN blocks.
   `split_into` (array-typed `split_with_sizes` → `let [z,x,b,c,…]=…`), `sanity` guards,
   `rope` (`wrap_angle`/`apply_rope{,_partial}`, Mamba-3 only).
 - **`loss/`** — bce, cross_entropy, mse (example training).
+
+## Optimizer (`src/optim/`, feature `optim`)
+
+Muon needs one linear map per parameter; the fused projections are several, and the
+rank-2 assert makes a wrong group a panic. So the plan is an **allowlist** and the
+splitting happens in the optimizer, leaving the forward's single fused GEMM alone.
+
+- **`spec.rs`** — `ProjSegment{name,width,muon}` (`muon()`/`adamw()`) and
+  `ProjSpec{path,scope,segments}` (`block`/`block_whole`/`path`/`path_whole`, `width`,
+  `has_muon`, `is_whole_muon`, `predicates`, `param_group`). `ProjScope::Block` matches
+  the path under each `BLOCK_CONTAINERS` entry (`mamba_block`/`straight_block`/
+  `reverse_block`), so one plan covers plain, virtual-layer and bidi stacks alike.
+- **`segmented.rs`** — `Segmented` (`Optimizer`): splits weight+grad along `dim`
+  (1 = a `Linear`'s output axis), steps each block with its own `Muon`/`AdamW`,
+  concatenates. Exact — AdamW is element-wise, Newton–Schulz per-matrix. `RecordState`
+  for `SegmentedState` is **hand-written**: the derive has no `Vec<nested>`, and
+  unflatten cannot see the spec, so a block's kind is recovered from its leaf names
+  (`momentum.velocity` vs `momentum.moment_1/2`, which never overlap).
+- **`mod.rs`** — `MuonPlan{specs}` (`new`/`extend`/`with_mlp`/`without_segment`) and
+  `build(&AdamWConfig, &MuonConfig)`: `adamw.init()` is the fallback group (and fixes
+  the gradient clipping every Muon group reuses), then one group per Muon-owning spec —
+  stock `Muon` for a whole-matrix spec, `Segmented` otherwise. `muon_config(wd)` defaults
+  to `AdjustLrFn::MatchRmsAdamW`, whose update RMS is `0.2·lr`, so Muon and AdamW share
+  one learning rate. Header records what is excluded and why — rank ≠ 2, embedding-like
+  boundary weights, per-head scalar channels (Δ/`A`/`λ`), and the MIMO tensors (the paper
+  parameterises them as element-wise scales, not the `DPR` stack of maps, so they are
+  diagonals; MIMO's real matrix expansion is B/C, already inside `in_proj`).
+- **`report.rs`** — `MuonPlan::describe(&impl Module)`: one line per parameter (path,
+  shape, owner, segments with `*` on AdamW's) plus the share on Muon.
 
 ## Utilities (`src/utils/`)
 

@@ -76,8 +76,8 @@ pub fn launch(app_args: &AppArgs) {
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
-                    .with_max_lr(1e-4)
-                    .with_min_lr(5e-5)
+                    .with_max_lr(8e-4)
+                    .with_min_lr(4e-4)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });

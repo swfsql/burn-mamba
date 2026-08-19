@@ -27,9 +27,10 @@ cargo run --example fibonacci -- --training --inference
   rocm,tch-cpu,tch-gpu,remote,ndarray}` (flex preferred for checks/tests, enabled 
   by default). Each just enables the matching `burn/<backend>`; several may be
   compiled in at once and `Device::default()` resolves which to use (honouring `BURN_DEVICE`).
-- `mamba1`/`mamba2`/`mamba3`/`autodiff` are default-on; `mamba2`/`mamba3` imply
-  `autodiff`. `cubecl`/`fusion` enable the memory-saving custom backward on those
-  backend families. `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
+- `mamba1`/`mamba2`/`mamba3`/`autodiff`/`optim` are default-on; `mamba2`/`mamba3` imply
+  `autodiff`, and `optim` (Muon parameter groups) implies `burn/optim`+`burn/std`.
+  `cubecl`/`fusion` enable the memory-saving custom backward on those backend families.
+  `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
 
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
@@ -89,6 +90,11 @@ src/
 │  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
 │  ├─ loss/          bce, cross_entropy, mse
 │  └─ misc/          gqa, segsum, split, sanity, rope
+├─ optim/            Muon parameter groups (feature `optim`); allowlist, not denylist
+│  ├─ mod.rs         MuonPlan: specs → ModuleOptimizer (AdamW fallback + Muon groups)
+│  ├─ spec.rs        ProjSpec/ProjSegment: fused-weight column seams → ParamGroup
+│  ├─ segmented.rs   Segmented: one optimizer per column block of a fused weight
+│  └─ report.rs      MuonPlan::describe(&module): per-param optimizer assignment
 └─ utils/            lower-level plumbing
    ├─ mod.rs         div_eps (per-dtype epsilon)
    ├─ class/         ClassToken / ClassLatent placement (CLS-style registers) +
@@ -292,6 +298,16 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.
+- **Muon sees split projections, the model does not** — Burn's `Muon` orthogonalises a
+  whole 2-D weight, which is wrong for a fused `in_proj` (independent maps sharing one
+  allocation) and panics for rank ≠ 2. `crate::optim` therefore carries a per-family
+  **allowlist** of `ProjSpec`s (the same column widths the forward's `split_into` uses)
+  and `Segmented` steps each block with its own optimizer — so each sub-matrix is
+  orthogonalised and shape-LR-adjusted alone, while the forward keeps its single fused
+  GEMM. Per-head *scalar* channels (Δ/`A`/`λ`), every 1-D/3-D tensor, and the boundary
+  weights (embedding, LM head, network in/out projections, class-token tables) stay on
+  AdamW. Specs match as path substrings under the block-container field names, so one
+  plan covers plain, virtual-layer and bidirectional stacks — hand-written models too.
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
   as you add it.
 - The project root is `/shared/claude/burn-mamba/`; do not read/write outside it.
