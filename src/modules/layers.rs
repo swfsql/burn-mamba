@@ -45,9 +45,34 @@ pub struct Layers<M: Module> {
     /// counted **from the top** so it stays meaningful when the stack depth
     /// changes, and so a training loop can move it per step.
     ///
-    /// Under weight sharing the same real layer serves both sides of the cut;
-    /// the prefix runs a [`detach_params`](crate::utils::detach_params) clone, so
-    /// each weight still receives gradient — from its tracked applications only.
+    /// Under weight sharing the same real layer serves both sides of the cut; the
+    /// prefix runs an inner-backend copy, so each weight still receives gradient
+    /// — from its tracked applications only.
+    ///
+    /// The stack **input** is the exception, and deliberately so. It enters at the
+    /// bottom and rides the residual stream upward, so a cut would sever its only
+    /// path and a network's `in_proj` (or a vocab net's embedding) would never
+    /// train at all — silently. TRM and HRM never meet this because they re-inject
+    /// the input at every recursion; this stack reads it once. The boundary
+    /// therefore re-attaches it *straight-through*: a value-zero term restores an
+    /// identity gradient path, which under [`Residuals::Standard`] is not a guess
+    /// but the exact leading term of `∂(x + Σ F_l)/∂x`, the rest being precisely
+    /// the prefix one chose not to differentiate. Under
+    /// [`MultiGate`](crate::modules::MultiGate) the pooling contracts, so identity
+    /// is the cruder of the two — the input gets one identity path to the output
+    /// either way. Values are untouched in both cases.
+    ///
+    /// **Every class embedding trains**, at all three levels and on both sides of
+    /// the cut: a network's [`ClassToken`]s and this stack's own
+    /// [`ClassLatent`]s ride the carry because it is taken *after* they are
+    /// spliced, and a per-[`Layer`] latent below the cut gets a **ghost** row in
+    /// the carry (value zero, taken from the tracked table). They are learnable
+    /// *input rows*, not part of a layer's transform — which is what stays
+    /// undifferentiated below the cut. Anything else would leave a silently dead
+    /// parameter.
+    ///
+    /// [`ClassToken`]: crate::utils::ClassToken
+    /// [`ClassLatent`]: crate::utils::ClassLatent
     ///
     /// `K >= n_virtual` behaves exactly like `None`, and so does any value at all
     /// off the autodiff backend. Honoured by [`Self::forward`], [`Self::step`]
@@ -194,6 +219,18 @@ where
         let cut = self.grad_cut(n);
         let inner_stack = (cut > 0).then(|| burn::module::AutodiffModule::valid(self));
         let mut slots = caches.into_slots();
+        // Straight-through carry (see `grad_horizon`): a value-**zero** tracked
+        // tensor standing in for the stack input, added back at the boundary so
+        // the input keeps an identity gradient path across the cut. It must be
+        // added exactly once, on the autodiff side of the boundary — earlier and
+        // it would be a tracked input to the prefix, which is both a backend
+        // mismatch and the end of the memory saving.
+        //
+        // It shadows `x`'s **shape**, not its value: a prefix layer's class
+        // latents lengthen the sequence, and the carry takes zero rows at those
+        // same positions (those latents are prefix parameters, deliberately not
+        // differentiated).
+        let mut st = (cut > 0).then(|| x.clone() - x.clone().detach());
         if cut > 0 {
             x = x.inner();
             // Only the prefix's own slots come down; the tracked suffix keeps
@@ -213,6 +250,9 @@ where
             // autodiff backend, as fresh graph roots.
             if cut > 0 && i == cut {
                 x = Tensor::from_inner(x);
+                if let Some(st) = st.take() {
+                    x = x + st;
+                }
                 streams = streams.map(Tensor::from_inner);
             }
             let real = self.real_idx(i);
@@ -243,6 +283,21 @@ where
                 );
                 x = splice_class_rows(x, &plan, &emb);
                 streams = streams.map(|s| splice_class_rows(s, &plan, &emb));
+                // Keep the carry aligned with `x`, splicing **ghost** rows at the
+                // latent positions: value zero like the rest of the carry, but
+                // taken from the *tracked* table, so a prefix layer's own class
+                // latents keep an identity gradient path exactly as the stack
+                // input does. They are learnable input rows, not part of the
+                // layer's transform — which stays undifferentiated below the cut.
+                st = st.map(|st| {
+                    let tracked = class_emb_table(
+                        &self.real_layers[real].class_latents,
+                        self.real_layers[real].class_latents_emb.as_ref(),
+                        emb.dims()[1],
+                    );
+                    let ghost = tracked.clone() - tracked.detach();
+                    splice_class_rows(st, &plan, &ghost)
+                });
             }
 
             match &this.residuals {
@@ -297,6 +352,9 @@ where
             // `cut == n` (a horizon of 0) never reaches the in-loop crossing.
             if cut >= n {
                 x = Tensor::from_inner(x);
+                if let Some(st) = st.take() {
+                    x = x + st;
+                }
             }
             for slot in slots.iter_mut().take(cut) {
                 *slot = slot.take().map(M::Caches::cache_from_inner);
@@ -431,6 +489,12 @@ where
         // own cache slots — and is lifted back at the boundary.
         let cut = self.grad_cut(n);
         let inner_stack = (cut > 0).then(|| burn::module::AutodiffModule::valid(self));
+        // The straight-through carry `forward` builds, one entry per token of the
+        // opening stream (see `grad_horizon`). `None` when the stream opens empty
+        // — a `prime` with nothing below the cut has no input to carry a gradient
+        // back to in the first place.
+        let mut st: Option<Vec<Tensor<2>>> = (cut > 0)
+            .then(|| stream.iter().map(|t| t.clone() - t.clone().detach()).collect());
         if cut > 0 {
             stream = stream.into_iter().map(Tensor::inner).collect();
             for slot in slots.iter_mut().take(cut) {
@@ -468,6 +532,10 @@ where
             // skip condition happens to be.
             if cut > 0 && pos == cut {
                 stream = stream.into_iter().map(Tensor::from_inner).collect();
+                if let Some(st) = st.take() {
+                    debug_assert_eq!(st.len(), stream.len(), "carry tracks the stream");
+                    stream = stream.into_iter().zip(st).map(|(t, s)| t + s).collect();
+                }
                 carried = carried.into_iter().map(Tensor::from_inner).collect();
             }
             let real = self.real_idx(pos);
@@ -568,22 +636,37 @@ where
                 let s = mg.map(|_| r.clone().unsqueeze_dim::<3>(1).expand([batch, k, width]));
                 (r, s)
             };
-            let mut push = |(out, s): (Tensor<2>, Option<Tensor<3>>)| {
+            // The carry rides along, taking a **ghost** row wherever a class
+            // latent is emitted: value zero, so it stays index-aligned with what
+            // this layer hands up, but tracked, so the latent trains (see
+            // `grad_horizon`). Built on demand rather than cloned from the carry,
+            // so a layer whose stream is empty still ghosts its own latents.
+            let carry_active = st.is_some();
+            let mut st_next: Vec<Tensor<2>> =
+                Vec::with_capacity(if carry_active { emitted } else { 0 });
+            let ghost = |i: usize| {
+                let emb = self.real_layers[real].class_latents_emb.as_ref();
+                let r = class_row(emb, i, batch, class_emb_width(emb));
+                r.clone() - r.detach()
+            };
+            let mut push = |(out, s): (Tensor<2>, Option<Tensor<3>>), carry: Option<Tensor<2>>| {
                 next.push(out);
                 next_carried.extend(s);
+                st_next.extend(carry);
             };
             let mut tokens_streams = carried.into_iter();
+            let mut st_tokens = st.take().map(Vec::into_iter);
             let mut plan = plan.into_iter().peekable();
             for (t, token) in stream.into_iter().enumerate() {
                 // This layer's class latents that fall before this token.
                 while let Some((_, i)) = plan.next_if(|&(at, _)| at == t) {
                     let (r, rs) = row(i);
                     let (out, s, c) = advance(r, rs, cache);
-                    push((out, s));
+                    push((out, s), carry_active.then(|| ghost(i)));
                     cache = Some(c);
                 }
                 let (out, s, c) = advance(token, tokens_streams.next(), cache);
-                push((out, s));
+                push((out, s), st_tokens.as_mut().and_then(Iterator::next));
                 cache = Some(c);
             }
             // …and the latents that follow the stream's last token: an `End`
@@ -592,8 +675,11 @@ where
             for (_at, i) in plan {
                 let (r, rs) = row(i);
                 let (out, s, c) = advance(r, rs, cache);
-                push((out, s));
+                push((out, s), carry_active.then(|| ghost(i)));
                 cache = Some(c);
+            }
+            if carry_active {
+                st = Some(st_next);
             }
             slots[pos] = cache;
             stream = next;
@@ -604,6 +690,9 @@ where
             // `cut == n` (a horizon of 0) never reaches the in-loop crossing.
             if cut >= n {
                 stream = stream.into_iter().map(Tensor::from_inner).collect();
+                if let Some(st) = st.take() {
+                    stream = stream.into_iter().zip(st).map(|(t, s)| t + s).collect();
+                }
             }
             for slot in slots.iter_mut().take(cut) {
                 *slot = slot.take().map(M::Caches::cache_from_inner);

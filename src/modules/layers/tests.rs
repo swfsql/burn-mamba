@@ -707,6 +707,18 @@ fn run_prime_cut(latent_layer: usize) {
             .is_some(),
         "the top layer lost its gradient (latent on layer {latent_layer})",
     );
+    // The latent itself trains from either side of the cut — below it that is
+    // the cascade's ghost row doing the work.
+    assert!(
+        layers.real_layers[latent_layer]
+            .class_latents_emb
+            .as_ref()
+            .unwrap()
+            .val()
+            .grad(&grads)
+            .is_some(),
+        "the class latent on layer {latent_layer} never trains",
+    );
 }
 
 /// Latent above the cut: every layer below it is skipped on an empty stream.
@@ -720,6 +732,198 @@ fn prime_under_a_cut_with_a_latent_above_it() {
 #[test]
 fn prime_under_a_cut_with_a_latent_below_it() {
     run_prime_cut(0);
+}
+
+// ===========================================================================
+// 8. The cut keeps the input's gradient (straight-through)
+// ===========================================================================
+
+/// A cut must not sever the gradient to whatever produced the stack input.
+///
+/// `x` enters `Layers` once, at the bottom, and rides the residual stream upward
+/// — so a bottom cut would otherwise sever its only path and a network's
+/// `in_proj` (or a vocab net's embedding) would **never train**, silently. TRM
+/// and HRM never hit this because they re-inject `x` at every recursion; this
+/// stack reads it once, so the boundary re-attaches it by straight-through.
+///
+/// Checked on a whole `LatentNetwork`, since `in_proj` never training is the
+/// consequence that actually matters.
+#[test]
+fn boundary_weights_keep_their_gradient_under_a_cut() {
+    use crate::modules::network::LatentNetworkBuilder;
+
+    let device = Device::default().autodiff();
+    let n = 4;
+    for horizon in [None, Some(4), Some(2), Some(0)] {
+        let mut lb = LayersBuilder::new(n, block_config(D_MODEL));
+        lb.grad_horizon = horizon;
+        let net = LatentNetworkBuilder {
+            input_size: 3,
+            layers: lb,
+            output_size: 3,
+            final_norm: false,
+            class_tokens: Vec::new(),
+        }
+        .init(&device);
+
+        let x = Tensor::<3>::random([BATCH, SEQ, 3], Distribution::Normal(0.0, 1.0), &device)
+            .require_grad();
+        let (y, _) = net.forward(x.clone(), None, path(), None);
+        let grads = y.sum().backward();
+
+        assert!(
+            x.grad(&grads).is_some(),
+            "the network input lost its gradient (horizon {horizon:?})",
+        );
+        assert!(
+            net.in_proj.weight.val().grad(&grads).is_some(),
+            "in_proj would never train (horizon {horizon:?})",
+        );
+        assert!(
+            net.out_proj.weight.val().grad(&grads).is_some(),
+            "out_proj lost its gradient (horizon {horizon:?})",
+        );
+    }
+}
+
+/// The same for `step`: the carry rides the cascade too, so a stack trained by
+/// stepping keeps its boundary weights alive.
+#[test]
+fn stepped_input_keeps_its_gradient_under_a_cut() {
+    let device = Device::default().autodiff();
+    let (n, k) = (4, 2);
+
+    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    layers.grad_horizon = Some(k);
+
+    let x = Tensor::<2>::random([BATCH, D_MODEL], Distribution::Normal(0.0, 1.0), &device)
+        .require_grad();
+    let (out, _) = layers.step(x.clone(), None, None);
+    assert!(
+        x.grad(&out.sum().backward()).is_some(),
+        "step severed the input's gradient across the cut",
+    );
+}
+
+/// The straight-through adds a tensor that is **exactly zero**, so a cut may
+/// change gradients and must change nothing else.
+///
+/// Run across the whole range including `Some(0)` (nothing differentiated at
+/// all), which is the case that skips the in-loop boundary entirely.
+#[test]
+fn a_cut_changes_gradients_only() {
+    let device = Device::default().autodiff();
+    let n = 4;
+
+    let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    let x = input(&device);
+    let (want, want_caches) = plain.forward(x.clone(), None, path(), None);
+    let want_flat = all_slots_flat(&want_caches, n);
+
+    for horizon in [Some(4), Some(3), Some(1), Some(0)] {
+        let mut cut = <Layers<_> as Clone>::clone(&plain);
+        cut.grad_horizon = horizon;
+        let (got, got_caches) = cut.forward(x.clone(), None, path(), None);
+        assert!(
+            max_abs_diff(want.clone(), got) < 1e-6,
+            "horizon {horizon:?} changed the output",
+        );
+        for (i, (a, b)) in want_flat.iter().zip(&all_slots_flat(&got_caches, n)).enumerate() {
+            assert!(
+                max_abs_diff(a.clone(), b.clone()) < 1e-6,
+                "horizon {horizon:?} changed final cache tensor {i}",
+            );
+        }
+    }
+}
+
+/// Class latents on a layer **below** the cut lengthen the sequence, so the
+/// straight-through carry has to grow with it — taking a **ghost** row (value
+/// zero, but tracked) at each latent position.
+///
+/// Two things ride on that. The lengths must agree or the boundary add fails
+/// outright; and the ghost is what keeps the latent itself trainable, since it is
+/// a learnable *input row* rather than part of the layer's transform. The layer's
+/// actual weights stay undifferentiated, which is what the last assertion
+/// separates.
+#[test]
+fn the_carry_tracks_class_latents_spliced_below_the_cut() {
+    use crate::utils::class::init_class_emb;
+    use crate::utils::{ClassCursors, ClassLatent};
+
+    let device = Device::default().autodiff();
+    let (n, k) = (4, 2);
+
+    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    layers.grad_horizon = Some(k);
+    // Two prefix layers each splice a row, so the boundary sequence is longer
+    // than the input by two.
+    for i in 0..(n - k) {
+        layers.real_layers[i].class_latents = vec![ClassLatent::Start];
+        layers.real_layers[i].class_latents_emb = init_class_emb(1, D_MODEL, &device);
+    }
+
+    let x = input(&device).require_grad();
+    let mut class = ClassCursors::new(SEQ);
+    let (y, _) = layers.forward(x.clone(), None, path(), Some(&mut class));
+    assert_eq!(y.dims()[1], SEQ + (n - k), "each prefix layer splices one row");
+
+    let grads = y.sum().backward();
+    assert!(
+        x.grad(&grads).is_some(),
+        "the input lost its gradient with latents spliced below the cut",
+    );
+    for i in 0..(n - k) {
+        let l = &layers.real_layers[i];
+        assert!(
+            l.class_latents_emb
+                .as_ref()
+                .unwrap()
+                .val()
+                .grad(&grads)
+                .is_some(),
+            "prefix layer {i}'s class latent is a learnable input row and must \
+             train — a dead parameter here would be silent",
+        );
+        assert!(
+            l.mamba_block.in_proj.weight.val().grad(&grads).is_none(),
+            "prefix layer {i}'s transform must stay undifferentiated",
+        );
+    }
+}
+
+/// The input keeps its gradient under `MultiGate` residuals too.
+///
+/// There the residual lives in the depth-streams rather than the token, and the
+/// carry is added to the pooled aggregate the next layer reads — one identity
+/// path to the output, as under `Standard`. The streams themselves are lifted but
+/// not corrected, so the input's gradient is *smaller* than a full
+/// identity-on-every-carrier analogue would give; what this pins is the floor
+/// that matters, which is that nothing silently dies.
+#[test]
+fn multi_gate_input_keeps_its_gradient_under_a_cut() {
+    use crate::modules::ResidualsConfig;
+
+    let device = Device::default().autodiff();
+    let n = 4;
+    for horizon in [None, Some(2)] {
+        let mut layers = LayersBuilder::new(n, block_config(D_MODEL))
+            .with_residuals(ResidualsConfig::MultiGate {
+                n_stream: 3,
+                init_bias: 0.0,
+                init_bias_step: 0.0,
+                per_virtual_layer: false,
+            })
+            .init(&device);
+        layers.grad_horizon = horizon;
+
+        let x = input(&device).require_grad();
+        let (y, _) = layers.forward(x.clone(), None, path(), None);
+        assert!(
+            x.grad(&y.sum().backward()).is_some(),
+            "MultiGate severed the input's gradient (horizon {horizon:?})",
+        );
+    }
 }
 
 // ===========================================================================

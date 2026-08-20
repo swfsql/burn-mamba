@@ -202,7 +202,16 @@ plus shared NN blocks.
   alike, so all three entry points cut on the same virtual layers; it returns `0` off the
   autodiff backend — keyed on the **module's** device, `prime` having no input tensor —
   because `.inner()`/`.valid()` panic there. Under weight sharing a real layer straddles
-  the cut and collects the gradient of its tracked applications only.
+  the cut and collects the gradient of its tracked applications only. The stack **input**
+  is re-attached *straight-through* at the boundary — added exactly once, on the autodiff
+  side (earlier would be a tracked input to the prefix: backend mismatch, and the end of
+  the memory saving). The carry shadows `x`'s *shape*, taking zero rows wherever a prefix
+  layer splices class latents, and rides the `cascade` the same way. Without it a cut
+  severs the input's only path (it enters at the bottom) and `in_proj`/the embedding
+  never trains. Those splice positions take a **ghost** row — value zero, from the
+  *tracked* table — so a per-layer class latent below the cut trains too; class
+  embeddings are learnable input rows at every level, while the layer's transform
+  stays undifferentiated.
   `forward`/`step`/`prime` take `Option<&mut ClassCursors>` (stack-level + per-virtual-
   layer); `step` cascades the stack latents and each layer's own up the stack in
   `forward`'s token order, returning the last token emitted. `prime(batch, caches,

@@ -250,7 +250,14 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   forward/backward layers. `grad_horizon: Some(K)` back-propagates only the top `K`
   of them (truncated BPTT for deep recursion), the rest running on the inner
   backend; `forward`/`step`/`prime` cut on the same layers, and a shared weight
-  collects the gradient of its tracked applications alone.
+  collects the gradient of its tracked applications alone. The stack **input** is
+  re-attached *straight-through* at the boundary (a value-zero term restoring an
+  identity gradient path) — it enters only at the bottom, so a cut would otherwise
+  leave a network's `in_proj`/embedding untrained; TRM/HRM avoid this by
+  re-injecting the input every recursion, which this stack does not. Class
+  embeddings train at every level and on both sides of the cut (a per-layer latent
+  below it gets a tracked zero-valued *ghost* row in the carry) — they are
+  learnable input rows, not part of a layer's transform.
 - **Bidirectional** (`modules/bidi.rs`): `BidiLayerPair<M>` runs a straight (→) and a
   reversed (← via `flip`) pass merged by `OutputMerge` (`Mean`|`CatLinear`);
   `BidiLayers<M>` stacks pairs. Generic over `M` → serves all families.
