@@ -42,6 +42,7 @@ pub fn model_config(
     MambaVocabNetConfig::Mamba2 {
         n_real_layers: n_layers,
         n_virtual_layers: None,
+        grad_horizon: None,
         vocab_size: p,
         // keep logits exactly `p`-way (no padded classes in the softmax)
         pad_vocab_size_multiple: 1,

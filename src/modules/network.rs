@@ -638,6 +638,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Output feature width.
@@ -672,6 +677,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Output feature width.
@@ -706,6 +716,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Output feature width.
@@ -755,7 +770,6 @@ impl MambaLatentNetConfig {
             Self::Mamba3 {
                 mamba_block, mlp, ..
             } => (mamba_block.muon_projections(), mlp.clone()),
-
         };
         crate::optim::MuonPlan::new(specs).with_mlp(mlp.as_ref())
     }
@@ -768,6 +782,7 @@ impl MambaLatentNetConfig {
                 input_size,
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 mamba_block,
                 output_size,
                 final_norm,
@@ -782,6 +797,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -798,6 +814,7 @@ impl MambaLatentNetConfig {
                 input_size,
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 mamba_block,
                 output_size,
                 final_norm,
@@ -812,6 +829,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -828,6 +846,7 @@ impl MambaLatentNetConfig {
                 input_size,
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 mamba_block,
                 output_size,
                 final_norm,
@@ -842,6 +861,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -1046,6 +1066,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -1077,6 +1102,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -1108,6 +1138,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
+        /// Back-propagate only the last `K` virtual layers, running everything
+        /// below on the inner backend (truncated BPTT for deep recursion).
+        /// `None` ⇒ track the whole stack. See
+        /// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon).
+        grad_horizon: Option<usize>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -1156,7 +1191,6 @@ impl MambaVocabNetConfig {
             Self::Mamba3 {
                 mamba_block, mlp, ..
             } => (mamba_block.muon_projections(), mlp.clone()),
-
         };
         crate::optim::MuonPlan::new(specs).with_mlp(mlp.as_ref())
     }
@@ -1168,6 +1202,7 @@ impl MambaVocabNetConfig {
             Self::Mamba1 {
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 vocab_size,
                 pad_vocab_size_multiple,
                 mamba_block,
@@ -1183,6 +1218,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -1196,6 +1232,7 @@ impl MambaVocabNetConfig {
             Self::Mamba2 {
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 vocab_size,
                 pad_vocab_size_multiple,
                 mamba_block,
@@ -1211,6 +1248,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -1224,6 +1262,7 @@ impl MambaVocabNetConfig {
             Self::Mamba3 {
                 n_real_layers,
                 n_virtual_layers,
+                grad_horizon,
                 vocab_size,
                 pad_vocab_size_multiple,
                 mamba_block,
@@ -1239,6 +1278,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
+                        .with_grad_horizon(*grad_horizon)
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)

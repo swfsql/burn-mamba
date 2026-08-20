@@ -137,6 +137,7 @@ fn mamba3_plan_fits_the_model() {
         final_norm: true,
         n_real_layers: 2,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: block,
         class_tokens: Vec::new(),
         class_latents: Vec::new(),
@@ -164,6 +165,7 @@ fn mamba2_plan_fits_the_model() {
         pad_vocab_size_multiple: 1,
         n_real_layers: 2,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: Mamba2Config::new(32)
             .with_state_rank(16)
             .with_expand(2)
@@ -194,6 +196,7 @@ fn mamba1_plan_fits_the_model() {
         final_norm: false,
         n_real_layers: 2,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: Mamba1Config::new(32).with_state_rank(16),
         class_tokens: Vec::new(),
         class_latents: Vec::new(),
@@ -403,6 +406,7 @@ fn build_assembles_groups_without_panicking() {
         final_norm: false,
         n_real_layers: 1,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: Mamba3Config::new(16)
             .with_state_rank(16)
             .with_expand(2)
@@ -440,6 +444,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
         final_norm: false,
         n_real_layers: 1,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: Mamba3Config::new(16)
             .with_state_rank(16)
             .with_expand(2)
@@ -498,6 +503,7 @@ fn describe_reports_every_parameter() {
         final_norm: false,
         n_real_layers: 2,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block: Mamba3Config::new(16)
             .with_state_rank(16)
             .with_expand(2)

@@ -11,6 +11,14 @@ use burn_mamba::utils::Schedule;
 /// Depth of the (virtual) layer stack.
 const N_VIRTUAL_LAYERS: usize = 16;
 
+/// Back-propagate only the top `K` of the [`N_VIRTUAL_LAYERS`], everything below
+/// running on the inner backend; `None` tracks the whole stack.
+///
+/// This stack — 16 virtual layers over 2 real weight sets — is TRM/HRM-style
+/// deep recursion, and its activations are most of the vram figure below, so a
+/// small `K` is what lets the stack grow deeper.
+const GRAD_HORIZON: Option<usize> = None;
+
 /// Stack-level class latents prepended to every image's pixel sequence:
 /// learnable `[CLS]`-style registers (width `d_model`) that let the model settle
 /// into a trained initial state before the first pixel arrives. They lengthen
@@ -69,6 +77,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // two real layers, virtually stretched (8×) to 16 for more expressivity
         n_real_layers: 2,
         n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Stretched)),
+        grad_horizon: GRAD_HORIZON,
         mamba_block,
         // Network-level class tokens would sit at `input_size = 1` (a single
         // learnable scalar each); the stack-level latents below are `d_model`

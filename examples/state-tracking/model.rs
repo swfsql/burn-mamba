@@ -37,6 +37,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         input_size: NUM_SYMBOLS,
         n_real_layers: 1,       // a single layer is sufficient
         n_virtual_layers: None, // don't virtually extend the amount of layers
+        grad_horizon: None,
         mamba_block,
         output_size: NUM_CLASSES,
         // no final norm: the additive residual already leaves an O(1)-scaled output

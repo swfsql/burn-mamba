@@ -49,6 +49,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // one real layer suffices
         n_real_layers: 1,
         n_virtual_layers: None,
+        grad_horizon: None,
         mamba_block,
         class_tokens: Vec::new(),
         class_latents: Vec::new(),
