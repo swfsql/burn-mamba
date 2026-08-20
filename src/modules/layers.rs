@@ -34,6 +34,25 @@ pub struct Layers<M: Module> {
     pub class_latents: Vec<ClassLatent>,
     /// The stack-level class-latent embeddings, `[num_class_latents, d_model]`.
     pub class_latents_emb: Option<Param<Tensor<2>>>,
+    /// Back-propagate only the **last `K` virtual layers**; everything below
+    /// runs without building an autodiff graph. `None` (the default) tracks the
+    /// whole stack.
+    ///
+    /// This is the truncated-BPTT knob of TRM/HRM-style deep recursion: with
+    /// `n_virtual_layers` far above `n_real_layers`, tracking every pass is what
+    /// runs out of memory, and both papers back-propagate only a suffix (TRM one
+    /// full recursion, HRM-Text a horizon `K` warmed from 2 to 5). `K` is
+    /// counted **from the top** so it stays meaningful when the stack depth
+    /// changes, and so a training loop can move it per step.
+    ///
+    /// Under weight sharing the same real layer serves both sides of the cut;
+    /// the prefix runs a [`detach_params`](crate::utils::detach_params) clone, so
+    /// each weight still receives gradient — from its tracked applications only.
+    ///
+    /// `K >= n_virtual` behaves exactly like `None`. Applies to
+    /// [`Self::forward`]; [`Self::step`]/[`Self::prime`] currently ignore it.
+    #[module(skip)]
+    pub grad_horizon: Option<usize>,
 }
 
 impl<M: MambaBlock> Layers<M>
@@ -77,6 +96,12 @@ where
         } else {
             virtual_idx
         }
+    }
+
+    /// First virtual index that is back-propagated, per [`Self::grad_horizon`]:
+    /// layers `0..cut` run detached, `cut..n` build the graph. `0` ⇒ no cut.
+    fn grad_cut(&self, n: usize) -> usize {
+        self.grad_horizon.map_or(0, |k| n.saturating_sub(k))
     }
 
     /// Whether (virtual) layer `i` of `n` suppresses its residual — the first
@@ -132,7 +157,39 @@ where
         let caches =
             caches.unwrap_or_else(|| self.real_layers[0].mamba_block.zero_caches_3d(&x, n));
         assert_eq!(caches.slot_count(), n, "one cache per virtual layer");
+
+        // Layers below `cut` must build no graph, and in Burn that means moving
+        // them **off the autodiff backend** — merely detaching is not enough.
+        // Detaching does cut gradient flow, but an untracked op is still
+        // registered in the graph (Burn keeps an `UntrackedOpsStep` per op so a
+        // memory-bound op can still retrieve an untracked parent), so its output
+        // stays retained: measured on a 64-virtual-layer stack, a detached
+        // prefix saved ~6% of peak memory and still scaled linearly with depth,
+        // while an inner-backend prefix was flat. The memory probe in this
+        // module's tests reproduces both curves.
+        //
+        // `Tensor::inner`/`AutodiffModule::valid` **panic** off the autodiff
+        // backend (unlike `detach`, which is a documented no-op there), so the
+        // cut is taken only when the input really is on one — at inference
+        // `grad_horizon` is simply inert.
+        // The guard is load-bearing, not an optimization: `.inner()`/`.valid()`
+        // panic off the autodiff backend, so a horizon left set in a config must
+        // fall through to the untouched path at inference.
+        let cut = if x.device().is_autodiff() {
+            self.grad_cut(n)
+        } else {
+            0
+        };
+        let inner_stack = (cut > 0).then(|| burn::module::AutodiffModule::valid(self));
         let mut slots = caches.into_slots();
+        if cut > 0 {
+            x = x.inner();
+            // Only the prefix's own slots come down; the tracked suffix keeps
+            // reading autodiff caches, so the two halves never meet in one op.
+            for slot in slots.iter_mut().take(cut) {
+                *slot = slot.take().map(M::Caches::cache_to_inner);
+            }
+        }
 
         // MultiGate carries up to `n_stream` parallel streams (the input is the
         // first, the early layers append the rest); Standard threads the single
@@ -140,8 +197,19 @@ where
         let mut streams = self.multi_gate_streams_seed(&x);
 
         for i in 0..n {
+            // Crossing the cut: lift what the prefix produced back onto the
+            // autodiff backend, as fresh graph roots.
+            if cut > 0 && i == cut {
+                x = Tensor::from_inner(x);
+                streams = streams.map(Tensor::from_inner);
+            }
             let real = self.real_idx(i);
-            let layer = &self.real_layers[real];
+            // `self` above the cut, the inner-backend copy below it.
+            let this = match &inner_stack {
+                Some(d) if i < cut => d,
+                _ => self,
+            };
+            let layer = &this.real_layers[real];
             let cache = slots[i].take().unwrap();
             let first = self.ignore_first_residual && i == 0;
             let last = self.ignore_last_residual && i + 1 == n;
@@ -165,7 +233,7 @@ where
                 streams = streams.map(|s| splice_class_rows(s, &plan, &emb));
             }
 
-            match &self.residuals {
+            match &this.residuals {
                 Residuals::Standard(_noop) => {
                     // Add the residual (the lengthened input) here — unless
                     // suppressed, in which case the input is moved straight in
@@ -211,6 +279,15 @@ where
                         streams = Some(new_streams);
                     }
                 }
+            }
+        }
+        if cut > 0 {
+            // `cut == n` (a horizon of 0) never reaches the in-loop crossing.
+            if cut >= n {
+                x = Tensor::from_inner(x);
+            }
+            for slot in slots.iter_mut().take(cut) {
+                *slot = slot.take().map(M::Caches::cache_from_inner);
             }
         }
         (x, M::Caches::from_slots(slots))
@@ -649,6 +726,9 @@ pub struct LayersBuilder<C> {
     /// and residual (`d_intermediate > 0` in the reference configs). `None` ⇒
     /// mixer-only layers.
     pub mlp: Option<GatedMlpConfig>,
+    /// Back-propagate only the last `K` virtual layers (see
+    /// [`Layers::grad_horizon`]). `None` ⇒ track the whole stack.
+    pub grad_horizon: Option<usize>,
 }
 
 impl<C: MambaBlockConfig> LayersBuilder<C> {
@@ -663,7 +743,15 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
             class_latents: Vec::new(),
             residuals: ResidualsConfig::Standard,
             mlp: None,
+            grad_horizon: None,
         }
+    }
+
+    /// Back-propagate only the last `K` virtual layers (see
+    /// [`Layers::grad_horizon`]). `None` tracks the whole stack.
+    pub fn with_grad_horizon(mut self, grad_horizon: Option<usize>) -> Self {
+        self.grad_horizon = grad_horizon;
+        self
     }
 
     /// Interleave a SwiGLU feed-forward sub-block after each layer's mixer
@@ -736,6 +824,10 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
                 .init(d_model, self.n_real_layers, n_virtual, device),
             class_latents_emb: init_class_emb(self.class_latents.len(), d_model, device),
             class_latents: self.class_latents.clone(),
+            grad_horizon: self.grad_horizon,
         }
     }
 }
+
+#[cfg(all(test, feature = "_dev-test", feature = "mamba3"))]
+mod tests;

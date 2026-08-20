@@ -55,7 +55,14 @@ pub use multi_gate::{
 pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
 
 /// Per-family block interface the generic [`Layer`]/[`Layers`] delegate to.
-pub trait MambaBlock: Module {
+///
+/// `ModuleDisplay` and `AutodiffModule` are supertraits so that the generic
+/// containers are themselves `Module`/`AutodiffModule` (Burn's derive requires
+/// both of every module-typed generic), which is what lets
+/// [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon) move the stack
+/// to the inner backend for its no-grad prefix. Every family satisfies them
+/// through `#[derive(Module)]`.
+pub trait MambaBlock: Module + burn::module::ModuleDisplay + burn::module::AutodiffModule {
     /// Per-block streaming cache (one layer's worth of state).
     type Cache;
     /// The per-network cache collection for this family.

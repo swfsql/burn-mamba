@@ -18,6 +18,8 @@ pub mod class;
 /// backward.
 #[cfg(feature = "autodiff")]
 pub mod combined_grad;
+/// Detach a module's parameters, so a no-grad prefix builds no autodiff graph.
+pub mod detach;
 /// Rank-tagged `FloatTensor` primitive wrapper mirroring the `Tensor` method
 /// API, used by the custom-backward gradient math (Mamba-2/3 only).
 #[cfg(any(feature = "mamba2", feature = "mamba3"))]
@@ -31,6 +33,7 @@ pub mod scheduler;
 pub mod test_helpers;
 
 pub use class::{ClassCursor, ClassCursors, ClassLatent, ClassToken};
+pub use detach::detach_params;
 pub use schedule::{BidiSchedule, Schedule};
 pub use scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 

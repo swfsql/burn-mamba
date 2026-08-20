@@ -17,6 +17,28 @@ pub trait CacheStack: Sized {
     fn into_slots(self) -> Vec<Option<Self::Cache>>;
     /// Inverse of [`Self::into_slots`].
     fn from_slots(slots: Vec<Option<Self::Cache>>) -> Self;
+    /// Move one cache slot **to** the inner (non-autodiff) backend.
+    ///
+    /// Needed by [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon),
+    /// whose no-grad prefix runs on the inner backend: a cache carried in from a
+    /// tracked segment has to come down with it, both so the prefix builds no
+    /// graph and because Burn's dispatch cannot mix backends within one op.
+    ///
+    /// Spelled out per family rather than derived, because
+    /// [`Module::map`] is a **no-op on plain `Tensor`
+    /// fields** (Burn implements `Module for Tensor` as a constant) and caches
+    /// hold bare tensors, not `Param`s — a `Module`-based conversion would
+    /// silently skip every one of them.
+    ///
+    /// # Panics
+    /// `Tensor::inner` panics on a tensor that is already off the autodiff
+    /// backend, so the caller must have checked
+    /// [`Device::is_autodiff`](burn::prelude::Device::is_autodiff) first.
+    fn cache_to_inner(cache: Self::Cache) -> Self::Cache;
+
+    /// Lift one cache slot back **from** the inner backend, as a fresh graph
+    /// root. The inverse of [`Self::cache_to_inner`]; see its notes.
+    fn cache_from_inner(cache: Self::Cache) -> Self::Cache;
 }
 
 /// Runtime-tagged caches: one variant per family, matching [`MambaLatentNet`].
@@ -60,6 +82,18 @@ mod impl_mamba2 {
         fn from_slots(slots: Vec<Option<Mamba2Cache>>) -> Self {
             Self {
                 caches: slots.into_iter().map(Option::unwrap).collect(),
+            }
+        }
+        fn cache_to_inner(c: Mamba2Cache) -> Mamba2Cache {
+            Mamba2Cache {
+                conv_bvk: c.conv_bvk.inner(),
+                ssm_bhpr: c.ssm_bhpr.inner(),
+            }
+        }
+        fn cache_from_inner(c: Mamba2Cache) -> Mamba2Cache {
+            Mamba2Cache {
+                conv_bvk: Tensor::from_inner(c.conv_bvk),
+                ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
             }
         }
     }
@@ -127,8 +161,10 @@ mod impl_mamba2 {
 mod impl_mamba3 {
     use super::*;
     use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
+    use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
     use crate::mamba3::single_ssd::prelude::{
-        Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches, Mamba3SingleSsdCachesConfig,
+        Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
+        Mamba3SingleSsdCachesConfig,
     };
 
     /// Zero single-ssd caches sized from a `[batch, sequence, d_model]` input.
@@ -166,6 +202,54 @@ mod impl_mamba3 {
         }
         fn from_slots(slots: Vec<Option<Mamba3Cache>>) -> Self {
             Self::from_options(slots)
+        }
+        fn cache_to_inner(c: Mamba3Cache) -> Mamba3Cache {
+            use crate::mamba3::prelude::RotationState;
+            fn rot(r: RotationState) -> RotationState {
+                match r {
+                    RotationState::Angle(t) => RotationState::Angle(t.inner()),
+                    RotationState::Quaternion(t) => RotationState::Quaternion(t.inner()),
+                }
+            }
+            match c {
+                Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
+                    ssm_bhpr: c.ssm_bhpr.inner(),
+                    k_state_bmhr: c.k_state_bmhr.inner(),
+                    v_state_bhp: c.v_state_bhp.inner(),
+                    rotation: rot(c.rotation),
+                }),
+                Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
+                    ssm_bhpr: c.ssm_bhpr.inner(),
+                    k_state_bmhr: c.k_state_bmhr.inner(),
+                    v_state_bhp: c.v_state_bhp.inner(),
+                    rotation: rot(c.rotation),
+                }),
+            }
+        }
+        fn cache_from_inner(c: Mamba3Cache) -> Mamba3Cache {
+            use crate::mamba3::prelude::RotationState;
+            fn rot(r: RotationState) -> RotationState {
+                match r {
+                    RotationState::Angle(t) => RotationState::Angle(Tensor::from_inner(t)),
+                    RotationState::Quaternion(t) => {
+                        RotationState::Quaternion(Tensor::from_inner(t))
+                    }
+                }
+            }
+            match c {
+                Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
+                    ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
+                    k_state_bmhr: Tensor::from_inner(c.k_state_bmhr),
+                    v_state_bhp: Tensor::from_inner(c.v_state_bhp),
+                    rotation: rot(c.rotation),
+                }),
+                Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
+                    ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
+                    k_state_bmhr: Tensor::from_inner(c.k_state_bmhr),
+                    v_state_bhp: Tensor::from_inner(c.v_state_bhp),
+                    rotation: rot(c.rotation),
+                }),
+            }
         }
     }
 
@@ -231,6 +315,18 @@ mod impl_mamba1 {
         fn from_slots(slots: Vec<Option<Mamba1Cache>>) -> Self {
             Self {
                 caches: slots.into_iter().map(Option::unwrap).collect(),
+            }
+        }
+        fn cache_to_inner(c: Mamba1Cache) -> Mamba1Cache {
+            Mamba1Cache {
+                conv_bik: c.conv_bik.inner(),
+                ssm_bir: c.ssm_bir.inner(),
+            }
+        }
+        fn cache_from_inner(c: Mamba1Cache) -> Mamba1Cache {
+            Mamba1Cache {
+                conv_bik: Tensor::from_inner(c.conv_bik),
+                ssm_bir: Tensor::from_inner(c.ssm_bir),
             }
         }
     }
