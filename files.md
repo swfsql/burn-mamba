@@ -167,7 +167,10 @@ plus shared NN blocks.
   `SsdPath=()`),
   `trait MambaBlockConfig` (`d_model()`+`init_block`+`muon_projections()`), and
   `enum MambaSsdPath`
-  (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`).
+  (`Mamba1|Mamba2(_)|Mamba3(_)` + `mamba{2,3}_default()`). `MambaBlock`'s
+  `ModuleDisplay + AutodiffModule` supertraits are what make the generic containers
+  themselves `Module`/`AutodiffModule` (needed by `Layers::grad_horizon`); every family
+  gets them from `#[derive(Module)]`.
 - **`layer.rs`** — `Layer<M>`: Pre-LN `M(RMSNorm(x))`; the outer residual and class-latent
   insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
   (a bare-`Layer` caller needs it too — `Layers` splices its layers' latents itself, since
@@ -189,7 +192,17 @@ plus shared NN blocks.
   Option<(usize, Schedule)>`, `residuals`; loops virtual→real per the schedule, each with
   its own cache; owns the outer residual (`skip_residual`/`ignore_first/last_residual` —
   which govern only that outer add, not the feed-forward's inner one).
-  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`, `with_mlp`).
+  `LayersBuilder` (`with_residuals`, `with_ignore_{first,last}_residual`, `with_mlp`,
+  `with_grad_horizon`).
+  `grad_horizon: Some(K)` back-propagates only the **top `K`** virtual layers; the rest
+  run on `AutodiffModule::valid(self)` and are lifted back with `Tensor::from_inner` at
+  the boundary, together with the token stream, its MultiGate stream sets and the
+  prefix's cache slots (the suffix's stay tracked, so a cache carried between calls still
+  transports gradient). One `grad_cut` decides for `forward` and the shared `cascade`
+  alike, so all three entry points cut on the same virtual layers; it returns `0` off the
+  autodiff backend — keyed on the **module's** device, `prime` having no input tensor —
+  because `.inner()`/`.valid()` panic there. Under weight sharing a real layer straddles
+  the cut and collects the gradient of its tracked applications only.
   `forward`/`step`/`prime` take `Option<&mut ClassCursors>` (stack-level + per-virtual-
   layer); `step` cascades the stack latents and each layer's own up the stack in
   `forward`'s token order, returning the last token emitted. `prime(batch, caches,
@@ -244,8 +257,11 @@ plus shared NN blocks.
   they ride along). `muon_plan()` adds the per-pair
   `CatLinear.weight` merge to the block specs.
 - **`cache.rs`** — `trait CacheStack` (collection iface `slot_count`/`into_slots`/
-  `from_slots`, impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain runtime
-  state**, not a `Module`).
+  `from_slots`, plus per-slot `cache_to_inner`/`cache_from_inner` for
+  `Layers::grad_horizon`; impl'd for `Mamba{1,2,3}Caches`) + `enum MambaCaches` (**plain
+  runtime state**, not a `Module`). The conversions are hand-written per family because
+  `Module::map` is a no-op on plain `Tensor` fields, which is all a cache holds — a
+  derived version would silently skip every tensor.
 - **`norm/`** — `RmsNorm` (also Mamba-3 QK-Norm) + `RmsNormGated` (RMSNorm × SiLU gate,
   `norm_before_gate` toggle). **fp16-safe**: normalise against `max(|x|)` to avoid `x²`
   overflow; epsilon from `div_eps`.
@@ -321,6 +337,12 @@ splitting happens in the optimizer, leaving the forward's single fused GEMM alon
   blocks) + `decl_ssd_autodiff_backend_ext!` (autodiff marker + `Autodiff<B>` blanket).
 - **`combined_grad.rs`** — `flatten_pair`/`unflatten_pair`: `(y, final_state)` into one
   tracked tensor and back (`prep.finish` takes a single tensor).
+- **`detach.rs`** — `detach_params(module)`: clears `require_grad` and re-roots every
+  `Param`. Cuts gradients but **frees no memory** — Burn registers untracked ops in the
+  graph anyway, so their activations stay retained (measured: 3144 MB vs 208 MB for an
+  inner-backend prefix at 64 virtual layers, and only the latter is flat in depth). The
+  module header carries the numbers; `Layers::grad_horizon` uses the inner backend
+  instead.
 - **`fprim.rs`** (`mamba2`/`mamba3` only) — `F<B, const D>`: rank-tagged `FloatTensor<B>`
   newtype mirroring the
   `Tensor` method API, so the generic-`B` forward kernels and `Backward<B,_>` nodes

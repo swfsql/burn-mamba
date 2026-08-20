@@ -490,6 +490,239 @@ fn chunked_forward_matches_single_forward_under_horizon() {
 }
 
 // ===========================================================================
+// 7. step / prime honour the same cut as forward
+// ===========================================================================
+
+/// `step` unrolled token-by-token must equal one `forward` over the same
+/// sequence — outputs, final caches, and parameter gradients — with the horizon
+/// set on both.
+///
+/// This is the guarantee the crate already makes for the uncut stack, extended
+/// across the cut: `step`'s cascade walks *depth* per token while `forward` walks
+/// *sequence* per layer, so the two only agree if the cut falls on the same
+/// virtual layers in both, and if what crosses it is lowered and lifted at the
+/// same boundary. A `step` that ignored `grad_horizon` (or cut at a different
+/// index) still matches on values — every path computes the same numbers — and
+/// diverges only on the gradients.
+fn run_step_parity(horizon: Option<usize>) {
+    let device = Device::default().autodiff();
+    let (n_real, n_virtual, seq) = (2, 6, 4);
+
+    let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
+        .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))
+        .init(&device);
+    layers.grad_horizon = horizon;
+
+    let x = Tensor::<3>::random(
+        [BATCH, seq, D_MODEL],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // ---- one forward ------------------------------------------------------
+    let (y_fwd, caches_fwd) = layers.forward(x.clone(), None, path(), None);
+
+    let normal = Distribution::Normal(0.0, 1.0);
+    let y_head = Tensor::<3>::random(y_fwd.dims(), normal, &device);
+    let flat_fwd = all_slots_flat(&caches_fwd, n_virtual);
+    let cache_heads: Vec<Tensor<1>> = flat_fwd
+        .iter()
+        .map(|t| Tensor::<1>::random(t.dims(), normal, &device))
+        .collect();
+    let loss = |y: Tensor<3>, flat: &[Tensor<1>]| {
+        flat.iter().zip(&cache_heads).fold(
+            (y * y_head.clone()).sum(),
+            |acc, (t, h)| acc + (t.clone() * h.clone()).sum(),
+        )
+    };
+    let grads_fwd = loss(y_fwd.clone(), &flat_fwd).backward();
+
+    // ---- the same sequence, one token at a time ---------------------------
+    let mut caches = None;
+    let mut outs: Vec<Tensor<3>> = Vec::with_capacity(seq);
+    for t in 0..seq {
+        let token = x.clone().slice([0..BATCH, t..t + 1]).squeeze::<2>();
+        let (out, c) = layers.step(token, caches, None);
+        outs.push(out.unsqueeze_dim::<3>(1));
+        caches = Some(c);
+    }
+    let y_step = Tensor::cat(outs, 1);
+    let caches_step = caches.expect("at least one step ran");
+    let flat_step = all_slots_flat(&caches_step, n_virtual);
+
+    assert!(
+        max_abs_diff(y_fwd, y_step.clone()) < 1e-5,
+        "stepped output differs from forward (horizon {horizon:?})",
+    );
+    for (i, (a, b)) in flat_fwd.iter().zip(&flat_step).enumerate() {
+        assert!(
+            max_abs_diff(a.clone(), b.clone()) < 1e-5,
+            "stepped final cache tensor {i} differs (horizon {horizon:?})",
+        );
+    }
+
+    let grads_step = loss(y_step, &flat_step).backward();
+    for r in 0..n_real {
+        let l = &layers.real_layers[r];
+        let a = l
+            .mamba_block
+            .in_proj
+            .weight
+            .val()
+            .grad(&grads_fwd)
+            .expect("forward grad");
+        let b = l
+            .mamba_block
+            .in_proj
+            .weight
+            .val()
+            .grad(&grads_step)
+            .expect("step grad");
+        assert!(
+            max_abs_diff(a, b) < 1e-4,
+            "real layer {r}: in_proj gradient differs between step and forward \
+             (horizon {horizon:?}) — the two do not cut at the same layers",
+        );
+        for (name, p) in [
+            ("norm.gamma", &l.norm.gamma),
+            ("mamba_block.dt_bias_h", &l.mamba_block.dt_bias_h),
+            ("mamba_block.d_h", &l.mamba_block.d_h),
+        ] {
+            let a = p.val().grad(&grads_fwd).expect("forward grad");
+            let b = p.val().grad(&grads_step).expect("step grad");
+            assert!(
+                max_abs_diff(a, b) < 1e-4,
+                "real layer {r}: {name} gradient differs between step and forward \
+                 (horizon {horizon:?})",
+            );
+        }
+    }
+}
+
+/// Control: step/forward parity already holds without a horizon.
+#[test]
+fn step_matches_forward() {
+    run_step_parity(None);
+}
+
+/// The same parity with the stack cut, which is what pins `step`'s cascade to
+/// `forward`'s cut.
+#[test]
+fn step_matches_forward_under_horizon() {
+    run_step_parity(Some(2));
+}
+
+/// Below the cut `step` must leave no gradient behind either — the same
+/// assertion as for `forward`, but reached through the cascade, which walks depth
+/// per token rather than sequence per layer.
+#[test]
+fn stepped_prefix_parameters_get_no_gradient() {
+    let device = Device::default().autodiff();
+    let (n, k) = (4, 2);
+    let cut = n - k;
+
+    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    layers.grad_horizon = Some(k);
+
+    let x = Tensor::<2>::random([BATCH, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
+    let (out, _) = layers.step(x, None, None);
+    let grads = out.sum().backward();
+
+    for i in 0..n {
+        let l = &layers.real_layers[i];
+        for (name, has) in [
+            ("norm.gamma", l.norm.gamma.val().grad(&grads).is_some()),
+            (
+                "mamba_block.in_proj.weight",
+                l.mamba_block.in_proj.weight.val().grad(&grads).is_some(),
+            ),
+            (
+                "mamba_block.b_bias_hmr",
+                l.mamba_block.b_bias_hmr.val().grad(&grads).is_some(),
+            ),
+        ] {
+            if i < cut {
+                assert!(!has, "stepped layer {i} (below the cut) got a {name} gradient");
+            } else {
+                assert!(has, "stepped layer {i} (above the cut) lost its {name} gradient");
+            }
+        }
+    }
+}
+
+/// `prime` under a cut, in both directions across the boundary.
+///
+/// `prime` opens with no user token at all, so the two interesting shapes are a
+/// latent **above** the cut (every layer below it runs on an empty stream and is
+/// skipped entirely) and one **below** it (the emitted row is created on the
+/// inner backend and has to be lifted at the boundary before any tracked layer
+/// touches it — without that lift the tracked half meets an inner tensor and
+/// Burn panics on a backend mismatch).
+///
+/// Either way the primed output is produced by tracked layers, so it must carry
+/// a gradient to those and to nothing below the cut.
+fn run_prime_cut(latent_layer: usize) {
+    use crate::utils::class::init_class_emb;
+    use crate::utils::{ClassCursors, ClassLatent};
+
+    let device = Device::default().autodiff();
+    let (n, k) = (4, 2);
+    let cut = n - k;
+
+    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    layers.grad_horizon = Some(k);
+    layers.real_layers[latent_layer].class_latents = vec![ClassLatent::Start];
+    layers.real_layers[latent_layer].class_latents_emb = init_class_emb(1, D_MODEL, &device);
+
+    let mut class = ClassCursors::new(SEQ);
+    let (primed, _caches) = layers.prime(BATCH, None, Some(&mut class));
+    let primed = primed.expect("a latent was waiting");
+
+    // It came out of a tracked layer, so it must still carry a gradient back to
+    // that layer's parameters — and to nothing below the cut.
+    let grads = primed.sum().backward();
+    for i in 0..n {
+        let has = layers.real_layers[i]
+            .mamba_block
+            .in_proj
+            .weight
+            .val()
+            .grad(&grads)
+            .is_some();
+        if i < cut {
+            assert!(
+                !has,
+                "primed layer {i} (below the cut) got a gradient \
+                 (latent on layer {latent_layer})",
+            );
+        }
+    }
+    assert!(
+        layers.real_layers[n - 1]
+            .mamba_block
+            .in_proj
+            .weight
+            .val()
+            .grad(&grads)
+            .is_some(),
+        "the top layer lost its gradient (latent on layer {latent_layer})",
+    );
+}
+
+/// Latent above the cut: every layer below it is skipped on an empty stream.
+#[test]
+fn prime_under_a_cut_with_a_latent_above_it() {
+    run_prime_cut(3);
+}
+
+/// Latent below the cut: the row is created on the inner backend and has to
+/// cross the boundary before any tracked layer sees it.
+#[test]
+fn prime_under_a_cut_with_a_latent_below_it() {
+    run_prime_cut(0);
+}
+
+// ===========================================================================
 // Memory probe (ignored by default)
 // ===========================================================================
 

@@ -49,8 +49,10 @@ pub struct Layers<M: Module> {
     /// the prefix runs a [`detach_params`](crate::utils::detach_params) clone, so
     /// each weight still receives gradient — from its tracked applications only.
     ///
-    /// `K >= n_virtual` behaves exactly like `None`. Applies to
-    /// [`Self::forward`]; [`Self::step`]/[`Self::prime`] currently ignore it.
+    /// `K >= n_virtual` behaves exactly like `None`, and so does any value at all
+    /// off the autodiff backend. Honoured by [`Self::forward`], [`Self::step`]
+    /// and [`Self::prime`] alike, so a cut stack decodes under the same
+    /// truncation it trains under.
     #[module(skip)]
     pub grad_horizon: Option<usize>,
 }
@@ -99,9 +101,26 @@ where
     }
 
     /// First virtual index that is back-propagated, per [`Self::grad_horizon`]:
-    /// layers `0..cut` run detached, `cut..n` build the graph. `0` ⇒ no cut.
+    /// layers `0..cut` run on the inner backend, `cut..n` build the graph.
+    /// `0` ⇒ no cut.
+    ///
+    /// Returns `0` off the autodiff backend: the cut is taken with
+    /// `Tensor::inner`/`AutodiffModule::valid`, which **panic** there (unlike
+    /// `detach`, a documented no-op), so the guard is load-bearing rather than an
+    /// optimisation — a horizon left set in a config has to fall through to the
+    /// untouched path at inference. The module's own device is what decides,
+    /// since [`Self::prime`] has no input tensor to ask.
     fn grad_cut(&self, n: usize) -> usize {
-        self.grad_horizon.map_or(0, |k| n.saturating_sub(k))
+        let on_autodiff = self.real_layers[0]
+            .norm
+            .gamma
+            .val()
+            .device()
+            .is_autodiff();
+        match on_autodiff {
+            true => self.grad_horizon.map_or(0, |k| n.saturating_sub(k)),
+            false => 0,
+        }
     }
 
     /// Whether (virtual) layer `i` of `n` suppresses its residual — the first
@@ -172,14 +191,7 @@ where
         // backend (unlike `detach`, which is a documented no-op there), so the
         // cut is taken only when the input really is on one — at inference
         // `grad_horizon` is simply inert.
-        // The guard is load-bearing, not an optimization: `.inner()`/`.valid()`
-        // panic off the autodiff backend, so a horizon left set in a config must
-        // fall through to the untouched path at inference.
-        let cut = if x.device().is_autodiff() {
-            self.grad_cut(n)
-        } else {
-            0
-        };
+        let cut = self.grad_cut(n);
         let inner_stack = (cut > 0).then(|| burn::module::AutodiffModule::valid(self));
         let mut slots = caches.into_slots();
         if cut > 0 {
@@ -324,6 +336,13 @@ where
     ///
     /// `None` injects nothing at either level (and `Middle`/`End` latents panic,
     /// as they do without a [`ClassCursors::full_len`] hint).
+    ///
+    /// [`Self::grad_horizon`] applies here exactly as in [`Self::forward`], on
+    /// the same virtual layers, so a stack decodes under the truncation it trains
+    /// under. Note the cut rebuilds an inner-backend view of the stack once per
+    /// call, which is per *token* here rather than per sequence — negligible
+    /// against a training step, but not something to leave set for plain decoding
+    /// (where it is inert anyway, the model then being off the autodiff backend).
     pub fn step(
         &self,
         x: Tensor<2>,
@@ -403,15 +422,27 @@ where
         prime: bool,
     ) -> Vec<Tensor<2>> {
         let n = slots.len();
-        let mg = match &self.residuals {
-            Residuals::Standard(_noop) => None,
-            Residuals::MultiGate(mg) => Some(mg),
-        };
+        let has_mg = matches!(&self.residuals, Residuals::MultiGate(_));
+
+        // The same cut `forward` takes, layer for layer: virtual layers below
+        // `cut` run on an inner-backend copy of the stack, so they build no graph
+        // (see `grad_horizon`). Everything crossing into them goes down with
+        // them — the token stream, its MultiGate stream sets, and the prefix's
+        // own cache slots — and is lifted back at the boundary.
+        let cut = self.grad_cut(n);
+        let inner_stack = (cut > 0).then(|| burn::module::AutodiffModule::valid(self));
+        if cut > 0 {
+            stream = stream.into_iter().map(Tensor::inner).collect();
+            for slot in slots.iter_mut().take(cut) {
+                *slot = slot.take().map(M::Caches::cache_to_inner);
+            }
+        }
+
         // MultiGate: one stream set per token, seeded (like `forward`'s) with
         // the token itself as the single stream. Empty for the Standard path.
-        let mut carried: Vec<Tensor<3>> = match mg {
-            None => Vec::new(),
-            Some(_) => stream
+        let mut carried: Vec<Tensor<3>> = match has_mg {
+            false => Vec::new(),
+            true => stream
                 .iter()
                 .map(|t| t.clone().unsqueeze_dim::<3>(1))
                 .collect(),
@@ -429,8 +460,28 @@ where
             .and_then(|c| c.full_len)
             .map(|l| l + self.class_latents.len());
         for pos in 0..n {
+            // Crossing the cut: lift what the prefix produced back onto the
+            // autodiff backend, as fresh graph roots. Placed before the
+            // empty-layer `continue` below only defensively — `carried` is empty
+            // exactly when `stream` is, so a skipped layer has nothing to lift
+            // either way — but that keeps the boundary independent of what the
+            // skip condition happens to be.
+            if cut > 0 && pos == cut {
+                stream = stream.into_iter().map(Tensor::from_inner).collect();
+                carried = carried.into_iter().map(Tensor::from_inner).collect();
+            }
             let real = self.real_idx(pos);
-            let layer = &self.real_layers[real];
+            // `self` above the cut, the inner-backend copy below it — layer
+            // weights, class-latent embeddings and MultiGate gates alike.
+            let this = match &inner_stack {
+                Some(d) if pos < cut => d,
+                _ => self,
+            };
+            let layer = &this.real_layers[real];
+            let mg = match &this.residuals {
+                Residuals::Standard(_noop) => None,
+                Residuals::MultiGate(mg) => Some(mg),
+            };
             let first = self.ignore_first_residual && pos == 0;
             let last = self.ignore_last_residual && pos + 1 == n;
             let plan = if let Some(class) = class.as_deref_mut() {
@@ -548,6 +599,15 @@ where
             stream = next;
             carried = next_carried;
             k = k_next;
+        }
+        if cut > 0 {
+            // `cut == n` (a horizon of 0) never reaches the in-loop crossing.
+            if cut >= n {
+                stream = stream.into_iter().map(Tensor::from_inner).collect();
+            }
+            for slot in slots.iter_mut().take(cut) {
+                *slot = slot.take().map(M::Caches::cache_from_inner);
+            }
         }
         stream
     }

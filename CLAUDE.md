@@ -80,12 +80,13 @@ src/
 │  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)) + optional norm2/mlp; returns
 │  │                 the layer's total delta, outer residual added by Layers
 │  ├─ mlp.rs         GatedMlp: SwiGLU feed-forward interleaved with the mixer
-│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets
+│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets;
+│  │                 grad_horizon truncates BPTT to the top K (forward/step/prime)
 │  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate): accumulate then mix
 │  ├─ network.rs     LatentNetwork (optional final norm) / VocabNetwork +
 │  │                 MambaLatentNet / MambaVocabNet enums
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
-│  ├─ cache.rs       CacheStack trait + MambaCaches enum
+│  ├─ cache.rs       CacheStack trait (+ per-slot inner/from_inner) + MambaCaches
 │  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
 │  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
 │  ├─ loss/          bce, cross_entropy, mse
@@ -104,6 +105,7 @@ src/
    ├─ scheduler/     LR schedulers (cosine + warmup, constant) — example use
    ├─ backend_macros.rs  per-backend BackendExt impls + autodiff marker traits
    ├─ combined_grad.rs   flatten/unflatten (y, final_state) for custom backward
+   ├─ detach.rs          detach_params: cuts gradients, does NOT free memory
    ├─ fprim.rs           F<B,D>: rank-tagged FloatTensor-primitive wrapper
    └─ test_helpers.rs    max_abs_diff + grad-comparison macros
 benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
@@ -245,7 +247,10 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
 - **Virtual layers** (`utils/schedule/`): `Layers<M>` runs `n_virtual_layers` logical
   passes over `n_real_layers` weight sets, each virtual layer keeping its own cache.
   `Schedule` maps virtual→real (`Cyclic`/`Stretched`/`Custom`); `BidiSchedule` pairs
-  forward/backward layers.
+  forward/backward layers. `grad_horizon: Some(K)` back-propagates only the top `K`
+  of them (truncated BPTT for deep recursion), the rest running on the inner
+  backend; `forward`/`step`/`prime` cut on the same layers, and a shared weight
+  collects the gradient of its tracked applications alone.
 - **Bidirectional** (`modules/bidi.rs`): `BidiLayerPair<M>` runs a straight (→) and a
   reversed (← via `flip`) pass merged by `OutputMerge` (`Mean`|`CatLinear`);
   `BidiLayers<M>` stacks pairs. Generic over `M` → serves all families.
@@ -287,6 +292,15 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   (`Mamba2`, `Mamba2Cache`, … carry no `<B>`). The backend is a runtime `Device`;
   autodiff and dtype are device properties. Only the custom-backward internals stay
   generic over `B` (`F<B,D>`, the `Backward<B,_>` nodes, `Autodiff<B>` ext impls).
+- **A no-grad region means the inner backend, not `detach`** — Burn registers untracked
+  ops in the graph anyway, so detaching cuts gradients while **retaining every
+  activation** (measured: 3144 MB vs 208 MB at 64 virtual layers; see
+  `utils/detach.rs`). `grad_horizon` runs its prefix on `AutodiffModule::valid(self)`.
+  Three consequences: `.inner()`/`.valid()` **panic** off autodiff (unlike `detach`, a
+  no-op there), so the `is_autodiff` guard is load-bearing; caches convert by hand
+  (`Module::map` is a no-op on plain `Tensor` fields, all a cache holds); and
+  `is_require_grad` only reports `Requirement::Grad` leaves, so tests assert gradient
+  *reachability*.
 - **Two Mamba-3 SSD pathways** — cache type selects double-ssd (simple) vs single-ssd
   (~½ memory); accumulators coincide at boundaries so caches inter-convert.
 - **SISO is `mimo_rank = 1`, not a separate implementation** — the fused `L·M` axis is
