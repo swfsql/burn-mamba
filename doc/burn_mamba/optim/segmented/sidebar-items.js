@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BlockOptim","BlockState"],"struct":["Segmented","SegmentedState"]};

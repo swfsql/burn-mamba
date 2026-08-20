@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["muon_config"],"mod":["report","segmented","spec"],"struct":["MuonPlan"]};
