@@ -42,6 +42,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         // no final norm: the additive residual already leaves an O(1)-scaled output
         final_norm: false,
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,

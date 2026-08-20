@@ -139,6 +139,7 @@ fn mamba3_plan_fits_the_model() {
         n_virtual_layers: None,
         mamba_block: block,
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
@@ -168,6 +169,7 @@ fn mamba2_plan_fits_the_model() {
             .with_expand(2)
             .with_per_head_dim(16),
         missing_lm_head: true,
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
@@ -194,6 +196,7 @@ fn mamba1_plan_fits_the_model() {
         n_virtual_layers: None,
         mamba_block: Mamba1Config::new(32).with_state_rank(16),
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
@@ -405,6 +408,7 @@ fn build_assembles_groups_without_panicking() {
             .with_expand(2)
             .with_per_head_dim(8),
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
@@ -441,6 +445,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
             .with_expand(2)
             .with_per_head_dim(8),
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,
@@ -498,6 +503,7 @@ fn describe_reports_every_parameter() {
             .with_expand(2)
             .with_per_head_dim(8),
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: crate::modules::ResidualsConfig::Standard,

@@ -647,6 +647,9 @@ pub enum MambaLatentNetConfig {
         final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`, unlike the class tokens above).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -678,6 +681,9 @@ pub enum MambaLatentNetConfig {
         final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`, unlike the class tokens above).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -709,6 +715,9 @@ pub enum MambaLatentNetConfig {
         final_norm: bool,
         /// Network-level class tokens, spliced into the input before `in_proj`.
         class_tokens: Vec<ClassToken>,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`, unlike the class tokens above).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -763,6 +772,7 @@ impl MambaLatentNetConfig {
                 output_size,
                 final_norm,
                 class_tokens,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -775,6 +785,7 @@ impl MambaLatentNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
@@ -791,6 +802,7 @@ impl MambaLatentNetConfig {
                 output_size,
                 final_norm,
                 class_tokens,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -803,6 +815,7 @@ impl MambaLatentNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
@@ -819,6 +832,7 @@ impl MambaLatentNetConfig {
                 output_size,
                 final_norm,
                 class_tokens,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -831,6 +845,7 @@ impl MambaLatentNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
@@ -1039,6 +1054,9 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -1067,6 +1085,9 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -1095,6 +1116,9 @@ pub enum MambaVocabNetConfig {
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Tie the LM head to the (transposed) embedding weights when `true`.
         missing_lm_head: bool,
+        /// Stack-level class latents, spliced into the sequence before the
+        /// first layer (width `d_model`).
+        class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
         /// seed carry). See [`Layers`](crate::modules::Layers).
         ignore_first_residual: bool,
@@ -1148,6 +1172,7 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -1161,6 +1186,7 @@ impl MambaVocabNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
@@ -1174,6 +1200,7 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -1187,6 +1214,7 @@ impl MambaVocabNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
@@ -1200,6 +1228,7 @@ impl MambaVocabNetConfig {
                 pad_vocab_size_multiple,
                 mamba_block,
                 missing_lm_head,
+                class_latents,
                 ignore_first_residual,
                 ignore_last_residual,
                 residuals,
@@ -1213,6 +1242,7 @@ impl MambaVocabNetConfig {
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
+                        .with_class_latents(class_latents.clone())
                         .with_mlp(mlp.clone()),
                     missing_lm_head: *missing_lm_head,
                 }

@@ -51,6 +51,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         n_virtual_layers: None,
         mamba_block,
         class_tokens: Vec::new(),
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,

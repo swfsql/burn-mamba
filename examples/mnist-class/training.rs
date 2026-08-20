@@ -20,6 +20,8 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
+use crate::model::OUTPUT_SEQUENCE_EXTRA;
+
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
 /// way).
@@ -332,8 +334,11 @@ impl Wrap {
         let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None)); // saves ~1/3 vram against Minimal
         //
         let (output, _caches) = model.forward(input.clone(), None, ssd_path, None);
-        assert_eq!([batch_size, sequence_size, 10], output.dims());
-        let last_output = output.narrow(1, sequence_size - 1, 1).squeeze_dim(1);
+        // The model's class latents lengthen the sequence; they are all `Start`,
+        // so the last position is still the last pixel — just further along.
+        let output_size = sequence_size + OUTPUT_SEQUENCE_EXTRA;
+        assert_eq!([batch_size, output_size, 10], output.dims());
+        let last_output = output.narrow(1, output_size - 1, 1).squeeze_dim(1);
         assert_eq!([batch_size, 10], last_output.dims());
 
         let loss = burn::nn::loss::CrossEntropyLossConfig::new()

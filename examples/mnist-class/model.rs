@@ -3,11 +3,26 @@
 //! [`model_config`].
 
 use burn_mamba::prelude::MultiGateResidualConfig;
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    ClassLatent, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind,
+};
 use burn_mamba::utils::Schedule;
 
 /// Depth of the (virtual) layer stack.
 const N_VIRTUAL_LAYERS: usize = 16;
+
+/// Stack-level class latents prepended to every image's pixel sequence:
+/// learnable `[CLS]`-style registers (width `d_model`) that let the model settle
+/// into a trained initial state before the first pixel arrives. They lengthen
+/// the output sequence, which the readout accounts for — see
+/// [`OUTPUT_SEQUENCE_EXTRA`].
+// pub const N_CLASS_LATENTS: usize = 4; // enable if using Start classes.
+pub const N_CLASS_LATENTS: usize = 0;
+
+/// How much longer the model's output is than its pixel input, in timesteps.
+/// The class latents all sit at the **front** (`Start`), so the classification
+/// readout is still the sequence's last position — just not index `784 - 1`.
+pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 
 /// This model configuration uses ~37K params (~154KB disk space in FP32).
 /// Reaches ~85% validation accuracy at the first epoch.
@@ -45,16 +60,21 @@ pub fn model_config() -> MambaLatentNetConfig {
     MambaLatentNetConfig::Mamba3 {
         // input  [batch_size, sequence_len = HEIGHT * WIDTH, input_size = 1]
         input_size: 1,
-        // output [batch_size, sequence_len = HEIGHT * WIDTH, output_size = 10]
+        // output [batch_size, HEIGHT * WIDTH + OUTPUT_SEQUENCE_EXTRA, output_size = 10]
         // (later narrowed to the last timestep for the 10-bin classification)
         output_size: 10,
         // best true for MultiGate Residuals (small model, few batches)
+        // final_norm: true,
         final_norm: false,
         // two real layers, virtually stretched (8×) to 16 for more expressivity
         n_real_layers: 2,
         n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Stretched)),
         mamba_block,
+        // Network-level class tokens would sit at `input_size = 1` (a single
+        // learnable scalar each); the stack-level latents below are `d_model`
+        // wide, so they are the useful register here.
         class_tokens: Vec::new(),
+        class_latents: vec![ClassLatent::Start; N_CLASS_LATENTS],
         // the first input/last output could skip their residual here too
         ignore_first_residual: false,
         ignore_last_residual: false,
@@ -63,10 +83,10 @@ pub fn model_config() -> MambaLatentNetConfig {
         // residuals: ResidualsConfig::MultiGate {
         //     n_stream: N_STREAM,
         //     init_bias: _carry_bias,
-        // // useful ramp for the few batches in this example
+        //     // useful ramp for the few batches in this example
         //     init_bias_step: -_carry_bias / (N_STREAM - 1) as f64,
         //     per_virtual_layer: true,
-        // }
+        // },
         residuals: ResidualsConfig::Standard,
         // No feed-forward interleave: these examples are mixer-only.
         mlp: None,

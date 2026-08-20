@@ -227,11 +227,13 @@ plus shared NN blocks.
   all three levels: the network's due class tokens each run a full pass, then
   `Layers::prime` flushes whatever is still waiting above them; `VocabNetwork::prime`
   returns the primed latent's logits.
-  `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum
-  variants carry `residuals: ResidualsConfig` (plain additive vs Multi-Gate),
-  `final_norm`, `ignore_first/last_residual` and `mlp: Option<GatedMlpConfig>`, and
-  build a `MuonPlan` via `muon_plan()` (block + MLP weights; the boundary
-  embedding/head/projections are deliberately absent).
+  `*Builder`s carry `with_class_{tokens,latents}`; the `*Config` enum variants carry
+  `class_latents` (stack level, `d_model`-wide) — `MambaLatentNetConfig` additionally
+  `class_tokens` (network level, `input_size`-wide) — plus `residuals: ResidualsConfig`
+  (plain additive vs Multi-Gate), `final_norm`, `ignore_first/last_residual` and
+  `mlp: Option<GatedMlpConfig>`, and build a `MuonPlan` via `muon_plan()` (block + MLP
+  weights; the boundary embedding/head/projections and the class tables are deliberately
+  absent — they stay on AdamW).
 - **`bidi.rs`** — `BidiLayerPair<M>` (straight + reversed-via-`flip`, merged) and
   `BidiLayers<M>` (stacks pairs with a `BidiSchedule`, adds the residual, runs pairs **by
   reference** via `bidi_pair_forward` — never clones a block, as a cloned un-materialised

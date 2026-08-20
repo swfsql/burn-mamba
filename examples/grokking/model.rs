@@ -48,6 +48,7 @@ pub fn model_config(
         mamba_block,
         // false ⇒ a dedicated (untied) LM head
         missing_lm_head: false,
+        class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
         residuals: ResidualsConfig::Standard,

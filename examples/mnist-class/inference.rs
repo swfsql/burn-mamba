@@ -112,7 +112,9 @@ fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
         .reshape([n, h * w, 1]);
     let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
     let (output, _caches) = model.forward(zscored, None, ssd_path, None); // [n, seq, 10]
-    let seq = h * w;
+    // The class latents lengthen the sequence (all `Start`, so the last position
+    // is still the last pixel) — see `model::OUTPUT_SEQUENCE_EXTRA`.
+    let seq = h * w + crate::model::OUTPUT_SEQUENCE_EXTRA;
     let last = output.narrow(1, seq - 1, 1).squeeze_dim::<2>(1); // [n, 10]
     burn::tensor::activation::softmax(last, 1)
 }
