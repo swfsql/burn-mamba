@@ -892,14 +892,109 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
     }
 }
 
+/// With an **identity prefix**, the straight-through is not an approximation and
+/// the cut must reproduce full backpropagation on the input's gradient exactly.
+///
+/// Zeroing a prefix layer's `out_proj` makes its Jacobian w.r.t. its input
+/// exactly zero, so the residual stream carries the input through untouched and
+/// the true prefix Jacobian *is* `I` — precisely what the carry asserts. Values
+/// are unaffected by the cut either way, so `dL/dx_boundary` is the same in both
+/// runs and the two gradients must agree to float noise.
+///
+/// This is what pins the MultiGate correction. Under `Standard` there is one
+/// carrier and correcting the token is the whole story, so the test would pass
+/// with or without it; under `MultiGate` the streams carry the residual, and a
+/// correction applied only to the pooled token leaves `dL/ds` out of the input's
+/// gradient and the two runs diverge.
+fn run_identity_prefix_exactness(residuals: crate::modules::ResidualsConfig) {
+    use crate::modules::Residuals;
+
+    let device = Device::default().autodiff();
+    let (n, k) = (4, 2);
+    let cut = n - k;
+
+    let mut base = LayersBuilder::new(n, block_config(D_MODEL))
+        .with_residuals(residuals)
+        .init(&device);
+    // Prefix layers become exact identities on the residual stream: a zero
+    // `out_proj` weight makes their Jacobian w.r.t. their input exactly zero, so
+    // the stream passes through untouched (the value may shift by a constant —
+    // only the Jacobian matters here).
+    for i in 0..cut {
+        let w = &mut base.real_layers[i].mamba_block.out_proj.weight;
+        *w = w.clone().map(|t| t.zeros_like());
+    }
+    // Under MultiGate the residual is in the streams, so the prefix is an
+    // identity only if its gates carry rather than mix. Biasing *only* the
+    // prefix's gates shut leaves the suffix mixing normally — otherwise the whole
+    // stack would be near-identity and the comparison would hold vacuously.
+    if let Residuals::MultiGate(mg) = &mut base.residuals {
+        for i in 0..cut {
+            let b = &mut mg.layers[i].b_beta;
+            *b = b.clone().map(|t| t.zeros_like() - 20.0);
+        }
+    }
+
+    let x = input(&device);
+    let head = Tensor::<3>::random(
+        [BATCH, SEQ, D_MODEL],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    // The *same* weights both times — only the horizon differs.
+    let grad_of = |horizon| {
+        let mut layers = <Layers<_> as Clone>::clone(&base);
+        layers.grad_horizon = horizon;
+        let xr = x.clone().require_grad();
+        let (y, _) = layers.forward(xr.clone(), None, path(), None);
+        let grads = (y * head.clone()).sum().backward();
+        xr.grad(&grads).expect("input gradient")
+    };
+
+    let full = grad_of(None);
+    let cut_grad = grad_of(Some(k));
+    let diff = max_abs_diff(full.clone(), cut_grad);
+    // Guard against a vacuous pass: if the stack were near-identity throughout,
+    // the gradient would be ~1 everywhere and any wiring would "agree".
+    let scale = full.abs().max().into_scalar::<f32>();
+    assert!(
+        scale > 1e-3,
+        "degenerate fixture: the input gradient is ~0, so the comparison proves \
+         nothing (max |grad| = {scale})",
+    );
+    assert!(
+        diff < 1e-5 * scale.max(1.0),
+        "with an identity prefix the cut must reproduce full backprop on the \
+         input's gradient — a carrier is missing its identity path \
+         (max abs diff {diff}, grad scale {scale})",
+    );
+}
+
+/// One carrier: correcting the token is the whole story.
+#[test]
+fn identity_prefix_is_exact_under_standard_residuals() {
+    run_identity_prefix_exactness(crate::modules::ResidualsConfig::Standard);
+}
+
+/// Several carriers: the streams hold the residual, so they need the carry too.
+/// `n_stream: 1` with a strongly carry-biased gate keeps the prefix an identity
+/// (no accumulation phase, gates closed), which is what makes the comparison
+/// exact rather than merely close.
+#[test]
+fn identity_prefix_is_exact_under_multi_gate_residuals() {
+    run_identity_prefix_exactness(crate::modules::ResidualsConfig::MultiGate {
+        n_stream: 1,
+        init_bias: -20.0,
+        init_bias_step: 0.0,
+        per_virtual_layer: false,
+    });
+}
+
 /// The input keeps its gradient under `MultiGate` residuals too.
 ///
-/// There the residual lives in the depth-streams rather than the token, and the
-/// carry is added to the pooled aggregate the next layer reads — one identity
-/// path to the output, as under `Standard`. The streams themselves are lifted but
-/// not corrected, so the input's gradient is *smaller* than a full
-/// identity-on-every-carrier analogue would give; what this pins is the floor
-/// that matters, which is that nothing silently dies.
+/// Complements the exactness test above with the ordinary configuration —
+/// several streams, default gates, so the accumulation phase runs — where the
+/// carry has to reach both the pooled token and the stream set.
 #[test]
 fn multi_gate_input_keeps_its_gradient_under_a_cut() {
     use crate::modules::ResidualsConfig;

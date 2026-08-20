@@ -254,7 +254,10 @@ Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
   re-attached *straight-through* at the boundary (a value-zero term restoring an
   identity gradient path) — it enters only at the bottom, so a cut would otherwise
   leave a network's `in_proj`/embedding untrained; TRM/HRM avoid this by
-  re-injecting the input every recursion, which this stack does not. Class
+  re-injecting the input every recursion, which this stack does not. Under
+  `MultiGate` the carry reaches every stream, not just the pooled token — that is
+  where the residual lives, and under a carry-biased gate init it holds most of
+  the input's gradient. Class
   embeddings train at every level and on both sides of the cut (a per-layer latent
   below it gets a tracked zero-valued *ghost* row in the carry) — they are
   learnable input rows, not part of a layer's transform.

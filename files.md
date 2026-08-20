@@ -211,7 +211,9 @@ plus shared NN blocks.
   never trains. Those splice positions take a **ghost** row — value zero, from the
   *tracked* table — so a per-layer class latent below the cut trains too; class
   embeddings are learnable input rows at every level, while the layer's transform
-  stays undifferentiated.
+  stays undifferentiated. Under MultiGate the carry goes to **every** stream as
+  well as the pooled token (that is where the residual lives; the aggregator's
+  weights sum to one, so this does not double-count).
   `forward`/`step`/`prime` take `Option<&mut ClassCursors>` (stack-level + per-virtual-
   layer); `step` cascades the stack latents and each layer's own up the stack in
   `forward`'s token order, returning the last token emitted. `prime(batch, caches,

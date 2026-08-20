@@ -58,9 +58,13 @@ pub struct Layers<M: Module> {
     /// identity gradient path, which under [`Residuals::Standard`] is not a guess
     /// but the exact leading term of `∂(x + Σ F_l)/∂x`, the rest being precisely
     /// the prefix one chose not to differentiate. Under
-    /// [`MultiGate`](crate::modules::MultiGate) the pooling contracts, so identity
-    /// is the cruder of the two — the input gets one identity path to the output
-    /// either way. Values are untouched in both cases.
+    /// [`MultiGate`](crate::modules::MultiGate) the residual lives in the
+    /// depth-streams rather than the token, so **every** carrier gets the
+    /// identity path — the seed stream is the input and the pool is convex, so an
+    /// identity prefix leaves all `k` streams equal to it. Correcting only the
+    /// pooled token would leave the streams' contribution out of the input's
+    /// gradient, and under the carry-biased gate init MGR is built for that is
+    /// most of it. Values are untouched in every case.
     ///
     /// **Every class embedding trains**, at all three levels and on both sides of
     /// the cut: a network's [`ClassToken`]s and this stack's own
@@ -250,10 +254,25 @@ where
             // autodiff backend, as fresh graph roots.
             if cut > 0 && i == cut {
                 x = Tensor::from_inner(x);
+                streams = streams.map(Tensor::from_inner);
                 if let Some(st) = st.take() {
+                    // Under MultiGate the residual lives in the streams, not the
+                    // token, so *every* carrier gets the identity path — which is
+                    // what "the prefix behaved like identity" means there: the
+                    // seed stream is the input and the pool is convex, so an
+                    // identity prefix leaves all `k` streams equal to it.
+                    //
+                    // This does not double-count the pooled `x`, even though it
+                    // is derived from the streams: an identity prefix routes the
+                    // input to `x` through the aggregator, whose weights are a
+                    // softmax and therefore sum to one, so the two spellings
+                    // agree exactly.
+                    streams = streams.map(|s| {
+                        let dims = s.dims();
+                        s + st.clone().unsqueeze_dim::<4>(2).expand(dims)
+                    });
                     x = x + st;
                 }
-                streams = streams.map(Tensor::from_inner);
             }
             let real = self.real_idx(i);
             // `self` above the cut, the inner-backend copy below it.
@@ -532,11 +551,24 @@ where
             // skip condition happens to be.
             if cut > 0 && pos == cut {
                 stream = stream.into_iter().map(Tensor::from_inner).collect();
+                carried = carried.into_iter().map(Tensor::from_inner).collect();
                 if let Some(st) = st.take() {
                     debug_assert_eq!(st.len(), stream.len(), "carry tracks the stream");
+                    // Every carrier, as in `forward`: under MultiGate each token
+                    // brings its own `[batch, k, d]` stream set.
+                    if !carried.is_empty() {
+                        debug_assert_eq!(carried.len(), st.len(), "one stream set per token");
+                        carried = carried
+                            .into_iter()
+                            .zip(&st)
+                            .map(|(c, s)| {
+                                let dims = c.dims();
+                                c + s.clone().unsqueeze_dim::<3>(1).expand(dims)
+                            })
+                            .collect();
+                    }
                     stream = stream.into_iter().zip(st).map(|(t, s)| t + s).collect();
                 }
-                carried = carried.into_iter().map(Tensor::from_inner).collect();
             }
             let real = self.real_idx(pos);
             // `self` above the cut, the inner-backend copy below it — layer
