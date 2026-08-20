@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["div_eps"],"mod":["backend_macros","class","combined_grad","fprim","schedule","scheduler"]};
+window.SIDEBAR_ITEMS = {"fn":["div_eps"],"mod":["backend_macros","class","combined_grad","detach","fprim","schedule","scheduler"]};

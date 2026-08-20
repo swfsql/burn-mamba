@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["detach_params"],"struct":["DetachParams"]};
