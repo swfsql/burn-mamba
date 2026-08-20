@@ -17,7 +17,7 @@ const N_VIRTUAL_LAYERS: usize = 16;
 /// This stack — 16 virtual layers over 2 real weight sets — is TRM/HRM-style
 /// deep recursion, and its activations are most of the vram figure below, so a
 /// small `K` is what lets the stack grow deeper.
-const GRAD_HORIZON: Option<usize> = None;
+const GRAD_HORIZON: Option<usize> = Some(4);
 
 /// Stack-level class latents prepended to every image's pixel sequence:
 /// learnable `[CLS]`-style registers (width `d_model`) that let the model settle
@@ -74,9 +74,9 @@ pub fn model_config() -> MambaLatentNetConfig {
         // best true for MultiGate Residuals (small model, few batches)
         // final_norm: true,
         final_norm: false,
-        // two real layers, virtually stretched (8×) to 16 for more expressivity
+        // two real layers, virtually cycled (2×2×2×2) to 16 for more expressivity
         n_real_layers: 2,
-        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Stretched)),
+        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)),
         grad_horizon: GRAD_HORIZON,
         mamba_block,
         // Network-level class tokens would sit at `input_size = 1` (a single
