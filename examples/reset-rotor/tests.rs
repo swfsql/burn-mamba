@@ -624,10 +624,11 @@ fn no_real_state_solves_the_task() {
 ///   do. `R` is free (the rotor is at detent 0 whenever it appears); everything
 ///   else is chance.
 /// - **positional**: the best a predictor that sees the current symbol *and how
-///   many steps have passed since the last reset* can do. This bounds the whole
-///   fixed-rotation family from above — an input-independent phase, and the
-///   decay of the state it reads, are both functions of exactly that number —
-///   and it is still nowhere near the block.
+///   many steps have passed since the last reset* can do. That bounds every
+///   block which, like the one swept above, writes its state at the reset and
+///   reads what has accumulated since: under an input-independent rotation both
+///   the phase and the decay of what it reads are functions of exactly that
+///   number. It is still nowhere near the block.
 #[test]
 fn memoryless_and_positional_ceilings() {
     let mut sym = [[0u64; NUM_CLASSES]; NUM_SYMBOLS];

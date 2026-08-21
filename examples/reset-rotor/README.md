@@ -92,9 +92,14 @@ The two ablations do **not** sweep the readout — they are given the best one
 they admit, computed exactly: every cut of the scalar channel into three
 intervals, every cut of the output plane into three sectors. Only the knob the
 ablation leaves free is swept. The `positional` row is the same idea taken to
-the limit: the best table lookup from `(symbol, steps since the reset)`, which
-upper-bounds *any* input-independent phase — and every decay it could be read
-through — without running a model at all.
+the limit: the best table lookup from `(symbol, steps since the reset)`. It
+bounds every block that writes its state at the reset and reads what has
+accumulated since — under an input-independent rotation both the phase and the
+decay of what it reads are functions of exactly that number — and it needs no
+model at all.
+
+The rung above is [`reset-spinor`](../reset-spinor/README.md): two turns that
+do not commute, where the rotation has to be **non-abelian** as well.
 
 ## Notes
 

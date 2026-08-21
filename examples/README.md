@@ -4,6 +4,7 @@
 
 - `reset-majority`: One Mamba-2 block (two scalar states, no conv, no residual) on the sign of a running vote since the last reset — the smallest task the block is *required* for. Its README carries a hand-built exact solution and a sweep showing no fixed decay reaches it.
 - `reset-rotor`: The Mamba-3 corollary of `reset-majority` — the same `+`/`-`/`R` stream read as a three-detent rotor (the turn count since the last reset, mod 3), the smallest task needing the *complex* transition. Its README carries a hand-built exact solution plus sweeps showing that neither a fixed rotation nor a real (rotation-free) state reaches it.
+- `reset-spinor`: The next rung — the same stream with two *non-commuting* turns, read as the running product in the quaternion group `Q₈`, the smallest task needing the **non-abelian** (`Quaternion4D`) rotation. Hand-built exact solution plus the abelian twin (`-- --rotation complex`) and the order-blind ceilings.
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 - `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
