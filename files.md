@@ -276,7 +276,11 @@ plus shared NN blocks.
 - **`norm/`** — `RmsNorm` (also Mamba-3 QK-Norm) + `RmsNormGated` (RMSNorm × SiLU gate,
   `norm_before_gate` toggle). **fp16-safe**: normalise against `max(|x|)` to avoid `x²`
   overflow; epsilon from `div_eps`.
-- **`activation/`** — `Silu`, `softplus`, `log_sigmoid` (fp16-aware variants Burn lacks).
+- **`activation/`** — `Silu`, `softplus`, `log_sigmoid` (dtype-aware variants Burn
+  lacks). `softplus` = identity above a per-dtype precision threshold (f64 38 / f32 18 /
+  bf16 7 / f16 9), else `log1p(eˣ)` on a `clamp_max`ed input (so `eˣ` never overflows);
+  `log_sigmoid` = `−softplus(−x)`, which keeps its large-negative tail (`log σ(x) → x`)
+  finite.
 - **`misc/`** — `gqa_expand_to_heads` (group→head replicate; `DP1=D+1` caller const),
   `segsum` (stable log-space 1-semiseparable mask; backbone of `ssd_minimal`),
   `split_into` (array-typed `split_with_sizes` → `let [z,x,b,c,…]=…`), `sanity` guards,

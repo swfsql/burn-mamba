@@ -87,7 +87,7 @@ src/
 │  │                 MambaLatentNet / MambaVocabNet enums
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait (+ per-slot inner/from_inner) + MambaCaches
-│  ├─ activation/    silu, softplus, log_sigmoid (fp16-aware)
+│  ├─ activation/    silu, softplus, log_sigmoid (dtype-aware)
 │  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
 │  ├─ loss/          bce, cross_entropy, mse
 │  └─ misc/          gqa, segsum, split, sanity, rope

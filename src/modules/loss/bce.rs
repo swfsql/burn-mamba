@@ -1,9 +1,9 @@
 //! Binary cross-entropy loss.
 //!
 //! When `logits = true` the loss is computed in a numerically stable way from
-//! raw logits via [`log_sigmoid`]; otherwise the inputs are treated as
-//! probabilities and the logs are floored by a dtype-aware epsilon (added
-//! *inside* the log) to avoid `−∞`.
+//! raw logits via [`log_sigmoid`](crate::modules::log_sigmoid); otherwise the
+//! inputs are treated as probabilities and the logs are floored by a
+//! dtype-aware epsilon (added *inside* the log) to avoid `−∞`.
 
 use crate::modules::log_sigmoid;
 use crate::utils::div_eps;
