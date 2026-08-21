@@ -1,6 +1,6 @@
 //! # Mamba-3 — Single-Pass SSD Forward
 //!
-//! This module provides the `forward_single_ssd` method on [`Mamba3`]:
+//! This module provides the `forward_single_ssd` method on [`Mamba3`](crate::mamba3::mamba3::Mamba3):
 //! The burn-mamba implementation of the **official Mamba-3 algorithm**
 //! as shipped in Triton (SISO) and Tilelang (MIMO):
 //!

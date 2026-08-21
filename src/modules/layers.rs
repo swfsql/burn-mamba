@@ -249,6 +249,10 @@ where
         // tensor `x` directly (streams stays `None`).
         let mut streams = self.multi_gate_streams_seed(&x);
 
+        // `i` is the virtual-layer index (schedule, cut boundary, residual
+        // flags); the slot lookup is incidental, and the bound stays `n` so a
+        // mis-sized cache stack still panics.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             // Crossing the cut: lift what the prefix produced back onto the
             // autodiff backend, as fresh graph roots.
@@ -542,6 +546,9 @@ where
             .as_deref()
             .and_then(|c| c.full_len)
             .map(|l| l + self.class_latents.len());
+        // `pos` is the virtual-layer index (schedule, cut boundary); the slot
+        // lookup is incidental.
+        #[allow(clippy::needless_range_loop)]
         for pos in 0..n {
             // Crossing the cut: lift what the prefix produced back onto the
             // autodiff backend, as fresh graph roots. Placed before the
@@ -936,7 +943,7 @@ impl<C: MambaBlockConfig> LayersBuilder<C> {
     }
 
     /// Interleave a SwiGLU feed-forward sub-block after each layer's mixer
-    /// (see [`Layer`](crate::modules::Layer)). `None` keeps layers mixer-only.
+    /// (see [`Layer`]). `None` keeps layers mixer-only.
     pub fn with_mlp(mut self, mlp: Option<GatedMlpConfig>) -> Self {
         self.mlp = mlp;
         self

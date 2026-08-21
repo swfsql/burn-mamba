@@ -34,7 +34,7 @@ fn rms_norm_gated_gradient_finite_on_collapsed_slice() {
     let x = Param::from_tensor(Tensor::from_inner(base));
     let grads = norm.forward(x.val(), z).sum().backward();
     let g = x.val().grad(&grads).expect("grad exists");
-    let gvec = g.into_data().to_vec::<f32>().unwrap();
+    let gvec = g.into_data().try_to_vec::<f32>().unwrap();
     assert!(
         gvec.iter().all(|v| v.is_finite()),
         "gated RMSNorm gradient must stay finite for a zero-norm slice"

@@ -656,16 +656,16 @@ pub enum MambaLatentNetConfig {
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-2 latent network.
@@ -695,16 +695,16 @@ pub enum MambaLatentNetConfig {
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-3 latent network.
@@ -734,16 +734,16 @@ pub enum MambaLatentNetConfig {
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
 }
@@ -1083,16 +1083,16 @@ pub enum MambaVocabNetConfig {
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-2 language model.
@@ -1119,16 +1119,16 @@ pub enum MambaVocabNetConfig {
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
     /// Build a Mamba-3 language model.
@@ -1155,16 +1155,16 @@ pub enum MambaVocabNetConfig {
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
         /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`](crate::modules::Layers).
+        /// seed carry). See [`Layers`].
         ignore_first_residual: bool,
         /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`](crate::modules::Layers).
+        /// layer's transform alone). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`](crate::modules::Layer).
+        /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<crate::modules::GatedMlpConfig>,
     },
 }

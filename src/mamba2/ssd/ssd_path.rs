@@ -1,7 +1,7 @@
 //! # SSD algorithm selection and input bundle (Mamba-2)
 //!
 //! [`Mamba2SsdPath`] chooses which of the three exact SSD reformulations
-//! ([`super::minimal`] / [`super::serial`] / [`super::serial_recalculated`])
+//! ([`super::minimal`](crate::mamba2::ssd::minimal) / [`super::serial`](crate::mamba2::ssd::serial) / [`super::serial_recalculated`](crate::mamba2::ssd::serial_recalculated))
 //! runs, and at what chunk length.  [`Mamba2SsdInput`] bundles the pre-processed
 //! tensors the scan consumes (B/C already GQA-expanded to per-head); its
 //! [`Mamba2SsdInput::run`] dispatches to the path-selected algorithm.
@@ -87,7 +87,7 @@ pub struct Mamba2SsdInput {
 }
 
 impl Mamba2SsdInput {
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every input tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every input tensor.
     pub fn sanity(&self) {
         use crate::modules::sanity as san;
         san(&self.x_bnlhp);

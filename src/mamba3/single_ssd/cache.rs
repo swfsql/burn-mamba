@@ -3,12 +3,12 @@
 //! The cache used by [`crate::mamba3::mamba3::Mamba3::forward_single_ssd`]
 //! (the single-pass SSD algorithm — see the Triton SISO and Tilelang MIMO
 //! reference kernels).
-//! The four tensor fields mirror those of [`Mamba3Cache`] but their
+//! The four tensor fields mirror those of [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache) but their
 //! **SSM accumulator carries different semantics**:
 //!
-//! - [`Mamba3Cache`]: `ssm_bhpr` holds the double-ssd trapezoidal hidden state
+//! - [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache): `ssm_bhpr` holds the double-ssd trapezoidal hidden state
 //!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ`.
-//! - [`Mamba3SingleSsdCache`]: `ssm_bhpr` holds the **trapezoid accumulator** `h'ₜ`
+//! - [`Mamba3SingleSsdCache`](crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache): `ssm_bhpr` holds the **trapezoid accumulator** `h'ₜ`
 //!   defined by `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, where
 //!   `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁`. The single-ssd form gives the correct output
 //!   `yₜ = Cₜᵀ h'ₜ` for all positions except the diagonal (s = t), which is
@@ -110,7 +110,7 @@ pub struct Mamba3SingleSsdCache {
 }
 
 impl Mamba3SingleSsdCache {
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);

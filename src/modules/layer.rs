@@ -9,7 +9,7 @@ use burn::module::Param;
 use burn::prelude::*;
 
 /// A single Pre-LN block wrapper computing `M(RMSNorm(x))` — the residual is
-/// **not** applied here. The enclosing [`Layers`](crate::modules::Layers) owns
+/// **not** applied here. The enclosing [`Layers`] owns
 /// that decision (add the input back, suppress it on the first/last layer, or
 /// thread it through Multi-Gate streams), so no input clone / zero-add is wasted
 /// when no residual is wanted.

@@ -155,9 +155,9 @@ fn digit_with_bars_png(digit: &[f32], probs: &[f32], true_label: usize, pred: us
         }
     }
     // Bars: height ∝ probability; predicted class brightest.
-    for c in 0..NUM_CLASSES {
+    for (c, p) in probs.iter().enumerate().take(NUM_CLASSES) {
         let x0 = base_x + c * (bar_w + gap);
-        let hbar = (probs[c].clamp(0.0, 1.0) * (HEIGHT as f32 - 1.0)).round() as usize;
+        let hbar = (p.clamp(0.0, 1.0) * (HEIGHT as f32 - 1.0)).round() as usize;
         let shade = if c == pred { 255 } else { 140 };
         for xx in 0..bar_w {
             for row in (HEIGHT - hbar)..HEIGHT {
@@ -188,7 +188,7 @@ fn argmax(probs: &[f32]) -> usize {
 fn to_host<const D: usize>(tensor: Tensor<D>) -> Vec<f32> {
     tensor
         .into_data()
-        .to_vec::<FloatElement>()
+        .try_to_vec::<FloatElement>()
         .unwrap()
         .into_iter()
         .map(|x| x.elem::<f32>())

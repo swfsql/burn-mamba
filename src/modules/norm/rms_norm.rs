@@ -10,7 +10,7 @@
 //! the squared values stay `≤ 1`, then rescales.  See [`rms_norm_gated`] for the
 //! SiLU-gated variant.
 //!
-//! [`rms_norm_gated`]: crate::utils::rms_norm_gated
+//! [`rms_norm_gated`]: crate::modules::norm::rms_norm_gated
 
 use crate::utils::div_eps;
 use burn::module::{Content, DisplaySettings, ModuleDisplay, Param};

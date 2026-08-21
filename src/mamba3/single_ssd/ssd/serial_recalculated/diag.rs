@@ -1,9 +1,9 @@
 //! # Same-step γ-correction on primitives — forward and analytic backward
 //!
-//! Primitive ([`F`]) port of [`super::super::diag`], plus the analytic backward
+//! Primitive (`F`) port of [`super::super::diag`](crate::mamba3::single_ssd::ssd::diag), plus the analytic backward
 //! the recompute node needs.  The forward is used by
-//! [`super::serial_recalculated`]'s K5; the backward by
-//! [`super::combined_backward`].  Both carry the same SISO fast path: at
+//! `super::serial_recalculated`'s K5; the backward by
+//! [`super::combined_backward`](crate::mamba3::single_ssd::ssd::serial_recalculated::combined_backward).  Both carry the same SISO fast path: at
 //! `mimo_rank == 1` the `m × m` Gram matrix is a scalar, so every matmul over
 //! the `mimo_rank` axis degenerates into a `1×K×1` / `1×1×N` GEMM and is
 //! replaced by a reduction plus broadcast multiplies.

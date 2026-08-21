@@ -212,8 +212,8 @@ pub fn evaluate(dataloader: Dataloader, model: &Wrap) -> (f64, f64) {
         acc_metric.update(&pre_metrics.adapt(), &metric_meta);
     }
     (
-        metric_current(loss_metric.running_value()) as f64,
-        metric_current(acc_metric.running_value()) as f64,
+        metric_current(loss_metric.running_value()),
+        metric_current(acc_metric.running_value()),
     )
 }
 

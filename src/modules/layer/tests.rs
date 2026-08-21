@@ -173,7 +173,7 @@ fn norm_and_norm2_are_independent() {
     });
 
     let layer = &layers.real_layers[0];
-    let norm_gamma = layer.norm.gamma.val().into_data().to_vec::<f32>().unwrap();
+    let norm_gamma = layer.norm.gamma.val().into_data().try_to_vec::<f32>().unwrap();
     let norm2_gamma = layer
         .norm2
         .as_ref()
@@ -181,7 +181,7 @@ fn norm_and_norm2_are_independent() {
         .gamma
         .val()
         .into_data()
-        .to_vec::<f32>()
+        .try_to_vec::<f32>()
         .unwrap();
     assert!(norm_gamma.iter().zip(&norm2_gamma).any(|(a, b)| a != b));
 }

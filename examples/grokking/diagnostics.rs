@@ -250,10 +250,10 @@ fn penalty_weights(model: &MambaVocabNet, target: PrPenaltyTarget) -> Vec<Tensor
     if matches!(target, Emb | EmbHead | All) {
         weights.push(net.embedding.weight.val());
     }
-    if matches!(target, EmbHead | All) {
-        if let Some(linear) = &net.lm_head {
-            weights.push(linear.weight.val());
-        }
+    if matches!(target, EmbHead | All)
+        && let Some(linear) = &net.lm_head
+    {
+        weights.push(linear.weight.val());
     }
     if matches!(target, Bc | All) {
         for l in &net.layers.real_layers {
@@ -329,7 +329,7 @@ fn dft_energy(w_pd: Tensor<2>) -> Vec<f64> {
     let energy_k1 = (re_kd.powf_scalar(2.0) + im_kd.powf_scalar(2.0)).sum_dim(1);
     energy_k1
         .into_data()
-        .to_vec::<f32>()
+        .try_to_vec::<f32>()
         .unwrap()
         .into_iter()
         .map(|e| e as f64)
@@ -346,5 +346,5 @@ fn pr_of_energies(energies: &[f64]) -> f64 {
 
 /// Read a single-element float tensor back to the host.
 fn scalar_f64(t: Tensor<1>) -> f64 {
-    t.into_data().to_vec::<f32>().unwrap()[0] as f64
+    t.into_data().try_to_vec::<f32>().unwrap()[0] as f64
 }

@@ -32,7 +32,7 @@
 //!
 //! # What this does *not* reach
 //!
-//! [`Module::map`] is a **no-op on plain `Tensor` fields** — Burn implements
+//! [`Module::map`](burn::module::Module::map) is a **no-op on plain `Tensor` fields** — Burn implements
 //! `Module for Tensor` as a constant (`map` returns `self`), so only
 //! [`Param`](burn::module::Param)-wrapped tensors go through the mapper. Weights
 //! are `Param`s and are covered; bare tensors (notably the caches) are not.

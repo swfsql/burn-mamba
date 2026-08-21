@@ -87,7 +87,7 @@ fn gradients_reach_both_projections() {
     let grads = mlp.forward(x.val()).sum().backward();
 
     let g = x.val().grad(&grads).expect("input grad exists");
-    let gvec = g.into_data().to_vec::<f32>().unwrap();
+    let gvec = g.into_data().try_to_vec::<f32>().unwrap();
     assert!(gvec.iter().all(|v| v.is_finite()));
     assert!(
         gvec.iter().any(|v| v.abs() > 0.),

@@ -10,7 +10,7 @@
 //!    `dt_bias`/`D`, the Mamba-1/2 depthwise conv weight, and every MIMO/bias
 //!    3-D tensor must stay on the fallback optimizer. Passing one to Muon
 //!    panics — which is why the plan built here is an **allowlist**: only the
-//!    weights named by a [`ProjSpec`] are moved off AdamW.
+//!    weights named by a [`ProjSpec`](crate::optim::spec::ProjSpec) are moved off AdamW.
 //! 2. **Embedding-like matrices.** The token embedding, the LM head, the
 //!    `LatentNetwork` input/output projections and the class-token/latent tables
 //!    are rank-2 but are lookup/readout tables at the model boundary; the usual
@@ -18,13 +18,13 @@
 //! 3. **Fused projections.** Every family concatenates several independent maps
 //!    into one `Linear` (`in_proj` most of all). Orthogonalising that
 //!    concatenation ties together maps that share nothing but an allocation, so
-//!    the plan carries the column seams and [`Segmented`] applies Muon
+//!    the plan carries the column seams and [`Segmented`](crate::optim::segmented::Segmented) applies Muon
 //!    **per block**. The model is untouched — the forward pass keeps its single
 //!    fused GEMM.
 //!
 //! Within a fused projection one more distinction applies: blocks that emit
 //! *per-head scalars* (Δ, `A`, `λ`) are gains rather than feature maps and stay
-//! on AdamW ([`ProjSegment::adamw`]).
+//! on AdamW ([`ProjSegment::adamw`](crate::optim::spec::ProjSegment::adamw)).
 //!
 //! ## Why the 3-D tensors are not "stacked matrices"
 //!
@@ -44,11 +44,11 @@
 //! bias (`b_bias_hmr`/`c_bias_hmr`), an initial condition (`init_state_hpr`), or
 //! a depthwise filter (the Mamba-1/2 conv) — diagonal or embedding-like again.
 //!
-//! The seams a [`ProjSpec`] carries are therefore **per named sub-projection**,
+//! The seams a [`ProjSpec`](crate::optim::spec::ProjSpec) carries are therefore **per named sub-projection**,
 //! not per head/group/MIMO rank — the same boundaries the forward's
 //! `split_into` uses, and the usual Muon convention (a transformer's `W_q` goes
 //! to Muon with all heads fused). A caller who wants to test a finer split can
-//! just hand [`ProjSpec::block`] more segments.
+//! just hand [`ProjSpec::block`](crate::optim::spec::ProjSpec::block) more segments.
 //!
 //! ## Usage
 //!
@@ -64,7 +64,7 @@
 //! [`AdjustLrFn::MatchRmsAdamW`](burn::optim::AdjustLrFn::MatchRmsAdamW) rescales
 //! Muon's update so its per-element RMS is `0.2·lr` — AdamW's own ballpark — so
 //! an LR schedule tuned for AdamW can be reused as-is. That is what
-//! [`muon_config`] returns; the default
+//! [`muon_config`](crate::optim::muon_config) returns; the default
 //! [`Original`](burn::optim::AdjustLrFn::Original) instead expects a Muon-specific
 //! (typically much larger) LR.
 

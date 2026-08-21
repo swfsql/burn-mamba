@@ -13,7 +13,7 @@
 //!
 //! The interface is MIMO-first (matches the other burn-mamba SSD inputs),
 //! with `mimo_rank = 1` collapsing to the SISO case. The algorithm is selected
-//! by [`Mamba3SsdPath`], shared with the double-ssd pathway.
+//! by [`Mamba3SsdPath`](crate::mamba3::ssd_path::Mamba3SsdPath), shared with the double-ssd pathway.
 
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
@@ -97,7 +97,7 @@ pub struct Mamba3SingleSsdInput {
 }
 
 impl Mamba3SingleSsdInput {
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every input tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every input tensor.
     pub fn sanity(&self) {
         use crate::modules::sanity as san;
         san(&self.v_bnlmhp);

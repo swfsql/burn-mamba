@@ -64,7 +64,7 @@ impl Mamba3 {
     /// limit of `step(input, …)` outputs as the same `input_bd` is stepped
     /// forever.
     ///
-    /// Closed form, O(1) in the horizon (see the [module header](self) for the
+    /// Closed form, O(1) in the horizon (see the module header for the
     /// derivation). The limit forgets any starting state (`αⁿ → 0`) and the
     /// SSM state itself never converges (it keeps rotating; only the output
     /// does), so this takes **no cache and returns none**.

@@ -1,5 +1,5 @@
 //! Smoke / parity tests for the family-generic abstraction in
-//! [`crate::generic`] — builder wiring, the unifying enums, and the
+//! [`crate::modules`] — builder wiring, the unifying enums, and the
 //! class-token / class-latent insertion + step-injection machinery.
 
 use super::*;
@@ -508,11 +508,11 @@ fn class_latents_step_matches_forward() {
     // are injected automatically as the cursor reaches their positions.
     let mut class = ClassCursors::new(seq);
     let mut caches = None;
-    for t in 0..seq {
+    for (t, &pos) in user_pos.iter().enumerate() {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
-        let expected = y_fwd.clone().narrow(1, user_pos[t], 1).squeeze_dim::<2>(1);
+        let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
             max_abs_diff(yt, expected) < 1e-4,
             "stepped user token {t} disagrees with forward"
@@ -1376,11 +1376,11 @@ fn class_markers_step_matches_forward_with_full_len() {
 
     let mut class = ClassCursors::new(seq);
     let mut caches = None;
-    for t in 0..seq {
+    for (t, &pos) in last_pos.iter().enumerate() {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
-        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
             max_abs_diff(yt, expected) < 1e-4,
             "step {t} disagrees with forward at its last emitted token"
@@ -1533,11 +1533,11 @@ fn class_markers_forward_then_step() {
     assert_eq!(y_pre.dims(), [batch, prefill + 1, d_model]);
     assert_eq!(class.stack, prefill + 1);
 
-    for t in prefill..seq {
+    for (t, &pos) in last_pos.iter().enumerate().skip(prefill) {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = layers.step(xt, Some(caches), Some(&mut class));
         caches = c;
-        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
             max_abs_diff(yt, expected) < 1e-4,
             "step {t} disagrees with forward at its last emitted token"
@@ -1584,11 +1584,11 @@ fn class_tokens_step_matches_forward_with_full_len() {
 
     let mut class = ClassCursors::new(seq);
     let mut caches = None;
-    for t in 0..seq {
+    for (t, &pos) in last_pos.iter().enumerate() {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = net.step(xt, caches, Some(&mut class));
         caches = Some(c);
-        let expected = y_fwd.clone().narrow(1, last_pos[t], 1).squeeze_dim::<2>(1);
+        let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
             max_abs_diff(yt, expected) < 1e-4,
             "step {t} disagrees with forward at its last emitted token"

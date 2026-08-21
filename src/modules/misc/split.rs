@@ -1,4 +1,4 @@
-//! Typed-array variants of [`Tensor::split_with_sizes`].
+//! Typed-array variants of [`Tensor::split_with_sizes`](burn::tensor::Tensor::split_with_sizes).
 
 use burn::prelude::*;
 

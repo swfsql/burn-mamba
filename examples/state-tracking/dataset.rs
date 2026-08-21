@@ -75,7 +75,7 @@ pub fn even_permutations() -> Vec<[usize; 5]> {
     let mut perms = Vec::new();
     let mut p = [0usize, 1, 2, 3, 4];
     permute(&mut p, 0, &mut perms);
-    perms.retain(|p| parity_even(p));
+    perms.retain(parity_even);
     perms.sort();
     perms
 }

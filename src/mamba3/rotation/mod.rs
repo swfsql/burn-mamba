@@ -6,7 +6,7 @@
 //! `SO(2) ≅ U(1)` is **abelian** the cumulative rotation collapses to a
 //! `cumsum` of angles and is absorbed into `B`/`C` (the "RoPE trick", Prop.
 //! *Complex SSM, Data-Dependent RoPE Equivalence*).  See
-//! [`crate::mamba3::double_ssd::double_ssd::apply_rope`].
+//! [`crate::modules::misc::rope::apply_rope`].
 //!
 //! This module implements the next rung of the ladder: a **quaternion**
 //! (`k = 4`) rotational state, i.e. the transition's rotation lives in the
@@ -73,23 +73,18 @@ use burn::prelude::*;
 ///
 /// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
 ///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
-///   [`apply_rope`]. The default; behaviourally unchanged.
+///   [`apply_rope`](crate::modules::misc::rope::apply_rope). The default; behaviourally unchanged.
 /// - [`Quaternion4D`](RotationKind::Quaternion4D) — the non-abelian
 ///   `SU(2) ⊂ SO(4)` quaternion rotation of this module: cumulative *product*
 ///   via [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
 ///   state-tracking; selects the [`RotationState::Quaternion`] cache accumulator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RotationKind {
     /// Abelian complex (`SO(2)`) RoPE — the current default behaviour.
+    #[default]
     Complex2D,
     /// Non-abelian quaternion (`SU(2)`) rotation.
     Quaternion4D,
-}
-
-impl Default for RotationKind {
-    fn default() -> Self {
-        RotationKind::Complex2D
-    }
 }
 
 /// The cumulative-rotation accumulator carried between calls in a Mamba-3 cache
@@ -155,7 +150,7 @@ impl RotationState {
         }
     }
 
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on the held tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on the held tensor.
     pub fn sanity(&self) {
         match self {
             RotationState::Angle(a) => crate::modules::sanity(a),

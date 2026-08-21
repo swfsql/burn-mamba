@@ -47,7 +47,7 @@ pub struct Mamba1Cache {
 }
 
 impl Mamba1Cache {
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bik);
         san(&self.ssm_bir);
@@ -106,7 +106,7 @@ impl Mamba1CacheConfig {
 ///
 /// During autoregressive decoding a [`Mamba1Caches`] instance is threaded
 /// through every layer-stack `step` call (the family-generic
-/// [`crate::generic::Layers`]).  Each element corresponds to one (virtual) layer
+/// [`crate::modules::Layers`]).  Each element corresponds to one (virtual) layer
 /// in the network.
 #[derive(Module, Debug)]
 pub struct Mamba1Caches {

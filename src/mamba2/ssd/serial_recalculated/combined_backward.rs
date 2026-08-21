@@ -9,7 +9,7 @@
 //! corresponding terms of the chunk-scan gradient, matching the reference.
 //!
 //! Everything here operates on backend **primitives** through the rank-tagged
-//! [`F`] wrapper: a custom [`Backward`](burn::backend::autodiff::ops::Backward)
+//! `F` wrapper: a custom [`Backward`](burn::backend::autodiff::ops::Backward)
 //! node runs with a generic backend `B`, so the high-level `Tensor` (pinned to
 //! the global `Dispatch` backend) is unavailable and the math must use `B`'s
 //! `float_*` ops.  The recomputed K1/K2/K4 kernels are local primitive ports of
@@ -58,7 +58,7 @@ pub struct CombinedGrads<B: Backend> {
 // [`super::serial_recalculated`]) plus the extended K3 below, which returns the
 // extra intermediates the gradient math needs.
 
-/// Same as [`k3_ssd_chunk_state`](super::serial_recalculated::k3_ssd_chunk_state)
+/// Same as `k3_ssd_chunk_state`
 /// but also returns intermediates needed by the custom backward:
 /// - `intra_chunk_state_bnhpr` — chunk-end state assuming zero initial state
 /// - `b_bar_scale_bhnl` — the K3 scaling factor `dt · exp(cumA_last − cumA)`

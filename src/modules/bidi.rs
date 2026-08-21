@@ -86,7 +86,7 @@ impl OutputMergeConfig {
 /// A single bidirectional pair: a straight (→) and a reversed (←) Pre-LN block
 /// whose outputs are merged. The residual is **not** applied here — the
 /// enclosing [`BidiLayers`] adds it (or suppresses it on the first/last pair),
-/// mirroring the [`Layer`](crate::modules::Layer) / [`Layers`](crate::modules::Layers) split.
+/// mirroring the [`Layer`] / [`Layers`] split.
 #[derive(Module, Debug)]
 pub struct BidiLayerPair<M: Module> {
     /// Pre-norm for the straight pass.

@@ -522,7 +522,7 @@ fn init_bias_step_ramps_the_gates() {
         .narrow(3, 0, 1)
         .reshape([n])
         .into_data()
-        .to_vec()
+        .try_to_vec()
         .unwrap();
     for (i, w) in betas.windows(2).enumerate() {
         assert!(
@@ -598,11 +598,11 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
 
     let mut class = ClassCursors::new(seq);
     let mut caches = None;
-    for t in 0..seq {
+    for (t, &pos) in user_pos.iter().enumerate() {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
-        let expected = y_fwd.clone().narrow(1, user_pos[t], 1).squeeze_dim::<2>(1);
+        let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
             max_abs_diff(yt, expected) < 1e-4,
             "MGR stack-latent step disagrees with forward at t={t}"
@@ -842,7 +842,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
     // Priming before every step must leave the same outputs and cursors.
     let mut class2 = ClassCursors::new(seq);
     let mut caches2 = None;
-    for t in 0..seq {
+    for (t, want) in plain.iter().enumerate() {
         let (primed, c) = layers.prime(batch, caches2, Some(&mut class2));
         caches2 = c;
         // The stack's `Start` (t == 0) and layer 2's own `Start` are due before
@@ -851,7 +851,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
         let (y, c) = layers.step(token(t), caches2, Some(&mut class2));
         caches2 = Some(c);
         assert!(
-            max_abs_diff(y, plain[t].clone()) < 1e-4,
+            max_abs_diff(y, want.clone()) < 1e-4,
             "prime+step disagrees with step at t={t}"
         );
     }
@@ -1043,13 +1043,13 @@ fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
 
         let mut class = ClassCursors::new(seq);
         let mut caches = None;
-        for t in 0..seq {
+        for (t, &pos) in user_pos.iter().enumerate() {
             let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
             let (yt, c) = layers.step(xt, caches, Some(&mut class));
             caches = Some(c);
             // The last step carries the closing `End`, so it returns *that*
             // token — the sequence's true last one.
-            let want = if t + 1 == seq { seq + 1 } else { user_pos[t] };
+            let want = if t + 1 == seq { seq + 1 } else { pos };
             let expected = y_fwd.clone().narrow(1, want, 1).squeeze_dim::<2>(1);
             assert!(
                 max_abs_diff(yt, expected) < 1e-4,

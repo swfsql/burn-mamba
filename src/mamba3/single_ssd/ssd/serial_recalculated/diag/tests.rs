@@ -22,6 +22,7 @@ fn to_tensor<const D: usize>(f: P<D>) -> Tensor<D> {
 }
 
 /// `(v, b, c, gamma)` at the given shape; `gamma` non-negative like `Δ·σ(λ)`.
+#[allow(clippy::too_many_arguments)]
 fn random_input(
     batch: usize,
     nchunks: usize,

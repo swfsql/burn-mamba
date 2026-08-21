@@ -1,7 +1,7 @@
 //! [`Segmented`]: run a different optimizer on each column block of a fused
 //! projection weight.
 //!
-//! Burn's [`Muon`] orthogonalises the *whole* matrix it is handed. Handing it a
+//! Burn's [`Muon`](burn::optim::Muon) orthogonalises the *whole* matrix it is handed. Handing it a
 //! fused `in_proj` would couple the singular values of maps that have nothing to
 //! do with each other (the gate `z`, the values `x`, the SSM keys/queries `B`/`C`,
 //! the per-head Δ/`A`/`λ` scalars, …). [`Segmented`] slices the weight and its

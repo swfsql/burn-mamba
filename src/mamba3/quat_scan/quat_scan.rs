@@ -4,15 +4,15 @@
 //! [`crate::mamba3::rotation::quat_cumprod`], but routed through the
 //! [`Mamba3QuatScanBackendExt`] trait so that `Autodiff` backends substitute a
 //! custom backward that recomputes the scan instead of retaining its
-//! intermediates (see [`super::backward`]). Plain backends use the trait's
+//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)). Plain backends use the trait's
 //! default body, which runs the scan on `B`'s primitives.
 //!
 //! The default body runs under a generic backend `B`, where the high-level
-//! [`Tensor`] (pinned to `Dispatch`) is unavailable, so the quaternion algebra
-//! goes through the rank-tagged [`F`] primitive wrapper, held in a
-//! struct-of-arrays [`Quat`] (the four components as separate tensors) so the
-//! Hamilton product is narrow/cat-free on the hot path. The same [`Quat`] helper
-//! and [`quat_prefix_product_soa`] are reused by the recompute backward.
+//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is unavailable, so the quaternion algebra
+//! goes through the rank-tagged `F` primitive wrapper, held in a
+//! struct-of-arrays `Quat` (the four components as separate tensors) so the
+//! Hamilton product is narrow/cat-free on the hot path. The same `Quat` helper
+//! and `quat_prefix_product_soa` are reused by the recompute backward.
 
 #![allow(non_snake_case)]
 

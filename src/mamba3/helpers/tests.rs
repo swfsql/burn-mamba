@@ -49,8 +49,8 @@ fn mimo_outer_sum_matches_einsum() {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-        let v_host: Vec<f32> = v.to_data().to_vec().unwrap();
-        let k_host: Vec<f32> = k.to_data().to_vec().unwrap();
+        let v_host: Vec<f32> = v.to_data().try_to_vec().unwrap();
+        let k_host: Vec<f32> = k.to_data().try_to_vec().unwrap();
 
         let want = reference(&v_host, &k_host, [batch, mimo_rank, nheads, per_head_dim]);
 
@@ -60,7 +60,7 @@ fn mimo_outer_sum_matches_einsum() {
             let got = mimo_outer_sum(v.clone(), k.clone(), siso);
             assert_eq!([batch, nheads, per_head_dim, state_rank], got.dims());
 
-            let got_host: Vec<f32> = got.to_data().to_vec().unwrap();
+            let got_host: Vec<f32> = got.to_data().try_to_vec().unwrap();
             for (i, (g, w)) in got_host.iter().zip(want.iter()).enumerate() {
                 assert!(
                     (g - w).abs() < 1e-5,

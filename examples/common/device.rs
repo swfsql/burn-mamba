@@ -17,7 +17,7 @@ use burn::prelude::*;
 
 /// The host-side scalar type matching the device's default float dtype.
 ///
-/// Used when reading tensor values back to the host (`to_vec`/`into_data`) so
+/// Used when reading tensor values back to the host (`try_to_vec`/`into_data`) so
 /// the element type matches the runtime dtype — fp16 under `dev-f16`, fp32
 /// otherwise.
 #[cfg(feature = "dev-f16")]

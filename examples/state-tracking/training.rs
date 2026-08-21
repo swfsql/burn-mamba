@@ -267,9 +267,9 @@ pub fn accumulate_per_position(
         .argmax(1)
         .reshape([bseq])
         .into_data()
-        .to_vec::<i32>()
+        .try_to_vec::<i32>()
         .unwrap();
-    let tgt = targets_flat.into_data().to_vec::<i32>().unwrap();
+    let tgt = targets_flat.into_data().try_to_vec::<i32>().unwrap();
     if correct.len() < seq {
         correct.resize(seq, 0);
         total.resize(seq, 0);

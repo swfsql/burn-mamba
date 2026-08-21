@@ -7,11 +7,11 @@
 //! has gathered the per-chunk slices.  The fused `L·M` length carries the
 //! `mimo_rank` axis through the intra-chunk products.
 //!
-//! Everything operates on backend **primitives** through the rank-tagged [`F`]
+//! Everything operates on backend **primitives** through the rank-tagged `F`
 //! wrapper: the custom [`Backward`](burn::backend::autodiff::ops::Backward) node
 //! runs with a generic backend `B`, so the high-level `Tensor` is unavailable
 //! and the math uses `B`'s `float_*` ops.  The recomputed K1/K2/K4 kernels are
-//! local primitive ports of the high-level [`super::super::serial`] kernels.
+//! local primitive ports of the high-level [`super::super::serial`](crate::mamba3::double_ssd::ssd::serial) kernels.
 
 #![allow(non_snake_case)]
 
@@ -41,7 +41,7 @@ pub struct CombinedGrads<B: Backend> {
 // [`super::serial_recalculated`]) plus the extended K3 below, which returns the
 // extra intermediates the gradient math needs.
 
-/// Same as [`k3_ssd_chunk_state`](super::serial_recalculated::k3_ssd_chunk_state) but
+/// Same as `k3_ssd_chunk_state` but
 /// also returns intermediates needed by the custom backward:
 /// - `intra_chunk_state_bnhpr` — the chunk-end state assuming zero initial state
 /// - `decay_bhnLM` — the fused-length K3 decay factor `exp(cumA_last − cumA_fused)`

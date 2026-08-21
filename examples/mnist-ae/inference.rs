@@ -50,9 +50,9 @@ pub fn infer(model_config: AeConfig, infer_device: Device, app_args: &AppArgs) {
     let recon = burn::tensor::activation::sigmoid(logits);
     let recon_host = to_host(recon);
     let original_host = to_host(input.clone().reshape([n, HEIGHT * WIDTH]));
-    for i in 0..n {
+    for (i, label) in labels.iter().enumerate().take(n) {
         let off = i * HEIGHT * WIDTH;
-        println!("\n--- digit {} (label {}) ---", i, labels[i]);
+        println!("\n--- digit {i} (label {label}) ---");
         println!(
             "{}",
             render_side_by_side(
@@ -130,7 +130,7 @@ fn side_by_side_png(orig: &[f32], recon: &[f32]) -> GrayImage {
 fn to_host<const D: usize>(tensor: Tensor<D>) -> Vec<f32> {
     tensor
         .into_data()
-        .to_vec::<FloatElement>()
+        .try_to_vec::<FloatElement>()
         .unwrap()
         .into_iter()
         .map(|x| x.elem::<f32>())

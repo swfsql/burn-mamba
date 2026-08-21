@@ -1,7 +1,7 @@
 //! # Custom autodiff node for the quaternion cumulative-product scan
 //!
 //! Implements [`Mamba3QuatScanBackendExt`](super::quat_scan::Mamba3QuatScanBackendExt)
-//! for `Autodiff<B>` via a single Burn [`Backward`] node. The forward keeps only
+//! for `Autodiff<B>` via a single Burn [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward keeps only
 //! its two leaf inputs (the per-step quaternions `q` and the carry `init`);
 //! backprop recomputes the prefix product and evaluates the exact quaternion VJP
 //! of the cumulative product, so the `O(log seq)` scan intermediates are never

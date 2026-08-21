@@ -4,18 +4,18 @@
 //! five Triton kernels of the reference `ssd_combined.py` (`ssd_chunk_state.py`,
 //! `ssd_bmm.py`, `ssd_state_passing.py`, `ssd_chunk_scan.py`):
 //!
-//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
-//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul.
-//! - **K3** [`k3_ssd_chunk_state`] — each chunk's contribution to its end state
+//! - **K1** [`k1_ssd_chunk_cumsum`](crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum) — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`](crate::mamba2::ssd::serial::k2_ssd_bmm) — the intra-chunk `C·Bᵀ` block matmul.
+//! - **K3** [`k3_ssd_chunk_state`](crate::mamba2::ssd::serial::k3_ssd_chunk_state) — each chunk's contribution to its end state
 //!   (assuming a zero state at the chunk's start).
 //! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan that carries the
 //!   running state across chunk boundaries.
-//! - **K5** [`k5_ssd_chunk_scan`] — combines the intra-chunk (attention-like) and
+//! - **K5** [`k5_ssd_chunk_scan`](crate::mamba2::ssd::serial::k5_ssd_chunk_scan) — combines the intra-chunk (attention-like) and
 //!   inter-chunk (state-carried) contributions into the output `y`.
 //!
-//! This produces identical values and gradients to [`super::minimal`]; the
+//! This produces identical values and gradients to [`super::minimal`](crate::mamba2::ssd::minimal); the
 //! serial form keeps per-chunk tensors small (lower peak memory) and is the
-//! basis of the recompute backward in [`super::serial_recalculated`].  Gradients
+//! basis of the recompute backward in [`super::serial_recalculated`](crate::mamba2::ssd::serial_recalculated).  Gradients
 //! here still flow through plain autodiff.
 
 #![allow(unused_variables)]

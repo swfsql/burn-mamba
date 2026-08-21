@@ -9,7 +9,7 @@
 //! internally, it additionally returns `d_gamma` and `d_scale`.  The shared K3
 //! extended helper (and K1/K2/K4) are reused from the double-SSD module.
 //!
-//! Everything operates on backend **primitives** through the rank-tagged [`F`]
+//! Everything operates on backend **primitives** through the rank-tagged `F`
 //! wrapper: the custom [`Backward`](burn::backend::autodiff::ops::Backward) node
 //! runs with a generic backend `B`, so the high-level `Tensor` is unavailable
 //! and the math uses `B`'s `float_*` ops.

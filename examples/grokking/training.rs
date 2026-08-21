@@ -388,7 +388,7 @@ pub fn eval_accuracies(
 
 /// Read a single-element float tensor back to the host.
 fn scalar_f32(t: Tensor<1>) -> f32 {
-    t.into_data().to_vec::<f32>().unwrap()[0]
+    t.into_data().try_to_vec::<f32>().unwrap()[0]
 }
 
 /// Compact console form of the diagnostics (centered PRs are the primary

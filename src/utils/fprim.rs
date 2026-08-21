@@ -208,7 +208,7 @@ impl<B: Backend, const D: usize> F<B, D> {
         let cols = dims[D - 1];
         let device = &self.0.device();
 
-        let mask2 = tri_bool::<B>(rows, cols, diagonal, false, &device);
+        let mask2 = tri_bool::<B>(rows, cols, diagonal, false, device);
         let mut lead = [1usize; D];
         lead[D - 2] = rows;
         lead[D - 1] = cols;

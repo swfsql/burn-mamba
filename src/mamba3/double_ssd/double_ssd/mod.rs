@@ -1,6 +1,6 @@
 //! # Mamba-3 — Double-Pass SSD Forward
 //!
-//! This module provides the [`Mamba3::forward_double_ssd`] method:
+//! This module provides the [`Mamba3::forward_double_ssd`](crate::mamba3::mamba3::Mamba3::forward_double_ssd) method:
 //! The burn-mamba implementation of the [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal) decomposition:
 //!
 //! ```text

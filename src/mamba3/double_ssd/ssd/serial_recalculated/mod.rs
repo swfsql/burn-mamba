@@ -1,8 +1,8 @@
 //! Double-SSD serial scan with a custom, memory-efficient backward.
 //!
 //! The forward + [`Mamba3DoubleSsdBackendExt`] impl live in
-//! `serial_recalculated`; the registered autodiff [`backward`] node and the
-//! recompute-based gradient math in [`combined_backward`] save training memory
+//! `serial_recalculated`; the registered autodiff [`backward`](crate::mamba3::double_ssd::ssd::serial_recalculated::backward) node and the
+//! recompute-based gradient math in [`combined_backward`](crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward) save training memory
 //! by recomputing intermediates instead of storing them.
 
 /// The registered custom `Backward` node (autodiff op).

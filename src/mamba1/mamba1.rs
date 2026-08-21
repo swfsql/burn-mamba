@@ -493,11 +493,7 @@ impl Mamba1 {
         assert_eq!(inner_shape, init_ssm.dims());
         let mut xs: Tensor<3> = init_ssm;
         let mut ys = Vec::with_capacity(sequence); // inner shape: [batch, d_inner]
-        for ((delta_a, delta_bu), c) in delta_a
-            .into_iter()
-            .zip(delta_bu.into_iter())
-            .zip(c.into_iter())
-        {
+        for ((delta_a, delta_bu), c) in delta_a.into_iter().zip(delta_bu).zip(c) {
             let delta_a = delta_a.squeeze_dim(0);
             assert_eq!(inner_shape, delta_a.dims());
             let delta_bu = delta_bu.squeeze_dim(0);

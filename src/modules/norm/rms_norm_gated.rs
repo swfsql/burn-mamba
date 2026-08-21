@@ -5,9 +5,9 @@
 //! - `false` — gate, then normalise:   `y = rms(x · SiLU(z)) · γ` applied to
 //!   `x · SiLU(z)`
 //!
-//! The numerical-stability epsilon is the per-dtype [`div_eps`] (so there is no
+//! The numerical-stability epsilon is the per-dtype [`div_eps`](crate::utils::div_eps) (so there is no
 //! configurable epsilon); the fp16 path uses the same `max(|x|)`-rescaling
-//! trick as [`RmsNorm`](crate::utils::rms_norm::RmsNorm).
+//! trick as [`RmsNorm`](crate::modules::norm::rms_norm::RmsNorm).
 
 use crate::modules::Silu;
 use crate::utils::div_eps;

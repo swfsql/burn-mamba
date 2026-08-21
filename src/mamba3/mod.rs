@@ -4,7 +4,7 @@
 //! or combined): **trapezoidal discretisation**, a **complex-valued state
 //! transition** — realised as **data-dependent RoPE** on the B/C projections,
 //! which is a re-factoring of the transition and *not* a positional encoding —
-//! and **MIMO** (multiple-input multiple-output) rank expansion.  See [`mamba3`]
+//! and **MIMO** (multiple-input multiple-output) rank expansion.  See [`mamba3`](crate::mamba3::mamba3)
 //! for the full combined math.
 //!
 //! ## Two SSD pathways
@@ -12,13 +12,13 @@
 //! The trapezoidal recurrence is realised by two interchangeable algorithms,
 //! selected at runtime by which **cache variant** is supplied:
 //!
-//! - [`double_ssd`] — splits the trapezoid into two standard SSD calls
+//! - [`double_ssd`](crate::mamba3::double_ssd) — splits the trapezoid into two standard SSD calls
 //!   (simple, easy to verify; ~2× the intra-chunk memory).
-//! - [`single_ssd`] — one SSD call in the official-kernel form
+//! - [`single_ssd`](crate::mamba3::single_ssd) — one SSD call in the official-kernel form
 //!   (≈ half the training memory; the cache's SSM accumulator has different
 //!   mid-sequence semantics).
 //!
-//! [`cache`] holds the enum that dispatches between them; [`ssd_path`] selects
+//! [`cache`](crate::mamba3::cache) holds the enum that dispatches between them; [`ssd_path`](crate::mamba3::ssd_path) selects
 //! the pathway-agnostic *algorithm* (Minimal / Serial / SerialRecalculated).
 
 pub mod double_ssd;

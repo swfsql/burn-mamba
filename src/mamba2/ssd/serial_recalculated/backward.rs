@@ -1,7 +1,7 @@
 //! # Custom autodiff node for the Mamba-2 recompute backward
 //!
 //! Implements [`Mamba2BackendExt`] for `Autodiff<B>` by registering a single
-//! Burn [`Backward`] node.  The forward stores only its (small) leaf inputs;
+//! Burn [`Backward`](burn::backend::autodiff::ops::Backward) node.  The forward stores only its (small) leaf inputs;
 //! during backprop those are replayed through the K1–K5 kernels and the
 //! analytic gradient math in [`combined_backward`], so the large intermediate
 //! tensors never have to be kept alive — the ~⅓ training-memory saving of the

@@ -1,8 +1,8 @@
 //! Serial SSD with a custom, memory-efficient backward.
 //!
 //! The forward + [`Mamba2BackendExt`] impl live in `serial_recalculated`; the
-//! registered autodiff [`backward`] node and the recompute-based gradient math
-//! in [`combined_backward`] together mirror the official `ssd_combined.py`,
+//! registered autodiff [`backward`](crate::mamba2::ssd::serial_recalculated::backward) node and the recompute-based gradient math
+//! in [`combined_backward`](crate::mamba2::ssd::serial_recalculated::combined_backward) together mirror the official `ssd_combined.py`,
 //! saving ~⅓ of the training memory versus storing every intermediate.
 
 /// The registered custom `Backward` node (autodiff op).

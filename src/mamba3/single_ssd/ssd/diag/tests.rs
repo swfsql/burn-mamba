@@ -14,6 +14,7 @@ type Device = burn::prelude::Device;
 
 /// `(v, b, c, gamma)` at the given shape. `gamma` is non-negative, matching the
 /// `Δ·σ(λ)` output of `helpers::trapezoidal_coefficients`.
+#[allow(clippy::too_many_arguments)]
 fn random_input(
     batch: usize,
     nchunks: usize,

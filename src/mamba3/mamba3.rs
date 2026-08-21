@@ -110,7 +110,7 @@
 //! is computed by splitting it into a γ-SSD (current-token contributions) and
 //! a β-SSD (previous-token contributions); see [`crate::mamba3::double_ssd::ssd::ssd_path`].
 //! RoPE is applied to B and C before the SSD calls
-//! (see [`crate::mamba3::double_ssd::double_ssd::apply_rope`]),
+//! (see [`crate::modules::misc::rope::apply_rope`]),
 //! and MIMO expansion happens by augmenting the V tensor with the per-rank
 //! `mimo_x` projection.
 //!
@@ -409,7 +409,7 @@ pub struct Mamba3Config {
     /// or `1.0`).
     ///
     /// - `0.0`: RoPE disabled — no B/C dimension is rotated
-    ///   ([`apply_rope_partial`](crate::mamba3::double_ssd::double_ssd::apply_rope_partial)
+    ///   ([`apply_rope_partial`](crate::modules::misc::rope::apply_rope_partial)
     ///   becomes the identity). Intended for ablations only. The angle
     ///   projection and cumulative-angle data flow are kept intact (with a
     ///   single dummy angle channel, see [`Self::num_rope_angles`]) so the rest

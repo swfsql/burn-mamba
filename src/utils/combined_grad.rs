@@ -54,6 +54,7 @@ pub fn unflatten_pair<B: Backend, const DA: usize, const DB: usize>(
 
 /// Inverse of [`flatten_pair`]: split a 1-D combined tensor back into the two
 /// outputs at their original ranks/shapes.
+#[allow(clippy::type_complexity)]
 pub fn autodiff_unflatten_pair<
     B: Backend,
     C: CheckpointStrategy,

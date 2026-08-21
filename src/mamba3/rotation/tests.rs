@@ -55,7 +55,7 @@ fn explicit_recurrence(
     c_bshr: Tensor<4>,
     init_state_bhr: Tensor<3>,
 ) -> Tensor<3> {
-    let [batch, sequence, nheads, blocks, _4] = q_bshj4.dims();
+    let [batch, sequence, nheads, blocks, _quat] = q_bshj4.dims();
     let state_rank = blocks * 4;
     let mut h_bhr = init_state_bhr;
     let mut ys: Vec<Tensor<3>> = Vec::with_capacity(sequence);
@@ -94,7 +94,7 @@ fn factored_recurrence(
     c_bshr: Tensor<4>,
     init_state_bhr: Tensor<3>,
 ) -> Tensor<3> {
-    let [_batch, sequence, _nheads, _blocks, _4] = q_bshj4.dims();
+    let [_batch, sequence, _nheads, _blocks, _quat] = q_bshj4.dims();
 
     // Cumulative rotation Pₜ (fresh identity carry), then absorb its inverse
     // (conjugate) into B and C.

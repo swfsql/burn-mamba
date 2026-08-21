@@ -20,7 +20,7 @@
 //! `mimo_rank == 1` it collapses to the **scalar** `Cₜ·Bₜ`, so both matmuls
 //! degenerate into `1×r×1` and `1×1×p` GEMMs — thousands of tiny batched
 //! products, one per `(batch, nchunks, chunk_len, nheads)`.
-//! [`y_diag_correction_siso`] instead contracts `state_rank` with a reduction
+//! `y_diag_correction_siso` instead contracts `state_rank` with a reduction
 //! and folds the result (together with `γₜ`) in as a per-`(b, n, l, h)` scalar
 //! broadcast. Both branches compute the same quantity; only the op mix differs,
 //! so [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
@@ -35,8 +35,8 @@
 use burn::prelude::*;
 
 /// The γ-weighted same-step correction `y_diag`, dispatching to the SISO fast
-/// path ([`y_diag_correction_siso`]) or the general MIMO path
-/// ([`y_diag_correction_mimo`]) on `mimo_rank`.
+/// path (`y_diag_correction_siso`) or the general MIMO path
+/// (`y_diag_correction_mimo`) on `mimo_rank`.
 ///
 /// `siso_specialization` is
 /// [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization):

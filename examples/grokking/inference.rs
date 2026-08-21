@@ -46,7 +46,7 @@ pub fn infer(
         .argmax(1)
         .reshape([b])
         .into_data()
-        .to_vec::<i32>()
+        .try_to_vec::<i32>()
         .unwrap();
     for ((seq, label), pred) in sample
         .seqs

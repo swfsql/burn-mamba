@@ -38,7 +38,7 @@ use burn::prelude::*;
 ///
 /// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
 /// through every layer-stack `step` call (the family-generic
-/// [`crate::generic::Layers`]).  Each element of `caches` corresponds to one
+/// [`crate::modules::Layers`]).  Each element of `caches` corresponds to one
 /// (virtual) layer in the network.
 #[derive(Module, Debug)]
 pub struct Mamba2Caches {
@@ -122,7 +122,7 @@ pub struct Mamba2Cache {
 }
 
 impl Mamba2Cache {
-    /// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
+    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bvk);
         san(&self.ssm_bhpr);

@@ -2,7 +2,7 @@
 //!
 //! Three exact reformulations (Minimal / Serial / SerialRecalculated) that
 //! agree on values and gradients; selected via [`Mamba3SsdPath`] and dispatched
-//! by [`Mamba3SingleSsdInput::run`].  These take the raw `v` plus `gamma`/`scale`
+//! by [`Mamba3SingleSsdInput::run`](crate::mamba3::single_ssd::ssd::ssd_path::Mamba3SingleSsdInput::run).  These take the raw `v` plus `gamma`/`scale`
 //! so the kernel applies the trapezoid weights and boundary seed internally.
 //!
 //! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
