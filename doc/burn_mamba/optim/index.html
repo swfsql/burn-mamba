@@ -11,7 +11,7 @@ crate:</p>
 <code>dt_bias</code>/<code>D</code>, the Mamba-1/2 depthwise conv weight, and every MIMO/bias
 3-D tensor must stay on the fallback optimizer. Passing one to Muon
 panics — which is why the plan built here is an <strong>allowlist</strong>: only the
-weights named by a [<code>ProjSpec</code>] are moved off AdamW.</li>
+weights named by a <a href="spec/struct.ProjSpec.html" title="struct burn_mamba::optim::spec::ProjSpec"><code>ProjSpec</code></a> are moved off AdamW.</li>
 <li><strong>Embedding-like matrices.</strong> The token embedding, the LM head, the
 <code>LatentNetwork</code> input/output projections and the class-token/latent tables
 are rank-2 but are lookup/readout tables at the model boundary; the usual
@@ -19,13 +19,13 @@ Muon recipe keeps them on AdamW. They are simply never listed.</li>
 <li><strong>Fused projections.</strong> Every family concatenates several independent maps
 into one <code>Linear</code> (<code>in_proj</code> most of all). Orthogonalising that
 concatenation ties together maps that share nothing but an allocation, so
-the plan carries the column seams and [<code>Segmented</code>] applies Muon
+the plan carries the column seams and <a href="segmented/struct.Segmented.html" title="struct burn_mamba::optim::segmented::Segmented"><code>Segmented</code></a> applies Muon
 <strong>per block</strong>. The model is untouched — the forward pass keeps its single
 fused GEMM.</li>
 </ol>
 <p>Within a fused projection one more distinction applies: blocks that emit
 <em>per-head scalars</em> (Δ, <code>A</code>, <code>λ</code>) are gains rather than feature maps and stay
-on AdamW ([<code>ProjSegment::adamw</code>]).</p>
+on AdamW (<a href="spec/struct.ProjSegment.html#method.adamw" title="associated function burn_mamba::optim::spec::ProjSegment::adamw"><code>ProjSegment::adamw</code></a>).</p>
 <h3 id="why-the-3-d-tensors-are-not-stacked-matrices"><a class="doc-anchor" href="#why-the-3-d-tensors-are-not-stacked-matrices">§</a>Why the 3-D tensors are not “stacked matrices”</h3>
 <p>MIMO’s <em>math</em> is R independent SSMs summed together, so a <code>[nheads, mimo_rank, per_head_dim]</code> tensor looks like a stack of matrices that a
 stack-aware Muon could take a slice at a time. It is not: the paper
@@ -41,11 +41,11 @@ MIMO that really is an R-fold matrix expansion is B/C (<code>DN → DNR</code>),
 lives in <code>in_proj</code> and is already Muon’s. The remaining 3-D tensors are a
 bias (<code>b_bias_hmr</code>/<code>c_bias_hmr</code>), an initial condition (<code>init_state_hpr</code>), or
 a depthwise filter (the Mamba-1/2 conv) — diagonal or embedding-like again.</p>
-<p>The seams a [<code>ProjSpec</code>] carries are therefore <strong>per named sub-projection</strong>,
+<p>The seams a <a href="spec/struct.ProjSpec.html" title="struct burn_mamba::optim::spec::ProjSpec"><code>ProjSpec</code></a> carries are therefore <strong>per named sub-projection</strong>,
 not per head/group/MIMO rank — the same boundaries the forward’s
 <code>split_into</code> uses, and the usual Muon convention (a transformer’s <code>W_q</code> goes
 to Muon with all heads fused). A caller who wants to test a finer split can
-just hand [<code>ProjSpec::block</code>] more segments.</p>
+just hand <a href="spec/struct.ProjSpec.html#method.block" title="associated function burn_mamba::optim::spec::ProjSpec::block"><code>ProjSpec::block</code></a> more segments.</p>
 <h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
 <div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">let </span>plan = model_config.muon_plan();
 <span class="kw">let </span><span class="kw-2">mut </span>optim = plan.build(<span class="kw-2">&amp;</span>adamw_config, <span class="kw-2">&amp;</span>muon_config);
@@ -54,7 +54,7 @@ just hand [<code>ProjSpec::block</code>] more segments.</p>
 <a href="burn::optim::AdjustLrFn::MatchRmsAdamW"><code>AdjustLrFn::MatchRmsAdamW</code></a> rescales
 Muon’s update so its per-element RMS is <code>0.2·lr</code> — AdamW’s own ballpark — so
 an LR schedule tuned for AdamW can be reused as-is. That is what
-[<code>muon_config</code>] returns; the default
+<a href="fn.muon_config.html" title="fn burn_mamba::optim::muon_config"><code>muon_config</code></a> returns; the default
 <a href="burn::optim::AdjustLrFn::Original"><code>Original</code></a> instead expects a Muon-specific
 (typically much larger) LR.</p>
 </div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.BlockState"><code>pub use segmented::<a class="enum" href="segmented/enum.BlockState.html" title="enum burn_mamba::optim::segmented::BlockState">BlockState</a>;</code></dt><dt id="reexport.Segmented"><code>pub use segmented::<a class="struct" href="segmented/struct.Segmented.html" title="struct burn_mamba::optim::segmented::Segmented">Segmented</a>;</code></dt><dt id="reexport.SegmentedState"><code>pub use segmented::<a class="struct" href="segmented/struct.SegmentedState.html" title="struct burn_mamba::optim::segmented::SegmentedState">SegmentedState</a>;</code></dt><dt id="reexport.BLOCK_CONTAINERS"><code>pub use spec::<a class="constant" href="spec/constant.BLOCK_CONTAINERS.html" title="constant burn_mamba::optim::spec::BLOCK_CONTAINERS">BLOCK_CONTAINERS</a>;</code></dt><dt id="reexport.ProjScope"><code>pub use spec::<a class="enum" href="spec/enum.ProjScope.html" title="enum burn_mamba::optim::spec::ProjScope">ProjScope</a>;</code></dt><dt id="reexport.ProjSegment"><code>pub use spec::<a class="struct" href="spec/struct.ProjSegment.html" title="struct burn_mamba::optim::spec::ProjSegment">ProjSegment</a>;</code></dt><dt id="reexport.ProjSpec"><code>pub use spec::<a class="struct" href="spec/struct.ProjSpec.html" title="struct burn_mamba::optim::spec::ProjSpec">ProjSpec</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="report/index.html" title="mod burn_mamba::optim::report">report</a></dt><dd><a href="struct.MuonPlan.html#method.describe" title="method burn_mamba::optim::MuonPlan::describe"><code>MuonPlan::describe</code></a>: the per-parameter optimizer assignment, for checking

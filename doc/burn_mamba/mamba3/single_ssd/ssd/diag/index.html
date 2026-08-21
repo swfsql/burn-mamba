@@ -14,7 +14,7 @@ reshape.</p>
 <code>mimo_rank == 1</code> it collapses to the <strong>scalar</strong> <code>Cₜ·Bₜ</code>, so both matmuls
 degenerate into <code>1×r×1</code> and <code>1×1×p</code> GEMMs — thousands of tiny batched
 products, one per <code>(batch, nchunks, chunk_len, nheads)</code>.
-[<code>y_diag_correction_siso</code>] instead contracts <code>state_rank</code> with a reduction
+<code>y_diag_correction_siso</code> instead contracts <code>state_rank</code> with a reduction
 and folds the result (together with <code>γₜ</code>) in as a per-<code>(b, n, l, h)</code> scalar
 broadcast. Both branches compute the same quantity; only the op mix differs,
 so <a href="../../../mamba3/struct.Mamba3Config.html#structfield.siso_specialization" title="field burn_mamba::mamba3::mamba3::Mamba3Config::siso_specialization"><code>Mamba3Config::siso_specialization</code></a>
@@ -25,7 +25,7 @@ can force the general branch at <code>mimo_rank == 1</code> to measure the diffe
 <li>MIMO: <code>refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py</code></li>
 </ul>
 </div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.y_diag_correction.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction">y_<wbr>diag_<wbr>correction</a></dt><dd>The γ-weighted same-step correction <code>y_diag</code>, dispatching to the SISO fast
-path (<a href="fn.y_diag_correction_siso.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_siso"><code>y_diag_correction_siso</code></a>) or the general MIMO path
-(<a href="fn.y_diag_correction_mimo.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_mimo"><code>y_diag_correction_mimo</code></a>) on <code>mimo_rank</code>.</dd><dt><a class="fn" href="fn.y_diag_correction_mimo.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_mimo">y_<wbr>diag_<wbr>correction_<wbr>mimo</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>General MIMO <code>y_diag</code>: the <code>m_out × m_in</code> Gram matrix <code>C · Bᵀ</code> (contracted
+path (<code>y_diag_correction_siso</code>) or the general MIMO path
+(<code>y_diag_correction_mimo</code>) on <code>mimo_rank</code>.</dd><dt><a class="fn" href="fn.y_diag_correction_mimo.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_mimo">y_<wbr>diag_<wbr>correction_<wbr>mimo</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>General MIMO <code>y_diag</code>: the <code>m_out × m_in</code> Gram matrix <code>C · Bᵀ</code> (contracted
 over <code>state_rank</code>) applied to <code>V</code>, then scaled by <code>γₜ</code>.</dd><dt><a class="fn" href="fn.y_diag_correction_siso.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_siso">y_<wbr>diag_<wbr>correction_<wbr>siso</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>SISO (<code>mimo_rank == 1</code>) <code>y_diag</code>: <code>qk_dot</code> is the scalar <code>Σ_r Cₜ·Bₜ</code> per
 <code>(b, n, l, h)</code>, so both MIMO matmuls become a reduction plus broadcasts.</dd></dl></section></div></main></body></html>

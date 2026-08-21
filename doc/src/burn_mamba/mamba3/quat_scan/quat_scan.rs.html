@@ -4,15 +4,15 @@
 <a href=#4 id=4 data-nosnippet>4</a>//! [`crate::mamba3::rotation::quat_cumprod`], but routed through the
 <a href=#5 id=5 data-nosnippet>5</a>//! [`Mamba3QuatScanBackendExt`] trait so that `Autodiff` backends substitute a
 <a href=#6 id=6 data-nosnippet>6</a>//! custom backward that recomputes the scan instead of retaining its
-<a href=#7 id=7 data-nosnippet>7</a>//! intermediates (see [`super::backward`]). Plain backends use the trait's
+<a href=#7 id=7 data-nosnippet>7</a>//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)). Plain backends use the trait's
 <a href=#8 id=8 data-nosnippet>8</a>//! default body, which runs the scan on `B`'s primitives.
 <a href=#9 id=9 data-nosnippet>9</a>//!
 <a href=#10 id=10 data-nosnippet>10</a>//! The default body runs under a generic backend `B`, where the high-level
-<a href=#11 id=11 data-nosnippet>11</a>//! [`Tensor`] (pinned to `Dispatch`) is unavailable, so the quaternion algebra
-<a href=#12 id=12 data-nosnippet>12</a>//! goes through the rank-tagged [`F`] primitive wrapper, held in a
-<a href=#13 id=13 data-nosnippet>13</a>//! struct-of-arrays [`Quat`] (the four components as separate tensors) so the
-<a href=#14 id=14 data-nosnippet>14</a>//! Hamilton product is narrow/cat-free on the hot path. The same [`Quat`] helper
-<a href=#15 id=15 data-nosnippet>15</a>//! and [`quat_prefix_product_soa`] are reused by the recompute backward.
+<a href=#11 id=11 data-nosnippet>11</a>//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is unavailable, so the quaternion algebra
+<a href=#12 id=12 data-nosnippet>12</a>//! goes through the rank-tagged `F` primitive wrapper, held in a
+<a href=#13 id=13 data-nosnippet>13</a>//! struct-of-arrays `Quat` (the four components as separate tensors) so the
+<a href=#14 id=14 data-nosnippet>14</a>//! Hamilton product is narrow/cat-free on the hot path. The same `Quat` helper
+<a href=#15 id=15 data-nosnippet>15</a>//! and `quat_prefix_product_soa` are reused by the recompute backward.
 <a href=#16 id=16 data-nosnippet>16</a>
 <a href=#17 id=17 data-nosnippet>17</a></span><span class="attr">#![allow(non_snake_case)]
 <a href=#18 id=18 data-nosnippet>18</a>

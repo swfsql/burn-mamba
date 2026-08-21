@@ -236,7 +236,7 @@ kind). The rotation accumulator is the matching <a href="../rotation/enum.Rotati
 </div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba3-7" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba3/step_constant/mod.rs.html#62-156">Source</a><a href="#impl-Mamba3-7" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba3.html" title="struct burn_mamba::mamba3::mamba3::Mamba3">Mamba3</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step_infinite" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba3/step_constant/mod.rs.html#79-155">Source</a><h4 class="code-header">pub fn <a href="#method.step_infinite" class="fn">step_infinite</a>(&amp;self, input_bd: Tensor&lt;2&gt;) -&gt; Tensor&lt;2&gt;</h4></section></summary><div class="docblock"><p>Stationary <strong>fixed point</strong> of the block under a constant token: the
 limit of <code>step(input, …)</code> outputs as the same <code>input_bd</code> is stepped
 forever.</p>
-<p>Closed form, O(1) in the horizon (see the <a href="../step_constant/index.html" title="mod burn_mamba::mamba3::step_constant">module header</a> for the
+<p>Closed form, O(1) in the horizon (see the module header for the
 derivation). The limit forgets any starting state (<code>αⁿ → 0</code>) and the
 SSM state itself never converges (it keeps rotating; only the output
 does), so this takes <strong>no cache and returns none</strong>.</p>

@@ -208,7 +208,7 @@
 <a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">let </span>cols = dims[D - <span class="number">1</span>];
 <a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span>device = <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>.device();
 <a href=#210 id=210 data-nosnippet>210</a>
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>mask2 = tri_bool::&lt;B&gt;(rows, cols, diagonal, <span class="bool-val">false</span>, <span class="kw-2">&amp;</span>device);
+<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>mask2 = tri_bool::&lt;B&gt;(rows, cols, diagonal, <span class="bool-val">false</span>, device);
 <a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">let </span><span class="kw-2">mut </span>lead = [<span class="number">1usize</span>; D];
 <a href=#213 id=213 data-nosnippet>213</a>        lead[D - <span class="number">2</span>] = rows;
 <a href=#214 id=214 data-nosnippet>214</a>        lead[D - <span class="number">1</span>] = cols;

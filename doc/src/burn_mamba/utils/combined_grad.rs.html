@@ -54,23 +54,24 @@
 <a href=#54 id=54 data-nosnippet>54</a>
 <a href=#55 id=55 data-nosnippet>55</a><span class="doccomment">/// Inverse of [`flatten_pair`]: split a 1-D combined tensor back into the two
 <a href=#56 id=56 data-nosnippet>56</a>/// outputs at their original ranks/shapes.
-<a href=#57 id=57 data-nosnippet>57</a></span><span class="kw">pub fn </span>autodiff_unflatten_pair&lt;
-<a href=#58 id=58 data-nosnippet>58</a>    B: Backend,
-<a href=#59 id=59 data-nosnippet>59</a>    C: CheckpointStrategy,
-<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">const </span>DA: usize,
-<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">const </span>DB: usize,
-<a href=#62 id=62 data-nosnippet>62</a>&gt;(
-<a href=#63 id=63 data-nosnippet>63</a>    combined: FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;,
-<a href=#64 id=64 data-nosnippet>64</a>    flat_y_len: usize,
-<a href=#65 id=65 data-nosnippet>65</a>    flat_s_len: usize,
-<a href=#66 id=66 data-nosnippet>66</a>    shape_y: [usize; DA],
-<a href=#67 id=67 data-nosnippet>67</a>    shape_s: [usize; DB],
-<a href=#68 id=68 data-nosnippet>68</a>) -&gt; (FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;, FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;) {
-<a href=#69 id=69 data-nosnippet>69</a>    <span class="kw">let </span>flat_y = Autodiff::&lt;B, C&gt;::float_slice(combined.clone(), <span class="kw-2">&amp;</span>[<span class="macro">s!</span>[<span class="number">0</span>..flat_y_len]]);
-<a href=#70 id=70 data-nosnippet>70</a>    <span class="kw">let </span>y = Autodiff::&lt;B, C&gt;::float_reshape(flat_y, Shape::new(shape_y));
-<a href=#71 id=71 data-nosnippet>71</a>    <span class="kw">let </span>flat_s =
-<a href=#72 id=72 data-nosnippet>72</a>        Autodiff::&lt;B, C&gt;::float_slice(combined, <span class="kw-2">&amp;</span>[<span class="macro">s!</span>[flat_y_len..flat_y_len + flat_s_len]]);
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="kw">let </span>s = Autodiff::&lt;B, C&gt;::float_reshape(flat_s, Shape::new(shape_s));
-<a href=#74 id=74 data-nosnippet>74</a>    (y, s)
-<a href=#75 id=75 data-nosnippet>75</a>}
+<a href=#57 id=57 data-nosnippet>57</a></span><span class="attr">#[allow(clippy::type_complexity)]
+<a href=#58 id=58 data-nosnippet>58</a></span><span class="kw">pub fn </span>autodiff_unflatten_pair&lt;
+<a href=#59 id=59 data-nosnippet>59</a>    B: Backend,
+<a href=#60 id=60 data-nosnippet>60</a>    C: CheckpointStrategy,
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="kw">const </span>DA: usize,
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">const </span>DB: usize,
+<a href=#63 id=63 data-nosnippet>63</a>&gt;(
+<a href=#64 id=64 data-nosnippet>64</a>    combined: FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;,
+<a href=#65 id=65 data-nosnippet>65</a>    flat_y_len: usize,
+<a href=#66 id=66 data-nosnippet>66</a>    flat_s_len: usize,
+<a href=#67 id=67 data-nosnippet>67</a>    shape_y: [usize; DA],
+<a href=#68 id=68 data-nosnippet>68</a>    shape_s: [usize; DB],
+<a href=#69 id=69 data-nosnippet>69</a>) -&gt; (FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;, FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;) {
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="kw">let </span>flat_y = Autodiff::&lt;B, C&gt;::float_slice(combined.clone(), <span class="kw-2">&amp;</span>[<span class="macro">s!</span>[<span class="number">0</span>..flat_y_len]]);
+<a href=#71 id=71 data-nosnippet>71</a>    <span class="kw">let </span>y = Autodiff::&lt;B, C&gt;::float_reshape(flat_y, Shape::new(shape_y));
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="kw">let </span>flat_s =
+<a href=#73 id=73 data-nosnippet>73</a>        Autodiff::&lt;B, C&gt;::float_slice(combined, <span class="kw-2">&amp;</span>[<span class="macro">s!</span>[flat_y_len..flat_y_len + flat_s_len]]);
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span>s = Autodiff::&lt;B, C&gt;::float_reshape(flat_s, Shape::new(shape_s));
+<a href=#75 id=75 data-nosnippet>75</a>    (y, s)
+<a href=#76 id=76 data-nosnippet>76</a>}
 </code></pre></div></section></main></body></html>

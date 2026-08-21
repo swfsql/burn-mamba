@@ -5,8 +5,8 @@
     gamma_bnlh: Tensor&lt;4&gt;,
     siso_specialization: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
 ) -&gt; Tensor&lt;6&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The γ-weighted same-step correction <code>y_diag</code>, dispatching to the SISO fast
-path (<a href="fn.y_diag_correction_siso.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_siso"><code>y_diag_correction_siso</code></a>) or the general MIMO path
-(<a href="fn.y_diag_correction_mimo.html" title="fn burn_mamba::mamba3::single_ssd::ssd::diag::y_diag_correction_mimo"><code>y_diag_correction_mimo</code></a>) on <code>mimo_rank</code>.</p>
+path (<code>y_diag_correction_siso</code>) or the general MIMO path
+(<code>y_diag_correction_mimo</code>) on <code>mimo_rank</code>.</p>
 <p><code>siso_specialization</code> is
 <a href="../../../mamba3/struct.Mamba3Config.html#structfield.siso_specialization" title="field burn_mamba::mamba3::mamba3::Mamba3Config::siso_specialization"><code>Mamba3Config::siso_specialization</code></a>:
 <code>false</code> keeps the general branch even at <code>mimo_rank == 1</code>.</p>

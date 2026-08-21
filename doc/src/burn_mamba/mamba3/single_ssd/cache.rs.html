@@ -3,12 +3,12 @@
 <a href=#3 id=3 data-nosnippet>3</a>//! The cache used by [`crate::mamba3::mamba3::Mamba3::forward_single_ssd`]
 <a href=#4 id=4 data-nosnippet>4</a>//! (the single-pass SSD algorithm — see the Triton SISO and Tilelang MIMO
 <a href=#5 id=5 data-nosnippet>5</a>//! reference kernels).
-<a href=#6 id=6 data-nosnippet>6</a>//! The four tensor fields mirror those of [`Mamba3Cache`] but their
+<a href=#6 id=6 data-nosnippet>6</a>//! The four tensor fields mirror those of [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache) but their
 <a href=#7 id=7 data-nosnippet>7</a>//! **SSM accumulator carries different semantics**:
 <a href=#8 id=8 data-nosnippet>8</a>//!
-<a href=#9 id=9 data-nosnippet>9</a>//! - [`Mamba3Cache`]: `ssm_bhpr` holds the double-ssd trapezoidal hidden state
+<a href=#9 id=9 data-nosnippet>9</a>//! - [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache): `ssm_bhpr` holds the double-ssd trapezoidal hidden state
 <a href=#10 id=10 data-nosnippet>10</a>//!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ`.
-<a href=#11 id=11 data-nosnippet>11</a>//! - [`Mamba3SingleSsdCache`]: `ssm_bhpr` holds the **trapezoid accumulator** `h'ₜ`
+<a href=#11 id=11 data-nosnippet>11</a>//! - [`Mamba3SingleSsdCache`](crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache): `ssm_bhpr` holds the **trapezoid accumulator** `h'ₜ`
 <a href=#12 id=12 data-nosnippet>12</a>//!   defined by `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, where
 <a href=#13 id=13 data-nosnippet>13</a>//!   `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁`. The single-ssd form gives the correct output
 <a href=#14 id=14 data-nosnippet>14</a>//!   `yₜ = Cₜᵀ h'ₜ` for all positions except the diagonal (s = t), which is
@@ -110,7 +110,7 @@
 <a href=#110 id=110 data-nosnippet>110</a>}
 <a href=#111 id=111 data-nosnippet>111</a>
 <a href=#112 id=112 data-nosnippet>112</a><span class="kw">impl </span>Mamba3SingleSsdCache {
-<a href=#113 id=113 data-nosnippet>113</a>    <span class="doccomment">/// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="doccomment">/// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
 <a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">pub fn </span>sanity(<span class="kw-2">&amp;</span><span class="self">self</span>) {
 <a href=#115 id=115 data-nosnippet>115</a>        san(<span class="kw-2">&amp;</span><span class="self">self</span>.ssm_bhpr);
 <a href=#116 id=116 data-nosnippet>116</a>        san(<span class="kw-2">&amp;</span><span class="self">self</span>.k_state_bmhr);

@@ -3,13 +3,13 @@
 <a href=#3 id=3 data-nosnippet>3</a>//! Structured State Space Duality (SSD).  Mamba-2 recasts the selective SSM
 <a href=#4 id=4 data-nosnippet>4</a>//! recurrence as a chunkwise algorithm built from batched GEMMs, making it
 <a href=#5 id=5 data-nosnippet>5</a>//! tensor-core friendly for training while remaining exactly equivalent to the
-<a href=#6 id=6 data-nosnippet>6</a>//! recurrent form used for decoding.  See [`mamba2`] for the full SSD math.
+<a href=#6 id=6 data-nosnippet>6</a>//! recurrent form used for decoding.  See [`mamba2`](crate::mamba2::mamba2) for the full SSD math.
 <a href=#7 id=7 data-nosnippet>7</a>//!
-<a href=#8 id=8 data-nosnippet>8</a>//! - [`mamba2`] — the SSD block.  The residual layer stack, the full language
+<a href=#8 id=8 data-nosnippet>8</a>//! - [`mamba2`](crate::mamba2::mamba2) — the SSD block.  The residual layer stack, the full language
 <a href=#9 id=9 data-nosnippet>9</a>//!   model, and the bidirectional wrappers are the family-generic types in
-<a href=#10 id=10 data-nosnippet>10</a>//!   [`crate::generic`] (`MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
-<a href=#11 id=11 data-nosnippet>11</a>//! - [`cache`] — the conv-window + SSM-state carried between calls.
-<a href=#12 id=12 data-nosnippet>12</a>//! - [`ssd`] — the pluggable chunkwise SSD algorithms (Minimal / Serial /
+<a href=#10 id=10 data-nosnippet>10</a>//!   [`crate::modules`] (`MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
+<a href=#11 id=11 data-nosnippet>11</a>//! - [`cache`](crate::mamba2::cache) — the conv-window + SSM-state carried between calls.
+<a href=#12 id=12 data-nosnippet>12</a>//! - [`ssd`](crate::mamba2::ssd) — the pluggable chunkwise SSD algorithms (Minimal / Serial /
 <a href=#13 id=13 data-nosnippet>13</a>//!   SerialRecalculated) and the backend extension trait.
 <a href=#14 id=14 data-nosnippet>14</a>
 <a href=#15 id=15 data-nosnippet>15</a></span><span class="kw">pub mod </span>cache;

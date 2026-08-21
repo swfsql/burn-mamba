@@ -8,7 +8,7 @@ lower-triangular intra-chunk (LOWER), and the K4 state-passing backwards; the
 <code>m × m</code> tensors).  Because this pathway applies the trapezoid weights
 internally, it additionally returns <code>d_gamma</code> and <code>d_scale</code>.  The shared K3
 extended helper (and K1/K2/K4) are reused from the double-SSD module.</p>
-<p>Everything operates on backend <strong>primitives</strong> through the rank-tagged [<code>F</code>]
+<p>Everything operates on backend <strong>primitives</strong> through the rank-tagged <code>F</code>
 wrapper: the custom <a href="burn::backend::autodiff::ops::Backward"><code>Backward</code></a> node
 runs with a generic backend <code>B</code>, so the high-level <code>Tensor</code> is unavailable
 and the math uses <code>B</code>’s <code>float_*</code> ops.</p>

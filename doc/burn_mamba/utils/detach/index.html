@@ -25,7 +25,7 @@ against 208 MB with an inner-backend one, and only the latter is flat in
 depth. Detaching buys the gradient semantics and essentially none of the
 memory.</p>
 <h2 id="what-this-does-not-reach"><a class="doc-anchor" href="#what-this-does-not-reach">§</a>What this does <em>not</em> reach</h2>
-<p>[<code>Module::map</code>] is a <strong>no-op on plain <code>Tensor</code> fields</strong> — Burn implements
+<p><a href="burn::module::Module::map"><code>Module::map</code></a> is a <strong>no-op on plain <code>Tensor</code> fields</strong> — Burn implements
 <code>Module for Tensor</code> as a constant (<code>map</code> returns <code>self</code>), so only
 <a href="burn::module::Param"><code>Param</code></a>-wrapped tensors go through the mapper. Weights
 are <code>Param</code>s and are covered; bare tensors (notably the caches) are not.</p>

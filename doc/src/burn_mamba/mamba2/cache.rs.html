@@ -38,7 +38,7 @@
 <a href=#38 id=38 data-nosnippet>38</a>///
 <a href=#39 id=39 data-nosnippet>39</a>/// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
 <a href=#40 id=40 data-nosnippet>40</a>/// through every layer-stack `step` call (the family-generic
-<a href=#41 id=41 data-nosnippet>41</a>/// [`crate::generic::Layers`]).  Each element of `caches` corresponds to one
+<a href=#41 id=41 data-nosnippet>41</a>/// [`crate::modules::Layers`]).  Each element of `caches` corresponds to one
 <a href=#42 id=42 data-nosnippet>42</a>/// (virtual) layer in the network.
 <a href=#43 id=43 data-nosnippet>43</a></span><span class="attr">#[derive(Module, Debug)]
 <a href=#44 id=44 data-nosnippet>44</a></span><span class="kw">pub struct </span>Mamba2Caches {
@@ -122,7 +122,7 @@
 <a href=#122 id=122 data-nosnippet>122</a>}
 <a href=#123 id=123 data-nosnippet>123</a>
 <a href=#124 id=124 data-nosnippet>124</a><span class="kw">impl </span>Mamba2Cache {
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// Run the [`NaN`/`Inf` guards](crate::utils::sanity) on every cached tensor.
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
 <a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">pub fn </span>sanity(<span class="kw-2">&amp;</span><span class="self">self</span>) {
 <a href=#127 id=127 data-nosnippet>127</a>        san(<span class="kw-2">&amp;</span><span class="self">self</span>.conv_bvk);
 <a href=#128 id=128 data-nosnippet>128</a>        san(<span class="kw-2">&amp;</span><span class="self">self</span>.ssm_bhpr);

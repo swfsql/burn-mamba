@@ -5,14 +5,14 @@ impls, and the <a href="fn.quat_cumprod_recalculated.html" title="fn burn_mamba:
 <a href="../../rotation/fn.quat_cumprod.html" title="fn burn_mamba::mamba3::rotation::quat_cumprod"><code>crate::mamba3::rotation::quat_cumprod</code></a>, but routed through the
 <a href="trait.Mamba3QuatScanBackendExt.html" title="trait burn_mamba::mamba3::quat_scan::quat_scan::Mamba3QuatScanBackendExt"><code>Mamba3QuatScanBackendExt</code></a> trait so that <code>Autodiff</code> backends substitute a
 custom backward that recomputes the scan instead of retaining its
-intermediates (see [<code>super::backward</code>]). Plain backends use the trait’s
+intermediates (see <a href="../backward/index.html" title="mod burn_mamba::mamba3::quat_scan::backward"><code>super::backward</code></a>). Plain backends use the trait’s
 default body, which runs the scan on <code>B</code>’s primitives.</p>
 <p>The default body runs under a generic backend <code>B</code>, where the high-level
-[<code>Tensor</code>] (pinned to <code>Dispatch</code>) is unavailable, so the quaternion algebra
-goes through the rank-tagged [<code>F</code>] primitive wrapper, held in a
-struct-of-arrays [<code>Quat</code>] (the four components as separate tensors) so the
-Hamilton product is narrow/cat-free on the hot path. The same [<code>Quat</code>] helper
-and [<code>quat_prefix_product_soa</code>] are reused by the recompute backward.</p>
+<a href="burn::tensor::Tensor"><code>Tensor</code></a> (pinned to <code>Dispatch</code>) is unavailable, so the quaternion algebra
+goes through the rank-tagged <code>F</code> primitive wrapper, held in a
+struct-of-arrays <code>Quat</code> (the four components as separate tensors) so the
+Hamilton product is narrow/cat-free on the hot path. The same <code>Quat</code> helper
+and <code>quat_prefix_product_soa</code> are reused by the recompute backward.</p>
 </div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Quat.html" title="struct burn_mamba::mamba3::quat_scan::quat_scan::Quat">Quat</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>A quaternion field in struct-of-arrays form: the four components
 <code>(w, x, y, z)</code> as separate rank-4 <code>[batch, sequence, nheads, blocks]</code> tensors
 (a leading seq-length of <code>1</code> broadcasts, e.g. the carry).</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.Mamba3QuatScanBackendExt.html" title="trait burn_mamba::mamba3::quat_scan::quat_scan::Mamba3QuatScanBackendExt">Mamba3<wbr>Quat<wbr>Scan<wbr>Backend<wbr>Ext</a></dt><dd>Extends the backend with the quaternion cumulative-product scan.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.quat_cumprod_recalculated.html" title="fn burn_mamba::mamba3::quat_scan::quat_scan::quat_cumprod_recalculated">quat_<wbr>cumprod_<wbr>recalculated</a></dt><dd>Cumulative quaternion product with a custom, memory-efficient backward — the

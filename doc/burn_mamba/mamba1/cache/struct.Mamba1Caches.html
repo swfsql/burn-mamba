@@ -3,7 +3,7 @@
 }</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A collection of per-layer caches for a complete Mamba-1 network.</p>
 <p>During autoregressive decoding a <a href="struct.Mamba1Caches.html" title="struct burn_mamba::mamba1::cache::Mamba1Caches"><code>Mamba1Caches</code></a> instance is threaded
 through every layer-stack <code>step</code> call (the family-generic
-[<code>crate::generic::Layers</code>]).  Each element corresponds to one (virtual) layer
+<a href="../../modules/layers/struct.Layers.html" title="struct burn_mamba::modules::layers::Layers"><code>crate::modules::Layers</code></a>).  Each element corresponds to one (virtual) layer
 in the network.</p>
 </div></details><h2 id="fields" class="fields section-header">Fields<a href="#fields" class="anchor">§</a></h2><span id="structfield.caches" class="structfield section-header"><a href="#structfield.caches" class="anchor field">§</a><code>caches: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&gt;</code></span><div class="docblock"><p>Per-layer caches.</p>
 <p>Length: <code>n_real_caches</code> (the number of <em>virtual</em> layers, which may

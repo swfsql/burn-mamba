@@ -20,7 +20,7 @@
 <a href=#20 id=20 data-nosnippet>20</a>//! `mimo_rank == 1` it collapses to the **scalar** `Cₜ·Bₜ`, so both matmuls
 <a href=#21 id=21 data-nosnippet>21</a>//! degenerate into `1×r×1` and `1×1×p` GEMMs — thousands of tiny batched
 <a href=#22 id=22 data-nosnippet>22</a>//! products, one per `(batch, nchunks, chunk_len, nheads)`.
-<a href=#23 id=23 data-nosnippet>23</a>//! [`y_diag_correction_siso`] instead contracts `state_rank` with a reduction
+<a href=#23 id=23 data-nosnippet>23</a>//! `y_diag_correction_siso` instead contracts `state_rank` with a reduction
 <a href=#24 id=24 data-nosnippet>24</a>//! and folds the result (together with `γₜ`) in as a per-`(b, n, l, h)` scalar
 <a href=#25 id=25 data-nosnippet>25</a>//! broadcast. Both branches compute the same quantity; only the op mix differs,
 <a href=#26 id=26 data-nosnippet>26</a>//! so [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
@@ -35,8 +35,8 @@
 <a href=#35 id=35 data-nosnippet>35</a></span><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#36 id=36 data-nosnippet>36</a>
 <a href=#37 id=37 data-nosnippet>37</a><span class="doccomment">/// The γ-weighted same-step correction `y_diag`, dispatching to the SISO fast
-<a href=#38 id=38 data-nosnippet>38</a>/// path ([`y_diag_correction_siso`]) or the general MIMO path
-<a href=#39 id=39 data-nosnippet>39</a>/// ([`y_diag_correction_mimo`]) on `mimo_rank`.
+<a href=#38 id=38 data-nosnippet>38</a>/// path (`y_diag_correction_siso`) or the general MIMO path
+<a href=#39 id=39 data-nosnippet>39</a>/// (`y_diag_correction_mimo`) on `mimo_rank`.
 <a href=#40 id=40 data-nosnippet>40</a>///
 <a href=#41 id=41 data-nosnippet>41</a>/// `siso_specialization` is
 <a href=#42 id=42 data-nosnippet>42</a>/// [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization):

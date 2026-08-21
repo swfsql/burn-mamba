@@ -68,7 +68,7 @@ and <code>C̃ₜ[m] = Rₜ Cₜ[m]</code> denote the RoPE-rotated MIMO projectio
 is computed by splitting it into a γ-SSD (current-token contributions) and
 a β-SSD (previous-token contributions); see <a href="../double_ssd/ssd/ssd_path/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::ssd_path"><code>crate::mamba3::double_ssd::ssd::ssd_path</code></a>.
 RoPE is applied to B and C before the SSD calls
-(see [<code>crate::mamba3::double_ssd::double_ssd::apply_rope</code>]),
+(see <a href="../../modules/misc/rope/fn.apply_rope.html" title="fn burn_mamba::modules::misc::rope::apply_rope"><code>crate::modules::misc::rope::apply_rope</code></a>),
 and MIMO expansion happens by augmenting the V tensor with the per-rank
 <code>mimo_x</code> projection.</p>
 <p>See also: <a href="../double_ssd/double_ssd/index.html" title="mod burn_mamba::mamba3::double_ssd::double_ssd"><code>crate::mamba3::double_ssd::double_ssd</code></a> and <a href="../single_ssd/single_ssd/index.html" title="mod burn_mamba::mamba3::single_ssd::single_ssd"><code>crate::mamba3::single_ssd::single_ssd</code></a>.</p>

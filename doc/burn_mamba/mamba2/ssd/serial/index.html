@@ -4,17 +4,17 @@
 five Triton kernels of the reference <code>ssd_combined.py</code> (<code>ssd_chunk_state.py</code>,
 <code>ssd_bmm.py</code>, <code>ssd_state_passing.py</code>, <code>ssd_chunk_scan.py</code>):</p>
 <ul>
-<li><strong>K1</strong> [<code>k1_ssd_chunk_cumsum</code>] — per-chunk cumulative <code>Δ·A</code> decays.</li>
-<li><strong>K2</strong> [<code>k2_ssd_bmm</code>] — the intra-chunk <code>C·Bᵀ</code> block matmul.</li>
-<li><strong>K3</strong> [<code>k3_ssd_chunk_state</code>] — each chunk’s contribution to its end state
+<li><strong>K1</strong> <a href="fn.k1_ssd_chunk_cumsum.html" title="fn burn_mamba::mamba2::ssd::serial::k1_ssd_chunk_cumsum"><code>k1_ssd_chunk_cumsum</code></a> — per-chunk cumulative <code>Δ·A</code> decays.</li>
+<li><strong>K2</strong> <a href="fn.k2_ssd_bmm.html" title="fn burn_mamba::mamba2::ssd::serial::k2_ssd_bmm"><code>k2_ssd_bmm</code></a> — the intra-chunk <code>C·Bᵀ</code> block matmul.</li>
+<li><strong>K3</strong> <a href="fn.k3_ssd_chunk_state.html" title="fn burn_mamba::mamba2::ssd::serial::k3_ssd_chunk_state"><code>k3_ssd_chunk_state</code></a> — each chunk’s contribution to its end state
 (assuming a zero state at the chunk’s start).</li>
 <li><strong>K4</strong> <code>k4_ssd_state_passing</code> — the serial inter-chunk scan that carries the
 running state across chunk boundaries.</li>
-<li><strong>K5</strong> [<code>k5_ssd_chunk_scan</code>] — combines the intra-chunk (attention-like) and
+<li><strong>K5</strong> <a href="fn.k5_ssd_chunk_scan.html" title="fn burn_mamba::mamba2::ssd::serial::k5_ssd_chunk_scan"><code>k5_ssd_chunk_scan</code></a> — combines the intra-chunk (attention-like) and
 inter-chunk (state-carried) contributions into the output <code>y</code>.</li>
 </ul>
-<p>This produces identical values and gradients to [<code>super::minimal</code>]; the
+<p>This produces identical values and gradients to <a href="../minimal/index.html" title="mod burn_mamba::mamba2::ssd::minimal"><code>super::minimal</code></a>; the
 serial form keeps per-chunk tensors small (lower peak memory) and is the
-basis of the recompute backward in [<code>super::serial_recalculated</code>].  Gradients
+basis of the recompute backward in <a href="../serial_recalculated/index.html" title="mod burn_mamba::mamba2::ssd::serial_recalculated"><code>super::serial_recalculated</code></a>.  Gradients
 here still flow through plain autodiff.</p>
 </div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.k1_ssd_chunk_cumsum.html" title="fn burn_mamba::mamba2::ssd::serial::k1_ssd_chunk_cumsum">k1_<wbr>ssd_<wbr>chunk_<wbr>cumsum</a></dt><dd>Based on the Kernel 1 Triton reference <code>_chunk_cumsum_fwd_kernel</code> (<code>ssd_chunk_state.py</code>).</dd><dt><a class="fn" href="fn.k2_ssd_bmm.html" title="fn burn_mamba::mamba2::ssd::serial::k2_ssd_bmm">k2_<wbr>ssd_<wbr>bmm</a></dt><dd>Based on the Kernel 2 Triton reference <code>_bmm_chunk_fwd_kernel</code> (<code>ssd_bmm.py</code>).</dd><dt><a class="fn" href="fn.k3_ssd_chunk_state.html" title="fn burn_mamba::mamba2::ssd::serial::k3_ssd_chunk_state">k3_<wbr>ssd_<wbr>chunk_<wbr>state</a></dt><dd>Based on the Kernel 3 Triton reference <code>_chunk_state_fwd_kernel</code> (<code>ssd_chunk_state.py</code>).</dd><dt><a class="fn" href="fn.k4_ssd_state_passing.html" title="fn burn_mamba::mamba2::ssd::serial::k4_ssd_state_passing">k4_<wbr>ssd_<wbr>state_<wbr>passing</a></dt><dd>Based on the Kernel 4 Triton reference <code>_state_passing_fwd_kernel</code> (<code>ssd_state_passing.py</code>).</dd><dt><a class="fn" href="fn.k5_ssd_chunk_scan.html" title="fn burn_mamba::mamba2::ssd::serial::k5_ssd_chunk_scan">k5_<wbr>ssd_<wbr>chunk_<wbr>scan</a></dt><dd>Based on the Kernel 5 Triton reference <code>_chunk_scan_fwd_kernel</code> (<code>ssd_chunk_scan.py</code>).</dd></dl></section></div></main></body></html>

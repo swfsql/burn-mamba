@@ -5,19 +5,19 @@
 or combined): <strong>trapezoidal discretisation</strong>, a <strong>complex-valued state
 transition</strong> — realised as <strong>data-dependent RoPE</strong> on the B/C projections,
 which is a re-factoring of the transition and <em>not</em> a positional encoding —
-and <strong>MIMO</strong> (multiple-input multiple-output) rank expansion.  See <a href="index.html" title="mod burn_mamba::mamba3"><code>mamba3</code></a>
+and <strong>MIMO</strong> (multiple-input multiple-output) rank expansion.  See <a href="mamba3/index.html" title="mod burn_mamba::mamba3::mamba3"><code>mamba3</code></a>
 for the full combined math.</p>
 <h3 id="two-ssd-pathways"><a class="doc-anchor" href="#two-ssd-pathways">§</a>Two SSD pathways</h3>
 <p>The trapezoidal recurrence is realised by two interchangeable algorithms,
 selected at runtime by which <strong>cache variant</strong> is supplied:</p>
 <ul>
-<li>[<code>double_ssd</code>] — splits the trapezoid into two standard SSD calls
+<li><a href="double_ssd/index.html" title="mod burn_mamba::mamba3::double_ssd"><code>double_ssd</code></a> — splits the trapezoid into two standard SSD calls
 (simple, easy to verify; ~2× the intra-chunk memory).</li>
-<li>[<code>single_ssd</code>] — one SSD call in the official-kernel form
+<li><a href="single_ssd/index.html" title="mod burn_mamba::mamba3::single_ssd"><code>single_ssd</code></a> — one SSD call in the official-kernel form
 (≈ half the training memory; the cache’s SSM accumulator has different
 mid-sequence semantics).</li>
 </ul>
-<p>[<code>cache</code>] holds the enum that dispatches between them; [<code>ssd_path</code>] selects
+<p><a href="cache/index.html" title="mod burn_mamba::mamba3::cache"><code>cache</code></a> holds the enum that dispatches between them; <a href="ssd_path/index.html" title="mod burn_mamba::mamba3::ssd_path"><code>ssd_path</code></a> selects
 the pathway-agnostic <em>algorithm</em> (Minimal / Serial / SerialRecalculated).</p>
 </div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="backwards/index.html" title="mod burn_mamba::mamba3::backwards">backwards</a></dt><dd>Blanket <a href="trait.Mamba3BackendExt.html" title="trait burn_mamba::mamba3::Mamba3BackendExt"><code>Mamba3BackendExt</code></a> implementation for autodiff backends.</dd><dt><a class="mod" href="cache/index.html" title="mod burn_mamba::mamba3::cache">cache</a></dt><dd>Mamba-3 Cache and Pathway Selection</dd><dt><a class="mod" href="double_ssd/index.html" title="mod burn_mamba::mamba3::double_ssd">double_<wbr>ssd</a></dt><dd>Double-SSD pathway (VikramLex-style)</dd><dt><a class="mod" href="helpers/index.html" title="mod burn_mamba::mamba3::helpers">helpers</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>Shared helpers used by both <a href="mamba3/struct.Mamba3.html#method.forward" title="method burn_mamba::mamba3::mamba3::Mamba3::forward"><code>Mamba3::forward</code></a>
 and <a href="mamba3/struct.Mamba3.html#method.step" title="method burn_mamba::mamba3::mamba3::Mamba3::step"><code>Mamba3::step</code></a>. They isolate three blocks

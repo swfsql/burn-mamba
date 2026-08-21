@@ -4,18 +4,18 @@
 <a href=#4 id=4 data-nosnippet>4</a>//! five Triton kernels of the reference `ssd_combined.py` (`ssd_chunk_state.py`,
 <a href=#5 id=5 data-nosnippet>5</a>//! `ssd_bmm.py`, `ssd_state_passing.py`, `ssd_chunk_scan.py`):
 <a href=#6 id=6 data-nosnippet>6</a>//!
-<a href=#7 id=7 data-nosnippet>7</a>//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
-<a href=#8 id=8 data-nosnippet>8</a>//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul.
-<a href=#9 id=9 data-nosnippet>9</a>//! - **K3** [`k3_ssd_chunk_state`] — each chunk's contribution to its end state
+<a href=#7 id=7 data-nosnippet>7</a>//! - **K1** [`k1_ssd_chunk_cumsum`](crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum) — per-chunk cumulative `Δ·A` decays.
+<a href=#8 id=8 data-nosnippet>8</a>//! - **K2** [`k2_ssd_bmm`](crate::mamba2::ssd::serial::k2_ssd_bmm) — the intra-chunk `C·Bᵀ` block matmul.
+<a href=#9 id=9 data-nosnippet>9</a>//! - **K3** [`k3_ssd_chunk_state`](crate::mamba2::ssd::serial::k3_ssd_chunk_state) — each chunk's contribution to its end state
 <a href=#10 id=10 data-nosnippet>10</a>//!   (assuming a zero state at the chunk's start).
 <a href=#11 id=11 data-nosnippet>11</a>//! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan that carries the
 <a href=#12 id=12 data-nosnippet>12</a>//!   running state across chunk boundaries.
-<a href=#13 id=13 data-nosnippet>13</a>//! - **K5** [`k5_ssd_chunk_scan`] — combines the intra-chunk (attention-like) and
+<a href=#13 id=13 data-nosnippet>13</a>//! - **K5** [`k5_ssd_chunk_scan`](crate::mamba2::ssd::serial::k5_ssd_chunk_scan) — combines the intra-chunk (attention-like) and
 <a href=#14 id=14 data-nosnippet>14</a>//!   inter-chunk (state-carried) contributions into the output `y`.
 <a href=#15 id=15 data-nosnippet>15</a>//!
-<a href=#16 id=16 data-nosnippet>16</a>//! This produces identical values and gradients to [`super::minimal`]; the
+<a href=#16 id=16 data-nosnippet>16</a>//! This produces identical values and gradients to [`super::minimal`](crate::mamba2::ssd::minimal); the
 <a href=#17 id=17 data-nosnippet>17</a>//! serial form keeps per-chunk tensors small (lower peak memory) and is the
-<a href=#18 id=18 data-nosnippet>18</a>//! basis of the recompute backward in [`super::serial_recalculated`].  Gradients
+<a href=#18 id=18 data-nosnippet>18</a>//! basis of the recompute backward in [`super::serial_recalculated`](crate::mamba2::ssd::serial_recalculated).  Gradients
 <a href=#19 id=19 data-nosnippet>19</a>//! here still flow through plain autodiff.
 <a href=#20 id=20 data-nosnippet>20</a>
 <a href=#21 id=21 data-nosnippet>21</a></span><span class="attr">#![allow(unused_variables)]

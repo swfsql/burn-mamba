@@ -19,7 +19,7 @@
 <a href=#19 id=19 data-nosnippet>19</a>/// The integer multiple `k` is `detach`ed, so it is a constant with respect to
 <a href=#20 id=20 data-nosnippet>20</a>/// autodiff: `d/dx (x − k·2π) = 1`, i.e. the backward pass is identical to the
 <a href=#21 id=21 data-nosnippet>21</a>/// un-wrapped angle. This mirrors the detached `max` rescaling in
-<a href=#22 id=22 data-nosnippet>22</a>/// [`RmsNormGated`](crate::utils::rms_norm_gated::RmsNormGated).
+<a href=#22 id=22 data-nosnippet>22</a>/// [`RmsNormGated`](crate::modules::norm::rms_norm_gated::RmsNormGated).
 <a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">pub fn </span>wrap_angle&lt;<span class="kw">const </span>D: usize&gt;(angles: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
 <a href=#24 id=24 data-nosnippet>24</a>    <span class="kw">let </span>two_pi = <span class="number">2.0 </span>* std::f32::consts::PI;
 <a href=#25 id=25 data-nosnippet>25</a>    <span class="kw">let </span>k = (angles.clone().detach() * (<span class="number">1.0f32 </span>/ two_pi)).round();

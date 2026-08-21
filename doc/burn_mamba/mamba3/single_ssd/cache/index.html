@@ -3,12 +3,12 @@
 <p>The cache used by <a href="../../mamba3/struct.Mamba3.html#method.forward_single_ssd" title="method burn_mamba::mamba3::mamba3::Mamba3::forward_single_ssd"><code>crate::mamba3::mamba3::Mamba3::forward_single_ssd</code></a>
 (the single-pass SSD algorithm — see the Triton SISO and Tilelang MIMO
 reference kernels).
-The four tensor fields mirror those of [<code>Mamba3Cache</code>] but their
+The four tensor fields mirror those of <a href="../../cache/enum.Mamba3Cache.html" title="enum burn_mamba::mamba3::cache::Mamba3Cache"><code>Mamba3Cache</code></a> but their
 <strong>SSM accumulator carries different semantics</strong>:</p>
 <ul>
-<li>[<code>Mamba3Cache</code>]: <code>ssm_bhpr</code> holds the double-ssd trapezoidal hidden state
+<li><a href="../../cache/enum.Mamba3Cache.html" title="enum burn_mamba::mamba3::cache::Mamba3Cache"><code>Mamba3Cache</code></a>: <code>ssm_bhpr</code> holds the double-ssd trapezoidal hidden state
 <code>hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ</code>.</li>
-<li>[<code>Mamba3SingleSsdCache</code>]: <code>ssm_bhpr</code> holds the <strong>trapezoid accumulator</strong> <code>h'ₜ</code>
+<li><a href="struct.Mamba3SingleSsdCache.html" title="struct burn_mamba::mamba3::single_ssd::cache::Mamba3SingleSsdCache"><code>Mamba3SingleSsdCache</code></a>: <code>ssm_bhpr</code> holds the <strong>trapezoid accumulator</strong> <code>h'ₜ</code>
 defined by <code>h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ</code>, where
 <code>scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁</code>. The single-ssd form gives the correct output
 <code>yₜ = Cₜᵀ h'ₜ</code> for all positions except the diagonal (s = t), which is

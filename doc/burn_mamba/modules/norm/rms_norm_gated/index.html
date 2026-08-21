@@ -6,7 +6,7 @@ RMS normalisation fused with a SiLU(z) gate — the Mamba-2 output norm.</p>
 <li><code>false</code> — gate, then normalise:   <code>y = rms(x · SiLU(z)) · γ</code> applied to
 <code>x · SiLU(z)</code></li>
 </ul>
-<p>The numerical-stability epsilon is the per-dtype [<code>div_eps</code>] (so there is no
+<p>The numerical-stability epsilon is the per-dtype <a href="../../../utils/fn.div_eps.html" title="fn burn_mamba::utils::div_eps"><code>div_eps</code></a> (so there is no
 configurable epsilon); the fp16 path uses the same <code>max(|x|)</code>-rescaling
-trick as <a href="crate::utils::rms_norm::RmsNorm"><code>RmsNorm</code></a>.</p>
+trick as <a href="../rms_norm/struct.RmsNorm.html" title="struct burn_mamba::modules::norm::rms_norm::RmsNorm"><code>RmsNorm</code></a>.</p>
 </div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.RmsNormGated.html" title="struct burn_mamba::modules::norm::rms_norm_gated::RmsNormGated">RmsNorm<wbr>Gated</a></dt><dd>Applies Gated Rms Normalization over an input tensor along the last dimension.</dd><dt><a class="struct" href="struct.RmsNormGatedConfig.html" title="struct burn_mamba::modules::norm::rms_norm_gated::RmsNormGatedConfig">RmsNorm<wbr>Gated<wbr>Config</a></dt><dd>Configuration to create a <a href="struct.RmsNormGated.html" title="struct burn_mamba::modules::norm::rms_norm_gated::RmsNormGated"><code>RmsNormGated</code></a> layer.</dd></dl></section></div></main></body></html>

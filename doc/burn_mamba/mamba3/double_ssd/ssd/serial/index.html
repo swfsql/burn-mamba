@@ -7,13 +7,13 @@ a single length <code>L·M</code> for the intra-chunk products.  The standard ke
 here are reused by <strong>both</strong> the γ-pass and the β-pass of the double-SSD
 decomposition (the caller pre-scales <code>v</code> by γ or β and shifts the β inputs).</p>
 <ul>
-<li><strong>K1</strong> [<code>k1_ssd_chunk_cumsum</code>] — per-chunk cumulative <code>Δ·A</code> decays.</li>
-<li><strong>K2</strong> [<code>k2_ssd_bmm</code>] — the intra-chunk <code>C·Bᵀ</code> block matmul (fused <code>L·M</code>).</li>
-<li><strong>K3</strong> [<code>k3_ssd_chunk_state</code>] — each chunk’s end-state contribution.</li>
+<li><strong>K1</strong> <a href="fn.k1_ssd_chunk_cumsum.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k1_ssd_chunk_cumsum"><code>k1_ssd_chunk_cumsum</code></a> — per-chunk cumulative <code>Δ·A</code> decays.</li>
+<li><strong>K2</strong> <a href="fn.k2_ssd_bmm.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k2_ssd_bmm"><code>k2_ssd_bmm</code></a> — the intra-chunk <code>C·Bᵀ</code> block matmul (fused <code>L·M</code>).</li>
+<li><strong>K3</strong> <a href="fn.k3_ssd_chunk_state.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k3_ssd_chunk_state"><code>k3_ssd_chunk_state</code></a> — each chunk’s end-state contribution.</li>
 <li><strong>K4</strong> <code>k4_ssd_state_passing</code> — the serial inter-chunk scan.</li>
-<li><strong>K5</strong> [<code>k5_ssd_chunk_scan</code>] — combines intra- and inter-chunk parts into <code>y</code>.</li>
+<li><strong>K5</strong> <a href="fn.k5_ssd_chunk_scan.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k5_ssd_chunk_scan"><code>k5_ssd_chunk_scan</code></a> — combines intra- and inter-chunk parts into <code>y</code>.</li>
 </ul>
-<p>Produces identical values/gradients to [<code>super::minimal</code>]; SISO
+<p>Produces identical values/gradients to <a href="../minimal/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::minimal"><code>super::minimal</code></a>; SISO
 (<code>mimo_rank = 1</code>) is the special case where the fused length equals the chunk
 length.  Gradients flow through plain autodiff.</p>
 </div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.k1_ssd_chunk_cumsum.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k1_ssd_chunk_cumsum">k1_<wbr>ssd_<wbr>chunk_<wbr>cumsum</a></dt><dd>Compute the intra-chunk cumulative log-decay and per-chunk decay totals.</dd><dt><a class="fn" href="fn.k2_ssd_bmm.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k2_ssd_bmm">k2_<wbr>ssd_<wbr>bmm</a></dt><dd>Compute the intra-chunk CB matrix on fused (mimo_rank-into-chunk_len) tensors.</dd><dt><a class="fn" href="fn.k3_ssd_chunk_state.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k3_ssd_chunk_state">k3_<wbr>ssd_<wbr>chunk_<wbr>state</a></dt><dd>Compute the SSM state at the end of each chunk, assuming zero initial hidden state.</dd><dt><a class="fn" href="fn.k4_ssd_state_passing.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k4_ssd_state_passing">k4_<wbr>ssd_<wbr>state_<wbr>passing</a></dt><dd>Propagate hidden state across chunk boundaries using a sequential scan.</dd><dt><a class="fn" href="fn.k5_ssd_chunk_scan.html" title="fn burn_mamba::mamba3::double_ssd::ssd::serial::k5_ssd_chunk_scan">k5_<wbr>ssd_<wbr>chunk_<wbr>scan</a></dt><dd>Compute the chunk output by combining the intra-chunk (diagonal) and
