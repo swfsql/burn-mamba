@@ -16,8 +16,8 @@ cannot *compose* it; the non-abelian `SU(2)` quaternion rotation can represent
 the binary icosahedral group `2I = SL(2,5)` (a double cover of `A₅`), so in
 principle it can.
 
-This example uses the shared example harness (`common/`), like `fibonacci` and
-`mnist-class`: `dataset.rs` (the A₅ generator/running-product dataset),
+This example uses the shared example harness (`common/`), like `reset-majority`
+and `mnist-class`: `dataset.rs` (the A₅ generator/running-product dataset),
 `model.rs` (`model_config(rotation)` returning a `MambaLatentNetConfig::Mamba3`),
 `training.rs` (cross-entropy over **every** position + a per-position accuracy
 readout), `inference.rs` (per-position eval accuracy), and `main.rs`.
@@ -34,8 +34,8 @@ result is nuanced:
   abelian/non-abelian distinction only lives in the **deep** positions, where the
   running product genuinely has to be composed.
 
-- **At this tiny scale the gap is modest.** With the default deliberately tiny,
-  single-layer, fibonacci-scale model, both rotations track to a similar depth
+- **At this tiny scale the gap is modest.** With the default deliberately tiny
+  single-layer model, both rotations track to a similar depth
   (both memorise short prefixes; with `NUM_TRAIN` sequences the "memorisation
   frontier" reaches depth ≈ `log_NUM_GENERATORS(NUM_TRAIN)`). The quaternion shows
   only a **small edge in the deepest positions**, and only after **extended

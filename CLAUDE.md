@@ -18,7 +18,7 @@ same code runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 cargo check                 # type-check the lib surface
 cargo test --lib            # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
-cargo run --example fibonacci -- --training --inference
+cargo run --example reset-majority -- --training --inference
 ./bench.sh                  # benchmarks — run by the user, never by you
 ./kernels.sh                # kernel-launch counts — deterministic, safe to run
 ```

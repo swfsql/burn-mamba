@@ -1,6 +1,6 @@
 //! Shared infrastructure for the burn-mamba examples.
 //!
-//! Each concrete example (`fibonacci`, `mnist-class`) wires together the pieces
+//! Each concrete example (`reset-majority`, `mnist-class`) wires together the pieces
 //! here: runtime [`device`] selection, CLI + artifact handling ([`cli`]), the
 //! example [`model`] networks, the generic [`training`] config, and the
 //! sequential-[`mnist`] dataset.

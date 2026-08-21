@@ -30,7 +30,7 @@
 //! positions, where genuine `A₅` composition is required.
 //!
 //! **What to expect (read the README first).** At this deliberately **tiny**
-//! single-layer, fibonacci-scale model the gap is *modest*: both rotations track
+//! single-layer model the gap is *modest*: both rotations track
 //! to a similar depth, and the quaternion shows only a small edge in the deepest
 //! positions, and only after extended training (resume with `--artifacts-path` to
 //! train further; a constant LR makes resuming seamless). A clean, dramatic gap

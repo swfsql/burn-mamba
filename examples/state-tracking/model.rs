@@ -7,9 +7,8 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 
 /// Build the example model config for the chosen `rotation`.
 ///
-/// The defaults are deliberately **tiny** (fibonacci-scale): `d_model = 32`,
-/// `expand = 2` (`d_inner = 64`), `nheads = 8` (`per_head_dim = 8`),
-/// `state_rank = 16` (a multiple of 4, required by `Quaternion4D`), and a single
+/// The defaults are deliberately **tiny**: `d_model = 32`, `expand = 2`
+/// (`d_inner = 64`), `nheads = 8` (`per_head_dim = 8`), `state_rank = 16` (a multiple of 4, required by `Quaternion4D`), and a single
 /// real layer. RoPE is applied to 100% of the B/C projections. The whole point
 /// of the example is to contrast `RotationKind::Complex2D` (abelian, the
 /// Mamba-3 default) against `RotationKind::Quaternion4D` (non-abelian) on the

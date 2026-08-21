@@ -2,7 +2,7 @@
 
 #### List of Examples:
 
-- `fibonacci`: Very small Mamba-2 model training on a fibonacci-like sequence.
+- `reset-majority`: One Mamba-2 block (two scalar states, no conv, no residual) on the sign of a running vote since the last reset — the smallest task the block is *required* for. Its README carries a hand-built exact solution and a sweep showing no fixed decay reaches it.
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 - `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion`).
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
@@ -45,20 +45,20 @@ All examples use a CLI defined in `common/cli.rs`.
 
 ```bash
 # training the simplest example on flex (fp32) and running inference:
-cargo run --example fibonacci --features "backend-flex" -- --training --inference
+cargo run --example reset-majority --features "backend-flex" -- --training --inference
 
-# assume /tmp/fibonacci-abcd-0 got created:
-ARTIFACTS="/tmp/fibonacci-abcd-0"
+# assume /tmp/reset-majority-abcd-0 got created:
+ARTIFACTS="/tmp/reset-majority-abcd-0"
 
 # running only the inference from the trained model:
-cargo run --example fibonacci --features "backend-flex" -- --inference --artifacts-path "$ARTIFACTS"
+cargo run --example reset-majority --features "backend-flex" -- --inference --artifacts-path "$ARTIFACTS"
 
 # assume /some/path/ contains a different training config file, e.g. with a different seed:
 TCONFIG="/some/path/training_config.json"
 
 # continue training from another training config
 # warning: "$ARTIFACTS/training_config.json" gets overwritten by "$TCONFIG"
-cargo run --example fibonacci --features "backend-flex" -- --training --artifacts-path "$ARTIFACTS" --training-config "$TCONFIG"
+cargo run --example reset-majority --features "backend-flex" -- --training --artifacts-path "$ARTIFACTS" --training-config "$TCONFIG"
 ```
 
 ##### CLI Help Message

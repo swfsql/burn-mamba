@@ -202,14 +202,15 @@ single-SSD), which is selected by the cache variant supplied.
 The [`examples/`](examples/) directory contains small, self-contained models on
 synthetic or canonical data:
 
-- **`fibonacci`** — the smallest demo: a tiny Mamba-2 model on a fibonacci-like
-  sequence, exercising the full train → save → infer flow.
+- **`reset-majority`** — the smallest demo: a single Mamba-2 block (62
+  parameters) on the sign of a running vote since the last reset, exercising the
+  full train → save → infer flow.
 - **`mnist-class`** — a Mamba-3 classifier that reads each MNIST image as a
   sequence of pixels.
 
 ```bash
 # train the smallest example (flex backend, fp32), then run inference
-cargo run --example fibonacci --features "backend-flex" -- --training --inference
+cargo run --example reset-majority --features "backend-flex" -- --training --inference
 ```
 
 For browser/wasm inference of the smallest pretrained Mamba-1/2/3 models from

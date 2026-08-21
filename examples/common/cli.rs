@@ -104,11 +104,11 @@ impl AppArgs {
             artifacts_path: pargs
                 .opt_value_from_os_str(["-a", "--artifacts-path"], parse_path)?
                 .unwrap_or_else(|| {
-                    // e.g. /tmp/burn-mamba-fibonacci-abcd-0
+                    // e.g. /tmp/burn-mamba-reset-majority-abcd-0
                     let name = format!(
                         "{}-{}-",
                         std::env!("CARGO_PKG_NAME"), // burn-mamba
-                        std::env!("CARGO_BIN_NAME")  // e.g. fibonacci
+                        std::env!("CARGO_BIN_NAME")  // e.g. reset-majority
                     );
                     let tmp = temp_dir::TempDir::with_prefix(name)
                         .expect("Failed to create the temporary directory")
