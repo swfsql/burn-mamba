@@ -572,9 +572,19 @@ pub fn angle_increment<const D: usize, const DP1: usize>(
 /// The magnitude — not each component — is bounded, so the axis is exactly the
 /// direction of the projection; see [`bound_rotation_vector`].
 ///
-/// `DP1 = D + 1`, `DP2 = D + 2`: a sequence-shaped call (`rot [b, s, 3·J]`,
+/// Unlike the abelian [`angle_increment`], the generators are projected **per
+/// head**: `rot` carries `nheads · 3 · J` channels, so every head turns about
+/// its own data-dependent axis rather than sharing one axis and differing only
+/// in `Δ`. Sharing would make the heads' rotations a one-parameter family of
+/// each other — the abelian path can afford that (its rotations commute, so a
+/// per-head angle is the only freedom there is), but for a non-abelian
+/// transition the axis *is* the expressive part: two heads turning about
+/// different axes track different words, which is the whole point of having
+/// more than one.
+///
+/// `DP1 = D + 1`, `DP2 = D + 2`: a sequence-shaped call (`rot [b, s, h·3·J]`,
 /// `dt [b, s, h]`) yields `[b, s, h, J, 3]` and a single-token call
-/// (`rot [b, 3·J]`, `dt [b, h]`) yields `[b, h, J, 3]`.
+/// (`rot [b, h·3·J]`, `dt [b, h]`) yields `[b, h, J, 3]`.
 pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
     rot: Tensor<D>,
     dt: Tensor<D>,
@@ -582,22 +592,23 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
     range: f64,
 ) -> Tensor<DP2> {
     assert_eq!(D + 1, DP1, "generator_increment splits (3·J) into (J, 3)");
-    assert_eq!(D + 2, DP2, "generator_increment also inserts the head axis");
+    assert_eq!(D + 2, DP2, "generator_increment also splits off the head axis");
     let dims = rot.dims();
+    let nheads = dt.dims()[D - 1];
     assert_eq!(
         dims[D - 1],
-        3 * blocks,
-        "the rotation channels are three generators per quaternion block"
+        nheads * 3 * blocks,
+        "the rotation channels are three generators per (head, quaternion block)"
     );
-    // [..., 3·J] → [..., J, 3]
-    let mut split = [0usize; DP1];
+    // [..., h·3·J] → [..., h, J, 3]
+    let mut split = [0usize; DP2];
     split[..D - 1].copy_from_slice(&dims[..D - 1]);
-    split[DP1 - 2] = blocks;
-    split[DP1 - 1] = 3;
-    let bounded = bound_rotation_vector::<DP1>(rot.reshape(split), range * std::f64::consts::PI);
-    // insert the head axis before (J, 3), and Δ's two trailing broadcast axes
-    bounded.unsqueeze_dim::<DP2>(D - 1)
-        * dt.unsqueeze_dim::<DP1>(D).unsqueeze_dim::<DP2>(D + 1)
+    split[DP2 - 3] = nheads;
+    split[DP2 - 2] = blocks;
+    split[DP2 - 1] = 3;
+    let bounded = bound_rotation_vector::<DP2>(rot.reshape(split), range * std::f64::consts::PI);
+    // Δ is per head: broadcast it over (J, 3)
+    bounded * dt.unsqueeze_dim::<DP1>(D).unsqueeze_dim::<DP2>(D + 1)
 }
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_per_head_dim(1)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Complex2D)
         .with_has_proj_bias(true);
 

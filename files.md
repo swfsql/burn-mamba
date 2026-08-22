@@ -62,7 +62,10 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** for RoPE pairing;
-  `mimo_rank` 1=SISO; `rope_fraction`; `rotation: RotationKind`; `a_floor`). Fields:
+  `mimo_rank` 1=SISO; `rope_fraction` (default 1, full); `rotation: RotationKind`;
+  `rotation_range` (default 2, the per-step bound in half-turns per unit Δ — both
+  defaults ship the full rotation, and the reference's narrower `1`/`0.5` are asked for
+  explicitly); `a_floor`). `rotation_spec()` bundles the three rotation fields. Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
   mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.
@@ -133,9 +136,25 @@ Algebra (`quat_mul`/`conj`/`normalize`), `quat_from_scaled_axis` (data-dependent
 materialise via the exp map), `quat_cumprod` (associative **scan** replacing `cumsum`,
 with a cross-chunk carry), `rotate_state_rank_blocks` (`B̄ = rotate(B, conj(Qcum))`).
 Wiring: `RotationKind{Complex2D|Quaternion4D}` (config) + `RotationState{Angle|Quaternion}`
-(cache); forward/step branch via `rotate_bc_forward`/`rotate_bc_step`; runs on both
-pathways. Tests: the RoPE factoring survives non-commutativity, and `k=2` reproduces
-the production `apply_rope`.
+(cache) + `RotationSpec{kind,rope_dim,range}` (from `Mamba3::rotation_spec()`);
+forward/step branch via `rotate_bc_forward`/`rotate_bc_step`; runs on both pathways.
+`forward`, `step` and `step_infinite` all derive the per-step rotation from one pair of
+helpers — `angle_increment` (`Δ·range·π·tanh(ϑ)`, shared across heads) and
+`generator_increment` (`Δ·range·π·tanh(‖r‖)·r̂`, **per head** and block, channels laid out
+`[head][block][xyz]`).
+Non-obvious: the quaternion generator bounds its **magnitude** (`bound_rotation_vector`),
+so the axis is the projection's direction at any scale — a per-component squash would
+make the reachable set a cube and tie the axis to the projection's size; `safe_norm`
+forms norms scale-free, since `‖r‖²` over raw in-projection channels overflows f16 at
+`|r|≈250` and `∞` divides back to a *zero* rotation; the rotated width comes from
+`rope_dim` (`0` ⇒ identity, in `rotate_blocks_partial`), never from the accumulator's
+block count, and a partial quaternion rotation must land on whole 4-blocks;
+`rotate_bc_forward` renormalises the scan's prefixes (`step` normalises per step) so a
+drifted product turns B/C without rescaling them.
+Tests: the RoPE factoring survives non-commutativity, `k=2` reproduces the production
+`apply_rope`, `range=1` reproduces the reference angle, `rope_fraction=0` leaves both
+kinds' outputs independent of their rotation channels, and the half-turn is reachable
+with a live gradient (at `range=1` it is not — f32's `tanh'` is exactly 0 there).
 
 ### `mamba3/quat_scan/`
 Memory-efficient cumprod scan (recompute backward, like SSD `SerialRecalculated`).
@@ -152,7 +171,9 @@ output; no cache in/out — the state orbits, the cumulative rotation cancels in
 readout, factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`). Per RoPE pair that factor is
 `(γ+βe^{−iθ̂})/(1−αe^{−iθ̂})`; per quaternion block the same in the abelian subalgebra
 of the constant per-step `q`; unrotated channels use the scalar series `(β+γ)/(1−α)`.
-Denominators floored by `div_eps`. Both rotation kinds, both SSD pathways.
+Denominators floored by `div_eps`. Both rotation kinds, both SSD pathways. The per-step
+increment comes from `rotation`'s shared helpers, so the fixed point cannot drift from
+the recurrence it is the limit of.
 
 ---
 

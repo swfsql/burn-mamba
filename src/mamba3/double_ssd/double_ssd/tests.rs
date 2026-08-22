@@ -342,7 +342,7 @@ fn cfg_rope_half() -> Mamba3Config {
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.5))
+        .with_rope_fraction(0.5)
 }
 fn cfg_rope_half_mimo() -> Mamba3Config {
     cfg_rope_half().with_mimo_rank(2)
@@ -352,7 +352,7 @@ fn cfg_rope_zero() -> Mamba3Config {
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.0))
+        .with_rope_fraction(0.0)
 }
 fn cfg_rope_zero_mimo() -> Mamba3Config {
     cfg_rope_zero().with_mimo_rank(2)
@@ -373,7 +373,7 @@ fn cfg_rope_half_outproj_norm_mimo() -> Mamba3Config {
         .with_expand(2)
         .with_per_head_dim(8)
         .with_mimo_rank(2)
-        .with_rope_fraction(Some(0.5))
+        .with_rope_fraction(0.5)
         .with_has_outproj_norm(true)
 }
 

@@ -39,7 +39,7 @@ fn cfg_rope_zero() -> Mamba3Config {
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.0))
+        .with_rope_fraction(0.0)
 }
 
 fn cfg_rope_zero_mimo() -> Mamba3Config {
@@ -890,7 +890,7 @@ fn cfg_quat() -> Mamba3Config {
         .with_state_rank(8) // multiple of 4 (required by Quaternion4D)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D)
 }
 
@@ -903,7 +903,7 @@ fn cfg_quat_partial() -> Mamba3Config {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.5))
+        .with_rope_fraction(0.5)
         .with_rotation(RotationKind::Quaternion4D)
 }
 

@@ -662,29 +662,25 @@ fn config_rotation_channels_and_d_in_proj() {
         + base.num_rope_angles();
     assert_eq!(base.d_in_proj(), legacy);
 
-    // Quaternion4D: rotation channels = 3 · num_quat_blocks, reflected in
-    // d_in_proj. Switching the kind also switches the *default* rotated
-    // fraction — the abelian path keeps the reference's half, the quaternion
-    // path turns the whole state (it exists to carry non-abelian state, and
-    // half a state is half a group).
+    // Quaternion4D: rotation channels = nheads · 3 · num_quat_blocks (an
+    // axis·angle generator per head and block), reflected in d_in_proj.
     let q = base.clone().with_rotation(RotationKind::Quaternion4D);
-    assert_eq!(q.resolved_rope_fraction(), 1.0);
-    assert_eq!(q.num_quat_blocks(), 4); // 16 / 4
-    assert_eq!(q.num_rotation_channels(), 3 * 4);
+    assert_eq!(q.num_quat_blocks(), 4); // 16 / 4, the default full rotation
+    assert_eq!(q.num_rotation_channels(), q.nheads() * 3 * 4);
     // an explicit half is still honoured (and still whole 4-blocks)
-    let q_half = q.clone().with_rope_fraction(Some(0.5));
+    let q_half = q.clone().with_rope_fraction(0.5);
     assert_eq!(q_half.num_quat_blocks(), 2);
     assert_eq!(q_half.rope_dim(), 8);
     let q_expected = 2 * q.d_inner()
         + 2 * q.ngroups * q.state_rank * q.mimo_rank
         + 3 * q.nheads()
-        + 3 * q.num_quat_blocks();
+        + q.nheads() * 3 * q.num_quat_blocks();
     assert_eq!(q.rope_dim(), q.state_rank);
     assert_eq!(q.d_in_proj(), q_expected);
     // The two pathways differ only in the rotation-channel count.
     assert_eq!(
         q.d_in_proj() as i64 - base.d_in_proj() as i64,
-        3 * q.num_quat_blocks() as i64 - base.num_rope_angles() as i64
+        q.num_rotation_channels() as i64 - base.num_rotation_channels() as i64
     );
 }
 
@@ -731,7 +727,7 @@ fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
         .with_expand(2)
         .with_per_head_dim(8)
         .with_mimo_rank(mimo_rank)
-        .with_rope_fraction(Some(rope_fraction))
+        .with_rope_fraction(rope_fraction)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 
@@ -787,7 +783,7 @@ fn quaternion_split_prefill_matches_full() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.5))
+        .with_rope_fraction(0.5)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 
@@ -832,7 +828,7 @@ fn quaternion_forward_step_grad_parity() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device.clone().autodiff());
 
@@ -934,7 +930,7 @@ fn quaternion_bidi_forward_runs() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D);
     let n_real = 2; // one bidirectional pair
     let layers = MambaBidiLayersConfig::Mamba3 {
@@ -1111,7 +1107,7 @@ fn rope_fraction_zero_ignores_rotation_channels(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.0))
+        .with_rope_fraction(0.0)
         .with_rotation(kind)
         .init(&device);
 
@@ -1233,11 +1229,13 @@ fn half_turn_is_reachable_with_a_live_gradient() {
     assert_eq!(dw, 0.0, "expected a dead gradient at the asymptote");
 }
 
-/// The abelian default must stay bit-for-bit the reference formula
-/// `Δ · π · tanh(ϑ)` — `rotation_range` is an opt-in, not a silent change to
-/// the Mamba-3 the paper and the official kernels describe.
+/// `rotation_range = 1.0` must stay bit-for-bit the reference formula
+/// `Δ · π · tanh(ϑ)`, so a model that needs the Mamba-3 the paper and the
+/// official kernels describe can ask for it in one line. (It is no longer the
+/// default: the block defaults to the whole rotation group per unit `Δ`, which
+/// keeps the half-turn differentiable.)
 #[test]
-fn complex_default_range_matches_the_reference_angle() {
+fn complex_range_one_matches_the_reference_angle() {
     let device: Device = Default::default();
     let rot = Tensor::<3>::random([2, 5, 3], Distribution::Normal(0.0, 1.0), &device);
     let dt = Tensor::<3>::random([2, 5, 4], Distribution::Uniform(0.01, 1.0), &device);
@@ -1259,12 +1257,12 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(kind);
 
     let default = base.clone().init(&device);
     let widened = base
-        .with_rotation_range(Some(1.37))
+        .with_rotation_range(1.37)
         .init(&device)
         .load_record(default.clone().into_record());
 
@@ -1335,7 +1333,7 @@ fn quaternion_partial_rope_must_be_whole_blocks() {
         .with_state_rank(4)
         .with_expand(1)
         .with_per_head_dim(8)
-        .with_rope_fraction(Some(0.5))
+        .with_rope_fraction(0.5)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 }
@@ -1385,6 +1383,34 @@ fn bounded_generator_survives_a_huge_projection() {
         assert!(
             (len - max_angle as f32).abs() < 1e-4,
             "at scale {scale} the generator is {len}, not the bound {max_angle}"
+        );
+    }
+}
+
+/// Each head turns about **its own** axis: the generator channels are laid out
+/// `[head][block][xyz]`, and head `h`'s rotation reads head `h`'s channels
+/// only. `Δ` still scales per head, but it can no longer be the *only* thing
+/// that separates two heads' rotations.
+#[test]
+fn quaternion_generators_are_per_head() {
+    let device: Device = Default::default();
+    let (nheads, blocks) = (2, 1);
+    // head 0 turns about x, head 1 about y — impossible to express when the
+    // three channels are shared and only Δ differs.
+    let raw = [1.0f32, 0.0, 0.0, /* head 1 */ 0.0, 1.0, 0.0];
+    let rot = Tensor::<1>::from_floats(raw.as_slice(), &device).reshape([1, nheads * 3 * blocks]);
+    let dt = Tensor::<1>::from_floats([1.0f32, 1.0].as_slice(), &device).reshape([1, nheads]);
+
+    let g = generator_increment::<2, 3, 4>(rot, dt, blocks, 1.0); // [1, h, J, 3]
+    assert_eq!([1, nheads, blocks, 3], g.dims());
+    let v = g.reshape([nheads * 3]).into_data().try_to_vec::<f32>().unwrap();
+    let angle = std::f32::consts::PI * 1.0f32.tanh();
+    // head 0: (angle, 0, 0)   head 1: (0, angle, 0)
+    for (k, expected) in [angle, 0.0, 0.0, 0.0, angle, 0.0].into_iter().enumerate() {
+        assert!(
+            (v[k] - expected).abs() < 1e-5,
+            "channel {k} is {} , expected {expected} (heads are sharing an axis?)",
+            v[k]
         );
     }
 }

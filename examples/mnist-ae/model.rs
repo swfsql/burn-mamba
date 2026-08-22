@@ -322,7 +322,7 @@ pub fn model_config(n_latent: usize) -> AeConfig {
         .with_per_head_dim(16)
         .with_ngroups(1)
         .with_mimo_rank(2)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
         // Non-abelian quaternion rotation: more expressive per parameter.

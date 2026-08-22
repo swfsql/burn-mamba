@@ -72,7 +72,8 @@ src/
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
-│  ├─ rotation/      quaternion non-abelian RoPE (Complex2D | Quaternion4D) + algebra
+│  ├─ rotation/      transition rotation (Complex2D | Quaternion4D) + quat algebra;
+│  │                 RotationSpec {kind,rope_dim,range}: the one per-step definition
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 ├─ modules/          family-generic composition + shared NN modules
@@ -229,11 +230,18 @@ scalar-decay SSD core. The angles are data-dependent, not a fixed frequency sche
 that is what buys state-tracking (parity/mod-k), and why a step difference `θⱼ−θᵢ` is
 rotation accumulated, never a position. Same argument for `Quaternion4D` below.
 
-Default **`Complex2D`** (abelian `SO(2)`): angles projected, `tanh·π`-squashed,
-Δ-scaled per head, then **`cumsum`** along the sequence (continued from the cache),
-absorbed into B/C. `wrap_angle` reduces mod `2π` (value-exact, the offset `detach`ed)
-to stay fp16-stable over long sequences. `rope_fraction` (0.5/1.0) rotates a prefix;
-SISO uses interleaved/NeoX pairing, MIMO half-and-half/GPT-J.
+Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
+`range·π·tanh(·)`, Δ-scaled per head, then **`cumsum`** along the sequence (continued
+from the cache), absorbed into B/C. `wrap_angle` reduces mod `2π` (value-exact, the
+offset `detach`ed) to stay fp16-stable over long sequences. `rope_fraction` (0/0.5/1,
+default 1) rotates a prefix; SISO uses interleaved/NeoX pairing, MIMO half-and-half/GPT-J.
+
+`rotation_range` bounds one step to `range·π·Δ` and defaults to **2** for both kinds:
+one full traverse of the rotation group per unit Δ (`2π` is a whole turn of `SO(2)`, and
+reaches every element of `SU(2)`, whose period is `4π`). The bound buys gradients, not
+reach — a rotation *at* it sits on `tanh`'s asymptote, where f32's derivative is exactly
+zero, so at `range=1` the half-turn state-tracking wants is unreachable by descent.
+`rotation_range=1` + `rope_fraction=0.5` is the reference model.
 
 `mamba3/rotation/` adds the **non-abelian** `Quaternion4D` (`SU(2) ⊂ SO(4)`): the
 cumulative rotation becomes an associative **scan** (with cross-chunk carry) instead
@@ -241,6 +249,11 @@ of a `cumsum`, while the B/C-factoring (so the scalar-decay SSD core) is unchang
 Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
 `RotationState`. It runs on **both** SSD pathways (applied to B/C before chunking).
 `quat_scan/` provides the memory-efficient recompute-backward version of the scan.
+Two further differences from the abelian path: the generator's **magnitude** is bounded
+(not each channel), so the axis is exactly the direction the projection names; and the
+axis is projected **per head** (`nheads·3·num_quat_blocks` channels), because for a
+non-abelian transition the axis is the expressive part — heads sharing one and differing
+only in Δ track one word at different speeds instead of different words.
 
 ### Virtual layers, bidirectional, class tokens
 

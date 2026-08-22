@@ -46,12 +46,14 @@ const DELTA: f64 = 1.0;
 /// `ϑ` for an axis a symbol turns about — a half-turn, i.e. the unit quaternion
 /// `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
 ///
-/// The block bounds one step to `rotation_range · π · Δ` and defaults to
-/// `range = 2` for the quaternion rotation, so a half-turn is
-/// `tanh(‖ϑ‖) = 1/2`: interior, where `tanh` is steep and the gradient is
-/// alive. (At `range = 1` the same half-turn would sit exactly on `tanh`'s
-/// asymptote, reachable only by saturating a channel — a place no optimiser can
-/// arrive at, since f32's `tanh` derivative there is exactly zero.)
+/// The block bounds one step to `rotation_range · π · Δ`, and the default range
+/// of 2 makes a half-turn `tanh(‖ϑ‖) = 1/2`: interior, where `tanh` is steep
+/// and the gradient is alive. (At `range = 1` the same half-turn would sit
+/// exactly on `tanh`'s asymptote, reachable only by saturating a channel — a
+/// place no optimiser can arrive at, since f32's `tanh` derivative there is
+/// exactly zero.) The abelian twin below reads the same constant through the
+/// same bound, so it too turns by a half — which is what makes what it computes
+/// exactly the abelianisation.
 const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
 /// `Â` on a turn. `A = −softplus(Â)`, floored at the block's `a_floor` (`1e-4`),
 /// so this is the flattest hold the block allows.
@@ -161,12 +163,19 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     // Each entry is the channel's value at (TURN_I, TURN_J, RESET), *before* its
     // own activation.
     let rotation_channels: Vec<[f64; NUM_SYMBOLS]> = match rotation {
-        // a scaled rotation axis: `i` turns π about x, `j` turns π about y
-        RotationKind::Quaternion4D => vec![
-            [TURN_RAW, 0.0, 0.0], // axis x
-            [0.0, TURN_RAW, 0.0], // axis y
-            [0.0, 0.0, 0.0],      // axis z — unused
-        ],
+        // A scaled rotation axis per head: `i` turns π about x, `j` about y.
+        // The block projects the generators **per head** (`nheads · 3` channels
+        // here), so every head gets its own copy — this construction wants all
+        // four to read the same rotation, but the block no longer forces that.
+        RotationKind::Quaternion4D => (0..N)
+            .flat_map(|_| {
+                [
+                    [TURN_RAW, 0.0, 0.0], // axis x
+                    [0.0, TURN_RAW, 0.0], // axis y
+                    [0.0, 0.0, 0.0],      // axis z — unused
+                ]
+            })
+            .collect(),
         // one angle per state pair: `i` turns pair 0 by π, `j` turns pair 1 by π
         RotationKind::Complex2D => vec![[TURN_RAW, 0.0, 0.0], [0.0, TURN_RAW, 0.0]],
     };
@@ -463,16 +472,19 @@ fn handmade_block_solves_every_family() {
 /// The identical construction with `RotationKind::Complex2D` — the one enum
 /// knob — reported two ways.
 ///
-/// Its cumulative rotation is a `cumsum`, so the two state pairs are turned by
-/// an angle proportional to `#i` and to `#j`: what reaches the head is a
-/// function of the **counts**, and nothing else. That is not nothing — at the
-/// abelian default (`rotation_range = 1`, so a quarter turn per symbol here) it
-/// resolves each count mod 4, which on this data is nearly everything the counts
-/// have to give. It is still not the answer: the second column hands the block
-/// the best table over a fine partition of its whole output space (fitted on a
-/// separate split), and it lands on the counts ceiling of
-/// [`counts_ceiling_is_the_abelian_limit`] rather than above it. The order —
-/// `ij` against `ji` — is simply not in there.
+/// Both rotations read the same `ϑ` through the same bound, so the abelian twin
+/// turns each of its two state pairs by a half-turn per symbol: what reaches
+/// the head is the pair of **parities**, which is precisely the abelianisation
+/// `Q₈/{±1} ≅ Z₂×Z₂`. Half the group is folded onto the other half, and no
+/// readout can unfold it — hence the second column, which hands the block the
+/// best table over a fine partition of its whole output space (fitted on a
+/// separate split) and still lands near the 50% that guessing the commutator's
+/// sign implies.
+///
+/// A `cumsum` of angles is a function of the symbol counts however the angles
+/// are chosen, so this is one point on a curve whose ceiling is
+/// [`counts_ceiling_is_the_abelian_limit`]; what no point on it has is the
+/// order.
 #[test]
 fn abelian_rotation_loses_the_order() {
     let device = Device::default();
@@ -504,9 +516,8 @@ fn abelian_rotation_loses_the_order() {
         "best readout of the abelian state, over the families: {:.2}%",
         100.0 * best
     );
-    // the same bar the counts ceiling is held to: an angle-sum cannot beat it
     assert!(
-        best < 0.85,
+        best < 0.75,
         "the abelian twin reached {best:.4} — the task does not need a non-abelian rotation"
     );
 }

@@ -79,7 +79,7 @@ fn step_infinite_matches_unroll_quat_siso() {
 fn step_infinite_matches_unroll_quat_rope_partial() {
     run_step_infinite_matches_unroll(
         "quat rope=0.5",
-        decaying(quat_config().with_rope_fraction(Some(0.5))),
+        decaying(quat_config().with_rope_fraction(0.5)),
         300,
         1e-3,
     );
@@ -99,7 +99,7 @@ fn step_infinite_matches_unroll_at_a_non_default_range() {
         ("complex range 1.4", decaying(small_config())),
         ("quat range 1.4", decaying(quat_config())),
     ] {
-        run_step_infinite_matches_unroll(label, cfg.with_rotation_range(Some(1.4)), 300, 1e-3);
+        run_step_infinite_matches_unroll(label, cfg.with_rotation_range(1.4), 300, 1e-3);
     }
 }
 

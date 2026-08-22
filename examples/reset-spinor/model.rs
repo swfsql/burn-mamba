@@ -39,11 +39,14 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 ///   eight-class head is a nearest-element decoder: logit `g` = `⟨q_rel, g⟩`.
 ///
 /// A half-turn is an ordinary interior point of the parameterisation, not a
-/// limit: the block bounds one step to `rotation_range · π · Δ` and defaults to
-/// `range = 2` for the quaternion rotation (its aliasing period is `4π`, since
-/// `q` and `−q` turn the state differently), so `i` sits at `tanh(‖ϑ‖) = 1/2`
-/// with a live gradient. The bound is on the generator's **magnitude**, so the
-/// axis is exactly the direction the projection names.
+/// limit: the block bounds one step to `rotation_range · π · Δ`, defaulting to
+/// `range = 2` — a full traverse of the rotation group per unit `Δ`, which for
+/// `SU(2)` is every element, since its period is `4π` (`q` and `−q` turn the
+/// state differently). So `i` sits at `tanh(‖ϑ‖) = 1/2`, with a live gradient.
+/// The bound is on the generator's **magnitude**, so the axis is exactly the
+/// direction the projection names — and it is projected **per head**, so the
+/// four heads could turn about four different axes; this construction just
+/// wants them to agree.
 ///
 /// Config choices that are load-bearing:
 ///
@@ -69,7 +72,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         .with_per_head_dim(1)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(1.0))
+        .with_rope_fraction(1.0)
         .with_rotation(rotation)
         .with_has_proj_bias(true);
 

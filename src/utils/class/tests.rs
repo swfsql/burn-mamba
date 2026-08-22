@@ -96,7 +96,7 @@ fn unified_net_config_mamba3() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(0.5));
+        .with_rope_fraction(0.5);
     let net = MambaLatentNetConfig::Mamba3 {
         input_size: 3,
         n_real_layers: 2,
@@ -201,7 +201,7 @@ fn bidi_layers_mamba3() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(0.5));
+        .with_rope_fraction(0.5);
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
@@ -348,7 +348,7 @@ fn bidi_forward_is_deterministic_mamba3() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(0.5));
+        .with_rope_fraction(0.5);
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
@@ -937,7 +937,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(Some(0.5));
+        .with_rope_fraction(0.5);
     let mut layers = LayersBuilder::new(2, block).init(&device);
     layers.real_layers[1].class_latents = vec![ClassLatent::Start];
     layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);

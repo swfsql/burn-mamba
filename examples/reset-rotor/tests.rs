@@ -37,6 +37,11 @@ use burn_mamba::prelude::*;
 
 /// One detent, in radians: the per-step rotation a `±` symbol applies.
 const DETENT: f64 = 2.0 * std::f64::consts::PI / MODULUS as f64;
+/// The block's per-step rotation bound, in radians per unit `Δ`
+/// (`Mamba3Config::rotation_range · π`, at its default of 2): an angle `θ` is
+/// asked for as `ϑ = atanh(θ / MAX_ANGLE)`, which for a detent is comfortably
+/// inside `tanh`'s slope.
+const MAX_ANGLE: f64 = 2.0 * std::f64::consts::PI;
 /// `Δ` for every head and every symbol. Fixed at 1 so the per-step angle is
 /// `π·tanh(ϑ)` outright and `γ = λ·Δ = 1` writes `B` unscaled.
 const DELTA: f64 = 1.0;
@@ -153,7 +158,7 @@ fn config_without_rotation() -> MambaLatentNetConfig {
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
         unreachable!("reset-rotor configures the Mamba-3 variant")
     };
-    *mamba_block = mamba_block.clone().with_rope_fraction(Some(0.0));
+    *mamba_block = mamba_block.clone().with_rope_fraction(0.0);
     cfg
 }
 
@@ -254,10 +259,10 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
     // per-step angle is π·tanh(ϑ).
     let theta = match turn {
         Turn::Selective => {
-            let t = (DETENT / std::f64::consts::PI).atanh();
+            let t = (DETENT / MAX_ANGLE).atanh();
             [-t, t, 0.0] // −one detent, +one detent, and R does not turn
         }
-        Turn::Fixed(omega) => [(omega / std::f64::consts::PI).atanh(); 3],
+        Turn::Fixed(omega) => [(omega / MAX_ANGLE).atanh(); 3],
     };
     // Channel order: [z(2) | x(2) | B_raw(2) | C_raw(2) | dt(2) | A(2) | λ(2) | ϑ(1)].
     let channels: Vec<[f64; 3]> = vec![
