@@ -72,14 +72,35 @@ fn step_infinite_matches_unroll_quat_siso() {
     run_step_infinite_matches_unroll("quat siso", decaying(quat_config()), 300, 1e-3);
 }
 
+/// The quaternion default is a *full* rotation, so the partial case needs
+/// asking for: `state_rank = 8` turned by one of its two 4-blocks, with the
+/// pass-through half decaying as a plain geometric series.
 #[test]
-fn step_infinite_matches_unroll_quat_rope_full() {
+fn step_infinite_matches_unroll_quat_rope_partial() {
     run_step_infinite_matches_unroll(
-        "quat rope=1.0",
-        decaying(quat_config().with_rope_fraction(1.0)),
+        "quat rope=0.5",
+        decaying(quat_config().with_rope_fraction(Some(0.5))),
         300,
         1e-3,
     );
+}
+
+/// `step_infinite` derives its per-step rotation from the same
+/// [`RotationSpec`](crate::mamba3::rotation::RotationSpec) as `step`, so a
+/// non-default
+/// [`rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range) must
+/// reach both. This is the cross-site guard: the constant-input shortcut used
+/// to spell the `Δ·π·tanh(ϑ)` formula out for itself, and a knob added to one
+/// site and missed at the other would leave the "fixed point" converging to
+/// something the recurrence never reaches.
+#[test]
+fn step_infinite_matches_unroll_at_a_non_default_range() {
+    for (label, cfg) in [
+        ("complex range 1.4", decaying(small_config())),
+        ("quat range 1.4", decaying(quat_config())),
+    ] {
+        run_step_infinite_matches_unroll(label, cfg.with_rotation_range(Some(1.4)), 300, 1e-3);
+    }
 }
 
 // ---------------------------------------------------------------------------

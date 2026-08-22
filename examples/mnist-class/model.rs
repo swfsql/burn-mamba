@@ -55,7 +55,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         //   |    Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
         //   |    Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
         //   | Quaternion4D | 100% |  4.3GB | 35%, 55%, 60% |
-        .with_rope_fraction(1.0)
+        .with_rope_fraction(Some(1.0))
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Complex2D); // 2D rotations on B/C

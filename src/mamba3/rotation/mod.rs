@@ -56,9 +56,9 @@
 //! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)` with
 //! `w` the real part.  A `state_rank` of `r = 4·J` is treated as `J` independent
 //! quaternion blocks; the rotation acts within each block, exactly as RoPE acts
-//! within each `2`-pair.  This module is a self-contained, tested reference for
-//! the math; wiring it into the [`Mamba3`](crate::mamba3::mamba3::Mamba3) block
-//! is a separate, larger change (the SSD kernels themselves need no edits).
+//! within each `2`-pair.  [`Mamba3`](crate::mamba3::mamba3::Mamba3) selects it
+//! with [`RotationKind::Quaternion4D`] and drives it through one
+//! [`RotationSpec`] (the SSD kernels themselves need no edits).
 
 use crate::modules::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
@@ -85,6 +85,30 @@ pub enum RotationKind {
     Complex2D,
     /// Non-abelian quaternion (`SU(2)`) rotation.
     Quaternion4D,
+}
+
+/// Everything the rotation needs from the block: which algebra, how much of
+/// `state_rank` it turns, and how far one step may turn it.
+///
+/// Carried by [`Mamba3`](crate::mamba3::mamba3::Mamba3) and handed to
+/// [`rotate_bc_forward`] / [`rotate_bc_step`] (and to the constant-input
+/// shortcut) so that every site derives the per-step rotation from **one**
+/// definition — the three used to spell the formula out separately, which is
+/// exactly the kind of duplication that lets `forward`, `step` and
+/// `step_infinite` drift apart.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RotationSpec {
+    /// Which rotational-state algebra ([`RotationKind`]).
+    pub kind: RotationKind,
+    /// How many leading `state_rank` entries are rotated (`0` ⇒ the rotation is
+    /// the identity; see
+    /// [`Mamba3Config::rope_fraction`](crate::mamba3::mamba3::Mamba3Config::rope_fraction)).
+    /// For [`RotationKind::Quaternion4D`] this is a multiple of 4.
+    pub rope_dim: usize,
+    /// The per-step rotation bound in half-turns per unit `Δ`
+    /// ([`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)):
+    /// one step turns by at most `range · π · Δ`.
+    pub range: f64,
 }
 
 /// The cumulative-rotation accumulator carried between calls in a Mamba-3 cache
@@ -237,6 +261,35 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     q / norm
 }
 
+/// Euclidean norm over the last axis, formed **scale-free** so it cannot
+/// overflow: the components are divided by their (detached) largest magnitude
+/// before squaring, and the result is scaled back.
+///
+/// Squaring the raw components is the obvious way and the wrong one here,
+/// because the inputs are raw in-projection channels: `‖r‖²` overflows f32 at
+/// `|r| ≈ 2e19` and **f16 at `|r| ≈ 250`**, which is an ordinary activation.
+/// The overflow does not announce itself — `∞` divides back to `0`, so a very
+/// large generator would silently produce *no* rotation, the exact opposite of
+/// the intended "turn as far as the bound allows". Same trick, same reason, as
+/// [`RmsNorm`](crate::modules::RmsNorm)'s fp16 path.
+///
+/// The sum of squares is floored by `div_eps` before the `sqrt`, so a zero
+/// vector lands in `clamp_min`'s flat region and backprops to a finite `0`
+/// instead of `sqrt`'s singular `1/(2·0)`.
+///
+/// # Shapes
+/// - `t`  : `[..., n]`
+/// - out  : `[..., 1]`
+fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
+    let n = D - 1;
+    let eps = crate::utils::div_eps(t.dtype());
+    // Detached: the rescaling is a numerical device, not part of the function
+    // being differentiated (`d‖t‖/dt = t̂` either way).
+    let scale = t.clone().abs().max_dim(n).detach() + eps; // [..., 1]
+    let unit = t / scale.clone(); // components ≤ 1
+    (unit.clone() * unit).sum_dim(n).clamp_min(eps).sqrt() * scale
+}
+
 /// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
 /// (axis · angle) via the exponential map — the data-dependent "materialise
 /// `Rₜ`" step, analogous to RoPE's `Δₜ · π · tanh(θₜ)` angle.
@@ -253,15 +306,10 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
 pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    // Clamp the sum-of-squares *before* `sqrt`: at `g = 0` the forward `sqrt(0)=0`
-    // is finite, but `sqrt`'s backward is `1/(2·0)=∞` and `∞·(2·0)=NaN`. Clamping
-    // pre-`sqrt` puts `g = 0` in `clamp_min`'s flat (zero-gradient) region, so the
-    // near-identity rotation gets a finite 0 gradient instead of a NaN. (This is
-    // the FiLM-triggered decoder-backward NaN: a per-position rotation generator
-    // hitting exactly zero.) The floor is the dtype-aware `div_eps` on the squared
-    // quantity — see [`quat_normalize`] for why it floors `sumsq`, not the norm.
-    let eps = crate::utils::div_eps(g.dtype());
-    let angle = (g.clone() * g.clone()).sum_dim(n).clamp_min(eps).sqrt(); // [..., 1]
+    // `safe_norm` both guards the origin (a zero generator would otherwise hit
+    // `sqrt`'s singular backward and yield NaN — the FiLM-triggered decoder
+    // NaN) and keeps the sum of squares from overflowing at large `g`.
+    let angle = safe_norm(g.clone()); // [..., 1]
     let half = angle.clone() * 0.5;
     let w = half.clone().cos(); // [..., 1]
     // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation); `angle ≥ √div_eps`
@@ -269,6 +317,33 @@ pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
     let scale = half.sin() / angle; // [..., 1]
     let v = g * scale; // [..., 3]
     quat_normalize(Tensor::cat(vec![w, v], n))
+}
+
+/// Bound a rotation vector's **magnitude**, leaving its direction alone:
+/// returns `max_angle · tanh(‖r‖) · r̂`.
+///
+/// This is the quaternion counterpart of the abelian path's `π·tanh(ϑ)`, and
+/// the difference is deliberate. Squashing each of the three raw channels
+/// *separately* would bound the rotation vector to a **cube**: the reachable
+/// angle would depend on the axis (`max_angle` about a coordinate axis but
+/// `√3·max_angle` about the diagonal), and — worse — `tanh` applied per
+/// component moves the *direction* too, so the axis a given projection selects
+/// would depend on how large the projection is. Bounding the norm keeps the
+/// axis exactly `r̂` and the angle a function of `‖r‖` alone, so axis and angle
+/// are independent knobs.
+///
+/// Near `r = 0` the map is `≈ max_angle · r` (the `tanh(n)/n → 1` limit); the
+/// `sum-of-squares` floor is the same pre-`sqrt` clamp
+/// [`quat_from_scaled_axis`] uses, and puts the degenerate point in the flat
+/// region of `clamp_min` with the correct finite gradient.
+///
+/// # Shapes
+/// - `r`  : `[..., 3]`
+/// - out  : `[..., 3]`, with `‖out‖ ≤ max_angle` (attained once `tanh` saturates).
+pub fn bound_rotation_vector<const D: usize>(r: Tensor<D>, max_angle: f64) -> Tensor<D> {
+    let norm = safe_norm(r.clone()); // [..., 1]
+    let scale = norm.clone().tanh() * max_angle / norm;
+    r * scale
 }
 
 /// Materialise the `4×4` orthogonal matrix of left-multiplication by `q`.
@@ -455,6 +530,12 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
     rope_width: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
+    if rope_width == 0 {
+        // The rotation is disabled (`rope_fraction = 0`): the identity, exactly
+        // as [`apply_rope_partial`] short-circuits on the abelian path. Also
+        // avoids a zero-width `narrow` below (Burn has no zero-width tensors).
+        return v;
+    }
     if rope_width == r {
         rotate_state_rank_blocks::<D, DB>(v, q)
     } else {
@@ -463,6 +544,60 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
         let head_rot = rotate_state_rank_blocks::<D, DB>(head, q);
         Tensor::cat(vec![head_rot, tail], D - 1)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-step rotation increments (the single definition every site derives from)
+// ---------------------------------------------------------------------------
+
+/// The abelian per-step angle increment `θ̂ₜ = Δₜ · range·π·tanh(ϑₜ)`, one per
+/// head and rotation pair.
+///
+/// `DP1 = D + 1`: the head axis is inserted before the pair axis, so a
+/// sequence-shaped call (`rot [b, s, a]`, `dt [b, s, h]`) yields `[b, s, h, a]`
+/// and a single-token call (`rot [b, a]`, `dt [b, h]`) yields `[b, h, a]`.
+pub fn angle_increment<const D: usize, const DP1: usize>(
+    rot: Tensor<D>,
+    dt: Tensor<D>,
+    range: f64,
+) -> Tensor<DP1> {
+    assert_eq!(D + 1, DP1, "angle_increment inserts the head axis");
+    let bounded = rot.tanh() * (range * std::f64::consts::PI);
+    dt.unsqueeze_dim::<DP1>(D) * bounded.unsqueeze_dim::<DP1>(D - 1)
+}
+
+/// The quaternion per-step rotation vector `gₜ = Δₜ · range·π·tanh(‖r‖)·r̂`, one
+/// per head and quaternion block (feed it to [`quat_from_scaled_axis`]).
+///
+/// The magnitude — not each component — is bounded, so the axis is exactly the
+/// direction of the projection; see [`bound_rotation_vector`].
+///
+/// `DP1 = D + 1`, `DP2 = D + 2`: a sequence-shaped call (`rot [b, s, 3·J]`,
+/// `dt [b, s, h]`) yields `[b, s, h, J, 3]` and a single-token call
+/// (`rot [b, 3·J]`, `dt [b, h]`) yields `[b, h, J, 3]`.
+pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
+    rot: Tensor<D>,
+    dt: Tensor<D>,
+    blocks: usize,
+    range: f64,
+) -> Tensor<DP2> {
+    assert_eq!(D + 1, DP1, "generator_increment splits (3·J) into (J, 3)");
+    assert_eq!(D + 2, DP2, "generator_increment also inserts the head axis");
+    let dims = rot.dims();
+    assert_eq!(
+        dims[D - 1],
+        3 * blocks,
+        "the rotation channels are three generators per quaternion block"
+    );
+    // [..., 3·J] → [..., J, 3]
+    let mut split = [0usize; DP1];
+    split[..D - 1].copy_from_slice(&dims[..D - 1]);
+    split[DP1 - 2] = blocks;
+    split[DP1 - 1] = 3;
+    let bounded = bound_rotation_vector::<DP1>(rot.reshape(split), range * std::f64::consts::PI);
+    // insert the head axis before (J, 3), and Δ's two trailing broadcast axes
+    bounded.unsqueeze_dim::<DP2>(D - 1)
+        * dt.unsqueeze_dim::<DP1>(D).unsqueeze_dim::<DP2>(D + 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -495,17 +630,19 @@ pub fn rotate_bc_forward(
     prev: RotationState,
     b_bsmhr: Tensor<5>,
     c_bsmhr: Tensor<5>,
-    kind: RotationKind,
-    rope_dim: usize,
+    spec: RotationSpec,
 ) -> (Tensor<5>, Tensor<5>, RotationState) {
     let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
+    let RotationSpec {
+        kind,
+        rope_dim,
+        range,
+    } = spec;
     match kind {
         RotationKind::Complex2D => {
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
-            let theta_scaled_bsa = rot_bsa.tanh() * std::f32::consts::PI;
-            let raw_angles_bsha =
-                dt_bsh.unsqueeze_dim::<4>(3) * theta_scaled_bsa.unsqueeze_dim::<4>(2);
+            let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
             let cum_angles_bsha = prev_angle_bha.unsqueeze_dim::<4>(1) + raw_angles_bsha.cumsum(1);
             let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
                 batch,
@@ -532,20 +669,18 @@ pub fn rotate_bc_forward(
         RotationKind::Quaternion4D => {
             let prev_q_bhj4 = prev.quaternion();
             let blocks = prev_q_bhj4.dims()[2];
-            let rope_width = blocks * 4;
-            // Generators [b,s,blocks,3] (shared across heads), scaled per-head by Δ.
-            //
-            // Bound the raw generator with `tanh·π` before scaling by Δ — the
-            // direct analogue of the Complex2D path (`rot.tanh()·π`). Without it
-            // the generator is unbounded, so a large in-projection activation makes
-            // `g = rot·Δ` overflow f32 to `inf`, and `quat_from_scaled_axis`'s
-            // `cos(∞)` then yields a forward NaN. The bound caps each per-step
-            // rotation to `±π·Δ` (cos/sin still give the periodicity within range);
-            // healthy `O(1)` generators stay in tanh's near-linear region.
-            let g_bshj3 = (rot_bsa.tanh() * core::f32::consts::PI)
-                .reshape([batch, sequence, blocks, 3])
-                .unsqueeze_dim::<5>(2)
-                * dt_bsh.unsqueeze_dim::<4>(3).unsqueeze_dim::<5>(4);
+            // The rotated width follows `rope_dim` (a multiple of 4 here), *not*
+            // the accumulator's block count: with `rope_fraction = 0` the block
+            // keeps one dummy block alive to carry the data flow, and rotates
+            // nothing — the same ablation the abelian path implements.
+            let rope_width = rope_dim.min(blocks * 4);
+            // Generators [b,s,h,blocks,3]: the raw channels bounded to an angle
+            // of at most `range·π` (see `generator_increment`) and scaled
+            // per-head by Δ. The bound is load-bearing, not cosmetic: an
+            // unbounded `g = rot·Δ` overflows f32 to `inf` for a large
+            // in-projection activation, and `quat_from_scaled_axis`'s `cos(∞)`
+            // then yields a forward NaN.
+            let g_bshj3 = generator_increment::<3, 4, 5>(rot_bsa, dt_bsh, blocks, range);
             let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
             // Memory-efficient scan: a custom recompute backward (saves only the
             // leaf inputs) instead of retaining the scan's intermediates. Equal
@@ -554,6 +689,14 @@ pub fn rotate_bc_forward(
                 q_step_bshj4,
                 Some(prev_q_bhj4),
             );
+            // Renormalise the prefixes. A product of unit quaternions is a unit
+            // quaternion in exact arithmetic, but the scan composes each prefix
+            // out of `⌈log₂ L⌉` multiplies, so the norm drifts — negligibly in
+            // f32, by ~1% over a long f16 sequence, and a non-unit rotation
+            // rescales B/C instead of only turning them. `step` already
+            // normalises every step; this is the chunkwise counterpart, and it
+            // keeps the two numerically alike as well as exactly orthogonal.
+            let cum_bshj4 = quat_normalize(cum_bshj4);
             // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
             // broadcast over the mimo_rank axis.
             let conj_bsmhj4 = quat_conj(cum_bshj4)
@@ -578,16 +721,19 @@ pub fn rotate_bc_step(
     prev: RotationState,
     b_bmhr: Tensor<4>,
     c_bmhr: Tensor<4>,
-    kind: RotationKind,
-    rope_dim: usize,
+    spec: RotationSpec,
 ) -> (Tensor<4>, Tensor<4>, RotationState) {
     let [batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
+    let RotationSpec {
+        kind,
+        rope_dim,
+        range,
+    } = spec;
     match kind {
         RotationKind::Complex2D => {
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
-            let theta_scaled_ba = rot_ba.tanh() * std::f32::consts::PI;
-            let raw_angle_bha = dt_bh.unsqueeze_dim::<3>(2) * theta_scaled_ba.unsqueeze_dim::<3>(1);
+            let raw_angle_bha = angle_increment::<2, 3>(rot_ba, dt_bh, range);
             let new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
             let new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::<4>(1).expand([
                 batch,
@@ -608,12 +754,9 @@ pub fn rotate_bc_step(
         RotationKind::Quaternion4D => {
             let prev_q_bhj4 = prev.quaternion();
             let blocks = prev_q_bhj4.dims()[2];
-            let rope_width = blocks * 4;
-            // `tanh·π` bound, matching `rotate_bc_forward` (see the note there).
-            let g_bhj3 = (rot_ba.tanh() * core::f32::consts::PI)
-                .reshape([batch, blocks, 3])
-                .unsqueeze_dim::<4>(1)
-                * dt_bh.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3);
+            let rope_width = rope_dim.min(blocks * 4);
+            // The same bounded generator as `rotate_bc_forward` (see the note there).
+            let g_bhj3 = generator_increment::<2, 3, 4>(rot_ba, dt_bh, blocks, range);
             let q_step_bhj4 = quat_from_scaled_axis::<4>(g_bhj3);
             // Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
             let new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));

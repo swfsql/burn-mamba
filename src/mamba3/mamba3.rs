@@ -266,6 +266,10 @@ pub struct Mamba3 {
     #[module(skip)]
     pub rotation: RotationKind,
 
+    /// How far one step may rotate, in half-turns per unit `Δ`
+    /// (see [`Mamba3Config::rotation_range`]).
+    pub rotation_range: f64,
+
     /// Number of in-projection channels devoted to the rotation parameters
     /// (`num_rope_angles` for `Complex2D`, `3·num_quat_blocks` for
     /// `Quaternion4D`); the size of the last `in_proj` split segment.
@@ -314,6 +318,18 @@ impl Mamba3 {
     /// The block's rotation kind ([`RotationKind`]).
     pub fn rotation_kind(&self) -> RotationKind {
         self.rotation
+    }
+
+    /// Everything the rotation needs, in one place — the algebra, the rotated
+    /// width, and the per-step bound. Every site that materialises a per-step
+    /// rotation ([`forward`](Self::forward), [`step`](Self::step),
+    /// [`step_infinite`](Self::step_infinite)) goes through this.
+    pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
+        crate::mamba3::rotation::RotationSpec {
+            kind: self.rotation,
+            rope_dim: self.rope_dim,
+            range: self.rotation_range,
+        }
     }
 
     /// Whether the specialized `mimo_rank == 1` **per-token** kernels should run:
@@ -405,22 +421,29 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
-    /// Fraction of `state_rank` to which RoPE is applied (must be `0.0`, `0.5`,
-    /// or `1.0`).
+    /// Fraction of `state_rank` the transition rotation turns (must be `0.0`,
+    /// `0.5`, or `1.0`).
     ///
-    /// - `0.0`: RoPE disabled — no B/C dimension is rotated
-    ///   ([`apply_rope_partial`](crate::modules::misc::rope::apply_rope_partial)
-    ///   becomes the identity). Intended for ablations only. The angle
-    ///   projection and cumulative-angle data flow are kept intact (with a
-    ///   single dummy angle channel, see [`Self::num_rope_angles`]) so the rest
-    ///   of the block is structurally unchanged.
-    /// - `0.5` (default): partial RoPE — only `state_rank / 2` dimensions are
-    ///   rotated; the rest pass through unchanged.
-    /// - `1.0`: full RoPE — every B/C dimension is rotated.
+    /// - `0.0`: rotation disabled — no B/C dimension is turned (both kinds
+    ///   short-circuit to the identity). Intended for ablations only. The
+    ///   rotation projection and its cumulative data flow are kept intact (with
+    ///   a single dummy channel group, see [`Self::num_rope_angles`] /
+    ///   [`Self::num_quat_blocks`]) so the rest of the block is structurally
+    ///   unchanged.
+    /// - `0.5`: partial rotation — only `state_rank / 2` dimensions are turned;
+    ///   the rest pass through unchanged.
+    /// - `1.0`: full rotation — every B/C dimension is turned.
     ///
-    /// Default matches the reference's `rope_fraction` argument in `mamba3.py`.
-    #[config(default = 0.5)]
-    pub rope_fraction: f64,
+    /// `None` selects the per-kind default: **`0.5`** for
+    /// [`Complex2D`](RotationKind::Complex2D), matching the reference's
+    /// `rope_fraction` in `mamba3.py`, and **`1.0`** for
+    /// [`Quaternion4D`](RotationKind::Quaternion4D). The quaternion rotation has
+    /// no reference to match and exists to carry non-abelian state, so leaving
+    /// half the state out of it is the wrong default; turning everything also
+    /// keeps the smallest legal `state_rank` (4 — a single quaternion block)
+    /// usable, which a half rotation cannot be (see [`Self::num_quat_blocks`]).
+    #[config(default = "None")]
+    pub rope_fraction: Option<f64>,
 
     /// Whether to apply a gated RMSNorm before the output projection.
     ///
@@ -443,6 +466,34 @@ pub struct Mamba3Config {
     /// angle channels (see [`Self::num_rotation_channels`]).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
+
+    /// How far a single step may rotate the state, in **half-turns per unit
+    /// `Δ`**: the per-step angle is bounded by `rotation_range · π · Δ`.
+    ///
+    /// The bound is not a hyperparameter to tune so much as an aliasing limit.
+    /// The rotation is the imaginary part of a discretised pole, so a per-step
+    /// angle beyond the parameterisation's half-period is indistinguishable
+    /// from a slower one — and the two rotations have *different* half-periods:
+    ///
+    /// - [`Complex2D`](RotationKind::Complex2D): `Rₜ ∈ SO(2)` has period `2π`,
+    ///   so the limit is `π` and the default is **1.0** — which is also exactly
+    ///   the reference implementation's `Δ·π·tanh(ϑ)`.
+    /// - [`Quaternion4D`](RotationKind::Quaternion4D): the state is turned by
+    ///   the quaternion itself, and `q` and `−q` act *differently* (they are the
+    ///   two lifts of one `SO(3)` rotation), so the period is `4π` and the limit
+    ///   is `2π`. The default is **2.0**, at which every element of `SU(2)` is
+    ///   reachable in one step.
+    ///
+    /// `None` selects that per-kind default. Setting it explicitly is worth it
+    /// in one common case: a rotation of exactly `range·π` sits at `tanh`'s
+    /// asymptote, where the gradient is not merely small but **exactly zero** in
+    /// f32 (`tanh(10) == 1.0`). Half-turns are what state-tracking wants, so at
+    /// `range = 1.0` the most useful rotation is the one the optimiser cannot
+    /// reach by gradient. A slight over-range (`Some(1.05)`) puts `±π` in the
+    /// interior at a finite, differentiable `ϑ`; the small excess past `π`
+    /// simply wraps, which costs nothing because rotations are periodic.
+    #[config(default = "None")]
+    pub rotation_range: Option<f64>,
 
     /// Whether to use the specialized `mimo_rank == 1` (SISO) **chunkwise**
     /// kernel: the same-step γ-correction
@@ -499,7 +550,7 @@ impl Mamba3Config {
     /// `rope_fraction = 0.5`, and `0` when RoPE is disabled
     /// (`rope_fraction = 0`), in which case the rotation is the identity.
     pub fn rope_dim(&self) -> usize {
-        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
+        let mut d = (self.state_rank as f64 * self.resolved_rope_fraction()) as usize;
         if !d.is_multiple_of(2) {
             d -= 1;
         }
@@ -522,9 +573,32 @@ impl Mamba3Config {
     /// of 4**, divided by 4, and floored at 1 (Burn has no zero-width tensors —
     /// mirrors [`Self::num_rope_angles`]).
     pub fn num_quat_blocks(&self) -> usize {
-        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
+        let mut d = (self.state_rank as f64 * self.resolved_rope_fraction()) as usize;
         d -= d % 4;
         (d / 4).max(1)
+    }
+
+    /// The resolved rotated fraction of `state_rank`: [`Self::rope_fraction`] if
+    /// set, else the per-kind default (`0.5` for
+    /// [`Complex2D`](RotationKind::Complex2D), `1.0` for
+    /// [`Quaternion4D`](RotationKind::Quaternion4D)).
+    pub fn resolved_rope_fraction(&self) -> f64 {
+        self.rope_fraction.unwrap_or(match self.rotation {
+            RotationKind::Complex2D => 0.5,
+            RotationKind::Quaternion4D => 1.0,
+        })
+    }
+
+    /// The resolved per-step rotation bound in half-turns per unit `Δ`:
+    /// [`Self::rotation_range`] if set, else the per-kind default (`1.0` for
+    /// [`Complex2D`](RotationKind::Complex2D), `2.0` for
+    /// [`Quaternion4D`](RotationKind::Quaternion4D) — see that field for why
+    /// they differ).
+    pub fn resolved_rotation_range(&self) -> f64 {
+        self.rotation_range.unwrap_or(match self.rotation {
+            RotationKind::Complex2D => 1.0,
+            RotationKind::Quaternion4D => 2.0,
+        })
     }
 
     /// Number of in-projection channels devoted to the rotation parameters,
@@ -609,7 +683,7 @@ impl Mamba3Config {
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(
-            self.rope_fraction == 0.0 || self.rope_fraction == 0.5 || self.rope_fraction == 1.0,
+            [0.0, 0.5, 1.0].contains(&self.resolved_rope_fraction()),
             "rope_fraction must be 0.0, 0.5 or 1.0"
         );
         assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
@@ -618,7 +692,20 @@ impl Mamba3Config {
                 self.state_rank.is_multiple_of(4),
                 "Quaternion4D requires state_rank to be a multiple of 4"
             );
+            // The rotated width is a whole number of quaternion blocks, so a
+            // partial rotation has to land on a multiple of 4. Without this the
+            // block would quietly round `num_quat_blocks` up to its floor of 1
+            // and rotate *everything* when asked for half.
+            assert!(
+                self.rope_dim().is_multiple_of(4),
+                "Quaternion4D rotates whole 4-blocks: rope_fraction·state_rank = {} is not a multiple of 4",
+                self.rope_dim()
+            );
         }
+        assert!(
+            self.resolved_rotation_range() > 0.0,
+            "rotation_range must be positive"
+        );
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -712,6 +799,7 @@ impl Mamba3Config {
             num_rope_angles,
             mimo_rank,
             rotation: self.rotation,
+            rotation_range: self.resolved_rotation_range(),
             num_rotation_channels: self.num_rotation_channels(),
             num_quat_blocks: self.num_quat_blocks(),
             siso_specialization: self.siso_specialization,

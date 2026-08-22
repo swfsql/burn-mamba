@@ -25,7 +25,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         .with_per_head_dim(8) // nheads = d_inner / per_head_dim = 8
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(1.0) // apply RoPE to 100% of the B/C projections
+        .with_rope_fraction(Some(1.0)) // apply RoPE to 100% of the B/C projections
         .with_has_proj_bias(true)
         // the one knob this example varies: abelian vs non-abelian rotation
         .with_rotation(rotation);

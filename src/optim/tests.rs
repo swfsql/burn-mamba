@@ -130,7 +130,7 @@ fn mamba3_plan_fits_the_model() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(16)
-        .with_rope_fraction(1.0);
+        .with_rope_fraction(Some(1.0));
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 3,
         output_size: 5,

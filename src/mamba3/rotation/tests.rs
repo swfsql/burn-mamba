@@ -662,14 +662,24 @@ fn config_rotation_channels_and_d_in_proj() {
         + base.num_rope_angles();
     assert_eq!(base.d_in_proj(), legacy);
 
-    // Quaternion4D: rotation channels = 3 · num_quat_blocks, reflected in d_in_proj.
+    // Quaternion4D: rotation channels = 3 · num_quat_blocks, reflected in
+    // d_in_proj. Switching the kind also switches the *default* rotated
+    // fraction — the abelian path keeps the reference's half, the quaternion
+    // path turns the whole state (it exists to carry non-abelian state, and
+    // half a state is half a group).
     let q = base.clone().with_rotation(RotationKind::Quaternion4D);
-    assert_eq!(q.num_quat_blocks(), 2);
-    assert_eq!(q.num_rotation_channels(), 3 * 2);
+    assert_eq!(q.resolved_rope_fraction(), 1.0);
+    assert_eq!(q.num_quat_blocks(), 4); // 16 / 4
+    assert_eq!(q.num_rotation_channels(), 3 * 4);
+    // an explicit half is still honoured (and still whole 4-blocks)
+    let q_half = q.clone().with_rope_fraction(Some(0.5));
+    assert_eq!(q_half.num_quat_blocks(), 2);
+    assert_eq!(q_half.rope_dim(), 8);
     let q_expected = 2 * q.d_inner()
         + 2 * q.ngroups * q.state_rank * q.mimo_rank
         + 3 * q.nheads()
         + 3 * q.num_quat_blocks();
+    assert_eq!(q.rope_dim(), q.state_rank);
     assert_eq!(q.d_in_proj(), q_expected);
     // The two pathways differ only in the rotation-channel count.
     assert_eq!(
@@ -721,7 +731,7 @@ fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
         .with_expand(2)
         .with_per_head_dim(8)
         .with_mimo_rank(mimo_rank)
-        .with_rope_fraction(rope_fraction)
+        .with_rope_fraction(Some(rope_fraction))
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 
@@ -777,7 +787,7 @@ fn quaternion_split_prefill_matches_full() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.5)
+        .with_rope_fraction(Some(0.5))
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 
@@ -822,7 +832,7 @@ fn quaternion_forward_step_grad_parity() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rope_fraction(Some(1.0))
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device.clone().autodiff());
 
@@ -924,7 +934,7 @@ fn quaternion_bidi_forward_runs() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rope_fraction(Some(1.0))
         .with_rotation(RotationKind::Quaternion4D);
     let n_real = 2; // one bidirectional pair
     let layers = MambaBidiLayersConfig::Mamba3 {
@@ -1053,6 +1063,328 @@ fn factored_matches_explicit_grads() {
         assert!(
             d < GRAD_TOL,
             "grad {name}: factored vs explicit max abs diff = {d:.6} (tol {GRAD_TOL})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 12. Rotation-disabled ablation (`rope_fraction = 0`)
+// ---------------------------------------------------------------------------
+
+/// Zero the last `n` columns of the block's in-projection (its rotation
+/// channels), so the rotation generator is identically zero.
+fn without_rotation_channels(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mamba3 {
+    use burn::module::Param;
+    let mut block = block;
+    let [d_model, d_in_proj] = block.in_proj.weight.dims();
+    let keep = d_in_proj - block.num_rotation_channels;
+    let w = block.in_proj.weight.val();
+    let device = w.device();
+    block.in_proj.weight = Param::from_tensor(Tensor::cat(
+        vec![
+            w.narrow(1, 0, keep),
+            Tensor::zeros([d_model, block.num_rotation_channels], &device),
+        ],
+        1,
+    ));
+    block.in_proj.bias = block.in_proj.bias.map(|b| {
+        let b = b.val();
+        Param::from_tensor(Tensor::cat(
+            vec![
+                b.narrow(0, 0, keep),
+                Tensor::zeros([block.num_rotation_channels], &device),
+            ],
+            0,
+        ))
+    });
+    block
+}
+
+/// `rope_fraction = 0` is documented as *the* rotation-disabled ablation: "no
+/// B/C dimension is rotated". It must hold for **both** rotation kinds — the
+/// block's output cannot depend on its rotation channels at all.
+fn rope_fraction_zero_ignores_rotation_channels(kind: RotationKind) {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let block = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(Some(0.0))
+        .with_rotation(kind)
+        .init(&device);
+
+    let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
+    let (with_rot, _) = block.clone().forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (no_rot, _) = without_rotation_channels(block).forward(x, None, Mamba3SsdPath::Minimal(None));
+    let diff = max_abs_diff(with_rot, no_rot);
+    assert!(
+        diff < 1e-5,
+        "{kind:?}: rope_fraction = 0 still rotates B/C (max diff {diff})"
+    );
+}
+
+#[test]
+fn rope_fraction_zero_disables_complex_rotation() {
+    rope_fraction_zero_ignores_rotation_channels(RotationKind::Complex2D);
+}
+
+#[test]
+fn rope_fraction_zero_disables_quaternion_rotation() {
+    rope_fraction_zero_ignores_rotation_channels(RotationKind::Quaternion4D);
+}
+
+// ---------------------------------------------------------------------------
+// 13. The per-step bound: axis, reachability, and the `rotation_range` knob
+// ---------------------------------------------------------------------------
+
+/// Read a `[1, n]` tensor back as a `Vec<f32>`.
+fn row(t: Tensor<2>) -> Vec<f32> {
+    t.into_data().try_to_vec::<f32>().unwrap()
+}
+
+/// The rotation the block applies is a turn about the axis the projection
+/// *names*: the bounded generator is parallel to the raw channels whatever
+/// their magnitude, and its length alone carries the angle.
+///
+/// Squashing the three channels separately — the obvious way to bound a
+/// generator — fails exactly here: `tanh` compresses large components more than
+/// small ones, so the axis would drift toward the diagonal as the projection
+/// grows, and the reachable set would be a cube (angle `√3·max` about the
+/// diagonal, `max` about a coordinate axis) rather than a ball.
+#[test]
+fn bounded_generator_keeps_its_axis() {
+    let device: Device = Default::default();
+    let max_angle = 2.0 * std::f64::consts::PI;
+    let dir = [2.0f32, -1.0, 0.5];
+    let dir_norm = (dir.iter().map(|v| v * v).sum::<f32>()).sqrt();
+
+    let mut last_len = 0.0f32;
+    for scale in [0.05f32, 0.5, 2.0, 20.0] {
+        let raw: Vec<f32> = dir.iter().map(|v| v * scale).collect();
+        let r = Tensor::<1>::from_floats(raw.as_slice(), &device).reshape([1, 3]);
+        let g = row(bound_rotation_vector::<2>(r, max_angle));
+        let len = g.iter().map(|v| v * v).sum::<f32>().sqrt();
+
+        // same direction as the raw channels
+        for (k, gk) in g.iter().enumerate() {
+            let expected = dir[k] / dir_norm * len;
+            assert!(
+                (gk - expected).abs() < 1e-5,
+                "axis warped at scale {scale}: {g:?} is not parallel to {dir:?}"
+            );
+        }
+        // magnitude bounded (attained, not exceeded, once tanh saturates) and
+        // monotone in the projection's magnitude
+        assert!(
+            len <= max_angle as f32 + 1e-5,
+            "bound exceeded at scale {scale}: {len}"
+        );
+        assert!(len > last_len, "angle not monotone at scale {scale}");
+        last_len = len;
+    }
+    // the bound is approached, so the whole range is usable
+    assert!(
+        last_len > 0.99 * max_angle as f32,
+        "the bound is never approached: {last_len}"
+    );
+}
+
+/// Why [`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)
+/// defaults to 2 for the quaternion path.
+///
+/// A rotation of exactly the bound sits at `tanh`'s asymptote, where f32 gives a
+/// forward value that is exactly right and a gradient that is exactly **zero** —
+/// so at `range = 1` the half-turn, the single most useful rotation for
+/// state-tracking, is reachable only by a step the optimiser can never take. At
+/// `range = 2` the same half-turn sits at `tanh = 0.5`, in the interior, with a
+/// healthy gradient.
+#[test]
+fn half_turn_is_reachable_with_a_live_gradient() {
+    let device: Device = Default::default();
+    let pi = std::f64::consts::PI;
+
+    // range = 2: a half-turn at ‖r‖ = atanh(0.5), differentiable.
+    let interior = 0.5f64.atanh();
+    let r = Param::from_tensor(Tensor::from_inner(
+        Tensor::<1>::from_floats([interior as f32, 0.0, 0.0].as_slice(), &device).reshape([1, 3]),
+    ));
+    let q = quat_from_scaled_axis(bound_rotation_vector::<2>(r.val(), 2.0 * pi));
+    let w = row(q.clone().narrow(1, 0, 1))[0];
+    assert!(w.abs() < 1e-5, "not a half turn: w = {w}");
+    let grads = q.narrow(1, 0, 1).sum().backward();
+    let dw = row(r.val().grad(&grads).expect("grad r"))[0];
+    assert!(
+        dw.abs() > 0.1,
+        "the half-turn is not differentiable at range 2: dw/dr = {dw}"
+    );
+
+    // range = 1: the same half-turn only at the asymptote, where f32's tanh is
+    // exactly 1 and its derivative is exactly 0.
+    let saturated = Param::from_tensor(Tensor::from_inner(
+        Tensor::<1>::from_floats([10.0f32, 0.0, 0.0].as_slice(), &device).reshape([1, 3]),
+    ));
+    let q = quat_from_scaled_axis(bound_rotation_vector::<2>(saturated.val(), pi));
+    let w = row(q.clone().narrow(1, 0, 1))[0];
+    assert!(w.abs() < 1e-5, "saturated tanh should give a half turn: {w}");
+    let grads = q.narrow(1, 0, 1).sum().backward();
+    let dw = row(saturated.val().grad(&grads).expect("grad r"))[0];
+    assert_eq!(dw, 0.0, "expected a dead gradient at the asymptote");
+}
+
+/// The abelian default must stay bit-for-bit the reference formula
+/// `Δ · π · tanh(ϑ)` — `rotation_range` is an opt-in, not a silent change to
+/// the Mamba-3 the paper and the official kernels describe.
+#[test]
+fn complex_default_range_matches_the_reference_angle() {
+    let device: Device = Default::default();
+    let rot = Tensor::<3>::random([2, 5, 3], Distribution::Normal(0.0, 1.0), &device);
+    let dt = Tensor::<3>::random([2, 5, 4], Distribution::Uniform(0.01, 1.0), &device);
+
+    let got = angle_increment::<3, 4>(rot.clone(), dt.clone(), 1.0);
+    let reference = dt.unsqueeze_dim::<4>(3) * (rot.tanh() * std::f32::consts::PI).unsqueeze_dim::<4>(2);
+    let d = max_abs_diff(got, reference);
+    assert!(d < 1e-6, "the default abelian angle drifted from the reference: {d}");
+}
+
+/// The knob reaches the block: a non-default `rotation_range` changes the
+/// output, and `forward` and `step` still agree under it (they must read the
+/// same [`RotationSpec`], not two copies of the formula).
+fn rotation_range_is_wired_through(kind: RotationKind) {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let base = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rope_fraction(Some(1.0))
+        .with_rotation(kind);
+
+    let default = base.clone().init(&device);
+    let widened = base
+        .with_rotation_range(Some(1.37))
+        .init(&device)
+        .load_record(default.clone().into_record());
+
+    let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
+    let (y_default, _) = default.forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (y_widened, cache_widened) = widened
+        .clone()
+        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    assert!(
+        max_abs_diff(y_default, y_widened.clone()) > 1e-4,
+        "{kind:?}: rotation_range is ignored"
+    );
+
+    // forward vs unrolled step under the same non-default range
+    let mut cache = None;
+    let mut steps = Vec::new();
+    for t in 0..x.dims()[1] {
+        let (y, c) = widened.step(x.clone().narrow(1, t, 1).squeeze_dim::<2>(1), cache);
+        steps.push(y.unsqueeze_dim::<3>(1));
+        cache = Some(c);
+    }
+    let d = max_abs_diff(y_widened, Tensor::cat(steps, 1));
+    assert!(d < 1e-4, "{kind:?}: forward/step disagree at range 1.37: {d}");
+    let _ = cache_widened;
+}
+
+#[test]
+fn rotation_range_is_wired_through_complex() {
+    rotation_range_is_wired_through(RotationKind::Complex2D);
+}
+
+#[test]
+fn rotation_range_is_wired_through_quaternion() {
+    rotation_range_is_wired_through(RotationKind::Quaternion4D);
+}
+
+/// The scan multiplies unit quaternions, so its prefixes must stay unit — the
+/// quaternion path's replacement for `wrap_angle`'s job on the abelian side.
+/// Checked over a long sequence, where the doubling scan has composed every
+/// prefix out of many factors.
+#[test]
+fn cumulative_quaternion_stays_unit() {
+    let device: Device = Default::default();
+    let g = Tensor::<5>::random([1, 512, 2, 1, 3], Distribution::Normal(0.0, 1.0), &device);
+    let q = quat_from_scaled_axis::<5>(g);
+    let (cum, carry) = quat_cumprod(q, None);
+    for (name, norms) in [
+        ("prefixes", (cum.clone() * cum).sum_dim(4).sqrt()),
+        (
+            "carry",
+            (carry.clone() * carry).sum_dim(3).sqrt().unsqueeze_dim::<5>(0),
+        ),
+    ] {
+        let drift = max_abs_diff(norms.clone(), norms.ones_like());
+        assert!(drift < 1e-4, "{name}: cumulative rotation drifted off the unit sphere by {drift}");
+    }
+}
+
+/// A partial quaternion rotation has to land on whole 4-blocks; asking for half
+/// of a `state_rank` that is not a multiple of 8 is a configuration error, not
+/// something to round silently (it used to rotate *everything*).
+#[test]
+#[should_panic(expected = "multiple of 4")]
+fn quaternion_partial_rope_must_be_whole_blocks() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    let device: Device = Default::default();
+    let _ = Mamba3Config::new(8)
+        .with_state_rank(4)
+        .with_expand(1)
+        .with_per_head_dim(8)
+        .with_rope_fraction(Some(0.5))
+        .with_rotation(RotationKind::Quaternion4D)
+        .init(&device);
+}
+
+/// Bounding the magnitude leaves the **axis** trainable even where the angle is
+/// pinned at the bound: `tanh` saturates in the radial direction only, so a
+/// projection long enough to freeze the angle can still be turned. Squashing
+/// each component separately froze both at once, because there the axis *is*
+/// the three saturated components.
+#[test]
+fn saturated_generator_keeps_a_live_axis_gradient() {
+    let device: Device = Default::default();
+    // long enough that tanh(‖r‖) is exactly 1.0 in f32
+    let raw = Tensor::<1>::from_floats([12.0f32, 6.0, -3.0].as_slice(), &device).reshape([1, 3]);
+    let r = Param::from_tensor(Tensor::from_inner(raw));
+
+    let g = bound_rotation_vector::<2>(r.val(), std::f64::consts::PI);
+    // the angle is pinned at the bound …
+    let len = row((g.clone() * g.clone()).sum_dim(1).sqrt())[0];
+    assert!(
+        (len - std::f32::consts::PI).abs() < 1e-5,
+        "expected a saturated angle, got {len}"
+    );
+    // … yet the direction still backprops
+    let grads = g.sum().backward();
+    let dr = row(r.val().grad(&grads).expect("grad r"));
+    assert!(
+        dr.iter().any(|v| v.abs() > 1e-4),
+        "saturated generator has no axis gradient left: {dr:?}"
+    );
+}
+
+/// A projection large enough to overflow the sum-of-squares must still saturate
+/// at the bound, not collapse: `‖r‖²` is formed at the raw scale, so a channel
+/// of `1e20` overflows f32 (and one of a few hundred overflows f16) — after
+/// which `max/∞ = 0` would silently mean *no rotation at all*, the opposite of
+/// the intended "as far as the bound allows".
+#[test]
+fn bounded_generator_survives_a_huge_projection() {
+    let device: Device = Default::default();
+    let max_angle = 2.0 * std::f64::consts::PI;
+    for scale in [1e3f32, 1e10, 1e20] {
+        let raw = Tensor::<1>::from_floats([scale, -scale * 0.5, 0.0].as_slice(), &device)
+            .reshape([1, 3]);
+        let g = row(bound_rotation_vector::<2>(raw, max_angle));
+        let len = g.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(
+            (len - max_angle as f32).abs() < 1e-4,
+            "at scale {scale} the generator is {len}, not the bound {max_angle}"
         );
     }
 }

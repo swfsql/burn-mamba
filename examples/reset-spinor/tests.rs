@@ -43,10 +43,16 @@ use burn_mamba::prelude::*;
 /// `Δ` for every head and every symbol. Fixed at 1 so the rotation generator is
 /// `π·tanh(ϑ)` outright and `γ = λ·Δ = 1` writes `B` unscaled.
 const DELTA: f64 = 1.0;
-/// `ϑ` for an axis a symbol turns about. `tanh` saturates to `1.0` in f32 long
-/// before this, so the generator is exactly `π` — a half-turn, i.e. the unit
-/// quaternion `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
-const TURN_RAW: f64 = 20.0;
+/// `ϑ` for an axis a symbol turns about — a half-turn, i.e. the unit quaternion
+/// `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
+///
+/// The block bounds one step to `rotation_range · π · Δ` and defaults to
+/// `range = 2` for the quaternion rotation, so a half-turn is
+/// `tanh(‖ϑ‖) = 1/2`: interior, where `tanh` is steep and the gradient is
+/// alive. (At `range = 1` the same half-turn would sit exactly on `tanh`'s
+/// asymptote, reachable only by saturating a channel — a place no optimiser can
+/// arrive at, since f32's `tanh` derivative there is exactly zero.)
+const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
 /// `Â` on a turn. `A = −softplus(Â)`, floored at the block's `a_floor` (`1e-4`),
 /// so this is the flattest hold the block allows.
 const A_HOLD_RAW: f64 = -20.0;
@@ -457,13 +463,16 @@ fn handmade_block_solves_every_family() {
 /// The identical construction with `RotationKind::Complex2D` — the one enum
 /// knob — reported two ways.
 ///
-/// Its cumulative rotation is a `cumsum`, so each state pair is turned by
-/// `π·(#i)` and `π·(#j)`: what reaches the head is the pair of **parities**,
-/// which is precisely `Q₈/{±1} ≅ Z₂×Z₂`. Half the group is folded onto the other
-/// half, and no readout can unfold it — hence the second column, which hands the
-/// abelian block the best table over a fine partition of its whole output space
-/// (fitted on a separate split) and still lands near the 50% that guessing the
-/// commutator's sign implies.
+/// Its cumulative rotation is a `cumsum`, so the two state pairs are turned by
+/// an angle proportional to `#i` and to `#j`: what reaches the head is a
+/// function of the **counts**, and nothing else. That is not nothing — at the
+/// abelian default (`rotation_range = 1`, so a quarter turn per symbol here) it
+/// resolves each count mod 4, which on this data is nearly everything the counts
+/// have to give. It is still not the answer: the second column hands the block
+/// the best table over a fine partition of its whole output space (fitted on a
+/// separate split), and it lands on the counts ceiling of
+/// [`counts_ceiling_is_the_abelian_limit`] rather than above it. The order —
+/// `ij` against `ji` — is simply not in there.
 #[test]
 fn abelian_rotation_loses_the_order() {
     let device = Device::default();
@@ -495,8 +504,9 @@ fn abelian_rotation_loses_the_order() {
         "best readout of the abelian state, over the families: {:.2}%",
         100.0 * best
     );
+    // the same bar the counts ceiling is held to: an angle-sum cannot beat it
     assert!(
-        best < 0.75,
+        best < 0.85,
         "the abelian twin reached {best:.4} — the task does not need a non-abelian rotation"
     );
 }

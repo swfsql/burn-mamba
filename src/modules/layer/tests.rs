@@ -27,7 +27,7 @@ fn block_config(d_model: usize) -> crate::mamba3::prelude::Mamba3Config {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(0.5)
+        .with_rope_fraction(Some(0.5))
 }
 
 /// A layer with an `mlp` must equal the reference block's two-residual form.

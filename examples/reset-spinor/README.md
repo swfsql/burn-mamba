@@ -79,7 +79,7 @@ channel on the rotation). Chance is 12.5%.
 | | random | shuffle | runs |
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 34.2% | 17.4% | 18.7% |
-| best readout of the **abelian twin's** state | 59.9% | 52.6% | 52.6% |
+| best readout of the **abelian twin's** state | 71.3% | 56.6% | 76.8% |
 | best predictor of `(#i, #j)` since the reset | 71.4% | 55.8% | 77.1% |
 | **hand-built** quaternion block, no training | **100%** | **100%** | **100%** |
 | trained, `--rotation quaternion` | **100%** | **100%** | **100%** |
@@ -89,14 +89,14 @@ The last two rows are the same model, the same data and the same schedule, with
 one enum changed: the quaternion run is exact on all three families
 (`16384/16384` each, every element at 100%), and the abelian one is not close.
 
-The middle two rows bound what an order-blind model can do, from two
-directions: the abelian twin's state carries the abelianisation and then has to
-guess a sign (~50%), while a table given the *exact* counts — far more than a
-sum of angles holds — is still stuck wherever both signs occur. Both are
-ceilings for a block that writes its state at the reset and reads the rotation
-accumulated since, which is what this construction does under either rotation;
-the trained `--rotation complex` row is what covers an abelian block free to do
-something else entirely.
+The middle two rows are the same bound reached from two directions, and they
+agree: a `cumsum` of angles is a function of the counts, so the abelian twin
+cannot beat a table given those counts — and it very nearly attains it (76.8%
+against 77.1% on `runs`). What neither can do is separate `ij` from `ji`. Both
+are ceilings for a block that writes its state at the reset and reads the
+rotation accumulated since, which is what this construction does under either
+rotation; the trained `--rotation complex` row covers an abelian block free to
+do something else entirely — and it lands on the same ceiling.
 
 `tests.rs` produces the first four rows (the last two are the two training
 runs above). `handmade_block_solves_every_family` writes every
@@ -119,26 +119,27 @@ ceilings are what a model could actually reach, not memorised answer keys.
   labels use. Writing `B = 1` (the group's unit) makes the readout the four
   components of that element, and the four heads — set apart only by the
   per-head bias `c_bias_hmr` — read one component each.
-- **Half-turns are exactly representable.** `i` needs a generator of `π`, i.e.
-  `tanh(ϑ) = 1`. `tanh` saturates to `1.0` in f32 well below `ϑ = 20`, so the
-  generator is `π` to the last bit and the per-step quaternion is `i` up to
-  `cos(π/2) ≈ 4e-8`.
+- **Half-turns sit in the interior.** The block bounds one step to
+  `rotation_range · π · Δ`, and for the quaternion rotation that range defaults
+  to 2 — its aliasing period is `4π`, because `q` and `−q` turn the state
+  differently. So `i` is `tanh(‖ϑ‖) = 1/2`, a point with a live gradient, rather
+  than `tanh`'s asymptote (where f32's derivative is exactly zero and no
+  optimiser could ever arrive). The bound is on the generator's *magnitude*, so
+  the axis is exactly the direction the projection names.
 - **The abelian twin is given the better `B`.** With `B = (1,0,0,0)` its second
-  rotated pair would multiply zero and it would carry one parity instead of two;
-  it gets `(1,0,1,0)` so its state is the *whole* abelianisation. Its "same
-  head" column is near chance only because the nearest-element decoder is
-  matched to a quaternion, not to a pair of parities — the meaningful number is
-  the best-readout column beside it.
-- **The trained abelian model beats its hand-built twin — and stops at the
-  counts.** On `random` it reaches 70.1% against the 71.4% counts ceiling, well
-  above the 59.9% its write-once-and-read twin manages, so training finds
-  something the construction does not (writing on every symbol makes the state
-  an order-*dependent* sum). It buys nothing on the other two families, and
-  nowhere does it clear what a table given the exact counts already gets.
+  rotated pair would multiply zero and it would carry one count instead of two;
+  it gets `(1,0,1,0)` so both reach the head. Its "same head" column is near
+  chance only because the nearest-element decoder is matched to a quaternion,
+  not to a pair of angles — the meaningful number is the best-readout column
+  beside it.
+- **Everything abelian lands on the counts ceiling, from below.** The trained
+  `--rotation complex` model gets 70.1% on `random` against a 71.4% ceiling; the
+  hand-built twin gets 71.3%. Different mechanisms, same wall — which is what
+  "the transition is abelian" costs, independently of how the block is wired.
 - **Training the quaternion model is a basin, as one rung down.** Accuracy
-  climbs to ~99/96/83% by epoch 30, falls back, and only settles at exact around
-  epoch 60 — with the same cosine schedule as the other two examples (warmup to
-  3e-2, annealed to 1e-4).
+  climbs, falls back, and snaps to exact around epoch 45 (`runs`, the slowest
+  family, is at 84% at epoch 40 and 100% at 45) — with the same cosine schedule
+  as the other two examples (warmup to 3e-2, annealed to 1e-4).
 - **Nothing here is `reset-rotor`'s job.** The reset (a selective decay) and the
   periodicity (a rotation) are inherited unchanged; the only new requirement is
   that the two turns fail to commute. That is why the ablation is a single enum

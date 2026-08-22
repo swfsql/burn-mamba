@@ -38,10 +38,12 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 ///   per-head bias `c_bias_hmr` alone, so `(y₀, y₁, y₂, y₃) ∝ q_rel` and the
 ///   eight-class head is a nearest-element decoder: logit `g` = `⟨q_rel, g⟩`.
 ///
-/// A half-turn needs `Δ · π · tanh(ϑ) = π`, i.e. `tanh(ϑ) = 1`. That is exactly
-/// representable: `tanh` saturates to `1.0` in f32 well before `ϑ = 20`, so the
-/// generator is `π` to the last bit and the per-step quaternion is `i` up to
-/// `cos(π/2) ≈ 4e-8`.
+/// A half-turn is an ordinary interior point of the parameterisation, not a
+/// limit: the block bounds one step to `rotation_range · π · Δ` and defaults to
+/// `range = 2` for the quaternion rotation (its aliasing period is `4π`, since
+/// `q` and `−q` turn the state differently), so `i` sits at `tanh(‖ϑ‖) = 1/2`
+/// with a live gradient. The bound is on the generator's **magnitude**, so the
+/// axis is exactly the direction the projection names.
 ///
 /// Config choices that are load-bearing:
 ///
@@ -67,7 +69,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         .with_per_head_dim(1)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(1.0)
+        .with_rope_fraction(Some(1.0))
         .with_rotation(rotation)
         .with_has_proj_bias(true);
 

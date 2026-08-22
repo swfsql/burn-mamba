@@ -153,7 +153,7 @@ fn config_without_rotation() -> MambaLatentNetConfig {
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
         unreachable!("reset-rotor configures the Mamba-3 variant")
     };
-    *mamba_block = mamba_block.clone().with_rope_fraction(0.0);
+    *mamba_block = mamba_block.clone().with_rope_fraction(Some(0.0));
     cfg
 }
 

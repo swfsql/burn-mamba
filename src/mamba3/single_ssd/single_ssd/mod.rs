@@ -180,8 +180,7 @@ impl Mamba3 {
             cache.rotation.clone(),
             b_bsmhr,
             c_bsmhr,
-            self.rotation_kind(),
-            self.rope_dim,
+            self.rotation_spec(),
         );
         san(&b_bsmhr);
         san(&c_bsmhr);

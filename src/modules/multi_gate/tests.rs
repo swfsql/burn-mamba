@@ -206,7 +206,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(0.5);
+        .with_rope_fraction(Some(0.5));
     let layers = LayersBuilder::new(2, block)
         .with_n_virtual_layers(Some((6, Schedule::Stretched)))
         .with_residuals(ResidualsConfig::MultiGate {

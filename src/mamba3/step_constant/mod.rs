@@ -47,13 +47,13 @@ use crate::mamba3::double_ssd::double_ssd::StepProjection;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{
-    quat_conj, quat_from_scaled_axis, quat_mul, rotate_state_rank_blocks,
+    angle_increment, generator_increment, quat_conj, quat_from_scaled_axis, quat_mul,
+    rotate_state_rank_blocks,
 };
 use crate::modules::sanity as san;
 use crate::modules::wrap_angle;
 use crate::utils::div_eps;
 use burn::prelude::*;
-use core::f32::consts::PI;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -97,9 +97,13 @@ impl Mamba3 {
 
         // Per-pair/block readout factor  m = (γ + β P⁻¹)(1 − α P⁻¹)⁻¹  applied
         // to `b`; the cumulative rotation cancels against `Cₙ` (orthogonality).
-        let b_eff_bmhr = match self.rotation_kind() {
+        let spec = self.rotation_spec();
+        let b_eff_bmhr = match spec.kind {
             RotationKind::Complex2D => {
-                let theta_bha = per_step_angle(rot_ba, dt_bh); // θ̂
+                // The same per-step increment `forward`/`step` use — one
+                // definition, so the fixed point cannot drift from the
+                // recurrence it is the limit of.
+                let theta_bha = angle_increment::<2, 3>(rot_ba, dt_bh, spec.range); // θ̂
                 let (cos, sin) = cos_sin(theta_bha);
                 let a_bh1 = alpha_bh.unsqueeze_dim::<3>(2);
                 let beta_bh1 = beta_bh.unsqueeze_dim::<3>(2);
@@ -113,7 +117,8 @@ impl Mamba3 {
                 mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
             }
             RotationKind::Quaternion4D => {
-                let g_bhj3 = per_step_generator(rot_ba, dt_bh, self.num_quat_blocks);
+                let g_bhj3 =
+                    generator_increment::<2, 3, 4>(rot_ba, dt_bh, self.num_quat_blocks, spec.range);
                 let q_bhj4 = quat_from_scaled_axis::<4>(g_bhj3); // P⁻¹ ↔ q
                 let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
                 let beta_bh11 = beta_bh.unsqueeze_dims::<4>(&[2, 3]);
@@ -122,7 +127,10 @@ impl Mamba3 {
                 let num = quat_scalar_affine(gamma_bh11, beta_bh11, q_bhj4.clone());
                 let den_inv = quat_inv(quat_one_minus(q_bhj4 * alpha_bh11));
                 let f_bhj4 = quat_mul(num, den_inv);
-                mul_quat_partial(b_bmhr, f_bhj4, tail_bh, self.num_quat_blocks * 4)
+                // As in `rotate_bc_step`, the rotated width comes from
+                // `rope_dim`, so `rope_fraction = 0` rotates nothing.
+                let rope_width = spec.rope_dim.min(self.num_quat_blocks * 4);
+                mul_quat_partial(b_bmhr, f_bhj4, tail_bh, rope_width)
             }
         };
         san(&b_eff_bmhr);
@@ -153,25 +161,6 @@ impl Mamba3 {
 
         self.step_finish(out_m_bmhp, x_vals_bmhp, z_bi)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Per-step rotation increments (mirroring `rotate_bc_step`)
-// ---------------------------------------------------------------------------
-
-/// `θ̂ = Δ · π·tanh(rot)` — the constant per-step RoPE angle increment.
-fn per_step_angle(rot_ba: Tensor<2>, dt_bh: Tensor<2>) -> Tensor<3> {
-    dt_bh.unsqueeze_dim::<3>(2) * (rot_ba.tanh() * PI).unsqueeze_dim::<3>(1)
-}
-
-/// `g = Δ · π·tanh(rot)` per quaternion block — the constant per-step rotation
-/// generator (`q = exp(g/2)`).
-fn per_step_generator(rot_ba: Tensor<2>, dt_bh: Tensor<2>, blocks: usize) -> Tensor<4> {
-    let [batch, _a] = rot_ba.dims();
-    (rot_ba.tanh() * PI)
-        .reshape([batch, blocks, 3])
-        .unsqueeze_dim::<4>(1)
-        * dt_bh.unsqueeze_dim::<3>(2).unsqueeze_dim::<4>(3)
 }
 
 // ---------------------------------------------------------------------------
