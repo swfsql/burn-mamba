@@ -82,8 +82,9 @@ fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> [f64; 3] {
                 continue;
             }
             let f = m[row][col] / m[col][col];
-            for k in col..3 {
-                m[row][k] -= f * m[col][k];
+            let pivot = m[col];
+            for (k, entry) in m[row].iter_mut().enumerate().skip(col) {
+                *entry -= f * pivot[k];
             }
             rhs[row] -= f * rhs[col];
         }

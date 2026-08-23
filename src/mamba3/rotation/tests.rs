@@ -220,6 +220,240 @@ fn factored_matches_explicit_multiblock() {
 }
 
 // ---------------------------------------------------------------------------
+// 1b. Rotor4D: the same headline for the *full* SO(4) rotation
+// ---------------------------------------------------------------------------
+
+/// Matrix of **right** multiplication `v ↦ v ⊗ p` — the second factor's
+/// oracle, mirroring [`quat_to_rot4`] (which is the left one). Test-only: the
+/// production path never materialises either.
+fn quat_to_rot4_right<const D: usize, const DR: usize>(p: Tensor<D>) -> Tensor<DR> {
+    let n = D - 1;
+    let w = p.clone().narrow(n, 0, 1);
+    let x = p.clone().narrow(n, 1, 1);
+    let y = p.clone().narrow(n, 2, 1);
+    let z = p.narrow(n, 3, 1);
+    let row0 = Tensor::cat(vec![w.clone(), -x.clone(), -y.clone(), -z.clone()], n);
+    let row1 = Tensor::cat(vec![x.clone(), w.clone(), z.clone(), -y.clone()], n);
+    let row2 = Tensor::cat(vec![y.clone(), -z.clone(), w.clone(), x.clone()], n);
+    let row3 = Tensor::cat(vec![z, y, -x, w], n);
+    Tensor::cat(
+        vec![
+            row0.unsqueeze_dim::<DR>(n),
+            row1.unsqueeze_dim::<DR>(n),
+            row2.unsqueeze_dim::<DR>(n),
+            row3.unsqueeze_dim::<DR>(n),
+        ],
+        n,
+    )
+}
+
+/// The oracle itself: `R_p · v == v ⊗ p`.
+#[test]
+fn rot4_right_multiplication_matrix() {
+    let device: Device = Default::default();
+    let normal = Distribution::Normal(0.0, 1.0);
+    let p = quat_normalize(Tensor::<2>::random([16, 4], normal, &device));
+    let v = Tensor::<2>::random([16, 4], normal, &device);
+
+    let by_matrix = quat_to_rot4_right::<2, 3>(p.clone())
+        .matmul(v.clone().unsqueeze_dim::<3>(2))
+        .squeeze_dim::<2>(2);
+    let by_product = quat_mul(v, p);
+    let d = max_abs_diff(by_matrix, by_product);
+    assert!(
+        d < VAL_TOL,
+        "right-multiplication matrix vs quat_mul: {d:.6}"
+    );
+}
+
+/// Explicit two-sided recurrence: carries the `4×4` rotation `L_q · R_p̄`
+/// inside the state.
+fn explicit_recurrence_rotor(
+    q_bshj4: Tensor<5>,
+    p_bshj4: Tensor<5>,
+    alpha_bsh: Tensor<3>,
+    x_bsh: Tensor<3>,
+    b_bshr: Tensor<4>,
+    c_bshr: Tensor<4>,
+    init_state_bhr: Tensor<3>,
+) -> Tensor<3> {
+    let [batch, sequence, nheads, blocks, _quat] = q_bshj4.dims();
+    let state_rank = blocks * 4;
+    let mut h_bhr = init_state_bhr;
+    let mut ys: Vec<Tensor<3>> = Vec::with_capacity(sequence);
+
+    for t in 0..sequence {
+        let alpha_bh1 = at_t_bh(alpha_bsh.clone(), t).unsqueeze_dim::<3>(2);
+        let x_bh1 = at_t_bh(x_bsh.clone(), t).unsqueeze_dim::<3>(2);
+        let b_t_bhr = at_t_bhr(b_bshr.clone(), t);
+        let c_t_bhr = at_t_bhr(c_bshr.clone(), t);
+
+        // R = L_q · R_p̄, materialised and applied as a plain 4×4 matmul.
+        let l_bhj44 = quat_to_rot4::<4, 5>(at_t_bhj4(q_bshj4.clone(), t));
+        let r_bhj44 = quat_to_rot4_right::<4, 5>(quat_conj(at_t_bhj4(p_bshj4.clone(), t)));
+        let rot_bhj44 = l_bhj44.matmul(r_bhj44);
+        let h_blocks_bhj41 = h_bhr
+            .clone()
+            .reshape([batch, nheads, blocks, 4])
+            .unsqueeze_dim::<5>(4);
+        let rotated_bhr = rot_bhj44
+            .matmul(h_blocks_bhj41)
+            .squeeze_dim::<4>(4)
+            .reshape([batch, nheads, state_rank]);
+
+        h_bhr = rotated_bhr * alpha_bh1 + b_t_bhr * x_bh1;
+        let y_bh = (c_t_bhr * h_bhr.clone()).sum_dim(2).squeeze_dim::<2>(2);
+        ys.push(y_bh.unsqueeze_dim::<3>(1));
+    }
+    Tensor::cat(ys, 1)
+}
+
+/// Factored two-sided recurrence: `B̄ᵢ = Qᵢ* ⊗ Bᵢ ⊗ Tᵢ` (and `C̄` likewise),
+/// then the same plain scalar-decay SSM.
+fn factored_recurrence_rotor(
+    q_bshj4: Tensor<5>,
+    p_bshj4: Tensor<5>,
+    alpha_bsh: Tensor<3>,
+    x_bsh: Tensor<3>,
+    b_bshr: Tensor<4>,
+    c_bshr: Tensor<4>,
+    init_state_bhr: Tensor<3>,
+) -> Tensor<3> {
+    let [_batch, sequence, _nheads, _blocks, _quat] = q_bshj4.dims();
+
+    // Both cumulative products are the same left fold (see the module header).
+    let (cum_q, _) = quat_cumprod(q_bshj4, None);
+    let (cum_p, _) = quat_cumprod(p_bshj4, None);
+    let ql = quat_conj(cum_q);
+    let b_bar = rotate_state_rank_blocks_two_sided::<4, 5>(b_bshr, ql.clone(), cum_p.clone());
+    let c_bar = rotate_state_rank_blocks_two_sided::<4, 5>(c_bshr, ql, cum_p);
+
+    let mut h_bhr = init_state_bhr;
+    let mut ys: Vec<Tensor<3>> = Vec::with_capacity(sequence);
+    for t in 0..sequence {
+        let alpha_bh1 = at_t_bh(alpha_bsh.clone(), t).unsqueeze_dim::<3>(2);
+        let x_bh1 = at_t_bh(x_bsh.clone(), t).unsqueeze_dim::<3>(2);
+        h_bhr = h_bhr * alpha_bh1 + at_t_bhr(b_bar.clone(), t) * x_bh1;
+        let y_bh = (at_t_bhr(c_bar.clone(), t) * h_bhr.clone())
+            .sum_dim(2)
+            .squeeze_dim::<2>(2);
+        ys.push(y_bh.unsqueeze_dim::<3>(1));
+    }
+    Tensor::cat(ys, 1)
+}
+
+/// The `Rotor4D` headline: absorbing the inverse cumulative `SO(4)` rotation
+/// into `B`/`C` reproduces the recurrence that carries the rotation in the
+/// state — for generic (non-commuting, non-isoclinic) rotors. As in
+/// [`factored_matches_explicit`], the two sides use different primitives
+/// (materialised `4×4` matmuls vs quaternion products), so this cross-validates
+/// the two-sided factoring and the `L_q · R_p̄` identification at once.
+#[test]
+fn rotor_factored_matches_explicit() {
+    for (batch, sequence, nheads, blocks, random_init) in
+        [(2, 7, 3, 1, false), (2, 7, 3, 1, true), (2, 6, 2, 3, true)]
+    {
+        let device: Device = Default::default();
+        let inp = random_inputs(batch, sequence, nheads, blocks, random_init, &device);
+        // A second, independent stream of unit quaternions for the right factor.
+        let p = quat_normalize(Tensor::<5>::random(
+            [batch, sequence, nheads, blocks, 4],
+            Distribution::Normal(0.0, 1.0),
+            &device,
+        ));
+
+        let y_exp = explicit_recurrence_rotor(
+            inp.q.clone(),
+            p.clone(),
+            inp.alpha.clone(),
+            inp.x.clone(),
+            inp.b.clone(),
+            inp.c.clone(),
+            inp.init.clone(),
+        );
+        let y_fac = factored_recurrence_rotor(inp.q, p, inp.alpha, inp.x, inp.b, inp.c, inp.init);
+        let d = max_abs_diff(y_exp, y_fac);
+        assert!(
+            d < VAL_TOL,
+            "rotor factored vs explicit: {d:.6} (tol {VAL_TOL})"
+        );
+    }
+}
+
+/// A trivial right factor is exactly the left-isoclinic kind — so `Rotor4D`
+/// contains `Quaternion4D`, and the shared code path cannot be quietly
+/// reinterpreting the left factor.
+#[test]
+fn rotor_with_identity_right_factor_is_quaternion4d() {
+    let device: Device = Default::default();
+    let (batch, sequence, nheads, blocks) = (2, 5, 3, 2);
+    let inp = random_inputs(batch, sequence, nheads, blocks, false, &device);
+    let ident = {
+        let w = Tensor::ones([batch, sequence, nheads, blocks, 1], &device);
+        let xyz = Tensor::zeros([batch, sequence, nheads, blocks, 3], &device);
+        Tensor::cat(vec![w, xyz], 4)
+    };
+
+    let y_rotor = factored_recurrence_rotor(
+        inp.q.clone(),
+        ident,
+        inp.alpha.clone(),
+        inp.x.clone(),
+        inp.b.clone(),
+        inp.c.clone(),
+        inp.init.clone(),
+    );
+    let y_quat = factored_recurrence(inp.q, inp.alpha, inp.x, inp.b, inp.c, inp.init);
+    let d = max_abs_diff(y_rotor, y_quat);
+    assert!(d < VAL_TOL, "rotor with p = 1 vs quaternion: {d:.6}");
+}
+
+/// What the right factor buys, in one line of algebra: with a shared axis the
+/// two invariant planes turn by `a−b` and `a+b`, i.e. **independently**.
+/// Left-only rotation is isoclinic (`b = 0` forces both planes to `a`), so this
+/// is precisely the abelian `SO(2)²` behaviour `Quaternion4D` cannot express —
+/// and the reason the ladder needs `Rotor4D` to contain `Complex2D`.
+#[test]
+fn rotor_turns_the_two_planes_independently() {
+    let device: Device = Default::default();
+    let (a, b) = (0.7f32, 0.3f32);
+    let quat = |angle: f32| {
+        Tensor::<2>::from_floats([[angle.cos(), angle.sin(), 0.0, 0.0]], &device) // axis = i
+    };
+    let q = quat(a);
+    let p = quat(b);
+    let apply = |v: Tensor<2>| quat_mul(quat_mul(q.clone(), v), quat_conj(p.clone()));
+
+    // The (1, i) plane turns by a − b …
+    let got = apply(Tensor::<2>::from_floats([[1.0, 0.0, 0.0, 0.0]], &device));
+    let want = Tensor::<2>::from_floats([[(a - b).cos(), (a - b).sin(), 0.0, 0.0]], &device);
+    let d = max_abs_diff(got, want);
+    assert!(d < VAL_TOL, "(1,i) plane angle is not a−b: {d:.6}");
+
+    // … and the (j, k) plane by a + b, in the same step.
+    let got = apply(Tensor::<2>::from_floats([[0.0, 0.0, 1.0, 0.0]], &device));
+    let want = Tensor::<2>::from_floats([[0.0, 0.0, (a + b).cos(), (a + b).sin()]], &device);
+    let d = max_abs_diff(got, want);
+    assert!(d < VAL_TOL, "(j,k) plane angle is not a+b: {d:.6}");
+}
+
+/// Two-sided multiplication is still orthogonal (it must be, or the
+/// `⟨C̄, B̄⟩ = ⟨C, PP⁻¹B⟩` step of the factoring fails).
+#[test]
+fn rotor_two_sided_is_orthogonal() {
+    let device: Device = Default::default();
+    let normal = Distribution::Normal(0.0, 1.0);
+    let q = quat_normalize(Tensor::<2>::random([64, 4], normal, &device));
+    let p = quat_normalize(Tensor::<2>::random([64, 4], normal, &device));
+    let v = Tensor::<2>::random([64, 4], normal, &device);
+    let rotated = quat_mul(quat_mul(q, v.clone()), quat_conj(p));
+    let n_before = (v.clone() * v).sum_dim(1);
+    let n_after = (rotated.clone() * rotated).sum_dim(1);
+    let d = max_abs_diff(n_before, n_after);
+    assert!(d < VAL_TOL, "two-sided rotation changed the norm: {d:.6}");
+}
+
+// ---------------------------------------------------------------------------
 // 2. q ↦ L_q is a homomorphism, and L_q is orthogonal
 // ---------------------------------------------------------------------------
 
@@ -682,6 +916,93 @@ fn config_rotation_channels_and_d_in_proj() {
         q.d_in_proj() as i64 - base.d_in_proj() as i64,
         q.num_rotation_channels() as i64 - base.num_rotation_channels() as i64
     );
+
+    // Rotor4D: the same blocks, but a generator per *factor* — twice the
+    // channels of Quaternion4D, and twice the scan's block axis.
+    let r = base.with_rotation(RotationKind::Rotor4D);
+    assert_eq!(r.num_quat_blocks(), q.num_quat_blocks());
+    assert_eq!(r.num_rotation_blocks(), 2 * q.num_quat_blocks());
+    assert_eq!(r.num_rotation_channels(), 2 * q.num_rotation_channels());
+    assert_eq!(
+        r.d_in_proj(),
+        q.d_in_proj() + q.num_rotation_channels(),
+        "the extra right-factor generators are the only size difference"
+    );
+    assert_eq!(
+        r.init(&Default::default()).num_rotation_blocks(),
+        r.num_rotation_blocks()
+    );
+}
+
+/// The rotation channels are laid out `[head][2·blocks][3]` with the **left**
+/// factors first: zeroing the second half must reproduce `Quaternion4D`
+/// exactly, on `B`, on `C` and on the accumulator. This is what lets the two
+/// kinds share one generator projection, one scan and one normalisation.
+#[test]
+fn rotor_generator_channels_are_left_then_right() {
+    let device: Device = Default::default();
+    let (batch, sequence, nheads, blocks) = (2, 4, 3, 2);
+    let state_rank = blocks * 4;
+    let normal = Distribution::Normal(0.0, 1.0);
+
+    let left_bshj3 = Tensor::<5>::random([batch, sequence, nheads, blocks, 3], normal, &device);
+    let zero_bshj3 = Tensor::<5>::zeros([batch, sequence, nheads, blocks, 3], &device);
+    let rot_quat = left_bshj3
+        .clone()
+        .reshape([batch, sequence, nheads * blocks * 3]);
+    let rot_rotor = Tensor::cat(vec![left_bshj3, zero_bshj3], 3).reshape([
+        batch,
+        sequence,
+        nheads * 2 * blocks * 3,
+    ]);
+
+    let dt = Tensor::<3>::random(
+        [batch, sequence, nheads],
+        Distribution::Uniform(0.1, 1.0),
+        &device,
+    );
+    let b = Tensor::<5>::random([batch, sequence, 1, nheads, state_rank], normal, &device);
+    let c = Tensor::<5>::random([batch, sequence, 1, nheads, state_rank], normal, &device);
+    let spec = |kind| RotationSpec {
+        kind,
+        rope_dim: state_rank,
+        range: 2.0,
+    };
+
+    let (b_q, c_q, st_q) = rotate_bc_forward(
+        rot_quat,
+        dt.clone(),
+        RotationState::identity_quaternion(batch, nheads, blocks, &device),
+        b.clone(),
+        c.clone(),
+        spec(RotationKind::Quaternion4D),
+    );
+    let (b_r, c_r, st_r) = rotate_bc_forward(
+        rot_rotor,
+        dt,
+        RotationState::identity_rotor(batch, nheads, blocks, &device),
+        b,
+        c,
+        spec(RotationKind::Rotor4D),
+    );
+
+    let (left_r, right_r) = split_rotor(st_r.rotor());
+    let ident = {
+        let w = Tensor::ones([batch, nheads, blocks, 1], &device);
+        let xyz = Tensor::zeros([batch, nheads, blocks, 3], &device);
+        Tensor::cat(vec![w, xyz], 3)
+    };
+    for (what, d) in [
+        ("B", max_abs_diff(b_q, b_r)),
+        ("C", max_abs_diff(c_q, c_r)),
+        ("left accumulator", max_abs_diff(st_q.quaternion(), left_r)),
+        ("right accumulator", max_abs_diff(ident, right_r)),
+    ] {
+        assert!(
+            d < VAL_TOL,
+            "{what}: a zero right generator is not the identity rotor ({d:.6})"
+        );
+    }
 }
 
 /// The block stores its [`RotationKind`] as a `#[module(skip)]` field (a
@@ -714,11 +1035,12 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
     assert_eq!([2, 4, 32], out.dims());
 }
 
-/// A Quaternion4D block's chunked `forward` must equal its recurrent `step`
+/// A quaternion block's chunked `forward` must equal its recurrent `step`
 /// unrolling — the same parity guarantee the abelian path satisfies, now for the
 /// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
-/// `quat_mul`, feeding the unchanged double-ssd SSD core).
-fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
+/// `quat_mul`, feeding the unchanged double-ssd SSD core). Both the
+/// left-isoclinic and the full-`SO(4)` kind run it.
+fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
@@ -728,7 +1050,7 @@ fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
         .with_per_head_dim(8)
         .with_mimo_rank(mimo_rank)
         .with_rope_fraction(rope_fraction)
-        .with_rotation(RotationKind::Quaternion4D)
+        .with_rotation(kind)
         .init(&device);
 
     let (batch, seq) = (2, 5);
@@ -751,8 +1073,12 @@ fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
     let d = max_abs_diff(out_fwd, out_step);
     assert!(
         d < 1e-3,
-        "quaternion forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}"
+        "{kind:?} forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}"
     );
+}
+
+fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
+    quaternion_forward_step_parity_kind(RotationKind::Quaternion4D, rope_fraction, mimo_rank);
 }
 
 #[test]
@@ -770,12 +1096,26 @@ fn quaternion_block_forward_step_parity_mimo() {
     quaternion_forward_step_parity(1.0, 2);
 }
 
+#[test]
+fn rotor_block_forward_step_parity_full_rope() {
+    quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 1.0, 1);
+}
+
+#[test]
+fn rotor_block_forward_step_parity_partial_rope() {
+    quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 0.5, 1);
+}
+
+#[test]
+fn rotor_block_forward_step_parity_mimo() {
+    quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 1.0, 2);
+}
+
 /// Chunked-prefill continuity for Quaternion4D: a single `forward` over the full
 /// sequence must equal a split `forward(prefix)` → `forward(suffix)` that threads
 /// the cache across the seam (exercises the cross-chunk quaternion carry at the
 /// block level).
-#[test]
-fn quaternion_split_prefill_matches_full() {
+fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
@@ -784,7 +1124,7 @@ fn quaternion_split_prefill_matches_full() {
         .with_expand(2)
         .with_per_head_dim(8)
         .with_rope_fraction(0.5)
-        .with_rotation(RotationKind::Quaternion4D)
+        .with_rotation(kind)
         .init(&device);
 
     let (batch, seq, split) = (2, 6, 4);
@@ -801,7 +1141,7 @@ fn quaternion_split_prefill_matches_full() {
     let d_out = max_abs_diff(out_full, out_cat);
     assert!(
         d_out < 1e-3,
-        "quaternion split-prefill output mismatch: {d_out:.6}"
+        "{kind:?} split-prefill output mismatch: {d_out:.6}"
     );
 
     // Final SSM state must also match. A fresh cache now defaults to the
@@ -811,16 +1151,27 @@ fn quaternion_split_prefill_matches_full() {
     let d_state = max_abs_diff(s_full, s_split);
     assert!(
         d_state < 1e-3,
-        "quaternion split-prefill final-state mismatch: {d_state:.6}"
+        "{kind:?} split-prefill final-state mismatch: {d_state:.6}"
     );
+}
+
+#[test]
+fn quaternion_split_prefill_matches_full() {
+    quaternion_split_prefill_matches_full_kind(RotationKind::Quaternion4D);
+}
+
+/// Both `SO(4)` factors are carried across the seam — a right factor dropped
+/// from the cache would show up here and nowhere else.
+#[test]
+fn rotor_split_prefill_matches_full() {
+    quaternion_split_prefill_matches_full_kind(RotationKind::Rotor4D);
 }
 
 /// Gradient parity for Quaternion4D: backprop through the chunked `forward` and
 /// through the recurrent `step` unrolling must agree (same function ⇒ same
 /// gradients), confirming the backward path through the quaternion scan matches
 /// the recurrent form.
-#[test]
-fn quaternion_forward_step_grad_parity() {
+fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
@@ -829,7 +1180,7 @@ fn quaternion_forward_step_grad_parity() {
         .with_expand(2)
         .with_per_head_dim(8)
         .with_rope_fraction(1.0)
-        .with_rotation(RotationKind::Quaternion4D)
+        .with_rotation(kind)
         .init(&device.clone().autodiff());
 
     let (batch, seq) = (2, 4);
@@ -876,12 +1227,72 @@ fn quaternion_forward_step_grad_parity() {
     let d_w = max_abs_diff(d_w_fwd, d_w_step);
     assert!(
         d_in < 1e-2,
-        "quaternion forward/step input-grad mismatch: {d_in:.6}"
+        "{kind:?} forward/step input-grad mismatch: {d_in:.6}"
     );
     assert!(
         d_w < 1e-2,
-        "quaternion forward/step in_proj-grad mismatch: {d_w:.6}"
+        "{kind:?} forward/step in_proj-grad mismatch: {d_w:.6}"
     );
+}
+
+#[test]
+fn quaternion_forward_step_grad_parity() {
+    quaternion_forward_step_grad_parity_kind(RotationKind::Quaternion4D);
+}
+
+#[test]
+fn rotor_forward_step_grad_parity() {
+    quaternion_forward_step_grad_parity_kind(RotationKind::Rotor4D);
+}
+
+/// The right factor must be *trainable*, not merely present: gradient has to
+/// reach the second half of every head's generator channels. A forward that
+/// dropped the right factor (or built it from the same channels as the left)
+/// would still pass every value-parity test above, and fail here.
+#[test]
+fn rotor_right_factor_channels_receive_gradient() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    let device: Device = Default::default();
+    let cfg = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rotation(RotationKind::Rotor4D);
+    let model = cfg.init(&device.clone().autodiff());
+
+    let x = Tensor::<3>::random([2, 5, 32], Distribution::Normal(0.0, 1.0), &device);
+    let (y, _) = model.forward(Tensor::from_inner(x), None, Mamba3SsdPath::Minimal(None));
+    let grads = y.sum().backward();
+    let g = model
+        .in_proj
+        .weight
+        .val()
+        .grad(&grads)
+        .expect("grad in_proj");
+
+    // Columns: [… | rotation], and inside it [head][2·blocks][3].
+    let [d_model, d_in_proj] = g.dims();
+    let (nheads, blocks) = (cfg.nheads(), cfg.num_quat_blocks());
+    let rot = g
+        .narrow(
+            1,
+            d_in_proj - cfg.num_rotation_channels(),
+            cfg.num_rotation_channels(),
+        )
+        .reshape([d_model, nheads, 2 * blocks, 3]);
+    for (half, name) in [(0, "left"), (blocks, "right")] {
+        let m: f32 = rot
+            .clone()
+            .narrow(2, half, blocks)
+            .abs()
+            .max()
+            .into_scalar();
+        assert!(
+            m > 1e-8,
+            "no gradient reaches the {name} factor's generator channels ({m:e})"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -895,6 +1306,25 @@ fn rotation_state_constructors_and_accessors() {
     let a = RotationState::zeros_angle(2, 3, 4, &device);
     a.sanity();
     assert_eq!(a.clone().angle().dims(), [2, 3, 4]);
+
+    let r = RotationState::identity_rotor(2, 3, 5, &device);
+    r.sanity();
+    // Both factors stacked along one block axis, both the identity.
+    let rt = r.rotor();
+    assert_eq!(rt.dims(), [2, 3, 10, 4]);
+    let (left, right) = split_rotor(rt);
+    assert_eq!(left.dims(), [2, 3, 5, 4]);
+    assert_eq!(
+        max_abs_diff(left.clone(), right),
+        0.0,
+        "both rotor factors start at the identity"
+    );
+    assert_eq!(
+        RotationState::identity(RotationKind::Rotor4D, 2, 3, 4, 5, &device)
+            .rotor()
+            .dims(),
+        [2, 3, 10, 4]
+    );
 
     let q = RotationState::identity_quaternion(2, 3, 5, &device);
     q.sanity();
@@ -1069,7 +1499,9 @@ fn factored_matches_explicit_grads() {
 
 /// Zero the last `n` columns of the block's in-projection (its rotation
 /// channels), so the rotation generator is identically zero.
-fn without_rotation_channels(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mamba3 {
+fn without_rotation_channels(
+    block: crate::mamba3::mamba3::Mamba3,
+) -> crate::mamba3::mamba3::Mamba3 {
     use burn::module::Param;
     let mut block = block;
     let [d_model, d_in_proj] = block.in_proj.weight.dims();
@@ -1112,8 +1544,11 @@ fn rope_fraction_zero_ignores_rotation_channels(kind: RotationKind) {
         .init(&device);
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (with_rot, _) = block.clone().forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
-    let (no_rot, _) = without_rotation_channels(block).forward(x, None, Mamba3SsdPath::Minimal(None));
+    let (with_rot, _) = block
+        .clone()
+        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (no_rot, _) =
+        without_rotation_channels(block).forward(x, None, Mamba3SsdPath::Minimal(None));
     let diff = max_abs_diff(with_rot, no_rot);
     assert!(
         diff < 1e-5,
@@ -1129,6 +1564,11 @@ fn rope_fraction_zero_disables_complex_rotation() {
 #[test]
 fn rope_fraction_zero_disables_quaternion_rotation() {
     rope_fraction_zero_ignores_rotation_channels(RotationKind::Quaternion4D);
+}
+
+#[test]
+fn rope_fraction_zero_disables_rotor_rotation() {
+    rope_fraction_zero_ignores_rotation_channels(RotationKind::Rotor4D);
 }
 
 // ---------------------------------------------------------------------------
@@ -1223,7 +1663,10 @@ fn half_turn_is_reachable_with_a_live_gradient() {
     ));
     let q = quat_from_scaled_axis(bound_rotation_vector::<2>(saturated.val(), pi));
     let w = row(q.clone().narrow(1, 0, 1))[0];
-    assert!(w.abs() < 1e-5, "saturated tanh should give a half turn: {w}");
+    assert!(
+        w.abs() < 1e-5,
+        "saturated tanh should give a half turn: {w}"
+    );
     let grads = q.narrow(1, 0, 1).sum().backward();
     let dw = row(saturated.val().grad(&grads).expect("grad r"))[0];
     assert_eq!(dw, 0.0, "expected a dead gradient at the asymptote");
@@ -1241,9 +1684,13 @@ fn complex_range_one_matches_the_reference_angle() {
     let dt = Tensor::<3>::random([2, 5, 4], Distribution::Uniform(0.01, 1.0), &device);
 
     let got = angle_increment::<3, 4>(rot.clone(), dt.clone(), 1.0);
-    let reference = dt.unsqueeze_dim::<4>(3) * (rot.tanh() * std::f32::consts::PI).unsqueeze_dim::<4>(2);
+    let reference =
+        dt.unsqueeze_dim::<4>(3) * (rot.tanh() * std::f32::consts::PI).unsqueeze_dim::<4>(2);
     let d = max_abs_diff(got, reference);
-    assert!(d < 1e-6, "the default abelian angle drifted from the reference: {d}");
+    assert!(
+        d < 1e-6,
+        "the default abelian angle drifted from the reference: {d}"
+    );
 }
 
 /// The knob reaches the block: a non-default `rotation_range` changes the
@@ -1268,9 +1715,10 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
     let (y_default, _) = default.forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
-    let (y_widened, cache_widened) = widened
-        .clone()
-        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (y_widened, cache_widened) =
+        widened
+            .clone()
+            .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
     assert!(
         max_abs_diff(y_default, y_widened.clone()) > 1e-4,
         "{kind:?}: rotation_range is ignored"
@@ -1285,13 +1733,21 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         cache = Some(c);
     }
     let d = max_abs_diff(y_widened, Tensor::cat(steps, 1));
-    assert!(d < 1e-4, "{kind:?}: forward/step disagree at range 1.37: {d}");
+    assert!(
+        d < 1e-4,
+        "{kind:?}: forward/step disagree at range 1.37: {d}"
+    );
     let _ = cache_widened;
 }
 
 #[test]
 fn rotation_range_is_wired_through_complex() {
     rotation_range_is_wired_through(RotationKind::Complex2D);
+}
+
+#[test]
+fn rotation_range_is_wired_through_rotor() {
+    rotation_range_is_wired_through(RotationKind::Rotor4D);
 }
 
 #[test]
@@ -1313,11 +1769,17 @@ fn cumulative_quaternion_stays_unit() {
         ("prefixes", (cum.clone() * cum).sum_dim(4).sqrt()),
         (
             "carry",
-            (carry.clone() * carry).sum_dim(3).sqrt().unsqueeze_dim::<5>(0),
+            (carry.clone() * carry)
+                .sum_dim(3)
+                .sqrt()
+                .unsqueeze_dim::<5>(0),
         ),
     ] {
         let drift = max_abs_diff(norms.clone(), norms.ones_like());
-        assert!(drift < 1e-4, "{name}: cumulative rotation drifted off the unit sphere by {drift}");
+        assert!(
+            drift < 1e-4,
+            "{name}: cumulative rotation drifted off the unit sphere by {drift}"
+        );
     }
 }
 
@@ -1403,7 +1865,11 @@ fn quaternion_generators_are_per_head() {
 
     let g = generator_increment::<2, 3, 4>(rot, dt, blocks, 1.0); // [1, h, J, 3]
     assert_eq!([1, nheads, blocks, 3], g.dims());
-    let v = g.reshape([nheads * 3]).into_data().try_to_vec::<f32>().unwrap();
+    let v = g
+        .reshape([nheads * 3])
+        .into_data()
+        .try_to_vec::<f32>()
+        .unwrap();
     let angle = std::f32::consts::PI * 1.0f32.tanh();
     // head 0: (angle, 0, 0)   head 1: (0, angle, 0)
     for (k, expected) in [angle, 0.0, 0.0, 0.0, angle, 0.0].into_iter().enumerate() {

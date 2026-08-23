@@ -320,6 +320,14 @@ impl Mamba3 {
         self.rotation
     }
 
+    /// Number of quaternion blocks the rotation projection and its cumulative
+    /// scan run over: `num_quat_blocks · quat_factors` — twice the state's
+    /// 4-block count for [`RotationKind::Rotor4D`], whose left and right
+    /// factors share one stacked block axis.
+    pub fn num_rotation_blocks(&self) -> usize {
+        self.num_quat_blocks * self.rotation.quat_factors()
+    }
+
     /// Everything the rotation needs, in one place — the algebra, the rotated
     /// width, and the per-step bound. Every site that materialises a per-step
     /// rotation ([`forward`](Self::forward), [`step`](Self::step),
@@ -439,9 +447,10 @@ pub struct Mamba3Config {
     /// rotation is a capacity trade (keeping "content" channels out of the
     /// turn), which is a deliberate choice a config should have to ask for
     /// rather than get by omission. For
-    /// [`Quaternion4D`](RotationKind::Quaternion4D) it is also what keeps the
-    /// smallest legal `state_rank` (4 — a single quaternion block) usable, since
-    /// a partial quaternion rotation must land on whole 4-blocks.
+    /// [`Quaternion4D`](RotationKind::Quaternion4D) and
+    /// [`Rotor4D`](RotationKind::Rotor4D) it is also what keeps the smallest
+    /// legal `state_rank` (4 — a single quaternion block) usable, since a
+    /// partial quaternion rotation must land on whole 4-blocks.
     #[config(default = 1.0)]
     pub rope_fraction: f64,
 
@@ -464,7 +473,9 @@ pub struct Mamba3Config {
     /// quaternion rotation; its in-projection devotes
     /// `nheads · 3 · num_quat_blocks` channels to per-head quaternion
     /// generators in place of the shared `num_rope_angles` angle channels (see
-    /// [`Self::num_rotation_channels`]).
+    /// [`Self::num_rotation_channels`]). [`Rotor4D`](RotationKind::Rotor4D)
+    /// selects the full `SO(4)` rotation of each 4-block and doubles that
+    /// channel count (a left and a right generator per head and block).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
@@ -480,6 +491,12 @@ pub struct Mamba3Config {
     /// - [`Quaternion4D`](RotationKind::Quaternion4D): `2π` reaches every
     ///   element of `SU(2)`, whose period is `4π` — `q` and `−q` are the two
     ///   lifts of one `SO(3)` rotation and turn the state differently.
+    /// - [`Rotor4D`](RotationKind::Rotor4D): the bound applies to **each
+    ///   factor**, so at the default each of `q` and `p` independently sweeps
+    ///   all of `SU(2)` and the pair reaches every element of
+    ///   `SO(4) ≅ (SU(2)×SU(2))/±1`. Bounding the composite instead (halving
+    ///   the per-factor angle) would cost reach for nothing: the two plane
+    ///   angles `a∓b` are periodic in `2π` anyway.
     ///
     /// What the bound buys is not reach but **gradients**. A rotation of exactly
     /// `range·π` sits at `tanh`'s asymptote, where the gradient is not merely
@@ -582,9 +599,12 @@ impl Mamba3Config {
     /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle
     ///   channels, shared across heads and scaled per-head by `Δ`, as in the
     ///   reference.
-    /// - [`Quaternion4D`](RotationKind::Quaternion4D):
-    ///   `nheads · 3 · num_quat_blocks` quaternion-generator channels — an
-    ///   axis·angle generator **per head** and block, fed through
+    /// - [`Quaternion4D`](RotationKind::Quaternion4D) /
+    ///   [`Rotor4D`](RotationKind::Rotor4D):
+    ///   `nheads · 3 · num_rotation_blocks` quaternion-generator channels — an
+    ///   axis·angle generator **per head** and block (and, for `Rotor4D`, per
+    ///   *factor*: one generator for the left quaternion and one for the
+    ///   right), fed through
     ///   [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis).
     ///   For a non-abelian transition the axis is where the expressiveness
     ///   lives: heads sharing one axis and differing only in `Δ` track one word
@@ -593,8 +613,20 @@ impl Mamba3Config {
     pub fn num_rotation_channels(&self) -> usize {
         match self.rotation {
             RotationKind::Complex2D => self.num_rope_angles(),
-            RotationKind::Quaternion4D => self.nheads() * 3 * self.num_quat_blocks(),
+            // Three generator channels per (head, block) and **per factor**:
+            // one factor for Quaternion4D, two for Rotor4D.
+            RotationKind::Quaternion4D | RotationKind::Rotor4D => {
+                self.nheads() * 3 * self.num_rotation_blocks()
+            }
         }
+    }
+
+    /// Number of quaternion blocks the *rotation projection and scan* run over:
+    /// [`Self::num_quat_blocks`] times [`RotationKind::quat_factors`] — i.e.
+    /// `2 · blocks` for [`RotationKind::Rotor4D`], whose left and right factors
+    /// share one stacked block axis.
+    pub fn num_rotation_blocks(&self) -> usize {
+        self.num_quat_blocks() * self.rotation.quat_factors()
     }
 
     /// Total input projection output size.
@@ -666,10 +698,14 @@ impl Mamba3Config {
             "rope_fraction must be 0.0, 0.5 or 1.0"
         );
         assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
-        if matches!(self.rotation, RotationKind::Quaternion4D) {
+        if matches!(
+            self.rotation,
+            RotationKind::Quaternion4D | RotationKind::Rotor4D
+        ) {
             assert!(
                 self.state_rank.is_multiple_of(4),
-                "Quaternion4D requires state_rank to be a multiple of 4"
+                "{:?} requires state_rank to be a multiple of 4",
+                self.rotation
             );
             // The rotated width is a whole number of quaternion blocks, so a
             // partial rotation has to land on a multiple of 4. Without this the
@@ -677,14 +713,12 @@ impl Mamba3Config {
             // and rotate *everything* when asked for half.
             assert!(
                 self.rope_dim().is_multiple_of(4),
-                "Quaternion4D rotates whole 4-blocks: rope_fraction·state_rank = {} is not a multiple of 4",
+                "{:?} rotates whole 4-blocks: rope_fraction·state_rank = {} is not a multiple of 4",
+                self.rotation,
                 self.rope_dim()
             );
         }
-        assert!(
-            self.rotation_range > 0.0,
-            "rotation_range must be positive"
-        );
+        assert!(self.rotation_range > 0.0, "rotation_range must be positive");
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -849,14 +883,7 @@ impl Mamba3 {
         let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
         let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
         let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-        let rotation = match self.rotation {
-            RotationKind::Quaternion4D => {
-                RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, device)
-            }
-            RotationKind::Complex2D => {
-                RotationState::zeros_angle(batch, nheads, self.num_rope_angles, device)
-            }
-        };
+        let rotation = self.zero_rotation_state(batch, device);
         crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
             ssm_bhpr,
             k_state_bmhr,
@@ -864,6 +891,20 @@ impl Mamba3 {
             rotation,
         }
         .into()
+    }
+
+    /// The fresh-sequence rotation accumulator for this block's
+    /// [`RotationKind`] — the identity rotation, in the matching
+    /// [`RotationState`] variant.
+    pub fn zero_rotation_state(&self, batch: usize, device: &Device) -> RotationState {
+        RotationState::identity(
+            self.rotation,
+            batch,
+            self.nheads(),
+            self.num_rope_angles,
+            self.num_quat_blocks,
+            device,
+        )
     }
 }
 

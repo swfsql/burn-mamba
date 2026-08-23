@@ -160,8 +160,8 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
     use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
     use crate::mamba3::single_ssd::prelude::{
         Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
         Mamba3SingleSsdCachesConfig,
@@ -209,6 +209,7 @@ mod impl_mamba3 {
                 match r {
                     RotationState::Angle(t) => RotationState::Angle(t.inner()),
                     RotationState::Quaternion(t) => RotationState::Quaternion(t.inner()),
+                    RotationState::Rotor(t) => RotationState::Rotor(t.inner()),
                 }
             }
             match c {
@@ -234,6 +235,7 @@ mod impl_mamba3 {
                     RotationState::Quaternion(t) => {
                         RotationState::Quaternion(Tensor::from_inner(t))
                     }
+                    RotationState::Rotor(t) => RotationState::Rotor(Tensor::from_inner(t)),
                 }
             }
             match c {

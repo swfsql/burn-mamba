@@ -17,7 +17,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
-use crate::mamba3::rotation::{RotationState, rotate_bc_forward, rotate_bc_step};
+use crate::mamba3::rotation::{rotate_bc_forward, rotate_bc_step};
 use crate::modules::Silu;
 use crate::modules::sanity as san;
 use burn::prelude::*;
@@ -49,7 +49,6 @@ impl Mamba3 {
         let ngroups = self.ngroups;
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
-        let num_rope_angles = self.num_rope_angles;
         let mimo_rank = self.mimo_rank;
         let device = input_bsm.device();
 
@@ -62,14 +61,7 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
             let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
-            let rotation = match self.rotation {
-                RotationKind::Quaternion4D => {
-                    RotationState::identity_quaternion(batch, nheads, self.num_quat_blocks, &device)
-                }
-                RotationKind::Complex2D => {
-                    RotationState::zeros_angle(batch, nheads, num_rope_angles, &device)
-                }
-            };
+            let rotation = self.zero_rotation_state(batch, &device);
             Mamba3DoubleSsdCache {
                 ssm_bhpr,
                 k_state_bmhr,
@@ -641,7 +633,6 @@ mod step {
             let nheads = self.nheads();
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
-            let num_rope_angles = self.num_rope_angles;
             let mimo_rank = self.mimo_rank;
             let device = &input_bd.device();
             let ssm_shape = [batch, nheads, per_head_dim, state_rank];
@@ -650,17 +641,7 @@ mod step {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
                 let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
                 let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
-                let rotation = match self.rotation {
-                    RotationKind::Quaternion4D => RotationState::identity_quaternion(
-                        batch,
-                        nheads,
-                        self.num_quat_blocks,
-                        device,
-                    ),
-                    RotationKind::Complex2D => {
-                        RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
-                    }
-                };
+                let rotation = self.zero_rotation_state(batch, device);
                 Mamba3DoubleSsdCache {
                     ssm_bhpr,
                     k_state_bmhr,

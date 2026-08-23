@@ -52,6 +52,14 @@ angles are data-dependent rather than a fixed frequency schedule, and the purpos
 is rotational state dynamics: that is what lets Mamba-3 track state (parity,
 mod-k) which a real, non-negative-eigenvalue SSM provably cannot.
 
+That rotation need not be abelian, and `RotationKind` picks the group it turns
+in: `Complex2D` is the paper's `SO(2)` (a `cumsum` of angles), `Quaternion4D` is
+`SU(2)` (an associative scan of unit quaternions, so the state composes a *word*
+in a group rather than counting), and `Rotor4D` is the whole `SO(4)`
+(`v ↦ q ⊗ v ⊗ p̄`), which contains both. The factoring onto `B`/`C` — and so the
+plain scalar-decay SSD kernel — is identical in all three. The `reset-*` examples
+are a ladder isolating exactly what each one buys.
+
 ## Highlights
 
 - **All three families** — Mamba-1, Mamba-2, and Mamba-3, each as a block, a
@@ -168,7 +176,7 @@ API references:
 |---|---|---|---|
 | Core algorithm | sequential selective scan | chunkwise SSD | trapezoidal SSD |
 | State transition | diagonal | scalar (SSD) | complex: data-dependent scalar decay × rotation |
-| Rotational state (the "RoPE trick") | — | — | data-dependent rotation factored onto B/C |
+| Rotational state (the "RoPE trick") | — | — | data-dependent rotation factored onto B/C (`SO(2)`, `SU(2)` or `SO(4)`) |
 | MIMO state | — | — | optional (`mimo_rank > 1`) |
 | Short convolution | yes | yes | removed |
 | Pluggable SSD algorithms | — | yes | yes |

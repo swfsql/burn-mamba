@@ -48,7 +48,7 @@ use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{
     angle_increment, generator_increment, quat_conj, quat_from_scaled_axis, quat_mul,
-    rotate_state_rank_blocks,
+    rotate_state_rank_blocks, safe_norm, split_rotor,
 };
 use crate::modules::sanity as san;
 use crate::modules::wrap_angle;
@@ -115,6 +115,20 @@ impl Mamba3 {
                 let den_im = a_bh1 * sin;
                 let (m_re, m_im) = complex_div(num_re, num_im, den_re, den_im);
                 mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
+            }
+            RotationKind::Rotor4D => {
+                let g_bhk3 = generator_increment::<2, 3, 4>(
+                    rot_ba,
+                    dt_bh,
+                    self.num_rotation_blocks(),
+                    spec.range,
+                );
+                let qp_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
+                let (q_bhj4, p_bhj4) = split_rotor(qp_bhk4); // M(v) = q ⊗ v ⊗ p̄
+                let rope_width = spec.rope_dim.min(self.num_quat_blocks * 4);
+                rotor_resolvent_partial(
+                    b_bmhr, q_bhj4, p_bhj4, alpha_bh, beta_bh, gamma_bh, tail_bh, rope_width,
+                )
             }
             RotationKind::Quaternion4D => {
                 let g_bhj3 =
@@ -307,6 +321,122 @@ fn mul_quat_partial(
             rotate_state_rank_blocks::<4, 5>(x_bmhr.clone().narrow(3, 0, rope_width), f_bmhj4);
         let tail = x_bmhr.narrow(3, rope_width, state_rank - rope_width) * tail_b1h1;
         Tensor::cat(vec![head, tail], 3)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rotor (`SO(4)`) helpers — the two-sided resolvent, per block
+// ---------------------------------------------------------------------------
+
+/// Apply `(γ + βM)(I − αM)⁻¹` to the rotation-active entries of `x`, where
+/// `M(v) = q ⊗ v ⊗ p̄` is the per-step `SO(4)` rotation of
+/// [`RotationKind::Rotor4D`], and scale the pass-through entries by the real
+/// scalar `tail` — the two-sided analogue of [`mul_quat_partial`].
+///
+/// Two-sided, the geometric series no longer lives in a commutative subalgebra
+/// (that shortcut is what [`quat_inv`] exploits for `Quaternion4D`), so the
+/// resolvent is taken over `ℝ⁴` by **Cayley–Hamilton**. `M` is orthogonal with
+/// characteristic polynomial `λ⁴ − c₁λ³ + c₂λ² − c₁λ + 1`, and its two plane
+/// angles are `a∓b` for the half-angles `a`, `b` of `q` and `p` (the standard
+/// `SO(4) ≅ (SU(2)×SU(2))/±1` decomposition — the axes fix the invariant
+/// *planes*, only the half-angles fix the *angles*), so with
+/// `k₁ = cos(a−b)`, `k₂ = cos(a+b)`:
+///
+/// ```text
+///   c₁ = 2(k₁ + k₂) = tr M ,   c₂ = 2 + 4k₁k₂ ,
+///   det(I − αM) = (1 − 2αk₁ + α²)(1 − 2αk₂ + α²) ,
+///   (I − αM)⁻¹  = (e₀ + e₁M + e₂M² + e₃M³) / det(I − αM)
+/// ```
+///
+/// with `e₃ = α³`, `e₂ = α² − c₁α³`, `e₁ = α − c₁α² + c₂α³`,
+/// `e₀ = 1 − c₁α + c₂α² − c₁α³` (the divided-difference form
+/// `q(λ) = (χ(μ)−χ(λ))/(μ−λ)` at `μ = 1/α`, rescaled). The cubic is evaluated
+/// by Horner **on the vector**, so no `4×4` matrix is ever materialised: each
+/// application of `M` is two quaternion products. `k₁ = k₂ = 1` (no rotation)
+/// collapses the whole thing to `(β+γ)/(1−α)`, i.e. `tail`.
+///
+/// Numerics: the determinant is formed factor-wise as `(1−α)² + 2α(1−kᵢ)`,
+/// which is manifestly `≥ (1−α)²` and free of the cancellation the expanded
+/// quartic would suffer; the numerator carries the same `α → 1` precision
+/// caveat as the abelian branch (see the module header).
+#[allow(clippy::too_many_arguments)]
+fn rotor_resolvent_partial(
+    x_bmhr: Tensor<4>,
+    q_bhj4: Tensor<4>,
+    p_bhj4: Tensor<4>,
+    alpha_bh: Tensor<2>,
+    beta_bh: Tensor<2>,
+    gamma_bh: Tensor<2>,
+    tail_bh: Tensor<2>,
+    rope_width: usize,
+) -> Tensor<4> {
+    let [batch, mimo_rank, nheads, state_rank] = x_bmhr.dims();
+    let blocks = q_bhj4.dims()[2];
+    let tail_b1h1 = tail_bh.unsqueeze_dims::<4>(&[1, 3]);
+    if rope_width == 0 {
+        return x_bmhr * tail_b1h1;
+    }
+    assert_eq!(
+        rope_width,
+        blocks * 4,
+        "the rotated width is a whole number of quaternion blocks"
+    );
+    let eps = div_eps(alpha_bh.dtype());
+
+    // Per-block plane cosines. `Re q = cos a`, `‖Im q‖ = |sin a|`; a sign flip
+    // of `sin a` only swaps k₁ ↔ k₂, and every quantity below is symmetric in
+    // the two, so the absolute value costs nothing.
+    let per_block = |t: Tensor<4>| t.unsqueeze_dim::<5>(1); // [b,h,J,1] → [b,1,h,J,1]
+    let wc = per_block(q_bhj4.clone().narrow(3, 0, 1) * p_bhj4.clone().narrow(3, 0, 1));
+    let ss = per_block(
+        safe_norm(q_bhj4.clone().narrow(3, 1, 3)) * safe_norm(p_bhj4.clone().narrow(3, 1, 3)),
+    );
+    let k1 = wc.clone() + ss.clone();
+    let k2 = wc - ss;
+
+    // Scalars, broadcast over (mimo, block, component).
+    let a = alpha_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
+    let beta = beta_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
+    let gamma = gamma_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
+    let a2 = a.clone() * a.clone();
+    let a3 = a2.clone() * a.clone();
+    let c1 = (k1.clone() + k2.clone()) * 2.0;
+    let c2 = k1.clone() * k2.clone() * 4.0 + 2.0;
+    let one_minus_a2 = (-a.clone() + 1.0) * (-a.clone() + 1.0);
+    let det = (one_minus_a2.clone() + (-k1 + 1.0) * a.clone() * 2.0)
+        * (one_minus_a2 + (-k2 + 1.0) * a.clone() * 2.0);
+    let det = det.clamp_min(eps);
+    let e3 = a3.clone();
+    let e2 = a2.clone() - c1.clone() * a3.clone();
+    let e1 = a.clone() - c1.clone() * a2.clone() + c2.clone() * a3.clone();
+    let e0 = -c1.clone() * a + c2 * a2 - c1 * a3 + 1.0;
+
+    // M(v) = q ⊗ v ⊗ p̄, on the block-split view of the rotated entries.
+    let expand = |q: Tensor<4>| {
+        q.unsqueeze_dim::<5>(1)
+            .expand([batch, mimo_rank, nheads, blocks, 4])
+    };
+    let ql = expand(q_bhj4);
+    let qr = expand(quat_conj(p_bhj4));
+    let m = |v: Tensor<5>| quat_mul(quat_mul(ql.clone(), v), qr.clone());
+
+    let head = x_bmhr
+        .clone()
+        .narrow(3, 0, rope_width)
+        .reshape([batch, mimo_rank, nheads, blocks, 4]);
+    // Horner on the vector: u = (e₀ + e₁M + e₂M² + e₃M³) x.
+    let u = head.clone() * e3;
+    let u = m(u) + head.clone() * e2;
+    let u = m(u) + head.clone() * e1;
+    let u = m(u) + head * e0;
+    let out = (u.clone() * gamma + m(u) * beta) / det;
+    let out = out.reshape([batch, mimo_rank, nheads, rope_width]);
+
+    if rope_width == state_rank {
+        out
+    } else {
+        let tail = x_bmhr.narrow(3, rope_width, state_rank - rope_width) * tail_b1h1;
+        Tensor::cat(vec![out, tail], 3)
     }
 }
 

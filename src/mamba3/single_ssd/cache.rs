@@ -150,7 +150,7 @@ pub struct Mamba3SingleSsdCacheConfig {
     pub rotation: RotationKind,
 
     /// Number of quaternion blocks (`rope_dim / 4`); only used for
-    /// [`RotationKind::Quaternion4D`].
+    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
     #[config(default = 1)]
     pub num_quat_blocks: usize,
 }
@@ -181,17 +181,14 @@ impl Mamba3SingleSsdCacheConfig {
             device,
         );
         let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
-        let rotation = match self.rotation {
-            RotationKind::Quaternion4D => RotationState::identity_quaternion(
-                self.batch,
-                self.nheads,
-                self.num_quat_blocks,
-                device,
-            ),
-            RotationKind::Complex2D => {
-                RotationState::zeros_angle(self.batch, self.nheads, self.num_rope_angles, device)
-            }
-        };
+        let rotation = RotationState::identity(
+            self.rotation,
+            self.batch,
+            self.nheads,
+            self.num_rope_angles,
+            self.num_quat_blocks,
+            device,
+        );
         Mamba3SingleSsdCache {
             ssm_bhpr,
             k_state_bmhr,

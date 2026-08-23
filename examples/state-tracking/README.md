@@ -69,7 +69,7 @@ cargo run --release --example state-tracking -- --training --inference -- --rota
 cargo run --release --example state-tracking -- --training --inference -- --rotation quaternion
 ```
 
-`--rotation complex|quaternion` (default `complex`) selects the rotation baked
+`--rotation complex|quaternion|rotor` (default `complex`) selects the rotation baked
 into a fresh model config; it is forwarded after the trailing `--` via the
 harness's `extra_args`. All the standard harness flags apply (`--training`,
 `--inference`, `--artifacts-path`, `--training-config`, `--model-config`,

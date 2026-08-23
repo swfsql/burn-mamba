@@ -178,6 +178,22 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
             .collect(),
         // one angle per state pair: `i` turns pair 0 by π, `j` turns pair 1 by π
         RotationKind::Complex2D => vec![[TURN_RAW, 0.0, 0.0], [0.0, TURN_RAW, 0.0]],
+        // `Rotor4D` is the same rotation with a second, *right* factor per head
+        // and block (channels `[head][left|right][3]`). The quaternion solution
+        // lives inside it at `p ≡ 1`, so the left generators are the ones above
+        // and the right ones are zero.
+        RotationKind::Rotor4D => (0..N)
+            .flat_map(|_| {
+                [
+                    [TURN_RAW, 0.0, 0.0], // left: axis x
+                    [0.0, TURN_RAW, 0.0], // left: axis y
+                    [0.0, 0.0, 0.0],      // left: axis z — unused
+                    [0.0, 0.0, 0.0],      // right: the identity, p ≡ 1
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            })
+            .collect(),
     };
     let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
     channels.extend([[Z_PRE; NUM_SYMBOLS]; N]); // z
@@ -258,9 +274,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 /// every symbol. QK-Norm scales it to `(2, 0, 0, 0)`; the per-head bias then
 /// moves head `h` to twice the `h`-th basis quaternion.
 fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
-    (0..N)
-        .map(|r| [f64::from(r == 0); NUM_SYMBOLS])
-        .collect()
+    (0..N).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
 }
 
 /// The four `B` channels — the vector `R` writes into the state.
@@ -278,7 +292,7 @@ fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
 fn b_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
     (0..N)
         .map(|r| match rotation {
-            RotationKind::Quaternion4D => [f64::from(r == 0); NUM_SYMBOLS],
+            RotationKind::Quaternion4D | RotationKind::Rotor4D => [f64::from(r == 0); NUM_SYMBOLS],
             RotationKind::Complex2D => [f64::from(r % 2 == 0); NUM_SYMBOLS],
         })
         .collect()
@@ -360,11 +374,7 @@ const EVAL: u64 = 0xE7A1;
 /// reach rather than a memorised answer key.
 ///
 /// Codes unseen while fitting fall back to the fit split's majority class.
-fn best_lookup(
-    fit: (&[usize], &[i64]),
-    eval: (&[usize], &[i64]),
-    num_codes: usize,
-) -> f64 {
+fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usize) -> f64 {
     let mut tally = vec![[0u64; NUM_CLASSES]; num_codes];
     let mut overall = [0u64; NUM_CLASSES];
     for (&c, &t) in fit.0.iter().zip(fit.1) {
@@ -372,14 +382,18 @@ fn best_lookup(
         overall[t as usize] += 1;
     }
     let argmax = |row: &[u64; NUM_CLASSES]| {
-        (0..NUM_CLASSES)
-            .max_by_key(|&c| row[c])
-            .expect("non-empty") as i64
+        (0..NUM_CLASSES).max_by_key(|&c| row[c]).expect("non-empty") as i64
     };
     let fallback = argmax(&overall);
     let table: Vec<i64> = tally
         .iter()
-        .map(|row| if row.iter().sum::<u64>() == 0 { fallback } else { argmax(row) })
+        .map(|row| {
+            if row.iter().sum::<u64>() == 0 {
+                fallback
+            } else {
+                argmax(row)
+            }
+        })
         .collect();
     let hits = eval
         .0
@@ -413,9 +427,11 @@ fn output_codes(channels: &[[f64; NUM_CLASSES]], range: &[(f64, f64); N]) -> Vec
 
 fn channel_range(channels: &[[f64; NUM_CLASSES]]) -> [(f64, f64); N] {
     std::array::from_fn(|r| {
-        channels.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), o| {
-            (lo.min(o[r]), hi.max(o[r]))
-        })
+        channels
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), o| {
+                (lo.min(o[r]), hi.max(o[r]))
+            })
     })
 }
 
@@ -576,7 +592,10 @@ fn counts_ceiling_is_the_abelian_limit() {
         100.0 * best,
         100.0 / NUM_CLASSES as f64
     );
-    assert!(best < 0.85, "the symbol counts nearly give the answer: {best}");
+    assert!(
+        best < 0.85,
+        "the symbol counts nearly give the answer: {best}"
+    );
 }
 
 // ---------------------------------------------------------------------------

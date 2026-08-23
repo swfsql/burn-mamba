@@ -14,7 +14,7 @@
 //! represent the icosahedral group `2I = SL(2,5)` (a double cover of `A₅`).
 //!
 //! Unlike the other examples this one carries a downstream flag,
-//! `--rotation complex|quaternion` (default `complex`), forwarded after the
+//! `--rotation complex|quaternion|rotor` (default `complex`), forwarded after the
 //! trailing `--`; it selects the rotation baked into the model config.
 //!
 //! ## Run
@@ -123,7 +123,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 }
 
-/// Parse `--rotation complex|quaternion` from the forwarded `extra_args`
+/// Parse `--rotation complex|quaternion|rotor` from the forwarded `extra_args`
 /// (defaults to `Complex2D` when absent).
 fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
     let value = extra_args
@@ -134,7 +134,10 @@ fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
     match value.as_deref() {
         Some("quaternion") | Some("quat") => RotationKind::Quaternion4D,
         Some("complex") | None => RotationKind::Complex2D,
-        Some(other) => panic!("--rotation must be 'complex' or 'quaternion', got {other:?}"),
+        Some("rotor") | Some("so4") => RotationKind::Rotor4D,
+        Some(other) => {
+            panic!("--rotation must be 'complex', 'quaternion' or 'rotor', got {other:?}")
+        }
     }
 }
 

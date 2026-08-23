@@ -53,6 +53,53 @@
 //!   B̄, C̄  ──►  standard scalar-decay SSD  (unchanged)
 //! ```
 //!
+//! For [`RotationKind::Rotor4D`] the same pipeline runs with the two factors
+//! stacked along the block axis, and the last step becomes the two-sided
+//! `rotate_state_rank_blocks_two_sided(B, conj(Qₜ), Tₜ)`.
+//!
+//! ## `SO(4)`: the whole rotation group of a block ([`RotationKind::Rotor4D`])
+//!
+//! `SU(2)` is only half of what a 4-block can turn by. The general element of
+//! `SO(4) ≅ (SU(2)×SU(2))/±1` is the **two-sided** product
+//!
+//! ```text
+//!   Rₜ(v) = qₜ ⊗ v ⊗ p̄ₜ            (a rotor; left factor q, right factor p)
+//! ```
+//!
+//! and everything above survives it, because the factoring never used more
+//! than "the per-step maps compose, and each is orthogonal". Composing,
+//!
+//! ```text
+//!   Pₜ(v) = Qₜ ⊗ v ⊗ T̄ₜ ,   Qₜ = qₜ⊗⋯⊗q₁ ,  Tₜ = pₜ⊗⋯⊗p₁
+//!   Pₜ⁻¹(v) = Qₜ* ⊗ v ⊗ Tₜ    ⇒   B̄ᵢ = Qᵢ* ⊗ Bᵢ ⊗ Tᵢ ,  C̄ₜ likewise
+//! ```
+//!
+//! — note the conjugation reverses the right-hand order **twice**, so `T`
+//! accumulates by the *same* left fold as `Q`: one [`quat_cumprod`] over a
+//! doubled block axis, not a second, reversed scan. The cost over
+//! [`Quaternion4D`](RotationKind::Quaternion4D) is twice the generator
+//! channels, twice the scan's block axis, and one extra [`quat_mul`] per
+//! `B`/`C` application; the SSD core is still untouched.
+//!
+//! Why bother, when left and right factors *commute* with each other and so add
+//! no "more non-abelianness": left multiplication is **isoclinic** — `L_q` turns
+//! both invariant planes of the block by the same angle — so `SU(2)` cannot
+//! produce two independent plane angles, and in particular does not contain the
+//! abelian `SO(2)²` rotation it was introduced to generalise. The right factor
+//! is exactly what opens the maximal torus (plane angles `a−b`, `a+b` for the
+//! half-angles of `q`, `p`), making the ladder
+//! `Complex2D ⊂ Rotor4D ⊃ Quaternion4D` a real one. It also contains the
+//! adjoint action `v ↦ q ⊗ v ⊗ q̄`, i.e. a faithful `SO(3)` on the block's
+//! imaginary part — so a group like `A₅` can be tracked as itself rather than
+//! through its double cover `2I`, where `±g` denote one element but two
+//! different states. And as a representation of `SU(2)×SU(2)`, `ℍ` is the
+//! irreducible tensor product `(½,½)`, not `(½,0) ⊕ (0,½)`: no arrangement of
+//! left-only blocks reproduces it.
+//!
+//! `SO(4)` is the ceiling for `k = 4` (the largest norm-preserving transition
+//! group of a block), and `k = 4` is the last rung with a cheap closed form —
+//! at `k = 8` the octonions are non-associative and the scan itself breaks.
+//!
 //! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)` with
 //! `w` the real part.  A `state_rank` of `r = 4·J` is treated as `J` independent
 //! quaternion blocks; the rotation acts within each block, exactly as RoPE acts
@@ -78,13 +125,49 @@ use burn::prelude::*;
 ///   `SU(2) ⊂ SO(4)` quaternion rotation of this module: cumulative *product*
 ///   via [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
 ///   state-tracking; selects the [`RotationState::Quaternion`] cache accumulator.
+/// - [`Rotor4D`](RotationKind::Rotor4D) — the **whole** rotation group of a
+///   4-block, `SO(4) ≅ (SU(2)×SU(2))/±1`: a *two-sided* quaternion product
+///   `v ↦ q ⊗ v ⊗ p̄`. Two per-step quaternions instead of one (twice the
+///   generator channels, one scan over a doubled block axis); selects the
+///   [`RotationState::Rotor`] accumulator.
+///
+/// The kinds are a ladder — `Complex2D ⊂ Rotor4D` and `Quaternion4D ⊂ Rotor4D`
+/// — but the middle two are **incomparable**, which is why `Rotor4D` exists.
+/// Left multiplication is *isoclinic*: `L_q` turns both invariant planes of the
+/// block by the same angle (`L_i` sends `1↦i` **and** `j↦k`), so
+/// `Quaternion4D` cannot express two independent per-pair angles — it does not
+/// contain the abelian rotation it generalises. The right factor opens the full
+/// maximal torus (plane angles `a−b` and `a+b` for half-angles `a`, `b`), and
+/// with it every element of `SO(4)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RotationKind {
     /// Abelian complex (`SO(2)`) RoPE — the current default behaviour.
     #[default]
     Complex2D,
-    /// Non-abelian quaternion (`SU(2)`) rotation.
+    /// Non-abelian quaternion (`SU(2)`, left-isoclinic) rotation.
     Quaternion4D,
+    /// The full `SO(4)` rotation of each 4-block: two-sided `v ↦ q ⊗ v ⊗ p̄`.
+    Rotor4D,
+}
+
+impl RotationKind {
+    /// How many cumulative-rotation quaternions the accumulator carries per
+    /// (head, 4-block): one for [`Quaternion4D`](RotationKind::Quaternion4D),
+    /// **two** for [`Rotor4D`](RotationKind::Rotor4D) (the left and right
+    /// factors). Meaningless for [`Complex2D`](RotationKind::Complex2D), which
+    /// accumulates angles — reported as 1.
+    ///
+    /// The factors are stacked along one block axis, so every quaternion
+    /// primitive — the generator split, [`quat_from_scaled_axis`], the
+    /// [`quat_cumprod`] scan, [`quat_normalize`] — runs **once** over
+    /// `quat_factors · blocks` blocks and needs no `Rotor4D` branch of its own.
+    /// Only the *application* to `B`/`C` differs.
+    pub fn quat_factors(self) -> usize {
+        match self {
+            RotationKind::Rotor4D => 2,
+            RotationKind::Complex2D | RotationKind::Quaternion4D => 1,
+        }
+    }
 }
 
 /// Everything the rotation needs from the block: which algebra, how much of
@@ -130,6 +213,16 @@ pub enum RotationState {
     Angle(Tensor<3>),
     /// Quaternion cumulative rotation, shape `[batch, nheads, blocks, 4]`.
     Quaternion(Tensor<4>),
+    /// `SO(4)` cumulative rotation, shape `[batch, nheads, 2·blocks, 4]`: the
+    /// left factors `Qₜ = qₜ⊗⋯⊗q₁` in the first `blocks` entries of the block
+    /// axis, the right factors `Tₜ = pₜ⊗⋯⊗p₁` in the second (see
+    /// [`split_rotor`]).
+    ///
+    /// One tensor rather than two so the scan, the normalisation and the cache
+    /// plumbing stay single-call; the conjugation in `v ↦ q v p̄` reverses the
+    /// right-hand order **twice**, so `T` accumulates with the very same
+    /// left-fold as `Q` and no reversed scan is needed.
+    Rotor(Tensor<4>),
 }
 
 impl RotationState {
@@ -156,12 +249,50 @@ impl RotationState {
         RotationState::Quaternion(Tensor::cat(vec![w, xyz], 3))
     }
 
+    /// The variant's name, for assertion messages.
+    fn variant(&self) -> &'static str {
+        match self {
+            RotationState::Angle(_) => "Angle",
+            RotationState::Quaternion(_) => "Quaternion",
+            RotationState::Rotor(_) => "Rotor",
+        }
+    }
+
     /// Unwrap the abelian angle accumulator; panics if this is a quaternion.
     pub fn angle(self) -> Tensor<3> {
         match self {
             RotationState::Angle(a) => a,
-            RotationState::Quaternion(_) => {
-                panic!("RotationState is Quaternion, expected Angle")
+            other => panic!("RotationState is {}, expected Angle", other.variant()),
+        }
+    }
+
+    /// Identity-initialised `SO(4)` accumulator `[batch, nheads, 2·blocks, 4]`
+    /// (both factors of every block are the identity quaternion `(1, 0, 0, 0)`).
+    pub fn identity_rotor(batch: usize, nheads: usize, blocks: usize, device: &Device) -> Self {
+        let w = Tensor::ones([batch, nheads, 2 * blocks, 1], device);
+        let xyz = Tensor::zeros([batch, nheads, 2 * blocks, 3], device);
+        RotationState::Rotor(Tensor::cat(vec![w, xyz], 3))
+    }
+
+    /// The identity accumulator for `kind` — the one place a fresh cache's
+    /// rotation state is built, for every pathway and both cache types.
+    pub fn identity(
+        kind: RotationKind,
+        batch: usize,
+        nheads: usize,
+        num_rope_angles: usize,
+        num_quat_blocks: usize,
+        device: &Device,
+    ) -> Self {
+        match kind {
+            RotationKind::Complex2D => {
+                RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
+            }
+            RotationKind::Quaternion4D => {
+                RotationState::identity_quaternion(batch, nheads, num_quat_blocks, device)
+            }
+            RotationKind::Rotor4D => {
+                RotationState::identity_rotor(batch, nheads, num_quat_blocks, device)
             }
         }
     }
@@ -170,7 +301,41 @@ impl RotationState {
     pub fn quaternion(self) -> Tensor<4> {
         match self {
             RotationState::Quaternion(q) => q,
-            RotationState::Angle(_) => panic!("RotationState is Angle, expected Quaternion"),
+            other => panic!("RotationState is {}, expected Quaternion", other.variant()),
+        }
+    }
+
+    /// Unwrap the `SO(4)` accumulator (`[batch, nheads, 2·blocks, 4]`, both
+    /// factors stacked); panics for any other variant.
+    pub fn rotor(self) -> Tensor<4> {
+        match self {
+            RotationState::Rotor(q) => q,
+            other => panic!("RotationState is {}, expected Rotor", other.variant()),
+        }
+    }
+
+    /// The stacked quaternion accumulator for `kind`, together with the number
+    /// of **state** 4-blocks it covers — half its block axis for
+    /// [`RotationKind::Rotor4D`], which stacks two factors there.
+    ///
+    /// Panics on a variant the kind does not use: the two are the same rank and
+    /// differ only in the length of one axis, so a mismatched cache would
+    /// otherwise be reinterpreted rather than rejected.
+    fn quat_stack(self, kind: RotationKind) -> (Tensor<4>, usize) {
+        match (kind, self) {
+            (RotationKind::Quaternion4D, RotationState::Quaternion(q)) => {
+                let blocks = q.dims()[2];
+                (q, blocks)
+            }
+            (RotationKind::Rotor4D, RotationState::Rotor(q)) => {
+                let stacked = q.dims()[2];
+                assert_eq!(stacked % 2, 0, "a Rotor accumulator stacks two factors");
+                (q, stacked / 2)
+            }
+            (kind, other) => panic!(
+                "RotationState is {}, which is not {kind:?}'s accumulator",
+                other.variant()
+            ),
         }
     }
 
@@ -178,7 +343,7 @@ impl RotationState {
     pub fn sanity(&self) {
         match self {
             RotationState::Angle(a) => crate::modules::sanity(a),
-            RotationState::Quaternion(q) => crate::modules::sanity(q),
+            RotationState::Quaternion(q) | RotationState::Rotor(q) => crate::modules::sanity(q),
         }
     }
 }
@@ -280,7 +445,7 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// # Shapes
 /// - `t`  : `[..., n]`
 /// - out  : `[..., 1]`
-fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
+pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
     let eps = crate::utils::div_eps(t.dtype());
     // Detached: the rescaling is a numerical device, not part of the function
@@ -437,6 +602,56 @@ pub fn rotate_state_rank_blocks<const D: usize, const DB: usize>(
     rotated.reshape(dims) // [..., state_rank]
 }
 
+/// Apply a per-block **two-sided** quaternion rotation to the `state_rank` axis
+/// of `v`: `v ↦ ql ⊗ v ⊗ qr` per 4-block.
+///
+/// This is the general `SO(4)` element ([`RotationKind::Rotor4D`]); pass
+/// `qr = (1,0,0,0)` to recover [`rotate_state_rank_blocks`]. Absorbing the
+/// *inverse* cumulative rotation into `B`/`C` (`B̄ = P⁻¹B` with
+/// `P(v) = Q v T̄`) is `ql = conj(Q)`, `qr = T` — note the conjugate is on the
+/// **left** factor only.
+///
+/// Shapes as [`rotate_state_rank_blocks`]: `v` is `[..., state_rank]`, both
+/// quaternions `[..., J, 4]`, and `DB = D + 1`.
+pub fn rotate_state_rank_blocks_two_sided<const D: usize, const DB: usize>(
+    v: Tensor<D>,
+    ql: Tensor<DB>,
+    qr: Tensor<DB>,
+) -> Tensor<D> {
+    assert_eq!(
+        D + 1,
+        DB,
+        "rotate_state_rank_blocks_two_sided splits one axis into (J, 4)"
+    );
+    let dims = v.dims();
+    let state_rank = dims[D - 1];
+    assert_eq!(
+        state_rank % 4,
+        0,
+        "state_rank must be a multiple of 4 (quaternion blocks)"
+    );
+
+    let mut split_shape = [0usize; DB];
+    split_shape[..D - 1].copy_from_slice(&dims[..D - 1]);
+    split_shape[DB - 2] = state_rank / 4;
+    split_shape[DB - 1] = 4;
+
+    let v_blocks = v.reshape(split_shape); // [..., J, 4]
+    quat_mul(quat_mul(ql, v_blocks), qr).reshape(dims)
+}
+
+/// Split a stacked [`RotationState::Rotor`] accumulator `[..., 2·J, 4]` into
+/// its `(left, right)` factors, each `[..., J, 4]`.
+pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
+    let stacked = q.dims()[D - 2];
+    assert_eq!(stacked % 2, 0, "a Rotor accumulator stacks two factors");
+    let blocks = stacked / 2;
+    (
+        q.clone().narrow(D - 2, 0, blocks),
+        q.narrow(D - 2, blocks, blocks),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Cumulative rotation scan (the associative, non-abelian replacement for cumsum)
 // ---------------------------------------------------------------------------
@@ -546,6 +761,29 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
     }
 }
 
+/// Two-sided counterpart of [`rotate_blocks_partial`]: rotates the first
+/// `rope_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`, passing
+/// the remainder through.
+pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
+    v: Tensor<D>,
+    ql: Tensor<DB>,
+    qr: Tensor<DB>,
+    rope_width: usize,
+) -> Tensor<D> {
+    let r = v.dims()[D - 1];
+    if rope_width == 0 {
+        return v;
+    }
+    if rope_width == r {
+        rotate_state_rank_blocks_two_sided::<D, DB>(v, ql, qr)
+    } else {
+        let head = v.clone().narrow(D - 1, 0, rope_width);
+        let tail = v.narrow(D - 1, rope_width, r - rope_width);
+        let head_rot = rotate_state_rank_blocks_two_sided::<D, DB>(head, ql, qr);
+        Tensor::cat(vec![head_rot, tail], D - 1)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-step rotation increments (the single definition every site derives from)
 // ---------------------------------------------------------------------------
@@ -592,7 +830,11 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
     range: f64,
 ) -> Tensor<DP2> {
     assert_eq!(D + 1, DP1, "generator_increment splits (3·J) into (J, 3)");
-    assert_eq!(D + 2, DP2, "generator_increment also splits off the head axis");
+    assert_eq!(
+        D + 2,
+        DP2,
+        "generator_increment also splits off the head axis"
+    );
     let dims = rot.dims();
     let nheads = dt.dims()[D - 1];
     assert_eq!(
@@ -677,28 +919,32 @@ pub fn rotate_bc_forward(
             );
             (b, c, RotationState::Angle(last))
         }
-        RotationKind::Quaternion4D => {
-            let prev_q_bhj4 = prev.quaternion();
-            let blocks = prev_q_bhj4.dims()[2];
+        RotationKind::Quaternion4D | RotationKind::Rotor4D => {
+            // `stack` is the generator/scan block axis: `blocks` for
+            // Quaternion4D, `2·blocks` for Rotor4D (left factors, then right).
+            // Everything up to the *application* is factor-agnostic and runs
+            // once over the whole stack.
+            let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
+            let stack = prev_q_bhk4.dims()[2];
             // The rotated width follows `rope_dim` (a multiple of 4 here), *not*
             // the accumulator's block count: with `rope_fraction = 0` the block
             // keeps one dummy block alive to carry the data flow, and rotates
             // nothing — the same ablation the abelian path implements.
             let rope_width = rope_dim.min(blocks * 4);
-            // Generators [b,s,h,blocks,3]: the raw channels bounded to an angle
+            // Generators [b,s,h,stack,3]: the raw channels bounded to an angle
             // of at most `range·π` (see `generator_increment`) and scaled
             // per-head by Δ. The bound is load-bearing, not cosmetic: an
             // unbounded `g = rot·Δ` overflows f32 to `inf` for a large
             // in-projection activation, and `quat_from_scaled_axis`'s `cos(∞)`
             // then yields a forward NaN.
-            let g_bshj3 = generator_increment::<3, 4, 5>(rot_bsa, dt_bsh, blocks, range);
-            let q_step_bshj4 = quat_from_scaled_axis::<5>(g_bshj3);
+            let g_bshk3 = generator_increment::<3, 4, 5>(rot_bsa, dt_bsh, stack, range);
+            let q_step_bshk4 = quat_from_scaled_axis::<5>(g_bshk3);
             // Memory-efficient scan: a custom recompute backward (saves only the
             // leaf inputs) instead of retaining the scan's intermediates. Equal
             // to [`quat_cumprod`] on values and gradients (asserted in tests).
-            let (cum_bshj4, final_bhj4) = crate::mamba3::quat_scan::quat_cumprod_recalculated(
-                q_step_bshj4,
-                Some(prev_q_bhj4),
+            let (cum_bshk4, final_bhk4) = crate::mamba3::quat_scan::quat_cumprod_recalculated(
+                q_step_bshk4,
+                Some(prev_q_bhk4),
             );
             // Renormalise the prefixes. A product of unit quaternions is a unit
             // quaternion in exact arithmetic, but the scan composes each prefix
@@ -707,15 +953,45 @@ pub fn rotate_bc_forward(
             // rescales B/C instead of only turning them. `step` already
             // normalises every step; this is the chunkwise counterpart, and it
             // keeps the two numerically alike as well as exactly orthogonal.
-            let cum_bshj4 = quat_normalize(cum_bshj4);
-            // B̄ = rotate by the inverse cumulative rotation (conjugate), per block,
+            let cum_bshk4 = quat_normalize(cum_bshk4);
+            let over_mimo = |q_bshj4: Tensor<5>| {
+                q_bshj4
+                    .unsqueeze_dim::<6>(2)
+                    .expand([batch, sequence, mimo_rank, nheads, blocks, 4])
+            };
+            // B̄ = P⁻¹B: rotate by the inverse cumulative rotation, per block,
             // broadcast over the mimo_rank axis.
-            let conj_bsmhj4 = quat_conj(cum_bshj4)
-                .unsqueeze_dim::<6>(2)
-                .expand([batch, sequence, mimo_rank, nheads, blocks, 4]);
-            let b = rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4.clone(), rope_width);
-            let c = rotate_blocks_partial::<5, 6>(c_bsmhr, conj_bsmhj4, rope_width);
-            (b, c, RotationState::Quaternion(quat_normalize(final_bhj4)))
+            let (b, c) = match kind {
+                RotationKind::Rotor4D => {
+                    // P(v) = Q v T̄  ⇒  P⁻¹(v) = Q* v T (conjugate on the left
+                    // factor only).
+                    let (left, right) = split_rotor(cum_bshk4);
+                    let ql = over_mimo(quat_conj(left));
+                    let qr = over_mimo(right);
+                    (
+                        rotate_blocks_two_sided_partial::<5, 6>(
+                            b_bsmhr,
+                            ql.clone(),
+                            qr.clone(),
+                            rope_width,
+                        ),
+                        rotate_blocks_two_sided_partial::<5, 6>(c_bsmhr, ql, qr, rope_width),
+                    )
+                }
+                _ => {
+                    let conj_bsmhj4 = over_mimo(quat_conj(cum_bshk4));
+                    (
+                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4.clone(), rope_width),
+                        rotate_blocks_partial::<5, 6>(c_bsmhr, conj_bsmhj4, rope_width),
+                    )
+                }
+            };
+            let final_bhk4 = quat_normalize(final_bhk4);
+            let state = match kind {
+                RotationKind::Rotor4D => RotationState::Rotor(final_bhk4),
+                _ => RotationState::Quaternion(final_bhk4),
+            };
+            (b, c, state)
         }
     }
 }
@@ -762,21 +1038,42 @@ pub fn rotate_bc_step(
             let c = apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
             (b, c, RotationState::Angle(new_cum_angle_bha))
         }
-        RotationKind::Quaternion4D => {
-            let prev_q_bhj4 = prev.quaternion();
-            let blocks = prev_q_bhj4.dims()[2];
+        RotationKind::Quaternion4D | RotationKind::Rotor4D => {
+            let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
+            let stack = prev_q_bhk4.dims()[2];
             let rope_width = rope_dim.min(blocks * 4);
             // The same bounded generator as `rotate_bc_forward` (see the note there).
-            let g_bhj3 = generator_increment::<2, 3, 4>(rot_ba, dt_bh, blocks, range);
-            let q_step_bhj4 = quat_from_scaled_axis::<4>(g_bhj3);
-            // Single step: Qₜ = qₜ ⊗ Qₜ₋₁.
-            let new_q_bhj4 = quat_normalize(quat_mul(q_step_bhj4, prev_q_bhj4));
-            let conj_bmhj4 = quat_conj(new_q_bhj4.clone())
-                .unsqueeze_dim::<5>(1)
-                .expand([batch, mimo_rank, nheads, blocks, 4]);
-            let b = rotate_blocks_partial::<4, 5>(b_bmhr, conj_bmhj4.clone(), rope_width);
-            let c = rotate_blocks_partial::<4, 5>(c_bmhr, conj_bmhj4, rope_width);
-            (b, c, RotationState::Quaternion(new_q_bhj4))
+            let g_bhk3 = generator_increment::<2, 3, 4>(rot_ba, dt_bh, stack, range);
+            let q_step_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
+            // Single step: Qₜ = qₜ ⊗ Qₜ₋₁ — and, stacked alongside it for
+            // Rotor4D, Tₜ = pₜ ⊗ Tₜ₋₁ (the same left fold, see [`RotationState::Rotor`]).
+            let new_q_bhk4 = quat_normalize(quat_mul(q_step_bhk4, prev_q_bhk4));
+            let over_mimo = |q_bhj4: Tensor<4>| {
+                q_bhj4
+                    .unsqueeze_dim::<5>(1)
+                    .expand([batch, mimo_rank, nheads, blocks, 4])
+            };
+            match kind {
+                RotationKind::Rotor4D => {
+                    let (left, right) = split_rotor(new_q_bhk4.clone());
+                    let ql = over_mimo(quat_conj(left));
+                    let qr = over_mimo(right);
+                    let b = rotate_blocks_two_sided_partial::<4, 5>(
+                        b_bmhr,
+                        ql.clone(),
+                        qr.clone(),
+                        rope_width,
+                    );
+                    let c = rotate_blocks_two_sided_partial::<4, 5>(c_bmhr, ql, qr, rope_width);
+                    (b, c, RotationState::Rotor(new_q_bhk4))
+                }
+                _ => {
+                    let conj_bmhj4 = over_mimo(quat_conj(new_q_bhk4.clone()));
+                    let b = rotate_blocks_partial::<4, 5>(b_bmhr, conj_bmhj4.clone(), rope_width);
+                    let c = rotate_blocks_partial::<4, 5>(c_bmhr, conj_bmhj4, rope_width);
+                    (b, c, RotationState::Quaternion(new_q_bhk4))
+                }
+            }
         }
     }
 }

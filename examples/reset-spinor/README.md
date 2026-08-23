@@ -27,6 +27,9 @@ cargo run --release --example reset-spinor -- --training --inference
 # the ablation: the identical model with the abelian rotation
 cargo run --release --example reset-spinor -- --training --inference -- --rotation complex
 
+# the same task under the full SO(4) rotation (a superset of the quaternion one)
+cargo run --release --example reset-spinor -- --training --inference -- --rotation rotor
+
 # the claims below, measured
 cargo test --release --example reset-spinor -- --nocapture
 ```
@@ -148,6 +151,16 @@ ceilings are what a model could actually reach, not memorised answer keys.
   family here — with the same cosine schedule as the other two examples (warmup
   to 3e-2, annealed to 1e-4). A run still short of 100% at the halfway mark has
   not necessarily stalled.
+- **`Rotor4D` is a strict superset, and runs here too** (`-- --rotation rotor`).
+  Left multiplication is *isoclinic* — it turns both invariant planes of a
+  4-block by the same angle — so `Quaternion4D` and `Complex2D` are actually
+  **incomparable**: the quaternion state cannot express two independent per-pair
+  angles. The full `SO(4)` kind (two-sided `q ⊗ v ⊗ p̄`, `p = 1` recovering this
+  one) contains both, at twice the rotation channels. `Q₈` needs none of that
+  extra reach — the ladder's point is the *smallest* state that solves each
+  rung — and it costs: the exact solution needs `p ≡ 1` on the turns, which the
+  same schedule does not find (see [`reset-swap`](../reset-swap/README.md),
+  where the second factor is what the task is *for*).
 - **Nothing here is `reset-rotor`'s job.** The reset (a selective decay) and the
   periodicity (a rotation) are inherited unchanged; the only new requirement is
   that the two turns fail to commute. That is why the ablation is a single enum

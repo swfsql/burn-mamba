@@ -17,6 +17,10 @@ fn quat_config() -> Mamba3Config {
     small_config().with_rotation(RotationKind::Quaternion4D)
 }
 
+fn rotor_config() -> Mamba3Config {
+    small_config().with_rotation(RotationKind::Rotor4D)
+}
+
 // ---------------------------------------------------------------------------
 // step_infinite — convergence to the unrolled fixed point
 // ---------------------------------------------------------------------------
@@ -85,6 +89,51 @@ fn step_infinite_matches_unroll_quat_rope_partial() {
     );
 }
 
+/// The `SO(4)` fixed point takes a different route entirely — the two-sided
+/// series leaves the commutative subalgebra the quaternion branch inverts in,
+/// so it is resolved by Cayley–Hamilton over `ℝ⁴`
+/// ([`rotor_resolvent_partial`]). Agreeing with the unrolled recurrence is what
+/// pins that closed form.
+#[test]
+fn step_infinite_matches_unroll_rotor_siso() {
+    run_step_infinite_matches_unroll("rotor siso", decaying(rotor_config()), 300, 3e-3);
+}
+
+#[test]
+fn step_infinite_matches_unroll_rotor_mimo() {
+    run_step_infinite_matches_unroll(
+        "rotor mimo",
+        decaying(rotor_config().with_mimo_rank(2)),
+        300,
+        3e-3,
+    );
+}
+
+/// The pass-through half must still be a plain geometric series when only one
+/// of the two 4-blocks is turned.
+#[test]
+fn step_infinite_matches_unroll_rotor_rope_partial() {
+    run_step_infinite_matches_unroll(
+        "rotor rope=0.5",
+        decaying(rotor_config().with_rope_fraction(0.5)),
+        300,
+        3e-3,
+    );
+}
+
+/// A decay close to 1 is where the resolvent's determinant approaches
+/// `(1−α)⁴`: the factored form it is built from must not lose it to
+/// cancellation.
+#[test]
+fn step_infinite_matches_unroll_rotor_slow_decay() {
+    run_step_infinite_matches_unroll(
+        "rotor slow decay",
+        rotor_config().with_a_floor(0.05).with_dt_limit((0.05, 1.0)),
+        4000,
+        1e-2,
+    );
+}
+
 /// `step_infinite` derives its per-step rotation from the same
 /// [`RotationSpec`](crate::mamba3::rotation::RotationSpec) as `step`, so a
 /// non-default
@@ -95,11 +144,15 @@ fn step_infinite_matches_unroll_quat_rope_partial() {
 /// something the recurrence never reaches.
 #[test]
 fn step_infinite_matches_unroll_at_a_non_default_range() {
-    for (label, cfg) in [
-        ("complex range 1.4", decaying(small_config())),
-        ("quat range 1.4", decaying(quat_config())),
+    for (label, cfg, tol) in [
+        ("complex range 1.4", decaying(small_config()), 1e-3),
+        ("quat range 1.4", decaying(quat_config()), 1e-3),
+        // The reference side is the noisy one here: 300 sequential steps of a
+        // two-factor rotation accumulate about twice the fp32 drift of the
+        // one-factor kind (and the drift is in `step`, not in the closed form).
+        ("rotor range 1.4", decaying(rotor_config()), 3e-3),
     ] {
-        run_step_infinite_matches_unroll(label, cfg.with_rotation_range(1.4), 300, 1e-3);
+        run_step_infinite_matches_unroll(label, cfg.with_rotation_range(1.4), 300, tol);
     }
 }
 

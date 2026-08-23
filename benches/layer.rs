@@ -250,8 +250,10 @@ fn mamba3_config(
 /// - `mimo-rank4`: genuine MIMO, where only the general kernels exist.
 /// - `quaternion4d`: the non-abelian rotation (an associative scan over the
 ///   sequence instead of a `cumsum`).
+/// - `rotor4d`: the full `SO(4)` rotation — the same scan over a doubled block
+///   axis, plus one extra quaternion product per `B`/`C` application.
 fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
-    use RotationKind::{Complex2D, Quaternion4D};
+    use RotationKind::{Complex2D, Quaternion4D, Rotor4D};
     vec![
         ("mamba3/siso", mamba3_config(shape, 1, Complex2D, true)),
         (
@@ -266,6 +268,7 @@ fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
             "mamba3/quaternion4d",
             mamba3_config(shape, 1, Quaternion4D, true),
         ),
+        ("mamba3/rotor4d", mamba3_config(shape, 1, Rotor4D, true)),
     ]
 }
 

@@ -1,41 +1,45 @@
-//! # Reset-spinor example — the smallest task a *quaternion* Mamba-3 block is needed for
+//! # Reset-swap example — the smallest task an `SO(4)` Mamba-3 block is needed for
 //!
-//! The corollary of `reset-rotor`, one rung further up the ladder. Same shape of
-//! stream — two kinds of turn and a reset — but the two turns **do not commute**:
-//! the model reads `i` / `j` / `R` and must report, at every position, the
-//! running product in the quaternion group `Q₈` since the last reset (one of
-//! `±1, ±i, ±j, ±k`).
+//! The corollary of `reset-spinor`, one rung further up. Same shape of stream —
+//! two kinds of turn and a reset — but now the turns are **swaps**: the model
+//! reads `s` / `t` / `R` and must report, at every position, how the three items
+//! `abc` are ordered, i.e. the running word in the symmetric group `S₃`.
 //!
-//! Where `reset-rotor` needs the transition to be *complex* — a rotation, so the
-//! state can be periodic — this needs it to be **non-abelian**. `Q₈` is the
-//! smallest non-abelian group of unit quaternions, which is to say the smallest
-//! group that the block's own [`RotationKind::Quaternion4D`] state contains and
-//! its [`RotationKind::Complex2D`] state does not:
+//! Where `reset-spinor` needs the transition to be **non-abelian**, this needs
+//! it to be *the group itself rather than a double cover*:
 //!
 //! - the answer is not a function of the current symbol, and Mamba-3 has no
 //!   short convolution, so the recurrent state is the only memory,
-//! - the label is periodic in every generator (`i⁴ = 1`), which no real state
-//!   can report — the `reset-rotor` argument,
-//! - **and it is not a function of how many `i`s and `j`s went by.** `ij = k`
-//!   but `ji = −k`, so only the *order* decides. An abelian rotation accumulates
-//!   a `cumsum` of angles, and a sum forgets order: what it computes is exactly
-//!   the abelianisation `Q₈/{±1}`, missing the commutator.
+//! - `st ≠ ts`, so a `cumsum` of angles — everything
+//!   [`RotationKind::Complex2D`] can accumulate — cannot decide it,
+//! - **and every swap must square to the identity.** A transposition has order
+//!   2, but in `SU(2)` the *only* element of order 2 is `−1`: a half-turn lifts
+//!   to `(0, û)`, whose square is `−1`. So a left-isoclinic
+//!   ([`RotationKind::Quaternion4D`]) state runs in the double cover `2D₃`, and
+//!   the two lifts of one permutation are **antipodal** state vectors that carry
+//!   the same label — which no linear readout can merge.
+//!
+//! Two-sided ([`RotationKind::Rotor4D`]) the block reaches conjugation
+//! `v ↦ q v q̄`, i.e. `SO(3) ⊂ SO(4)`, where `±q` act identically, the three
+//! swaps are three honest half-turns about three axes `60°` apart, and the state
+//! *is* the permutation.
 //!
 //! ## Run
 //!
 //! ```bash
-//! cargo run --release --example reset-spinor -- --training --inference
+//! cargo run --release --example reset-swap -- --training --inference
 //!
-//! # the ablation: the same model with the abelian rotation
-//! cargo run --release --example reset-spinor -- --training --inference -- --rotation complex
+//! # the ablations: the same model one and two rungs down
+//! cargo run --release --example reset-swap -- --training --inference -- --rotation quaternion
+//! cargo run --release --example reset-swap -- --training --inference -- --rotation complex
 //!
-//! # the claims above, measured: a hand-built exact solution, its abelian twin,
-//! # and the ceiling for everything order-blind
-//! cargo test --release --example reset-spinor -- --nocapture
+//! # the claims above, measured: a hand-built exact solution, its left-isoclinic
+//! # twin, and the ceilings
+//! cargo test --release --example reset-swap -- --nocapture
 //! ```
 //!
-//! Like `state-tracking`, this example carries a downstream flag,
-//! `--rotation complex|quaternion` (default `quaternion`), forwarded after the
+//! Like the other `reset-*` examples this carries a downstream flag,
+//! `--rotation complex|quaternion|rotor` (default `rotor`), forwarded after the
 //! trailing `--`; it selects the rotation baked into a **fresh** model config
 //! (a persisted one wins on reload).
 
@@ -47,16 +51,16 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
-/// The reset-spinor dataset, its `Q₈` arithmetic and its families.
+/// The reset-swap dataset, its `S₃` arithmetic and its families.
 pub mod dataset;
 /// Inference: per-family accuracy on fresh eval sets.
 pub mod inference;
 /// The example's `model_config()`.
 pub mod model;
-/// Training entry point for the reset-spinor task.
+/// Training entry point for the reset-swap task.
 pub mod training;
 
-/// The hand-built solution, its abelian twin, and the order-blind ceiling.
+/// The hand-built solution, its left-isoclinic twin, and the ceilings.
 #[cfg(test)]
 pub mod tests;
 
@@ -86,7 +90,7 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // As in `reset-rotor`: a large step to leave the order-blind solution,
+        // As in `reset-spinor`: a large step to leave the order-blind solution,
         // a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         TrainingConfig::new(common::training::OptimizerConfig::new(
@@ -128,8 +132,8 @@ pub fn launch(app_args: &AppArgs) {
     }
 }
 
-/// `--rotation complex|quaternion|rotor`, defaulting to the quaternion rotation
-/// this example is about (`rotor` is the full-`SO(4)` kind, which contains it).
+/// `--rotation complex|quaternion|rotor`, defaulting to the full `SO(4)`
+/// rotation this example is about.
 fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
     let value = extra_args
         .iter()
@@ -137,9 +141,9 @@ fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
         .and_then(|i| extra_args.get(i + 1))
         .map(|v| v.to_string_lossy().into_owned());
     match value.as_deref() {
-        Some("quaternion") | Some("quat") | None => RotationKind::Quaternion4D,
+        Some("rotor") | Some("so4") | None => RotationKind::Rotor4D,
+        Some("quaternion") | Some("quat") => RotationKind::Quaternion4D,
         Some("complex") => RotationKind::Complex2D,
-        Some("rotor") | Some("so4") => RotationKind::Rotor4D,
         Some(other) => {
             panic!("--rotation must be 'complex', 'quaternion' or 'rotor', got {other:?}")
         }

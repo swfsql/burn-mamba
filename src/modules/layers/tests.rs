@@ -76,7 +76,7 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
         c.v_state_bhp.clone().reshape([-1]),
         match &c.rotation {
             RotationState::Angle(t) => t.clone().reshape([-1]),
-            RotationState::Quaternion(t) => t.clone().reshape([-1]),
+            RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().reshape([-1]),
         },
     ]
 }
@@ -94,7 +94,7 @@ fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
     };
     let rot = match &c.rotation {
         RotationState::Angle(t) => t.clone().sum(),
-        RotationState::Quaternion(t) => t.clone().sum(),
+        RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };
     c.ssm_bhpr.clone().sum() + c.k_state_bmhr.clone().sum() + c.v_state_bhp.clone().sum() + rot
 }
