@@ -30,8 +30,9 @@ struct RunGrads {
     final_k: Tensor<4>,
     /// Final previous-token x state from the returned cache.
     final_v: Tensor<3>,
-    /// Final cumulative RoPE angle from the returned cache.
-    final_angle: Tensor<3>,
+    /// Final cumulative RoPE angle from the returned cache; `None` for
+    /// [`RotationKind::Real1D`], which has no accumulator.
+    final_angle: Option<Tensor<3>>,
     d_input: Tensor<3>,
     d_in_proj_w: Tensor<2>,
     d_dt_bias: Tensor<1>,
@@ -51,7 +52,9 @@ struct Heads {
     ssm: Tensor<4>,
     k: Tensor<4>,
     v: Tensor<3>,
-    angle: Tensor<3>,
+    /// `None` when the block is [`RotationKind::Real1D`] and its cache has no
+    /// rotation accumulator to attach a loss head to.
+    angle: Option<Tensor<3>>,
 }
 
 /// Build the initial cache passed to both `forward` and the `step`
@@ -83,15 +86,17 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         };
         Tensor::from_inner(t)
     };
+    // `Real1D` has no accumulator at all; every other kind exercised here is
+    // the abelian one.
+    let rotation = match cfg.rotation {
+        RotationKind::Real1D => RotationState::real(),
+        _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
+    };
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
         k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
         v_state_bhp: mk3([batch, nheads, per_head_dim]),
-        rotation: crate::mamba3::rotation::RotationState::Angle(mk3([
-            batch,
-            nheads,
-            num_rope_angles,
-        ])),
+        rotation,
     }
 }
 
@@ -112,11 +117,17 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
             "final v_state",
             max_abs_diff(a.final_v.clone(), b.final_v.clone()),
         ),
-        (
-            "final cum_angle",
-            max_abs_diff(a.final_angle.clone(), b.final_angle.clone()),
-        ),
     ];
+    let checks: Vec<(&str, f32)> = checks
+        .into_iter()
+        .chain(
+            // `Real1D` has no accumulator to compare.
+            a.final_angle
+                .clone()
+                .zip(b.final_angle.clone())
+                .map(|(x, y)| ("final cum_angle", max_abs_diff(x, y))),
+        )
+        .collect();
     for (name, d) in checks {
         assert!(d < tol, "{label}: {name} max abs diff = {d:.6} (tol {tol})");
     }
@@ -137,11 +148,14 @@ fn run_with_grads(
     let ssm = cache.ssm_bhpr;
     let k = cache.k_state_bmhr;
     let v = cache.v_state_bhp;
-    let angle = cache.rotation.angle();
+    let angle = match cache.rotation {
+        RotationState::Real(_) => None,
+        other => Some(other.angle()),
+    };
     let final_ssm = ssm.clone().inner();
     let final_k = k.clone().inner();
     let final_v = v.clone().inner();
-    let final_angle = angle.clone().inner();
+    let final_angle = angle.clone().map(|a| a.inner());
 
     // Loss couples the output and every final cache field (each via its own
     // random head) so parameter gradients reflect both output and state.
@@ -149,12 +163,28 @@ fn run_with_grads(
     let ssm_head = Tensor::from_inner(heads.ssm.clone());
     let k_head = Tensor::from_inner(heads.k.clone());
     let v_head = Tensor::from_inner(heads.v.clone());
-    let angle_head = Tensor::from_inner(heads.angle.clone());
-    let loss = (out * out_head).sum()
-        + (ssm * ssm_head).sum()
-        + (k * k_head).sum()
-        + (v * v_head).sum()
-        + (angle * angle_head).sum();
+    let loss = match angle {
+        Some(a) => {
+            let angle_head = Tensor::from_inner(
+                heads
+                    .angle
+                    .clone()
+                    .expect("a rotating kind needs an angle head"),
+            );
+            (out * out_head).sum()
+                + (ssm * ssm_head).sum()
+                + (k * k_head).sum()
+                + (v * v_head).sum()
+                + (a * angle_head).sum()
+        }
+        // `Real1D` has no accumulator, hence no head and no term.
+        None => {
+            (out * out_head).sum()
+                + (ssm * ssm_head).sum()
+                + (k * k_head).sum()
+                + (v * v_head).sum()
+        }
+    };
     let grads = loss.backward();
 
     RunGrads {
@@ -276,7 +306,8 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+        angle: (num_rope_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
 
     let ssd_path = Mamba3SsdPath::Minimal(Some(4));
@@ -347,15 +378,15 @@ fn cfg_rope_half() -> Mamba3Config {
 fn cfg_rope_half_mimo() -> Mamba3Config {
     cfg_rope_half().with_mimo_rank(2)
 }
-fn cfg_rope_zero() -> Mamba3Config {
+fn cfg_real1d() -> Mamba3Config {
     Mamba3Config::new(32)
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.0)
+        .with_rotation(RotationKind::Real1D)
 }
-fn cfg_rope_zero_mimo() -> Mamba3Config {
-    cfg_rope_zero().with_mimo_rank(2)
+fn cfg_real1d_mimo() -> Mamba3Config {
+    cfg_real1d().with_mimo_rank(2)
 }
 fn cfg_outproj_norm() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -439,26 +470,26 @@ fn step_matches_forward_rope_half_mimo_random_init() {
     run_step_matches_forward(cfg_rope_half_mimo(), true);
 }
 
-// ── rope_fraction = 0 (RoPE disabled / identity) ────────────────────────
+// ── RotationKind::Real1D (no rotation: a real transition) ───────────────
 
 #[test]
-fn step_matches_forward_rope_zero() {
-    run_step_matches_forward(cfg_rope_zero(), false);
+fn step_matches_forward_real1d() {
+    run_step_matches_forward(cfg_real1d(), false);
 }
 
 #[test]
-fn step_matches_forward_rope_zero_random_init() {
-    run_step_matches_forward(cfg_rope_zero(), true);
+fn step_matches_forward_real1d_random_init() {
+    run_step_matches_forward(cfg_real1d(), true);
 }
 
 #[test]
-fn step_matches_forward_rope_zero_mimo() {
-    run_step_matches_forward(cfg_rope_zero_mimo(), false);
+fn step_matches_forward_real1d_mimo() {
+    run_step_matches_forward(cfg_real1d_mimo(), false);
 }
 
 #[test]
-fn step_matches_forward_rope_zero_mimo_random_init() {
-    run_step_matches_forward(cfg_rope_zero_mimo(), true);
+fn step_matches_forward_real1d_mimo_random_init() {
+    run_step_matches_forward(cfg_real1d_mimo(), true);
 }
 
 // ── has_outproj_norm = true (gated RMSNorm) ─────────────────────────────
@@ -529,7 +560,8 @@ fn run_split_matches_full(cfg: Mamba3Config) {
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+        angle: (num_rope_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
 
     let ssd_path = Mamba3SsdPath::Minimal(Some(4));
@@ -606,7 +638,8 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
         k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
         v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
-        angle: Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device),
+        angle: (num_rope_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
 
     let unroll = |m: &Mamba3, x: Tensor<3>, init: Mamba3DoubleSsdCache| {

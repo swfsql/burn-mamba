@@ -970,7 +970,7 @@ fn rotor_generator_channels_are_left_then_right() {
     };
 
     let (b_q, c_q, st_q) = rotate_bc_forward(
-        rot_quat,
+        Some(rot_quat),
         dt.clone(),
         RotationState::identity_quaternion(batch, nheads, blocks, &device),
         b.clone(),
@@ -978,7 +978,7 @@ fn rotor_generator_channels_are_left_then_right() {
         spec(RotationKind::Quaternion4D),
     );
     let (b_r, c_r, st_r) = rotate_bc_forward(
-        rot_rotor,
+        Some(rot_rotor),
         dt,
         RotationState::identity_rotor(batch, nheads, blocks, &device),
         b,
@@ -1494,7 +1494,7 @@ fn factored_matches_explicit_grads() {
 }
 
 // ---------------------------------------------------------------------------
-// 12. Rotation-disabled ablation (`rope_fraction = 0`)
+// 12. Rotation-disabled ablation (`RotationKind::Real1D`)
 // ---------------------------------------------------------------------------
 
 /// Zero the last `n` columns of the block's in-projection (its rotation
@@ -1528,10 +1528,37 @@ fn without_rotation_channels(
     block
 }
 
-/// `rope_fraction = 0` is documented as *the* rotation-disabled ablation: "no
-/// B/C dimension is rotated". It must hold for **both** rotation kinds — the
-/// block's output cannot depend on its rotation channels at all.
-fn rope_fraction_zero_ignores_rotation_channels(kind: RotationKind) {
+/// The same block re-labelled as [`RotationKind::Real1D`]: the trailing
+/// rotation columns of `in_proj` are **dropped** (not zeroed) and every derived
+/// rotation count goes to zero. Every other weight is shared, so the two blocks
+/// differ in exactly one thing — whether the rotation exists.
+fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mamba3 {
+    use burn::module::Param;
+    let mut block = block;
+    let [_d_model, d_in_proj] = block.in_proj.weight.dims();
+    let keep = d_in_proj - block.num_rotation_channels;
+    let w = block.in_proj.weight.val();
+    block.in_proj.weight = Param::from_tensor(w.narrow(1, 0, keep));
+    block.in_proj.bias = block
+        .in_proj
+        .bias
+        .map(|b| Param::from_tensor(b.val().narrow(0, 0, keep)));
+    block.rotation = RotationKind::Real1D;
+    block.rope_dim = 0;
+    block.num_rope_angles = 0;
+    block.num_quat_blocks = 0;
+    block.num_rotation_channels = 0;
+    block
+}
+
+/// [`RotationKind::Real1D`] is *the* rotation-disabled ablation, and it must be
+/// the honest one: a block whose rotation is switched off by zeroing its
+/// generator (any kind, so any per-step rotation is the identity) has to agree
+/// with the `Real1D` block that never projects those channels at all.
+///
+/// The equality is what makes `Real1D` an ablation rather than a fourth model:
+/// it removes the rotation and changes nothing else.
+fn real1d_matches_zeroed_rotation(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device: Device = Default::default();
@@ -1539,36 +1566,59 @@ fn rope_fraction_zero_ignores_rotation_channels(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.0)
         .with_rotation(kind)
         .init(&device);
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (with_rot, _) = block
-        .clone()
+    let (zeroed, _) = without_rotation_channels(block.clone())
         .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
-    let (no_rot, _) =
-        without_rotation_channels(block).forward(x, None, Mamba3SsdPath::Minimal(None));
-    let diff = max_abs_diff(with_rot, no_rot);
+    let (real, _) = as_real1d(block).forward(x, None, Mamba3SsdPath::Minimal(None));
+    let diff = max_abs_diff(zeroed, real);
     assert!(
         diff < 1e-5,
-        "{kind:?}: rope_fraction = 0 still rotates B/C (max diff {diff})"
+        "{kind:?} with a zeroed generator differs from Real1D (max diff {diff})"
     );
 }
 
 #[test]
-fn rope_fraction_zero_disables_complex_rotation() {
-    rope_fraction_zero_ignores_rotation_channels(RotationKind::Complex2D);
+fn real1d_matches_zeroed_complex_rotation() {
+    real1d_matches_zeroed_rotation(RotationKind::Complex2D);
 }
 
 #[test]
-fn rope_fraction_zero_disables_quaternion_rotation() {
-    rope_fraction_zero_ignores_rotation_channels(RotationKind::Quaternion4D);
+fn real1d_matches_zeroed_quaternion_rotation() {
+    real1d_matches_zeroed_rotation(RotationKind::Quaternion4D);
 }
 
 #[test]
-fn rope_fraction_zero_disables_rotor_rotation() {
-    rope_fraction_zero_ignores_rotation_channels(RotationKind::Rotor4D);
+fn real1d_matches_zeroed_rotor_rotation() {
+    real1d_matches_zeroed_rotation(RotationKind::Rotor4D);
+}
+
+/// `Real1D` spends nothing on a rotation it does not have: no in-projection
+/// columns, and a cache slot with no accumulator tensor.
+#[test]
+fn real1d_projects_no_rotation_channels() {
+    use crate::mamba3::mamba3::Mamba3Config;
+    let base = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8);
+    let complex = base.clone();
+    let real = base.with_rotation(RotationKind::Real1D);
+    assert_eq!(0, real.num_rotation_channels());
+    assert_eq!(0, real.rope_dim());
+    assert_eq!(
+        complex.d_in_proj() - complex.num_rope_angles(),
+        real.d_in_proj()
+    );
+
+    let device: Device = Default::default();
+    let block = real.init(&device);
+    assert!(matches!(
+        block.zero_rotation_state(2, &device),
+        RotationState::Real(_)
+    ));
 }
 
 // ---------------------------------------------------------------------------

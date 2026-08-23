@@ -53,12 +53,14 @@ is rotational state dynamics: that is what lets Mamba-3 track state (parity,
 mod-k) which a real, non-negative-eigenvalue SSM provably cannot.
 
 That rotation need not be abelian, and `RotationKind` picks the group it turns
-in: `Complex2D` is the paper's `SO(2)` (a `cumsum` of angles), `Quaternion4D` is
-`SU(2)` (an associative scan of unit quaternions, so the state composes a *word*
-in a group rather than counting), and `Rotor4D` is the whole `SO(4)`
-(`v ↦ q ⊗ v ⊗ p̄`), which contains both. The factoring onto `B`/`C` — and so the
-plain scalar-decay SSD kernel — is identical in all three. The `reset-*` examples
-are a ladder isolating exactly what each one buys.
+in: `Real1D` is the trivial group (no rotation at all — a real transition, and
+the ablation the rest is measured against), `Complex2D` is the paper's `SO(2)`
+(a `cumsum` of angles), `Quaternion4D` is `SU(2)` (an associative scan of unit
+quaternions, so the state composes a *word* in a group rather than counting),
+and `Rotor4D` is the whole `SO(4)` (`v ↦ q ⊗ v ⊗ p̄`), which contains both. The
+factoring onto `B`/`C` — and so the plain scalar-decay SSD kernel — is identical
+in all of them. The `reset-*` examples are a ladder isolating exactly what each
+one buys.
 
 ## Highlights
 

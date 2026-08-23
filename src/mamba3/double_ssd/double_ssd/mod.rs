@@ -76,19 +76,21 @@ impl Mamba3 {
 
         // [batch, sequence, *] split along channel dim.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
+        // The rotation channels come off first: `Real1D` projects none, and a
+        // zero-width segment would silently vanish from the split below.
+        let (proj_bsd, rot_bsa) =
+            helpers::split_rotation_channels(proj_bsd, self.num_rotation_channels, 2);
         #[rustfmt::skip]
         let [
                 z_bsi, x_bsi,
                 b_raw_bsMGR, c_raw_bsMGR,
                 dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
-                rot_bsa
         ] = crate::modules::split_into(
             proj_bsd,
             [
                 d_inner, d_inner,
                 bc_size, bc_size,
                 nheads, nheads, nheads,
-                self.num_rotation_channels,
             ],
             2,
         );
@@ -382,8 +384,10 @@ mod step {
         pub b_bmhr: Tensor<4>,
         /// QK-normed, GQA-expanded, biased C — **before** the rotation.
         pub c_bmhr: Tensor<4>,
-        /// Raw rotation channels `[batch, num_rotation_channels]`.
-        pub rot_ba: Tensor<2>,
+        /// Raw rotation channels `[batch, num_rotation_channels]`; `None` for
+        /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
+        /// which projects none.
+        pub rot_ba: Option<Tensor<2>>,
         /// `Δ` `[batch, nheads]`.
         pub dt_bh: Tensor<2>,
         /// `α = exp(Δ·A)` `[batch, nheads]`.
@@ -417,19 +421,20 @@ mod step {
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
+            // See the note in `forward`: `Real1D` projects no rotation channels.
+            let (proj_bd, rot_ba) =
+                helpers::split_rotation_channels(proj_bd, self.num_rotation_channels, 1);
             #[rustfmt::skip]
             let [
                     z_bi, x_bi,
                     b_raw_bMGR, c_raw_bMGR,
                     dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
-                    rot_ba,
             ] = crate::modules::split_into(
                 proj_bd,
                 [
                     d_inner, d_inner,
                     bc_size, bc_size,
                     nheads, nheads, nheads,
-                    self.num_rotation_channels,
                 ],
                 1,
             );

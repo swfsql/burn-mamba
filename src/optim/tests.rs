@@ -124,13 +124,27 @@ fn assert_plan_excludes_boundaries(plan: &MuonPlan, rows: &[ParamRow]) {
 #[cfg(feature = "mamba3")]
 #[test]
 fn mamba3_plan_fits_the_model() {
+    mamba3_plan_fits(crate::mamba3::rotation::RotationKind::Complex2D);
+}
+
+/// `Real1D` drops the `in_proj`'s rotation columns entirely, so the plan has to
+/// drop the matching segment — a zero-width one would not sum to the weight.
+#[cfg(feature = "mamba3")]
+#[test]
+fn mamba3_real1d_plan_fits_the_model() {
+    mamba3_plan_fits(crate::mamba3::rotation::RotationKind::Real1D);
+}
+
+#[cfg(feature = "mamba3")]
+fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
     use crate::prelude::*;
     let device = Device::default();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(16)
-        .with_rope_fraction(1.0);
+        .with_rope_fraction(1.0)
+        .with_rotation(rotation);
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 3,
         output_size: 5,

@@ -13,6 +13,10 @@ fn small_config() -> Mamba3Config {
         .with_per_head_dim(8)
 }
 
+fn real1d_config() -> Mamba3Config {
+    small_config().with_rotation(RotationKind::Real1D)
+}
+
 fn quat_config() -> Mamba3Config {
     small_config().with_rotation(RotationKind::Quaternion4D)
 }
@@ -53,6 +57,23 @@ fn run_step_infinite_matches_unroll(label: &str, cfg: Mamba3Config, steps: usize
     assert!(
         d < tol,
         "{label}: step_infinite vs {steps} unrolled steps max abs diff = {d:.6} (tol {tol})"
+    );
+}
+
+/// [`RotationKind::Real1D`] takes the shortest route of all: with no rotation
+/// to resolve, every channel is the plain geometric series `(β+γ)/(1−α)`.
+#[test]
+fn step_infinite_matches_unroll_real1d_siso() {
+    run_step_infinite_matches_unroll("real1d siso", decaying(real1d_config()), 300, 1e-3);
+}
+
+#[test]
+fn step_infinite_matches_unroll_real1d_mimo() {
+    run_step_infinite_matches_unroll(
+        "real1d mimo",
+        decaying(real1d_config().with_mimo_rank(2)),
+        300,
+        1e-3,
     );
 }
 

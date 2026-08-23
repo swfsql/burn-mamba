@@ -207,6 +207,7 @@ mod impl_mamba3 {
             use crate::mamba3::prelude::RotationState;
             fn rot(r: RotationState) -> RotationState {
                 match r {
+                    RotationState::Real(u) => RotationState::Real(u),
                     RotationState::Angle(t) => RotationState::Angle(t.inner()),
                     RotationState::Quaternion(t) => RotationState::Quaternion(t.inner()),
                     RotationState::Rotor(t) => RotationState::Rotor(t.inner()),
@@ -231,6 +232,7 @@ mod impl_mamba3 {
             use crate::mamba3::prelude::RotationState;
             fn rot(r: RotationState) -> RotationState {
                 match r {
+                    RotationState::Real(u) => RotationState::Real(u),
                     RotationState::Angle(t) => RotationState::Angle(Tensor::from_inner(t)),
                     RotationState::Quaternion(t) => {
                         RotationState::Quaternion(Tensor::from_inner(t))

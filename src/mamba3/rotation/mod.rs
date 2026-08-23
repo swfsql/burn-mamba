@@ -100,6 +100,15 @@
 //! group of a block), and `k = 4` is the last rung with a cheap closed form —
 //! at `k = 8` the octonions are non-associative and the scan itself breaks.
 //!
+//! ## The bottom rung: [`RotationKind::Real1D`]
+//!
+//! `k = 1`, the trivial group: no rotation, a purely real transition. It is the
+//! ablation the ladder is measured against, and it is *structural* rather than a
+//! zeroed knob — the in-projection spends no channels on rotation, the cache
+//! carries no accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD
+//! core untouched. Switching the rotation off is therefore a choice of *kind*;
+//! `rope_fraction` only ever narrows a rotation that exists.
+//!
 //! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)` with
 //! `w` the real part.  A `state_rank` of `r = 4·J` is treated as `J` independent
 //! quaternion blocks; the rotation acts within each block, exactly as RoPE acts
@@ -118,6 +127,12 @@ use burn::prelude::*;
 /// Which rotational-state algebra the block uses for the data-dependent
 /// transition rotation absorbed into `B`/`C`.
 ///
+/// - [`Real1D`](RotationKind::Real1D) — the trivial group: no rotation at all.
+///   The transition is the plain scalar decay, i.e. a **real** SSM (Mamba-2's
+///   transition under Mamba-3's trapezoid). The in-projection spends *no*
+///   channels on rotation and the cache carries no accumulator
+///   ([`RotationState::Real`]) — this is the rotation ablation, which is why
+///   `rope_fraction` has no `0.0` setting.
 /// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
 ///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
 ///   [`apply_rope`](crate::modules::misc::rope::apply_rope). The default; behaviourally unchanged.
@@ -131,8 +146,9 @@ use burn::prelude::*;
 ///   generator channels, one scan over a doubled block axis); selects the
 ///   [`RotationState::Rotor`] accumulator.
 ///
-/// The kinds are a ladder — `Complex2D ⊂ Rotor4D` and `Quaternion4D ⊂ Rotor4D`
-/// — but the middle two are **incomparable**, which is why `Rotor4D` exists.
+/// The kinds are a ladder — `Real1D ⊂ Complex2D ⊂ Rotor4D` and
+/// `Real1D ⊂ Quaternion4D ⊂ Rotor4D` — but the middle two are
+/// **incomparable**, which is why `Rotor4D` exists.
 /// Left multiplication is *isoclinic*: `L_q` turns both invariant planes of the
 /// block by the same angle (`L_i` sends `1↦i` **and** `j↦k`), so
 /// `Quaternion4D` cannot express two independent per-pair angles — it does not
@@ -141,6 +157,9 @@ use burn::prelude::*;
 /// with it every element of `SO(4)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RotationKind {
+    /// No rotation: a real transition (the trivial group). No rotation
+    /// channels, no cumulative accumulator, `B`/`C` pass through untouched.
+    Real1D,
     /// Abelian complex (`SO(2)`) RoPE — the current default behaviour.
     #[default]
     Complex2D,
@@ -154,8 +173,9 @@ impl RotationKind {
     /// How many cumulative-rotation quaternions the accumulator carries per
     /// (head, 4-block): one for [`Quaternion4D`](RotationKind::Quaternion4D),
     /// **two** for [`Rotor4D`](RotationKind::Rotor4D) (the left and right
-    /// factors). Meaningless for [`Complex2D`](RotationKind::Complex2D), which
-    /// accumulates angles — reported as 1.
+    /// factors). Meaningless for the non-quaternion kinds
+    /// ([`Complex2D`](RotationKind::Complex2D) accumulates angles,
+    /// [`Real1D`](RotationKind::Real1D) accumulates nothing) — reported as 1.
     ///
     /// The factors are stacked along one block axis, so every quaternion
     /// primitive — the generator split, [`quat_from_scaled_axis`], the
@@ -165,7 +185,7 @@ impl RotationKind {
     pub fn quat_factors(self) -> usize {
         match self {
             RotationKind::Rotor4D => 2,
-            RotationKind::Complex2D | RotationKind::Quaternion4D => 1,
+            RotationKind::Real1D | RotationKind::Complex2D | RotationKind::Quaternion4D => 1,
         }
     }
 }
@@ -183,10 +203,10 @@ impl RotationKind {
 pub struct RotationSpec {
     /// Which rotational-state algebra ([`RotationKind`]).
     pub kind: RotationKind,
-    /// How many leading `state_rank` entries are rotated (`0` ⇒ the rotation is
-    /// the identity; see
+    /// How many leading `state_rank` entries are rotated (see
     /// [`Mamba3Config::rope_fraction`](crate::mamba3::mamba3::Mamba3Config::rope_fraction)).
-    /// For [`RotationKind::Quaternion4D`] this is a multiple of 4.
+    /// For [`RotationKind::Quaternion4D`] this is a multiple of 4; for
+    /// [`RotationKind::Real1D`] it is `0` and nothing reads it.
     pub rope_dim: usize,
     /// The per-step rotation bound in half-turns per unit `Δ`
     /// ([`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)):
@@ -194,9 +214,17 @@ pub struct RotationSpec {
     pub range: f64,
 }
 
+/// The stateless payload of [`RotationState::Real`] — a [`Module`] holding no
+/// tensors, so a real transition's cache slot allocates nothing and converts
+/// between backends by `Clone`.
+#[derive(Module, Debug, Default)]
+pub struct NoRotation;
+
 /// The cumulative-rotation accumulator carried between calls in a Mamba-3 cache
 /// — the variant matching the block's [`RotationKind`].
 ///
+/// - [`Real`](RotationState::Real) — nothing at all: a real transition has no
+///   cumulative rotation to carry.
 /// - [`Angle`](RotationState::Angle) — abelian per-pair cumulative RoPE angle,
 ///   shape `[batch, nheads, num_rope_angles]` (today's `cum_angle`).
 /// - [`Quaternion`](RotationState::Quaternion) — per-block cumulative unit
@@ -209,6 +237,10 @@ pub struct RotationSpec {
 /// wiring that consumes it.
 #[derive(Module, Debug)]
 pub enum RotationState {
+    /// [`RotationKind::Real1D`]'s empty accumulator: a real transition composes
+    /// nothing between calls. It carries a [`NoRotation`] only because Burn's
+    /// `Module` derive takes exactly one field per enum variant.
+    Real(NoRotation),
     /// Abelian RoPE cumulative angle, shape `[batch, nheads, num_rope_angles]`.
     Angle(Tensor<3>),
     /// Quaternion cumulative rotation, shape `[batch, nheads, blocks, 4]`.
@@ -226,6 +258,11 @@ pub enum RotationState {
 }
 
 impl RotationState {
+    /// The empty accumulator of [`RotationKind::Real1D`].
+    pub fn real() -> Self {
+        RotationState::Real(NoRotation)
+    }
+
     /// Zero-initialised abelian angle accumulator `[batch, nheads, num_rope_angles]`.
     pub fn zeros_angle(
         batch: usize,
@@ -252,9 +289,20 @@ impl RotationState {
     /// The variant's name, for assertion messages.
     fn variant(&self) -> &'static str {
         match self {
+            RotationState::Real(_) => "Real",
             RotationState::Angle(_) => "Angle",
             RotationState::Quaternion(_) => "Quaternion",
             RotationState::Rotor(_) => "Rotor",
+        }
+    }
+
+    /// Check this is the empty [`Real`](RotationState::Real) accumulator and
+    /// hand it back; panics on any other variant, so a cache built for a
+    /// rotating kind cannot be fed to a [`Real1D`](RotationKind::Real1D) block.
+    pub fn expect_real(self) -> Self {
+        match self {
+            RotationState::Real(_) => self,
+            other => panic!("RotationState is {}, expected Real", other.variant()),
         }
     }
 
@@ -285,6 +333,7 @@ impl RotationState {
         device: &Device,
     ) -> Self {
         match kind {
+            RotationKind::Real1D => RotationState::real(),
             RotationKind::Complex2D => {
                 RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
             }
@@ -342,6 +391,7 @@ impl RotationState {
     /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on the held tensor.
     pub fn sanity(&self) {
         match self {
+            RotationState::Real(_) => {}
             RotationState::Angle(a) => crate::modules::sanity(a),
             RotationState::Quaternion(q) | RotationState::Rotor(q) => crate::modules::sanity(q),
         }
@@ -745,12 +795,10 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
     rope_width: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
-    if rope_width == 0 {
-        // The rotation is disabled (`rope_fraction = 0`): the identity, exactly
-        // as [`apply_rope_partial`] short-circuits on the abelian path. Also
-        // avoids a zero-width `narrow` below (Burn has no zero-width tensors).
-        return v;
-    }
+    debug_assert!(
+        rope_width > 0,
+        "a quaternion kind always turns at least one block; a real transition is RotationKind::Real1D"
+    );
     if rope_width == r {
         rotate_state_rank_blocks::<D, DB>(v, q)
     } else {
@@ -771,9 +819,7 @@ pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
     rope_width: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
-    if rope_width == 0 {
-        return v;
-    }
+    debug_assert!(rope_width > 0, "see rotate_blocks_partial");
     if rope_width == r {
         rotate_state_rank_blocks_two_sided::<D, DB>(v, ql, qr)
     } else {
@@ -862,6 +908,9 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// [`RotationState`] to store in the cache.
 ///
 /// Branches on [`RotationKind`]:
+/// - [`Real1D`](RotationKind::Real1D): nothing happens — `B`/`C` pass through
+///   and the (empty) accumulator is handed back. `rot` is `None` there, since
+///   the block projects no rotation channels at all.
 /// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
 ///   angle `cumsum` continued from `prev`, then [`apply_rope_partial`]. Exactly
 ///   the original Mamba-3 behaviour.
@@ -874,11 +923,11 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
 ///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
-///   for Quaternion4D).
+///   for Quaternion4D), `None` for Real1D, which projects none.
 /// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
 /// - `b_bsmhr` / `c_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
 pub fn rotate_bc_forward(
-    rot_bsa: Tensor<3>,
+    rot_bsa: Option<Tensor<3>>,
     dt_bsh: Tensor<3>,
     prev: RotationState,
     b_bsmhr: Tensor<5>,
@@ -891,8 +940,12 @@ pub fn rotate_bc_forward(
         rope_dim,
         range,
     } = spec;
+    // Only `Real1D` projects no rotation channels, and it never reads them.
+    let rot = |r: Option<Tensor<3>>| r.expect("a rotating kind projects rotation channels");
     match kind {
+        RotationKind::Real1D => (b_bsmhr, c_bsmhr, prev.expect_real()),
         RotationKind::Complex2D => {
+            let rot_bsa = rot(rot_bsa);
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
             let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
@@ -926,18 +979,17 @@ pub fn rotate_bc_forward(
             // once over the whole stack.
             let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
             let stack = prev_q_bhk4.dims()[2];
-            // The rotated width follows `rope_dim` (a multiple of 4 here), *not*
-            // the accumulator's block count: with `rope_fraction = 0` the block
-            // keeps one dummy block alive to carry the data flow, and rotates
-            // nothing — the same ablation the abelian path implements.
-            let rope_width = rope_dim.min(blocks * 4);
+            // The rotated width is a whole number of quaternion blocks, and
+            // the cache was sized for exactly that many.
+            assert_eq!(rope_dim, blocks * 4, "cache/block rotation width mismatch");
+            let rope_width = rope_dim;
             // Generators [b,s,h,stack,3]: the raw channels bounded to an angle
             // of at most `range·π` (see `generator_increment`) and scaled
             // per-head by Δ. The bound is load-bearing, not cosmetic: an
             // unbounded `g = rot·Δ` overflows f32 to `inf` for a large
             // in-projection activation, and `quat_from_scaled_axis`'s `cos(∞)`
             // then yields a forward NaN.
-            let g_bshk3 = generator_increment::<3, 4, 5>(rot_bsa, dt_bsh, stack, range);
+            let g_bshk3 = generator_increment::<3, 4, 5>(rot(rot_bsa), dt_bsh, stack, range);
             let q_step_bshk4 = quat_from_scaled_axis::<5>(g_bshk3);
             // Memory-efficient scan: a custom recompute backward (saves only the
             // leaf inputs) instead of retaining the scan's intermediates. Equal
@@ -999,11 +1051,11 @@ pub fn rotate_bc_forward(
 /// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
 ///
 /// # Shapes
-/// - `rot_ba`  : `[batch, num_rotation_channels]`.
+/// - `rot_ba`  : `[batch, num_rotation_channels]`, `None` for Real1D.
 /// - `dt_bh`   : `[batch, nheads]`.
 /// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
 pub fn rotate_bc_step(
-    rot_ba: Tensor<2>,
+    rot_ba: Option<Tensor<2>>,
     dt_bh: Tensor<2>,
     prev: RotationState,
     b_bmhr: Tensor<4>,
@@ -1016,8 +1068,11 @@ pub fn rotate_bc_step(
         rope_dim,
         range,
     } = spec;
+    let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
     match kind {
+        RotationKind::Real1D => (b_bmhr, c_bmhr, prev.expect_real()),
         RotationKind::Complex2D => {
+            let rot_ba = rot(rot_ba);
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
             let raw_angle_bha = angle_increment::<2, 3>(rot_ba, dt_bh, range);
@@ -1041,9 +1096,10 @@ pub fn rotate_bc_step(
         RotationKind::Quaternion4D | RotationKind::Rotor4D => {
             let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
             let stack = prev_q_bhk4.dims()[2];
-            let rope_width = rope_dim.min(blocks * 4);
+            assert_eq!(rope_dim, blocks * 4, "cache/block rotation width mismatch");
+            let rope_width = rope_dim;
             // The same bounded generator as `rotate_bc_forward` (see the note there).
-            let g_bhk3 = generator_increment::<2, 3, 4>(rot_ba, dt_bh, stack, range);
+            let g_bhk3 = generator_increment::<2, 3, 4>(rot(rot_ba), dt_bh, stack, range);
             let q_step_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
             // Single step: Qₜ = qₜ ⊗ Qₜ₋₁ — and, stacked alongside it for
             // Rotor4D, Tₜ = pₜ ⊗ Tₜ₋₁ (the same left fold, see [`RotationState::Rotor`]).

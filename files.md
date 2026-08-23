@@ -62,13 +62,15 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** for RoPE pairing;
-  `mimo_rank` 1=SISO; `rope_fraction` (default 1, full); `rotation: RotationKind`;
+  `mimo_rank` 1=SISO; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
   narrower `1`/`0.5` are asked for explicitly); `a_floor`). `rotation_spec()` bundles the
   three rotation fields; `num_rotation_blocks()` = `num_quat_blocks · quat_factors` (the
   projection/scan block axis, doubled for `Rotor4D`) drives `num_rotation_channels()`;
-  `zero_rotation_state()` is the one fresh-cache accumulator, shared by every pathway. Fields:
+  `zero_rotation_state()` is the one fresh-cache accumulator, shared by every pathway.
+  Under `Real1D` every rotation count is `0`; `init` asserts any other kind turns ≥ 1 pair,
+  and `muon_projections()` omits the (then absent) rotation segment. Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
   mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.
@@ -83,7 +85,9 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
   (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`, `mimo_outer_sum`
   (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso` broadcast vs `_mimo`
-  matmul, per `siso_specialization_decode`). Non-obvious: the
+  matmul, per `siso_specialization_decode`), `split_rotation_channels` (peels the in-proj's
+  trailing rotation columns, `None` under `Real1D`; it cannot be one more entry in the main
+  `split_into` because `split_with_sizes` **drops** a zero-length segment). Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
   instead pins `A ≡ +a_floor` (data-independent growth).
@@ -99,11 +103,11 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
   summed; ~2× SSD memory. `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
-  (in-proj → coeffs → QK-norm, pre-rotation), `step_readout` (state×C einsum, `_siso`/
-  `_mimo` branches) and
-  `step_finish` (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
+  (in-proj → coeffs → QK-norm, pre-rotation; its `rot_ba` is `None` under `Real1D`),
+  `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and `step_finish`
+  (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
   `step_constant`. `apply_rope`/`apply_rope_partial` (rotate last-dim pairs;
-  interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; identity when `rope_dim==0`) and
+  interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; `rope_dim > 0` required) and
   `wrap_angle` are used by **both** pathways.
 - **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), `k_state_bmhr`
   (prev-token B, β term), `v_state_bhp` (prev-token x), `rotation` (`RotationState`). No conv.
@@ -139,9 +143,11 @@ Algebra (`quat_mul`/`conj`/`normalize`), `quat_from_scaled_axis` (data-dependent
 materialise via the exp map), `quat_cumprod` (associative **scan** replacing `cumsum`,
 with a cross-chunk carry), `rotate_state_rank_blocks` (`B̄ = rotate(B, conj(Qcum))`) and
 its two-sided `…_two_sided` / `rotate_blocks_two_sided_partial` / `split_rotor`.
-Wiring: `RotationKind{Complex2D|Quaternion4D|Rotor4D}` (config, `.quat_factors()` = 1|1|2)
-+ `RotationState{Angle|Quaternion|Rotor}` (cache; `identity(kind,…)` builds any of them,
-`quat_stack(kind)` unwraps either quaternion one and rejects a mismatched variant)
+Wiring: `RotationKind{Real1D|Complex2D|Quaternion4D|Rotor4D}` (config, `.quat_factors()`
+= 1|1|1|2) + `RotationState{Real|Angle|Quaternion|Rotor}` (cache; `identity(kind,…)` builds
+any of them, `quat_stack(kind)` unwraps either quaternion one and rejects a mismatched
+variant; `Real` holds a tensor-less `NoRotation` — Burn's enum `Module` derive wants exactly
+one field per variant)
 + `RotationSpec{kind,rope_dim,range}` (from `Mamba3::rotation_spec()`);
 forward/step dispatch via `rotate_bc_forward`/`rotate_bc_step`; runs on both pathways.
 `Rotor4D` is the two-sided `v ↦ q⊗v⊗p̄`, i.e. every element of `SO(4) ≅ (SU(2)×SU(2))/±1`.
@@ -152,6 +158,10 @@ and the normalisation run once over `2·blocks`, unbranched — only the applica
 `k=4`, and the only kind containing the abelian one: `L_q` is *isoclinic* (both invariant
 planes turn by the same angle), so `Quaternion4D` cannot express two independent per-pair
 angles; two-sided the planes turn by `a∓b`. `p=q` gives the adjoint `SO(3)`.
+`Real1D` is the trivial group at the bottom of the ladder, and it is structural, not a
+zeroed knob: no in-projection channels (so `rotate_bc_forward`/`_step` take an
+`Option<Tensor>` and hand `prev` straight back), no accumulator, `B`/`C` untouched. It is
+what a rotation ablation selects — `rope_fraction` has no `0` setting.
 `forward`, `step` and `step_infinite` all derive the per-step rotation from one pair of
 helpers — `angle_increment` (`Δ·range·π·tanh(ϑ)`, shared across heads) and
 `generator_increment` (`Δ·range·π·tanh(‖r‖)·r̂`, **per head** and block, channels laid out
@@ -162,14 +172,14 @@ so the axis is the projection's direction at any scale — a per-component squas
 make the reachable set a cube and tie the axis to the projection's size; `safe_norm`
 forms norms scale-free, since `‖r‖²` over raw in-projection channels overflows f16 at
 `|r|≈250` and `∞` divides back to a *zero* rotation; the rotated width comes from
-`rope_dim` (`0` ⇒ identity, in `rotate_blocks_partial`), never from the accumulator's
-block count, and a partial quaternion rotation must land on whole 4-blocks;
+`rope_dim`, asserted equal to the accumulator's `blocks·4` rather than read off it, and a
+partial quaternion rotation must land on whole 4-blocks;
 `rotate_bc_forward` renormalises the scan's prefixes (`step` normalises per step) so a
 drifted product turns B/C without rescaling them.
 Tests: the RoPE factoring survives non-commutativity (and, against materialised
 `L_q·R_p̄` matmuls, two-sidedness), `k=2` reproduces the production `apply_rope`,
-`range=1` reproduces the reference angle, `rope_fraction=0` leaves every kind's output
-independent of its rotation channels, the half-turn is reachable with a live gradient (at
+`range=1` reproduces the reference angle, `Real1D` equals any kind whose generator is
+zeroed (and projects/caches nothing), the half-turn is reachable with a live gradient (at
 `range=1` it is not — f32's `tanh'` is exactly 0 there), a zero right generator reproduces
 `Quaternion4D` on B, C and the accumulator, a shared axis turns the two planes by `a∓b`,
 and gradient reaches the right factor's channels.
@@ -194,8 +204,8 @@ of the constant per-step `q`; unrotated channels use the scalar series `(β+γ)/
 `k₁,₂ = cos(a∓b)` (the half-angles alone fix them; the axes only fix the planes), the
 cubic Horner-evaluated **on the vector** (no `4×4` materialised) and the determinant
 formed factor-wise as `(1−α)²+2α(1−kᵢ)`, which the expanded quartic would lose to
-cancellation. Denominators floored by `div_eps`. All three rotation kinds, both SSD
-pathways. The per-step
+cancellation. Denominators floored by `div_eps`. `Real1D` is the scalar series alone. All
+four rotation kinds, both SSD pathways. The per-step
 increment comes from `rotation`'s shared helpers, so the fixed point cannot drift from
 the recurrence it is the limit of.
 
@@ -413,7 +423,9 @@ splitting happens in the optimizer, leaving the forward's single fused GEMM alon
 
 ## Benchmarks (`benches/layer.rs`, `bench.sh`, `kernels.sh`)
 
-Criterion single-block benches (`forward`/`train`/`step`) over all three families.
+Criterion single-block benches (`forward`/`train`/`step`) over all three families; the
+Mamba-3 cases pair the SISO-specialization flags head-to-head and sweep the rotation ladder
+(`real1d`/`quaternion4d`/`rotor4d` against `siso`'s `Complex2D`).
 **Run by the user, not by an agent.** Each case builds its block, input and warm-up
 *inside* the criterion closure, so a `--` filter really isolates one case.
 `bench.sh` drives the backend configurations — flex and CUDA share one build,

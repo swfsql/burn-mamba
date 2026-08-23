@@ -152,14 +152,18 @@ enum Head {
     Probe,
 }
 
-/// The model config with the rotation switched off (`rope_fraction = 0` makes
-/// the transition real), everything else identical.
+/// The model config with the rotation switched off (`RotationKind::Real1D`
+/// makes the transition real), everything else identical. The block then
+/// projects no rotation channels at all, so its `in_proj` is one column
+/// narrower than the rotating model's.
 fn config_without_rotation() -> MambaLatentNetConfig {
     let mut cfg = crate::model::model_config();
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
         unreachable!("reset-rotor configures the Mamba-3 variant")
     };
-    *mamba_block = mamba_block.clone().with_rope_fraction(0.0);
+    *mamba_block = mamba_block
+        .clone()
+        .with_rotation(burn_mamba::mamba3::prelude::RotationKind::Real1D);
     cfg
 }
 
@@ -312,7 +316,7 @@ fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
         [A_HOLD_RAW; 3],                                        // A, head 1
         [LAMBDA_RAW; 3],                                        // λ, head 0
         [LAMBDA_RAW; 3],                                        // λ, head 1
-        [0.0; 3],                                               // ϑ — inert (rope off)
+        // No ϑ channel: `Real1D` projects none.
     ];
     // D₀ = 0 (head 0 reads the state alone), D₁ = 1 (head 1 *is* its skip).
     build(

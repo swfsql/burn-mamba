@@ -78,19 +78,21 @@ impl Mamba3 {
         let proj_bsd = self.in_proj.forward(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
+        // The rotation channels come off first: `Real1D` projects none, and a
+        // zero-width segment would silently vanish from the split below.
+        let (proj_bsd, rot_bsa) =
+            helpers::split_rotation_channels(proj_bsd, self.num_rotation_channels, 2);
         #[rustfmt::skip]
         let [
                 z_bsi, x_bsi,
                 b_raw_bsMGR, c_raw_bsMGR,
                 dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
-                rot_bsa
         ] = crate::modules::split_into(
             proj_bsd,
             [
                 d_inner, d_inner,
                 bc_size, bc_size,
                 nheads, nheads, nheads,
-                self.num_rotation_channels,
             ],
             2,
         );

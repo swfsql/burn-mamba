@@ -66,16 +66,18 @@ src/
 │  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated
 ├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
 │  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
-│  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build
+│  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build,
+│  │                 split_rotation_channels (peels the in-proj's rotation tail)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
-│  ├─ rotation/      transition rotation (Complex2D | Quaternion4D | Rotor4D) + quat
-│  │                 algebra; RotationSpec {kind,rope_dim,range}: the one per-step
-│  │                 definition. Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors
-│  │                 stacked on one block axis ⇒ one scan)
+│  ├─ rotation/      transition rotation (Real1D | Complex2D | Quaternion4D | Rotor4D)
+│  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
+│  │                 per-step definition. Real1D = the trivial group: no in-proj
+│  │                 channels, no cache accumulator. Rotor4D = full SO(4), two-sided
+│  │                 q⊗v⊗p̄ (both factors stacked on one block axis ⇒ one scan)
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 ├─ modules/          family-generic composition + shared NN modules
@@ -235,8 +237,17 @@ rotation accumulated, never a position. Same argument for `Quaternion4D` below.
 Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
 `range·π·tanh(·)`, Δ-scaled per head, then **`cumsum`** along the sequence (continued
 from the cache), absorbed into B/C. `wrap_angle` reduces mod `2π` (value-exact, the
-offset `detach`ed) to stay fp16-stable over long sequences. `rope_fraction` (0/0.5/1,
+offset `detach`ed) to stay fp16-stable over long sequences. `rope_fraction` (0.5/1,
 default 1) rotates a prefix; SISO uses interleaved/NeoX pairing, MIMO half-and-half/GPT-J.
+
+**`Real1D`** is the bottom rung: the trivial group, i.e. a real transition. Switching the
+rotation off is a choice of *kind*, not a fraction of zero — `rope_fraction` only narrows a
+rotation that exists, and `init` asserts a rotating kind turns at least one pair. The kind
+is structural: every rotation count is `0`, so the in-projection has no rotation segment at
+all (Burn drops a zero-length `split_with_sizes` part, hence `split_rotation_channels`), the
+cache slot is the tensor-less `RotationState::Real`, `B`/`C` reach the SSD core untouched,
+and `muon_projections()` omits the rotation segment. Ladder: `Real1D ⊂ Complex2D ⊂ Rotor4D`
+and `Real1D ⊂ Quaternion4D ⊂ Rotor4D`.
 
 `rotation_range` bounds one step to `range·π·Δ` and defaults to **2** for every kind:
 one full traverse of the rotation group per unit Δ (`2π` is a whole turn of `SO(2)`, and

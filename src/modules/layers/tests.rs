@@ -75,6 +75,7 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
         c.k_state_bmhr.clone().reshape([-1]),
         c.v_state_bhp.clone().reshape([-1]),
         match &c.rotation {
+            RotationState::Real(_) => Tensor::zeros([1], &c.ssm_bhpr.device()),
             RotationState::Angle(t) => t.clone().reshape([-1]),
             RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().reshape([-1]),
         },
@@ -93,6 +94,7 @@ fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
         Mamba3Caches::DoubleSsd(_) => panic!("expected the default single-ssd caches"),
     };
     let rot = match &c.rotation {
+        RotationState::Real(_) => Tensor::zeros([1], &c.ssm_bhpr.device()),
         RotationState::Angle(t) => t.clone().sum(),
         RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };

@@ -253,6 +253,8 @@ pub struct Mamba3 {
 
     /// Effective RoPE dimension (= `2 · num_rope_angles`). Always even and
     /// `≤ state_rank`. Only the first `rope_dim` entries of B/C are rotated.
+    /// `0` — like every other rotation count here — for
+    /// [`RotationKind::Real1D`], which rotates nothing.
     pub rope_dim: usize,
 
     /// MIMO rank. 1 = SISO (standard Mamba-3).
@@ -271,12 +273,13 @@ pub struct Mamba3 {
     pub rotation_range: f64,
 
     /// Number of in-projection channels devoted to the rotation parameters
-    /// (`num_rope_angles` for `Complex2D`, `nheads·3·num_quat_blocks` for
-    /// `Quaternion4D`); the size of the last `in_proj` split segment.
+    /// (`num_rope_angles` for `Complex2D`, `nheads·3·num_rotation_blocks` for
+    /// the quaternion kinds, `0` for `Real1D`); the size of the trailing
+    /// `in_proj` segment, which is absent entirely when it is `0`.
     pub num_rotation_channels: usize,
 
     /// Number of quaternion blocks (`rope_dim / 4`); only used for
-    /// [`RotationKind::Quaternion4D`].
+    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
     pub num_quat_blocks: usize,
 
     /// Whether the `mimo_rank == 1` specialized *chunkwise* kernel is enabled
@@ -429,15 +432,15 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
-    /// Fraction of `state_rank` the transition rotation turns (must be `0.0`,
-    /// `0.5`, or `1.0`).
+    /// Fraction of `state_rank` the transition rotation turns (must be `0.5`
+    /// or `1.0`).
     ///
-    /// - `0.0`: rotation disabled — no B/C dimension is turned (both kinds
-    ///   short-circuit to the identity). Intended for ablations only. The
-    ///   rotation projection and its cumulative data flow are kept intact (with
-    ///   a single dummy channel group, see [`Self::num_rope_angles`] /
-    ///   [`Self::num_quat_blocks`]) so the rest of the block is structurally
-    ///   unchanged.
+    /// To disable the rotation, pick the *kind* [`RotationKind::Real1D`] rather
+    /// than a fraction of zero: a real transition projects no rotation channels
+    /// and caches no accumulator, where a zero fraction used to keep both alive
+    /// around a rotation nobody applied. Ignored by `Real1D`, which turns
+    /// nothing whatever this says.
+    ///
     /// - `0.5`: partial rotation — only `state_rank / 2` dimensions are turned;
     ///   the rest pass through unchanged. This is the reference's value in
     ///   `mamba3.py`; set it explicitly to reproduce that model.
@@ -476,6 +479,8 @@ pub struct Mamba3Config {
     /// [`Self::num_rotation_channels`]). [`Rotor4D`](RotationKind::Rotor4D)
     /// selects the full `SO(4)` rotation of each 4-block and doubles that
     /// channel count (a left and a right generator per head and block).
+    /// [`Real1D`](RotationKind::Real1D) removes the rotation altogether — no
+    /// channels, no accumulator, a real transition.
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
@@ -506,7 +511,8 @@ pub struct Mamba3Config {
     /// reach. At `2.0` it sits at `tanh = 1/2`, in the interior.
     ///
     /// `1.0` is the reference implementation's abelian bound (`Δ·π·tanh(ϑ)`);
-    /// set it explicitly to reproduce that model.
+    /// set it explicitly to reproduce that model. Ignored by
+    /// [`Real1D`](RotationKind::Real1D), which never turns.
     #[config(default = 2.0)]
     pub rotation_range: f64,
 
@@ -562,9 +568,12 @@ impl Mamba3Config {
 
     /// Effective RoPE dimension: the number of B/C channels actually rotated.
     /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
-    /// `rope_fraction = 0.5`, and `0` when RoPE is disabled
-    /// (`rope_fraction = 0`), in which case the rotation is the identity.
+    /// `rope_fraction = 0.5` — and `0` for [`RotationKind::Real1D`], which
+    /// rotates nothing at all.
     pub fn rope_dim(&self) -> usize {
+        if self.rotation == RotationKind::Real1D {
+            return 0;
+        }
         let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
         if !d.is_multiple_of(2) {
             d -= 1;
@@ -572,30 +581,26 @@ impl Mamba3Config {
         d
     }
 
-    /// Number of RoPE rotation angles projected per head: `rope_dim / 2`, but
-    /// **at least 1**.
-    ///
-    /// When RoPE is disabled (`rope_fraction = 0` ⇒ `rope_dim = 0`) the floor of
-    /// 1 keeps a single angle channel alive: Burn has no zero-width tensors, and
-    /// retaining one channel lets the angle projection / cumulative-angle data
-    /// flow stay intact while the rotation itself short-circuits to the identity.
+    /// Number of RoPE rotation angles projected per head: `rope_dim / 2` (`0`
+    /// for [`RotationKind::Real1D`]). `init` asserts every rotating kind turns
+    /// at least one pair, so this is `> 0` wherever it is read.
     pub fn num_rope_angles(&self) -> usize {
-        (self.rope_dim() / 2).max(1)
+        self.rope_dim() / 2
     }
 
-    /// Number of quaternion blocks for [`RotationKind::Quaternion4D`]: the
-    /// rotated width (`state_rank · rope_fraction`) rounded **down to a multiple
-    /// of 4**, divided by 4, and floored at 1 (Burn has no zero-width tensors —
-    /// mirrors [`Self::num_rope_angles`]).
+    /// Number of **state** quaternion blocks for the quaternion kinds:
+    /// `rope_dim / 4`, which `init` asserts is a whole number (and non-zero)
+    /// for them. `0` for [`RotationKind::Real1D`]; meaningless, and unread, for
+    /// [`RotationKind::Complex2D`].
     pub fn num_quat_blocks(&self) -> usize {
-        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
-        d -= d % 4;
-        (d / 4).max(1)
+        self.rope_dim() / 4
     }
 
     /// Number of in-projection channels devoted to the rotation parameters,
     /// per the configured [`RotationKind`]:
     ///
+    /// - [`Real1D`](RotationKind::Real1D): none — the trailing `in_proj`
+    ///   segment is absent, not zero-width (Burn has no zero-width tensors).
     /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle
     ///   channels, shared across heads and scaled per-head by `Δ`, as in the
     ///   reference.
@@ -612,6 +617,8 @@ impl Mamba3Config {
     ///   [`generator_increment`](crate::mamba3::rotation::generator_increment).
     pub fn num_rotation_channels(&self) -> usize {
         match self.rotation {
+            // A real transition has no rotation to parameterise.
+            RotationKind::Real1D => 0,
             RotationKind::Complex2D => self.num_rope_angles(),
             // Three generator channels per (head, block) and **per factor**:
             // one factor for Quaternion4D, two for Rotor4D.
@@ -663,8 +670,14 @@ impl Mamba3Config {
                     Seg::adamw("dt", nheads),
                     Seg::adamw("a", nheads),
                     Seg::adamw("lambda", nheads),
-                    Seg::muon("rotation", self.num_rotation_channels()),
-                ],
+                ]
+                .into_iter()
+                // `Real1D` has no rotation columns, and a zero-width segment is
+                // not a thing (see `num_rotation_channels`).
+                .chain((self.num_rotation_channels() > 0).then(|| {
+                    Seg::muon("rotation", self.num_rotation_channels())
+                }))
+                .collect(),
             ),
             ProjSpec::block_whole("out_proj.weight", self.d_model),
         ]
@@ -694,10 +707,20 @@ impl Mamba3Config {
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(
-            [0.0, 0.5, 1.0].contains(&self.rope_fraction),
-            "rope_fraction must be 0.0, 0.5 or 1.0"
+            [0.5, 1.0].contains(&self.rope_fraction),
+            "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
         );
-        assert!(num_rope_angles > 0, "num_rope_angles must be at least 1");
+        if self.rotation != RotationKind::Real1D {
+            // Every rotating kind must actually turn something; the ablation is
+            // a kind of its own now, not a fraction of zero.
+            assert!(
+                num_rope_angles > 0,
+                "{:?} rotates nothing at state_rank = {} and rope_fraction = {} — use RotationKind::Real1D",
+                self.rotation,
+                self.state_rank,
+                self.rope_fraction
+            );
+        }
         if matches!(
             self.rotation,
             RotationKind::Quaternion4D | RotationKind::Rotor4D

@@ -98,12 +98,16 @@ impl Mamba3 {
         // Per-pair/block readout factor  m = (γ + β P⁻¹)(1 − α P⁻¹)⁻¹  applied
         // to `b`; the cumulative rotation cancels against `Cₙ` (orthogonality).
         let spec = self.rotation_spec();
+        let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
         let b_eff_bmhr = match spec.kind {
+            // A real transition: every channel is the plain geometric series
+            // `(β + γ)/(1 − α)`, which is exactly `tail`.
+            RotationKind::Real1D => b_bmhr * tail_bh.clone().unsqueeze_dims::<4>(&[1, 3]),
             RotationKind::Complex2D => {
                 // The same per-step increment `forward`/`step` use — one
                 // definition, so the fixed point cannot drift from the
                 // recurrence it is the limit of.
-                let theta_bha = angle_increment::<2, 3>(rot_ba, dt_bh, spec.range); // θ̂
+                let theta_bha = angle_increment::<2, 3>(rot(rot_ba), dt_bh, spec.range); // θ̂
                 let (cos, sin) = cos_sin(theta_bha);
                 let a_bh1 = alpha_bh.unsqueeze_dim::<3>(2);
                 let beta_bh1 = beta_bh.unsqueeze_dim::<3>(2);
@@ -118,21 +122,25 @@ impl Mamba3 {
             }
             RotationKind::Rotor4D => {
                 let g_bhk3 = generator_increment::<2, 3, 4>(
-                    rot_ba,
+                    rot(rot_ba),
                     dt_bh,
                     self.num_rotation_blocks(),
                     spec.range,
                 );
                 let qp_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
                 let (q_bhj4, p_bhj4) = split_rotor(qp_bhk4); // M(v) = q ⊗ v ⊗ p̄
-                let rope_width = spec.rope_dim.min(self.num_quat_blocks * 4);
+                let rope_width = spec.rope_dim;
                 rotor_resolvent_partial(
                     b_bmhr, q_bhj4, p_bhj4, alpha_bh, beta_bh, gamma_bh, tail_bh, rope_width,
                 )
             }
             RotationKind::Quaternion4D => {
-                let g_bhj3 =
-                    generator_increment::<2, 3, 4>(rot_ba, dt_bh, self.num_quat_blocks, spec.range);
+                let g_bhj3 = generator_increment::<2, 3, 4>(
+                    rot(rot_ba),
+                    dt_bh,
+                    self.num_quat_blocks,
+                    spec.range,
+                );
                 let q_bhj4 = quat_from_scaled_axis::<4>(g_bhj3); // P⁻¹ ↔ q
                 let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
                 let beta_bh11 = beta_bh.unsqueeze_dims::<4>(&[2, 3]);
@@ -142,8 +150,8 @@ impl Mamba3 {
                 let den_inv = quat_inv(quat_one_minus(q_bhj4 * alpha_bh11));
                 let f_bhj4 = quat_mul(num, den_inv);
                 // As in `rotate_bc_step`, the rotated width comes from
-                // `rope_dim`, so `rope_fraction = 0` rotates nothing.
-                let rope_width = spec.rope_dim.min(self.num_quat_blocks * 4);
+                // `rope_dim` (a partial rotation turns whole 4-blocks).
+                let rope_width = spec.rope_dim;
                 mul_quat_partial(b_bmhr, f_bhj4, tail_bh, rope_width)
             }
         };
@@ -218,10 +226,7 @@ fn mul_complex_partial(
 ) -> Tensor<4> {
     let [batch, mimo_rank, nheads, state_rank] = x_bmhr.dims();
     let tail_b1h1 = tail_bh.unsqueeze_dims::<4>(&[1, 3]);
-    if rope_dim == 0 {
-        // RoPE disabled: every channel is a plain geometric series.
-        return x_bmhr * tail_b1h1;
-    }
+    debug_assert!(rope_dim > 0, "a rotating kind turns at least one pair");
     let re_b1ha = re_bha.unsqueeze_dim::<4>(1);
     let im_b1ha = im_bha.unsqueeze_dim::<4>(1);
 
@@ -308,9 +313,7 @@ fn mul_quat_partial(
     let [batch, mimo_rank, nheads, state_rank] = x_bmhr.dims();
     let blocks = f_bhj4.dims()[2];
     let tail_b1h1 = tail_bh.unsqueeze_dims::<4>(&[1, 3]);
-    if rope_width == 0 {
-        return x_bmhr * tail_b1h1;
-    }
+    debug_assert!(rope_width > 0, "a rotating kind turns at least one block");
     let f_bmhj4 = f_bhj4
         .unsqueeze_dim::<5>(1)
         .expand([batch, mimo_rank, nheads, blocks, 4]);
@@ -373,9 +376,7 @@ fn rotor_resolvent_partial(
     let [batch, mimo_rank, nheads, state_rank] = x_bmhr.dims();
     let blocks = q_bhj4.dims()[2];
     let tail_b1h1 = tail_bh.unsqueeze_dims::<4>(&[1, 3]);
-    if rope_width == 0 {
-        return x_bmhr * tail_b1h1;
-    }
+    debug_assert!(rope_width > 0, "a rotating kind turns at least one block");
     assert_eq!(
         rope_width,
         blocks * 4,

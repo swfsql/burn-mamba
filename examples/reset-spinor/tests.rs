@@ -163,6 +163,8 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     // Each entry is the channel's value at (TURN_I, TURN_J, RESET), *before* its
     // own activation.
     let rotation_channels: Vec<[f64; NUM_SYMBOLS]> = match rotation {
+        // `Real1D` has no rotation to hand-build; the ladder starts above it.
+        RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // A scaled rotation axis per head: `i` turns π about x, `j` about y.
         // The block projects the generators **per head** (`nheads · 3` channels
         // here), so every head gets its own copy — this construction wants all
@@ -294,6 +296,8 @@ fn b_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
         .map(|r| match rotation {
             RotationKind::Quaternion4D | RotationKind::Rotor4D => [f64::from(r == 0); NUM_SYMBOLS],
             RotationKind::Complex2D => [f64::from(r % 2 == 0); NUM_SYMBOLS],
+            // `Real1D` has no rotation to hand-build; the ladder starts above it.
+            RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         })
         .collect()
 }

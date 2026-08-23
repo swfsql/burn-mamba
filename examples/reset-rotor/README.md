@@ -85,7 +85,7 @@ in-projection channel drive it, takes the same block to 100%.
 weight down in closed form from the unrolled recurrence (no fitting anywhere);
 `no_fixed_rotation_solves_the_task` re-runs that block with `ϑ`'s data
 dependence removed, sweeping the per-step angle; `no_real_state_solves_the_task`
-switches the rotation off entirely (`rope_fraction = 0`, i.e. a real transition)
+switches the rotation off entirely (`RotationKind::Real1D`, i.e. a real transition)
 and sweeps the decay of a block that holds the turn count.
 
 The two ablations do **not** sweep the readout — they are given the best one

@@ -241,6 +241,8 @@ fn rotation_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
         ]
     };
     match rotation {
+        // `Real1D` has no rotation to hand-build; the ladder starts above it.
+        RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // Left and right generators **equal** ⇒ v ↦ q v q̄, conjugation, SO(3).
         // Channels are laid out [head][left | right][x, y, z].
         RotationKind::Rotor4D => (0..N)

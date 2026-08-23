@@ -7,6 +7,7 @@
 //! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`.
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
 //!    (SISO-branched).
+//! 5. Peeling the rotation channels off the in-projection.
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
@@ -16,6 +17,32 @@ use crate::modules::RmsNorm;
 use crate::modules::gqa_expand_to_heads;
 use crate::modules::softplus;
 use burn::prelude::*;
+
+/// Split the in-projection into everything-but-the-rotation and the trailing
+/// `num_rotation_channels` rotation channels — `None` when the block projects
+/// none, i.e. [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D).
+///
+/// The rotation slice cannot simply be one more entry in the main
+/// `split_into`: Burn has no zero-width tensors, and `split_with_sizes`
+/// *drops* a zero-length segment rather than returning an empty one, so the
+/// destructuring would come up one part short.
+///
+/// # Shapes
+/// - `proj` : `[..., d_in_proj]` along `dim`
+/// - out    : `[..., d_in_proj − num_rotation_channels]` and, if any,
+///   `[..., num_rotation_channels]`
+pub fn split_rotation_channels<const D: usize>(
+    proj: Tensor<D>,
+    num_rotation_channels: usize,
+    dim: usize,
+) -> (Tensor<D>, Option<Tensor<D>>) {
+    if num_rotation_channels == 0 {
+        return (proj, None);
+    }
+    let rest = proj.dims()[dim] - num_rotation_channels;
+    let rot = proj.clone().narrow(dim, rest, num_rotation_channels);
+    (proj.narrow(dim, 0, rest), Some(rot))
+}
 
 /// Output of [`trapezoidal_coefficients`].
 ///
