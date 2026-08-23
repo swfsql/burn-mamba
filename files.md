@@ -296,7 +296,8 @@ plus shared NN blocks.
 - **`network.rs`** — `LatentNetwork<M>` (linear in/out, **optional** pre-`out_proj`
   `norm_f` via `final_norm` — shared readout `head()`) and `VocabNetwork<M>` (embedding →
   unconditional `norm_f` → tied/untied LM head, vocab padded). Both build on the same
-  `Layers<M>`.
+  `Layers<M>`. The embedding keeps Burn's `N(0,1)` `EmbeddingConfig` default (no
+  initializer knob), so a **tied** head opens at logit variance `d_model`.
   Runtime enums `MambaLatentNet`/`MambaVocabNet` (+ concrete `*Config` enums — Config
   derive is not generic-aware); `forward`/`step` **panic on a family-mismatched
   cache/path**; `step_infinite` mirrors `step` (enums included;

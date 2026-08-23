@@ -9,6 +9,7 @@
 - `mnist-class`: A small Mamba-3 model training to classify mnist digits.
 - `state-tracking`: A tiny Mamba-3 model on the `A₅` word problem, contrasting the abelian `Complex2D` rotation against the non-abelian `Quaternion4D` (`-- --rotation complex|quaternion|rotor`, the last being the full `SO(4)` rotation).
 - `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
+- `tiny-stories`: A tiny character-level Mamba-3 language model on the cleaned [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) corpus, with a tied 48-character embedding at both ends. Its README covers the case-folded alphabet (the corpus's own inventory), the datasets-server paging that avoids a 673MB parquet, the prefill-`forward()` / decode-`step()` sampler, and a measured table on what truncated BPTT costs a language model.
 - `grokking`: A small Mamba-2 LM on k-summand modular addition (the classic grokking task), grown into an experimentation/ablation platform: participation-ratio diagnostics (state + weight spectra + embedding-frequency), differentiable rank/norm/noise loss terms with schedules, and an SGD probe path. Its README is a standalone report of the findings with reproduction commands for every claim.
 
 #### Examples Structure
@@ -21,7 +22,7 @@ There are shared definitions in `common/mod.rs`, imported as an outside module b
 
 ##### Model Definition
 
-The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`grokking`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
+The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/generic.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`grokking`, `tiny-stories`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
 
 ##### Optimizer
 

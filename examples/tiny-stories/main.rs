@@ -1,0 +1,186 @@
+//! # TinyStories character-level language model
+//!
+//! An auto-regressive Mamba-3 LM over single **characters** of the
+//! [TinyStories-GPT4-clean] corpus: two Mamba-3 blocks (cycled to a 4-deep
+//! virtual stack) between a **tied** 48-character embedding and its transpose,
+//! 39,496 parameters all told.
+//!
+//! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
+//!
+//! Training scores every position of a 256-character window against its next
+//! character; inference prefills a prompt with one chunkwise `forward` and then
+//! samples one character per `step`.
+//!
+//! Corpus knobs are forwarded after the trailing `--` (they are written into the
+//! artifacts' `training_config.json`, so resuming a run keeps them):
+//!
+//! ```bash
+//! # train and then sample (downloads ~3.4MB of stories on the first run)
+//! cargo run --release --example tiny-stories --features backend-flex -- --training --inference
+//! # a bigger corpus and a longer window
+//! cargo run --release --example tiny-stories --features backend-flex -- --training \
+//!     -- --train-stories 32768 --seq-len 512
+//! ```
+
+#![allow(clippy::let_and_return)]
+#![allow(clippy::module_inception)]
+
+pub use common::{
+    cli::AppArgs,
+    training::{CosineAnnealingLr, Lr, TrainingConfig},
+};
+use std::ffi::OsString;
+use training::TinyStoriesConfig;
+
+/// The character-level TinyStories corpus: alphabet, download/cache, windowing.
+pub mod dataset;
+/// Sampling from the trained LM.
+pub mod inference;
+/// The example's `model_config()`.
+pub mod model;
+/// Training entry point for the LM.
+pub mod training;
+
+/// Shared example infrastructure (included by path).
+#[path = "../common/mod.rs"]
+pub mod common;
+
+/// Wire up the device, configs, and the train/infer flow for the LM.
+pub fn launch(app_args: &AppArgs) {
+    let overrides = Overrides::parse(&app_args.extra_args);
+    app_args.create_artifact_dir();
+
+    // `Device::default()` resolves to the enabled `backend-*` feature (honouring
+    // the `BURN_DEVICE` env override); `configure_dtype` installs fp16/i32 when
+    // `dev-f16` is on.
+    let mut device = burn::prelude::Device::default();
+    common::device::configure_dtype(&mut device);
+    let autodiff_device = device.clone().autodiff();
+    let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
+
+    // setup training and model configs
+    let batch_size = 16;
+    let num_epochs = 4;
+    let loaded = app_args.load_training_config::<TinyStoriesConfig>();
+    let is_fresh = loaded.is_none();
+    let mut config = loaded.unwrap_or_else(|| {
+        println!("Initializing new training config");
+        let optimizer = common::training::OptimizerConfig::adamw_only(dtype);
+        TinyStoriesConfig::new(
+            TrainingConfig::new(optimizer)
+                .with_num_epochs(num_epochs)
+                .with_batch_size(batch_size)
+                .with_num_workers(2),
+        )
+    });
+    overrides.apply(&mut config);
+    if is_fresh {
+        // The cosine schedule spans the whole run, so it can only be sized once
+        // the corpus knobs are settled: windows/epoch = characters / seq_len.
+        const CHARS_PER_STORY: usize = 820; // the corpus median is 721, the mean ~820
+        let windows = config.train_stories * CHARS_PER_STORY / config.seq_len;
+        let iterations_per_epoch = windows / config.training.batch_size;
+        config.training.lr = Lr::CosineAnnealing(
+            CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
+                .with_max_lr(2e-3)
+                .with_min_lr(2e-4)
+                .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch
+        );
+    }
+    let model_config = app_args.load_model_config().unwrap_or_else(|| {
+        println!("Initializing new model config");
+        model::model_config()
+    });
+    // save configs
+    app_args.save_training_config(&config);
+    app_args.save_model_config(&model_config);
+
+    if app_args.training {
+        training::train(
+            config.clone(),
+            model_config.clone(),
+            autodiff_device,
+            app_args,
+        );
+    }
+
+    if app_args.inference {
+        inference::infer(model_config, device, app_args);
+    }
+
+    if !app_args.inference && !app_args.training {
+        println!("neither training nor inference were enabled");
+        println!("{}", common::cli::HELP);
+    }
+}
+
+/// Corpus knobs forwarded after `--`; each applies on top of the loaded/created
+/// [`TinyStoriesConfig`] (and is then persisted with it).
+struct Overrides {
+    /// `--seq-len <usize>`: characters per training window.
+    seq_len: Option<usize>,
+    /// `--train-stories <usize>`: stories pulled from the train split.
+    train_stories: Option<usize>,
+    /// `--valid-stories <usize>`: stories pulled from the validation split.
+    valid_stories: Option<usize>,
+    /// `--epochs <usize>`: passes over the corpus.
+    epochs: Option<usize>,
+    /// `--batch-size <usize>`: windows per optimizer step.
+    batch_size: Option<usize>,
+    /// `--muon`: move the block's hidden weight matrices from AdamW to Muon.
+    muon: bool,
+}
+
+impl Overrides {
+    fn parse(extra_args: &[OsString]) -> Self {
+        let mut pargs = pico_args::Arguments::from_vec(extra_args.to_vec());
+        let overrides = Overrides {
+            seq_len: pargs.opt_value_from_str("--seq-len").unwrap(),
+            train_stories: pargs.opt_value_from_str("--train-stories").unwrap(),
+            valid_stories: pargs.opt_value_from_str("--valid-stories").unwrap(),
+            epochs: pargs.opt_value_from_str("--epochs").unwrap(),
+            batch_size: pargs.opt_value_from_str("--batch-size").unwrap(),
+            muon: pargs.contains("--muon"),
+        };
+        let remaining = pargs.finish();
+        assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");
+        overrides
+    }
+
+    fn apply(&self, config: &mut TinyStoriesConfig) {
+        if let Some(seq_len) = self.seq_len {
+            config.seq_len = seq_len;
+        }
+        if let Some(train_stories) = self.train_stories {
+            config.train_stories = train_stories;
+        }
+        if let Some(valid_stories) = self.valid_stories {
+            config.valid_stories = valid_stories;
+        }
+        if let Some(epochs) = self.epochs {
+            config.training.num_epochs = epochs;
+        }
+        if let Some(batch_size) = self.batch_size {
+            config.training.batch_size = batch_size;
+        }
+        if self.muon {
+            // Muon reuses AdamW's LR and weight decay (`MatchRmsAdamW` sizes its
+            // update to AdamW's RMS), so only the optimizer of the planned
+            // matrices changes between the two arms.
+            config.training.optimizer = config
+                .training
+                .optimizer
+                .clone()
+                .with_muon_defaults(ADAMW_WEIGHT_DECAY);
+        }
+    }
+}
+
+/// AdamW's default weight decay, mirrored into the Muon group so the two arms
+/// decay the same weights by the same amount.
+const ADAMW_WEIGHT_DECAY: f32 = 1e-4;
+
+fn main() {
+    let app_args = AppArgs::parse().unwrap();
+    launch(&app_args);
+}

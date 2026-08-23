@@ -75,6 +75,8 @@ dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 temp-dir = "0.1.16"
 image = "0.25.10"
+# the `tiny-stories` example reads the Hugging Face datasets-server JSON rows
+serde_json = "1.0.151"
 
 ### For the main branch. ###
 # burn = { version = "0.22.0-pre.2", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
