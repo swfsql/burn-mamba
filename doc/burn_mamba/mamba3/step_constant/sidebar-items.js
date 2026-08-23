@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["complex_div","cos_sin","mul_complex_partial","mul_quat_partial","quat_inv","quat_one_minus","quat_scalar_affine"]};
+window.SIDEBAR_ITEMS = {"fn":["complex_div","cos_sin","mul_complex_partial","mul_quat_partial","quat_inv","quat_one_minus","quat_scalar_affine","rotor_resolvent_partial"]};

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/cache.rs`."><title>cache.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (c656540d6 2026-08-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/</div>cache.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 Inference Caches
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/cache.rs`."><title>cache.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (c54751567 2026-08-22)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/</div>cache.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 Inference Caches
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! During autoregressive (token-by-token) generation, three pieces of state
 <a href=#4 id=4 data-nosnippet>4</a>//! must be preserved between calls:
@@ -143,59 +143,57 @@
 <a href=#143 id=143 data-nosnippet>143</a>
 <a href=#144 id=144 data-nosnippet>144</a>    <span class="doccomment">/// Which transition rotation the block uses ([`RotationKind`]); selects the
 <a href=#145 id=145 data-nosnippet>145</a>    /// accumulator variant — [`RotationState::Quaternion`] for
-<a href=#146 id=146 data-nosnippet>146</a>    /// [`RotationKind::Quaternion4D`], else [`RotationState::Angle`].
-<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="attr">#[config(default = <span class="string">"crate::mamba3::rotation::RotationKind::Complex2D"</span>)]
-<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">pub </span>rotation: RotationKind,
-<a href=#149 id=149 data-nosnippet>149</a>
-<a href=#150 id=150 data-nosnippet>150</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used for
-<a href=#151 id=151 data-nosnippet>151</a>    /// [`RotationKind::Quaternion4D`].
-<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
-<a href=#153 id=153 data-nosnippet>153</a>    </span><span class="kw">pub </span>num_quat_blocks: usize,
-<a href=#154 id=154 data-nosnippet>154</a>}
-<a href=#155 id=155 data-nosnippet>155</a>
-<a href=#156 id=156 data-nosnippet>156</a><span class="kw">impl </span>Mamba3DoubleSsdCacheConfig {
-<a href=#157 id=157 data-nosnippet>157</a>    <span class="doccomment">/// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
-<a href=#158 id=158 data-nosnippet>158</a>    </span><span class="kw">pub fn </span>new_from_block_config(batch: usize, block_config: Mamba3Config) -&gt; <span class="self">Self </span>{
-<a href=#159 id=159 data-nosnippet>159</a>        <span class="self">Self </span>{
-<a href=#160 id=160 data-nosnippet>160</a>            batch,
-<a href=#161 id=161 data-nosnippet>161</a>            state_rank: block_config.state_rank,
-<a href=#162 id=162 data-nosnippet>162</a>            per_head_dim: block_config.per_head_dim,
-<a href=#163 id=163 data-nosnippet>163</a>            nheads: block_config.nheads(),
-<a href=#164 id=164 data-nosnippet>164</a>            mimo_rank: block_config.mimo_rank,
-<a href=#165 id=165 data-nosnippet>165</a>            num_rope_angles: block_config.num_rope_angles(),
-<a href=#166 id=166 data-nosnippet>166</a>            rotation: block_config.rotation,
-<a href=#167 id=167 data-nosnippet>167</a>            num_quat_blocks: block_config.num_quat_blocks(),
-<a href=#168 id=168 data-nosnippet>168</a>        }
-<a href=#169 id=169 data-nosnippet>169</a>    }
-<a href=#170 id=170 data-nosnippet>170</a>
-<a href=#171 id=171 data-nosnippet>171</a>    <span class="doccomment">/// Allocate zero/identity-initialised cache tensors on `device`.
-<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3DoubleSsdCache {
-<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
-<a href=#174 id=174 data-nosnippet>174</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim, <span class="self">self</span>.state_rank],
-<a href=#175 id=175 data-nosnippet>175</a>            device,
-<a href=#176 id=176 data-nosnippet>176</a>        );
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros(
-<a href=#178 id=178 data-nosnippet>178</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.mimo_rank, <span class="self">self</span>.nheads, <span class="self">self</span>.state_rank],
-<a href=#179 id=179 data-nosnippet>179</a>            device,
-<a href=#180 id=180 data-nosnippet>180</a>        );
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim], device);
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>rotation = <span class="kw">match </span><span class="self">self</span>.rotation {
-<a href=#183 id=183 data-nosnippet>183</a>            RotationKind::Quaternion4D =&gt; RotationState::identity_quaternion(
-<a href=#184 id=184 data-nosnippet>184</a>                <span class="self">self</span>.batch,
-<a href=#185 id=185 data-nosnippet>185</a>                <span class="self">self</span>.nheads,
-<a href=#186 id=186 data-nosnippet>186</a>                <span class="self">self</span>.num_quat_blocks,
-<a href=#187 id=187 data-nosnippet>187</a>                device,
-<a href=#188 id=188 data-nosnippet>188</a>            ),
-<a href=#189 id=189 data-nosnippet>189</a>            RotationKind::Complex2D =&gt; {
-<a href=#190 id=190 data-nosnippet>190</a>                RotationState::zeros_angle(<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.num_rope_angles, device)
-<a href=#191 id=191 data-nosnippet>191</a>            }
-<a href=#192 id=192 data-nosnippet>192</a>        };
-<a href=#193 id=193 data-nosnippet>193</a>        Mamba3DoubleSsdCache {
-<a href=#194 id=194 data-nosnippet>194</a>            ssm_bhpr,
-<a href=#195 id=195 data-nosnippet>195</a>            k_state_bmhr,
-<a href=#196 id=196 data-nosnippet>196</a>            v_state_bhp,
-<a href=#197 id=197 data-nosnippet>197</a>            rotation,
-<a href=#198 id=198 data-nosnippet>198</a>        }
-<a href=#199 id=199 data-nosnippet>199</a>    }
-<a href=#200 id=200 data-nosnippet>200</a>}
+<a href=#146 id=146 data-nosnippet>146</a>    /// [`RotationKind::Quaternion4D`], [`RotationState::Rotor`] for
+<a href=#147 id=147 data-nosnippet>147</a>    /// [`RotationKind::Rotor4D`], else [`RotationState::Angle`].
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="attr">#[config(default = <span class="string">"crate::mamba3::rotation::RotationKind::Complex2D"</span>)]
+<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="kw">pub </span>rotation: RotationKind,
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// Number of quaternion blocks (`rope_dim / 4`); only used for
+<a href=#152 id=152 data-nosnippet>152</a>    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
+<a href=#153 id=153 data-nosnippet>153</a>    </span><span class="attr">#[config(default = <span class="number">1</span>)]
+<a href=#154 id=154 data-nosnippet>154</a>    </span><span class="kw">pub </span>num_quat_blocks: usize,
+<a href=#155 id=155 data-nosnippet>155</a>}
+<a href=#156 id=156 data-nosnippet>156</a>
+<a href=#157 id=157 data-nosnippet>157</a><span class="kw">impl </span>Mamba3DoubleSsdCacheConfig {
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="doccomment">/// Derive cache shapes from a Mamba-3 block configuration plus a batch size.
+<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">pub fn </span>new_from_block_config(batch: usize, block_config: Mamba3Config) -&gt; <span class="self">Self </span>{
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="self">Self </span>{
+<a href=#161 id=161 data-nosnippet>161</a>            batch,
+<a href=#162 id=162 data-nosnippet>162</a>            state_rank: block_config.state_rank,
+<a href=#163 id=163 data-nosnippet>163</a>            per_head_dim: block_config.per_head_dim,
+<a href=#164 id=164 data-nosnippet>164</a>            nheads: block_config.nheads(),
+<a href=#165 id=165 data-nosnippet>165</a>            mimo_rank: block_config.mimo_rank,
+<a href=#166 id=166 data-nosnippet>166</a>            num_rope_angles: block_config.num_rope_angles(),
+<a href=#167 id=167 data-nosnippet>167</a>            rotation: block_config.rotation,
+<a href=#168 id=168 data-nosnippet>168</a>            num_quat_blocks: block_config.num_quat_blocks(),
+<a href=#169 id=169 data-nosnippet>169</a>        }
+<a href=#170 id=170 data-nosnippet>170</a>    }
+<a href=#171 id=171 data-nosnippet>171</a>
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="doccomment">/// Allocate zero/identity-initialised cache tensors on `device`.
+<a href=#173 id=173 data-nosnippet>173</a>    </span><span class="kw">pub fn </span>init(<span class="kw-2">&amp;</span><span class="self">self</span>, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3DoubleSsdCache {
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">let </span>ssm_bhpr = Tensor::zeros(
+<a href=#175 id=175 data-nosnippet>175</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim, <span class="self">self</span>.state_rank],
+<a href=#176 id=176 data-nosnippet>176</a>            device,
+<a href=#177 id=177 data-nosnippet>177</a>        );
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>k_state_bmhr = Tensor::zeros(
+<a href=#179 id=179 data-nosnippet>179</a>            [<span class="self">self</span>.batch, <span class="self">self</span>.mimo_rank, <span class="self">self</span>.nheads, <span class="self">self</span>.state_rank],
+<a href=#180 id=180 data-nosnippet>180</a>            device,
+<a href=#181 id=181 data-nosnippet>181</a>        );
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>v_state_bhp = Tensor::zeros([<span class="self">self</span>.batch, <span class="self">self</span>.nheads, <span class="self">self</span>.per_head_dim], device);
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">let </span>rotation = RotationState::identity(
+<a href=#184 id=184 data-nosnippet>184</a>            <span class="self">self</span>.rotation,
+<a href=#185 id=185 data-nosnippet>185</a>            <span class="self">self</span>.batch,
+<a href=#186 id=186 data-nosnippet>186</a>            <span class="self">self</span>.nheads,
+<a href=#187 id=187 data-nosnippet>187</a>            <span class="self">self</span>.num_rope_angles,
+<a href=#188 id=188 data-nosnippet>188</a>            <span class="self">self</span>.num_quat_blocks,
+<a href=#189 id=189 data-nosnippet>189</a>            device,
+<a href=#190 id=190 data-nosnippet>190</a>        );
+<a href=#191 id=191 data-nosnippet>191</a>        Mamba3DoubleSsdCache {
+<a href=#192 id=192 data-nosnippet>192</a>            ssm_bhpr,
+<a href=#193 id=193 data-nosnippet>193</a>            k_state_bmhr,
+<a href=#194 id=194 data-nosnippet>194</a>            v_state_bhp,
+<a href=#195 id=195 data-nosnippet>195</a>            rotation,
+<a href=#196 id=196 data-nosnippet>196</a>        }
+<a href=#197 id=197 data-nosnippet>197</a>    }
+<a href=#198 id=198 data-nosnippet>198</a>}
 </code></pre></div></section></main></body></html>
