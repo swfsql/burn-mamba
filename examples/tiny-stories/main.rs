@@ -1,9 +1,9 @@
 //! # TinyStories character-level language model
 //!
 //! An auto-regressive Mamba-3 LM over single **characters** of the
-//! [TinyStories-GPT4-clean] corpus: two Mamba-3 blocks (cycled to a 4-deep
-//! virtual stack) between a **tied** 48-character embedding and its transpose,
-//! 39,496 parameters all told.
+//! [TinyStories-GPT4-clean] corpus: two Mamba-3 blocks (cycled to an 8-deep
+//! virtual stack over Multi-Gate residuals) between a **tied** 48-character
+//! embedding and its transpose, 39,632 parameters all told.
 //!
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
 //!
@@ -59,13 +59,25 @@ pub fn launch(app_args: &AppArgs) {
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     // setup training and model configs
-    let batch_size = 16;
-    let num_epochs = 4;
+    // Batch size is the single largest lever on this model's final loss, and it
+    // is *not* a capacity knob: halving it from 16 to 8 beat the entire learning
+    // rate ladder (a 6x increase), and it kept paying at 4. 8 is where the
+    // accuracy-per-minute stops being worth it — batch 4 costs twice the wall
+    // clock for a fraction of the gain.
+    let batch_size = 8;
+    // The validation curve is still improving at epoch 14 and flattens at 15-16,
+    // so this is the schedule's own natural length, not an arbitrary budget.
+    let num_epochs = 16;
     let loaded = app_args.load_training_config::<TinyStoriesConfig>();
     let is_fresh = loaded.is_none();
     let mut config = loaded.unwrap_or_else(|| {
         println!("Initializing new training config");
-        let optimizer = common::training::OptimizerConfig::adamw_only(dtype);
+        // Muon on the block's hidden weight matrices, AdamW on everything else.
+        // It is the smallest of this example's optimizer wins but it stacks with
+        // the other two (higher LR, smaller batch) rather than overlapping them.
+        // `--no-muon` returns to plain AdamW.
+        let optimizer = common::training::OptimizerConfig::adamw_only(dtype)
+            .with_muon_defaults(ADAMW_WEIGHT_DECAY);
         TinyStoriesConfig::new(
             TrainingConfig::new(optimizer)
                 .with_num_epochs(num_epochs)
@@ -82,8 +94,12 @@ pub fn launch(app_args: &AppArgs) {
         let iterations_per_epoch = windows / config.training.batch_size;
         config.training.lr = Lr::CosineAnnealing(
             CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
-                .with_max_lr(2e-3)
-                .with_min_lr(2e-4)
+                // The model is optimization-limited, not capacity-limited, and
+                // this is where that shows: 2e-3 (the obvious default) leaves a
+                // lot on the table. The ladder improves monotonically to 16e-3,
+                // is flat to 24e-3, and only turns over at 32e-3.
+                .with_max_lr(12e-3)
+                .with_min_lr(12e-4)
                 .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch
         );
     }
@@ -127,8 +143,9 @@ struct Overrides {
     epochs: Option<usize>,
     /// `--batch-size <usize>`: windows per optimizer step.
     batch_size: Option<usize>,
-    /// `--muon`: move the block's hidden weight matrices from AdamW to Muon.
-    muon: bool,
+    /// `--no-muon`: keep the block's hidden weight matrices on AdamW instead of
+    /// moving them to Muon (which is the default).
+    no_muon: bool,
 }
 
 impl Overrides {
@@ -140,7 +157,7 @@ impl Overrides {
             valid_stories: pargs.opt_value_from_str("--valid-stories").unwrap(),
             epochs: pargs.opt_value_from_str("--epochs").unwrap(),
             batch_size: pargs.opt_value_from_str("--batch-size").unwrap(),
-            muon: pargs.contains("--muon"),
+            no_muon: pargs.contains("--no-muon"),
         };
         let remaining = pargs.finish();
         assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");
@@ -163,15 +180,11 @@ impl Overrides {
         if let Some(batch_size) = self.batch_size {
             config.training.batch_size = batch_size;
         }
-        if self.muon {
+        if self.no_muon {
             // Muon reuses AdamW's LR and weight decay (`MatchRmsAdamW` sizes its
             // update to AdamW's RMS), so only the optimizer of the planned
             // matrices changes between the two arms.
-            config.training.optimizer = config
-                .training
-                .optimizer
-                .clone()
-                .with_muon_defaults(ADAMW_WEIGHT_DECAY);
+            config.training.optimizer = config.training.optimizer.clone().with_muon(None);
         }
     }
 }

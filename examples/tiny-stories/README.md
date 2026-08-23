@@ -6,9 +6,9 @@ a cleaned 2.7M-story subset of [TinyStories](https://arxiv.org/abs/2305.07759)
 (GPT-4-generated children's stories, plain ASCII).
 
 The model is deliberately tiny: two Mamba-3 blocks (`d_model = 32`,
-`state_rank = 64`, `expand = 4`), cycled to a 4-deep virtual stack, between a
-tied character embedding and its transpose. 39,496 parameters, of which the
-embedding is 1,536.
+`state_rank = 64`, `expand = 4`), cycled to an 8-deep virtual stack over
+Multi-Gate residuals, between a tied character embedding and its transpose.
+39,632 parameters, of which the embedding is 1,536.
 
 ## Vocabulary
 
@@ -73,7 +73,7 @@ cargo run --release --example tiny-stories --features "backend-cuda" -- --traini
     -- --train-stories 32768 --seq-len 512
 ```
 
-With the defaults (`seq_len = 256`, `batch_size = 16`) training needs ~1.3GB of
+With the defaults (`seq_len = 256`, `batch_size = 8`) training needs ~1.2GB of
 vram. Downstream flags, all forwarded after the trailing `--` and persisted into
 the artifacts' `training_config.json`:
 
@@ -82,41 +82,83 @@ the artifacts' `training_config.json`:
 | `--seq-len <n>` | 256 | characters per window (the BPTT length) |
 | `--train-stories <n>` | 4096 | stories pulled from the train split |
 | `--valid-stories <n>` | 256 | stories pulled from the validation split |
-| `--epochs <n>` | 4 | passes over the corpus |
-| `--batch-size <n>` | 16 | windows per optimizer step |
-| `--muon` | off | hidden weight matrices on [Muon](https://kellerjordan.github.io/posts/muon/) instead of AdamW (see `mnist-class`'s README) |
+| `--epochs <n>` | 16 | passes over the corpus |
+| `--batch-size <n>` | 8 | windows per optimizer step |
+| `--no-muon` | off | keep the hidden weight matrices on AdamW instead of [Muon](https://kellerjordan.github.io/posts/muon/) (see `mnist-class`'s README) |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
 
 ## Results
 
-4 epochs over the default corpus (3.36M characters, 3252 optimizer steps),
-measured on the held-out validation split:
+16 epochs over the default corpus (3.36M characters), measured on the held-out
+validation split. Uniform baseline: `log2(48) = 5.58` bits/char.
+
+| Setting | Valid bits/char | Valid char accuracy |
+|---|---|---|
+| **the default** | **1.386** | **70.2%** |
+| the same model, 4 epochs | 1.475 | 68.3% |
+| batch 16, `lr = 2e-3`, no Muon, 4 epochs | 1.749 | 63.2% |
+
+The last row is what the obvious defaults give. Closing that gap took no extra
+parameters worth mentioning (39,496 → 39,632, still under 40K) — this model is
+**optimization-limited, not capacity-limited**, and the cheapest evidence is that
+two unrelated optimizer changes each beat *every* architectural reallocation that
+fits the budget. In decreasing order the levers were:
+
+| Lever | Effect |
+|---|---|
+| `batch_size` 16 → 8 | the largest single win; worth more than the whole LR ladder |
+| `max_lr` 2e-3 → 12e-3 | monotone to 16e-3, flat to 24e-3, turns over at 32e-3 |
+| virtual layers 4 → 8 | free in parameters; peaks at 8 (12 is worse) |
+| `MultiGate` residuals, `n_stream = 4` | +136 parameters; peaks at 4 (8 is worse) |
+| 4 → 16 epochs | still improving at epoch 14, flat by 15-16 |
+| Muon | the smallest, but it stacks with the other two optimizer changes |
+
+Depth and `MultiGate` are worth a note: both are essentially free in parameters,
+and both *lost* when screened at the original `lr = 2e-3` (8 virtual layers gave
+1.758 against 4 layers' 1.749). They only pay once the optimizer can use them —
+which is the same finding as the LR ladder, seen from the architecture side.
+Nothing that trades one part of the budget for another ever won: a SwiGLU MLP,
+more real layers at lower `expand`, `Quaternion4D`, and the library's reference
+`rotation_range = 1` + `rope_fraction = 0.5` all scored at or below the default.
+The model also never overfits — at epoch 14 validation is *ahead* of the epoch's
+running training average — so `--train-stories` is not the lever either.
+
+### Truncated BPTT
+
+`grad_horizon` back-propagates only the top `K` virtual layers. It is a bad deal
+here, at the same parameter count (measured at the older 4-epoch, 4-layer setting):
 
 | Virtual layers | `grad_horizon` | Valid bits/char | Valid char accuracy | it/s |
 |---|---|---|---|---|
-| **4** (the default) | `None` | **1.749** | **63.2%** | ~7 |
+| 4 | `None` | 1.749 | 63.2% | ~7 |
 | 16 | 4 | 3.208 | 36.1% | ~3.2 |
 
-(uniform baseline: `log2(48) = 5.58` bits/char.)
+A language model is scored at *every* position, so leaving 12 of the 16
+applications of a shared weight undifferentiated biases every one of those
+readouts — unlike a task that reads out once, at the end of the sequence. The
+16-layer arm also plateaued at epoch 2 and then regressed, on training loss as
+well as validation.
 
-The parameter count is identical — only how many times the 2 real weight sets are
-applied, and how much of that is differentiated, differs. Truncated BPTT is a bad
-deal for a language model specifically: it is scored at *every* position, so
-leaving 12 of the 16 applications of a shared weight undifferentiated biases every
-one of those readouts — unlike a task that reads out once, at the end of the
-sequence. The 16-layer arm also plateaued at epoch 2 and then regressed, on
-training loss as well as validation.
-
-At 1.75 bits/char the samples are real words with real spelling and story
-structure, and broken grammar — about what 39K parameters buys:
+At 1.39 bits/char the samples are real words with real spelling, a consistent
+character, and clauses that mostly parse — about what 39K parameters buys. Four
+consecutive **unprompted** samples from the last epoch (seeded only with the
+document boundary, `sample_temperature = 0.8`, first 100 characters of each):
 
 ```text
-once upon a time, there was a little girl named button to the fish and had a big
-looked at the girl and said, "i said. the bird came to the boy named to play with
-his friends. they like to play with his truck saw a big buy and had a big sing.
+once upon a time, there was a little girl named lucy. she loved to drop and saw a small fruit gold c
+once upon a time, there was a little girl named looks. she liked to play with her toys and walked on
+once upon a time, there was a little girl named kitty. she liked to play with it. she climbed in her
+once upon a time, there was a little girl named lucy. she loved to cry ahead and started to eat it.
 ```
+
+Nothing supplies that opening — the model reconstructs the corpus's stock first
+sentence from a start-of-document token alone, then keeps one subject and its
+pronoun consistent to the end of the sample. Its grip is on syntax rather than
+sense: the clauses parse and the sentence boundaries land, but "loved to drop",
+"loved to cry ahead", and the name "looks" show it is still assembling plausible
+shapes rather than meanings. That is the honest ceiling for 39K parameters.
 
 ## Sampling
 
