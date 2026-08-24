@@ -92,6 +92,14 @@
 //! The hidden state hₜ is shared across ranks; each rank contributes to it
 //! independently but reads the full shared state when producing its output.
 //!
+//! Both rank sums are **uniform** in the paper's form. [`MimoMix::Gated`] makes
+//! them data-dependent instead — a per-token write gate on `B̄ₜ[m]` and a pool
+//! over the readouts `yₜ[m]`, in the shape of the two halves of
+//! [`MultiGateResidual`](crate::modules::MultiGateResidual). What it does *not*
+//! touch is the transition (`α`, `Δ`, `λ`, the rotation), which stays per-head:
+//! sharing it is exactly what collapses the `M` inner SSMs onto one state.
+//! See [`crate::mamba3::mimo_gate`].
+//!
 //! ## 4. Combined formulation (everything together)
 //!
 //! Putting trapezoid + RoPE + MIMO into a single expression — `B̃ₜ[m] = Rₜ Bₜ[m]`
@@ -143,6 +151,7 @@
 //! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
+use crate::mamba3::mimo_gate::{MimoGate, MimoMix};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
 use crate::modules::sanity as san;
@@ -221,6 +230,12 @@ pub struct Mamba3 {
     /// Shape: `[nheads, mimo_rank, per_head_dim]`.
     /// Only present when `mimo_rank > 1`. When SISO, this is `None`.
     pub mimo_o_hmp: Option<Param<Tensor<3>>>,
+
+    /// Data-dependent soft mixing of the MIMO ranks, replacing the uniform
+    /// write sum and/or the fixed `mimo_o` read merge; `None` for
+    /// [`MimoMix::Sum`] (and always `None` when SISO). See
+    /// [`crate::mamba3::mimo_gate`].
+    pub mimo_gate: Option<MimoGate>,
 
     /// Optional gated RMSNorm applied before the output projection.
     ///
@@ -403,6 +418,13 @@ pub struct Mamba3Config {
     /// Paper: `M`. Python: `mimo_rank`.
     #[config(default = 1)]
     pub mimo_rank: usize,
+
+    /// How the `mimo_rank` inner SSMs are combined: the paper's uniform sum, or
+    /// data-dependent soft mixing of the per-rank writes and/or readouts (see
+    /// [`crate::mamba3::mimo_gate`]). Requires `mimo_rank > 1` when gated;
+    /// bit-exact with [`MimoMix::Sum`] at initialisation either way.
+    #[config(default = "crate::mamba3::mimo_gate::MimoMix::Sum")]
+    pub mimo_mix: MimoMix,
 
     /// Minimum absolute value of A after clamping.
     #[config(default = "1e-4")]
@@ -797,6 +819,15 @@ impl Mamba3Config {
             (None, None, None)
         };
 
+        // MIMO rank mixing (asserts `mimo_rank > 1` when gated).
+        let mimo_gate = self.mimo_mix.init(
+            nheads,
+            mimo_rank,
+            state_rank,
+            self.per_head_dim,
+            device,
+        );
+
         // Gated RMSNorm applied per-head (group size = per_head_dim).
         let out_norm = self.has_outproj_norm.then(|| {
             RmsNormGatedConfig::new(self.per_head_dim)
@@ -826,6 +857,7 @@ impl Mamba3Config {
             mimo_x_hmp,
             mimo_z_hmp,
             mimo_o_hmp,
+            mimo_gate,
             out_norm,
             out_proj,
             init_state_hpr,

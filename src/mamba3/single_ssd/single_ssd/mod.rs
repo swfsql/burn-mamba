@@ -24,7 +24,6 @@ use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
-use crate::modules::Silu;
 use crate::modules::sanity as san;
 use burn::prelude::*;
 
@@ -162,6 +161,14 @@ impl Mamba3 {
             nheads,
         );
 
+        // ── Step 4b: MIMO write gate ──────────────────────────────────────────
+        // Per-rank scale on the key = per-rank scale on the write into the
+        // shared state; scored pre-rotation. It reaches the in-kernel `scale·B`
+        // and γ-correction terms and the boundary-β seed (through the cached
+        // `k_state`) alike, so the two pathways stay equivalent. No-op under
+        // `MimoMix::Sum`. See [`crate::mamba3::mimo_gate`].
+        let b_bsmhr = self.apply_write_gate(b_bsmhr);
+
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
         // unit quaternion. Shared with the double-ssd pathway via
@@ -287,48 +294,13 @@ impl Mamba3 {
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp;
 
-        let y_bsi = if mimo_rank > 1 {
-            let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-            let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-
-            let z_bshp = z_bsi
-                .clone()
-                .reshape([batch, sequence, nheads, per_head_dim]);
-            let z_bsmhp = {
-                let z_bsmhp = z_bshp.unsqueeze_dim::<5>(2).expand([
-                    batch,
-                    sequence,
-                    mimo_rank,
-                    nheads,
-                    per_head_dim,
-                ]);
-                let mimo_z_bsmhp = mimo_z_hmp
-                    .swap_dims(0, 1)
-                    .unsqueeze_dims::<5>(&[0, 1])
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-                z_bsmhp * mimo_z_bsmhp
-            };
-
-            let y_combined_bsmhp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bsmhp, z_bsmhp),
-                None => y_bsmhp * Silu::new().forward(z_bsmhp),
-            };
-
-            let mimo_o_bsmhp = mimo_o_hmp
-                .swap_dims(0, 1)
-                .unsqueeze_dims::<5>(&[0, 1])
-                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-            let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(2).squeeze_dim(2);
-            y_bshp.reshape([batch, sequence, d_inner])
-        } else {
-            let y_bshp: Tensor<4> = y_bsmhp.squeeze_dim(2);
-            let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
-            let y_combined_bshp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bshp, z_bshp),
-                None => y_bshp * Silu::new().forward(z_bshp),
-            };
-            y_combined_bshp.reshape([batch, sequence, d_inner])
-        };
+        // Gate each rank and merge the ranks (see `Mamba3::mimo_merge`): the
+        // `mimo_o` down-projection, times the read pool's data-dependent
+        // weights when one is configured.
+        let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
+        let y_bsi = self
+            .mimo_merge::<5, 4>(y_bsmhp, z_bshp)
+            .reshape([batch, sequence, d_inner]);
         san(&y_bsi);
 
         // ── Out-projection ────────────────────────────────────────────────────

@@ -80,13 +80,12 @@
 //! [`final_norm`]: crate::modules::network::LatentNetwork::norm_f
 
 use crate::modules::bidi::NoOp;
-use crate::utils::div_eps;
+use crate::modules::{normed_score, score_scale};
 use burn::config::Config;
 use burn::module::Param;
 use burn::nn::Initializer;
 use burn::prelude::*;
 use burn::tensor::activation::{sigmoid, softmax};
-use burn::tensor::{DType, f16};
 
 /// One layer's Multi-Gate Residual parameters: the mixer query `w⁽ᵝ⁾` + bias
 /// `b⁽ᵝ⁾`, and the aggregator (AttnPool) query `w⁽ᵅ⁾`.
@@ -107,52 +106,15 @@ pub struct MultiGateResidual {
 }
 
 impl MultiGateResidual {
-    fn scale(&self) -> f32 {
-        (self.d_model as f32).powf(-0.5)
+    /// This module's score temperature `1/√d`.
+    fn scale(&self) -> f64 {
+        score_scale(self.d_model)
     }
 
-    /// The parameter-free RMS denominator `d(x) ∈ [‥, 1]` such that the RMSNorm
-    /// (matching [`RmsNorm`] math with `γ ≡ 1`) is `x / d(x)`. Returning the
-    /// denominator rather than the normalised tensor lets [`Self::normed_score`]
-    /// fold it out of the (feature-axis) score reduction, so the full-width
-    /// normalised tensor is never built. The fp16 path keeps the same
-    /// overflow-safe max-rescale, folded into the same scalar denominator.
-    ///
-    /// [`RmsNorm`]: crate::modules::RmsNorm
-    fn rms_denom<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
-        match x.dtype() {
-            DType::F64 | DType::F32 | DType::Flex32 | DType::BF16 => {
-                let eps = div_eps(x.dtype());
-                // eps *inside* the root (matches `RmsNorm`): the `sqrt` backward
-                // is otherwise singular for a zero-norm slice.
-                ((x.clone() * x).mean_dim(D - 1) + eps).sqrt()
-            }
-            DType::F16 => {
-                use burn::tensor::ElementConversion;
-                let eps: f16 = f16::from_elem(div_eps(x.dtype())) * f16::from_f32(2.);
-                // Single global scalar `max`, reshaped to `[1; D]` so it
-                // broadcasts against the `[‥, 1]` partial RMS.
-                let max = x.clone().no_grad().detach().abs().max().reshape([1; D]);
-                let x_ = x.clone() / (max.clone() + eps); // x_.abs() <= 1
-                // eps inside the root (matches `RmsNorm`'s F16 branch).
-                let rms_partial = ((x.clone() * x_).mean_dim(D - 1) + eps).sqrt();
-                // `max` is detached (no backward), but floor it too so an
-                // all-zero tensor (`max = 0`) yields a nonzero denominator
-                // rather than `0/0` in the caller — matching the F32 branch.
-                rms_partial * (max + eps).sqrt()
-            }
-            _ => unreachable!("rms_denom expects a float dtype"),
-        }
-    }
-
-    /// The RMSNorm-then-dot score `scale · Σ_feat(x · w) / (rms(x)+eps)`,
-    /// shape `[‥, 1]`. The RMS denominator is constant over the feature axis, so
-    /// it is folded out of the reduction (via [`Self::rms_denom`]) — equal to
-    /// `Σ_feat(rms_norm(x) · w) · scale` but without materialising the full-width
-    /// normalised tensor.
+    /// The RMSNorm-then-dot score of each stream against `w`, shape
+    /// `[‥, n_stream, 1]` — [`normed_score`], at this module's width.
     fn normed_score<const R: usize>(&self, x: Tensor<R>, w: Tensor<R>) -> Tensor<R> {
-        let dot = (x.clone() * w).sum_dim(R - 1);
-        dot * self.scale() / self.rms_denom(x)
+        normed_score(x, w, self.scale())
     }
 
     /// The shared mix + pool, generic over the streams rank `R` (the *stream*

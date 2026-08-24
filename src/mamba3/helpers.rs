@@ -8,13 +8,18 @@
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
 //!    (SISO-branched).
 //! 5. Peeling the rotation channels off the in-projection.
+//! 6. The block tail: gate (or gated norm) and MIMO rank aggregation, shared
+//!    by both pathways' `forward` and by `step`/`step_infinite`.
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
 //! (`step`) code paths.
 
+use crate::mamba3::mamba3::Mamba3;
 use crate::modules::RmsNorm;
+use crate::modules::Silu;
 use crate::modules::gqa_expand_to_heads;
+use crate::modules::sanity as san;
 use crate::modules::softplus;
 use burn::prelude::*;
 
@@ -191,5 +196,102 @@ pub fn build_v_with_mimo<const D: usize, const DP1: usize>(
             let mimo_x_broadcast = mimo_x_hmp.clone().swap_dims(0, 1).unsqueeze::<DP1>();
             x_with_rank_axis * mimo_x_broadcast
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block-tail helpers on `Mamba3` (rank-generic: `D = 5` over a sequence,
+// `D = 4` for a single token)
+// ---------------------------------------------------------------------------
+
+impl Mamba3 {
+    /// Scale `B` by the MIMO **write gate**, or pass it through under
+    /// [`MimoMix::Sum`](crate::mamba3::mimo_gate::MimoMix::Sum).
+    ///
+    /// Called right after QK-norm, **before** the transition rotation: gating
+    /// the key is gating the write (`Σₘ (wₘBₘ)⊗vₘ ≡ Σₘ Bₘ⊗(wₘvₘ)`), and the
+    /// gate is a scalar that commutes with the rotation — but the *score* must
+    /// see the unrotated `B`, else it would swing with the cumulative rotation.
+    /// See [`crate::mamba3::mimo_gate`].
+    ///
+    /// # Shapes
+    /// - `b_mhr` : `[‥, mimo_rank, nheads, state_rank]`
+    pub(crate) fn apply_write_gate<const D: usize>(&self, b_mhr: Tensor<D>) -> Tensor<D> {
+        match self.mimo_gate.as_ref().and_then(|gate| gate.write.as_ref()) {
+            None => b_mhr,
+            Some(arm) => arm.apply(b_mhr),
+        }
+    }
+
+    /// `y ⊙ silu(z)`, or `RmsNormGated(y, z)` when the block carries an
+    /// `out_norm` — the one gate shared by the SISO and MIMO tails.
+    fn gate_or_norm<const R: usize>(&self, y: Tensor<R>, z: Tensor<R>) -> Tensor<R> {
+        match &self.out_norm {
+            Some(norm) => norm.forward(y, z),
+            None => y * Silu::new().forward(z),
+        }
+    }
+
+    /// The block tail after the `D` skip: gate (or gated RMSNorm) each rank's
+    /// readout and merge the ranks into one `[‥, nheads, per_head_dim]` output.
+    ///
+    /// ```text
+    ///   out = Σₘ [αₘ ·] mimo_o[m] ⊙ φ(y[m], z ⊙ mimo_z[m])
+    ///   φ(y, z) = y ⊙ silu(z)   or   RmsNormGated(y, z) when `out_norm` is set
+    /// ```
+    ///
+    /// `αₘ` is the optional **read pool** — data-dependent weights over the
+    /// rank axis (see [`crate::mamba3::mimo_gate`]), scored on the readouts
+    /// *before* the `z` gate so they answer "what did rank `m` retrieve" rather
+    /// than "how much output does this token want at all", which is `z`'s job.
+    /// Absent under [`MimoMix::Sum`](crate::mamba3::mimo_gate::MimoMix::Sum),
+    /// and at `mimo_rank == 1` there is no rank axis to merge at all.
+    ///
+    /// # Shapes
+    /// - `y_mhp` : `[‥, mimo_rank, nheads, per_head_dim]`
+    /// - `z_hp`  : `[‥, nheads, per_head_dim]`
+    /// - out     : `[‥, nheads, per_head_dim]`
+    ///
+    /// `DM1 = D − 1`.
+    pub(crate) fn mimo_merge<const D: usize, const DM1: usize>(
+        &self,
+        y_mhp: Tensor<D>,
+        z_hp: Tensor<DM1>,
+    ) -> Tensor<DM1> {
+        let rank_axis = D - 3;
+
+        if self.mimo_rank == 1 {
+            // SISO: drop the singleton rank axis and gate over per_head_dim.
+            let y_hp: Tensor<DM1> = y_mhp.squeeze_dim(rank_axis);
+            return self.gate_or_norm(y_hp, z_hp);
+        }
+
+        let shape = y_mhp.dims();
+        let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
+        let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
+
+        let weights = self
+            .mimo_gate
+            .as_ref()
+            .and_then(|gate| gate.read.as_ref())
+            .map(|arm| arm.weights(y_mhp.clone()));
+
+        // zₘ = z ⊙ mimo_z[m]  (`mimo_z_hmp` → `[1, ‥, 1, mimo_rank, nheads, per_head_dim]`).
+        let z_mhp = z_hp.unsqueeze_dim::<D>(rank_axis).expand(shape)
+            * mimo_z_hmp.swap_dims(0, 1).unsqueeze::<D>().expand(shape);
+        san(&z_mhp);
+
+        let combined_mhp = self.gate_or_norm(y_mhp, z_mhp);
+        san(&combined_mhp);
+
+        // Down-project with `mimo_o`, optionally pooled, then sum the ranks.
+        let scaled_mhp = combined_mhp * mimo_o_hmp.swap_dims(0, 1).unsqueeze::<D>();
+        let scaled_mhp = match weights {
+            None => scaled_mhp,
+            Some(weights) => scaled_mhp * weights,
+        };
+        let out_hp: Tensor<DM1> = scaled_mhp.sum_dim(rank_axis).squeeze_dim(rank_axis);
+        san(&out_hp);
+        out_hp
     }
 }

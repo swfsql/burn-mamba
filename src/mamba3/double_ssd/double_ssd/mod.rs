@@ -18,7 +18,6 @@ use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{rotate_bc_forward, rotate_bc_step};
-use crate::modules::Silu;
 use crate::modules::sanity as san;
 use burn::prelude::*;
 
@@ -149,6 +148,14 @@ impl Mamba3 {
             [batch, sequence, mimo_rank, nheads, state_rank],
             c_bsmhr.dims()
         );
+
+        // ── Step 4b: MIMO write gate ──────────────────────────────────────────
+        // Data-dependent per-rank scale on the key — i.e. on the *write* into
+        // the shared state. Folding it into B here (before the rotation, whose
+        // frame the score must not see) carries it for free into the shifted
+        // β-term, the cached `k_state`, and both SSD calls.
+        // See [`crate::mamba3::mimo_gate`]. A no-op under `MimoMix::Sum`.
+        let b_bsmhr = self.apply_write_gate(b_bsmhr);
 
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
@@ -292,54 +299,13 @@ impl Mamba3 {
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
 
         // ── Gate (or gated norm) and rank aggregation ─────────────────────────
-        // When `out_norm` is set, the SiLU gate is replaced by a per-head
-        // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
-        let y_bsi = if mimo_rank > 1 {
-            let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-            let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-
-            let z_bshp = z_bsi
-                .clone()
-                .reshape([batch, sequence, nheads, per_head_dim]);
-            let z_bsmhp = {
-                let z_bsmhp = z_bshp
-                    .unsqueeze_dim::<5>(2) // z_bs1hp
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // z_bsmhp
-                let mimo_z_bsmhp = mimo_z_hmp
-                    .swap_dims(0, 1) // mimo_z_mhp
-                    .unsqueeze_dims::<5>(&[0, 1]) // mimo_z_11mhp
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_z_bsmhp
-                z_bsmhp * mimo_z_bsmhp
-            };
-
-            // gate or gated norm:
-            //   without out_norm: y_r * silu(z_r)
-            //   with    out_norm: norm(y_r) * silu(z_r)  (norm over per_head_dim)
-            let y_combined_bsmhp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bsmhp, z_bsmhp),
-                None => y_bsmhp * Silu::new().forward(z_bsmhp),
-            };
-
-            // Down-project with mimoₒ_hmp: out = sumₘ mimoₒ_hmp[h, r, p] * yᵣ
-            let mimo_o_bsmhp = mimo_o_hmp
-                .swap_dims(0, 1) // mimo_o_mhp
-                .unsqueeze_dims::<5>(&[0, 1]) // mimo_o_11mhp
-                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_o_bsmhp
-            // sum over mimo rank dim
-            let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp)
-                .sum_dim(2) // y_bs1hp
-                .squeeze_dim(2); // y_bshp
-            y_bshp.reshape([batch, sequence, d_inner])
-        } else {
-            // SISO: squeeze rank dim, apply gate (or gated norm) over per_head_dim.
-            let y_bshp: Tensor<4> = y_bsmhp.squeeze_dim(2); // mimo_rank == 1
-            let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
-            let y_combined_bshp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bshp, z_bshp),
-                None => y_bshp * Silu::new().forward(z_bshp),
-            };
-            y_combined_bshp.reshape([batch, sequence, d_inner])
-        };
+        // `mimo_merge` gates each rank (a SiLU gate, or the per-head gated
+        // RMSNorm when `out_norm` is set) and merges the ranks — under a
+        // read-pool gate, by data-dependent weights instead of `mimo_o` alone.
+        let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
+        let y_bsi = self
+            .mimo_merge::<5, 4>(y_bsmhp, z_bshp)
+            .reshape([batch, sequence, d_inner]);
         san(&y_bsi);
 
         // ── Out-projection ────────────────────────────────────────────────────
@@ -380,7 +346,8 @@ mod step {
         pub z_bi: Tensor<2>,
         /// Value stream `[batch, nheads, per_head_dim]`.
         pub x_bhp: Tensor<3>,
-        /// QK-normed, GQA-expanded, biased B — **before** the rotation.
+        /// QK-normed, GQA-expanded, biased and **write-gated** B — before the
+        /// rotation.
         pub b_bmhr: Tensor<4>,
         /// QK-normed, GQA-expanded, biased C — **before** the rotation.
         pub c_bmhr: Tensor<4>,
@@ -399,9 +366,9 @@ mod step {
     }
 
     impl Mamba3 {
-        /// In-projection → split → trapezoid coefficients → QK-norm for a
-        /// single token, **stopping before** the rotation (which
-        /// needs the cache's cumulative rotation).
+        /// In-projection → split → trapezoid coefficients → QK-norm → MIMO
+        /// write gate for a single token, **stopping before** the rotation
+        /// (which needs the cache's cumulative rotation).
         #[allow(non_snake_case)]
         pub(crate) fn step_project(&self, input_bd: Tensor<2>) -> StepProjection {
             let [batch, _d_model] = input_bd.dims();
@@ -479,6 +446,12 @@ mod step {
                 nheads,
             );
             assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
+
+            // MIMO write gate — the per-token, per-rank scale on the key, i.e.
+            // on the write into the shared state. Applied here so `step` and
+            // `step_infinite` both inherit it, and (like `forward`) scored on
+            // the *unrotated* B. No-op under `MimoMix::Sum`.
+            let b_bmhr = self.apply_write_gate(b_bmhr);
             san(&b_bmhr);
             san(&c_bmhr);
 
@@ -557,52 +530,11 @@ mod step {
             san(&out_m_bmhp);
 
             // ── Gate (or gated norm) and rank aggregation ─────────────────────
-            // When `out_norm` is set, the SiLU gate is replaced by a per-head
-            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
+            // The same `mimo_merge` the two `forward`s use, one rank lower.
             let z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
-            let y_bi = if mimo_rank > 1 {
-                let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-                let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-
-                // zₘ = z * mimo_z_hmp[m]
-                let z_bmhp = z_bhp
-                    .unsqueeze_dim::<4>(1) // z_b1hp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // z_bmhp
-                // mimo_z_hmp
-                let mimo_z_bmhp = mimo_z_hmp
-                    .swap_dims(0, 1) // mimo_z_mhp
-                    .unsqueeze_dim::<4>(0) // mimo_z_1mhp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_z_bmhp
-                let z_bmhp = z_bmhp * mimo_z_bmhp;
-                san(&z_bmhp);
-
-                // Per-rank gate or gated norm.
-                let combined_bmhp = match &self.out_norm {
-                    Some(norm) => norm.forward(out_m_bmhp, z_bmhp),
-                    None => out_m_bmhp * Silu::new().forward(z_bmhp),
-                };
-                san(&combined_bmhp);
-
-                // Project down: out = sumₘ mimo_o_hmp[m] * combined_bmhp[m]
-                let mimo_o_bmhp = mimo_o_hmp
-                    .swap_dims(0, 1) // mimo_o_mhp
-                    .unsqueeze_dim::<4>(0) // mimo_o_1mhp
-                    .expand([batch, mimo_rank, nheads, per_head_dim]); // mimo_o_bmhp
-                let out_bhp: Tensor<3> = (combined_bmhp * mimo_o_bmhp)
-                    .sum_dim(1) // out_b1hp
-                    .squeeze_dim(1); // out_bhp
-                san(&out_bhp);
-                out_bhp.reshape([batch, d_inner]) // y_bi
-            } else {
-                // SISO: squeeze rank dim, gate (or gated norm) over per_head_dim.
-                let y_bhp: Tensor<3> = out_m_bmhp.squeeze_dim(1);
-                let combined = match &self.out_norm {
-                    Some(norm) => norm.forward(y_bhp, z_bhp),
-                    None => y_bhp * Silu::new().forward(z_bhp),
-                };
-                san(&combined);
-                combined.reshape([batch, d_inner])
-            };
+            let y_bi = self
+                .mimo_merge::<4, 3>(out_m_bmhp, z_bhp)
+                .reshape([batch, d_inner]);
 
             // ── Out-projection ────────────────────────────────────────────────
             let out_bm = self.out_proj.forward(y_bi);

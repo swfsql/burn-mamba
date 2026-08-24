@@ -62,7 +62,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** for RoPE pairing;
-  `mimo_rank` 1=SISO; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
+  `mimo_rank` 1=SISO; `mimo_mix: MimoMix` (default `Sum`; see `mimo_gate/`);
+  `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
   narrower `1`/`0.5` are asked for explicitly); `a_floor`). `rotation_spec()` bundles the
@@ -71,8 +72,8 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
   `zero_rotation_state()` is the one fresh-cache accumulator, shared by every pathway.
   Under `Real1D` every rotation count is `0`; `init` asserts any other kind turns ≥ 1 pair,
   and `muon_projections()` omits the (then absent) rotation segment. Fields:
-  QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
-  `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
+  QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp`,
+  `mimo_gate` and `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
   mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.
   `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
   Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
@@ -85,7 +86,10 @@ Crate guards `DENY_NAN`/`DENY_INF` (both `false` ⇒ the `sanity` checks are no-
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
   (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`, `mimo_outer_sum`
   (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso` broadcast vs `_mimo`
-  matmul, per `siso_specialization_decode`), `split_rotation_channels` (peels the in-proj's
+  matmul, per `siso_specialization_decode`), `apply_write_gate` (MIMO
+  write gate on `B`; no-op under `MimoMix::Sum`), `mimo_merge` (the rank-generic block
+  tail — per-rank gate or `out_norm`, optional read pool, `mimo_o` sum — one definition
+  for both `forward`s and `step_finish`), `split_rotation_channels` (peels the in-proj's
   trailing rotation columns, `None` under `Real1D`; it cannot be one more entry in the main
   `split_into` because `split_with_sizes` **drops** a zero-length segment). Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
@@ -183,6 +187,26 @@ zeroed (and projects/caches nothing), the half-turn is reachable with a live gra
 `range=1` it is not — f32's `tanh'` is exactly 0 there), a zero right generator reproduces
 `Quaternion4D` on B, C and the accumulator, a shared axis turns the two planes by `a∓b`,
 and gradient reaches the right factor's channels.
+
+### `mamba3/mimo_gate/` (`mod.rs`)
+Data-dependent soft mixing of the MIMO ranks in place of the paper's uniform sums, in
+the shape of `multi_gate.rs`'s two halves. `MimoMix{Sum(default)|Gated{write,read:
+Option<GateKind>}}` (a `Mamba3Config` field) → `Option<MimoGate>` on the block;
+`GateKind{Independent = 2σ(s) | Competitive = M·softmax_m(s)}`. Each direction is one
+`MimoGateArm` — per-**head** query `[nheads, width]` (shared would tie GQA-grouped heads,
+whose `B` differs only by `b_bias_hmr`) + per-`(head, rank)` bias, both zero-init — whose
+`weights()` scores `[‥, m, h, width]` content by `normed_score` and squashes over the
+rank axis (`D-3`). Both squashings are **mean-one at zero logits**, so a gated block is
+bit-exact with `Sum` at init. Write arm: `apply()`d to `B` by `helpers::apply_write_gate`,
+called right after QK-norm and **before** the rotation (a scalar commutes with it, but the
+*score* must not see the cumulative frame) — gating the key gates the write
+(`Σₘ(wₘBₘ)⊗vₘ ≡ Σₘ Bₘ⊗(wₘvₘ)`) and `B` is the factor already carrying the rank axis in
+the cache, so the shifted β-term, the single-ssd boundary seed and decode inherit it with
+**no cache or kernel change**; the `D` skip (which bypasses the state) does not. Read arm:
+weights in `mimo_merge`, scored on the readouts *before* the `z` gate. `init` rejects a
+gated SISO block and a `Gated` with no arm. Not mixed: `α`, `Δ`, `λ`, the rotation — all
+per-head, which is what keeps one `[N×P]` state instead of `M`. The gate params are
+unlisted in `muon_projections()`, so Muon's allowlist leaves them on AdamW.
 
 ### `mamba3/quat_scan/`
 Memory-efficient cumprod scan (recompute backward, like SSD `SerialRecalculated`).
@@ -292,7 +316,8 @@ plus shared NN blocks.
   alike, so the convex pool hands the row on unchanged — as the additive skip would.
   `depth_init_bias(n_mixing_layers, n_stream)` is the paper's carry bias over the *mixing*
   layers only; `init_bias_step` ramps it per stream (`0` = the paper's uniform init).
-  Math, and why a convex mean-pool wants a norm before the head, in the header.
+  Math, and why a convex mean-pool wants a norm before the head, in the header. Scores
+  come from `norm/rms_score.rs`, shared with `mamba3/mimo_gate/`.
 - **`network.rs`** — `LatentNetwork<M>` (linear in/out, **optional** pre-`out_proj`
   `norm_f` via `final_norm` — shared readout `head()`) and `VocabNetwork<M>` (embedding →
   unconditional `norm_f` → tied/untied LM head, vocab padded). Both build on the same
@@ -331,7 +356,11 @@ plus shared NN blocks.
   derived version would silently skip every tensor.
 - **`norm/`** — `RmsNorm` (also Mamba-3 QK-Norm) + `RmsNormGated` (RMSNorm × SiLU gate,
   `norm_before_gate` toggle). **fp16-safe**: normalise against `max(|x|)` to avoid `x²`
-  overflow; epsilon from `div_eps`.
+  overflow; epsilon from `div_eps`. `rms_score.rs` is the parameter-free scoring
+  primitive both gate-mixers share (`multi_gate.rs`, `mamba3/mimo_gate/`):
+  `rms_denom` (same fp16 rescale) + `normed_score(x, w, scale)` =
+  `Σ_feat(rms_norm(x)·w)·scale` with the denominator folded *out* of the reduction (the
+  full-width normalised tensor is never built) + `score_scale(width)` = `1/√width`.
 - **`activation/`** — `Silu`, `softplus`, `log_sigmoid` (dtype-aware variants Burn
   lacks). `softplus` = identity above a per-dtype precision threshold (f64 38 / f32 18 /
   bf16 7 / f16 9), else `log1p(eˣ)` on a `clamp_max`ed input (so `eˣ` never overflows);

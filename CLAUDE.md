@@ -67,7 +67,8 @@ src/
 ├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
 │  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
 │  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build,
-│  │                 split_rotation_channels (peels the in-proj's rotation tail)
+│  │                 split_rotation_channels (peels the in-proj's rotation tail),
+│  │                 apply_write_gate + mimo_merge (the rank-generic block tail)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
@@ -78,6 +79,8 @@ src/
 │  │                 per-step definition. Real1D = the trivial group: no in-proj
 │  │                 channels, no cache accumulator. Rotor4D = full SO(4), two-sided
 │  │                 q⊗v⊗p̄ (both factors stacked on one block axis ⇒ one scan)
+│  ├─ mimo_gate/     MimoMix: data-dependent mixing of the MIMO ranks (write gate on
+│  │                 B + read pool over the readouts) in place of the uniform sums
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 ├─ modules/          family-generic composition + shared NN modules
@@ -93,7 +96,8 @@ src/
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait (+ per-slot inner/from_inner) + MambaCaches
 │  ├─ activation/    silu, softplus, log_sigmoid (dtype-aware)
-│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
+│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated, rms_score
+│  │                 (the scoring primitive multi_gate + mimo_gate share)
 │  ├─ loss/          bce, cross_entropy, mse
 │  └─ misc/          gqa, segsum, split, sanity, rope
 ├─ optim/            Muon parameter groups (feature `optim`); allowlist, not denylist
@@ -203,7 +207,8 @@ notation tables; the essentials:
   collapses to Mamba-2), a **complex transition** (`A+iθ`) realised as
   **data-dependent RoPE** on B/C, and **MIMO** (`mimo_rank>1`).
   B/C use **QK-Norm before** the SSD (not a post gated norm); no short conv. The
-  in-projection splits `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`.
+  in-projection splits `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`. MIMO's two rank sums
+  (write, read merge) are uniform by default; `mimo_mix` gates them — see below.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
@@ -284,6 +289,27 @@ are incomparable and `Rotor4D` contains both (plane angles `a∓b`). It also con
 adjoint `SO(3)` (`p=q`), where `±q` act identically — the difference between tracking a
 group and tracking its double cover. `SO(4)` is the ceiling for `k=4`; `k=8` would break
 the scan (octonions are non-associative).
+
+### Mamba-3: MIMO rank mixing (`mimo_mix`)
+
+A rank-`M` MIMO SSM is `M²` SISO SSMs sharing **one** recurrence: `M` writes summed into
+one state, `M` readouts merged out of it. `MimoMix::Gated` makes both weightings
+data-dependent, transposing `MultiGate`'s two halves onto the rank axis — a **write
+gate** (MGR's mixer) and a **read pool** (MGR's aggregator), each a per-head query
+scored against RMS-normalised content (`norm/rms_score.rs`, shared with MGR) plus a
+per-`(head, rank)` bias. `GateKind` picks `Independent` (`2σ`) or `Competitive`
+(`M·softmax`, a router on a fixed budget); both are **mean-one at zero logits**, so a
+gated block is bit-exact with `Sum` at init.
+
+Why it is free: the write gate folds into `B` after QK-norm (gating the key gates the
+write, and `B` is the factor already carrying the rank axis in the cache), so the shifted
+β-term, the boundary seed and decode inherit it with no cache or kernel change; the pool
+lives in the post-SSD tail. Nothing joins the state, so decode cost is unchanged.
+
+What stays uniform, necessarily: `α`, `Δ`, `λ` and the rotation are **per head**, and
+that shared transition is exactly what collapses the `M` inner SSMs onto one `[N×P]`
+state. Per-rank *dynamics* would cost `M×` state and decode traffic — a different
+architecture, not a flag.
 
 ### Virtual layers, bidirectional, class tokens
 
