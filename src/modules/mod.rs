@@ -40,6 +40,7 @@ pub use misc::split::split_into;
 pub use mlp::{GatedMlp, GatedMlpConfig};
 pub use norm::rms_norm::{RmsNorm, RmsNormConfig};
 pub use norm::rms_norm_gated::{RmsNormGated, RmsNormGatedConfig};
+pub use norm::rms_score::{normed_score, rms_denom, score_scale};
 
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};

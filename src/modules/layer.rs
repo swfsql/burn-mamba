@@ -217,11 +217,14 @@ impl<M: MambaBlock> Layer<M> {
 
     /// The actual one-token work: no class injection, no outer residual.
     ///
-    /// `pub(crate)` for [`Layers`]'s cascade, which places this layer's class
-    /// latents from the stack-wide [`ClassCursors`](crate::utils::ClassCursors)
-    /// itself and so must bypass [`Self::step`]'s cursorless guard (that guard
-    /// rejects `Middle`/`End`, which the cascade has already resolved).
-    pub(crate) fn step_one(&self, x: Tensor<2>, cache: Option<M::Cache>) -> (Tensor<2>, M::Cache) {
+    /// [`Layers`]'s cascade uses it to place this layer's class latents from the
+    /// stack-wide [`ClassCursors`](crate::utils::ClassCursors) itself, bypassing
+    /// [`Self::step`]'s cursorless guard (that guard rejects `Middle`/`End`,
+    /// which the cascade has already resolved). It is public because an external
+    /// container that owns the residual — one threading its own state between
+    /// layers rather than a per-layer cache — needs exactly this: the layer's
+    /// delta and the cache it produced, with nothing added.
+    pub fn step_one(&self, x: Tensor<2>, cache: Option<M::Cache>) -> (Tensor<2>, M::Cache) {
         let residual = self.mlp_residual(&x);
         let normed = self.norm.forward(x);
         let (h1, cache) = self.mamba_block.block_step(normed, cache);

@@ -37,7 +37,7 @@ pub enum Mamba3Caches {
 /// If none is specified, this defaults to [`Self::SingleSsd`].
 ///
 /// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Mamba3Cache {
     /// Caches for double-ssd pathway.
     DoubleSsd(Mamba3DoubleSsdCache),

@@ -230,8 +230,9 @@ plus shared NN blocks.
   insert are applied by `Layers`. `insert_latents(x, Option<&mut ClassCursor>)` is `pub`
   (a bare-`Layer` caller needs it too — `Layers` splices its layers' latents itself, since
   under MultiGate the rows must also enter the streams); `step` takes the same cursor and
-  returns its last emitted token (`step_one`, the injection-free body, is `pub(crate)` for
-  the cascade, which has already placed the markers `step`'s cursorless guard rejects). `prime(batch, cache, cursor)`
+  returns its last emitted token (`step_one`, the injection-free body, is `pub`: the
+  cascade uses it, having already placed the markers `step`'s cursorless guard rejects,
+  and so does any external container that owns the residual itself). `prime(batch, cache, cursor)`
   steps the latents waiting for the next token without one, returning `Option<(delta,
   latent)>` — the row comes back with the delta because the residual is the caller's — and
   the cache untouched (`None` included) when none were waiting. Cursorless `step_infinite`
@@ -331,7 +332,11 @@ plus shared NN blocks.
   derived version would silently skip every tensor.
 - **`norm/`** — `RmsNorm` (also Mamba-3 QK-Norm) + `RmsNormGated` (RMSNorm × SiLU gate,
   `norm_before_gate` toggle). **fp16-safe**: normalise against `max(|x|)` to avoid `x²`
-  overflow; epsilon from `div_eps`.
+  overflow; epsilon from `div_eps`. `rms_score` — `rms_denom` + `normed_score` +
+  `score_scale`: a query dotted against RMS-normalised content, the denominator folded
+  out of the reduction so the normalised tensor is never built. `MultiGateResidual`'s
+  scoring primitive, public so a downstream container weighting parallel items scores by
+  the same rule instead of a fresh projection off `d_model`.
 - **`activation/`** — `Silu`, `softplus`, `log_sigmoid` (dtype-aware variants Burn
   lacks). `softplus` = identity above a per-dtype precision threshold (f64 38 / f32 18 /
   bf16 7 / f16 9), else `log1p(eˣ)` on a `clamp_max`ed input (so `eˣ` never overflows);

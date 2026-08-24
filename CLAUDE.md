@@ -93,7 +93,7 @@ src/
 │  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
 │  ├─ cache.rs       CacheStack trait (+ per-slot inner/from_inner) + MambaCaches
 │  ├─ activation/    silu, softplus, log_sigmoid (dtype-aware)
-│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated
+│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated, rms_score
 │  ├─ loss/          bce, cross_entropy, mse
 │  └─ misc/          gqa, segsum, split, sanity, rope
 ├─ optim/            Muon parameter groups (feature `optim`); allowlist, not denylist
