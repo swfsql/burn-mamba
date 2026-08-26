@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {};
+window.SIDEBAR_ITEMS = {"enum":["BidiSchedule","ClassLatent","ClassToken","OutputMerge","OutputMergeConfig","Residuals","ResidualsConfig","Schedule"],"fn":["muon_config"],"struct":["BidiLayerPair","BidiLayers","GatedMlp","GatedMlpConfig","LatentNetwork","Layer","Layers","LayersBuilder","MultiGateResidualConfig","MuonPlan","ProjSegment","ProjSpec","RmsNorm","RmsNormConfig","VocabNetwork"],"trait":["Block","BlockConfig","CacheStack"]};

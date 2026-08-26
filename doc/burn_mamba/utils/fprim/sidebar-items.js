@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["san","tri_bool"],"struct":["F","Mask"]};

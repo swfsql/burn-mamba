@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["MambaLatentNet","MambaLatentNetConfig","MambaLatentNetConfigSerde","MambaVocabNet","MambaVocabNetConfig","MambaVocabNetConfigSerde"],"struct":["LatentNetwork","LatentNetworkBuilder","VocabNetwork","VocabNetworkBuilder"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["BLOCK_CONTAINERS"],"enum":["ProjScope"],"struct":["ProjSegment","ProjSpec"]};

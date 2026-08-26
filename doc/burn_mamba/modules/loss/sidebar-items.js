@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["bce","cross_entropy","mse"]};

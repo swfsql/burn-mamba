@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["sanity","sanity_nan"]};
