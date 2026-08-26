@@ -85,11 +85,8 @@ one buys.
 
 ```toml
 [dependencies]
-# burn = "0.22.0-pre.1"
-# burn 0.22.0-pre.1 is not yet released, so pin to the same version that burn-mamba uses:
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "ed4d313b16ac348093cfa0f979774b4312b17058" }
-
-# pin to a specific revision:
+# Note: check Cargo.toml for the actual burn rev being used
+burn = { git = "https://github.com/tracel-ai/burn.git", rev = "abc..." }
 burn-mamba = { git = "https://github.com/swfsql/burn-mamba.git", rev = "abc..." }
 ```
 
