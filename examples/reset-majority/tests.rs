@@ -128,7 +128,7 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
-    let block = &mut layer.mamba_block;
+    let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order is `[z(2) | x(2) B(1) C(1) | dt_raw(2)]`; each entry is the

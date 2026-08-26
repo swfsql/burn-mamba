@@ -9,12 +9,12 @@
 //!
 //! Every plain (non-autodiff) backend uses the trait's default body, which
 //! simply replays the [`super::super::serial`] kernels K1–K5.  The
-//! [`crate::impl_ssd_backend_ext_for_burn_backends!`] /
-//! [`crate::decl_ssd_autodiff_backend_ext!`] macros wire up the per-backend
+//! [`burn_stack::impl_backend_ext_for_burn_backends!`] /
+//! [`burn_stack::decl_autodiff_backend_ext!`] macros wire up the per-backend
 //! impls and the autodiff marker trait.
 
 use crate::mamba2::prelude::*;
-use crate::utils::fprim::{F, Mask, san};
+use burn_stack::utils::fprim::{F, Mask, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, backend_extension};
@@ -344,6 +344,6 @@ fn k5_ssd_chunk_scan<B: Backend>(
 // autodiff backward lives in `super::backward` as a separate impl.
 //
 // TODO: somehow avoid leaking backend-* features into the library.
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba2BackendExt);
+burn_stack::impl_backend_ext_for_burn_backends!(Mamba2BackendExt);
 
-crate::decl_ssd_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);
+burn_stack::decl_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);

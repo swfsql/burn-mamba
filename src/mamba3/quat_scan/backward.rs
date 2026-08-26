@@ -39,7 +39,7 @@
 #![allow(non_snake_case)]
 
 use super::quat_scan::{Mamba3QuatScanBackendExt, Quat, quat_prefix_product_soa};
-use crate::utils::fprim::F;
+use burn_stack::utils::fprim::F;
 use burn::backend::autodiff::{
     Autodiff,
     checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},

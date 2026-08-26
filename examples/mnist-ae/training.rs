@@ -20,7 +20,7 @@ use burn::{
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
-use burn_mamba::modules::loss::bce::BinaryCrossEntropyLossConfig;
+use burn_stack::modules::loss::bce::BinaryCrossEntropyLossConfig;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the

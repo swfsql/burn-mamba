@@ -16,7 +16,7 @@
 //! and the learnable B/C biases).
 
 use crate::mamba3::prelude::*;
-use crate::modules::sanity as san;
+use burn_stack::modules::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -107,7 +107,7 @@ pub struct Mamba3DoubleSsdCache {
 }
 
 impl Mamba3DoubleSsdCache {
-    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
         san(&self.k_state_bmhr);

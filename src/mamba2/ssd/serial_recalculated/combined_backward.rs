@@ -18,7 +18,7 @@
 #![allow(non_snake_case)]
 
 use super::serial_recalculated::{k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing};
-use crate::utils::fprim::{F, Mask, san};
+use burn_stack::utils::fprim::{F, Mask, san};
 use burn::backend::Backend;
 use burn::tensor::s;
 

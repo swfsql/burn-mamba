@@ -6,7 +6,7 @@
 //! `SO(2) ≅ U(1)` is **abelian** the cumulative rotation collapses to a
 //! `cumsum` of angles and is absorbed into `B`/`C` (the "RoPE trick", Prop.
 //! *Complex SSM, Data-Dependent RoPE Equivalence*).  See
-//! [`crate::modules::misc::rope::apply_rope`].
+//! [`crate::mamba3::rotation::rope::apply_rope`].
 //!
 //! This module implements the next rung of the ladder: a **quaternion**
 //! (`k = 4`) rotational state, i.e. the transition's rotation lives in the
@@ -116,7 +116,11 @@
 //! with [`RotationKind::Quaternion4D`] and drives it through one
 //! [`RotationSpec`] (the SSD kernels themselves need no edits).
 
-use crate::modules::{apply_rope_partial, wrap_angle};
+/// Rotary (RoPE) application: the mechanical pairwise rotation the abelian
+/// pathway factors into B/C.
+pub mod rope;
+
+use crate::mamba3::rotation::rope::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -135,7 +139,7 @@ use burn::prelude::*;
 ///   `rope_fraction` has no `0.0` setting.
 /// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
 ///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
-///   [`apply_rope`](crate::modules::misc::rope::apply_rope). The default; behaviourally unchanged.
+///   [`apply_rope`](crate::mamba3::rotation::rope::apply_rope). The default; behaviourally unchanged.
 /// - [`Quaternion4D`](RotationKind::Quaternion4D) — the non-abelian
 ///   `SU(2) ⊂ SO(4)` quaternion rotation of this module: cumulative *product*
 ///   via [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
@@ -388,12 +392,12 @@ impl RotationState {
         }
     }
 
-    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on the held tensor.
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on the held tensor.
     pub fn sanity(&self) {
         match self {
             RotationState::Real(_) => {}
-            RotationState::Angle(a) => crate::modules::sanity(a),
-            RotationState::Quaternion(q) | RotationState::Rotor(q) => crate::modules::sanity(q),
+            RotationState::Angle(a) => burn_stack::modules::sanity(a),
+            RotationState::Quaternion(q) | RotationState::Rotor(q) => burn_stack::modules::sanity(q),
         }
     }
 }
@@ -471,7 +475,7 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     // underflow below the min-normal (~6.1e-5) and silently no-op, so we floor
     // the squared quantity at `div_eps` itself, which sits above each format's
     // denormal floor by construction.
-    let eps = crate::utils::div_eps(q.dtype());
+    let eps = burn_stack::utils::div_eps(q.dtype());
     let norm = (q.clone() * q.clone()).sum_dim(n).clamp_min(eps).sqrt();
     q / norm
 }
@@ -486,7 +490,7 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// The overflow does not announce itself — `∞` divides back to `0`, so a very
 /// large generator would silently produce *no* rotation, the exact opposite of
 /// the intended "turn as far as the bound allows". Same trick, same reason, as
-/// [`RmsNorm`](crate::modules::RmsNorm)'s fp16 path.
+/// [`RmsNorm`](burn_stack::modules::RmsNorm)'s fp16 path.
 ///
 /// The sum of squares is floored by `div_eps` before the `sqrt`, so a zero
 /// vector lands in `clamp_min`'s flat region and backprops to a finite `0`
@@ -497,7 +501,7 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 /// - out  : `[..., 1]`
 pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    let eps = crate::utils::div_eps(t.dtype());
+    let eps = burn_stack::utils::div_eps(t.dtype());
     // Detached: the rescaling is a numerical device, not part of the function
     // being differentiated (`d‖t‖/dt = t̂` either way).
     let scale = t.clone().abs().max_dim(n).detach() + eps; // [..., 1]

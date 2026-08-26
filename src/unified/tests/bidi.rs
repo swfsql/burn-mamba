@@ -3,9 +3,9 @@
 //! forward determinism. MultiGate-on-bidi wiring is covered by the
 //! `multi_gate` tests.
 
-use crate::modules::ResidualsConfig;
-use crate::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfig};
-use crate::utils::BidiSchedule;
+use burn_stack::modules::ResidualsConfig;
+use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfig};
+use burn_stack::utils::BidiSchedule;
 use burn::prelude::*;
 use burn::tensor::Distribution;
 
@@ -37,7 +37,7 @@ fn virtual_layers_share_per_real_pair_merge() {
     let layers = BidiLayersBuilder {
         n_real_layers: n_real,
         n_virtual_layers: Some((n_virtual, BidiSchedule::StridedCyclic)),
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         // CatLinear (weight-bearing) is what surfaces the indexing bug.
@@ -83,7 +83,7 @@ fn virtual_layers_share_per_real_pair_merge() {
 #[test]
 fn virtual_forward_is_deterministic() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
 
     let device = Device::default();
     let d_model = 16;
@@ -96,7 +96,7 @@ fn virtual_forward_is_deterministic() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: Some((6, BidiSchedule::StridedStretched)),
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),

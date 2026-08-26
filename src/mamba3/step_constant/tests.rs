@@ -1,7 +1,7 @@
 use super::*;
-use crate::modules::LayersBuilder;
-use crate::modules::network::LatentNetworkBuilder;
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::modules::LayersBuilder;
+use burn_stack::modules::network::LatentNetworkBuilder;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
 
 type Device = burn::prelude::Device;

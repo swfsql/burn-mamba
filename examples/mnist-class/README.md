@@ -48,7 +48,7 @@ every parameter the plan does not claim keeps its AdamW state. The flag is
 recorded in `<artifacts>/training_config.json`, so a resumed run keeps it — and a
 persisted config wins over the flag on reload.
 
-Which weights move (see `burn_mamba::optim`, and the `muon_plan()` on the model
+Which weights move (see `burn_stack::optim`, and the `muon_plan()` on the model
 config): the block `out_proj`, and the Muon-owned segments of the fused
 `in_proj` — `z`, `x`, `B`, `C` and the rotation channels. The per-head Δ/`A`/`λ`
 channels of the same tensor stay on AdamW, as do every 1-D/3-D parameter, the

@@ -1,11 +1,16 @@
 //! Smoke / parity tests for the family-generic abstraction in
-//! [`crate::modules`] — builder wiring, the unifying enums, and the
+//! [`burn_stack::modules`] — builder wiring, the unifying enums, and the
 //! class-token / class-latent insertion + step-injection machinery.
 
-use super::*;
-use crate::modules::*;
-use crate::modules::{bidi::*, network::*};
 use crate::prelude::*;
+use crate::unified::{bidi::*, network::*};
+use burn::prelude::*;
+use burn_stack::modules::*;
+use burn::module::Param;
+use burn_stack::utils::class::{
+    class_chunk_plan, class_marker_output_indices, class_prime_plan, init_class_emb,
+};
+use burn_stack::utils::{ClassCursor, ClassCursors};
 
 #[cfg(feature = "mamba2")]
 #[test]
@@ -59,7 +64,7 @@ fn unified_net_config_mamba2() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     }
     .init(&device);
@@ -109,7 +114,7 @@ fn unified_net_config_mamba3() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     }
     .init(&device);
@@ -142,7 +147,7 @@ fn unified_net_config_mamba1() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     }
     .init(&device);
@@ -174,12 +179,12 @@ fn bidi_layers_mamba2() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -205,12 +210,12 @@ fn bidi_layers_mamba3() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -232,12 +237,12 @@ fn bidi_layers_mamba1() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, (), None);
@@ -264,7 +269,7 @@ fn unified_bidi_config_mamba2() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -292,12 +297,12 @@ fn bidi_forward_is_deterministic_mamba2() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: true,
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -319,12 +324,12 @@ fn bidi_forward_is_deterministic_mamba1() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: true,
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -352,12 +357,12 @@ fn bidi_forward_is_deterministic_mamba3() {
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: true,
         ignore_last_residual: true,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 
@@ -377,7 +382,7 @@ fn bidi_forward_is_deterministic_mamba3() {
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 fn assert_bidi_deterministic(y1: Tensor<3>, y2: Tensor<3>) {
     assert!(
-        crate::utils::test_helpers::max_abs_diff(y1, y2) < 1e-6,
+        burn_stack::utils::test_helpers::max_abs_diff(y1, y2) < 1e-6,
         "two identical bidi forward passes diverged (weights resampled per call?)"
     );
 }
@@ -480,7 +485,7 @@ fn class_latents_step_panics() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_step_matches_forward() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let device = Device::default();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -531,7 +536,7 @@ fn class_latents_step_matches_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn per_layer_class_latents_step_matches_forward() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -624,7 +629,7 @@ fn per_layer_class_latents_step_matches_forward() {
             state,
             x.val().grad(&grads).expect("input grad"),
             layers.real_layers[0]
-                .mamba_block
+                .block
                 .in_proj
                 .weight
                 .val()
@@ -755,7 +760,7 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_emits_the_class_markers_a_step_would_drop() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -857,7 +862,7 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -926,7 +931,7 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn prime_runs_a_per_layer_latent_mamba3() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -979,7 +984,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_on_a_network_covers_every_class_level() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1049,7 +1054,7 @@ fn prime_on_a_network_covers_every_class_level() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn layer_prime_returns_the_latent_and_its_delta() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1139,7 +1144,7 @@ fn prime_through_the_runtime_enums() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     }
     .init(&device);
@@ -1264,7 +1269,7 @@ fn class_chunk_plan_splits_a_sequence() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_split_forward_matches_single_forward() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1346,7 +1351,7 @@ fn class_markers_split_forward_matches_single_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_step_matches_forward_with_full_len() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1408,7 +1413,7 @@ fn class_markers_step_matches_forward_with_full_len() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_split_forward_matches_single_forward() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1490,7 +1495,7 @@ fn class_markers_without_full_len_panic_in_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_forward_then_step() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1554,7 +1559,7 @@ fn class_markers_forward_then_step() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_step_matches_forward_with_full_len() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1613,7 +1618,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn end_closes_the_sequence_custom_never_does() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();
@@ -1736,7 +1741,7 @@ fn end_closes_the_sequence_custom_never_does() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn step_output_and_state_follow_the_last_emitted_token() {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
     let device = Device::default();

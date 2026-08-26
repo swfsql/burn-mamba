@@ -6,7 +6,7 @@
 
 use super::quat_cumprod_recalculated;
 use crate::mamba3::rotation::{quat_cumprod, quat_normalize};
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::prelude::*;
 use burn::tensor::Distribution;

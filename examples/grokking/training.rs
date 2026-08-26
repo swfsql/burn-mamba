@@ -12,9 +12,9 @@ use crate::diagnostics::{self, StatePr, WeightPr};
 use burn::module::AutodiffModule;
 use burn::optim::{AdamWConfig, GradientsParams};
 use burn::prelude::*;
-use burn_mamba::modules::loss::cross_entropy::CrossEntropyLossConfig;
+use burn_stack::modules::loss::cross_entropy::CrossEntropyLossConfig;
 use burn_mamba::prelude::*;
-pub use burn_mamba::utils::scheduler::{ConstantLr, Lr};
+pub use burn_stack::utils::scheduler::{ConstantLr, Lr};
 
 /// Grokking hyperparameters: optimizer + task/split + schedule knobs.
 ///

@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 
 [features]
@@ -8,45 +8,48 @@ default = ["mamba1", "mamba2", "mamba3", "autodiff", "optim", "backend-flex"]
 mamba1 = []
 mamba2 = ["autodiff"]
 mamba3 = ["autodiff"]
-autodiff = ["burn/autodiff"]
+autodiff = ["burn/autodiff", "burn-stack/autodiff"]
 # Optimizer support (`crate::optim`): Muon parameter groups over the fused
 # projections. Pulls `burn-optim` (which implies `burn/autodiff`).
-optim = ["burn/optim", "burn/std", "autodiff"]
-cubecl = ["dep:burn-cubecl", "burn/cubecl"]
-fusion = ["burn/fusion", "dep:burn-fusion"]
-check-inf = []
-check-nan = []
+optim = ["burn/optim", "burn/std", "autodiff", "burn-stack/optim"]
+cubecl = ["dep:burn-cubecl", "burn/cubecl", "burn-stack/cubecl"]
+fusion = ["burn/fusion", "dep:burn-fusion", "burn-stack/fusion"]
+check-inf = ["burn-stack/check-inf"]
+check-nan = ["burn-stack/check-nan"]
 # Backend selection. With the Dispatch architecture each feature simply enables
 # the corresponding burn backend; multiple may be compiled in simultaneously.
 # At runtime the examples (and tests) use `Device::default()`, which resolves to
 # an enabled backend (honouring the `BURN_DEVICE` env override). Each backend
 # also turns on the internal `_dev-test` marker so the tensor test suite compiles
 # under whichever backend is present.
-backend-ndarray = ["burn/ndarray", "_dev-test"]
-backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate"]
-backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib"]
-backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas"]
-backend-flex = ["burn/flex", "_dev-test"]
-backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon"]
-backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-test"]
-backend-tch-cpu = ["burn/tch", "burn/std", "_dev-test"]
-backend-tch-gpu = ["burn/tch", "burn/std", "_dev-test"]
-backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-test"]
-backend-webgpu = ["burn/webgpu", "burn/std", "cubecl", "_dev-test"]
-backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-test"]
-backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-test"]
-backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-test"]
-backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-test"]
-backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-test"]
+backend-ndarray = ["burn/ndarray", "_dev-test", "burn-stack/backend-ndarray"]
+backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate", "burn-stack/backend-ndarray-blas-accelerate"]
+backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib", "burn-stack/backend-ndarray-blas-netlib"]
+backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas", "burn-stack/backend-ndarray-blas-openblas"]
+backend-flex = ["burn/flex", "_dev-test", "burn-stack/backend-flex"]
+backend-flex-rayon = ["backend-flex", "dep:burn-flex", "burn-flex?/rayon", "burn-stack/backend-flex-rayon"]
+backend-cpu = ["burn/cpu", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-cpu"]
+backend-tch-cpu = ["burn/tch", "burn/std", "_dev-test", "burn-stack/backend-tch-cpu"]
+backend-tch-gpu = ["burn/tch", "burn/std", "_dev-test", "burn-stack/backend-tch-gpu"]
+backend-wgpu = ["burn/wgpu", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-wgpu"]
+backend-webgpu = ["burn/webgpu", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-webgpu"]
+backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-metal"]
+backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-vulkan"]
+backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-cuda"]
+backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-rocm"]
+backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-remote"]
 # misc features for tests or examples
 # `_dev-test` (internal): enabled by every `backend-*` so the tensor test suite
 # compiles whenever a backend is present. Not meant to be enabled directly.
-_dev-test = []
+_dev-test = ["burn-stack/_dev-test"]
 dev-f16 = []
-dev-simd = ["burn/simd", "burn/std"]
-dev-autotune = ["burn/autotune"]
+dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
+dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
+# The block-generic composition layer (layers/networks/bidi/class tokens/Muon
+# plan). Path-local: the two crates are developed together.
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "456223da2567cb05f23a711a3e4ce27850e9a876", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 # burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
 burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1c70d286e4de89f852308d56b3270ea", default-features = false, optional = true }
@@ -65,6 +68,7 @@ burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "456223da2567cb05f23a711a3e4ce27850e9a876", default-features = false, features = ["test-helpers"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 num-traits = "0.2.19"
 rand = "0.9.2"

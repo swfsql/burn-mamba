@@ -156,7 +156,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
-    let block = &mut layer.mamba_block;
+    let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(4) | x(4) | B_raw(4) | C_raw(4) | Δ(4) | A(4) | λ(4) | ϑ(2 or 3)].

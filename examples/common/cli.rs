@@ -224,7 +224,7 @@ impl AppArgs {
 
     /// Load optimizer state from the artifacts directory into `optim`, if
     /// present. `optim` must already carry the parameter groups the state was
-    /// saved with (see [`burn_mamba::optim::MuonPlan`]).
+    /// saved with (see [`burn_stack::optim::MuonPlan`]).
     pub fn load_optim(&self, optim: ModuleOptimizer) -> Option<ModuleOptimizer> {
         load_optim(&self.artifacts_path, optim)
     }

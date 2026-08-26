@@ -4,7 +4,7 @@
 
 use crate::dataset::VOCAB_SIZE;
 use burn_mamba::prelude::{Mamba3Config, MambaVocabNetConfig, ResidualsConfig, RotationKind};
-use burn_mamba::utils::Schedule;
+use burn_stack::utils::Schedule;
 
 /// Depth of the (virtual) layer stack: the 2 real weight sets applied four times.
 ///

@@ -7,7 +7,7 @@
 //!
 //! This example carries one downstream flag, `--muon`, forwarded after the
 //! trailing `--`: it moves the block's hidden weight matrices from AdamW to
-//! [Muon](burn_mamba::optim) for a fresh training config (the fused `in_proj` is
+//! [Muon](burn_stack::optim) for a fresh training config (the fused `in_proj` is
 //! split per sub-projection first). The choice is written into the artifacts'
 //! `training_config.json`, so resuming a run keeps it.
 //!

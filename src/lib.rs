@@ -23,9 +23,13 @@
 //! - [`mamba3`] — SSD extended with trapezoidal discretisation, a complex-valued
 //!   state transition (data-dependent RoPE on B/C), and MIMO rank expansion.
 //!
-//! Shared infrastructure lives in [`modules`] (the family-generic layer/network
-//! composition, plus activations, norms and losses) and [`utils`] (virtual-layer
-//! scheduling, class tokens, and the custom-backward plumbing).
+//! Everything *around* the block — the Pre-LN [`Layer`](burn_stack::modules::Layer),
+//! the (virtual-)layer [`Layers`](burn_stack::modules::Layers) stack,
+//! bidirectional pairs, latent/vocab networks, multi-gate residuals, class
+//! tokens, LR/virtual-layer scheduling and the Muon parameter groups — lives in
+//! the block-agnostic [`burn_stack`] crate. This crate supplies the three
+//! [`Block`](burn_stack::modules::Block) implementations and, in [`unified`],
+//! the runtime-selectable enums that pick a family at run time.
 //!
 //! ## Two execution modes
 //!
@@ -63,47 +67,20 @@ pub mod prelude {
     #[cfg(feature = "mamba3")]
     pub use crate::mamba3::{self, prelude::*};
 
-    // The family-generic, runtime-selectable unified API.
+    // The runtime-selectable unified API (this crate).
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-    pub use crate::modules::{
-        Layers, MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
-        MambaVocabNet, MambaVocabNetConfig, MultiGateResidualConfig, ResidualsConfig,
+    pub use crate::unified::{
+        MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
+        MambaVocabNet, MambaVocabNetConfig,
     };
+    pub use crate::unified::{MambaCaches, MambaSsdPath};
 
-    pub use crate::modules::{
-        CacheStack, Layer, MambaBlock, MambaBlockConfig, MambaCaches, MambaSsdPath,
-    };
-    pub use crate::utils::{ClassLatent, ClassToken};
-
-    #[cfg(feature = "optim")]
-    pub use crate::optim::{MuonPlan, ProjSegment, ProjSpec, muon_config};
+    // The block-generic composition layer (`burn-stack`).
+    pub use burn_stack::prelude::*;
 }
 
-/// Family-generic composition (`Layer`/`Layers`/networks/bidi/caches) plus the
-/// shared neural modules (activations, norms, losses, tensor helpers).
-pub mod modules;
-/// Muon parameter groups over the fused projections (which weights the
-/// optimizer may own, and where they split).
-#[cfg(feature = "optim")]
-pub mod optim;
-/// Virtual-layer/LR scheduling, class tokens, and custom-backward plumbing.
-pub mod utils;
+pub mod unified;
 
-/// When `true`, [`modules::sanity`] panics if it observes a `NaN`.
-///
-/// Compiled-in guard (off by default) for debugging numerical issues; leaving
-/// it `false` removes the check entirely.
-#[cfg(feature = "check-nan")]
-pub const DENY_NAN: bool = true;
-/// When `true`, [`modules::sanity`] panics if it observes a `NaN`.
-#[cfg(not(feature = "check-nan"))]
-pub const DENY_NAN: bool = false;
-
-/// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
-///
-/// Compiled-in guard (off by default), companion to [`DENY_NAN`].
-#[cfg(feature = "check-inf")]
-pub const DENY_INF: bool = true;
-/// When `true`, [`modules::sanity`] panics if it observes an `Inf`.
-#[cfg(not(feature = "check-inf"))]
-pub const DENY_INF: bool = false;
+/// Re-export of the block-generic composition crate this one builds on, so a
+/// dependent can reach `Layer`/`Layers`/networks without naming it separately.
+pub use burn_stack;

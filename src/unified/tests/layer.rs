@@ -1,7 +1,7 @@
 //! Tests for the optional feed-forward sub-block on [`Layer`].
 //!
 //! The load-bearing claim is that [`Layer`] returning its *total delta*, plus the
-//! single outer add in [`Layers`](crate::modules::Layers), reproduces the two
+//! single outer add in [`Layers`](burn_stack::modules::Layers), reproduces the two
 //! separate residuals of the reference `mamba_ssm` `Block`:
 //!
 //! ```text
@@ -12,9 +12,10 @@
 //! Nothing about that is visible in the shapes, so it needs an explicit
 //! reference computation to pin it down.
 
-use super::*;
-use crate::modules::{GatedMlpConfig, LayersBuilder, RmsNormConfig};
-use crate::utils::test_helpers::max_abs_diff;
+use crate::prelude::*;
+use burn::prelude::*;
+use burn_stack::modules::{GatedMlpConfig, LayersBuilder, RmsNormConfig};
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
 
 type Device = burn::prelude::Device;
@@ -58,7 +59,7 @@ fn layer_with_mlp_matches_the_two_residual_reference() {
     let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
 
     // The reference block, spelled out.
-    let (h1, _c) = layer.mamba_block.block_forward(
+    let (h1, _c) = layer.block.block_forward(
         layer.norm.forward(x.clone()),
         None,
         Mamba3SsdPath::default(),
@@ -125,7 +126,7 @@ fn mixer_only_layer_is_unchanged() {
     );
     let (got, _caches) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
 
-    let (h1, _c) = layer.mamba_block.block_forward(
+    let (h1, _c) = layer.block.block_forward(
         layer.norm.forward(x.clone()),
         None,
         Mamba3SsdPath::default(),

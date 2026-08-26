@@ -257,7 +257,7 @@ fn run_minimal_matches_serial(
     );
 
     // ── Forward agreement ────────────────────────────────────────────
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let tol = 1e-4f32;
     let dy_ser = max_abs_diff(r_min.y.clone(), r_ser.y.clone());
     let ds_ser = max_abs_diff(r_min.state.clone(), r_ser.state.clone());
@@ -284,7 +284,7 @@ fn run_minimal_matches_serial(
     // Looser tolerance: every path computes the same mathematical
     // gradients, but the chunkwise reformulations accumulate the
     // summations in different orders, so small drift is expected.
-    crate::check_grads_match_two_paths!(
+    burn_stack::check_grads_match_two_paths!(
         baseline: r_min,
         alt1: ("Serial", r_ser),
         alt2: ("SerialRecalculated", r_rec),

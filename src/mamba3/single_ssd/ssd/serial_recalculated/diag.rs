@@ -17,7 +17,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::utils::fprim::F;
+use burn_stack::utils::fprim::F;
 use burn::backend::Backend;
 
 /// Gradients produced by [`y_diag_correction_backward`] — the `y_diag` term's

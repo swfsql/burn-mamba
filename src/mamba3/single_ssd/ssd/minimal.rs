@@ -56,7 +56,7 @@
 
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
-use crate::modules::segsum;
+use burn_stack::modules::segsum;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {

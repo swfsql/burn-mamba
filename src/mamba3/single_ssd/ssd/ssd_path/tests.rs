@@ -173,7 +173,7 @@ fn run_path(
 }
 
 fn assert_path_runs_agree(label: &str, a: &PathRun, b: &PathRun, val_tol: f32, grad_tol: f32) {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check_inner {
         ($field:ident, $name:expr, $tol:expr) => {{

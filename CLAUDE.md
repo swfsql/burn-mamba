@@ -12,11 +12,19 @@ The goal is a **minimal, readable reference** that ports the official CUDA/Trito
 kernels down to standard, portable Burn tensor ops — **no custom kernels**, so the
 same code runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 
+Everything *around* the block — layers, (virtual-)layer stacks, bidirectional
+pairs, latent/vocab networks, multi-gate residuals, class tokens, schedules, the
+Muon plan — lives in **[`burn-stack`](../burn-stack)** (`../burn-stack/CLAUDE.md`),
+which is block-agnostic by construction. This crate supplies the three `Block`
+implementations plus the runtime-selectable `Mamba*` enums in `src/unified/`.
+**Never push anything mamba-specific into `burn-stack`** — a name, a shape
+assumption, or a doc reference. If it needs one, it belongs here.
+
 ## Build & Test Commands
 
 ```bash
 cargo check                 # type-check the lib surface
-cargo test --lib            # run tests (any backend; flex = CPU default)
+cargo test --lib --examples # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
 cargo run --example reset-majority -- --training --inference
 ./bench.sh                  # benchmarks — run by the user, never by you
@@ -31,6 +39,10 @@ cargo run --example reset-majority -- --training --inference
   `autodiff`, and `optim` (Muon parameter groups) implies `burn/optim`+`burn/std`.
   `cubecl`/`fusion` enable the memory-saving custom backward on those backend families.
   `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
+- Every feature above **forwards to `burn-stack`** (see `Cargo.toml`). It must: the
+  `backend-*` cfgs are evaluated where `burn_stack::impl_backend_ext_for_burn_backends!`
+  expands, i.e. in *this* crate. A backend added on one side and not the other
+  silently loses its `BackendExt` impls.
 
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
@@ -52,7 +64,8 @@ cargo run --example reset-majority -- --training --inference
 
 `../` contain external reference material (see [Extra References](#extra-references)).
 Every leaf module has a sibling `tests.rs` (forward/step parity, gradients,
-cross-variant agreement) — not listed individually.
+cross-variant agreement) — not listed individually. The composition layer is
+`../burn-stack/` and has its own File Map.
 
 ```text
 src/
@@ -74,52 +87,35 @@ src/
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
 │  ├─ rotation/      transition rotation (Real1D | Complex2D | Quaternion4D | Rotor4D)
+│  │                 + rope.rs (the mechanical pairwise rotation of the abelian path)
 │  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
 │  │                 per-step definition. Real1D = the trivial group: no in-proj
 │  │                 channels, no cache accumulator. Rotor4D = full SO(4), two-sided
 │  │                 q⊗v⊗p̄ (both factors stacked on one block axis ⇒ one scan)
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
-├─ modules/          family-generic composition + shared NN modules
-│  ├─ mod.rs         MambaBlock / MambaBlockConfig traits; MambaSsdPath enum
-│  ├─ layer.rs       Layer<M>: Pre-LN block M(RMSNorm(·)) + optional norm2/mlp; returns
-│  │                 the layer's total delta, outer residual added by Layers
-│  ├─ mlp.rs         GatedMlp: SwiGLU feed-forward interleaved with the mixer
-│  ├─ layers.rs      Layers<M>: virtual-layer stack over real weight sets;
-│  │                 grad_horizon truncates BPTT to the top K (forward/step/prime)
-│  ├─ multi_gate.rs  Multi-Gate Residuals (Standard|MultiGate): accumulate then mix
-│  ├─ network.rs     LatentNetwork (optional final norm) / VocabNetwork +
-│  │                 MambaLatentNet / MambaVocabNet enums
-│  ├─ bidi.rs        BidiLayers<M> + OutputMerge + MambaBidiLayers enum
-│  ├─ cache.rs       CacheStack trait (+ per-slot inner/from_inner) + MambaCaches
-│  ├─ activation/    silu, softplus, log_sigmoid (dtype-aware)
-│  ├─ norm/          rms_norm (also Mamba-3 QK-Norm), rms_norm_gated, rms_score
-│  ├─ loss/          bce, cross_entropy, mse
-│  └─ misc/          gqa, segsum, split, sanity, rope
-├─ optim/            Muon parameter groups (feature `optim`); allowlist, not denylist
-│  ├─ mod.rs         MuonPlan: specs → ModuleOptimizer (AdamW fallback + Muon groups)
-│  ├─ spec.rs        ProjSpec/ProjSegment: fused-weight column seams → ParamGroup
-│  ├─ segmented.rs   Segmented: one optimizer per column block of a fused weight
-│  └─ report.rs      MuonPlan::describe(&module): per-param optimizer assignment
-└─ utils/            lower-level plumbing
-   ├─ mod.rs         div_eps (per-dtype epsilon)
-   ├─ class/         ClassToken / ClassLatent placement (CLS-style registers) +
-   │                 ClassCursor(s): offsets + full-length hint, shared by
-   │                 forward/step/prime
-   ├─ schedule/      Schedule + BidiSchedule (virtual→real index mapping)
-   ├─ scheduler/     LR schedulers (cosine + warmup, constant) — example use
-   ├─ backend_macros.rs  per-backend BackendExt impls + autodiff marker traits
-   ├─ combined_grad.rs   flatten/unflatten (y, final_state) for custom backward
-   ├─ detach.rs          detach_params: cuts gradients, does NOT free memory
-   ├─ fprim.rs           F<B,D>: rank-tagged FloatTensor-primitive wrapper
-   └─ test_helpers.rs    max_abs_diff + grad-comparison macros
+└─ unified/          the runtime-selectable API + where the families plug in
+   ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
+   │                 not stacked matrices" argument (MIMO diagonals)
+   ├─ cache.rs       MambaCaches enum + impl Block / BlockConfig / CacheStack
+   │                 for Mamba{1,2,3}(Config|Caches)
+   ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs)
+   ├─ bidi.rs        MambaBidiLayers (+ Config)
+   └─ tests/         the burn-stack containers exercised through real blocks:
+                     layer, layers (grad_horizon), multi_gate, bidi, class, optim
+```
+
+The generic containers themselves (`Layer`/`Layers`/networks/bidi/multi_gate/
+class tokens/schedules/norms/losses/Muon) are `burn-stack`; see its File Map.
+
+```text
 benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
 bench.sh             runs them per backend, writes bench.md
 kernels.sh           counts kernel launches per case, writes kernels.md
 ```
 
-`files.md` is the per-file signature reference (what each important file defines +
-the non-obvious decisions). The detailed per-family math lives in the `mamba2.rs` /
+`files.md` is the per-file signature reference for **this** crate (what each
+important file defines + the non-obvious decisions). The detailed per-family math lives in the `mamba2.rs` /
 `mamba3.rs` module headers. Always consider starting-off searching from `files.md`.
 
 ---
@@ -128,16 +124,21 @@ the non-obvious decisions). The detailed per-family math lives in the `mamba2.rs
 
 ### Layer → Network hierarchy (all families)
 
-All three families share **one** set of generic composition types in `src/modules/`,
-parameterised by the SSM core block `M` (`Mamba1`/`Mamba2`/`Mamba3`):
+All three families share **one** set of generic composition types, which live in
+`burn-stack` and are parameterised by the SSM core block `M`
+(`Mamba1`/`Mamba2`/`Mamba3`):
 
 ```text
 VocabNetwork<M>   embedding → Layers<M> → final RMSNorm → LM head → logits
 LatentNetwork<M>  in_proj → Layers<M> → [norm_f] → out_proj (continuous I/O)
 Layers<M>         a stack of N (virtual) layers over R real weight sets
 Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
-M (Block)         the SSM core (mamba1.rs / mamba2.rs / mamba3.rs)
+M (Block)         the SSM core (mamba1.rs / mamba2.rs / mamba3.rs) — this crate
 ```
+
+A family joins the stack by implementing `burn_stack::modules::{Block,
+BlockConfig}` and `CacheStack` on its `Caches` (all three impls live in
+`src/unified/cache.rs`). `Block::Options` is the per-call SSD-path selector.
 
 `VocabNetwork`'s LM head is tied to the embeddingᵀ (`missing_lm_head`) or a separate
 `Linear`. Runtime-dispatch enums `MambaVocabNet` / `MambaLatentNet` /
@@ -285,54 +286,13 @@ adjoint `SO(3)` (`p=q`), where `±q` act identically — the difference between 
 group and tracking its double cover. `SO(4)` is the ceiling for `k=4`; `k=8` would break
 the scan (octonions are non-associative).
 
-### Virtual layers, bidirectional, class tokens
+### Virtual layers, bidirectional, class tokens, multi-gate
 
-- **Virtual layers** (`utils/schedule/`): `Layers<M>` runs `n_virtual_layers` logical
-  passes over `n_real_layers` weight sets, each virtual layer keeping its own cache.
-  `Schedule` maps virtual→real (`Cyclic`/`Stretched`/`Custom`); `BidiSchedule` pairs
-  forward/backward layers. `grad_horizon: Some(K)` back-propagates only the top `K`
-  of them (truncated BPTT for deep recursion), the rest running on the inner
-  backend; `forward`/`step`/`prime` cut on the same layers, and a shared weight
-  collects the gradient of its tracked applications alone. The stack **input** is
-  re-attached *straight-through* at the boundary (a value-zero term restoring an
-  identity gradient path) — it enters only at the bottom, so a cut would otherwise
-  leave a network's `in_proj`/embedding untrained; TRM/HRM avoid this by
-  re-injecting the input every recursion, which this stack does not. Under
-  `MultiGate` the carry reaches every stream, not just the pooled token — that is
-  where the residual lives, and under a carry-biased gate init it holds most of
-  the input's gradient. Class
-  embeddings train at every level and on both sides of the cut (a per-layer latent
-  below it gets a tracked zero-valued *ghost* row in the carry) — they are
-  learnable input rows, not part of a layer's transform.
-- **Bidirectional** (`modules/bidi.rs`): `BidiLayerPair<M>` runs a straight (→) and a
-  reversed (← via `flip`) pass merged by `OutputMerge` (`Mean`|`CatLinear`);
-  `BidiLayers<M>` stacks pairs. Generic over `M` → serves all families.
-- **Class tokens/latents** (`utils/class/`): learnable `[CLS]`-style embeddings spliced
-  into the sequence. `ClassToken` on a *network*, `ClassLatent` on a *layer container*.
-  `Start`(0)/`Middle`(`L/2`)/`Custom(k)` are emitted **before** the original token at that
-  index — uniformly, so a `Custom(k ≥ L)` never lands (unless the caller streams past `L`,
-  and even then it precedes the next token); `End` alone **closes** the sequence, trailing
-  its last token. Placement is streamed and identical for both calls: each takes an
-  optional `&mut ClassCursors` (one `full_len` hint + one cursor per level:
-  `network`/`stack`/`per_layer`), so a sequence splits into any number of `forward` chunks
-  and/or `step`s without moving a marker. A cursor past a marker skips it (`Start` fires
-  once); `Middle`/`End` panic without the hint. `step` returns the **last** token it
-  emitted (and the state after it) — the user token, unless an `End` follows it; `prime`
-  takes no user token at all and emits the markers preceding the next one, returning the
-  last of them (`End` is never primed — it closes the sequence, so the `step`/`forward`
-  carrying the last user token is what hands it back). `None` keeps the defaults:
-  `forward` = this call is the whole sequence, `step`/`prime` = no injection.
-  Read markers back via `class_*_output_indices` (minus the level's pre-call cursor for a
-  chunk; a non-landing marker reports a position past the output).
-- **Multi-Gate Residuals** (`modules/multi_gate.rs`): `Layers<M>.residuals` picks plain
-  additive (`Standard`) vs `MultiGate` — up to `n_stream` streams gated/attention-pooled
-  between layers instead of one additive skip. The input is stream 1 and the first
-  `n_stream−1` layers **append** their output as a new one; only then does gated mixing
-  start (seeding `n` copies is a symmetry that never breaks). Being a convex mean-pool, it
-  leaves an `O(1)` output where the additive skip grows with depth, so a latent head wants
-  `final_norm`. Class markers ride along at every level: one is spliced into the token
-  sequence **and** into all `k` streams, which the aggregator then reproduces exactly.
-  See the module header.
+All four are `burn-stack` features and documented in `../burn-stack/CLAUDE.md`.
+What matters here: they are family-agnostic, every one of them is exercised
+against real blocks by `src/unified/tests/`, and the runtime enums
+(`MambaLatentNet` / `MambaBidiLayers`) wrap the generic containers rather than
+reimplementing them.
 
 ---
 
@@ -345,15 +305,11 @@ the scan (octonions are non-associative).
   (`Mamba2`, `Mamba2Cache`, … carry no `<B>`). The backend is a runtime `Device`;
   autodiff and dtype are device properties. Only the custom-backward internals stay
   generic over `B` (`F<B,D>`, the `Backward<B,_>` nodes, `Autodiff<B>` ext impls).
-- **A no-grad region means the inner backend, not `detach`** — Burn registers untracked
-  ops in the graph anyway, so detaching cuts gradients while **retaining every
-  activation** (measured: 3144 MB vs 208 MB at 64 virtual layers; see
-  `utils/detach.rs`). `grad_horizon` runs its prefix on `AutodiffModule::valid(self)`.
-  Three consequences: `.inner()`/`.valid()` **panic** off autodiff (unlike `detach`, a
-  no-op there), so the `is_autodiff` guard is load-bearing; caches convert by hand
-  (`Module::map` is a no-op on plain `Tensor` fields, all a cache holds); and
-  `is_require_grad` only reports `Requirement::Grad` leaves, so tests assert gradient
-  *reachability*.
+- **A no-grad region means the inner backend, not `detach`** (`burn-stack`, see
+  its `utils/detach.rs`). The consequence *here* is that each family's `Caches`
+  must implement `CacheStack::cache_to_inner`/`cache_from_inner` **by hand**:
+  `Module::map` is a no-op on plain `Tensor` fields, which is all a cache holds,
+  so a `Module`-based conversion would silently skip every one of them.
 - **Two Mamba-3 SSD pathways** — cache type selects double-ssd (simple) vs single-ssd
   (~½ memory); accumulators coincide at boundaries so caches inter-convert.
 - **SISO is `mimo_rank = 1`, not a separate implementation** — the fused `L·M` axis is
@@ -367,21 +323,19 @@ the scan (octonions are non-associative).
   one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.
-- **Muon sees split projections, the model does not** — Burn's `Muon` orthogonalises a
-  whole 2-D weight, which is wrong for a fused `in_proj` (independent maps sharing one
-  allocation) and panics for rank ≠ 2. `crate::optim` therefore carries a per-family
-  **allowlist** of `ProjSpec`s (the same column widths the forward's `split_into` uses)
-  and `Segmented` steps each block with its own optimizer — so each sub-matrix is
-  orthogonalised and shape-LR-adjusted alone, while the forward keeps its single fused
-  GEMM. Per-head *scalar* channels (Δ/`A`/`λ`), every 1-D/3-D tensor, and the boundary
-  weights (embedding, LM head, network in/out projections, class-token tables) stay on
-  AdamW. Specs match as path substrings under the block-container field names, so one
-  plan covers plain, virtual-layer and bidirectional stacks — hand-written models too.
+- **Muon sees split projections, the model does not** — the machinery is
+  `burn_stack::optim`; what this crate owns is the **allowlist**, one
+  `muon_projections()` per family config, listing the same column widths the
+  forward's `split_into` uses. Per-head *scalar* channels (Δ/`A`/`λ`), every
+  1-D/3-D tensor, and the boundary weights stay on AdamW. Why the MIMO 3-D
+  tensors are diagonals and not stacked matrices is argued in the
+  `src/unified/mod.rs` header.
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
-  as you add it.
+  as you add it. `cargo doc --all --no-deps` must be warning-free too.
 - The project root is `/shared/claude/burn-mamba/`; do not read/write outside it.
 - When a source file is added/removed/changed, prepare an update to its entry for the
   [File Map](#file-map) and `files.md` (per the maintenance rules above).
+  A change to a composition type instead updates `../burn-stack/CLAUDE.md`.
   Important rule: this is reserved to the end of your workload, and if by then you
   haven't yet read those files, **do not** read them. Your context then is still big
   from the work and it is expensive to read big files then. Instead, just prepare a

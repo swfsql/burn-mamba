@@ -33,12 +33,12 @@ use crate::common::model::ModelConfigExt;
 use burn::module::Param;
 use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
-use burn_mamba::modules::bidi::OutputMergeConfig;
+use burn_stack::modules::bidi::OutputMergeConfig;
 use burn_mamba::prelude::{
     ClassLatent, Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath,
     RotationKind,
 };
-use burn_mamba::utils::BidiSchedule;
+use burn_stack::utils::BidiSchedule;
 
 /// How the decoder conditions its per-position queries on the latent `z`.
 ///
@@ -238,7 +238,7 @@ impl AeConfig {
             ignore_last_residual: true,
             outputs_merge: OutputMergeConfig::cat_linear(self.n_enc_layers),
             class_latents: self.enc_class_latents.clone(),
-            residuals: burn_mamba::modules::ResidualsConfig::Standard,
+            residuals: burn_stack::modules::ResidualsConfig::Standard,
         }
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
@@ -251,7 +251,7 @@ impl AeConfig {
             ignore_last_residual: true,
             outputs_merge: OutputMergeConfig::cat_linear(self.n_dec_layers),
             class_latents: Vec::new(),
-            residuals: burn_mamba::modules::ResidualsConfig::Standard,
+            residuals: burn_stack::modules::ResidualsConfig::Standard,
         }
         .init(device);
 
@@ -283,8 +283,8 @@ impl ModelConfigExt for AeConfig {
     /// encoder and the decoder (matched under `straight_block`/`reverse_block`),
     /// plus each pair's `CatLinear` merge. The patch/latent/FiLM projections at
     /// the model boundary stay on AdamW.
-    fn muon_plan(&self) -> burn_mamba::optim::MuonPlan {
-        use burn_mamba::optim::{MuonPlan, ProjSpec};
+    fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
+        use burn_stack::optim::{MuonPlan, ProjSpec};
         let mut specs = self.mamba_block.muon_projections();
         specs.push(ProjSpec::path_whole("CatLinear.weight", self.d_model));
         MuonPlan::new(specs)

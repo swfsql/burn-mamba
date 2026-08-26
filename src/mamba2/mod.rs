@@ -7,7 +7,7 @@
 //!
 //! - [`mamba2`](crate::mamba2::mamba2) — the SSD block.  The residual layer stack, the full language
 //!   model, and the bidirectional wrappers are the family-generic types in
-//!   [`crate::modules`] (`MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
+//!   [`burn_stack::modules`] (`MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
 //! - [`cache`](crate::mamba2::cache) — the conv-window + SSM-state carried between calls.
 //! - [`ssd`](crate::mamba2::ssd) — the pluggable chunkwise SSD algorithms (Minimal / Serial /
 //!   SerialRecalculated) and the backend extension trait.

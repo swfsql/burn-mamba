@@ -193,7 +193,7 @@ fn build(
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
-    let block = &mut layer.mamba_block;
+    let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     let rows = [

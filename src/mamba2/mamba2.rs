@@ -83,8 +83,8 @@
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
 use crate::mamba2::prelude::*;
-use crate::modules::sanity as san;
-use crate::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
+use burn_stack::modules::sanity as san;
+use burn_stack::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -362,10 +362,10 @@ impl Mamba2Config {
     /// `in_proj` is `[z | xbc | dt]`; `xbc` is split further into its own
     /// `x`/`B`/`C` maps (they only share the depthwise conv, not a linear map),
     /// and the per-head dt channels stay on AdamW. The conv weight is 3-D, so it
-    /// is never listed. See [`crate::optim`].
+    /// is never listed. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
-    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
-        use crate::optim::{ProjSegment as Seg, ProjSpec};
+    pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
+        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
         let d_inner = self.d_inner();
         let bc = self.ngroups * self.state_rank;
         vec![
@@ -596,7 +596,7 @@ impl Mamba2 {
             );
 
             let [z_gate_bsi, xbc_bsv, dt_raw_bsh] =
-                crate::modules::split_into(z_xbc_dt_bsd, [d_inner, conv_dim, nheads], 2);
+                burn_stack::modules::split_into(z_xbc_dt_bsd, [d_inner, conv_dim, nheads], 2);
             (z_gate_bsi, xbc_bsv, dt_raw_bsh)
         };
         assert_eq!([batch, sequence, d_inner], z_gate_bsi.dims());
@@ -661,7 +661,7 @@ impl Mamba2 {
         //
         // Note: in the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
-            let [x_bsi, b_bsGR, c_bsGR] = crate::modules::split_into(
+            let [x_bsi, b_bsGR, c_bsGR] = burn_stack::modules::split_into(
                 xbc_bsv,
                 [d_inner, ngroups * state_rank, ngroups * state_rank],
                 2,
@@ -730,8 +730,8 @@ impl Mamba2 {
 
         // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
         // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
-        let b_bnlhr = crate::modules::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
-        let c_bnlhr = crate::modules::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
+        let b_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
+        let c_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
 
         // ── Step 6: Selective Scan ────────────────────────────────────────────
         let ssd_input = crate::mamba2::ssd::Mamba2SsdInput {
@@ -852,7 +852,7 @@ mod step {
                 assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
 
                 let [z_gate_bi, xbc_bv, dt_raw_bh] =
-                    crate::modules::split_into(z_xbc_dt_bd, [d_inner, conv_dim, nheads], 1);
+                    burn_stack::modules::split_into(z_xbc_dt_bd, [d_inner, conv_dim, nheads], 1);
                 (z_gate_bi, xbc_bv, dt_raw_bh)
             };
             assert_eq!([batch, d_inner], z_gate_bi.dims());
@@ -905,7 +905,7 @@ mod step {
             // ── Split (x, B, C) ───────────────────────────────────────────────
             assert_eq!(d_inner, nheads * per_head_dim);
             let (x_bhp, b_bgr, c_bgr) = {
-                let [x_bi, b_bGR, c_bGR] = crate::modules::split_into(
+                let [x_bi, b_bGR, c_bGR] = burn_stack::modules::split_into(
                     xbc_bv,
                     [d_inner, ngroups * state_rank, ngroups * state_rank],
                     1,

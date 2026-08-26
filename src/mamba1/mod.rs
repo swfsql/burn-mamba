@@ -3,7 +3,7 @@
 //! The original selective state space model.  Mamba-1 runs a **sequential
 //! selective scan** (no SSD, no backend-extension trait).  See [`mamba1`](crate::mamba1::mamba1) for
 //! the block; the residual layer stack, the full language model, and the
-//! bidirectional wrappers are the family-generic types in [`crate::modules`]
+//! bidirectional wrappers are the family-generic types in [`burn_stack::modules`]
 //! (e.g. `MambaLatentNet` / `MambaVocabNet` / `MambaBidiLayers`).
 //!
 //! - [`mamba1`](crate::mamba1::mamba1) — the selective-SSM block.

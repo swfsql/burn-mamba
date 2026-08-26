@@ -38,7 +38,7 @@
 //! Numerics: the rotation angle is reduced mod `2π` with the value-exact
 //! [`wrap_angle`]; the geometric denominators satisfy
 //! `|1 − α e^{−iθ̂}|² ≥ (1 − α)²` and are floored by
-//! [`div_eps`](crate::utils::div_eps). When `α → 1` *and* `θ̂ → 0` the series
+//! [`div_eps`](burn_stack::utils::div_eps). When `α → 1` *and* `θ̂ → 0` the series
 //! value `(β+γ)/(1−α)` stays finite but loses fp32 precision once `1 − α` nears
 //! the epsilon floor — the same regime where the unrolled recurrence itself
 //! accumulates near-undamped terms.
@@ -50,9 +50,9 @@ use crate::mamba3::rotation::{
     angle_increment, generator_increment, quat_conj, quat_from_scaled_axis, quat_mul,
     rotate_state_rank_blocks, safe_norm, split_rotor,
 };
-use crate::modules::sanity as san;
-use crate::modules::wrap_angle;
-use crate::utils::div_eps;
+use burn_stack::modules::sanity as san;
+use crate::mamba3::rotation::rope::wrap_angle;
+use burn_stack::utils::div_eps;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------

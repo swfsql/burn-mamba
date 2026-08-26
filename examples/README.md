@@ -30,7 +30,7 @@ The overall model used throughout the examples is the lib-generic `MambaLatentNe
 `TrainingConfig`. `muon = None` (the default) is plain AdamW on every parameter.
 Setting `muon` moves the hidden weight matrices to
 [Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
-`muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_mamba::optim`): Muon
+`muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon
 only ever gets rank-2 hidden matrices, and each fused projection (`in_proj`,
 `fc1`, …) is split into its independent sub-projections first, so the
 orthogonalisation is per linear map rather than per allocation. The `mnist-class`

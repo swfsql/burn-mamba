@@ -8,7 +8,7 @@
 //! variant in its `model_config()`.
 
 use burn::prelude::*;
-use burn_mamba::optim::MuonPlan;
+use burn_stack::optim::MuonPlan;
 use burn_mamba::prelude::{
     MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
 };
@@ -21,7 +21,7 @@ pub trait ModelConfigExt: Config {
     /// Allocate and initialise the model on `device`.
     fn init(&self, device: &Device) -> Self::Model;
     /// Which of the model's weights Muon may own, and where the fused
-    /// projections split (see `burn_mamba::optim`). Consumed by
+    /// projections split (see `burn_stack::optim`). Consumed by
     /// [`OptimizerConfig::init`](crate::common::training::OptimizerConfig::init);
     /// irrelevant when the training config leaves `muon` unset.
     fn muon_plan(&self) -> MuonPlan;

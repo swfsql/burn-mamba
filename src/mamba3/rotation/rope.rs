@@ -1,6 +1,10 @@
-use burn::prelude::*;
+//! Rotary (RoPE) application helpers for the abelian rotation pathway.
+//!
+//! Purely mechanical: given per-pair cumulative angles, rotate the paired
+//! channels of B/C. See the [module header](crate::mamba3::rotation) for why
+//! these angles are a *state transition*, not a positional encoding.
 
-// TODO: move to mamba3/rotation/mod.rs
+use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
 // RoPE utility
@@ -19,7 +23,7 @@ use burn::prelude::*;
 /// The integer multiple `k` is `detach`ed, so it is a constant with respect to
 /// autodiff: `d/dx (x − k·2π) = 1`, i.e. the backward pass is identical to the
 /// un-wrapped angle. This mirrors the detached `max` rescaling in
-/// [`RmsNormGated`](crate::modules::norm::rms_norm_gated::RmsNormGated).
+/// [`RmsNormGated`](burn_stack::modules::norm::rms_norm_gated::RmsNormGated).
 pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     let two_pi = 2.0 * std::f32::consts::PI;
     let k = (angles.clone().detach() * (1.0f32 / two_pi)).round();

@@ -23,7 +23,7 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::{
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::{
     DiagGrads, y_diag_correction_backward,
 };
-use crate::utils::fprim::{F, san};
+use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
 use burn::tensor::s;
 

@@ -2,8 +2,11 @@
 //! point-wise depth construct, so the two must agree), the convex-mixture
 //! identity at initialisation, and that gradients reach every parameter.
 
-use super::*;
-use crate::utils::test_helpers::max_abs_diff;
+use crate::prelude::*;
+use burn::module::Param;
+use burn::prelude::*;
+use burn_stack::modules::multi_gate::MultiGateResidual;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
 
 type Device = burn::prelude::Device;
@@ -93,13 +96,13 @@ fn gradients_flow() {
 /// output and `Layers` adds the residual) must keep `forward == unrolled step`
 /// with both the first and last residuals suppressed, over virtual layers.
 ///
-/// [`Layer`]: crate::modules::Layer
+/// [`Layer`]: burn_stack::modules::Layer
 #[cfg(feature = "mamba2")]
 #[test]
 fn layers_standard_ignore_residuals_parity() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::Schedule;
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::Schedule;
 
     let device = Device::default();
     let d_model = 16;
@@ -146,7 +149,7 @@ fn layers_standard_ignore_residuals_parity() {
 #[test]
 fn layers_multi_gate_forward_step_parity() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
 
     let device = Device::default();
     let d_model = 16;
@@ -195,8 +198,8 @@ fn layers_multi_gate_forward_step_parity() {
 #[test]
 fn layers_multi_gate_virtual_forward_step_parity() {
     use crate::mamba3::prelude::{Mamba3Config, Mamba3SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::Schedule;
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::Schedule;
 
     let device = Device::default();
     let d_model = 16;
@@ -248,8 +251,8 @@ fn layers_multi_gate_virtual_forward_step_parity() {
 #[test]
 fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::Schedule;
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::Schedule;
 
     let device = Device::default();
     let d_model = 16;
@@ -272,7 +275,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
     let layers = builder.init(&device);
 
     // One MGR per virtual layer (5), not per real layer (2).
-    if let crate::modules::Residuals::MultiGate(mg) = &layers.residuals {
+    if let burn_stack::modules::Residuals::MultiGate(mg) = &layers.residuals {
         assert_eq!(
             mg.layers.len(),
             5,
@@ -314,9 +317,9 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
 #[test]
 fn bidi_multi_gate_forward_and_grads() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::ResidualsConfig;
-    use crate::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
-    use crate::modules::{Layer, Residuals};
+    use burn_stack::modules::ResidualsConfig;
+    use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
+    use burn_stack::modules::{Layer, Residuals};
 
     let device = Device::default().autodiff();
     let d_model = 16;
@@ -330,7 +333,7 @@ fn bidi_multi_gate_forward_and_grads() {
     let layers = BidiLayersBuilder {
         n_real_layers: n_real,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
@@ -424,8 +427,8 @@ fn accumulate_appends_a_stream() {
 #[test]
 fn layers_multi_gate_streams_are_distinct() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, Residuals, ResidualsConfig};
-    use crate::utils::Schedule;
+    use burn_stack::modules::{LayersBuilder, Residuals, ResidualsConfig};
+    use burn_stack::utils::Schedule;
 
     let device = Device::default();
     let (d_model, n_stream, n_virtual) = (16, 3, 5);
@@ -564,8 +567,8 @@ fn attn_pool_reproduces_a_row_present_in_every_stream() {
 #[test]
 fn layers_multi_gate_stack_class_latents_step_matches_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default();
     let d_model = 16;
@@ -620,9 +623,9 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
 #[test]
 fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, Residuals, ResidualsConfig};
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::modules::{LayersBuilder, Residuals, ResidualsConfig};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
     use burn::module::Param;
 
     let device = Device::default();
@@ -710,7 +713,7 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
             out_user.inner(),
             x.val().grad(&grads).expect("input grad"),
             layers.real_layers[0]
-                .mamba_block
+                .block
                 .in_proj
                 .weight
                 .val()
@@ -745,9 +748,9 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
 #[test]
 fn layers_multi_gate_class_latents_split_forward_matches_single() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default();
     let d_model = 16;
@@ -797,9 +800,9 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
 #[test]
 fn layers_multi_gate_prime_then_step_matches_step() {
     use crate::mamba2::prelude::Mamba2Config;
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default();
     let d_model = 16;
@@ -864,9 +867,9 @@ fn layers_multi_gate_prime_then_step_matches_step() {
 #[test]
 fn bidi_multi_gate_class_latents_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::ResidualsConfig;
-    use crate::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
-    use crate::utils::ClassLatent;
+    use burn_stack::modules::ResidualsConfig;
+    use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
+    use burn_stack::utils::ClassLatent;
 
     let device = Device::default();
     let d_model = 16;
@@ -880,7 +883,7 @@ fn bidi_multi_gate_class_latents_forward() {
     let layers = BidiLayersBuilder {
         n_real_layers: n_real,
         n_virtual_layers: None,
-        mamba_block: block,
+        block,
         ignore_first_residual: false,
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
@@ -909,16 +912,16 @@ fn bidi_multi_gate_class_latents_forward() {
 /// config surface a user actually reaches. `prime` then `step` must reproduce
 /// the single `forward`, marker for marker, and the final state with it.
 ///
-/// [`ClassToken`]: crate::utils::ClassToken
-/// [`ClassLatent`]: crate::utils::ClassLatent
+/// [`ClassToken`]: burn_stack::utils::ClassToken
+/// [`ClassLatent`]: burn_stack::utils::ClassLatent
 #[cfg(feature = "mamba2")]
 #[test]
 fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::network::LatentNetworkBuilder;
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent, ClassToken};
+    use burn_stack::modules::network::LatentNetworkBuilder;
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent, ClassToken};
 
     let device = Device::default();
     let d_model = 16;
@@ -995,14 +998,14 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
 /// tokens past [`Layer::step`]'s cursorless guard. Both schemes must match
 /// their own `forward`, MGR additionally threading the rows into its streams.
 ///
-/// [`Layer::step`]: crate::modules::Layer::step
+/// [`Layer::step`]: burn_stack::modules::Layer::step
 #[cfg(feature = "mamba2")]
 #[test]
 fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use crate::modules::{LayersBuilder, ResidualsConfig};
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default();
     let d_model = 16;

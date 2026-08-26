@@ -5,12 +5,12 @@
 //! its leaf inputs; backprop replays the serial kernels and the gradient math in
 //! [`super::combined_backward`](crate::mamba3::single_ssd::ssd::serial_recalculated::combined_backward), so the large intermediates are never retained.
 //! The two outputs (`y`, `final_state`) are flattened into one tracked tensor
-//! (via [`crate::utils::combined_grad`]) so one node covers both.
+//! (via [`burn_stack::utils::combined_grad`]) so one node covers both.
 
 #![allow(non_snake_case)]
 
 use crate::mamba3::single_ssd::ssd;
-use crate::utils::fprim::F;
+use burn_stack::utils::fprim::F;
 use burn::backend::autodiff::{
     Autodiff,
     checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
@@ -125,7 +125,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     F::<B, 4>::new(initial_state_bhpr).reshape(shape_initial_state_bhpr);
 
                 let (d_y_bnlmhp, d_final_state_bhpr) =
-                    crate::utils::combined_grad::unflatten_pair::<B, 6, 4>(
+                    burn_stack::utils::combined_grad::unflatten_pair::<B, 6, 4>(
                         d_combined,
                         flat_len_y_BNLMHP,
                         flat_len_final_state_BHPR,
@@ -223,7 +223,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     siso_specialization,
                 );
 
-                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
                     prim_y_bnlmhp,
                     prim_final_state_bhpr,
                 );
@@ -253,7 +253,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     prep.finish(state, prim_combined);
 
                 let (tracked_y_bnlmhp, tracked_final_state_bhpr) =
-                    crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 6, 4>(
+                    burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 6, 4>(
                         tracked_combined,
                         flat_len_y_BNLMHP,
                         flat_len_final_state_BHPR,
@@ -276,7 +276,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     siso_specialization,
                 );
 
-                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
                     prim_y_bnlmhp,
                     prim_final_state_bhpr,
                 );
@@ -284,7 +284,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                 let tracked_combined: FloatTensor<Autodiff<B, C>> = prep.finish(prim_combined);
 
                 let (tracked_y_bnlmhp, tracked_final_state_bhpr) =
-                    crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 6, 4>(
+                    burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 6, 4>(
                         tracked_combined,
                         flat_len_y_BNLMHP,
                         flat_len_final_state_BHPR,

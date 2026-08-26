@@ -39,9 +39,9 @@
 //! it are annotated with an explicit shape comment.
 
 use crate::mamba1::prelude::*;
-use crate::modules::Silu;
-use crate::modules::sanity as san;
-use crate::modules::split_into;
+use burn_stack::modules::Silu;
+use burn_stack::modules::sanity as san;
+use burn_stack::modules::split_into;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -241,10 +241,10 @@ impl Mamba1Config {
     /// `in_proj` is `[x | res]` and `x_proj` is `[dt_raw | B | C]`; the `dt_raw`
     /// block and the whole of `dt_proj` stay on AdamW — they carry the Δ path,
     /// whose careful initialisation (`dt_proj`) is a scale, not a feature map.
-    /// The conv weight is 3-D, so it is never listed. See [`crate::optim`].
+    /// The conv weight is 3-D, so it is never listed. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
-    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
-        use crate::optim::{ProjSegment as Seg, ProjSpec};
+    pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
+        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
         let d_inner = self.d_inner();
         vec![
             ProjSpec::block(

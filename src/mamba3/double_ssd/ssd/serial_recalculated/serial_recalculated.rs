@@ -15,7 +15,7 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
-use crate::utils::fprim::{F, san};
+use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, backend_extension};
@@ -134,13 +134,13 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     }
 }
 
-crate::decl_ssd_autodiff_backend_ext!(Mamba3DoubleSsdAutodiffBackendExt, Mamba3DoubleSsdBackendExt);
+burn_stack::decl_autodiff_backend_ext!(Mamba3DoubleSsdAutodiffBackendExt, Mamba3DoubleSsdBackendExt);
 
 // ---------------------------------------------------------------------------
 // Per-backend impls: each delegates to the trait's default (K1-K5) body. The
 // custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3DoubleSsdBackendExt);
+burn_stack::impl_backend_ext_for_burn_backends!(Mamba3DoubleSsdBackendExt);
 
 // ─── Primitive forward kernels (K1–K5) ───────────────────────────────────────
 // Primitive ports of the high-level [`super::super::serial`] kernels, expressed

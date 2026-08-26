@@ -16,7 +16,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::utils::fprim::F;
+use burn_stack::utils::fprim::F;
 use burn::backend::tensor::{Device, FloatTensor};
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
@@ -236,7 +236,7 @@ pub trait Mamba3QuatScanBackendExt: Backend {
 
 // Per-backend impls delegate to the trait's default body; the custom autodiff
 // backward lives in `super::backward` as a separate `Autodiff<B>` impl.
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3QuatScanBackendExt);
+burn_stack::impl_backend_ext_for_burn_backends!(Mamba3QuatScanBackendExt);
 
 // ---------------------------------------------------------------------------
 // High-level wrapper (Dispatch-pinned `Tensor`)

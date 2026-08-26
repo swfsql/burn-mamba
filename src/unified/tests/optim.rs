@@ -2,11 +2,12 @@
 //! groups only ever select rank-2 tensors, and per-block stepping agrees with
 //! the stock optimizers.
 
-use super::*;
+use crate::prelude::*;
 use burn::module::{Module, ModuleVisitor, Param, ParamId};
 use burn::optim::{AdamWConfig, MuonConfig, Optimizer, RecordState, StateSink, StateSource};
 use burn::prelude::*;
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::optim::segmented::{BlockState, Segmented, SegmentedState};
+use burn_stack::utils::test_helpers::max_abs_diff;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -106,8 +107,9 @@ fn assert_plan_excludes_boundaries(plan: &MuonPlan, rows: &[ParamRow]) {
         let leaf = path.rsplit('.').nth(1).unwrap_or("");
         matches!(leaf, "embedding" | "lm_head" | "class_tokens_emb")
             // the network's own projections sit at the model root, i.e. their
-            // path has no layer container above them
-            || (matches!(leaf, "in_proj" | "out_proj") && !path.contains("_block."))
+            // path has no block container above them
+            || (matches!(leaf, "in_proj" | "out_proj")
+                && !burn_stack::optim::BLOCK_CONTAINERS.iter().any(|c| path.contains(c)))
     };
     for spec in &plan.specs {
         for row in selected(spec, rows) {
@@ -157,8 +159,8 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
-        mlp: Some(crate::modules::GatedMlpConfig::new(32, 64).with_multiple_of(32)),
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
+        mlp: Some(burn_stack::modules::GatedMlpConfig::new(32, 64).with_multiple_of(32)),
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -188,7 +190,7 @@ fn mamba2_plan_fits_the_model() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     };
     let rows = params_of(&config.init(&device));
@@ -216,7 +218,7 @@ fn mamba1_plan_fits_the_model() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     };
     let rows = params_of(&config.init(&device));
@@ -229,11 +231,12 @@ fn mamba1_plan_fits_the_model() {
 }
 
 /// A bidirectional stack stores its blocks under `straight_block`/`reverse_block`
-/// rather than `mamba_block`; the plan must still find them (both of them).
+/// rather than `block`; the plan must still find them (both of them).
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_plan_fits_the_model() {
-    use crate::modules::bidi::{MambaBidiLayersConfig, OutputMergeConfig};
+    use crate::unified::MambaBidiLayersConfig;
+    use burn_stack::modules::bidi::OutputMergeConfig;
     use crate::prelude::*;
     let device = Device::default();
     let config = MambaBidiLayersConfig::Mamba3 {
@@ -247,7 +250,7 @@ fn bidi_plan_fits_the_model() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -429,7 +432,7 @@ fn build_assembles_groups_without_panicking() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     };
     let model = config.init(&device);
@@ -467,7 +470,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     };
     let plan = config.muon_plan();
@@ -481,7 +484,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
         optim.step(1e-3, model, grads)
     };
     let in_proj = |m: &MambaLatentNet| match m {
-        MambaLatentNet::Mamba3(net) => net.layers.real_layers[0].mamba_block.in_proj.weight.val(),
+        MambaLatentNet::Mamba3(net) => net.layers.real_layers[0].block.in_proj.weight.val(),
         _ => panic!("expected a Mamba-3 network"),
     };
 
@@ -526,7 +529,7 @@ fn describe_reports_every_parameter() {
         class_latents: Vec::new(),
         ignore_first_residual: false,
         ignore_last_residual: false,
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
     };
     let model = config.init(&device);

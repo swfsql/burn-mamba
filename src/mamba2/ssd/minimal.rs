@@ -19,7 +19,7 @@
 //! scan over `sequence/chunk_len` elements rather than `sequence`.
 
 use crate::mamba2::prelude::*;
-use crate::modules::{sanity as san, segsum};
+use burn_stack::modules::{sanity as san, segsum};
 use burn::prelude::*;
 
 impl Mamba2SsdInput {

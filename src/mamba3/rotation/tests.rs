@@ -13,8 +13,8 @@
 //! collapse to a `cumsum` of angles (RoPE), and gradient parity.
 
 use super::*;
-use crate::modules::apply_rope;
-use crate::utils::test_helpers::max_abs_diff;
+use crate::mamba3::rotation::rope::apply_rope;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;
 
@@ -1353,8 +1353,8 @@ fn rotation_state_wrong_unwrap_panics() {
 fn quaternion_bidi_forward_runs() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    use crate::modules::bidi::OutputMergeConfig;
-    use crate::modules::{MambaBidiLayersConfig, MambaSsdPath};
+    use burn_stack::modules::bidi::OutputMergeConfig;
+    use crate::unified::{MambaBidiLayersConfig, MambaSsdPath};
     let device: Device = Default::default();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1371,7 +1371,7 @@ fn quaternion_bidi_forward_runs() {
         ignore_last_residual: false,
         outputs_merge: OutputMergeConfig::mean(n_real),
         class_latents: Vec::new(),
-        residuals: crate::modules::ResidualsConfig::Standard,
+        residuals: burn_stack::modules::ResidualsConfig::Standard,
     }
     .init(&device);
 

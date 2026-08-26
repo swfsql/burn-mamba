@@ -307,10 +307,10 @@ fn run_forward<M, B, C>(
     device: &Device,
     build: B,
     cache: C,
-    path: M::SsdPath,
+    path: M::Options,
 ) where
-    M: MambaBlock,
-    M::SsdPath: Clone,
+    M: Block,
+    M::Options: Clone,
     B: Fn(&Device) -> M,
     C: Fn(&Device) -> Option<M::Cache>,
 {
@@ -341,10 +341,10 @@ fn run_train<M, B, C>(
     device: &Device,
     build: B,
     cache: C,
-    path: M::SsdPath,
+    path: M::Options,
 ) where
-    M: MambaBlock,
-    M::SsdPath: Clone,
+    M: Block,
+    M::Options: Clone,
     B: Fn(&Device) -> M,
     C: Fn(&Device) -> Option<M::Cache>,
 {
@@ -377,7 +377,7 @@ fn run_step<M, B, C>(
     build: B,
     cache: C,
 ) where
-    M: MambaBlock,
+    M: Block,
     B: Fn(&Device) -> M,
     C: Fn(&Device) -> Option<M::Cache>,
 {

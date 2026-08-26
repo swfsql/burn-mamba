@@ -8,7 +8,7 @@
 //! `SerialRecalculated` path.
 //!
 //! The two forward outputs (`y` and `final_state`) are flattened into one
-//! tracked 1-D tensor (via [`crate::utils::combined_grad`]) so that a single
+//! tracked 1-D tensor (via [`burn_stack::utils::combined_grad`]) so that a single
 //! `Backward<B, 7>` node — one per the 7 differentiable inputs — covers both.
 
 #![allow(non_snake_case)]
@@ -123,7 +123,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 } = ops.state;
 
                 // ── Reconstruct saved tensors as rank-tagged primitives ────
-                use crate::utils::fprim::F;
+                use burn_stack::utils::fprim::F;
 
                 let x_bnlhp = F::<B, 5>::new(x_bnlhp).reshape(shape_x_bnlhp);
                 let dt_discretized_bhnl =
@@ -137,7 +137,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
 
                 // ── Split incoming combined gradient ───────────────────────
                 let (d_y_bnlhp, d_final_state_bhpr) =
-                    crate::utils::combined_grad::unflatten_pair::<B, 5, 4>(
+                    burn_stack::utils::combined_grad::unflatten_pair::<B, 5, 4>(
                         d_combined,
                         flat_len_y_BNLHP,
                         flat_len_final_state_BHPR,
@@ -241,7 +241,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
 
                 // prep.finish takes a single tensor, so pack both outputs into a
                 // single 1-D tensor; one Backward node then covers both.
-                let (prim_combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
                     prim_y_bnlhp,
                     prim_final_state_bhpr,
                 );
@@ -269,7 +269,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 // backwards accumulate into the combined gradient vector that
                 // `backward` above consumes.
                 let (tracked_y_bnlhp, tracked_final_state_bhpr) =
-                    crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
+                    burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
                     tracked_combined,
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
@@ -295,7 +295,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     a_decay_h.primitive,
                 );
 
-                let (combined, _, _) = crate::utils::combined_grad::flatten_pair::<B>(
+                let (combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
                     prim_y_bnlhp,
                     prim_final_state_bhpr,
                 );
@@ -303,7 +303,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 let tracked_combined: FloatTensor<Autodiff<B, C>> =
                     prep.finish(combined);
 
-                let (tracked_y_bnlhp, tracked_final_state_bhpr) = crate::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
+                let (tracked_y_bnlhp, tracked_final_state_bhpr) = burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
                     tracked_combined,
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,

@@ -1,47 +1,12 @@
-use crate::prelude::*;
+//! Runtime-tagged cache collection, and where each family plugs into the
+//! block-generic stack: `impl Block`, `impl BlockConfig`, `impl CacheStack`.
+
 use burn::prelude::*;
+use burn_stack::modules::{Block, BlockConfig, CacheStack};
 
-// ===========================================================================
-// Unifying enums: one runtime + one serializable Config across all families
-// ===========================================================================
 
-/// The uniform interface a per-network cache collection exposes for the generic
-/// [`Layers`] loop. The existing `Mamba{1,2,3}Caches` already provide it (under
-/// `caches_len`/`into_options`/`from_options`).
-pub trait CacheStack: Sized {
-    /// The per-layer cache element.
-    type Cache;
-    /// Number of per-(virtual-)layer slots.
-    fn slot_count(&self) -> usize;
-    /// Move each slot into an `Option` so the loop can `take` without cloning.
-    fn into_slots(self) -> Vec<Option<Self::Cache>>;
-    /// Inverse of [`Self::into_slots`].
-    fn from_slots(slots: Vec<Option<Self::Cache>>) -> Self;
-    /// Move one cache slot **to** the inner (non-autodiff) backend.
-    ///
-    /// Needed by [`Layers::grad_horizon`](crate::modules::Layers::grad_horizon),
-    /// whose no-grad prefix runs on the inner backend: a cache carried in from a
-    /// tracked segment has to come down with it, both so the prefix builds no
-    /// graph and because Burn's dispatch cannot mix backends within one op.
-    ///
-    /// Spelled out per family rather than derived, because
-    /// [`Module::map`] is a **no-op on plain `Tensor`
-    /// fields** (Burn implements `Module for Tensor` as a constant) and caches
-    /// hold bare tensors, not `Param`s — a `Module`-based conversion would
-    /// silently skip every one of them.
-    ///
-    /// # Panics
-    /// `Tensor::inner` panics on a tensor that is already off the autodiff
-    /// backend, so the caller must have checked
-    /// [`Device::is_autodiff`](burn::prelude::Device::is_autodiff) first.
-    fn cache_to_inner(cache: Self::Cache) -> Self::Cache;
-
-    /// Lift one cache slot back **from** the inner backend, as a fresh graph
-    /// root. The inverse of [`Self::cache_to_inner`]; see its notes.
-    fn cache_from_inner(cache: Self::Cache) -> Self::Cache;
-}
-
-/// Runtime-tagged caches: one variant per family, matching [`MambaLatentNet`].
+/// Runtime-tagged caches: one variant per family, matching
+/// [`MambaLatentNet`](crate::unified::MambaLatentNet).
 ///
 /// This is plain runtime state (not a `Module`): caches are threaded through
 /// `forward`/`step`, never recorded or optimised. (`Mamba3Caches` is itself a
@@ -98,18 +63,18 @@ mod impl_mamba2 {
         }
     }
 
-    impl MambaBlock for Mamba2 {
+    impl Block for Mamba2 {
         type Cache = Mamba2Cache;
         type Caches = Mamba2Caches;
-        type SsdPath = Mamba2SsdPath;
+        type Options = Mamba2SsdPath;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
             cache: Option<Mamba2Cache>,
-            ssd_path: Mamba2SsdPath,
+            options: Mamba2SsdPath,
         ) -> (Tensor<3>, Mamba2Cache) {
-            self.forward(x, cache, ssd_path)
+            self.forward(x, cache, options)
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
@@ -142,7 +107,7 @@ mod impl_mamba2 {
         }
     }
 
-    impl MambaBlockConfig for Mamba2Config {
+    impl BlockConfig for Mamba2Config {
         type Block = Mamba2;
         fn d_model(&self) -> usize {
             self.d_model
@@ -151,7 +116,7 @@ mod impl_mamba2 {
             self.init(device)
         }
         #[cfg(feature = "optim")]
-        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
             self.muon_projections()
         }
     }
@@ -257,18 +222,18 @@ mod impl_mamba3 {
         }
     }
 
-    impl MambaBlock for Mamba3 {
+    impl Block for Mamba3 {
         type Cache = Mamba3Cache;
         type Caches = Mamba3Caches;
-        type SsdPath = Mamba3SsdPath;
+        type Options = Mamba3SsdPath;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
             cache: Option<Mamba3Cache>,
-            ssd_path: Mamba3SsdPath,
+            options: Mamba3SsdPath,
         ) -> (Tensor<3>, Mamba3Cache) {
-            self.forward(x, cache, ssd_path)
+            self.forward(x, cache, options)
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
@@ -286,7 +251,7 @@ mod impl_mamba3 {
         }
     }
 
-    impl MambaBlockConfig for Mamba3Config {
+    impl BlockConfig for Mamba3Config {
         type Block = Mamba3;
         fn d_model(&self) -> usize {
             self.d_model
@@ -295,7 +260,7 @@ mod impl_mamba3 {
             self.init(device)
         }
         #[cfg(feature = "optim")]
-        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
             self.muon_projections()
         }
     }
@@ -335,17 +300,17 @@ mod impl_mamba1 {
         }
     }
 
-    impl MambaBlock for Mamba1 {
+    impl Block for Mamba1 {
         type Cache = Mamba1Cache;
         type Caches = Mamba1Caches;
         /// Mamba-1 has no SSD chunking, so there is no path selector.
-        type SsdPath = ();
+        type Options = ();
 
         fn block_forward(
             &self,
             x: Tensor<3>,
             cache: Option<Mamba1Cache>,
-            _ssd_path: (),
+            _options: (),
         ) -> (Tensor<3>, Mamba1Cache) {
             self.forward(x, cache)
         }
@@ -375,7 +340,7 @@ mod impl_mamba1 {
         }
     }
 
-    impl MambaBlockConfig for Mamba1Config {
+    impl BlockConfig for Mamba1Config {
         type Block = Mamba1;
         fn d_model(&self) -> usize {
             self.d_model
@@ -384,7 +349,7 @@ mod impl_mamba1 {
             self.init(device)
         }
         #[cfg(feature = "optim")]
-        fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
+        fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
             self.muon_projections()
         }
     }

@@ -21,7 +21,7 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::{
 };
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
-use crate::utils::fprim::{F, san};
+use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::*;
 use burn::backend::{Backend, Dispatch, backend_extension};
@@ -163,13 +163,13 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     }
 }
 
-crate::decl_ssd_autodiff_backend_ext!(Mamba3SingleSsdAutodiffBackendExt, Mamba3SingleSsdBackendExt);
+burn_stack::decl_autodiff_backend_ext!(Mamba3SingleSsdAutodiffBackendExt, Mamba3SingleSsdBackendExt);
 
 // ---------------------------------------------------------------------------
 // Per-backend impls: each delegates to the trait's default (K1–K5) body. The
 // custom autodiff backward lives in `super::backward` as a separate impl.
 // ---------------------------------------------------------------------------
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
+burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 
 // ─── Primitive forward K5 (single-ssd) ───────────────────────────────────────
 // Primitive port of [`super::super::serial::k5_single_ssd_chunk_scan`]. Combines

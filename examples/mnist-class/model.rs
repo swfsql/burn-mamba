@@ -6,7 +6,7 @@ use burn_mamba::prelude::MultiGateResidualConfig;
 use burn_mamba::prelude::{
     ClassLatent, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind,
 };
-use burn_mamba::utils::Schedule;
+use burn_stack::utils::Schedule;
 
 /// Depth of the (virtual) layer stack.
 const N_VIRTUAL_LAYERS: usize = 16;

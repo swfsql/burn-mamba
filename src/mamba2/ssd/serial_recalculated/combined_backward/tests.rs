@@ -1,6 +1,6 @@
 use super::*;
 use crate::mamba2::ssd::serial;
-use crate::utils::fprim::F;
+use burn_stack::utils::fprim::F;
 use burn::backend::Dispatch;
 use burn::prelude::*;
 use burn::tensor::Distribution;

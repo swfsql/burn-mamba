@@ -26,7 +26,7 @@
 //!    is always O(per_head_dim·state_rank).
 
 use crate::mamba2::prelude::*;
-use crate::modules::sanity as san;
+use burn_stack::modules::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
 
@@ -38,7 +38,7 @@ use burn::prelude::*;
 ///
 /// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
 /// through every layer-stack `step` call (the family-generic
-/// [`crate::modules::Layers`]).  Each element of `caches` corresponds to one
+/// [`burn_stack::modules::Layers`]).  Each element of `caches` corresponds to one
 /// (virtual) layer in the network.
 #[derive(Module, Debug)]
 pub struct Mamba2Caches {
@@ -122,7 +122,7 @@ pub struct Mamba2Cache {
 }
 
 impl Mamba2Cache {
-    /// Run the [`NaN`/`Inf` guards](crate::modules::misc::sanity) on every cached tensor.
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.conv_bvk);
         san(&self.ssm_bhpr);

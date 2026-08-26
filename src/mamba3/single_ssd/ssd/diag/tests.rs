@@ -6,7 +6,7 @@
 //! compare them (values *and* gradients).
 
 use super::*;
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;
 

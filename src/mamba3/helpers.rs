@@ -13,9 +13,9 @@
 //! definition serves both the sequence-aware (`forward`) and single-token
 //! (`step`) code paths.
 
-use crate::modules::RmsNorm;
-use crate::modules::gqa_expand_to_heads;
-use crate::modules::softplus;
+use burn_stack::modules::RmsNorm;
+use burn_stack::modules::gqa_expand_to_heads;
+use burn_stack::modules::softplus;
 use burn::prelude::*;
 
 /// Split the in-projection into everything-but-the-rotation and the trailing

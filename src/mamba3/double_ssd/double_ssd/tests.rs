@@ -102,7 +102,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
 
 /// Compare the output and every final cache field of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let checks = [
         ("output", max_abs_diff(a.out.clone(), b.out.clone())),
         (
@@ -342,7 +342,7 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     // from the random-init output. Otherwise the initial state is being
     // silently ignored and forward/step would match trivially.
     if random_init {
-        use crate::utils::test_helpers::max_abs_diff;
+        use burn_stack::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward_double_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),

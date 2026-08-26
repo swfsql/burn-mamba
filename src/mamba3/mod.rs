@@ -47,13 +47,13 @@ pub trait Mamba3BackendExt:
 {
 }
 
-crate::decl_ssd_autodiff_backend_ext!(
+burn_stack::decl_autodiff_backend_ext!(
     Mamba3AutodiffBackendExt,
     Mamba3BackendExt,
     Mamba3DoubleSsdAutodiffBackendExt,
     Mamba3SingleSsdAutodiffBackendExt
 );
-crate::impl_ssd_backend_ext_for_burn_backends!(Mamba3BackendExt);
+burn_stack::impl_backend_ext_for_burn_backends!(Mamba3BackendExt);
 
 /// Blanket [`Mamba3BackendExt`] implementation for autodiff backends.
 #[cfg(feature = "autodiff")]

@@ -4,15 +4,15 @@
 //! schedule, seed) plus the [`OptimizerConfig`].  [`optimizer_config`] builds the
 //! AdamW defaults shared by the examples (epsilon, grad clipping, cautious
 //! weight decay); [`OptimizerConfig::muon`] optionally moves the hidden weight
-//! matrices to Muon (see `burn_mamba::optim`).
+//! matrices to Muon (see `burn_stack::optim`).
 
 use burn::{
     optim::{AdamWConfig, ModuleOptimizer, MuonConfig},
     prelude::*,
     train::metric::NumericEntry,
 };
-use burn_mamba::optim::MuonPlan;
-pub use burn_mamba::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
+use burn_stack::optim::MuonPlan;
+pub use burn_stack::utils::scheduler::{ConstantLr, CosineAnnealingLr, Lr};
 
 /// Current value of a metric reading, or `NaN` when the metric has none yet
 /// (`Numeric::value` / `running_value` are `None` for metrics that only produce
@@ -43,9 +43,9 @@ impl OptimizerConfig {
     }
 
     /// AdamW + Muon on `plan`'s weights, sharing AdamW's weight decay and LR
-    /// (see [`burn_mamba::optim::muon_config`]).
+    /// (see [`burn_stack::optim::muon_config`]).
     pub fn with_muon_defaults(self, weight_decay: f32) -> Self {
-        self.with_muon(Some(burn_mamba::optim::muon_config(weight_decay)))
+        self.with_muon(Some(burn_stack::optim::muon_config(weight_decay)))
     }
 
     /// Build the module optimizer for a model whose Muon plan is `plan`.
@@ -84,7 +84,7 @@ pub struct TrainingConfig {
 /// default float dtype (epsilon is sized to it).
 pub fn optimizer_config(dtype: burn::tensor::DType) -> AdamWConfig {
     AdamWConfig::new()
-        .with_epsilon(burn_mamba::utils::div_eps(dtype))
+        .with_epsilon(burn_stack::utils::div_eps(dtype))
         .with_grad_clipping(Some(burn::grad_clipping::GradientClippingConfig::Value(
             1.0,
         )))

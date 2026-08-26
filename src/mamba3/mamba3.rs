@@ -110,7 +110,7 @@
 //! is computed by splitting it into a γ-SSD (current-token contributions) and
 //! a β-SSD (previous-token contributions); see [`crate::mamba3::double_ssd::ssd::ssd_path`].
 //! RoPE is applied to B and C before the SSD calls
-//! (see [`crate::modules::misc::rope::apply_rope`]),
+//! (see [`crate::mamba3::rotation::rope::apply_rope`]),
 //! and MIMO expansion happens by augmenting the V tensor with the per-rank
 //! `mimo_x` projection.
 //!
@@ -145,8 +145,8 @@
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
-use crate::modules::sanity as san;
-use crate::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
+use burn_stack::modules::sanity as san;
+use burn_stack::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -652,10 +652,10 @@ impl Mamba3Config {
     ///
     /// `in_proj`'s segments mirror the `split_into` in the SSD pathways
     /// (`[z | x | B | C | Δ | A | λ | rotation]`); the three per-head *scalar*
-    /// channels stay on AdamW. See [`crate::optim`].
+    /// channels stay on AdamW. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
-    pub fn muon_projections(&self) -> Vec<crate::optim::ProjSpec> {
-        use crate::optim::{ProjSegment as Seg, ProjSpec};
+    pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
+        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let bc = self.ngroups * self.state_rank * self.mimo_rank;

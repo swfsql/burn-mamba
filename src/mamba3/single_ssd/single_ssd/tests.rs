@@ -339,7 +339,7 @@ fn check_single_ssd_match(
     val_tol: f32,
     grad_tol: f32,
 ) {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let vals = [
         ("output", max_abs_diff(a.rg.out.clone(), b.rg.out.clone())),
         (
@@ -389,7 +389,7 @@ fn guard_random_init_consumed(
     if !random_init {
         return;
     }
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let (out_zero, _) = model.forward_single_ssd(
         Tensor::from_inner(input.clone()),
         Some(build_single_ssd_cache(cfg, batch, false)),
@@ -683,7 +683,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
 
     // Guard: the random initial single_ssd cache must change the full output.
     {
-        use crate::utils::test_helpers::max_abs_diff;
+        use burn_stack::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward_single_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_single_ssd_cache(&cfg, batch, false)),

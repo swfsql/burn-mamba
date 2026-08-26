@@ -15,7 +15,7 @@
 //!   `false` for every intermediate (`Requirement::GradInBackward`) whether or
 //!   not that intermediate is in the graph. Reachability has no such blind spot.
 //! * absence of a gradient on prefix-only parameters — catches
-//!   [`detach_params`](crate::utils::detach_params) failing to reach a nested
+//!   [`detach_params`](burn_stack::utils::detach_params) failing to reach a nested
 //!   `Param`, which is a live hazard because `Module::map` is a no-op on plain
 //!   `Tensor` fields and only recurses through module-typed ones.
 //!
@@ -23,11 +23,12 @@
 //! stack exactly, and under weight sharing a shared weight must collect the
 //! gradient of its *tracked applications only*.
 
-use super::*;
+use crate::prelude::*;
+use burn::prelude::*;
 use crate::mamba3::prelude::{Mamba3Caches, Mamba3Config, Mamba3SsdPath};
-use crate::modules::LayersBuilder;
-use crate::utils::Schedule;
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::modules::LayersBuilder;
+use burn_stack::utils::Schedule;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
 
 type Device = burn::prelude::Device;
@@ -126,7 +127,7 @@ fn full_horizon_matches_no_horizon() {
     let g_a = y_a.sum().backward();
     let g_b = y_b.sum().backward();
     for i in 0..n {
-        let w = &plain.real_layers[i].mamba_block.in_proj.weight;
+        let w = &plain.real_layers[i].block.in_proj.weight;
         let d_a = w.val().grad(&g_a).expect("baseline grad");
         let d_b = w.val().grad(&g_b).expect("full-horizon grad");
         assert!(
@@ -243,24 +244,24 @@ fn prefix_parameters_get_no_gradient() {
         let probes: Vec<(&str, bool)> = vec![
             ("norm.gamma", l.norm.gamma.val().grad(&grads).is_some()),
             (
-                "mamba_block.in_proj.weight",
-                l.mamba_block.in_proj.weight.val().grad(&grads).is_some(),
+                "block.in_proj.weight",
+                l.block.in_proj.weight.val().grad(&grads).is_some(),
             ),
             (
-                "mamba_block.dt_bias_h",
-                l.mamba_block.dt_bias_h.val().grad(&grads).is_some(),
+                "block.dt_bias_h",
+                l.block.dt_bias_h.val().grad(&grads).is_some(),
             ),
             (
-                "mamba_block.d_h",
-                l.mamba_block.d_h.val().grad(&grads).is_some(),
+                "block.d_h",
+                l.block.d_h.val().grad(&grads).is_some(),
             ),
             (
-                "mamba_block.b_bias_hmr",
-                l.mamba_block.b_bias_hmr.val().grad(&grads).is_some(),
+                "block.b_bias_hmr",
+                l.block.b_bias_hmr.val().grad(&grads).is_some(),
             ),
             (
-                "mamba_block.b_norm.gamma",
-                l.mamba_block.b_norm.gamma.val().grad(&grads).is_some(),
+                "block.b_norm.gamma",
+                l.block.b_norm.gamma.val().grad(&grads).is_some(),
             ),
         ];
         for (name, has_grad) in probes {
@@ -325,7 +326,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
 
     let grads_ref = y_ref.sum().backward();
     for r in 0..n_real {
-        let w = &layers.real_layers[r].mamba_block.in_proj.weight;
+        let w = &layers.real_layers[r].block.in_proj.weight;
         let got = w.val().grad(&grads).expect("shared weight grad");
         let want = w
             .val()
@@ -449,7 +450,7 @@ fn run_chunked_parity(horizon: Option<usize>) {
     for r in 0..n_real {
         let l = &layers.real_layers[r];
         let probes: Vec<(&str, &burn::module::Param<Tensor<2>>)> =
-            vec![("mamba_block.in_proj.weight", &l.mamba_block.in_proj.weight)];
+            vec![("block.in_proj.weight", &l.block.in_proj.weight)];
         for (name, p) in probes {
             let a = p.val().grad(&grads_full).expect("single-call grad");
             let b = p.val().grad(&grads_split).expect("chunked grad");
@@ -462,8 +463,8 @@ fn run_chunked_parity(horizon: Option<usize>) {
         }
         for (name, p) in [
             ("norm.gamma", &l.norm.gamma),
-            ("mamba_block.dt_bias_h", &l.mamba_block.dt_bias_h),
-            ("mamba_block.d_h", &l.mamba_block.d_h),
+            ("block.dt_bias_h", &l.block.dt_bias_h),
+            ("block.d_h", &l.block.d_h),
         ] {
             let a = p.val().grad(&grads_full).expect("single-call grad");
             let b = p.val().grad(&grads_split).expect("chunked grad");
@@ -567,14 +568,14 @@ fn run_step_parity(horizon: Option<usize>) {
     for r in 0..n_real {
         let l = &layers.real_layers[r];
         let a = l
-            .mamba_block
+            .block
             .in_proj
             .weight
             .val()
             .grad(&grads_fwd)
             .expect("forward grad");
         let b = l
-            .mamba_block
+            .block
             .in_proj
             .weight
             .val()
@@ -587,8 +588,8 @@ fn run_step_parity(horizon: Option<usize>) {
         );
         for (name, p) in [
             ("norm.gamma", &l.norm.gamma),
-            ("mamba_block.dt_bias_h", &l.mamba_block.dt_bias_h),
-            ("mamba_block.d_h", &l.mamba_block.d_h),
+            ("block.dt_bias_h", &l.block.dt_bias_h),
+            ("block.d_h", &l.block.d_h),
         ] {
             let a = p.val().grad(&grads_fwd).expect("forward grad");
             let b = p.val().grad(&grads_step).expect("step grad");
@@ -635,12 +636,12 @@ fn stepped_prefix_parameters_get_no_gradient() {
         for (name, has) in [
             ("norm.gamma", l.norm.gamma.val().grad(&grads).is_some()),
             (
-                "mamba_block.in_proj.weight",
-                l.mamba_block.in_proj.weight.val().grad(&grads).is_some(),
+                "block.in_proj.weight",
+                l.block.in_proj.weight.val().grad(&grads).is_some(),
             ),
             (
-                "mamba_block.b_bias_hmr",
-                l.mamba_block.b_bias_hmr.val().grad(&grads).is_some(),
+                "block.b_bias_hmr",
+                l.block.b_bias_hmr.val().grad(&grads).is_some(),
             ),
         ] {
             if i < cut {
@@ -664,8 +665,8 @@ fn stepped_prefix_parameters_get_no_gradient() {
 /// Either way the primed output is produced by tracked layers, so it must carry
 /// a gradient to those and to nothing below the cut.
 fn run_prime_cut(latent_layer: usize) {
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default().autodiff();
     let (n, k) = (4, 2);
@@ -685,7 +686,7 @@ fn run_prime_cut(latent_layer: usize) {
     let grads = primed.sum().backward();
     for i in 0..n {
         let has = layers.real_layers[i]
-            .mamba_block
+            .block
             .in_proj
             .weight
             .val()
@@ -701,7 +702,7 @@ fn run_prime_cut(latent_layer: usize) {
     }
     assert!(
         layers.real_layers[n - 1]
-            .mamba_block
+            .block
             .in_proj
             .weight
             .val()
@@ -752,7 +753,7 @@ fn prime_under_a_cut_with_a_latent_below_it() {
 /// consequence that actually matters.
 #[test]
 fn boundary_weights_keep_their_gradient_under_a_cut() {
-    use crate::modules::network::LatentNetworkBuilder;
+    use burn_stack::modules::network::LatentNetworkBuilder;
 
     let device = Device::default().autodiff();
     let n = 4;
@@ -850,8 +851,8 @@ fn a_cut_changes_gradients_only() {
 /// separates.
 #[test]
 fn the_carry_tracks_class_latents_spliced_below_the_cut() {
-    use crate::utils::class::init_class_emb;
-    use crate::utils::{ClassCursors, ClassLatent};
+    use burn_stack::utils::class::init_class_emb;
+    use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = Device::default().autodiff();
     let (n, k) = (4, 2);
@@ -888,7 +889,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
              train — a dead parameter here would be silent",
         );
         assert!(
-            l.mamba_block.in_proj.weight.val().grad(&grads).is_none(),
+            l.block.in_proj.weight.val().grad(&grads).is_none(),
             "prefix layer {i}'s transform must stay undifferentiated",
         );
     }
@@ -908,8 +909,8 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
 /// with or without it; under `MultiGate` the streams carry the residual, and a
 /// correction applied only to the pooled token leaves `dL/ds` out of the input's
 /// gradient and the two runs diverge.
-fn run_identity_prefix_exactness(residuals: crate::modules::ResidualsConfig) {
-    use crate::modules::Residuals;
+fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig) {
+    use burn_stack::modules::Residuals;
 
     let device = Device::default().autodiff();
     let (n, k) = (4, 2);
@@ -923,7 +924,7 @@ fn run_identity_prefix_exactness(residuals: crate::modules::ResidualsConfig) {
     // the stream passes through untouched (the value may shift by a constant —
     // only the Jacobian matters here).
     for i in 0..cut {
-        let w = &mut base.real_layers[i].mamba_block.out_proj.weight;
+        let w = &mut base.real_layers[i].block.out_proj.weight;
         *w = w.clone().map(|t| t.zeros_like());
     }
     // Under MultiGate the residual is in the streams, so the prefix is an
@@ -975,7 +976,7 @@ fn run_identity_prefix_exactness(residuals: crate::modules::ResidualsConfig) {
 /// One carrier: correcting the token is the whole story.
 #[test]
 fn identity_prefix_is_exact_under_standard_residuals() {
-    run_identity_prefix_exactness(crate::modules::ResidualsConfig::Standard);
+    run_identity_prefix_exactness(burn_stack::modules::ResidualsConfig::Standard);
 }
 
 /// Several carriers: the streams hold the residual, so they need the carry too.
@@ -984,7 +985,7 @@ fn identity_prefix_is_exact_under_standard_residuals() {
 /// exact rather than merely close.
 #[test]
 fn identity_prefix_is_exact_under_multi_gate_residuals() {
-    run_identity_prefix_exactness(crate::modules::ResidualsConfig::MultiGate {
+    run_identity_prefix_exactness(burn_stack::modules::ResidualsConfig::MultiGate {
         n_stream: 1,
         init_bias: -20.0,
         init_bias_step: 0.0,
@@ -999,7 +1000,7 @@ fn identity_prefix_is_exact_under_multi_gate_residuals() {
 /// carry has to reach both the pooled token and the stream set.
 #[test]
 fn multi_gate_input_keeps_its_gradient_under_a_cut() {
-    use crate::modules::ResidualsConfig;
+    use burn_stack::modules::ResidualsConfig;
 
     let device = Device::default().autodiff();
     let n = 4;
@@ -1089,7 +1090,7 @@ fn grad_horizon_memory_probe() {
         let mut prefix = <Layers<_> as Clone>::clone(&layers);
         prefix.n_virtual_layers = Some((n_virtual - k, Schedule::Cyclic));
         prefix.grad_horizon = None;
-        let prefix = crate::utils::detach_params(prefix);
+        let prefix = burn_stack::utils::detach_params(prefix);
 
         let mut suffix = <Layers<_> as Clone>::clone(&layers);
         suffix.n_virtual_layers = Some((k, Schedule::Cyclic));

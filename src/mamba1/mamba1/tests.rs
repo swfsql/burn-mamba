@@ -114,7 +114,7 @@ fn run_with_grads(
 
 /// Compare the output and final cache (conv window + SSM state) of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
-    use crate::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_abs_diff;
     let d_out = max_abs_diff(a.out.clone(), b.out.clone());
     let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
     let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
@@ -269,7 +269,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     // from the random-init output. Otherwise the initial state is being
     // silently ignored and forward/step would match trivially.
     if random_init {
-        use crate::utils::test_helpers::max_abs_diff;
+        use burn_stack::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),

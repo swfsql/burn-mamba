@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::mamba3::single_ssd::ssd::diag;
-use crate::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::backend::Dispatch;
 use burn::module::Param;
 use burn::prelude::*;

@@ -151,7 +151,7 @@ pub fn weight_pr(model: &MambaVocabNet, p: usize) -> WeightPr {
         .iter()
         .enumerate()
         .map(|(layer, l)| {
-            let block = &l.mamba_block;
+            let block = &l.block;
             let d_inner = block.d_inner();
             let gn = block.ngroups * block.state_rank;
             // in_proj weight `[d_model, d_inner + conv_dim + nheads]`,
@@ -257,7 +257,7 @@ fn penalty_weights(model: &MambaVocabNet, target: PrPenaltyTarget) -> Vec<Tensor
     }
     if matches!(target, Bc | All) {
         for l in &net.layers.real_layers {
-            let block = &l.mamba_block;
+            let block = &l.block;
             let d_inner = block.d_inner();
             let gn = block.ngroups * block.state_rank;
             // Same `[z | x | B | C | dt]` column layout as in [`weight_pr`].
