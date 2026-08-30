@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["MambaLatentNet","MambaLatentNetConfig","MambaLatentNetConfigSerde","MambaVocabNet","MambaVocabNetConfig","MambaVocabNetConfigSerde"]};
+window.SIDEBAR_ITEMS = {"enum":["MambaLatentNet","MambaLatentNetConfig","MambaLatentNetConfigSerde","MambaVocabNet","MambaVocabNetConfig","MambaVocabNetConfigSerde"],"mod":["model_config_ext"]};
