@@ -194,6 +194,6 @@ impl Overrides {
 const ADAMW_WEIGHT_DECAY: f32 = 1e-4;
 
 fn main() {
-    let app_args = AppArgs::parse().unwrap();
+    let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();
     launch(&app_args);
 }

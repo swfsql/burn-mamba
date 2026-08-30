@@ -130,6 +130,6 @@ fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
 }
 
 fn main() {
-    let app_args = AppArgs::parse().unwrap();
+    let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();
     launch(&app_args);
 }

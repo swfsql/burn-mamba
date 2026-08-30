@@ -4,7 +4,7 @@
 
 use crate::dataset::VOCAB_SIZE;
 use burn_mamba::prelude::{Mamba3Config, MambaVocabNetConfig, ResidualsConfig, RotationKind};
-use burn_stack::utils::Schedule;
+use burn_stack::utils::{GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack: the 2 real weight sets applied four times.
 ///
@@ -23,10 +23,10 @@ use burn_stack::utils::Schedule;
 /// a task that reads out once, at the end of the sequence.
 const N_VIRTUAL_LAYERS: usize = 8;
 
-/// Back-propagate only the top `K` of the [`N_VIRTUAL_LAYERS`], everything below
-/// running on the inner backend; `None` tracks the whole stack — which is what a
-/// 4-deep stack over a 256-character window can afford.
-const GRAD_HORIZON: Option<usize> = None;
+/// Back-propagate only the top `Depth(K)` applications of each real layer,
+/// everything below running on the inner backend; `None` tracks the whole stack
+/// — which is what a 4-deep stack over a 256-character window can afford.
+const GRAD_HORIZON: Option<GradHorizon> = None;
 
 /// The character-level LM: 39,632 parameters (~161KB on disk in FP32), of which
 /// the tied embedding is only `VOCAB_SIZE · d_model` = 1536 — nearly everything

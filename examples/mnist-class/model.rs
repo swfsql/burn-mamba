@@ -6,18 +6,20 @@ use burn_mamba::prelude::MultiGateResidualConfig;
 use burn_mamba::prelude::{
     ClassLatent, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind,
 };
-use burn_stack::utils::Schedule;
+use burn_stack::utils::{GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack.
 const N_VIRTUAL_LAYERS: usize = 16;
 
-/// Back-propagate only the top `K` of the [`N_VIRTUAL_LAYERS`], everything below
+/// Back-propagate only the last `K` applications of **each real layer** —
+/// [`GradHorizon::Depth`], counted per weight set — with everything below
 /// running on the inner backend; `None` tracks the whole stack.
 ///
 /// This stack — 16 virtual layers over 2 real weight sets — is TRM/HRM-style
 /// deep recursion, and its activations are most of the vram figure below, so a
-/// small `K` is what lets the stack grow deeper.
-const GRAD_HORIZON: Option<usize> = Some(4);
+/// small `K` is what lets the stack grow deeper. `Depth(2)` here tracks 4 of the
+/// 16 virtual layers, two per real layer.
+const GRAD_HORIZON: Option<GradHorizon> = Some(GradHorizon::Depth(2));
 
 /// Stack-level class latents prepended to every image's pixel sequence:
 /// learnable `[CLS]`-style registers (width `d_model`) that let the model settle

@@ -42,12 +42,12 @@ backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-test", "burn-stack/
 # `_dev-test` (internal): enabled by every `backend-*` so the tensor test suite
 # compiles whenever a backend is present. Not meant to be enabled directly.
 _dev-test = ["burn-stack/_dev-test"]
-dev-f16 = []
+dev-f16 = ["burn-stack/dev-f16"]
 dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "e34b5bb6c9ba0a734a5d18471bb0f5fe746c1ab0", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "cd593d2f053cf2592545cecf38df5fa67ca78ec1", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 # burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
 burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1c70d286e4de89f852308d56b3270ea", default-features = false, optional = true }
@@ -66,16 +66,14 @@ burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "e34b5bb6c9ba0a734a5d18471bb0f5fe746c1ab0", default-features = false, features = ["test-helpers"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "cd593d2f053cf2592545cecf38df5fa67ca78ec1", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 num-traits = "0.2.19"
 rand = "0.9.2"
 rand_chacha = "0.9.0"
 rand_distr = "0.5.1"
-flate2 = "1.1.4"
 dirs = "6.0.0"
 pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
-temp-dir = "0.1.16"
 image = "0.25.10"
 # the `tiny-stories` example reads the Hugging Face datasets-server JSON rows
 serde_json = "1.0.151"

@@ -840,7 +840,6 @@ dependencies = [
  "burn-stack",
  "criterion",
  "dirs",
- "flate2",
  "image",
  "num-traits",
  "pico-args",
@@ -849,7 +848,6 @@ dependencies = [
  "rand_distr 0.5.1",
  "serde",
  "serde_json",
- "temp-dir",
 ]
 
 [[package]]
@@ -964,14 +962,20 @@ dependencies = [
 
 [[package]]
 name = "burn-stack"
-version = "0.1.0"
-source = "git+https://github.com/swfsql/burn-stack.git?rev=e34b5bb6c9ba0a734a5d18471bb0f5fe746c1ab0#e34b5bb6c9ba0a734a5d18471bb0f5fe746c1ab0"
+version = "0.2.0"
+source = "git+https://github.com/swfsql/burn-stack.git?rev=cd593d2f053cf2592545cecf38df5fa67ca78ec1#cd593d2f053cf2592545cecf38df5fa67ca78ec1"
 dependencies = [
  "burn",
  "burn-cubecl",
+ "burn-dataset",
  "burn-flex",
  "burn-fusion",
+ "dirs",
+ "flate2",
+ "image",
+ "pico-args",
  "serde",
+ "temp-dir",
 ]
 
 [[package]]

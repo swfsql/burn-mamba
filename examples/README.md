@@ -13,16 +13,16 @@ Each example lives in its own directory (the `reset-*` ladder one level deeper, 
 
 The lauching procedure first triggers some basic command arguments parsing, which sets whether training and/or inference should run. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
 
-There are shared definitions in `common/mod.rs`, imported as an outside module by each example. Importantly, a common model definition and the backend selection is shared among all examples. Some dataset and helpers for training may be also defined under `common`.
+There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, the sequential-MNIST dataset and the MNIST classification loop all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate.
 
 ##### Model Definition
 
-The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/unified/network.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`tiny-stories`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `common/model.rs` only supplies the `ModelConfigExt` glue (config enum → `Module`); examples no longer define their own network types.
+The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/unified/network.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`tiny-stories`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `ModelConfigExt` (config enum → `Module`, plus the Muon plan) is implemented on those configs in `src/unified/network.rs`; examples no longer define their own network types.
 
 ##### Optimizer
 
-`common/training.rs` defines `OptimizerConfig { adamw, muon }`, held by
-`TrainingConfig`. `muon = None` (the default) is plain AdamW on every parameter.
+`burn_stack::examples::training` defines `OptimizerConfig { adamw, muon }`, held
+by `TrainingConfig`. `muon = None` (the default) is plain AdamW on every parameter.
 Setting `muon` moves the hidden weight matrices to
 [Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
 `muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon
@@ -38,7 +38,7 @@ If no backend is selected, you should get a compile error message.
 
 #### Examples CLI
 
-All examples use a CLI defined in `common/cli.rs`.
+All examples use a CLI defined in `burn_stack::examples::cli`, re-exported as `common::cli`.
 
 ##### Usage Example
 
@@ -63,7 +63,7 @@ cargo run --example reset-majority --features "backend-flex" -- --training --art
 ##### CLI Help Message
 
 ```txt
-Burn Mamba Example
+Burn Example
 
 A command-line tool for training and/or running inference with machine learning models.
 Models, optimizers, and configurations are persisted in an artifacts directory.

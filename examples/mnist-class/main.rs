@@ -121,6 +121,6 @@ fn parse_muon(extra_args: &[std::ffi::OsString]) -> bool {
 }
 
 fn main() {
-    let app_args = AppArgs::parse().unwrap();
+    let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();
     launch(&app_args);
 }

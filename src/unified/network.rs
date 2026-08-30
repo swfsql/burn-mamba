@@ -9,7 +9,7 @@ use burn_stack::modules::{
     LatentNetwork, LatentNetworkBuilder, LayersBuilder, ResidualsConfig, VocabNetwork,
     VocabNetworkBuilder,
 };
-use burn_stack::utils::{ClassCursors, ClassToken, Schedule};
+use burn_stack::utils::{ClassCursors, ClassToken, GradHorizon, Schedule};
 
 // ===========================================================================
 // Unifying enums: one runtime + one serializable Config across all families
@@ -205,11 +205,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
         /// Output feature width.
@@ -244,11 +244,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
         /// Output feature width.
@@ -283,11 +283,11 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
         /// Output feature width.
@@ -364,7 +364,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -396,7 +396,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -428,7 +428,7 @@ impl MambaLatentNetConfig {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -633,11 +633,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -669,11 +669,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -705,11 +705,11 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Back-propagate only the last `K` virtual layers, running everything
-        /// below on the inner backend (truncated BPTT for deep recursion).
-        /// `None` ⇒ track the whole stack. See
+        /// Which virtual layers back-propagate; everything else runs on the
+        /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
+        /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
-        grad_horizon: Option<usize>,
+        grad_horizon: Option<GradHorizon>,
         /// Unpadded vocabulary size.
         vocab_size: usize,
         /// Round `vocab_size` up to a multiple of this (1 disables rounding).
@@ -785,7 +785,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -815,7 +815,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -845,7 +845,7 @@ impl MambaVocabNetConfig {
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
                         .with_n_virtual_layers(n_virtual_layers.clone())
-                        .with_grad_horizon(*grad_horizon)
+                        .with_grad_horizon(grad_horizon.clone())
                         .with_residuals(residuals.clone())
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
@@ -855,6 +855,44 @@ impl MambaVocabNetConfig {
                 }
                 .init(device),
             ),
+        }
+    }
+}
+
+// ===========================================================================
+// The `config → module` seam
+// ===========================================================================
+
+/// The [`ModelConfigExt`] impls: what a model-agnostic driver (an example's
+/// training loop, artifact loading) needs from a whole-model config, namely how
+/// to build it on a device and which weights Muon may own.
+///
+/// Both methods forward to the inherent ones just above — `self.init(..)`
+/// resolves to `MambaLatentNetConfig::init` (inherent methods win over trait
+/// methods in method-call syntax), so this delegates rather than recurses.
+mod model_config_ext {
+    use super::*;
+    use burn_stack::modules::ModelConfigExt;
+
+    impl ModelConfigExt for MambaLatentNetConfig {
+        type Model = MambaLatentNet;
+        fn init(&self, device: &Device) -> Self::Model {
+            self.init(device)
+        }
+        #[cfg(feature = "optim")]
+        fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
+            self.muon_plan()
+        }
+    }
+
+    impl ModelConfigExt for MambaVocabNetConfig {
+        type Model = MambaVocabNet;
+        fn init(&self, device: &Device) -> Self::Model {
+            self.init(device)
+        }
+        #[cfg(feature = "optim")]
+        fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
+            self.muon_plan()
         }
     }
 }

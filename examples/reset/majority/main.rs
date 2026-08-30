@@ -100,6 +100,6 @@ pub fn launch(app_args: &AppArgs) {
 }
 
 fn main() {
-    let app_args = AppArgs::parse().unwrap();
+    let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();
     launch(&app_args);
 }

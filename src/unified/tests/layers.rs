@@ -27,7 +27,7 @@ use crate::prelude::*;
 use burn::prelude::*;
 use crate::mamba3::prelude::{Mamba3Caches, Mamba3Config, Mamba3SsdPath};
 use burn_stack::modules::LayersBuilder;
-use burn_stack::utils::Schedule;
+use burn_stack::utils::{GradHorizon, Schedule};
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
 
@@ -116,7 +116,7 @@ fn full_horizon_matches_no_horizon() {
 
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     let mut full = <Layers<_> as Clone>::clone(&plain);
-    full.grad_horizon = Some(n);
+    full.grad_horizon = Some(GradHorizon::last(n, n));
 
     let x = input(&device);
 
@@ -184,7 +184,7 @@ fn nothing_tracked_reaches_the_prefix() {
     let (_, caches_carry) = layers.forward(x_carry.clone(), None, path(), None);
 
     // ---- with a horizon, from zero caches ---------------------------------
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
     let x1 = input(&device).require_grad();
     let (_, caches1) = layers.forward(x1.clone(), None, path(), None);
     let a1 = anchor();
@@ -234,7 +234,7 @@ fn prefix_parameters_get_no_gradient() {
     let cut = n - k;
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
 
     let (y, _) = layers.forward(input(&device), None, path(), None);
     let grads = y.sum().backward();
@@ -300,7 +300,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
         .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))
         .init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n_virtual));
 
     let x = input(&device);
     let (y, _) = layers.forward(x.clone(), None, path(), None);
@@ -358,7 +358,7 @@ fn horizon_is_inert_without_autodiff() {
 
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     let mut with_horizon = <Layers<_> as Clone>::clone(&plain);
-    with_horizon.grad_horizon = Some(2);
+    with_horizon.grad_horizon = Some(GradHorizon::last(2, n));
 
     let x = input(&device);
     let (y_a, _) = plain.forward(x.clone(), None, path(), None);
@@ -388,7 +388,7 @@ fn horizon_is_inert_without_autodiff() {
 /// The loss weights the output and every final cache tensor by a fixed random
 /// head, so a sign or ordering error cannot cancel out the way a plain `sum`
 /// would let it.
-fn run_chunked_parity(horizon: Option<usize>) {
+fn run_chunked_parity(horizon: Option<GradHorizon>) {
     let device = Device::default().autodiff();
     let (n_real, n_virtual) = (2, 6);
     // Split on a chunk boundary (`path()` uses chunk_len 4) so the two runs do
@@ -398,7 +398,7 @@ fn run_chunked_parity(horizon: Option<usize>) {
     let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
         .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))
         .init(&device);
-    layers.grad_horizon = horizon;
+    layers.grad_horizon = horizon.clone();
 
     let x = Tensor::<3>::random(
         [BATCH, head_len + tail_len, D_MODEL],
@@ -489,7 +489,7 @@ fn chunked_forward_matches_single_forward() {
 /// boundary, and the result must be indistinguishable from one long call.
 #[test]
 fn chunked_forward_matches_single_forward_under_horizon() {
-    run_chunked_parity(Some(2));
+    run_chunked_parity(Some(GradHorizon::last(2, 6)));
 }
 
 // ===========================================================================
@@ -507,14 +507,14 @@ fn chunked_forward_matches_single_forward_under_horizon() {
 /// same boundary. A `step` that ignored `grad_horizon` (or cut at a different
 /// index) still matches on values — every path computes the same numbers — and
 /// diverges only on the gradients.
-fn run_step_parity(horizon: Option<usize>) {
+fn run_step_parity(horizon: Option<GradHorizon>) {
     let device = Device::default().autodiff();
     let (n_real, n_virtual, seq) = (2, 6, 4);
 
     let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
         .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))
         .init(&device);
-    layers.grad_horizon = horizon;
+    layers.grad_horizon = horizon.clone();
 
     let x = Tensor::<3>::random(
         [BATCH, seq, D_MODEL],
@@ -612,7 +612,7 @@ fn step_matches_forward() {
 /// `forward`'s cut.
 #[test]
 fn step_matches_forward_under_horizon() {
-    run_step_parity(Some(2));
+    run_step_parity(Some(GradHorizon::last(2, 6)));
 }
 
 /// Below the cut `step` must leave no gradient behind either — the same
@@ -625,7 +625,7 @@ fn stepped_prefix_parameters_get_no_gradient() {
     let cut = n - k;
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
 
     let x = Tensor::<2>::random([BATCH, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
     let (out, _) = layers.step(x, None, None);
@@ -673,7 +673,7 @@ fn run_prime_cut(latent_layer: usize) {
     let cut = n - k;
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
     layers.real_layers[latent_layer].class_latents = vec![ClassLatent::Start];
     layers.real_layers[latent_layer].class_latents_emb = init_class_emb(1, D_MODEL, &device);
 
@@ -757,9 +757,10 @@ fn boundary_weights_keep_their_gradient_under_a_cut() {
 
     let device = Device::default().autodiff();
     let n = 4;
-    for horizon in [None, Some(4), Some(2), Some(0)] {
+    for k in [None, Some(4), Some(2), Some(0)] {
+        let horizon = k.map(|k| GradHorizon::last(k, n));
         let mut lb = LayersBuilder::new(n, block_config(D_MODEL));
-        lb.grad_horizon = horizon;
+        lb.grad_horizon = horizon.clone();
         let net = LatentNetworkBuilder {
             input_size: 3,
             layers: lb,
@@ -797,7 +798,7 @@ fn stepped_input_keeps_its_gradient_under_a_cut() {
     let (n, k) = (4, 2);
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
 
     let x = Tensor::<2>::random([BATCH, D_MODEL], Distribution::Normal(0.0, 1.0), &device)
         .require_grad();
@@ -823,9 +824,10 @@ fn a_cut_changes_gradients_only() {
     let (want, want_caches) = plain.forward(x.clone(), None, path(), None);
     let want_flat = all_slots_flat(&want_caches, n);
 
-    for horizon in [Some(4), Some(3), Some(1), Some(0)] {
+    for k in [4, 3, 1, 0] {
+        let horizon = Some(GradHorizon::last(k, n));
         let mut cut = <Layers<_> as Clone>::clone(&plain);
-        cut.grad_horizon = horizon;
+        cut.grad_horizon = horizon.clone();
         let (got, got_caches) = cut.forward(x.clone(), None, path(), None);
         assert!(
             max_abs_diff(want.clone(), got) < 1e-6,
@@ -858,7 +860,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
     let (n, k) = (4, 2);
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(k);
+    layers.grad_horizon = Some(GradHorizon::last(k, n));
     // Two prefix layers each splice a row, so the boundary sequence is longer
     // than the input by two.
     for i in 0..(n - k) {
@@ -945,9 +947,9 @@ fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig
         &device,
     );
     // The *same* weights both times — only the horizon differs.
-    let grad_of = |horizon| {
+    let grad_of = |horizon: Option<GradHorizon>| {
         let mut layers = <Layers<_> as Clone>::clone(&base);
-        layers.grad_horizon = horizon;
+        layers.grad_horizon = horizon.clone();
         let xr = x.clone().require_grad();
         let (y, _) = layers.forward(xr.clone(), None, path(), None);
         let grads = (y * head.clone()).sum().backward();
@@ -955,7 +957,7 @@ fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig
     };
 
     let full = grad_of(None);
-    let cut_grad = grad_of(Some(k));
+    let cut_grad = grad_of(Some(GradHorizon::last(k, n)));
     let diff = max_abs_diff(full.clone(), cut_grad);
     // Guard against a vacuous pass: if the stack were near-identity throughout,
     // the gradient would be ~1 everywhere and any wiring would "agree".
@@ -1004,7 +1006,7 @@ fn multi_gate_input_keeps_its_gradient_under_a_cut() {
 
     let device = Device::default().autodiff();
     let n = 4;
-    for horizon in [None, Some(2)] {
+    for horizon in [None, Some(GradHorizon::last(2, n))] {
         let mut layers = LayersBuilder::new(n, block_config(D_MODEL))
             .with_residuals(ResidualsConfig::MultiGate {
                 n_stream: 3,
@@ -1013,7 +1015,7 @@ fn multi_gate_input_keeps_its_gradient_under_a_cut() {
                 per_virtual_layer: false,
             })
             .init(&device);
-        layers.grad_horizon = horizon;
+        layers.grad_horizon = horizon.clone();
 
         let x = input(&device).require_grad();
         let (y, _) = layers.forward(x.clone(), None, path(), None);
@@ -1056,10 +1058,11 @@ fn grad_horizon_memory_probe() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(32);
-    let horizon = match std::env::var("BURN_MAMBA_GRAD_HORIZON").as_deref() {
+    let horizon_k: Option<usize> = match std::env::var("BURN_MAMBA_GRAD_HORIZON").as_deref() {
         Ok("none") | Err(_) => None,
         Ok(k) => Some(k.parse().expect("BURN_MAMBA_GRAD_HORIZON: 'none' or an integer")),
     };
+    let horizon = horizon_k.map(|k| GradHorizon::last(k, n_virtual));
 
     // `plain` is the control: the same forward with no autodiff device at all
     // and no backward, so whatever RSS it uses is the forward working set rather
@@ -1073,7 +1076,7 @@ fn grad_horizon_memory_probe() {
     let mut layers = LayersBuilder::new(n_real, block_config(d_model))
         .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))
         .init(&device);
-    layers.grad_horizon = horizon;
+    layers.grad_horizon = horizon.clone();
 
     let x = Tensor::<3>::random(
         [batch, seq, d_model],
@@ -1086,7 +1089,7 @@ fn grad_horizon_memory_probe() {
     // contrast that justifies the inner-backend one.
     let detached = std::env::var("BURN_MAMBA_DETACHED").is_ok();
     let y = if detached {
-        let k = horizon.expect("BURN_MAMBA_DETACHED needs a horizon");
+        let k = horizon_k.expect("BURN_MAMBA_DETACHED needs a horizon");
         let mut prefix = <Layers<_> as Clone>::clone(&layers);
         prefix.n_virtual_layers = Some((n_virtual - k, Schedule::Cyclic));
         prefix.grad_horizon = None;
