@@ -1,4 +1,4 @@
-# The `reset-*` ladder
+# The `reset` ladder
 
 Four examples on the **same shape of stream**, each the smallest task its block
 is *needed* for and that the rung below cannot solve. Read together they isolate,
@@ -80,15 +80,16 @@ The model reads `+` / `-` / `R` and reports the sign of the running vote **since
 the last `R`**:
 
 ```text
-  symbols   + + - + + R - - + - - + R + -
-  vote      1 2 1 2 3 0 -1 -2 -1 -2 -3 -2 0 1 0
-  target    p p p p p .  n  n  n  n  n  n .  p .
+  symbols    +  +  -  +  +  R  -  -  +  -  -  +  R  +  -
+  vote      +1 +2 +1 +2 +3 +0 -1 -2 -1 -2 -3 -2 +0 +1 +0
+  target     p  p  p  p  p  .  n  n  n  n  n  n  .  p  .
 ```
 
 Positions where the vote is exactly zero have no sign to report and are not
 scored (`.`).
 
-### Why this task
+<details>
+<summary>Why this task</summary>
 
 A Mamba-3 block at `d_model = 2`, `state_rank = 1`, `RotationKind::Real1D`
 unrolls to two data-dependent scalar recurrences and a sign-like readout — see
@@ -108,7 +109,10 @@ The eval set pins that down from both sides:
   other, so the majority is decided by the *oldest* post-reset tokens. Any decay
   away from 1 lets the recent block outvote them.
 
-### Measured
+</details>
+
+<details> 
+<summary>Measured</summary>
 
 70 parameters. Chance is 50%.
 
@@ -129,7 +133,10 @@ the unrolled recurrence (no fitting anywhere), and `no_fixed_decay_solves_the_ta
 re-runs that same block with `RESET`'s selectivity switched off — `A` made
 input-independent, the one changed knob — sweeping the decay and the readout gain.
 
-### Notes
+</details>
+
+<details> 
+<summary>Notes</summary>
 
 - **The selective solution is a basin you have to find.** With a constant LR
   training either reaches it or stalls near the memoryless ceiling depending on the
@@ -139,6 +146,8 @@ input-independent, the one changed knob — sweeping the decay and the readout g
 - **Ties are unscored on purpose.** Asking for a third "vote is exactly zero" class
   turns a sign readout into an exact-zero detector; it costs most of the accuracy
   and tests calibration rather than memory.
+
+</details>
 
 ---
 
@@ -153,15 +162,16 @@ Same stream, read differently. The model sees `+` / `-` / `R` and reports where 
 **mod 3**.
 
 ```text
-  symbols   R  +  +  +  -  +  +  R  -  -  -  -  +
-  turns     0  1  2  3  2  3  4  0 -1 -2 -3 -4 -3
-  detent    0  1  2  0  2  0  1  0  2  1  0  2  0
+  symbols    R  +  +  +  -  +  +  R  -  -  -  -  +
+  turns     +0 +1 +2 +3 +2 +3 +4 +0 -1 -2 -3 -4 -3
+  detent     0  1  2  0  2  0  1  0  2  1  0  2  0
 ```
 
 Every position is scored. Every sequence opens with an `R` — the token that anchors
 the rotor, and (see `model.rs`) the one that gives the block its phase reference.
 
-### Why this task
+<details> 
+<summary>Why this task</summary>
 
 `reset-majority` isolates the one thing a selective SSM has that a linear one does
 not: a **data-dependent decay**. This isolates the one thing a rotating transition
@@ -188,7 +198,10 @@ The eval set pins those down from both sides:
 available — after a reset, "three steps in" almost gives the answer — which is why
 it is reported separately rather than averaged in.
 
-### Measured
+</details>
+
+<details> 
+<summary>Measured</summary>
 
 86 parameters. Chance is 33.3%.
 
@@ -217,7 +230,10 @@ at the reset and reads what has accumulated since — under an input-independent
 rotation both the phase and the decay of what it reads are functions of exactly
 that number — and it needs no model at all.
 
-### Notes
+</details>
+
+<details> 
+<summary>Notes</summary>
 
 - **The rotor is the state.** `R` writes `B` into the state at whatever phase the
   sequence has reached and wipes what was there (`A(R) ≈ −20`); `±` write nothing at
@@ -244,6 +260,8 @@ that number — and it needs no model at all.
   `A` read the reset flag — which is what makes the closed-form solution
   constructible.
 
+</details>
+
 ---
 
 ## reset-spinor
@@ -265,7 +283,8 @@ Classes are `1, i, j, k, -1, -i, -j, -k` in that order. Every position is scored
 and every sequence opens with an `R` — the token that writes the identity into the
 state.
 
-### Why this task
+<details> 
+<summary>Why this task</summary>
 
 `Q₈` is the smallest non-abelian group of unit quaternions — which is to say the
 smallest group that `RotationKind::Quaternion4D`'s state space contains and
@@ -290,7 +309,10 @@ families put that under different pressure:
 - **`random`** — resets at ~⅛ of positions, so many words are short, and a short word
   is often pinned by its counts alone.
 
-### Measured
+</details>
+
+<details> 
+<summary>Measured</summary>
 
 328 parameters (278 for the abelian twin — the quaternion block projects a rotation
 axis per head, twelve channels against the abelian two, which are shared across
@@ -327,7 +349,10 @@ through the best table over a fine partition of its output space;
 `labels_are_the_quaternion_group` checks the dataset really is the `Q₈` word problem
 (`ij = k`, `ji = −k`, `i⁴ = 1`).
 
-### Notes
+</details>
+
+<details> 
+<summary>Notes</summary>
 
 - **The group is the state.** Left multiplication by a unit quaternion is
   orthogonal, so a state written at step `τ` and read at step `t` gives
@@ -362,6 +387,8 @@ through the best table over a fine partition of its output space;
   the two turns fail to commute. That is why the ablation is a single enum knob
   rather than a different model.
 
+</details>
+
 ---
 
 ## reset-swap
@@ -384,7 +411,8 @@ Classes are the six orders `abc, acb, bac, bca, cab, cba` in that order. Every
 position is scored, and every sequence opens with an `R` — the token that writes the
 identity into the state.
 
-### Why this task
+<details> 
+<summary>Why this task</summary>
 
 `S₃` is the smallest non-abelian group, so everything `reset-spinor` argues applies
 here unchanged: the label is not a function of the current symbol, it is periodic in
@@ -412,7 +440,10 @@ The eval families are `reset-spinor`'s three, with `s`/`t` for `i`/`j` — excep
 that here `s² = 1`, so a run only alternates and `runs` is nearly wasted motion,
 which is what makes it the family the counts come closest to deciding.
 
-### Measured
+</details>
+
+<details> 
+<summary>Measured</summary>
 
 378 parameters (318 for the left-isoclinic twin — the rotor projects a left and a
 right axis per head, twelve channels each against six). Chance is 16.7%.
@@ -465,7 +496,10 @@ statistic; `abelian_rotation_loses_the_order` does the same one rung further dow
 the dataset really is the `S₃` word problem and that the obstruction is what it is
 claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
 
-### Notes
+</details>
+
+<details> 
+<summary>Notes</summary>
 
 - **Conjugation is the point, not "more parameters".** The hand-built solution ties
   the right factor to the left (`p = q`) and uses no other freedom of `SO(4)`. What it
@@ -492,6 +526,8 @@ claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
   readout. That makes it the sharper statement about the block: a Mamba block's output
   is linear in its state, so a state that needs unfolding is a state the block cannot
   report.
+
+</details>
 
 ---
 
