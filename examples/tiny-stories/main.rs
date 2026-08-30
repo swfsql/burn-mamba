@@ -27,13 +27,11 @@
 
 pub use common::{
     cli::AppArgs,
+    tiny_stories::dataset,
+    tiny_stories::lm::{Overrides, TinyStoriesConfig},
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
-use std::ffi::OsString;
-use training::TinyStoriesConfig;
 
-/// The character-level TinyStories corpus: alphabet, download/cache, windowing.
-pub mod dataset;
 /// Sampling from the trained LM.
 pub mod inference;
 /// The example's `model_config()`.
@@ -127,65 +125,6 @@ pub fn launch(app_args: &AppArgs) {
     if !app_args.inference && !app_args.training {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
-    }
-}
-
-/// Corpus knobs forwarded after `--`; each applies on top of the loaded/created
-/// [`TinyStoriesConfig`] (and is then persisted with it).
-struct Overrides {
-    /// `--seq-len <usize>`: characters per training window.
-    seq_len: Option<usize>,
-    /// `--train-stories <usize>`: stories pulled from the train split.
-    train_stories: Option<usize>,
-    /// `--valid-stories <usize>`: stories pulled from the validation split.
-    valid_stories: Option<usize>,
-    /// `--epochs <usize>`: passes over the corpus.
-    epochs: Option<usize>,
-    /// `--batch-size <usize>`: windows per optimizer step.
-    batch_size: Option<usize>,
-    /// `--no-muon`: keep the block's hidden weight matrices on AdamW instead of
-    /// moving them to Muon (which is the default).
-    no_muon: bool,
-}
-
-impl Overrides {
-    fn parse(extra_args: &[OsString]) -> Self {
-        let mut pargs = pico_args::Arguments::from_vec(extra_args.to_vec());
-        let overrides = Overrides {
-            seq_len: pargs.opt_value_from_str("--seq-len").unwrap(),
-            train_stories: pargs.opt_value_from_str("--train-stories").unwrap(),
-            valid_stories: pargs.opt_value_from_str("--valid-stories").unwrap(),
-            epochs: pargs.opt_value_from_str("--epochs").unwrap(),
-            batch_size: pargs.opt_value_from_str("--batch-size").unwrap(),
-            no_muon: pargs.contains("--no-muon"),
-        };
-        let remaining = pargs.finish();
-        assert!(remaining.is_empty(), "unused extra arguments: {remaining:?}");
-        overrides
-    }
-
-    fn apply(&self, config: &mut TinyStoriesConfig) {
-        if let Some(seq_len) = self.seq_len {
-            config.seq_len = seq_len;
-        }
-        if let Some(train_stories) = self.train_stories {
-            config.train_stories = train_stories;
-        }
-        if let Some(valid_stories) = self.valid_stories {
-            config.valid_stories = valid_stories;
-        }
-        if let Some(epochs) = self.epochs {
-            config.training.num_epochs = epochs;
-        }
-        if let Some(batch_size) = self.batch_size {
-            config.training.batch_size = batch_size;
-        }
-        if self.no_muon {
-            // Muon reuses AdamW's LR and weight decay (`MatchRmsAdamW` sizes its
-            // update to AdamW's RMS), so only the optimizer of the planned
-            // matrices changes between the two arms.
-            config.training.optimizer = config.training.optimizer.clone().with_muon(None);
-        }
     }
 }
 

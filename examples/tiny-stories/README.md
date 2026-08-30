@@ -14,8 +14,8 @@ Multi-Gate residuals, between a tied character embedding and its transpose.
 
 The dataset's cleaning pipeline guarantees exactly 74 distinct ASCII characters:
 the 52 cased letters plus ``\n !"$',-.0123456789:;?``. Case-folding the letters
-leaves **48** tokens, and every one of them actually occurs — so the alphabet in
-`dataset.rs` is the corpus's own inventory, not a slice of ASCII:
+leaves **48** tokens, and every one of them actually occurs — so the alphabet is
+the corpus's own inventory, not a slice of ASCII:
 
 ```text
 \n !"$',-.0123456789:;?abcdefghijklmnopqrstuvwxyz
@@ -38,7 +38,9 @@ this size, so instead of the `HuggingfaceDatasetLoader` path (python + the
 [datasets-server](https://huggingface.co/docs/datasets-server) `/rows` endpoint,
 100 stories per request (its hard maximum, ~2s each). The normalized text is
 cached in `~/.cache/burn-dataset/tinystories-gpt4-clean/<split>-<n>.txt`, so the
-download happens once per `(split, story count)`.
+download happens once per `(split, story count)`. The loader, the windowing
+and the epoch loops are `burn_stack::examples::tiny_stories`, one copy shared
+with `burn-deltanet`'s counterpart of this example — including that cache.
 
 The endpoint is rate limited — the measured budget is ~28 requests per two
 minutes, after which CloudFront answers `429` with an HTML body for ~15s at a

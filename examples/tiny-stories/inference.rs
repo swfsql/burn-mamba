@@ -1,20 +1,22 @@
 //! Sampling from the trained character LM.
 //!
-//! [`generate`] is the reusable sampler and shows off the library's two
-//! execution modes back to back: the prompt is consumed by one chunkwise
-//! [`forward`](MambaVocabNet::forward) (prefill), and every generated character
-//! then costs one [`step`](MambaVocabNet::step) against the same cache — O(state)
-//! per token, with no growing KV cache. [`infer`] loads the checkpoint and
-//! prints a few stories at different temperatures.
+//! [`generate`] shows off the library's two execution modes back to back: the
+//! prompt is consumed by one chunkwise [`forward`](MambaVocabNet::forward)
+//! (prefill), and every generated character then costs one
+//! [`step`](MambaVocabNet::step) against the same cache — O(state) per token,
+//! with no growing KV cache. It is `burn_stack`'s
+//! [`generate`](burn_stack::examples::tiny_stories::sample::generate) written
+//! over this crate's family enum, which the block-generic one cannot dispatch;
+//! the token sampler itself is shared. [`infer`] loads the checkpoint and prints
+//! a few stories at different temperatures.
 
 use crate::AppArgs;
-use crate::common::device::FloatElement;
-use crate::dataset::{STORY_SEPARATOR, VOCAB, VOCAB_SIZE};
+use crate::dataset::{STORY_SEPARATOR, VOCAB};
+use crate::training::ssd_path;
 use burn::prelude::*;
-use burn::tensor::ElementConversion;
-use burn::tensor::activation::softmax;
-use burn_mamba::prelude::{Mamba3SsdPath, MambaSsdPath, MambaVocabNet, MambaVocabNetConfig};
-use rand::{Rng, SeedableRng};
+use burn_mamba::prelude::{MambaVocabNet, MambaVocabNetConfig};
+use burn_stack::examples::tiny_stories::sample::sample_token;
+use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 /// Temperatures sampled by [`infer`], from near-greedy to loose.
@@ -90,15 +92,14 @@ pub fn generate(
     let ids: Vec<i32> = tokens.iter().map(|&t| t as i32).collect();
     let prompt_len = ids.len();
     let input = Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([1, prompt_len]);
-    let ssd_path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
-    let (logits, caches) = model.forward(input, None, ssd_path, None);
+    let (logits, caches) = model.forward(input, None, ssd_path(), None);
     let mut logits = logits.narrow(1, prompt_len - 1, 1).squeeze_dim::<2>(1); // [1, VOCAB_SIZE]
     let mut caches = Some(caches);
 
     // Decode: one `step` per character, against that same cache.
     let mut out = String::with_capacity(n_chars);
     for _ in 0..n_chars {
-        let token = sample(logits, temperature, &mut rng);
+        let token = sample_token(logits, temperature, &mut rng);
         out.push(VOCAB.character(token));
         let next = Tensor::<1, Int>::from_ints([token as i32], device);
         let (next_logits, next_caches) = model.step(next, caches.take(), None);
@@ -106,36 +107,4 @@ pub fn generate(
         caches = Some(next_caches);
     }
     out
-}
-
-/// Draw one token from `logits` (`[1, VOCAB_SIZE]`): temperature-scaled
-/// multinomial sampling, or argmax when `temperature <= 0`.
-fn sample(logits: Tensor<2>, temperature: f64, rng: &mut ChaCha8Rng) -> u8 {
-    assert_eq!([1, VOCAB_SIZE], logits.dims());
-    if temperature <= 0.0 {
-        let best = logits.argmax(1).into_data().try_to_vec::<i32>().unwrap();
-        return best[0] as u8;
-    }
-    let probs = to_host(softmax(logits / temperature, 1));
-    let threshold: f32 = rng.random_range(0.0..1.0);
-    let mut cumulative = 0.0;
-    for (token, p) in probs.iter().enumerate() {
-        cumulative += p;
-        if cumulative >= threshold {
-            return token as u8;
-        }
-    }
-    // Only reachable when the probabilities sum to slightly under 1 (rounding).
-    (VOCAB_SIZE - 1) as u8
-}
-
-/// Read a float tensor back to a host `Vec<f32>` (dtype-agnostic).
-fn to_host<const D: usize>(tensor: Tensor<D>) -> Vec<f32> {
-    tensor
-        .into_data()
-        .try_to_vec::<FloatElement>()
-        .unwrap()
-        .into_iter()
-        .map(|x| x.elem::<f32>())
-        .collect()
 }

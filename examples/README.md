@@ -13,7 +13,7 @@ Each example lives in its own directory (the `reset-*` ladder one level deeper, 
 
 The lauching procedure first triggers some basic command arguments parsing, which sets whether training and/or inference should run. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
 
-There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, the sequential-MNIST dataset and the MNIST classification loop all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate.
+There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, and both datasets with their epoch loops (sequential-MNIST classification, character-level TinyStories language modelling) all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate.
 
 ##### Model Definition
 
