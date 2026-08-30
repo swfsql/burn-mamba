@@ -383,3 +383,4 @@ double-ssd) (`../py/VikramLex/mamba3-minimal/`); **Burn** (`../burn/`).
 
 - `rg`: available.
 - `cargo fmt`: don't use.
+- Prefer using the file editing tool to edit files. Use python scripts for editing iff there are procedural benefits.

@@ -92,3 +92,21 @@ burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d
 [[bench]]
 name = "layer"
 harness = false
+
+# The `reset-*` ladder lives one directory deeper (`examples/reset/`, sharing one
+# README), which is past cargo's `examples/<name>/main.rs` autodiscovery.
+[[example]]
+name = "reset-majority"
+path = "examples/reset/majority/main.rs"
+
+[[example]]
+name = "reset-rotor"
+path = "examples/reset/rotor/main.rs"
+
+[[example]]
+name = "reset-spinor"
+path = "examples/reset/spinor/main.rs"
+
+[[example]]
+name = "reset-swap"
+path = "examples/reset/swap/main.rs"

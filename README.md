@@ -209,9 +209,13 @@ single-SSD), which is selected by the cache variant supplied.
 The [`examples/`](examples/) directory contains small, self-contained models on
 synthetic or canonical data:
 
-- **`reset-majority`** — the smallest demo: a single Mamba-2 block (62
-  parameters) on the sign of a running vote since the last reset, exercising the
-  full train → save → infer flow.
+- **[`reset-*`](examples/reset/)** — a four-rung ladder on one stream shape, each
+  rung the smallest task its block is *needed* for: `reset-majority` (a single
+  62-parameter Mamba-2 block on the sign of a running vote since the last reset,
+  and the full train → save → infer flow), then `reset-rotor`, `reset-spinor` and
+  `reset-swap` for the complex, quaternion and two-sided `SO(4)` rotations. Every
+  rung carries a hand-built exact solution and the ablations that wall off the
+  rung below.
 - **`mnist-class`** — a Mamba-3 classifier that reads each MNIST image as a
   sequence of pixels.
 

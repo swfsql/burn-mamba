@@ -1,47 +1,26 @@
-//! # Reset-swap example — the smallest task an `SO(4)` Mamba-3 block is needed for
+//! # Reset-swap — the smallest task an `SO(4)` Mamba-3 block is needed for
 //!
 //! The corollary of `reset-spinor`, one rung further up. Same shape of stream —
 //! two kinds of turn and a reset — but now the turns are **swaps**: the model
 //! reads `s` / `t` / `R` and must report, at every position, how the three items
 //! `abc` are ordered, i.e. the running word in the symmetric group `S₃`.
 //!
-//! Where `reset-spinor` needs the transition to be **non-abelian**, this needs
-//! it to be *the group itself rather than a double cover*:
+//! Where `reset-spinor` needs the transition to be **non-abelian**, this needs it
+//! to be *the group itself rather than a double cover*. A transposition has order
+//! 2, but in `SU(2)` the *only* element of order 2 is `−1`: a half-turn lifts to
+//! `(0, û)`, whose square is `−1`. So a left-isoclinic
+//! ([`RotationKind::Quaternion4D`]) state runs in the double cover `2D₃`, and the
+//! two lifts of one permutation are **antipodal** state vectors carrying the same
+//! label — which no linear readout can merge. Two-sided
+//! ([`RotationKind::Rotor4D`]) the block reaches conjugation `v ↦ q v q̄`, i.e.
+//! `SO(3) ⊂ SO(4)`, where `±q` act identically, the three swaps are three honest
+//! half-turns about three axes `60°` apart, and the state *is* the permutation.
 //!
-//! - the answer is not a function of the current symbol, and Mamba-3 has no
-//!   short convolution, so the recurrent state is the only memory,
-//! - `st ≠ ts`, so a `cumsum` of angles — everything
-//!   [`RotationKind::Complex2D`] can accumulate — cannot decide it,
-//! - **and every swap must square to the identity.** A transposition has order
-//!   2, but in `SU(2)` the *only* element of order 2 is `−1`: a half-turn lifts
-//!   to `(0, û)`, whose square is `−1`. So a left-isoclinic
-//!   ([`RotationKind::Quaternion4D`]) state runs in the double cover `2D₃`, and
-//!   the two lifts of one permutation are **antipodal** state vectors that carry
-//!   the same label — which no linear readout can merge.
+//! Carries a downstream `--rotation complex|quaternion|rotor` flag (default
+//! `rotor`) after the trailing `--`; it selects the rotation baked into a
+//! **fresh** model config (a persisted one wins on reload).
 //!
-//! Two-sided ([`RotationKind::Rotor4D`]) the block reaches conjugation
-//! `v ↦ q v q̄`, i.e. `SO(3) ⊂ SO(4)`, where `±q` act identically, the three
-//! swaps are three honest half-turns about three axes `60°` apart, and the state
-//! *is* the permutation.
-//!
-//! ## Run
-//!
-//! ```bash
-//! cargo run --release --example reset-swap -- --training --inference
-//!
-//! # the ablations: the same model one and two rungs down
-//! cargo run --release --example reset-swap -- --training --inference -- --rotation quaternion
-//! cargo run --release --example reset-swap -- --training --inference -- --rotation complex
-//!
-//! # the claims above, measured: a hand-built exact solution, its left-isoclinic
-//! # twin, and the ceilings
-//! cargo test --release --example reset-swap -- --nocapture
-//! ```
-//!
-//! Like the other `reset-*` examples this carries a downstream flag,
-//! `--rotation complex|quaternion|rotor` (default `rotor`), forwarded after the
-//! trailing `--`; it selects the rotation baked into a **fresh** model config
-//! (a persisted one wins on reload).
+//! The task, the measurements and how to run it: `examples/reset/README.md`.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -65,7 +44,7 @@ pub mod training;
 pub mod tests;
 
 /// Shared example infrastructure (included by path).
-#[path = "../common/mod.rs"]
+#[path = "../../common/mod.rs"]
 pub mod common;
 
 use burn_mamba::prelude::RotationKind;

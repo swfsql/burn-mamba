@@ -1,4 +1,4 @@
-//! # Reset-spinor example — the smallest task a *quaternion* Mamba-3 block is needed for
+//! # Reset-spinor — the smallest task a *quaternion* Mamba-3 block is needed for
 //!
 //! The corollary of `reset-rotor`, one rung further up the ladder. Same shape of
 //! stream — two kinds of turn and a reset — but the two turns **do not commute**:
@@ -7,37 +7,18 @@
 //! `±1, ±i, ±j, ±k`).
 //!
 //! Where `reset-rotor` needs the transition to be *complex* — a rotation, so the
-//! state can be periodic — this needs it to be **non-abelian**. `Q₈` is the
-//! smallest non-abelian group of unit quaternions, which is to say the smallest
-//! group that the block's own [`RotationKind::Quaternion4D`] state contains and
-//! its [`RotationKind::Complex2D`] state does not:
+//! state can be periodic — this needs it to be **non-abelian**: `ij = k` but
+//! `ji = −k`, so only the *order* decides, while an abelian rotation accumulates
+//! a `cumsum` of angles and a sum forgets order, computing exactly the
+//! abelianisation `Q₈/{±1}`. `Q₈` is the smallest group that the block's own
+//! [`RotationKind::Quaternion4D`] state contains and its
+//! [`RotationKind::Complex2D`] state does not.
 //!
-//! - the answer is not a function of the current symbol, and Mamba-3 has no
-//!   short convolution, so the recurrent state is the only memory,
-//! - the label is periodic in every generator (`i⁴ = 1`), which no real state
-//!   can report — the `reset-rotor` argument,
-//! - **and it is not a function of how many `i`s and `j`s went by.** `ij = k`
-//!   but `ji = −k`, so only the *order* decides. An abelian rotation accumulates
-//!   a `cumsum` of angles, and a sum forgets order: what it computes is exactly
-//!   the abelianisation `Q₈/{±1}`, missing the commutator.
+//! Carries a downstream `--rotation complex|quaternion|rotor` flag (default
+//! `quaternion`) after the trailing `--`; it selects the rotation baked into a
+//! **fresh** model config (a persisted one wins on reload).
 //!
-//! ## Run
-//!
-//! ```bash
-//! cargo run --release --example reset-spinor -- --training --inference
-//!
-//! # the ablation: the same model with the abelian rotation
-//! cargo run --release --example reset-spinor -- --training --inference -- --rotation complex
-//!
-//! # the claims above, measured: a hand-built exact solution, its abelian twin,
-//! # and the ceiling for everything order-blind
-//! cargo test --release --example reset-spinor -- --nocapture
-//! ```
-//!
-//! Like `state-tracking`, this example carries a downstream flag,
-//! `--rotation complex|quaternion` (default `quaternion`), forwarded after the
-//! trailing `--`; it selects the rotation baked into a **fresh** model config
-//! (a persisted one wins on reload).
+//! The task, the measurements and how to run it: `examples/reset/README.md`.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -61,7 +42,7 @@ pub mod training;
 pub mod tests;
 
 /// Shared example infrastructure (included by path).
-#[path = "../common/mod.rs"]
+#[path = "../../common/mod.rs"]
 pub mod common;
 
 use burn_mamba::prelude::RotationKind;

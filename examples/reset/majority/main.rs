@@ -1,30 +1,15 @@
-//! # Reset-majority example — the smallest task a Mamba-2 block is *needed* for
+//! # Reset-majority — the smallest task a Mamba-2 block is *needed* for
 //!
 //! One Mamba-2 block, two scalar states, no convolution, no residual: the model
 //! reads a stream of `+` / `-` / `R` symbols and must report, at **every**
 //! position, the sign of the running vote **since the last `R`**.
 //!
-//! The task is chosen so that nothing but the block's selective state can solve
-//! it:
+//! The bottom rung of the `reset-*` ladder, and the one requirement it adds is
+//! that the decay be **data-dependent**: a reset must erase its past outright
+//! while the votes after it stay unweighted. Two adversarial families in the
+//! eval set pin that down from both sides — see [`dataset`](crate::dataset).
 //!
-//! - the answer is not a function of the current symbol (so the embedding and
-//!   the residual are useless — the residual is switched off anyway),
-//! - the lookback is unbounded (so no fixed window helps, and `conv_kernel = 1`
-//!   removes the only window there was),
-//! - **and it needs the decay to be data-dependent**: a reset must erase its
-//!   past outright while the votes after it stay unweighted. Two adversarial
-//!   families in the eval set pin that down from both sides — see
-//!   [`dataset`](crate::dataset).
-//!
-//! ## Run
-//!
-//! ```bash
-//! cargo run --release --example reset-majority -- --training --inference
-//!
-//! # the claims above, measured: a hand-built exact solution, and a sweep
-//! # showing no fixed decay reaches it
-//! cargo test --release --example reset-majority -- --nocapture
-//! ```
+//! The task, the measurements and how to run it: `examples/reset/README.md`.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -48,7 +33,7 @@ pub mod training;
 pub mod tests;
 
 /// Shared example infrastructure (included by path).
-#[path = "../common/mod.rs"]
+#[path = "../../common/mod.rs"]
 pub mod common;
 
 /// Wire up the device, configs, and the train/infer flow for the task.

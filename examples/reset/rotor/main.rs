@@ -1,38 +1,20 @@
-//! # Reset-rotor example — the smallest task a Mamba-3 block is *needed* for
+//! # Reset-rotor — the smallest task a Mamba-3 block is *needed* for
 //!
 //! The corollary of `reset-majority`, one family up. Same three symbols, same
-//! reset: the model reads a stream of `+` / `-` / `R` and must report, at
-//! **every** position, where a three-detent rotor stands — the running turn
-//! count since the last `R`, **mod 3**.
+//! reset: the model reads `+` / `-` / `R` and must report, at **every**
+//! position, where a three-detent rotor stands — the running turn count since
+//! the last `R`, **mod 3**.
 //!
-//! Where `reset-majority` isolates the one thing a Mamba-2 block has that a
-//! linear SSM does not (a *selective decay*), this isolates the one thing a
-//! Mamba-3 block has that a Mamba-2 block does not: a **complex transition**,
-//! the data-dependent rotation absorbed into `B`/`C`. The task is chosen so
-//! that nothing else can stand in for it:
+//! The rung isolates the one thing a Mamba-3 block has that a Mamba-2 block does
+//! not: a **complex transition**, the data-dependent rotation absorbed into
+//! `B`/`C`. It adds two requirements, one per adversarial family — the state has
+//! to *turn*, since the label is periodic in a count that a real state can hold
+//! but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)); and the
+//! turn has to be data-dependent, since a fixed per-step angle is vanilla RoPE,
+//! whose phase measures position rather than turns
+//! ([`Family::Balanced`](crate::dataset::Family::Balanced)).
 //!
-//! - the answer is not a function of the current symbol (so the embedding and
-//!   the residual are useless — the residual is switched off anyway, and
-//!   Mamba-3 has no short convolution to shortcut through),
-//! - the lookback is unbounded, so the recurrent state is the only memory,
-//! - the state has to *turn*: the label is periodic in the turn count, and a
-//!   real state with non-negative eigenvalues can hold that count but never
-//!   reduce it. [`dataset::Family::Drift`](crate::dataset::Family::Drift) pins
-//!   that down,
-//! - **and the turn has to be data-dependent**: a fixed per-step angle is
-//!   vanilla RoPE, whose phase measures position, not turns.
-//!   [`dataset::Family::Balanced`](crate::dataset::Family::Balanced) pins that
-//!   down from the other side.
-//!
-//! ## Run
-//!
-//! ```bash
-//! cargo run --release --example reset-rotor -- --training --inference
-//!
-//! # the claims above, measured: a hand-built exact solution, and two sweeps
-//! # showing neither a fixed rotation nor a real state reaches it
-//! cargo test --release --example reset-rotor -- --nocapture
-//! ```
+//! The task, the measurements and how to run it: `examples/reset/README.md`.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -56,7 +38,7 @@ pub mod training;
 pub mod tests;
 
 /// Shared example infrastructure (included by path).
-#[path = "../common/mod.rs"]
+#[path = "../../common/mod.rs"]
 pub mod common;
 
 /// Wire up the device, configs, and the train/infer flow for the task.
