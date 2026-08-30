@@ -6,7 +6,7 @@ one at a time, what each piece of the SSM recurrence actually buys:
 
 | rung | what only that block can do | the state it needs | the group it tracks |
 |---|---|---|---|
-| [`reset-majority`](#reset-majority) | forget on command | a **selective decay** (Mamba-2) | — (a sign) |
+| [`reset-majority`](#reset-majority) | forget on command | a **real** transition, `RotationKind::Real1D` | — (a sign) |
 | [`reset-rotor`](#reset-rotor) | count modulo `k` | a **complex** transition, `RotationKind::Complex2D` | `Z₃` |
 | [`reset-spinor`](#reset-spinor) | compose in a non-abelian group | a **quaternion** transition, `Quaternion4D` | `Q₈` |
 | [`reset-swap`](#reset-swap) | hold a group with more than one involution | a **two-sided** `SO(4)` transition, `Rotor4D` | `S₃` |
@@ -24,7 +24,7 @@ The three shortcuts every rung closes:
 | shortcut | why it is closed |
 |---|---|
 | read the current symbol | the label is not a function of it |
-| read a fixed window | `conv_kernel = 1` on Mamba-2; Mamba-3 has no short convolution at all |
+| read a fixed window | Mamba-3 has no short convolution at all |
 | read the residual | `ignore_last_residual` — the head sees the block alone |
 
 Each rung then closes one more, and *that* is what the rung is about. It is the
@@ -40,7 +40,8 @@ cargo run --release --example reset-<rung> -- --training --inference
 cargo test --release --example reset-<rung> -- --nocapture
 ```
 
-The three Mamba-3 rungs also take a downstream `--rotation` flag, forwarded after
+All four rungs are one Mamba-3 block; the upper three (whose transition actually
+rotates) also take a downstream `--rotation` flag, forwarded after
 a second `--`; it selects the rotation baked into a **fresh** model config (a
 persisted one wins on reload), so each rung can be run as its own ablation:
 
@@ -71,8 +72,9 @@ which are the training runs above. Two conventions hold:
 
 ## reset-majority
 
-The smallest task that a **single Mamba-2 block actually has to solve** — and that
-nothing else in the model can.
+The smallest task that a **selective decay actually has to solve** — and that
+nothing else in the model can. All four rungs are one Mamba-3 block; this is the
+one whose rotation group is trivial, so the decay is all it has.
 
 The model reads `+` / `-` / `R` and reports the sign of the running vote **since
 the last `R`**:
@@ -88,9 +90,11 @@ scored (`.`).
 
 ### Why this task
 
-A Mamba-2 block at `d_model = 2`, `state_rank = 1`, `conv_kernel = 1` unrolls to
-two data-dependent scalar recurrences and a sign-like readout — see `model.rs` for
-the derivation. Beyond the three shared rows:
+A Mamba-3 block at `d_model = 2`, `state_rank = 1`, `RotationKind::Real1D`
+unrolls to two data-dependent scalar recurrences and a sign-like readout — see
+`model.rs` for the derivation. `Real1D` pairs nothing, so it is the one rotation
+kind that admits an odd `state_rank`: here the state *is* one real scalar per
+head. Beyond the three shared rows:
 
 | shortcut | why it is closed |
 |---|---|
@@ -106,24 +110,24 @@ The eval set pins that down from both sides:
 
 ### Measured
 
-62 parameters. Chance is 50%.
+70 parameters. Chance is 50%.
 
 | | random | long-prefix | long-suffix |
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 77.3% | 82.3% | 55.2% |
-| best **fixed**-decay block (10 decays × 6 gains) | 85.9% | 82.6% | 98.8% |
+| best **fixed**-decay block (10 decays × 6 gains) | 91.0% | 82.6% | 98.8% |
 | — the same, worst family per decay | \<71% | | |
 | **hand-built** selective block, no training | **100%** | **100%** | **100%** |
 | trained, 80 epochs | **100%** | **100%** | **100%** |
 
 The row that matters is the third: no fixed decay clears 71% on its worst family,
 which is where a model with *no memory whatsoever* already sits. Turning
-selectivity on — one channel of the block's `Δ` projection — takes it to 100%.
+selectivity on — one channel of the block's `A` projection — takes it to 100%.
 
 `handmade_block_solves_every_family` writes every weight down in closed form from
 the unrolled recurrence (no fitting anywhere), and `no_fixed_decay_solves_the_task`
-re-runs that same block with `RESET`'s selectivity switched off, sweeping the decay
-and the readout gain.
+re-runs that same block with `RESET`'s selectivity switched off — `A` made
+input-independent, the one changed knob — sweeping the decay and the readout gain.
 
 ### Notes
 
@@ -140,8 +144,9 @@ and the readout gain.
 
 ## reset-rotor
 
-The corollary one family up: the smallest task that a **single Mamba-3 block
-actually has to solve** — and that a Mamba-2 block, at any size, cannot.
+The corollary one rung up: the smallest task that a **rotating transition
+actually has to solve** — and that a real one (the rung below, or a Mamba-2 block)
+cannot, at any size.
 
 Same stream, read differently. The model sees `+` / `-` / `R` and reports where a
 **three-detent rotor** stands: the running turn count since the last `R`, taken
@@ -158,9 +163,9 @@ the rotor, and (see `model.rs`) the one that gives the block its phase reference
 
 ### Why this task
 
-`reset-majority` isolates the one thing a Mamba-2 block has that a linear SSM does
-not: a **selective decay**. This isolates the one thing a Mamba-3 block has that a
-Mamba-2 block does not: a **complex transition** — the data-dependent rotation that
+`reset-majority` isolates the one thing a selective SSM has that a linear one does
+not: a **data-dependent decay**. This isolates the one thing a rotating transition
+has that a real one does not: a **complex transition** — the data-dependent rotation that
 Mamba-3 absorbs into `B`/`C` (the "RoPE trick"). At `d_model = 2`, `state_rank = 2`,
 `per_head_dim = 1` the block unrolls to two heads sharing one rotating pair.
 

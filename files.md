@@ -67,7 +67,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ## Mamba-3 (`src/mamba3/`)
 
-- **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** for RoPE pairing;
+- **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** unless `Real1D`;
   `mimo_rank` 1=SISO; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
@@ -75,8 +75,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   three rotation fields; `num_rotation_blocks()` = `num_quat_blocks · quat_factors` (the
   projection/scan block axis, doubled for `Rotor4D`) drives `num_rotation_channels()`;
   `zero_rotation_state()` is the one fresh-cache accumulator, shared by every pathway.
-  Under `Real1D` every rotation count is `0`; `init` asserts any other kind turns ≥ 1 pair,
-  and `muon_projections()` omits the (then absent) rotation segment. Fields:
+  Under `Real1D` every rotation count is `0` and `state_rank` may be odd (scalar `1`);
+  `init` asserts any other kind turns ≥ 1 pair over an even `state_rank`, and
+  `muon_projections()` omits the (then absent) rotation segment. Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
   mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.

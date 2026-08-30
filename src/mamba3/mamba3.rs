@@ -370,7 +370,9 @@ pub struct Mamba3Config {
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
-    /// **Must be even** (required for RoPE pairing).
+    /// **Must be even** for every rotating [`RotationKind`] (RoPE pairing);
+    /// [`RotationKind::Real1D`] pairs nothing, so it also admits an odd rank
+    /// (down to the scalar state `1`).
     ///
     /// Paper: `N`. Python: `d_state`.
     #[config(default = 128)]
@@ -692,8 +694,11 @@ impl Mamba3Config {
         let mimo_rank = self.mimo_rank;
         let num_rope_angles = self.num_rope_angles();
 
+        assert!(state_rank > 0, "state_rank must be positive");
+        // Evenness is a RoPE-pairing requirement; `Real1D` pairs nothing, so it
+        // is the one kind that admits an odd (in particular, scalar) state.
         assert!(
-            state_rank.is_multiple_of(2),
+            self.rotation == RotationKind::Real1D || state_rank.is_multiple_of(2),
             "state_rank must be even for RoPE pairing"
         );
         assert!(self.per_head_dim > 0, "per_head_dim must be positive");

@@ -32,6 +32,12 @@ pub const EVAL_FAMILIES: [(&str, Family); 3] = [
     ("long-suffix", Family::LongSuffix),
 ];
 
+/// The SSD pathway used everywhere in this example. The model is tiny and the
+/// sequences are short, so the simplest (autodiff) variant is the right one.
+pub fn ssd_path() -> MambaSsdPath {
+    MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
+}
+
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
 /// way).
@@ -252,8 +258,7 @@ impl Wrap {
         let [batch_size, sequence_size, _num_symbols] = inputs.dims();
         assert_eq!([batch_size, sequence_size], targets.dims());
 
-        let ssd_path = MambaSsdPath::Mamba2(Mamba2SsdPath::Minimal(None));
-        let (output, _caches) = model.forward(inputs, None, ssd_path, None);
+        let (output, _caches) = model.forward(inputs, None, ssd_path(), None);
         assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
         // Keep only the positions that have a sign to report; the zero-vote ones

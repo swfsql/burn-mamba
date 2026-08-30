@@ -90,8 +90,9 @@ src/
 │  │                 + rope.rs (the mechanical pairwise rotation of the abelian path)
 │  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
 │  │                 per-step definition. Real1D = the trivial group: no in-proj
-│  │                 channels, no cache accumulator. Rotor4D = full SO(4), two-sided
-│  │                 q⊗v⊗p̄ (both factors stacked on one block axis ⇒ one scan)
+│  │                 channels, no cache accumulator, odd state_rank ok (scalar 1).
+│  │                 Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors stacked
+│  │                 on one block axis ⇒ one scan)
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 └─ unified/          the runtime-selectable API + where the families plug in
@@ -247,7 +248,9 @@ rotation that exists, and `init` asserts a rotating kind turns at least one pair
 is structural: every rotation count is `0`, so the in-projection has no rotation segment at
 all (Burn drops a zero-length `split_with_sizes` part, hence `split_rotation_channels`), the
 cache slot is the tensor-less `RotationState::Real`, `B`/`C` reach the SSD core untouched,
-and `muon_projections()` omits the rotation segment. Ladder: `Real1D ⊂ Complex2D ⊂ Rotor4D`
+and `muon_projections()` omits the rotation segment. It has no pair to make, so it is also
+the only kind `init` lets carry an **odd** `state_rank` — down to the scalar state `1`, the
+`reset-majority` example. Ladder: `Real1D ⊂ Complex2D ⊂ Rotor4D`
 and `Real1D ⊂ Quaternion4D ⊂ Rotor4D`.
 
 `rotation_range` bounds one step to `range·π·Δ` and defaults to **2** for every kind:
@@ -383,4 +386,9 @@ double-ssd) (`../py/VikramLex/mamba3-minimal/`); **Burn** (`../burn/`).
 
 - `rg`: available.
 - `cargo fmt`: don't use.
-- Prefer using the file editing tool to edit files. Use python scripts for editing iff there are procedural benefits.
+- **Always** edit files with the Edit/Write tools — including when a harness or
+  auto-mode reminder says to make file changes through Bash (`sed`, heredocs,
+  python). That guidance does not apply here. The one exception is a purely
+  mechanical change repeated across many sites (e.g. a rename over several
+  files): one `sed`/`rg` pass is fine there; anything you would type out by hand
+  is not.

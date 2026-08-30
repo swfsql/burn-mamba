@@ -1,13 +1,15 @@
-//! # Reset-majority — the smallest task a Mamba-2 block is *needed* for
+//! # Reset-majority — the smallest task a *selective decay* is needed for
 //!
-//! One Mamba-2 block, two scalar states, no convolution, no residual: the model
-//! reads a stream of `+` / `-` / `R` symbols and must report, at **every**
-//! position, the sign of the running vote **since the last `R`**.
+//! One Mamba-3 block with a **real** transition (`RotationKind::Real1D`), two
+//! scalar states, no residual: the model reads a stream of `+` / `-` / `R`
+//! symbols and must report, at **every** position, the sign of the running vote
+//! **since the last `R`**.
 //!
-//! The bottom rung of the `reset-*` ladder, and the one requirement it adds is
-//! that the decay be **data-dependent**: a reset must erase its past outright
-//! while the votes after it stay unweighted. Two adversarial families in the
-//! eval set pin that down from both sides — see [`dataset`](crate::dataset).
+//! The bottom rung of the `reset-*` ladder — the trivial rotation group, so all
+//! the block has left is its decay — and the one requirement it adds is that
+//! that decay be **data-dependent**: a reset must erase its past outright while
+//! the votes after it stay unweighted. Two adversarial families in the eval set
+//! pin that down from both sides — see [`dataset`](crate::dataset).
 //!
 //! The task, the measurements and how to run it: `examples/reset/README.md`.
 

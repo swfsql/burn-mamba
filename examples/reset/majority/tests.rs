@@ -1,15 +1,15 @@
 //! The two claims this example rests on, measured.
 //!
-//! 1. A **hand-built** Mamba-2 block solves the task exactly — no fitting, every
+//! 1. A **hand-built** Mamba-3 block solves the task exactly — no fitting, every
 //!    weight written down in closed form from the unrolled recurrence.
 //! 2. The **same block with a non-selective decay** cannot, for *any* decay and
-//!    *any* readout gain. That is what makes the task a Mamba-2 task rather than
-//!    a plain linear-SSM one.
+//!    *any* readout gain. That is what makes the task a selective-SSM task
+//!    rather than a plain linear-SSM one.
 //!
 //! The construction is the one derived in [`crate::model`]: head 0 is the ballot
-//! box (`Δ₀` tiny on `±` so `ᾱ₀ ≈ 1`, huge on `RESET` so `ᾱ₀ ≈ 0`), head 1 is a
-//! constant reference, and the gated RMSNorm turns the pair into a direction the
-//! two-class head reads off.
+//! box (`A₀` at the block's floor on `±` so `ᾱ₀ ≈ 1`, large on `RESET` so
+//! `ᾱ₀ ≈ 0`), head 1 is a constant reference, and the network's final RMSNorm
+//! turns the pair into a direction the two-class head reads off.
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
@@ -25,20 +25,26 @@ use burn_mamba::prelude::*;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `Δ₀` on a `±` symbol: with `A₀ = ln(HOLD_ALPHA)/Δ_HOLD` this makes the decay
-/// `HOLD_ALPHA` per step, i.e. an (essentially) unweighted running sum.
-const DELTA_HOLD: f64 = 1e-5;
-/// `Δ₀` on a `RESET`: `Δ_WIPE·|A₀| = 20`, so `ᾱ₀ = e⁻²⁰` erases the past.
-const DELTA_WIPE: f64 = 20.0;
-/// The per-step decay the ballot box holds at.
-const HOLD_ALPHA: f64 = 0.99999; // = exp(-1e-5)
+/// `Δ` for the ballot box, on every symbol. Fixed at 1, so `ᾱ = exp(A)` outright
+/// and `γ = λ·Δ = 1` writes `B·x` unscaled: the decay is carried by `A` alone.
+const DELTA: f64 = 1.0;
+/// The per-step decay the ballot box holds at: the block floors `|A|` at its
+/// `a_floor` (`1e-4`), so this is the flattest hold it allows — an (essentially)
+/// unweighted running sum over a 32-token sequence.
+const HOLD_ALPHA: f64 = 0.9999; // = exp(-1e-4)
+/// `−A₀` on a `RESET`: `ᾱ₀ = e⁻²⁰` erases what the ballot box held.
+const A_WIPE: f64 = 20.0;
+/// `Â` for the reference head: `A = −softplus(Â)` lands under the block's
+/// `a_floor`, so head 1 holds at the same flattest decay.
+const A_HOLD_RAW: f64 = -20.0;
+/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`: the trapezoid's left-endpoint weight
+/// `β = (1−λ)Δᾱ` vanishes and only the current token is written.
+const LAMBDA_RAW: f64 = 20.0;
 /// `Δ₁`, small enough that head 1's state never leaves its `D₁·x₁` reference.
 const DELTA_REF: f64 = 1e-12;
-/// `x₀(±) = ±V`. Bounded by silu's floor (`min silu = -0.2785`), which is what
-/// lets the two votes be exactly symmetric.
+/// `x₀(±) = ±V`. Mamba-3 has no activation on `x` (the gate's `silu(z)` is the
+/// block's only one), so the two votes are exactly symmetric.
 const V: f64 = 0.2;
-/// The shared `B` and `C` magnitudes: `C·(Δ_HOLD·B·V) = 2` per vote.
-const BC_MAG: f64 = 1000.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
 /// Class-logit gain on the vote axis.
@@ -47,21 +53,6 @@ const OUT_GAIN: f64 = 3.0;
 // ---------------------------------------------------------------------------
 // scalar helpers
 // ---------------------------------------------------------------------------
-
-fn silu(t: f64) -> f64 {
-    t / (1.0 + (-t).exp())
-}
-
-/// Inverse of `silu` on the branch containing 0 (`t > -1.2785`).
-fn silu_inv(v: f64) -> f64 {
-    assert!(v > -0.2784, "silu bottoms out at -0.2785, cannot reach {v}");
-    let (mut lo, mut hi) = (-1.2785f64, v.max(0.0) + 1.0);
-    for _ in 0..200 {
-        let mid = 0.5 * (lo + hi);
-        if silu(mid) < v { lo = mid } else { hi = mid }
-    }
-    0.5 * (lo + hi)
-}
 
 /// Inverse of `softplus`, stable for tiny `v`.
 fn softplus_inv(v: f64) -> f64 {
@@ -118,8 +109,8 @@ const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
 fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLatentNet {
     let cfg = crate::model::model_config();
     let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba2(net) = &mut model else {
-        unreachable!("reset-majority configures the Mamba-2 variant")
+    let MambaLatentNet::Mamba3(net) = &mut model else {
+        unreachable!("reset-majority configures the Mamba-3 variant")
     };
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
@@ -131,65 +122,70 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order is `[z(2) | x(2) B(1) C(1) | dt_raw(2)]`; each entry is the
-    // channel's target value at (MINUS, PLUS, RESET), *before* silu/softplus.
-    let hold = softplus_inv(DELTA_HOLD);
-    let dt0 = if selective {
-        [hold, hold, softplus_inv(DELTA_WIPE)]
+    // Channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2) | λ(2)]` — no
+    // rotation segment at all, since `Real1D` projects none. Each entry is the
+    // channel's target value at (MINUS, PLUS, RESET), *before* the channel's own
+    // activation (none on `x`, softplus on `Δ` and `−A`, σ on `λ`; `B`/`C` are
+    // QK-normed instead, which at `state_rank = 1` fixes them at their `γ`).
+    // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
+    let hold = softplus_inv(-alpha.ln());
+    let a0 = if selective {
+        [hold, hold, softplus_inv(A_WIPE)]
     } else {
         [hold; 3]
     };
-    let bc = silu_inv(BC_MAG);
-    let targets: [[f64; 3]; 8] = [
-        [Z_PRE; 3],                              // z, head 0
-        [Z_PRE; 3],                              // z, head 1
-        [silu_inv(-V), silu_inv(V), 0.0],        // x, head 0 — the ballot
-        [silu_inv(1.0); 3],                      // x, head 1 — the reference
-        [bc; 3],                                 // B (shared)
-        [silu_inv(BC_MAG * gain); 3],            // C (shared)
-        dt0,                                     // dt_raw, head 0
-        [softplus_inv(DELTA_REF); 3],            // dt_raw, head 1
+    let targets: [[f64; 3]; 12] = [
+        [Z_PRE; 3],                       // z, head 0
+        [Z_PRE; 3],                       // z, head 1
+        [-V, V, 0.0],                     // x, head 0 — the ballot
+        [1.0; 3],                         // x, head 1 — the reference
+        [1.0; 3],                         // B (shared)
+        [1.0; 3],                         // C (shared)
+        [softplus_inv(DELTA); 3],         // Δ, head 0
+        [softplus_inv(DELTA_REF); 3],     // Δ, head 1 — never writes
+        a0,                               // A, head 0 — hold, hold, wipe
+        [A_HOLD_RAW; 3],                  // A, head 1
+        [LAMBDA_RAW; 3],                  // λ, head 0
+        [LAMBDA_RAW; 3],                  // λ, head 1
     ];
     let rows = [
         [EMBED[MINUS][0], EMBED[MINUS][1], 1.0],
         [EMBED[PLUS][0], EMBED[PLUS][1], 1.0],
         [EMBED[RESET][0], EMBED[RESET][1], 1.0],
     ];
-    let mut w = vec![0.0f64; 2 * 8];
-    let mut b = vec![0.0f64; 8];
+    let n_ch = targets.len();
+    let mut w = vec![0.0f64; 2 * n_ch];
+    let mut b = vec![0.0f64; n_ch];
     for (ch, target) in targets.iter().enumerate() {
         let [w0, w1, bias] = solve3(rows, *target);
         w[ch] = w0; // weight is [d_model, out]: row i, column ch
-        w[8 + ch] = w1;
+        w[n_ch + ch] = w1;
         b[ch] = bias;
     }
-    block.in_proj.weight = Param::from_tensor(t1(&w, [2, 8], device));
-    block.in_proj.bias = Some(Param::from_tensor(t1(&b, [8], device)));
+    block.in_proj.weight = Param::from_tensor(t1(&w, [2, n_ch], device));
+    block.in_proj.bias = Some(Param::from_tensor(t1(&b, [n_ch], device)));
 
-    // ── conv1d (kernel 1): the identity ──────────────────────────────────────
-    let conv_dim = 4; // d_inner + 2·ngroups·state_rank
-    block.conv1d.weight = Param::from_tensor(Tensor::ones(Shape::new([conv_dim, 1, 1]), device));
-    block.conv1d.bias = Some(Param::from_tensor(Tensor::zeros(
-        Shape::new([conv_dim]),
-        device,
-    )));
-
-    // ── Δ bias, A, D ─────────────────────────────────────────────────────────
+    // ── Δ bias, D, QK-norm scales, B/C biases ────────────────────────────────
+    // Δ and A are entirely data-dependent here, so the bias is zero.
     block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([2]), device));
-    // A_h = -exp(a_log_h); head 0 is set so exp(Δ_HOLD·A₀) = alpha exactly.
-    let a0 = -alpha.ln() / DELTA_HOLD;
-    block.a_log_h = Param::from_tensor(t1(&[a0.ln(), 0.0], [2], device));
     // D₀ = 0 (head 0 reads the state alone), D₁ = 1 (head 1 *is* its skip).
     block.d_h = Param::from_tensor(t1(&[0.0, 1.0], [2], device));
+    // A scalar state has nothing to normalise *against*: QK-norm pins |B| = |C|
+    // = 1, so the readout gain lives in `c_norm`'s scale.
+    block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
+    block.c_norm.gamma = Param::from_tensor(t1(&[gain], [1], device));
+    block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([2, 1, 1]), device));
+    block.c_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([2, 1, 1]), device));
 
-    // ── output norm and the two projections ──────────────────────────────────
-    block.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
+    // ── the two projections ──────────────────────────────────────────────────
     block.out_proj.weight = Param::from_tensor(t1(&[1.0, 0.0, 0.0, 1.0], [2, 2], device));
     block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([2]), device)));
 
     // logits [NEG, POS] = [-g·o₀, +g·o₀]; `ignore_last_residual` means `o` is
     // all the head sees. `o₁` (the reference axis) enters only through the
-    // normalisation, which is what keeps the margin proportional to the vote.
+    // final norm, which is what keeps the margin proportional to the vote.
+    let norm_f = net.norm_f.as_mut().expect("final_norm is on");
+    norm_f.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
     net.out_proj.weight = Param::from_tensor(t1(
         &[-OUT_GAIN, OUT_GAIN, 0.0, 0.0],
         [2, NUM_CLASSES],
@@ -220,12 +216,7 @@ fn accuracy(model: &MambaLatentNet, family: Family, count: usize, device: &Devic
             .collect::<Vec<_>>(),
         0,
     );
-    let (out, _c) = model.forward(
-        inputs,
-        None,
-        MambaSsdPath::Mamba2(Mamba2SsdPath::Minimal(None)),
-        None,
-    );
+    let (out, _c) = model.forward(inputs, None, crate::training::ssd_path(), None);
     let n = count * SEQ_LENGTH;
     let pred = out
         .reshape([n, NUM_CLASSES])
@@ -285,7 +276,7 @@ fn handmade_block_solves_every_family() {
 fn no_fixed_decay_solves_the_task() {
     let device = Device::default();
     let alphas = [
-        1.0 - 1e-5,
+        HOLD_ALPHA, // the flattest hold the block's `a_floor` allows
         0.99,
         0.95,
         0.9,
@@ -337,8 +328,9 @@ fn no_fixed_decay_solves_the_task() {
 // ---------------------------------------------------------------------------
 
 /// The **memoryless ceiling**: the best a model that sees only the current
-/// symbol can do. No residual, embedding, or `conv_kernel = 1` window gets past
-/// it, and the hand-built block above is at 100%.
+/// symbol can do. No residual or embedding gets past it (and Mamba-3 has no
+/// short convolution to widen the window with), while the hand-built block above
+/// is at 100%.
 ///
 /// It is not chance — a `+` really does more often sit on a positive count, and
 /// the long same-sign runs in `long-prefix` sharpen that — but it is nowhere
@@ -385,4 +377,5 @@ fn table_ceiling(tally: &[[u64; NUM_CLASSES]; NUM_SYMBOLS]) -> f64 {
         .sum();
     best as f64 / total as f64
 }
+
 

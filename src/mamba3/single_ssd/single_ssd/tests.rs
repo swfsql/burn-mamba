@@ -46,6 +46,12 @@ fn cfg_real1d_mimo() -> Mamba3Config {
     cfg_real1d().with_mimo_rank(2)
 }
 
+/// A real transition pairs nothing, so it is the one kind whose `state_rank`
+/// may be odd — here the scalar state `state_rank = 1`.
+fn cfg_real1d_scalar() -> Mamba3Config {
+    cfg_real1d().with_state_rank(1)
+}
+
 /// Build a matched pair of initial caches for cross-algorithm parity
 /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
 /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
@@ -411,6 +417,21 @@ fn guard_random_init_consumed(
 /// not compared here (different semantics from the double-form state); the
 /// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
 fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) {
+    forward_match_tol(cfg, ssd_path, random_init, 1e-3);
+}
+
+/// [`forward_match`] with an explicit gradient tolerance.
+///
+/// Only the `state_rank = 1` rung needs one: QK-norm is then `γ·x/√(x²+ε)`,
+/// whose derivative peaks at `γ/√ε ≈ 300`, so a random draw that lands a `B`/`C`
+/// channel near zero amplifies fp32 noise by that factor. The *values* are
+/// untouched (`|B| = 1` either way), so only this bound moves.
+fn forward_match_tol(
+    cfg: Mamba3Config,
+    ssd_path: Mamba3SsdPath,
+    random_init: bool,
+    grad_tol: f32,
+) {
     let device: Device = Default::default();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -452,7 +473,7 @@ fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) 
         "forward_single_ssd vs forward_double_ssd",
         &r_fwd_double_ssd,
         &r_fwd_single_ssd,
-        1e-3,
+        grad_tol,
     );
 
     guard_random_init_consumed(
@@ -521,6 +542,16 @@ fn forward_match_real1d_random_init() {
 #[test]
 fn forward_match_real1d_mimo() {
     forward_match(cfg_real1d_mimo(), Mamba3SsdPath::Minimal(Some(4)), false);
+}
+
+#[test]
+fn forward_match_real1d_scalar() {
+    forward_match_tol(cfg_real1d_scalar(), Mamba3SsdPath::Minimal(Some(4)), false, 2e-2);
+}
+
+#[test]
+fn forward_match_real1d_scalar_random_init() {
+    forward_match_tol(cfg_real1d_scalar(), Mamba3SsdPath::Minimal(Some(4)), true, 2e-2);
 }
 
 /// forward_single_ssd ≡ token-by-token step on values and gradients, from the same

@@ -107,7 +107,9 @@
 //! zeroed knob — the in-projection spends no channels on rotation, the cache
 //! carries no accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD
 //! core untouched. Switching the rotation off is therefore a choice of *kind*;
-//! `rope_fraction` only ever narrows a rotation that exists.
+//! `rope_fraction` only ever narrows a rotation that exists. It is also the one
+//! kind with no pair to make, hence the only one that admits an **odd**
+//! `state_rank` — down to the scalar state `state_rank = 1`.
 //!
 //! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)` with
 //! `w` the real part.  A `state_rank` of `r = 4·J` is treated as `J` independent

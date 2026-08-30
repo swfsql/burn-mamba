@@ -10,11 +10,12 @@
 //! Positions where the vote is exactly zero (every reset, and every tie) have no
 //! sign to report and are **not scored** — see [`IGNORE`].
 //!
-//! Two properties make this the task a single Mamba-2 block is for:
+//! Two properties make this the task a single selective-decay block is for:
 //!
 //! - **It needs the SSM state.** The lookback is unbounded (a reset may be
 //!   arbitrarily far back) and the answer is not a function of the last symbol.
-//!   With `conv_kernel = 1` the recurrent state is the model's *only* memory.
+//!   Mamba-3 has no short convolution, so the recurrent state is the model's
+//!   *only* memory.
 //! - **It needs the state to be *selective*.** A fixed decay `ᾱ` cannot both
 //!   erase a reset's past outright and keep an unweighted vote afterwards.
 //!   [`Family::LongPrefix`] and [`Family::LongSuffix`] are the two adversarial

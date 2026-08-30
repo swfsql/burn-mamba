@@ -287,6 +287,16 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// recurrent unrolling from that same state — outputs *and* final cache —
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
+    run_step_matches_forward_tol(cfg, random_init, 1e-3);
+}
+
+/// [`run_step_matches_forward`] with an explicit gradient tolerance.
+///
+/// Only the `state_rank = 1` rung needs one: QK-norm is then `γ·x/√(x²+ε)`,
+/// whose derivative peaks at `γ/√ε ≈ 300`, so a random draw that lands a `B`/`C`
+/// channel near zero amplifies fp32 noise by that factor. The *values* are
+/// untouched (`|B| = 1` either way), so only this bound moves.
+fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: f32) {
     let device: Device = Default::default();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -335,7 +345,7 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     });
 
     assert_outputs_match("step vs forward", &r_fwd, &r_step, 1e-4);
-    check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
+    check_grads_match("step vs forward", &r_fwd, &r_step, grad_tol);
 
     // ── Guard: the random initial state must actually be consumed ─────
     // Re-run forward from a *zero* initial cache; its output must differ
@@ -387,6 +397,11 @@ fn cfg_real1d() -> Mamba3Config {
 }
 fn cfg_real1d_mimo() -> Mamba3Config {
     cfg_real1d().with_mimo_rank(2)
+}
+/// A real transition pairs nothing, so it is the one kind whose `state_rank`
+/// may be odd — here the scalar state `state_rank = 1`.
+fn cfg_real1d_scalar() -> Mamba3Config {
+    cfg_real1d().with_state_rank(1)
 }
 fn cfg_outproj_norm() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -490,6 +505,16 @@ fn step_matches_forward_real1d_mimo() {
 #[test]
 fn step_matches_forward_real1d_mimo_random_init() {
     run_step_matches_forward(cfg_real1d_mimo(), true);
+}
+
+#[test]
+fn step_matches_forward_real1d_scalar() {
+    run_step_matches_forward_tol(cfg_real1d_scalar(), false, 2e-2);
+}
+
+#[test]
+fn step_matches_forward_real1d_scalar_random_init() {
+    run_step_matches_forward_tol(cfg_real1d_scalar(), true, 2e-2);
 }
 
 // ── has_outproj_norm = true (gated RMSNorm) ─────────────────────────────

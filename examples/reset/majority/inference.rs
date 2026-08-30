@@ -6,7 +6,7 @@ use crate::dataset::{
     EVAL_SEED, Family, IGNORE, MINUS, NUM_CLASSES, NUM_EVAL, PLUS, RESET, ResetMajorityBatcher,
     ResetMajorityDataset, ResetMajorityItem, SEQ_LENGTH,
 };
-use crate::training::EVAL_FAMILIES;
+use crate::training::{EVAL_FAMILIES, ssd_path};
 use burn::{
     data::{dataloader::batcher::Batcher, dataset::Dataset},
     prelude::*,
@@ -31,12 +31,7 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
         let batch = batcher.batch(items, &infer_device);
         let [batch_size, seq, _] = batch.inputs.dims();
 
-        let (output, _caches) = model.forward(
-            batch.inputs,
-            None,
-            MambaSsdPath::Mamba2(Mamba2SsdPath::Minimal(None)),
-            None,
-        );
+        let (output, _caches) = model.forward(batch.inputs, None, ssd_path(), None);
         assert_eq!([batch_size, seq, NUM_CLASSES], output.dims());
 
         let pred = argmax_classes(output);
