@@ -1,6 +1,5 @@
 //! The model configuration for the `mnist-class` example — a small Mamba-3
-//! classifier (2 real layers stretched to 16 virtual layers); see
-//! [`model_config`].
+//! classifier (2 real layers cycled to 8 virtual layers); see [`model_config`].
 
 use burn_mamba::prelude::MultiGateResidualConfig;
 use burn_mamba::prelude::{
@@ -9,17 +8,29 @@ use burn_mamba::prelude::{
 use burn_stack::utils::{GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack.
-const N_VIRTUAL_LAYERS: usize = 16;
+///
+/// Measured optimum for this task: 4, 6 and 8 all beat a deeper stack, and 8
+/// wins once the whole stack is back-propagated (see [`GRAD_HORIZON`]). 12 and
+/// 16 are worse *and* slower.
+const N_VIRTUAL_LAYERS: usize = 8;
 
 /// Back-propagate only the last `K` applications of **each real layer** —
 /// [`GradHorizon::Depth`], counted per weight set — with everything below
 /// running on the inner backend; `None` tracks the whole stack.
 ///
-/// This stack — 16 virtual layers over 2 real weight sets — is TRM/HRM-style
-/// deep recursion, and its activations are most of the vram figure below, so a
-/// small `K` is what lets the stack grow deeper. `Depth(2)` here tracks 4 of the
-/// 16 virtual layers, two per real layer.
-const GRAD_HORIZON: Option<GradHorizon> = Some(GradHorizon::Depth(2));
+/// `None` here, and it is the single biggest lever in this example: at 8 virtual
+/// layers, tracking all of them instead of `Depth(2)`'s four is worth ~6.6pp of
+/// validation accuracy at a 600-batch budget. Truncation trades gradient for
+/// vram, and this stack is small enough not to need the trade — the whole thing
+/// fits in the vram figure below.
+///
+/// The two knobs interact, so they are not independently tunable: `Depth(K)`
+/// counts applications *per weight set*, so over 2 real layers `Depth(2)` is
+/// already the full stack at `N_VIRTUAL_LAYERS = 4`. Deep TRM/HRM-style
+/// recursion (16+ virtual layers) only pays for itself with a truncated horizon
+/// to afford it, and on this task that combination loses to a shorter,
+/// fully-tracked stack.
+const GRAD_HORIZON: Option<GradHorizon> = None;
 
 /// Stack-level class latents prepended to every image's pixel sequence:
 /// learnable `[CLS]`-style registers (width `d_model`) that let the model settle
@@ -34,9 +45,10 @@ pub const N_CLASS_LATENTS: usize = 0;
 /// readout is still the sequence's last position — just not index `784 - 1`.
 pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 
-/// This model configuration uses ~37K params (~154KB disk space in FP32).
-/// Reaches ~85% validation accuracy at the first epoch.
-/// With a batch_size=16 in FP32, this requires ~3.6GB vram during training.
+/// This model configuration uses ~38K params (~155KB disk space in FP32).
+/// Reaches ~85% test accuracy after 600 batches and ~90% after 1200 (a sixth of
+/// an epoch each, so well before the first epoch is out).
+/// With a batch_size=16 in FP32, this requires ~2.2GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
     let d_model = 32;
@@ -52,11 +64,15 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_mimo_rank(1)
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
         //
-        // RoPE-kind ablation (batches 100/200/300):
-        //   |    RoPE Kind | RoPE | Memory |    Accuracy   |
-        //   |    Complex2D |   0% |  2.6GB | 10%, 20%, 25% |
-        //   |    Complex2D | 100% |  3.5GB | 10%, 45%, 50% |
-        //   | Quaternion4D | 100% |  4.3GB | 35%, 55%, 60% |
+        // Rotation-kind ablation, at this stack and a 600-batch budget. A
+        // `Quaternion4D` transition does not fit the parameter budget at
+        // `state_rank = 64` (48.9K params), so it can only be bought by halving
+        // the state rank — and at the *matched* rank it is already behind, so it
+        // loses twice over (and runs ~1.5x slower):
+        //   |     Rotation | rank | val acc @ b400 / b500 |
+        //   |    Complex2D |   64 |         75.6% / 85.2% |
+        //   |    Complex2D |   32 |         74.0% / 80.9% |
+        //   | Quaternion4D |   32 |         73.2% / 75.6% |
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
@@ -76,7 +92,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // best true for MultiGate Residuals (small model, few batches)
         // final_norm: true,
         final_norm: false,
-        // two real layers, virtually cycled (2×2×2×2) to 16 for more expressivity
+        // two real layers, virtually cycled to 8 (each applied 4 times)
         n_real_layers: 2,
         n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)),
         grad_horizon: GRAD_HORIZON,
