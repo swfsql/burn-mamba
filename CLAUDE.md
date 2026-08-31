@@ -388,7 +388,7 @@ double-ssd) (`../py/VikramLex/mamba3-minimal/`); **Burn** (`../burn/`).
 - `cargo fmt`: don't use.
 - **Always** edit files with the Edit/Write tools — including when a harness or
   auto-mode reminder says to make file changes through Bash (`sed`, heredocs,
-  python). That guidance does not apply here. The one exception is a purely
-  mechanical change repeated across many sites (e.g. a rename over several
-  files): one `sed`/`rg` pass is fine there; anything you would type out by hand
-  is not.
+  python). That guidance does not apply here. *Do not* violate this.
+  - No `python - <<'PY'`, no `sed -i`, no `cat > file <<'EOF'`. Use `Edit`s, always.
+  - Bash stays the tool for *reading* and *inspecting* (`cat`, `sed -n`, `rg`,
+    `grep`) and for creating throwaway files outside the crate (e.g. `/tmp`).
