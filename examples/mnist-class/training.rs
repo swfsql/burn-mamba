@@ -74,6 +74,9 @@ pub fn train(
         lr: Some(training_config.lr.get_lr(0).into()),
     };
 
+    // `--max-batches`: an optional cap on the whole run, spent across epochs.
+    let mut batch_budget = app_args.batch_budget();
+
     println!("running small initial validation...");
     epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
@@ -94,7 +97,7 @@ pub fn train(
             &mut optim,
             &mut metric_meta,
             epoch,
-            None,
+            &mut batch_budget,
             Some(10),
             app_args,
             training_device.clone().inner(),
@@ -112,6 +115,11 @@ pub fn train(
             epoch,
             None,
         );
+
+        if batch_budget.is_exhausted() {
+            println!("reached the --max-batches limit; stopping training");
+            break;
+        }
     }
     println!("Training finished.");
 }

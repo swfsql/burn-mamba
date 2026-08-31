@@ -8,7 +8,7 @@ pub use crate::common::{
     model::ModelConfigExt,
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
-    training::{TrainingConfig, metric_current},
+    training::{BatchBudget, TrainingConfig, metric_current},
 };
 use crate::model::{AeConfig, AeModel};
 use burn::prelude::*;
@@ -71,6 +71,9 @@ pub fn train(
         lr: Some(training_config.lr.get_lr(0).into()),
     };
 
+    // `--max-batches`: an optional cap on the whole run, spent across epochs.
+    let mut batch_budget = app_args.batch_budget();
+
     println!("running small initial validation...");
     epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
@@ -92,7 +95,7 @@ pub fn train(
             &mut optim,
             &mut metric_meta,
             epoch,
-            None,
+            &mut batch_budget,
             Some(10),
             app_args,
             training_device.clone().inner(),
@@ -111,6 +114,11 @@ pub fn train(
             epoch,
             None,
         );
+
+        if batch_budget.is_exhausted() {
+            println!("reached the --max-batches limit; stopping training");
+            break;
+        }
     }
     println!("Training finished.");
 }
@@ -131,7 +139,8 @@ fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
 }
 
 /// Train for a single epoch, stepping the optimizer per batch and periodically
-/// validating + checkpointing; returns the updated model.
+/// validating + checkpointing; returns the updated model. Ends early once
+/// `batch_budget` (the `--max-batches` cap) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -142,12 +151,12 @@ pub fn epoch_train(
     optim: &mut ModuleOptimizer,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
-    training_loop_limit: Option<usize>,
+    batch_budget: &mut BatchBudget,
     valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
     valid_device: Device,
 ) -> AeModel {
-    let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
+    let training_loop_limit = batch_budget.take_limit();
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
@@ -165,6 +174,7 @@ pub fn epoch_train(
         .take(training_loop_limit)
     {
         b += 1;
+        batch_budget.spend();
         let [batch_size, _, _, _] = batch.images.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;

@@ -7,7 +7,7 @@
 pub use crate::common::{
     cli::AppArgs,
     model::ModelConfigExt,
-    training::{TrainingConfig, metric_current},
+    training::{BatchBudget, TrainingConfig, metric_current},
 };
 use crate::dataset::{
     EVAL_SEED, Family, NUM_CLASSES, NUM_EVAL, NUM_TRAIN, ResetSwapBatch, ResetSwapBatcher,
@@ -93,6 +93,9 @@ pub fn train(
         lr: Some(training_config.lr.get_lr(0).into()),
     };
 
+    // `--max-batches`: an optional cap on the whole run, spent across epochs.
+    let mut batch_budget = app_args.batch_budget();
+
     println!(
         "running initial validation (chance ≈ {:.1}%)...",
         100.0 / NUM_CLASSES as f32
@@ -109,7 +112,7 @@ pub fn train(
             &mut optim,
             &mut metric_meta,
             epoch,
-            None,
+            &mut batch_budget,
         );
 
         app_args.save_model(&model.0);
@@ -119,6 +122,11 @@ pub fn train(
             println!("running validation...");
             validate_all(&valid_loaders, model.0.valid(), &model_config, epoch);
         }
+
+        if batch_budget.is_exhausted() {
+            println!("reached the --max-batches limit; stopping training");
+            break;
+        }
     }
     println!("Training finished.");
 }
@@ -126,7 +134,7 @@ pub fn train(
 type Dataloader = std::sync::Arc<dyn DataLoader<ResetSwapBatch> + 'static>;
 
 /// Train for a single epoch, stepping the optimizer per batch; returns the
-/// updated model.
+/// updated model. Ends early once `batch_budget` (`--max-batches`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -136,9 +144,9 @@ pub fn epoch_train(
     optim: &mut ModuleOptimizer,
     metric_meta: &mut MetricMetadata,
     epoch: usize,
-    training_loop_limit: Option<usize>,
+    batch_budget: &mut BatchBudget,
 ) -> MambaLatentNet {
-    let training_loop_limit = training_loop_limit.unwrap_or(usize::MAX);
+    let training_loop_limit = batch_budget.take_limit();
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
@@ -152,6 +160,7 @@ pub fn epoch_train(
         .take(training_loop_limit)
     {
         b += 1;
+        batch_budget.spend();
         let [batch_size, _, _] = batch.inputs.dims();
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;

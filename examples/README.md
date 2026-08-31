@@ -52,6 +52,10 @@ ARTIFACTS="/tmp/reset-majority-abcd-0"
 # running only the inference from the trained model:
 cargo run --example reset-majority --features "backend-flex" -- --inference --artifacts-path "$ARTIFACTS"
 
+# a short run: stop after 600 mini-batches, however many epochs that spans
+# (checkpoints and the end-of-epoch validation still happen before it stops)
+cargo run --example reset-majority --features "backend-flex" -- --training --max-batches 600
+
 # assume /some/path/ contains a different training config file, e.g. with a different seed:
 TCONFIG="/some/path/training_config.json"
 
@@ -81,6 +85,7 @@ BEHAVIOR OVERVIEW
 - With --remove-artifacts, any existing model and optimizer files in the artifacts directory are deleted before training (if --training is active).
 - Model and optimizer weights are loaded from the artifacts directory if present; otherwise new ones are created and saved.
 - If both --training and --inference are specified, training executes first, followed by inference using the trained model.
+- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns.
 
 FLAGS:
     -h, --help                  Show this help message and exit
@@ -93,6 +98,8 @@ OPTIONS:
     -c, --training-config <PATH>
                                 Load training configuration from this file (overrides any config in artifacts directory)
     -m, --model-config <PATH>   Load model configuration from this file (overrides any config in artifacts directory)
+    -b, --max-batches <N>       Stop training after N mini-batches in total (across epochs), regardless of the
+                                configured number of epochs. Unlimited when absent.
     -a, --artifacts-path <PATH>
                                 Directory where configurations, model weights, and optimizer state are saved and loaded.
                                 If the directory does not exist, it will be created.
