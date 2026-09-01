@@ -7,7 +7,10 @@
 //! shared with `burn-deltanet`. What is Mamba's here is the [`Wrap`] newtype: it
 //! adapts the network to Burn's `TrainStep` / `InferenceStep` via
 //! next-character cross-entropy over **every** position of the window, and
-//! supplies the `LmModel` seam the shared loops build against.
+//! supplies the `LmModel` seam the shared loops build against — including the
+//! two cache-aware halves of it, since the loops train a *run* of windows and
+//! carry [`MambaCaches`] from each window into the next (see that module's
+//! "Runs, carried state, and the frontier").
 
 pub use crate::common::{
     cli::AppArgs,
@@ -25,7 +28,9 @@ use burn::{
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
-use burn_stack::examples::tiny_stories::lm::{self, LmModel, dataloaders, epoch_train, epoch_valid};
+use burn_stack::examples::tiny_stories::lm::{
+    self, Frontier, LmModel, dataloaders, epoch_train, epoch_valid,
+};
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating, sampling and checkpointing
@@ -64,8 +69,12 @@ pub fn train(
     // `--max-batches`: an optional cap on the whole run, spent across epochs.
     let mut batch_budget = app_args.batch_budget();
 
+    // The frontier gate outlives the epochs: its opening-window baseline is a
+    // property of the model's current skill, not of where the epoch loop is.
+    let mut frontier = Frontier::new(config.frontier.clone());
+
     println!("running small initial validation...");
-    epoch_valid(
+    epoch_valid::<Wrap>(
         std::sync::Arc::clone(&dataloader_valid),
         &model.valid(),
         &config,
@@ -83,6 +92,7 @@ pub fn train(
             &config,
             &mut optim,
             &mut metric_meta,
+            &mut frontier,
             epoch,
             &mut batch_budget,
             Some(10),
@@ -95,7 +105,7 @@ pub fn train(
         app_args.save_optim(&optim);
 
         println!("running full validation...");
-        epoch_valid(
+        epoch_valid::<Wrap>(
             std::sync::Arc::clone(&dataloader_valid),
             &model.valid(),
             &config,
@@ -122,9 +132,32 @@ pub struct Wrap(pub MambaVocabNet);
 
 impl LmModel for Wrap {
     type Valid = Wrap;
+    type Caches = MambaCaches;
 
     fn valid(&self) -> Self::Valid {
         Wrap(self.0.valid())
+    }
+
+    fn train_window(
+        &self,
+        batch: TinyStoriesBatch,
+        caches: Option<Self::Caches>,
+    ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
+        let (pre_metrics, caches) = self.forward_lm(batch.inputs, batch.targets, caches);
+        let grads = pre_metrics.loss.backward();
+        (TrainOutput::new(&self.0, grads, pre_metrics), caches)
+    }
+
+    fn detach_caches(caches: Self::Caches) -> Self::Caches {
+        caches.detach()
+    }
+
+    fn valid_window(
+        valid: &Self::Valid,
+        batch: TinyStoriesBatch,
+        caches: Option<Self::Caches>,
+    ) -> (ClassificationOutput, Self::Caches) {
+        valid.forward_lm(batch.inputs, batch.targets, caches)
     }
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
@@ -152,10 +185,7 @@ impl TrainStep for Wrap {
     type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
-        let pre_metrics = InferenceStep::step(self, batch);
-        let grads = pre_metrics.loss.backward();
-
-        TrainOutput::new(&self.0, grads, pre_metrics)
+        LmModel::train_window(self, batch, None).0
     }
 }
 
@@ -164,20 +194,22 @@ impl InferenceStep for Wrap {
     type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
-        self.forward_lm(batch.inputs, batch.targets)
+        self.forward_lm(batch.inputs, batch.targets, None).0
     }
 }
 
 impl Wrap {
-    /// Forward the LM and score **every** position of the window against its
-    /// next character (see
-    /// [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output)).
+    /// Forward the LM from `caches` (`None` ⇒ a zero state) and score **every**
+    /// position of the window against its next character (see
+    /// [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output)),
+    /// returning the window's final state alongside.
     pub fn forward_lm(
         &self,
         inputs: Tensor<2, Int>,
         targets: Tensor<2, Int>,
-    ) -> ClassificationOutput {
-        let (logits, _caches) = self.0.forward(inputs, None, ssd_path(), None);
-        lm::lm_output(logits, targets)
+        caches: Option<MambaCaches>,
+    ) -> (ClassificationOutput, MambaCaches) {
+        let (logits, caches) = self.0.forward(inputs, caches, ssd_path(), None);
+        (lm::lm_output(logits, targets), caches)
     }
 }

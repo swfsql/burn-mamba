@@ -24,6 +24,31 @@ pub enum MambaCaches {
     Mamba3(crate::mamba3::prelude::Mamba3Caches),
 }
 
+impl MambaCaches {
+    /// Round-trip every slot of the tagged family through the inner backend:
+    /// same values, no graph.
+    ///
+    /// What [`CacheStack::detach`] is, dispatched over the runtime tag — the
+    /// enum cannot implement [`CacheStack`] itself (its slot type would have to
+    /// be a fourth enum), and a caller carrying a cache across a gradient
+    /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
+    /// not the family type.
+    ///
+    /// # Panics
+    /// The caches must be on an autodiff device; see
+    /// [`CacheStack::cache_to_inner`].
+    pub fn detach(self) -> Self {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(caches) => Self::Mamba1(caches.detach()),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(caches) => Self::Mamba2(caches.detach()),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(caches) => Self::Mamba3(caches.detach()),
+        }
+    }
+}
+
 // ===========================================================================
 // Per-family impls
 // ===========================================================================

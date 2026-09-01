@@ -98,8 +98,8 @@ src/
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
    │                 not stacked matrices" argument (MIMO diagonals)
-   ├─ cache.rs       MambaCaches enum + impl Block / BlockConfig / CacheStack
-   │                 for Mamba{1,2,3}(Config|Caches)
+   ├─ cache.rs       MambaCaches enum (+ detach()) + impl Block / BlockConfig /
+   │                 CacheStack for Mamba{1,2,3}(Config|Caches)
    ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs)
    ├─ bidi.rs        MambaBidiLayers (+ Config)
    └─ tests/         the burn-stack containers exercised through real blocks:

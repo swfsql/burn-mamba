@@ -246,7 +246,10 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   rather than derived: `Module::map` is a **no-op on plain `Tensor` fields**, which is
   all a cache holds, so a `Module`-based conversion would silently skip every one of
   them — and `Tensor::inner` panics off autodiff, so `Layers::grad_horizon` must check
-  `Device::is_autodiff` first.
+  `Device::is_autodiff` first. `MambaCaches::detach()` is `CacheStack::detach` (values
+  kept, graph dropped) dispatched over the runtime tag: the enum cannot implement
+  `CacheStack` itself (its slot type would have to be a fourth enum), and a caller
+  carrying a cache across a gradient boundary holds the enum, not the family type.
 - **`network.rs`** — `MambaLatentNet`/`MambaVocabNet` + `#[derive(Config)]` `*Config`,
   wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`. The variant field is
   still named `mamba_block`, so saved `model_config.json` files keep loading.

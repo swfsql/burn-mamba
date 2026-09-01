@@ -8,8 +8,10 @@
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
 //!
 //! Training scores every position of a 256-character window against its next
-//! character; inference prefills a prompt with one chunkwise `forward` and then
-//! samples one character per `step`.
+//! character, and walks a *run* of 8 such windows carrying the (detached) state
+//! from each into the next for as long as the frontier gate admits it — see the
+//! README's "Runs and the frontier". Inference prefills a prompt with one
+//! chunkwise `forward` and then samples one character per `step`.
 //!
 //! Corpus knobs are forwarded after the trailing `--` (they are written into the
 //! artifacts' `training_config.json`, so resuming a run keeps them):
@@ -87,6 +89,10 @@ pub fn launch(app_args: &AppArgs) {
     if is_fresh {
         // The cosine schedule spans the whole run, so it can only be sized once
         // the corpus knobs are settled: windows/epoch = characters / seq_len.
+        // It is counted in *windows*, not in dataloader items, and the training
+        // loop charges the schedule for the windows the frontier gate skipped
+        // too — so a stalling gate shortens the run rather than leaving the
+        // cosine unfinished, and `run_len` does not enter here at all.
         const CHARS_PER_STORY: usize = 820; // the corpus median is 721, the mean ~820
         let windows = config.train_stories * CHARS_PER_STORY / config.seq_len;
         let iterations_per_epoch = windows / config.training.batch_size;

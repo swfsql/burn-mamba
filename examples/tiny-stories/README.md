@@ -56,10 +56,48 @@ so a contiguous range is already a random sample): rows `0..10k` are test,
 validation stories (~3.4MB of text, ~43 requests); `--train-stories` scales that
 up.
 
-The character stream is cut into non-overlapping windows of `seq_len + 1`; each
-window is one training item, scored at **every** position against its next
-character (so one window contributes `seq_len` classification examples, and the
-reported accuracy is per character).
+The character stream is cut into non-overlapping windows of `seq_len + 1`, each
+scored at **every** position against its next character (so one window
+contributes `seq_len` classification examples, and the reported accuracy is per
+character). One training **item** is a *run* of `run_len` consecutive windows —
+see [Runs and the frontier](#runs-and-the-frontier).
+
+## Runs and the frontier
+
+A window is `seq_len` characters, but the stories are not: the stream continues
+past the cut, and so does the state that generation would have there. Training
+each window from a **zero** state — the obvious tiling, and what `--run-len 1`
+still does — therefore trains a regime inference is never in after its first
+`seq_len` characters.
+
+So the loop walks the `run_len` windows of an item in order, takes one optimizer
+step per window, and **carries the final state into the next window**:
+
+- The carry is *earned*. After each window the **frontier gate** scores it, and a
+  failing window ends the run — the rest of the item is discarded rather than
+  trained on a state the model got lost in. The gate is trainer-side: it reads
+  one scalar and decides whether a cache is passed on; no gradient goes near it.
+  The default is relative — advance while the window scored at most `1 + tol`
+  times the running EMA of **opening** (zero-state) window losses, i.e. *did the
+  carried state do at least as well as starting fresh would have?* The baseline
+  rides the training curve down, so the question means the same thing in epoch 1
+  and epoch 16.
+- The carry is **detached** (a round trip through the inner backend, not
+  `Tensor::detach`, which frees nothing): gradients never cross a window
+  boundary, and peak memory is one window's activations regardless of `run_len`
+  — measured flat at 312MB RSS for `run_len` 1 and 8 (flex, `seq_len = 256`,
+  batch 8). Back-propagation *within* the window is untouched.
+
+Every slot of a mini-batch walks its own run in lockstep, so one training
+iteration is still one batch and the log line stays `Batch b/N` — with
+`Windows k/run_len (mean m)` added, `m` being the epoch's mean depth so far,
+which is the number that says whether the curriculum is moving. `1.0` is
+a fully stalled frontier (stateless training); `run_len` is a gate that never
+fires (`--no-frontier`, plain stateful TBPTT).
+
+Validation reports both regimes, `[fresh state]` (every window from zero — the
+`run_len`-independent number, and the one the [Results](#results) table is in)
+and `[carried state]` (threaded through the run, ungated — what generation has).
 
 ## Usage
 
@@ -82,6 +120,9 @@ the artifacts' `training_config.json`:
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--seq-len <n>` | 256 | characters per window (the BPTT length) |
+| `--run-len <n>` | 8 | windows per item, i.e. how far the carried state may reach (`1` ⇒ stateless) |
+| `--frontier-tol <f>` | 0.05 | slack of the frontier gate over its opening-window baseline |
+| `--no-frontier` | off | carry the state through the whole run, ungated |
 | `--train-stories <n>` | 4096 | stories pulled from the train split |
 | `--valid-stories <n>` | 256 | stories pulled from the validation split |
 | `--epochs <n>` | 16 | passes over the corpus |
@@ -94,7 +135,11 @@ the artifacts' `training_config.json`:
 ## Results
 
 16 epochs over the default corpus (3.36M characters), measured on the held-out
-validation split. Uniform baseline: `log2(48) = 5.58` bits/char.
+validation split from a **zero** state (the `[fresh state]` line). Uniform
+baseline: `log2(48) = 5.58` bits/char.
+
+Every number below was measured with stateless windows, i.e. at what is now
+`--run-len 1`; carried state and the frontier gate are not in them.
 
 | Setting | Valid bits/char | Valid char accuracy |
 |---|---|---|
@@ -175,7 +220,8 @@ reproducible.
 continuation of a fixed prompt into `<artifacts>/inference/`. Training samples a
 short story at every small validation check into
 `<artifacts>/sample-epoch-{e}-batch-{b}.txt`, so the text can be watched turning
-from noise into words into sentences.
+from noise into words into sentences. The checks are spaced in optimizer steps
+(every 100), so their cadence does not move with `--run-len`.
 
 ## Notes
 
