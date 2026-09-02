@@ -261,6 +261,75 @@ fn split_prefill_matches_full() {
 // Gradients reach every micro-step
 // ---------------------------------------------------------------------------
 
+/// The third leg of forward ≡ step, alongside the outputs and the cache:
+/// backprop through the chunked `forward` and through the unrolled `step` must
+/// agree. Same function ⇒ same gradients, so a fold whose backward disagreed
+/// with its own recurrence — a micro-step whose gradient landed on the wrong
+/// position, or a `C` broadcast whose gradient was not summed back over the
+/// group — would show up here and in no value test.
+fn forward_step_grad_parity(kind: RotationKind, micro_steps: usize) {
+    let device: Device = Default::default();
+    let config = cfg(kind, micro_steps);
+    let model: Mamba3 = config.init(&device.clone().autodiff());
+
+    let (batch, tokens) = (2, 4);
+    let input = Tensor::<3>::random(
+        [batch, tokens, config.d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+    let head = Tensor::<3>::random(
+        [batch, tokens, config.d_model],
+        Distribution::Normal(0.0, 1.0),
+        &device,
+    );
+
+    // Fresh autodiff leaves per path.
+    let p_fwd = burn::module::Param::from_tensor(Tensor::from_inner(input.clone()));
+    let p_step = burn::module::Param::from_tensor(Tensor::from_inner(input));
+
+    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None));
+    let g_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum().backward();
+
+    let mut cache: Option<Mamba3Cache> = None;
+    let mut outs = Vec::with_capacity(tokens);
+    for t in 0..tokens {
+        let (o, c) = model.step(p_step.val().narrow(1, t, 1).squeeze_dim::<2>(1), cache);
+        outs.push(o.unsqueeze_dim::<3>(1));
+        cache = Some(c);
+    }
+    let g_step = (Tensor::cat(outs, 1) * Tensor::from_inner(head))
+        .sum()
+        .backward();
+
+    let label = format!("{kind:?} u={micro_steps}");
+    let d_in = max_abs_diff(
+        p_fwd.val().grad(&g_fwd).expect("grad input (forward)"),
+        p_step.val().grad(&g_step).expect("grad input (step)"),
+    );
+    let weight = model.in_proj.weight.val();
+    let d_w = max_abs_diff(
+        weight.clone().grad(&g_fwd).expect("grad in_proj (forward)"),
+        weight.grad(&g_step).expect("grad in_proj (step)"),
+    );
+    assert!(d_in < 1e-2, "{label}: forward/step input-grad diff {d_in:.6}");
+    assert!(d_w < 1e-2, "{label}: forward/step in_proj-grad diff {d_w:.6}");
+}
+
+#[test]
+fn forward_step_grad_parity_abelian() {
+    for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
+        forward_step_grad_parity(kind, 2);
+        forward_step_grad_parity(kind, MICRO);
+    }
+}
+
+#[test]
+fn forward_step_grad_parity_non_abelian() {
+    forward_step_grad_parity(RotationKind::Quaternion4D, 2);
+    forward_step_grad_parity(RotationKind::Rotor4D, 2);
+}
+
 /// Every micro-step's slice of the widened `in_proj` must receive gradient.
 /// A fold that dropped a micro-step (or read the segments in the wrong order)
 /// would leave one of these blocks dead, and every value-parity test above

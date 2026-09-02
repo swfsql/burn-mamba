@@ -105,3 +105,7 @@ path = "examples/reset/spinor/main.rs"
 [[example]]
 name = "reset-swap"
 path = "examples/reset/swap/main.rs"
+
+[[example]]
+name = "spinor-product"
+path = "examples/reset/product/main.rs"

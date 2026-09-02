@@ -2,7 +2,8 @@
 
 Four examples on the **same shape of stream**, each the smallest task its block
 is *needed* for and that the rung below cannot solve. Read together they isolate,
-one at a time, what each piece of the SSM recurrence actually buys:
+one at a time, what each piece of the SSM recurrence actually buys — plus a fifth
+that keeps the stream and moves the *other* dial, `micro_steps`:
 
 | rung | what only that block can do | the state it needs | the group it tracks |
 |---|---|---|---|
@@ -10,6 +11,7 @@ one at a time, what each piece of the SSM recurrence actually buys:
 | [`reset-rotor`](#reset-rotor) | count modulo `k` | a **complex** transition, `RotationKind::Complex2D` | `Z₃` |
 | [`reset-spinor`](#reset-spinor) | compose in a non-abelian group | a **quaternion** transition, `Quaternion4D` | `Q₈` |
 | [`reset-swap`](#reset-swap) | hold a group with more than one involution | a **two-sided** `SO(4)` transition, `Rotor4D` | `S₃` |
+| [`spinor-product`](#spinor-product) | apply **two** group elements in one token | two recurrence steps, `micro_steps = 2` | `Q₈`, two generators per token |
 
 ## The shared shape
 
@@ -48,6 +50,13 @@ persisted one wins on reload), so each rung can be run as its own ablation:
 ```bash
 cargo run --release --example reset-spinor -- --training --inference -- --rotation complex
 cargo run --release --example reset-swap   -- --training --inference -- --rotation quaternion
+```
+
+The coda is its own target, with `--micro-steps` in place of `--rotation`:
+
+```bash
+cargo run --release --example spinor-product -- --training --inference
+cargo run --release --example spinor-product -- --training --inference -- --micro-steps 1
 ```
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
@@ -531,6 +540,181 @@ claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
 
 ---
 
+## spinor-product
+
+The coda: the only one that leaves the block's transition *group* alone and moves
+`micro_steps` instead. It is [`reset-spinor`](#reset-spinor)'s task with the
+stream **packed two symbols per token** — a composition one recurrence step
+cannot do and two can.
+
+The alphabet gains the third unit and a hold (`i` / `j` / `k` / `.` / `R`), a
+token is an ordered *pair* of them, and the target is the running product in `Q₈`
+after **both**:
+
+```text
+  token       R.      ij      .k      jk      ii      k.
+  state      1  1    i -k   -k  1    j -i    1  i    j  j
+  target        1       -k       1      -i       i       j
+```
+
+Sequences are 32 tokens (64 symbols); every token is scored, and every sequence
+opens with an `R`.
+
+<details>
+<summary>Why this task</summary>
+
+A Mamba-3 step's transition is `α·R`, and `R = exp(ϑ)` where the generator `ϑ`
+is a projection of the token — an **affine functional** of it. A token here is
+two one-hot slots, so at `u = 1`
+
+```text
+   ϑ(a, b) = v_a + w_b          generators ADD
+   token   = q_b ⊗ q_a          the group MULTIPLIES
+```
+
+and those are the same thing only when the two commute. `MambaProduct` runs `u`
+full recurrence steps per token (`micro_steps`, `burn_mamba::mamba3::product`),
+each with its own `x`, `B`, `Δ`, `A`, `λ` and rotation, so at `u = 2` the token's
+transition is `exp(w_b) ⊗ exp(v_a)` — the product itself.
+
+| shortcut | why it is closed |
+|---|---|
+| compose the token's two symbols in **one** step | generators add where the group multiplies — and the alphabet leaves no way to reparameterise around it (below) |
+
+Two properties of the alphabet make that exact rather than merely likely, and
+both are load-bearing:
+
+- **The hold pins the axes.** With `.` in the alphabet a token can carry one
+  turn alone, so `(i, .)` forces `exp(v_i) = i` and `(., j)` forces
+  `exp(w_j) = j`. The only generators inside the block's bound
+  (`‖ϑ‖ < rotation_range·π = 2π`) with those images lie along `±x̂` and `±ŷ` —
+  the axes of `i` and `j`. Every sum of them lies in the `xy`-plane, and `exp` of
+  a vector in a plane has **zero** component along the axis orthogonal to it.
+  The token `(i, j)` needs `j·i = −k`, which is nothing *but* that component. No
+  weights, no scale and no squash can bend this: they change `‖ϑ‖`, never its
+  direction (`one_step_generators_add_and_cannot_reach_k`).
+- **The third unit keeps the pairs non-abelian.** Over `i`/`j` alone every
+  two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes — one rotation per
+  token is then enough to carry a whole word, and a `micro_steps = 1` model
+  trains to 98–100% on that two-unit variant. With three units, `(i,j) ↦ k` and
+  `(i,k) ↦ j` do not commute and no abelian reparameterisation exists.
+
+The eval families are `reset-spinor`'s, over the three units and with holds mixed
+into every word — the mixture is what puts single-turn and two-turn tokens side
+by side. `shuffle` is one reset then a shuffled bag of equal `i`/`j`/`k` plus a
+quarter holds (the counts fixed, the word the whole sequence: nothing in it but
+composition); `runs` is blocks of one symbol (where the counts come closest to
+deciding); `random` resets at ~1/16 of symbols (shorter words, the ones a
+decaying trace can carry without any group structure).
+
+Length is part of the question here, and inference reports every family at 32
+tokens and at three times that: a block that composes each token exactly tracks
+the group for as long as you run it, while one that only approximates the
+composition compounds its error with every token.
+
+</details>
+
+<details>
+<summary>Measured</summary>
+
+1044 parameters at `u = 2` (720 at `u = 1` — `u` widens only the per-micro-step
+in-projection segments). Chance is 12.5%.
+
+| | random | shuffle | runs |
+|---|---|---|---|
+| best per-token lookup (no memory at all) | 30.9% | 16.4% | 21.1% |
+| best predictor of `(#i, #j, #k)` since the reset | 62.9% | 52.0% | 66.6% |
+| the same construction at `u = 1`, same head | 26.7% | 16.3% | 20.9% |
+| — the same, best readout of its state | 19.2% | 13.6% | 13.7% |
+| **hand-built** `u = 2` block, no training | **100%** | **100%** | **100%** |
+| **trained**, `--micro-steps 2` | **100%** | **100%** | **100%** |
+| trained, `--micro-steps 1`, seed 0 | 73.8% | 44.3% | 62.0% |
+| trained, `--micro-steps 1`, seed 1 | 68.1% | 54.0% | 56.8% |
+
+The trained rows are the same model, the same data and the same schedule with
+one integer changed. `u = 2` is **exact** — `16384/16384` on every family, every
+group element at 100%, and there by epoch 40 — while neither `u = 1` seed clears
+the row three above it, the ceiling for a model that sees only how many of each
+symbol went by. That is what "cannot compose the token" costs: the block falls
+back on something the counts already contain.
+
+The same models at **96 tokens**, three times the length they were trained on:
+
+| at 96 tokens | random | shuffle | runs |
+|---|---|---|---|
+| **hand-built** `u = 2` block | **100%** | **100%** | **100%** |
+| **trained**, `--micro-steps 2` | **100%** | **100%** (49150/49152) | **100%** |
+| trained, `--micro-steps 1`, seed 0 | 70.7% | 26.2% | 37.4% |
+| trained, `--micro-steps 1`, seed 1 | 66.3% | 41.5% | 41.2% |
+
+The `u = 2` model extrapolates to two errors in fifty thousand positions, because
+what it learned is the group; both `u = 1` models lose ground exactly where the
+words get longer.
+
+The two `u = 1` construction rows in the first table are the twin of the
+hand-built solution, swept over the generator scale and reported both through the
+identical head and through the best table over a fine partition of its output
+space. They land *below* the order-blind ceiling, which is the point rather than
+a defect: a rotation that is wrong is worse than no rotation at all, and
+everything else in the construction — the reset, the write, the decay — folds
+into a single step perfectly well. Only the composition does not.
+
+`handmade_product_block_solves_every_family` writes every weight down in closed
+form (no fitting anywhere); `one_step_cannot_compose_a_token` re-runs that same
+construction at `micro_steps = 1`; `one_step_generators_add_and_cannot_reach_k`
+is the obstruction above, computed over all six ordered pairs of distinct units;
+`counts_ceiling_is_the_order_blind_limit` needs no model at all;
+`labels_are_the_paired_quaternion_word_problem` checks the dataset really is the
+`Q₈` word problem read in pairs.
+
+</details>
+
+<details>
+<summary>Notes</summary>
+
+- **The hand-built solution is `reset-spinor`'s, folded.** Each micro-step is a
+  plain Mamba-3 step over the slot it reads: `R` writes the identity quaternion
+  and wipes (`A ≈ −20`), `i` / `j` / `k` turn the cumulative rotation by
+  half-turns about the three axes, `.` does nothing, and the four heads read the
+  four components of the relative quaternion. `micro_steps` needed no new
+  construction, because it is not a new kernel — the micro-steps are folded into
+  the sequence axis and the recurrence runs at length `tokens · u`.
+- **The dial is the transition, not the memory.** The state is one
+  `[nheads, per_head_dim, state_rank]` matrix at every `u`; what widens is the
+  in-projection (720 → 1044 parameters here) and the recurrence work. That is
+  DeltaProduct's trade, and the reason it is a *dial* rather than a size.
+- **The obstruction is about the token→rotation map, not information.** Both
+  `u = 1` and `u = 2` can express the *same set* of per-token transitions (a
+  scalar times a rotation — `(∏αⱼ)·R₂R₁` is one of each). What `u = 2` changes is
+  that the map from token to that rotation stops having to be `exp ∘ affine`.
+  A trained `u = 1` block has one more string to pull than the hand-built twin —
+  the layer's pre-`RmsNorm` divides by a per-token scalar, and a bias then bends
+  the sum slightly off the plane — so it can *approximate*, which is why the
+  trained rows are measured rather than argued. Approximating is also why the
+  words are 32 tokens long: over a handful of tokens a near-miss per token still
+  scores well (at 16 tokens a `u = 1` model reaches 95%), and over a long word it
+  compounds into the numbers above. The exact solution is the only one whose
+  accuracy does not depend on how long you run it.
+- **What `u` buys is decided by the `RotationKind`.** This is the non-abelian
+  case, where the gain is a per-token transition the parameterisation otherwise
+  cannot name. Under `Complex2D` the same pairing would cost nothing — a sum of
+  angles *is* the composite rotation of an abelian group, which is exactly why
+  the two-unit version of this task is solvable at `u = 1` — and under `Real1D`
+  there is no rotation to compose, so `u` widens only the write.
+- **Two symbols per token, not two tokens.** The stream is `reset-spinor`'s
+  length in symbols; only the packing changes. So this is not a harder word
+  problem — it is the same one, asked at half the number of recurrence steps a
+  stock block would take.
+- **`step_infinite` is unavailable here**, as it is for every non-abelian kind
+  at `u > 1`: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` depends on `n`
+  alone only if `Qⱼ` commutes with `P`, so the constant-token output is
+  almost-periodic rather than convergent. The block asserts rather than
+  approximating.
+
+</details>
+
+---
+
 ## Notes shared by the rungs
 
 - **Half-turns sit in the interior.** Both `reset-spinor` and `reset-swap` need a
@@ -543,13 +727,13 @@ claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
   in both. The bound is on the generator's *magnitude*, so the axis is exactly the
   direction the projection names — and the generators are projected per head, so the
   heads need not agree on one.
-- **Each solution is a basin you have to find.** All four use the same cosine
+- **Each solution is a basin you have to find.** All five use the same cosine
   schedule (warmup to 3e-2, annealed to 1e-4). Accuracy climbs, falls back, and snaps
   to exact partway through — `reset-rotor`'s slowest seed by epoch 50, `reset-spinor`
-  by epoch 55, `reset-swap` by epoch 40 — so a run still short of 100% at the halfway
-  mark has not necessarily stalled. Only `reset-majority` is seed-sensitive enough to
-  need a restart.
+  by epoch 55, `reset-swap` and `spinor-product` by epoch 40 — so a run still short of
+  100% at the halfway mark has not necessarily stalled. Only `reset-majority` is
+  seed-sensitive enough to need a restart.
 - **Each rung inherits the ones below.** The reset is always `reset-majority`'s
   selective decay and the periodicity is always `reset-rotor`'s rotation; a rung adds
-  exactly one requirement, which is why every ablation is one enum knob rather than a
-  different model.
+  exactly one requirement, which is why every ablation is one knob rather than a
+  different model — an enum for the rungs, an integer for the coda.

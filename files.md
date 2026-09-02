@@ -177,9 +177,9 @@ scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silen
 rotation with it. The trapezoid's two taps consequently straddle *micro-steps*, and the
 caches hold the **last micro-step**, which is exactly what the next call's first follows.
 Tests: helper round-trips; `d_in_proj`/Muon-tiling arithmetic (`u=1` is stock); forward≡step
-on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; per-micro-step
-gradient liveness (a dropped or mis-ordered micro-step passes every value test);
-`step_infinite` vs unrolled.
+on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; forward≡step
+**gradients** (input + `in_proj`); per-micro-step gradient liveness (a dropped or
+mis-ordered micro-step passes every value test); `step_infinite` vs unrolled.
 
 ### `mamba3/rotation/` (`mod.rs`, `rope.rs`)
 
