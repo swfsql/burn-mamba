@@ -47,16 +47,23 @@ impl Mamba3 {
         cache: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
-        let [batch, sequence, _d_model] = input_bsm.dims();
+        let [batch, tokens, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
         let mimo_rank = self.mimo_rank;
+        let micro_steps = self.micro_steps;
         let device = input_bsm.device();
 
-        assert!(sequence > 0, "sequence length must be at least 1");
+        // MambaProduct: from the split below down to the readout, one sequence
+        // position *is* one micro-step — the `s` in every shape suffix counts
+        // micro-steps, and `tokens` is the only name still at token resolution.
+        // See [`crate::mamba3::product`].
+        let sequence = tokens * micro_steps;
+
+        assert!(tokens > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
 
@@ -78,24 +85,39 @@ impl Mamba3 {
         let proj_bsd = self.in_proj.forward(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
+        // `u` = micro_steps widens every per-micro-step segment, and `unfold`
+        // reinterprets each of them as `u` consecutive sequence positions. `z`
+        // (per-token gate) and `C` (per-token read) do not widen — `C` is
+        // instead broadcast across the group so its *last* copy carries the
+        // right cumulative rotation. See [`crate::mamba3::product`].
         // The rotation channels come off first: `Real1D` projects none, and a
         // zero-width segment would silently vanish from the split below.
-        let (proj_bsd, rot_bsa) =
-            helpers::split_rotation_channels(proj_bsd, self.num_rotation_channels, 2);
+        let u = micro_steps;
+        let (proj_bsd, rot_btA) =
+            helpers::split_rotation_channels(proj_bsd, self.rotation_channels_total(), 2);
         #[rustfmt::skip]
         let [
-                z_bsi, x_bsi,
-                b_raw_bsMGR, c_raw_bsMGR,
-                dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
+                z_bsi, x_btI,
+                b_raw_btMGRU, c_raw_btMGR,
+                dd_dt_btH, dd_A_raw_btH, lambda_raw_btH,
         ] = burn_stack::modules::split_into(
             proj_bsd,
             [
-                d_inner, d_inner,
-                bc_size, bc_size,
-                nheads, nheads, nheads,
+                d_inner, u * d_inner,
+                u * bc_size, bc_size,
+                u * nheads, u * nheads, u * nheads,
             ],
             2,
         );
+
+        use crate::mamba3::product::{repeat_micro_bs, unfold_micro_bs};
+        let x_bsi = unfold_micro_bs(x_btI, u);
+        let b_raw_bsMGR = unfold_micro_bs(b_raw_btMGRU, u);
+        let c_raw_bsMGR = repeat_micro_bs(c_raw_btMGR, u);
+        let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
+        let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
+        let lambda_raw_bsh = unfold_micro_bs(lambda_raw_btH, u);
+        let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
         san(&x_bsi);
@@ -179,7 +201,10 @@ impl Mamba3 {
         san(&b_bsmhr);
         san(&c_bsmhr);
 
-        // ── Save last-token B and last-token x (raw, no MIMO_V) for cache ─────
+        // ── Save the last position's B and x (raw, no MIMO_V) for the cache ───
+        // "Last position" is the last *micro-step* of the last token — exactly
+        // the step the next call's first micro-step follows, so the trapezoid's
+        // previous-step taps continue across a split prefill unchanged.
         let b_last_bmhr = b_bsmhr
             .clone()
             .narrow(1, sequence - 1, 1)
@@ -280,10 +305,18 @@ impl Mamba3 {
             y_bSmhp.narrow(1, 0, sequence)
         };
 
+        // ── Step 8b: back to token resolution (MambaProduct) ──────────────────
+        // The readout happens after all `u` writes, so only each token's last
+        // micro-step survives; the intervening positions computed a `y` from a
+        // repeated `C` and it is dropped here.
+        let y_bsmhp = crate::mamba3::product::last_micro5(y_bsmhp, micro_steps);
+        let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
+        let sequence = tokens;
+
         // ── Step 9: D skip + gate + MIMO_O down-projection ────────────────────
-        // D skip uses raw x ⊙ mimo_x (not γ-scaled, matching forward).
-        let v_raw_bsmhp =
-            helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+        // D skip uses raw x ⊙ mimo_x (not γ-scaled, matching forward), at the
+        // micro-step the readout is contemporaneous with.
+        let v_raw_bsmhp = helpers::build_v_with_mimo::<4, 5>(x_bthp, mimo_x_hmp.as_ref(), 2);
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp;
 

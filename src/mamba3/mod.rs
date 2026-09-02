@@ -20,6 +20,14 @@
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that dispatches between them; [`ssd_path`](crate::mamba3::ssd_path) selects
 //! the pathway-agnostic *algorithm* (Minimal / Serial / SerialRecalculated).
+//!
+//! ## A fourth addition: MambaProduct
+//!
+//! [`product`](crate::mamba3::product) adds DeltaProduct's dial —
+//! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) recurrence
+//! steps per token, so one token's transition is a **product** of `u` of them.
+//! It rides both pathways and needs no kernel: the micro-steps fold into the
+//! sequence axis.
 
 pub mod double_ssd;
 pub mod single_ssd;
@@ -27,6 +35,7 @@ pub mod single_ssd;
 pub mod cache;
 pub(crate) mod helpers;
 pub mod mamba3;
+pub mod product;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;

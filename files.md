@@ -68,7 +68,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** unless `Real1D`;
-  `mimo_rank` 1=SISO; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
+  `mimo_rank` 1=SISO; `micro_steps` (`u`, default 1 = stock) — MambaProduct, see
+  `mamba3/product/`; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
   narrower `1`/`0.5` are asked for explicitly); `a_floor`). `rotation_spec()` bundles the
@@ -79,8 +80,12 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `init` asserts any other kind turns ≥ 1 pair over an even `state_rank`, and
   `muon_projections()` omits the (then absent) rotation segment. Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
-  `out_norm`. Derived `d_in_proj` (split `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`),
-  mirrored by `muon_projections()` as `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` + `out_proj`.
+  `out_norm`. Derived `d_in_proj` (split `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|θ·u]`
+  — only the per-micro-step segments widen; `rotation_channels_total()` = `u·`
+  `num_rotation_channels()` peels the trailing one), mirrored by `muon_projections()` as
+  `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` with each `u`-wide stream emitted as `u`
+  same-named segments (independent maps to Muon; `without_segment` still drops the whole
+  stream) + `out_proj`.
   `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
   Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
   values/grads): `siso_specialization` for the chunkwise γ-correction (threaded down as a
@@ -108,10 +113,15 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ### `mamba3/double_ssd/`
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
-  summed; ~2× SSD memory. `step_double_ssd` is reused (via cache conversion) for
+  summed; ~2× SSD memory. `forward` folds the micro-steps in right after the split and
+  collapses back after the SSD (so between them `s` counts micro-steps and `tokens` is the
+  only token-resolution name); `step` loops the recurrence `u` times and reads out once.
+  `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
-  (in-proj → coeffs → QK-norm, pre-rotation; its `rot_ba` is `None` under `Real1D`),
-  `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and `step_finish`
+  (in-proj → coeffs → QK-norm, pre-rotation; per-micro-step streams keep a `u` axis that
+  `MicroProjection`/`StepProjection::micro(j)` peels, `z`/`C` are per token; `rot_ba` is
+  `None` under `Real1D`), `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and
+  `step_finish`
   (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
   `step_constant`. `rotation/rope.rs`'s `apply_rope`/`apply_rope_partial` (rotate
   last-dim pairs; interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; `rope_dim > 0`
@@ -126,7 +136,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
   `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁`, strict-lower-triangular intra-chunk mask + same-step γ
-  correction (in-kernel), and a **boundary-β seed** folded into the initial state.
+  correction (in-kernel), and a **boundary-β seed** folded into the initial state. Same
+  micro-step fold/collapse as the double pathway; everything between (trapezoid, `scale`,
+  QK-norm, rotation, seed, chunking) runs at micro-step resolution unchanged.
   `step_single_ssd` converts to a double-ssd cache, runs `step_double_ssd`, converts back.
 - **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields but `ssm_bhpr` carries
   `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the diagonal, patched in-kernel). The
@@ -141,6 +153,33 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   (`DiagGrads`, `d_gamma` whole not partial); the flag reaches it through the ext-trait
   method and the `Backward` node's `State`, so backward replays the forward's branch.
   Both keep the two branches separately callable for the `m=1` comparison tests.
+
+### `mamba3/product/` (`mod.rs`)
+
+**MambaProduct** — DeltaProduct's dial: `u = Mamba3Config::micro_steps` full Mamba-3 steps
+per token, so a token's transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a
+sum of `u` outer products staggered along it. Evaluated by folding the micro-steps into the
+**sequence axis** — no new kernel, no cache change (`u` buys transition expressiveness, not
+memory) — with the read `C`, the gate `z`, the `D` skip and the output per token.
+`unfold_micro_bs`/`unfold_micro_b` reinterpret a `u`-wide in-proj segment as `u` positions
+(a pure reshape: the projection already lays micro-steps out contiguously),
+`repeat_micro_bs` broadcasts the per-token `C` across the group so its *last* copy carries
+the right cumulative rotation, `last_micro5`/`last_micro4` collapse `y`/`x` back.
+Why it is a Mamba-3 dial and not a Mamba-2 one: a scalar transition commutes, so there `u`
+micro-writes provably collapse into one decay-weighted rank-`u` write. The same is true
+here under `Real1D` — the sequential reading of the cell `mimo_rank` occupies jointly —
+while `Complex2D` gains `u`× the per-token angle reach with a live gradient at every factor
+(a single step at the `rotation_range` bound sits on `tanh`'s asymptote), and the
+non-abelian kinds gain a product no single bounded step can express.
+Non-obvious: unlike DeltaProduct there is no forget gate to keep at token rate — Mamba
+fuses decay, write weight and rotation rate into one `Δ` — so every micro-step decays; a
+scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silence the
+rotation with it. The trapezoid's two taps consequently straddle *micro-steps*, and the
+caches hold the **last micro-step**, which is exactly what the next call's first follows.
+Tests: helper round-trips; `d_in_proj`/Muon-tiling arithmetic (`u=1` is stock); forward≡step
+on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; per-micro-step
+gradient liveness (a dropped or mis-ordered micro-step passes every value test);
+`step_infinite` vs unrolled.
 
 ### `mamba3/rotation/` (`mod.rs`, `rope.rs`)
 
@@ -222,6 +261,13 @@ cancellation. Denominators floored by `div_eps`. `Real1D` is the scalar series a
 four rotation kinds, both SSD pathways. The per-step
 increment comes from `rotation`'s shared helpers, so the fixed point cannot drift from
 the recurrence it is the limit of.
+Under MambaProduct the limit is a sum of `u` such terms: suffix decays `aⱼ = ∏_{j'>j}α_{j'}`
+give per-pair weights `cⱼ = aⱼγⱼ + a_{j+1}β_{j+1}`, the last pair keeping its taps apart as
+`γ_{u−1} + a₀β₀P⁻¹` (its β partner is the *next* token's micro-step 0, one turn further back
+in the same series), and `Qⱼ P⁻¹` is the rotation still to come after `j`. **It exists only
+for the abelian kinds**: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` is a function of
+`n` alone iff `Qⱼ` commutes with `P`, so `Quaternion4D`/`Rotor4D` at `u>1` are
+almost-periodic, not convergent — asserted, not approximated.
 
 ---
 

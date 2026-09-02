@@ -35,6 +35,41 @@
 //! [`Mamba3::step_infinite`] evaluates exactly this (and therefore takes and
 //! returns no cache).
 //!
+//! ## MambaProduct (`micro_steps = u > 1`)
+//!
+//! A constant token still drives `u` *different* micro-steps, so the per-token
+//! map is a product `A·P = (∏ⱼ αⱼ)·P_{u−1}⋯P₀` and the token writes `u` pairs
+//! `(bⱼ, xⱼ)` at `u` different points along it. Collecting the trapezoid's two
+//! taps by which pair they write gives one weight per pair,
+//!
+//! ```text
+//!   aⱼ = ∏_{j'>j} α_{j'} ,   cⱼ = aⱼγⱼ + a_{j+1}β_{j+1}   (j < u−1)
+//! ```
+//!
+//! and the last pair keeps its taps apart, because its β partner is the *next*
+//! token's micro-step 0 and therefore sits one turn further back in the same
+//! geometric series (`γ_{u−1} + a₀β₀ P⁻¹`). The limit is then a sum of `u` terms
+//! of exactly the shape above:
+//!
+//! ```text
+//!   y_∞ = Σⱼ xⱼᵀ · cᵀ Wⱼ bⱼ + D x_{u−1} ,
+//!   Wⱼ = cⱼ · Qⱼ P⁻¹ (I − A P⁻¹)⁻¹  (j < u−1) ,   Q_j = Pⱼ⋯P₀
+//!   W_{u−1} = (γ_{u−1} + a₀β₀ P⁻¹)(I − A P⁻¹)⁻¹
+//! ```
+//!
+//! `Qⱼ P⁻¹` is the rotation still *to come* after micro-step `j`, and at `u = 1`
+//! the whole thing collapses back to the single term above.
+//!
+//! **This exists only for the abelian kinds.** The readout at token `t` sees the
+//! pair written at token `t−n` through `P⁻ᵗ Qⱼ Pᵗ⁻ⁿ⁻¹`, which is a function of
+//! `n` alone iff `Qⱼ` commutes with `P`. For
+//! [`Quaternion4D`](crate::mamba3::rotation::RotationKind::Quaternion4D) and
+//! [`Rotor4D`](crate::mamba3::rotation::RotationKind::Rotor4D) it does not: the
+//! conjugation keeps turning with `t` and the output is almost-periodic, not
+//! convergent. [`Mamba3::step_infinite`] asserts against that combination —
+//! there is no limit to return, which is a property of the recurrence and not a
+//! gap here.
+//!
 //! Numerics: the rotation angle is reduced mod `2π` with the value-exact
 //! [`wrap_angle`]; the geometric denominators satisfy
 //! `|1 − α e^{−iθ̂}|² ≥ (1 − α)²` and are floored by
@@ -43,7 +78,7 @@
 //! the epsilon floor — the same regime where the unrolled recurrence itself
 //! accumulates near-undamped terms.
 
-use crate::mamba3::double_ssd::double_ssd::StepProjection;
+use crate::mamba3::double_ssd::double_ssd::MicroProjection;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::{
@@ -77,111 +112,208 @@ impl Mamba3 {
     /// - `input_bd` : `[batch, d_model]`
     /// - output     : `[batch, d_model]`
     pub fn step_infinite(&self, input_bd: Tensor<2>) -> Tensor<2> {
-        let StepProjection {
-            z_bi,
-            x_bhp,
-            b_bmhr,
-            c_bmhr,
-            rot_ba,
-            dt_bh,
-            alpha_bh,
-            beta_bh,
-            gamma_bh,
-        } = self.step_project(input_bd);
-        let [batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
-        let eps = div_eps(alpha_bh.dtype());
-
-        // Rotation-free channels: (β + γ) / (1 − α).
-        let tail_bh =
-            (beta_bh.clone() + gamma_bh.clone()) / (-alpha_bh.clone() + 1.0).clamp_min(eps);
-
-        // Per-pair/block readout factor  m = (γ + β P⁻¹)(1 − α P⁻¹)⁻¹  applied
-        // to `b`; the cumulative rotation cancels against `Cₙ` (orthogonality).
+        let proj = self.step_project(input_bd);
+        let u = proj.micro_steps;
         let spec = self.rotation_spec();
-        let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
-        let b_eff_bmhr = match spec.kind {
-            // A real transition: every channel is the plain geometric series
-            // `(β + γ)/(1 − α)`, which is exactly `tail`.
-            RotationKind::Real1D => b_bmhr * tail_bh.clone().unsqueeze_dims::<4>(&[1, 3]),
-            RotationKind::Complex2D => {
-                // The same per-step increment `forward`/`step` use — one
-                // definition, so the fixed point cannot drift from the
-                // recurrence it is the limit of.
-                let theta_bha = angle_increment::<2, 3>(rot(rot_ba), dt_bh, spec.range); // θ̂
-                let (cos, sin) = cos_sin(theta_bha);
-                let a_bh1 = alpha_bh.unsqueeze_dim::<3>(2);
-                let beta_bh1 = beta_bh.unsqueeze_dim::<3>(2);
-                let gamma_bh1 = gamma_bh.unsqueeze_dim::<3>(2);
-                // (γ + β e^{−iθ̂}) / (1 − α e^{−iθ̂})
-                let num_re = gamma_bh1 + beta_bh1.clone() * cos.clone();
-                let num_im = -beta_bh1 * sin.clone();
-                let den_re = -a_bh1.clone() * cos + 1.0;
-                let den_im = a_bh1 * sin;
-                let (m_re, m_im) = complex_div(num_re, num_im, den_re, den_im);
-                mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
-            }
-            RotationKind::Rotor4D => {
-                let g_bhk3 = generator_increment::<2, 3, 4>(
-                    rot(rot_ba),
-                    dt_bh,
-                    self.num_rotation_blocks(),
-                    spec.range,
-                );
-                let qp_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
-                let (q_bhj4, p_bhj4) = split_rotor(qp_bhk4); // M(v) = q ⊗ v ⊗ p̄
-                let rope_width = spec.rope_dim;
-                rotor_resolvent_partial(
-                    b_bmhr, q_bhj4, p_bhj4, alpha_bh, beta_bh, gamma_bh, tail_bh, rope_width,
-                )
-            }
-            RotationKind::Quaternion4D => {
-                let g_bhj3 = generator_increment::<2, 3, 4>(
-                    rot(rot_ba),
-                    dt_bh,
-                    self.num_quat_blocks,
-                    spec.range,
-                );
-                let q_bhj4 = quat_from_scaled_axis::<4>(g_bhj3); // P⁻¹ ↔ q
-                let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
-                let beta_bh11 = beta_bh.unsqueeze_dims::<4>(&[2, 3]);
-                let gamma_bh11 = gamma_bh.unsqueeze_dims::<4>(&[2, 3]);
-                // (γ + β q) ⊗ (1 − α q)⁻¹  — all in the abelian subalgebra of q.
-                let num = quat_scalar_affine(gamma_bh11, beta_bh11, q_bhj4.clone());
-                let den_inv = quat_inv(quat_one_minus(q_bhj4 * alpha_bh11));
-                let f_bhj4 = quat_mul(num, den_inv);
-                // As in `rotate_bc_step`, the rotated width comes from
-                // `rope_dim` (a partial rotation turns whole 4-blocks).
-                let rope_width = spec.rope_dim;
-                mul_quat_partial(b_bmhr, f_bhj4, tail_bh, rope_width)
-            }
-        };
-        san(&b_eff_bmhr);
+        let [batch, mimo_rank, nheads, _state_rank] = proj.c_bmhr.dims();
+        assert!(
+            u == 1 || matches!(spec.kind, RotationKind::Real1D | RotationKind::Complex2D),
+            "step_infinite has no limit to return at micro_steps = {u} with {:?}: the \
+             per-token rotation product `P` and its partial products `Qⱼ` do not commute, so \
+             the read-to-write relative rotation `P⁻ᵗ Qⱼ Pᵗ⁻ⁿ⁻¹` keeps turning with `t` and \
+             the output is almost-periodic rather than convergent. Use micro_steps = 1, or an \
+             abelian RotationKind (Real1D / Complex2D). See `crate::mamba3::product`.",
+            spec.kind
+        );
 
-        // y_∞[m] = Σ_m' ⟨c[m], m·b[m']⟩ · x_vals[m']   (then D-skip/gate/out-proj).
-        let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let x_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(x_bhp, mimo_x_hmp.as_ref(), 1);
-        let out_m_bmhp = if self.use_siso_decode_kernels() {
-            // SISO: the Gram matrix is the scalar ⟨c, m·b⟩ per (batch, nheads),
-            // so both matmuls degenerate — contract `state_rank` with a
-            // reduction and broadcast the result over `per_head_dim`.
-            let gram_bmh1: Tensor<4> = (c_bmhr * b_eff_bmhr).sum_dim(3);
-            x_vals_bmhp.clone() * gram_bmh1
-        } else {
-            let gram_bhmm = {
-                let c_bhmr = c_bmhr.swap_dims(1, 2);
-                let b_bhrm = b_eff_bmhr.permute([0, 2, 3, 1]);
-                c_bhmr.matmul(b_bhrm) // [batch, nheads, mimo_rank, mimo_rank']
-            };
-            let x_bhmp = x_vals_bmhp.clone().swap_dims(1, 2);
-            gram_bhmm.matmul(x_bhmp).swap_dims(1, 2)
+        let micros: Vec<MicroProjection> = (0..u).map(|j| proj.micro(j)).collect();
+        let eps = div_eps(micros[0].alpha_bh.dtype());
+
+        // Suffix decay `aⱼ = ∏_{j'>j} α_{j'}` — how much a write at micro-step
+        // `j` has decayed by the token's end — and `A = ∏ⱼ αⱼ`, the token's own
+        // decay. `a_{u−1} = 1`: the last micro-step's write is not decayed again
+        // before the readout.
+        let mut suffix_bh: Vec<Tensor<2>> =
+            vec![Tensor::ones([batch, nheads], &micros[0].alpha_bh.device()); u];
+        for j in (0..u.saturating_sub(1)).rev() {
+            suffix_bh[j] = suffix_bh[j + 1].clone() * micros[j + 1].alpha_bh.clone();
+        }
+        let total_decay_bh = suffix_bh[0].clone() * micros[0].alpha_bh.clone();
+        let one_minus_a_bh = (-total_decay_bh.clone() + 1.0).clamp_min(eps);
+
+        // How much of the token's write lands on micro-step `j`'s `(b, x)` pair.
+        // Two taps write it: `j`'s own γ tap, and `j+1`'s β tap (the trapezoid's
+        // left endpoint). The last pair is special — its β partner is the *next
+        // token's* micro-step 0, which contributes one extra factor of `P⁻¹`
+        // (its write sits one token later in the same geometric series), so it
+        // keeps the two taps apart.
+        let pair_weight_bh = |j: usize| {
+            let own = suffix_bh[j].clone() * micros[j].gamma_bh.clone();
+            if j + 1 < u {
+                own + suffix_bh[j + 1].clone() * micros[j + 1].beta_bh.clone()
+            } else {
+                own
+            }
         };
+        // The wrapped β weight attached to the last pair, `a₀·β₀`.
+        let wrap_bh = suffix_bh[0].clone() * micros[0].beta_bh.clone();
+
+        let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
+        let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
+        let siso = self.use_siso_decode_kernels();
+
+        // Per-pair/block readout factor. For the last pair it is the familiar
+        // `(γ + β P⁻¹)(I − A P⁻¹)⁻¹`; for the others the weight is a scalar and
+        // the rotation is the *remaining* one, `Qⱼ P⁻¹ = (P_{u−1}⋯P_{j+1})⁻¹`.
+        // The cumulative rotation cancels against `Cₙ` (orthogonality), so only
+        // these relative turns survive.
+        let b_eff = |j: usize| -> Tensor<4> {
+            let b_bmhr = micros[j].b_bmhr.clone();
+            let last = j + 1 == u;
+            // Rotation-free channels: the plain real geometric series.
+            let tail_num_bh = if last {
+                pair_weight_bh(j) + wrap_bh.clone()
+            } else {
+                pair_weight_bh(j)
+            };
+            let tail_bh = tail_num_bh / one_minus_a_bh.clone();
+            match spec.kind {
+                // A real transition: every channel is `tail`.
+                RotationKind::Real1D => b_bmhr * tail_bh.unsqueeze_dims::<4>(&[1, 3]),
+                RotationKind::Complex2D => {
+                    // The same per-step increments `forward`/`step` use — one
+                    // definition, so the fixed point cannot drift from the
+                    // recurrence it is the limit of. `Θ` is the token's total
+                    // turn, `Φⱼ` the part of it still to come after `j`.
+                    let theta = |k: usize| {
+                        angle_increment::<2, 3>(
+                            rot(micros[k].rot_ba.clone()),
+                            micros[k].dt_bh.clone(),
+                            spec.range,
+                        )
+                    };
+                    let mut total_bha = theta(0);
+                    for k in 1..u {
+                        total_bha = total_bha + theta(k);
+                    }
+                    let (cos_t, sin_t) = cos_sin(total_bha.clone());
+                    let a_bh1 = total_decay_bh.clone().unsqueeze_dim::<3>(2);
+                    let den_re = -a_bh1.clone() * cos_t.clone() + 1.0;
+                    let den_im = a_bh1 * sin_t.clone();
+                    let (num_re, num_im) = if last {
+                        // γ + (a₀β₀) e^{−iΘ}
+                        let w_bh1 = wrap_bh.clone().unsqueeze_dim::<3>(2);
+                        let g_bh1 = pair_weight_bh(j).unsqueeze_dim::<3>(2);
+                        (
+                            g_bh1 + w_bh1.clone() * cos_t,
+                            -w_bh1 * sin_t,
+                        )
+                    } else {
+                        // cⱼ e^{−iΦⱼ},  Φⱼ = Σ_{j'>j} θ̂_{j'}
+                        let mut phi_bha = theta(j + 1);
+                        for k in j + 2..u {
+                            phi_bha = phi_bha + theta(k);
+                        }
+                        let (cos_p, sin_p) = cos_sin(phi_bha);
+                        let c_bh1 = pair_weight_bh(j).unsqueeze_dim::<3>(2);
+                        (c_bh1.clone() * cos_p, -c_bh1 * sin_p)
+                    };
+                    let (m_re, m_im) = complex_div(num_re, num_im, den_re, den_im);
+                    mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
+                }
+                // The non-abelian kinds are reachable only at `u == 1` (asserted
+                // above), where `j` is the one and only pair and the weights
+                // collapse to the plain `(γ, β, α)`.
+                RotationKind::Rotor4D => {
+                    let m = &micros[0];
+                    let g_bhk3 = generator_increment::<2, 3, 4>(
+                        rot(m.rot_ba.clone()),
+                        m.dt_bh.clone(),
+                        self.num_rotation_blocks(),
+                        spec.range,
+                    );
+                    let qp_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
+                    let (q_bhj4, p_bhj4) = split_rotor(qp_bhk4); // M(v) = q ⊗ v ⊗ p̄
+                    rotor_resolvent_partial(
+                        b_bmhr,
+                        q_bhj4,
+                        p_bhj4,
+                        m.alpha_bh.clone(),
+                        m.beta_bh.clone(),
+                        m.gamma_bh.clone(),
+                        tail_bh,
+                        spec.rope_dim,
+                    )
+                }
+                RotationKind::Quaternion4D => {
+                    let m = &micros[0];
+                    let g_bhj3 = generator_increment::<2, 3, 4>(
+                        rot(m.rot_ba.clone()),
+                        m.dt_bh.clone(),
+                        self.num_quat_blocks,
+                        spec.range,
+                    );
+                    let q_bhj4 = quat_from_scaled_axis::<4>(g_bhj3); // P⁻¹ ↔ q
+                    let alpha_bh11 = m.alpha_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
+                    let beta_bh11 = m.beta_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
+                    let gamma_bh11 = m.gamma_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
+                    // (γ + β q) ⊗ (1 − α q)⁻¹  — all in the abelian subalgebra of q.
+                    let num = quat_scalar_affine(gamma_bh11, beta_bh11, q_bhj4.clone());
+                    let den_inv = quat_inv(quat_one_minus(q_bhj4 * alpha_bh11));
+                    let f_bhj4 = quat_mul(num, den_inv);
+                    // As in `rotate_bc_step`, the rotated width comes from
+                    // `rope_dim` (a partial rotation turns whole 4-blocks).
+                    mul_quat_partial(b_bmhr, f_bhj4, tail_bh, spec.rope_dim)
+                }
+            }
+        };
+
+        // y_∞[m] = Σⱼ Σ_m' ⟨c[m], Wⱼ·bⱼ[m']⟩ · x_vals,ⱼ[m']  — one term per
+        // micro-step, then the shared D-skip/gate/out-projection on the *last*
+        // micro-step's values (the one the readout is contemporaneous with).
+        let mut out_m_bmhp: Option<Tensor<4>> = None;
+        let mut last_x_vals_bmhp: Option<Tensor<4>> = None;
+        for j in 0..u {
+            let b_eff_bmhr = b_eff(j);
+            san(&b_eff_bmhr);
+            let x_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
+                micros[j].x_bhp.clone(),
+                mimo_x_hmp.as_ref(),
+                1,
+            );
+            let term_bmhp = if siso {
+                // SISO: the Gram matrix is the scalar ⟨c, W·b⟩ per (batch,
+                // nheads), so both matmuls degenerate — contract `state_rank`
+                // with a reduction and broadcast over `per_head_dim`.
+                let gram_bmh1: Tensor<4> = (proj.c_bmhr.clone() * b_eff_bmhr).sum_dim(3);
+                x_vals_bmhp.clone() * gram_bmh1
+            } else {
+                let gram_bhmm = {
+                    let c_bhmr = proj.c_bmhr.clone().swap_dims(1, 2);
+                    let b_bhrm = b_eff_bmhr.permute([0, 2, 3, 1]);
+                    c_bhmr.matmul(b_bhrm) // [batch, nheads, mimo_rank, mimo_rank']
+                };
+                let x_bhmp = x_vals_bmhp.clone().swap_dims(1, 2);
+                gram_bhmm.matmul(x_bhmp).swap_dims(1, 2)
+            };
+            out_m_bmhp = Some(match out_m_bmhp {
+                Some(acc) => acc + term_bmhp,
+                None => term_bmhp,
+            });
+            last_x_vals_bmhp = Some(x_vals_bmhp);
+        }
+        let out_m_bmhp = out_m_bmhp.expect("micro_steps ≥ 1");
         assert_eq!(
             [batch, mimo_rank, nheads, self.per_head_dim()],
             out_m_bmhp.dims()
         );
         san(&out_m_bmhp);
 
-        self.step_finish(out_m_bmhp, x_vals_bmhp, z_bi)
+        self.step_finish(
+            out_m_bmhp,
+            last_x_vals_bmhp.expect("micro_steps ≥ 1"),
+            proj.z_bi,
+        )
     }
 }
 

@@ -43,16 +43,23 @@ impl Mamba3 {
         cache: Option<Mamba3DoubleSsdCache>,
         ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
-        let [batch, sequence, _d_model] = input_bsm.dims();
+        let [batch, tokens, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
         let mimo_rank = self.mimo_rank;
+        let micro_steps = self.micro_steps;
         let device = input_bsm.device();
 
-        assert!(sequence > 0, "sequence length must be at least 1");
+        // MambaProduct: from the split below down to the readout, one sequence
+        // position *is* one micro-step — the `s` in every shape suffix counts
+        // micro-steps, and `tokens` is the only name still at token resolution.
+        // See [`crate::mamba3::product`].
+        let sequence = tokens * micro_steps;
+
+        assert!(tokens > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
 
@@ -74,26 +81,40 @@ impl Mamba3 {
         let proj_bsd = self.in_proj.forward(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
-        // [batch, sequence, *] split along channel dim.
+        // [batch, tokens, *] split along channel dim; `u` = micro_steps widens
+        // every per-micro-step segment, and `unfold` reinterprets each of them
+        // as `u` consecutive sequence positions. `z` (per-token gate) and `C`
+        // (per-token read) do not widen — `C` is instead broadcast across the
+        // group so its *last* copy carries the right cumulative rotation.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
         // The rotation channels come off first: `Real1D` projects none, and a
         // zero-width segment would silently vanish from the split below.
-        let (proj_bsd, rot_bsa) =
-            helpers::split_rotation_channels(proj_bsd, self.num_rotation_channels, 2);
+        let u = micro_steps;
+        let (proj_bsd, rot_btA) =
+            helpers::split_rotation_channels(proj_bsd, self.rotation_channels_total(), 2);
         #[rustfmt::skip]
         let [
-                z_bsi, x_bsi,
-                b_raw_bsMGR, c_raw_bsMGR,
-                dd_dt_bsh, dd_A_raw_bsh, lambda_raw_bsh,
+                z_bsi, x_btI,
+                b_raw_btMGRU, c_raw_btMGR,
+                dd_dt_btH, dd_A_raw_btH, lambda_raw_btH,
         ] = burn_stack::modules::split_into(
             proj_bsd,
             [
-                d_inner, d_inner,
-                bc_size, bc_size,
-                nheads, nheads, nheads,
+                d_inner, u * d_inner,
+                u * bc_size, bc_size,
+                u * nheads, u * nheads, u * nheads,
             ],
             2,
         );
+
+        use crate::mamba3::product::{repeat_micro_bs, unfold_micro_bs};
+        let x_bsi = unfold_micro_bs(x_btI, u);
+        let b_raw_bsMGR = unfold_micro_bs(b_raw_btMGRU, u);
+        let c_raw_bsMGR = repeat_micro_bs(c_raw_btMGR, u);
+        let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
+        let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
+        let lambda_raw_bsh = unfold_micro_bs(lambda_raw_btH, u);
+        let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
         san(&x_bsi);
@@ -200,11 +221,18 @@ impl Mamba3 {
         let x_gamma_bshp = x_bshp.clone() * gamma_bsh1; // γₜ · xₜ
         let x_beta_bshp = x_prev_bshp * beta_bsh1; // βₜ · xₜ₋₁
 
-        // ── Save last-token B for cache ───────────────────────────────────────
+        // ── Save the last position's B and x for the cache ────────────────────
+        // "Last position" is the last *micro-step* of the last token — exactly
+        // the step the next call's first micro-step follows, so the trapezoid's
+        // previous-step taps continue across a split prefill unchanged.
         let b_last_bmhr = b_bsmhr
             .clone()
             .narrow(1, sequence - 1, 1)
             .reshape([batch, mimo_rank, nheads, state_rank]);
+        let x_last_bhp = x_bshp
+            .clone()
+            .narrow(1, sequence - 1, 1) // x_b1hp
+            .squeeze_dim::<3>(1); // x_bhp
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
@@ -282,11 +310,21 @@ impl Mamba3 {
             y_bSmhp.narrow(1, 0, sequence)
         };
 
+        // ── Step 10b: back to token resolution (MambaProduct) ─────────────────
+        // The readout happens after all `u` writes, so only each token's last
+        // micro-step survives; the intervening positions computed a `y` from a
+        // repeated `C` and it is dropped here. From this point `t` (`tokens`)
+        // is the sequence axis again.
+        let y_btmhp = crate::mamba3::product::last_micro5(y_bsmhp, micro_steps);
+        let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
+
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
-        // D skip uses raw x * mimo_x_hmp (not gamma-scaled)
-        // Insert the mimo_rank axis at position 2 of `_bshp`.
-        let v_raw_bsmhp =
-            helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
+        // D skip uses raw x * mimo_x_hmp (not gamma-scaled), at the micro-step
+        // the readout is contemporaneous with.
+        // Insert the mimo_rank axis at position 2 of `_bthp`.
+        let v_raw_bsmhp = helpers::build_v_with_mimo::<4, 5>(x_bthp, mimo_x_hmp.as_ref(), 2);
+        let y_bsmhp = y_btmhp;
+        let sequence = tokens;
 
         let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
@@ -347,15 +385,11 @@ impl Mamba3 {
         san(&out_bsm);
 
         // ── Update remaining cache fields ─────────────────────────────────────
-        // k_state = B at last token
+        // k_state / v_state = B / x at the last micro-step of the last token
         cache.k_state_bmhr = b_last_bmhr;
+        cache.v_state_bhp = x_last_bhp;
 
-        // v_state = x at last token
-        cache.v_state_bhp = x_bshp
-            .narrow(1, sequence - 1, 1) // x_b1hp
-            .squeeze_dim::<3>(1); // x_bhp
-
-        // Cumulative rotation at the last token (angle wrapped to [−π, π], or
+        // Cumulative rotation at the last micro-step (angle wrapped to [−π, π], or
         // the cumulative quaternion), to continue a longer sequence.
         cache.rotation = new_rotation;
 
@@ -375,18 +409,43 @@ mod step {
     /// [`Mamba3::step_infinite`]: the gate/value streams, the **pre-rotation**
     /// QK-normed B/C, the raw rotation channels, and the trapezoid
     /// coefficients.
+    ///
+    /// Every per-micro-step stream carries a `u` axis (MambaProduct; `u = 1` for
+    /// stock Mamba-3). [`Self::micro`] peels one micro-step off it.
     pub(crate) struct StepProjection {
-        /// Gate stream `[batch, d_inner]`.
+        /// Recurrence micro-steps per token — the size of the `u` axis below.
+        pub micro_steps: usize,
+        /// Per-token gate stream `[batch, d_inner]`.
         pub z_bi: Tensor<2>,
-        /// Value stream `[batch, nheads, per_head_dim]`.
-        pub x_bhp: Tensor<3>,
-        /// QK-normed, GQA-expanded, biased B — **before** the rotation.
-        pub b_bmhr: Tensor<4>,
-        /// QK-normed, GQA-expanded, biased C — **before** the rotation.
+        /// Per-token QK-normed, GQA-expanded, biased C — **before** the
+        /// rotation. The read happens once, after all `u` writes.
         pub c_bmhr: Tensor<4>,
-        /// Raw rotation channels `[batch, num_rotation_channels]`; `None` for
+        /// Value stream `[batch, u, nheads, per_head_dim]`.
+        pub x_buhp: Tensor<4>,
+        /// QK-normed, GQA-expanded, biased B — **before** the rotation.
+        /// `[batch, u, mimo_rank, nheads, state_rank]`.
+        pub b_bumhr: Tensor<5>,
+        /// Raw rotation channels `[batch, u, num_rotation_channels]`; `None` for
         /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
         /// which projects none.
+        pub rot_bua: Option<Tensor<3>>,
+        /// `Δ` `[batch, u, nheads]`.
+        pub dt_buh: Tensor<3>,
+        /// `α = exp(Δ·A)` `[batch, u, nheads]`.
+        pub alpha_buh: Tensor<3>,
+        /// `β = (1−λ)·Δ·α` `[batch, u, nheads]`.
+        pub beta_buh: Tensor<3>,
+        /// `γ = λ·Δ` `[batch, u, nheads]`.
+        pub gamma_buh: Tensor<3>,
+    }
+
+    /// One micro-step of a [`StepProjection`], with the `u` axis peeled off.
+    pub(crate) struct MicroProjection {
+        /// Value stream `[batch, nheads, per_head_dim]`.
+        pub x_bhp: Tensor<3>,
+        /// Pre-rotation B `[batch, mimo_rank, nheads, state_rank]`.
+        pub b_bmhr: Tensor<4>,
+        /// Raw rotation channels `[batch, num_rotation_channels]`.
         pub rot_ba: Option<Tensor<2>>,
         /// `Δ` `[batch, nheads]`.
         pub dt_bh: Tensor<2>,
@@ -398,10 +457,28 @@ mod step {
         pub gamma_bh: Tensor<2>,
     }
 
+    impl StepProjection {
+        /// Micro-step `j` (`0 ≤ j < micro_steps`), in execution order.
+        pub fn micro(&self, j: usize) -> MicroProjection {
+            let pick2 = |t: Tensor<3>| t.narrow(1, j, 1).squeeze_dim::<2>(1);
+            MicroProjection {
+                x_bhp: self.x_buhp.clone().narrow(1, j, 1).squeeze_dim(1),
+                b_bmhr: self.b_bumhr.clone().narrow(1, j, 1).squeeze_dim(1),
+                rot_ba: self.rot_bua.clone().map(pick2),
+                dt_bh: pick2(self.dt_buh.clone()),
+                alpha_bh: pick2(self.alpha_buh.clone()),
+                beta_bh: pick2(self.beta_buh.clone()),
+                gamma_bh: pick2(self.gamma_buh.clone()),
+            }
+        }
+    }
+
     impl Mamba3 {
         /// In-projection → split → trapezoid coefficients → QK-norm for a
         /// single token, **stopping before** the rotation (which
         /// needs the cache's cumulative rotation).
+        ///
+        /// The per-micro-step streams keep a `u` axis; see [`StepProjection`].
         #[allow(non_snake_case)]
         pub(crate) fn step_project(&self, input_bd: Tensor<2>) -> StepProjection {
             let [batch, _d_model] = input_bd.dims();
@@ -411,6 +488,7 @@ mod step {
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
             let mimo_rank = self.mimo_rank;
+            let u = self.micro_steps;
 
             assert_eq!(nheads % ngroups, 0);
             san(&input_bd);
@@ -419,56 +497,62 @@ mod step {
             let proj_bd = self.in_proj.forward(input_bd);
             san(&proj_bd);
             let bc_size = ngroups * state_rank * mimo_rank;
-            // [batch, *] split along channel dim.
+            // [batch, *] split along channel dim; the per-micro-step segments
+            // are `u` times as wide and split onto a `u` axis of their own,
+            // matching `forward`'s fold into the sequence.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
             // See the note in `forward`: `Real1D` projects no rotation channels.
-            let (proj_bd, rot_ba) =
-                helpers::split_rotation_channels(proj_bd, self.num_rotation_channels, 1);
+            let (proj_bd, rot_bA) =
+                helpers::split_rotation_channels(proj_bd, self.rotation_channels_total(), 1);
             #[rustfmt::skip]
             let [
-                    z_bi, x_bi,
-                    b_raw_bMGR, c_raw_bMGR,
-                    dd_dt_bh, dd_a_raw_bh, lambda_raw_bh,
+                    z_bi, x_bI,
+                    b_raw_bMGRU, c_raw_bMGR,
+                    dd_dt_bH, dd_a_raw_bH, lambda_raw_bH,
             ] = burn_stack::modules::split_into(
                 proj_bd,
                 [
-                    d_inner, d_inner,
-                    bc_size, bc_size,
-                    nheads, nheads, nheads,
+                    d_inner, u * d_inner,
+                    u * bc_size, bc_size,
+                    u * nheads, u * nheads, u * nheads,
                 ],
                 1,
             );
 
+            use crate::mamba3::product::unfold_micro_b;
+            let rot_bua = rot_bA.map(|t| unfold_micro_b(t, u));
+
             // ── Reshape x ─────────────────────────────────────────────────────
-            let x_bhp = x_bi.reshape([batch, nheads, per_head_dim]);
+            let x_buhp = x_bI.reshape([batch, u, nheads, per_head_dim]);
 
             // ── Discretisation + trapezoidal coefficients ─────────────────────
             let helpers::TrapezoidCoeffs {
-                dt: dt_bh,
-                da: _da_bh,
-                alpha: alpha_bh,
-                beta: beta_bh,
-                gamma: gamma_bh,
+                dt: dt_buh,
+                da: _da_buh,
+                alpha: alpha_buh,
+                beta: beta_buh,
+                gamma: gamma_buh,
             } = helpers::trapezoidal_coefficients(
-                dd_dt_bh,
-                dd_a_raw_bh,
-                lambda_raw_bh,
+                unfold_micro_b(dd_dt_bH, u),
+                unfold_micro_b(dd_a_raw_bH, u),
+                unfold_micro_b(lambda_raw_bH, u),
                 self.dt_bias_h.val(),
                 self.dt_limit,
                 self.a_floor,
             );
-            san(&dt_bh);
-            san(&alpha_bh);
-            san(&beta_bh);
-            san(&gamma_bh);
+            san(&dt_buh);
+            san(&alpha_buh);
+            san(&beta_buh);
+            san(&gamma_buh);
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
-            // Group dim is axis 2 of `_bmgr` (D = 4).
-            let b_bmhr = helpers::qk_norm_expand_bias::<4, 5>(
-                b_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+            // B carries the `u` axis, so its group dim is axis 3 of `_bumgr`
+            // (D = 5); C is per token, group dim axis 2 of `_bmgr` (D = 4).
+            let b_bumhr = helpers::qk_norm_expand_bias::<5, 6>(
+                b_raw_bMGRU.reshape([batch, u, mimo_rank, ngroups, state_rank]),
                 &self.b_norm,
                 self.b_bias_hmr.val(),
-                2,
+                3,
                 nheads,
             );
             let c_bmhr = helpers::qk_norm_expand_bias::<4, 5>(
@@ -478,20 +562,21 @@ mod step {
                 2,
                 nheads,
             );
-            assert_eq!([batch, mimo_rank, nheads, state_rank], b_bmhr.dims());
-            san(&b_bmhr);
+            assert_eq!([batch, u, mimo_rank, nheads, state_rank], b_bumhr.dims());
+            san(&b_bumhr);
             san(&c_bmhr);
 
             StepProjection {
+                micro_steps: u,
                 z_bi,
-                x_bhp,
-                b_bmhr,
                 c_bmhr,
-                rot_ba,
-                dt_bh,
-                alpha_bh,
-                beta_bh,
-                gamma_bh,
+                x_buhp,
+                b_bumhr,
+                rot_bua,
+                dt_buh,
+                alpha_buh,
+                beta_buh,
+                gamma_buh,
             }
         }
 
@@ -656,98 +741,111 @@ mod step {
             });
 
             // ── In-projection → coefficients → QK-norm ────────────────────────
-            let StepProjection {
-                z_bi,
-                x_bhp,
-                b_bmhr,
-                c_bmhr,
-                rot_ba,
-                dt_bh,
-                alpha_bh,
-                beta_bh,
-                gamma_bh,
-            } = self.step_project(input_bd);
-
-            // ── Update cumulative rotation, rotate B and C ─────────────────────
-            // Complex2D: abelian RoPE angle. Quaternion4D: cumulative quaternion.
-            // See [`rotate_bc_step`].
-            let (b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
-                rot_ba,
-                dt_bh.clone(),
-                cache.rotation.clone(),
-                b_bmhr,
-                c_bmhr,
-                self.rotation_spec(),
-            );
-            san(&b_bmhr);
-            san(&c_bmhr);
-            new_rotation.sanity();
-
-            // ── Build MIMO value tensors ───────────────────────────────────────
-            // Insert the mimo_rank axis at position 1 of `_bhp`.
+            let proj = self.step_project(input_bd);
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-            let x_vals_bmhp =
-                helpers::build_v_with_mimo::<3, 4>(x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
-            san(&x_vals_bmhp);
-            let xs_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
-                cache.v_state_bhp.clone(),
-                mimo_x_hmp.as_ref(),
-                1,
-            );
-            san(&xs_vals_bmhp);
-
-            // ── SSM state update ───────────────────────────────────────────────
-            // new_state[b, h, p, r] = alpha * state
-            //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
-            //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]
-            //
-            // For the outer product sum:
-            //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
-            //   = einsum('bmhp,bmhr->bhpr', coeff*x_vals, B)
-            //   = matmul over m: [b, h, p, m] @ [b, h, m, r]
-            // x_vals_bmhp * gamma_b1h1
-            // Need gamma as [b, 1, h, 1] to broadcast over m and p:
-            let gamma_b1h1 = gamma_bh.clone().unsqueeze_dims::<4>(&[1, 3]);
-            let beta_b1h1 = beta_bh.clone().unsqueeze_dims::<4>(&[1, 3]);
-
-            let x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
-            san(&x_gamma_bmhp);
-            let x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
-            san(&x_beta_bmhp);
-
-            // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
             let siso = self.use_siso_decode_kernels();
-            let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
-            san(&xbt_state_bhpr);
-            let xbt_prev_bhpr =
-                helpers::mimo_outer_sum(x_beta_bmhp, cache.k_state_bmhr.clone(), siso);
-            san(&xbt_prev_bhpr);
 
-            let alpha_bh11 = alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
-            let new_state_bhpr =
-                alpha_bh11 * cache.ssm_bhpr.clone() + xbt_state_bhpr + xbt_prev_bhpr;
-            san(&new_state_bhpr);
+            // ── `u` micro-steps of the recurrence, then one readout ────────────
+            // MambaProduct: each pass is one plain Mamba-3 step, so the token's
+            // transition is the product of the `u` of them and the trapezoid's
+            // two taps straddle *micro-steps*. Identical to `forward` running
+            // over the folded sequence, which is what the parity tests assert.
+            // `u = 1` executes the loop once and is stock Mamba-3.
+            let mut state_bhpr = cache.ssm_bhpr.clone();
+            let mut prev_b_bmhr = cache.k_state_bmhr.clone();
+            let mut prev_x_bhp = cache.v_state_bhp.clone();
+            let mut rotation = cache.rotation.clone();
+            // Set on the last pass; the readout uses only that one.
+            let mut last: Option<(Tensor<4>, Tensor<4>)> = None;
+
+            for j in 0..proj.micro_steps {
+                let m = proj.micro(j);
+
+                // ── Update cumulative rotation, rotate B and C ─────────────
+                // Complex2D: abelian RoPE angle. Quaternion4D: cumulative
+                // quaternion. See [`rotate_bc_step`]. `C` is the same tensor at
+                // every micro-step — matching `forward`'s repeat — so the copy
+                // that reaches the readout carries the cumulative rotation of
+                // the *last* micro-step.
+                let (b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
+                    m.rot_ba,
+                    m.dt_bh,
+                    rotation,
+                    m.b_bmhr,
+                    proj.c_bmhr.clone(),
+                    self.rotation_spec(),
+                );
+                san(&b_bmhr);
+                san(&c_bmhr);
+                new_rotation.sanity();
+
+                // ── Build MIMO value tensors ───────────────────────────────
+                // Insert the mimo_rank axis at position 1 of `_bhp`.
+                let x_vals_bmhp =
+                    helpers::build_v_with_mimo::<3, 4>(m.x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
+                san(&x_vals_bmhp);
+                let xs_vals_bmhp =
+                    helpers::build_v_with_mimo::<3, 4>(prev_x_bhp, mimo_x_hmp.as_ref(), 1);
+                san(&xs_vals_bmhp);
+
+                // ── SSM state update ───────────────────────────────────────
+                // new_state[b, h, p, r] = alpha * state
+                //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
+                //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]
+                //
+                // For the outer product sum:
+                //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
+                //   = einsum('bmhp,bmhr->bhpr', coeff*x_vals, B)
+                //   = matmul over m: [b, h, p, m] @ [b, h, m, r]
+                // x_vals_bmhp * gamma_b1h1
+                // Need gamma as [b, 1, h, 1] to broadcast over m and p:
+                let gamma_b1h1 = m.gamma_bh.unsqueeze_dims::<4>(&[1, 3]);
+                let beta_b1h1 = m.beta_bh.unsqueeze_dims::<4>(&[1, 3]);
+
+                let x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
+                san(&x_gamma_bmhp);
+                let x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
+                san(&x_beta_bmhp);
+
+                // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
+                let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
+                san(&xbt_state_bhpr);
+                let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, prev_b_bmhr, siso);
+                san(&xbt_prev_bhpr);
+
+                let alpha_bh11 = m.alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
+                let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr + xbt_prev_bhpr;
+                san(&new_state_bhpr);
+
+                state_bhpr = new_state_bhpr;
+                prev_b_bmhr = b_bmhr;
+                prev_x_bhp = m.x_bhp;
+                rotation = new_rotation;
+                last = Some((c_bmhr, x_vals_bmhp));
+            }
+
+            let (c_bmhr, x_vals_bmhp) = last.expect("micro_steps ≥ 1");
 
             // ── Output ────────────────────────────────────────────────────────
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
-            let out_m_bmhp = Self::step_readout(new_state_bhpr.clone(), c_bmhr, siso);
+            let out_m_bmhp = Self::step_readout(state_bhpr.clone(), c_bmhr, siso);
             san(&out_m_bmhp);
 
             // ── D skip, gate (or gated norm), rank aggregation, out-projection ─
-            let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, z_bi);
+            let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, proj.z_bi);
 
             // ── Update cache ──────────────────────────────────────────────────
-            cache.ssm_bhpr = new_state_bhpr;
-            cache.k_state_bmhr = b_bmhr;
-            cache.v_state_bhp = x_bhp;
-            cache.rotation = new_rotation;
+            cache.ssm_bhpr = state_bhpr;
+            cache.k_state_bmhr = prev_b_bmhr;
+            cache.v_state_bhp = prev_x_bhp;
+            cache.rotation = rotation;
 
             (out_bm, cache)
         }
     }
 }
 
-pub(crate) use step::StepProjection;
+pub(crate) use step::MicroProjection;
 
 // ---------------------------------------------------------------------------
 // Tests

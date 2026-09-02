@@ -106,6 +106,26 @@
 //!   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]
 //! ```
 //!
+//! ## 5. MambaProduct (`micro_steps = u > 1`)
+//!
+//! A fourth, independent dial, ported from *DeltaProduct*: `u` recurrence
+//! micro-steps per token, each a full step of the above with its own projected
+//! `x`, `B`, `Δ`, `A`, `λ` and rotation. One *token*'s transition is then the
+//! **product**
+//!
+//! ```text
+//!   Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁
+//! ```
+//!
+//! and its write a sum of `u` outer products staggered along it; the read `C`,
+//! the gate `z` and the `D` skip stay per token. It is evaluated by folding the
+//! micro-steps into the sequence axis, so nothing below this line changes. See
+//! [`crate::mamba3::product`] for what `u` buys per
+//! [`RotationKind`] — the answer is very
+//! different for the abelian and non-abelian ones — and for the fact that
+//! [`Mamba3::step_infinite`] has no limit to return at `u > 1` when the
+//! rotations do not commute.
+//!
 //! Implementation note: the trapezoidal recurrence (in the double-ssd pathway)
 //! is computed by splitting it into a γ-SSD (current-token contributions) and
 //! a β-SSD (previous-token contributions); see [`crate::mamba3::double_ssd::ssd::ssd_path`].
@@ -167,14 +187,16 @@ use burn::{
 /// - [`Self::step`]    — recurrent form for token-by-token decoding
 #[derive(Module, Debug)]
 pub struct Mamba3 {
-    /// Input projection.
+    /// Input projection; width [`Mamba3Config::d_in_proj`].
     ///
-    /// For SISO (R=1), maps:
-    /// `d_model → 2·d_inner + 2·ngroups·state_rank + 3·nheads + num_rope_angles`
-    /// For MIMO (R>1), maps:
-    /// `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rope_angles`
+    /// Output splits, with `u` = [`Self::micro_steps`]:
+    /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | rotation·u]`
     ///
-    /// Output splits: `[z | x | B_raw | C_raw | dd_dt | dd_A | lambda_raw | theta_raw]`
+    /// Every **per-micro-step** stream is projected `u` times over and folded
+    /// into the sequence by [`crate::mamba3::product`]; the gate `z` and the
+    /// read `C` are per token. At the default `u = 1` this is the stock
+    /// `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
+    /// + num_rotation_channels`.
     pub in_proj: Linear,
 
     /// Per-head bias for the discretisation step size Δ.
@@ -262,6 +284,11 @@ pub struct Mamba3 {
     /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 
+    /// Recurrence micro-steps per token — DeltaProduct's `u`
+    /// (see [`Mamba3Config::micro_steps`] and [`crate::mamba3::product`]).
+    /// `1` is stock Mamba-3.
+    pub micro_steps: usize,
+
     /// Which transition rotation the block applies to `B`/`C` ([`RotationKind`]).
     /// A non-parameter constant — `#[module(skip)]` keeps it out of the record and
     /// carries it through `load_record`/`to_device`/… unchanged.
@@ -329,6 +356,13 @@ impl Mamba3 {
     /// factors share one stacked block axis.
     pub fn num_rotation_blocks(&self) -> usize {
         self.num_quat_blocks * self.rotation.quat_factors()
+    }
+
+    /// Width of the in-projection's trailing rotation segment: the per-step
+    /// [`Self::num_rotation_channels`] once per micro-step, since each
+    /// micro-step turns the state by a rotation of its own.
+    pub fn rotation_channels_total(&self) -> usize {
+        self.micro_steps * self.num_rotation_channels
     }
 
     /// Everything the rotation needs, in one place — the algebra, the rotated
@@ -405,6 +439,29 @@ pub struct Mamba3Config {
     /// Paper: `M`. Python: `mimo_rank`.
     #[config(default = 1)]
     pub mimo_rank: usize,
+
+    /// **MambaProduct**: recurrence micro-steps per token — DeltaProduct's `u`.
+    /// `1` (the default) is stock Mamba-3, byte for byte.
+    ///
+    /// Each micro-step is a full Mamba-3 step with its own projected
+    /// `x`, `B`, `Δ`, `A`, `λ` and rotation, so one *token*'s transition is the
+    /// **product** `(∏ⱼ αⱼ)·Rᵤ⋯R₁` and its write is `u` staggered outer
+    /// products. The read `C`, the gate `z`, the `D` skip and the output are
+    /// per token. Cost is `u`× the recurrence; the state does not grow.
+    ///
+    /// What it buys depends on [`Self::rotation`], and the split is sharp: with
+    /// [`Real1D`](crate::mamba3::rotation::RotationKind::Real1D) the factors are
+    /// scalars and commute, so `u` widens only the write (the sequential
+    /// reading of what [`Self::mimo_rank`] does jointly); with
+    /// [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D) it also
+    /// multiplies the per-token angle reach by `u` *without* pushing any single
+    /// factor onto `tanh`'s flat region (see [`Self::rotation_range`]); with the
+    /// non-abelian kinds it composes generators that no single step can express.
+    /// See [`crate::mamba3::product`] for the full argument, the folding, and
+    /// the one capability `u > 1` costs
+    /// ([`step_infinite`](Mamba3::step_infinite) on the non-abelian kinds).
+    #[config(default = 1)]
+    pub micro_steps: usize,
 
     /// Minimum absolute value of A after clamping.
     #[config(default = "1e-4")]
@@ -640,47 +697,65 @@ impl Mamba3Config {
 
     /// Total input projection output size.
     ///
-    /// `d_in_proj = 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads + num_rotation_channels`
-    /// where the last term is [`Self::num_rotation_channels`] (`num_rope_angles`
-    /// for the default `Complex2D`, so the size is unchanged from before).
+    /// ```text
+    ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u ]
+    /// ```
+    ///
+    /// i.e. `d_inner + u·d_inner + u·bc + bc + 3·u·nheads + u·num_rotation_channels`
+    /// with `bc = ngroups·state_rank·mimo_rank` and `u` =
+    /// [`Self::micro_steps`]. Only the **per-micro-step** segments widen; the
+    /// gate `z` and the read `C` are per token (see [`crate::mamba3::product`]).
+    /// At `u = 1` this is the stock
+    /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
     pub fn d_in_proj(&self) -> usize {
-        2 * self.d_inner()
-            + 2 * self.ngroups * self.state_rank * self.mimo_rank
-            + 3 * self.nheads()
-            + self.num_rotation_channels()
+        let u = self.micro_steps;
+        let bc = self.ngroups * self.state_rank * self.mimo_rank;
+        self.d_inner()
+            + u * self.d_inner()
+            + u * bc
+            + bc
+            + 3 * u * self.nheads()
+            + u * self.num_rotation_channels()
     }
 
     /// The block's 2-D weights Muon may own, and how their fused columns split.
     ///
     /// `in_proj`'s segments mirror the `split_into` in the SSD pathways
-    /// (`[z | x | B | C | Δ | A | λ | rotation]`); the three per-head *scalar*
-    /// channels stay on AdamW. See [`burn_stack::optim`].
+    /// (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u]`); the three per-head
+    /// *scalar* channels stay on AdamW. See [`burn_stack::optim`].
+    ///
+    /// Each micro-step gets its **own** segment rather than sharing one `u`-wide
+    /// slab: they are `u` independent `d_model → width` maps, and Muon should
+    /// orthogonalise each on its own. They share a name, so
+    /// [`MuonPlan::without_segment`](burn_stack::optim::MuonPlan::without_segment)
+    /// still opts all of a stream's micro-steps out at once.
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
         use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
+        let rot = self.num_rotation_channels();
+        // One copy of `seg` per micro-step.
+        let per_micro = |seg: Seg| std::iter::repeat_n(seg, self.micro_steps);
+        let segments = std::iter::once(Seg::muon("z", d_inner))
+            .chain(per_micro(Seg::muon("x", d_inner)))
+            .chain(per_micro(Seg::muon("b", bc)))
+            .chain(std::iter::once(Seg::muon("c", bc)))
+            .chain(per_micro(Seg::adamw("dt", nheads)))
+            .chain(per_micro(Seg::adamw("a", nheads)))
+            .chain(per_micro(Seg::adamw("lambda", nheads)))
+            // `Real1D` has no rotation columns, and a zero-width segment is
+            // not a thing (see `num_rotation_channels`).
+            .chain(
+                (rot > 0)
+                    .then(|| per_micro(Seg::muon("rotation", rot)))
+                    .into_iter()
+                    .flatten(),
+            )
+            .collect();
         vec![
-            ProjSpec::block(
-                "in_proj.weight",
-                vec![
-                    Seg::muon("z", d_inner),
-                    Seg::muon("x", d_inner),
-                    Seg::muon("b", bc),
-                    Seg::muon("c", bc),
-                    Seg::adamw("dt", nheads),
-                    Seg::adamw("a", nheads),
-                    Seg::adamw("lambda", nheads),
-                ]
-                .into_iter()
-                // `Real1D` has no rotation columns, and a zero-width segment is
-                // not a thing (see `num_rotation_channels`).
-                .chain((self.num_rotation_channels() > 0).then(|| {
-                    Seg::muon("rotation", self.num_rotation_channels())
-                }))
-                .collect(),
-            ),
+            ProjSpec::block("in_proj.weight", segments),
             ProjSpec::block_whole("out_proj.weight", self.d_model),
         ]
     }
@@ -711,6 +786,7 @@ impl Mamba3Config {
         assert_eq!(nheads % ngroups, 0, "nheads must be divisible by ngroups");
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
+        assert!(self.micro_steps >= 1, "micro_steps must be at least 1");
         assert!(
             [0.5, 1.0].contains(&self.rope_fraction),
             "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
@@ -839,6 +915,7 @@ impl Mamba3Config {
             rope_dim: self.rope_dim(),
             num_rope_angles,
             mimo_rank,
+            micro_steps: self.micro_steps,
             rotation: self.rotation,
             rotation_range: self.rotation_range,
             num_rotation_channels: self.num_rotation_channels(),

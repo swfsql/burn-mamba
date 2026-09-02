@@ -93,6 +93,8 @@ src/
 │  │                 channels, no cache accumulator, odd state_rank ok (scalar 1).
 │  │                 Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors stacked
 │  │                 on one block axis ⇒ one scan)
+│  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
+│  │                 folded into the sequence axis (no new kernel); u=1 is stock
 │  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 │  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
 └─ unified/          the runtime-selectable API + where the families plug in
@@ -200,12 +202,14 @@ notation tables; the essentials:
   (`Ā=exp(Δ·A)`, `B̄=Δ·B`) → zero-pad to a `chunk_len` multiple (exact) → GQA-expand
   B/C → SSD path → gated RMSNorm(z) → out-proj. `step()` is the recurrence
   `hₜ = Āₜhₜ₋₁ + B̄ₜxₜᵀ`, `yₜ = Cₜᵀhₜ + Dxₜ`.
-- **Mamba-3** — Mamba-2 plus three independent additions: **trapezoidal**
+- **Mamba-3** — Mamba-2 plus four independent additions: **trapezoidal**
   discretisation (3-term `h = αh + βB₋₁x₋₁ + γBₜxₜ`, data-dependent `A`/`λ`; `λ≡1`
   collapses to Mamba-2), a **complex transition** (`A+iθ`) realised as
-  **data-dependent RoPE** on B/C, and **MIMO** (`mimo_rank>1`).
-  B/C use **QK-Norm before** the SSD (not a post gated norm); no short conv. The
-  in-projection splits `[z|x|B_raw|C_raw|dd_dt|dd_A|λ_raw|θ]`.
+  **data-dependent RoPE** on B/C, **MIMO** (`mimo_rank>1`), and **MambaProduct**
+  (`micro_steps=u>1`, below). B/C use **QK-Norm before** the SSD (not a post gated
+  norm); no short conv. The in-projection splits
+  `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|θ·u]` — only the per-micro-step
+  segments widen.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
@@ -289,6 +293,34 @@ adjoint `SO(3)` (`p=q`), where `±q` act identically — the difference between 
 group and tracking its double cover. `SO(4)` is the ceiling for `k=4`; `k=8` would break
 the scan (octonions are non-associative).
 
+### Mamba-3: MambaProduct (`micro_steps`)
+
+DeltaProduct's dial, ported (`mamba3/product/`): `u = micro_steps` full Mamba-3 steps
+per token, each with its own `x`, `B`, `Δ`, `A`, `λ` and rotation, so a *token*'s
+transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a sum of `u` outer
+products staggered along it. `u=1` is stock, byte for byte.
+
+Evaluated by folding the micro-steps into the **sequence axis** — the `u`-wide
+in-projection segments become `u` consecutive positions and the existing pipeline
+(trapezoid, rotation scan, chunked SSD, padding, caches) runs at length `sequence·u`.
+No kernel, no cache change: the state is one matrix at every `u`. The read `C` (broadcast
+so its last copy carries the right cumulative rotation), the gate `z`, the `D` skip and
+the output are per token. Cost is `u`× the recurrence plus `(u−1)·(d_inner+bc+3·nheads+
+rot)` in-proj columns.
+
+What `u` buys is decided by the `RotationKind`, and the split is sharp. `Real1D`: the
+factors are scalars and commute, so it widens only the write — the *sequential* reading of
+the cell `mimo_rank` occupies *jointly*, which is also why the dial does not exist on
+Mamba-2. `Complex2D`: `u`× the per-token angle reach with a live gradient at every factor,
+lifting exactly the `tanh`-asymptote bound `rotation_range` documents. `Quaternion4D`/
+`Rotor4D`: a non-commuting product no single bounded step can express — DeltaProduct's own
+argument, with the group given directly rather than factored into reflections.
+
+`step_infinite` generalises to a sum of `u` terms but **exists only for the abelian
+kinds** at `u>1`: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` depends on `n` alone
+iff `Qⱼ` commutes with `P`, so the quaternion kinds are almost-periodic, not convergent.
+It asserts rather than approximating.
+
 ### Virtual layers, bidirectional, class tokens, multi-gate
 
 All four are `burn-stack` features and documented in `../burn-stack/CLAUDE.md`.
@@ -326,6 +358,13 @@ reimplementing them.
   one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.
+- **MambaProduct is a sequence fold, not a kernel** — `u` micro-steps per token are `u`
+  consecutive positions of the existing recurrence, so only the per-micro-step in-proj
+  segments widen and the state/caches/SSD paths are untouched. Unlike DeltaProduct every
+  micro-step carries its own decay: Mamba has no forget gate separate from its step size
+  (`α=exp(ΔA)`, and `Δ` also weights the write and paces the rotation), and pinning
+  `α ≡ 1` on the interior steps would silence the rotation with it. A scalar decay
+  composes, so the uniform placement costs nothing.
 - **Muon sees split projections, the model does not** — the machinery is
   `burn_stack::optim`; what this crate owns is the **allowlist**, one
   `muon_projections()` per family config, listing the same column widths the

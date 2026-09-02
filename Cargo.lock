@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.40.0"
+version = "0.41.0"
 dependencies = [
  "burn",
  "burn-cubecl",
