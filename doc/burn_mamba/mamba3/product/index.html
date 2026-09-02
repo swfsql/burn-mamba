@@ -1,0 +1,106 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="MambaProduct — `u` micro-steps per token"><title>burn_mamba::mamba3::product - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (5db7f4be8 2026-09-01)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module product</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.41.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module product</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#mambaproduct--u-micro-steps-per-token" title="MambaProduct — `u` micro-steps per token">MambaProduct — <code>u</code> micro-steps per token</a><ul><li><a href="#what-deltaproduct-does-and-what-carries-over" title="What DeltaProduct does, and what carries over">What DeltaProduct does, and what carries over</a></li><li><a href="#how-it-is-evaluated" title="How it is evaluated">How it is evaluated</a></li><li><a href="#caches-and-what-does-not-change" title="Caches, and what does not change">Caches, and what does not change</a></li><li><a href="#the-one-thing-u--1-takes-away" title="The one thing `u &#62; 1` takes away">The one thing <code>u &gt; 1</code> takes away</a></li><li><a href="#notation" title="Notation">Notation</a></li></ul></li></ul><h3><a href="#functions">Module Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>product</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/product/mod.rs.html#1-236">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="mambaproduct--u-micro-steps-per-token"><a class="doc-anchor" href="#mambaproduct--u-micro-steps-per-token">§</a>MambaProduct — <code>u</code> micro-steps per token</h2>
+<p><em>DeltaProduct: Improving State-Tracking in Linear RNNs via Householder
+Products</em> (Siems, Carstensen, Zela, Hutter, Pontil, Grazzi; 2025), carried
+over to the Mamba-3 recurrence. Selected by
+<a href="../mamba3/struct.Mamba3Config.html#structfield.micro_steps" title="field burn_mamba::mamba3::mamba3::Mamba3Config::micro_steps"><code>Mamba3Config::micro_steps</code></a>
+(<code>u</code>); <code>u = 1</code> is stock Mamba-3, byte for byte.</p>
+<h3 id="what-deltaproduct-does-and-what-carries-over"><a class="doc-anchor" href="#what-deltaproduct-does-and-what-carries-over">§</a>What DeltaProduct does, and what carries over</h3>
+<p>DeltaNet’s transition is one generalised Householder <code>I − βkkᵀ</code>, so one step
+moves the state along one direction. DeltaProduct takes <code>u</code> delta-rule
+micro-steps per token, making the transition a <strong>product</strong>
+<code>∏ⱼ (I − βⱼkⱼkⱼᵀ)</code>, which by Cartan–Dieudonné reaches every element of the
+orthogonal group of a <code>u</code>-dimensional subspace — a direct dial on how much
+group structure one transition can track, at <code>u</code>× the recurrence work and no
+extra state.</p>
+<p>Mamba-3’s transition is <code>αₜ Rₜ</code> (§<em>Complex-Valued SSMs</em>): a scalar decay
+times a rotation. Running <code>u</code> micro-steps per token makes the per-token
+transition</p>
+<div class="example-wrap"><pre class="language-text"><code>  Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁</code></pre></div>
+<p>and the write a sum of <code>u</code> outer products, each landing at its own point of
+that rotation product. What <code>u</code> buys therefore depends entirely on the
+<a href="../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind"><code>RotationKind</code></a>, and the answer is
+sharp:</p>
+<div class="table"><table><thead><tr><th>kind</th><th>the product <code>Rₜ,ᵤ⋯Rₜ,₁</code></th><th>what <code>u &gt; 1</code> buys</th></tr></thead><tbody>
+<tr><td><a href="../rotation/enum.RotationKind.html#variant.Real1D" title="variant burn_mamba::mamba3::rotation::RotationKind::Real1D"><code>Real1D</code></a></td><td><code>I</code></td><td>the write only: <code>u</code> staggered rank-1 writes per token</td></tr>
+<tr><td><a href="../rotation/enum.RotationKind.html#variant.Complex2D" title="variant burn_mamba::mamba3::rotation::RotationKind::Complex2D"><code>Complex2D</code></a></td><td><code>R(Σⱼ θⱼ)</code>, abelian</td><td><code>u</code>× the per-token <strong>angle reach</strong>, plus the staggered write</td></tr>
+<tr><td><a href="../rotation/enum.RotationKind.html#variant.Quaternion4D" title="variant burn_mamba::mamba3::rotation::RotationKind::Quaternion4D"><code>Quaternion4D</code></a> / <a href="../rotation/enum.RotationKind.html#variant.Rotor4D" title="variant burn_mamba::mamba3::rotation::RotationKind::Rotor4D"><code>Rotor4D</code></a></td><td>a genuinely non-commuting product</td><td>a per-token transition <strong>no single step can express</strong></td></tr>
+</tbody></table>
+</div>
+<p>Three consequences worth stating outright, because they decide when the dial
+is worth turning:</p>
+<ul>
+<li><strong>On a real transition it is not a new transition, only a wider write.</strong>
+With <a href="../rotation/enum.RotationKind.html#variant.Real1D" title="variant burn_mamba::mamba3::rotation::RotationKind::Real1D"><code>Real1D</code></a> every factor is a scalar, scalars commute, and the <code>u</code>
+micro-writes collapse into one rank-<code>u</code> update with decay-staggered
+weights. That is the <em>sequential</em> reading of the cell
+<a href="../mamba3/struct.Mamba3Config.html#structfield.mimo_rank" title="field burn_mamba::mamba3::mamba3::Mamba3Config::mimo_rank"><code>mimo_rank</code></a> occupies
+<em>jointly</em> — an epoch of <code>u</code> samples versus a minibatch of <code>M</code> — and it is
+why this dial lives on Mamba-3 and not on Mamba-2, whose transition is
+scalar by construction and for which <code>u</code> would buy nothing at all.</li>
+<li><strong>On the abelian rotation it lifts a bound the block otherwise cannot
+cross.</strong> One step turns by at most
+<a href="../mamba3/struct.Mamba3Config.html#structfield.rotation_range" title="field burn_mamba::mamba3::mamba3::Mamba3Config::rotation_range"><code>rotation_range</code></a><code>·π·Δ</code>,
+and a rotation <em>at</em> that bound sits on <code>tanh</code>’s asymptote where the f32
+gradient is exactly zero — so the half-turn state-tracking wants is
+unreachable by descent at <code>rotation_range = 1</code>. <code>u</code> micro-rotations, each
+comfortably inside the bound, compose to <code>u</code>× the reach with live
+gradients at every factor.</li>
+<li><strong>On the non-abelian rotations it is DeltaProduct’s own argument,
+verbatim.</strong> The factors do not commute, so the product is not any single
+bounded step; <code>u</code> is the number of generators the token may compose.</li>
+</ul>
+<h3 id="how-it-is-evaluated"><a class="doc-anchor" href="#how-it-is-evaluated">§</a>How it is evaluated</h3>
+<p>Not with a new kernel — the micro-steps are folded into the <strong>sequence</strong>.
+The in-projection widens exactly the per-micro-step segments,</p>
+<div class="example-wrap"><pre class="language-text"><code>  [ z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u ]</code></pre></div>
+<p>and <a href="fn.unfold_micro_bs.html" title="fn burn_mamba::mamba3::product::unfold_micro_bs"><code>unfold_micro_bs</code></a> reinterprets each <code>u</code>-wide segment as <code>u</code> consecutive
+sequence positions, so the SSD core, the trapezoid, the rotation scan, the
+chunking and the caches all run unchanged on a sequence of length
+<code>sequence · u</code>. Two placements make that exactly the recurrence above:</p>
+<ul>
+<li><strong>The read <code>C</code> sits on the last micro-step.</strong> It is
+<a href="fn.repeat_micro_bs.html" title="fn burn_mamba::mamba3::product::repeat_micro_bs"><code>repeat_micro_bs</code></a>-broadcast across the group so the last position sees
+the correct cumulative rotation; the other positions’ outputs are sliced
+away by <a href="fn.last_micro5.html" title="fn burn_mamba::mamba3::product::last_micro5"><code>last_micro5</code></a>, so what they hold never matters.</li>
+<li><strong><code>z</code>, the <code>D</code> skip and the output gate are per token</strong>, the skip taking
+the last micro-step’s <code>x</code> — the value the readout is contemporaneous with.</li>
+</ul>
+<p>Everything else is per micro-step, including the decay. Mamba has no forget
+gate separate from its step size — <code>α = exp(ΔA)</code> and <code>Δ</code> also weights the
+write and paces the rotation — so DeltaProduct’s “forget gate on micro-step
+0” has no faithful analogue here, and pinning <code>α ≡ 1</code> on the interior
+micro-steps would silence the rotation with it. A scalar decay composes
+either way (<code>∏ⱼ αₜ,ⱼ</code> is one decay per token), so the uniform placement costs
+nothing and keeps every micro-step a plain Mamba-3 step.</p>
+<h3 id="caches-and-what-does-not-change"><a class="doc-anchor" href="#caches-and-what-does-not-change">§</a>Caches, and what does <em>not</em> change</h3>
+<p>Nothing. The state is one <code>[batch, nheads, per_head_dim, state_rank]</code> matrix
+at every <code>u</code>: like DeltaProduct, this buys transition expressiveness, not
+memory. The trapezoid’s previous-token taps (<code>k_state</code>, <code>v_state</code>) and the
+rotation accumulator hold the <strong>last micro-step</strong> of the last token, which is
+precisely the position the next call’s first micro-step follows — so a
+chunked prefill splits at token boundaries exactly as it did before.</p>
+<p>One thing genuinely does move: the trapezoid’s two taps now straddle
+<em>micro-steps</em> rather than tokens, i.e. the 2-tap FIR filter on the state
+input runs at the finer rate. That is what “the recurrence is the folded
+sequence” means, and it is what keeps <code>forward</code> and <code>step</code> in exact
+agreement.</p>
+<h3 id="the-one-thing-u--1-takes-away"><a class="doc-anchor" href="#the-one-thing-u--1-takes-away">§</a>The one thing <code>u &gt; 1</code> takes away</h3>
+<p><a href="../mamba3/struct.Mamba3.html#method.step_infinite" title="method burn_mamba::mamba3::mamba3::Mamba3::step_infinite"><code>Mamba3::step_infinite</code></a> —
+the stationary output under a constant token — <strong>exists only for the abelian
+kinds</strong> once
+<code>u &gt; 1</code>. The readout at token <code>t</code> sees a write from token <code>t − n</code> through the
+relative rotation <code>P⁻ᵗ Qⱼ Pᵗ⁻ⁿ⁻¹</code>, where <code>P = Rᵤ⋯R₁</code> is the per-token product
+and <code>Qⱼ = Rⱼ⋯R₁</code> the partial one. That collapses to a function of <code>n</code> alone
+iff <code>Qⱼ</code> commutes with <code>P</code>. When it does not — <a href="../rotation/enum.RotationKind.html#variant.Quaternion4D" title="variant burn_mamba::mamba3::rotation::RotationKind::Quaternion4D"><code>Quaternion4D</code></a>,
+<a href="../rotation/enum.RotationKind.html#variant.Rotor4D" title="variant burn_mamba::mamba3::rotation::RotationKind::Rotor4D"><code>Rotor4D</code></a> — the conjugation <code>P⁻ᵗQⱼPᵗ</code> keeps turning with <code>t</code> and the output
+is almost-periodic rather than convergent: there is no limit to return, which
+is a fact about the recurrence and not a gap in the implementation.</p>
+<h3 id="notation"><a class="doc-anchor" href="#notation">§</a>Notation</h3>
+<p><code>u</code> is <code>micro_steps</code>. In the folded region of <code>forward</code> the shape letter <code>s</code>
+counts <strong>micro-steps</strong>, not tokens; a name still at token resolution says so
+(<code>tokens</code>). See the <a href="../mamba3/index.html" title="mod burn_mamba::mamba3::mamba3"><code>mamba3</code></a> module header for the
+rest of the dimension keys.</p>
+</div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.last_micro4.html" title="fn burn_mamba::mamba3::product::last_micro4">last_<wbr>micro4</a></dt><dd><a href="fn.last_micro5.html" title="fn burn_mamba::mamba3::product::last_micro5"><code>last_micro5</code></a> one rank down — the value stream feeding the <code>D</code> skip.</dd><dt><a class="fn" href="fn.last_micro5.html" title="fn burn_mamba::mamba3::product::last_micro5">last_<wbr>micro5</a></dt><dd>Keep each token’s <strong>last</strong> micro-step — the position the readout happens at —
+collapsing the folded sequence back to token resolution.</dd><dt><a class="fn" href="fn.repeat_micro_bs.html" title="fn burn_mamba::mamba3::product::repeat_micro_bs">repeat_<wbr>micro_<wbr>bs</a></dt><dd>Broadcast a <strong>per-token</strong> projection across the token’s micro-steps, so it
+can ride the folded sequence alongside the per-micro-step ones.</dd><dt><a class="fn" href="fn.unfold_micro_b.html" title="fn burn_mamba::mamba3::product::unfold_micro_b">unfold_<wbr>micro_<wbr>b</a></dt><dd><a href="fn.unfold_micro_bs.html" title="fn burn_mamba::mamba3::product::unfold_micro_bs"><code>unfold_micro_bs</code></a> for a single token: split the micro-steps onto an axis of
+their own.</dd><dt><a class="fn" href="fn.unfold_micro_bs.html" title="fn burn_mamba::mamba3::product::unfold_micro_bs">unfold_<wbr>micro_<wbr>bs</a></dt><dd>Fold a <code>u</code>-wide in-projection segment into the sequence axis.</dd></dl></section></div></main></body></html>
