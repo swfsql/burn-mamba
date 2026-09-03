@@ -46,8 +46,8 @@ is worth turning:</p>
 <ul>
 <li><strong>On a real transition it is not a new transition, only a wider write.</strong>
 With <a href="../rotation/enum.RotationKind.html#variant.Real1D" title="variant burn_mamba::mamba3::rotation::RotationKind::Real1D"><code>Real1D</code></a> the step size is real too, so every factor is a <em>real</em>
-scalar, scalars commute, and the <code>u</code>
-micro-writes collapse into one rank-<code>u</code> update with decay-staggered
+scalar, scalars commute, and the <code>u</code> micro-writes collapse into one
+rank-<code>u</code> update with decay-staggered
 weights. That is the <em>sequential</em> reading of the cell
 <a href="../mamba3/struct.Mamba3Config.html#structfield.mimo_rank" title="field burn_mamba::mamba3::mamba3::Mamba3Config::mimo_rank"><code>mimo_rank</code></a> occupies
 <em>jointly</em> — an epoch of <code>u</code> samples versus a minibatch of <code>M</code> — and it is
@@ -64,8 +64,8 @@ gradients at every factor. Note what pays for it: the token gets <code>u</code>
 <em>full-size</em> steps, i.e. its effective interval is inflated <code>u</code>×, not
 subdivided. The consistent alternative (<code>Δⱼ = Δ/u</code>, same per-token
 transition, buying only the staggered writes and the ordering below) stays
-inside the model’s reach — <code>dt_limit</code> has no lower floor — so this is a
-superset of it, not a substitute.</li>
+inside the model’s reach — <code>dt_limit</code> has no lower floor by default — so
+this is a superset of it, not a substitute.</li>
 <li><strong>On the non-abelian rotations it is DeltaProduct’s argument reached by
 the other dial.</strong> The factors do not commute, so the product is not any
 single bounded step; <code>u</code> is the number of generators the token may

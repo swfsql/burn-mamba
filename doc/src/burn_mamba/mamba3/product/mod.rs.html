@@ -61,8 +61,8 @@
 <a href=#61 id=61 data-nosnippet>61</a>//!
 <a href=#62 id=62 data-nosnippet>62</a>//! - **On a real transition it is not a new transition, only a wider write.**
 <a href=#63 id=63 data-nosnippet>63</a>//!   With [`Real1D`] the step size is real too, so every factor is a *real*
-<a href=#64 id=64 data-nosnippet>64</a>//!   scalar, scalars commute, and the `u`
-<a href=#65 id=65 data-nosnippet>65</a>//!   micro-writes collapse into one rank-`u` update with decay-staggered
+<a href=#64 id=64 data-nosnippet>64</a>//!   scalar, scalars commute, and the `u` micro-writes collapse into one
+<a href=#65 id=65 data-nosnippet>65</a>//!   rank-`u` update with decay-staggered
 <a href=#66 id=66 data-nosnippet>66</a>//!   weights. That is the *sequential* reading of the cell
 <a href=#67 id=67 data-nosnippet>67</a>//!   [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank) occupies
 <a href=#68 id=68 data-nosnippet>68</a>//!   *jointly* — an epoch of `u` samples versus a minibatch of `M` — and it is
@@ -79,8 +79,8 @@
 <a href=#79 id=79 data-nosnippet>79</a>//!   *full-size* steps, i.e. its effective interval is inflated `u`×, not
 <a href=#80 id=80 data-nosnippet>80</a>//!   subdivided. The consistent alternative (`Δⱼ = Δ/u`, same per-token
 <a href=#81 id=81 data-nosnippet>81</a>//!   transition, buying only the staggered writes and the ordering below) stays
-<a href=#82 id=82 data-nosnippet>82</a>//!   inside the model's reach — `dt_limit` has no lower floor — so this is a
-<a href=#83 id=83 data-nosnippet>83</a>//!   superset of it, not a substitute.
+<a href=#82 id=82 data-nosnippet>82</a>//!   inside the model's reach — `dt_limit` has no lower floor by default — so
+<a href=#83 id=83 data-nosnippet>83</a>//!   this is a superset of it, not a substitute.
 <a href=#84 id=84 data-nosnippet>84</a>//! - **On the non-abelian rotations it is DeltaProduct's argument reached by
 <a href=#85 id=85 data-nosnippet>85</a>//!   the other dial.** The factors do not commute, so the product is not any
 <a href=#86 id=86 data-nosnippet>86</a>//!   single bounded step; `u` is the number of generators the token may
