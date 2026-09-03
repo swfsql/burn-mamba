@@ -156,7 +156,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ### `mamba3/product/` (`mod.rs`)
 
-**MambaProduct** — DeltaProduct's dial: `u = Mamba3Config::micro_steps` full Mamba-3 steps
+**MambaProduct** — DeltaProduct's *dial*, not its mechanism (`info/rotation-as-optimization.md`):
+`u = Mamba3Config::micro_steps` full Mamba-3 steps
 per token, so a token's transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a
 sum of `u` outer products staggered along it. Evaluated by folding the micro-steps into the
 **sequence axis** — no new kernel, no cache change (`u` buys transition expressiveness, not
@@ -165,12 +166,17 @@ memory) — with the read `C`, the gate `z`, the `D` skip and the output per tok
 (a pure reshape: the projection already lays micro-steps out contiguously),
 `repeat_micro_bs` broadcasts the per-token `C` across the group so its *last* copy carries
 the right cumulative rotation, `last_micro5`/`last_micro4` collapse `y`/`x` back.
-Why it is a Mamba-3 dial and not a Mamba-2 one: a scalar transition commutes, so there `u`
-micro-writes provably collapse into one decay-weighted rank-`u` write. The same is true
+Why it is a Mamba-3 dial and not a Mamba-2 one: the curvature is isotropic, so every
+per-micro-step factor is a scalar and scalars commute — `u` micro-writes provably collapse
+into one decay-weighted rank-`u` write, and the rotation must come from the *step size*
+(`RotationKind`) rather than from the product. The same is true
 here under `Real1D` — the sequential reading of the cell `mimo_rank` occupies jointly —
 while `Complex2D` gains `u`× the per-token angle reach with a live gradient at every factor
 (a single step at the `rotation_range` bound sits on `tanh`'s asymptote), and the
 non-abelian kinds gain a product no single bounded step can express.
+What `u` buys is bought by inflating the token's effective interval `u`×, not subdividing
+it; the consistent alternative (`Δⱼ = Δ/u`) is inside the model's reach (`dt_limit` has no
+lower floor), so this is a superset of it.
 Non-obvious: unlike DeltaProduct there is no forget gate to keep at token rate — Mamba
 fuses decay, write weight and rotation rate into one `Δ` — so every micro-step decays; a
 scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silence the
@@ -321,3 +327,17 @@ fusion needs its own — and writes `bench.md`.
 profiling logger at `basic` totals the launches between syncs, and a count is
 exact, so one `--test` iteration suffices — and writes `kernels.md`. All carry
 their own rationale.
+
+## Notes (`info/`) and their checks (`scripts/`)
+
+- **`info/rotation-as-optimization.md`** — the reference for the `micro_steps`/DeltaProduct
+  relationship and for the optimization reading of the complex transition. Derives: a real
+  step on any real loss cannot rotate; the three views of Mamba-3's rotation that can
+  (complex step size / descent-ascent on a harmonic potential / momentum); DeltaProduct's
+  fourth route (composing non-commuting rank-one curvatures) and why isotropy forbids it
+  here; the (curvature rank × step algebra) 2×2 the `RotationKind` table follows from.
+  Cite it rather than restating it.
+- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 45 of that
+  document's numbered claims, section numbers matching. Encodes the recurrence from the
+  equations and never imports the crate, so it is independent of the implementation
+  (which the Rust suites cover). Runs standalone; non-zero exit on failure.

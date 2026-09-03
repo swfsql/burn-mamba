@@ -115,6 +115,8 @@ class tokens/schedules/norms/losses/Muon) are `burn-stack`; see its File Map.
 benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
 bench.sh             runs them per backend, writes bench.md
 kernels.sh           counts kernel launches per case, writes kernels.md
+info/                standalone reference notes (committed); see files.md
+scripts/             their numerical checks (python3 + numpy, standalone)
 ```
 
 `files.md` is the per-file signature reference for **this** crate (what each
@@ -295,10 +297,19 @@ the scan (octonions are non-associative).
 
 ### Mamba-3: MambaProduct (`micro_steps`)
 
-DeltaProduct's dial, ported (`mamba3/product/`): `u = micro_steps` full Mamba-3 steps
-per token, each with its own `x`, `B`, `Δ`, `A`, `λ` and rotation, so a *token*'s
-transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a sum of `u` outer
-products staggered along it. `u=1` is stock, byte for byte.
+DeltaProduct's **dial**, not its mechanism (`mamba3/product/`): `u = micro_steps` full
+Mamba-3 steps per token, each with its own `x`, `B`, `Δ`, `A`, `λ` and rotation, so a
+*token*'s transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a sum of `u`
+outer products staggered along it. `u=1` is stock, byte for byte.
+
+Both families are `Mₜ = ∏ⱼ (I − ηⱼ∇²Lⱼ)`; they turn different dials in it. DeltaProduct
+turns the **curvature** (rank-one `kⱼkⱼᵀ`, so factors with different `kⱼ` don't commute);
+Mamba's curvature is isotropic, so every factor is a scalar and no product of them can
+rotate — the rotation must come from the **step size** leaving `ℝ`, which is what
+`RotationKind` is. Hence DeltaProduct's mechanism has no instance here, and the
+`RotationKind` split below follows from the algebra of `η` alone. Derived, with the
+2×2 design space and the two other readings of the same recurrence (min–max on a harmonic
+potential; momentum), in `info/rotation-as-optimization.md` — cite it, don't restate it.
 
 Evaluated by folding the micro-steps into the **sequence axis** — the `u`-wide
 in-projection segments become `u` consecutive positions and the existing pipeline
@@ -364,7 +375,9 @@ reimplementing them.
   micro-step carries its own decay: Mamba has no forget gate separate from its step size
   (`α=exp(ΔA)`, and `Δ` also weights the write and paces the rotation), and pinning
   `α ≡ 1` on the interior steps would silence the rotation with it. A scalar decay
-  composes, so the uniform placement costs nothing.
+  composes, so the uniform placement costs nothing. The `u` steps are full-size, so a
+  token's effective interval is inflated `u`×, not subdivided — that is what buys the
+  reach; the consistent alternative (`Δⱼ=Δ/u`) is reachable, so this is a superset.
 - **Muon sees split projections, the model does not** — the machinery is
   `burn_stack::optim`; what this crate owns is the **allowlist**, one
   `muon_projections()` per family config, listing the same column widths the

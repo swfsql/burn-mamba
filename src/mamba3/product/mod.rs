@@ -1,20 +1,36 @@
 //! # MambaProduct — `u` micro-steps per token
 //!
-//! *DeltaProduct: Improving State-Tracking in Linear RNNs via Householder
-//! Products* (Siems, Carstensen, Zela, Hutter, Pontil, Grazzi; 2025), carried
-//! over to the Mamba-3 recurrence. Selected by
+//! `u` full Mamba-3 recurrence steps per token, each with its own projected
+//! `x`, `B`, `Δ`, `A`, `λ` and rotation, read on the last. Selected by
 //! [`Mamba3Config::micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)
 //! (`u`); `u = 1` is stock Mamba-3, byte for byte.
 //!
-//! ## What DeltaProduct does, and what carries over
+//! ## The dial, and whose it is
 //!
-//! DeltaNet's transition is one generalised Householder `I − βkkᵀ`, so one step
-//! moves the state along one direction. DeltaProduct takes `u` delta-rule
-//! micro-steps per token, making the transition a **product**
-//! `∏ⱼ (I − βⱼkⱼkⱼᵀ)`, which by Cartan–Dieudonné reaches every element of the
-//! orthogonal group of a `u`-dimensional subspace — a direct dial on how much
-//! group structure one transition can track, at `u`× the recurrence work and no
-//! extra state.
+//! The *dial* is DeltaProduct's (*Improving State-Tracking in Linear RNNs via
+//! Householder Products*, Siems, Carstensen, Zela, Hutter, Pontil, Grazzi;
+//! 2025): `u` first-order steps per token, buying transition expressiveness at
+//! `u`× the recurrence work and **no** extra state. The *mechanism* is not, and
+//! the difference is worth stating once, because it decides everything below.
+//!
+//! Write both as `u` steps of an online learner, `Mₜ = ∏ⱼ (I − ηⱼ ∇²Lⱼ)`. The
+//! two families turn different dials in it:
+//!
+//! - **DeltaProduct turns the curvature.** Its `∇²Lⱼ = kⱼkⱼᵀ` is rank-one and
+//!   direction-dependent, so factors with different `kⱼ` do not commute and the
+//!   product leaves the real axis (Cartan–Dieudonné; the paper's own condition
+//!   is that *both* `βⱼ > 1`, i.e. both micro-steps overshoot).
+//! - **Mamba-3 turns the step size.** Its curvature is isotropic (`∇²L = ρI`,
+//!   the scalar transition), so every factor is a *scalar* — and scalars
+//!   commute. No number of micro-steps can rotate a Mamba transition; the
+//!   rotation has to come from `ηⱼ` leaving `ℝ`, which is exactly what
+//!   [`RotationKind`](crate::mamba3::rotation::RotationKind) is.
+//!
+//! So DeltaProduct's mechanism has no instance here (with isotropic curvature
+//! `u` micro-writes under a shared transition provably collapse into a rank-`u`
+//! write, which is [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank)),
+//! and this is the same construction reached by the other dial. `info/rotation-as-optimization.md`
+//! derives the above and everything in the table below.
 //!
 //! Mamba-3's transition is `αₜ Rₜ` (§*Complex-Valued SSMs*): a scalar decay
 //! times a rotation. Running `u` micro-steps per token makes the per-token
@@ -44,7 +60,8 @@
 //! is worth turning:
 //!
 //! - **On a real transition it is not a new transition, only a wider write.**
-//!   With [`Real1D`] every factor is a scalar, scalars commute, and the `u`
+//!   With [`Real1D`] the step size is real too, so every factor is a *real*
+//!   scalar, scalars commute, and the `u`
 //!   micro-writes collapse into one rank-`u` update with decay-staggered
 //!   weights. That is the *sequential* reading of the cell
 //!   [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank) occupies
@@ -58,10 +75,17 @@
 //!   gradient is exactly zero — so the half-turn state-tracking wants is
 //!   unreachable by descent at `rotation_range = 1`. `u` micro-rotations, each
 //!   comfortably inside the bound, compose to `u`× the reach with live
-//!   gradients at every factor.
-//! - **On the non-abelian rotations it is DeltaProduct's own argument,
-//!   verbatim.** The factors do not commute, so the product is not any single
-//!   bounded step; `u` is the number of generators the token may compose.
+//!   gradients at every factor. Note what pays for it: the token gets `u`
+//!   *full-size* steps, i.e. its effective interval is inflated `u`×, not
+//!   subdivided. The consistent alternative (`Δⱼ = Δ/u`, same per-token
+//!   transition, buying only the staggered writes and the ordering below) stays
+//!   inside the model's reach — `dt_limit` has no lower floor — so this is a
+//!   superset of it, not a substitute.
+//! - **On the non-abelian rotations it is DeltaProduct's argument reached by
+//!   the other dial.** The factors do not commute, so the product is not any
+//!   single bounded step; `u` is the number of generators the token may
+//!   compose, and the group is given directly rather than factored into
+//!   reflections.
 //!
 //! ## How it is evaluated
 //!

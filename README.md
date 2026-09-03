@@ -241,6 +241,11 @@ single configuration.
 - **[API docs][docsurl]** — the rendered `rustdoc`; every public item is
   documented, and the per-block module headers carry the full math and notation.
 - **[DeepWiki][deepwikiurl]** — an explorable overview of the codebase.
+- **[Rotation as Optimization](info/rotation-as-optimization.md)** — a standalone
+  note deriving what a Mamba-3 step optimizes, in what sense its complex
+  transition is a learning rate (or a saddle, or momentum), and what
+  `micro_steps` composes versus DeltaProduct. Checked by
+  [`scripts/rotation_as_optimization.py`](scripts/rotation_as_optimization.py).
 - Contributors: `CLAUDE.md` and `files.md` map the repository's structure,
   architecture, and conventions.
 

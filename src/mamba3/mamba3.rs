@@ -41,6 +41,11 @@
 //!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                — rotational state update
 //! ```
 //!
+//! The **exponential** discretisation is load-bearing here, not merely more
+//! accurate than forward Euler: `|exp(iΔϑ)| = 1` exactly, so the transition is
+//! orthogonal and a tracked rotation neither decays nor grows, where Euler's
+//! `|1 + iΔϑ| > 1` spirals outward (`info/rotation-as-optimization.md` §9.5).
+//!
 //! `αₜ` is a scalar (so it commutes with `ρₜ`) and each `ρₜ` is orthogonal, so
 //! the *cumulative* rotation telescopes out of the recurrence and can be absorbed
 //! into B/C instead — the **"RoPE trick"** (paper Prop. *Complex SSM,
@@ -108,10 +113,11 @@
 //!
 //! ## 5. MambaProduct (`micro_steps = u > 1`)
 //!
-//! A fourth, independent dial, ported from *DeltaProduct*: `u` recurrence
-//! micro-steps per token, each a full step of the above with its own projected
-//! `x`, `B`, `Δ`, `A`, `λ` and rotation. One *token*'s transition is then the
-//! **product**
+//! A fourth, independent dial (DeltaProduct's dial, not its mechanism — see
+//! [`crate::mamba3::product`] and `info/rotation-as-optimization.md`): `u`
+//! recurrence micro-steps per token, each a full step of the above with its own
+//! projected `x`, `B`, `Δ`, `A`, `λ` and rotation. One *token*'s transition is
+//! then the **product**
 //!
 //! ```text
 //!   Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁
