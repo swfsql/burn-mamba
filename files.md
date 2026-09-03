@@ -337,7 +337,7 @@ their own rationale.
   fourth route (composing non-commuting rank-one curvatures) and why isotropy forbids it
   here; the (curvature rank × step algebra) 2×2 the `RotationKind` table follows from.
   Cite it rather than restating it.
-- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 64 of that
+- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 66 of that
   document's numbered claims, section numbers matching. Encodes the recurrence from the
   equations and never imports the crate, so it is independent of the implementation
   (which the Rust suites cover). Runs standalone; non-zero exit on failure.

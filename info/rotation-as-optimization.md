@@ -9,7 +9,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/rotation_as_optimization.py`](../scripts/rotation_as_optimization.py)
-> (64 checks, section numbers match). The script depends only on `numpy` and on
+> (66 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.
 
@@ -523,9 +523,15 @@ the step is ordered, while the *erase* key follows the rotation:
 | rotate, then erase | `P_t*k_t` | `P_t*k_t` | **tied** — the existing WY/tied-key kernel applies verbatim |
 | erase, then rotate | `P_{t−1}*k_t` | `P_t*k_t` | **untied** — the generalized-DPLR shape, which that kernel does not compute |
 
-Verified. The erase factor stays a proper tied Householder in both cases, so the
-`‖·‖₂ ≤ 1` bound and the `u > 1` stability argument survive either way — what the
-wrong ordering costs is the kernel, not the guarantee. Since Mamba-3 has no erase,
+Verified, in both the left- and right-multiplication orientations — the rows above
+name the *temporal* order, and a product does not survive transposition unreversed,
+so "rotate first" is the leftmost matrix factor in one convention and the rightmost
+in the other. Reading one convention's equation in the other's order turns the tied
+model into the untied one, which is a live failure mode rather than a hypothetical.
+
+The erase factor stays a proper tied Householder in both cases, so the `‖·‖₂ ≤ 1`
+bound and the `u > 1` stability argument survive either way — what the wrong
+ordering costs is the kernel, not the guarantee. Since Mamba-3 has no erase,
 nothing here constrains this crate; it constrains anyone building the cell.
 
 It has a **precondition** that is easy to miss: a complex step rotates a rank-one
@@ -714,7 +720,7 @@ is independent of everything else in this note.
 python3 scripts/rotation_as_optimization.py
 ```
 
-`numpy` only; float64 throughout; 64 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 66 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence
 from §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites

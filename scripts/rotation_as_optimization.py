@@ -588,6 +588,58 @@ ok("erase-then-rotate: the erase key lags to P_{t-1} (untied, a different kernel
    close(_raw("rot_last"), _gauged(erase_lag=True), 1e-9)
    and not close(_raw("rot_last"), _gauged(erase_lag=False), 1e-9))
 
+# The same statement in the RIGHT-multiplication orientation the cross-model
+# reference note is written in (S_t = S_{t-1} M_t + u k^T, gauge S'_t = S_t T_t
+# with T_t = Rbar_t^-1). A product does not survive transposition unreversed, so
+# "rotate first" is the LEFTmost factor here and the RIGHTmost one there; both are
+# the tied ordering. Reading one convention's equation in the other's order is
+# what turns the correct model into the untied one.
+dr, dv, Tr = 6, 3, 6
+ang = RNG.normal(size=(Tr, dr // 2))
+
+
+def _rot(a):
+    M = np.eye(dr)
+    for p in range(dr // 2):
+        c, s = np.cos(a[p]), np.sin(a[p])
+        M[2 * p : 2 * p + 2, 2 * p : 2 * p + 2] = [[c, -s], [s, c]]
+    return M
+
+
+Rr = [_rot(a) for a in ang]
+kr = [v / np.linalg.norm(v) for v in RNG.normal(size=(Tr, dr))]
+br = RNG.uniform(0.2, 1.8, size=Tr)
+ar = RNG.uniform(0.5, 0.95, size=Tr)
+ur = RNG.normal(size=(Tr, dv))
+Rb, _acc = [], np.eye(dr)
+for R in Rr:
+    _acc = _acc @ R
+    Rb.append(_acc)
+
+
+def _raw_right(order):
+    S = np.zeros((dv, dr))
+    for t in range(Tr):
+        E = np.eye(dr) - br[t] * np.outer(kr[t], kr[t])
+        M = ar[t] * (Rr[t] @ E) if order == "rot_then_erase" else ar[t] * (E @ Rr[t])
+        S = S @ M + np.outer(ur[t], kr[t])
+    return S
+
+
+def _gauged_right(erase_lag):
+    S = np.zeros((dv, dr))
+    for t in range(Tr):
+        ei = t - 1 if erase_lag else t
+        ek = Rb[ei] @ kr[t] if ei >= 0 else kr[t]
+        S = S @ (ar[t] * (np.eye(dr) - br[t] * np.outer(ek, ek))) + np.outer(ur[t], Rb[t] @ kr[t])
+    return S @ Rb[Tr - 1]
+
+
+ok("right-multiplication: S.(alpha R).(I - b k k^T) is rotate-first, hence TIED",
+   close(_raw_right("rot_then_erase"), _gauged_right(erase_lag=False), 1e-9))
+ok("...and the reversed written order is the untied one, in that convention too",
+   close(_raw_right("erase_then_rot"), _gauged_right(erase_lag=True), 1e-9))
+
 
 # =============================================================================
 section("9. The trapezoid, and 10. the integrator")
