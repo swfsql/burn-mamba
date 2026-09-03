@@ -9,7 +9,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/rotation_as_optimization.py`](../scripts/rotation_as_optimization.py)
-> (61 checks, section numbers match). The script depends only on `numpy` and on
+> (64 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.
 
@@ -509,8 +509,24 @@ the product also leaves `exp(Σ generators)`.
 
 **(iii) The empty cell is real and is the interesting extrapolation.** Rank-one
 curvature with a complex step — a delta rule whose transition carries a
-data-dependent rotation. Because the rank-one erase conjugates through a
-rotational gauge exactly as the write does, it needs no new chunkwise algorithm.
+data-dependent rotation. The rank-one erase does conjugate through a rotational
+gauge, `P*(I − βkk^H)P = I − β(P*k)(P*k)^H`, which needs only that `P` is a
+linear isometry and therefore survives the non-abelian kinds unchanged.
+
+That is **not** enough to conclude "no new chunkwise algorithm", which an earlier
+version of this section claimed and which is true of only one of the two orderings.
+The recurrence is affine, and the gauge pins the *write* key to `P_t*k_t` however
+the step is ordered, while the *erase* key follows the rotation:
+
+| ordering within a step | erase key | write key | |
+|---|---|---|---|
+| rotate, then erase | `P_t*k_t` | `P_t*k_t` | **tied** — the existing WY/tied-key kernel applies verbatim |
+| erase, then rotate | `P_{t−1}*k_t` | `P_t*k_t` | **untied** — the generalized-DPLR shape, which that kernel does not compute |
+
+Verified. The erase factor stays a proper tied Householder in both cases, so the
+`‖·‖₂ ≤ 1` bound and the `u > 1` stability argument survive either way — what the
+wrong ordering costs is the kernel, not the guarantee. Since Mamba-3 has no erase,
+nothing here constrains this crate; it constrains anyone building the cell.
 
 It has a **precondition** that is easy to miss: a complex step rotates a rank-one
 curvature only if that curvature is `ℂ`-Hermitian, which forces the regression
@@ -698,7 +714,7 @@ is independent of everything else in this note.
 python3 scripts/rotation_as_optimization.py
 ```
 
-`numpy` only; float64 throughout; 61 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 64 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence
 from §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites

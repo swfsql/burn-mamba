@@ -545,6 +545,49 @@ blk = np.linalg.lstsq(basis2, Mr @ basis2, rcond=None)[0]
 ok("K^T J K = 0, so M is [[1-a, 0], [-b, 1]] on span{K, JK}: a shear, not a rotation",
    abs(Kr @ JK) < 1e-12 and close(blk, [[1 - a_s, 0.0], [-b_s, 1.0]], 1e-9))
 
+# "No new chunkwise algorithm" holds for ONE of the two orderings. The recurrence
+# is affine: the gauge pins the write key to P_t^H k_t however the step is
+# ordered, while the erase key follows the rotation. Note the rotation is
+# PER-PLANE (Mamba-3 projects one angle per plane), not a scalar phase -- with a
+# scalar phase the whole question disappears, and that is not the model.
+nq, Tq = 4, 5
+th = RNG.normal(size=(Tq, nq))
+Th = np.cumsum(th, axis=0)                      # cumulative per-plane angles
+ky = RNG.normal(size=(Tq, nq)) + 1j * RNG.normal(size=(Tq, nq))
+ky /= np.linalg.norm(ky, axis=1, keepdims=True)
+bet = np.array([1 - 0.6 * np.exp(1j * a) for a in RNG.uniform(-np.pi, np.pi, Tq)])
+wv = RNG.normal(size=Tq) + 1j * RNG.normal(size=Tq)
+
+ok("a per-plane rotation does NOT commute with a rank-one erase (a scalar one does)",
+   np.linalg.norm(np.diag(np.exp(1j * th[0])) @ (np.eye(nq) - bet[0] * np.outer(ky[0], ky[0].conj()))
+                  - (np.eye(nq) - bet[0] * np.outer(ky[0], ky[0].conj())) @ np.diag(np.exp(1j * th[0]))) > 1e-3)
+
+
+def _raw(order):
+    s = np.zeros(nq, complex)
+    for t in range(Tq):
+        E = np.eye(nq) - bet[t] * np.outer(ky[t], ky[t].conj())
+        R = np.diag(np.exp(1j * th[t]))
+        s = (E @ R @ s) if order == "rot_first" else (R @ E @ s)
+        s = s + ky[t] * wv[t]
+    return s
+
+
+def _gauged(erase_lag):
+    s = np.zeros(nq, complex)
+    for t in range(Tq):
+        ek = ky[t] * np.exp(-1j * (Th[t - 1] if (erase_lag and t) else (0 if erase_lag else Th[t])))
+        wk = ky[t] * np.exp(-1j * Th[t])
+        s = (np.eye(nq) - bet[t] * np.outer(ek, ek.conj())) @ s + wk * wv[t]
+    return np.exp(1j * Th[Tq - 1]) * s
+
+
+ok("rotate-then-erase: erase and write keys both land at P_t (tied keys)",
+   close(_raw("rot_first"), _gauged(erase_lag=False), 1e-9))
+ok("erase-then-rotate: the erase key lags to P_{t-1} (untied, a different kernel)",
+   close(_raw("rot_last"), _gauged(erase_lag=True), 1e-9)
+   and not close(_raw("rot_last"), _gauged(erase_lag=False), 1e-9))
+
 
 # =============================================================================
 section("9. The trapezoid, and 10. the integrator")
