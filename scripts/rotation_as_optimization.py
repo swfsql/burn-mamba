@@ -456,6 +456,28 @@ ok("...hence ||M||_2 = rho(M) exactly -- no transient growth, exact norm bound",
    abs(np.linalg.norm(step_c, 2) / max(abs(np.linalg.eigvals(step_c))) - 1) < 1e-12)
 ok("SO(4): the two-sided rotor is an isometry too, so the bound covers every kind",
    abs(np.linalg.norm(Tm, 2) - 1) < 1e-12)
+
+# Proposition 2': the same premise gives DESCENT for every kind, uniformly. The
+# two-sided map is not multiplication by a scalar, so Re(eta) > 0 has nothing to
+# attach to -- but sym(I - alpha T) >= (1 - alpha) I for ANY isometry T, because
+# every eigenvalue of the symmetric part of an orthogonal map is in [-1, 1].
+worst_margin, neg_trace, worst_neg = np.inf, 0, np.inf
+for _ in range(4000):
+    qa = rng_unit = RNG.normal(size=4)
+    qa = qa / np.linalg.norm(qa)
+    pa = RNG.normal(size=4)
+    pa = pa / np.linalg.norm(pa)
+    alpha_r = RNG.uniform(0.0, 1.0)
+    Tr = np.stack([qmul(qmul(qa, basis[i]), qconj(pa)) for i in range(4)], axis=1)
+    lam_min = np.min(np.linalg.eigvalsh(np.eye(4) - alpha_r * (Tr + Tr.T) / 2))
+    worst_margin = min(worst_margin, lam_min - (1 - alpha_r))
+    if qa[0] * pa[0] < 0:  # the draws whose normalised trace is negative
+        neg_trace += 1
+        worst_neg = min(worst_neg, lam_min)
+ok("Prop 2': sym(I - alpha T) >= (1 - alpha) I for the two-sided rotor",
+   worst_margin > -1e-9)
+ok(f"...including the {neg_trace} draws with Re(q)Re(p) < 0 (min eig {worst_neg:.4f} > 0) "
+   "-- the trace is an average, not the descent condition", neg_trace > 500 and worst_neg > 0)
 # A general (non-normal) alternative has no such bound, and the gap is unbounded
 # rather than merely large: conjugating a rotation by an ill-conditioned D keeps
 # the spectrum on the unit circle while the norm grows with cond(D).

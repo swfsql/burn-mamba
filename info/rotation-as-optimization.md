@@ -9,7 +9,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/rotation_as_optimization.py`](../scripts/rotation_as_optimization.py)
-> (59 checks, section numbers match). The script depends only on `numpy` and on
+> (61 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.
 
@@ -295,7 +295,9 @@ Mamba-3 it costs nothing:
 it for `α < 1`, and the tangent lines from the origin subtend `arcsin α`. ∎
 
 Verified over the whole closed disc. So **every admissible Mamba-3 parameter gives
-a genuine descent step**, with an exact accounting:
+a genuine descent step** — for the abelian kind here, and for all four by
+Proposition 2′ in §8, which needs only that the transition is `α ×` an isometry —
+with an exact accounting:
 
 $$\text{descent fraction} = \cos\psi = \frac{1-\alpha\cos\varphi}{|1-\alpha e^{i\varphi}|},
 \qquad \text{circulation fraction} = \sin\psi$$
@@ -550,9 +552,29 @@ crate's rotation code is unbranched:
 | `ℝ` | positive scalar | `η·I` | `η > 0` |
 | `ℂ` | complex scalar | `Re(η)·I` | `Re η > 0` |
 | `ℍ` | quaternion | `Re(η)·I` | `Re η > 0` |
-| two-sided `(q, p)` | pair | trace `= 4·Re(q)Re(p)` | — |
+| two-sided `(q, p)` | pair | not a multiple of `I`; trace `= 4·Re(q)Re(p)` | `α < 1` (below) |
 
 All verified; Proposition 2's bound `|arg| ≤ arcsin α` holds verbatim over `ℍ`.
+
+The two-sided row is the one that does not fit the pattern — `v ↦ qvp̄` is not
+multiplication by a scalar in any algebra, and its symmetric part is not a multiple
+of `I`, so `Re(η) > 0` has nothing to attach to. Its normalised trace is
+`Re(q)Re(p)`, which is negative about half the time, and it is tempting to read that
+as descent failing and needing a sign constraint. **It is not**: the trace is the
+*average* of `⟨Tv, v⟩` over directions, not the condition. The condition is an
+eigenvalue statement, and it is satisfied uniformly:
+
+> **Proposition 2′ (descent, all four kinds).** Let `M = αT` with `T` any isometry
+> and `α ∈ (0,1)`. Then `sym(I − M) = I − α·T_sym ≽ (1−α)I ≻ 0`.
+>
+> *Proof.* `‖T‖₂ = 1`, so `|⟨Tv, v⟩| ≤ ‖v‖²` and every eigenvalue of `T_sym` lies in
+> `[−1, 1]`; hence every eigenvalue of `I − αT_sym` is at least `1 − α`. ∎
+
+Verified, including on the draws where `Re(q)Re(p) < 0` (`λ_min > 0` in every one of
+20 000). So **descent is free for every `RotationKind`, with a uniform margin
+`1 − α`** — the conformality bullet above is what buys it, and the per-algebra
+`Re(η) > 0` rows are the sharper single-sided specialisation (`1 − α cos φ ≥ 1 − α`),
+not a separate condition.
 
 Two properties of *this* enlargement are load-bearing, and they are why the escape
 is "the step size joins a normed division algebra" rather than the strictly larger
@@ -676,7 +698,7 @@ is independent of everything else in this note.
 python3 scripts/rotation_as_optimization.py
 ```
 
-`numpy` only; float64 throughout; 59 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 61 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence
 from §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites
