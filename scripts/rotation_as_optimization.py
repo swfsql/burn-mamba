@@ -61,6 +61,27 @@ def loss(S, rho, w, x):
     return quad - lin
 
 
+def expm(M, terms=24):
+    """Matrix exponential by scaling and squaring (keeps this numpy-only)."""
+    s = max(0, int(np.ceil(np.log2(max(np.linalg.norm(M, np.inf), 1e-300)))) + 1)
+    Ms = M / 2.0**s
+    acc = term = np.eye(M.shape[0])
+    for i in range(1, terms):
+        term = term @ Ms / i
+        acc = acc + term
+    for _ in range(s):
+        acc = acc @ acc
+    return acc
+
+
+def realify_diag(z):
+    """Real 2n x 2n form of C-linear multiplication by diag(z), interleaved."""
+    m = np.zeros((2 * len(z), 2 * len(z)))
+    for j, zz in enumerate(z):
+        m[2 * j : 2 * j + 2, 2 * j : 2 * j + 2] = [[zz.real, -zz.imag], [zz.imag, zz.real]]
+    return m
+
+
 def random_run(T, P, n):
     """A random Mamba-3 complex-Euler run: (mu, dt, alpha, theta, A, k, x, q)."""
     dt = np.abs(RNG.normal(size=T)) + 0.05
@@ -219,17 +240,64 @@ want = At * (zr + 1j * zi) + gw
 ok("descent-in-Re / ascent-in-Im on F is exactly the complex flow",
    close(field, [want.real, want.imag], 1e-6))
 
+# Where the sign comes from, which is the part a reader redoing this by hand
+# gets wrong. With phi holomorphic and F = Re(phi), Cauchy-Riemann gives
+# dF/dzr = Re(phi') and dF/dzi = -Im(phi'), so (-dF/dzr, +dF/dzi) = -phi':
+# ascending in Im is exactly what cancels the conjugation that descending in
+# Re alone would introduce. Both sides computed numerically, independently.
+zc = zr + 1j * zi
+phi = lambda zz: -At / 2 * zz**2 - gw * zz  # noqa: E731
+dphi = (phi(zc + 1e-6) - phi(zc - 1e-6)) / 2e-6
+ok("Cauchy-Riemann: dF/dzr = Re(phi') and dF/dzi = -Im(phi')",
+   abs(-field[0] - dphi.real) < 1e-6 and abs(field[1] + dphi.imag) < 1e-6)
+ok("hence the field is -phi'(z), which is Atilde z + g",
+   abs(complex(field[0], field[1]) - (-dphi)) < 1e-6
+   and abs(-dphi - (At * zc + gw)) < 1e-6)
+
 h = 1e-4
 lap = (F(zr + h, zi) + F(zr - h, zi) + F(zr, zi + h) + F(zr, zi - h) - 4 * F(zr, zi)) / h**2
 ok(f"F is harmonic (Laplacian {lap:.1e}), so it has no minimum -- only saddles", abs(lap) < 1e-4)
 
-S, ys_gda = np.zeros((P, n), complex), []
-for i in range(T):
-    At_i = A[i] + 1j * theta[i]
-    S = np.exp(dt[i] * At_i)[None, :] * S + dt[i] * np.outer(x[i], k[i])
-    ys_gda.append(np.real(S @ np.conj(q[i])))
-ok("the matrix descent-ascent flow, integrated exponentially, == the recurrence",
-   close(ys_ref, ys_gda))
+# The transition, obtained from the field rather than from the same expression:
+# build the realified 2n x 2n descent-ascent generator by differencing F on R^2n,
+# exponentiate it over the interval, and compare with the realified transition.
+# Nothing here shares a subexpression with `mu`.
+At_vec = A[0] + 1j * theta[0]
+
+
+def gda_generator(atil, h=1e-5):
+    """The realified descent-in-Re / ascent-in-Im field of the homogeneous F."""
+    m = len(atil)
+
+    def f_real(v):
+        zz = v[0::2] + 1j * v[1::2]
+        return float(np.real(np.sum(-atil / 2 * zz**2)))
+
+    gen = np.zeros((2 * m, 2 * m))
+    for col in range(2 * m):  # the field is linear, so columns = field(basis)
+        v = np.zeros(2 * m)
+        v[col] = 1.0
+        for row in range(2 * m):
+            e = np.zeros(2 * m)
+            e[row] = h
+            d = (f_real(v + e) - f_real(v - e)) / (2 * h)
+            gen[row, col] = -d if row % 2 == 0 else +d
+    return gen
+
+
+ok("exp(dt * the descent-ascent generator) == the realified transition",
+   close(expm(dt[0] * gda_generator(At_vec)), realify_diag(np.exp(dt[0] * At_vec)), 1e-8))
+
+# Precision the note states: only the *homogeneous* part is the exact flow map.
+# Integrating the forcing exactly would give ZOH, gamma = A^-1(exp(dA) - I);
+# Mamba-1/-2/-3 hold the right endpoint instead, gamma = dt ("exponential-Euler",
+# Mamba-3 paper Tab. 1). The two differ, and agree to first order as dt -> 0.
+zoh = (np.exp(dt[0] * At_vec) - 1) / At_vec
+ok("the exact flow's forcing is ZOH, not Mamba's Euler forcing gamma = dt",
+   np.max(np.abs(zoh - dt[0])) > 1e-3)
+ratio = [np.max(np.abs(((np.exp(d * At_vec) - 1) / At_vec) - d)) / d for d in (1e-2, 1e-3)]
+ok("...and the gap is O(dt), so the two agree in the continuous limit",
+   ratio[0] / ratio[1] > 5)
 
 
 # =============================================================================
@@ -258,6 +326,20 @@ ok("the companion matrix is similar to alpha*R(phi) (same trace and determinant)
    close(np.trace(comp), np.trace(rot)) and close(np.linalg.det(comp), np.linalg.det(rot)))
 ok("momentum needs two real slots per channel -- the same two the complex state has",
    comp.shape == (2, 2))
+
+# The correspondence has no phi in {0, pi} member, which is why Prop. 3 excludes
+# them: a companion matrix is non-derogatory, so it is never similar to the
+# scalar pair diag(alpha, alpha) that a NON-rotating Mamba-3 channel pair is.
+al = 0.8
+comp0 = np.array([[1 + al**2 - (1 - al) ** 2, -al**2], [1.0, 0.0]])
+pair0 = np.diag([al, al])
+ok("at phi = 0 the companion is defective (rank(C - aI) = 1), the pair is not",
+   np.linalg.matrix_rank(comp0 - al * np.eye(2), tol=1e-9) == 1
+   and np.linalg.matrix_rank(pair0 - al * np.eye(2), tol=1e-9) == 0)
+growth = max(np.linalg.norm(np.linalg.matrix_power(comp0, t) @ np.array([1.0, 0.0]))
+             for t in range(1, 30))
+ok(f"...so it has transient growth ({growth:.2f}) where the pair is monotone",
+   growth > 2.5 and np.linalg.norm(pair0 @ np.array([1.0, 0.0])) < 1.0)
 
 
 # =============================================================================
@@ -362,6 +444,84 @@ ok("H: the same generators in the reverse order give a different product",
    np.max(np.abs(fwd - rev)) > 1e-3)
 ok("H: the product also leaves exp(sum of generators) -- it is not any single step",
    np.max(np.abs(fwd - qexp_pure(sum(gens)))) > 1e-3)
+
+# Why a scalar algebra and not just "a non-symmetric preconditioner": every kind
+# is alpha x isometry, hence normal, hence ||M|| = rho(M) exactly. A general
+# non-symmetric preconditioner is not, and admits transient growth.
+step_c = 0.9 * np.array([[np.cos(0.6), -np.sin(0.6)], [np.sin(0.6), np.cos(0.6)]])
+ok("a complex step IS a non-symmetric preconditioner, but a normal one",
+   abs(step_c[0, 1] - step_c[1, 0]) > 1e-9
+   and close(step_c.T @ step_c, step_c @ step_c.T, 1e-12))
+ok("...hence ||M||_2 = rho(M) exactly -- no transient growth, exact norm bound",
+   abs(np.linalg.norm(step_c, 2) / max(abs(np.linalg.eigvals(step_c))) - 1) < 1e-12)
+ok("SO(4): the two-sided rotor is an isometry too, so the bound covers every kind",
+   abs(np.linalg.norm(Tm, 2) - 1) < 1e-12)
+# A general (non-normal) alternative has no such bound, and the gap is unbounded
+# rather than merely large: conjugating a rotation by an ill-conditioned D keeps
+# the spectrum on the unit circle while the norm grows with cond(D).
+for cond in (5.0, 50.0):
+    D = np.diag([cond, 1.0])
+    th = np.pi / 4
+    Mg = D @ np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]]) @ np.linalg.inv(D)
+    ratio = np.linalg.norm(Mg, 2) / np.max(np.abs(np.linalg.eigvals(Mg)))
+    ok(f"    non-normal D R(th) D^-1 at cond(D) = {cond:g}: rho = 1 but ||M||/rho = {ratio:.1f}",
+       abs(np.max(np.abs(np.linalg.eigvals(Mg))) - 1) < 1e-9 and ratio > cond / 2)
+
+
+# =============================================================================
+section("8b. The empty cell: a complex step needs a C-Hermitian curvature")
+
+
+def realify(M):
+    """Real 2n x 2n form of a C-linear map on C^n, interleaved."""
+    m = M.shape[0]
+    out = np.zeros((2 * m, 2 * m))
+    for j in range(2 * m):
+        e = np.zeros(2 * m)
+        e[j] = 1.0
+        zz = M @ (e[0::2] + 1j * e[1::2])
+        out[0::2, j], out[1::2, j] = zz.real, zz.imag
+    return out
+
+
+nk = 3
+Jb = np.zeros((2 * nk, 2 * nk))
+for p in range(nk):
+    Jb[2 * p : 2 * p + 2, 2 * p : 2 * p + 2] = [[0, -1], [1, 0]]
+
+rot_real = nrm_real = 0.0
+rot_cx, nrm_cx = 0.0, 0.0
+for _ in range(2000):
+    kv = RNG.normal(size=nk) + 1j * RNG.normal(size=nk)
+    kv /= np.linalg.norm(kv)
+    b = 1 + np.sqrt(RNG.uniform()) * np.exp(1j * RNG.uniform(-np.pi, np.pi))  # |1-b| <= 1
+    # real regression target: curvature K K^T over R^2n
+    Kr = np.zeros(2 * nk)
+    Kr[0::2], Kr[1::2] = kv.real, kv.imag
+    Mr = np.eye(2 * nk) - (b.real * np.eye(2 * nk) + b.imag * Jb) @ np.outer(Kr, Kr)
+    rot_real += np.max(np.abs(np.linalg.eigvals(Mr).imag)) > 1e-9
+    nrm_real = max(nrm_real, np.linalg.norm(Mr, 2))
+    # complex target: curvature k k^H, C-Hermitian
+    Mc = realify(np.eye(nk, dtype=complex) - b * np.outer(kv, kv.conj()))
+    rot_cx += np.max(np.abs(np.linalg.eigvals(Mc).imag)) > 1e-9
+    nrm_cx = max(nrm_cx, np.linalg.norm(Mc, 2))
+ok(f"real target: 0% of draws rotate, and the norm bound is lost ({nrm_real:.2f})",
+   rot_real == 0 and nrm_real > 1.2)
+ok(f"complex target: every draw rotates, with ||M|| = {nrm_cx:.3f}",
+   rot_cx == 2000 and nrm_cx < 1.0001)
+
+# the closed form behind it: M is triangular on span{K, JK} because K^T J K = 0
+kv = RNG.normal(size=nk) + 1j * RNG.normal(size=nk)
+kv /= np.linalg.norm(kv)
+Kr = np.zeros(2 * nk)
+Kr[0::2], Kr[1::2] = kv.real, kv.imag
+a_s, b_s = 0.7, 0.4
+Mr = np.eye(2 * nk) - (a_s * np.eye(2 * nk) + b_s * Jb) @ np.outer(Kr, Kr)
+JK = Jb @ Kr
+basis2 = np.stack([Kr, JK], axis=1)
+blk = np.linalg.lstsq(basis2, Mr @ basis2, rcond=None)[0]
+ok("K^T J K = 0, so M is [[1-a, 0], [-b, 1]] on span{K, JK}: a shear, not a rotation",
+   abs(Kr @ JK) < 1e-12 and close(blk, [[1 - a_s, 0.0], [-b_s, 1.0]], 1e-9))
 
 
 # =============================================================================

@@ -9,7 +9,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/rotation_as_optimization.py`](../scripts/rotation_as_optimization.py)
-> (45 checks, section numbers match). The script depends only on `numpy` and on
+> (59 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.
 
@@ -88,7 +88,12 @@ defaults.
 ### 2.1 The recurrence
 
 One head, dropping the trapezoid and MIMO until §9 (they are orthogonal). Mamba-3
-with a complex transition, exponential-Euler on the state and Euler on the input:
+with a complex transition, under the **exponential-Euler** discretisation: the
+exponential on the transition, the held right endpoint on the state-input
+(`α = e^{ΔA}`, `γ = Δ`). That is the scheme Mamba-1 and Mamba-2 actually
+implement, and the Mamba-3 paper's discretisation table is what names it — the
+same table notes that Mamba-1's paper reports ZOH (`γ = A⁻¹(e^{ΔA} − I)`) while
+its released implementation does not use it. §5 turns on the distinction.
 
 $$h_t = e^{\Delta_t(A_t + i\theta_t)}\,h_{t-1} + \Delta_t\,B_t\,x_t^\top,
 \qquad y_t = \operatorname{Re}\big(C_t^\top h_t\big)$$
@@ -179,15 +184,32 @@ Verified over 2000 random (loss, step) draws with steps of both signs
 Two immediate corollaries worth stating, because both are tempting escapes that
 do not work:
 
-- **Complexifying the loss alone does not help.** The Hessian of a real-valued
-  quadratic on `ℂ^n` is Hermitian, so a "complex delta rule" factor
-  `I − βkk^*` still has a real spectrum. Verified.
+- **Complexifying the loss, with the step size left real, does not help.** The
+  Hessian of a real-valued quadratic on `ℂ^n` is Hermitian, so a "complex delta
+  rule" factor `I − βkk^*` still has a real spectrum. Verified. Read this as a
+  statement about the *step*, not about the loss: the same factor with `β` on the
+  complex disc rotates in 100% of draws, which is the cell §8(iii) calls the
+  interesting extrapolation.
 - **Changing the metric does not help.** An SPD preconditioner `P` yields
   `G = (I−M)P^{-1}` symmetric only when `M` is diagonalizable over `ℝ`, which a
   rotation is not.
 
 Proposition 1 is therefore the right frame: it says precisely which premise must
-break. There are four, and the rest of this note is one section each.
+break. It has four, and the note takes one section each.
+
+| premise | broken by | § |
+|---|---|---|
+| the step size is a real scalar | a step in `ℂ` or `ℍ` | 4 |
+| the objective is minimized | descent–ascent on a saddle | 5 |
+| the update depends only on the current state | momentum — a larger state space | 6 |
+| one step per token | composing `u` of them | 7 |
+
+The third is the loosest fit and is flagged as such in §6: heavy ball does not
+contradict Proposition 1 at all, since it produces its rotation by *enlarging the
+state space* rather than by rotating on the given one. It earns its section by
+landing on the same transition, not by escaping the same statement. Nor is the
+list claimed exhaustive — these are four constructions that work, over premises
+that admit other breaks.
 
 ---
 
@@ -324,7 +346,23 @@ $$F_t(S) = \operatorname{Re}\Big(-\tfrac12\operatorname{tr}\big(S\,\mathrm{D}(\t
 - x_t^\top S k_t\Big),\qquad \tilde A_t = A_t + i\theta_t$$
 
 and run **descent in `Re S`, ascent in `Im S`**. That field is exactly the
-Mamba-3 complex flow — verified pointwise and over a full trajectory.
+Mamba-3 complex flow, and exponentiating it over one interval is exactly the
+transition — both verified, the second by building the realified generator from
+the field and exponentiating it, so it shares no subexpression with the
+transition it is compared against.
+
+The sign is the part worth pausing on, because it is what a reader redoing this
+by hand gets wrong. For `F = Re(φ)` with `φ` holomorphic, Cauchy–Riemann gives
+`∂F/∂z_r = Re(φ′)` and `∂F/∂z_i = −Im(φ′)`, so the descent–ascent field
+`(−∂F/∂z_r, +∂F/∂z_i)` is `−φ′(z)` as a complex number: **ascending in the
+imaginary part is exactly what cancels the conjugation that descending in the
+real part alone would introduce.** Descending in both would give `−conj(φ′)`,
+which is not a flow of this system.
+
+One precision. Only the *homogeneous* part is the exact flow map. Integrating the
+forcing exactly would be ZOH, `γ = A⁻¹(e^{ΔA} − I)`, where Mamba holds the right
+endpoint at `γ = Δ` (§2.1). So this is the approximation Mamba-1/-2 already make
+and the min–max reading inherits, not one it introduces; the two agree to `O(Δ)`.
 
 This is more than a re-parameterisation, for two reasons.
 
@@ -365,13 +403,24 @@ Verified over 500 random `(α, φ, ρ)` draws, exact to `1e-9`, with the closed 
 So the complex transition **is** momentum, with the velocity buffer folded into
 the imaginary part of the state rather than held as a second tensor. Momentum's
 usual price is a second state slot; Mamba-3 pays it by declaring half of the
-state imaginary. That is also a fair reading of `rope_fraction = 0.5`: half the
-channels get a velocity, half do not.
+state imaginary.
 
-One precision, so this is not overclaimed: the *transition* is exactly heavy
-ball's up to a change of basis. Mamba-3's *write* is more general — `B` and `B̂`
-are independent projections, so the input drives both the iterate and the
-velocity, where heavy ball drives only the iterate.
+Two precisions, so this is not overclaimed.
+
+The *transition* is exactly heavy ball's up to a change of basis. Mamba-3's
+*write* is more general — `B` and `B̂` are independent projections, so the input
+drives both the iterate and the velocity, where heavy ball drives only the
+iterate.
+
+And the correspondence has no `φ ∈ {0, π}` member, which is why Proposition 3
+excludes them. It is not that the map degrades there: a companion matrix is
+**non-derogatory** (its minimal polynomial is its characteristic polynomial), so
+it is never similar to a scalar pair `diag(α, α)` — which is exactly what a
+*non-rotating* Mamba-3 pair is. At `φ = 0` the parameters above give a defective
+Jordan block, `rank(C − αI) = 1`, with transient growth to `2.84` before decaying,
+where the Mamba-3 pair is diagonal and monotone. So momentum is a reading of the
+*rotating* channels only; it does not extend along `rope_fraction` to the
+unrotated ones, which never enter the correspondence at all.
 
 Views I, II and III are three readings of one recurrence. I and II are the same
 mechanism (`Im η` is the ascent direction); III is genuinely a different method
@@ -460,10 +509,38 @@ the product also leaves `exp(Σ generators)`.
 curvature with a complex step — a delta rule whose transition carries a
 data-dependent rotation. Because the rank-one erase conjugates through a
 rotational gauge exactly as the write does, it needs no new chunkwise algorithm.
-It is also where the two families' non-commutativity budgets overlap: when the
-curvature already supplies the non-commutativity, the step's phase does not have
-to, which is why a block *with* an erase may reasonably place its rotation once
-per token rather than once per micro-step.
+
+It has a **precondition** that is easy to miss: a complex step rotates a rank-one
+curvature only if that curvature is `ℂ`-Hermitian, which forces the regression
+*target* to be complex too. With a real target the curvature is `KKᵀ` over
+`ℝ^{2n}`, and since `KᵀJK = 0`,
+
+$$M = I - (aI + bJ)KK^\top \;=\; \begin{bmatrix}1-a & 0\\ -b & 1\end{bmatrix}
+\quad\text{on } \operatorname{span}\{K, JK\}$$
+
+— triangular, eigenvalues `1−a` and `1`, both **real**, and non-normal: a shear,
+with the norm bound gone. Verified: `0%` of draws rotate with a real target
+(`max‖M‖₂ = 1.41`), `100%` with a complex one (`‖M‖₂ = 1`). So tying the target's
+imaginary half to its real half, or zeroing it, is not a cheaper variant of this
+cell — it deletes the mechanism. Mamba-3's own value `x` is real and this does not
+bite, because isotropic `ρI` is `ℂ`-Hermitian for free; the precondition is
+specific to the rank-one column.
+
+A block in that cell also carries **two** step sizes, hence two phases, at two
+different rates — which dissolves the question of whether "the" rotation belongs
+per token or per micro-step:
+
+| term | curvature | step | phase | rate |
+|---|---|---|---|---|
+| ridge `(ρ/2)‖S‖²` | isotropic | `η` | `arg η` — Mamba-3's | once per **token** |
+| data fit `½‖kᴴS − v‖²` | rank-one over `ℂ` | `β` | `arg(1−β)` | once per **micro-step** |
+
+The ridge step is per token because the `u` corrective steps share one interval
+(§7); `β` is per micro-step because there are `u` of them. The two are
+independent: the decay's phase acts on every plane, the erase's only in the plane
+its own key spans, so for `n ≥ 2` no single decay phase with real erase gates
+reproduces a token carrying two erase phases. Each phase already rides an existing
+gate at the right rate, so neither needs a configuration knob.
 
 The ladder `ℝ ⊂ ℂ ⊂ ℍ` is uniform in a way worth recording, because it is why the
 crate's rotation code is unbranched:
@@ -475,7 +552,31 @@ crate's rotation code is unbranched:
 | `ℍ` | quaternion | `Re(η)·I` | `Re η > 0` |
 | two-sided `(q, p)` | pair | trace `= 4·Re(q)Re(p)` | — |
 
-All verified. Proposition 2's bound `|arg| ≤ arcsin α` holds verbatim over `ℍ`.
+All verified; Proposition 2's bound `|arg| ≤ arcsin α` holds verbatim over `ℍ`.
+
+Two properties of *this* enlargement are load-bearing, and they are why the escape
+is "the step size joins a normed division algebra" rather than the strictly larger
+"the preconditioner need not be symmetric" — which is vacuous on its own, since any
+`M` is `I − GP` for symmetric `G` and general `P`:
+
+- **Every kind is `α × isometry`, hence normal, hence `‖M‖₂ = ρ(M) = α` exactly.**
+  This includes `Rotor4D`, whose `v ↦ qvp̄` is in `SO(4)`. For a general
+  non-symmetric preconditioner the gap between norm and spectral radius is not
+  merely present but *unbounded*: conjugating a rotation by an ill-conditioned `D`
+  leaves the spectrum on the unit circle while `‖M‖₂` grows with `cond(D)`
+  (verified: `‖M‖₂/ρ(M) = 35` at `cond(D) = 50`). That forfeits the bound a
+  *time-varying* product needs:
+  boundedness of `M_t⋯M_1` does not follow from per-factor spectral radius, but
+  does follow from a submultiplicative `‖M_t‖₂ ≤ 1`. Conformality is what makes the
+  state-tracking norm argument exact rather than asymptotic.
+- **Commutativity is not what makes the RoPE trick work.** The trick needs only
+  that the transition is *scalar × group element*: `α` is scalar so it commutes
+  with everything, and the cumulative rotation telescopes as
+  `R_{i+1..t} = R̄_t R̄_i^{-1}` by associativity and invertibility. Commutativity is
+  what collapses that telescoping scan into a closed-form **cumsum of angles**; its
+  absence is exactly why the non-abelian kinds need a scan with a cross-chunk
+  accumulator. The carry exists *because* the factors do not commute, not despite
+  it — which is also why the trick survives `Quaternion4D` and `Rotor4D` unchanged.
 
 ---
 
@@ -513,7 +614,9 @@ The mechanism should be stated honestly: it is bought by giving the token `u`
 full-size steps, i.e. by inflating its effective interval, not by subdividing it.
 The consistent alternative (`Δ_j = Δ/u`, same per-token transition, buying only the
 staggered writes and the non-abelian ordering) is inside the model's reachable set —
-`dt_limit` has no lower floor — so this is a superset, not an error.
+`dt_limit` has no lower floor by default — so this is a superset, not an error.
+(It is a configurable clamp, so a run that raises the floor above `Δ/u` gives that
+up; the crate's own `step_infinite` tests set `(0.05, 5.0)`.)
 
 ### 9.3 `micro_steps` versus `mimo_rank`
 
@@ -573,7 +676,7 @@ is independent of everything else in this note.
 python3 scripts/rotation_as_optimization.py
 ```
 
-`numpy` only; float64 throughout; 45 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 59 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence
 from §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites
@@ -624,8 +727,8 @@ implementation is asserted separately, by the Rust test suites
 **Note on novelty.** Nothing in §§3–7 is a new result in optimization; each is a
 standard fact (symmetry of Hessians, Wirtinger calculus, harmonicity of `Re` of a
 holomorphic function, GDA cycling, heavy ball's complex eigenvalues, products of
-symmetric matrices). The contribution of this note is the assembly — that the four
-are the *complete* set of escapes from Proposition 1, that three of them describe
-the same Mamba-3 recurrence, and that the resulting 2×2 derives the design
+symmetric matrices). The contribution of this note is the assembly — that these
+four constructions each break a different premise of Proposition 1 (§3), that
+three of them describe the same Mamba-3 recurrence, and that the resulting 2×2 derives the design
 decisions in `src/mamba3/product/` and `src/mamba3/rotation/` which were
 previously stated as observations.

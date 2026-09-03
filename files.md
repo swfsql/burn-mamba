@@ -176,7 +176,7 @@ while `Complex2D` gains `u`× the per-token angle reach with a live gradient at 
 non-abelian kinds gain a product no single bounded step can express.
 What `u` buys is bought by inflating the token's effective interval `u`×, not subdividing
 it; the consistent alternative (`Δⱼ = Δ/u`) is inside the model's reach (`dt_limit` has no
-lower floor), so this is a superset of it.
+lower floor **by default** — it is a configurable clamp), so this is a superset of it.
 Non-obvious: unlike DeltaProduct there is no forget gate to keep at token rate — Mamba
 fuses decay, write weight and rotation rate into one `Δ` — so every micro-step decays; a
 scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silence the
@@ -337,7 +337,7 @@ their own rationale.
   fourth route (composing non-commuting rank-one curvatures) and why isotropy forbids it
   here; the (curvature rank × step algebra) 2×2 the `RotationKind` table follows from.
   Cite it rather than restating it.
-- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 45 of that
+- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 59 of that
   document's numbered claims, section numbers matching. Encodes the recurrence from the
   equations and never imports the crate, so it is independent of the implementation
   (which the Rust suites cover). Runs standalone; non-zero exit on failure.

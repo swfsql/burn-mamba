@@ -61,8 +61,8 @@
 //!
 //! - **On a real transition it is not a new transition, only a wider write.**
 //!   With [`Real1D`] the step size is real too, so every factor is a *real*
-//!   scalar, scalars commute, and the `u`
-//!   micro-writes collapse into one rank-`u` update with decay-staggered
+//!   scalar, scalars commute, and the `u` micro-writes collapse into one
+//!   rank-`u` update with decay-staggered
 //!   weights. That is the *sequential* reading of the cell
 //!   [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank) occupies
 //!   *jointly* — an epoch of `u` samples versus a minibatch of `M` — and it is
@@ -79,8 +79,8 @@
 //!   *full-size* steps, i.e. its effective interval is inflated `u`×, not
 //!   subdivided. The consistent alternative (`Δⱼ = Δ/u`, same per-token
 //!   transition, buying only the staggered writes and the ordering below) stays
-//!   inside the model's reach — `dt_limit` has no lower floor — so this is a
-//!   superset of it, not a substitute.
+//!   inside the model's reach — `dt_limit` has no lower floor by default — so
+//!   this is a superset of it, not a substitute.
 //! - **On the non-abelian rotations it is DeltaProduct's argument reached by
 //!   the other dial.** The factors do not commute, so the product is not any
 //!   single bounded step; `u` is the number of generators the token may
