@@ -28,6 +28,14 @@
 //! steps per token, so one token's transition is a **product** of `u` of them.
 //! It rides both pathways and needs no kernel: the micro-steps fold into the
 //! sequence axis.
+//!
+//! ## The trapezoid's tap pattern
+//!
+//! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample the
+//! write's second tap reads — a choice that only exists at `u > 1`, and one
+//! that changes the algorithm *and* the cache. Only the default
+//! ([`Trapezoid::HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver))
+//! has an algorithm today.
 
 pub mod double_ssd;
 pub mod single_ssd;
@@ -40,6 +48,7 @@ pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
 mod step_constant;
+pub mod trapezoid;
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
@@ -88,4 +97,5 @@ pub mod prelude {
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
     pub use ssd_path::Mamba3SsdPath;
+    pub use trapezoid::Trapezoid;
 }

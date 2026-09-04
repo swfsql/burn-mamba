@@ -192,6 +192,10 @@ impl Mamba3 {
         // sequence level (before SSD chunking) so the β term at t=0 sees the
         // prior token from a continued cache. For a fresh (zero) cache this is
         // equivalent to zero-padding.
+        //
+        // The shift is one *folded* position — [`Trapezoid::HorizontalCarryOver`],
+        // matching `step`'s per-micro-step carry. A lag-`u` pattern shifts by `u`
+        // and seeds from a `u`-slot cache instead; nothing else here changes.
         let x_prev_first_b1hp = cache.v_state_bhp.clone().unsqueeze_dim::<4>(1);
         let x_prev_bshp = if sequence == 1 {
             x_prev_first_b1hp
@@ -751,6 +755,11 @@ mod step {
             // two taps straddle *micro-steps*. Identical to `forward` running
             // over the folded sequence, which is what the parity tests assert.
             // `u = 1` executes the loop once and is stock Mamba-3.
+            //
+            // The `prev_*` carries below are re-assigned every micro-step, which
+            // is [`Trapezoid::HorizontalCarryOver`] — lag 1 on the folded
+            // sequence, so the tap crosses a token only at `j = 0`. A lag-`u`
+            // pattern would carry `u` slots and read the one `u` back.
             let mut state_bhpr = cache.ssm_bhpr.clone();
             let mut prev_b_bmhr = cache.k_state_bmhr.clone();
             let mut prev_x_bhp = cache.v_state_bhp.clone();

@@ -83,6 +83,11 @@ src/
 │  │                 split_rotation_channels (peels the in-proj's rotation tail)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
+│  ├─ trapezoid.rs   Trapezoid: which earlier sample the β tap reads (None |
+│  │                 Vertical | HorizontalReset | HorizontalCarryOver (default,
+│  │                 the only implemented one) | VerticalPlusHorizontalReset).
+│  │                 Structural: picks the shift, the γ-correction band and the
+│  │                 cache's tap slots; init panics on the rest
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
@@ -218,6 +223,11 @@ notation tables; the essentials:
   linear term along **rank** — a minibatch of `M` with free keys and tied values, `G`
   untouched — which is why it composes with everything else and why a MIMO block *is* its
   SISO block at init: `info/mimo-as-batch.md` — cite it, don't restate it.
+  *Which* earlier sample the trapezoid's `β` tap reads is `Mamba3Config.trapezoid`
+  (`mamba3/trapezoid.rs`) — a lattice that exists only at `u > 1`, selecting an algorithm
+  and a cache layout; the default `HorizontalCarryOver` (lag 1 on the **folded** sequence,
+  so `1/u` of the taps cross a token) is the only implemented member, the rest panic in
+  `init`.
 
 ### Mamba-3: two SSD pathways (the central design point)
 

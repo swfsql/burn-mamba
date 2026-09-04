@@ -27,6 +27,11 @@
 //! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)` controlling the left/right split of the trapezoid.
 //! Setting `λ ≡ 1` collapses this to the Mamba-2 (Euler / right-endpoint) form.
 //!
+//! *Which* earlier sample the `βₜ` tap reads is [`Mamba3Config::trapezoid`]; at
+//! `micro_steps = 1` (below) `t−1` is the only answer, and the default
+//! [`Trapezoid::HorizontalCarryOver`] keeps reading the immediately preceding
+//! recurrence step at every `u`.
+//!
 //! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
 //! — paper section *Complex-Valued SSMs*)
 //!
@@ -171,6 +176,7 @@
 
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
+use crate::mamba3::trapezoid::Trapezoid;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
 use burn::prelude::*;
@@ -300,6 +306,12 @@ pub struct Mamba3 {
     /// carries it through `load_record`/`to_device`/… unchanged.
     #[module(skip)]
     pub rotation: RotationKind,
+
+    /// Which earlier sample the trapezoid's `β` tap reads ([`Trapezoid`]);
+    /// [`Trapezoid::HorizontalCarryOver`] is the only implemented pattern.
+    /// A non-parameter constant, like [`Self::rotation`].
+    #[module(skip)]
+    pub trapezoid: Trapezoid,
 
     /// How far one step may rotate, in half-turns per unit `Δ`
     /// (see [`Mamba3Config::rotation_range`]).
@@ -468,6 +480,21 @@ pub struct Mamba3Config {
     /// ([`step_infinite`](Mamba3::step_infinite) on the non-abelian kinds).
     #[config(default = 1)]
     pub micro_steps: usize,
+
+    /// Which earlier sample the trapezoid's `β` tap reads — the **tap pattern**
+    /// ([`Trapezoid`]).
+    ///
+    /// A choice that only exists at [`Self::micro_steps`] `> 1`, where "the
+    /// previous step" may mean the previous micro-step or the previous token;
+    /// at `u = 1` every pattern either coincides with the default or switches
+    /// the trapezoid off. It selects an *algorithm* and a *cache layout*, not a
+    /// coefficient: see [`Trapezoid`] and `info/trapezoid-as-integration.md` §9.
+    ///
+    /// Defaults to [`Trapezoid::HorizontalCarryOver`], which is what the crate
+    /// has always done and the only pattern implemented — [`Self::init`]
+    /// panics on the others rather than run the wrong recurrence.
+    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
+    pub trapezoid: Trapezoid,
 
     /// Minimum absolute value of A after clamping.
     #[config(default = "1e-4")]
@@ -793,6 +820,9 @@ impl Mamba3Config {
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(self.micro_steps >= 1, "micro_steps must be at least 1");
+        // A tap pattern is an algorithm and a cache layout, so an unimplemented
+        // one has to fail here rather than fall through to the default's code.
+        self.trapezoid.assert_implemented();
         assert!(
             [0.5, 1.0].contains(&self.rope_fraction),
             "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
@@ -923,6 +953,7 @@ impl Mamba3Config {
             mimo_rank,
             micro_steps: self.micro_steps,
             rotation: self.rotation,
+            trapezoid: self.trapezoid,
             rotation_range: self.rotation_range,
             num_rotation_channels: self.num_rotation_channels(),
             num_quat_blocks: self.num_quat_blocks(),

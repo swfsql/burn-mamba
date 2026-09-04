@@ -104,7 +104,13 @@
 //! - **The read `C` sits on the last micro-step.** It is
 //!   [`repeat_micro_bs`]-broadcast across the group so the last position sees
 //!   the correct cumulative rotation; the other positions' outputs are sliced
-//!   away by [`last_micro5`], so what they hold never matters.
+//!   away by [`last_micro5`], so what they hold never matters. (Which means
+//!   `forward` computes `u`× the output it keeps: both the intra-chunk
+//!   `(L∘C̄K̄ᵀ)V` and the state-to-output product run on every folded position.
+//!   Keeping only the rows `≡ u−1 (mod u)` of `C` before those two matmuls
+//!   would recover `(u−1)/u` of the *output-side* work — the state side is
+//!   irreducible — at the cost of a strided gather. A future optimisation;
+//!   `step` does not pay it, its readout is outside the micro-step loop.)
 //! - **`z`, the `D` skip and the output gate are per token**, the skip taking
 //!   the last micro-step's `x` — the value the readout is contemporaneous with.
 //!

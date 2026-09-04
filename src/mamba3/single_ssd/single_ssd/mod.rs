@@ -147,6 +147,11 @@ impl Mamba3 {
         // The shifted term is zero at the very last sequence position (no future
         // token). Out-of-bounds Δ_{t+1} is zero by construction (we pad with
         // zeros), and (1 − λ) is bounded, so the multiplication safely yields 0.
+        //
+        // `t+1` is the next *folded* position — [`Trapezoid::HorizontalCarryOver`].
+        // This is the `Δ̃` collapse (`info/trapezoid-as-integration.md` §5) at
+        // micro-step resolution; a lag-`u` pattern shifts by `u` here and widens
+        // `ssd/diag.rs`'s same-step correction from the diagonal to a `u`-band.
         let lambda_bsh = burn::tensor::activation::sigmoid(lambda_raw_bsh);
         let shifted_gamma_bsh = {
             let zero_b1h = Tensor::zeros([batch, 1, nheads], &device);

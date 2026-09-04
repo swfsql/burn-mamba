@@ -72,7 +72,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `1/M`, `1`, `1/M`, so a MIMO block *is* its SISO block at init — key `mean_m B[m]`,
   query `mean_m C[m]`, `D/M`, and a rank-**one** write);
   `micro_steps` (`u`, default 1 = stock) — MambaProduct, see
-  `mamba3/product/`; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
+  `mamba3/product/`; `trapezoid: Trapezoid` (the `β` tap pattern; `init` panics on the
+  unimplemented ones); `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
   narrower `1`/`0.5` are asked for explicitly); `a_floor`). `rotation_spec()` bundles the
@@ -112,6 +113,18 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `h'` equals double-ssd `h`.
 - **`ssd_path.rs`** — pathway-agnostic `Mamba3SsdPath` (`Default=SerialRecalculated(None)`);
   `From` both sub-paths so it converts to whichever pathway the cache selects.
+- **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample
+  the `β` tap reads. A choice that exists only at `micro_steps > 1`
+  (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks the
+  pre-chunking shift, the width of `single_ssd/ssd/diag.rs`'s same-step correction,
+  whether the in-proj spends `λ` channels, and `tap_slots()`, the cache's `(B, x)` buffer
+  depth (`0` none / `1` lag-1 / `u` lag-`u`). `HorizontalCarryOver` (lag 1 on the *folded*
+  sequence) is the default and the only implemented pattern; `assert_implemented()` is
+  called from `Mamba3Config::init`, so the rest fail at construction. Degeneracies at
+  `u = 1`: `Vertical` = `HorizontalCarryOver`, `HorizontalReset` = `None`.
+  `VerticalPlusHorizontalReset` is the least settled: a 2-D tap graph (`(t−1,j)` and
+  `(t,j−1)`) that still collapses to one scalar per sample, both taps being lags on the
+  one folded chain.
 
 ### `mamba3/double_ssd/`
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
