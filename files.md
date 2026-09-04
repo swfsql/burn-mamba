@@ -85,8 +85,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `muon_projections()` omits the (then absent) rotation segment. Fields:
   QK-norm `b_norm`/`c_norm`, `b/c_bias_hmr` (init 1), optional `mimo_{x,z,o}_hmp` and
   `out_norm`. Derived `d_in_proj` (split `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|θ·u]`
-  — only the per-micro-step segments widen; `rotation_channels_total()` = `u·`
-  `num_rotation_channels()` peels the trailing one), mirrored by `muon_projections()` as
+  — only the per-micro-step segments widen; the two trailing segments are the optional
+  ones, peeled by `split_trailing` in layout order: `rotation_channels_total()` = `u·`
+  `num_rotation_channels()` (`0` under `Real1D`), then `lambda_channels_total()` = `u·nheads`
+  (`0` under `Trapezoid::None`)), mirrored by `muon_projections()` as
   `in_proj [z|x|B|C|dt*|A*|λ*|rotation]` with each `u`-wide stream emitted as `u`
   same-named segments (independent maps to Muon; `without_segment` still drops the whole
   stream) + `out_proj`.
@@ -99,10 +101,12 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 - **`mod.rs`** — `Mamba3BackendExt: Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt`,
   wired via `backend_macros`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
-  (`Δ/A/da/α/β/γ`, `λ=σ`), `qk_norm_expand_bias`, `build_v_with_mimo`, `mimo_outer_sum`
-  (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso` broadcast vs `_mimo`
-  matmul, per `siso_specialization_decode`), `split_rotation_channels` (peels the in-proj's
-  trailing rotation columns, `None` under `Real1D`; it cannot be one more entry in the main
+  (`Δ/A/da/α/γ` + **optional** `β`; a `None` `lambda_raw` is `Trapezoid::None` and yields
+  `β = None`, `γ = Δ` by sharing `Δ`'s tensor), `qk_norm_expand_bias`, `build_v_with_mimo`,
+  `mimo_outer_sum` (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso`
+  broadcast vs `_mimo` matmul, per `siso_specialization_decode`), `split_trailing` (peels an
+  optional trailing in-proj segment — rotation under `Real1D`, then `λ` under
+  `Trapezoid::None`, which is why those two are last; it cannot be one more entry in the main
   `split_into` because `split_with_sizes` **drops** a zero-length segment). Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
@@ -118,9 +122,13 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks the
   pre-chunking shift, the width of `single_ssd/ssd/diag.rs`'s same-step correction,
   whether the in-proj spends `λ` channels, and `tap_slots()`, the cache's `(B, x)` buffer
-  depth (`0` none / `1` lag-1 / `u` lag-`u`). `HorizontalCarryOver` (lag 1 on the *folded*
-  sequence) is the default and the only implemented pattern; `assert_implemented()` is
-  called from `Mamba3Config::init`, so the rest fail at construction. Degeneracies at
+  depth (`0` none / `1` lag-1 / `u` lag-`u`). Implemented: `HorizontalCarryOver` (lag 1 on
+  the *folded* sequence; the default) and `None` (`λ ≡ 1` ⇒ `β = 0`, `γ = Δ`, with nothing
+  paid for the absent term anywhere — no `λ` in-proj/Muon segment, no `β` tensor, no tap
+  slots, **one** SSD call in `forward`, one outer product in `step`, a `β`-free
+  `step_infinite`; the two pathways coincide, so `forward_single_ssd` delegates).
+  `assert_implemented()` is called from `Mamba3Config::init`, so the rest fail at
+  construction. Degeneracies at
   `u = 1`: `Vertical` = `HorizontalCarryOver`, `HorizontalReset` = `None`.
   `VerticalPlusHorizontalReset` is the least settled: a 2-D tap graph (`(t−1,j)` and
   `(t,j−1)`) that still collapses to one scalar per sample, both taps being lags on the
@@ -129,7 +137,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ### `mamba3/double_ssd/`
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
   Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
-  summed; ~2× SSD memory. `forward` folds the micro-steps in right after the split and
+  summed; ~2× SSD memory — except under `Trapezoid::None`, where the β side (shift,
+  scale, second SSD call, tap slots) is skipped outright and this is one plain SSD pass.
+  `forward` folds the micro-steps in right after the split and
   collapses back after the SSD (so between them `s` counts micro-steps and `tokens` is the
   only token-resolution name); `step` loops the recurrence `u` times and reads out once.
   `step_double_ssd` is reused (via cache conversion) for
@@ -144,6 +154,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   required) and `wrap_angle` are used by **both** pathways.
 - **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), `k_state_bmhr`
   (prev-token B, β term), `v_state_bhp` (prev-token x), `rotation` (`RotationState`). No conv.
+  The two tap slots are `Option`s — absent, not zeroed, when the `Trapezoid` has no β tap
+  (`sanity()` asserts they agree); the `*CacheConfig`s carry the `trapezoid` to size them.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3DoubleSsdPath`; `Mamba3DoubleSsdInput` is
   **MIMO-first** (`v_bnlmhp` already ×γ/β, `da_bnlh`, `b/c_bnlmhr`). Same three algorithms
   as Mamba-2 with the `mimo_rank` axis fused into the chunk reshape;
@@ -158,9 +170,13 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   micro-step fold/collapse as the double pathway; everything between (trapezoid, `scale`,
   QK-norm, rotation, seed, chunking) runs at micro-step resolution unchanged.
   `step_single_ssd` converts to a double-ssd cache, runs `step_double_ssd`, converts back.
+  Under `Trapezoid::None` the whole body is skipped: `scale ≡ γ` makes this the double-ssd
+  form (strict mask + full diagonal correction = inclusive mask), so `forward_single_ssd`
+  delegates rather than reassemble what it masked.
 - **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields but `ssm_bhpr` carries
   `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the diagonal, patched in-kernel). The
-  distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence.
+  distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence — a
+  distinction that vanishes under `Trapezoid::None`, where `h' ≡ h` everywhere.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
   + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel, + `siso_specialization`);
   `Mamba3SingleSsdBackendExt`; same trio.
@@ -276,7 +292,9 @@ unit-quaternion VJP with parallel ops only.
 ### `mamba3/step_constant/` (`mod.rs`)
 Constant-input closed form on `Mamba3`: `step_infinite` (stationary fixed-point
 output; no cache in/out — the state orbits, the cumulative rotation cancels in the
-readout, factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`). Per RoPE pair that factor is
+readout, factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`; under `Trapezoid::None` the `β` term and the
+rotation product carrying it are dropped, not zeroed — a real numerator, so the
+complex/quaternion multiply degenerates to a scalar one). Per RoPE pair that factor is
 `(γ+βe^{−iθ̂})/(1−αe^{−iθ̂})`; per quaternion block the same in the abelian subalgebra
 of the constant per-step `q`; unrotated channels use the scalar series `(β+γ)/(1−α)`.
 `Rotor4D` leaves that commutative subalgebra, so its factor is the `ℝ⁴` resolvent by

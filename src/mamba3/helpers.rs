@@ -18,30 +18,34 @@ use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
 use burn::prelude::*;
 
-/// Split the in-projection into everything-but-the-rotation and the trailing
-/// `num_rotation_channels` rotation channels — `None` when the block projects
-/// none, i.e. [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D).
+/// Peel a **trailing** in-projection segment of `width` channels off `proj`,
+/// yielding `None` for it when the block projects none.
 ///
-/// The rotation slice cannot simply be one more entry in the main
-/// `split_into`: Burn has no zero-width tensors, and `split_with_sizes`
-/// *drops* a zero-length segment rather than returning an empty one, so the
-/// destructuring would come up one part short.
+/// Used for the two segments a block may omit entirely — the rotation channels
+/// ([`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
+/// projects none) and then `λ`
+/// ([`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) projects
+/// none) — which is why the in-projection lays them out last, in that order.
+///
+/// An optional slice cannot simply be one more entry in the main `split_into`:
+/// Burn has no zero-width tensors, and `split_with_sizes` *drops* a zero-length
+/// segment rather than returning an empty one, so the destructuring would come
+/// up one part short.
 ///
 /// # Shapes
-/// - `proj` : `[..., d_in_proj]` along `dim`
-/// - out    : `[..., d_in_proj − num_rotation_channels]` and, if any,
-///   `[..., num_rotation_channels]`
-pub fn split_rotation_channels<const D: usize>(
+/// - `proj` : `[..., w]` along `dim`
+/// - out    : `[..., w − width]` and, if any, `[..., width]`
+pub fn split_trailing<const D: usize>(
     proj: Tensor<D>,
-    num_rotation_channels: usize,
+    width: usize,
     dim: usize,
 ) -> (Tensor<D>, Option<Tensor<D>>) {
-    if num_rotation_channels == 0 {
+    if width == 0 {
         return (proj, None);
     }
-    let rest = proj.dims()[dim] - num_rotation_channels;
-    let rot = proj.clone().narrow(dim, rest, num_rotation_channels);
-    (proj.narrow(dim, 0, rest), Some(rot))
+    let rest = proj.dims()[dim] - width;
+    let tail = proj.clone().narrow(dim, rest, width);
+    (proj.narrow(dim, 0, rest), Some(tail))
 }
 
 /// Output of [`trapezoidal_coefficients`].
@@ -54,9 +58,12 @@ pub struct TrapezoidCoeffs<const D: usize> {
     pub da: Tensor<D>,
     /// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
     pub alpha: Tensor<D>,
-    /// `βₜ = (1 − λₜ) · Δₜ · αₜ` — left-endpoint weight.
-    pub beta: Tensor<D>,
-    /// `γₜ = λₜ · Δₜ` — right-endpoint weight.
+    /// `βₜ = (1 − λₜ) · Δₜ · αₜ` — left-endpoint weight. `None` under
+    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which has
+    /// no left endpoint: the tensor is not formed rather than formed as zeros.
+    pub beta: Option<Tensor<D>>,
+    /// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
+    /// no `λ` (the whole step is paid at the right endpoint).
     pub gamma: Tensor<D>,
 }
 
@@ -64,12 +71,18 @@ pub struct TrapezoidCoeffs<const D: usize> {
 /// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
 /// formulas.
 ///
-/// All four data tensors share rank `D` and have `nheads` as the last dim.
+/// All data tensors share rank `D` and have `nheads` as the last dim.
 /// `dt_bias_h` is broadcast to match.
+///
+/// `lambda_raw` is `None` under
+/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) — the block
+/// projects no `λ` channels — and the coefficients then take their `λ ≡ 1`
+/// values *by construction*: `β` is absent and `γ` **is** `Δ`, sharing its
+/// tensor rather than recomputing `1 · Δ`.
 pub fn trapezoidal_coefficients<const D: usize>(
     dd_dt: Tensor<D>,
     dd_a_raw: Tensor<D>,
-    lambda_raw: Tensor<D>,
+    lambda_raw: Option<Tensor<D>>,
     dt_bias_h: Tensor<1>,
     dt_limit: (f64, f64),
     a_floor: f64,
@@ -86,10 +99,16 @@ pub fn trapezoidal_coefficients<const D: usize>(
     // dead `dd_A` projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
-    let lambda = burn::tensor::activation::sigmoid(lambda_raw);
     let alpha = da.clone().exp();
-    let beta = (-lambda.clone() + 1.0) * dt.clone() * alpha.clone();
-    let gamma = lambda * dt.clone();
+    let (beta, gamma) = match lambda_raw {
+        Some(lambda_raw) => {
+            let lambda = burn::tensor::activation::sigmoid(lambda_raw);
+            let beta = (-lambda.clone() + 1.0) * dt.clone() * alpha.clone();
+            (Some(beta), lambda * dt.clone())
+        }
+        // λ ≡ 1: the left endpoint is unweighted and the right one takes Δ whole.
+        None => (None, dt.clone()),
+    };
     TrapezoidCoeffs {
         dt,
         da,

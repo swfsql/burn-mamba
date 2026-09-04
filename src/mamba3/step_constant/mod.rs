@@ -147,16 +147,20 @@ impl Mamba3 {
         // token's* micro-step 0, which contributes one extra factor of `P⁻¹`
         // (its write sits one token later in the same geometric series), so it
         // keeps the two taps apart.
+        // Under [`Trapezoid::None`] there is no left endpoint: every pair keeps
+        // only its own γ, and the last one loses the wrapped term entirely.
         let pair_weight_bh = |j: usize| {
             let own = suffix_bh[j].clone() * micros[j].gamma_bh.clone();
-            if j + 1 < u {
-                own + suffix_bh[j + 1].clone() * micros[j + 1].beta_bh.clone()
-            } else {
-                own
+            match micros.get(j + 1).and_then(|m| m.beta_bh.clone()) {
+                Some(beta_bh) => own + suffix_bh[j + 1].clone() * beta_bh,
+                None => own,
             }
         };
         // The wrapped β weight attached to the last pair, `a₀·β₀`.
-        let wrap_bh = suffix_bh[0].clone() * micros[0].beta_bh.clone();
+        let wrap_bh = micros[0]
+            .beta_bh
+            .clone()
+            .map(|beta_bh| suffix_bh[0].clone() * beta_bh);
 
         let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
@@ -171,10 +175,9 @@ impl Mamba3 {
             let b_bmhr = micros[j].b_bmhr.clone();
             let last = j + 1 == u;
             // Rotation-free channels: the plain real geometric series.
-            let tail_num_bh = if last {
-                pair_weight_bh(j) + wrap_bh.clone()
-            } else {
-                pair_weight_bh(j)
+            let tail_num_bh = match (last, wrap_bh.clone()) {
+                (true, Some(wrap_bh)) => pair_weight_bh(j) + wrap_bh,
+                _ => pair_weight_bh(j),
             };
             let tail_bh = tail_num_bh / one_minus_a_bh.clone();
             match spec.kind {
@@ -201,13 +204,16 @@ impl Mamba3 {
                     let den_re = -a_bh1.clone() * cos_t.clone() + 1.0;
                     let den_im = a_bh1 * sin_t.clone();
                     let (num_re, num_im) = if last {
-                        // γ + (a₀β₀) e^{−iΘ}
-                        let w_bh1 = wrap_bh.clone().unsqueeze_dim::<3>(2);
+                        // γ + (a₀β₀) e^{−iΘ}; with no β tap the numerator is the
+                        // bare real γ and no zero imaginary part is formed.
                         let g_bh1 = pair_weight_bh(j).unsqueeze_dim::<3>(2);
-                        (
-                            g_bh1 + w_bh1.clone() * cos_t,
-                            -w_bh1 * sin_t,
-                        )
+                        match wrap_bh.clone() {
+                            Some(wrap_bh) => {
+                                let w_bh1 = wrap_bh.unsqueeze_dim::<3>(2);
+                                (g_bh1 + w_bh1.clone() * cos_t, Some(-w_bh1 * sin_t))
+                            }
+                            None => (g_bh1, None),
+                        }
                     } else {
                         // cⱼ e^{−iΦⱼ},  Φⱼ = Σ_{j'>j} θ̂_{j'}
                         let mut phi_bha = theta(j + 1);
@@ -216,7 +222,7 @@ impl Mamba3 {
                         }
                         let (cos_p, sin_p) = cos_sin(phi_bha);
                         let c_bh1 = pair_weight_bh(j).unsqueeze_dim::<3>(2);
-                        (c_bh1.clone() * cos_p, -c_bh1 * sin_p)
+                        (c_bh1.clone() * cos_p, Some(-c_bh1 * sin_p))
                     };
                     let (m_re, m_im) = complex_div(num_re, num_im, den_re, den_im);
                     mul_complex_partial(b_bmhr, m_re, m_im, tail_bh, self.rope_dim, mimo_rank == 1)
@@ -255,12 +261,22 @@ impl Mamba3 {
                     );
                     let q_bhj4 = quat_from_scaled_axis::<4>(g_bhj3); // P⁻¹ ↔ q
                     let alpha_bh11 = m.alpha_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
-                    let beta_bh11 = m.beta_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
+                    let beta_bh11 = m
+                        .beta_bh
+                        .clone()
+                        .map(|beta_bh| beta_bh.unsqueeze_dims::<4>(&[2, 3]));
                     let gamma_bh11 = m.gamma_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
                     // (γ + β q) ⊗ (1 − α q)⁻¹  — all in the abelian subalgebra of q.
-                    let num = quat_scalar_affine(gamma_bh11, beta_bh11, q_bhj4.clone());
-                    let den_inv = quat_inv(quat_one_minus(q_bhj4 * alpha_bh11));
-                    let f_bhj4 = quat_mul(num, den_inv);
+                    let den_inv = quat_inv(quat_one_minus(q_bhj4.clone() * alpha_bh11));
+                    let f_bhj4 = match beta_bh11 {
+                        Some(beta_bh11) => {
+                            let num = quat_scalar_affine(gamma_bh11, beta_bh11, q_bhj4);
+                            quat_mul(num, den_inv)
+                        }
+                        // A *real* numerator commutes with everything, so the
+                        // quaternion product degenerates to a scalar multiply.
+                        None => den_inv * gamma_bh11,
+                    };
                     // As in `rotate_bc_step`, the rotated width comes from
                     // `rope_dim` (a partial rotation turns whole 4-blocks).
                     mul_quat_partial(b_bmhr, f_bhj4, tail_bh, spec.rope_dim)
@@ -328,18 +344,27 @@ fn cos_sin(angle_bha: Tensor<3>) -> (Tensor<3>, Tensor<3>) {
 }
 
 /// Component-wise complex quotient; `|den|²` floored by `div_eps`.
+/// A `None` numerator imaginary part means a **real** numerator (no `β` tap),
+/// and drops the two products it would contribute rather than multiplying by a
+/// materialised zero.
 fn complex_div(
     nr: Tensor<3>,
-    ni: Tensor<3>,
+    ni: Option<Tensor<3>>,
     dr: Tensor<3>,
     di: Tensor<3>,
 ) -> (Tensor<3>, Tensor<3>) {
     let eps = div_eps(dr.dtype());
     let d2 = (dr.clone() * dr.clone() + di.clone() * di.clone()).clamp_min(eps);
-    (
-        (nr.clone() * dr.clone() + ni.clone() * di.clone()) / d2.clone(),
-        (ni * dr - nr * di) / d2,
-    )
+    match ni {
+        Some(ni) => (
+            (nr.clone() * dr.clone() + ni.clone() * di.clone()) / d2.clone(),
+            (ni * dr - nr * di) / d2,
+        ),
+        None => {
+            let scaled = nr / d2;
+            (scaled.clone() * dr, -scaled * di)
+        }
+    }
 }
 
 /// Multiply the rotation-active entries of `x` by the complex scalar
@@ -500,7 +525,7 @@ fn rotor_resolvent_partial(
     q_bhj4: Tensor<4>,
     p_bhj4: Tensor<4>,
     alpha_bh: Tensor<2>,
-    beta_bh: Tensor<2>,
+    beta_bh: Option<Tensor<2>>,
     gamma_bh: Tensor<2>,
     tail_bh: Tensor<2>,
     rope_width: usize,
@@ -529,7 +554,7 @@ fn rotor_resolvent_partial(
 
     // Scalars, broadcast over (mimo, block, component).
     let a = alpha_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
-    let beta = beta_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
+    let beta = beta_bh.map(|beta_bh| beta_bh.unsqueeze_dims::<5>(&[1, 3, 4]));
     let gamma = gamma_bh.unsqueeze_dims::<5>(&[1, 3, 4]);
     let a2 = a.clone() * a.clone();
     let a3 = a2.clone() * a.clone();
@@ -562,7 +587,12 @@ fn rotor_resolvent_partial(
     let u = m(u) + head.clone() * e2;
     let u = m(u) + head.clone() * e1;
     let u = m(u) + head * e0;
-    let out = (u.clone() * gamma + m(u) * beta) / det;
+    // With no β tap the second term — and the extra pair of quaternion products
+    // `m(u)` it needs — does not exist.
+    let out = match beta {
+        Some(beta) => (u.clone() * gamma + m(u) * beta) / det,
+        None => u * gamma / det,
+    };
     let out = out.reshape([batch, mimo_rank, nheads, rope_width]);
 
     if rope_width == state_rank {

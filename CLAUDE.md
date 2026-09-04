@@ -80,14 +80,15 @@ src/
 ├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
 │  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
 │  ├─ helpers.rs     shared: trapezoid coeffs, QK-norm+GQA+bias, MIMO-V build,
-│  │                 split_rotation_channels (peels the in-proj's rotation tail)
+│  │                 split_trailing (peels the in-proj's optional tails: rotation, λ)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ trapezoid.rs   Trapezoid: which earlier sample the β tap reads (None |
-│  │                 Vertical | HorizontalReset | HorizontalCarryOver (default,
-│  │                 the only implemented one) | VerticalPlusHorizontalReset).
-│  │                 Structural: picks the shift, the γ-correction band and the
-│  │                 cache's tap slots; init panics on the rest
+│  │                 Vertical | HorizontalReset | HorizontalCarryOver (default) |
+│  │                 VerticalPlusHorizontalReset; the first two implemented).
+│  │                 Structural: picks the shift, the γ-correction band, the λ
+│  │                 in-proj segment and the cache's tap slots; init panics on
+│  │                 the rest
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
 │  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
@@ -225,9 +226,12 @@ notation tables; the essentials:
   SISO block at init: `info/mimo-as-batch.md` — cite it, don't restate it.
   *Which* earlier sample the trapezoid's `β` tap reads is `Mamba3Config.trapezoid`
   (`mamba3/trapezoid.rs`) — a lattice that exists only at `u > 1`, selecting an algorithm
-  and a cache layout; the default `HorizontalCarryOver` (lag 1 on the **folded** sequence,
-  so `1/u` of the taps cross a token) is the only implemented member, the rest panic in
-  `init`.
+  and a cache layout. Implemented: the default `HorizontalCarryOver` (lag 1 on the
+  **folded** sequence, so `1/u` of the taps cross a token) and `None` (`λ ≡ 1`, the
+  Mamba-2 write); the rest panic in `init`. `None` is structural, and the branch runs
+  deep: no `λ` in-proj segment or Muon segment, no `β` tensor, no tap slots in either
+  cache, **one** SSD call in `forward` (so the pathways coincide and `forward_single_ssd`
+  delegates), one outer product in `step`, and a `β`-free `step_infinite` numerator.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
@@ -272,7 +276,7 @@ default 1) rotates a prefix; SISO uses interleaved/NeoX pairing, MIMO half-and-h
 rotation off is a choice of *kind*, not a fraction of zero — `rope_fraction` only narrows a
 rotation that exists, and `init` asserts a rotating kind turns at least one pair. The kind
 is structural: every rotation count is `0`, so the in-projection has no rotation segment at
-all (Burn drops a zero-length `split_with_sizes` part, hence `split_rotation_channels`), the
+all (Burn drops a zero-length `split_with_sizes` part, hence `split_trailing`), the
 cache slot is the tensor-less `RotationState::Real`, `B`/`C` reach the SSD core untouched,
 and `muon_projections()` omits the rotation segment. It has no pair to make, so it is also
 the only kind `init` lets carry an **odd** `state_rank` — down to the scalar state `1`, the

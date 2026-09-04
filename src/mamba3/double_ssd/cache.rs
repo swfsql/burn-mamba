@@ -8,6 +8,8 @@
 //!    needed for the β term of the (double-ssd) trapezoidal recurrence.
 //! 3. **Previous V state** — `xₜ₋₁` per head `[batch, nheads, per_head_dim]`,
 //!    paired with k_state to reconstruct β Bₜ₋₁ ⊗ xₜ₋₁.
+//!    Both are the trapezoid's **tap slots** and exist only when the block's
+//!    [`Trapezoid`](crate::mamba3::trapezoid::Trapezoid) has a β tap.
 //! 4. **Cumulative RoPE angle** — the accumulated rotation angle up to position
 //!    `t`, needed to correctly continue data-dependent rotary embeddings.
 //!
@@ -85,15 +87,20 @@ pub struct Mamba3DoubleSsdCache {
     /// Used to reconstruct the β term: `β * sum_r Bₜ₋₁[m] ⊗ (xₜ₋₁ * mimo_x[m])`.
     /// For SISO (mimo_rank=1) this is shape `[batch, 1, nheads, state_rank]`.
     ///
+    /// The trapezoid's tap slot: `None` — allocated nowhere, not zeroed — under
+    /// [`Trapezoid::None`], which has no β term. Present exactly when
+    /// [`Self::v_state_bhp`] is (see [`Trapezoid::tap_slots`]).
+    ///
     /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_bmhr: Tensor<4>,
+    pub k_state_bmhr: Option<Tensor<4>>,
 
     /// **Previous token's x** = `xₜ₋₁`.
     ///
-    /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term.
+    /// Combined with `k_state_bmhr` and `mimo_x` to produce the β term; `None`
+    /// with it.
     ///
     /// Shape: `[batch, nheads, per_head_dim]`
-    pub v_state_bhp: Tensor<3>,
+    pub v_state_bhp: Option<Tensor<3>>,
 
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]): the abelian RoPE angle for
@@ -110,8 +117,17 @@ impl Mamba3DoubleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        san(&self.k_state_bmhr);
-        san(&self.v_state_bhp);
+        assert_eq!(
+            self.k_state_bmhr.is_some(),
+            self.v_state_bhp.is_some(),
+            "the trapezoid's tap slots are present or absent together"
+        );
+        if let Some(k_state_bmhr) = &self.k_state_bmhr {
+            san(k_state_bmhr);
+        }
+        if let Some(v_state_bhp) = &self.v_state_bhp {
+            san(v_state_bhp);
+        }
         self.rotation.sanity();
     }
 }
@@ -152,6 +168,11 @@ pub struct Mamba3DoubleSsdCacheConfig {
     /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
     #[config(default = 1)]
     pub num_quat_blocks: usize,
+
+    /// The block's tap pattern ([`Trapezoid`]) — it decides whether the tap
+    /// slots exist at all (see [`Trapezoid::tap_slots`]).
+    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
+    pub trapezoid: Trapezoid,
 }
 
 impl Mamba3DoubleSsdCacheConfig {
@@ -166,6 +187,7 @@ impl Mamba3DoubleSsdCacheConfig {
             num_rope_angles: block_config.num_rope_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
+            trapezoid: block_config.trapezoid,
         }
     }
 
@@ -175,11 +197,15 @@ impl Mamba3DoubleSsdCacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let k_state_bmhr = Tensor::zeros(
-            [self.batch, self.mimo_rank, self.nheads, self.state_rank],
-            device,
-        );
-        let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
+        let tap = self.trapezoid.has_beta_tap();
+        let k_state_bmhr = tap.then(|| {
+            Tensor::zeros(
+                [self.batch, self.mimo_rank, self.nheads, self.state_rank],
+                device,
+            )
+        });
+        let v_state_bhp =
+            tap.then(|| Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device));
         let rotation = RotationState::identity(
             self.rotation,
             self.batch,

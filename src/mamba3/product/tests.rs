@@ -149,14 +149,24 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
         max_abs_diff(cache_fwd.ssm_bhpr, cache_step.ssm_bhpr) < 1e-4,
         "{label}: final ssm state"
     );
-    assert!(
-        max_abs_diff(cache_fwd.k_state_bmhr, cache_step.k_state_bmhr) < 1e-4,
-        "{label}: final k_state (last micro-step's B)"
+    // The tap slots are absent under `Trapezoid::None`, in both caches.
+    assert_eq!(
+        cache_fwd.k_state_bmhr.is_some(),
+        cache_step.k_state_bmhr.is_some(),
+        "{label}: the two paths disagree on whether a tap slot exists"
     );
-    assert!(
-        max_abs_diff(cache_fwd.v_state_bhp, cache_step.v_state_bhp) < 1e-4,
-        "{label}: final v_state (last micro-step's x)"
-    );
+    if let (Some(fwd), Some(step)) = (cache_fwd.k_state_bmhr, cache_step.k_state_bmhr) {
+        assert!(
+            max_abs_diff(fwd, step) < 1e-4,
+            "{label}: final k_state (last micro-step's B)"
+        );
+    }
+    if let (Some(fwd), Some(step)) = (cache_fwd.v_state_bhp, cache_step.v_state_bhp) {
+        assert!(
+            max_abs_diff(fwd, step) < 1e-4,
+            "{label}: final v_state (last micro-step's x)"
+        );
+    }
 }
 
 #[test]

@@ -71,10 +71,17 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
         Mamba3Caches::DoubleSsd(_) => panic!("expected the default single-ssd caches"),
     };
+    // The trapezoid's tap slots are absent under `Trapezoid::None`.
     vec![
         c.ssm_bhpr.clone().reshape([-1]),
-        c.k_state_bmhr.clone().reshape([-1]),
-        c.v_state_bhp.clone().reshape([-1]),
+        match &c.k_state_bmhr {
+            Some(t) => t.clone().reshape([-1]),
+            None => Tensor::zeros([1], &c.ssm_bhpr.device()),
+        },
+        match &c.v_state_bhp {
+            Some(t) => t.clone().reshape([-1]),
+            None => Tensor::zeros([1], &c.ssm_bhpr.device()),
+        },
         match &c.rotation {
             RotationState::Real(_) => Tensor::zeros([1], &c.ssm_bhpr.device()),
             RotationState::Angle(t) => t.clone().reshape([-1]),
@@ -99,7 +106,13 @@ fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
         RotationState::Angle(t) => t.clone().sum(),
         RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };
-    c.ssm_bhpr.clone().sum() + c.k_state_bmhr.clone().sum() + c.v_state_bhp.clone().sum() + rot
+    let taps = [
+        c.k_state_bmhr.clone().map(|t| t.sum()),
+        c.v_state_bhp.clone().map(|t| t.sum()),
+    ];
+    taps.into_iter()
+        .flatten()
+        .fold(c.ssm_bhpr.clone().sum() + rot, |acc, t| acc + t)
 }
 
 // ===========================================================================

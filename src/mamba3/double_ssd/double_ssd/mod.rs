@@ -66,8 +66,10 @@ impl Mamba3 {
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
-            let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
+            let tap = self.trapezoid.has_beta_tap();
+            let k_state_bmhr =
+                tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device));
+            let v_state_bhp = tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], &device));
             let rotation = self.zero_rotation_state(batch, &device);
             Mamba3DoubleSsdCache {
                 ssm_bhpr,
@@ -87,22 +89,25 @@ impl Mamba3 {
         // (per-token read) do not widen — `C` is instead broadcast across the
         // group so its *last* copy carries the right cumulative rotation.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
-        // The rotation channels come off first: `Real1D` projects none, and a
-        // zero-width segment would silently vanish from the split below.
+        // The two optional segments come off the tail first — `Real1D` projects no
+        // rotation and `Trapezoid::None` no `λ`, and a zero-width segment would
+        // silently vanish from the fixed-arity split below.
         let u = micro_steps;
+        let lambda_channels = self.lambda_channels_total();
         let (proj_bsd, rot_btA) =
-            helpers::split_rotation_channels(proj_bsd, self.rotation_channels_total(), 2);
+            helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
+        let (proj_bsd, lambda_raw_btH) = helpers::split_trailing(proj_bsd, lambda_channels, 2);
         #[rustfmt::skip]
         let [
                 z_bsi, x_btI,
                 b_raw_btMGRU, c_raw_btMGR,
-                dd_dt_btH, dd_A_raw_btH, lambda_raw_btH,
+                dd_dt_btH, dd_A_raw_btH,
         ] = burn_stack::modules::split_into(
             proj_bsd,
             [
                 d_inner, u * d_inner,
                 u * bc_size, bc_size,
-                u * nheads, u * nheads, u * nheads,
+                u * nheads, u * nheads,
             ],
             2,
         );
@@ -113,7 +118,7 @@ impl Mamba3 {
         let c_raw_bsMGR = repeat_micro_bs(c_raw_btMGR, u);
         let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
         let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
-        let lambda_raw_bsh = unfold_micro_bs(lambda_raw_btH, u);
+        let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
         let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
@@ -138,7 +143,9 @@ impl Mamba3 {
 
         san(&dt_bsh);
         san(&da_bsh);
-        san(&beta_bsh);
+        if let Some(beta_bsh) = &beta_bsh {
+            san(beta_bsh);
+        }
         san(&gamma_bsh);
 
         // ── Step 3: Reshape x ─────────────────────────────────────────────────
@@ -186,7 +193,7 @@ impl Mamba3 {
         san(&b_bsmhr);
         san(&c_bsmhr);
 
-        // ── Step 6: Build shifted inputs for β term ───────────────────────────
+        // ── Steps 6–7: the β term's shifted, β-scaled inputs ──────────────────
         //
         // "Shift-Before-Chunking": prepend the cached xₜ₋₁ / Bₜ₋₁ at the
         // sequence level (before SSD chunking) so the β term at t=0 sees the
@@ -196,87 +203,122 @@ impl Mamba3 {
         // The shift is one *folded* position — [`Trapezoid::HorizontalCarryOver`],
         // matching `step`'s per-micro-step carry. A lag-`u` pattern shifts by `u`
         // and seeds from a `u`-slot cache instead; nothing else here changes.
-        let x_prev_first_b1hp = cache.v_state_bhp.clone().unsqueeze_dim::<4>(1);
-        let x_prev_bshp = if sequence == 1 {
-            x_prev_first_b1hp
-        } else {
-            Tensor::cat(
-                vec![x_prev_first_b1hp, x_bshp.clone().narrow(1, 0, sequence - 1)],
-                1,
-            )
-        };
-        let b_prev_first_b1mhr = cache.k_state_bmhr.clone().unsqueeze_dim::<5>(1);
-        let b_prev_bsmhr = if sequence == 1 {
-            b_prev_first_b1mhr
-        } else {
-            Tensor::cat(
-                vec![
-                    b_prev_first_b1mhr,
-                    b_bsmhr.clone().narrow(1, 0, sequence - 1),
-                ],
-                1,
-            )
-        };
+        //
+        // Under [`Trapezoid::None`] there is no left endpoint at all: no shift,
+        // no β-scaled copy of `x`, and (below) no second SSD call — `forward`
+        // becomes one standard SSD pass whose keys are scaled by `γ = Δ`.
+        let beta_side: Option<(Tensor<4>, Tensor<5>)> = beta_bsh.map(|beta_bsh| {
+            let v_state_bhp = cache
+                .v_state_bhp
+                .clone()
+                .expect("a β tap keeps its (B, x) cache slot");
+            let k_state_bmhr = cache
+                .k_state_bmhr
+                .clone()
+                .expect("a β tap keeps its (B, x) cache slot");
+            let x_prev_first_b1hp = v_state_bhp.unsqueeze_dim::<4>(1);
+            let x_prev_bshp = if sequence == 1 {
+                x_prev_first_b1hp
+            } else {
+                Tensor::cat(
+                    vec![x_prev_first_b1hp, x_bshp.clone().narrow(1, 0, sequence - 1)],
+                    1,
+                )
+            };
+            let b_prev_first_b1mhr = k_state_bmhr.unsqueeze_dim::<5>(1);
+            let b_prev_bsmhr = if sequence == 1 {
+                b_prev_first_b1mhr
+            } else {
+                Tensor::cat(
+                    vec![
+                        b_prev_first_b1mhr,
+                        b_bsmhr.clone().narrow(1, 0, sequence - 1),
+                    ],
+                    1,
+                )
+            };
+            // β is a per-head scalar, broadcast over mimo_rank and per_head_dim.
+            let beta_bsh1 = beta_bsh.unsqueeze_dim::<4>(3);
+            (x_prev_bshp * beta_bsh1, b_prev_bsmhr) // βₜ · xₜ₋₁
+        });
 
-        // ── Step 7: Scale inputs by trapezoidal coefficients ──────────────────
-        // gamma and beta are per-head scalars, broadcast over mimo_rank and per_head_dim:
+        // ── Step 7b: Scale the current-token input by γ ───────────────────────
         let gamma_bsh1 = gamma_bsh.unsqueeze_dim::<4>(3);
-        let beta_bsh1 = beta_bsh.unsqueeze_dim::<4>(3);
         let x_gamma_bshp = x_bshp.clone() * gamma_bsh1; // γₜ · xₜ
-        let x_beta_bshp = x_prev_bshp * beta_bsh1; // βₜ · xₜ₋₁
 
         // ── Save the last position's B and x for the cache ────────────────────
         // "Last position" is the last *micro-step* of the last token — exactly
         // the step the next call's first micro-step follows, so the trapezoid's
-        // previous-step taps continue across a split prefill unchanged.
-        let b_last_bmhr = b_bsmhr
-            .clone()
-            .narrow(1, sequence - 1, 1)
-            .reshape([batch, mimo_rank, nheads, state_rank]);
-        let x_last_bhp = x_bshp
-            .clone()
-            .narrow(1, sequence - 1, 1) // x_b1hp
-            .squeeze_dim::<3>(1); // x_bhp
+        // previous-step taps continue across a split prefill unchanged. With no
+        // β tap there is nothing to continue and the slots stay empty.
+        let (b_last_bmhr, x_last_bhp) = if self.trapezoid.has_beta_tap() {
+            (
+                Some(
+                    b_bsmhr
+                        .clone()
+                        .narrow(1, sequence - 1, 1)
+                        .reshape([batch, mimo_rank, nheads, state_rank]),
+                ),
+                Some(
+                    x_bshp
+                        .clone()
+                        .narrow(1, sequence - 1, 1) // x_b1hp
+                        .squeeze_dim::<3>(1), // x_bhp
+                ),
+            )
+        } else {
+            (None, None)
+        };
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
-        #[rustfmt::skip]
-        let (x_gamma_bShp, x_beta_bShp, da_bSh, b_bSmhr, b_prev_bSmhr, c_bSmhr) = if pad == 0 {
-            (x_gamma_bshp, x_beta_bshp, da_bsh, b_bsmhr, b_prev_bsmhr, c_bsmhr)
-        } else {
-            let pad_bShp = Tensor::zeros([batch, pad, nheads, per_head_dim], &device);
-            let pad_bSh = Tensor::zeros([batch, pad, nheads], &device);
-            let pad_bSmhr = Tensor::zeros([batch, pad, mimo_rank, nheads, state_rank], &device);
+        // The zero blocks are built at most once each and shared by the streams
+        // that need them (a `Tensor` clone is a handle, not a copy).
+        let pads = (pad > 0).then(|| {
             (
-                Tensor::cat(vec![x_gamma_bshp, pad_bShp.clone()], 1),
-                Tensor::cat(vec![x_beta_bshp, pad_bShp], 1),
-                Tensor::cat(vec![da_bsh, pad_bSh], 1),
-                Tensor::cat(vec![b_bsmhr, pad_bSmhr.clone()], 1),
-                Tensor::cat(vec![b_prev_bsmhr, pad_bSmhr.clone()], 1),
-                Tensor::cat(vec![c_bsmhr, pad_bSmhr], 1),
+                Tensor::<4>::zeros([batch, pad, nheads, per_head_dim], &device),
+                Tensor::<3>::zeros([batch, pad, nheads], &device),
+                Tensor::<5>::zeros([batch, pad, mimo_rank, nheads, state_rank], &device),
             )
+        });
+        let pad_hp = |t: Tensor<4>| match &pads {
+            Some((p, _, _)) => Tensor::cat(vec![t, p.clone()], 1),
+            None => t,
         };
+        let pad_h = |t: Tensor<3>| match &pads {
+            Some((_, p, _)) => Tensor::cat(vec![t, p.clone()], 1),
+            None => t,
+        };
+        let pad_mhr = |t: Tensor<5>| match &pads {
+            Some((_, _, p)) => Tensor::cat(vec![t, p.clone()], 1),
+            None => t,
+        };
+
+        let x_gamma_bShp = pad_hp(x_gamma_bshp);
+        let da_bSh = pad_h(da_bsh);
+        let b_bSmhr = pad_mhr(b_bsmhr);
+        let c_bSmhr = pad_mhr(c_bsmhr);
+        let beta_side =
+            beta_side.map(|(x_beta, b_prev)| (pad_hp(x_beta), pad_mhr(b_prev)));
 
         // ── Reshape into chunks ───────────────────────────────────────────────
         let nchunks = sequence_padded / chunk_len;
         let x_gamma_bnlhp = x_gamma_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
-        let x_beta_bnlhp = x_beta_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
         let da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
         let b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
-        let b_prev_bnlmhr =
-            b_prev_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
         let c_bnlmhr = c_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
 
-        // ── Step 9: Double MIMO-SSD calls ────────────────────────────────────────
+        // ── Step 9: the MIMO-SSD call(s) ─────────────────────────────────────────
         // Build V tensors — insert the mimo_rank axis at position 3 of `_bnlhp`.
+        // With a β tap this is the pair of standard SSD passes the pathway is
+        // named for (γ-SSM + β-SSM, summed); under [`Trapezoid::None`] the second
+        // one does not exist and a "double"-SSD forward is a single pass.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
             helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
-        let v_beta_bnlmhp =
-            helpers::build_v_with_mimo::<5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
 
         let input_gamma = Mamba3DoubleSsdInput {
             v_bnlmhp: v_gamma_bnlmhp,
@@ -286,20 +328,35 @@ impl Mamba3 {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
         };
-        let (y_gamma_bnlmhp, final_state_gamma_bhpr) = input_gamma.run(ssd_path);
+        let (y_bnlmhp, final_state_bhpr) = input_gamma.run(ssd_path);
 
-        let input_beta = Mamba3DoubleSsdInput {
-            v_bnlmhp: v_beta_bnlmhp,
-            da_bnlh,
-            b_bnlmhr: b_prev_bnlmhr,
-            c_bnlmhr,
-            initial_state_bhpr: Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device),
-            init_state_hpr: None,
+        let (y_bnlmhp, final_state_bhpr) = match beta_side {
+            None => (y_bnlmhp, final_state_bhpr),
+            Some((x_beta_bShp, b_prev_bSmhr)) => {
+                let x_beta_bnlhp =
+                    x_beta_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
+                let b_prev_bnlmhr =
+                    b_prev_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
+                let v_beta_bnlmhp =
+                    helpers::build_v_with_mimo::<5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
+                let input_beta = Mamba3DoubleSsdInput {
+                    v_bnlmhp: v_beta_bnlmhp,
+                    da_bnlh,
+                    b_bnlmhr: b_prev_bnlmhr,
+                    c_bnlmhr,
+                    initial_state_bhpr: Tensor::zeros(
+                        [batch, nheads, per_head_dim, state_rank],
+                        &device,
+                    ),
+                    init_state_hpr: None,
+                };
+                let (y_beta_bnlmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
+                (
+                    y_bnlmhp + y_beta_bnlmhp,
+                    final_state_bhpr + final_state_beta_bhpr,
+                )
+            }
         };
-        let (y_beta_bnlmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
-
-        let y_bnlmhp = y_gamma_bnlmhp + y_beta_bnlmhp;
-        let final_state_bhpr = final_state_gamma_bhpr + final_state_beta_bhpr;
 
         san(&y_bnlmhp);
         san(&final_state_bhpr);
@@ -390,6 +447,7 @@ impl Mamba3 {
 
         // ── Update remaining cache fields ─────────────────────────────────────
         // k_state / v_state = B / x at the last micro-step of the last token
+        // (both `None` when the pattern has no β tap).
         cache.k_state_bmhr = b_last_bmhr;
         cache.v_state_bhp = x_last_bhp;
 
@@ -437,9 +495,10 @@ mod step {
         pub dt_buh: Tensor<3>,
         /// `α = exp(Δ·A)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
-        /// `β = (1−λ)·Δ·α` `[batch, u, nheads]`.
-        pub beta_buh: Tensor<3>,
-        /// `γ = λ·Δ` `[batch, u, nheads]`.
+        /// `β = (1−λ)·Δ·α` `[batch, u, nheads]`; `None` under
+        /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
+        pub beta_buh: Option<Tensor<3>>,
+        /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
     }
 
@@ -455,9 +514,10 @@ mod step {
         pub dt_bh: Tensor<2>,
         /// `α = exp(Δ·A)` `[batch, nheads]`.
         pub alpha_bh: Tensor<2>,
-        /// `β = (1−λ)·Δ·α` `[batch, nheads]`.
-        pub beta_bh: Tensor<2>,
-        /// `γ = λ·Δ` `[batch, nheads]`.
+        /// `β = (1−λ)·Δ·α` `[batch, nheads]`; `None` under
+        /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
+        pub beta_bh: Option<Tensor<2>>,
+        /// `γ = λ·Δ` `[batch, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_bh: Tensor<2>,
     }
 
@@ -471,7 +531,7 @@ mod step {
                 rot_ba: self.rot_bua.clone().map(pick2),
                 dt_bh: pick2(self.dt_buh.clone()),
                 alpha_bh: pick2(self.alpha_buh.clone()),
-                beta_bh: pick2(self.beta_buh.clone()),
+                beta_bh: self.beta_buh.clone().map(pick2),
                 gamma_bh: pick2(self.gamma_buh.clone()),
             }
         }
@@ -505,20 +565,23 @@ mod step {
             // are `u` times as wide and split onto a `u` axis of their own,
             // matching `forward`'s fold into the sequence.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
-            // See the note in `forward`: `Real1D` projects no rotation channels.
+            // See the note in `forward`: the two trailing segments are the
+            // optional ones (`Real1D` projects no rotation, `Trapezoid::None` no `λ`).
             let (proj_bd, rot_bA) =
-                helpers::split_rotation_channels(proj_bd, self.rotation_channels_total(), 1);
+                helpers::split_trailing(proj_bd, self.rotation_channels_total(), 1);
+            let (proj_bd, lambda_raw_bH) =
+                helpers::split_trailing(proj_bd, self.lambda_channels_total(), 1);
             #[rustfmt::skip]
             let [
                     z_bi, x_bI,
                     b_raw_bMGRU, c_raw_bMGR,
-                    dd_dt_bH, dd_a_raw_bH, lambda_raw_bH,
+                    dd_dt_bH, dd_a_raw_bH,
             ] = burn_stack::modules::split_into(
                 proj_bd,
                 [
                     d_inner, u * d_inner,
                     u * bc_size, bc_size,
-                    u * nheads, u * nheads, u * nheads,
+                    u * nheads, u * nheads,
                 ],
                 1,
             );
@@ -539,14 +602,16 @@ mod step {
             } = helpers::trapezoidal_coefficients(
                 unfold_micro_b(dd_dt_bH, u),
                 unfold_micro_b(dd_a_raw_bH, u),
-                unfold_micro_b(lambda_raw_bH, u),
+                lambda_raw_bH.map(|t| unfold_micro_b(t, u)),
                 self.dt_bias_h.val(),
                 self.dt_limit,
                 self.a_floor,
             );
             san(&dt_buh);
             san(&alpha_buh);
-            san(&beta_buh);
+            if let Some(beta_buh) = &beta_buh {
+                san(beta_buh);
+            }
             san(&gamma_buh);
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
@@ -733,8 +798,11 @@ mod step {
 
             let mut cache = cache.unwrap_or_else(|| {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
-                let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
-                let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+                let tap = self.trapezoid.has_beta_tap();
+                let k_state_bmhr =
+                    tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], device));
+                let v_state_bhp =
+                    tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], device));
                 let rotation = self.zero_rotation_state(batch, device);
                 Mamba3DoubleSsdCache {
                     ssm_bhpr,
@@ -760,6 +828,7 @@ mod step {
             // is [`Trapezoid::HorizontalCarryOver`] — lag 1 on the folded
             // sequence, so the tap crosses a token only at `j = 0`. A lag-`u`
             // pattern would carry `u` slots and read the one `u` back.
+            let has_beta_tap = self.trapezoid.has_beta_tap();
             let mut state_bhpr = cache.ssm_bhpr.clone();
             let mut prev_b_bmhr = cache.k_state_bmhr.clone();
             let mut prev_x_bhp = cache.v_state_bhp.clone();
@@ -793,14 +862,11 @@ mod step {
                 let x_vals_bmhp =
                     helpers::build_v_with_mimo::<3, 4>(m.x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
                 san(&x_vals_bmhp);
-                let xs_vals_bmhp =
-                    helpers::build_v_with_mimo::<3, 4>(prev_x_bhp, mimo_x_hmp.as_ref(), 1);
-                san(&xs_vals_bmhp);
 
                 // ── SSM state update ───────────────────────────────────────
                 // new_state[b, h, p, r] = alpha * state
                 //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
-                //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]
+                //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]   (β tap only)
                 //
                 // For the outer product sum:
                 //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
@@ -809,26 +875,47 @@ mod step {
                 // x_vals_bmhp * gamma_b1h1
                 // Need gamma as [b, 1, h, 1] to broadcast over m and p:
                 let gamma_b1h1 = m.gamma_bh.unsqueeze_dims::<4>(&[1, 3]);
-                let beta_b1h1 = m.beta_bh.unsqueeze_dims::<4>(&[1, 3]);
-
                 let x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
                 san(&x_gamma_bmhp);
-                let x_beta_bmhp = xs_vals_bmhp * beta_b1h1;
-                san(&x_beta_bmhp);
 
                 // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
                 let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
                 san(&xbt_state_bhpr);
-                let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, prev_b_bmhr, siso);
-                san(&xbt_prev_bhpr);
+
+                // The previous step's write. Under `Trapezoid::None` there is no
+                // second tap: no previous value tensor, no second outer product,
+                // and one fewer term in the state update.
+                let xbt_prev_bhpr = m.beta_bh.map(|beta_bh| {
+                    let xs_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
+                        prev_x_bhp.take().expect("a β tap keeps its previous x"),
+                        mimo_x_hmp.as_ref(),
+                        1,
+                    );
+                    san(&xs_vals_bmhp);
+                    let x_beta_bmhp = xs_vals_bmhp * beta_bh.unsqueeze_dims::<4>(&[1, 3]);
+                    san(&x_beta_bmhp);
+                    let xbt_prev_bhpr = helpers::mimo_outer_sum(
+                        x_beta_bmhp,
+                        prev_b_bmhr.take().expect("a β tap keeps its previous B"),
+                        siso,
+                    );
+                    san(&xbt_prev_bhpr);
+                    xbt_prev_bhpr
+                });
 
                 let alpha_bh11 = m.alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
-                let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr + xbt_prev_bhpr;
+                let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr;
+                let new_state_bhpr = match xbt_prev_bhpr {
+                    Some(xbt_prev_bhpr) => new_state_bhpr + xbt_prev_bhpr,
+                    None => new_state_bhpr,
+                };
                 san(&new_state_bhpr);
 
                 state_bhpr = new_state_bhpr;
-                prev_b_bmhr = b_bmhr;
-                prev_x_bhp = m.x_bhp;
+                if has_beta_tap {
+                    prev_b_bmhr = Some(b_bmhr);
+                    prev_x_bhp = Some(m.x_bhp);
+                }
                 rotation = new_rotation;
                 last = Some((c_bmhr, x_vals_bmhp));
             }

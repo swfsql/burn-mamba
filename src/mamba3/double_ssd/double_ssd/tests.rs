@@ -26,10 +26,11 @@ struct RunGrads {
     out: Tensor<3>,
     /// Final SSM hidden state from the returned cache.
     final_ssm: Tensor<4>,
-    /// Final previous-token B state from the returned cache.
-    final_k: Tensor<4>,
-    /// Final previous-token x state from the returned cache.
-    final_v: Tensor<3>,
+    /// Final previous-token B state from the returned cache; `None` for
+    /// [`Trapezoid::None`], which keeps no tap slot.
+    final_k: Option<Tensor<4>>,
+    /// Final previous-token x state from the returned cache; `None` with it.
+    final_v: Option<Tensor<3>>,
     /// Final cumulative RoPE angle from the returned cache; `None` for
     /// [`RotationKind::Real1D`], which has no accumulator.
     final_angle: Option<Tensor<3>>,
@@ -50,8 +51,10 @@ struct RunGrads {
 struct Heads {
     out: Tensor<3>,
     ssm: Tensor<4>,
-    k: Tensor<4>,
-    v: Tensor<3>,
+    /// `None` when the block is [`Trapezoid::None`] and its cache has no tap
+    /// slots to attach a loss head to.
+    k: Option<Tensor<4>>,
+    v: Option<Tensor<3>>,
     /// `None` when the block is [`RotationKind::Real1D`] and its cache has no
     /// rotation accumulator to attach a loss head to.
     angle: Option<Tensor<3>>,
@@ -92,10 +95,11 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         RotationKind::Real1D => RotationState::real(),
         _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
     };
+    let tap = cfg.trapezoid.has_beta_tap();
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
-        v_state_bhp: mk3([batch, nheads, per_head_dim]),
+        k_state_bmhr: tap.then(|| mk4([batch, mimo_rank, nheads, state_rank])),
+        v_state_bhp: tap.then(|| mk3([batch, nheads, per_head_dim])),
         rotation,
     }
 }
@@ -109,17 +113,22 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
             "final ssm",
             max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone()),
         ),
-        (
-            "final k_state",
-            max_abs_diff(a.final_k.clone(), b.final_k.clone()),
-        ),
-        (
-            "final v_state",
-            max_abs_diff(a.final_v.clone(), b.final_v.clone()),
-        ),
     ];
     let checks: Vec<(&str, f32)> = checks
         .into_iter()
+        // `Trapezoid::None` keeps no tap slots to compare.
+        .chain(
+            a.final_k
+                .clone()
+                .zip(b.final_k.clone())
+                .map(|(x, y)| ("final k_state", max_abs_diff(x, y))),
+        )
+        .chain(
+            a.final_v
+                .clone()
+                .zip(b.final_v.clone())
+                .map(|(x, y)| ("final v_state", max_abs_diff(x, y))),
+        )
         .chain(
             // `Real1D` has no accumulator to compare.
             a.final_angle
@@ -153,38 +162,36 @@ fn run_with_grads(
         other => Some(other.angle()),
     };
     let final_ssm = ssm.clone().inner();
-    let final_k = k.clone().inner();
-    let final_v = v.clone().inner();
+    let final_k = k.clone().map(|k| k.inner());
+    let final_v = v.clone().map(|v| v.inner());
     let final_angle = angle.clone().map(|a| a.inner());
 
     // Loss couples the output and every final cache field (each via its own
     // random head) so parameter gradients reflect both output and state.
+    // A field the pattern does not keep has no head and contributes no term.
     let out_head = Tensor::from_inner(heads.out.clone());
     let ssm_head = Tensor::from_inner(heads.ssm.clone());
-    let k_head = Tensor::from_inner(heads.k.clone());
-    let v_head = Tensor::from_inner(heads.v.clone());
-    let loss = match angle {
-        Some(a) => {
-            let angle_head = Tensor::from_inner(
-                heads
-                    .angle
-                    .clone()
-                    .expect("a rotating kind needs an angle head"),
-            );
-            (out * out_head).sum()
-                + (ssm * ssm_head).sum()
-                + (k * k_head).sum()
-                + (v * v_head).sum()
-                + (a * angle_head).sum()
-        }
-        // `Real1D` has no accumulator, hence no head and no term.
-        None => {
-            (out * out_head).sum()
-                + (ssm * ssm_head).sum()
-                + (k * k_head).sum()
-                + (v * v_head).sum()
-        }
-    };
+    let k_term = k
+        .zip(heads.k.clone())
+        .map(|(k, head)| (k * Tensor::from_inner(head)).sum());
+    let v_term = v
+        .zip(heads.v.clone())
+        .map(|(v, head)| (v * Tensor::from_inner(head)).sum());
+    // `Real1D` has no accumulator, hence no head and no term.
+    let angle_term = angle.map(|a| {
+        let angle_head = Tensor::from_inner(
+            heads
+                .angle
+                .clone()
+                .expect("a rotating kind needs an angle head"),
+        );
+        (a * angle_head).sum()
+    });
+    let loss = (out * out_head).sum() + (ssm * ssm_head).sum();
+    let loss = [k_term, v_term, angle_term]
+        .into_iter()
+        .flatten()
+        .fold(loss, |acc, term| acc + term);
     let grads = loss.backward();
 
     RunGrads {
@@ -314,8 +321,13 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: cfg.trapezoid.has_beta_tap().then(|| {
+            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        }),
+        v: cfg
+            .trapezoid
+            .has_beta_tap()
+            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -583,8 +595,13 @@ fn run_split_matches_full(cfg: Mamba3Config) {
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: cfg.trapezoid.has_beta_tap().then(|| {
+            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        }),
+        v: cfg
+            .trapezoid
+            .has_beta_tap()
+            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -661,8 +678,13 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: cfg.trapezoid.has_beta_tap().then(|| {
+            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        }),
+        v: cfg
+            .trapezoid
+            .has_beta_tap()
+            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };

@@ -14,6 +14,10 @@
 //!   `yₜ = Cₜᵀ h'ₜ` for all positions except the diagonal (s = t), which is
 //!   patched by an explicit `γₜ · (Cₜᵀ Bₜ) · xₜ` correction term in the kernel.
 //!
+//! Under [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) that
+//! difference disappears — `scaleₜ = γₜ` everywhere, so `h' ≡ h` at every
+//! position and the tap slots are absent from both caches.
+//!
 //! Because the two accumulators differ, the two caches are not interchangeable.
 //! The distinct type prevents accidentally feeding a `forward_double_ssd` cache into
 //! `forward_single_ssd` (or vice versa) mid-sequence — that would silently corrupt state.
@@ -90,15 +94,18 @@ pub struct Mamba3SingleSsdCache {
     /// contribution `(1 − λ₀) · Δ₀ · Bₜ₋₁ ⊗ xₜ₋₁` (which the previous call could
     /// not yet add because it did not know `λ₀, Δ₀`).
     ///
+    /// `None` under [`Trapezoid::None`], which has no boundary β term to defer.
+    ///
     /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_bmhr: Tensor<4>,
+    pub k_state_bmhr: Option<Tensor<4>>,
 
     /// **Previous token's x** = `xₜ₋₁`.
     ///
-    /// Paired with [`Self::k_state_bmhr`] to form the boundary β term.
+    /// Paired with [`Self::k_state_bmhr`] to form the boundary β term, and
+    /// `None` with it.
     ///
     /// Shape: `[batch, nheads, per_head_dim]`
-    pub v_state_bhp: Tensor<3>,
+    pub v_state_bhp: Option<Tensor<3>>,
 
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]).
@@ -113,8 +120,17 @@ impl Mamba3SingleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        san(&self.k_state_bmhr);
-        san(&self.v_state_bhp);
+        assert_eq!(
+            self.k_state_bmhr.is_some(),
+            self.v_state_bhp.is_some(),
+            "the trapezoid's tap slots are present or absent together"
+        );
+        if let Some(k_state_bmhr) = &self.k_state_bmhr {
+            san(k_state_bmhr);
+        }
+        if let Some(v_state_bhp) = &self.v_state_bhp {
+            san(v_state_bhp);
+        }
         self.rotation.sanity();
     }
 }
@@ -153,6 +169,11 @@ pub struct Mamba3SingleSsdCacheConfig {
     /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
     #[config(default = 1)]
     pub num_quat_blocks: usize,
+
+    /// The block's tap pattern (see
+    /// [`Mamba3DoubleSsdCacheConfig::trapezoid`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::trapezoid)).
+    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
+    pub trapezoid: Trapezoid,
 }
 
 impl Mamba3SingleSsdCacheConfig {
@@ -167,6 +188,7 @@ impl Mamba3SingleSsdCacheConfig {
             num_rope_angles: block_config.num_rope_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
+            trapezoid: block_config.trapezoid,
         }
     }
 
@@ -176,11 +198,15 @@ impl Mamba3SingleSsdCacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let k_state_bmhr = Tensor::zeros(
-            [self.batch, self.mimo_rank, self.nheads, self.state_rank],
-            device,
-        );
-        let v_state_bhp = Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device);
+        let tap = self.trapezoid.has_beta_tap();
+        let k_state_bmhr = tap.then(|| {
+            Tensor::zeros(
+                [self.batch, self.mimo_rank, self.nheads, self.state_rank],
+                device,
+            )
+        });
+        let v_state_bhp =
+            tap.then(|| Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device));
         let rotation = RotationState::identity(
             self.rotation,
             self.batch,

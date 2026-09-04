@@ -94,14 +94,14 @@ fn build_cross_caches(
     let v = Tensor::<3>::zeros([batch, nheads, per_head_dim], &device);
     let c3 = Mamba3DoubleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm.clone()),
-        k_state_bmhr: Tensor::from_inner(k.clone()),
-        v_state_bhp: Tensor::from_inner(v.clone()),
+        k_state_bmhr: Some(Tensor::from_inner(k.clone())),
+        v_state_bhp: Some(Tensor::from_inner(v.clone())),
         rotation: rotation(),
     };
     let cm = Mamba3SingleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm),
-        k_state_bmhr: Tensor::from_inner(k),
-        v_state_bhp: Tensor::from_inner(v),
+        k_state_bmhr: Some(Tensor::from_inner(k)),
+        v_state_bhp: Some(Tensor::from_inner(v)),
         rotation: rotation(),
     };
     (c3, cm)
@@ -141,10 +141,11 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         RotationKind::Real1D => RotationState::real(),
         _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
     };
+    let tap = cfg.trapezoid.has_beta_tap();
     Mamba3SingleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        k_state_bmhr: mk4([batch, mimo_rank, nheads, state_rank]),
-        v_state_bhp: mk3([batch, nheads, per_head_dim]),
+        k_state_bmhr: tap.then(|| mk4([batch, mimo_rank, nheads, state_rank])),
+        v_state_bhp: tap.then(|| mk3([batch, nheads, per_head_dim])),
         rotation,
     }
 }
@@ -284,8 +285,10 @@ fn run_with_grads_single_ssd(
     let (out, cache) = runner(model, input.val());
     let out_inner = out.clone().inner();
     let ssm = cache.ssm_bhpr;
-    let k = cache.k_state_bmhr;
-    let v = cache.v_state_bhp;
+    // These tests all run a β tap; `Trapezoid::None` never reaches this pathway
+    // (`forward_single_ssd` delegates to the double-SSD form for it).
+    let k = cache.k_state_bmhr.expect("a β tap keeps its tap slots");
+    let v = cache.v_state_bhp.expect("a β tap keeps its tap slots");
     let angle = match cache.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),
@@ -873,8 +876,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_a = run_cache_fields_with_grads(&model, &input_a, &heads, move |m, x| {
         let init_double = Mamba3DoubleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_a),
-            k_state_bmhr: Tensor::from_inner(k_a),
-            v_state_bhp: Tensor::from_inner(v_a),
+            k_state_bmhr: Some(Tensor::from_inner(k_a)),
+            v_state_bhp: Some(Tensor::from_inner(v_a)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
         };
         let prefix = x.clone().narrow(1, 0, split);
@@ -886,8 +889,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         (
             out,
             last.ssm_bhpr,
-            last.k_state_bmhr,
-            last.v_state_bhp,
+            last.k_state_bmhr.expect("a β tap keeps its tap slots"),
+            last.v_state_bhp.expect("a β tap keeps its tap slots"),
             last.rotation.angle(),
         )
     });
@@ -899,8 +902,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
         let init_single = Mamba3SingleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_b),
-            k_state_bmhr: Tensor::from_inner(k_b),
-            v_state_bhp: Tensor::from_inner(v_b),
+            k_state_bmhr: Some(Tensor::from_inner(k_b)),
+            v_state_bhp: Some(Tensor::from_inner(v_b)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
         };
         let prefix = x.clone().narrow(1, 0, split);
@@ -912,8 +915,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         (
             out,
             last.ssm_bhpr,
-            last.k_state_bmhr,
-            last.v_state_bhp,
+            last.k_state_bmhr.expect("a β tap keeps its tap slots"),
+            last.v_state_bhp.expect("a β tap keeps its tap slots"),
             last.rotation.angle(),
         )
     });

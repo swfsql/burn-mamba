@@ -37,6 +37,12 @@ impl Mamba3 {
     /// ([`Mamba3SingleSsdCache`]) because the stored hidden state has different
     /// semantics than the original-form cache used by [`Self::forward`].
     ///
+    /// Except under [`Trapezoid::None`], where there is no second pass to fuse:
+    /// the composite key scale is `γ` and the same-step correction is the whole
+    /// diagonal, so this *is* the double-SSD form — `h' ≡ h` at every position,
+    /// not merely at boundaries — and the call delegates rather than run a
+    /// strict-mask kernel plus a correction that reassembles what it masked.
+    ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
     /// - output: `[batch, sequence, d_model]`
@@ -47,6 +53,11 @@ impl Mamba3 {
         cache: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
+        if !self.trapezoid.has_beta_tap() {
+            let (out_bsm, cache) =
+                self.forward_double_ssd(input_bsm, cache.map(Into::into), ssd_path);
+            return (out_bsm, cache.into());
+        }
         let [batch, tokens, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
         let nheads = self.nheads();
@@ -70,8 +81,12 @@ impl Mamba3 {
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device);
-            let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], &device);
+            // Reached only with a β tap (`Trapezoid::None` delegated above).
+            let k_state_bmhr = Some(Tensor::zeros(
+                [batch, mimo_rank, nheads, state_rank],
+                &device,
+            ));
+            let v_state_bhp = Some(Tensor::zeros([batch, nheads, per_head_dim], &device));
             let rotation = self.zero_rotation_state(batch, &device);
             Mamba3SingleSsdCache {
                 ssm_bhpr,
@@ -90,22 +105,27 @@ impl Mamba3 {
         // (per-token gate) and `C` (per-token read) do not widen — `C` is
         // instead broadcast across the group so its *last* copy carries the
         // right cumulative rotation. See [`crate::mamba3::product`].
-        // The rotation channels come off first: `Real1D` projects none, and a
+        // The optional segments come off the tail first, in layout order: the
+        // rotation (`Real1D` projects none) and then `λ` — which is always
+        // present here, `Trapezoid::None` having delegated above — since a
         // zero-width segment would silently vanish from the split below.
         let u = micro_steps;
         let (proj_bsd, rot_btA) =
-            helpers::split_rotation_channels(proj_bsd, self.rotation_channels_total(), 2);
+            helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
+        let (proj_bsd, lambda_raw_btH) =
+            helpers::split_trailing(proj_bsd, self.lambda_channels_total(), 2);
+        let lambda_raw_btH = lambda_raw_btH.expect("a β tap projects λ");
         #[rustfmt::skip]
         let [
                 z_bsi, x_btI,
                 b_raw_btMGRU, c_raw_btMGR,
-                dd_dt_btH, dd_A_raw_btH, lambda_raw_btH,
+                dd_dt_btH, dd_A_raw_btH,
         ] = burn_stack::modules::split_into(
             proj_bsd,
             [
                 d_inner, u * d_inner,
                 u * bc_size, bc_size,
-                u * nheads, u * nheads, u * nheads,
+                u * nheads, u * nheads,
             ],
             2,
         );
@@ -133,7 +153,7 @@ impl Mamba3 {
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
             dd_A_raw_bsh,
-            lambda_raw_bsh.clone(),
+            Some(lambda_raw_bsh.clone()),
             self.dt_bias_h.val(),
             self.dt_limit,
             self.a_floor,
@@ -230,12 +250,21 @@ impl Mamba3 {
 
         // Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ)  → [batch, nheads, per_head_dim, state_rank]
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let v_prev_mimo_bmhp =
-            helpers::build_v_with_mimo::<3, 4>(cache.v_state_bhp.clone(), mimo_x_hmp.as_ref(), 1); // [batch, mimo_rank, nheads, per_head_dim]
+        let v_prev_mimo_bmhp = helpers::build_v_with_mimo::<3, 4>(
+            cache
+                .v_state_bhp
+                .clone()
+                .expect("a β tap keeps its (B, x) cache slot"),
+            mimo_x_hmp.as_ref(),
+            1,
+        ); // [batch, mimo_rank, nheads, per_head_dim]
         // einsum: bmhp, bmhr -> bhpr  (contract over m)
         let boundary_seed_bhpr = helpers::mimo_outer_sum(
             v_prev_mimo_bmhp,
-            cache.k_state_bmhr.clone(),
+            cache
+                .k_state_bmhr
+                .clone()
+                .expect("a β tap keeps its (B, x) cache slot"),
             self.use_siso_decode_kernels(),
         );
         let initial_state_bhpr = cache.ssm_bhpr.clone()
@@ -374,8 +403,8 @@ impl Mamba3 {
         san(&out_bsm);
 
         // ── Update remaining cache fields ─────────────────────────────────────
-        cache.k_state_bmhr = b_last_bmhr;
-        cache.v_state_bhp = x_last_bhp;
+        cache.k_state_bmhr = Some(b_last_bmhr);
+        cache.v_state_bhp = Some(x_last_bhp);
         // The new cumulative rotation (Complex2D: angle wrapped to [−π, π];
         // Quaternion4D: the cumulative quaternion), from [`rotate_bc_forward`] —
         // matches the double-ssd cache convention so the two inter-convert.

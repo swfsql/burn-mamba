@@ -204,6 +204,10 @@ pub struct Mamba3 {
     /// Output splits, with `u` = [`Self::micro_steps`]:
     /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | rotation·u]`
     ///
+    /// The last two segments are optional and trail for that reason:
+    /// [`Trapezoid::None`] projects no `lambda_raw`,
+    /// [`RotationKind::Real1D`] no `rotation`.
+    ///
     /// Every **per-micro-step** stream is projected `u` times over and folded
     /// into the sequence by [`crate::mamba3::product`]; the gate `z` and the
     /// read `C` are per token. At the default `u = 1` this is the stock
@@ -381,6 +385,18 @@ impl Mamba3 {
     /// micro-step turns the state by a rotation of its own.
     pub fn rotation_channels_total(&self) -> usize {
         self.micro_steps * self.num_rotation_channels
+    }
+
+    /// Width of the in-projection's `λ` segment — one channel per (head,
+    /// micro-step), or **`0`** under [`Trapezoid::None`], which has no `λ` to
+    /// project. Peeled off the tail by `helpers::split_trailing`, immediately
+    /// inside the rotation segment.
+    pub fn lambda_channels_total(&self) -> usize {
+        if self.trapezoid.has_beta_tap() {
+            self.micro_steps * self.nheads()
+        } else {
+            0
+        }
     }
 
     /// Everything the rotation needs, in one place — the algebra, the rotated
@@ -734,20 +750,26 @@ impl Mamba3Config {
     ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u ]
     /// ```
     ///
-    /// i.e. `d_inner + u·d_inner + u·bc + bc + 3·u·nheads + u·num_rotation_channels`
-    /// with `bc = ngroups·state_rank·mimo_rank` and `u` =
+    /// i.e. `d_inner + u·d_inner + u·bc + bc + (2 or 3)·u·nheads +
+    /// u·num_rotation_channels` with `bc = ngroups·state_rank·mimo_rank` and `u` =
     /// [`Self::micro_steps`]. Only the **per-micro-step** segments widen; the
     /// gate `z` and the read `C` are per token (see [`crate::mamba3::product`]).
     /// At `u = 1` this is the stock
     /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
+    ///
+    /// The two trailing segments are the ones a block may omit outright:
+    /// [`Trapezoid::None`] projects no `λ` and
+    /// [`RotationKind::Real1D`] no rotation
+    /// (`helpers::split_trailing` peels them in that order).
     pub fn d_in_proj(&self) -> usize {
         let u = self.micro_steps;
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
+        let scalars = if self.trapezoid.has_beta_tap() { 3 } else { 2 };
         self.d_inner()
             + u * self.d_inner()
             + u * bc
             + bc
-            + 3 * u * self.nheads()
+            + scalars * u * self.nheads()
             + u * self.num_rotation_channels()
     }
 
@@ -777,7 +799,14 @@ impl Mamba3Config {
             .chain(std::iter::once(Seg::muon("c", bc)))
             .chain(per_micro(Seg::adamw("dt", nheads)))
             .chain(per_micro(Seg::adamw("a", nheads)))
-            .chain(per_micro(Seg::adamw("lambda", nheads)))
+            // `Trapezoid::None` projects no `λ`, as `Real1D` projects no rotation.
+            .chain(
+                self.trapezoid
+                    .has_beta_tap()
+                    .then(|| per_micro(Seg::adamw("lambda", nheads)))
+                    .into_iter()
+                    .flatten(),
+            )
             // `Real1D` has no rotation columns, and a zero-width segment is
             // not a thing (see `num_rotation_channels`).
             .chain(
@@ -1023,8 +1052,10 @@ impl Mamba3 {
         let state_rank = self.state_rank;
         let mimo_rank = self.mimo_rank;
         let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
-        let k_state_bmhr = Tensor::zeros([batch, mimo_rank, nheads, state_rank], device);
-        let v_state_bhp = Tensor::zeros([batch, nheads, per_head_dim], device);
+        let tap = self.trapezoid.has_beta_tap();
+        let k_state_bmhr =
+            tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], device));
+        let v_state_bhp = tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], device));
         let rotation = self.zero_rotation_state(batch, device);
         crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
             ssm_bhpr,
