@@ -211,7 +211,10 @@ notation tables; the essentials:
   (`micro_steps=u>1`, below). B/C use **QK-Norm before** the SSD (not a post gated
   norm); no short conv. The in-projection splits
   `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|θ·u]` — only the per-micro-step
-  segments widen.
+  segments widen. The trapezoid touches only the *linear* term of the local objective
+  (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two
+  installments collapse), so it is orthogonal to the rotation and to `micro_steps`:
+  `info/trapezoid-as-integration.md` — cite it, don't restate it.
 
 ### Mamba-3: two SSD pathways (the central design point)
 

@@ -135,7 +135,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
-  `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁`, strict-lower-triangular intra-chunk mask + same-step γ
+  `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` (a sample's two trapezoid installments share a transport
+  and collapse to this one scalar — `info/trapezoid-as-integration.md` §5; the pathway
+  exists because they do), strict-lower-triangular intra-chunk mask + same-step γ
   correction (in-kernel), and a **boundary-β seed** folded into the initial state. Same
   micro-step fold/collapse as the double pathway; everything between (trapezoid, `scale`,
   QK-norm, rotation, seed, chunking) runs at micro-step resolution unchanged.
@@ -181,7 +183,10 @@ Non-obvious: unlike DeltaProduct there is no forget gate to keep at token rate �
 fuses decay, write weight and rotation rate into one `Δ` — so every micro-step decays; a
 scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silence the
 rotation with it. The trapezoid's two taps consequently straddle *micro-steps*, and the
-caches hold the **last micro-step**, which is exactly what the next call's first follows.
+caches hold the **last micro-step**, which is exactly what the next call's first follows —
+so only `1/u` of the taps still cross a token and the interior ones pair two projections of
+*one* token (`info/trapezoid-as-integration.md` §§8–9, with the tap lattice `u>1` opens;
+`λ` is per micro-step, so `λ=1` on the interior recovers the `u=1` semantics).
 Tests: helper round-trips; `d_in_proj`/Muon-tiling arithmetic (`u=1` is stock); forward≡step
 on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; forward≡step
 **gradients** (input + `in_proj`); per-micro-step gradient liveness (a dropped or
@@ -341,3 +346,16 @@ their own rationale.
   document's numbered claims, section numbers matching. Encodes the recurrence from the
   equations and never imports the crate, so it is independent of the implementation
   (which the Rust suites cover). Runs standalone; non-zero exit on failure.
+- **`info/trapezoid-as-integration.md`** — the reference for the trapezoidal
+  discretisation and its interaction with `micro_steps`; companion to the above, which
+  classifies the *quadratic* term while this classifies the *linear* one. Derives: the
+  rank-two target, and that `λ` touches only the linear term (so the isotropy arguments
+  survive); `λ` as an operator-splitting parameter (Lie–Trotter at 1, Strang at ½, which
+  *derives* the paper's `O(Δ³)` condition); the two-installment collapse `Δ̃ₛ`, which **is**
+  single-ssd's key scale; the augmented state as a feedforward buffer (`spec = spec(M)∪{0}`)
+  and its exact difference from momentum; the token-level `A(x_i)`/`B(x_{i−1},x_i)` unroll,
+  in which `λ` never appears in `A`; the collapse theorem for arbitrary tap lags and the
+  vertical/reset-horizontal/carry-over-horizontal lattice it opens at `u>1`.
+  Cite it rather than restating it.
+- **`scripts/trapezoid_as_integration.py`** — same contract as the above: float64 `numpy`,
+  54 checks, section numbers matching, standalone, non-zero exit on failure.
