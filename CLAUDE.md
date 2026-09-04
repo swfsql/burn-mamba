@@ -214,7 +214,10 @@ notation tables; the essentials:
   segments widen. The trapezoid touches only the *linear* term of the local objective
   (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two
   installments collapse), so it is orthogonal to the rotation and to `micro_steps`:
-  `info/trapezoid-as-integration.md` — cite it, don't restate it.
+  `info/trapezoid-as-integration.md` — cite it, don't restate it. MIMO widens that *same*
+  linear term along **rank** — a minibatch of `M` with free keys and tied values, `G`
+  untouched — which is why it composes with everything else and why a MIMO block *is* its
+  SISO block at init: `info/mimo-as-batch.md` — cite it, don't restate it.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
@@ -244,6 +247,10 @@ telescopes out of the state and is absorbed into B/C ("RoPE trick"), leaving the
 scalar-decay SSD core. The angles are data-dependent, not a fixed frequency schedule —
 that is what buys state-tracking (parity/mod-k), and why a step difference `θⱼ−θᵢ` is
 rotation accumulated, never a position. Same argument for `Quaternion4D` below.
+
+The rotation is per (head, plane) and **broadcast over the MIMO ranks**, necessarily: the `M`
+ranks share one state, so they share its transition, and per-rank angles have no state-space
+preimage at all (`info/mimo-as-batch.md` §7).
 
 Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
 `range·π·tanh(·)`, Δ-scaled per head, then **`cumsum`** along the sequence (continued
@@ -324,7 +331,9 @@ rot)` in-proj columns.
 
 What `u` buys is decided by the `RotationKind`, and the split is sharp. `Real1D`: the
 factors are scalars and commute, so it widens only the write — the *sequential* reading of
-the cell `mimo_rank` occupies *jointly*, which is also why the dial does not exist on
+the cell `mimo_rank` occupies *jointly* (exactly: `MambaProduct(u=M)` reproduces a whole
+`MIMO(M)` trajectory and the converse fails — `u` is MIMO with the values, step sizes and
+rotation *untied*, at `u`× the recurrence), which is also why the dial does not exist on
 Mamba-2. `Complex2D`: `u`× the per-token angle reach with a live gradient at every factor,
 lifting exactly the `tanh`-asymptote bound `rotation_range` documents. `Quaternion4D`/
 `Rotor4D`: a non-commuting product no single bounded step can express — DeltaProduct's own

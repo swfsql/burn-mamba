@@ -68,7 +68,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** unless `Real1D`;
-  `mimo_rank` 1=SISO; `micro_steps` (`u`, default 1 = stock) — MambaProduct, see
+  `mimo_rank` 1=SISO, the rank dial (`info/mimo-as-batch.md`; `mimo_{x,z,o}_hmp` init
+  `1/M`, `1`, `1/M`, so a MIMO block *is* its SISO block at init — key `mean_m B[m]`,
+  query `mean_m C[m]`, `D/M`, and a rank-**one** write);
+  `micro_steps` (`u`, default 1 = stock) — MambaProduct, see
   `mamba3/product/`; `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
@@ -359,3 +362,17 @@ their own rationale.
   Cite it rather than restating it.
 - **`scripts/trapezoid_as_integration.py`** — same contract as the above: float64 `numpy`,
   54 checks, section numbers matching, standalone, non-zero exit on failure.
+- **`info/mimo-as-batch.md`** — the reference for `mimo_rank` and its interaction with
+  `micro_steps` and `RotationKind`; third of the trio, classifying the linear term along
+  *rank* where the trapezoid note classifies it along *time*. Derives: the rank-`M`
+  objective (a minibatch of `M`, ridge split `ρ/M`; `G` stays `(1−α)I`, so the isotropy
+  arguments survive); the value tying — `M` free keys but one value through `M` fixed
+  masks — priced at `(M−1)P − M² + 1` lost write dimensions; the paper's `M²`-SISO
+  identity as *isotropy*, not a property of MIMO (it fails for both a sequential and a
+  jointly-solved rank-`M` delta rule); the init identity above; why the rotation **must**
+  be shared across ranks (one state ⇒ one transition; per-rank angles have no state-space
+  preimage and break the time-invariance of the same-step `M²` Gram); and the containment
+  `MambaProduct(u=M) ⊇ MIMO(M)`, the two dials being one dial with different things tied.
+  Cite it rather than restating it.
+- **`scripts/mimo_as_batch.py`** — same contract as the above: float64 `numpy`, 54 checks,
+  section numbers matching, standalone, non-zero exit on failure.
