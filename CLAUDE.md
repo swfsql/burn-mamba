@@ -183,7 +183,8 @@ Carry streaming state between calls. Mamba-1/2 caches hold a conv window + SSM s
 
 The chunkwise scan is pluggable via an `…SsdPath` enum; each variant carries an
 optional chunk length (`None` ⇒ optimal ≈ `√(state_rank·per_head_dim)`, mult-of-32,
-capped 512):
+capped 512 — Mamba-3 divides that by `mimo_rank·micro_steps` first, both being
+widenings of the chunk that do not appear in it: `info/architecture-deltas.md` §8):
 
 | Variant | Algorithm | Backward |
 |---------|-----------|----------|
@@ -215,7 +216,10 @@ notation tables; the essentials:
   collapses to Mamba-2), a **complex transition** (`A+iθ`) realised as
   **data-dependent RoPE** on B/C, **MIMO** (`mimo_rank>1`), and **MambaProduct**
   (`micro_steps=u>1`, below). B/C use **QK-Norm before** the SSD (not a post gated
-  norm); no short conv. The in-projection splits
+  norm), then a learnable ones-init per-(head,rank) bias, then the rotation; no short
+  conv. Why those two deletions are affordable, why the bias order and its init are
+  mechanisms rather than decoration, and what data-dependent `A` buys:
+  `info/architecture-deltas.md` — cite it, don't restate it. The in-projection splits
   `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u]` — only the per-micro-step
   segments widen. The trapezoid touches only the *linear* term of the local objective
   (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two

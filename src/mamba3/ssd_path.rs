@@ -21,7 +21,8 @@ use crate::mamba3::prelude::*;
 ///
 /// Each variant carries an optional chunk length. Larger values increase the
 /// intra-chunk GEMM work and reduce the inter-chunk scan length; the optimal
-/// value is approximately `√(state_rank · per_head_dim)` (see
+/// value is approximately `√(state_rank · per_head_dim)`, divided by whatever
+/// `mimo_rank` and `micro_steps` already widen the chunk by (see
 /// [`Self::optimal_chunk_len`]). `None` falls back to that optimal value.
 ///
 /// If no path is specified, the cache defaults to
@@ -54,13 +55,47 @@ pub enum Mamba3SsdPath {
 }
 
 impl Mamba3SsdPath {
-    /// Optimal chunk length, approximately `√(state_rank · per_head_dim)`,
-    /// rounded up to a multiple of 32 and capped at 512.
-    pub fn optimal_chunk_len(state_rank: usize, per_head_dim: usize) -> usize {
+    /// Optimal chunk length: approximately `√(state_rank · per_head_dim)` divided
+    /// by `mimo_rank · micro_steps`, rounded up to a multiple of 32 and clamped to
+    /// `32 ..= 512`.
+    ///
+    /// The square root is the SISO rule of thumb — it balances the intra-chunk
+    /// GEMMs against the inter-chunk scan. Two of the block's dials widen a chunk
+    /// without appearing in it, and the divisor takes both back:
+    ///
+    /// - **`mimo_rank`** (`m`): the intra-chunk matmuls run on the *fused*
+    ///   `chunk_len · mimo_rank` axis, so the quantity the rule of thumb is about
+    ///   is `chunk_len · m`, not `chunk_len`. Leaving `chunk_len` alone costs `m²`
+    ///   where the schedule below costs `m` — the source's own advice, carried on
+    ///   its `chunk_size` argument as "64 for SISO, 64/mimo_rank for MIMO".
+    /// - **`micro_steps`** (`u`): micro-steps are folded into the sequence axis, so
+    ///   a chunk of `chunk_len` positions holds `chunk_len / u` tokens. FLOPs alone
+    ///   are indifferent to this (`u` multiplies the intra- and inter-chunk terms
+    ///   alike), but the materialised score `[batch, nchunks, heads, LM, LM]` costs
+    ///   `batch · sequence · u · heads · chunk_len · m²` — linear in `chunk_len`,
+    ///   in `u` and in `m²`. Dividing the chunk divides that memory by the same
+    ///   factor. Memory is the binding constraint here, there being no fused kernel
+    ///   to hide it.
+    ///
+    /// The 32 grid survives the division (it is applied after it), so the divisor
+    /// saturates: at the usual `√(N·P) ≈ 90` the schedule is `96 → 64 → 32` for a
+    /// fold of `1 → 2 → ≥3`, and 32 is the floor. The saving is therefore
+    /// `96 / chunk_len`, capping at `3×` — the schedule flattens the slope in `u`,
+    /// it does not remove it. Pass an explicit chunk length to go further.
+    ///
+    /// `info/architecture-deltas.md` §8.
+    pub fn optimal_chunk_len(
+        state_rank: usize,
+        per_head_dim: usize,
+        mimo_rank: usize,
+        micro_steps: usize,
+    ) -> usize {
+        let fold = (mimo_rank * micro_steps).max(1);
         (state_rank * per_head_dim)
             .isqrt()
+            .div_ceil(fold) // the fused axis is `chunk_len · m`, over `u`-fold positions.
             .next_multiple_of(32) // rule-of-thumb: common plane dimension.
-            .min(512) // rule-of-thumb: ceiling at 512.
+            .clamp(32, 512) // rule-of-thumb: one plane minimum, ceiling at 512.
     }
 
     /// The chunk length carried by this variant, if any.
@@ -73,19 +108,33 @@ impl Mamba3SsdPath {
     }
 
     /// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
-    /// when unset.
-    pub fn chunk_len_or_optimal(&self, state_rank: usize, per_head_dim: usize) -> usize {
-        self.chunk_len()
-            .unwrap_or_else(|| Self::optimal_chunk_len(state_rank, per_head_dim))
+    /// for `block`'s dimensions when unset.
+    pub fn chunk_len_or_optimal(&self, block: &Mamba3) -> usize {
+        self.chunk_len().unwrap_or_else(|| {
+            Self::optimal_chunk_len(
+                block.state_rank,
+                block.per_head_dim(),
+                block.mimo_rank,
+                block.micro_steps,
+            )
+        })
     }
 
     /// The recommended default path for a given block: [`Self::SerialRecalculated`]
     /// with [`Self::optimal_chunk_len`] for the block's dimensions.
     pub fn default_optimal_from_block(block: &Mamba3) -> Self {
-        let chunk_len = Self::optimal_chunk_len(block.state_rank, block.per_head_dim());
+        let chunk_len = Self::optimal_chunk_len(
+            block.state_rank,
+            block.per_head_dim(),
+            block.mimo_rank,
+            block.micro_steps,
+        );
         Self::SerialRecalculated(Some(chunk_len))
     }
 }
+
+#[cfg(all(test, feature = "_dev-test"))]
+mod tests;
 
 impl Default for Mamba3SsdPath {
     fn default() -> Self {

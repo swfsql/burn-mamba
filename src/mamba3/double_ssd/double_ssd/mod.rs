@@ -277,7 +277,7 @@ impl Mamba3 {
             self.save_tap_slots(&b_bsmhr, &x_bshp, &da_bsh, lag);
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
-        let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+        let chunk_len = ssd_path.chunk_len_or_optimal(self);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 

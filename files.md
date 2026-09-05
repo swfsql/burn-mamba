@@ -133,6 +133,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `h'` equals double-ssd `h`.
 - **`ssd_path.rs`** — pathway-agnostic `Mamba3SsdPath` (`Default=SerialRecalculated(None)`);
   `From` both sub-paths so it converts to whichever pathway the cache selects.
+  `optimal_chunk_len(r, p, m, u)` divides the `√(r·p)` rule by `m·u` before the 32-grid
+  rounding (`clamp(32, 512)`): `m` fuses onto the chunk axis (FLOPs, the source's own
+  `chunk_size` advice), `u` folds into the sequence axis (the materialised score costs
+  `C·m²·u` per token). Saturates at the floor — `info/architecture-deltas.md` §8.
 - **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample(s)
   the `β` tap reads. A choice that exists only at `micro_steps > 1`
   (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks how many
@@ -449,3 +453,23 @@ their own rationale.
   Cite it rather than restating it.
 - **`scripts/mimo_as_batch.py`** — same contract as the above: float64 `numpy`, 54 checks,
   section numbers matching, standalone, non-zero exit on failure.
+- **`info/architecture-deltas.md`** — the reference for the Mamba-3 block *outside* the
+  recurrence, where the trio above covers the recurrence itself; the only note that
+  prices empirical ablations rather than deriving. Establishes: BCNorm pins `‖B‖=√N`, so
+  the ones-initialised `B`/`C` biases add a score term of exactly `N` against a data term
+  of sd `√N` — a fresh block's read **is** the decay-weighted causal average to `O(1/√N)`,
+  which is the paper's "convolution-like behaviour" made quantitative and reproduces its
+  bias-init ablation order (floor `=⟨b_C,b_B⟩`: `N`, `N/4`, `0`, `0`); the bias lands
+  **before** the rotation, so that floor is `(N−rope_dim)+2Σcos(θₜ−θₛ)`, a locality prior
+  whose flat part is `1−rope_fraction`; the two mechanisms that replaced the short conv
+  (the trapezoid's width-2 state-input filter, the bias floor) are both strictly
+  **positive**, so the deletion costs differencing, not smoothing; data-dependent `A` adds
+  exactly one dof per (token, head), untying decay from write weight up to
+  `α ≤ e^{−a_floor·Δ}` (the source calls it performance-neutral); what each output-norm
+  placement erases (post-gate erases a gate rescaling, pre-gate keeps it), the mechanism
+  behind the hybrid norm table; and §8, the argument behind `optimal_chunk_len`'s divisor.
+  Cite it rather than restating it.
+- **`scripts/architecture_deltas.py`** — same contract as the above: float64 `numpy`, 35
+  checks, section numbers matching, standalone, non-zero exit on failure. Defines the
+  `B`/`C` path and the trapezoid coefficients from scratch and never calls the crate, so
+  a failure is a wrong claim, not a drifted implementation.
