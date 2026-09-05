@@ -313,7 +313,7 @@ And the underlying reason is structural, not a matter of degree:
 
 So per-rank angles are not a member of the rotation ladder at all — the transition
 would remain the real scalar `α_t`, and every transition-level property (`Real1D`'s
-row: no state tracking, the descent bound, `step_infinite`) would go with it. They
+row: no state tracking, the descent bound) would go with it. They
 would also buy nothing on the write: measured against a QK-normed key, a per-rank
 rotation adds **zero** directions to the reachable write map, because QK-norm removes
 the key's *magnitude* and never its direction, and the direction was already free.

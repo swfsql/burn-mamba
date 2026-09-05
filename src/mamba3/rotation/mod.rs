@@ -200,11 +200,10 @@ impl RotationKind {
 /// `state_rank` it turns, and how far one step may turn it.
 ///
 /// Carried by [`Mamba3`](crate::mamba3::mamba3::Mamba3) and handed to
-/// [`rotate_bc_forward`] / [`rotate_bc_step`] (and to the constant-input
-/// shortcut) so that every site derives the per-step rotation from **one**
-/// definition — the three used to spell the formula out separately, which is
-/// exactly the kind of duplication that lets `forward`, `step` and
-/// `step_infinite` drift apart.
+/// [`rotate_bc_forward`] / [`rotate_bc_step`] so that every site derives the
+/// per-step rotation from **one** definition — the two used to spell the
+/// formula out separately, which is exactly the kind of duplication that lets
+/// `forward` and `step` drift apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RotationSpec {
     /// Which rotational-state algebra ([`RotationKind`]).

@@ -176,19 +176,6 @@ impl MambaLatentNet {
         }
     }
 
-    /// Stationary fixed point under a constant token (no caches) — see
-    /// [`LatentNetwork::step_infinite`]. Only the Mamba-3 family implements the
-    /// closed form; the other variants panic.
-    pub fn step_infinite(&self, x: Tensor<2>) -> Tensor<2> {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(net) => net.step_infinite(x),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(net) => net.step_infinite(x),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(net) => net.step_infinite(x),
-        }
-    }
 }
 
 /// The serializable, documentation-friendly config for [`MambaLatentNet`]. Each
@@ -606,19 +593,6 @@ impl MambaVocabNet {
         }
     }
 
-    /// Stationary fixed point under a constant token (no caches) — see
-    /// [`VocabNetwork::step_infinite`]. Only the Mamba-3 family implements the
-    /// closed form; the other variants panic.
-    pub fn step_infinite(&self, x: Tensor<1, Int>) -> Tensor<2> {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(net) => net.step_infinite(x),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(net) => net.step_infinite(x),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(net) => net.step_infinite(x),
-        }
-    }
 }
 
 /// The serializable, documentation-friendly config for [`MambaVocabNet`]. Each

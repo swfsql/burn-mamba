@@ -705,11 +705,6 @@ is the obstruction above, computed over all six ordered pairs of distinct units;
   length in symbols; only the packing changes. So this is not a harder word
   problem — it is the same one, asked at half the number of recurrence steps a
   stock block would take.
-- **`step_infinite` is unavailable here**, as it is for every non-abelian kind
-  at `u > 1`: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` depends on `n`
-  alone only if `Qⱼ` commutes with `P`, so the constant-token output is
-  almost-periodic rather than convergent. The block asserts rather than
-  approximating.
 
 </details>
 

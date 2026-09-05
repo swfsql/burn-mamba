@@ -133,9 +133,7 @@
 //! micro-steps into the sequence axis, so nothing below this line changes. See
 //! [`crate::mamba3::product`] for what `u` buys per
 //! [`RotationKind`] — the answer is very
-//! different for the abelian and non-abelian ones — and for the fact that
-//! [`Mamba3::step_infinite`] has no limit to return at `u > 1` when the
-//! rotations do not commute.
+//! different for the abelian and non-abelian ones.
 //!
 //! Implementation note: the trapezoidal recurrence (in the double-ssd pathway)
 //! is computed by splitting it into a γ-SSD (current-token contributions) and
@@ -401,8 +399,8 @@ impl Mamba3 {
 
     /// Everything the rotation needs, in one place — the algebra, the rotated
     /// width, and the per-step bound. Every site that materialises a per-step
-    /// rotation ([`forward`](Self::forward), [`step`](Self::step),
-    /// [`step_infinite`](Self::step_infinite)) goes through this.
+    /// rotation ([`forward`](Self::forward), [`step`](Self::step)) goes
+    /// through this.
     pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
         crate::mamba3::rotation::RotationSpec {
             kind: self.rotation,
@@ -491,9 +489,7 @@ pub struct Mamba3Config {
     /// multiplies the per-token angle reach by `u` *without* pushing any single
     /// factor onto `tanh`'s flat region (see [`Self::rotation_range`]); with the
     /// non-abelian kinds it composes generators that no single step can express.
-    /// See [`crate::mamba3::product`] for the full argument, the folding, and
-    /// the one capability `u > 1` costs
-    /// ([`step_infinite`](Mamba3::step_infinite) on the non-abelian kinds).
+    /// See [`crate::mamba3::product`] for the full argument and the folding.
     #[config(default = 1)]
     pub micro_steps: usize,
 
@@ -645,8 +641,8 @@ pub struct Mamba3Config {
 
     /// Whether to use the specialized `mimo_rank == 1` (SISO) **per-token**
     /// kernels: the decode state update and readout
-    /// (`helpers::mimo_outer_sum`, `Mamba3::step_readout`), the single-SSD
-    /// boundary-β seed, and [`step_infinite`](Mamba3::step_infinite)'s Gram.
+    /// (`helpers::mimo_outer_sum`, `Mamba3::step_readout`) and the single-SSD
+    /// boundary-β seed.
     ///
     /// **Set this to `false` on the CPU backends.** Unlike the chunkwise flag,
     /// this one replaces a *single, already efficient* batched matmul with a

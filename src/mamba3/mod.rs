@@ -47,7 +47,6 @@ pub mod product;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
-mod step_constant;
 pub mod trapezoid;
 
 use crate::mamba3::double_ssd::prelude::*;

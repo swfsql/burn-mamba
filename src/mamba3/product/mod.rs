@@ -137,19 +137,6 @@
 //! sequence" means, and it is what keeps `forward` and `step` in exact
 //! agreement.
 //!
-//! ## The one thing `u > 1` takes away
-//!
-//! [`Mamba3::step_infinite`](crate::mamba3::mamba3::Mamba3::step_infinite) —
-//! the stationary output under a constant token — **exists only for the abelian
-//! kinds** once
-//! `u > 1`. The readout at token `t` sees a write from token `t − n` through the
-//! relative rotation `P⁻ᵗ Qⱼ Pᵗ⁻ⁿ⁻¹`, where `P = Rᵤ⋯R₁` is the per-token product
-//! and `Qⱼ = Rⱼ⋯R₁` the partial one. That collapses to a function of `n` alone
-//! iff `Qⱼ` commutes with `P`. When it does not — [`Quaternion4D`],
-//! [`Rotor4D`] — the conjugation `P⁻ᵗQⱼPᵗ` keeps turning with `t` and the output
-//! is almost-periodic rather than convergent: there is no limit to return, which
-//! is a fact about the recurrence and not a gap in the implementation.
-//!
 //! ## Notation
 //!
 //! `u` is `micro_steps`. In the folded region of `forward` the shape letter `s`

@@ -125,8 +125,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   depth (`0` none / `1` lag-1 / `u` lag-`u`). Implemented: `HorizontalCarryOver` (lag 1 on
   the *folded* sequence; the default) and `None` (`λ ≡ 1` ⇒ `β = 0`, `γ = Δ`, with nothing
   paid for the absent term anywhere — no `λ` in-proj/Muon segment, no `β` tensor, no tap
-  slots, **one** SSD call in `forward`, one outer product in `step`, a `β`-free
-  `step_infinite`; the two pathways coincide, so `forward_single_ssd` delegates).
+  slots, **one** SSD call in `forward`, one outer product in `step`; the two pathways
+  coincide, so `forward_single_ssd` delegates).
   `assert_implemented()` is called from `Mamba3Config::init`, so the rest fail at
   construction. Degeneracies at
   `u = 1`: `Vertical` = `HorizontalCarryOver`, `HorizontalReset` = `None`.
@@ -148,8 +148,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `MicroProjection`/`StepProjection::micro(j)` peels, `z`/`C` are per token; `rot_ba` is
   `None` under `Real1D`), `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and
   `step_finish`
-  (D-skip, gate/gated-norm, MIMO aggregation, out-proj), shared with
-  `step_constant`. `rotation/rope.rs`'s `apply_rope`/`apply_rope_partial` (rotate
+  (D-skip, gate/gated-norm, MIMO aggregation, out-proj). `rotation/rope.rs`'s `apply_rope`/`apply_rope_partial` (rotate
   last-dim pairs; interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; `rope_dim > 0`
   required) and `wrap_angle` are used by **both** pathways.
 - **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), `k_state_bmhr`
@@ -222,7 +221,7 @@ so only `1/u` of the taps still cross a token and the interior ones pair two pro
 Tests: helper round-trips; `d_in_proj`/Muon-tiling arithmetic (`u=1` is stock); forward≡step
 on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; forward≡step
 **gradients** (input + `in_proj`); per-micro-step gradient liveness (a dropped or
-mis-ordered micro-step passes every value test); `step_infinite` vs unrolled.
+mis-ordered micro-step passes every value test).
 
 ### `mamba3/rotation/` (`mod.rs`, `rope.rs`)
 
@@ -258,7 +257,7 @@ angles; two-sided the planes turn by `a∓b`. `p=q` gives the adjoint `SO(3)`.
 zeroed knob: no in-projection channels (so `rotate_bc_forward`/`_step` take an
 `Option<Tensor>` and hand `prev` straight back), no accumulator, `B`/`C` untouched. It is
 what a rotation ablation selects — `rope_fraction` has no `0` setting.
-`forward`, `step` and `step_infinite` all derive the per-step rotation from one pair of
+`forward` and `step` both derive the per-step rotation from one pair of
 helpers — `angle_increment` (`Δ·range·π·tanh(ϑ)`, shared across heads) and
 `generator_increment` (`Δ·range·π·tanh(‖r‖)·r̂`, **per head** and block, channels laid out
 `[head][block][xyz]` — for `Rotor4D` the block axis is `[left…|right…]`, so the bound
@@ -289,31 +288,6 @@ element-wise math, no per-step `narrow`/`cat`) + `quat_cumprod_recalculated(q,in
 `Backward<B,2>` saving only `q`+`init`, recomputing the prefix product, exact
 unit-quaternion VJP with parallel ops only.
 
-### `mamba3/step_constant/` (`mod.rs`)
-Constant-input closed form on `Mamba3`: `step_infinite` (stationary fixed-point
-output; no cache in/out — the state orbits, the cumulative rotation cancels in the
-readout, factor `(γ+βP⁻¹)(1−αP⁻¹)⁻¹`; under `Trapezoid::None` the `β` term and the
-rotation product carrying it are dropped, not zeroed — a real numerator, so the
-complex/quaternion multiply degenerates to a scalar one). Per RoPE pair that factor is
-`(γ+βe^{−iθ̂})/(1−αe^{−iθ̂})`; per quaternion block the same in the abelian subalgebra
-of the constant per-step `q`; unrotated channels use the scalar series `(β+γ)/(1−α)`.
-`Rotor4D` leaves that commutative subalgebra, so its factor is the `ℝ⁴` resolvent by
-**Cayley–Hamilton**: `c₁ = 2(k₁+k₂)`, `c₂ = 2+4k₁k₂` from the two plane cosines
-`k₁,₂ = cos(a∓b)` (the half-angles alone fix them; the axes only fix the planes), the
-cubic Horner-evaluated **on the vector** (no `4×4` materialised) and the determinant
-formed factor-wise as `(1−α)²+2α(1−kᵢ)`, which the expanded quartic would lose to
-cancellation. Denominators floored by `div_eps`. `Real1D` is the scalar series alone. All
-four rotation kinds, both SSD pathways. The per-step
-increment comes from `rotation`'s shared helpers, so the fixed point cannot drift from
-the recurrence it is the limit of.
-Under MambaProduct the limit is a sum of `u` such terms: suffix decays `aⱼ = ∏_{j'>j}α_{j'}`
-give per-pair weights `cⱼ = aⱼγⱼ + a_{j+1}β_{j+1}`, the last pair keeping its taps apart as
-`γ_{u−1} + a₀β₀P⁻¹` (its β partner is the *next* token's micro-step 0, one turn further back
-in the same series), and `Qⱼ P⁻¹` is the rotation still to come after `j`. **It exists only
-for the abelian kinds**: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` is a function of
-`n` alone iff `Qⱼ` commutes with `P`, so `Quaternion4D`/`Rotor4D` at `u>1` are
-almost-periodic, not convergent — asserted, not approximated.
-
 ---
 
 ## The unified API (`src/unified/`)
@@ -332,7 +306,7 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   are threaded through `forward`/`step`, never recorded or optimised) and the three
   per-family plug-ins: `impl CacheStack for Mamba{1,2,3}Caches`, `impl Block for
   Mamba{1,2,3}` (`Options` = that family's `*SsdPath`; `()` for Mamba-1, which has no
-  chunking; only Mamba-3 overrides `block_step_infinite`), `impl BlockConfig for
+  chunking), `impl BlockConfig for
   Mamba{1,2,3}Config`. `cache_to_inner`/`cache_from_inner` are spelled out per family
   rather than derived: `Module::map` is a **no-op on plain `Tensor` fields**, which is
   all a cache holds, so a `Module`-based conversion would silently skip every one of

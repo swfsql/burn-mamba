@@ -40,9 +40,8 @@ pub enum Trapezoid {
     /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
     /// and nothing is paid for the absent term: the in-projection spends no `λ`
     /// channels (so Muon sees no `λ` segment), no `β` is formed, the caches'
-    /// tap slots are `None`, `forward` makes **one** SSD call, `step` drops the
-    /// second outer product, and `step_infinite`'s numerator loses its `β`
-    /// rotation product. The two SSD pathways coincide here — with no second
+    /// tap slots are `None`, `forward` makes **one** SSD call, and `step` drops
+    /// the second outer product. The two SSD pathways coincide here — with no second
     /// pass to fuse, single-SSD's composite key scale is `γ` and its
     /// same-step correction is the whole diagonal — so
     /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
@@ -349,49 +348,6 @@ mod tests {
             assert!(
                 max_abs_diff(fwd_dt, step_dt) < 1e-4,
                 "{kind:?}: d dt_bias_h"
-            );
-        }
-    }
-
-    /// `step_infinite` drops the `β` term from its numerator (and, on the
-    /// quaternion kinds, the rotation product that carried it), so its closed
-    /// form has to be re-checked against the recurrence it is the limit of.
-    /// The decay knobs match the `step_constant` suite's.
-    #[test]
-    fn none_step_infinite_matches_unrolled() {
-        let device: burn::prelude::Device = Default::default();
-        for (kind, micro_steps, mimo_rank) in [
-            (RotationKind::Real1D, 1, 1),
-            (RotationKind::Real1D, 3, 1),
-            (RotationKind::Complex2D, 1, 1),
-            (RotationKind::Complex2D, 3, 2),
-            // The non-abelian kinds have a limit only at `u = 1`.
-            (RotationKind::Quaternion4D, 1, 1),
-            (RotationKind::Rotor4D, 1, 2),
-        ] {
-            let config = cfg_none(kind, micro_steps)
-                .with_mimo_rank(mimo_rank)
-                .with_a_floor(1.0)
-                .with_dt_limit((0.05, 5.0));
-            let model: Mamba3 = config.init(&device);
-            let token = Tensor::<2>::random(
-                [2, config.d_model],
-                Distribution::Normal(0.0, 1.0),
-                &device,
-            );
-
-            let mut cache: Option<Mamba3Cache> = None;
-            let mut out = None;
-            for _ in 0..300 {
-                let (o, c) = model.step(token.clone(), cache);
-                cache = Some(c);
-                out = Some(o);
-            }
-            let d = max_abs_diff(out.expect("300 steps"), model.step_infinite(token));
-            assert!(
-                d < 1e-3,
-                "{kind:?} u={micro_steps} M={mimo_rank}: step_infinite vs 300 unrolled \
-                 steps, max abs diff = {d:.6}"
             );
         }
     }

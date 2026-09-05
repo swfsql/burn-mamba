@@ -466,11 +466,10 @@ impl Mamba3 {
 mod step {
     use super::*;
 
-    /// One token's in-projection unpacked into the step-shaped pieces shared by
-    /// [`Mamba3::step_double_ssd`] and the constant-input shortcut
-    /// [`Mamba3::step_infinite`]: the gate/value streams, the **pre-rotation**
-    /// QK-normed B/C, the raw rotation channels, and the trapezoid
-    /// coefficients.
+    /// One token's in-projection unpacked into the step-shaped pieces
+    /// [`Mamba3::step_double_ssd`] works from: the gate/value streams, the
+    /// **pre-rotation** QK-normed B/C, the raw rotation channels, and the
+    /// trapezoid coefficients.
     ///
     /// Every per-micro-step stream carries a `u` axis (MambaProduct; `u = 1` for
     /// stock Mamba-3). [`Self::micro`] peels one micro-step off it.
@@ -940,8 +939,6 @@ mod step {
         }
     }
 }
-
-pub(crate) use step::MicroProjection;
 
 // ---------------------------------------------------------------------------
 // Tests

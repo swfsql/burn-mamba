@@ -660,7 +660,7 @@ The consistent alternative (`Δ_j = Δ/u`, same per-token transition, buying onl
 staggered writes and the non-abelian ordering) is inside the model's reachable set —
 `dt_limit` has no lower floor by default — so this is a superset, not an error.
 (It is a configurable clamp, so a run that raises the floor above `Δ/u` gives that
-up; the crate's own `step_infinite` tests set `(0.05, 5.0)`.)
+up.)
 
 ### 9.3 `micro_steps` versus `mimo_rank`
 
@@ -707,10 +707,6 @@ is independent of everything else in this note.
   direction, equivalently a velocity. Under all three, the query still never
   appears in any objective, and the reading still says nothing about what is read
   back out.
-- `step_infinite`'s restriction to the abelian kinds at `u > 1` is unaffected and
-  has the same explanation as before: the read-to-write relative rotation depends
-  on the gap alone iff the partial products commute with the per-token product, so
-  the non-abelian kinds are almost-periodic rather than convergent.
 
 ---
 

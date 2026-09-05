@@ -101,8 +101,7 @@ src/
 │  │                 on one block axis ⇒ one scan)
 │  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
 │  │                 folded into the sequence axis (no new kernel); u=1 is stock
-│  ├─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
-│  └─ step_constant/ constant-input shortcut: step_infinite (stationary fixed point)
+│  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
    │                 not stacked matrices" argument (MIMO diagonals)
@@ -169,11 +168,6 @@ a user token: it emits the class tokens/latents waiting for the next one and
 returns the last of them (`None` if none were), for seedless generation. `prime`
 then `step` runs exactly what that `step` alone would.
 
-Mamba-3 additionally exposes **`step_infinite(x)`** (the stationary fixed-point
-output under a constant token; no cache — the state orbits, only the output
-converges; the limit composes exactly through `Layer`/`Layers`/networks and the
-runtime enums, which panic for Mamba-1/2).
-
 ### Caches
 
 Carry streaming state between calls. Mamba-1/2 caches hold a conv window + SSM state.
@@ -231,7 +225,7 @@ notation tables; the essentials:
   Mamba-2 write); the rest panic in `init`. `None` is structural, and the branch runs
   deep: no `λ` in-proj segment or Muon segment, no `β` tensor, no tap slots in either
   cache, **one** SSD call in `forward` (so the pathways coincide and `forward_single_ssd`
-  delegates), one outer product in `step`, and a `β`-free `step_infinite` numerator.
+  delegates), and one outer product in `step`.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
@@ -353,11 +347,6 @@ lifting exactly the `tanh`-asymptote bound `rotation_range` documents. `Quaterni
 `Rotor4D`: a non-commuting product no single bounded step can express — DeltaProduct's own
 argument, with the group given directly rather than factored into reflections.
 
-`step_infinite` generalises to a sum of `u` terms but **exists only for the abelian
-kinds** at `u>1`: the read-to-write relative rotation `P⁻ᵗQⱼPᵗ⁻ⁿ⁻¹` depends on `n` alone
-iff `Qⱼ` commutes with `P`, so the quaternion kinds are almost-periodic, not convergent.
-It asserts rather than approximating.
-
 ### Virtual layers, bidirectional, class tokens, multi-gate
 
 All four are `burn-stack` features and documented in `../burn-stack/CLAUDE.md`.
@@ -391,7 +380,7 @@ reimplementing them.
   differ — `Mamba3Config.siso_specialization` for the chunkwise γ-correction
   (`single_ssd/ssd/diag.rs`; deletes thousands of tiny GEMMs, wins everywhere) and
   `siso_specialization_decode` for the per-token sites (`helpers::mimo_outer_sum`,
-  `step_readout`, `step_infinite`'s Gram, via `Mamba3::use_siso_decode_kernels`; replaces
+  `step_readout`, via `Mamba3::use_siso_decode_kernels`; replaces
   one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
 - **Three SSD algorithm variants**, the last with a custom recompute backward; proven
   equal on values + gradients by tests.

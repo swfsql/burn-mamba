@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.41.0"
+version = "0.42.0"
 edition = "2024"
 
 [features]
@@ -47,7 +47,7 @@ dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "1351fc60cf7243562aebfd0d39ea17411cfd8f9c", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "f9344a8e46dcab7e87ec4b4ebbba44eed84f84bd", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 # burn-flex = { version = "0.22.0-pre.1", default-features = false, optional = true }
 burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1c70d286e4de89f852308d56b3270ea", default-features = false, optional = true }
@@ -66,7 +66,7 @@ burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "1893b608d1
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "1351fc60cf7243562aebfd0d39ea17411cfd8f9c", default-features = false, features = ["test-helpers", "examples-common"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "f9344a8e46dcab7e87ec4b4ebbba44eed84f84bd", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 num-traits = "0.2.19"
 rand = "0.9.2"
