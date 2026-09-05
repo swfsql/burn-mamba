@@ -1,0 +1,42 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The lag-`u` correction band, as one intra-token term outside the kernel."><title>burn_mamba::mamba3::single_ssd::token_band - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (0ed41eb41 2026-09-04)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module token_band</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.42.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module token_<wbr>band</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#the-lag-u-correction-band-single-ssd-vertical" title="The lag-`u` correction band (single-SSD, `Vertical`)">The lag-<code>u</code> correction band (single-SSD, <code>Vertical</code>)</a><ul><li><a href="#why-the-band-never-has-to-enter-the-kernel" title="Why the band never has to enter the kernel">Why the band never has to enter the kernel</a></li><li><a href="#the-term" title="The term">The term</a></li></ul></li></ul><h3><a href="#functions">Module Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3::<wbr>single_<wbr>ssd</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">burn_mamba</a>::<wbr><a href="../../index.html">mamba3</a>::<wbr><a href="../index.html">single_ssd</a></div><h1>Module <span>token_<wbr>band</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../../src/burn_mamba/mamba3/single_ssd/token_band.rs.html#1-130">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The lag-<code>u</code> correction band, as one intra-token term outside the kernel.</p>
+<h2 id="the-lag-u-correction-band-single-ssd-vertical"><a class="doc-anchor" href="#the-lag-u-correction-band-single-ssd-vertical">§</a>The lag-<code>u</code> correction band (single-SSD, <a href="../../trapezoid/enum.Trapezoid.html#variant.Vertical" title="variant burn_mamba::mamba3::trapezoid::Trapezoid::Vertical"><code>Vertical</code></a>)</h2>
+<p>The single-SSD pathway scales sample <code>s</code>’s key by the whole collapsed weight
+<code>Δ̃ₛ = γₛ + νₛ₊ₗₐ₉</code> (<code>info/trapezoid-as-integration.md</code> §5), which is right for
+every read <code>t</code> that happens <em>after</em> the tap has been paid, i.e. <code>t − s ≥ lag</code>,
+and wrong for the <code>lag</code> reads before it, where the weight must still be <code>γₛ</code>.
+At lag 1 that exception is the diagonal alone and
+<a href="../ssd/diag/index.html" title="mod burn_mamba::mamba3::single_ssd::ssd::diag"><code>ssd::diag</code></a> handles it inside the
+kernel; at lag <code>u</code> it is a <code>u</code>-wide <strong>band</strong> (§9).</p>
+<h3 id="why-the-band-never-has-to-enter-the-kernel"><a class="doc-anchor" href="#why-the-band-never-has-to-enter-the-kernel">§</a>Why the band never has to enter the kernel</h3>
+<p>The band would straddle chunk boundaries, and the part of it that arrived
+through the chunk’s initial state could not be un-weighted. It does not have
+to: the only outputs that survive <code>forward</code> are each token’s <strong>last</strong>
+micro-step (<a href="../../product/fn.last_micro5.html" title="fn burn_mamba::mamba3::product::last_micro5"><code>crate::mamba3::product::last_micro5</code></a>), and for a read at
+folded position <code>p = τ·u + (u−1)</code> the band <code>{p−u+1 … p}</code> is <em>exactly token
+<code>τ</code></em>. So the correction is one small contraction per token, applied after the
+kernel at token resolution, with no mask change, no chunk-length constraint
+and no cross-chunk term.</p>
+<p>What this gives up is worth stating exactly, because it is the one place the
+two pathways stop agreeing pointwise. The two remain equivalent on
+<strong>everything a caller can observe</strong> — the block’s output and every field of
+the returned cache — and that is all <code>forward_single_ssd</code> ever promised. What
+is not corrected is the intermediate <code>y</code> at the <code>u−1</code> folded positions per
+token that <a href="../../product/fn.last_micro5.html" title="fn burn_mamba::mamba3::product::last_micro5"><code>last_micro5</code></a> discards:
+partial sums on the way to the read, never a value the block computes. The
+<strong>state</strong> is exact at every position in both pathways, which is what the
+caches carry and what a split prefill continues from.</p>
+<p>Correcting those positions too is possible, not free: their band reaches back
+over a token boundary, so part of it arrives through the chunk’s initial state
+(or, in the call’s first token, through the boundary β seed) already weighted
+by <code>scale</code>, where it can no longer be un-weighted. That is the cost this
+module declines to pay.</p>
+<h3 id="the-term"><a class="doc-anchor" href="#the-term">§</a>The term</h3>
+<p>The kernel’s diagonal is already <code>γ</code>, so what is left over is <code>j &lt; u−1</code>:</p>
+<div class="example-wrap"><pre class="language-text"><code>  corr[τ, m_out, h, p] = Σ_{j&lt;u−1} νᵗᵃᵖ[τ,j] · dcy[τ,j]
+                         · Σ_{m_in} (C[τ,u−1,m_out]·B[τ,j,m_in]) · V[τ,j,m_in,p]
+
+  νᵗᵃᵖ[τ,j] = Δ̃ − γ  at (τ,j)          dcy[τ,j] = exp(Σ_{r=j+1}^{u−1} da[τ,r])</code></pre></div>
+<p><code>dcy</code> is the scalar decay from the tapped position to the read; the relative
+<em>rotation</em> needs no factor at all, being already carried by <code>C̄</code>/<code>B̄</code>.</p>
+</div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.token_band_correction.html" title="fn burn_mamba::mamba3::single_ssd::token_band::token_band_correction">token_<wbr>band_<wbr>correction</a></dt><dd>The intra-token part of the <code>lag</code>-wide correction band, to be <strong>subtracted</strong>
+from the single-SSD output at token resolution.</dd></dl></section></div></main></body></html>

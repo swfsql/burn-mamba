@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cache","prelude","single_ssd","ssd"]};
+window.SIDEBAR_ITEMS = {"mod":["cache","prelude","single_ssd","ssd","token_band"]};
