@@ -8,13 +8,16 @@
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
 //!    (SISO-branched).
 //! 5. Peeling the rotation channels off the in-projection.
-//! 6. The trapezoid tap's lag arithmetic: the shift, the gap transport and the
-//!    decay a cached slot carries across a call boundary.
+//! 6. The trapezoid tap's lag arithmetic: the shift, the gap transport, the
+//!    decay a cached slot carries across a call boundary, and the per-position
+//!    gate a tap pattern admits its taps by.
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
-//! (`step`) code paths.
+//! (`step`) code paths. The discretisation is the exception: MambaProduct gives
+//! `step` a `u` axis of its own, so both paths reach it at rank 3.
 
+use crate::mamba3::trapezoid::TrapezoidSpec;
 use burn_stack::modules::RmsNorm;
 use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
@@ -131,48 +134,88 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
     Some((total_b1h - cumulative_blh).exp())
 }
 
-/// Output of [`trapezoidal_coefficients`].
+/// A `[1, len, 1]` gate over a folded axis: `0` at each token's **first**
+/// micro-step (`p ≡ 0 mod u`) and `1` elsewhere.
 ///
-/// All tensors share the rank `D` of the inputs.
-pub struct TrapezoidCoeffs<const D: usize> {
+/// Broadcasts against any `[batch, len, nheads]` stream, in `forward` (`len` is
+/// the folded sequence, which starts at a token boundary) and in `step` (`len`
+/// is `u` itself, so the gate is its first entry). At `u = 1` every position is
+/// a token start and the gate is all zeros — which is the whole of why
+/// [`Trapezoid::HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
+/// degenerates to [`None`](crate::mamba3::trapezoid::Trapezoid::None) there.
+///
+/// This is where a pattern's admissibility rule becomes a tensor; *which* mass
+/// it applies to is the caller's — `λ` for
+/// [`Trapezoid::far_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::far_tap_crosses_tokens),
+/// `μ` for
+/// [`interior_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::interior_tap_crosses_tokens).
+pub fn token_start_gate(len: usize, micro_steps: usize, device: &Device) -> Tensor<3> {
+    let open: Vec<f32> = (0..len)
+        .map(|p| if p.is_multiple_of(micro_steps) { 0.0 } else { 1.0 })
+        .collect();
+    Tensor::<1>::from_floats(open.as_slice(), device).reshape([1, len, 1])
+}
+
+/// Output of [`trapezoidal_coefficients`] — the step's mass `Δₜ`, split.
+///
+/// The masses are **untransported**: `α` and any wider gap decay are the
+/// consumer's to apply, since which one a tap needs depends on the pathway (the
+/// double-SSD pass multiplies them in, the single-SSD key scale never does).
+pub struct TrapezoidCoeffs {
     /// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
-    pub dt: Tensor<D>,
+    pub dt: Tensor<3>,
     /// `Δₜ · Aₜ` (negative; the log-decay).
-    pub da: Tensor<D>,
+    pub da: Tensor<3>,
     /// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
-    pub alpha: Tensor<D>,
-    /// `βₜ = (1 − λₜ) · Δₜ · αₜ` — left-endpoint weight. `None` under
+    pub alpha: Tensor<3>,
+    /// `νₜ` — the mass of the tap at
+    /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
+    /// transport. `None` under
     /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which has
     /// no left endpoint: the tensor is not formed rather than formed as zeros.
-    pub beta: Option<Tensor<D>>,
+    pub nu: Option<Tensor<3>>,
+    /// `νⁱⁿᵗₜ` — the mass of the extra lag-1 tap, `None` unless
+    /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+    pub nu_interior: Option<Tensor<3>>,
     /// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
     /// no `λ` (the whole step is paid at the right endpoint).
-    pub gamma: Tensor<D>,
+    pub gamma: Tensor<3>,
 }
 
 /// Compute the trapezoidal discretisation coefficients from the raw
 /// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
-/// formulas.
+/// formulas and `trapezoid.rs`'s header for how the masses divide.
 ///
-/// All data tensors share rank `D` and have `nheads` as the last dim.
-/// `dt_bias_h` is broadcast to match.
+/// All data tensors are `[batch, len, nheads]`, `len` being the folded sequence
+/// (`forward`) or the `u` micro-steps of one token (`step`); `dt_bias_h` is
+/// broadcast to match. Axis 1 is what the patterns' gates are periodic in, in
+/// both cases.
 ///
 /// `lambda_raw` is `None` under
 /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) — the block
 /// projects no `λ` channels — and the coefficients then take their `λ ≡ 1`
-/// values *by construction*: `β` is absent and `γ` **is** `Δ`, sharing its
-/// tensor rather than recomputing `1 · Δ`.
-pub fn trapezoidal_coefficients<const D: usize>(
-    dd_dt: Tensor<D>,
-    dd_a_raw: Tensor<D>,
-    lambda_raw: Option<Tensor<D>>,
+/// values *by construction*: no mass is formed and `γ` **is** `Δ`, sharing its
+/// tensor rather than recomputing `1 · Δ`. `mu_raw` is `None` unless the pattern
+/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap),
+/// and the same holds one level down: no `μ`, no second mass.
+///
+/// A gate closes by handing its mass back, not by dropping it: `λ` is set to `1`
+/// where the far tap is inadmissible (so `γ` takes the step whole) and `μ` to
+/// `0` where the interior one is (so the far tap takes the left endpoint whole).
+/// Both are exact at the ends, so the degenerate members are their targets bit
+/// for bit.
+pub fn trapezoidal_coefficients(
+    dd_dt: Tensor<3>,
+    dd_a_raw: Tensor<3>,
+    lambda_raw: Option<Tensor<3>>,
+    mu_raw: Option<Tensor<3>>,
     dt_bias_h: Tensor<1>,
-    dt_limit: (f64, f64),
-    a_floor: f64,
-) -> TrapezoidCoeffs<D> {
-    // Broadcast dt_bias_h [nheads] → [1, ..., 1, nheads] so the addition aligns
-    // on the last dim regardless of leading shape.
-    let dt_bias_broadcast = dt_bias_h.unsqueeze::<D>();
+    spec: TrapezoidSpec,
+) -> TrapezoidCoeffs {
+    let (dt_limit, a_floor) = (spec.dt_limit, spec.a_floor);
+    // Broadcast dt_bias_h [nheads] → [1, 1, nheads] so the addition aligns on
+    // the last dim.
+    let dt_bias_broadcast = dt_bias_h.unsqueeze::<3>();
     let dt = softplus(dd_dt + dt_bias_broadcast).clamp(dt_limit.0, dt_limit.1);
     // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
     // applied to the (positive) softplus *before* negating: a method call
@@ -183,20 +226,46 @@ pub fn trapezoidal_coefficients<const D: usize>(
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
     let alpha = da.clone().exp();
-    let (beta, gamma) = match lambda_raw {
+    let gate = |crosses: bool| {
+        (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
+    };
+    let (nu, nu_interior, gamma) = match lambda_raw {
         Some(lambda_raw) => {
             let lambda = burn::tensor::activation::sigmoid(lambda_raw);
-            let beta = (-lambda.clone() + 1.0) * dt.clone() * alpha.clone();
-            (Some(beta), lambda * dt.clone())
+            // A closed far tap means λ = 1 there: the whole step is paid at the
+            // right endpoint, which is what makes the gated pattern a submodel
+            // of the ungated one rather than a lossy version of it.
+            let lambda = match gate(spec.pattern.far_tap_crosses_tokens()) {
+                Some(open_1s1) => lambda * open_1s1.clone() + (-open_1s1 + 1.0),
+                None => lambda,
+            };
+            let nu = (-lambda.clone() + 1.0) * dt.clone();
+            let gamma = lambda * dt.clone();
+            // …and a closed interior tap means μ = 0 there: its share of the
+            // left endpoint returns to the far tap, one level up.
+            let (nu, nu_interior) = match mu_raw {
+                Some(mu_raw) => {
+                    let mu = burn::tensor::activation::sigmoid(mu_raw);
+                    let mu = match gate(spec.pattern.interior_tap_crosses_tokens()) {
+                        Some(open_1s1) => mu * open_1s1,
+                        None => mu,
+                    };
+                    let nu_interior = nu.clone() * mu.clone();
+                    (nu * (-mu + 1.0), Some(nu_interior))
+                }
+                None => (nu, None),
+            };
+            (Some(nu), nu_interior, gamma)
         }
         // λ ≡ 1: the left endpoint is unweighted and the right one takes Δ whole.
-        None => (None, dt.clone()),
+        None => (None, None, dt.clone()),
     };
     TrapezoidCoeffs {
         dt,
         da,
         alpha,
-        beta,
+        nu,
+        nu_interior,
         gamma,
     }
 }

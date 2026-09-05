@@ -93,7 +93,7 @@
 //! The in-projection widens exactly the per-micro-step segments,
 //!
 //! ```text
-//!   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u ]
+//!   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u ]
 //! ```
 //!
 //! and [`unfold_micro_bs`] reinterprets each `u`-wide segment as `u` consecutive

@@ -12,7 +12,12 @@
 //! The shift is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
 //! folded positions (`1` by default, `u` for
 //! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)), and
-//! `β` carries the transport across that whole gap.
+//! `β = ν·α` carries the transport across that whole gap.
+//!
+//! A two-tap pattern adds a second `β` side at lag 1. The two shifts differ, so
+//! the passes cannot be fused and this pathway runs **three** SSD calls — the
+//! single-SSD one collapses them into its key scale and stays at one, which is
+//! where such a pattern wants to run.
 //!
 //! This is simple to derive and to verify (everything reuses the standard SSD)
 //! but increases the intra-chunk and chunk-state memory during training.
@@ -91,14 +96,16 @@ impl Mamba3 {
         // (per-token read) do not widen — `C` is instead broadcast across the
         // group so its *last* copy carries the right cumulative rotation.
         // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
-        // The two optional segments come off the tail first — `Real1D` projects no
-        // rotation and `Trapezoid::None` no `λ`, and a zero-width segment would
-        // silently vanish from the fixed-arity split below.
+        // The three optional segments come off the tail first — `Real1D` projects
+        // no rotation, a one-tap pattern no `μ` and `Trapezoid::None` no `λ` —
+        // since a zero-width segment would silently vanish from the fixed-arity
+        // split below.
         let u = micro_steps;
-        let lambda_channels = self.lambda_channels_total();
         let (proj_bsd, rot_btA) =
             helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
-        let (proj_bsd, lambda_raw_btH) = helpers::split_trailing(proj_bsd, lambda_channels, 2);
+        let (proj_bsd, mu_raw_btH) = helpers::split_trailing(proj_bsd, self.mu_channels_total(), 2);
+        let (proj_bsd, lambda_raw_btH) =
+            helpers::split_trailing(proj_bsd, self.lambda_channels_total(), 2);
         #[rustfmt::skip]
         let [
                 z_bsi, x_btI,
@@ -121,6 +128,7 @@ impl Mamba3 {
         let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
         let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
         let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
+        let mu_raw_bsh = mu_raw_btH.map(|t| unfold_micro_bs(t, u));
         let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
@@ -131,22 +139,23 @@ impl Mamba3 {
         let helpers::TrapezoidCoeffs {
             dt: dt_bsh,
             da: da_bsh,
-            alpha: _alpha_bsh,
-            beta: beta_bsh,
+            alpha: alpha_bsh,
+            nu: nu_bsh,
+            nu_interior: nu_interior_bsh,
             gamma: gamma_bsh,
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
             dd_A_raw_bsh,
             lambda_raw_bsh,
+            mu_raw_bsh,
             self.dt_bias_h.val(),
-            self.dt_limit,
-            self.a_floor,
+            self.trapezoid_spec(),
         );
 
         san(&dt_bsh);
         san(&da_bsh);
-        if let Some(beta_bsh) = &beta_bsh {
-            san(beta_bsh);
+        for nu_bsh in [&nu_bsh, &nu_interior_bsh].into_iter().flatten() {
+            san(nu_bsh);
         }
         san(&gamma_bsh);
 
@@ -207,25 +216,39 @@ impl Mamba3 {
         // [`Trapezoid::Vertical`] — matching `step`'s FIFO depth exactly.
         //
         // A lag-`L` tap must be transported across *its own* gap (§9), i.e. by
-        // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`. `β` carries the `d = 0` factor and
-        // `interior_gap_decay` the rest; for the first `L` positions the missing
-        // factors are the ones the cache's `v` slots already carry.
+        // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`. `β = ν·α` carries the `d = 0` factor
+        // and `interior_gap_decay` the rest; for the first `L` positions the
+        // missing factors are the ones the cache's `v` slots already carry.
+        //
+        // A two-tap pattern adds a second, lag-1 side. The two shifts differ, so
+        // they cannot share a pass and this pathway runs three SSD calls; the
+        // single-SSD one fuses them into its key scale and stays at one. The
+        // interior tap's prefix is the FIFO's newest slot — which *is* the lag-1
+        // slot, undecayed — and is inert under
+        // [`Trapezoid::VerticalPlusHorizontalReset`], whose `νⁱⁿᵗ` is zero at
+        // every position that would read it.
         //
         // Under [`Trapezoid::None`] there is no left endpoint at all: no shift,
         // no β-scaled copy of `x`, and (below) no second SSD call — `forward`
         // becomes one standard SSD pass whose keys are scaled by `γ = Δ`.
         let lag = self.tap_lag();
-        let beta_side: Option<(Tensor<4>, Tensor<5>)> = beta_bsh.map(|beta_bsh| {
-            let v_state_buhp = cache
+        let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
+            let slots_buhp = cache
                 .v_state_buhp
                 .clone()
                 .expect("a β tap keeps its (B, x) cache slots");
-            let k_state_bumhr = cache
+            let slots_bumhr = cache
                 .k_state_bumhr
                 .clone()
                 .expect("a β tap keeps its (B, x) cache slots");
-            let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), v_state_buhp, lag);
-            let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), k_state_bumhr, lag);
+            // A lag-`L` tap's prefix is the FIFO's newest `L` slots — all of it
+            // for the pattern's own tap, the last one alone for an interior tap.
+            let newest = slots_buhp.dims()[1] - lag;
+            let x_prev_bshp =
+                helpers::shift_stream(x_bshp.clone(), slots_buhp.narrow(1, newest, lag), lag);
+            let b_prev_bsmhr =
+                helpers::shift_stream(b_bsmhr.clone(), slots_bumhr.narrow(1, newest, lag), lag);
+            let beta_bsh = nu_bsh * alpha_bsh.clone();
             let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag) {
                 Some(gap_bsh) => beta_bsh * gap_bsh,
                 None => beta_bsh,
@@ -233,7 +256,12 @@ impl Mamba3 {
             // β is a per-head scalar, broadcast over mimo_rank and per_head_dim.
             let beta_bsh1 = beta_bsh.unsqueeze_dim::<4>(3);
             (x_prev_bshp * beta_bsh1, b_prev_bsmhr) // βₚ · xₚ₋ₗₐ₉
-        });
+        };
+        let beta_sides: Vec<(Tensor<4>, Tensor<5>)> = nu_bsh
+            .map(|nu_bsh| beta_side(nu_bsh, lag))
+            .into_iter()
+            .chain(nu_interior_bsh.map(|nu_bsh| beta_side(nu_bsh, 1)))
+            .collect();
 
         // ── Step 7b: Scale the current-token input by γ ───────────────────────
         let gamma_bsh1 = gamma_bsh.unsqueeze_dim::<4>(3);
@@ -279,8 +307,10 @@ impl Mamba3 {
         let da_bSh = pad_h(da_bsh);
         let b_bSmhr = pad_mhr(b_bsmhr);
         let c_bSmhr = pad_mhr(c_bsmhr);
-        let beta_side =
-            beta_side.map(|(x_beta, b_prev)| (pad_hp(x_beta), pad_mhr(b_prev)));
+        let beta_sides: Vec<_> = beta_sides
+            .into_iter()
+            .map(|(x_beta, b_prev)| (pad_hp(x_beta), pad_mhr(b_prev)))
+            .collect();
 
         // ── Reshape into chunks ───────────────────────────────────────────────
         let nchunks = sequence_padded / chunk_len;
@@ -308,9 +338,9 @@ impl Mamba3 {
         };
         let (y_bnlmhp, final_state_bhpr) = input_gamma.run(ssd_path);
 
-        let (y_bnlmhp, final_state_bhpr) = match beta_side {
-            None => (y_bnlmhp, final_state_bhpr),
-            Some((x_beta_bShp, b_prev_bSmhr)) => {
+        let (y_bnlmhp, final_state_bhpr) = beta_sides.into_iter().fold(
+            (y_bnlmhp, final_state_bhpr),
+            |(y_bnlmhp, final_state_bhpr), (x_beta_bShp, b_prev_bSmhr)| {
                 let x_beta_bnlhp =
                     x_beta_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
                 let b_prev_bnlmhr =
@@ -319,9 +349,9 @@ impl Mamba3 {
                     helpers::build_v_with_mimo::<5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
                 let input_beta = Mamba3DoubleSsdInput {
                     v_bnlmhp: v_beta_bnlmhp,
-                    da_bnlh,
+                    da_bnlh: da_bnlh.clone(),
                     b_bnlmhr: b_prev_bnlmhr,
-                    c_bnlmhr,
+                    c_bnlmhr: c_bnlmhr.clone(),
                     initial_state_bhpr: Tensor::zeros(
                         [batch, nheads, per_head_dim, state_rank],
                         &device,
@@ -333,8 +363,8 @@ impl Mamba3 {
                     y_bnlmhp + y_beta_bnlmhp,
                     final_state_bhpr + final_state_beta_bhpr,
                 )
-            }
-        };
+            },
+        );
 
         san(&y_bnlmhp);
         san(&final_state_bhpr);
@@ -472,9 +502,14 @@ mod step {
         pub dt_buh: Tensor<3>,
         /// `α = exp(Δ·A)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
-        /// `β = (1−λ)·Δ·α` `[batch, u, nheads]`; `None` under
+        /// The tap mass `ν` `[batch, u, nheads]`; `None` under
         /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
-        pub beta_buh: Option<Tensor<3>>,
+        /// `β = ν·α` is formed where it is spent.
+        pub nu_buh: Option<Tensor<3>>,
+        /// The interior (lag-1) tap's mass `[batch, u, nheads]`; `None` unless
+        /// the pattern
+        /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+        pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
     }
@@ -491,9 +526,13 @@ mod step {
         pub dt_bh: Tensor<2>,
         /// `α = exp(Δ·A)` `[batch, nheads]`.
         pub alpha_bh: Tensor<2>,
-        /// `β = (1−λ)·Δ·α` `[batch, nheads]`; `None` under
+        /// The tap mass `ν` `[batch, nheads]`; `None` under
         /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
-        pub beta_bh: Option<Tensor<2>>,
+        pub nu_bh: Option<Tensor<2>>,
+        /// The interior (lag-1) tap's mass `[batch, nheads]`; `None` unless the
+        /// pattern
+        /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+        pub nu_interior_bh: Option<Tensor<2>>,
         /// `γ = λ·Δ` `[batch, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_bh: Tensor<2>,
     }
@@ -508,7 +547,8 @@ mod step {
                 rot_ba: self.rot_bua.clone().map(pick2),
                 dt_bh: pick2(self.dt_buh.clone()),
                 alpha_bh: pick2(self.alpha_buh.clone()),
-                beta_bh: self.beta_buh.clone().map(pick2),
+                nu_bh: self.nu_buh.clone().map(pick2),
+                nu_interior_bh: self.nu_interior_buh.clone().map(pick2),
                 gamma_bh: pick2(self.gamma_buh.clone()),
             }
         }
@@ -542,10 +582,13 @@ mod step {
             // are `u` times as wide and split onto a `u` axis of their own,
             // matching `forward`'s fold into the sequence.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
-            // See the note in `forward`: the two trailing segments are the
-            // optional ones (`Real1D` projects no rotation, `Trapezoid::None` no `λ`).
+            // See the note in `forward`: the three trailing segments are the
+            // optional ones (`Real1D` projects no rotation, a one-tap pattern no
+            // `μ`, `Trapezoid::None` no `λ`).
             let (proj_bd, rot_bA) =
                 helpers::split_trailing(proj_bd, self.rotation_channels_total(), 1);
+            let (proj_bd, mu_raw_bH) =
+                helpers::split_trailing(proj_bd, self.mu_channels_total(), 1);
             let (proj_bd, lambda_raw_bH) =
                 helpers::split_trailing(proj_bd, self.lambda_channels_total(), 1);
             #[rustfmt::skip]
@@ -574,20 +617,21 @@ mod step {
                 dt: dt_buh,
                 da: _da_buh,
                 alpha: alpha_buh,
-                beta: beta_buh,
+                nu: nu_buh,
+                nu_interior: nu_interior_buh,
                 gamma: gamma_buh,
             } = helpers::trapezoidal_coefficients(
                 unfold_micro_b(dd_dt_bH, u),
                 unfold_micro_b(dd_a_raw_bH, u),
                 lambda_raw_bH.map(|t| unfold_micro_b(t, u)),
+                mu_raw_bH.map(|t| unfold_micro_b(t, u)),
                 self.dt_bias_h.val(),
-                self.dt_limit,
-                self.a_floor,
+                self.trapezoid_spec(),
             );
             san(&dt_buh);
             san(&alpha_buh);
-            if let Some(beta_buh) = &beta_buh {
-                san(beta_buh);
+            for nu_buh in [&nu_buh, &nu_interior_buh].into_iter().flatten() {
+                san(nu_buh);
             }
             san(&gamma_buh);
 
@@ -621,7 +665,8 @@ mod step {
                 rot_bua,
                 dt_buh,
                 alpha_buh,
-                beta_buh,
+                nu_buh,
+                nu_interior_buh,
                 gamma_buh,
             }
         }
@@ -805,8 +850,13 @@ mod step {
             // pushed** — so a slot's `x` accumulates exactly the `α`s between
             // its own position and the one that taps it, which is the gap
             // transport a lag-`L` tap needs (§9). At lag 1 nothing survives a
-            // tap, so no decay is ever applied and `β = (1−λ)Δα` is the whole
+            // tap, so no decay is ever applied and `β = να` is the whole
             // coefficient, as before.
+            //
+            // A two-tap pattern needs no second buffer: its lag-1 tap is this
+            // FIFO's **newest** slot, which by the same convention carries the
+            // empty decay product. One FIFO, two reads — the oldest slot leaves
+            // it, the newest stays.
             let lag = self.tap_lag();
             let mut state_bhpr = cache.ssm_bhpr.clone();
             let mut rotation = cache.rotation.clone();
@@ -869,30 +919,39 @@ mod step {
                 let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
                 san(&xbt_state_bhpr);
 
-                // The tapped step's write — the FIFO's oldest slot, i.e. the
-                // position `lag` back. Under `Trapezoid::None` there is no
-                // second tap: no previous value tensor, no second outer product,
-                // and one fewer term in the state update.
-                let xbt_prev_bhpr = m.beta_bh.map(|beta_bh| {
-                    let x_prev_bhp = tap_x.remove(0);
-                    let b_prev_bmhr = tap_b.remove(0);
+                // The tapped steps' writes. `β = ν·α` is the tap's own
+                // coefficient; the FIFO slot supplies the rest of the gap
+                // transport, so both taps are read from the *same* buffer:
+                // the oldest slot for the pattern's lag-`lag` tap, the newest
+                // for a two-tap pattern's lag-1 one. Under `Trapezoid::None`
+                // there is neither: no previous value tensor, no second outer
+                // product, and one fewer term in the state update.
+                let tap_write = |nu_bh: Tensor<2>, x_prev_bhp: Tensor<3>, b_prev_bmhr: Tensor<4>| {
                     let xs_vals_bmhp =
                         helpers::build_v_with_mimo::<3, 4>(x_prev_bhp, mimo_x_hmp.as_ref(), 1);
                     san(&xs_vals_bmhp);
+                    let beta_bh = nu_bh * m.alpha_bh.clone();
                     let x_beta_bmhp = xs_vals_bmhp * beta_bh.unsqueeze_dims::<4>(&[1, 3]);
                     san(&x_beta_bmhp);
-                    let xbt_prev_bhpr =
-                        helpers::mimo_outer_sum(x_beta_bmhp, b_prev_bmhr, siso);
+                    let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, b_prev_bmhr, siso);
                     san(&xbt_prev_bhpr);
                     xbt_prev_bhpr
+                };
+                let xbt_interior_bhpr = m.nu_interior_bh.map(|nu_bh| {
+                    let newest = tap_x.len() - 1;
+                    tap_write(nu_bh, tap_x[newest].clone(), tap_b[newest].clone())
+                });
+                let xbt_prev_bhpr = m.nu_bh.map(|nu_bh| {
+                    let (x_prev_bhp, b_prev_bmhr) = (tap_x.remove(0), tap_b.remove(0));
+                    tap_write(nu_bh, x_prev_bhp, b_prev_bmhr)
                 });
 
                 let alpha_bh11 = m.alpha_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
                 let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr;
-                let new_state_bhpr = match xbt_prev_bhpr {
-                    Some(xbt_prev_bhpr) => new_state_bhpr + xbt_prev_bhpr,
-                    None => new_state_bhpr,
-                };
+                let new_state_bhpr = [xbt_prev_bhpr, xbt_interior_bhpr]
+                    .into_iter()
+                    .flatten()
+                    .fold(new_state_bhpr, |state, write| state + write);
                 san(&new_state_bhpr);
 
                 state_bhpr = new_state_bhpr;

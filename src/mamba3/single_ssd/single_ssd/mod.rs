@@ -5,12 +5,12 @@
 //! as shipped in Triton (SISO) and Tilelang (MIMO):
 //!
 //! ```text
-//!   scaleₜ = γₜ + (1 − λₜ₊ₗₐ₉) · Δₜ₊ₗₐ₉
+//!   scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)
 //!
 //!   forward_single_ssd:    h' = SSD(V_raw, K_scaled = scaleₜ B) with:
 //!                               * strict lower-triangular intra-chunk mask
 //!                               * additive γ-weighted same-step correction
-//!                               * boundary β seed Σⱼ (1−λⱼ) Δⱼ Kⱼ ⊗ xⱼ over the
+//!                               * boundary β seed Σⱼ νⱼ Kⱼ ⊗ xⱼ over the
 //!                                 cache's `lag` tap slots
 //!                               * at lag > 1, the rest of the correction band
 //!                                 ([`crate::mamba3::single_ssd::token_band`])
@@ -18,7 +18,10 @@
 //!
 //! `lag` is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag):
 //! `1` for the default tap pattern, `u` for
-//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical).
+//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical). A
+//! two-tap pattern adds the parenthesised term — a second shift of the same
+//! shape, since §9's collapse leaves one scalar per sample however many taps
+//! there are. That is the whole of its cost here: one pass either way.
 //!
 //! References:
 //! - [`mamba3_siso_fwd.py`](https://github.com/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py),
@@ -121,12 +124,14 @@ impl Mamba3 {
         // instead broadcast across the group so its *last* copy carries the
         // right cumulative rotation. See [`crate::mamba3::product`].
         // The optional segments come off the tail first, in layout order: the
-        // rotation (`Real1D` projects none) and then `λ` — which is always
-        // present here, `Trapezoid::None` having delegated above — since a
-        // zero-width segment would silently vanish from the split below.
+        // rotation (`Real1D` projects none), then `μ` (only a two-tap pattern
+        // projects it), then `λ` — which is always present here,
+        // `Trapezoid::None` having delegated above — since a zero-width segment
+        // would silently vanish from the split below.
         let u = micro_steps;
         let (proj_bsd, rot_btA) =
             helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
+        let (proj_bsd, mu_raw_btH) = helpers::split_trailing(proj_bsd, self.mu_channels_total(), 2);
         let (proj_bsd, lambda_raw_btH) =
             helpers::split_trailing(proj_bsd, self.lambda_channels_total(), 2);
         let lambda_raw_btH = lambda_raw_btH.expect("a β tap projects λ");
@@ -152,6 +157,7 @@ impl Mamba3 {
         let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
         let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
         let lambda_raw_bsh = unfold_micro_bs(lambda_raw_btH, u);
+        let mu_raw_bsh = mu_raw_btH.map(|t| unfold_micro_bs(t, u));
         let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
@@ -163,49 +169,58 @@ impl Mamba3 {
             dt: dt_bsh,
             da: da_bsh,
             alpha: _alpha_bsh,
-            beta: _beta_bsh,
+            nu: nu_bsh,
+            nu_interior: nu_interior_bsh,
             gamma: gamma_bsh,
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
             dd_A_raw_bsh,
-            Some(lambda_raw_bsh.clone()),
+            Some(lambda_raw_bsh),
+            mu_raw_bsh,
             self.dt_bias_h.val(),
-            self.dt_limit,
-            self.a_floor,
+            self.trapezoid_spec(),
         );
+        let nu_bsh = nu_bsh.expect("a β tap has a mass");
         san(&dt_bsh);
         san(&da_bsh);
         san(&gamma_bsh);
 
-        // ── Compute scaleₜ = γₜ + (1 − λₜ₊ₗₐ₉) · Δₜ₊ₗₐ₉ ──────────────────────
+        // ── Compute scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁) ─────────────────────────
         //
-        // The shifted term is zero for the last `lag` sequence positions (the
-        // taps that pay them belong to the *next* call, out of the tap slots) —
-        // which is also what makes `h'` coincide with the double-SSD state at a
-        // cache boundary, hence the field-identity `From` impls.
+        // Each shifted term is zero for the last positions its own lag reaches
+        // past (the taps that pay them belong to the *next* call, out of the tap
+        // slots) — which is also what makes `h'` coincide with the double-SSD
+        // state at a cache boundary, hence the field-identity `From` impls.
         //
         // `t+lag` is a later *folded* position: lag 1 is
         // [`Trapezoid::HorizontalCarryOver`], lag `u` is [`Trapezoid::Vertical`].
         // This is the `Δ̃` collapse (`info/trapezoid-as-integration.md` §5), and
-        // §9's collapse theorem is why it survives the wider lag unchanged —
-        // only the same-step correction widens from the diagonal to a `lag`-wide
-        // band (see [`crate::mamba3::single_ssd::token_band`]).
+        // §9's collapse theorem is why it survives the wider lag — and a second
+        // tap — unchanged: still one scalar per sample, hence one pass. Only the
+        // same-step correction widens from the diagonal to a `lag`-wide band
+        // (see [`crate::mamba3::single_ssd::token_band`]).
         let lag = self.tap_lag();
-        let lambda_bsh = burn::tensor::activation::sigmoid(lambda_raw_bsh);
-        // νₜ = (1 − λₜ)·Δₜ, the tap's own coefficient before any transport.
-        let nu_bsh = dt_bsh.clone() * (-lambda_bsh + 1.0);
-        let shifted_gamma_bsh = {
-            let zero_bLh = Tensor::zeros([batch, lag, nheads], &device);
-            if sequence == lag {
+        // νₜ₊ₗ, the mass a later position pays this one — zero past the end of
+        // the call, where the tap belongs to the next one.
+        let pay_forward = |nu_bsh: Tensor<3>, l: usize| {
+            let zero_bLh = Tensor::zeros([batch, l, nheads], &device);
+            if sequence == l {
                 zero_bLh
             } else {
-                Tensor::cat(
-                    vec![nu_bsh.clone().narrow(1, lag, sequence - lag), zero_bLh],
-                    1,
-                )
+                Tensor::cat(vec![nu_bsh.narrow(1, l, sequence - l), zero_bLh], 1)
             }
         };
-        let scale_bsh = gamma_bsh.clone() + shifted_gamma_bsh.clone();
+        let far_shifted_bsh = pay_forward(nu_bsh.clone(), lag);
+        // A two-tap pattern collapses to one scalar all the same (§9), just with
+        // a second shift in it: `scaleₜ = γₜ + νⁱⁿᵗₜ₊₁ + νᶠᵃʳₜ₊ₗₐ₉`.
+        let interior_shifted_bsh = nu_interior_bsh
+            .clone()
+            .map(|nu_bsh| pay_forward(nu_bsh, 1));
+        let scale_bsh = gamma_bsh.clone() + far_shifted_bsh.clone();
+        let scale_bsh = match &interior_shifted_bsh {
+            Some(interior_bsh) => scale_bsh + interior_bsh.clone(),
+            None => scale_bsh,
+        };
         san(&scale_bsh);
 
         // ── Step 3: Reshape x ─────────────────────────────────────────────────
@@ -258,9 +273,27 @@ impl Mamba3 {
         // decay from its own position to the boundary, and `K_prev` its own
         // rotation, so the pair *is* the transported write.
         //
-        // γₜ = λₜ·Δₜ, so νⱼ = (1−λⱼ)·Δⱼ = Δⱼ − γⱼ.
+        // Under [`Trapezoid::VerticalPlusHorizontalCarryOver`] one more
+        // installment crosses: the newest slot is also the lag-1 tap of this
+        // call's *first* position, and it carries the empty decay product, so it
+        // is the same term with `νⁱⁿᵗ₀` on top of that slot's own weight. Every
+        // other pattern's interior tap is closed exactly there.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let nu_head_buh = nu_bsh.clone().narrow(1, 0, lag);
+        let nu_head_buh = match nu_interior_bsh
+            .filter(|_| self.trapezoid.interior_tap_crosses_tokens())
+        {
+            // `lag ≥ 2` here: a two-tap pattern folds at `u = 1`, so an interior
+            // tap and a one-slot FIFO never coexist.
+            Some(nu_interior_bsh) => Tensor::cat(
+                vec![
+                    nu_head_buh.clone().narrow(1, 0, lag - 1),
+                    nu_head_buh.narrow(1, lag - 1, 1) + nu_interior_bsh.narrow(1, 0, 1),
+                ],
+                1,
+            ),
+            None => nu_head_buh,
+        };
         let v_prev_mimo_bumhp = helpers::build_v_with_mimo::<4, 5>(
             cache
                 .v_state_buhp
@@ -300,13 +333,19 @@ impl Mamba3 {
         // is exactly the token at the positions the readout keeps, so it is one
         // contraction here rather than a wider mask. See
         // [`crate::mamba3::single_ssd::token_band`].
+        //
+        // The band is the **far** installment alone, even for a two-tap pattern:
+        // at the surviving read `t = τu + u−1` a sample's interior installment
+        // (lag 1) has already landed for every `j < u−1`, and at `j = u−1` the
+        // kernel replaces the whole weight with `γ` anyway. Only the lag-`u` one
+        // is still unpaid there.
         let band_correction_btmhp = (lag > 1)
             .then(|| {
                 crate::mamba3::single_ssd::token_band::token_band_correction(
                     v_bshmp.clone(),
                     b_bsmhr.clone(),
                     c_bsmhr.clone(),
-                    shifted_gamma_bsh,
+                    far_shifted_bsh,
                     da_bsh.clone(),
                     micro_steps,
                 )

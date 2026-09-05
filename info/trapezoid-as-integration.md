@@ -16,7 +16,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/trapezoid_as_integration.py`](../scripts/trapezoid_as_integration.py)
-> (54 checks, section numbers match). The script depends only on `numpy` and on the
+> (72 checks, section numbers match). The script depends only on `numpy` and on the
 > equations reproduced here — not on the crate — so the results stand independently
 > of the implementation.
 
@@ -390,6 +390,11 @@ one line worth carrying out of it is that **the collapse is the invariant to
 protect**: it is what the single-SSD pathway is built on, and it survives any tap
 set that transports each tap over its own gap.
 
+How the members are *parameterised* is a separate question this note does not
+settle — `src/mamba3/trapezoid.rs`'s header does, and the checks for that choice
+(mass conservation, the gate's fallback, and the two-tap key scale) sit under
+this section in the script.
+
 ---
 
 ## 10. Consequences for this crate
@@ -436,7 +441,7 @@ and the interior ones change kind (§8).
 python3 scripts/trapezoid_as_integration.py
 ```
 
-`numpy` only; float64 throughout; 54 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 72 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence from
 §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites

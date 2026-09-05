@@ -31,7 +31,12 @@
 //! `micro_steps = 1` (below) `t−1` is the only answer. At `u > 1` the default
 //! [`Trapezoid::HorizontalCarryOver`] keeps reading the immediately preceding
 //! recurrence step, and [`Trapezoid::Vertical`] reads the previous **token**'s
-//! same micro-step instead — one lag, everywhere the tap appears.
+//! same micro-step instead — one lag, everywhere the tap appears. Two members
+//! read **both**, splitting `(1 − λₜ)Δₜ` between them by a second projected
+//! scalar `μₜ = σ(μ̂ₜ)`; one gates its lag-1 tap to within a token. The tap and
+//! its mass are one choice: a closed tap hands its share back (to the other tap,
+//! or to `γ`), so the step's mass is `Δₜ` under every member. See
+//! [`Trapezoid`]'s header.
 //!
 //! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
 //! — paper section *Complex-Valued SSMs*)
@@ -310,8 +315,7 @@ pub struct Mamba3 {
     #[module(skip)]
     pub rotation: RotationKind,
 
-    /// Which earlier sample the trapezoid's `β` tap reads ([`Trapezoid`]);
-    /// [`Trapezoid::HorizontalCarryOver`] is the only implemented pattern.
+    /// Which earlier sample(s) the trapezoid's `β` tap reads ([`Trapezoid`]).
     /// A non-parameter constant, like [`Self::rotation`].
     #[module(skip)]
     pub trapezoid: Trapezoid,
@@ -395,6 +399,32 @@ impl Mamba3 {
             self.micro_steps * self.nheads()
         } else {
             0
+        }
+    }
+
+    /// Width of the in-projection's `μ` segment — the second tap's mix, one
+    /// channel per (head, micro-step) for the two-tap patterns and **`0`** for
+    /// every other, including a two-tap one at `u = 1`, where the taps fold
+    /// ([`Trapezoid::has_interior_tap`]). Peeled off the tail by
+    /// `helpers::split_trailing`, immediately inside the `λ` segment.
+    pub fn mu_channels_total(&self) -> usize {
+        if self.trapezoid.has_interior_tap(self.micro_steps) {
+            self.micro_steps * self.nheads()
+        } else {
+            0
+        }
+    }
+
+    /// Everything the discretisation needs, in one place — the tap pattern, the
+    /// micro-steps its gates are periodic in, and the two clamps. Every site
+    /// that forms the trapezoid's masses ([`forward`](Self::forward),
+    /// [`step`](Self::step)) goes through this.
+    pub fn trapezoid_spec(&self) -> crate::mamba3::trapezoid::TrapezoidSpec {
+        crate::mamba3::trapezoid::TrapezoidSpec {
+            pattern: self.trapezoid,
+            micro_steps: self.micro_steps,
+            dt_limit: self.dt_limit,
+            a_floor: self.a_floor,
         }
     }
 
@@ -494,18 +524,18 @@ pub struct Mamba3Config {
     #[config(default = 1)]
     pub micro_steps: usize,
 
-    /// Which earlier sample the trapezoid's `β` tap reads — the **tap pattern**
-    /// ([`Trapezoid`]).
+    /// Which earlier sample(s) the trapezoid's `β` tap reads — the **tap
+    /// pattern** ([`Trapezoid`]).
     ///
     /// A choice that only exists at [`Self::micro_steps`] `> 1`, where "the
     /// previous step" may mean the previous micro-step or the previous token;
     /// at `u = 1` every pattern either coincides with the default or switches
-    /// the trapezoid off. It selects an *algorithm* and a *cache layout*, not a
-    /// coefficient: see [`Trapezoid`] and `info/trapezoid-as-integration.md` §9.
+    /// the trapezoid off. It selects an *algorithm*, a *cache layout* and how
+    /// many per-head masses the in-projection carries — not a coefficient's
+    /// value: see [`Trapezoid`] and `info/trapezoid-as-integration.md` §9.
     ///
     /// Defaults to [`Trapezoid::HorizontalCarryOver`], which is what the crate
-    /// has always done and the only pattern implemented — [`Self::init`]
-    /// panics on the others rather than run the wrong recurrence.
+    /// has always done.
     #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
     pub trapezoid: Trapezoid,
 
@@ -744,24 +774,26 @@ impl Mamba3Config {
     /// Total input projection output size.
     ///
     /// ```text
-    ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u ]
+    ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u ]
     /// ```
     ///
-    /// i.e. `d_inner + u·d_inner + u·bc + bc + (2 or 3)·u·nheads +
+    /// i.e. `d_inner + u·d_inner + u·bc + bc + (2 … 4)·u·nheads +
     /// u·num_rotation_channels` with `bc = ngroups·state_rank·mimo_rank` and `u` =
     /// [`Self::micro_steps`]. Only the **per-micro-step** segments widen; the
     /// gate `z` and the read `C` are per token (see [`crate::mamba3::product`]).
     /// At `u = 1` this is the stock
     /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
     ///
-    /// The two trailing segments are the ones a block may omit outright:
-    /// [`Trapezoid::None`] projects no `λ` and
-    /// [`RotationKind::Real1D`] no rotation
-    /// (`helpers::split_trailing` peels them in that order).
+    /// The three trailing segments are the ones a block may omit outright:
+    /// [`Trapezoid::None`] projects no `λ`, a one-tap pattern no `μ`, and
+    /// [`RotationKind::Real1D`] no rotation (`helpers::split_trailing` peels
+    /// them in the reverse of that order).
     pub fn d_in_proj(&self) -> usize {
         let u = self.micro_steps;
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
-        let scalars = if self.trapezoid.has_beta_tap() { 3 } else { 2 };
+        let scalars = 2
+            + usize::from(self.trapezoid.has_beta_tap())
+            + usize::from(self.trapezoid.has_interior_tap(u));
         self.d_inner()
             + u * self.d_inner()
             + u * bc
@@ -773,7 +805,7 @@ impl Mamba3Config {
     /// The block's 2-D weights Muon may own, and how their fused columns split.
     ///
     /// `in_proj`'s segments mirror the `split_into` in the SSD pathways
-    /// (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u]`); the three per-head
+    /// (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u]`); the per-head
     /// *scalar* channels stay on AdamW. See [`burn_stack::optim`].
     ///
     /// Each micro-step gets its **own** segment rather than sharing one `u`-wide
@@ -796,11 +828,19 @@ impl Mamba3Config {
             .chain(std::iter::once(Seg::muon("c", bc)))
             .chain(per_micro(Seg::adamw("dt", nheads)))
             .chain(per_micro(Seg::adamw("a", nheads)))
-            // `Trapezoid::None` projects no `λ`, as `Real1D` projects no rotation.
+            // `Trapezoid::None` projects no `λ`, as `Real1D` projects no rotation;
+            // and only a two-tap pattern projects the second mass's mix `μ`.
             .chain(
                 self.trapezoid
                     .has_beta_tap()
                     .then(|| per_micro(Seg::adamw("lambda", nheads)))
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                self.trapezoid
+                    .has_interior_tap(self.micro_steps)
+                    .then(|| per_micro(Seg::adamw("mu", nheads)))
                     .into_iter()
                     .flatten(),
             )
@@ -846,9 +886,6 @@ impl Mamba3Config {
         assert!(self.a_floor > 0.0, "a_floor must be positive");
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(self.micro_steps >= 1, "micro_steps must be at least 1");
-        // A tap pattern is an algorithm and a cache layout, so an unimplemented
-        // one has to fail here rather than fall through to the default's code.
-        self.trapezoid.assert_implemented();
         assert!(
             [0.5, 1.0].contains(&self.rope_fraction),
             "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"

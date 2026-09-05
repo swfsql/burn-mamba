@@ -10,6 +10,11 @@
 //! [`ssd::diag`](crate::mamba3::single_ssd::ssd::diag) handles it inside the
 //! kernel; at lag `u` it is a `u`-wide **band** (§9).
 //!
+//! The excess is passed in rather than recomputed from `scale − γ`, because a
+//! two-tap pattern's scale also carries a **lag-1** installment, and that one has
+//! already landed at every read the band covers except the diagonal — which the
+//! kernel replaces outright. So what belongs here is the lag-`u` mass alone.
+//!
 //! ## Why the band never has to enter the kernel
 //!
 //! The band would straddle chunk boundaries, and the part of it that arrived
@@ -57,8 +62,11 @@ use burn::prelude::*;
 /// from the single-SSD output at token resolution.
 ///
 /// `None` at `micro_steps == 1` (the band is the diagonal, already the kernel's)
-/// — and callers only reach it at `lag == micro_steps`, the pattern
-/// [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical).
+/// — and callers only reach it at `lag == micro_steps`, i.e. under one of the
+/// lag-`u` patterns
+/// ([`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical) and
+/// the two that add a tap to it). `excess_bsh` is the **lag-`u`** mass shifted
+/// back to the sample that owes it (`νₛ₊ᵤ`), never the whole `scaleₛ − γₛ`.
 ///
 /// # Shapes
 /// - `b_bsmhr`, `c_bsmhr`  : `[batch, sequence, mimo_rank, nheads, state_rank]`

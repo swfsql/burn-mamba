@@ -517,6 +517,81 @@ ok("at u = 1 vertical and carry-over-horizontal coincide",
 ok("at u = 1 reset-horizontal degenerates to no trapezoid at all",
    close(run_taps([(1, nu_l, np.zeros(TF, dtype=bool))]), run_taps([])))
 
+# --- the crate's parameterisation of the lattice ----------------------------
+# The document prices the members; `burn-mamba` has to *parameterise* them, and
+# there is one choice that keeps every property above. The step's mass dt is
+# split by two learned scalars, and a tap that is not admissible hands its mass
+# back one level (interior -> far, far -> gamma) rather than dropping it:
+#
+#   gamma = lam dt        nu = (1 - lam) dt        nu_int = nu mu,  nu_far = nu - nu_int
+#
+# so gamma + nu_int + nu_far = dt at every position, whatever is gated.
+mu = RNG.uniform(0.0, 1.0, TF)
+nu_tot = (1 - lamp) * dtp
+# reset-horizontal: no admissible earlier sample at a token's first micro-step,
+# so the whole left-endpoint mass returns to gamma (i.e. lam = 1 there).
+gam_reset = np.where(micro == 0, dtp, gam_l)
+nu_reset = nu_tot * en_reset
+# the two-tap members: the interior (lag-1) tap takes mu of the mass, gated or not.
+nu_int_r, nu_far_r = nu_tot * mu * en_reset, nu_tot * (1 - mu * en_reset)
+nu_int_c, nu_far_c = nu_tot * mu, nu_tot * (1 - mu)
+
+CRATE = {
+    "HorizontalReset": ([(1, nu_reset, en_all)], gam_reset),
+    "VerticalPlusHorizontalReset": ([(U, nu_far_r, en_all), (1, nu_int_r, en_all)], gam_l),
+    "VerticalPlusHorizontalCarryOver": ([(U, nu_far_c, en_all), (1, nu_int_c, en_all)], gam_l),
+}
+for name, (taps, gam) in CRATE.items():
+    ok(f"the step's whole mass dt is spent, nowhere else: {name}",
+       close(gam + sum(nu for _, nu, _ in taps), dtp))
+    ok(f"every weight is non-negative (a top-up, never a rollback): {name}",
+       gam.min() >= 0.0 and min(nu.min() for _, nu, _ in taps) >= 0.0)
+    Hx = run_taps(taps, gam)
+    ok(f"scalar per-sample collapse is exact: {name}",
+       all(close(collapse_taps(taps, t, gam), Hx[t], 1e-9) for t in range(TF)))
+
+# The reset is a *submodel* of the carry-over, which is what makes the fallback
+# the right rule: saturating lam at each token's first micro-step is exactly it.
+lam_reset = np.where(micro == 0, 1.0, lamp)
+ok("reset-horizontal is carry-over-horizontal with lam = 1 at each token's start",
+   close(run_taps(*CRATE["HorizontalReset"]),
+         run_taps([(1, (1 - lam_reset) * dtp, en_all)], lam_reset * dtp)))
+
+# ...and the ungated two-tap member is the *join* of the two implemented ones:
+# mu is a per-(head, micro-step) interpolation between them, not a third model.
+taps_c, _ = CRATE["VerticalPlusHorizontalCarryOver"]
+for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),
+                         ("mu = 0 is vertical", np.zeros(TF), Hv)]:
+    ok(f"vertical + carry-over-horizontal: {label}",
+       close(run_taps([(U, nu_tot * (1 - m), en_all), (1, nu_tot * m, en_all)]), target))
+
+# The single-SSD form survives both members: one global scale per sample, and a
+# band correction that is the *far* installment alone -- the interior one is
+# already paid at every read inside the band except the diagonal, which the
+# kernel replaces with gamma outright.
+for name in ("VerticalPlusHorizontalReset", "VerticalPlusHorizontalCarryOver"):
+    taps, gam = CRATE[name]
+    (_, nu_far, _), (_, nu_int, _) = taps
+    scale2 = gam.copy()
+    scale2[:-1] += nu_int[1:]
+    scale2[:-U] += nu_far[U:]
+    exact = np.array([[gam[s] + (nu_int[s + 1] if s + 1 <= t else 0.0)
+                       + (nu_far[s + U] if s + U <= t else 0.0) if s <= t else 0.0
+                       for s in range(TF)] for t in range(TF)])
+    Hx = run_taps(taps, gam)
+    ok(f"the two-tap key scale is one scalar per sample: {name}",
+       all(close(sum(exact[t, s] * (mprod(Mp, s + 1, t) @ Vp[s]) for s in range(t + 1)),
+                 Hx[t], 1e-9) for t in range(TF)))
+    band2 = np.array([[nu_far[s + U] if (s < t and t - s < U and s + U < TF) else 0.0
+                       for s in range(TF)] for t in range(TF)])
+    diag2 = np.array([[gam[s] if s == t else 0.0 for s in range(TF)] for t in range(TF)])
+    strict = np.array([[scale2[s] if s < t else 0.0 for s in range(TF)] for t in range(TF)])
+    ok(f"strict scale - far band + gamma diagonal = the exact weights: {name}",
+       close(strict - band2 + diag2, exact))
+    reads = [t for t in range(TF) if micro[t] == U - 1]
+    ok(f"the band is nonzero only inside the token a surviving read ends: {name}",
+       all(tok[s] == tok[t] for t in reads for s in range(TF) if band2[t, s] != 0.0))
+
 
 # =============================================================================
 print(f"\n{PASSED} passed, {FAILED} failed")

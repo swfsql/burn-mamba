@@ -31,14 +31,17 @@
 //!
 //! ## The trapezoid's tap pattern
 //!
-//! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample the
+//! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample(s) the
 //! write's second tap reads — a choice that only exists at `u > 1`, and one
-//! that changes the algorithm *and* the cache. Two patterns have one today, and
-//! they are the same code at two lags
-//! ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)): the default
+//! that changes the algorithm *and* the cache. Four of the six members are one
+//! tap at one lag ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
+//! the default
 //! [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
 //! (lag 1) and [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)
-//! (lag `u`), which coincide at `u = 1`.
+//! (lag `u`), which coincide at `u = 1`, plus the gated
+//! [`HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
+//! and the tapless [`None`](crate::mamba3::trapezoid::Trapezoid::None). The
+//! remaining two carry both lags at once, mixed by a second per-head mass.
 
 pub mod double_ssd;
 pub mod single_ssd;
