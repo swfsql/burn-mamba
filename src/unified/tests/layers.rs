@@ -74,11 +74,11 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
     // The trapezoid's tap slots are absent under `Trapezoid::None`.
     vec![
         c.ssm_bhpr.clone().reshape([-1]),
-        match &c.k_state_bmhr {
+        match &c.k_state_bumhr {
             Some(t) => t.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
-        match &c.v_state_bhp {
+        match &c.v_state_buhp {
             Some(t) => t.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
@@ -107,8 +107,8 @@ fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
         RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };
     let taps = [
-        c.k_state_bmhr.clone().map(|t| t.sum()),
-        c.v_state_bhp.clone().map(|t| t.sum()),
+        c.k_state_bumhr.clone().map(|t| t.sum()),
+        c.v_state_buhp.clone().map(|t| t.sum()),
     ];
     taps.into_iter()
         .flatten()

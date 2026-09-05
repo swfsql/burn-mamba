@@ -8,6 +8,8 @@
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
 //!    (SISO-branched).
 //! 5. Peeling the rotation channels off the in-projection.
+//! 6. The trapezoid tap's lag arithmetic: the shift, the gap transport and the
+//!    decay a cached slot carries across a call boundary.
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
@@ -46,6 +48,87 @@ pub fn split_trailing<const D: usize>(
     let rest = proj.dims()[dim] - width;
     let tail = proj.clone().narrow(dim, rest, width);
     (proj.narrow(dim, 0, rest), Some(tail))
+}
+
+/// Shift a per-position stream back by `lag`, seeding the first `lag` positions
+/// from the cache's tap slots: `out[p] = stream[p − lag]`, and `prefix[p]` where
+/// that index is before the call.
+///
+/// This is the "shift-before-chunking" of the double-SSD pathway generalised
+/// from lag 1 to [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag).
+/// A folded sequence is `tokens · u` long and `lag ∈ {1, u}`, so `sequence ≥
+/// lag` always holds; at equality the whole call is prefix.
+///
+/// # Shapes
+/// - `stream` : `[batch, sequence, …]`
+/// - `prefix` : `[batch, lag, …]`
+/// - out      : `[batch, sequence, …]`
+pub fn shift_stream<const D: usize>(
+    stream: Tensor<D>,
+    prefix: Tensor<D>,
+    lag: usize,
+) -> Tensor<D> {
+    let sequence = stream.dims()[1];
+    assert_eq!(prefix.dims()[1], lag, "one prefix slot per lagged position");
+    assert!(sequence >= lag, "a call is at least one token, i.e. `lag` long");
+    if sequence == lag {
+        prefix
+    } else {
+        Tensor::cat(vec![prefix, stream.narrow(1, 0, sequence - lag)], 1)
+    }
+}
+
+/// The **interior** of a lag-`lag` tap's gap: `Πᵈ⁼¹..ˡᵃᵍ⁻¹ αₚ₋ᵈ`, or `None` at
+/// `lag = 1` (where the gap has no interior).
+///
+/// A tap at lag `L` is transported across its own gap, `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`
+/// (`info/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
+/// `d = 0` factor, so this is the rest of it.
+///
+/// The front is **zero-padded**, not clamped to what the call happens to hold:
+/// for `p < L` the missing factors are exactly the ones the cache's `v` slots
+/// were already scaled by when they were stored (see [`tail_decay`]).
+///
+/// # Shapes
+/// - `da_bsh` : `[batch, sequence, nheads]` (`Δ·A`, the log-decay)
+/// - out      : `[batch, sequence, nheads]`
+pub fn interior_gap_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
+    if lag <= 1 {
+        return None;
+    }
+    let [batch, sequence, nheads] = da_bsh.dims();
+    let device = da_bsh.device();
+    let mut window_bsh = Tensor::zeros([batch, sequence, nheads], &device);
+    for d in 1..lag {
+        let zeros_bdh = Tensor::zeros([batch, d, nheads], &device);
+        let shifted = Tensor::cat(vec![zeros_bdh, da_bsh.clone().narrow(1, 0, sequence - d)], 1);
+        window_bsh = window_bsh + shifted;
+    }
+    Some(window_bsh.exp())
+}
+
+/// The decay each cached tap slot has already accumulated: `Πᵣ₌q₊₁^{S−1} αᵣ` for
+/// the last `lag` positions `q` (oldest first), or `None` at `lag = 1` (the one
+/// slot *is* the last position, so the product is empty).
+///
+/// Storing the tap slots pre-scaled by this is what lets a lag-`L` tap span a
+/// call boundary: the next call supplies the in-call part of the gap
+/// ([`interior_gap_decay`], front-zero-padded) and the slot carries the rest.
+///
+/// # Shapes
+/// - `da_bsh` : `[batch, sequence, nheads]`
+/// - out      : `[batch, lag, nheads]`
+pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
+    if lag <= 1 {
+        return None;
+    }
+    let sequence = da_bsh.dims()[1];
+    // Only the tail window matters, so the cumulative sum is over `lag` terms
+    // and never accumulates the whole sequence's decay.
+    let tail_blh = da_bsh.narrow(1, sequence - lag, lag);
+    let cumulative_blh = tail_blh.cumsum(1);
+    let total_b1h = cumulative_blh.clone().narrow(1, lag - 1, 1);
+    Some((total_b1h - cumulative_blh).exp())
 }
 
 /// Output of [`trapezoidal_coefficients`].

@@ -26,11 +26,11 @@ struct RunGrads {
     out: Tensor<3>,
     /// Final SSM hidden state from the returned cache.
     final_ssm: Tensor<4>,
-    /// Final previous-token B state from the returned cache; `None` for
-    /// [`Trapezoid::None`], which keeps no tap slot.
-    final_k: Option<Tensor<4>>,
-    /// Final previous-token x state from the returned cache; `None` with it.
-    final_v: Option<Tensor<3>>,
+    /// Final tap-FIFO B from the returned cache; `None` for
+    /// [`Trapezoid::None`], which keeps no tap slots.
+    final_k: Option<Tensor<5>>,
+    /// Final tap-FIFO x from the returned cache; `None` with it.
+    final_v: Option<Tensor<4>>,
     /// Final cumulative RoPE angle from the returned cache; `None` for
     /// [`RotationKind::Real1D`], which has no accumulator.
     final_angle: Option<Tensor<3>>,
@@ -53,8 +53,8 @@ struct Heads {
     ssm: Tensor<4>,
     /// `None` when the block is [`Trapezoid::None`] and its cache has no tap
     /// slots to attach a loss head to.
-    k: Option<Tensor<4>>,
-    v: Option<Tensor<3>>,
+    k: Option<Tensor<5>>,
+    v: Option<Tensor<4>>,
     /// `None` when the block is [`RotationKind::Real1D`] and its cache has no
     /// rotation accumulator to attach a loss head to.
     angle: Option<Tensor<3>>,
@@ -89,17 +89,27 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         };
         Tensor::from_inner(t)
     };
+    let mk5 = |shape: [usize; 5]| {
+        let t = if random {
+            Tensor::<5>::random(shape, dist, &device)
+        } else {
+            Tensor::<5>::zeros(shape, &device)
+        };
+        Tensor::from_inner(t)
+    };
     // `Real1D` has no accumulator at all; every other kind exercised here is
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
         _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
     };
-    let tap = cfg.trapezoid.has_beta_tap();
+    // The tap FIFO is as deep as the pattern's lag.
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let tap = slots > 0;
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        k_state_bmhr: tap.then(|| mk4([batch, mimo_rank, nheads, state_rank])),
-        v_state_bhp: tap.then(|| mk3([batch, nheads, per_head_dim])),
+        k_state_bumhr: tap.then(|| mk5([batch, slots, mimo_rank, nheads, state_rank])),
+        v_state_buhp: tap.then(|| mk4([batch, slots, nheads, per_head_dim])),
         rotation,
     }
 }
@@ -155,8 +165,8 @@ fn run_with_grads(
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
     let ssm = cache.ssm_bhpr;
-    let k = cache.k_state_bmhr;
-    let v = cache.v_state_bhp;
+    let k = cache.k_state_bumhr;
+    let v = cache.v_state_buhp;
     let angle = match cache.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),
@@ -315,19 +325,22 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rope_angles = cfg.num_rope_angles();
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: cfg.trapezoid.has_beta_tap().then(|| {
-            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        k: (slots > 0).then(|| {
+            Tensor::<5>::random(
+                [batch, slots, mimo_rank, nheads, state_rank],
+                normal,
+                &device,
+            )
         }),
-        v: cfg
-            .trapezoid
-            .has_beta_tap()
-            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
+        v: (slots > 0)
+            .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -589,19 +602,22 @@ fn run_split_matches_full(cfg: Mamba3Config) {
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rope_angles = cfg.num_rope_angles();
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: cfg.trapezoid.has_beta_tap().then(|| {
-            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        k: (slots > 0).then(|| {
+            Tensor::<5>::random(
+                [batch, slots, mimo_rank, nheads, state_rank],
+                normal,
+                &device,
+            )
         }),
-        v: cfg
-            .trapezoid
-            .has_beta_tap()
-            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
+        v: (slots > 0)
+            .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -672,19 +688,22 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rope_angles = cfg.num_rope_angles();
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: cfg.trapezoid.has_beta_tap().then(|| {
-            Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device)
+        k: (slots > 0).then(|| {
+            Tensor::<5>::random(
+                [batch, slots, mimo_rank, nheads, state_rank],
+                normal,
+                &device,
+            )
         }),
-        v: cfg
-            .trapezoid
-            .has_beta_tap()
-            .then(|| Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device)),
+        v: (slots > 0)
+            .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };

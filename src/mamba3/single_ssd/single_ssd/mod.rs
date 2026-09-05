@@ -5,13 +5,20 @@
 //! as shipped in Triton (SISO) and Tilelang (MIMO):
 //!
 //! ```text
-//!   scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁
+//!   scaleₜ = γₜ + (1 − λₜ₊ₗₐ₉) · Δₜ₊ₗₐ₉
 //!
 //!   forward_single_ssd:    h' = SSD(V_raw, K_scaled = scaleₜ B) with:
 //!                               * strict lower-triangular intra-chunk mask
 //!                               * additive γ-weighted same-step correction
-//!                               * boundary β seed (1−λ₀) Δ₀ Kₜ₋₁ ⊗ xₜ₋₁
+//!                               * boundary β seed Σⱼ (1−λⱼ) Δⱼ Kⱼ ⊗ xⱼ over the
+//!                                 cache's `lag` tap slots
+//!                               * at lag > 1, the rest of the correction band
+//!                                 ([`crate::mamba3::single_ssd::token_band`])
 //! ```
+//!
+//! `lag` is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag):
+//! `1` for the default tap pattern, `u` for
+//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical).
 //!
 //! References:
 //! - [`mamba3_siso_fwd.py`](https://github.com/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py),
@@ -36,6 +43,18 @@ impl Mamba3 {
     /// the SSD memory during training. Cache is a separate type
     /// ([`Mamba3SingleSsdCache`]) because the stored hidden state has different
     /// semantics than the original-form cache used by [`Self::forward`].
+    ///
+    /// "Equivalent" is over **everything a caller can observe** — the returned
+    /// output and every field of the returned cache — which is the whole of what
+    /// this method is. It is not a claim about the intermediate `y` the SSD core
+    /// produces at each *folded* position: under
+    /// [`Trapezoid::Vertical`] the
+    /// correction band is only applied at each token's last micro-step, the one
+    /// the readout happens at, so the `u−1` per-token partial sums this pathway
+    /// discards do not match the double-SSD ones. Nothing reads them, and the
+    /// *state* is exact at every position in both pathways — see
+    /// [`crate::mamba3::single_ssd::token_band`], which is also why that band
+    /// never has to enter the kernel.
     ///
     /// Except under [`Trapezoid::None`], where there is no second pass to fuse:
     /// the composite key scale is `γ` and the same-step correction is the whole
@@ -82,16 +101,12 @@ impl Mamba3 {
         let mut cache = cache.unwrap_or_else(|| {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             // Reached only with a β tap (`Trapezoid::None` delegated above).
-            let k_state_bmhr = Some(Tensor::zeros(
-                [batch, mimo_rank, nheads, state_rank],
-                &device,
-            ));
-            let v_state_bhp = Some(Tensor::zeros([batch, nheads, per_head_dim], &device));
+            let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
             let rotation = self.zero_rotation_state(batch, &device);
             Mamba3SingleSsdCache {
                 ssm_bhpr,
-                k_state_bmhr,
-                v_state_bhp,
+                k_state_bumhr,
+                v_state_buhp,
                 rotation,
             }
         });
@@ -162,32 +177,35 @@ impl Mamba3 {
         san(&da_bsh);
         san(&gamma_bsh);
 
-        // ── Compute scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁ ──────────────────────────
+        // ── Compute scaleₜ = γₜ + (1 − λₜ₊ₗₐ₉) · Δₜ₊ₗₐ₉ ──────────────────────
         //
-        // The shifted term is zero at the very last sequence position (no future
-        // token). Out-of-bounds Δ_{t+1} is zero by construction (we pad with
-        // zeros), and (1 − λ) is bounded, so the multiplication safely yields 0.
+        // The shifted term is zero for the last `lag` sequence positions (the
+        // taps that pay them belong to the *next* call, out of the tap slots) —
+        // which is also what makes `h'` coincide with the double-SSD state at a
+        // cache boundary, hence the field-identity `From` impls.
         //
-        // `t+1` is the next *folded* position — [`Trapezoid::HorizontalCarryOver`].
-        // This is the `Δ̃` collapse (`info/trapezoid-as-integration.md` §5) at
-        // micro-step resolution; a lag-`u` pattern shifts by `u` here and widens
-        // `ssd/diag.rs`'s same-step correction from the diagonal to a `u`-band.
+        // `t+lag` is a later *folded* position: lag 1 is
+        // [`Trapezoid::HorizontalCarryOver`], lag `u` is [`Trapezoid::Vertical`].
+        // This is the `Δ̃` collapse (`info/trapezoid-as-integration.md` §5), and
+        // §9's collapse theorem is why it survives the wider lag unchanged —
+        // only the same-step correction widens from the diagonal to a `lag`-wide
+        // band (see [`crate::mamba3::single_ssd::token_band`]).
+        let lag = self.tap_lag();
         let lambda_bsh = burn::tensor::activation::sigmoid(lambda_raw_bsh);
+        // νₜ = (1 − λₜ)·Δₜ, the tap's own coefficient before any transport.
+        let nu_bsh = dt_bsh.clone() * (-lambda_bsh + 1.0);
         let shifted_gamma_bsh = {
-            let zero_b1h = Tensor::zeros([batch, 1, nheads], &device);
-            if sequence == 1 {
-                zero_b1h.clone()
+            let zero_bLh = Tensor::zeros([batch, lag, nheads], &device);
+            if sequence == lag {
+                zero_bLh
             } else {
-                let dt_next_bsh = Tensor::cat(
-                    vec![dt_bsh.clone().narrow(1, 1, sequence - 1), zero_b1h.clone()],
+                Tensor::cat(
+                    vec![nu_bsh.clone().narrow(1, lag, sequence - lag), zero_bLh],
                     1,
-                );
-                let lambda_next_bsh =
-                    Tensor::cat(vec![lambda_bsh.narrow(1, 1, sequence - 1), zero_b1h], 1);
-                dt_next_bsh * (-lambda_next_bsh + 1.0)
+                )
             }
         };
-        let scale_bsh = gamma_bsh.clone() + shifted_gamma_bsh;
+        let scale_bsh = gamma_bsh.clone() + shifted_gamma_bsh.clone();
         san(&scale_bsh);
 
         // ── Step 3: Reshape x ─────────────────────────────────────────────────
@@ -226,55 +244,45 @@ impl Mamba3 {
         san(&b_bsmhr);
         san(&c_bsmhr);
 
-        // ── Save the last position's B and x (raw, no MIMO_V) for the cache ───
-        // "Last position" is the last *micro-step* of the last token — exactly
-        // the step the next call's first micro-step follows, so the trapezoid's
-        // previous-step taps continue across a split prefill unchanged.
-        let b_last_bmhr = b_bsmhr
-            .clone()
-            .narrow(1, sequence - 1, 1)
-            .reshape([batch, mimo_rank, nheads, state_rank]);
-        let x_last_bhp = x_bshp
-            .clone()
-            .narrow(1, sequence - 1, 1)
-            .squeeze_dim::<3>(1);
+        // ── Save the last `lag` positions' B and x (raw, no MIMO_V) ───────────
+        // The positions whose second installment the next call pays; at
+        // `lag = u` that window is precisely the last token.
+        let (b_last_bumhr, x_last_buhp) =
+            self.save_tap_slots(&b_bsmhr, &x_bshp, &da_bsh, lag);
 
         // ── Boundary β seed for initial state ─────────────────────────────────
-        // Add (1 − λ₀) · Δ₀ · Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ) to the carried
-        // single-ssd SSM state. λ₀, Δ₀ are taken from the current call's first
-        // token; Kₜ₋₁ and xₜ₋₁ come from the cache (zeros on fresh start).
+        // Add Σⱼ νⱼ · Σₘ K_prev[j, m] ⊗ (x_prev[j] ⊙ mimo_xₘ) to the carried
+        // single-ssd SSM state: cache slot `j` (oldest first) is the position
+        // whose tap is paid by this call's position `j`, so it takes `νⱼ` from
+        // the current call's first `lag` positions. `x_prev` already carries the
+        // decay from its own position to the boundary, and `K_prev` its own
+        // rotation, so the pair *is* the transported write.
         //
-        // γₜ = λₜ·Δₜ, so (1−λ₀)·Δ₀ = Δ₀ − γ₀.
-        let boundary_factor_bh = dt_bsh.clone().narrow(1, 0, 1).squeeze_dim::<2>(1)
-            - gamma_bsh.clone().narrow(1, 0, 1).squeeze_dim::<2>(1);
-
-        // Σₘ Kₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_xₘ)  → [batch, nheads, per_head_dim, state_rank]
+        // γₜ = λₜ·Δₜ, so νⱼ = (1−λⱼ)·Δⱼ = Δⱼ − γⱼ.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
-        let v_prev_mimo_bmhp = helpers::build_v_with_mimo::<3, 4>(
+        let nu_head_buh = nu_bsh.clone().narrow(1, 0, lag);
+        let v_prev_mimo_bumhp = helpers::build_v_with_mimo::<4, 5>(
             cache
-                .v_state_bhp
+                .v_state_buhp
                 .clone()
-                .expect("a β tap keeps its (B, x) cache slot"),
+                .expect("a β tap keeps its (B, x) cache slots"),
             mimo_x_hmp.as_ref(),
-            1,
-        ); // [batch, mimo_rank, nheads, per_head_dim]
-        // einsum: bmhp, bmhr -> bhpr  (contract over m)
+            2,
+        ); // [batch, lag, mimo_rank, nheads, per_head_dim]
+        let v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
+        // The seed contracts over the slots *and* the ranks — both are just
+        // outer products sharing one state — so fusing them makes it the one
+        // `mimo_outer_sum` the per-token write already uses.
+        let k_prev_bumhr = cache
+            .k_state_bumhr
+            .clone()
+            .expect("a β tap keeps its (B, x) cache slots");
         let boundary_seed_bhpr = helpers::mimo_outer_sum(
-            v_prev_mimo_bmhp,
-            cache
-                .k_state_bmhr
-                .clone()
-                .expect("a β tap keeps its (B, x) cache slot"),
+            v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
+            k_prev_bumhr.reshape([batch, lag * mimo_rank, nheads, state_rank]),
             self.use_siso_decode_kernels(),
         );
-        let initial_state_bhpr = cache.ssm_bhpr.clone()
-            + boundary_seed_bhpr
-                * boundary_factor_bh.unsqueeze_dims::<4>(&[2, 3]).expand([
-                    batch,
-                    nheads,
-                    per_head_dim,
-                    state_rank,
-                ]);
+        let initial_state_bhpr = cache.ssm_bhpr.clone() + boundary_seed_bhpr;
         san(&initial_state_bhpr);
 
         // ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
@@ -285,6 +293,25 @@ impl Mamba3 {
         // V passed to SSD is raw x with MIMO_V applied (not γ-scaled).
         let v_bshmp = helpers::build_v_with_mimo::<4, 5>(x_bshp.clone(), mimo_x_hmp.as_ref(), 2);
         // v_bshmp has axis order [b, s, m, h, p] (insert_dim=2 onto [b,s,h,p]).
+
+        // ── The lag-`u` correction band ───────────────────────────────────────
+        // At lag 1 the key scale is wrong only on the diagonal and `ssd/diag.rs`
+        // fixes it inside the kernel. At lag `u` the exception is `u` wide — and
+        // is exactly the token at the positions the readout keeps, so it is one
+        // contraction here rather than a wider mask. See
+        // [`crate::mamba3::single_ssd::token_band`].
+        let band_correction_btmhp = (lag > 1)
+            .then(|| {
+                crate::mamba3::single_ssd::token_band::token_band_correction(
+                    v_bshmp.clone(),
+                    b_bsmhr.clone(),
+                    c_bsmhr.clone(),
+                    shifted_gamma_bsh,
+                    da_bsh.clone(),
+                    micro_steps,
+                )
+            })
+            .flatten();
 
         #[rustfmt::skip]
         let (v_bShmp, da_bSh, gamma_bSh, scale_bSh, b_bSmhr, c_bSmhr) = if pad == 0 {
@@ -344,6 +371,10 @@ impl Mamba3 {
         // micro-step survives; the intervening positions computed a `y` from a
         // repeated `C` and it is dropped here.
         let y_bsmhp = crate::mamba3::product::last_micro5(y_bsmhp, micro_steps);
+        let y_bsmhp = match band_correction_btmhp {
+            Some(correction_btmhp) => y_bsmhp - correction_btmhp,
+            None => y_bsmhp,
+        };
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
         let sequence = tokens;
 
@@ -403,8 +434,8 @@ impl Mamba3 {
         san(&out_bsm);
 
         // ── Update remaining cache fields ─────────────────────────────────────
-        cache.k_state_bmhr = Some(b_last_bmhr);
-        cache.v_state_bhp = Some(x_last_bhp);
+        cache.k_state_bumhr = b_last_bumhr;
+        cache.v_state_buhp = x_last_buhp;
         // The new cumulative rotation (Complex2D: angle wrapped to [−π, π];
         // Quaternion4D: the cumulative quaternion), from [`rotate_bc_forward`] —
         // matches the double-ssd cache convention so the two inter-convert.

@@ -33,9 +33,12 @@
 //!
 //! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample the
 //! write's second tap reads — a choice that only exists at `u > 1`, and one
-//! that changes the algorithm *and* the cache. Only the default
-//! ([`Trapezoid::HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver))
-//! has an algorithm today.
+//! that changes the algorithm *and* the cache. Two patterns have one today, and
+//! they are the same code at two lags
+//! ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)): the default
+//! [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
+//! (lag 1) and [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)
+//! (lag `u`), which coincide at `u = 1`.
 
 pub mod double_ssd;
 pub mod single_ssd;

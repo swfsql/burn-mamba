@@ -178,6 +178,7 @@ mod impl_mamba3 {
                 rotation: mamba_block.rotation,
                 num_quat_blocks: mamba_block.num_quat_blocks,
                 trapezoid: mamba_block.trapezoid,
+                micro_steps: mamba_block.micro_steps,
             },
         )
         .init(device)
@@ -207,14 +208,14 @@ mod impl_mamba3 {
             match c {
                 Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
                     ssm_bhpr: c.ssm_bhpr.inner(),
-                    k_state_bmhr: c.k_state_bmhr.map(|t| t.inner()),
-                    v_state_bhp: c.v_state_bhp.map(|t| t.inner()),
+                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
+                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
                     rotation: rot(c.rotation),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: c.ssm_bhpr.inner(),
-                    k_state_bmhr: c.k_state_bmhr.map(|t| t.inner()),
-                    v_state_bhp: c.v_state_bhp.map(|t| t.inner()),
+                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
+                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
                     rotation: rot(c.rotation),
                 }),
             }
@@ -234,14 +235,14 @@ mod impl_mamba3 {
             match c {
                 Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
                     ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
-                    k_state_bmhr: c.k_state_bmhr.map(Tensor::from_inner),
-                    v_state_bhp: c.v_state_bhp.map(Tensor::from_inner),
+                    k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
+                    v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
                     rotation: rot(c.rotation),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
-                    k_state_bmhr: c.k_state_bmhr.map(Tensor::from_inner),
-                    v_state_bhp: c.v_state_bhp.map(Tensor::from_inner),
+                    k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
+                    v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
                     rotation: rot(c.rotation),
                 }),
             }

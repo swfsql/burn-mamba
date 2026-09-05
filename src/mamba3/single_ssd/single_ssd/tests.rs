@@ -89,19 +89,20 @@ fn build_cross_caches(
         Some(a) => RotationState::Angle(Tensor::from_inner(a)),
         None => RotationState::real(),
     };
-    // Zero previous-token history so the two cache forms agree logically.
-    let k = Tensor::<4>::zeros([batch, mimo_rank, nheads, state_rank], &device);
-    let v = Tensor::<3>::zeros([batch, nheads, per_head_dim], &device);
+    // Zero tap history so the two cache forms agree logically.
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let k = Tensor::<5>::zeros([batch, slots, mimo_rank, nheads, state_rank], &device);
+    let v = Tensor::<4>::zeros([batch, slots, nheads, per_head_dim], &device);
     let c3 = Mamba3DoubleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm.clone()),
-        k_state_bmhr: Some(Tensor::from_inner(k.clone())),
-        v_state_bhp: Some(Tensor::from_inner(v.clone())),
+        k_state_bumhr: Some(Tensor::from_inner(k.clone())),
+        v_state_buhp: Some(Tensor::from_inner(v.clone())),
         rotation: rotation(),
     };
     let cm = Mamba3SingleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm),
-        k_state_bmhr: Some(Tensor::from_inner(k)),
-        v_state_bhp: Some(Tensor::from_inner(v)),
+        k_state_bumhr: Some(Tensor::from_inner(k)),
+        v_state_buhp: Some(Tensor::from_inner(v)),
         rotation: rotation(),
     };
     (c3, cm)
@@ -135,17 +136,26 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         };
         Tensor::from_inner(t)
     };
+    let mk5 = |shape: [usize; 5]| {
+        let t = if random {
+            Tensor::<5>::random(shape, dist, &device)
+        } else {
+            Tensor::<5>::zeros(shape, &device)
+        };
+        Tensor::from_inner(t)
+    };
     // `Real1D` has no accumulator at all; every other kind exercised here is
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
         _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
     };
-    let tap = cfg.trapezoid.has_beta_tap();
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let tap = slots > 0;
     Mamba3SingleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        k_state_bmhr: tap.then(|| mk4([batch, mimo_rank, nheads, state_rank])),
-        v_state_bhp: tap.then(|| mk3([batch, nheads, per_head_dim])),
+        k_state_bumhr: tap.then(|| mk5([batch, slots, mimo_rank, nheads, state_rank])),
+        v_state_buhp: tap.then(|| mk4([batch, slots, nheads, per_head_dim])),
         rotation,
     }
 }
@@ -242,8 +252,8 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 struct Heads {
     out: Tensor<3>,
     ssm: Tensor<4>,
-    k: Tensor<4>,
-    v: Tensor<3>,
+    k: Tensor<5>,
+    v: Tensor<4>,
     /// `None` when the block is [`RotationKind::Real1D`] and its cache has no
     /// rotation accumulator to attach a loss head to.
     angle: Option<Tensor<3>>,
@@ -268,8 +278,8 @@ fn add_angle_loss(loss: Tensor<1>, angle: Option<Tensor<3>>, heads: &Heads) -> T
 struct SingleSsdRun {
     rg: RunGrads,
     final_ssm: Tensor<4>,
-    final_k: Tensor<4>,
-    final_v: Tensor<3>,
+    final_k: Tensor<5>,
+    final_v: Tensor<4>,
     final_angle: Option<Tensor<3>>,
 }
 
@@ -287,8 +297,8 @@ fn run_with_grads_single_ssd(
     let ssm = cache.ssm_bhpr;
     // These tests all run a β tap; `Trapezoid::None` never reaches this pathway
     // (`forward_single_ssd` delegates to the double-SSD form for it).
-    let k = cache.k_state_bmhr.expect("a β tap keeps its tap slots");
-    let v = cache.v_state_bhp.expect("a β tap keeps its tap slots");
+    let k = cache.k_state_bumhr.expect("a β tap keeps its tap slots");
+    let v = cache.v_state_buhp.expect("a β tap keeps its tap slots");
     let angle = match cache.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),
@@ -681,8 +691,27 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: Tensor::<5>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                mimo_rank,
+                nheads,
+                state_rank,
+            ],
+            normal,
+            &device,
+        ),
+        v: Tensor::<4>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                nheads,
+                per_head_dim,
+            ],
+            normal,
+            &device,
+        ),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -760,8 +789,8 @@ fn run_cache_fields_with_grads(
     ) -> (
         Tensor<3>, // out
         Tensor<4>, // ssm_bhpr
-        Tensor<4>, // k_state_bmhr
-        Tensor<3>, // v_state_bhp
+        Tensor<5>, // k_state_bumhr
+        Tensor<4>, // v_state_buhp
         Tensor<3>, // cum_angle_bha
     ),
 ) -> SingleSsdRun {
@@ -848,8 +877,27 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: Tensor::<5>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                mimo_rank,
+                nheads,
+                state_rank,
+            ],
+            normal,
+            &device,
+        ),
+        v: Tensor::<4>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                nheads,
+                per_head_dim,
+            ],
+            normal,
+            &device,
+        ),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };
@@ -857,8 +905,10 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     // Shared, fully-random initial cache fields (including the previous-token
     // K/V history) — both runs start from the exact same logical state.
     let init_ssm = Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
-    let init_k = Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device);
-    let init_v = Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device);
+    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let init_k =
+        Tensor::<5>::random([batch, slots, mimo_rank, nheads, state_rank], normal, &device);
+    let init_v = Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device);
     let init_angle = Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device);
 
     let path_double = ssd_path.clone();
@@ -876,8 +926,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_a = run_cache_fields_with_grads(&model, &input_a, &heads, move |m, x| {
         let init_double = Mamba3DoubleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_a),
-            k_state_bmhr: Some(Tensor::from_inner(k_a)),
-            v_state_bhp: Some(Tensor::from_inner(v_a)),
+            k_state_bumhr: Some(Tensor::from_inner(k_a)),
+            v_state_buhp: Some(Tensor::from_inner(v_a)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
         };
         let prefix = x.clone().narrow(1, 0, split);
@@ -889,8 +939,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         (
             out,
             last.ssm_bhpr,
-            last.k_state_bmhr.expect("a β tap keeps its tap slots"),
-            last.v_state_bhp.expect("a β tap keeps its tap slots"),
+            last.k_state_bumhr.expect("a β tap keeps its tap slots"),
+            last.v_state_buhp.expect("a β tap keeps its tap slots"),
             last.rotation.angle(),
         )
     });
@@ -902,8 +952,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
         let init_single = Mamba3SingleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_b),
-            k_state_bmhr: Some(Tensor::from_inner(k_b)),
-            v_state_bhp: Some(Tensor::from_inner(v_b)),
+            k_state_bumhr: Some(Tensor::from_inner(k_b)),
+            v_state_buhp: Some(Tensor::from_inner(v_b)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
         };
         let prefix = x.clone().narrow(1, 0, split);
@@ -915,8 +965,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         (
             out,
             last.ssm_bhpr,
-            last.k_state_bmhr.expect("a β tap keeps its tap slots"),
-            last.v_state_bhp.expect("a β tap keeps its tap slots"),
+            last.k_state_bumhr.expect("a β tap keeps its tap slots"),
+            last.v_state_buhp.expect("a β tap keeps its tap slots"),
             last.rotation.angle(),
         )
     });
@@ -1118,8 +1168,27 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
     let heads = Heads {
         out: Tensor::<3>::random([batch, seq_len, d_model], normal, &device),
         ssm: Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device),
-        k: Tensor::<4>::random([batch, mimo_rank, nheads, state_rank], normal, &device),
-        v: Tensor::<3>::random([batch, nheads, per_head_dim], normal, &device),
+        k: Tensor::<5>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                mimo_rank,
+                nheads,
+                state_rank,
+            ],
+            normal,
+            &device,
+        ),
+        v: Tensor::<4>::random(
+            [
+                batch,
+                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                nheads,
+                per_head_dim,
+            ],
+            normal,
+            &device,
+        ),
         angle: (num_rope_angles > 0)
             .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
     };

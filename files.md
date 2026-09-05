@@ -103,8 +103,13 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 - **`helpers.rs`** — rank-generic, shared by both pathways/modes: `trapezoidal_coefficients`
   (`Δ/A/da/α/γ` + **optional** `β`; a `None` `lambda_raw` is `Trapezoid::None` and yields
   `β = None`, `γ = Δ` by sharing `Δ`'s tensor), `qk_norm_expand_bias`, `build_v_with_mimo`,
-  `mimo_outer_sum` (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed; `_siso`
-  broadcast vs `_mimo` matmul, per `siso_specialization_decode`), `split_trailing` (peels an
+  `mimo_outer_sum` (`Σₘ v[m]⊗k[m]` state contribution; step + boundary seed, which fuses the
+  tap slots into `m`; `_siso` broadcast vs `_mimo` matmul, per `siso_specialization_decode`),
+  the tap-lag trio `shift_stream` / `interior_gap_decay` / `tail_decay` (the lag-`L` shift
+  with the cache's slots as prefix; `Πᵈ⁼¹‥ᴸ⁻¹αₚ₋ᵈ`, the gap transport `β`'s own `αₚ` does not
+  cover, front **zero**-padded because the cache's `x` slots already carry that part; and
+  that part — `Πᵣ₌q₊₁ᔆ⁻¹αᵣ` for the last `L` positions. All three are `None`/no-ops at
+  `L = 1`, so the default pattern is byte-identical), `split_trailing` (peels an
   optional trailing in-proj segment — rotation under `Real1D`, then `λ` under
   `Trapezoid::None`, which is why those two are last; it cannot be one more entry in the main
   `split_into` because `split_with_sizes` **drops** a zero-length segment). Non-obvious: the
@@ -119,14 +124,23 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `From` both sub-paths so it converts to whichever pathway the cache selects.
 - **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample
   the `β` tap reads. A choice that exists only at `micro_steps > 1`
-  (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks the
-  pre-chunking shift, the width of `single_ssd/ssd/diag.rs`'s same-step correction,
-  whether the in-proj spends `λ` channels, and `tap_slots()`, the cache's `(B, x)` buffer
-  depth (`0` none / `1` lag-1 / `u` lag-`u`). Implemented: `HorizontalCarryOver` (lag 1 on
-  the *folded* sequence; the default) and `None` (`λ ≡ 1` ⇒ `β = 0`, `γ = Δ`, with nothing
+  (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks
+  whether the in-proj spends `λ` channels and, through `tap_lag()`, everything else.
+  **`tap_lag(u)` is the one knob the two implemented patterns share**: `0` no tap /
+  `1` `HorizontalCarryOver` (the default) / `u` `Vertical`, and it *is* `tap_slots()`
+  (a lag-`L` tap needs the last `L` positions live), the pre-chunking shift, the
+  single-SSD key-scale offset and `step`'s FIFO depth. So the two are one algorithm
+  read at two lags, and coincide at `u = 1`.
+  `Vertical` = lag `u`: the tap reads the *same micro-step of the previous token*, so
+  all taps cross (vs `1/u`) and the pattern is `u` token-rate filters. What is vertical
+  is the **tap graph**, not the scan — the state keeps the one flattened chain, which is
+  what keeps it causal and `forward` ≡ `step`. Closed form at token resolution:
+  `hₜ = Aₜ(hₜ₋₁ + Σⱼ νₜ,ⱼ ṽₜ₋₁,ⱼ) + Σⱼ γₜ,ⱼ ṽₜ,ⱼ` — the `u=1` trapezoid with its left
+  endpoint promoted from rank 1 to rank `u`, `A` untouched (still `λ`-free).
+  `None` = `λ ≡ 1` ⇒ `β = 0`, `γ = Δ`, with nothing
   paid for the absent term anywhere — no `λ` in-proj/Muon segment, no `β` tensor, no tap
   slots, **one** SSD call in `forward`, one outer product in `step`; the two pathways
-  coincide, so `forward_single_ssd` delegates).
+  coincide, so `forward_single_ssd` delegates.
   `assert_implemented()` is called from `Mamba3Config::init`, so the rest fail at
   construction. Degeneracies at
   `u = 1`: `Vertical` = `HorizontalCarryOver`, `HorizontalReset` = `None`.
@@ -136,12 +150,16 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ### `mamba3/double_ssd/`
 - **`double_ssd/mod.rs`** — `forward_double_ssd`/`step_double_ssd` + the RoPE utilities.
-  Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (prev ×β, shift-before-chunking),
-  summed; ~2× SSD memory — except under `Trapezoid::None`, where the β side (shift,
+  Splits the trapezoid into γ-SSM (current ×γ) + β-SSM (tapped ×β, shift-before-chunking
+  by `tap_lag`, `β` picking up `interior_gap_decay` so it carries the whole gap), summed;
+  ~2× SSD memory — except under `Trapezoid::None`, where the β side (shift,
   scale, second SSD call, tap slots) is skipped outright and this is one plain SSD pass.
   `forward` folds the micro-steps in right after the split and
   collapses back after the SSD (so between them `s` counts micro-steps and `tokens` is the
-  only token-resolution name); `step` loops the recurrence `u` times and reads out once.
+  only token-resolution name); `step` loops the recurrence `u` times and reads out once,
+  driving the tap FIFO **tap → decay the survivors → push** so a slot's `x` accumulates
+  exactly the `α`s between its own position and the one that taps it (at lag 1 nothing
+  survives a tap, so nothing is ever decayed and `β = (1−λ)Δα` is the whole coefficient).
   `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
   (in-proj → coeffs → QK-norm, pre-rotation; per-micro-step streams keep a `u` axis that
@@ -151,10 +169,14 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   (D-skip, gate/gated-norm, MIMO aggregation, out-proj). `rotation/rope.rs`'s `apply_rope`/`apply_rope_partial` (rotate
   last-dim pairs; interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; `rope_dim > 0`
   required) and `wrap_angle` are used by **both** pathways.
-- **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), `k_state_bmhr`
-  (prev-token B, β term), `v_state_bhp` (prev-token x), `rotation` (`RotationState`). No conv.
-  The two tap slots are `Option`s — absent, not zeroed, when the `Trapezoid` has no β tap
-  (`sanity()` asserts they agree); the `*CacheConfig`s carry the `trapezoid` to size them.
+- **`cache.rs`** — `Mamba3DoubleSsdCache`: `ssm_bhpr` (trapezoidal state), the tap FIFO
+  `k_state_bumhr`/`v_state_buhp` (`tap_slots` deep, **oldest first**), `rotation`
+  (`RotationState`). No conv. The FIFO's `k` is stored **as rotated at its own position**
+  (the relative-rotation factoring reconstructs the transport) and its `x` **pre-scaled by
+  the decay since that position** — which is what carries a lag-`u` gap across a call
+  boundary, and is a no-op at lag 1. The two tap slots are `Option`s — absent, not zeroed,
+  when the `Trapezoid` has no β tap (`sanity()` asserts they agree); the `*CacheConfig`s
+  carry `trapezoid` + `micro_steps` to size them.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3DoubleSsdPath`; `Mamba3DoubleSsdInput` is
   **MIMO-first** (`v_bnlmhp` already ×γ/β, `da_bnlh`, `b/c_bnlmhr`). Same three algorithms
   as Mamba-2 with the `mimo_rank` axis fused into the chunk reshape;
@@ -162,18 +184,31 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
-  `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` (a sample's two trapezoid installments share a transport
+  `scaleₜ = γₜ + (1−λₜ₊ₗₐ₉)·Δₜ₊ₗₐ₉` (a sample's two trapezoid installments share a transport
   and collapse to this one scalar — `info/trapezoid-as-integration.md` §5; the pathway
-  exists because they do), strict-lower-triangular intra-chunk mask + same-step γ
-  correction (in-kernel), and a **boundary-β seed** folded into the initial state. Same
+  exists because they do, and §9's collapse theorem is why the wider lag changes nothing
+  here), strict-lower-triangular intra-chunk mask + same-step γ
+  correction (in-kernel) widened by `token_band` at lag > 1, and a **boundary-β seed** over
+  the cache's `lag` slots folded into the initial state. Same
   micro-step fold/collapse as the double pathway; everything between (trapezoid, `scale`,
   QK-norm, rotation, seed, chunking) runs at micro-step resolution unchanged.
   `step_single_ssd` converts to a double-ssd cache, runs `step_double_ssd`, converts back.
   Under `Trapezoid::None` the whole body is skipped: `scale ≡ γ` makes this the double-ssd
   form (strict mask + full diagonal correction = inclusive mask), so `forward_single_ssd`
   delegates rather than reassemble what it masked.
-- **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields but `ssm_bhpr` carries
-  `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the diagonal, patched in-kernel). The
+- **`token_band.rs`** — the lag-`u` correction band, as **one intra-token contraction
+  outside the kernel**. `scale` is wrong for the `lag` reads before a tap is paid: the
+  diagonal at lag 1 (in-kernel, `ssd/diag.rs`), a `u`-wide band at lag `u`. Non-obvious and
+  the reason no mask, chunk-length constraint or cross-chunk term is needed: at the only
+  reads that survive (`j = u−1`) that band **is the token**. Equivalence with double-SSD
+  therefore holds on everything a caller observes (output + every cache field) but not on
+  the `u−1` per-token partial sums `last_micro5` discards — correcting those would need the
+  band's cross-chunk and boundary-seed parts, where it is already `scale`-weighted and
+  cannot be un-weighted. The state is exact at every position in both pathways.
+- **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields (same tap-FIFO layout and
+  decayed-`x` convention, hence the field-identity `From`) but `ssm_bhpr` carries
+  `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the `lag`-wide band, patched in-kernel at
+  lag 1 and by `token_band` beyond). The
   distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence — a
   distinction that vanishes under `Trapezoid::None`, where `h' ≡ h` everywhere.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
@@ -213,11 +248,12 @@ lower floor **by default** — it is a configurable clamp), so this is a superse
 Non-obvious: unlike DeltaProduct there is no forget gate to keep at token rate — Mamba
 fuses decay, write weight and rotation rate into one `Δ` — so every micro-step decays; a
 scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silence the
-rotation with it. The trapezoid's two taps consequently straddle *micro-steps*, and the
-caches hold the **last micro-step**, which is exactly what the next call's first follows —
-so only `1/u` of the taps still cross a token and the interior ones pair two projections of
-*one* token (`info/trapezoid-as-integration.md` §§8–9, with the tap lattice `u>1` opens;
-`λ` is per micro-step, so `λ=1` on the interior recovers the `u=1` semantics).
+rotation with it. What `u > 1` does change is the trapezoid's taps, which now live on the
+folded chain and so become a *choice* (`trapezoid.rs`): at the default lag 1 they straddle
+*micro-steps*, so only `1/u` still cross a token and the interior ones pair two projections
+of *one* token (`info/trapezoid-as-integration.md` §§8–9, with the tap lattice `u>1` opens;
+`λ` is per micro-step, so `λ=1` on the interior recovers the `u=1` semantics); at
+`Vertical`'s lag `u` all of them cross. The tap cache is the FIFO that choice needs.
 Tests: helper round-trips; `d_in_proj`/Muon-tiling arithmetic (`u=1` is stock); forward≡step
 on both pathways × all four kinds × `u∈{2,3}`; split-prefill continuity; forward≡step
 **gradients** (input + `in_proj`); per-micro-step gradient liveness (a dropped or

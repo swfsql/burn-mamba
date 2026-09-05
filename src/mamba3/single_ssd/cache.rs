@@ -88,24 +88,25 @@ pub struct Mamba3SingleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **Previous token's K per mimo rank** = post-RoPE, post-bias `Bₜ₋₁[m]`.
+    /// **The tap FIFO's K** (post-RoPE, post-bias `B`), one slot per lagged
+    /// position, **oldest first**.
     ///
-    /// Used at the start of the next forward_single_ssd call to seed the boundary β
-    /// contribution `(1 − λ₀) · Δ₀ · Bₜ₋₁ ⊗ xₜ₋₁` (which the previous call could
-    /// not yet add because it did not know `λ₀, Δ₀`).
+    /// Used at the start of the next forward_single_ssd call to seed the deferred
+    /// boundary β contributions `Σⱼ (1 − λⱼ) · Δⱼ · Bₚ₋ₗₐ₉₊ⱼ ⊗ xₚ₋ₗₐ₉₊ⱼ` (which the
+    /// previous call could not yet add because it did not know the `λ, Δ` of the
+    /// `lag` positions that pay them).
     ///
     /// `None` under [`Trapezoid::None`], which has no boundary β term to defer.
     ///
-    /// Shape: `[batch, mimo_rank, nheads, state_rank]`
-    pub k_state_bmhr: Option<Tensor<4>>,
+    /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
+    pub k_state_bumhr: Option<Tensor<5>>,
 
-    /// **Previous token's x** = `xₜ₋₁`.
+    /// **The tap FIFO's x**, matching [`Self::k_state_bumhr`] slot for slot, and
+    /// `None` with it. Pre-scaled by the decay accumulated since its own
+    /// position, exactly as in the double-SSD cache (whose field this is).
     ///
-    /// Paired with [`Self::k_state_bmhr`] to form the boundary β term, and
-    /// `None` with it.
-    ///
-    /// Shape: `[batch, nheads, per_head_dim]`
-    pub v_state_bhp: Option<Tensor<3>>,
+    /// Shape: `[batch, tap_slots, nheads, per_head_dim]`
+    pub v_state_buhp: Option<Tensor<4>>,
 
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]).
@@ -121,15 +122,15 @@ impl Mamba3SingleSsdCache {
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
         assert_eq!(
-            self.k_state_bmhr.is_some(),
-            self.v_state_bhp.is_some(),
+            self.k_state_bumhr.is_some(),
+            self.v_state_buhp.is_some(),
             "the trapezoid's tap slots are present or absent together"
         );
-        if let Some(k_state_bmhr) = &self.k_state_bmhr {
-            san(k_state_bmhr);
+        if let Some(k_state_bumhr) = &self.k_state_bumhr {
+            san(k_state_bumhr);
         }
-        if let Some(v_state_bhp) = &self.v_state_bhp {
-            san(v_state_bhp);
+        if let Some(v_state_buhp) = &self.v_state_buhp {
+            san(v_state_buhp);
         }
         self.rotation.sanity();
     }
@@ -174,6 +175,11 @@ pub struct Mamba3SingleSsdCacheConfig {
     /// [`Mamba3DoubleSsdCacheConfig::trapezoid`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::trapezoid)).
     #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
     pub trapezoid: Trapezoid,
+
+    /// Recurrence micro-steps per token (`u`); with [`Self::trapezoid`] it fixes
+    /// the tap FIFO's depth (see [`Trapezoid::tap_lag`]).
+    #[config(default = 1)]
+    pub micro_steps: usize,
 }
 
 impl Mamba3SingleSsdCacheConfig {
@@ -189,6 +195,7 @@ impl Mamba3SingleSsdCacheConfig {
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
             trapezoid: block_config.trapezoid,
+            micro_steps: block_config.micro_steps,
         }
     }
 
@@ -198,15 +205,26 @@ impl Mamba3SingleSsdCacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let tap = self.trapezoid.has_beta_tap();
-        let k_state_bmhr = tap.then(|| {
+        let slots = self.trapezoid.tap_slots(self.micro_steps);
+        let tap = slots > 0;
+        let k_state_bumhr = tap.then(|| {
             Tensor::zeros(
-                [self.batch, self.mimo_rank, self.nheads, self.state_rank],
+                [
+                    self.batch,
+                    slots,
+                    self.mimo_rank,
+                    self.nheads,
+                    self.state_rank,
+                ],
                 device,
             )
         });
-        let v_state_bhp =
-            tap.then(|| Tensor::zeros([self.batch, self.nheads, self.per_head_dim], device));
+        let v_state_buhp = tap.then(|| {
+            Tensor::zeros(
+                [self.batch, slots, self.nheads, self.per_head_dim],
+                device,
+            )
+        });
         let rotation = RotationState::identity(
             self.rotation,
             self.batch,
@@ -217,8 +235,8 @@ impl Mamba3SingleSsdCacheConfig {
         );
         Mamba3SingleSsdCache {
             ssm_bhpr,
-            k_state_bmhr,
-            v_state_bhp,
+            k_state_bumhr,
+            v_state_buhp,
             rotation,
         }
     }

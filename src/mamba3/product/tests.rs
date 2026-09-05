@@ -151,20 +151,20 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     );
     // The tap slots are absent under `Trapezoid::None`, in both caches.
     assert_eq!(
-        cache_fwd.k_state_bmhr.is_some(),
-        cache_step.k_state_bmhr.is_some(),
+        cache_fwd.k_state_bumhr.is_some(),
+        cache_step.k_state_bumhr.is_some(),
         "{label}: the two paths disagree on whether a tap slot exists"
     );
-    if let (Some(fwd), Some(step)) = (cache_fwd.k_state_bmhr, cache_step.k_state_bmhr) {
+    if let (Some(fwd), Some(step)) = (cache_fwd.k_state_bumhr, cache_step.k_state_bumhr) {
         assert!(
             max_abs_diff(fwd, step) < 1e-4,
-            "{label}: final k_state (last micro-step's B)"
+            "{label}: final k_state (the tap FIFO's B)"
         );
     }
-    if let (Some(fwd), Some(step)) = (cache_fwd.v_state_bhp, cache_step.v_state_bhp) {
+    if let (Some(fwd), Some(step)) = (cache_fwd.v_state_buhp, cache_step.v_state_buhp) {
         assert!(
             max_abs_diff(fwd, step) < 1e-4,
-            "{label}: final v_state (last micro-step's x)"
+            "{label}: final v_state (the tap FIFO's x)"
         );
     }
 }

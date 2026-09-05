@@ -124,18 +124,21 @@
 //!
 //! ## Caches, and what does *not* change
 //!
-//! Nothing. The state is one `[batch, nheads, per_head_dim, state_rank]` matrix
-//! at every `u`: like DeltaProduct, this buys transition expressiveness, not
-//! memory. The trapezoid's previous-token taps (`k_state`, `v_state`) and the
-//! rotation accumulator hold the **last micro-step** of the last token, which is
-//! precisely the position the next call's first micro-step follows — so a
+//! The state is one `[batch, nheads, per_head_dim, state_rank]` matrix at every
+//! `u`: like DeltaProduct, this buys transition expressiveness, not memory. The
+//! rotation accumulator holds the **last micro-step** of the last token, which
+//! is precisely the position the next call's first micro-step follows — so a
 //! chunked prefill splits at token boundaries exactly as it did before.
 //!
-//! One thing genuinely does move: the trapezoid's two taps now straddle
-//! *micro-steps* rather than tokens, i.e. the 2-tap FIR filter on the state
-//! input runs at the finer rate. That is what "the recurrence is the folded
-//! sequence" means, and it is what keeps `forward` and `step` in exact
-//! agreement.
+//! What `u > 1` genuinely changes is the trapezoid's taps, which now live on the
+//! folded chain and so become a *choice*
+//! ([`Trapezoid`](crate::mamba3::trapezoid::Trapezoid)): the default
+//! `HorizontalCarryOver` reads the previous **micro-step** (the 2-tap FIR filter
+//! runs at the finer rate, and only `1/u` of the taps still cross a token) and
+//! `Vertical` reads the previous **token's** same micro-step. The tap cache
+//! (`k_state`, `v_state`) is the FIFO that choice needs — one slot, or `u`.
+//! Either way `forward` runs the same folded chain `step` does, which is what
+//! keeps them in exact agreement.
 //!
 //! ## Notation
 //!

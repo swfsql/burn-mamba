@@ -28,9 +28,10 @@
 //! Setting `λ ≡ 1` collapses this to the Mamba-2 (Euler / right-endpoint) form.
 //!
 //! *Which* earlier sample the `βₜ` tap reads is [`Mamba3Config::trapezoid`]; at
-//! `micro_steps = 1` (below) `t−1` is the only answer, and the default
+//! `micro_steps = 1` (below) `t−1` is the only answer. At `u > 1` the default
 //! [`Trapezoid::HorizontalCarryOver`] keeps reading the immediately preceding
-//! recurrence step at every `u`.
+//! recurrence step, and [`Trapezoid::Vertical`] reads the previous **token**'s
+//! same micro-step instead — one lag, everywhere the tap appears.
 //!
 //! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
 //! — paper section *Complex-Valued SSMs*)
@@ -1046,20 +1047,86 @@ impl Mamba3 {
         let nheads = self.nheads();
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
-        let mimo_rank = self.mimo_rank;
         let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
-        let tap = self.trapezoid.has_beta_tap();
-        let k_state_bmhr =
-            tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], device));
-        let v_state_bhp = tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], device));
+        let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
         let rotation = self.zero_rotation_state(batch, device);
         crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
             ssm_bhpr,
-            k_state_bmhr,
-            v_state_bhp,
+            k_state_bumhr,
+            v_state_buhp,
             rotation,
         }
         .into()
+    }
+
+    /// How far back this block's `β` tap reaches, in folded positions —
+    /// [`Trapezoid::tap_lag`] at this block's `micro_steps`. `0` when the
+    /// pattern has no tap.
+    pub fn tap_lag(&self) -> usize {
+        self.trapezoid.tap_lag(self.micro_steps)
+    }
+
+    /// The trapezoid's tap FIFO, zero-filled: [`Self::tap_lag`] slots of
+    /// `(B, x)`, oldest first — or `None` under a pattern with no `β` tap, in
+    /// which case nothing is allocated at all.
+    ///
+    /// # Shapes
+    /// - `.0` : `[batch, tap_slots, mimo_rank, nheads, state_rank]`
+    /// - `.1` : `[batch, tap_slots, nheads, per_head_dim]`
+    pub fn zero_tap_slots(
+        &self,
+        batch: usize,
+        device: &Device,
+    ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
+        let slots = self.tap_lag();
+        if slots == 0 {
+            return (None, None);
+        }
+        let nheads = self.nheads();
+        (
+            Some(Tensor::zeros(
+                [batch, slots, self.mimo_rank, nheads, self.state_rank],
+                device,
+            )),
+            Some(Tensor::zeros(
+                [batch, slots, nheads, self.per_head_dim()],
+                device,
+            )),
+        )
+    }
+
+    /// The tap FIFO to hand to the next call: the last `lag` folded positions'
+    /// `(B, x)`, oldest first — or `(None, None)` when the pattern has no `β`
+    /// tap.
+    ///
+    /// `x` is pre-scaled by the decay accumulated since its own position
+    /// ([`crate::mamba3::helpers::tail_decay`]), which is what lets a lag-`u`
+    /// tap's gap transport span the call boundary; at `lag = 1` that product is
+    /// empty and the slot is the plain last `x`. Shared by both pathways, whose
+    /// caches therefore stay field-identical.
+    ///
+    /// # Shapes
+    /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
+    /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
+    /// - `da_bsh`  : `[batch, sequence, nheads]`
+    pub(crate) fn save_tap_slots(
+        &self,
+        b_bsmhr: &Tensor<5>,
+        x_bshp: &Tensor<4>,
+        da_bsh: &Tensor<3>,
+        lag: usize,
+    ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
+        if lag == 0 {
+            return (None, None);
+        }
+        let sequence = x_bshp.dims()[1];
+        let b_last_bumhr = b_bsmhr.clone().narrow(1, sequence - lag, lag);
+        let x_last_buhp = x_bshp.clone().narrow(1, sequence - lag, lag);
+        let x_last_buhp = match crate::mamba3::helpers::tail_decay(da_bsh.clone(), lag) {
+            Some(tail_buh) => x_last_buhp * tail_buh.unsqueeze_dim::<4>(3),
+            None => x_last_buhp,
+        };
+        (Some(b_last_bumhr), Some(x_last_buhp))
     }
 
     /// The fresh-sequence rotation accumulator for this block's

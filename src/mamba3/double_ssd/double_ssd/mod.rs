@@ -4,10 +4,15 @@
 //! The burn-mamba implementation of the [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal) decomposition:
 //!
 //! ```text
-//!   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ      (original double-ssd trapezoidal)
+//!   hₚ = αₚ hₚ₋₁ + βₚ Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉ + γₚ Bₚ ⊗ xₚ   (original double-ssd trapezoidal)
 //!
 //!   forward:    h = SSD(γ-scaled V, B)   +   SSD(β-scaled V_shifted, B_shifted)
 //! ```
+//!
+//! The shift is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
+//! folded positions (`1` by default, `u` for
+//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)), and
+//! `β` carries the transport across that whole gap.
 //!
 //! This is simple to derive and to verify (everything reuses the standard SSD)
 //! but increases the intra-chunk and chunk-state memory during training.
@@ -66,15 +71,12 @@ impl Mamba3 {
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let tap = self.trapezoid.has_beta_tap();
-            let k_state_bmhr =
-                tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], &device));
-            let v_state_bhp = tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], &device));
+            let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
             let rotation = self.zero_rotation_state(batch, &device);
             Mamba3DoubleSsdCache {
                 ssm_bhpr,
-                k_state_bmhr,
-                v_state_bhp,
+                k_state_bumhr,
+                v_state_buhp,
                 rotation,
             }
         });
@@ -200,75 +202,51 @@ impl Mamba3 {
         // prior token from a continued cache. For a fresh (zero) cache this is
         // equivalent to zero-padding.
         //
-        // The shift is one *folded* position — [`Trapezoid::HorizontalCarryOver`],
-        // matching `step`'s per-micro-step carry. A lag-`u` pattern shifts by `u`
-        // and seeds from a `u`-slot cache instead; nothing else here changes.
+        // The shift is [`Trapezoid::tap_lag`] *folded* positions — 1 for the
+        // default [`Trapezoid::HorizontalCarryOver`], `u` for
+        // [`Trapezoid::Vertical`] — matching `step`'s FIFO depth exactly.
+        //
+        // A lag-`L` tap must be transported across *its own* gap (§9), i.e. by
+        // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`. `β` carries the `d = 0` factor and
+        // `interior_gap_decay` the rest; for the first `L` positions the missing
+        // factors are the ones the cache's `v` slots already carry.
         //
         // Under [`Trapezoid::None`] there is no left endpoint at all: no shift,
         // no β-scaled copy of `x`, and (below) no second SSD call — `forward`
         // becomes one standard SSD pass whose keys are scaled by `γ = Δ`.
+        let lag = self.tap_lag();
         let beta_side: Option<(Tensor<4>, Tensor<5>)> = beta_bsh.map(|beta_bsh| {
-            let v_state_bhp = cache
-                .v_state_bhp
+            let v_state_buhp = cache
+                .v_state_buhp
                 .clone()
-                .expect("a β tap keeps its (B, x) cache slot");
-            let k_state_bmhr = cache
-                .k_state_bmhr
+                .expect("a β tap keeps its (B, x) cache slots");
+            let k_state_bumhr = cache
+                .k_state_bumhr
                 .clone()
-                .expect("a β tap keeps its (B, x) cache slot");
-            let x_prev_first_b1hp = v_state_bhp.unsqueeze_dim::<4>(1);
-            let x_prev_bshp = if sequence == 1 {
-                x_prev_first_b1hp
-            } else {
-                Tensor::cat(
-                    vec![x_prev_first_b1hp, x_bshp.clone().narrow(1, 0, sequence - 1)],
-                    1,
-                )
-            };
-            let b_prev_first_b1mhr = k_state_bmhr.unsqueeze_dim::<5>(1);
-            let b_prev_bsmhr = if sequence == 1 {
-                b_prev_first_b1mhr
-            } else {
-                Tensor::cat(
-                    vec![
-                        b_prev_first_b1mhr,
-                        b_bsmhr.clone().narrow(1, 0, sequence - 1),
-                    ],
-                    1,
-                )
+                .expect("a β tap keeps its (B, x) cache slots");
+            let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), v_state_buhp, lag);
+            let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), k_state_bumhr, lag);
+            let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag) {
+                Some(gap_bsh) => beta_bsh * gap_bsh,
+                None => beta_bsh,
             };
             // β is a per-head scalar, broadcast over mimo_rank and per_head_dim.
             let beta_bsh1 = beta_bsh.unsqueeze_dim::<4>(3);
-            (x_prev_bshp * beta_bsh1, b_prev_bsmhr) // βₜ · xₜ₋₁
+            (x_prev_bshp * beta_bsh1, b_prev_bsmhr) // βₚ · xₚ₋ₗₐ₉
         });
 
         // ── Step 7b: Scale the current-token input by γ ───────────────────────
         let gamma_bsh1 = gamma_bsh.unsqueeze_dim::<4>(3);
         let x_gamma_bshp = x_bshp.clone() * gamma_bsh1; // γₜ · xₜ
 
-        // ── Save the last position's B and x for the cache ────────────────────
-        // "Last position" is the last *micro-step* of the last token — exactly
-        // the step the next call's first micro-step follows, so the trapezoid's
-        // previous-step taps continue across a split prefill unchanged. With no
-        // β tap there is nothing to continue and the slots stay empty.
-        let (b_last_bmhr, x_last_bhp) = if self.trapezoid.has_beta_tap() {
-            (
-                Some(
-                    b_bsmhr
-                        .clone()
-                        .narrow(1, sequence - 1, 1)
-                        .reshape([batch, mimo_rank, nheads, state_rank]),
-                ),
-                Some(
-                    x_bshp
-                        .clone()
-                        .narrow(1, sequence - 1, 1) // x_b1hp
-                        .squeeze_dim::<3>(1), // x_bhp
-                ),
-            )
-        } else {
-            (None, None)
-        };
+        // ── Save the last `lag` positions' B and x for the cache ──────────────
+        // The last `lag` *micro-steps* — exactly the positions whose taps the
+        // next call has to pay, so the trapezoid continues across a split
+        // prefill unchanged (at `lag = u` that window is precisely the last
+        // token). With no β tap there is nothing to continue and the slots stay
+        // empty. See [`Self::save_tap_slots`].
+        let (b_last_bumhr, x_last_buhp) =
+            self.save_tap_slots(&b_bsmhr, &x_bshp, &da_bsh, lag);
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
@@ -446,10 +424,10 @@ impl Mamba3 {
         san(&out_bsm);
 
         // ── Update remaining cache fields ─────────────────────────────────────
-        // k_state / v_state = B / x at the last micro-step of the last token
-        // (both `None` when the pattern has no β tap).
-        cache.k_state_bmhr = b_last_bmhr;
-        cache.v_state_bhp = x_last_bhp;
+        // k_state / v_state = the tap FIFO's last `lag` positions (both `None`
+        // when the pattern has no β tap).
+        cache.k_state_bumhr = b_last_bumhr;
+        cache.v_state_buhp = x_last_buhp;
 
         // Cumulative rotation at the last micro-step (angle wrapped to [−π, π], or
         // the cumulative quaternion), to continue a longer sequence.
@@ -791,22 +769,17 @@ mod step {
             let nheads = self.nheads();
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
-            let mimo_rank = self.mimo_rank;
             let device = &input_bd.device();
             let ssm_shape = [batch, nheads, per_head_dim, state_rank];
 
             let mut cache = cache.unwrap_or_else(|| {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
-                let tap = self.trapezoid.has_beta_tap();
-                let k_state_bmhr =
-                    tap.then(|| Tensor::zeros([batch, mimo_rank, nheads, state_rank], device));
-                let v_state_bhp =
-                    tap.then(|| Tensor::zeros([batch, nheads, per_head_dim], device));
+                let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
                 let rotation = self.zero_rotation_state(batch, device);
                 Mamba3DoubleSsdCache {
                     ssm_bhpr,
-                    k_state_bmhr,
-                    v_state_bhp,
+                    k_state_bumhr,
+                    v_state_buhp,
                     rotation,
                 }
             });
@@ -823,15 +796,30 @@ mod step {
             // over the folded sequence, which is what the parity tests assert.
             // `u = 1` executes the loop once and is stock Mamba-3.
             //
-            // The `prev_*` carries below are re-assigned every micro-step, which
-            // is [`Trapezoid::HorizontalCarryOver`] — lag 1 on the folded
-            // sequence, so the tap crosses a token only at `j = 0`. A lag-`u`
-            // pattern would carry `u` slots and read the one `u` back.
-            let has_beta_tap = self.trapezoid.has_beta_tap();
+            // The taps below are a FIFO [`Trapezoid::tap_lag`] deep, oldest
+            // first: lag 1 is [`Trapezoid::HorizontalCarryOver`] (the tap
+            // crosses a token only at `j = 0`), lag `u` is
+            // [`Trapezoid::Vertical`] (every tap crosses, reading the same
+            // micro-step of the previous token). Per micro-step the FIFO is
+            // **tapped, then the survivors are decayed, then the new position is
+            // pushed** — so a slot's `x` accumulates exactly the `α`s between
+            // its own position and the one that taps it, which is the gap
+            // transport a lag-`L` tap needs (§9). At lag 1 nothing survives a
+            // tap, so no decay is ever applied and `β = (1−λ)Δα` is the whole
+            // coefficient, as before.
+            let lag = self.tap_lag();
             let mut state_bhpr = cache.ssm_bhpr.clone();
-            let mut prev_b_bmhr = cache.k_state_bmhr.clone();
-            let mut prev_x_bhp = cache.v_state_bhp.clone();
             let mut rotation = cache.rotation.clone();
+            let mut tap_b: Vec<Tensor<4>> = Vec::new();
+            let mut tap_x: Vec<Tensor<3>> = Vec::new();
+            if let (Some(k_state_bumhr), Some(v_state_buhp)) =
+                (cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
+            {
+                for slot in 0..lag {
+                    tap_b.push(k_state_bumhr.clone().narrow(1, slot, 1).squeeze_dim(1));
+                    tap_x.push(v_state_buhp.clone().narrow(1, slot, 1).squeeze_dim(1));
+                }
+            }
             // Set on the last pass; the readout uses only that one.
             let mut last: Option<(Tensor<4>, Tensor<4>)> = None;
 
@@ -881,28 +869,25 @@ mod step {
                 let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
                 san(&xbt_state_bhpr);
 
-                // The previous step's write. Under `Trapezoid::None` there is no
+                // The tapped step's write — the FIFO's oldest slot, i.e. the
+                // position `lag` back. Under `Trapezoid::None` there is no
                 // second tap: no previous value tensor, no second outer product,
                 // and one fewer term in the state update.
                 let xbt_prev_bhpr = m.beta_bh.map(|beta_bh| {
-                    let xs_vals_bmhp = helpers::build_v_with_mimo::<3, 4>(
-                        prev_x_bhp.take().expect("a β tap keeps its previous x"),
-                        mimo_x_hmp.as_ref(),
-                        1,
-                    );
+                    let x_prev_bhp = tap_x.remove(0);
+                    let b_prev_bmhr = tap_b.remove(0);
+                    let xs_vals_bmhp =
+                        helpers::build_v_with_mimo::<3, 4>(x_prev_bhp, mimo_x_hmp.as_ref(), 1);
                     san(&xs_vals_bmhp);
                     let x_beta_bmhp = xs_vals_bmhp * beta_bh.unsqueeze_dims::<4>(&[1, 3]);
                     san(&x_beta_bmhp);
-                    let xbt_prev_bhpr = helpers::mimo_outer_sum(
-                        x_beta_bmhp,
-                        prev_b_bmhr.take().expect("a β tap keeps its previous B"),
-                        siso,
-                    );
+                    let xbt_prev_bhpr =
+                        helpers::mimo_outer_sum(x_beta_bmhp, b_prev_bmhr, siso);
                     san(&xbt_prev_bhpr);
                     xbt_prev_bhpr
                 });
 
-                let alpha_bh11 = m.alpha_bh.unsqueeze_dims::<4>(&[2, 3]);
+                let alpha_bh11 = m.alpha_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
                 let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr;
                 let new_state_bhpr = match xbt_prev_bhpr {
                     Some(xbt_prev_bhpr) => new_state_bhpr + xbt_prev_bhpr,
@@ -911,9 +896,16 @@ mod step {
                 san(&new_state_bhpr);
 
                 state_bhpr = new_state_bhpr;
-                if has_beta_tap {
-                    prev_b_bmhr = Some(b_bmhr);
-                    prev_x_bhp = Some(m.x_bhp);
+                if lag > 0 {
+                    // Decay the slots that survived this step's tap, then push
+                    // this position: each slot's `x` ends up carrying `Πα` from
+                    // its own position to the current one.
+                    let alpha_bh1 = m.alpha_bh.clone().unsqueeze_dim::<3>(2);
+                    for x_bhp in tap_x.iter_mut() {
+                        *x_bhp = x_bhp.clone() * alpha_bh1.clone();
+                    }
+                    tap_b.push(b_bmhr);
+                    tap_x.push(m.x_bhp);
                 }
                 rotation = new_rotation;
                 last = Some((c_bmhr, x_vals_bmhp));
@@ -930,9 +922,21 @@ mod step {
             let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, proj.z_bi);
 
             // ── Update cache ──────────────────────────────────────────────────
+            // The FIFO, re-stacked onto its slot axis (oldest first) — the same
+            // layout, and the same decayed-`x` convention, `forward` writes.
             cache.ssm_bhpr = state_bhpr;
-            cache.k_state_bmhr = prev_b_bmhr;
-            cache.v_state_bhp = prev_x_bhp;
+            cache.k_state_bumhr = (lag > 0).then(|| {
+                Tensor::cat(
+                    tap_b.into_iter().map(|t| t.unsqueeze_dim::<5>(1)).collect(),
+                    1,
+                )
+            });
+            cache.v_state_buhp = (lag > 0).then(|| {
+                Tensor::cat(
+                    tap_x.into_iter().map(|t| t.unsqueeze_dim::<4>(1)).collect(),
+                    1,
+                )
+            });
             cache.rotation = rotation;
 
             (out_bm, cache)

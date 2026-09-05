@@ -85,13 +85,15 @@ src/
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ trapezoid.rs   Trapezoid: which earlier sample the β tap reads (None |
 │  │                 Vertical | HorizontalReset | HorizontalCarryOver (default) |
-│  │                 VerticalPlusHorizontalReset; the first two implemented).
-│  │                 Structural: picks the shift, the γ-correction band, the λ
-│  │                 in-proj segment and the cache's tap slots; init panics on
-│  │                 the rest
+│  │                 VerticalPlusHorizontalReset; all but the last two done).
+│  │                 Structural: `tap_lag(u)` (0|1|u) is the shift, the
+│  │                 γ-correction width, the key-scale offset and the cache's
+│  │                 FIFO depth at once; plus the λ in-proj segment. init panics
+│  │                 on the rest
 │  ├─ double_ssd/    two-pass trapezoid (γ-SSD + β-SSD); cache.rs + ssd/ kernels
 │  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
-│  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched)
+│  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched) +
+│  │                 token_band.rs (its lag-u widening, outside the kernel)
 │  ├─ rotation/      transition rotation (Real1D | Complex2D | Quaternion4D | Rotor4D)
 │  │                 + rope.rs (the mechanical pairwise rotation of the abelian path)
 │  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
@@ -220,9 +222,12 @@ notation tables; the essentials:
   SISO block at init: `info/mimo-as-batch.md` — cite it, don't restate it.
   *Which* earlier sample the trapezoid's `β` tap reads is `Mamba3Config.trapezoid`
   (`mamba3/trapezoid.rs`) — a lattice that exists only at `u > 1`, selecting an algorithm
-  and a cache layout. Implemented: the default `HorizontalCarryOver` (lag 1 on the
-  **folded** sequence, so `1/u` of the taps cross a token) and `None` (`λ ≡ 1`, the
-  Mamba-2 write); the rest panic in `init`. `None` is structural, and the branch runs
+  and a cache layout. Implemented: `HorizontalCarryOver` (the default, lag 1 on the
+  **folded** sequence, so `1/u` of the taps cross a token), `Vertical` (lag `u`: the same
+  micro-step of the previous token, so all of them cross) and `None` (`λ ≡ 1`, the
+  Mamba-2 write); the rest panic in `init`. The first two are **one algorithm at two
+  lags** — `Trapezoid::tap_lag(u)`, which every tap site reads instead of branching — and
+  coincide at `u = 1`. `None` is structural, and the branch runs
   deep: no `λ` in-proj segment or Muon segment, no `β` tensor, no tap slots in either
   cache, **one** SSD call in `forward` (so the pathways coincide and `forward_single_ssd`
   delegates), and one outer product in `step`.
@@ -242,7 +247,11 @@ at runtime by which **cache variant** is supplied (`Mamba3Cache`/`Mamba3Caches` 
   semantics mid-sequence (distinct cache type so the two can't be mixed in a chunked
   pass), but coincides with the double-ssd state at boundaries — hence the
   field-identity `From` conversions in `mamba3/cache.rs`. `step_single_ssd` decodes by
-  round-tripping through the double-ssd cache.
+  round-tripping through the double-ssd cache. Under `Trapezoid::Vertical` the γ
+  correction widens to a `u`-band — which *is* the token at the only reads that
+  survive, so it runs outside the kernel (`single_ssd/token_band.rs`): the pathways
+  then agree on everything a caller observes (output + every cache field) but not on
+  the mid-token partial sums `last_micro5` discards.
 
 `Mamba3SsdPath` is pathway-agnostic and `From`-converts to either. The inputs differ:
 double feeds pre-scaled `v_bnlmhp`; single feeds raw `v` + `gamma_bnlh` + `scale_bnlh`.
