@@ -4,7 +4,7 @@
 
 use crate::dataset::VOCAB_SIZE;
 use burn_mamba::prelude::{Mamba3Config, MambaVocabNetConfig, ResidualsConfig, RotationKind};
-use burn_stack::utils::{GradHorizon, Schedule};
+use burn_stack::utils::{ClassLatent, GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack: the 2 real weight sets applied four times.
 ///
@@ -27,6 +27,17 @@ const N_VIRTUAL_LAYERS: usize = 8;
 /// everything below running on the inner backend; `None` tracks the whole stack
 /// — which is what a 4-deep stack over a 256-character window can afford.
 const GRAD_HORIZON: Option<GradHorizon> = None;
+
+/// Learnable `[CLS]`-style registers (width `d_model`) spliced in front of every
+/// story — the model's "a story starts here", in place of a separator character.
+///
+/// They are what makes seedless generation honest: the last of them is scored
+/// against the story's **first** character during training, so `prime` replays
+/// them and answers with that character's distribution, having been fed nothing.
+/// The alternative — seeding with the `"\n\n"` that used to join the stories — is
+/// out of distribution, since that sequence only ever occurred *between* two of
+/// them, i.e. always on a state carrying the previous story.
+const N_CLASS_LATENTS: usize = 4;
 
 /// The character-level LM: 39,632 parameters (~161KB on disk in FP32), of which
 /// the tied embedding is only `VOCAB_SIZE · d_model` = 1536 — nearly everything
@@ -79,7 +90,7 @@ pub fn model_config() -> MambaVocabNetConfig {
         // "which character is this" and "which character comes next", which at
         // `d_model = 32` is also a third of the parameters saved
         missing_lm_head: true,
-        class_latents: Vec::new(),
+        class_latents: vec![ClassLatent::Start; N_CLASS_LATENTS],
         ignore_first_residual: false,
         ignore_last_residual: false,
         // Multi-Gate Residuals: `n_stream` pooled streams between layers instead

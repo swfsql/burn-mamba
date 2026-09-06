@@ -26,78 +26,92 @@ There is no `<unk>`, no `<bos>` and no padding class (`pad_vocab_size_multiple =
 embedding is **tied** (`missing_lm_head = true`): one table answers both "which
 character is this" and "which character comes next".
 
-Stories are joined with `"\n\n"` — a blank line, which never occurs *inside* a
-story (single `\n` separates its paragraphs), so it is an unambiguous document
-boundary, and it is also the prompt used for unconditional sampling.
+A story's start is marked out of band, by four learnable **class latents**, not by
+a character — see [Story boundaries](#story-boundaries).
 
 ## Data
 
-The dataset ships as a single 673MB parquet file, which is absurd for an example
-this size, so instead of the `HuggingfaceDatasetLoader` path (python + the
-`datasets` library + a full sqlite import) the corpus is paged out of the public
-[datasets-server](https://huggingface.co/docs/datasets-server) `/rows` endpoint,
-100 stories per request (its hard maximum, ~2s each). The normalized text is
-cached in `~/.cache/burn-dataset/tinystories-gpt4-clean/<split>-<n>.txt`, so the
-download happens once per `(split, story count)`. The loader, the windowing
-and the epoch loops are `burn_stack::examples::tiny_stories`, one copy shared
-with `burn-deltanet`'s counterpart of this example — including that cache.
-
-The endpoint is rate limited — the measured budget is ~28 requests per two
-minutes, after which CloudFront answers `429` with an HTML body for ~15s at a
-time — so the pager paces itself at one page per 4s and retries a failed one with
-exponential backoff (30s, doubling, 6 attempts). The default corpus is 43
-requests, roughly three minutes; `--train-stories 32768` is 329 requests, closer
-to half an hour. All of it is one-time: the normalized text is then read from the
-cache.
+The dataset is a single 673MB parquet file: one column (`text`), one row per
+story, 2,669 ZSTD row groups of 1,024 rows. It is downloaded **whole**, once, the
+same way `mnist-*` downloads its IDX files, into
+`~/.cache/burn-dataset/tinystories-gpt4-clean/`; only the row groups a request
+touches are decompressed. The stories that come out are normalized and cached
+again as text, one file per `(split, story count)` — so every later run reads a
+few MB of text and never opens the parquet at all. The loader, the windowing and
+the epoch loops are `burn_stack::examples::tiny_stories`.
 
 Splits follow the dataset card's suggested row ranges (the rows are pre-shuffled,
 so a contiguous range is already a random sample): rows `0..10k` are test,
 `10k..20k` validation, `20k..` training. The defaults pull 4,096 train and 256
-validation stories (~3.4MB of text, ~43 requests); `--train-stories` scales that
-up.
+validation stories (~3.4MB of text); `--train-stories` scales that up at no extra
+download.
 
-The character stream is cut into non-overlapping windows of `seq_len + 1`, each
-scored at **every** position against its next character (so one window
-contributes `seq_len` classification examples, and the reported accuracy is per
-character). One training **item** is a *run* of `run_len` consecutive windows —
-see [Runs and the frontier](#runs-and-the-frontier).
+## Story boundaries
+
+**One item is one story** (303–4,149 characters, median 724), stripped of its
+surrounding whitespace, and nothing is spliced between two of them: a story is a
+self-contained example. What marks its start is four `ClassLatent::Start`
+registers — learnable `d_model`-wide rows the stack prepends to the sequence — and
+the **last of them is scored against the story's first character**. So the model
+is trained to answer "what does a story open with?" from the latents alone.
+
+That is what unconditional sampling then does: `prime()` replays the latents
+against a zero cache, with no input token, and hands back the first character's
+distribution; generation continues from there with plain `step()`s. The
+alternative — the `"\n\n"` that used to join the stories, fed in as a seed — is out
+of distribution, because that sequence only ever occurred *between* two stories,
+i.e. always on a state still carrying the previous one.
+
+One `generate()` call is therefore one story. A second story wants a second call
+against a **reset** cache, which is the one place these examples genuinely reset
+one.
+
+Every position is scored against its next character (so the reported accuracy is
+per character), and a story is walked in windows — see
+[Runs and the frontier](#runs-and-the-frontier). Stories differ in length, so a
+batch is padded to a whole number of windows of its longest one; the batch
+carries how many positions of each slot are real, and the padding is gathered
+away before the loss, never reaching it or the accuracy.
 
 ## Runs and the frontier
 
-A window is `seq_len` characters, but the stories are not: the stream continues
-past the cut, and so does the state that generation would have there. Training
-each window from a **zero** state — the obvious tiling, and what `--run-len 1`
-still does — therefore trains a regime inference is never in after its first
-`seq_len` characters.
+A window is `seq_len` characters, but a story is not: it continues past the cut,
+and so does the state that generation would have there. Dropping the rest — what
+`--run-len 1` does — trains the model only on story openings, so it never sees the
+state a story is in past its first `seq_len` characters.
 
-So the loop walks the `run_len` windows of an item in order, takes one optimizer
+So the loop walks a story's windows in order — the *run* — takes one optimizer
 step per window, and **carries the final state into the next window**:
 
+- The run's length is the **story's**. `--run-len` is only a cap on it, and its
+  default (`usize::MAX`) imposes none, leaving the depth entirely to the gate.
 - The carry is *earned*. After each window the **frontier gate** scores it, and a
-  failing window ends the run — the rest of the item is discarded rather than
+  failing window ends the run — the rest of the story is discarded rather than
   trained on a state the model got lost in. The gate is trainer-side: it reads
   one scalar and decides whether a cache is passed on; no gradient goes near it.
-  The default is relative — advance while the window scored at most `1 + tol`
-  times the running EMA of **opening** (zero-state) window losses, i.e. *did the
-  carried state do at least as well as starting fresh would have?* The baseline
-  rides the training curve down, so the question means the same thing in epoch 1
-  and epoch 16.
+  The default is absolute: advance while the window scored at most
+  `--frontier-bits` (1.6) bits per character. That acts from the first window of
+  the first epoch, and depth grows out of the training curve by itself. A closed
+  gate is not a *wrong* regime — window 0 is the story's own beginning, so its
+  zero state is the right one and the recurrence still runs the whole window;
+  what a closed gate costs is **reach**, the model seeing only each story's first
+  `seq_len` characters. The threshold has to sit *above* where the model settles
+  (this one reaches ~1.4-1.5 bits/char), or the curriculum never starts.
 - The carry is **detached** (a round trip through the inner backend, not
   `Tensor::detach`, which frees nothing): gradients never cross a window
-  boundary, and peak memory is one window's activations regardless of `run_len`
-  — measured flat at 312MB RSS for `run_len` 1 and 8 (flex, `seq_len = 256`,
-  batch 8). Back-propagation *within* the window is untouched.
+  boundary, and peak memory is one window's activations regardless of how deep
+  the run goes. Back-propagation *within* the window is untouched.
 
-Every slot of a mini-batch walks its own run in lockstep, so one training
+Every slot of a mini-batch walks its own story in lockstep, so one training
 iteration is still one batch and the log line stays `Batch b/N` — with
-`Windows k/run_len (mean m)` added, `m` being the epoch's mean depth so far,
-which is the number that says whether the curriculum is moving. `1.0` is
-a fully stalled frontier (stateless training); `run_len` is a gate that never
-fires (`--no-frontier`, plain stateful TBPTT).
+`Windows k/n (mean m)` added, `n` being the windows the batch's longest story
+spans and `m` the epoch's mean depth so far, which is the number that says
+whether the curriculum is moving. `1.0` is a frontier that never opens (each
+story trained to its first window and no further); `n` is a gate that never fires
+(`--no-frontier`, plain stateful TBPTT).
 
-Validation reports both regimes, `[fresh state]` (every window from zero — the
-`run_len`-independent number, and the one the [Results](#results) table is in)
-and `[carried state]` (threaded through the run, ungated — what generation has).
+Validation runs the one regime that exists: the state threaded through each whole
+story, ungated, which is exactly what generation has.
 
 ## Usage
 
@@ -120,9 +134,9 @@ the artifacts' `training_config.json`:
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--seq-len <n>` | 256 | characters per window (the BPTT length) |
-| `--run-len <n>` | 8 | windows per item, i.e. how far the carried state may reach (`1` ⇒ stateless) |
-| `--frontier-tol <f>` | 0.05 | slack of the frontier gate over its opening-window baseline |
-| `--no-frontier` | off | carry the state through the whole run, ungated |
+| `--run-len <n>` | `usize::MAX` | cap on the windows one story may spend (`1` ⇒ openings only) |
+| `--frontier-bits <f>` | 1.6 | the frontier gate's threshold, in bits per character |
+| `--no-frontier` | off | carry the state through the whole story, ungated |
 | `--train-stories <n>` | 4096 | stories pulled from the train split |
 | `--valid-stories <n>` | 256 | stories pulled from the validation split |
 | `--epochs <n>` | 16 | passes over the corpus |
@@ -135,11 +149,13 @@ the artifacts' `training_config.json`:
 ## Results
 
 16 epochs over the default corpus (3.36M characters), measured on the held-out
-validation split from a **zero** state (the `[fresh state]` line). Uniform
-baseline: `log2(48) = 5.58` bits/char.
+validation split. Uniform baseline: `log2(48) = 5.58` bits/char.
 
-Every number below was measured with stateless windows, i.e. at what is now
-`--run-len 1`; carried state and the frontier gate are not in them.
+Every number below was measured on the **previous** corpus layout: one continuous
+`"\n\n"`-joined character stream, cut into stateless windows (what is now
+`--run-len 1`), with no class latents. Story-per-item scoring changes what the
+average is over, so the table is a record of the *levers*, not a current
+measurement; the ranking is what it is here for.
 
 | Setting | Valid bits/char | Valid char accuracy |
 |---|---|---|
@@ -201,7 +217,7 @@ once upon a time, there was a little girl named lucy. she loved to cry ahead and
 ```
 
 Nothing supplies that opening — the model reconstructs the corpus's stock first
-sentence from a start-of-document token alone, then keeps one subject and its
+sentence from the sequence's own start alone, then keeps one subject and its
 pronoun consistent to the end of the sample. Its grip is on syntax rather than
 sense: the clauses parse and the sentence boundaries land, but "loved to drop",
 "loved to cry ahead", and the name "looks" show it is still assembling plausible
@@ -209,19 +225,21 @@ shapes rather than meanings. That is the honest ceiling for 39K parameters.
 
 ## Sampling
 
-`inference.rs` shows the library's two execution modes back to back: the prompt
-is consumed by one chunkwise `forward()` (prefill), and every generated character
-then costs one `step()` against that same cache — O(state) per token, with no
-growing KV cache. Sampling is temperature-scaled multinomial over the full 48-way
-softmax (`temperature <= 0` is greedy), seeded by `ChaCha8Rng` so a run is
-reproducible.
+`inference.rs` shows the library's three execution modes back to back: the class
+latents are replayed by one `prime()` (no input token, and it already answers with
+the first character's distribution), a prompt — when there is one — is consumed by
+one chunkwise `forward()` (prefill), and every generated character then costs one
+`step()` against that same cache — O(state) per token, with no growing KV cache.
+Sampling is temperature-scaled multinomial over the full 48-way softmax
+(`temperature <= 0` is greedy), seeded by `ChaCha8Rng` so a run is reproducible.
 
-`--inference` writes one story per temperature (0.5 / 0.8 / 1.0) plus one
-continuation of a fixed prompt into `<artifacts>/inference/`. Training samples a
-short story at every small validation check into
-`<artifacts>/sample-epoch-{e}-batch-{b}.txt`, so the text can be watched turning
-from noise into words into sentences. The checks are spaced in optimizer steps
-(every 100), so their cadence does not move with `--run-len`.
+`--inference` writes one story per temperature (0.5 / 0.8 / 1.0), each primed and
+unprompted, plus one continuation of a fixed prompt into
+`<artifacts>/inference/`. Training samples a short story at every small validation
+check into `<artifacts>/sample-epoch-{e}-batch-{b}.txt`, so the text can be
+watched turning from noise into words into sentences. The checks are spaced in
+optimizer steps (every 300), so their cadence does not move with the run lengths
+the corpus happens to hand out.
 
 ## Notes
 

@@ -31,6 +31,7 @@ use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::lm::{
     self, Frontier, LmModel, dataloaders, epoch_train, epoch_valid,
 };
+use burn_stack::utils::ClassCursors;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating, sampling and checkpointing
@@ -142,8 +143,9 @@ impl LmModel for Wrap {
         &self,
         batch: TinyStoriesBatch,
         caches: Option<Self::Caches>,
+        class: &mut ClassCursors,
     ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
-        let (pre_metrics, caches) = self.forward_lm(batch.inputs, batch.targets, caches);
+        let (pre_metrics, caches) = self.forward_lm(batch, caches, class);
         let grads = pre_metrics.loss.backward();
         (TrainOutput::new(&self.0, grads, pre_metrics), caches)
     }
@@ -156,8 +158,9 @@ impl LmModel for Wrap {
         valid: &Self::Valid,
         batch: TinyStoriesBatch,
         caches: Option<Self::Caches>,
+        class: &mut ClassCursors,
     ) -> (ClassificationOutput, Self::Caches) {
-        valid.forward_lm(batch.inputs, batch.targets, caches)
+        valid.forward_lm(batch, caches, class)
     }
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
@@ -171,7 +174,7 @@ impl LmModel for Wrap {
     fn generate(
         valid: &Self::Valid,
         device: &Device,
-        prompt: &str,
+        prompt: Option<&str>,
         n_chars: usize,
         temperature: f64,
         seed: u64,
@@ -185,7 +188,7 @@ impl TrainStep for Wrap {
     type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
-        LmModel::train_window(self, batch, None).0
+        LmModel::train_window(self, batch, None, &mut ClassCursors::stream()).0
     }
 }
 
@@ -194,22 +197,34 @@ impl InferenceStep for Wrap {
     type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
-        self.forward_lm(batch.inputs, batch.targets, None).0
+        self.forward_lm(batch, None, &mut ClassCursors::stream()).0
     }
 }
 
 impl Wrap {
-    /// Forward the LM from `caches` (`None` ⇒ a zero state) and score **every**
-    /// position of the window against its next character (see
-    /// [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output)),
-    /// returning the window's final state alongside.
+    /// Forward the LM from `caches` (`None` ⇒ a zero state) and score every
+    /// **real** position of the window against its next character — plus, in the
+    /// window that opened the story, the class latents' readout against its first
+    /// one (see [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output))
+    /// — returning the window's final state alongside.
+    ///
+    /// `class` is the run's cursor: it splices the latents into the first window
+    /// of a story and into no other.
     pub fn forward_lm(
         &self,
-        inputs: Tensor<2, Int>,
-        targets: Tensor<2, Int>,
+        batch: TinyStoriesBatch,
         caches: Option<MambaCaches>,
+        class: &mut ClassCursors,
     ) -> (ClassificationOutput, MambaCaches) {
-        let (logits, caches) = self.0.forward(inputs, caches, ssd_path(), None);
-        (lm::lm_output(logits, targets), caches)
+        let TinyStoriesBatch {
+            inputs,
+            targets,
+            scored,
+            ..
+        } = batch;
+        let (logits, caches) = self
+            .0
+            .forward(inputs.clone(), caches, ssd_path(), Some(class));
+        (lm::lm_output(logits, inputs, targets, &scored), caches)
     }
 }

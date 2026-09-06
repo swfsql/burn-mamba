@@ -7,11 +7,15 @@
 //!
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
 //!
-//! Training scores every position of a 256-character window against its next
-//! character, and walks a *run* of 8 such windows carrying the (detached) state
-//! from each into the next for as long as the frontier gate admits it — see the
-//! README's "Runs and the frontier". Inference prefills a prompt with one
-//! chunkwise `forward` and then samples one character per `step`.
+//! One item is one **story**, opened by four class latents rather than by a
+//! separator character. Training scores every position of a 256-character window
+//! against its next character — plus, in the story's first window, the latents'
+//! readout against its first character — and walks the story's windows carrying
+//! the (detached) state from each into the next for as long as the frontier gate
+//! admits it; see the README's "Story boundaries" and "Runs and the frontier".
+//! Inference replays those latents with one `prime` (which is already the first
+//! character's distribution), optionally prefills a prompt with one chunkwise
+//! `forward`, and then samples one character per `step`.
 //!
 //! Corpus knobs are forwarded after the trailing `--` (they are written into the
 //! artifacts' `training_config.json`, so resuming a run keeps them):
@@ -88,14 +92,20 @@ pub fn launch(app_args: &AppArgs) {
     overrides.apply(&mut config);
     if is_fresh {
         // The cosine schedule spans the whole run, so it can only be sized once
-        // the corpus knobs are settled: windows/epoch = characters / seq_len.
-        // It is counted in *windows*, not in dataloader items, and the training
-        // loop charges the schedule for the windows the frontier gate skipped
-        // too — so a stalling gate shortens the run rather than leaving the
-        // cosine unfinished, and `run_len` does not enter here at all.
-        const CHARS_PER_STORY: usize = 820; // the corpus median is 721, the mean ~820
-        let windows = config.train_stories * CHARS_PER_STORY / config.seq_len;
-        let iterations_per_epoch = windows / config.training.batch_size;
+        // the corpus knobs are settled. It is counted in *windows*, not in
+        // dataloader items, and the training loop charges the schedule for the
+        // windows the frontier gate skipped too — so a stalling gate shortens
+        // the run rather than leaving the cosine unfinished.
+        //
+        // One item is one story, and a batch runs the windows of its *longest*
+        // story — so the schedule is sized from that maximum, not from the mean:
+        // ~1200 characters is the expected longest of `batch_size = 8` draws
+        // (the corpus's mean is ~820, its 90th percentile 1103, its longest
+        // story 4149).
+        const CHARS_PER_LONGEST_STORY: usize = 1200;
+        let batches_per_epoch = config.train_stories / config.training.batch_size;
+        let iterations_per_epoch =
+            batches_per_epoch * CHARS_PER_LONGEST_STORY.div_ceil(config.seq_len);
         config.training.lr = Lr::CosineAnnealing(
             CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
                 // The model is optimization-limited, not capacity-limited, and
