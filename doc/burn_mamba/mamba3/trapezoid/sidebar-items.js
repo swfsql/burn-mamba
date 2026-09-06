@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Trapezoid"]};
+window.SIDEBAR_ITEMS = {"enum":["Trapezoid"],"struct":["TrapezoidSpec"]};
