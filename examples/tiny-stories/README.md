@@ -119,7 +119,7 @@ story, ungated, which is exactly what generation has.
 # debug check in flex (fp32)
 cargo check --example tiny-stories
 
-# train and then sample (downloads ~3.4MB of stories on the first run)
+# train and then sample (downloads the 673MB parquet once, if it is not cached yet)
 cargo run --release --example tiny-stories --features "backend-cuda" -- --training --inference
 
 # a bigger corpus and a longer window

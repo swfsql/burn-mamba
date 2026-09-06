@@ -21,7 +21,7 @@
 //! artifacts' `training_config.json`, so resuming a run keeps them):
 //!
 //! ```bash
-//! # train and then sample (downloads ~3.4MB of stories on the first run)
+//! # train and then sample (downloads the 673MB parquet once, if not cached yet)
 //! cargo run --release --example tiny-stories --features backend-flex -- --training --inference
 //! # a bigger corpus and a longer window
 //! cargo run --release --example tiny-stories --features backend-flex -- --training \

@@ -70,8 +70,8 @@ pub fn train(
     // `--max-batches`: an optional cap on the whole run, spent across epochs.
     let mut batch_budget = app_args.batch_budget();
 
-    // The frontier gate outlives the epochs: its opening-window baseline is a
-    // property of the model's current skill, not of where the epoch loop is.
+    // The frontier gate outlives the epochs: its depth statistics are cumulative
+    // over the whole run of training, not per epoch.
     let mut frontier = Frontier::new(config.frontier.clone());
 
     println!("running small initial validation...");
