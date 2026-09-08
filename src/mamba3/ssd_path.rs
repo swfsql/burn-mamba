@@ -55,33 +55,34 @@ pub enum Mamba3SsdPath {
 }
 
 impl Mamba3SsdPath {
-    /// Optimal chunk length: approximately `√(state_rank · per_head_dim)` divided
-    /// by `mimo_rank · micro_steps`, rounded up to a multiple of 32 and clamped to
-    /// `32 ..= 512`.
+    /// Optimal chunk length, in **folded positions**: `√(state_rank ·
+    /// per_head_dim)` divided by `mimo_rank`, on the 32 grid, clamped to
+    /// `32 ..= 512` — then held there while [`Self::chunk_tokens`] absorbs
+    /// `micro_steps`.
     ///
     /// The square root is the SISO rule of thumb — it balances the intra-chunk
     /// GEMMs against the inter-chunk scan. Two of the block's dials widen a chunk
-    /// without appearing in it, and the divisor takes both back:
+    /// without appearing in it, and they are **not** the same widening:
     ///
-    /// - **`mimo_rank`** (`m`): the intra-chunk matmuls run on the *fused*
-    ///   `chunk_len · mimo_rank` axis, so the quantity the rule of thumb is about
-    ///   is `chunk_len · m`, not `chunk_len`. Leaving `chunk_len` alone costs `m²`
-    ///   where the schedule below costs `m` — the source's own advice, carried on
-    ///   its `chunk_size` argument as "64 for SISO, 64/mimo_rank for MIMO".
-    /// - **`micro_steps`** (`u`): micro-steps are folded into the sequence axis, so
-    ///   a chunk of `chunk_len` positions holds `chunk_len / u` tokens. FLOPs alone
-    ///   are indifferent to this (`u` multiplies the intra- and inter-chunk terms
-    ///   alike), but the materialised score `[batch, nchunks, heads, LM, LM]` costs
-    ///   `batch · sequence · u · heads · chunk_len · m²` — linear in `chunk_len`,
-    ///   in `u` and in `m²`. Dividing the chunk divides that memory by the same
-    ///   factor. Memory is the binding constraint here, there being no fused kernel
-    ///   to hide it.
+    /// - **`mimo_rank`** (`m`) widens *both* of a chunk's axes: every rank writes
+    ///   and every rank reads, so the intra-chunk matmuls run on the fused
+    ///   `chunk_len · m`. The quantity the rule of thumb is about is that
+    ///   product, hence the divisor. Leaving `chunk_len` alone costs `m²` where
+    ///   this costs `m` — the source's own advice, carried on its `chunk_size`
+    ///   argument as "64 for SISO, 64/mimo_rank for MIMO".
+    /// - **`micro_steps`** (`u`) widens only the **write** axis. A token's `u`
+    ///   micro-steps all write to the state, but the token is *read* once, at its
+    ///   last one, so the score is `[batch, nchunks, heads, T·m, T·u·m]` for
+    ///   `T` = [`Self::chunk_tokens`] and holds `batch · sequence · heads · T · u
+    ///   · m²` elements. Keeping that flat in `u` means keeping `T · u` — the
+    ///   *folded* chunk — flat, and shrinking the token count instead. Memory is
+    ///   the binding constraint here, there being no fused kernel to hide it.
     ///
-    /// The 32 grid survives the division (it is applied after it), so the divisor
-    /// saturates: at the usual `√(N·P) ≈ 90` the schedule is `96 → 64 → 32` for a
-    /// fold of `1 → 2 → ≥3`, and 32 is the floor. The saving is therefore
-    /// `96 / chunk_len`, capping at `3×` — the schedule flattens the slope in `u`,
-    /// it does not remove it. Pass an explicit chunk length to go further.
+    /// So `u` no longer shortens the chunk, only subdivides it, and `nchunks`
+    /// grows like `u` rather than `u²`. The returned length is a multiple of
+    /// `micro_steps` (which is what makes each chunk a whole number of tokens,
+    /// and their rows a contiguous run); it is on the 32 grid exactly when
+    /// `micro_steps` divides it.
     ///
     /// `info/architecture-deltas.md` §8.
     pub fn optimal_chunk_len(
@@ -90,12 +91,33 @@ impl Mamba3SsdPath {
         mimo_rank: usize,
         micro_steps: usize,
     ) -> usize {
-        let fold = (mimo_rank * micro_steps).max(1);
-        (state_rank * per_head_dim)
+        let micro_steps = micro_steps.max(1);
+        let folded = (state_rank * per_head_dim)
             .isqrt()
-            .div_ceil(fold) // the fused axis is `chunk_len · m`, over `u`-fold positions.
+            .div_ceil(mimo_rank.max(1)) // the fused read axis is `chunk_tokens · m`.
             .next_multiple_of(32) // rule-of-thumb: common plane dimension.
-            .clamp(32, 512) // rule-of-thumb: one plane minimum, ceiling at 512.
+            .clamp(32, 512); // rule-of-thumb: one plane minimum, ceiling at 512.
+        // A whole number of tokens per chunk, at (very nearly) that folded width.
+        folded.div_ceil(micro_steps) * micro_steps
+    }
+
+    /// Tokens per chunk: `chunk_len / micro_steps`, the chunk's **read** axis.
+    ///
+    /// `chunk_len` counts folded positions (one per micro-step); the SSD reads
+    /// each token once, at its last micro-step, so this is the row count of the
+    /// score and of the `y` the kernels return. See [`Self::optimal_chunk_len`].
+    ///
+    /// # Panics
+    /// If `micro_steps` does not divide `chunk_len` — [`Self::chunk_len_or_optimal`]
+    /// is what guarantees it does.
+    pub fn chunk_tokens(chunk_len: usize, micro_steps: usize) -> usize {
+        let micro_steps = micro_steps.max(1);
+        assert_eq!(
+            chunk_len % micro_steps,
+            0,
+            "chunk_len {chunk_len} must be a whole number of tokens at micro_steps {micro_steps}",
+        );
+        chunk_len / micro_steps
     }
 
     /// The chunk length carried by this variant, if any.
@@ -108,16 +130,23 @@ impl Mamba3SsdPath {
     }
 
     /// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
-    /// for `block`'s dimensions when unset.
+    /// for `block`'s dimensions when unset — in either case rounded **up to a
+    /// multiple of `micro_steps`**, so a chunk is a whole number of tokens.
+    ///
+    /// That rounding is what lets the read axis be a plain reshape: with
+    /// `chunk_len = T·u` a chunk covers folded positions `[cL, (c+1)L)`, i.e.
+    /// tokens `[cT, (c+1)T)`, and the surviving rows (`≡ u−1 mod u`) are a
+    /// contiguous run of them. At `micro_steps = 1` it is the identity.
     pub fn chunk_len_or_optimal(&self, block: &Mamba3) -> usize {
-        self.chunk_len().unwrap_or_else(|| {
-            Self::optimal_chunk_len(
+        match self.chunk_len() {
+            Some(chunk_len) => chunk_len.next_multiple_of(block.micro_steps.max(1)),
+            None => Self::optimal_chunk_len(
                 block.state_rank,
                 block.per_head_dim(),
                 block.mimo_rank,
                 block.micro_steps,
-            )
-        })
+            ),
+        }
     }
 
     /// The recommended default path for a given block: [`Self::SerialRecalculated`]

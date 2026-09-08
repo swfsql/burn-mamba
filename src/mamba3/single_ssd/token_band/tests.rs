@@ -11,7 +11,7 @@ use burn_stack::utils::test_helpers::max_abs_diff;
 fn reference(
     v_bsmhp: Tensor<5>,
     b_bsmhr: Tensor<5>,
-    c_bsmhr: Tensor<5>,
+    c_btmhr: Tensor<5>,
     excess_bsh: Tensor<3>,
     da_bsh: Tensor<3>,
     u: usize,
@@ -24,8 +24,8 @@ fn reference(
     for token in 0..tokens {
         let read = token * u + (u - 1);
         let mut acc = Tensor::zeros([batch, mimo_rank, nheads, per_head_dim], &device);
-        // C at the read, [batch, mimo_rank, nheads, state_rank].
-        let c_bmhr: Tensor<4> = c_bsmhr.clone().narrow(1, read, 1).squeeze_dim(1);
+        // C at the read — one row per token, the read axis's own resolution.
+        let c_bmhr: Tensor<4> = c_btmhr.clone().narrow(1, token, 1).squeeze_dim(1);
         for j in 0..u - 1 {
             let tap = token * u + j;
             let b_bmhr: Tensor<4> = b_bsmhr.clone().narrow(1, tap, 1).squeeze_dim(1);
@@ -69,7 +69,8 @@ fn matches_the_direct_sum() {
         let sequence = tokens * u;
         let v = Tensor::<5>::random([batch, sequence, mimo_rank, nheads, per_head_dim], dist, &device);
         let b = Tensor::<5>::random([batch, sequence, mimo_rank, nheads, state_rank], dist, &device);
-        let c = Tensor::<5>::random([batch, sequence, mimo_rank, nheads, state_rank], dist, &device);
+        // `C` is on the read axis: one row per token.
+        let c = Tensor::<5>::random([batch, tokens, mimo_rank, nheads, state_rank], dist, &device);
         let excess = Tensor::<3>::random([batch, sequence, nheads], dist, &device);
         // `da = Δ·A ≤ 0`, so the decay it exponentiates is in (0, 1].
         let da = -Tensor::<3>::random([batch, sequence, nheads], dist, &device).abs();

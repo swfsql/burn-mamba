@@ -413,21 +413,24 @@ ok("8.4  so leaving C at its SISO value costs ~2.5x the C = N/R schedule here",
 print(f"        R={R}: C=N/R -> {ratio_scaled:.2f}x,  C=N -> {ratio_unscaled:.2f}x")
 
 # The crate's schedule (`Mamba3SsdPath::optimal_chunk_len`): the same square-root
-# rule, divided by the two dials that widen a chunk without appearing in it, then
-# put back on the 32 grid.
+# rule, divided by the rank (which widens both of a chunk's axes) and put back on
+# the 32 grid, then rounded up to a whole number of tokens (`micro_steps` widens
+# only the write axis, so it subdivides the chunk instead of shortening it).
 def optimal_chunk_len(state_rank, per_head_dim, mimo_rank=1, micro_steps=1):
-    fold = max(mimo_rank * micro_steps, 1)
-    n = -(-math.isqrt(state_rank * per_head_dim) // fold)
-    n = ((n + 31) // 32) * 32
-    return min(max(n, 32), 512)
+    u = max(micro_steps, 1)
+    folded = -(-math.isqrt(state_rank * per_head_dim) // max(mimo_rank, 1))
+    folded = ((folded + 31) // 32) * 32
+    folded = min(max(folded, 32), 512)
+    return -(-folded // u) * u
 
 
-ok("8.5  the schedule is 96 / 64 / 32 at fold 1 / 2 / >=3, and only the product folds",
+ok("8.5  the schedule is 96 / 64 / 32 at rank 1 / 2 / >=4, and u leaves the width alone",
    optimal_chunk_len(128, 64) == 96
    and optimal_chunk_len(128, 64, 2, 1) == 64
-   and optimal_chunk_len(128, 64, 1, 2) == 64
    and optimal_chunk_len(128, 64, 4, 1) == 32
-   and optimal_chunk_len(128, 64, 2, 2) == 32)
+   and all(96 <= optimal_chunk_len(128, 64, 1, u) < 96 + u
+           and optimal_chunk_len(128, 64, 1, u) % u == 0
+           for u in (1, 2, 3, 4, 5, 8, 16)))
 
 fused = lambda m, u: optimal_chunk_len(128, 64, m, u) * m
 ok("8.6  it keeps the fused axis near the SISO target instead of scaling with the rank",
@@ -435,25 +438,37 @@ ok("8.6  it keeps the fused axis near the SISO target instead of scaling with th
 print(f"        fused chunk*m:  m=1 -> {fused(1, 1)},  m=4 -> {fused(4, 1)}"
       f"  (unscaled would be {96 * 4})")
 
-# The materialised intra-chunk score is [batch, nchunks, heads, LM, LM]; over
-# sequence*u folded positions that is batch*s*heads * C*m^2*u elements. Exact
-# u-independence would want C = base/(m*u); the 32 grid and its floor round that
-# off, so the saving is base_chunk / scheduled_chunk and saturates at 96/32 = 3.
-score_mem = lambda C, m, u: C * m ** 2 * u                  # per token, per head
-saving = lambda m, u: (score_mem(optimal_chunk_len(128, 64), m, u)
-                       / score_mem(optimal_chunk_len(128, 64, m, u), m, u))
-ok("8.7  the schedule divides that memory by 1.5x at fold 2 and 3x once 32 floors it",
-   abs(saving(1, 2) - 1.5) < 1e-9
-   and abs(saving(1, 4) - 3.0) < 1e-9
-   and abs(saving(4, 1) - 3.0) < 1e-9
-   and all(saving(m, u) >= 1.0 for m in (1, 2, 4, 8) for u in (1, 2, 3, 8)))
+# The materialised intra-chunk score is [batch, nchunks, heads, (C/u)*m, C*m]: the
+# read axis carries the tokens, the write axis the micro-steps. Over sequence*u
+# folded positions that is batch*s*heads * C*m^2 elements -- no u at all.
+score_mem = lambda m, u: optimal_chunk_len(128, 64, m, u) * m ** 2   # per token, per head
+ok("8.7  the score carries no u: memory per token is C*m^2, flat to the token rounding",
+   all(1.0 <= score_mem(m, u) / score_mem(m, 1)
+       < 1.0 + u / optimal_chunk_len(128, 64, m, 1)
+       for m in (1, 2, 4, 8) for u in (1, 2, 3, 4, 8))
+   and all(score_mem(m, u) == score_mem(m, 1)
+           for m in (1, 2, 4, 8) for u in (1, 2, 4, 8)
+           if optimal_chunk_len(128, 64, m, 1) % u == 0))
 
-grown = lambda m, u: (score_mem(optimal_chunk_len(128, 64, m, u), m, u)
-                      / score_mem(optimal_chunk_len(128, 64), 1, 1))
-ok("8.8  so growth in u is a third of the unscaled slope, not eliminated",
-   abs(grown(1, 8) - 8.0 / 3.0) < 1e-9 and abs(grown(1, 2) - 4.0 / 3.0) < 1e-9)
-print(f"        score memory vs SISO:  u=2 -> {grown(1, 2):.2f}x (unscaled 2x),  "
-      f"u=8 -> {grown(1, 8):.2f}x (unscaled 8x)")
+# The alternative -- divide by the product, as if a chunk of C positions were C/u
+# tokens' worth of work. It doubles the exponent on nchunks and, once 32 floors the
+# division, fails to hold the memory it was spent on anyway.
+def divide_by_product(state_rank, per_head_dim, mimo_rank=1, micro_steps=1):
+    n = -(-math.isqrt(state_rank * per_head_dim) // max(mimo_rank * micro_steps, 1))
+    return min(max(((n + 31) // 32) * 32, 32), 512)
+
+nchunks = lambda sched, u: u / sched(128, 64, 1, u)          # per token, up to `s`
+ok("8.8  dividing by u too puts nchunks at u^2 and still lets the score grow 2.67x at u=8",
+   abs(nchunks(optimal_chunk_len, 8) / nchunks(optimal_chunk_len, 1) - 8) < 0.1
+   and abs(nchunks(divide_by_product, 8) / nchunks(divide_by_product, 1) - 24) < 0.1
+   and abs(divide_by_product(128, 64, 1, 8) * 1 ** 2 * 8 / 96 - 8.0 / 3.0) < 1e-9
+   and score_mem(1, 8) == score_mem(1, 1))
+print(f"        nchunks vs u=1 at u=8:  read axis -> "
+      f"{nchunks(optimal_chunk_len, 8) / nchunks(optimal_chunk_len, 1):.0f}x,  "
+      f"divide-by-product -> "
+      f"{nchunks(divide_by_product, 8) / nchunks(divide_by_product, 1):.0f}x")
+print(f"        score memory vs u=1 at u=8:  read axis -> 1.00x,  "
+      f"divide-by-product -> {divide_by_product(128, 64, 1, 8) * 8 / 96:.2f}x")
 
 
 # ---------------------------------------------------------------------------

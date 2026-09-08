@@ -16,6 +16,8 @@
 #![allow(non_snake_case)]
 
 use super::serial_recalculated::{k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing};
+use crate::mamba3::helpers::prim::{read_causal_mask, read_rows, scatter_read_rows};
+use crate::mamba3::ssd_path::Mamba3SsdPath;
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
 use burn::tensor::s;
@@ -30,8 +32,8 @@ pub struct CombinedGrads<B: Backend> {
     pub d_da_bnlh: F<B, 4>,
     /// Gradient of the input projection `B`.
     pub d_b_bnlmhr: F<B, 6>,
-    /// Gradient of the output projection `C`.
-    pub d_c_bnlmhr: F<B, 6>,
+    /// Gradient of the output projection `C`, on the chunk's read axis.
+    pub d_c_bntmhr: F<B, 6>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
 }
@@ -96,26 +98,31 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// # Returns
 /// One [`CombinedGrads`] struct containing gradients for all 5 inputs.
 pub fn combined_backward<B: Backend>(
-    d_y_bnlmhp: F<B, 6>,
+    d_y_bntmhp: F<B, 6>,
     d_final_bhpr: F<B, 4>,
     //
     v_bnlmhp: F<B, 6>,
     da_bnlh: F<B, 4>,
     b_bnlmhr: F<B, 6>,
-    c_bnlmhr: F<B, 6>,
+    c_bntmhr: F<B, 6>,
     initial_state_bhpr: F<B, 4>,
+    read_stride: usize,
 ) -> CombinedGrads<B> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
     let device = v_bnlmhp.device();
     let dtype = v_bnlmhp.dtype();
+    // The chunk's two axes: `fused` is what it writes, `read` what it is read at.
+    let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+    let fused = chunk_len * mimo_rank;
+    let read = chunk_tokens * mimo_rank;
 
-    san(&d_y_bnlmhp);
+    san(&d_y_bntmhp);
     san(&d_final_bhpr);
     san(&v_bnlmhp);
     san(&da_bnlh);
     san(&b_bnlmhr);
-    san(&c_bnlmhr);
+    san(&c_bntmhr);
     san(&initial_state_bhpr);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -127,8 +134,8 @@ pub fn combined_backward<B: Backend>(
     san(&da_cumsum_bhnl);
 
     // K2 — CB matrix used in K5 ORANGE
-    let cb_bnhLMLM = k2_ssd_bmm(c_bnlmhr.clone(), b_bnlmhr.clone());
-    san(&cb_bnhLMLM);
+    let cb_bnhTMLM = k2_ssd_bmm(c_bntmhr.clone(), b_bnlmhr.clone());
+    san(&cb_bnhTMLM);
 
     // K3 — intra-chunk state + decay/decayed-V intermediates
     let (intra_chunk_state_bnhpr, k3_decay_bhnLM, k3_decayed_v_bnLMhp) =
@@ -151,18 +158,22 @@ pub fn combined_backward<B: Backend>(
         .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
-        .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]); // da_cumsum_bhnLM
+        .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
+    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
+        .unsqueeze_dim::<5>(4)
+        .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
+        .reshape([batch, nheads, nchunks, read]);
 
-    // d_y in (batch, nchunks, nheads, chunk_len * mimo_rank, per_head_dim) ordering
-    // — matches the per-chunk slicing.
-    let d_y_bnhLMp = d_y_bnlmhp
-        .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]) // d_y_bnLMhp
-        .swap_dims(2, 3); // d_y_bnhLMp
-    san(&d_y_bnhLMp);
+    // d_y in (batch, nchunks, nheads, chunk_tokens * mimo_rank, per_head_dim)
+    // ordering — matches the per-chunk slicing.
+    let d_y_bnhTMp = d_y_bntmhp
+        .reshape([batch, nchunks, read, nheads, per_head_dim]) // d_y_bnTMhp
+        .swap_dims(2, 3); // d_y_bnhTMp
+    san(&d_y_bnhTMp);
 
-    // Reusable [chunk_len, chunk_len] -inf upper-triangular base mask for ORANGE.
-    let neg_inf_base_ll: F<B, 2> =
-        { F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype).triu(1) };
+    // Reusable [chunk_tokens, chunk_len] -inf upper-triangular base mask for
+    // ORANGE (`triu(1)`: the double-SSD sum includes the same step).
+    let neg_inf_base_tl: F<B, 2> = read_causal_mask::<B>(chunk_len, read_stride, 1, &device, dtype);
 
     // ═══════════════════════════════════════════════════════════════════════
     // REVERSE PER-CHUNK LOOP — K5 (BLUE + ORANGE) + K4 fused
@@ -171,8 +182,8 @@ pub fn combined_backward<B: Backend>(
     // [batch,state_rank,nheads,chunk_len*mimo_rank,...] tensors a fully batched K5 backward would allocate.
     // ═══════════════════════════════════════════════════════════════════════
     let mut vec_orange_d_v_bhLMp: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
-    let mut vec_blue_d_c_bhLMr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
-    let mut vec_d_cb_bhLMLM: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    let mut vec_blue_d_c_bhTMr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    let mut vec_d_cb_bhTMLM: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
     let mut vec_blue_d_da_bhl: Vec<F<B, 3>> = Vec::with_capacity(nchunks);
     let mut vec_orange_d_da_bhl: Vec<F<B, 3>> = Vec::with_capacity(nchunks);
     let mut vec_d_intra_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
@@ -186,25 +197,29 @@ pub fn combined_backward<B: Backend>(
             .clone()
             .slice(s![.., i_chunk, .., .., .., ..]) // v_b1lmhp
             .squeeze_dim::<5>(1) // v_blmhp
-            .reshape([batch, chunk_len * mimo_rank, nheads, per_head_dim]) // v_bLMhp
+            .reshape([batch, fused, nheads, per_head_dim]) // v_bLMhp
             .swap_dims(1, 2); // v_bhLMp
 
-        let c_bhLMr: F<B, 4> = c_bnlmhr
+        let c_bhTMr: F<B, 4> = c_bntmhr
             .clone()
-            .slice(s![.., i_chunk, .., .., .., ..]) // c_b1lmhr
-            .squeeze_dim::<5>(1) // c_blmhr
-            .reshape([batch, chunk_len * mimo_rank, nheads, state_rank]) // c_bLMhr
-            .swap_dims(1, 2); // c_bhLMr
+            .slice(s![.., i_chunk, .., .., .., ..]) // c_b1tmhr
+            .squeeze_dim::<5>(1) // c_btmhr
+            .reshape([batch, read, nheads, state_rank]) // c_bTMhr
+            .swap_dims(1, 2); // c_bhTMr
 
-        let cb_bhLMLM: F<B, 4> = cb_bnhLMLM
+        let cb_bhTMLM: F<B, 4> = cb_bnhTMLM
             .clone()
-            .slice(s![.., i_chunk, .., .., ..]) // cb_b1hLMLM
-            .squeeze_dim::<4>(1); // cb_bhLMLM
+            .slice(s![.., i_chunk, .., .., ..]) // cb_b1hTMLM
+            .squeeze_dim::<4>(1); // cb_bhTMLM
 
         let da_cumsum_bhLM: F<B, 3> = da_cumsum_bhnLM
             .clone()
             .slice(s![.., .., i_chunk, ..]) // da_cumsum_bh1LM
             .squeeze_dim::<3>(2); // da_cumsum_bhLM
+        let da_cumsum_bhTM: F<B, 3> = da_cumsum_bhnTM
+            .clone()
+            .slice(s![.., .., i_chunk, ..]) // da_cumsum_bh1TM
+            .squeeze_dim::<3>(2); // da_cumsum_bhTM
 
         let chunk_input_state_bhpr: F<B, 4> = chunk_input_state_bnhpr
             .clone()
@@ -212,125 +227,137 @@ pub fn combined_backward<B: Backend>(
             .squeeze_dim::<4>(1); // chunk_input_state_bhpr
         san(&chunk_input_state_bhpr);
 
-        let d_y_bhLMp: F<B, 4> = d_y_bnhLMp
+        let d_y_bhTMp: F<B, 4> = d_y_bnhTMp
             .clone()
-            .slice(s![.., i_chunk, .., .., ..]) // d_y_b1hLMp
-            .squeeze_dim::<4>(1); // d_y_bhLMp
+            .slice(s![.., i_chunk, .., .., ..]) // d_y_b1hTMp
+            .squeeze_dim::<4>(1); // d_y_bhTMp
 
         // ── BLUE backward ──────────────────────────────────────────────
         //
-        //   blue[LM,p] = exp(cumA[LM]) · Σᵣ C[LM,r] · state[p,r]
+        //   blue[TM,p] = exp(cumA[TM]) · Σᵣ C[TM,r] · state[p,r]
         //
-        // exp_da depends on the fused position LM only — broadcast over per_head_dim.
-        let exp_da_cumsum_bhLM: F<B, 3> = da_cumsum_bhLM.clone().exp();
-        let exp_da_cumsum_bhLMp: F<B, 4> = exp_da_cumsum_bhLM
+        // exp_da depends on the read position TM only — broadcast over per_head_dim.
+        let exp_da_cumsum_bhTM: F<B, 3> = da_cumsum_bhTM.clone().exp();
+        let exp_da_cumsum_bhTMp: F<B, 4> = exp_da_cumsum_bhTM
             .clone()
-            .unsqueeze_dim::<4>(3) // exp_da_cumsum_bhLM1
-            .expand([batch, nheads, chunk_len * mimo_rank, per_head_dim]); // exp_da_cumsum_bhLMp
-        let d_ch_bhLMp: F<B, 4> = d_y_bhLMp.clone() * exp_da_cumsum_bhLMp.clone();
-        san(&d_ch_bhLMp);
+            .unsqueeze_dim::<4>(3) // exp_da_cumsum_bhTM1
+            .expand([batch, nheads, read, per_head_dim]); // exp_da_cumsum_bhTMp
+        let d_ch_bhTMp: F<B, 4> = d_y_bhTMp.clone() * exp_da_cumsum_bhTMp.clone();
+        san(&d_ch_bhTMp);
 
-        // d_chunk_input_state[p,r] = Σ_LM C[LM,r] · d_ch[LM,p]
-        //   C^T (bhrLM) @ d_ch (bhLMp)  → bhrp  → transpose → bhpr
-        let d_chunk_input_state_bhpr: F<B, 4> = c_bhLMr
+        // d_chunk_input_state[p,r] = Σ_TM C[TM,r] · d_ch[TM,p]
+        //   C^T (bhrTM) @ d_ch (bhTMp)  → bhrp  → transpose → bhpr
+        let d_chunk_input_state_bhpr: F<B, 4> = c_bhTMr
             .clone()
-            .transpose() // c_bhrLM
-            .matmul(d_ch_bhLMp.clone()) // d_chunk_input_state_bhrp
+            .transpose() // c_bhrTM
+            .matmul(d_ch_bhTMp.clone()) // d_chunk_input_state_bhrp
             .transpose(); // d_chunk_input_state_bhpr
         san(&d_chunk_input_state_bhpr);
 
-        // d_C_blue[LM,r] = Σₚ d_ch[LM,p] · state[p,r]
-        //   d_ch (bhLMp) @ state (bhpr)  → bhLMr
-        let d_c_blue_bhLMr: F<B, 4> = d_ch_bhLMp.matmul(chunk_input_state_bhpr.clone());
-        san(&d_c_blue_bhLMr);
-        vec_blue_d_c_bhLMr.push(d_c_blue_bhLMr);
+        // d_C_blue[TM,r] = Σₚ d_ch[TM,p] · state[p,r]
+        //   d_ch (bhTMp) @ state (bhpr)  → bhTMr
+        let d_c_blue_bhTMr: F<B, 4> = d_ch_bhTMp.matmul(chunk_input_state_bhpr.clone());
+        san(&d_c_blue_bhTMr);
+        vec_blue_d_c_bhTMr.push(d_c_blue_bhTMr);
 
         // d_da from BLUE:
-        //   ch[LM,p] = Σᵣ C[LM,r] · state[p,r]      (= C @ state_rp after transpose)
-        //   d_da[LM] = (Σₚ d_y[LM,p] · ch[LM,p]) · exp_da[LM]
-        let ch_bhLMp: F<B, 4> = c_bhLMr.clone().matmul(
+        //   ch[TM,p] = Σᵣ C[TM,r] · state[p,r]      (= C @ state_rp after transpose)
+        //   d_da[TM] = (Σₚ d_y[TM,p] · ch[TM,p]) · exp_da[TM]
+        let ch_bhTMp: F<B, 4> = c_bhTMr.clone().matmul(
             chunk_input_state_bhpr.clone().transpose(), // chunk_input_state_bhrp
-        ); // ch_bhLMp
-        let d_da_blue_bhLM: F<B, 3> = (d_y_bhLMp.clone() * ch_bhLMp * exp_da_cumsum_bhLMp)
-            .sum_dim(3) // d_da_blue_bhLM1
-            .squeeze_dim::<3>(3); // d_da_blue_bhLM
-        san(&d_da_blue_bhLM);
+        ); // ch_bhTMp
+        let d_da_blue_bhTM: F<B, 3> = (d_y_bhTMp.clone() * ch_bhTMp * exp_da_cumsum_bhTMp)
+            .sum_dim(3) // d_da_blue_bhTM1
+            .squeeze_dim::<3>(3); // d_da_blue_bhTM
+        san(&d_da_blue_bhTM);
 
-        // Reduce fused LM → l (sum the mimo_rank copies that K5 broadcast).
-        let d_da_blue_bhl: F<B, 3> = d_da_blue_bhLM
-            .reshape([batch, nheads, chunk_len, mimo_rank]) // d_da_blue_bhlm
-            .sum_dim(3) // d_da_blue_bhl1
-            .squeeze_dim::<3>(3); // d_da_blue_bhl
+        // Reduce fused TM → t (sum the mimo_rank copies K5 broadcast), then
+        // scatter back onto the folded axis: a read row's `da` is one position.
+        let d_da_blue_bhl: F<B, 3> = scatter_read_rows::<B, 3, 4>(
+            d_da_blue_bhTM
+                .reshape([batch, nheads, chunk_tokens, mimo_rank]) // d_da_blue_bhtm
+                .sum_dim(3) // d_da_blue_bht1
+                .squeeze_dim::<3>(3), // d_da_blue_bht
+            2,
+            read_stride,
+        );
         vec_blue_d_da_bhl.push(d_da_blue_bhl);
 
         // ── ORANGE backward ────────────────────────────────────────────
         //
         //   w[LMₜ,LMₛ] = CB[LMₜ,LMₛ] · decay[LMₜ,LMₛ]   (MIMO causal mask in decay)
         //   orange[LMₜ,p] = Σ_{LMₛ} w[LMₜ,LMₛ] · v[LMₛ,p]
-        let da_target_bhLMLM: F<B, 4> = da_cumsum_bhLM
-            .clone()
-            .unsqueeze_dim::<4>(3) // da_cumsum_bhLMₜ1
-            .expand([batch, nheads, chunk_len * mimo_rank, chunk_len * mimo_rank]); // da_target_bhLMₜLM
-        let da_source_bhLMLM: F<B, 4> = da_cumsum_bhLM
+        let da_target_bhTMLM: F<B, 4> = da_cumsum_bhTM
+            .unsqueeze_dim::<4>(3) // da_cumsum_bhTMₜ1
+            .expand([batch, nheads, read, fused]); // da_target_bhTMₜLM
+        let da_source_bhTMLM: F<B, 4> = da_cumsum_bhLM
             .unsqueeze_dim::<4>(2) // da_cumsum_bh1LMₛ
-            .expand([batch, nheads, chunk_len * mimo_rank, chunk_len * mimo_rank]); // da_source_bhLMLMₛ
-        let diff_bhLMLM = da_target_bhLMLM - da_source_bhLMLM;
-        san(&diff_bhLMLM);
+            .expand([batch, nheads, read, fused]); // da_source_bhTMLMₛ
+        let diff_bhTMLM = da_target_bhTMLM - da_source_bhTMLM;
+        san(&diff_bhTMLM);
 
-        // MIMO causal mask: -inf where LMₛ//mimo_rank > LMₜ//mimo_rank — interleaved expansion
-        // of the [l, l] upper-triangular base mask (matches K5).
-        let neg_inf_mimo_bhLMLM: F<B, 4> = neg_inf_base_ll
+        // MIMO causal mask: -inf where LMₛ//mimo_rank > row(TMₜ)//mimo_rank —
+        // interleaved expansion of the [t, l] upper-triangular base mask
+        // (matches K5).
+        let neg_inf_mimo_bhTMLM: F<B, 4> = neg_inf_base_tl
             .clone()
-            .unsqueeze_dims::<4>(&[0, 1]) // neg_inf_base_11ll
-            .expand([batch, nheads, chunk_len, chunk_len]) // neg_inf_base_bhll
-            .unsqueeze_dim::<5>(3) // neg_inf_base_bhl1l
-            .expand([batch, nheads, chunk_len, mimo_rank, chunk_len]) // neg_inf_base_bhlml
-            .reshape([batch, nheads, chunk_len * mimo_rank, chunk_len]) // neg_inf_base_bhLMl
-            .unsqueeze_dim::<5>(4) // neg_inf_base_bhLMl1
-            .expand([batch, nheads, chunk_len * mimo_rank, chunk_len, mimo_rank]) // neg_inf_base_bhLMlm
-            .reshape([batch, nheads, chunk_len * mimo_rank, chunk_len * mimo_rank]); // neg_inf_mimo_bhLMLM
-        let decay_bhLMLM = (diff_bhLMLM + neg_inf_mimo_bhLMLM).exp();
-        san(&decay_bhLMLM);
+            .unsqueeze_dims::<4>(&[0, 1]) // neg_inf_base_11tl
+            .expand([batch, nheads, chunk_tokens, chunk_len]) // neg_inf_base_bhtl
+            .unsqueeze_dim::<5>(3) // neg_inf_base_bht1l
+            .expand([batch, nheads, chunk_tokens, mimo_rank, chunk_len]) // neg_inf_base_bhtml
+            .reshape([batch, nheads, read, chunk_len]) // neg_inf_base_bhTMl
+            .unsqueeze_dim::<5>(4) // neg_inf_base_bhTMl1
+            .expand([batch, nheads, read, chunk_len, mimo_rank]) // neg_inf_base_bhTMlm
+            .reshape([batch, nheads, read, fused]); // neg_inf_mimo_bhTMLM
+        let decay_bhTMLM = (diff_bhTMLM + neg_inf_mimo_bhTMLM).exp();
+        san(&decay_bhTMLM);
 
         // d_v_orange = w^T @ d_orange ; d_w = d_orange @ v^T
-        let d_orange_bhLMp = d_y_bhLMp;
-        let w_bhLMLM = cb_bhLMLM.clone() * decay_bhLMLM.clone();
-        let d_w_bhLMLM: F<B, 4> = d_orange_bhLMp.clone().matmul(
+        let d_orange_bhTMp = d_y_bhTMp;
+        let w_bhTMLM = cb_bhTMLM.clone() * decay_bhTMLM.clone();
+        let d_w_bhTMLM: F<B, 4> = d_orange_bhTMp.clone().matmul(
             v_bhLMp.clone().transpose(), // v_bhpLM
-        ); // d_w_bhLMₜLMₛ
-        san(&d_w_bhLMLM);
-        let d_v_orange_bhLMp: F<B, 4> = w_bhLMLM
-            .transpose() // w_bhLMₛLMₜ
-            .matmul(d_orange_bhLMp); // d_v_orange_bhLMₛp
+        ); // d_w_bhTMₜLMₛ
+        san(&d_w_bhTMLM);
+        let d_v_orange_bhLMp: F<B, 4> = w_bhTMLM
+            .transpose() // w_bhLMₛTMₜ
+            .matmul(d_orange_bhTMp); // d_v_orange_bhLMₛp
         san(&d_v_orange_bhLMp);
         vec_orange_d_v_bhLMp.push(d_v_orange_bhLMp);
 
         // d_cb = d_w · decay ; d_decay = d_w · cb ; d_diff = d_decay · decay
         // (masked positions where decay=0 contribute 0 to d_diff automatically)
-        let d_cb_bhLMLM = d_w_bhLMLM.clone() * decay_bhLMLM.clone();
-        vec_d_cb_bhLMLM.push(d_cb_bhLMLM);
+        let d_cb_bhTMLM = d_w_bhTMLM.clone() * decay_bhTMLM.clone();
+        vec_d_cb_bhTMLM.push(d_cb_bhTMLM);
 
-        let d_decay_bhLMLM = d_w_bhLMLM * cb_bhLMLM;
-        let d_diff_bhLMLM = d_decay_bhLMLM * decay_bhLMLM;
+        let d_decay_bhTMLM = d_w_bhTMLM * cb_bhTMLM;
+        let d_diff_bhTMLM = d_decay_bhTMLM * decay_bhTMLM;
 
-        // d_da_target[LMₜ] = Σ_{LMₛ} d_diff[LMₜ, LMₛ] ;
-        // d_da_source[LMₛ] = Σ_{LMₜ} d_diff[LMₜ, LMₛ] ;
+        // d_da_target[TMₜ] = Σ_{LMₛ} d_diff[TMₜ, LMₛ] (scattered onto the folded
+        // axis); d_da_source[LMₛ] = Σ_{TMₜ} d_diff[TMₜ, LMₛ] (already folded);
         // d_da_orange = d_da_target − d_da_source  (diff = target − source).
-        let d_da_target_bhLM: F<B, 3> = d_diff_bhLMLM
+        let d_da_target_bhTM: F<B, 3> = d_diff_bhTMLM
             .clone()
-            .sum_dim(3) // d_diff_bhLMₜ1
-            .squeeze_dim::<3>(3); // d_da_target_bhLMₜ
-        let d_da_source_bhLM: F<B, 3> = d_diff_bhLMLM
+            .sum_dim(3) // d_diff_bhTMₜ1
+            .squeeze_dim::<3>(3); // d_da_target_bhTMₜ
+        let d_da_source_bhLM: F<B, 3> = d_diff_bhTMLM
             .sum_dim(2) // d_diff_bh1LMₛ
             .squeeze_dim::<3>(2); // d_da_source_bhLMₛ
-        let d_da_orange_bhLM = d_da_target_bhLM - d_da_source_bhLM;
-        san(&d_da_orange_bhLM);
 
-        // Reduce fused LM → l (sum over the mimo_rank-broadcast copies).
-        let d_da_orange_bhl: F<B, 3> = d_da_orange_bhLM
-            .reshape([batch, nheads, chunk_len, mimo_rank]) // d_da_orange_bhlm
-            .sum_dim(3) // d_da_orange_bhl1
-            .squeeze_dim::<3>(3); // d_da_orange_bhl
+        let d_da_target_bhl: F<B, 3> = scatter_read_rows::<B, 3, 4>(
+            d_da_target_bhTM
+                .reshape([batch, nheads, chunk_tokens, mimo_rank])
+                .sum_dim(3)
+                .squeeze_dim::<3>(3),
+            2,
+            read_stride,
+        );
+        let d_da_source_bhl: F<B, 3> = d_da_source_bhLM
+            .reshape([batch, nheads, chunk_len, mimo_rank]) // d_da_source_bhlm
+            .sum_dim(3) // d_da_source_bhl1
+            .squeeze_dim::<3>(3); // d_da_source_bhl
+        let d_da_orange_bhl = d_da_target_bhl - d_da_source_bhl;
+        san(&d_da_orange_bhl);
         vec_orange_d_da_bhl.push(d_da_orange_bhl);
 
         // ── K4 backward step for chunk i_chunk ─────────────────────────
@@ -365,8 +392,8 @@ pub fn combined_backward<B: Backend>(
 
     // ── Restore natural (forward) chunk order ─────────────────────────────
     vec_orange_d_v_bhLMp.reverse();
-    vec_blue_d_c_bhLMr.reverse();
-    vec_d_cb_bhLMLM.reverse();
+    vec_blue_d_c_bhTMr.reverse();
+    vec_d_cb_bhTMLM.reverse();
     vec_blue_d_da_bhl.reverse();
     vec_orange_d_da_bhl.reverse();
     vec_d_intra_bhpr.reverse();
@@ -374,8 +401,8 @@ pub fn combined_backward<B: Backend>(
 
     // ── Stack per-chunk slices back into batched tensors ──────────────────
     let d_v_orange_bnhLMp: F<B, 5> = F::stack(vec_orange_d_v_bhLMp, 1);
-    let d_c_blue_bnhLMr: F<B, 5> = F::stack(vec_blue_d_c_bhLMr, 1);
-    let d_cb_bnhLMLM: F<B, 5> = F::stack(vec_d_cb_bhLMLM, 1);
+    let d_c_blue_bnhTMr: F<B, 5> = F::stack(vec_blue_d_c_bhTMr, 1);
+    let d_cb_bnhTMLM: F<B, 5> = F::stack(vec_d_cb_bhTMLM, 1);
     let d_da_blue_bhnl: F<B, 4> = F::stack(vec_blue_d_da_bhl, 2);
     let d_da_orange_bhnl: F<B, 4> = F::stack(vec_orange_d_da_bhl, 2);
     let d_intra_chunk_state_bnhpr: F<B, 5> = F::stack(vec_d_intra_bhpr, 1);
@@ -469,29 +496,29 @@ pub fn combined_backward<B: Backend>(
     //   d_c_bnhLMr = d_cb @ b_bnhLMr      (= d_cb @ b_bnhrLM^T)
     //   d_b_bnhrLM = c_bnhrLM @ d_cb      (= c_bnhLMr^T @ d_cb)
     // ═══════════════════════════════════════════════════════════════════════
-    let c_bnhLMr = c_bnlmhr
+    let c_bnhTMr = c_bntmhr
         .clone()
-        .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]) // c_bnLMhr
-        .swap_dims(2, 3); // c_bnhLMr
+        .reshape([batch, nchunks, read, nheads, state_rank]) // c_bnTMhr
+        .swap_dims(2, 3); // c_bnhTMr
     let b_for_k2_bnhLMr = b_bnLMhr.swap_dims(2, 3);
 
-    let d_c_k2_bnhLMr: F<B, 5> = d_cb_bnhLMLM.clone().matmul(b_for_k2_bnhLMr);
-    let d_b_k2_bnhrLM: F<B, 5> = c_bnhLMr
-        .transpose() // c_bnhrLM
-        .matmul(d_cb_bnhLMLM); // d_b_k2_bnhrLM
+    let d_c_k2_bnhTMr: F<B, 5> = d_cb_bnhTMLM.clone().matmul(b_for_k2_bnhLMr);
+    let d_b_k2_bnhrLM: F<B, 5> = c_bnhTMr
+        .transpose() // c_bnhrTM
+        .matmul(d_cb_bnhTMLM); // d_b_k2_bnhrLM
 
     // Undo permutes and reshape back
-    let d_c_k2_bnlmhr: F<B, 6> = d_c_k2_bnhLMr
-        .swap_dims(2, 3) // d_c_k2_bnLMhr
-        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]); // d_c_k2_bnlmhr
+    let d_c_k2_bntmhr: F<B, 6> = d_c_k2_bnhTMr
+        .swap_dims(2, 3) // d_c_k2_bnTMhr
+        .reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]); // d_c_k2_bntmhr
     let d_b_k2_bnlmhr: F<B, 6> = d_b_k2_bnhrLM
         .permute([0, 1, 4, 2, 3]) // d_b_k2_bnLMhr
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]); // d_b_k2_bnlmhr
 
     // ── Unstack d_c_blue / d_v_orange and reshape back ────────────────────
-    let d_c_blue_bnlmhr: F<B, 6> = d_c_blue_bnhLMr
-        .swap_dims(2, 3) // d_c_blue_bnLMhr
-        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]); // d_c_blue_bnlmhr
+    let d_c_blue_bntmhr: F<B, 6> = d_c_blue_bnhTMr
+        .swap_dims(2, 3) // d_c_blue_bnTMhr
+        .reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]); // d_c_blue_bntmhr
     let d_v_orange_bnlrhp: F<B, 6> = d_v_orange_bnhLMp
         .swap_dims(2, 3) // d_v_orange_bnLMhp
         .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // d_v_orange_bnlrhp
@@ -524,19 +551,19 @@ pub fn combined_backward<B: Backend>(
     // ── Combine per-input gradient contributions ──────────────────────────
     let d_v_bnlmhp = d_v_k3_bnlrhp + d_v_orange_bnlrhp;
     let d_b_bnlmhr = d_b_k2_bnlmhr + d_b_k3_bnlmhr;
-    let d_c_bnlmhr = d_c_k2_bnlmhr + d_c_blue_bnlmhr;
+    let d_c_bntmhr = d_c_k2_bntmhr + d_c_blue_bntmhr;
 
     san(&d_v_bnlmhp);
     san(&d_da_bnlh);
     san(&d_b_bnlmhr);
-    san(&d_c_bnlmhr);
+    san(&d_c_bntmhr);
     san(&d_initial_state_bhpr);
 
     CombinedGrads {
         d_v_bnlmhp,
         d_da_bnlh,
         d_b_bnlmhr,
-        d_c_bnlmhr,
+        d_c_bntmhr,
         d_initial_state_bhpr,
     }
 }

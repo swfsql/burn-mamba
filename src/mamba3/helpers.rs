@@ -201,6 +201,189 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     }
 }
 
+// ---------------------------------------------------------------------------
+// The read axis
+// ---------------------------------------------------------------------------
+//
+// A chunk has two axes, and `micro_steps` widens only one of them. Every one of
+// a token's `u` micro-steps **writes** to the state, so the source axis is the
+// folded `chunk_len`; the token is **read** once, at its last micro-step, so
+// the target axis is `chunk_len / u` — the rows whose `y` survives, everything
+// else being multiplied by a zero gradient. `read_stride` is that `u` (and `1`
+// wherever there is no fold: Mamba-2, `micro_steps = 1`, the `step` path),
+// which makes both helpers below the identity there.
+//
+// The alignment is what keeps this a reshape rather than a gather:
+// `chunk_len` is a multiple of `read_stride`
+// ([`Mamba3SsdPath::chunk_len_or_optimal`](crate::mamba3::ssd_path::Mamba3SsdPath::chunk_len_or_optimal)),
+// so chunk `c` covers folded positions `[c·L, (c+1)·L)` = tokens
+// `[c·T, (c+1)·T)` and its read rows are a **contiguous run** of them.
+
+/// The read rows of a folded axis: index `i·stride + (stride − 1)` for each
+/// `i`, i.e. the last position of every run of `stride`.
+///
+/// The identity at `stride = 1`.
+///
+/// # Shapes
+/// - `t`   : `[…, len, …]` at `dim`, `len` a multiple of `stride`
+/// - out   : `[…, len / stride, …]`
+///
+/// `DP1 = D + 1`.
+pub fn read_rows<const D: usize, const DP1: usize>(
+    t: Tensor<D>,
+    dim: usize,
+    stride: usize,
+) -> Tensor<D> {
+    if stride <= 1 {
+        return t;
+    }
+    let dims = t.dims();
+    let len = dims[dim];
+    assert_eq!(
+        len % stride,
+        0,
+        "a folded axis of {len} is not a whole number of {stride}-step tokens",
+    );
+    let mut split = [0usize; DP1];
+    split[..dim].copy_from_slice(&dims[..dim]);
+    split[dim] = len / stride;
+    split[dim + 1] = stride;
+    split[dim + 2..].copy_from_slice(&dims[dim + 1..]);
+
+    let mut out = dims;
+    out[dim] = len / stride;
+    // Row-major, so the split moves nothing and the narrow is a strided view.
+    t.reshape(split).narrow(dim + 1, stride - 1, 1).reshape(out)
+}
+
+/// The additive causal mask over `(read row, folded source)`:
+/// `0` where the source is early enough to contribute, `−∞` where it is not.
+///
+/// `diagonal` is passed to [`Tensor::triu`] on the **folded** grid, so it says
+/// the same thing it says today: `0` excludes the same position (the single-SSD
+/// strict mask, whose diagonal `ssd::diag` adds back with `γ`), `1` keeps it
+/// (the double-SSD inclusive mask).
+///
+/// `−∞` rather than a `0/1` multiply because the mask is added *before* the
+/// `exp`: for a source after the row the decay difference is positive and would
+/// overflow.
+///
+/// # Shapes
+/// - out : `[chunk_len / stride, chunk_len]`
+pub fn read_causal_mask(
+    chunk_len: usize,
+    stride: usize,
+    diagonal: i64,
+    device: &Device,
+) -> Tensor<2> {
+    // Rows of the full folded mask, at the positions the readout happens at —
+    // which is the same statement as `read_rows`, so it is the same op.
+    let full = Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, device).triu(diagonal);
+    read_rows::<2, 3>(full, 0, stride)
+}
+
+/// The read axis on primitives, for the recompute-backward math.
+///
+/// Same definitions as [`read_rows`] / [`read_causal_mask`] one module up, on
+/// [`F`] instead of `Tensor` — the split every kernel in this crate already has
+/// between its `Tensor` body and the `F<B, _>` one a
+/// [`Backward`](burn::backend::autodiff::ops::Backward) node can run (see
+/// [`fprim`](burn_stack::utils::fprim)). Both are reshape-and-narrow, so
+/// neither needs an op `F` does not carry.
+pub mod prim {
+    use burn_stack::utils::fprim::F;
+    use burn::backend::Backend;
+    use burn::backend::tensor::Device;
+    use burn::backend::FloatDType;
+
+    /// [`super::read_rows`] on primitives.
+    pub fn read_rows<B: Backend, const D: usize, const DP1: usize>(
+        t: F<B, D>,
+        dim: usize,
+        stride: usize,
+    ) -> F<B, D> {
+        if stride <= 1 {
+            return t;
+        }
+        let dims = t.dims();
+        let len = dims[dim];
+        assert_eq!(
+            len % stride,
+            0,
+            "a folded axis of {len} is not a whole number of {stride}-step tokens",
+        );
+        let mut split = [0usize; DP1];
+        split[..dim].copy_from_slice(&dims[..dim]);
+        split[dim] = len / stride;
+        split[dim + 1] = stride;
+        split[dim + 2..].copy_from_slice(&dims[dim + 1..]);
+
+        let mut out = dims;
+        out[dim] = len / stride;
+        t.reshape::<DP1>(split)
+            .narrow(dim + 1, stride - 1, 1)
+            .reshape::<D>(out)
+    }
+
+    /// The transpose of [`read_rows`]: scatter a read-row tensor back onto the
+    /// folded axis, zero at the positions no readout happens at.
+    ///
+    /// The gradient of `read_rows` — the hand-written backward's counterpart to
+    /// what autodiff does for the `Minimal` / `Serial` paths. The identity at
+    /// `stride = 1`.
+    ///
+    /// # Shapes
+    /// - `t`  : `[…, len / stride, …]` at `dim`
+    /// - out  : `[…, len, …]`
+    pub fn scatter_read_rows<B: Backend, const D: usize, const DP1: usize>(
+        t: F<B, D>,
+        dim: usize,
+        stride: usize,
+    ) -> F<B, D> {
+        if stride <= 1 {
+            return t;
+        }
+        let dims = t.dims();
+        let device = t.device();
+        let dtype = t.dtype();
+
+        let mut split = [0usize; DP1];
+        split[..dim].copy_from_slice(&dims[..dim]);
+        split[dim] = dims[dim];
+        split[dim + 1] = 1;
+        split[dim + 2..].copy_from_slice(&dims[dim + 1..]);
+        let mut pad = split;
+        pad[dim + 1] = stride - 1;
+
+        let mut out = dims;
+        out[dim] = dims[dim] * stride;
+        // The row is the *last* of its run, so the zeros go in front of it.
+        F::cat(
+            vec![F::<B, DP1>::zeros(pad, &device, dtype), t.reshape::<DP1>(split)],
+            dim + 1,
+        )
+        .reshape::<D>(out)
+    }
+
+    /// [`super::read_causal_mask`] on primitives.
+    pub fn read_causal_mask<B: Backend>(
+        chunk_len: usize,
+        stride: usize,
+        diagonal: i64,
+        device: &Device<B>,
+        dtype: FloatDType,
+    ) -> F<B, 2> {
+        let full = F::<B, 2>::full(
+            [chunk_len, chunk_len],
+            f32::NEG_INFINITY,
+            device,
+            dtype,
+        )
+        .triu(diagonal);
+        read_rows::<B, 2, 3>(full, 0, stride)
+    }
+}
+
 /// The **interior** of a lag-`lag` tap's gap: `Πᵈ⁼¹..ˡᵃᵍ⁻¹ αₚ₋ᵈ`, or `None` at
 /// `lag = 1` (where the gap has no interior).
 ///

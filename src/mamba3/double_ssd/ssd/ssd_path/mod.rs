@@ -36,11 +36,20 @@ pub struct Mamba3DoubleSsdInput {
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     pub b_bnlmhr: Tensor<6>,
 
-    /// Query/C tensor: same processing as B.
+    /// Query/C tensor: same processing as B, but on the chunk's **read** axis —
+    /// one row per token rather than per folded position, since a token is read
+    /// once, at its last micro-step. See
+    /// [`Mamba3SingleSsdInput::c_bntmhr`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput)
+    /// and [the read axis](crate::mamba3::product).
     ///
     /// # Shape
-    /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub c_bnlmhr: Tensor<6>,
+    /// - `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`,
+    ///   `chunk_tokens = chunk_len / read_stride`
+    pub c_bntmhr: Tensor<6>,
+
+    /// The chunk's read stride: `micro_steps`, i.e. folded positions per read
+    /// row. `1` for stock Mamba-3, where the two axes coincide.
+    pub read_stride: usize,
 
     /// Initial SSM hidden state.
     ///
@@ -62,7 +71,7 @@ impl Mamba3DoubleSsdInput {
         san(&self.v_bnlmhp);
         san(&self.da_bnlh);
         san(&self.b_bnlmhr);
-        san(&self.c_bnlmhr);
+        san(&self.c_bntmhr);
         san(&self.initial_state_bhpr);
         if let Some(ref init_state_hpr) = self.init_state_hpr {
             san(init_state_hpr);
@@ -77,7 +86,8 @@ impl Mamba3DoubleSsdInput {
     /// `double_ssd_serial`, or `double_ssd_serial_recalculated`.
     ///
     /// # Returns
-    /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
+    ///   — token resolution, the readout's own (see [`Self::c_bntmhr`])
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {

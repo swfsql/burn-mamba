@@ -43,11 +43,19 @@ pub struct Mamba3SingleSsdInput {
     /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     pub b_bnlmhr: Tensor<6>,
 
-    /// Q/C tensor: same processing as `b_bnlmhr`.
+    /// Q/C tensor: same processing as `b_bnlmhr`, but on the chunk's **read**
+    /// axis — one row per token rather than per folded position.
+    ///
+    /// Every micro-step of a token writes to the state; the token is read once,
+    /// at its last one ([`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)
+    /// is [`Self::read_stride`]), so `C` is only ever needed there and the `y`
+    /// this bundle returns is already at token resolution. See
+    /// [the read axis](crate::mamba3::product).
     ///
     /// # Shape
-    /// - `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    pub c_bnlmhr: Tensor<6>,
+    /// - `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`,
+    ///   `chunk_tokens = chunk_len / read_stride`
+    pub c_bntmhr: Tensor<6>,
 
     /// Pre-combined log-decay `Δ·A` (negative).
     ///
@@ -57,9 +65,13 @@ pub struct Mamba3SingleSsdInput {
 
     /// `γₜ = λₜ · Δₜ` — used as the per-token diagonal multiplier.
     ///
+    /// On the **read** axis, like `c_bntmhr`: γ weights the same-step term of a
+    /// row's output and nothing else (the state recurrence runs on
+    /// `scale_bnlh`), so the folded positions in between never spend it.
+    ///
     /// # Shape
-    /// - `[batch, nchunks, chunk_len, nheads]`
-    pub gamma_bnlh: Tensor<4>,
+    /// - `[batch, nchunks, chunk_tokens, nheads]`
+    pub gamma_bnth: Tensor<4>,
 
     /// `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁` — K is multiplied by this for the
     /// lower-triangular and state recurrence paths. The shifted term is zero
@@ -86,6 +98,15 @@ pub struct Mamba3SingleSsdInput {
     /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<3>>,
 
+    /// The chunk's read stride: `micro_steps`, i.e. how many folded positions
+    /// (writes) a token spans. `1` for stock Mamba-3, where the read axis *is*
+    /// the chunk and every shape below reduces to `chunk_len`.
+    ///
+    /// `chunk_len` is a multiple of it, so a chunk holds a whole number of
+    /// tokens and their rows are the contiguous run
+    /// `[chunk · chunk_tokens, (chunk+1) · chunk_tokens)`.
+    pub read_stride: usize,
+
     /// Whether the specialized `mimo_rank == 1` γ-correction may be used
     /// ([`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
     /// — the chunkwise flag; the per-token sites have their own).
@@ -102,9 +123,9 @@ impl Mamba3SingleSsdInput {
         use burn_stack::modules::sanity as san;
         san(&self.v_bnlmhp);
         san(&self.b_bnlmhr);
-        san(&self.c_bnlmhr);
+        san(&self.c_bntmhr);
         san(&self.da_bnlh);
-        san(&self.gamma_bnlh);
+        san(&self.gamma_bnth);
         san(&self.scale_bnlh);
         san(&self.initial_state_bhpr);
         if let Some(ref init_state_hpr) = self.init_state_hpr {
@@ -120,7 +141,8 @@ impl Mamba3SingleSsdInput {
     /// `single_ssd_serial`, or `single_ssd_serial_recalculated`.
     ///
     /// # Returns
-    /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
+    ///   — token resolution, the readout's own (see [`Self::c_bntmhr`])
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the merged-form accumulator at the last token (to be stored in the
     ///   cache for streaming).

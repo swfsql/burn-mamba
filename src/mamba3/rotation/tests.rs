@@ -975,6 +975,7 @@ fn rotor_generator_channels_are_left_then_right() {
         RotationState::identity_quaternion(batch, nheads, blocks, &device),
         b.clone(),
         c.clone(),
+        1,
         spec(RotationKind::Quaternion4D),
     );
     let (b_r, c_r, st_r) = rotate_bc_forward(
@@ -983,6 +984,7 @@ fn rotor_generator_channels_are_left_then_right() {
         RotationState::identity_rotor(batch, nheads, blocks, &device),
         b,
         c,
+        1,
         spec(RotationKind::Rotor4D),
     );
 

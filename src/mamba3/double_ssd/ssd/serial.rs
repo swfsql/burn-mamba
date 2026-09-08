@@ -20,6 +20,8 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::helpers;
+use crate::mamba3::prelude::Mamba3SsdPath;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
@@ -32,12 +34,13 @@ impl Mamba3DoubleSsdInput {
     /// SISO (mimo_rank=1) is the special case where the fused length equals the chunk length.
     ///
     /// # Returns
-    /// - `y_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn double_ssd_serial(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
+        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, input.read_stride);
 
         assert!(
             input.init_state_hpr.is_none(),
@@ -51,16 +54,16 @@ impl Mamba3DoubleSsdInput {
         assert_eq!([batch, nheads, nchunks], da_chunk_end_bhn.dims());
 
         // ── K2: CB matrix on fused tensors ────────────────────────────────────
-        let cb_bnhLMLM: Tensor<5> = k2_ssd_bmm(input.c_bnlmhr.clone(), input.b_bnlmhr.clone());
+        let cb_bnhTMLM: Tensor<5> = k2_ssd_bmm(input.c_bntmhr.clone(), input.b_bnlmhr.clone());
         assert_eq!(
             [
                 batch,
                 nchunks,
                 nheads,
-                chunk_len * mimo_rank,
+                chunk_tokens * mimo_rank,
                 chunk_len * mimo_rank
             ],
-            cb_bnhLMLM.dims()
+            cb_bnhTMLM.dims()
         );
 
         // ── K3: intra-chunk state ─────────────────────────────────────────────
@@ -91,15 +94,16 @@ impl Mamba3DoubleSsdInput {
         );
 
         // ── K5: MIMO chunk scan ───────────────────────────────────────────────
-        let y_bnlmhp: Tensor<6> = k5_ssd_chunk_scan(
+        let y_bntmhp: Tensor<6> = k5_ssd_chunk_scan(
             da_cumsum_bhnl,
             input.v_bnlmhp,
-            input.c_bnlmhr,
-            cb_bnhLMLM,
+            input.c_bntmhr,
+            cb_bnhTMLM,
             chunk_input_state_bnhpr,
+            input.read_stride,
         );
 
-        (y_bnlmhp, final_state_bhpr)
+        (y_bntmhp, final_state_bhpr)
     }
 }
 
@@ -135,35 +139,35 @@ pub fn k1_ssd_chunk_cumsum(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
 // K2 — CB block matrix (C @ B^T on fused MIMO tensors)
 // ---------------------------------------------------------------------------
 
-/// Compute the intra-chunk CB matrix on fused (mimo_rank-into-chunk_len) tensors.
+/// Compute the intra-chunk CB matrix on fused (mimo_rank-into-chunk) tensors.
+///
+/// The two arguments carry the chunk's two axes, which differ only when
+/// `micro_steps > 1`: `C` is indexed by the positions the chunk is **read** at
+/// (one per token) and `B` by the positions it is **written** at (one per
+/// micro-step). See [the read axis](crate::mamba3::product).
 ///
 /// # Arguments
-/// - `c_bnlmhr`: `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
+/// - `c_bntmhr`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
 /// - `b_bnlmhr`: `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
 ///
 /// # Returns
-/// - `cb_bnhLMLM`: `[batch, nchunks, nheads, chunk_len*mimo_rank, chunk_len*mimo_rank]`
-pub fn k2_ssd_bmm(c_bnlmhr: Tensor<6>, b_bnlmhr: Tensor<6>) -> Tensor<5> {
-    let [batch, nchunks, chunk_len, mimo_rank, nheads, state_rank] = c_bnlmhr.dims();
+/// - `cb_bnhTMLM`: `[batch, nchunks, nheads, chunk_tokens*mimo_rank, chunk_len*mimo_rank]`
+pub fn k2_ssd_bmm(c_bntmhr: Tensor<6>, b_bnlmhr: Tensor<6>) -> Tensor<5> {
+    let [batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank] = c_bntmhr.dims();
+    let [.., chunk_len, _, _, _] = b_bnlmhr.dims();
+    let read = chunk_tokens * mimo_rank;
+    let fused = chunk_len * mimo_rank;
 
-    // Fuse R into chunk_len
-    let c_bnLMhr = c_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+    // Fuse M into the chunk axes. `C`'s is the chunk's *read* axis and `B`'s its
+    // *write* axis; they coincide unless `micro_steps > 1`.
+    let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
+    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, fused, nheads, state_rank]);
 
-    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+    let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
     let b_bnhrLM = b_bnLMhr.permute([0, 1, 3, 4, 2]);
-    let cb_bnhLMLM: Tensor<5> = c_bnhLMr.matmul(b_bnhrLM);
-    assert_eq!(
-        [
-            batch,
-            nchunks,
-            nheads,
-            chunk_len * mimo_rank,
-            chunk_len * mimo_rank
-        ],
-        cb_bnhLMLM.dims()
-    );
-    cb_bnhLMLM
+    let cb_bnhTMLM: Tensor<5> = c_bnhTMr.matmul(b_bnhrLM);
+    assert_eq!([batch, nchunks, nheads, read, fused], cb_bnhTMLM.dims());
+    cb_bnhTMLM
 }
 
 // ---------------------------------------------------------------------------
@@ -309,101 +313,84 @@ pub fn k4_ssd_state_passing(
 pub fn k5_ssd_chunk_scan(
     da_cumsum_bhnl: Tensor<4>,
     v_bnlmhp: Tensor<6>,
-    c_bnlmhr: Tensor<6>,
-    cb_bnhLMLM: Tensor<5>,
+    c_bntmhr: Tensor<6>,
+    cb_bnhTMLM: Tensor<5>,
     chunk_input_state_bnhpr: Tensor<5>,
+    read_stride: usize,
 ) -> Tensor<6> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
-    let [.., state_rank] = c_bnlmhr.dims();
+    let [.., chunk_tokens, _, _, state_rank] = c_bntmhr.dims();
     let device = v_bnlmhp.device();
+    let fused = chunk_len * mimo_rank; // write (source) axis
+    let read = chunk_tokens * mimo_rank; // read (target) axis
 
-    // Fuse mimo_rank into chunk_len
-    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
-    let c_bnLMhr = c_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+    // Fuse mimo_rank into the chunk axes
+    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
+    let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
 
-    // Expand base da_cumsum to fused length: [b, nheads, n, l] → [b, nheads, n, L]
+    // Expand base da_cumsum to fused length: [b, nheads, n, l] → [b, nheads, n, L],
+    // and to the read rows the target axis needs.
     let da_cumsum_bhnLM = da_cumsum_bhnl
+        .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
-        .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]); // da_cumsum_bhnLM
+        .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
+    let da_cumsum_bhnTM = helpers::read_rows::<4, 5>(da_cumsum_bhnl, 3, read_stride)
+        .unsqueeze_dim::<5>(4)
+        .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
+        .reshape([batch, nheads, nchunks, read]);
 
     // ── BLUE (Y_off): exp(cumA[i]) · C[i] · h[n-1] ─────────────────────
-    let exp_da_bnhLMp = da_cumsum_bhnLM
+    let exp_da_bnhTMp = da_cumsum_bhnTM
         .clone()
         .exp()
-        .swap_dims(1, 2) // exp_da_bnhLM
-        .unsqueeze_dim::<5>(4) // // exp_da_bnhLM1
-        .expand([batch, nchunks, nheads, chunk_len * mimo_rank, per_head_dim]); // exp_da_bnhLMp
+        .swap_dims(1, 2) // exp_da_bnhTM
+        .unsqueeze_dim::<5>(4) // exp_da_bnhTM1
+        .expand([batch, nchunks, nheads, read, per_head_dim]); // exp_da_bnhTMp
 
-    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+    let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
     let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
-    let ch_bnhLMp = c_bnhLMr.matmul(chunk_input_state_bnhrp);
-    let blue_bnhLMp = ch_bnhLMp * exp_da_bnhLMp;
+    let ch_bnhTMp = c_bnhTMr.matmul(chunk_input_state_bnhrp);
+    let blue_bnhTMp = ch_bnhTMp * exp_da_bnhTMp;
 
     // ── ORANGE (Y_diag): MIMO causal decay matrix · CB @ V ────────────────────
     //
-    // MIMO pairwise decay: diff[i,j] = cumA[i] - cumA[j]
-    //                                = cumA_base[i//m] - cumA_base[j//m]
-    let da_cumsum_bnhLM = da_cumsum_bhnLM.swap_dims(1, 2);
-    let target_da_cumsum_bnhLMLM = da_cumsum_bnhLM
-        .clone()
-        .unsqueeze_dim::<5>(4) // da_cumsum_bnhLM1
-        .expand([
-            batch,
-            nchunks,
-            nheads,
-            chunk_len * mimo_rank,
-            chunk_len * mimo_rank,
-        ]);
-    let source_da_cumsum_bnhLMLM = da_cumsum_bnhLM
+    // MIMO pairwise decay: diff[i,j] = cumA[row(i)] - cumA[j]
+    //                                = cumA_base[row(i)//m] - cumA_base[j//m]
+    let target_da_cumsum_bnhTMLM = da_cumsum_bhnTM
+        .swap_dims(1, 2) // da_cumsum_bnhTM
+        .unsqueeze_dim::<5>(4) // da_cumsum_bnhTM1
+        .expand([batch, nchunks, nheads, read, fused]);
+    let source_da_cumsum_bnhTMLM = da_cumsum_bhnLM
+        .swap_dims(1, 2) // da_cumsum_bnhLM
         .unsqueeze_dim::<5>(3) // da_cumsum_bnh1LM
-        .expand([
-            batch,
-            nchunks,
-            nheads,
-            chunk_len * mimo_rank,
-            chunk_len * mimo_rank,
-        ]);
-    let diff_da_cumsum_bnhLMLM = target_da_cumsum_bnhLMLM - source_da_cumsum_bnhLMLM;
+        .expand([batch, nchunks, nheads, read, fused]);
+    let diff_da_cumsum_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
     // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of target in time).
-    // Build as interleaved expansion of the standard 2-dimensional upper-triangle mask.
-    let neg_inf_base_bnhll: Tensor<5> =
-        Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device)
-            .triu(1) // [chunk_len, chunk_len]: -inf above diagonal
-            .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111ll
-            .expand([batch, nchunks, nheads, chunk_len, chunk_len]); // neg_inf_base_bnhll
+    // `triu(1)` keeps the diagonal — the double-SSD sum is inclusive of the
+    // same step, unlike the single-SSD one.
+    let neg_inf_base_bnhtl: Tensor<5> = helpers::read_causal_mask(chunk_len, read_stride, 1, &device)
+        .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111tl
+        .expand([batch, nchunks, nheads, chunk_tokens, chunk_len]); // neg_inf_base_bnhtl
     // Interleave-expand
-    let neg_inf_bnhLMLM: Tensor<5> = neg_inf_base_bnhll
-        .unsqueeze_dim::<6>(4) // neg_inf_base_bnhl1l
-        .expand([batch, nchunks, nheads, chunk_len, mimo_rank, chunk_len]) // neg_inf_base_bnhlml
-        .reshape([batch, nchunks, nheads, chunk_len * mimo_rank, chunk_len]) // neg_inf_base_bnhLMl
-        .unsqueeze_dim::<6>(5) // neg_inf_base_bnhLMl1
-        .expand([
-            batch,
-            nchunks,
-            nheads,
-            chunk_len * mimo_rank,
-            chunk_len,
-            mimo_rank,
-        ]) // neg_inf_base_bnhLMlm
-        .reshape([
-            batch,
-            nchunks,
-            nheads,
-            chunk_len * mimo_rank,
-            chunk_len * mimo_rank,
-        ]); // neg_inf_bnhLMLM
+    let neg_inf_bnhTMLM: Tensor<5> = neg_inf_base_bnhtl
+        .unsqueeze_dim::<6>(4) // neg_inf_base_bnht1l
+        .expand([batch, nchunks, nheads, chunk_tokens, mimo_rank, chunk_len]) // neg_inf_base_bnhtml
+        .reshape([batch, nchunks, nheads, read, chunk_len]) // neg_inf_base_bnhTMl
+        .unsqueeze_dim::<6>(5) // neg_inf_base_bnhTMl1
+        .expand([batch, nchunks, nheads, read, chunk_len, mimo_rank]) // neg_inf_base_bnhTMlm
+        .reshape([batch, nchunks, nheads, read, fused]); // neg_inf_bnhTMLM
 
-    let decay_bnhLMLM = (diff_da_cumsum_bnhLMLM + neg_inf_bnhLMLM).exp();
+    let decay_bnhTMLM = (diff_da_cumsum_bnhTMLM + neg_inf_bnhTMLM).exp();
 
     let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
-    let orange_bnhLMp = (cb_bnhLMLM * decay_bnhLMLM).matmul(v_bnhLMp);
+    let orange_bnhTMp = (cb_bnhTMLM * decay_bnhTMLM).matmul(v_bnhLMp);
 
     // ── Combine and reshape ────────────────────────────────────────────────────
-    let y_bnlmhp = (blue_bnhLMp + orange_bnhLMp)
-        .swap_dims(2, 3) // y_bnLMhp
-        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // y_bnlmhp
+    let y_bntmhp = (blue_bnhTMp + orange_bnhTMp)
+        .swap_dims(2, 3) // y_bnTMhp
+        .reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]); // y_bntmhp
 
-    y_bnlmhp
+    y_bntmhp
 }

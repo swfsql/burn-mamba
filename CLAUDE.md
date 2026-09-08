@@ -82,7 +82,9 @@ src/
 │  ├─ helpers.rs     shared: trapezoid masses (ν, untransported), QK-norm+GQA+bias,
 │  │                 MIMO-V build, the tap gate, split_trailing (peels the in-proj's
 │  │                 optional tails: rotation, μ, λ), prefix_sum (the blocked
-│  │                 inclusive scan every sequence-length cumsum goes through)
+│  │                 inclusive scan every sequence-length cumsum goes through),
+│  │                 and the **read axis** (read_rows / read_causal_mask, + a
+│  │                 `prim` twin on `F<B,_>` adding scatter_read_rows)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ trapezoid.rs   Trapezoid: which earlier sample(s) the β tap reads — the
@@ -108,7 +110,9 @@ src/
 │  │                 on one block axis ⇒ one scan). The abelian angle scan is
 │  │                 helpers::prefix_sum, not cumsum (§Mamba-3: rotation)
 │  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
-│  │                 folded into the sequence axis (no new kernel); u=1 is stock
+│  │                 folded into the sequence axis (no new kernel); u=1 is stock.
+│  │                 Its module doc is where the chunk's read/write axis split
+│  │                 (`u` widens the writes only) is stated
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
@@ -185,8 +189,11 @@ Carry streaming state between calls. Mamba-1/2 caches hold a conv window + SSM s
 
 The chunkwise scan is pluggable via an `…SsdPath` enum; each variant carries an
 optional chunk length (`None` ⇒ optimal ≈ `√(state_rank·per_head_dim)`, mult-of-32,
-capped 512 — Mamba-3 divides that by `mimo_rank·micro_steps` first, both being
-widenings of the chunk that do not appear in it: `info/architecture-deltas.md` §8):
+capped 512 — Mamba-3 divides that by `mimo_rank`, then rounds it to a multiple of
+`micro_steps`: the two dials widen a chunk *differently*, `m` on both its axes and
+`u` on the writes only, so `m` divides the chunk and `u` only subdivides it into
+`chunk_tokens = chunk_len/u` read rows. `nchunks` therefore grows like `u`, not
+`u²`, at u-invariant score memory: `info/architecture-deltas.md` §8):
 
 | Variant | Algorithm | Backward |
 |---------|-----------|----------|
@@ -269,11 +276,14 @@ at runtime by which **cache variant** is supplied (`Mamba3Cache`/`Mamba3Caches` 
   correction widens to a `u`-band (of the lag-`u` mass alone: a second tap's lag-1
   installment is already paid at every read the band covers) — which *is* the token at the
   only reads that survive, so it runs outside the kernel (`single_ssd/token_band.rs`): the pathways
-  then agree on everything a caller observes (output + every cache field) but not on
-  the mid-token partial sums `last_micro5` discards.
+  then agree on everything a caller observes (output + every cache field) and the
+  mid-token partial sums they would have disagreed on are no longer computed at all
+  (the read axis never asks for them).
 
 `Mamba3SsdPath` is pathway-agnostic and `From`-converts to either. The inputs differ:
-double feeds pre-scaled `v_bnlmhp`; single feeds raw `v` + `gamma_bnlh` + `scale_bnlh`.
+double feeds pre-scaled `v_bnlmhp`; single feeds raw `v` + `gamma_bnth` + `scale_bnlh`.
+Both take `C` on the read axis (`c_bntmhr`) and a `read_stride`, and return `y` at token
+resolution.
 
 ### Mamba-3: rotation (complex transition, a.k.a. "RoPE")
 
@@ -362,9 +372,15 @@ potential; momentum), in `info/rotation-as-optimization.md` — cite it, don't r
 Evaluated by folding the micro-steps into the **sequence axis** — the `u`-wide
 in-projection segments become `u` consecutive positions and the existing pipeline
 (trapezoid, rotation scan, chunked SSD, padding, caches) runs at length `sequence·u`.
-No kernel, no cache change: the state is one matrix at every `u`. The read `C` (broadcast
-so its last copy carries the right cumulative rotation), the gate `z`, the `D` skip and
-the output are per token. Cost is `u`× the recurrence plus `(u−1)·(d_inner+bc+3·nheads+
+No kernel, no cache change: the state is one matrix at every `u`. The fold is on the
+**writes only**: every micro-step writes to the state, so `x`/`B`/`Δ`/`A`/`λ` and the
+rotation ride the folded axis, while the read `C` — and the gate `z`, the `D` skip and
+the output — stay at token resolution. That is the chunk's **read axis**
+(`helpers::read_rows`, `Mamba3*SsdInput::read_stride`): a chunk is `chunk_len` writes by
+`chunk_tokens = chunk_len/u` reads, so the score, the state-to-output product and `C`'s
+own QK-norm/rotation are u-invariant instead of `u`× computed and discarded. `chunk_len`
+is a multiple of `u`, which makes a chunk's read rows a contiguous run of tokens — a
+reshape, not a gather. Cost is `u`× the recurrence plus `(u−1)·(d_inner+bc+3·nheads+
 rot)` in-proj columns (`4·nheads` under a two-tap `Trapezoid`).
 
 What `u` buys is decided by the `RotationKind`, and the split is sharp. `Real1D`: the
@@ -416,7 +432,9 @@ reimplementing them.
   equal on values + gradients by tests.
 - **MambaProduct is a sequence fold, not a kernel** — `u` micro-steps per token are `u`
   consecutive positions of the existing recurrence, so only the per-micro-step in-proj
-  segments widen and the state/caches/SSD paths are untouched. Unlike DeltaProduct every
+  segments widen and the state and caches are untouched. What the SSD kernels take from
+  it is one number, `read_stride`: the fold is on a chunk's *write* axis, its *read* axis
+  stays at token resolution (above). Unlike DeltaProduct every
   micro-step carries its own decay: Mamba has no forget gate separate from its step size
   (`α=exp(ΔA)`, and `Δ` also weights the write and paces the rotation), and pinning
   `α ≡ 1` on the interior steps would silence the rotation with it. A scalar decay

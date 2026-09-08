@@ -46,23 +46,22 @@ fn unfold_reads_micro_steps_in_order() {
     assert_eq!(vec![0., 1., 2., 3., 4., 5.], flat);
 }
 
-/// `repeat_micro_bs` puts the same per-token value at every micro-step, and
-/// `last_micro*` picks the last one back out — so the two are inverse on the
-/// positions that survive.
+/// `last_micro4` takes the position the readout is contemporaneous with — the
+/// last of every run of `u` — which is the same rule the chunk's read axis
+/// applies inside the SSD.
 #[test]
-fn repeat_then_take_last_is_identity() {
+fn last_micro_takes_the_read_position() {
     let device: Device = Default::default();
-    let t = Tensor::<1, burn::tensor::Int>::arange(0..8, &device).float().reshape([1, 4, 2]);
-    let wide = repeat_micro_bs(t.clone(), MICRO);
-    assert_eq!([1, 12, 2], wide.dims());
-    let back = last_micro4(wide.clone().reshape([1, 12, 2, 1]), MICRO);
-    assert_eq!([1, 4, 2, 1], back.dims());
-    let d = max_abs_diff(back.reshape([1, 4, 2]), t);
-    assert_eq!(0.0, d);
-    // last_micro5 picks the same positions one rank up.
-    let five = wide.reshape([1, 12, 1, 2, 1]);
-    let picked = last_micro5(five, MICRO);
-    assert_eq!([1, 4, 1, 2, 1], picked.dims());
+    let folded = Tensor::<1, burn::tensor::Int>::arange(0..12, &device)
+        .float()
+        .reshape([1, 12, 1, 1]);
+    let back = last_micro4(folded.clone(), MICRO);
+    assert_eq!([1, 4, 1, 1], back.dims());
+    let want = Tensor::<1>::from_floats([2., 5., 8., 11.], &device).reshape([1, 4, 1, 1]);
+    assert_eq!(0.0, max_abs_diff(back, want));
+    // The same positions `crate::mamba3::helpers::read_rows` slices out.
+    let rows = crate::mamba3::helpers::read_rows::<4, 5>(folded, 1, MICRO);
+    assert_eq!([1, 4, 1, 1], rows.dims());
 }
 
 // ---------------------------------------------------------------------------

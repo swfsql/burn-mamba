@@ -122,6 +122,7 @@
 /// pathway factors into B/C.
 pub mod rope;
 
+use crate::mamba3::helpers;
 use crate::mamba3::helpers::prefix_sum;
 use crate::mamba3::rotation::rope::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
@@ -926,21 +927,31 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 ///   applied to `B`/`C` as `rotate(·, conj(Qₜ))` over the first `4·blocks`
 ///   state-rank entries.
 ///
+/// `B` is rotated at every position of the folded sequence — it writes at all of
+/// them — while `C` is rotated only where it is **read**, one position per
+/// `read_stride` (`micro_steps`; `1` leaves the two axes equal). The cumulative
+/// rotation is accumulated over the whole folded axis either way; `C` just takes
+/// a stride slice of it. See
+/// [the read axis](crate::mamba3::product).
+///
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
 ///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
 ///   for Quaternion4D), `None` for Real1D, which projects none.
 /// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
-/// - `b_bsmhr` / `c_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
+/// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
+/// - `c_btmhr` : `[batch, sequence / read_stride, mimo_rank, nheads, state_rank]`.
 pub fn rotate_bc_forward(
     rot_bsa: Option<Tensor<3>>,
     dt_bsh: Tensor<3>,
     prev: RotationState,
     b_bsmhr: Tensor<5>,
-    c_bsmhr: Tensor<5>,
+    c_btmhr: Tensor<5>,
+    read_stride: usize,
     spec: RotationSpec,
 ) -> (Tensor<5>, Tensor<5>, RotationState) {
     let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
+    let tokens = c_btmhr.dims()[1];
     let RotationSpec {
         kind,
         rope_dim,
@@ -949,7 +960,7 @@ pub fn rotate_bc_forward(
     // Only `Real1D` projects no rotation channels, and it never reads them.
     let rot = |r: Option<Tensor<3>>| r.expect("a rotating kind projects rotation channels");
     match kind {
-        RotationKind::Real1D => (b_bsmhr, c_bsmhr, prev.expect_real()),
+        RotationKind::Real1D => (b_bsmhr, c_btmhr, prev.expect_real()),
         RotationKind::Complex2D => {
             let rot_bsa = rot(rot_bsa);
             let prev_angle_bha = prev.angle();
@@ -979,7 +990,12 @@ pub fn rotate_bc_forward(
                 rope_dim,
                 rotate_pairwise,
             );
-            let c = apply_rope_partial::<5>(c_bsmhr, cum_angles_bsmha, rope_dim, rotate_pairwise);
+            // `C` reads at one folded position per token, so it is rotated by
+            // that position's cumulative angle and nowhere else — `u`× less
+            // work than rotating a broadcast copy at every micro-step.
+            let cum_angles_btmha =
+                helpers::read_rows::<5, 6>(cum_angles_bsmha, 1, read_stride);
+            let c = apply_rope_partial::<5>(c_btmhr, cum_angles_btmha, rope_dim, rotate_pairwise);
             let last = wrap_angle(
                 cum_angles_bsha
                     .narrow(1, sequence - 1, 1)
@@ -1026,6 +1042,12 @@ pub fn rotate_bc_forward(
                     .unsqueeze_dim::<6>(2)
                     .expand([batch, sequence, mimo_rank, nheads, blocks, 4])
             };
+            // `C`'s copy, at the one folded position per token it reads at.
+            let over_mimo_read = |q_bshj4: Tensor<5>| {
+                helpers::read_rows::<5, 6>(q_bshj4, 1, read_stride)
+                    .unsqueeze_dim::<6>(2)
+                    .expand([batch, tokens, mimo_rank, nheads, blocks, 4])
+            };
             // B̄ = P⁻¹B: rotate by the inverse cumulative rotation, per block,
             // broadcast over the mimo_rank axis.
             let (b, c) = match kind {
@@ -1033,23 +1055,24 @@ pub fn rotate_bc_forward(
                     // P(v) = Q v T̄  ⇒  P⁻¹(v) = Q* v T (conjugate on the left
                     // factor only).
                     let (left, right) = split_rotor(cum_bshk4);
-                    let ql = over_mimo(quat_conj(left));
-                    let qr = over_mimo(right);
+                    let left = quat_conj(left);
+                    let (ql_read, qr_read) =
+                        (over_mimo_read(left.clone()), over_mimo_read(right.clone()));
+                    let (ql, qr) = (over_mimo(left), over_mimo(right));
                     (
+                        rotate_blocks_two_sided_partial::<5, 6>(b_bsmhr, ql, qr, rope_width),
                         rotate_blocks_two_sided_partial::<5, 6>(
-                            b_bsmhr,
-                            ql.clone(),
-                            qr.clone(),
-                            rope_width,
+                            c_btmhr, ql_read, qr_read, rope_width,
                         ),
-                        rotate_blocks_two_sided_partial::<5, 6>(c_bsmhr, ql, qr, rope_width),
                     )
                 }
                 _ => {
-                    let conj_bsmhj4 = over_mimo(quat_conj(cum_bshk4));
+                    let conj_bshk4 = quat_conj(cum_bshk4);
+                    let conj_btmhj4 = over_mimo_read(conj_bshk4.clone());
+                    let conj_bsmhj4 = over_mimo(conj_bshk4);
                     (
-                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4.clone(), rope_width),
-                        rotate_blocks_partial::<5, 6>(c_bsmhr, conj_bsmhj4, rope_width),
+                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4, rope_width),
+                        rotate_blocks_partial::<5, 6>(c_btmhr, conj_btmhj4, rope_width),
                     )
                 }
             };

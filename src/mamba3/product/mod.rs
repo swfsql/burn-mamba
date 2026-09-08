@@ -101,18 +101,18 @@
 //! chunking and the caches all run unchanged on a sequence of length
 //! `sequence · u`. Two placements make that exactly the recurrence above:
 //!
-//! - **The read `C` sits on the last micro-step.** It is
-//!   [`repeat_micro_bs`]-broadcast across the group so the last position sees
-//!   the correct cumulative rotation; the other positions' outputs are sliced
-//!   away by [`last_micro5`], so what they hold never matters. (Which means
-//!   `forward` computes `u`× the output it keeps: both the intra-chunk
-//!   `(L∘C̄K̄ᵀ)V` and the state-to-output product run on every folded position.
-//!   Keeping only the rows `≡ u−1 (mod u)` of `C` before those two matmuls
-//!   would recover `(u−1)/u` of the *output-side* work — the state side is
-//!   irreducible — at the cost of a strided gather. A future optimisation;
-//!   `step` does not pay it, its readout is outside the micro-step loop.)
+//! - **The read `C` sits on the last micro-step — and only there.** Every
+//!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
+//!   rotation ride the folded axis; the token is *read* once, so `C` never
+//!   leaves token resolution and neither does the `y` the SSD returns. That is
+//!   the chunk's **read axis** (`helpers::read_rows`):
+//!   `u` widens a chunk's write axis alone, which is what keeps the intra-chunk
+//!   score, the state-to-output product and `C`'s own QK-norm/rotation
+//!   `u`-invariant instead of computing `u`× the output and discarding all but
+//!   one row of it.
 //! - **`z`, the `D` skip and the output gate are per token**, the skip taking
-//!   the last micro-step's `x` — the value the readout is contemporaneous with.
+//!   the last micro-step's `x` — the value the readout is contemporaneous with
+//!   ([`last_micro4`]).
 //!
 //! Everything else is per micro-step, including the decay. Mamba has no forget
 //! gate separate from its step size — `α = exp(ΔA)` and `Δ` also weights the
@@ -187,54 +187,14 @@ pub fn unfold_micro_b(t_bW: Tensor<2>, micro_steps: usize) -> Tensor<3> {
     t_bW.reshape([batch, micro_steps, fused / micro_steps])
 }
 
-/// Broadcast a **per-token** projection across the token's micro-steps, so it
-/// can ride the folded sequence alongside the per-micro-step ones.
+/// Keep each token's **last** micro-step of the value stream — the position the
+/// readout is contemporaneous with — collapsing the folded sequence back to
+/// token resolution for the `D` skip.
 ///
-/// Used for the read `C`: only its last-micro-step copy is ever read (the
-/// others' outputs are dropped by [`last_micro5`]), but that copy has to sit at
-/// the last position to pick up the right cumulative rotation.
-///
-/// # Shapes
-/// - `t_bsw` : `[batch, sequence, width]`
-/// - out     : `[batch, sequence · u, width]`
-pub fn repeat_micro_bs(t_bsw: Tensor<3>, micro_steps: usize) -> Tensor<3> {
-    let [batch, sequence, width] = t_bsw.dims();
-    if micro_steps == 1 {
-        return t_bsw;
-    }
-    t_bsw
-        .unsqueeze_dim::<4>(2)
-        .repeat_dim(2, micro_steps)
-        .reshape([batch, sequence * micro_steps, width])
-}
-
-/// Keep each token's **last** micro-step — the position the readout happens at —
-/// collapsing the folded sequence back to token resolution.
-///
-/// # Shapes
-/// - `t_bSmhp` : `[batch, sequence · u, mimo_rank, nheads, per_head_dim]`
-/// - out       : `[batch, sequence, mimo_rank, nheads, per_head_dim]`
-#[allow(non_snake_case)]
-pub fn last_micro5(t_bSmhp: Tensor<5>, micro_steps: usize) -> Tensor<5> {
-    let [batch, folded, mimo_rank, nheads, per_head_dim] = t_bSmhp.dims();
-    if micro_steps == 1 {
-        return t_bSmhp;
-    }
-    let sequence = folded / micro_steps;
-    t_bSmhp
-        .reshape([
-            batch,
-            sequence,
-            micro_steps,
-            mimo_rank,
-            nheads,
-            per_head_dim,
-        ])
-        .narrow(2, micro_steps - 1, 1)
-        .squeeze_dim(2)
-}
-
-/// [`last_micro5`] one rank down — the value stream feeding the `D` skip.
+/// The output `y` needs no such collapse: the SSD is only ever asked for the
+/// row the readout happens at (the chunk's read axis, see
+/// `helpers::read_rows`), so it returns
+/// token resolution already.
 ///
 /// # Shapes
 /// - `t_bShp` : `[batch, sequence · u, nheads, per_head_dim]`

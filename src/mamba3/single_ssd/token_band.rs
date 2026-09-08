@@ -19,9 +19,9 @@
 //!
 //! The band would straddle chunk boundaries, and the part of it that arrived
 //! through the chunk's initial state could not be un-weighted. It does not have
-//! to: the only outputs that survive `forward` are each token's **last**
-//! micro-step ([`crate::mamba3::product::last_micro5`]), and for a read at
-//! folded position `p = τ·u + (u−1)` the band `{p−u+1 … p}` is *exactly token
+//! to: the only outputs `forward` ever asks for are each token's **last**
+//! micro-step (the chunk's [read axis](crate::mamba3::product)), and for a read
+//! at folded position `p = τ·u + (u−1)` the band `{p−u+1 … p}` is *exactly token
 //! `τ`*. So the correction is one small contraction per token, applied after the
 //! kernel at token resolution, with no mask change, no chunk-length constraint
 //! and no cross-chunk term.
@@ -31,7 +31,7 @@
 //! **everything a caller can observe** — the block's output and every field of
 //! the returned cache — and that is all `forward_single_ssd` ever promised. What
 //! is not corrected is the intermediate `y` at the `u−1` folded positions per
-//! token that [`last_micro5`](crate::mamba3::product::last_micro5) discards:
+//! token the read axis never asks for (and, since the read axis, never computes):
 //! partial sums on the way to the read, never a value the block computes. The
 //! **state** is exact at every position in both pathways, which is what the
 //! caches carry and what a split prefill continues from.
@@ -69,7 +69,9 @@ use burn::prelude::*;
 /// back to the sample that owes it (`νₛ₊ᵤ`), never the whole `scaleₛ − γₛ`.
 ///
 /// # Shapes
-/// - `b_bsmhr`, `c_bsmhr`  : `[batch, sequence, mimo_rank, nheads, state_rank]`
+/// - `b_bsmhr`             : `[batch, sequence, mimo_rank, nheads, state_rank]`
+/// - `c_btmhr`             : `[batch, tokens, mimo_rank, nheads, state_rank]` —
+///   already on the read axis, like everywhere else `C` appears
 /// - `v_bsmhp`             : `[batch, sequence, mimo_rank, nheads, per_head_dim]`
 /// - `excess_bsh`, `da_bsh`: `[batch, sequence, nheads]`
 /// - out                   : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
@@ -79,7 +81,7 @@ use burn::prelude::*;
 pub fn token_band_correction(
     v_bsmhp: Tensor<5>,
     b_bsmhr: Tensor<5>,
-    c_bsmhr: Tensor<5>,
+    c_btmhr: Tensor<5>,
     excess_bsh: Tensor<3>,
     da_bsh: Tensor<3>,
     micro_steps: usize,
@@ -91,6 +93,7 @@ pub fn token_band_correction(
     let [batch, sequence, mimo_rank, nheads, per_head_dim] = v_bsmhp.dims();
     let [.., state_rank] = b_bsmhr.dims();
     let tokens = sequence / u;
+    debug_assert_eq!(tokens, c_btmhr.dims()[1], "C is on the read axis");
     // The `u−1` tapped positions per token; the `u`-th is the read itself, whose
     // weight the kernel's γ-diagonal already fixed.
     let taps = u - 1;
@@ -119,11 +122,8 @@ pub fn token_band_correction(
         .narrow(2, 0, taps)
         .reshape([batch, tokens, fused, nheads, state_rank]);
     // The read `C` is the token's last micro-step — the copy carrying the
-    // cumulative rotation the readout happens at.
-    let c_btmhr = c_bsmhr
-        .reshape([batch, tokens, u, mimo_rank, nheads, state_rank])
-        .narrow(2, u - 1, 1)
-        .squeeze_dim::<5>(2);
+    // cumulative rotation the readout happens at, which is the only one it is
+    // ever built at.
 
     // ── (C · Bᵀ) · V, contracting state_rank then the fused axis ──────────────
     let c_bthmr = c_btmhr.swap_dims(2, 3);

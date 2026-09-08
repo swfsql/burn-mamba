@@ -19,6 +19,7 @@
 use crate::mamba3::double_ssd::ssd::serial_recalculated::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
+use crate::mamba3::helpers::prim::{read_causal_mask, read_rows};
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
 use burn_stack::utils::fprim::{F, san};
@@ -36,7 +37,7 @@ impl Mamba3SingleSsdInput {
     /// wrapper) and falls back to the standard K1–K5 forward on others.
     ///
     /// # Returns
-    /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn single_ssd_serial_recalculated(self) -> (Tensor<6>, Tensor<4>) {
         let input = self;
@@ -46,20 +47,21 @@ impl Mamba3SingleSsdInput {
             "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
-        let (y_bnlmhp, final_state_bhpr) =
+        let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
                 input.da_bnlh.into_dispatch(),
                 input.b_bnlmhr.into_dispatch(),
-                input.c_bnlmhr.into_dispatch(),
-                input.gamma_bnlh.into_dispatch(),
+                input.c_bntmhr.into_dispatch(),
+                input.gamma_bnth.into_dispatch(),
                 input.scale_bnlh.into_dispatch(),
                 input.initial_state_bhpr.into_dispatch(),
+                input.read_stride,
                 input.siso_specialization,
             );
-        let y_bnlmhp = Tensor::from_dispatch(y_bnlmhp);
+        let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
-        (y_bnlmhp, final_state_bhpr)
+        (y_bntmhp, final_state_bhpr)
     }
 }
 
@@ -90,34 +92,38 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `v_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
     /// - `da_bnlh`:            `[batch, nchunks, chunk_len, nheads]` — pre-combined Δ·A
     /// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    /// - `c_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
-    /// - `gamma_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `γₜ = λₜ Δₜ`
+    /// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
+    /// - `gamma_bnth`:         `[batch, nchunks, chunk_tokens, nheads]` — `γₜ = λₜ Δₜ`
     /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ = γₜ + (1−λₜ₊₁)Δₜ₊₁`
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+    /// - `read_stride`:        `micro_steps` — folded positions per read row, so
+    ///   `chunk_tokens = chunk_len / read_stride` (see
+    ///   [`Mamba3SingleSsdInput::read_stride`])
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
     ///   γ-correction (performance-only; see
     ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
     ///
     /// # Returns
-    /// - `y_bnlmhp`:         `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(clippy::too_many_arguments)]
     fn single_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
         b_bnlmhr: FloatTensor<Self>,
-        c_bnlmhr: FloatTensor<Self>,
-        gamma_bnlh: FloatTensor<Self>,
+        c_bntmhr: FloatTensor<Self>,
+        gamma_bnth: FloatTensor<Self>,
         scale_bnlh: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
+        read_stride: usize,
         siso_specialization: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate the single-ssd form K1–K5 on primitives.
         let v_bnlmhp = F::<Self, 6>::new(v_bnlmhp);
         let da_bnlh = F::<Self, 4>::new(da_bnlh);
         let b_bnlmhr = F::<Self, 6>::new(b_bnlmhr);
-        let c_bnlmhr = F::<Self, 6>::new(c_bnlmhr);
-        let gamma_bnlh = F::<Self, 4>::new(gamma_bnlh);
+        let c_bntmhr = F::<Self, 6>::new(c_bntmhr);
+        let gamma_bnth = F::<Self, 4>::new(gamma_bnth);
         let scale_bnlh = F::<Self, 4>::new(scale_bnlh);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
 
@@ -126,8 +132,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         san(&da_cumsum_bhnl);
 
         // K2 — CB matrix on unscaled B/C.
-        let cb_bnhLMLM = k2_ssd_bmm::<Self>(c_bnlmhr.clone(), b_bnlmhr.clone());
-        san(&cb_bnhLMLM);
+        let cb_bnhTMLM = k2_ssd_bmm::<Self>(c_bntmhr.clone(), b_bnlmhr.clone());
+        san(&cb_bnhTMLM);
 
         // K3 — chunk state on K_scaled = scaleₜ · B.
         let scale_bnlh11 = scale_bnlh.clone().unsqueeze_dims::<6>(&[3, 5]);
@@ -146,20 +152,21 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         san(&final_state_bhpr);
 
         // K5 — single-ssd form chunk scan.
-        let y_bnlmhp = k5_single_ssd_chunk_scan::<Self>(
+        let y_bntmhp = k5_single_ssd_chunk_scan::<Self>(
             da_cumsum_bhnl,
             v_bnlmhp,
-            c_bnlmhr,
+            c_bntmhr,
             b_bnlmhr,
-            cb_bnhLMLM,
-            gamma_bnlh,
+            cb_bnhTMLM,
+            gamma_bnth,
             scale_bnlh,
             chunk_input_state_bnhpr,
+            read_stride,
             siso_specialization,
         );
-        san(&y_bnlmhp);
+        san(&y_bntmhp);
 
-        (y_bnlmhp.inner(), final_state_bhpr.inner())
+        (y_bntmhp.inner(), final_state_bhpr.inner())
     }
 }
 
@@ -186,77 +193,85 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 ///   `γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]`
 /// - **State-to-output (Y_off)**: `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
-/// `cb_bnhLMLM` is the unscaled `C · Bᵀ` from K2; `b_bnlmhr` is the unscaled
-/// K/B tensor (γ-correction matmul).
+/// `cb_bnhTMLM` is the unscaled `C · Bᵀ` from K2; `b_bnlmhr` is the unscaled
+/// K/B tensor (γ-correction matmul). `T = chunk_tokens = chunk_len /
+/// read_stride` is the chunk's read axis.
 #[allow(clippy::too_many_arguments)]
 fn k5_single_ssd_chunk_scan<B: Backend>(
     da_cumsum_bhnl: F<B, 4>,
     v_bnlmhp: F<B, 6>,
-    c_bnlmhr: F<B, 6>,
+    c_bntmhr: F<B, 6>,
     b_bnlmhr: F<B, 6>,
-    cb_bnhLMLM: F<B, 5>,
-    gamma_bnlh: F<B, 4>,
+    cb_bnhTMLM: F<B, 5>,
+    gamma_bnth: F<B, 4>,
     scale_bnlh: F<B, 4>,
     chunk_input_state_bnhpr: F<B, 5>,
+    read_stride: usize,
     siso_specialization: bool,
 ) -> F<B, 6> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
-    let [.., state_rank] = c_bnlmhr.dims();
+    let [.., chunk_tokens, _, _, state_rank] = c_bntmhr.dims();
     let device = v_bnlmhp.device();
     let dtype = v_bnlmhp.dtype();
-    let fused = chunk_len * mimo_rank;
+    let fused = chunk_len * mimo_rank; // write (source) axis
+    let read = chunk_tokens * mimo_rank; // read (target) axis
 
-    // Fuse mimo_rank into chunk_len for the SSM-style matmul.
+    // Fuse mimo_rank into the chunk axes for the SSM-style matmuls.
     let v_bnLMhp = v_bnlmhp
         .clone()
         .reshape([batch, nchunks, fused, nheads, per_head_dim]);
-    let c_bnLMhr = c_bnlmhr
+    let c_bnTMhr = c_bntmhr
         .clone()
-        .reshape([batch, nchunks, fused, nheads, state_rank]);
+        .reshape([batch, nchunks, read, nheads, state_rank]);
 
-    // Per-fused-step cumulative decay (interleave-expand the base grid).
+    // Per-fused-step cumulative decay (interleave-expand the base grid), on the
+    // source axis and — sliced to the readout's own positions — on the target.
     let da_cumsum_bhnLM = da_cumsum_bhnl
+        .clone()
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
         .reshape([batch, nheads, nchunks, fused]);
+    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
+        .unsqueeze_dim::<5>(4)
+        .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
+        .reshape([batch, nheads, nchunks, read]);
 
     // ── Y_off: exp(cumA[t]) · C[t] · h'[n-1] ────────────────────────────────
-    let exp_da_bnhLMp = da_cumsum_bhnLM
+    let exp_da_bnhTMp = da_cumsum_bhnTM
         .clone()
         .exp()
-        .swap_dims(1, 2) // bnhLM
-        .unsqueeze_dim::<5>(4) // bnhLM1
-        .expand([batch, nchunks, nheads, fused, per_head_dim]);
-    let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+        .swap_dims(1, 2) // bnhTM
+        .unsqueeze_dim::<5>(4) // bnhTM1
+        .expand([batch, nchunks, nheads, read, per_head_dim]);
+    let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
     let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
-    let ch_bnhLMp = c_bnhLMr.matmul(chunk_input_state_bnhrp);
-    let y_off_bnhLMp = ch_bnhLMp * exp_da_bnhLMp;
+    let ch_bnhTMp = c_bnhTMr.matmul(chunk_input_state_bnhrp);
+    let y_off_bnhTMp = ch_bnhTMp * exp_da_bnhTMp;
 
     // ── Y_lower: strict lower-tri intra-chunk with scale and decay ──────────
-    let da_cumsum_bnhLM = da_cumsum_bhnLM.swap_dims(1, 2); // bnhLM
-    let target_da_cumsum_bnhLMLM = da_cumsum_bnhLM
-        .clone()
-        .unsqueeze_dim::<5>(4) // bnhLM1
-        .expand([batch, nchunks, nheads, fused, fused]);
-    let source_da_cumsum_bnhLMLM = da_cumsum_bnhLM
+    let target_da_cumsum_bnhTMLM = da_cumsum_bhnTM
+        .swap_dims(1, 2) // bnhTM
+        .unsqueeze_dim::<5>(4) // bnhTM1
+        .expand([batch, nchunks, nheads, read, fused]);
+    let source_da_cumsum_bnhTMLM = da_cumsum_bhnLM
+        .swap_dims(1, 2) // bnhLM
         .unsqueeze_dim::<5>(3) // bnh1LM
-        .expand([batch, nchunks, nheads, fused, fused]);
-    let diff_bnhLMLM = target_da_cumsum_bnhLMLM - source_da_cumsum_bnhLMLM;
+        .expand([batch, nchunks, nheads, read, fused]);
+    let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
-    // Strict-upper -inf mask on the base time grid (`t1 <= t2` → -inf), then
-    // interleave-expand to fused length so MIMO same-time blocks are zeroed.
-    let inf_upper_bnhLMLM =
-        F::<B, 2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, &device, dtype)
-            .triu(0) // upper triangle INCLUDING diagonal
-            .unsqueeze_dims::<5>(&[0, 1, 2])
-            .expand([batch, nchunks, nheads, chunk_len, chunk_len])
-            .unsqueeze_dim::<6>(4)
-            .expand([batch, nchunks, nheads, chunk_len, mimo_rank, chunk_len])
-            .reshape([batch, nchunks, nheads, fused, chunk_len])
-            .unsqueeze_dim::<6>(5)
-            .expand([batch, nchunks, nheads, fused, chunk_len, mimo_rank])
-            .reshape([batch, nchunks, nheads, fused, fused]);
-    let decay_strict_bnhLMLM = (diff_bnhLMLM + inf_upper_bnhLMLM).exp();
+    // Strict-upper -inf mask over (read row, folded source) on the base time
+    // grid, then interleave-expand both axes so MIMO same-time blocks are
+    // zeroed.
+    let inf_upper_bnhTMLM = read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype)
+        .unsqueeze_dims::<5>(&[0, 1, 2])
+        .expand([batch, nchunks, nheads, chunk_tokens, chunk_len])
+        .unsqueeze_dim::<6>(4)
+        .expand([batch, nchunks, nheads, chunk_tokens, mimo_rank, chunk_len])
+        .reshape([batch, nchunks, nheads, read, chunk_len])
+        .unsqueeze_dim::<6>(5)
+        .expand([batch, nchunks, nheads, read, chunk_len, mimo_rank])
+        .reshape([batch, nchunks, nheads, read, fused]);
+    let decay_strict_bnhTMLM = (diff_bnhTMLM + inf_upper_bnhTMLM).exp();
 
     // Per-column scale: `scale[t2]` lives on the source axis (column).
     let scale_bnhLM = scale_bnlh
@@ -264,28 +279,28 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .unsqueeze_dim::<5>(4) // bnhl1
         .expand([batch, nchunks, nheads, chunk_len, mimo_rank])
         .reshape([batch, nchunks, nheads, fused]);
-    let scale_col_bnhLMLM = scale_bnhLM
+    let scale_col_bnhTMLM = scale_bnhLM
         .unsqueeze_dim::<5>(3) // bnh1LM
-        .expand([batch, nchunks, nheads, fused, fused]);
+        .expand([batch, nchunks, nheads, read, fused]);
 
-    let kernel_bnhLMLM = decay_strict_bnhLMLM * scale_col_bnhLMLM;
-    let masked_cb_bnhLMLM = cb_bnhLMLM * kernel_bnhLMLM;
+    let kernel_bnhTMLM = decay_strict_bnhTMLM * scale_col_bnhTMLM;
+    let masked_cb_bnhTMLM = cb_bnhTMLM * kernel_bnhTMLM;
     let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
-    let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
+    let y_lower_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-    // ── Y_diag: γ-weighted same-step correction ─────────────────────────────
-    let y_diag_bnlmhp = y_diag_correction::<B>(
-        v_bnlmhp,
-        b_bnlmhr,
-        c_bnlmhr,
-        gamma_bnlh,
+    // ── Y_diag: γ-weighted same-step correction, at the read rows ───────────
+    let y_diag_bntmhp = y_diag_correction::<B>(
+        read_rows::<B, 6, 7>(v_bnlmhp, 2, read_stride),
+        read_rows::<B, 6, 7>(b_bnlmhr, 2, read_stride),
+        c_bntmhr,
+        gamma_bnth,
         siso_specialization,
     );
-    let y_diag_bnLMhp = y_diag_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
-    let y_diag_bnhLMp = y_diag_bnLMhp.swap_dims(2, 3);
+    let y_diag_bnTMhp = y_diag_bntmhp.reshape([batch, nchunks, read, nheads, per_head_dim]);
+    let y_diag_bnhTMp = y_diag_bnTMhp.swap_dims(2, 3);
 
     // ── Combine and reshape ─────────────────────────────────────────────────
-    let y_bnhLMp = y_off_bnhLMp + y_lower_bnhLMp + y_diag_bnhLMp;
-    let y_bnLMhp = y_bnhLMp.swap_dims(2, 3);
-    y_bnLMhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim])
+    let y_bnhTMp = y_off_bnhTMp + y_lower_bnhTMp + y_diag_bnhTMp;
+    let y_bnTMhp = y_bnhTMp.swap_dims(2, 3);
+    y_bnTMhp.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim])
 }

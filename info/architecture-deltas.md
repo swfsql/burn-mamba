@@ -63,9 +63,9 @@ channel) bias to each of them, and makes `A` data-dependent. Four results:
 
 §7 gives the mechanism behind the output-norm placement table the source calls
 "unintuitive". §8 is the one section that changed the library rather than
-describing it: the default chunk length now divides the square-root rule by
-`mimo_rank · micro_steps`, the first half being the source's own advice and the
-second a memory argument this crate needs and the source does not.
+describing it: the default chunk length divides the square-root rule by
+`mimo_rank` — the source's own advice — and then only *subdivides* it by
+`micro_steps`, the two dials widening a chunk along different axes.
 
 ---
 
@@ -79,7 +79,7 @@ second a memory argument this crate needs and the source does not.
 | 5 | The short convolution and its two replacements; both are strictly positive filters. |
 | 6 | Data-dependent `A` unties decay from write weight, up to the floor cap. |
 | 7 | What each output-norm placement erases. |
-| 8 | The chunk-length schedule: why `mimo_rank` divides it (FLOPs) and why `micro_steps` does too (memory). |
+| 8 | The chunk-length schedule: why `mimo_rank` divides it (FLOPs) and why `micro_steps` only subdivides it (a chunk's read axis). |
 | 9 | Consequences for this crate. |
 
 §§3–7 propose no behavioural change: they document, and give the reasons behind
@@ -347,27 +347,41 @@ the `chunk_size` argument ("64 for SISO, 64/mimo_rank for MIMO"). At `N = P = 64
 
 This crate fuses the rank onto the chunk axis (`[L·M, L·M]` intra-chunk matrices in
 `single_ssd/ssd/serial.rs`), so the same arithmetic applies verbatim, and
-`Mamba3SsdPath::optimal_chunk_len` implements it: `√(N·P)` divided by
-`mimo_rank · micro_steps`, then rounded onto the 32 grid and clamped to `32..=512`.
-At `N = 128`, `P = 64` that is `96 / 64 / 32` for a fold of `1 / 2 / ≥3` (§8.5), so
-the fused axis `C·M` lands at 128 for `M = 4` where the unscaled chunk would put it
-at 384 (§8.6). A SISO, `u = 1` block is unaffected: the divisor is 1 and the value
-is what it always was.
+`Mamba3SsdPath::optimal_chunk_len` implements it: `√(N·P)` divided by `mimo_rank`,
+then rounded onto the 32 grid and clamped to `32..=512`. At `N = 128`, `P = 64` that
+is `96 / 64 / 32` for a rank of `1 / 2 / ≥4` (§8.5), so the fused axis `C·M` lands at
+128 for `M = 4` where the unscaled chunk would put it at 384 (§8.6). A SISO block is
+unaffected: the divisor is 1 and the value is what it always was.
 
-**`micro_steps` divides it too, for a different reason.** Micro-steps fold into the
-sequence axis, so a chunk of `C` positions holds `C/u` tokens — and the FLOP count
-is *indifferent* to that, since `u` multiplies the intra- and inter-chunk terms
-alike and cancels out of the balance. What does not cancel is memory. The
-materialised score is `[batch, nchunks, heads, L·M, L·M]`, i.e.
-`batch · sequence · heads · C · M² · u` elements: linear in the chunk, in `u`, and
-quadratic in the rank. Dividing the chunk divides that memory by the same factor,
-which is the constraint that binds in a crate with no fused kernel to hide it.
+**`micro_steps` is the other widening, and it is not the same one.** Micro-steps fold
+into the sequence axis, but they fold only the *writes*: each of a token's `u`
+micro-steps writes to the state, while the token is **read** once, at its last one.
+A chunk therefore has two axes — `C` writes by `C/u` reads — and its score is
+`[batch, nchunks, heads, (C/u)·M, C·M]`, i.e. `batch · sequence · heads · C · M²`
+elements with no `u` in it at all (§8.7). The rank appears on *both* axes and so
+divides the chunk; `u` appears on one and so only subdivides it. Hence the second
+half of the schedule: round the width up to a multiple of `u`, which makes a chunk a
+whole number of tokens — and makes its read rows a contiguous run of them, a reshape
+rather than a gather.
 
-The 32 grid caps how far this goes. The saving is exactly `96 / C`, so it saturates
-at `3×` once the floor is reached: the score memory of a `u = 8` model is `2.67×`
-its `u = 1` value instead of `8×` (§8.7, §8.8). The schedule flattens the slope; it
-does not remove it, and a model that wants more can pass an explicit chunk length
-(`Mamba3SsdPath::SerialRecalculated(Some(n))`), which always wins over the schedule.
+The alternative is to divide by `u` as well, on the reading that a chunk of `C`
+positions holds `C/u` tokens. It is worse on both counts. FLOPs are indifferent to
+it either way (`u` multiplies the intra- and inter-chunk terms alike and cancels out
+of the balance), but a chunk shrinking as `1/u` over a sequence growing as `u` puts
+`nchunks` at `u²` — twice the serial scan the current schedule runs, and both
+pathways' backwards walk it chunk by chunk. And it does not even buy the memory it
+is spent on: the 32 grid floors the division, so past a fold of 3 the chunk stops
+shrinking and the score grows with `u` regardless — `2.67×` at `u = 8` where holding
+the width fixed is exactly `1×` (§8.8).
+
+What remains linear in `u` is the write side, and irreducibly so: the state
+recurrence really does take `u` steps per token. The read side — the score, the
+state-to-output product, and `C`'s own QK-norm and rotation — is `u`-invariant in
+both FLOPs and memory, because it is only ever evaluated where the readout happens
+(`helpers::read_rows`; the kernels take the stride as `Mamba3*SsdInput::read_stride`).
+A model that wants a different trade can pass an explicit chunk length
+(`Mamba3SsdPath::SerialRecalculated(Some(n))`), which wins over the schedule and is
+rounded up to a whole number of tokens.
 
 Two caveats on the whole exercise. `optimal_chunk_len` is a rule of thumb about
 matmul shapes on real backends, not a FLOP-minimiser — which is why the 32 grid and
@@ -411,13 +425,14 @@ in `Mamba3Config::init`. Mamba-2's own norm (`is_norm_before_gate = false`, over
 that table across the two families. Whether Mamba-3 should expose the other two is
 an open question the source explicitly leaves open; nothing here argues for it.
 
-### 9.4 The chunk schedule divides by `mimo_rank · micro_steps`
+### 9.4 The chunk schedule divides by `mimo_rank`, and only subdivides by `micro_steps`
 
-§8. `Mamba3SsdPath::optimal_chunk_len` takes both dials and divides the square-root
-rule by their product before rounding onto the 32 grid. The rank half is the
-source's own advice (its kernels carry it as a comment on `chunk_size`); the
-`micro_steps` half is this crate's, and is a memory argument rather than a FLOP one
-(§8). The default path for a SISO, `u = 1` block is byte for byte what it was.
+§8. `Mamba3SsdPath::optimal_chunk_len` divides the square-root rule by the rank,
+rounds onto the 32 grid, and then rounds *up* to a whole number of tokens. The rank
+half is the source's own advice (its kernels carry it as a comment on `chunk_size`);
+treating `micro_steps` as a different widening is this crate's, and follows from the
+chunk having a read axis the rank widens and `u` does not (§8). The default path for
+a SISO, `u = 1` block is byte for byte what it was.
 
 This is the one place where the note changed behaviour rather than describing it,
 and it is a heuristic changing a heuristic: exact values, unchanged; cost, moved.

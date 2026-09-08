@@ -1,9 +1,10 @@
 //! The chunk-length schedule. Pure arithmetic — no tensors, no backend.
 //!
 //! What is being pinned is that the two dials which widen a chunk without
-//! appearing in it (`mimo_rank` fuses onto the chunk axis, `micro_steps` folds
-//! into the sequence axis) divide it back out, and that the 32 grid survives the
-//! division. See [`Mamba3SsdPath::optimal_chunk_len`] and
+//! appearing in it are treated as the *different* widenings they are:
+//! `mimo_rank` fuses onto both of a chunk's axes and so divides it out, while
+//! `micro_steps` widens only the write axis and so subdivides a chunk of
+//! unchanged folded width. See [`Mamba3SsdPath::optimal_chunk_len`] and
 //! `info/architecture-deltas.md` §8.
 
 use super::*;
@@ -30,20 +31,45 @@ fn mimo_rank_divides_the_chunk() {
     assert_eq!(opt(8), 32);
 }
 
-/// `micro_steps` folds into the sequence axis and divides it the same way.
+/// `micro_steps` subdivides the chunk instead of shortening it: the folded
+/// width stays put (to within one token) and the token count carries the `u`.
 #[test]
-fn micro_steps_divides_the_chunk_the_same_way() {
-    for (m, u) in [(1, 2), (2, 1), (1, 4), (4, 1), (2, 2), (1, 8), (8, 1)] {
+fn micro_steps_subdivides_the_chunk() {
+    let base = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, 1);
+    assert_eq!(base, 96);
+    for u in [1, 2, 3, 4, 5, 8, 16] {
+        let folded = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, u);
+        assert!(
+            (base..base + u).contains(&folded),
+            "u = {u} moved the folded chunk off {base} to {folded}",
+        );
         assert_eq!(
-            Mamba3SsdPath::optimal_chunk_len(128, 64, m, u),
-            Mamba3SsdPath::optimal_chunk_len(128, 64, 1, m * u),
-            "only the product m·u is supposed to matter (m = {m}, u = {u})",
+            Mamba3SsdPath::chunk_tokens(folded, u),
+            base.div_ceil(u),
+            "u = {u} should divide the *token* count, not the folded width",
         );
     }
 }
 
-/// Every value the schedule can produce is a usable chunk: on the 32 grid,
-/// never zero, never above the ceiling — for any dial combination.
+/// `mimo_rank` and `micro_steps` are not interchangeable: `m` divides the fused
+/// read axis, `u` only splits a chunk into more tokens' worth of writes.
+#[test]
+fn the_two_dials_are_not_the_same_widening() {
+    // Score elements per token, up to the shared `batch · sequence · heads`:
+    // `chunk_tokens · micro_steps · mimo_rank²` = `chunk_len · m²`.
+    let score = |m: usize, u: usize| Mamba3SsdPath::optimal_chunk_len(128, 64, m, u) * m * m;
+    let siso = score(1, 1);
+    for u in [1, 2, 4, 8] {
+        assert!(
+            score(1, u) <= siso + u,
+            "micro_steps should leave the score flat, not grow it",
+        );
+    }
+    assert!(score(2, 1) > siso / 2, "mimo_rank costs `m`, not nothing");
+}
+
+/// Every value the schedule can produce is a usable chunk: a whole number of
+/// tokens, never zero, never far above the ceiling — for any dial combination.
 #[test]
 fn the_schedule_stays_on_the_grid() {
     for state_rank in [1, 4, 16, 64, 128, 256, 4096] {
@@ -56,8 +82,14 @@ fn the_schedule_stays_on_the_grid() {
                         mimo_rank,
                         micro_steps,
                     );
-                    assert_eq!(n % 32, 0, "{n} is off the 32 grid");
-                    assert!((32..=512).contains(&n), "{n} is outside 32..=512");
+                    assert_eq!(n % micro_steps, 0, "{n} is not a whole number of tokens");
+                    assert!(Mamba3SsdPath::chunk_tokens(n, micro_steps) >= 1);
+                    // The rounding to a multiple of `u` can overshoot the ceiling
+                    // by less than one token, and only there.
+                    assert!((32..512 + micro_steps).contains(&n), "{n} is out of range");
+                    if micro_steps == 1 {
+                        assert_eq!(n % 32, 0, "{n} is off the 32 grid at u = 1");
+                    }
                 }
             }
         }

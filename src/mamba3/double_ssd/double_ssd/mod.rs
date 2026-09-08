@@ -121,10 +121,11 @@ impl Mamba3 {
             2,
         );
 
-        use crate::mamba3::product::{repeat_micro_bs, unfold_micro_bs};
+        use crate::mamba3::product::unfold_micro_bs;
         let x_bsi = unfold_micro_bs(x_btI, u);
         let b_raw_bsMGR = unfold_micro_bs(b_raw_btMGRU, u);
-        let c_raw_bsMGR = repeat_micro_bs(c_raw_btMGR, u);
+        // `C` stays at token resolution: the readout happens once per token, at
+        // its last micro-step. See [`Mamba3DoubleSsdInput::c_bntmhr`].
         let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
         let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
         let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
@@ -173,8 +174,8 @@ impl Mamba3 {
             3,
             nheads,
         );
-        let c_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
-            c_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
+        let c_btmhr = helpers::qk_norm_expand_bias::<5, 6>(
+            c_raw_btMGR.reshape([batch, tokens, mimo_rank, ngroups, state_rank]),
             &self.c_norm,
             self.c_bias_hmr.val(),
             3,
@@ -185,24 +186,27 @@ impl Mamba3 {
             b_bsmhr.dims()
         );
         assert_eq!(
-            [batch, sequence, mimo_rank, nheads, state_rank],
-            c_bsmhr.dims()
+            [batch, tokens, mimo_rank, nheads, state_rank],
+            c_btmhr.dims()
         );
 
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
         // unit quaternion. The new cache accumulator is returned for Step (cache
         // update) below. See [`rotate_bc_forward`].
-        let (b_bsmhr, c_bsmhr, new_rotation) = rotate_bc_forward(
+        // `C` is rotated at token resolution too: it needs the cumulative
+        // rotation of the micro-step it is read at.
+        let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh.clone(),
             cache.rotation.clone(),
             b_bsmhr,
-            c_bsmhr,
+            c_btmhr,
+            u,
             self.rotation_spec(),
         );
         san(&b_bsmhr);
-        san(&c_bsmhr);
+        san(&c_btmhr);
 
         // ── Steps 6–7: the β term's shifted, β-scaled inputs ──────────────────
         //
@@ -303,10 +307,27 @@ impl Mamba3 {
             None => t,
         };
 
+        // `C` rides the chunk's read axis, so it pads by whole tokens.
+        // `chunk_len` is a multiple of `u`, hence so is `pad`.
+        let tokens_padded = sequence_padded / u;
+        let pad_tmhr = |t: Tensor<5>| match pad {
+            0 => t,
+            _ => Tensor::cat(
+                vec![
+                    t,
+                    Tensor::zeros(
+                        [batch, tokens_padded - tokens, mimo_rank, nheads, state_rank],
+                        &device,
+                    ),
+                ],
+                1,
+            ),
+        };
+
         let x_gamma_bShp = pad_hp(x_gamma_bshp);
         let da_bSh = pad_h(da_bsh);
         let b_bSmhr = pad_mhr(b_bsmhr);
-        let c_bSmhr = pad_mhr(c_bsmhr);
+        let c_bTmhr = pad_tmhr(c_btmhr);
         let beta_sides: Vec<_> = beta_sides
             .into_iter()
             .map(|(x_beta, b_prev)| (pad_hp(x_beta), pad_mhr(b_prev)))
@@ -314,10 +335,12 @@ impl Mamba3 {
 
         // ── Reshape into chunks ───────────────────────────────────────────────
         let nchunks = sequence_padded / chunk_len;
+        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
         let x_gamma_bnlhp = x_gamma_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
         let da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
         let b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
-        let c_bnlmhr = c_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
+        let c_bntmhr =
+            c_bTmhr.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]);
 
         // ── Step 9: the MIMO-SSD call(s) ─────────────────────────────────────────
         // Build V tensors — insert the mimo_rank axis at position 3 of `_bnlhp`.
@@ -332,15 +355,16 @@ impl Mamba3 {
             v_bnlmhp: v_gamma_bnlmhp,
             da_bnlh: da_bnlh.clone(),
             b_bnlmhr: b_bnlmhr.clone(),
-            c_bnlmhr: c_bnlmhr.clone(),
+            c_bntmhr: c_bntmhr.clone(),
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
+            read_stride: u,
         };
-        let (y_bnlmhp, final_state_bhpr) = input_gamma.run(ssd_path);
+        let (y_bntmhp, final_state_bhpr) = input_gamma.run(ssd_path);
 
-        let (y_bnlmhp, final_state_bhpr) = beta_sides.into_iter().fold(
-            (y_bnlmhp, final_state_bhpr),
-            |(y_bnlmhp, final_state_bhpr), (x_beta_bShp, b_prev_bSmhr)| {
+        let (y_bntmhp, final_state_bhpr) = beta_sides.into_iter().fold(
+            (y_bntmhp, final_state_bhpr),
+            |(y_bntmhp, final_state_bhpr), (x_beta_bShp, b_prev_bSmhr)| {
                 let x_beta_bnlhp =
                     x_beta_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
                 let b_prev_bnlmhr =
@@ -351,40 +375,37 @@ impl Mamba3 {
                     v_bnlmhp: v_beta_bnlmhp,
                     da_bnlh: da_bnlh.clone(),
                     b_bnlmhr: b_prev_bnlmhr,
-                    c_bnlmhr: c_bnlmhr.clone(),
+                    c_bntmhr: c_bntmhr.clone(),
                     initial_state_bhpr: Tensor::zeros(
                         [batch, nheads, per_head_dim, state_rank],
                         &device,
                     ),
                     init_state_hpr: None,
+                    read_stride: u,
                 };
-                let (y_beta_bnlmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
+                let (y_beta_bntmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
                 (
-                    y_bnlmhp + y_beta_bnlmhp,
+                    y_bntmhp + y_beta_bntmhp,
                     final_state_bhpr + final_state_beta_bhpr,
                 )
             },
         );
 
-        san(&y_bnlmhp);
+        san(&y_bntmhp);
         san(&final_state_bhpr);
 
         cache.ssm_bhpr = final_state_bhpr;
 
         // ── Step 10: Unpad ────────────────────────────────────────────────────
-        let y_bSmhp = y_bnlmhp.reshape([batch, sequence_padded, mimo_rank, nheads, per_head_dim]);
-        let y_bsmhp = if pad == 0 {
-            y_bSmhp
+        // The SSD returns token resolution: the readout happens after all `u`
+        // writes, and the kernel only ever computed the row it happens at. From
+        // this point `t` (`tokens`) is the sequence axis again.
+        let y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
+        let y_btmhp = if pad == 0 {
+            y_bTmhp
         } else {
-            y_bSmhp.narrow(1, 0, sequence)
+            y_bTmhp.narrow(1, 0, tokens)
         };
-
-        // ── Step 10b: back to token resolution (MambaProduct) ─────────────────
-        // The readout happens after all `u` writes, so only each token's last
-        // micro-step survives; the intervening positions computed a `y` from a
-        // repeated `C` and it is dropped here. From this point `t` (`tokens`)
-        // is the sequence axis again.
-        let y_btmhp = crate::mamba3::product::last_micro5(y_bsmhp, micro_steps);
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
 
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────

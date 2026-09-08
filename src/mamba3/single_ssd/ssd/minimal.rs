@@ -54,6 +54,8 @@
 //! - SISO: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
 //! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
+use crate::mamba3::helpers;
+use crate::mamba3::prelude::Mamba3SsdPath;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
 use burn_stack::modules::segsum;
@@ -66,9 +68,12 @@ impl Mamba3SingleSsdInput {
     /// and the final single-ssd accumulator.
     ///
     /// # Shapes
+    /// `T = chunk_tokens = chunk_len / read_stride` is the chunk's read axis
+    /// (see [`Mamba3SingleSsdInput::c_bntmhr`]); at `read_stride = 1` it is
+    /// `chunk_len` and every shape here is the stock one.
     /// - input: see [`Mamba3SingleSsdInput`]
-    /// - output `(y_bnlmhp, final_state_bhpr)`:
-    ///   - `y_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+    /// - output `(y_bntmhp, final_state_bhpr)`:
+    ///   - `y_bntmhp`:           `[batch, nchunks, T, mimo_rank, nheads, per_head_dim]`
     ///   - `final_state_bhpr`:   `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
     pub fn single_ssd_minimal(self) -> (Tensor<6>, Tensor<4>) {
@@ -77,13 +82,17 @@ impl Mamba3SingleSsdInput {
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
         let device = &input.v_bnlmhp.device();
+        let read_stride = input.read_stride;
+        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+        let fused = chunk_len * mimo_rank; // write (source) axis
+        let read = chunk_tokens * mimo_rank; // read (target) axis
 
         assert!(nchunks >= 1, "sequence must be non-empty");
         assert!(chunk_len > 0, "chunk_len must be positive");
         assert_eq!(
-            [batch, nchunks, chunk_len, nheads],
-            input.gamma_bnlh.dims(),
-            "gamma must align with da"
+            [batch, nchunks, chunk_tokens, nheads],
+            input.gamma_bnth.dims(),
+            "gamma must align with the read axis"
         );
         assert_eq!(
             [batch, nchunks, chunk_len, nheads],
@@ -91,21 +100,17 @@ impl Mamba3SingleSsdInput {
             "scale must align with da"
         );
 
-        // ── Fuse mimo_rank into chunk_len (matches `ssd_minimal`) ─────────────
-        let c_bnLMhr = input.c_bnlmhr.clone().reshape([
-            batch,
-            nchunks,
-            chunk_len * mimo_rank,
-            nheads,
-            state_rank,
-        ]);
-        let v_bnLMhp = input.v_bnlmhp.clone().reshape([
-            batch,
-            nchunks,
-            chunk_len * mimo_rank,
-            nheads,
-            per_head_dim,
-        ]);
+        // ── Fuse mimo_rank into the chunk axes (matches `ssd_minimal`) ────────
+        let c_bnTMhr =
+            input
+                .c_bntmhr
+                .clone()
+                .reshape([batch, nchunks, read, nheads, state_rank]);
+        let v_bnLMhp =
+            input
+                .v_bnlmhp
+                .clone()
+                .reshape([batch, nchunks, fused, nheads, per_head_dim]);
 
         // Per-time-step cumulative log-decay (used for L_strict, decay_states, y_off)
         let a_bhnl = input.da_bnlh.permute([0, 3, 1, 2]);
@@ -121,7 +126,7 @@ impl Mamba3SingleSsdInput {
             ;
         let k_scaled_bnlmhr = input.b_bnlmhr.clone() * scale_bnlh11;
         let k_scaled_bnLMhr =
-            k_scaled_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+            k_scaled_bnlmhr.reshape([batch, nchunks, fused, nheads, state_rank]);
 
         // =============================================================
         // STEP 1a: Strict lower-triangular intra-chunk output (y_lower)
@@ -130,56 +135,46 @@ impl Mamba3SingleSsdInput {
         //              · exp(cumA[t1] - cumA[t2])  · PsiV[t2]
         // (block-diagonal in time t1 = t2 is excluded — handled by y_diag.)
         // =============================================================
-        let y_lower_bnLMhp = {
-            let c_bnhLMr = c_bnLMhr.clone().swap_dims(2, 3);
+        let y_lower_bnTMhp = {
+            let c_bnhTMr = c_bnTMhr.clone().swap_dims(2, 3);
             let k_bnhrLM = k_scaled_bnLMhr.clone().permute([0, 1, 3, 4, 2]);
-            // [batch, nchunks, nheads, chunk_len*mimo_rank, chunk_len*mimo_rank]
-            let cb_bnhLMLM = c_bnhLMr.matmul(k_bnhrLM);
+            // [batch, nchunks, nheads, T*mimo_rank, chunk_len*mimo_rank]
+            let cb_bnhTMLM = c_bnhTMr.matmul(k_bnhrLM);
 
-            // L_strict_base[i, j] = exp(cumA[i] - cumA[j]) for i > j, else 0.
+            // L_strict_base[i, j] = exp(cumA[row(i)] - cumA[j]) for row(i) > j,
+            // else 0 — rectangular, the read rows against every source.
             //
             // Like `segsum` but with -inf on the diagonal as well (so exp = 0
-            // there). Replaces the existing `triu(1)` masking with `triu(0)`.
-            let l_strict_base_bhnll = {
+            // there), i.e. `triu(0)` rather than `triu(1)`.
+            let l_strict_base_bhntl = {
                 let x_cumsum = a_bhnl.clone().cumsum(3);
-                let row: Tensor<5> = x_cumsum.clone().unsqueeze_dim(4); // [..., l, 1]
+                let row: Tensor<5> =
+                    helpers::read_rows::<4, 5>(x_cumsum.clone(), 3, read_stride).unsqueeze_dim(4); // [..., t, 1]
                 let col: Tensor<5> = x_cumsum.unsqueeze_dim(3); // [..., 1, l]
-                let diff = row - col; // [..., l, l]
-                let neg_inf_strict = Tensor::full_like(&diff, f32::NEG_INFINITY).triu(0);
+                let diff = row - col; // [..., t, l]
+                let neg_inf_strict =
+                    helpers::read_causal_mask(chunk_len, read_stride, 0, device).unsqueeze::<5>();
                 (diff + neg_inf_strict).exp()
             };
 
-            // Interleave-expand to fused length (L_strict[i,j] = L_strict_base[i//m, j//m]):
-            let l_strict_bhnLMLM = l_strict_base_bhnll
+            // Interleave-expand both axes (L_strict[i,j] = L_strict_base[i//m, j//m]):
+            let l_strict_bhnTMLM = l_strict_base_bhntl
                 .unsqueeze_dim::<6>(4)
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank, chunk_len])
-                .reshape([batch, nheads, nchunks, chunk_len * mimo_rank, chunk_len])
+                .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank, chunk_len])
+                .reshape([batch, nheads, nchunks, read, chunk_len])
                 .unsqueeze_dim::<6>(5)
-                .expand([
-                    batch,
-                    nheads,
-                    nchunks,
-                    chunk_len * mimo_rank,
-                    chunk_len,
-                    mimo_rank,
-                ])
-                .reshape([
-                    batch,
-                    nheads,
-                    nchunks,
-                    chunk_len * mimo_rank,
-                    chunk_len * mimo_rank,
-                ]);
+                .expand([batch, nheads, nchunks, read, chunk_len, mimo_rank])
+                .reshape([batch, nheads, nchunks, read, fused]);
 
             // (CB ⊙ L_strict) · V    (back in MIMO-fused layout)
-            let cb_bnLMhLM = cb_bnhLMLM.swap_dims(2, 3);
-            let l_bnLMhLM = l_strict_bhnLMLM.permute([0, 2, 3, 1, 4]);
-            let masked_cb_bnhLMLM = (cb_bnLMhLM * l_bnLMhLM).swap_dims(2, 3);
+            let cb_bnTMhLM = cb_bnhTMLM.swap_dims(2, 3);
+            let l_bnTMhLM = l_strict_bhnTMLM.permute([0, 2, 3, 1, 4]);
+            let masked_cb_bnhTMLM = (cb_bnTMhLM * l_bnTMhLM).swap_dims(2, 3);
 
             let v_bnhLMp = v_bnLMhp.clone().swap_dims(2, 3);
-            let y_lower_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
+            let y_lower_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-            y_lower_bnhLMp.swap_dims(2, 3) // y_lower_bnLMhp
+            y_lower_bnhTMp.swap_dims(2, 3) // y_lower_bnTMhp
         };
 
         // =============================================================
@@ -187,16 +182,17 @@ impl Mamba3SingleSsdInput {
         //
         // y_diag[t, m_out, h, p] = γₜ · Σ_{m_in} (C[t, m_out, h, ·] · B[t, m_in, h, ·]) · PsiV[t, m_in, h, p]
         // =============================================================
-        let y_diag_bnlmhp = y_diag_correction(
-            input.v_bnlmhp,
-            input.b_bnlmhr,
-            input.c_bnlmhr,
-            input.gamma_bnlh,
+        // Same step means the *read* row, so V and B enter at those positions.
+        let y_diag_bntmhp = y_diag_correction(
+            helpers::read_rows::<6, 7>(input.v_bnlmhp, 2, read_stride),
+            helpers::read_rows::<6, 7>(input.b_bnlmhr, 2, read_stride),
+            input.c_bntmhr,
+            input.gamma_bnth,
             input.siso_specialization,
         );
         // Reshape to fused layout for combination with y_lower / y_off.
-        let y_diag_bnLMhp =
-            y_diag_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+        let y_diag_bnTMhp =
+            y_diag_bntmhp.reshape([batch, nchunks, read, nheads, per_head_dim]);
 
         // =============================================================
         // STEP 2: Per-chunk single-ssd state (standard SSD with K_scaled)
@@ -279,27 +275,27 @@ impl Mamba3SingleSsdInput {
         //
         // y_off[n, t*M+m] = C[t*M+m]^T · exp(cumA[t]) · h'[n-1]
         // =============================================================
-        let y_off_bnLMhp = {
-            let state_decay_bhnLM = a_cumsum_bhnl
+        let y_off_bnTMhp = {
+            let state_decay_bhnTM = helpers::read_rows::<4, 5>(a_cumsum_bhnl, 3, read_stride)
                 .unsqueeze_dim::<5>(4)
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
-                .reshape([batch, nheads, nchunks, chunk_len * mimo_rank])
+                .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
+                .reshape([batch, nheads, nchunks, read])
                 .exp();
 
-            let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+            let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
             let state_bnhrp = state_bnhpr.transpose();
-            let ch_bnhLMp = c_bnhLMr.matmul(state_bnhrp);
+            let ch_bnhTMp = c_bnhTMr.matmul(state_bnhrp);
 
-            let decay_bnhLM1 = state_decay_bhnLM.swap_dims(1, 2).unsqueeze_dim(4);
-            let y_off_bnhLMp = ch_bnhLMp * decay_bnhLM1;
-            y_off_bnhLMp.swap_dims(2, 3)
+            let decay_bnhTM1 = state_decay_bhnTM.swap_dims(1, 2).unsqueeze_dim(4);
+            let y_off_bnhTMp = ch_bnhTMp * decay_bnhTM1;
+            y_off_bnhTMp.swap_dims(2, 3)
         };
 
         // ── Combine and reshape ───────────────────────────────────────────────
-        let y_bnLMhp = y_lower_bnLMhp + y_diag_bnLMhp + y_off_bnLMhp;
-        let y_bnlmhp =
-            y_bnLMhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+        let y_bnTMhp = y_lower_bnTMhp + y_diag_bnTMhp + y_off_bnTMhp;
+        let y_bntmhp =
+            y_bnTMhp.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]);
 
-        (y_bnlmhp, final_state_bhpr)
+        (y_bntmhp, final_state_bhpr)
     }
 }

@@ -131,7 +131,15 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   blocking, not the Hillis–Steele doubling `quat_scan` uses — head to head, blocking wins at
   **every** length 256‥8192 (4.8–6.6× on CUDA forward, 15–41× on CPU), `O(len·log len)` in
   `3⌈log₂len⌉` full-tensor kernels losing to `O(len·∛len)` in six on bandwidth-bound
-  hardware, so there is nothing for a runtime knob to pick. Non-obvious: the
+  hardware, so there is nothing for a runtime knob to pick. Also **the read axis**:
+  `read_rows(t, dim, stride)` takes the last position of every run of `stride` (the one
+  the readout happens at) and `read_causal_mask(chunk_len, stride, diagonal, device)` is
+  the additive `−∞` causal mask over `(read row, folded source)` — built as `triu(diagonal)`
+  on the folded grid, then row-sliced by `read_rows`, so it is the same statement twice.
+  Both are the identity at `stride = 1`, which is why `micro_steps = 1` and Mamba-2 keep
+  the exact op graph they had. `mod prim` mirrors them on `F<B,_>` for the recompute
+  backwards and adds `scatter_read_rows`, `read_rows`' transpose — what autodiff does for
+  the other two SSD paths and the hand-written ones must do themselves. Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
   instead pins `A ≡ +a_floor` (data-independent growth).
@@ -141,10 +149,15 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `h'` equals double-ssd `h`.
 - **`ssd_path.rs`** — pathway-agnostic `Mamba3SsdPath` (`Default=SerialRecalculated(None)`);
   `From` both sub-paths so it converts to whichever pathway the cache selects.
-  `optimal_chunk_len(r, p, m, u)` divides the `√(r·p)` rule by `m·u` before the 32-grid
-  rounding (`clamp(32, 512)`): `m` fuses onto the chunk axis (FLOPs, the source's own
-  `chunk_size` advice), `u` folds into the sequence axis (the materialised score costs
-  `C·m²·u` per token). Saturates at the floor — `info/architecture-deltas.md` §8.
+  `optimal_chunk_len(r, p, m, u)` divides the `√(r·p)` rule by `m` before the 32-grid
+  rounding (`clamp(32, 512)`), then rounds **up to a multiple of `u`**: the two dials are
+  not the same widening. `m` fuses onto *both* of a chunk's axes, so it divides it (FLOPs,
+  the source's own `chunk_size` advice); `u` folds only the *writes*, so it subdivides a
+  chunk of unchanged folded width into `chunk_tokens(chunk_len, u) = chunk_len/u` read rows.
+  The score is then `C·m²` per token at every `u`, and `nchunks ∝ u` rather than `u²` —
+  `info/architecture-deltas.md` §8. `chunk_len_or_optimal` applies the same rounding to a
+  user-supplied chunk, which is what makes a chunk's read rows a contiguous run of tokens
+  (a reshape, not a gather).
 - **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample(s)
   the `β` tap reads. A choice that exists only at `micro_steps > 1`
   (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks how many
@@ -213,9 +226,12 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   when the `Trapezoid` has no β tap (`sanity()` asserts they agree); the `*CacheConfig`s
   carry `trapezoid` + `micro_steps` to size them.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3DoubleSsdPath`; `Mamba3DoubleSsdInput` is
-  **MIMO-first** (`v_bnlmhp` already ×γ/β, `da_bnlh`, `b/c_bnlmhr`). Same three algorithms
-  as Mamba-2 with the `mimo_rank` axis fused into the chunk reshape;
-  `serial_recalculated/` defines `Mamba3DoubleSsdBackendExt` + custom backward.
+  **MIMO-first** (`v_bnlmhp` already ×γ/β, `da_bnlh`, `b_bnlmhr` on the chunk's write axis;
+  `c_bntmhr` + `read_stride` on its **read** axis, and `y_bntmhp` comes back there too).
+  Same three algorithms as Mamba-2 with the `mimo_rank` axis fused into the chunk reshape;
+  `serial_recalculated/` defines `Mamba3DoubleSsdBackendExt` + custom backward, whose
+  `d_da` splits in two — the target term scatters back onto the folded axis, the source
+  term is already on it.
 
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
@@ -242,9 +258,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   the reason no mask, chunk-length constraint or cross-chunk term is needed: at the only
   reads that survive (`j = u−1`) that band **is the token**. Equivalence with double-SSD
   therefore holds on everything a caller observes (output + every cache field) but not on
-  the `u−1` per-token partial sums `last_micro5` discards — correcting those would need the
-  band's cross-chunk and boundary-seed parts, where it is already `scale`-weighted and
-  cannot be un-weighted. The state is exact at every position in both pathways.
+  the `u−1` per-token partial sums the read axis never asks for — correcting those would
+  need the band's cross-chunk and boundary-seed parts, where it is already `scale`-weighted
+  and cannot be un-weighted. The state is exact at every position in both pathways. `C`
+  arrives here at token resolution, like everywhere else it appears.
 - **`cache.rs`** — `Mamba3SingleSsdCache`: same four fields (same tap-FIFO layout and
   decayed-`x` convention, hence the field-identity `From`) but `ssm_bhpr` carries
   `h'ₜ = αₜh'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` (correct except the `lag`-wide band, patched in-kernel at
@@ -252,8 +269,12 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   distinct type prevents mixing a double-ssd cache into single-ssd mid-sequence — a
   distinction that vanishes under `Trapezoid::None`, where `h' ≡ h` everywhere.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3SingleSsdPath` + `Mamba3SingleSsdInput` (raw `v`
-  + `gamma_bnlh` + `scale_bnlh`, scaled in-kernel, + `siso_specialization`);
-  `Mamba3SingleSsdBackendExt`; same trio.
+  + `scale_bnlh` on the write axis, scaled in-kernel; `c_bntmhr` + `gamma_bnth` +
+  `read_stride` on the **read** axis — `γ` weights a row's same-step term and nothing else,
+  so it decimates with `C` — and `y_bntmhp` back; + `siso_specialization`);
+  `Mamba3SingleSsdBackendExt`; same trio. Its `combined_backward` returns `d_c`/`d_gamma`
+  on the read axis and scatters `d_v`/`d_b`'s diagonal share and `d_da`'s target share back
+  onto the folded one.
 - **`ssd/diag.rs`** — `y_diag_correction`, the same-step γ term all three algorithms add
   back over the strict-lower mask; branches on `mimo_rank == 1 && siso_specialization` (at
   1 the `m×m` Gram is a scalar, so both matmuls collapse to a reduction + broadcast).
@@ -269,11 +290,14 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 per token, so a token's transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a
 sum of `u` outer products staggered along it. Evaluated by folding the micro-steps into the
 **sequence axis** — no new kernel, no cache change (`u` buys transition expressiveness, not
-memory) — with the read `C`, the gate `z`, the `D` skip and the output per token.
-`unfold_micro_bs`/`unfold_micro_b` reinterpret a `u`-wide in-proj segment as `u` positions
-(a pure reshape: the projection already lays micro-steps out contiguously),
-`repeat_micro_bs` broadcasts the per-token `C` across the group so its *last* copy carries
-the right cumulative rotation, `last_micro5`/`last_micro4` collapse `y`/`x` back.
+memory). The fold is on the **writes only**, which is where this module's header states the
+chunk's read/write axis split: every micro-step writes to the state, so `x`/`B`/`Δ`/`A`/`λ`
+and the rotation ride the folded axis, while the read `C` — and the gate `z`, the `D` skip
+and the output — never leave token resolution, and neither does the `y` the SSD returns
+(`helpers::read_rows`, `Mamba3*SsdInput::read_stride`). `unfold_micro_bs`/`unfold_micro_b`
+reinterpret a `u`-wide in-proj segment as `u` positions (a pure reshape: the projection
+already lays micro-steps out contiguously); `last_micro4` takes the `x` the readout is
+contemporaneous with, for the `D` skip.
 Why it is a Mamba-3 dial and not a Mamba-2 one: the curvature is isotropic, so every
 per-micro-step factor is a scalar and scalars commute — `u` micro-writes provably collapse
 into one decay-weighted rank-`u` write, and the rotation must come from the *step size*
@@ -307,7 +331,9 @@ the value is exact and fp16 stays stable over long sequences) and
 `apply_rope`/`apply_rope_partial` (rotate last-dim pairs over a `rope_dim` prefix;
 interleaved/NeoX pairing for SISO, half-and-half/GPT-J for MIMO). `rotate_bc_forward`
 accumulates the `Complex2D` angle with `helpers::prefix_sum` (the cached angle as its
-carry-in), never `cumsum`. Not a positional
+carry-in), never `cumsum`, and takes a `read_stride`: the cumulative rotation is
+accumulated over the whole folded axis, `B` is rotated at every position of it, `C` only
+at the one per token it is read at. Not a positional
 encoding — the angles are the imaginary part of the *state transition*, factored out of
 the state and into B/C.
 "RoPE" here is the *transition's* imaginary part (`hₜ = αₜRₜhₜ₋₁`) factored onto B/C, not

@@ -19,6 +19,8 @@
 //! maintaining causal ordering across time steps.
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::helpers;
+use crate::mamba3::prelude::Mamba3SsdPath;
 use burn_stack::modules::segsum;
 use burn::prelude::*;
 
@@ -32,7 +34,7 @@ impl Mamba3DoubleSsdInput {
     ///
     /// # Shapes
     /// - input: see [`Mamba3DoubleSsdInput`]
-    /// - output.0 `y_bnlrhp`:       `[batch, nchunks, chunk_len, R, nheads, per_head_dim]`
+    /// - output.0 `y_bntrhp`:       `[batch, nchunks, chunk_tokens, R, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
     pub fn double_ssd_minimal(self) -> (Tensor<6>, Tensor<4>) {
@@ -41,23 +43,24 @@ impl Mamba3DoubleSsdInput {
         let [.., state_rank] = input.b_bnlmhr.dims();
         // note: L above denotes the chunk_len
         let device = &input.v_bnlmhp.device();
+        let read_stride = input.read_stride;
+        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+        let fused = chunk_len * mimo_rank; // write (source) axis
+        let read = chunk_tokens * mimo_rank; // read (target) axis
 
         assert!(nchunks >= 1, "sequence must be non-empty");
         assert!(chunk_len > 0, "chunk_len must be positive");
 
-        // ── Fuse mimo_rank into chunk_len ────────────────────────────────────────
-        let b_bnLMhr =
-            input
-                .b_bnlmhr
-                .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-        let c_bnLMhr =
-            input
-                .c_bnlmhr
-                .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-        let v_bnLMhp =
-            input
-                .v_bnlmhp
-                .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+        // ── Fuse mimo_rank into the chunk axes ───────────────────────────────────
+        let b_bnLMhr = input
+            .b_bnlmhr
+            .reshape([batch, nchunks, fused, nheads, state_rank]);
+        let c_bnTMhr = input
+            .c_bntmhr
+            .reshape([batch, nchunks, read, nheads, state_rank]);
+        let v_bnLMhp = input
+            .v_bnlmhp
+            .reshape([batch, nchunks, fused, nheads, per_head_dim]);
 
         // Base per-time-step cumulative log-decay
         let a_bhnl = input.da_bnlh.clone().permute([0, 3, 1, 2]);
@@ -71,51 +74,47 @@ impl Mamba3DoubleSsdInput {
         //
         // MIMO mask: L_mimo[i,j] = exp(cumA[i//m] - cumA[j//m]) if i//m >= j//m, else 0
         // =============================================================
-        let y_diag_bnLMhp = {
+        let y_diag_bnTMhp = {
             // CB = C @ B^T: contract over state_rank
-            let c_bnhLMr = c_bnLMhr.clone().swap_dims(2, 3);
+            let c_bnhTMr = c_bnTMhr.clone().swap_dims(2, 3);
             let b_bnhrLM = b_bnLMhr.clone().permute([0, 1, 3, 4, 2]);
-            // [batch, nchunks, nheads, chunk_len*mimo_rank, chunk_len*mimo_rank]
-            let cb_bnhLMLM = c_bnhLMr.matmul(b_bnhrLM);
+            // [batch, nchunks, nheads, chunk_tokens*mimo_rank, chunk_len*mimo_rank]
+            let cb_bnhTMLM = c_bnhTMr.matmul(b_bnhrLM);
 
-            // Build MIMO causal mask from segsum on base dimension, then interleave-expand.
-            // l_base_bhnll[i,j] = exp(cumA[i] - cumA[j]) if i >= j, else 0
-            let l_base_bhnll = segsum::<4, 5>(a_bhnl.clone()).exp();
+            // The causal decay over (read row, folded source): `segsum`'s
+            // rectangular counterpart, which is what it *is* at `read_stride = 1`.
+            // l_base_bhntl[i,j] = exp(cumA[row(i)] - cumA[j]) if row(i) >= j, else 0
+            let l_base_bhntl = {
+                let row: Tensor<5> =
+                    helpers::read_rows::<4, 5>(a_cumsum_bhnl.clone(), 3, read_stride)
+                        .unsqueeze_dim(4); // [..., t, 1]
+                let col: Tensor<5> = a_cumsum_bhnl.clone().unsqueeze_dim(3); // [..., 1, l]
+                let neg_inf =
+                    helpers::read_causal_mask(chunk_len, read_stride, 1, device).unsqueeze::<5>();
+                (row - col + neg_inf).exp()
+            };
 
             // Interleave-expand
             // L_mimo[i, j] = L_base[i//m, j//m]  (same decay for all ranks at a given time)
-            let l_mimo_bhnLMLM = l_base_bhnll
-                // row interleaving: insert mimo_rank copies of each l-row
-                .unsqueeze_dim::<6>(4) // l_base_bhnl1l
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank, chunk_len]) // l_base_bhnlml
-                .reshape([batch, nheads, nchunks, chunk_len * mimo_rank, chunk_len]) // l_base_bhnLMl
+            let l_mimo_bhnTMLM = l_base_bhntl
+                // row interleaving: insert mimo_rank copies of each t-row
+                .unsqueeze_dim::<6>(4) // l_base_bhnt1l
+                .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank, chunk_len]) // l_base_bhntml
+                .reshape([batch, nheads, nchunks, read, chunk_len]) // l_base_bhnTMl
                 // col interleaving: insert mimo_rank copies of each l-col
-                .unsqueeze_dim::<6>(5) // l_base_bhnLMl1
-                .expand([
-                    batch,
-                    nheads,
-                    nchunks,
-                    chunk_len * mimo_rank,
-                    chunk_len,
-                    mimo_rank,
-                ]) // l_base_bhnLMlm
-                .reshape([
-                    batch,
-                    nheads,
-                    nchunks,
-                    chunk_len * mimo_rank,
-                    chunk_len * mimo_rank,
-                ]); // l_base_bhnLMLM
+                .unsqueeze_dim::<6>(5) // l_base_bhnTMl1
+                .expand([batch, nheads, nchunks, read, chunk_len, mimo_rank]) // l_base_bhnTMlm
+                .reshape([batch, nheads, nchunks, read, fused]); // l_base_bhnTMLM
 
             // Apply mask: (CB ∘ L_mimo) · V
-            let cb_bnLMhLM = cb_bnhLMLM.swap_dims(2, 3);
-            let l_bnLMhLM = l_mimo_bhnLMLM.permute([0, 2, 3, 1, 4]);
-            let masked_cb_bnhLMLM = (cb_bnLMhLM * l_bnLMhLM).swap_dims(2, 3);
+            let cb_bnTMhLM = cb_bnhTMLM.swap_dims(2, 3);
+            let l_bnTMhLM = l_mimo_bhnTMLM.permute([0, 2, 3, 1, 4]);
+            let masked_cb_bnhTMLM = (cb_bnTMhLM * l_bnTMhLM).swap_dims(2, 3);
 
             let v_bnhLMp = v_bnLMhp.clone().swap_dims(2, 3);
-            let y_diag_bnhLMp = masked_cb_bnhLMLM.matmul(v_bnhLMp);
+            let y_diag_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-            y_diag_bnhLMp.swap_dims(2, 3)
+            y_diag_bnhTMp.swap_dims(2, 3)
         };
 
         // =============================================================
@@ -213,33 +212,32 @@ impl Mamba3DoubleSsdInput {
         //
         // Y_off[n, t*m+r] = C[t*m+r]ᵀ · exp(cumA[t]) · h[n-1]
         // =============================================================
-        let y_off_bnLMhp = {
-            // Expand base cumsum to fused, then exp:
-            let state_decay_bhnLM = a_cumsum_bhnl
-                .clone()
-                .unsqueeze_dim::<5>(4) // a_cumsum_bhnl1
-                .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // a_cumsum_bhnlm
-                .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]) // a_cumsum_bhnLM
+        let y_off_bnTMhp = {
+            // Expand the read rows' cumsum to fused, then exp:
+            let state_decay_bhnTM = helpers::read_rows::<4, 5>(a_cumsum_bhnl, 3, read_stride)
+                .unsqueeze_dim::<5>(4) // a_cumsum_bhnt1
+                .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank]) // a_cumsum_bhntm
+                .reshape([batch, nheads, nchunks, read]) // a_cumsum_bhnTM
                 .exp();
 
             // C
-            let c_bnhLMr = c_bnLMhr.swap_dims(2, 3);
+            let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
             let state_bnhrp = state_bnhpr.transpose();
-            let ch_bnhLMp = c_bnhLMr.matmul(state_bnhrp);
+            let ch_bnhTMp = c_bnhTMr.matmul(state_bnhrp);
 
             // Multiply by intra-chunk decay
-            let decay_bnhLM1 = state_decay_bhnLM
-                .swap_dims(1, 2) // state_decay_bnhLM
-                .unsqueeze_dim(4); // state_decay_bnhLM1
-            let y_off_bnhLMp = ch_bnhLMp * decay_bnhLM1;
-            y_off_bnhLMp.swap_dims(2, 3) // y_off_bnLMhp
+            let decay_bnhTM1 = state_decay_bhnTM
+                .swap_dims(1, 2) // state_decay_bnhTM
+                .unsqueeze_dim(4); // state_decay_bnhTM1
+            let y_off_bnhTMp = ch_bnhTMp * decay_bnhTM1;
+            y_off_bnhTMp.swap_dims(2, 3) // y_off_bnTMhp
         };
 
         // ── Combine and reshape ───────────────────────────────────────────────
-        let y_bnLMhp = y_diag_bnLMhp + y_off_bnLMhp;
-        let y_bnlmhp =
-            y_bnLMhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+        let y_bnTMhp = y_diag_bnTMhp + y_off_bnTMhp;
+        let y_bntmhp =
+            y_bnTMhp.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]);
 
-        (y_bnlmhp, final_state_bhpr)
+        (y_bntmhp, final_state_bhpr)
     }
 }
