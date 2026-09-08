@@ -81,7 +81,8 @@ src/
 │  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
 │  ├─ helpers.rs     shared: trapezoid masses (ν, untransported), QK-norm+GQA+bias,
 │  │                 MIMO-V build, the tap gate, split_trailing (peels the in-proj's
-│  │                 optional tails: rotation, μ, λ)
+│  │                 optional tails: rotation, μ, λ), prefix_sum (the blocked
+│  │                 inclusive scan every sequence-length cumsum goes through)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ trapezoid.rs   Trapezoid: which earlier sample(s) the β tap reads — the
@@ -104,7 +105,8 @@ src/
 │  │                 per-step definition. Real1D = the trivial group: no in-proj
 │  │                 channels, no cache accumulator, odd state_rank ok (scalar 1).
 │  │                 Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors stacked
-│  │                 on one block axis ⇒ one scan)
+│  │                 on one block axis ⇒ one scan). The abelian angle scan is
+│  │                 helpers::prefix_sum, not cumsum (§Mamba-3: rotation)
 │  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
 │  │                 folded into the sequence axis (no new kernel); u=1 is stock
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
@@ -287,8 +289,10 @@ ranks share one state, so they share its transition, and per-rank angles have no
 preimage at all (`info/mimo-as-batch.md` §7).
 
 Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
-`range·π·tanh(·)`, Δ-scaled per head, then **`cumsum`** along the sequence (continued
-from the cache), absorbed into B/C. `wrap_angle` reduces mod `2π` (value-exact, the
+`range·π·tanh(·)`, Δ-scaled per head, then **`helpers::prefix_sum`** along the sequence
+(a *blocked* inclusive scan, the cache's angle as its carry-in — Burn's `cumsum` costs
+`O(len²)` and this is the crate's only scan over the whole folded sequence), absorbed
+into B/C. `wrap_angle` reduces mod `2π` (value-exact, the
 offset `detach`ed) to stay fp16-stable over long sequences. `rope_fraction` (0.5/1,
 default 1) rotates a prefix; SISO uses interleaved/NeoX pairing, MIMO half-and-half/GPT-J.
 

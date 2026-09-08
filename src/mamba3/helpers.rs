@@ -131,9 +131,12 @@ pub(crate) fn scan_block(len: usize) -> usize {
 ///
 /// The non-abelian sibling ([`quat_scan`](crate::mamba3::quat_scan)) solves the
 /// same problem with a Hillis–Steele doubling instead, having no `cumprod` to
-/// block with. Doubling works here too and was measured: 7× at `len = 2048` but
-/// **2.8× slower** than `cumsum` at 256, since it spends `⌈log₂ len⌉` rounds of
-/// three kernels however short the axis. Blocking wins at both ends.
+/// block with. Doubling works here too, and blocking beats it at **every** length
+/// measured (256 … 8192): 4.8× → 6.6× on CUDA forward, 2.3× → 3.3× with the
+/// backward, and 15× → 41× on the CPU backend. `O(len·log len)` work in
+/// `3·⌈log₂ len⌉` full-tensor kernels loses to `O(len·∛len)` in six, on hardware
+/// that is bandwidth- and launch-bound rather than FLOP-bound. So there is
+/// nothing here for a runtime knob to pick between.
 ///
 /// The additions associate differently from a sequential scan, so the two agree
 /// to rounding rather than bit-for-bit.

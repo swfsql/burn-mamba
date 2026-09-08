@@ -123,7 +123,15 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   optional trailing in-proj segment — rotation under `Real1D`, then `μ` off a one-tap
   pattern, then `λ` under `Trapezoid::None`, which is why those three are last; it cannot be
   one more entry in the main
-  `split_into` because `split_with_sizes` **drops** a zero-length segment). Non-obvious: the
+  `split_into` because `split_with_sizes` **drops** a zero-length segment), and
+  `prefix_sum(t, dim, init)` — inclusive scan along `dim` continued from `init`, **blocked**:
+  scan runs of `scan_block(len) = ∛(2·len)` clamped `16..=256`, then offset by the exclusive
+  prefix of the run totals, which `init` rides for free. Burn's `cumsum` is `O(len²)` on the
+  cubecl backends, and this is the only scan here over a whole sequence. Non-obvious:
+  blocking, not the Hillis–Steele doubling `quat_scan` uses — head to head, blocking wins at
+  **every** length 256‥8192 (4.8–6.6× on CUDA forward, 15–41× on CPU), `O(len·log len)` in
+  `3⌈log₂len⌉` full-tensor kernels losing to `O(len·∛len)` in six on bandwidth-bound
+  hardware, so there is nothing for a runtime knob to pick. Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
   softplus before the unary minus (`A ≤ −a_floor` ⇒ `α < 1`); clamping after negation
   instead pins `A ≡ +a_floor` (data-independent growth).
@@ -297,7 +305,9 @@ mis-ordered micro-step passes every value test).
 `rope.rs` is the mechanical half: `wrap_angle` (reduce mod `2π`, offset `detach`ed so
 the value is exact and fp16 stays stable over long sequences) and
 `apply_rope`/`apply_rope_partial` (rotate last-dim pairs over a `rope_dim` prefix;
-interleaved/NeoX pairing for SISO, half-and-half/GPT-J for MIMO). Not a positional
+interleaved/NeoX pairing for SISO, half-and-half/GPT-J for MIMO). `rotate_bc_forward`
+accumulates the `Complex2D` angle with `helpers::prefix_sum` (the cached angle as its
+carry-in), never `cumsum`. Not a positional
 encoding — the angles are the imaginary part of the *state transition*, factored out of
 the state and into B/C.
 "RoPE" here is the *transition's* imaginary part (`hₜ = αₜRₜhₜ₋₁`) factored onto B/C, not
