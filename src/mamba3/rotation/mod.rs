@@ -122,6 +122,7 @@
 /// pathway factors into B/C.
 pub mod rope;
 
+use crate::mamba3::helpers::prefix_sum;
 use crate::mamba3::rotation::rope::{apply_rope_partial, wrap_angle};
 use burn::module::Module;
 use burn::prelude::*;
@@ -954,7 +955,16 @@ pub fn rotate_bc_forward(
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
             let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
-            let cum_angles_bsha = prev_angle_bha.unsqueeze_dim::<4>(1) + raw_angles_bsha.cumsum(1);
+            // The abelian scan — blocked, like the quaternion one below is
+            // log-depth, and *not* `Tensor::cumsum`, whose cost is quadratic in
+            // the sequence length it is handed here. The cache's angle is the
+            // scan's carry-in, so it rides the block offset instead of costing
+            // an add of its own. See [`prefix_sum`].
+            let cum_angles_bsha = prefix_sum::<4, 5>(
+                raw_angles_bsha,
+                1,
+                Some(prev_angle_bha.unsqueeze_dim::<4>(1)),
+            );
             let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
                 batch,
                 sequence,

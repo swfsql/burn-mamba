@@ -11,6 +11,8 @@
 //! 6. The trapezoid tap's lag arithmetic: the shift, the gap transport, the
 //!    decay a cached slot carries across a call boundary, and the per-position
 //!    gate a tap pattern admits its taps by.
+//! 7. [`prefix_sum`]: the log-depth inclusive scan every sequence-length
+//!    cumulative sum goes through instead of `Tensor::cumsum`.
 //!
 //! Most helpers are generic over the rank `D` of the data tensors so a single
 //! definition serves both the sequence-aware (`forward`) and single-token
@@ -78,6 +80,121 @@ pub fn shift_stream<const D: usize>(
         prefix
     } else {
         Tensor::cat(vec![prefix, stream.narrow(1, 0, sequence - lag)], 1)
+    }
+}
+
+/// The in-block length [`prefix_sum`] scans directly.
+///
+/// A `cumsum` of length `L` over `N` elements costs `∝ N·L` (below), so a
+/// blocked scan costs `∝ N·(block + len/block²)` — one pass inside each block
+/// plus one over the `len/block` block totals. That is least at
+/// `block = ∛(2·len)`, which this walks up to on a power-of-two grid. The floor
+/// of 16 keeps the fixed cost (a reshape, a subtract, a broadcast add) amortised
+/// on short axes; the ceiling bounds the in-block quadratic.
+///
+/// `scan_block(len) < len` is exactly "this length takes the blocked branch",
+/// which the parity tests assert so that re-tuning the rule cannot silently stop
+/// covering it.
+pub(crate) fn scan_block(len: usize) -> usize {
+    let mut block = 16;
+    while block < 256 && block * block * block < 2 * len {
+        block *= 2;
+    }
+    block
+}
+
+/// Inclusive prefix sum along `dim`, continued from `init`:
+/// `out[i] = init + Σ_{j ≤ i} t[j]`.
+///
+/// The values [`Tensor::cumsum`] computes, but **blocked**: the scanned axis is
+/// split into runs of [`scan_block`], each run scanned on its own, then offset
+/// by the exclusive prefix of the run totals. Both of those scans are short and
+/// bounded, and the whole thing is a handful of ops whatever `len` is.
+///
+/// `init` is the scan's carry-in — for the cumulative rotation angle, the one
+/// the cache brings from the previous call, exactly as `quat_cumprod` takes its
+/// `init` quaternion. It rides the block offset rather than costing a pass of
+/// its own, which is what keeps this at parity with a plain `cumsum` **plus the
+/// caller's add** on a backend whose `cumsum` is already linear.
+///
+/// It exists because Burn's `cumsum` is **quadratic in the scanned length** on
+/// the cubecl backends: measured on CUDA over `[2, len, 32, 32]` along `dim 1`,
+/// 0.27 ms at `len = 256` rising to 143 ms at 4096, ≈4× per doubling — and the
+/// same scan on the trailing, contiguous axis is only 2.6× cheaper and still
+/// ≈4× per doubling, so it is the scan and not the stride. Every other scan in
+/// this crate runs over `chunk_len`, `lag` or `micro_steps`, all bounded, which
+/// is the regime this restores the angle scan to: the cumulative rotation angle
+/// is the one that runs over the whole **folded** sequence, and `micro_steps`
+/// multiplies that axis, so `u > 1` reaches the quadratic `u`× sooner. Blocked,
+/// the same case is 1.9× / 6.7× / 23× / 46× faster at `len = 256 / 512 / 1024 /
+/// 2048`, and the forward is near-flat in `len` (0.14 → 0.51 ms over that span).
+///
+/// The non-abelian sibling ([`quat_scan`](crate::mamba3::quat_scan)) solves the
+/// same problem with a Hillis–Steele doubling instead, having no `cumprod` to
+/// block with. Doubling works here too and was measured: 7× at `len = 2048` but
+/// **2.8× slower** than `cumsum` at 256, since it spends `⌈log₂ len⌉` rounds of
+/// three kernels however short the axis. Blocking wins at both ends.
+///
+/// The additions associate differently from a sequential scan, so the two agree
+/// to rounding rather than bit-for-bit.
+///
+/// # Shapes
+/// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
+/// - `init` : `t`'s shape with `1` along `dim` (it broadcasts along it)
+/// - out    : `t`'s shape
+pub fn prefix_sum<const D: usize, const DP1: usize>(
+    t: Tensor<D>,
+    dim: usize,
+    init: Option<Tensor<D>>,
+) -> Tensor<D> {
+    let len = t.dims()[dim];
+    let block = scan_block(len);
+    if len <= block {
+        let scanned = t.cumsum(dim);
+        return match init {
+            Some(init) => scanned + init,
+            None => scanned,
+        };
+    }
+    let device = t.device();
+
+    // Pad up to a whole number of blocks. Zero is the additive identity, so the
+    // padding contributes to no prefix, and it is narrowed off at the end.
+    let nblocks = len.div_ceil(block);
+    let pad = nblocks * block - len;
+    let t = if pad == 0 {
+        t
+    } else {
+        let mut pad_dims = t.dims();
+        pad_dims[dim] = pad;
+        Tensor::cat(vec![t, Tensor::zeros(pad_dims, &device)], dim)
+    };
+
+    // Split the scanned axis into (which block, where in it). Row-major, so the
+    // reshape moves nothing.
+    let dims = t.dims();
+    let mut split = [0usize; DP1];
+    split[..dim].copy_from_slice(&dims[..dim]);
+    split[dim] = nblocks;
+    split[dim + 1] = block;
+    split[dim + 2..].copy_from_slice(&dims[dim + 1..]);
+
+    let inner = t.reshape(split).cumsum(dim + 1);
+    // Each block's total is its last in-block prefix; kept at width 1 on that
+    // axis so the carry broadcasts back over the block. `init` joins the carry
+    // here, for free — one add serves both.
+    let totals = inner.clone().narrow(dim + 1, block - 1, 1);
+    let carry = totals.clone().cumsum(dim) - totals;
+    let carry = match init {
+        Some(init) => carry + init.unsqueeze_dim::<DP1>(dim + 1),
+        None => carry,
+    };
+
+    let joined = (inner + carry).reshape(dims);
+    if pad == 0 {
+        joined
+    } else {
+        joined.narrow(dim, 0, len)
     }
 }
 

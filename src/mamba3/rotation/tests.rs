@@ -1245,6 +1245,201 @@ fn rotor_forward_step_grad_parity() {
     quaternion_forward_step_grad_parity_kind(RotationKind::Rotor4D);
 }
 
+/// Every field of a Mamba-3 cache, compared: the SSM state, the tap FIFO, and
+/// the cumulative rotation.
+///
+/// The rotation is compared as the rotation it *stands for*, not as the number
+/// stored: `wrap_angle` reduces mod 2π, so two representatives of one rotation
+/// differ by a whole turn whenever the two paths land on opposite sides of the
+/// cut. `(sin, cos)` is the comparison that does not care.
+fn assert_cache_parity(
+    label: &str,
+    a: crate::mamba3::cache::Mamba3Cache,
+    b: crate::mamba3::cache::Mamba3Cache,
+) {
+    let missing = "a missing cache defaults to the single-ssd pathway";
+    let (a, b) = (a.single_ssd().expect(missing), b.single_ssd().expect(missing));
+
+    let d = max_abs_diff(a.ssm_bhpr, b.ssm_bhpr);
+    assert!(d < VAL_TOL, "{label}: ssm state: {d:.3e}");
+
+    let slots = "the default carry-over tap keeps its slots";
+    let d = max_abs_diff(a.k_state_bumhr.expect(slots), b.k_state_bumhr.expect(slots));
+    assert!(d < VAL_TOL, "{label}: tap key slots: {d:.3e}");
+    let d = max_abs_diff(a.v_state_buhp.expect(slots), b.v_state_buhp.expect(slots));
+    assert!(d < VAL_TOL, "{label}: tap value slots: {d:.3e}");
+
+    let (a, b) = (a.rotation.angle(), b.rotation.angle());
+    let d = max_abs_diff(a.clone().sin(), b.clone().sin()).max(max_abs_diff(a.cos(), b.cos()));
+    assert!(d < VAL_TOL, "{label}: cumulative rotation: {d:.3e}");
+}
+
+/// Full parity — **output, cache and gradients** — for the abelian angle scan,
+/// at folded lengths on both sides of
+/// [`prefix_sum`](crate::mamba3::helpers::prefix_sum)'s blocking threshold.
+///
+/// `step` accumulates the cumulative angle one position at a time
+/// ([`rotate_bc_step`]) and so never runs a scan at all. That makes it the
+/// oracle which outlives whichever algorithm `forward` builds the prefix with —
+/// `Tensor::cumsum` once, the blocked scan now, whatever replaces it — which is
+/// the whole point of pinning the contract here rather than against the op.
+///
+/// The cases are the branch cases: a folded axis inside one block, one spanning
+/// several exactly, and one with a partial last block — the middle one reached
+/// through `micro_steps`, which is what multiplies the axis and made the scan's
+/// cost matter in the first place. Every *other* `Complex2D` forward/step test
+/// in the crate runs at a folded length of 18 or less, i.e. entirely on the
+/// unblocked branch, so this is the one that covers the blocked one; the
+/// [`scan_block`](crate::mamba3::helpers::scan_block) assertion fails loudly
+/// rather than silently losing that coverage if the block rule is re-tuned.
+#[test]
+fn complex_angle_scan_forward_step_parity() {
+    use crate::mamba3::helpers::scan_block;
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+
+    let device: Device = Default::default();
+    // (tokens, micro_steps, expected to take the blocked branch)
+    for (tokens, micro_steps, blocked) in [(8, 1, false), (16, 2, true), (24, 1, true)] {
+        let folded = tokens * micro_steps;
+        let label = format!("tokens={tokens} u={micro_steps} folded={folded}");
+        assert_eq!(
+            blocked,
+            scan_block(folded) < folded,
+            "{label}: the scan's branch moved — re-pick the lengths so both \
+             branches stay covered"
+        );
+
+        let model = Mamba3Config::new(32)
+            .with_state_rank(16)
+            .with_expand(2)
+            .with_per_head_dim(8)
+            .with_micro_steps(micro_steps)
+            .with_rotation(RotationKind::Complex2D)
+            .init(&device.clone().autodiff());
+
+        let x = Tensor::<3>::random([2, tokens, 32], Distribution::Normal(0.0, 1.0), &device);
+        let head = Tensor::<3>::random([2, tokens, 32], Distribution::Normal(0.0, 1.0), &device);
+        // Fresh autodiff leaves per path, so the two backwards are independent.
+        let p_fwd = Param::from_tensor(Tensor::from_inner(x.clone()));
+        let p_step = Param::from_tensor(Tensor::from_inner(x));
+
+        // Chunked: one scan over the whole folded axis.
+        let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3SsdPath::default());
+
+        // Recurrent: `micro_steps` plain adds per token, no scan anywhere.
+        let mut cache = None;
+        let mut outs: Vec<Tensor<3>> = Vec::with_capacity(tokens);
+        for t in 0..tokens {
+            let x_t = p_step.val().narrow(1, t, 1).squeeze_dim::<2>(1);
+            let (o, c) = model.step(x_t, cache);
+            outs.push(o.unsqueeze_dim::<3>(1));
+            cache = Some(c);
+        }
+        let out_step = Tensor::cat(outs, 1);
+        let cache_step = cache.expect("a non-empty sequence");
+
+        // ── Output ───────────────────────────────────────────────────────────
+        let d = max_abs_diff(out_fwd.clone(), out_step.clone());
+        assert!(d < VAL_TOL, "{label}: forward vs step output: {d:.3e}");
+
+        // ── State ────────────────────────────────────────────────────────────
+        assert_cache_parity(&label, cache_fwd, cache_step);
+
+        // ── Gradients ────────────────────────────────────────────────────────
+        let grads_of = |out: Tensor<3>, p: &Param<Tensor<3>>| {
+            let g = (out * Tensor::from_inner(head.clone())).sum().backward();
+            (
+                p.val().grad(&g).expect("grad input"),
+                model.in_proj.weight.val().grad(&g).expect("grad in_proj"),
+                model.dt_bias_h.val().grad(&g).expect("grad dt_bias_h"),
+            )
+        };
+        let (in_f, w_f, dt_f) = grads_of(out_fwd, &p_fwd);
+        let (in_s, w_s, dt_s) = grads_of(out_step, &p_step);
+        for (name, d) in [
+            ("input", max_abs_diff(in_f, in_s)),
+            ("in_proj.weight", max_abs_diff(w_f, w_s)),
+            ("dt_bias_h", max_abs_diff(dt_f, dt_s)),
+        ] {
+            assert!(d < GRAD_TOL, "{label}: {name} gradient: {d:.3e}");
+        }
+    }
+}
+
+/// The scan's **carry-in**, at full parity: a split prefill whose *continuation*
+/// is long enough to take the blocked branch must land exactly where one call
+/// does — output, every cache field, and gradients.
+///
+/// The cached angle enters the scan as its initial value, and it rides the block
+/// offset rather than costing a pass of its own, so getting it wrong (dropped,
+/// or broadcast along the wrong axis) is invisible to any test whose second call
+/// is short — which, before this one, was all of them: the existing split-prefill
+/// tests continue into calls of 12 folded positions or fewer, entirely on the
+/// unblocked branch.
+#[test]
+fn complex_angle_scan_split_prefill_parity() {
+    use crate::mamba3::helpers::scan_block;
+    use crate::mamba3::mamba3::Mamba3Config;
+    use crate::mamba3::ssd_path::Mamba3SsdPath;
+
+    let device: Device = Default::default();
+    let (head_tokens, tail_tokens) = (6, 24);
+    let tokens = head_tokens + tail_tokens;
+    assert!(
+        scan_block(tail_tokens) < tail_tokens,
+        "the continuation must take the blocked branch, or the carry-in this \
+         test exercises is not the blocked one — lengthen it"
+    );
+
+    let model = Mamba3Config::new(32)
+        .with_state_rank(16)
+        .with_expand(2)
+        .with_per_head_dim(8)
+        .with_rotation(RotationKind::Complex2D)
+        .init(&device.clone().autodiff());
+
+    let x = Tensor::<3>::random([2, tokens, 32], Distribution::Normal(0.0, 1.0), &device);
+    let head = Tensor::<3>::random([2, tokens, 32], Distribution::Normal(0.0, 1.0), &device);
+    // Fresh autodiff leaves per path, so the two backwards are independent.
+    let p_whole = Param::from_tensor(Tensor::from_inner(x.clone()));
+    let p_split = Param::from_tensor(Tensor::from_inner(x));
+    let path = Mamba3SsdPath::default();
+
+    let (out_whole, cache_whole) = model.forward(p_whole.val(), None, path.clone());
+
+    let xs = p_split.val();
+    let (out_a, mid) = model.forward(xs.clone().narrow(1, 0, head_tokens), None, path.clone());
+    let (out_b, cache_split) = model.forward(
+        xs.narrow(1, head_tokens, tail_tokens),
+        Some(mid),
+        path.clone(),
+    );
+    let out_split = Tensor::cat(vec![out_a, out_b], 1);
+
+    let d = max_abs_diff(out_whole.clone(), out_split.clone());
+    assert!(d < VAL_TOL, "split prefill output: {d:.3e}");
+    assert_cache_parity("split prefill", cache_whole, cache_split);
+
+    let grads_of = |out: Tensor<3>, p: &Param<Tensor<3>>| {
+        let g = (out * Tensor::from_inner(head.clone())).sum().backward();
+        (
+            p.val().grad(&g).expect("grad input"),
+            model.in_proj.weight.val().grad(&g).expect("grad in_proj"),
+            model.dt_bias_h.val().grad(&g).expect("grad dt_bias_h"),
+        )
+    };
+    let (in_w, w_w, dt_w) = grads_of(out_whole, &p_whole);
+    let (in_s, w_s, dt_s) = grads_of(out_split, &p_split);
+    for (name, d) in [
+        ("input", max_abs_diff(in_w, in_s)),
+        ("in_proj.weight", max_abs_diff(w_w, w_s)),
+        ("dt_bias_h", max_abs_diff(dt_w, dt_s)),
+    ] {
+        assert!(d < GRAD_TOL, "split prefill: {name} gradient: {d:.3e}");
+    }
+}
+
 /// The right factor must be *trainable*, not merely present: gradient has to
 /// reach the second half of every head's generator channels. A forward that
 /// dropped the right factor (or built it from the same channels as the left)
