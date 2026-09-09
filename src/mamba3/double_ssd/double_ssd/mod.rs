@@ -27,7 +27,7 @@
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::*;
-use crate::mamba3::rotation::{rotate_bc_forward, rotate_bc_step};
+use crate::mamba3::rotation::rotate_bc_forward;
 use burn_stack::modules::Silu;
 use burn_stack::modules::sanity as san;
 use burn::prelude::*;
@@ -501,15 +501,17 @@ mod step {
     /// trapezoid coefficients.
     ///
     /// Every per-micro-step stream carries a `u` axis (MambaProduct; `u = 1` for
-    /// stock Mamba-3). [`Self::micro`] peels one micro-step off it.
+    /// stock Mamba-3) — the token's whole folded block, which
+    /// [`Mamba3::step_double_ssd`] consumes at once rather than a position at a
+    /// time.
     pub(crate) struct StepProjection {
-        /// Recurrence micro-steps per token — the size of the `u` axis below.
-        pub micro_steps: usize,
         /// Per-token gate stream `[batch, d_inner]`.
         pub z_bi: Tensor<2>,
         /// Per-token QK-normed, GQA-expanded, biased C — **before** the
-        /// rotation. The read happens once, after all `u` writes.
-        pub c_bmhr: Tensor<4>,
+        /// rotation. The read happens once, after all `u` writes, so this is
+        /// the chunk's read axis with a single row: `[batch, 1, mimo_rank,
+        /// nheads, state_rank]`.
+        pub c_b1mhr: Tensor<5>,
         /// Value stream `[batch, u, nheads, per_head_dim]`.
         pub x_buhp: Tensor<4>,
         /// QK-normed, GQA-expanded, biased B — **before** the rotation.
@@ -521,6 +523,10 @@ mod step {
         pub rot_bua: Option<Tensor<3>>,
         /// `Δ` `[batch, u, nheads]`.
         pub dt_buh: Tensor<3>,
+        /// `Δ·A` `[batch, u, nheads]`, the log-decay — the block's transport
+        /// (both within it and into the tap slots it leaves behind) is a
+        /// product of `α`s, i.e. a sum of these.
+        pub da_buh: Tensor<3>,
         /// `α = exp(Δ·A)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
         /// The tap mass `ν` `[batch, u, nheads]`; `None` under
@@ -533,46 +539,6 @@ mod step {
         pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
-    }
-
-    /// One micro-step of a [`StepProjection`], with the `u` axis peeled off.
-    pub(crate) struct MicroProjection {
-        /// Value stream `[batch, nheads, per_head_dim]`.
-        pub x_bhp: Tensor<3>,
-        /// Pre-rotation B `[batch, mimo_rank, nheads, state_rank]`.
-        pub b_bmhr: Tensor<4>,
-        /// Raw rotation channels `[batch, num_rotation_channels]`.
-        pub rot_ba: Option<Tensor<2>>,
-        /// `Δ` `[batch, nheads]`.
-        pub dt_bh: Tensor<2>,
-        /// `α = exp(Δ·A)` `[batch, nheads]`.
-        pub alpha_bh: Tensor<2>,
-        /// The tap mass `ν` `[batch, nheads]`; `None` under
-        /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
-        pub nu_bh: Option<Tensor<2>>,
-        /// The interior (lag-1) tap's mass `[batch, nheads]`; `None` unless the
-        /// pattern
-        /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
-        pub nu_interior_bh: Option<Tensor<2>>,
-        /// `γ = λ·Δ` `[batch, nheads]` (`= Δ` when there is no `λ`).
-        pub gamma_bh: Tensor<2>,
-    }
-
-    impl StepProjection {
-        /// Micro-step `j` (`0 ≤ j < micro_steps`), in execution order.
-        pub fn micro(&self, j: usize) -> MicroProjection {
-            let pick2 = |t: Tensor<3>| t.narrow(1, j, 1).squeeze_dim::<2>(1);
-            MicroProjection {
-                x_bhp: self.x_buhp.clone().narrow(1, j, 1).squeeze_dim(1),
-                b_bmhr: self.b_bumhr.clone().narrow(1, j, 1).squeeze_dim(1),
-                rot_ba: self.rot_bua.clone().map(pick2),
-                dt_bh: pick2(self.dt_buh.clone()),
-                alpha_bh: pick2(self.alpha_buh.clone()),
-                nu_bh: self.nu_buh.clone().map(pick2),
-                nu_interior_bh: self.nu_interior_buh.clone().map(pick2),
-                gamma_bh: pick2(self.gamma_buh.clone()),
-            }
-        }
     }
 
     impl Mamba3 {
@@ -636,7 +602,7 @@ mod step {
             // ── Discretisation + trapezoidal coefficients ─────────────────────
             let helpers::TrapezoidCoeffs {
                 dt: dt_buh,
-                da: _da_buh,
+                da: da_buh,
                 alpha: alpha_buh,
                 nu: nu_buh,
                 nu_interior: nu_interior_buh,
@@ -657,8 +623,9 @@ mod step {
             san(&gamma_buh);
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
-            // B carries the `u` axis, so its group dim is axis 3 of `_bumgr`
-            // (D = 5); C is per token, group dim axis 2 of `_bmgr` (D = 4).
+            // Both carry a leading axis — `u` writes for B, the token's one read
+            // for C — so this is `forward`'s pair of calls at `sequence = u`,
+            // `tokens = 1`, group dim 3.
             let b_bumhr = helpers::qk_norm_expand_bias::<5, 6>(
                 b_raw_bMGRU.reshape([batch, u, mimo_rank, ngroups, state_rank]),
                 &self.b_norm,
@@ -666,25 +633,25 @@ mod step {
                 3,
                 nheads,
             );
-            let c_bmhr = helpers::qk_norm_expand_bias::<4, 5>(
-                c_raw_bMGR.reshape([batch, mimo_rank, ngroups, state_rank]),
+            let c_b1mhr = helpers::qk_norm_expand_bias::<5, 6>(
+                c_raw_bMGR.reshape([batch, 1, mimo_rank, ngroups, state_rank]),
                 &self.c_norm,
                 self.c_bias_hmr.val(),
-                2,
+                3,
                 nheads,
             );
             assert_eq!([batch, u, mimo_rank, nheads, state_rank], b_bumhr.dims());
             san(&b_bumhr);
-            san(&c_bmhr);
+            san(&c_b1mhr);
 
             StepProjection {
-                micro_steps: u,
                 z_bi,
-                c_bmhr,
+                c_b1mhr,
                 x_buhp,
                 b_bumhr,
                 rot_bua,
                 dt_buh,
+                da_buh,
                 alpha_buh,
                 nu_buh,
                 nu_interior_buh,
@@ -822,6 +789,10 @@ mod step {
         ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
         /// ```
         ///
+        /// At `micro_steps = u > 1` the token is `u` of those steps
+        /// ([`crate::mamba3::product`]) and they are evaluated **together**, not
+        /// one at a time — see the body.
+        ///
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
         /// - output     : `[batch, d_model]`
@@ -835,6 +806,8 @@ mod step {
             let nheads = self.nheads();
             let per_head_dim = self.per_head_dim();
             let state_rank = self.state_rank;
+            let mimo_rank = self.mimo_rank;
+            let u = self.micro_steps;
             let device = &input_bd.device();
             let ssm_shape = [batch, nheads, per_head_dim, state_rank];
 
@@ -855,143 +828,146 @@ mod step {
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let siso = self.use_siso_decode_kernels();
 
-            // ── `u` micro-steps of the recurrence, then one readout ────────────
-            // MambaProduct: each pass is one plain Mamba-3 step, so the token's
-            // transition is the product of the `u` of them and the trapezoid's
-            // two taps straddle *micro-steps*. Identical to `forward` running
-            // over the folded sequence, which is what the parity tests assert.
-            // `u = 1` executes the loop once and is stock Mamba-3.
+            // ── The token's `u` micro-steps at once, then one readout ────────────
+            // MambaProduct evaluates a token as `u` consecutive positions of the
+            // ordinary recurrence, so a `step` call is a **folded block** of
+            // length `u` — and one is `forward` on a one-token sequence, which
+            // is what the parity tests assert. It is not walked a position at a
+            // time, because it need not be: after the RoPE factoring the
+            // transition inside the block is the *scalar* `α`, so the block has
+            // a closed form,
             //
-            // The taps below are a FIFO [`Trapezoid::tap_lag`] deep, oldest
-            // first: lag 1 is [`Trapezoid::HorizontalCarryOver`] (the tap
-            // crosses a token only at `j = 0`), lag `u` is
-            // [`Trapezoid::Vertical`] (every tap crosses, reading the same
-            // micro-step of the previous token). Per micro-step the FIFO is
-            // **tapped, then the survivors are decayed, then the new position is
-            // pushed** — so a slot's `x` accumulates exactly the `α`s between
-            // its own position and the one that taps it, which is the gap
-            // transport a lag-`L` tap needs (§9). At lag 1 nothing survives a
-            // tap, so no decay is ever applied and `β = να` is the whole
-            // coefficient, as before.
+            //     h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ · writeⱼ ,    wⱼ = ∏_{r>j} αᵣ
             //
-            // A two-tap pattern needs no second buffer: its lag-1 tap is this
-            // FIFO's **newest** slot, which by the same convention carries the
-            // empty decay product. One FIFO, two reads — the oldest slot leaves
-            // it, the newest stays.
+            // whose transport `wⱼ` — a write's decay to the end of the block —
+            // is the very quantity [`crate::mamba3::helpers::tail_decay`]
+            // already computes for the tap slots the call leaves behind, over
+            // the whole block instead of its last `lag`.
+            //
+            // Every `writeⱼ` is an outer product into one shared state, so
+            // transporting them and fusing `(u, mimo_rank)` into a single
+            // contracted axis makes each **side** of the recurrence one
+            // [`helpers::mimo_outer_sum`] — the collapse the single-SSD boundary
+            // seed already makes over its slots. The op count is therefore
+            // independent of `u`, and at `u = 1` the fused axis is `mimo_rank`
+            // and this is stock Mamba-3's op graph unchanged.
+            //
+            // The trapezoid is untouched by any of it: a tap at
+            // [`Trapezoid::tap_lag`] reads folded position `p − lag`, which is
+            // `forward`'s [`helpers::shift_stream`] over this block with the
+            // cache's FIFO as the prefix, and `β = ν·α` times
+            // [`helpers::interior_gap_decay`] is the same gap transport (§9). At
+            // lag 1 that gap has no interior and the FIFO is one slot deep; at
+            // lag `u` the block is exactly as long as the lag, so every tap
+            // reads the FIFO and none of them reads within the block.
             let lag = self.tap_lag();
-            let mut state_bhpr = cache.ssm_bhpr.clone();
-            let mut rotation = cache.rotation.clone();
-            let mut tap_b: Vec<Tensor<4>> = Vec::new();
-            let mut tap_x: Vec<Tensor<3>> = Vec::new();
-            if let (Some(k_state_bumhr), Some(v_state_buhp)) =
-                (cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
-            {
-                for slot in 0..lag {
-                    tap_b.push(k_state_bumhr.clone().narrow(1, slot, 1).squeeze_dim(1));
-                    tap_x.push(v_state_buhp.clone().narrow(1, slot, 1).squeeze_dim(1));
-                }
-            }
-            // Set on the last pass; the readout uses only that one.
-            let mut last: Option<(Tensor<4>, Tensor<4>)> = None;
 
-            for j in 0..proj.micro_steps {
-                let m = proj.micro(j);
+            // ── Cumulative rotation, applied to B at every write and to C ─────
+            // at the one read: `forward`'s routine at `sequence = u`,
+            // `tokens = 1`, `read_stride = u`. The read row is the last
+            // micro-step, so `C` picks up exactly the cumulative rotation the
+            // readout happens at.
+            let (b_bumhr, c_b1mhr, new_rotation) = rotate_bc_forward(
+                proj.rot_bua,
+                proj.dt_buh,
+                cache.rotation.clone(),
+                proj.b_bumhr,
+                proj.c_b1mhr,
+                u,
+                self.rotation_spec(),
+            );
+            san(&b_bumhr);
+            san(&c_b1mhr);
+            new_rotation.sanity();
 
-                // ── Update cumulative rotation, rotate B and C ─────────────
-                // Complex2D: abelian RoPE angle. Quaternion4D: cumulative
-                // quaternion. See [`rotate_bc_step`]. `C` is the same tensor at
-                // every micro-step — matching `forward`'s repeat — so the copy
-                // that reaches the readout carries the cumulative rotation of
-                // the *last* micro-step.
-                let (b_bmhr, c_bmhr, new_rotation) = rotate_bc_step(
-                    m.rot_ba,
-                    m.dt_bh,
-                    rotation,
-                    m.b_bmhr,
-                    proj.c_bmhr.clone(),
-                    self.rotation_spec(),
-                );
-                san(&b_bmhr);
-                san(&c_bmhr);
-                new_rotation.sanity();
+            // ── The block's two transports ────────────────────────────────────
+            // `w` carries a write to the end of the block (`None` at `u = 1`,
+            // where that product is empty); `α_total` is the token's whole
+            // transition, the one factor the carried state takes.
+            let w_buh = helpers::tail_decay(proj.da_buh.clone(), u);
+            let alpha_total_bh11 = proj
+                .da_buh
+                .clone()
+                .sum_dim(1)
+                .squeeze_dim::<2>(1)
+                .exp()
+                .unsqueeze_dims::<4>(&[2, 3]);
 
-                // ── Build MIMO value tensors ───────────────────────────────
-                // Insert the mimo_rank axis at position 1 of `_bhp`.
-                let x_vals_bmhp =
-                    helpers::build_v_with_mimo::<3, 4>(m.x_bhp.clone(), mimo_x_hmp.as_ref(), 1);
-                san(&x_vals_bmhp);
-
-                // ── SSM state update ───────────────────────────────────────
-                // new_state[b, h, p, r] = alpha * state
-                //   + sumₘ gamma * x_vals[m] ⊗ B_cur[m]
-                //   + sumₘ beta  * xs_vals[m] ⊗ B_state[m]   (β tap only)
-                //
-                // For the outer product sum:
-                //   xBt[b, h, p, r] = sumₘ coeff[m, h, p] * B[m, h, n]
-                //   = einsum('bmhp,bmhr->bhpr', coeff*x_vals, B)
-                //   = matmul over m: [b, h, p, m] @ [b, h, m, r]
-                // x_vals_bmhp * gamma_b1h1
-                // Need gamma as [b, 1, h, 1] to broadcast over m and p:
-                let gamma_b1h1 = m.gamma_bh.unsqueeze_dims::<4>(&[1, 3]);
-                let x_gamma_bmhp = x_vals_bmhp.clone() * gamma_b1h1;
-                san(&x_gamma_bmhp);
-
-                // einsum('bmhp,bmhr->bhpr', x_gamma, B_cur):
-                let xbt_state_bhpr = helpers::mimo_outer_sum(x_gamma_bmhp, b_bmhr.clone(), siso);
-                san(&xbt_state_bhpr);
-
-                // The tapped steps' writes. `β = ν·α` is the tap's own
-                // coefficient; the FIFO slot supplies the rest of the gap
-                // transport, so both taps are read from the *same* buffer:
-                // the oldest slot for the pattern's lag-`lag` tap, the newest
-                // for a two-tap pattern's lag-1 one. Under `Trapezoid::None`
-                // there is neither: no previous value tensor, no second outer
-                // product, and one fewer term in the state update.
-                let tap_write = |nu_bh: Tensor<2>, x_prev_bhp: Tensor<3>, b_prev_bmhr: Tensor<4>| {
-                    let xs_vals_bmhp =
-                        helpers::build_v_with_mimo::<3, 4>(x_prev_bhp, mimo_x_hmp.as_ref(), 1);
-                    san(&xs_vals_bmhp);
-                    let beta_bh = nu_bh * m.alpha_bh.clone();
-                    let x_beta_bmhp = xs_vals_bmhp * beta_bh.unsqueeze_dims::<4>(&[1, 3]);
-                    san(&x_beta_bmhp);
-                    let xbt_prev_bhpr = helpers::mimo_outer_sum(x_beta_bmhp, b_prev_bmhr, siso);
-                    san(&xbt_prev_bhpr);
-                    xbt_prev_bhpr
+            // One side of the recurrence, transported and fused:
+            //
+            //   write[b, h, p, r] = Σ_{j,m} massⱼ·wⱼ · v[j, m, h, p] · K[j, m, h, r]
+            //
+            // i.e. `einsum('bfhp,bfhr->bhpr', mass·w·v, K)` over the fused
+            // `f = u · mimo_rank` axis — one matmul, whatever `u` is.
+            let write = |mass_buh: Tensor<3>, x_buhp: Tensor<4>, k_bumhr: Tensor<5>| {
+                let mass_buh = match &w_buh {
+                    Some(w_buh) => mass_buh * w_buh.clone(),
+                    None => mass_buh,
                 };
-                let xbt_interior_bhpr = m.nu_interior_bh.map(|nu_bh| {
-                    let newest = tap_x.len() - 1;
-                    tap_write(nu_bh, tap_x[newest].clone(), tap_b[newest].clone())
-                });
-                let xbt_prev_bhpr = m.nu_bh.map(|nu_bh| {
-                    let (x_prev_bhp, b_prev_bmhr) = (tap_x.remove(0), tap_b.remove(0));
-                    tap_write(nu_bh, x_prev_bhp, b_prev_bmhr)
-                });
+                let v_bumhp = helpers::build_v_with_mimo::<4, 5>(x_buhp, mimo_x_hmp.as_ref(), 2)
+                    * mass_buh.unsqueeze_dims::<5>(&[2, 4]);
+                san(&v_bumhp);
+                let write_bhpr = helpers::mimo_outer_sum(
+                    v_bumhp.reshape([batch, u * mimo_rank, nheads, per_head_dim]),
+                    k_bumhr.reshape([batch, u * mimo_rank, nheads, state_rank]),
+                    siso,
+                );
+                san(&write_bhpr);
+                write_bhpr
+            };
 
-                let alpha_bh11 = m.alpha_bh.clone().unsqueeze_dims::<4>(&[2, 3]);
-                let new_state_bhpr = alpha_bh11 * state_bhpr + xbt_state_bhpr;
-                let new_state_bhpr = [xbt_prev_bhpr, xbt_interior_bhpr]
-                    .into_iter()
-                    .flatten()
-                    .fold(new_state_bhpr, |state, write| state + write);
-                san(&new_state_bhpr);
+            // A tapped side at its own lag — `forward`'s `beta_side`, over this
+            // block. The prefix is the FIFO's newest `lag` slots: all of it for
+            // the pattern's own tap, the newest slot alone for a two-tap
+            // pattern's lag-1 one, which by the FIFO's convention carries the
+            // empty decay product. Under [`Trapezoid::None`] there is no tapped
+            // side at all — no shifted stream, no second outer product, one
+            // fewer term in the state update.
+            let tap_write = |nu_buh: Tensor<3>, lag: usize| {
+                let slots_buhp = cache
+                    .v_state_buhp
+                    .clone()
+                    .expect("a β tap keeps its (B, x) cache slots");
+                let slots_bumhr = cache
+                    .k_state_bumhr
+                    .clone()
+                    .expect("a β tap keeps its (B, x) cache slots");
+                let newest = slots_buhp.dims()[1] - lag;
+                let x_prev_buhp = helpers::shift_stream(
+                    proj.x_buhp.clone(),
+                    slots_buhp.narrow(1, newest, lag),
+                    lag,
+                );
+                let b_prev_bumhr =
+                    helpers::shift_stream(b_bumhr.clone(), slots_bumhr.narrow(1, newest, lag), lag);
+                let beta_buh = nu_buh * proj.alpha_buh.clone();
+                let beta_buh = match helpers::interior_gap_decay(proj.da_buh.clone(), lag) {
+                    Some(gap_buh) => beta_buh * gap_buh,
+                    None => beta_buh,
+                };
+                write(beta_buh, x_prev_buhp, b_prev_bumhr)
+            };
 
-                state_bhpr = new_state_bhpr;
-                if lag > 0 {
-                    // Decay the slots that survived this step's tap, then push
-                    // this position: each slot's `x` ends up carrying `Πα` from
-                    // its own position to the current one.
-                    let alpha_bh1 = m.alpha_bh.clone().unsqueeze_dim::<3>(2);
-                    for x_bhp in tap_x.iter_mut() {
-                        *x_bhp = x_bhp.clone() * alpha_bh1.clone();
-                    }
-                    tap_b.push(b_bmhr);
-                    tap_x.push(m.x_bhp);
-                }
-                rotation = new_rotation;
-                last = Some((c_bmhr, x_vals_bmhp));
-            }
+            // ── SSM state update ──────────────────────────────────────────────
+            let state_bhpr = alpha_total_bh11 * cache.ssm_bhpr.clone()
+                + write(proj.gamma_buh, proj.x_buhp.clone(), b_bumhr.clone());
+            let state_bhpr = [
+                proj.nu_buh.map(|nu_buh| tap_write(nu_buh, lag)),
+                proj.nu_interior_buh.map(|nu_buh| tap_write(nu_buh, 1)),
+            ]
+            .into_iter()
+            .flatten()
+            .fold(state_bhpr, |state, write| state + write);
+            san(&state_bhpr);
 
-            let (c_bmhr, x_vals_bmhp) = last.expect("micro_steps ≥ 1");
+            // The readout's own inputs: `C` at the block's one read row, and the
+            // `D` skip's value at the micro-step that read is contemporaneous
+            // with — the last one.
+            let c_bmhr = c_b1mhr.squeeze_dim::<4>(1);
+            let x_last_bhp = proj.x_buhp.clone().narrow(1, u - 1, 1).squeeze_dim::<3>(1);
+            let x_vals_bmhp =
+                helpers::build_v_with_mimo::<3, 4>(x_last_bhp, mimo_x_hmp.as_ref(), 1);
+            san(&x_vals_bmhp);
 
             // ── Output ────────────────────────────────────────────────────────
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
@@ -1002,22 +978,15 @@ mod step {
             let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, proj.z_bi);
 
             // ── Update cache ──────────────────────────────────────────────────
-            // The FIFO, re-stacked onto its slot axis (oldest first) — the same
-            // layout, and the same decayed-`x` convention, `forward` writes.
+            // The block's last `lag` positions, `x` pre-scaled by the decay
+            // since its own position — `forward`'s own helper, so the two write
+            // the same slot layout under the same convention.
+            let (k_state_bumhr, v_state_buhp) =
+                self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag);
             cache.ssm_bhpr = state_bhpr;
-            cache.k_state_bumhr = (lag > 0).then(|| {
-                Tensor::cat(
-                    tap_b.into_iter().map(|t| t.unsqueeze_dim::<5>(1)).collect(),
-                    1,
-                )
-            });
-            cache.v_state_buhp = (lag > 0).then(|| {
-                Tensor::cat(
-                    tap_x.into_iter().map(|t| t.unsqueeze_dim::<4>(1)).collect(),
-                    1,
-                )
-            });
-            cache.rotation = rotation;
+            cache.k_state_bumhr = k_state_bumhr;
+            cache.v_state_buhp = v_state_buhp;
+            cache.rotation = new_rotation;
 
             (out_bm, cache)
         }

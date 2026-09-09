@@ -202,10 +202,9 @@ impl RotationKind {
 /// `state_rank` it turns, and how far one step may turn it.
 ///
 /// Carried by [`Mamba3`](crate::mamba3::mamba3::Mamba3) and handed to
-/// [`rotate_bc_forward`] / [`rotate_bc_step`] so that every site derives the
-/// per-step rotation from **one** definition — the two used to spell the
-/// formula out separately, which is exactly the kind of duplication that lets
-/// `forward` and `step` drift apart.
+/// [`rotate_bc_forward`], the one site that derives the per-step rotation —
+/// `step` reaches it too, its token being a sequence of `micro_steps`
+/// positions, so `forward` and `step` cannot drift apart here by construction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RotationSpec {
     /// Which rotational-state algebra ([`RotationKind`]).
@@ -1082,92 +1081,6 @@ pub fn rotate_bc_forward(
                 _ => RotationState::Quaternion(final_bhk4),
             };
             (b, c, state)
-        }
-    }
-}
-
-/// Single-token counterpart of [`rotate_bc_forward`] for the recurrent `step`.
-///
-/// # Shapes
-/// - `rot_ba`  : `[batch, num_rotation_channels]`, `None` for Real1D.
-/// - `dt_bh`   : `[batch, nheads]`.
-/// - `b_bmhr` / `c_bmhr` : `[batch, mimo_rank, nheads, state_rank]`.
-pub fn rotate_bc_step(
-    rot_ba: Option<Tensor<2>>,
-    dt_bh: Tensor<2>,
-    prev: RotationState,
-    b_bmhr: Tensor<4>,
-    c_bmhr: Tensor<4>,
-    spec: RotationSpec,
-) -> (Tensor<4>, Tensor<4>, RotationState) {
-    let [batch, mimo_rank, nheads, _state_rank] = b_bmhr.dims();
-    let RotationSpec {
-        kind,
-        rope_dim,
-        range,
-    } = spec;
-    let rot = |r: Option<Tensor<2>>| r.expect("a rotating kind projects rotation channels");
-    match kind {
-        RotationKind::Real1D => (b_bmhr, c_bmhr, prev.expect_real()),
-        RotationKind::Complex2D => {
-            let rot_ba = rot(rot_ba);
-            let prev_angle_bha = prev.angle();
-            let num_rope_angles = prev_angle_bha.dims()[2];
-            let raw_angle_bha = angle_increment::<2, 3>(rot_ba, dt_bh, range);
-            let new_cum_angle_bha = wrap_angle(prev_angle_bha + raw_angle_bha);
-            let new_cum_angle_bmha = new_cum_angle_bha.clone().unsqueeze_dim::<4>(1).expand([
-                batch,
-                mimo_rank,
-                nheads,
-                num_rope_angles,
-            ]);
-            let rotate_pairwise = mimo_rank == 1;
-            let b = apply_rope_partial::<4>(
-                b_bmhr,
-                new_cum_angle_bmha.clone(),
-                rope_dim,
-                rotate_pairwise,
-            );
-            let c = apply_rope_partial::<4>(c_bmhr, new_cum_angle_bmha, rope_dim, rotate_pairwise);
-            (b, c, RotationState::Angle(new_cum_angle_bha))
-        }
-        RotationKind::Quaternion4D | RotationKind::Rotor4D => {
-            let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
-            let stack = prev_q_bhk4.dims()[2];
-            assert_eq!(rope_dim, blocks * 4, "cache/block rotation width mismatch");
-            let rope_width = rope_dim;
-            // The same bounded generator as `rotate_bc_forward` (see the note there).
-            let g_bhk3 = generator_increment::<2, 3, 4>(rot(rot_ba), dt_bh, stack, range);
-            let q_step_bhk4 = quat_from_scaled_axis::<4>(g_bhk3);
-            // Single step: Qₜ = qₜ ⊗ Qₜ₋₁ — and, stacked alongside it for
-            // Rotor4D, Tₜ = pₜ ⊗ Tₜ₋₁ (the same left fold, see [`RotationState::Rotor`]).
-            let new_q_bhk4 = quat_normalize(quat_mul(q_step_bhk4, prev_q_bhk4));
-            let over_mimo = |q_bhj4: Tensor<4>| {
-                q_bhj4
-                    .unsqueeze_dim::<5>(1)
-                    .expand([batch, mimo_rank, nheads, blocks, 4])
-            };
-            match kind {
-                RotationKind::Rotor4D => {
-                    let (left, right) = split_rotor(new_q_bhk4.clone());
-                    let ql = over_mimo(quat_conj(left));
-                    let qr = over_mimo(right);
-                    let b = rotate_blocks_two_sided_partial::<4, 5>(
-                        b_bmhr,
-                        ql.clone(),
-                        qr.clone(),
-                        rope_width,
-                    );
-                    let c = rotate_blocks_two_sided_partial::<4, 5>(c_bmhr, ql, qr, rope_width);
-                    (b, c, RotationState::Rotor(new_q_bhk4))
-                }
-                _ => {
-                    let conj_bmhj4 = over_mimo(quat_conj(new_q_bhk4.clone()));
-                    let b = rotate_blocks_partial::<4, 5>(b_bmhr, conj_bmhj4.clone(), rope_width);
-                    let c = rotate_blocks_partial::<4, 5>(c_bmhr, conj_bmhj4, rope_width);
-                    (b, c, RotationState::Quaternion(new_q_bhk4))
-                }
-            }
         }
     }
 }

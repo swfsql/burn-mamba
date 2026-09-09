@@ -137,7 +137,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   the additive `−∞` causal mask over `(read row, folded source)` — built as `triu(diagonal)`
   on the folded grid, then row-sliced by `read_rows`, so it is the same statement twice.
   Both are the identity at `stride = 1`, which is why `micro_steps = 1` and Mamba-2 keep
-  the exact op graph they had. `mod prim` mirrors them on `F<B,_>` for the recompute
+  the exact op graph they had; `step` reads the axis too, its token being a block of `u`
+  positions with one read row. `mod prim` mirrors them on `F<B,_>` for the recompute
   backwards and adds `scatter_read_rows`, `read_rows`' transpose — what autodiff does for
   the other two SSD paths and the hand-written ones must do themselves. Non-obvious: the
   `A` floor is `-softplus(x).clamp(a_floor, ∞)` — the clamp must bind the **positive**
@@ -202,18 +203,21 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   outright and this is one plain SSD pass.
   `forward` folds the micro-steps in right after the split and
   collapses back after the SSD (so between them `s` counts micro-steps and `tokens` is the
-  only token-resolution name); `step` loops the recurrence `u` times and reads out once,
-  driving the tap FIFO **tap → decay the survivors → push** so a slot's `x` accumulates
-  exactly the `α`s between its own position and the one that taps it (at lag 1 nothing
-  survives a tap, so nothing is ever decayed and `β = να` is the whole coefficient). A
-  two-tap pattern needs no second buffer: it reads the same FIFO twice — oldest slot for
-  its lag-`u` tap, newest (which carries the empty decay product) for the lag-1 one.
+  only token-resolution name); `step` folds the same way over a block of `u` positions and
+  solves it **in closed form** rather than walking it — the transition inside a token is the
+  scalar `α`, so `h = (∏ⱼαⱼ)·h₋₁ + Σⱼ wⱼ·writeⱼ` with `wⱼ = ∏_{r>j}αᵣ`, which is
+  `tail_decay` over the whole block instead of its last `lag`. Every write is an outer
+  product into one state, so transporting them and fusing `(u, mimo_rank)` into one
+  contracted axis makes each side of the recurrence a single `mimo_outer_sum` and a decode
+  step costs the same launches at every `u` (at `u = 1` the fused axis is `mimo_rank` and
+  the op graph is unchanged). The taps and the FIFO handed on are `forward`'s own
+  `shift_stream`/`interior_gap_decay`/`save_tap_slots`, so the two cannot drift.
   `step_double_ssd` is reused (via cache conversion) for
   single-ssd decoding; it is factored through pub(crate) `StepProjection`/`step_project`
-  (in-proj → coeffs → QK-norm, pre-rotation; per-micro-step streams keep a `u` axis that
-  `MicroProjection`/`StepProjection::micro(j)` peels, `z`/`C` are per token; `rot_ba` is
-  `None` under `Real1D`), `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and
-  `step_finish`
+  (in-proj → coeffs → QK-norm, pre-rotation; per-micro-step streams carry a `u` axis and are
+  consumed whole, `z` is per token and `C` sits on the read axis's single row as
+  `c_b1mhr`; `rot_bua` is `None` under `Real1D`),
+  `step_readout` (state×C einsum, `_siso`/`_mimo` branches) and `step_finish`
   (D-skip, gate/gated-norm, MIMO aggregation, out-proj). `rotation/rope.rs`'s `apply_rope`/`apply_rope_partial` (rotate
   last-dim pairs; interleaved/NeoX SISO vs half-and-half/GPT-J MIMO; `rope_dim > 0`
   required) and `wrap_angle` are used by **both** pathways.
@@ -297,7 +301,11 @@ and the output — never leave token resolution, and neither does the `y` the SS
 (`helpers::read_rows`, `Mamba3*SsdInput::read_stride`). `unfold_micro_bs`/`unfold_micro_b`
 reinterpret a `u`-wide in-proj segment as `u` positions (a pure reshape: the projection
 already lays micro-steps out contiguously); `last_micro4` takes the `x` the readout is
-contemporaneous with, for the `D` skip.
+contemporaneous with, for the `D` skip. `step` folds the same way over a block of `u`
+positions and solves it in closed form (scalar transition ⇒
+`h = (∏ⱼαⱼ)·h₋₁ + Σⱼwⱼ·writeⱼ`, every write an outer product into one state, so one
+`mimo_outer_sum` per side over a fused `(u·mimo_rank)` axis), which makes a decode step's
+launch count `u`-independent.
 Why it is a Mamba-3 dial and not a Mamba-2 one: the curvature is isotropic, so every
 per-micro-step factor is a scalar and scalars commute — `u` micro-writes provably collapse
 into one decay-weighted rank-`u` write, and the rotation must come from the *step size*
@@ -349,7 +357,8 @@ any of them, `quat_stack(kind)` unwraps either quaternion one and rejects a mism
 variant; `Real` holds a tensor-less `NoRotation` — Burn's enum `Module` derive wants exactly
 one field per variant)
 + `RotationSpec{kind,rope_dim,range}` (from `Mamba3::rotation_spec()`);
-forward/step dispatch via `rotate_bc_forward`/`rotate_bc_step`; runs on both pathways.
+**one** entry point, `rotate_bc_forward` — `step` reaches it too, handing it its token's
+`u` positions — and it runs on both pathways.
 `Rotor4D` is the two-sided `v ↦ q⊗v⊗p̄`, i.e. every element of `SO(4) ≅ (SU(2)×SU(2))/±1`.
 The conjugation reverses the right-hand order **twice**, so `Tₜ = pₜ⊗⋯⊗p₁` is the *same*
 left fold as `Qₜ`: both factors stack on one block axis and the generator split, the scan
@@ -359,10 +368,10 @@ and the normalisation run once over `2·blocks`, unbranched — only the applica
 planes turn by the same angle), so `Quaternion4D` cannot express two independent per-pair
 angles; two-sided the planes turn by `a∓b`. `p=q` gives the adjoint `SO(3)`.
 `Real1D` is the trivial group at the bottom of the ladder, and it is structural, not a
-zeroed knob: no in-projection channels (so `rotate_bc_forward`/`_step` take an
-`Option<Tensor>` and hand `prev` straight back), no accumulator, `B`/`C` untouched. It is
+zeroed knob: no in-projection channels (so `rotate_bc_forward` takes an
+`Option<Tensor>` and hands `prev` straight back), no accumulator, `B`/`C` untouched. It is
 what a rotation ablation selects — `rope_fraction` has no `0` setting.
-`forward` and `step` both derive the per-step rotation from one pair of
+The per-step rotation is derived from one pair of
 helpers — `angle_increment` (`Δ·range·π·tanh(ϑ)`, shared across heads) and
 `generator_increment` (`Δ·range·π·tanh(‖r‖)·r̂`, **per head** and block, channels laid out
 `[head][block][xyz]` — for `Rotor4D` the block axis is `[left…|right…]`, so the bound
@@ -374,8 +383,8 @@ forms norms scale-free, since `‖r‖²` over raw in-projection channels overfl
 `|r|≈250` and `∞` divides back to a *zero* rotation; the rotated width comes from
 `rope_dim`, asserted equal to the accumulator's `blocks·4` rather than read off it, and a
 partial quaternion rotation must land on whole 4-blocks;
-`rotate_bc_forward` renormalises the scan's prefixes (`step` normalises per step) so a
-drifted product turns B/C without rescaling them.
+`rotate_bc_forward` renormalises the scan's prefixes, so a drifted product turns B/C
+without rescaling them.
 Tests: the RoPE factoring survives non-commutativity (and, against materialised
 `L_q·R_p̄` matmuls, two-sidedness), `k=2` reproduces the production `apply_rope`,
 `range=1` reproduces the reference angle, `Real1D` equals any kind whose generator is

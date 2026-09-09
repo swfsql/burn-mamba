@@ -84,7 +84,8 @@ src/
 │  │                 optional tails: rotation, μ, λ), prefix_sum (the blocked
 │  │                 inclusive scan every sequence-length cumsum goes through),
 │  │                 and the **read axis** (read_rows / read_causal_mask, + a
-│  │                 `prim` twin on `F<B,_>` adding scatter_read_rows)
+│  │                 `prim` twin on `F<B,_>` adding scatter_read_rows), which
+│  │                 `step` reads too — its token is a `u`-block with one read row
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
 │  ├─ trapezoid.rs   Trapezoid: which earlier sample(s) the β tap reads — the
@@ -104,7 +105,9 @@ src/
 │  ├─ rotation/      transition rotation (Real1D | Complex2D | Quaternion4D | Rotor4D)
 │  │                 + rope.rs (the mechanical pairwise rotation of the abelian path)
 │  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
-│  │                 per-step definition. Real1D = the trivial group: no in-proj
+│  │                 per-step definition, consumed by the one entry point
+│  │                 rotate_bc_forward (`step` hands it its `u` positions).
+│  │                 Real1D = the trivial group: no in-proj
 │  │                 channels, no cache accumulator, odd state_rank ok (scalar 1).
 │  │                 Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors stacked
 │  │                 on one block axis ⇒ one scan). The abelian angle scan is
@@ -112,7 +115,8 @@ src/
 │  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
 │  │                 folded into the sequence axis (no new kernel); u=1 is stock.
 │  │                 Its module doc is where the chunk's read/write axis split
-│  │                 (`u` widens the writes only) is stated
+│  │                 (`u` widens the writes only) is stated, and where `step`'s
+│  │                 closed form for one folded block is derived
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
@@ -383,6 +387,14 @@ is a multiple of `u`, which makes a chunk's read rows a contiguous run of tokens
 reshape, not a gather. Cost is `u`× the recurrence plus `(u−1)·(d_inner+bc+3·nheads+
 rot)` in-proj columns (`4·nheads` under a two-tap `Trapezoid`).
 
+`step` folds the same way, over a **block** of `u` positions, and solves it in closed form
+rather than walking it: the transition inside a token is the scalar `α`, so
+`h = (∏ⱼαⱼ)·h₋₁ + Σⱼwⱼ·writeⱼ` (`wⱼ = ∏_{r>j}αᵣ`, which is `helpers::tail_decay` over the
+whole block), and every write is an outer product into one state, so transporting them and
+fusing `(u, mimo_rank)` into one contracted axis makes each side a single
+`helpers::mimo_outer_sum`. A decode step therefore costs the same launches at every `u`,
+and its taps, FIFO and rotation are `forward`'s own helpers, so the two cannot drift.
+
 What `u` buys is decided by the `RotationKind`, and the split is sharp. `Real1D`: the
 factors are scalars and commute, so it widens only the write — the *sequential* reading of
 the cell `mimo_rank` occupies *jointly* (exactly: `MambaProduct(u=M)` reproduces a whole
@@ -434,7 +446,9 @@ reimplementing them.
   consecutive positions of the existing recurrence, so only the per-micro-step in-proj
   segments widen and the state and caches are untouched. What the SSD kernels take from
   it is one number, `read_stride`: the fold is on a chunk's *write* axis, its *read* axis
-  stays at token resolution (above). Unlike DeltaProduct every
+  stays at token resolution (above). `step` takes the same fold with no chunk at all — one
+  block of `u` positions, solved in closed form, so decode's launch count does not move
+  with `u`. Unlike DeltaProduct every
   micro-step carries its own decay: Mamba has no forget gate separate from its step size
   (`α=exp(ΔA)`, and `Δ` also weights the write and paces the rotation), and pinning
   `α ≡ 1` on the interior steps would silence the rotation with it. A scalar decay

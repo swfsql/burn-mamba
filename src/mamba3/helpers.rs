@@ -210,8 +210,9 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 // folded `chunk_len`; the token is **read** once, at its last micro-step, so
 // the target axis is `chunk_len / u` — the rows whose `y` survives, everything
 // else being multiplied by a zero gradient. `read_stride` is that `u` (and `1`
-// wherever there is no fold: Mamba-2, `micro_steps = 1`, the `step` path),
-// which makes both helpers below the identity there.
+// wherever there is no fold: Mamba-2, `micro_steps = 1`), which makes both
+// helpers below the identity there. `step` reads the axis too, its token being
+// a block of `u` positions with one read row.
 //
 // The alignment is what keeps this a reshape rather than a gather:
 // `chunk_len` is a multiple of `read_stride`

@@ -1280,11 +1280,13 @@ fn assert_cache_parity(
 /// at folded lengths on both sides of
 /// [`prefix_sum`](crate::mamba3::helpers::prefix_sum)'s blocking threshold.
 ///
-/// `step` accumulates the cumulative angle one position at a time
-/// ([`rotate_bc_step`]) and so never runs a scan at all. That makes it the
-/// oracle which outlives whichever algorithm `forward` builds the prefix with —
-/// `Tensor::cumsum` once, the blocked scan now, whatever replaces it — which is
-/// the whole point of pinning the contract here rather than against the op.
+/// `step` scans one token's `micro_steps` at a time and carries the rest
+/// through the cache, so its axis is `u` — below
+/// [`scan_block`](crate::mamba3::helpers::scan_block) at any usable `u`, hence
+/// never the blocked branch. That makes it the oracle which outlives whichever
+/// algorithm `forward` builds the prefix with — `Tensor::cumsum` once, the
+/// blocked scan now, whatever replaces it — which is the whole point of pinning
+/// the contract here rather than against the op.
 ///
 /// The cases are the branch cases: a folded axis inside one block, one spanning
 /// several exactly, and one with a partial last block — the middle one reached

@@ -114,6 +114,15 @@
 //!   the last micro-step's `x` — the value the readout is contemporaneous with
 //!   ([`last_micro4`]).
 //!
+//! `step` folds the same way, over a block of `u` positions rather than a
+//! sequence of them, and evaluates that block **at once**: with the rotation
+//! factored out the transition inside a token is the scalar `α`, so the block
+//! has the closed form `h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ·writeⱼ` and every write in it
+//! is an outer product into one shared state. Transporting them by
+//! `wⱼ = ∏_{r>j} αᵣ` and fusing `(u, mimo_rank)` into one contracted axis makes
+//! each side of the recurrence a single `mimo_outer_sum`, so a decode step costs
+//! the same number of kernel launches at every `u`.
+//!
 //! Everything else is per micro-step, including the decay. Mamba has no forget
 //! gate separate from its step size — `α = exp(ΔA)` and `Δ` also weights the
 //! write and paces the rotation — so DeltaProduct's "forget gate on micro-step
