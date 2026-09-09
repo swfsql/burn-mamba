@@ -255,6 +255,79 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     (chunk_input_state_bnhpr, final_state_bhpr)
 }
 
+/// Backward of [`k4_ssd_state_passing`] — the reverse of its scalar-decay scan,
+/// and the only part of the recompute backward that is still a walk.
+///
+/// Forward, writing `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
+/// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and `d_sᵢ = decayᵢ·d_sᵢ₊₁ +
+/// d_chunk_input_stateᵢ`, which the walk ends on as `d_initial`. `d_decayᵢ =
+/// d_sᵢ₊₁·sᵢ` needs no walk — `decay` is one scalar per `(b, h, n)`, so it comes
+/// out of the `(p, r)` sum and the whole stream is one batched product.
+///
+/// # Returns
+/// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
+/// - `d_da_chunk_end_bhn` — gradient of the per-chunk log-decay
+/// - `d_initial_state_bhpr`
+pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
+    d_chunk_input_state_bnhpr: F<B, 5>,
+    chunk_input_state_bnhpr: F<B, 5>,
+    da_chunk_end_bhn: F<B, 3>,
+    d_final_state_bhpr: F<B, 4>,
+) -> (F<B, 5>, F<B, 3>, F<B, 4>) {
+    let [batch, nchunks, nheads, per_head_dim, state_rank] = chunk_input_state_bnhpr.dims();
+
+    let mut d_running_state_bhpr = d_final_state_bhpr;
+    let mut d_intra_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    for i_chunk in (0..nchunks).rev() {
+        d_intra_vec_bhpr.push(d_running_state_bhpr.clone());
+
+        let decay_bhpr: F<B, 4> = da_chunk_end_bhn
+            .clone()
+            .slice(s![.., .., i_chunk]) // da_chunk_end_bh1
+            .exp()
+            .unsqueeze_dim::<4>(3) // decay_bh11
+            .expand([batch, nheads, per_head_dim, state_rank]);
+        let d_chunk_input_state_bhpr: F<B, 4> = d_chunk_input_state_bnhpr
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1);
+
+        d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        san(&d_running_state_bhpr);
+    }
+    d_intra_vec_bhpr.reverse();
+    let d_intra_chunk_state_bnhpr: F<B, 5> = F::stack(d_intra_vec_bhpr, 1);
+
+    let d_decay_bhn: F<B, 3> = (d_intra_chunk_state_bnhpr.clone() * chunk_input_state_bnhpr)
+        .reshape([batch, nchunks, nheads, per_head_dim * state_rank])
+        .sum_dim(3) // d_decay_bnh1
+        .squeeze_dim::<3>(3) // d_decay_bnh
+        .permute([0, 2, 1]); // d_decay_bhn
+    // decay = exp(da_chunk_end), so the chain rule multiplies it back in.
+    let d_da_chunk_end_bhn = d_decay_bhn * da_chunk_end_bhn.exp();
+    san(&d_da_chunk_end_bhn);
+
+    (
+        d_intra_chunk_state_bnhpr,
+        d_da_chunk_end_bhn,
+        d_running_state_bhpr,
+    )
+}
+
+/// Concatenate a chunk-group pass's per-group outputs back along the chunk
+/// axis — and nothing at all when the pass ran in one group, which a short
+/// enough chunk axis leaves it in (see
+/// [`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
+pub(crate) fn cat_chunk_groups<B: Backend, const D: usize>(
+    mut groups: Vec<F<B, D>>,
+    dim: usize,
+) -> F<B, D> {
+    match groups.len() {
+        1 => groups.pop().expect("one group"),
+        _ => F::cat(groups, dim),
+    }
+}
+
 /// Primitive port of [`super::super::serial::k5_ssd_chunk_scan`].
 ///
 /// Combines the intra-chunk (ORANGE, MIMO causal) and inter-chunk (BLUE,

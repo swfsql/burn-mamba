@@ -107,6 +107,18 @@ fn the_schedule_is_monotone_in_the_fold() {
     }
 }
 
+/// The recompute backward's chunk-local pass costs two iterations at any chunk
+/// count, and never holds more of the chunk axis than the forward's own K5.
+#[test]
+fn the_backward_walk_is_two_iterations() {
+    for nchunks in [1usize, 2, 3, 4, 5, 16, 31, 32, 1024] {
+        let group = Mamba3SsdPath::backward_chunk_group(nchunks);
+        assert!((1..=nchunks).contains(&group), "{group} is not a group of {nchunks}");
+        assert!(2 * group <= nchunks + 1, "{group} of {nchunks} is over half the axis");
+        assert!(nchunks.div_ceil(group) <= 2, "{nchunks} in groups of {group} needs a third pass");
+    }
+}
+
 /// An explicit chunk length wins over the schedule, at every dial setting.
 #[test]
 fn an_explicit_chunk_len_is_not_overridden() {

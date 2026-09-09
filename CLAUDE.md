@@ -27,8 +27,9 @@ cargo check                 # type-check the lib surface
 cargo test --lib --examples -- --test-threads=1 # run tests (any backend; flex = CPU default)
 cargo doc --all --no-deps   # build docs
 cargo run --example reset-majority -- --training --inference
-./bench.sh                  # benchmarks — run by the user, never by you
-./kernels.sh                # kernel-launch counts — deterministic, safe to run
+# benches run by the user, not by you:
+./bench.sh
+./kernels.sh
 ```
 
 - **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,

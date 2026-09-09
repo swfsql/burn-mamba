@@ -149,6 +149,28 @@ impl Mamba3SsdPath {
         }
     }
 
+    /// Chunks per iteration of the [`Self::SerialRecalculated`] backward's
+    /// chunk-local pass — how far that pass batches the chunk axis.
+    ///
+    /// The recompute backward has no reason to *walk* that axis: every
+    /// chunk-local gradient (the state-to-output term and the intra-chunk
+    /// triangular one) needs the chunk's own slices plus its input state, which
+    /// the recomputed K4 already produced batched. Only the state gradient
+    /// itself is a scan, and it is a few ops per chunk.
+    ///
+    /// What batching the rest costs is memory: the score `[batch, group,
+    /// nheads, read, fused]` is live `group`-wide, and this pass holds about six
+    /// score-shaped tensors at its peak where the forward's K5 holds about four
+    /// at **full** width. **Half** therefore keeps it under the peak the forward
+    /// already reaches, while still cutting the walk to two iterations at any
+    /// chunk count. Being a ratio of live tensors, the bound needs neither a
+    /// dimension nor an absolute budget. The path's actual promise — not
+    /// carrying intermediates across the forward/backward boundary — is
+    /// untouched either way: by the time this runs, the forward's own are freed.
+    pub fn backward_chunk_group(nchunks: usize) -> usize {
+        nchunks.div_ceil(2).max(1)
+    }
+
     /// The recommended default path for a given block: [`Self::SerialRecalculated`]
     /// with [`Self::optimal_chunk_len`] for the block's dimensions.
     pub fn default_optimal_from_block(block: &Mamba3) -> Self {

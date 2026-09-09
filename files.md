@@ -158,7 +158,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   The score is then `C·m²` per token at every `u`, and `nchunks ∝ u` rather than `u²` —
   `info/architecture-deltas.md` §8. `chunk_len_or_optimal` applies the same rounding to a
   user-supplied chunk, which is what makes a chunk's read rows a contiguous run of tokens
-  (a reshape, not a gather).
+  (a reshape, not a gather). `backward_chunk_group(nchunks) = ⌈n/2⌉` is the recompute
+  backward's own schedule: its chunk-**local** gradients are batched (only K4's state
+  passing is a scan), and **half** is the ratio that keeps that pass's ~6 live
+  score-shaped tensors under the forward K5's ~4 at full width — no dimension, no budget.
 - **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample(s)
   the `β` tap reads. A choice that exists only at `micro_steps > 1`
   (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks how many
@@ -235,7 +238,11 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   Same three algorithms as Mamba-2 with the `mimo_rank` axis fused into the chunk reshape;
   `serial_recalculated/` defines `Mamba3DoubleSsdBackendExt` + custom backward, whose
   `d_da` splits in two — the target term scatters back onto the folded axis, the source
-  term is already on it.
+  term is already on it. It also owns the K1–K4 primitives **both** pathways' backwards
+  reuse, including `k4_ssd_state_passing_backward`: the reverse of the state-passing scan,
+  the only walk either backward keeps (`d_decay` needs none — `decay` is one scalar per
+  `(b,h,n)`, so it leaves the `(p,r)` sum and the stream is one batched product). The
+  chunk-local rest runs batched over `Mamba3SsdPath::backward_chunk_group` chunks.
 
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
