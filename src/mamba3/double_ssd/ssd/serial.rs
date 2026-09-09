@@ -229,6 +229,17 @@ pub fn k3_ssd_chunk_state(
 
 /// Propagate hidden state across chunk boundaries using a sequential scan.
 ///
+/// The walk is deliberate. `hₙ = dₙ·hₙ₋₁ + sₙ` has a **scalar** `dₙ`, so it is
+/// the affine monoid `(d₁,s₁)∘(d₂,s₂) = (d₁d₂, d₂s₁+s₂)` and the whole stream
+/// is equally one masked matmul — the form [`minimal`](super::minimal) uses for
+/// it. That form trades `3n` launches for `O(n²)` work plus a
+/// `(b, n, h) → (b, h, n)` round-trip, and the launches are the side that is
+/// already free: in a real pass they queue behind GPU work. Swapping the two
+/// moves `forward` by less than the run-to-run noise at 32 *and* 64 chunks
+/// (CUDA, `d_model = 1024`, sequence 256 and 2048) and costs `train` ~2%.
+/// Timed **alone** the same swap looks like a 2× win on this kernel — the
+/// measurement that does not carry over.
+///
 /// This kernel is independent of MIMO rank — it operates on the `[nheads, per_head_dim, state_rank]` state
 /// which is already aggregated over ranks.
 ///

@@ -256,7 +256,8 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
 }
 
 /// Backward of [`k4_ssd_state_passing`] — the reverse of its scalar-decay scan,
-/// and the only part of the recompute backward that is still a walk.
+/// and the only part of the recompute backward that is still a walk (which is
+/// the forward's own choice, and measured there).
 ///
 /// Forward, writing `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
 /// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and `d_sᵢ = decayᵢ·d_sᵢ₊₁ +
