@@ -15,13 +15,13 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 |---|---|---|
 | `mamba1` | 1319 | 795 |
 | `mamba2` | 103 | 75 |
-| `mamba3/siso` | 187 | 117 |
-| `mamba3/mimo-rank1` | 197 | 124 |
-| `mamba3/mimo-rank4` | 230 | 145 |
-| `mamba3/real1d` | 140 | 92 |
-| `mamba3/quaternion4d` | 625 | 209 |
-| `mamba3/rotor4d` | 707 | 231 |
-| `mamba3/siso-double-ssd` | 238 | 161 |
+| `mamba3/siso` | 190 | 117 |
+| `mamba3/mimo-rank1` | 200 | 124 |
+| `mamba3/mimo-rank4` | 234 | 146 |
+| `mamba3/real1d` | 140 | 90 |
+| `mamba3/quaternion4d` | 625 | 207 |
+| `mamba3/rotor4d` | 707 | 229 |
+| `mamba3/siso-double-ssd` | 241 | 159 |
 
 ## `train` — forward + backward (autodiff device)
 
@@ -29,13 +29,13 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 |---|---|---|
 | `mamba1` | 7298 | 5775 |
 | `mamba2` | 3088 | 2908 |
-| `mamba3/siso` | 772 | 471 |
-| `mamba3/mimo-rank1` | 796 | 488 |
-| `mamba3/mimo-rank4` | 1120 | 695 |
-| `mamba3/real1d` | 651 | 412 |
-| `mamba3/quaternion4d` | 1894 | 738 |
-| `mamba3/rotor4d` | 2158 | 937 |
-| `mamba3/siso-double-ssd` | 1065 | 683 |
+| `mamba3/siso` | 682 | 408 |
+| `mamba3/mimo-rank1` | 706 | 425 |
+| `mamba3/mimo-rank4` | 822 | 498 |
+| `mamba3/real1d` | 549 | 338 |
+| `mamba3/quaternion4d` | 1792 | 665 |
+| `mamba3/rotor4d` | 2056 | 862 |
+| `mamba3/siso-double-ssd` | 909 | 566 |
 
 ## `step` — one recurrent decode step
 
@@ -43,10 +43,10 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 |---|---|---|
 | `mamba1` | 39 | 20 |
 | `mamba2` | 49 | 35 |
-| `mamba3/siso` | 117 | 63 |
-| `mamba3/mimo-rank1` | 127 | 69 |
-| `mamba3/mimo-rank4` | 131 | 73 |
-| `mamba3/real1d` | 73 | 43 |
-| `mamba3/quaternion4d` | 243 | 85 |
-| `mamba3/rotor4d` | 325 | 107 |
-| `mamba3/siso-double-ssd` | 117 | 63 |
+| `mamba3/siso` | 118 | 64 |
+| `mamba3/mimo-rank1` | 128 | 70 |
+| `mamba3/mimo-rank4` | 133 | 76 |
+| `mamba3/real1d` | 73 | 41 |
+| `mamba3/quaternion4d` | 249 | 98 |
+| `mamba3/rotor4d` | 331 | 120 |
+| `mamba3/siso-double-ssd` | 118 | 64 |
