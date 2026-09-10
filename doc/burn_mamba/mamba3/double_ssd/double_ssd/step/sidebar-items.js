@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["MicroProjection","StepProjection"]};
+window.SIDEBAR_ITEMS = {"struct":["StepProjection"]};

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/single_ssd/token_band.rs`."><title>token_band.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (f248f4038 2026-09-05)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/single_ssd/</div>token_band.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The lag-`u` correction band (single-SSD, [`Vertical`])
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/single_ssd/token_band.rs`."><title>token_band.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (a36d05efa 2026-09-09)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/single_ssd/</div>token_band.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The lag-`u` correction band (single-SSD, [`Vertical`])
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! [`Vertical`]: crate::mamba3::trapezoid::Trapezoid::Vertical
 <a href=#4 id=4 data-nosnippet>4</a>//!
@@ -19,9 +19,9 @@
 <a href=#19 id=19 data-nosnippet>19</a>//!
 <a href=#20 id=20 data-nosnippet>20</a>//! The band would straddle chunk boundaries, and the part of it that arrived
 <a href=#21 id=21 data-nosnippet>21</a>//! through the chunk's initial state could not be un-weighted. It does not have
-<a href=#22 id=22 data-nosnippet>22</a>//! to: the only outputs that survive `forward` are each token's **last**
-<a href=#23 id=23 data-nosnippet>23</a>//! micro-step ([`crate::mamba3::product::last_micro5`]), and for a read at
-<a href=#24 id=24 data-nosnippet>24</a>//! folded position `p = τ·u + (u−1)` the band `{p−u+1 … p}` is *exactly token
+<a href=#22 id=22 data-nosnippet>22</a>//! to: the only outputs `forward` ever asks for are each token's **last**
+<a href=#23 id=23 data-nosnippet>23</a>//! micro-step (the chunk's [read axis](crate::mamba3::product)), and for a read
+<a href=#24 id=24 data-nosnippet>24</a>//! at folded position `p = τ·u + (u−1)` the band `{p−u+1 … p}` is *exactly token
 <a href=#25 id=25 data-nosnippet>25</a>//! `τ`*. So the correction is one small contraction per token, applied after the
 <a href=#26 id=26 data-nosnippet>26</a>//! kernel at token resolution, with no mask change, no chunk-length constraint
 <a href=#27 id=27 data-nosnippet>27</a>//! and no cross-chunk term.
@@ -31,7 +31,7 @@
 <a href=#31 id=31 data-nosnippet>31</a>//! **everything a caller can observe** — the block's output and every field of
 <a href=#32 id=32 data-nosnippet>32</a>//! the returned cache — and that is all `forward_single_ssd` ever promised. What
 <a href=#33 id=33 data-nosnippet>33</a>//! is not corrected is the intermediate `y` at the `u−1` folded positions per
-<a href=#34 id=34 data-nosnippet>34</a>//! token that [`last_micro5`](crate::mamba3::product::last_micro5) discards:
+<a href=#34 id=34 data-nosnippet>34</a>//! token the read axis never asks for (and, since the read axis, never computes):
 <a href=#35 id=35 data-nosnippet>35</a>//! partial sums on the way to the read, never a value the block computes. The
 <a href=#36 id=36 data-nosnippet>36</a>//! **state** is exact at every position in both pathways, which is what the
 <a href=#37 id=37 data-nosnippet>37</a>//! caches carry and what a split prefill continues from.
@@ -69,63 +69,63 @@
 <a href=#69 id=69 data-nosnippet>69</a>/// back to the sample that owes it (`νₛ₊ᵤ`), never the whole `scaleₛ − γₛ`.
 <a href=#70 id=70 data-nosnippet>70</a>///
 <a href=#71 id=71 data-nosnippet>71</a>/// # Shapes
-<a href=#72 id=72 data-nosnippet>72</a>/// - `b_bsmhr`, `c_bsmhr`  : `[batch, sequence, mimo_rank, nheads, state_rank]`
-<a href=#73 id=73 data-nosnippet>73</a>/// - `v_bsmhp`             : `[batch, sequence, mimo_rank, nheads, per_head_dim]`
-<a href=#74 id=74 data-nosnippet>74</a>/// - `excess_bsh`, `da_bsh`: `[batch, sequence, nheads]`
-<a href=#75 id=75 data-nosnippet>75</a>/// - out                   : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
-<a href=#76 id=76 data-nosnippet>76</a>///
-<a href=#77 id=77 data-nosnippet>77</a>/// where `sequence = tokens · micro_steps` is the folded axis.
-<a href=#78 id=78 data-nosnippet>78</a></span><span class="attr">#[allow(non_snake_case)]
-<a href=#79 id=79 data-nosnippet>79</a></span><span class="kw">pub fn </span>token_band_correction(
-<a href=#80 id=80 data-nosnippet>80</a>    v_bsmhp: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#81 id=81 data-nosnippet>81</a>    b_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#82 id=82 data-nosnippet>82</a>    c_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#83 id=83 data-nosnippet>83</a>    excess_bsh: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#84 id=84 data-nosnippet>84</a>    da_bsh: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#85 id=85 data-nosnippet>85</a>    micro_steps: usize,
-<a href=#86 id=86 data-nosnippet>86</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">5</span>&gt;&gt; {
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="kw">let </span>u = micro_steps;
-<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">if </span>u == <span class="number">1 </span>{
-<a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#90 id=90 data-nosnippet>90</a>    }
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">let </span>[batch, sequence, mimo_rank, nheads, per_head_dim] = v_bsmhp.dims();
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="kw">let </span>[.., state_rank] = b_bsmhr.dims();
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span>tokens = sequence / u;
-<a href=#94 id=94 data-nosnippet>94</a>    <span class="comment">// The `u−1` tapped positions per token; the `u`-th is the read itself, whose
-<a href=#95 id=95 data-nosnippet>95</a>    // weight the kernel's γ-diagonal already fixed.
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">let </span>taps = u - <span class="number">1</span>;
-<a href=#97 id=97 data-nosnippet>97</a>
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="comment">// ── The per-tap scalar: the unpaid excess, decayed to the read ────────────
-<a href=#99 id=99 data-nosnippet>99</a>    // `Σ_{r=j+1}^{u−1} da` within the token, i.e. the reverse-exclusive
-<a href=#100 id=100 data-nosnippet>100</a>    // cumulative log-decay of the token's own window.
-<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">let </span>da_btuh = da_bsh.reshape([batch, tokens, u, nheads]);
-<a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">let </span>cumulative_btuh = da_btuh.cumsum(<span class="number">2</span>);
-<a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span>total_bt1h = cumulative_btuh.clone().narrow(<span class="number">2</span>, u - <span class="number">1</span>, <span class="number">1</span>);
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="kw">let </span>decay_btJh = (total_bt1h - cumulative_btuh).exp().narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
-<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">let </span>excess_btJh = excess_bsh
-<a href=#106 id=106 data-nosnippet>106</a>        .reshape([batch, tokens, u, nheads])
-<a href=#107 id=107 data-nosnippet>107</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
-<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>weight_btJh = excess_btJh * decay_btJh;
-<a href=#109 id=109 data-nosnippet>109</a>
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="comment">// ── Fuse (tap, mimo_rank): both are outer products into one state ─────────
-<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">let </span>fused = taps * mimo_rank;
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">let </span>v_btJmhp = v_bsmhp
-<a href=#113 id=113 data-nosnippet>113</a>        .reshape([batch, tokens, u, mimo_rank, nheads, per_head_dim])
-<a href=#114 id=114 data-nosnippet>114</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
-<a href=#115 id=115 data-nosnippet>115</a>    <span class="kw">let </span>v_weighted_btKhp = (v_btJmhp * weight_btJh.unsqueeze_dims::&lt;<span class="number">6</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">3</span>, <span class="number">5</span>]))
-<a href=#116 id=116 data-nosnippet>116</a>        .reshape([batch, tokens, fused, nheads, per_head_dim]);
-<a href=#117 id=117 data-nosnippet>117</a>    <span class="kw">let </span>b_btKhr = b_bsmhr
-<a href=#118 id=118 data-nosnippet>118</a>        .reshape([batch, tokens, u, mimo_rank, nheads, state_rank])
-<a href=#119 id=119 data-nosnippet>119</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps)
-<a href=#120 id=120 data-nosnippet>120</a>        .reshape([batch, tokens, fused, nheads, state_rank]);
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="comment">// The read `C` is the token's last micro-step — the copy carrying the
-<a href=#122 id=122 data-nosnippet>122</a>    // cumulative rotation the readout happens at.
-<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">let </span>c_btmhr = c_bsmhr
-<a href=#124 id=124 data-nosnippet>124</a>        .reshape([batch, tokens, u, mimo_rank, nheads, state_rank])
-<a href=#125 id=125 data-nosnippet>125</a>        .narrow(<span class="number">2</span>, u - <span class="number">1</span>, <span class="number">1</span>)
-<a href=#126 id=126 data-nosnippet>126</a>        .squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>);
+<a href=#72 id=72 data-nosnippet>72</a>/// - `b_bsmhr`             : `[batch, sequence, mimo_rank, nheads, state_rank]`
+<a href=#73 id=73 data-nosnippet>73</a>/// - `c_btmhr`             : `[batch, tokens, mimo_rank, nheads, state_rank]` —
+<a href=#74 id=74 data-nosnippet>74</a>///   already on the read axis, like everywhere else `C` appears
+<a href=#75 id=75 data-nosnippet>75</a>/// - `v_bsmhp`             : `[batch, sequence, mimo_rank, nheads, per_head_dim]`
+<a href=#76 id=76 data-nosnippet>76</a>/// - `excess_bsh`, `da_bsh`: `[batch, sequence, nheads]`
+<a href=#77 id=77 data-nosnippet>77</a>/// - out                   : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
+<a href=#78 id=78 data-nosnippet>78</a>///
+<a href=#79 id=79 data-nosnippet>79</a>/// where `sequence = tokens · micro_steps` is the folded axis.
+<a href=#80 id=80 data-nosnippet>80</a></span><span class="attr">#[allow(non_snake_case)]
+<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub fn </span>token_band_correction(
+<a href=#82 id=82 data-nosnippet>82</a>    v_bsmhp: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#83 id=83 data-nosnippet>83</a>    b_bsmhr: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#84 id=84 data-nosnippet>84</a>    c_btmhr: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#85 id=85 data-nosnippet>85</a>    excess_bsh: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#86 id=86 data-nosnippet>86</a>    da_bsh: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#87 id=87 data-nosnippet>87</a>    micro_steps: usize,
+<a href=#88 id=88 data-nosnippet>88</a>) -&gt; <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">5</span>&gt;&gt; {
+<a href=#89 id=89 data-nosnippet>89</a>    <span class="kw">let </span>u = micro_steps;
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="kw">if </span>u == <span class="number">1 </span>{
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#92 id=92 data-nosnippet>92</a>    }
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="kw">let </span>[batch, sequence, mimo_rank, nheads, per_head_dim] = v_bsmhp.dims();
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span>[.., state_rank] = b_bsmhr.dims();
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">let </span>tokens = sequence / u;
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="macro">debug_assert_eq!</span>(tokens, c_btmhr.dims()[<span class="number">1</span>], <span class="string">"C is on the read axis"</span>);
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="comment">// The `u−1` tapped positions per token; the `u`-th is the read itself, whose
+<a href=#98 id=98 data-nosnippet>98</a>    // weight the kernel's γ-diagonal already fixed.
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">let </span>taps = u - <span class="number">1</span>;
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a>    <span class="comment">// ── The per-tap scalar: the unpaid excess, decayed to the read ────────────
+<a href=#102 id=102 data-nosnippet>102</a>    // `Σ_{r=j+1}^{u−1} da` within the token, i.e. the reverse-exclusive
+<a href=#103 id=103 data-nosnippet>103</a>    // cumulative log-decay of the token's own window.
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="kw">let </span>da_btuh = da_bsh.reshape([batch, tokens, u, nheads]);
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">let </span>cumulative_btuh = da_btuh.cumsum(<span class="number">2</span>);
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>total_bt1h = cumulative_btuh.clone().narrow(<span class="number">2</span>, u - <span class="number">1</span>, <span class="number">1</span>);
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">let </span>decay_btJh = (total_bt1h - cumulative_btuh).exp().narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>excess_btJh = excess_bsh
+<a href=#109 id=109 data-nosnippet>109</a>        .reshape([batch, tokens, u, nheads])
+<a href=#110 id=110 data-nosnippet>110</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="kw">let </span>weight_btJh = excess_btJh * decay_btJh;
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="comment">// ── Fuse (tap, mimo_rank): both are outer products into one state ─────────
+<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">let </span>fused = taps * mimo_rank;
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="kw">let </span>v_btJmhp = v_bsmhp
+<a href=#116 id=116 data-nosnippet>116</a>        .reshape([batch, tokens, u, mimo_rank, nheads, per_head_dim])
+<a href=#117 id=117 data-nosnippet>117</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps);
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="kw">let </span>v_weighted_btKhp = (v_btJmhp * weight_btJh.unsqueeze_dims::&lt;<span class="number">6</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">3</span>, <span class="number">5</span>]))
+<a href=#119 id=119 data-nosnippet>119</a>        .reshape([batch, tokens, fused, nheads, per_head_dim]);
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="kw">let </span>b_btKhr = b_bsmhr
+<a href=#121 id=121 data-nosnippet>121</a>        .reshape([batch, tokens, u, mimo_rank, nheads, state_rank])
+<a href=#122 id=122 data-nosnippet>122</a>        .narrow(<span class="number">2</span>, <span class="number">0</span>, taps)
+<a href=#123 id=123 data-nosnippet>123</a>        .reshape([batch, tokens, fused, nheads, state_rank]);
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="comment">// The read `C` is the token's last micro-step — the copy carrying the
+<a href=#125 id=125 data-nosnippet>125</a>    // cumulative rotation the readout happens at, which is the only one it is
+<a href=#126 id=126 data-nosnippet>126</a>    // ever built at.
 <a href=#127 id=127 data-nosnippet>127</a>
-<a href=#128 id=128 data-nosnippet>128</a>    <span class="comment">// ── (C · Bᵀ) · V, contracting state_rank then the fused axis ──────────────
+<a href=#128 id=128 data-nosnippet>128</a>    // ── (C · Bᵀ) · V, contracting state_rank then the fused axis ──────────────
 <a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">let </span>c_bthmr = c_btmhr.swap_dims(<span class="number">2</span>, <span class="number">3</span>);
 <a href=#130 id=130 data-nosnippet>130</a>    <span class="kw">let </span>b_bthrK = b_btKhr.permute([<span class="number">0</span>, <span class="number">1</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">2</span>]);
 <a href=#131 id=131 data-nosnippet>131</a>    <span class="kw">let </span>qk_bthmK = c_bthmr.matmul(b_bthrK);

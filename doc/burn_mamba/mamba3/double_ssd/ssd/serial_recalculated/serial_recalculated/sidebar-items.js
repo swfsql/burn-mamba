@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["k1_ssd_chunk_cumsum","k2_ssd_bmm","k3_ssd_chunk_state","k4_ssd_state_passing","k5_ssd_chunk_scan"],"trait":["Mamba3DoubleSsdAutodiffBackendExt","Mamba3DoubleSsdBackendExt"]};
+window.SIDEBAR_ITEMS = {"fn":["cat_chunk_groups","k1_ssd_chunk_cumsum","k2_ssd_bmm","k3_ssd_chunk_state","k4_ssd_state_passing","k4_ssd_state_passing_backward","k5_ssd_chunk_scan"],"trait":["Mamba3DoubleSsdAutodiffBackendExt","Mamba3DoubleSsdBackendExt"]};
