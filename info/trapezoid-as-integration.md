@@ -99,8 +99,10 @@ matching `helpers::trapezoidal_coefficients` exactly. `λ ≡ 1` collapses to Ma
 Where a rotation is present the scalar `α_t` becomes `M_t = α_tR_t` with `R_t`
 orthogonal, and **the β tap carries `M_t`** — the older sample is parallel-
 transported into the current frame before being weighted. This is why the caches
-store the raw `(B_{t−1}, x_{t−1})` and re-weight at time `t` rather than storing a
-pre-decayed contribution.
+store the tapped `(B, x)` **un-weighted by the tap's mass**, applying `ν` at time
+`t` rather than storing a pre-weighted contribution. The slot is not otherwise
+raw: `B` carries its own rotation, and at lag `u` (§9) `x` carries its own decay
+to the call boundary, which is what lets a tap span a call.
 
 Two conventions carried over from the companion note. The step-size/curvature
 product is pinned but its factors are not: `η_tρ_t = 1−μ_t` is a **gauge freedom**,

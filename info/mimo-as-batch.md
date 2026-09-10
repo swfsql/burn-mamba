@@ -279,8 +279,10 @@ The `M` ranks share **one** state `S ∈ ℝ^{P×N}`, and the rotation acts on t
 state's `N` axis. So there is exactly one rotation per step no matter how many ranks
 write into it — the rotation is a property of the *state's coordinates*, the rank
 index a property of the *samples*, and they cannot meet. The implementation says the
-same thing operationally: the cumulative angles are projected per (head, plane) and
-**broadcast** over the rank axis.
+same thing operationally: the cumulative angles are per (head, plane) and
+**broadcast** over the rank axis. What is *projected* is per plane at `Complex2D`
+(head-shared, then `Δ`-scaled per head) and per (head, block) at the quaternion
+kinds — neither carries a rank index.
 
 The invariant that makes this checkable is the same-step read/write Gram. For any
 transition of the form `α ×` isometry, `R̄^\top R̄ = I` gives

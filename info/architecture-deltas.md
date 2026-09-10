@@ -100,7 +100,7 @@ families). One head throughout.
 
 | | Mamba-2 | Mamba-3 |
 |---|---|---|
-| in-projection | `[z ǀ x ǀ B ǀ C ǀ Δ]` | `[z ǀ x ǀ B ǀ C ǀ Δ ǀ A ǀ λ ǀ θ]` |
+| in-projection | `[z ǀ x ǀ B ǀ C ǀ Δ]` | `[z ǀ x ǀ B ǀ C ǀ Δ ǀ A ǀ λ ǀ μ* ǀ θ]` |
 | short conv | depthwise, width 4, over `x‖B‖C` | **none** |
 | activation on `x`, `B`, `C` | `SiLU` after the conv | **none** |
 | `B`, `C` normalisation | none | **RMSNorm over `N`**, then a learnable bias, then the rotation |
@@ -111,11 +111,17 @@ families). One head throughout.
 | output | gated RMSNorm(`y`, `z`) → out-proj | `y ⊙ SiLU(z)` → out-proj; the norm is **optional** |
 | skip | `D ⊙ x` per head | unchanged |
 
+`*` `μ` is this crate's segment, not the source's: the mass that splits the left
+endpoint between two taps, present only under a two-tap `Trapezoid`
+([`trapezoid-as-integration.md`](trapezoid-as-integration.md) §9) and folded away
+at `micro_steps = 1`. Every per-micro-step segment widens by `u`; `z` and `C` do
+not.
+
 The consequence of rows 2–4 together is worth stating on its own: **the only
 nonlinearities left on the `B`/`C`/`x` path are the normalisation itself and the
-squashing of the scalar channels** (`softplus` on `Δ` and `A`, `σ` on `λ`, `tanh`
-on `θ`). Values reach the SSD core as raw projections; the gate's `SiLU` is the
-block's only pointwise activation.
+squashing of the scalar channels** (`softplus` on `Δ` and `A`, `σ` on `λ` and `μ`,
+`tanh` on `θ`). Values reach the SSD core as raw projections; the gate's `SiLU` is
+the block's only pointwise activation.
 
 The `B`/`C` path, in the order the reference kernel runs it (`mamba3.py` →
 `mamba3_siso_fwd.py`) and this crate with it (`helpers::qk_norm_expand_bias`, then
@@ -205,12 +211,15 @@ learns its content-dependence on top of that, rather than starting from a
 zero-mean score and having to discover locality.
 
 **The ablation table falls out of the constant term.** `⟨b_C, b_B⟩` is `N` for the
-ones init, `N/4` for `U(0,1)`, `0` for the zero init and `0` in expectation for
-`U(−1,1)` (§4.6) — matching the measured order `15.72 < 15.76 < 16.07 < 16.57` and
-the source's own summary that the model "is not very sensitive to the
-initialization of the biases as long as they are positive". Positivity is not a
-convention: it is what makes the four-term expansion have a floor at all. A
-symmetric init has the same *variance* as the ones init and none of its effect.
+ones init, `N/4` for `U(0,1)`, and `0` for both the zero init and — in expectation
+— `U(−1,1)` (§4.6). That is a *weak* order, and the measured
+`15.72 < 15.76 < 16.07 < 16.57` refines it rather than contradicting it: the floor
+ranks the first two and ties the last two, and what breaks the tie is variance. A
+symmetric init keeps the ones init's two `O(√N)` cross terms and none of its floor,
+where the zero init contributes neither. The weak order carries the source's own
+summary that the model "is not very sensitive to the initialization of the biases
+as long as they are positive". Positivity is not a convention: it is what makes the
+four-term expansion have a floor at all.
 
 **The rotation localises the floor.** Because the bias is added before the rotation,
 both bias vectors are rotated by their own cumulative angles, and the constant term
@@ -346,7 +355,9 @@ the `chunk_size` argument ("64 for SISO, 64/mimo_rank for MIMO"). At `N = P = 64
 `R = 4` the two schedules differ by `2.5×` (§8.4).
 
 This crate fuses the rank onto the chunk axis (`[L·M, L·M]` intra-chunk matrices in
-`single_ssd/ssd/serial.rs`), so the same arithmetic applies verbatim, and
+`single_ssd/ssd/serial.rs`; §8.7 gives the general `[T·M, L·M]`, `T` being the
+chunk's read rows, which this is at `u = 1`), so the same arithmetic applies
+verbatim, and
 `Mamba3SsdPath::optimal_chunk_len` implements it: `√(N·P)` divided by `mimo_rank`,
 then rounded onto the 32 grid and clamped to `32..=512`. At `N = 128`, `P = 64` that
 is `96 / 64 / 32` for a rank of `1 / 2 / ≥4` (§8.5), so the fused axis `C·M` lands at

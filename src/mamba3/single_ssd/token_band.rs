@@ -50,7 +50,7 @@
 //!   corr[τ, m_out, h, p] = Σ_{j<u−1} νᵗᵃᵖ[τ,j] · dcy[τ,j]
 //!                          · Σ_{m_in} (C[τ,u−1,m_out]·B[τ,j,m_in]) · V[τ,j,m_in,p]
 //!
-//!   νᵗᵃᵖ[τ,j] = Δ̃ − γ  at (τ,j)          dcy[τ,j] = exp(Σ_{r=j+1}^{u−1} da[τ,r])
+//!   νᵗᵃᵖ[τ,j] = νᶠᵃʳₛ₊ᵤ at s = (τ,j)     dcy[τ,j] = exp(Σ_{r=j+1}^{u−1} da[τ,r])
 //! ```
 //!
 //! `dcy` is the scalar decay from the tapped position to the read; the relative

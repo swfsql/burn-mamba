@@ -9,7 +9,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/rotation_as_optimization.py`](../scripts/rotation_as_optimization.py)
-> (66 checks, section numbers match). The script depends only on `numpy` and on
+> (69 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.
 
@@ -75,6 +75,7 @@ Results, in the order they are derived:
 | 6 | The same recurrence is heavy-ball momentum on the unchanged objective, with the velocity folded into the imaginary part of the state. |
 | 7 | The delta-rule escape: composition. Verified sharp — rotation appears iff both micro-steps overshoot. |
 | 8 | The design space, and what `micro_steps` is. |
+| 8b | The empty cell: what a rotational delta rule needs — a `ℂ`-Hermitian curvature, and the tied ordering (with its `ℍ` side condition). |
 | 9 | Consequences for this crate, including one that changes an implementation claim: the exponential integrator is load-bearing for state tracking, not merely for accuracy. |
 
 Nothing here proposes a behavioural change to the library. §9 lists what it does
@@ -192,7 +193,11 @@ do not work:
   interesting extrapolation.
 - **Changing the metric does not help.** An SPD preconditioner `P` yields
   `G = (I−M)P^{-1}` symmetric only when `M` is diagonalizable over `ℝ`, which a
-  rotation is not.
+  rotation is not. Preconditioned DeltaNet is this corollary built: it
+  approximates the key Gram by a diagonal and preconditions the write key with it,
+  so `I − βPkkᵀ` is similar to a symmetric PSD perturbation and the spectrum stays
+  real. It sharpens the curvature the delta rule descends on; it does not leave
+  the real column of §8's table.
 
 Proposition 1 is therefore the right frame: it says precisely which premise must
 break. It has four, and the note takes one section each.
@@ -483,7 +488,7 @@ They differ in two independent dials — the **rank of the curvature** and the
 
 |  | curvature `ρI` (isotropic) | curvature `kkᵀ` (rank-one) |
 |---|---|---|
-| **`η ∈ ℝ`** | Mamba-2 — `u` collapses to a rank-`u` write (MIMO) | DeltaNet, **DeltaProduct** |
+| **`η ∈ ℝ`** | Mamba-2, and Mamba-3 at `Real1D` — `u` collapses to a rank-`u` write (MIMO) | DeltaNet, **DeltaProduct**, Preconditioned DeltaNet |
 | **`η ∈ ℂ`, `ℍ`** | **Mamba-3, MambaProduct** | *empty* — a "rotational delta rule" |
 
 Three things follow directly, and they are exactly the claims the `micro_steps`
@@ -511,7 +516,14 @@ the product also leaves `exp(Σ generators)`.
 curvature with a complex step — a delta rule whose transition carries a
 data-dependent rotation. The rank-one erase does conjugate through a rotational
 gauge, `P*(I − βkk^H)P = I − β(P*k)(P*k)^H`, which needs only that `P` is a
-linear isometry and therefore survives the non-abelian kinds unchanged.
+linear isometry and therefore survives the non-abelian kinds unchanged — with one
+**side** condition that is invisible over `ℂ` and not over `ℍ`. The gauge acts on
+the left (`v ↦ qv`, or `v ↦ qvp̄`), so the step must multiply on the *opposite*
+side of the key, `v − kβ⟨k,v⟩`: then `β` never has to commute with `q`, the right
+factor of the two-sided kind cancels against its own inverse, and the identity is
+exact for both quaternion kinds. Put `β` on the same side as the gauge and it
+comes back conjugated, `q̄βq` — the same key, a different step. All three
+verified.
 
 That is **not** enough to conclude "no new chunkwise algorithm", which an earlier
 version of this section claimed and which is true of only one of the two orderings.
@@ -534,10 +546,13 @@ bound and the `u > 1` stability argument survive either way — what the wrong
 ordering costs is the kernel, not the guarantee. Since Mamba-3 has no erase,
 nothing here constrains this crate; it constrains anyone building the cell.
 
-It has a **precondition** that is easy to miss: a complex step rotates a rank-one
-curvature only if that curvature is `ℂ`-Hermitian, which forces the regression
-*target* to be complex too. With a real target the curvature is `KKᵀ` over
-`ℝ^{2n}`, and since `KᵀJK = 0`,
+It has a second **precondition** that is easy to miss: a complex step rotates a
+rank-one curvature only if that curvature is `ℂ`-Hermitian, and what decides that
+is the *measurement*, not the target's type — a loss that penalises only
+`Re(k^HS)` gives the real curvature whatever it is compared against. Penalising
+both components of the residual is what yields `kk^H`, and that is what forces the
+regression *target* to be complex too. With a real target the curvature is `KKᵀ`
+over `ℝ^{2n}`, and since `KᵀJK = 0`,
 
 $$M = I - (aI + bJ)KK^\top \;=\; \begin{bmatrix}1-a & 0\\ -b & 1\end{bmatrix}
 \quad\text{on } \operatorname{span}\{K, JK\}$$
@@ -682,8 +697,8 @@ $$\text{linear term} \ \propto\ \gamma_t\,x_tk_t^\top \;+\; \beta_t\,x_{t-1}\big
 Verified exact over a full trajectory. The usual reading of the trapezoid as a
 two-tap FIR filter on the gradient stream survives the complex transition; it is a
 *transported* filter, not a naive one. This is also why the crate's caches store the
-raw previous-token `(B, x)` and re-weight them at time `t` rather than storing a
-pre-decayed contribution.
+tapped `(B, x)` **un-weighted by the tap's mass**, applying `β` at time `t` rather
+than storing a pre-weighted contribution.
 
 ### 9.5 The exponential integrator is load-bearing (implementation claim)
 
@@ -716,7 +731,7 @@ is independent of everything else in this note.
 python3 scripts/rotation_as_optimization.py
 ```
 
-`numpy` only; float64 throughout; 66 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 69 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence
 from §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites
@@ -741,6 +756,9 @@ implementation is asserted separately, by the Rust test suites
   Weight Programmers*, 2021. The delta rule as an online learner.
 - S. Yang et al. *Parallelizing Linear Transformers with the Delta Rule over
   Sequence Length*, 2024.
+- *Preconditioned DeltaNet: Curvature-aware Sequence Modeling for Linear
+  Recurrences*, 2026. §3's metric corollary, instantiated: a diagonal
+  approximation to the key Gram, preconditioning the write key.
 - J. Su et al. *RoFormer: Enhanced Transformer with Rotary Position Embedding*.
   arXiv:2104.09864. The RoPE trick's original form.
 

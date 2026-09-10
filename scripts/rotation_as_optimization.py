@@ -640,6 +640,50 @@ ok("right-multiplication: S.(alpha R).(I - b k k^T) is rotate-first, hence TIED"
 ok("...and the reversed written order is the untied one, in that convention too",
    close(_raw_right("erase_then_rot"), _gauged_right(erase_lag=True), 1e-9))
 
+# The conjugation P*(I - b k k^H)P = I - b (P*k)(P*k)^H over H. The gauge acts on
+# the LEFT (v -> q v, or q v pbar), so the step must multiply on the opposite side
+# of the key: then b never has to commute with q and the identity is exact for both
+# quaternion kinds. Put b on the same side and the gauge conjugates it instead.
+
+
+def qinner(kq, vq):
+    out = np.zeros(4)
+    for j in range(len(kq)):
+        out = out + qmul(qconj(kq[j]), vq[j])
+    return out
+
+
+def qerase(vq, kq, bq, side):
+    inr = qinner(kq, vq)
+    if side == "right":                       # v - k b <k, v>
+        return np.stack([vq[i] - qmul(qmul(kq[i], bq), inr) for i in range(len(vq))])
+    return np.stack([vq[i] - qmul(bq, qmul(kq[i], inr)) for i in range(len(vq))])
+
+
+def qrot(vq, ql, pr=None):
+    if pr is None:
+        return np.stack([qmul(ql, vq[i]) for i in range(len(vq))])
+    return np.stack([qmul(qmul(ql, vq[i]), qconj(pr)) for i in range(len(vq))])
+
+
+nh = 3
+kh, vh, bh = RNG.normal(size=(nh, 4)), RNG.normal(size=(nh, 4)), RNG.normal(size=4)
+ql, pr = RNG.normal(size=4), RNG.normal(size=4)
+ql /= np.linalg.norm(ql)
+pr /= np.linalg.norm(pr)
+gkh = np.stack([qmul(qconj(ql), kh[i]) for i in range(nh)])
+ok("H, one-sided (Quaternion4D): the gauge moves the key to qbar k and leaves b",
+   close(qrot(qerase(qrot(vh, ql), kh, bh, "right"), qconj(ql)),
+         qerase(vh, gkh, bh, "right"), 1e-12))
+ok("H, two-sided (Rotor4D): the right factor cancels, so the same identity holds",
+   close(qrot(qerase(qrot(vh, ql, pr), kh, bh, "right"), qconj(ql), qconj(pr)),
+         qerase(vh, gkh, bh, "right"), 1e-12))
+ok("...but a step on the SAME side as the gauge comes back conjugated, qbar b q",
+   not close(qrot(qerase(qrot(vh, ql), kh, bh, "left"), qconj(ql)),
+             qerase(vh, gkh, bh, "left"), 1e-6)
+   and close(qrot(qerase(qrot(vh, ql), kh, bh, "left"), qconj(ql)),
+             qerase(vh, gkh, qmul(qconj(ql), qmul(bh, ql)), "left"), 1e-12))
+
 
 # =============================================================================
 section("9. The trapezoid, and 10. the integrator")
