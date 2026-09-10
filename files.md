@@ -453,14 +453,21 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
 Criterion single-block benches (`forward`/`train`/`step`) over all three families; the
 Mamba-3 cases pair the SISO-specialization flags head-to-head and sweep the rotation ladder
 (`real1d`/`quaternion4d`/`rotor4d` against `siso`'s `Complex2D`).
-**Run by the user, not by an agent.** Each case builds its block, input and warm-up
-*inside* the criterion closure, so a `--` filter really isolates one case.
+**Run by the user, not by an agent.** Each case builds its block, input, seed cache and
+warm-up *inside* the criterion closure — so a `--` filter really isolates one case — and
+*outside* the timed region: the cache is cloned in, the call consuming it, and only
+`mamba3/siso-double-ssd` passes a real one (which is how the double-SSD pathway is
+selected).
 `bench.sh` drives the backend configurations — flex and CUDA share one build,
 fusion needs its own — and writes `bench.md`.
 `kernels.sh` reuses those builds to count kernel launches per case — cubecl's
 profiling logger at `basic` totals the launches between syncs, and a count is
-exact, so one `--test` iteration suffices — and writes `kernels.md`. All carry
-their own rationale.
+exact, so one `--test` iteration suffices — and writes `kernels.md`. Tables are
+attributed to cases by criterion's `Testing` banner and owed two apiece; the *shape* of a
+mismatch names the cause, since every case runs the same code: uniform ⇒ the sync points
+moved, ragged surplus ⇒ a cold autotune cache (cubecl namespaces it by its own version, so
+a burn bump empties it and every candidate's sync flushes a table). All carry their own
+rationale.
 
 ## Notes (`info/`) and their checks (`scripts/`)
 

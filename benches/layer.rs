@@ -291,8 +291,11 @@ fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mam
 // Runners
 // ---------------------------------------------------------------------------
 
-/// `forward` on a plain device. `cache` is rebuilt per iteration (caches are
-/// consumed by the call); for the single-SSD default that is just `None`.
+/// `forward` on a plain device. The call consumes its cache, so a fresh one is
+/// needed per iteration — but it is *built* once, before the timed region, and
+/// cloned in (a clone is a refcount bump; building one is an allocation and a
+/// zero-fill). Only `mamba3/siso-double-ssd` passes a real cache; for the
+/// single-SSD default it is just `None`, and every case is charged the same.
 ///
 /// The block, its input, and the warm-up are all built *inside* the closure,
 /// which criterion only calls when the case passes its filter — so `-- mamba2`
@@ -310,6 +313,7 @@ fn run_forward<M, B, C>(
     path: M::Options,
 ) where
     M: Block,
+    M::Cache: Clone,
     M::Options: Clone,
     B: Fn(&Device) -> M,
     C: Fn(&Device) -> Option<M::Cache>,
@@ -317,15 +321,16 @@ fn run_forward<M, B, C>(
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_3d(shape, device);
+        let seed = cache(device);
 
         // Untimed: compile (and autotune) the kernels this case needs.
         for _ in 0..warmup_iters() {
-            let (_y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+            let (_y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
             sync(device);
         }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
                 y
             })
         })
@@ -344,6 +349,7 @@ fn run_train<M, B, C>(
     path: M::Options,
 ) where
     M: Block,
+    M::Cache: Clone,
     M::Options: Clone,
     B: Fn(&Device) -> M,
     C: Fn(&Device) -> Option<M::Cache>,
@@ -351,16 +357,17 @@ fn run_train<M, B, C>(
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_3d(shape, device);
+        let seed = cache(device);
 
         // Untimed: the backward has kernels of its own to compile and tune.
         for _ in 0..warmup_iters() {
-            let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
             let _grads = y.powf_scalar(2.0).mean().backward();
             sync(device);
         }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), cache(device), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
                 y.powf_scalar(2.0).mean().backward()
             })
         })

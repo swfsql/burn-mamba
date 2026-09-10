@@ -26,11 +26,15 @@
 # whole matrix takes about a minute per configuration — nearly all of it kernel
 # compilation, not measurement.
 #
-# Two consequences of the `basic` level are worth knowing: it times every launch
+# Two consequences of the `basic` level are worth knowing. It times every launch
 # with `submit_blocking`, which serialises the queue (trust the counts, never
-# the wall-clock, from this run), and autotuning launches each candidate, which
-# is why the *second* table of each pair is the one read — by then the tuner has
-# settled.
+# the wall-clock, from this run). And autotuning measures each candidate behind
+# a sync of its own, so a *cold* tuner emits a table per candidate on top of the
+# pair: cubecl namespaces its cache by its own version (~/.cache/cubecl), which
+# makes the first run after a burn bump a re-tune of everything. That surplus is
+# detected and refused rather than parsed — those tables are indistinguishable
+# from real ones under fusion, where a candidate is a whole fused segment — so
+# the fix is to re-run once the tuner has written its results.
 #
 # Configurations
 # --------------
@@ -142,9 +146,18 @@ GROUP_TITLES = {
     "step": "`step` — one recurrent decode step",
 }
 
-# The `| Total | <duration> | <num computed> | <ratio> |` line closing a table.
-# Kernel names contain `|` themselves, so fields are counted from the right.
-TOTAL = re.compile(r"^\| Total\s+\|.*?\|\s*(\d+)\s*\|\s*\d+ %\s*\|", re.M)
+# Two kinds of line are read, in the order they appear. `Testing <case>` is
+# criterion's per-case banner under `--test`, so the tables that follow one
+# belong to the case it names — attributing by banner rather than by position
+# keeps a case's surplus tables from being charged to its neighbours. The other
+# is the `| Total | <duration> | <num computed> | <ratio> |` line closing a
+# table; kernel names contain `|` themselves, so fields are counted from the
+# right.
+EVENT = re.compile(
+    r"^Testing (?P<case>\S+)\s*$"
+    r"|^\| Total\s+\|.*?\|\s*(?P<total>\d+)\s*\|\s*\d+ %\s*\|",
+    re.M,
+)
 
 results, config_lines, present = {}, {}, []
 for label, _ in CONFIGS:
@@ -155,13 +168,55 @@ for label, _ in CONFIGS:
         continue
     text = log.read_text(errors="replace")
     cases = cases_file.read_text().split()
-    counts = [int(m.group(1)) for m in TOTAL.finditer(text)]
 
-    if len(counts) != 2 * len(cases):
+    # case -> its summary tables, in order. Tables before the first banner (the
+    # device throughput probe) belong to no case and are dropped.
+    tables, current = {c: [] for c in cases}, None
+    for m in EVENT.finditer(text):
+        case = m.group("case")
+        if case is not None:
+            current = case if case in tables else None
+        elif current is not None:
+            tables[current].append(int(m.group("total")))
+
+    # Which of the three ways this can go wrong is read off the *shape* of the
+    # per-case counts, not their total. Every case runs the same code, so a
+    # changed sync point moves all of them together; a cold tuner or a killed
+    # run leaves them ragged.
+    counted = {c: len(t) for c, t in tables.items()}
+    shape = set(counted.values())
+
+    if shape == {0}:
         sys.exit(
-            f"{label}: expected {2 * len(cases)} summary tables for "
-            f"{len(cases)} cases, found {len(counts)} — the sync points in "
-            f"benches/layer.rs changed; see {log}"
+            f"{label}: no summary table could be attributed to any of the "
+            f"{len(cases)} cases — criterion's `Testing <case>` banners no "
+            f"longer match `--list`, or profiling is off; see {log}"
+        )
+    if len(shape) == 1 and shape != {2}:
+        n = shape.pop()
+        sys.exit(
+            f"{label}: every case emitted {n} summary table{'s'[:n != 1]} "
+            f"instead of 2 — the sync points in benches/layer.rs changed; "
+            f"see {log}"
+        )
+    if shape != {2}:
+        short = sorted(c for c, n in counted.items() if n < 2)
+        if short:
+            sys.exit(
+                f"{label}: {len(short)} of {len(cases)} cases emitted fewer "
+                f"than the 2 expected summary tables "
+                f"({', '.join(short[:3])}) — the run was cut short; see {log}"
+            )
+        surplus = sorted((n, c) for c, n in counted.items() if n > 2)
+        worst = ", ".join(f"{c} ({n})" for n, c in reversed(surplus[-3:]))
+        sys.exit(
+            f"{label}: {len(surplus)} of {len(cases)} cases emitted more than "
+            f"the 2 expected summary tables ({worst}) — the autotune cache was "
+            "cold, not a sync-point change. cubecl namespaces that cache by its "
+            "own version (~/.cache/cubecl), so the first run after a burn bump "
+            "re-measures every candidate, and each candidate's sync flushes a "
+            "table of its own. Those results are cached now: re-run this "
+            f"script. See {log}"
         )
 
     present.append(label)
@@ -170,9 +225,9 @@ for label, _ in CONFIGS:
         break
     # Pairs are (model init + warm-up iteration, measured iteration); the
     # second is the clean per-iteration count.
-    for case, measured in zip(cases, counts[1::2]):
+    for case in cases:
         group, _, name = case.partition("/")
-        results[(group, name, label)] = measured
+        results[(group, name, label)] = tables[case][1]
 
 cols = [(label, head) for label, head in CONFIGS if label in present]
 if not cols:
