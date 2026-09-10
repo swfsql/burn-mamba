@@ -565,6 +565,19 @@ for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),
     ok(f"vertical + carry-over-horizontal: {label}",
        close(run_taps([(U, nu_tot * (1 - m), en_all), (1, nu_tot * m, en_all)]), target))
 
+# At u = 1 the two lags coincide, so the split is a decomposition of ONE
+# coefficient and the pair folds back onto the carry-over -- whatever mu says,
+# and with the reset's gate closed everywhere (every position starts a token).
+en_reset_u1 = np.zeros(TF)
+for name, taps_u1 in [
+    ("VerticalPlusHorizontalReset",
+     [(1, nu_tot * (1 - mu * en_reset_u1), en_all), (1, nu_tot * mu * en_reset_u1, en_all)]),
+    ("VerticalPlusHorizontalCarryOver",
+     [(1, nu_tot * (1 - mu), en_all), (1, nu_tot * mu, en_all)]),
+]:
+    ok(f"at u = 1 both lags coincide and the masses re-add: {name} is the carry-over",
+       close(run_taps(taps_u1), Hh))
+
 # The single-SSD form survives both members: one global scale per sample, and a
 # band correction that is the *far* installment alone -- the interior one is
 # already paid at every read inside the band except the diagonal, which the

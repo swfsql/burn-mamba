@@ -16,7 +16,7 @@
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/trapezoid_as_integration.py`](../scripts/trapezoid_as_integration.py)
-> (72 checks, section numbers match). The script depends only on `numpy` and on the
+> (74 checks, section numbers match). The script depends only on `numpy` and on the
 > equations reproduced here — not on the crate — so the results stand independently
 > of the implementation.
 
@@ -53,9 +53,9 @@ assumed. Four results:
    tap at any lag `d`, transported across *its own* gap, the collapse still holds:
    one scalar per sample, whatever the lags. So multi-tap trapezoids keep the
    single-SSD form; only the correction band widens to `max(d)`. A wider tap set is
-   therefore free on the algorithm side, and it defines a three-point design space
-   — *vertical*, *reset-horizontal*, *carry-over-horizontal* — that only exists at
-   `micro_steps > 1`.
+   therefore free on the algorithm side, and it defines a closed 2×3 lattice — a
+   lag-1 tap absent, gated to within a token, or unrestricted, times a lag-`u` tap
+   absent or present — that only exists at `micro_steps > 1`.
 
 Combined with the companion note's unroll, Mamba-3's token-level form is
 `h_i = A(x_i)h_{i−1} + B(x_{i−1}, x_i)`, in which **`λ` never appears in `A`**. The
@@ -76,7 +76,7 @@ skip, the normalisations and the read are outside the object being classified.
 | 6 | The augmented state is a feedforward buffer: `spec(Â) = spec(M) ∪ {0}`. The precise difference from momentum. |
 | 7 | The DeltaProduct-style unroll: `A(x_i)`, `B(x_{i−1}, x_i)`, and why the write is not a function of the current token alone. |
 | 8 | What `u > 1` does to the tap semantics, and what is recoverable by learning. |
-| 9 | The tap lattice: the general collapse theorem, the three patterns, and their cost. |
+| 9 | The tap lattice: the general collapse theorem, its six members, and their cost. |
 | 10 | Consequences for this crate. |
 
 Nothing here proposes a behavioural change to the library. §10 lists what it does
@@ -330,8 +330,9 @@ specialisation is reachable but not encouraged.
 
 ## 9. The tap lattice
 
-§8 raises a design question that only exists at `u > 1`: **which** earlier sample
-should the `β` tap read? Answering it needs one generalisation done correctly.
+§8 raises a design question that only exists at `u > 1`: **which** earlier
+sample(s) should the `β` tap read? Answering it needs one generalisation done
+correctly.
 
 At lag 1 the tap coefficient is `(1−λ_p)Δ_p·α_p`, and `α_p` is the transition
 **over the gap between the two samples**. So the faithful generalisation of a tap
@@ -356,41 +357,56 @@ taps is a standing suggestion in this literature — the mask's banded factor is
 obvious thing to widen — and the theorem says what it costs: nothing on the
 algorithm side, provided the transport rule above is respected.
 
-**The three patterns.** All three collapse, all three are genuinely different
-models, and the degenerate cases rank them:
+**The six members.** The tap set is a choice about two taps, so the lattice is a
+product: a lag-1 (*horizontal*) tap that is absent, gated to within a token, or
+unrestricted, times a lag-`u` (*vertical*) tap that is absent or present. All six
+collapse, all six are genuinely different models at `u > 1`, and the degenerate
+cases rank them:
 
-| pattern | tap | cross-token taps | at `u = 1` |
+| member | taps | crossing a token, per token | at `u = 1` |
 |---|---|---|---|
-| **carry-over-horizontal** (today) | lag 1, always | `1/u` | — it *is* the baseline |
-| **reset-horizontal** | lag 1, suppressed at `j = 1` | **none** | degenerates to no trapezoid |
-| **vertical** | lag `u`, always | `u/u` | coincides with carry-over-horizontal |
+| `None` | — | `0` | no trapezoid, at any `u` |
+| `HorizontalReset` | lag 1, closed at each token's first micro-step | `0` | is `None` |
+| `HorizontalCarryOver` (default) | lag 1, always | `1` | — it *is* the baseline |
+| `Vertical` | lag `u`, always | `u` | is `HorizontalCarryOver` |
+| `VerticalPlusHorizontalReset` | both, the lag-1 one closed | `u` | is `HorizontalCarryOver` |
+| `VerticalPlusHorizontalCarryOver` | both, ungated | `u+1` | is `HorizontalCarryOver` |
 
-Both degeneracies verified. Reset-horizontal alone has no cross-token path at all,
+Every degeneracy verified. `HorizontalReset` alone has no cross-token path at all,
 so it cannot do the job the trapezoid was introduced for; it is a component, not an
-alternative. Vertical restores the `u = 1` semantics at every micro-step: `u`
+alternative. `Vertical` restores the `u = 1` semantics at every micro-step: `u`
 parallel filters at token resolution, one per micro-step channel, with a `u`-slot
-tap cache.
+tap cache. The two-tap members give each job its own coefficient instead of making
+them share one `λ`, mixed by a second per-(head, micro-step) mass `μ`; that makes
+`VerticalPlusHorizontalCarryOver` the **join** — it *is* `HorizontalCarryOver` at
+`μ ≡ 1` and `Vertical` at `μ ≡ 0`, both exactly, so the choice the rest of the
+column makes at configuration time is made there by descent.
 
-**Cost of vertical**, all verified:
+**Cost of the lag-`u` tap**, all verified:
 
 - key scale `= γ_s + (1−λ_{s+u})Δ_{s+u}` — today's formula with the index shifted
   `s+1 → s+u`;
 - the same-step γ-correction generalises from a **diagonal** to a **`u`-wide band**
-  (subtract `Δ̃_s − γ_s` where `t−s < u`); at `u = 1` the band *is* the diagonal,
-  i.e. `diag.rs` unchanged;
-- double-SSD shifts by `u` instead of `1` (`double_ssd/double_ssd/mod.rs` builds the β term by
-  a `narrow` plus a prepended cached element);
-- the tap cache gains a `u` dimension, and the cross-chunk seed needs `u` positions.
+  (subtract the still-unpaid mass where `t−s < u`); at `u = 1` the band *is* the
+  diagonal, i.e. `diag.rs` unchanged. The band does not have to enter the kernel:
+  at the only reads a folded pass keeps — each token's last micro-step — the band
+  *is* that token, so it is one intra-token contraction afterwards, with no mask
+  change, no chunk-length constraint and no cross-chunk term;
+- double-SSD shifts by `u` instead of `1`;
+- the tap cache becomes a `u`-deep FIFO, and the cross-chunk seed needs `u`
+  positions.
 
-All bounded; nothing structural is lost. The combinations are also live —
-`vertical + reset-horizontal` gives each job its own coefficient instead of making
-them share one `λ`, at the cost of one extra per-micro-step scalar channel and a
-third nonzero per row in the mask's banded factor.
+**Cost of the second tap**: one extra per-(head, micro-step) scalar channel, and on
+the single-SSD pathway nothing else — the collapse yields one scalar per sample
+however many taps there are, so the key scale gains a term and the pass count does
+not, and the band stays the lag-`u` mass alone (a lag-1 installment has already
+landed at every read the band covers). On the double-SSD pathway the two taps have
+different shifts and cannot share a pass, so it runs **three** SSD calls. That
+asymmetry is the honest price of the join, and it says where the join belongs.
 
-None of this is a recommendation. It is a map of what the lattice costs, and the
-one line worth carrying out of it is that **the collapse is the invariant to
-protect**: it is what the single-SSD pathway is built on, and it survives any tap
-set that transports each tap over its own gap.
+The map is not a ranking. What it is for is the invariant: **the collapse is what
+has to be protected** — it is what the single-SSD pathway is built on, and it
+survives any tap set that transports each tap over its own gap.
 
 How the members are *parameterised* is a separate question this note does not
 settle — `src/mamba3/trapezoid.rs`'s header does, and the checks for that choice
@@ -422,8 +438,9 @@ it (transport each tap over its own gap).
 `λ` never appears in `A(x_i)`; `u` multiplies factors in `A` and terms in `B`
 (§7). That is the structural reason the fold needed no special-casing, and it is
 the precise sense in which the two compose. The one nuance worth documenting where
-`micro_steps` is documented: at `u > 1` only `1/u` of the taps still cross a token,
-and the interior ones change kind (§8).
+`micro_steps` is documented: under the default member only `1/u` of the taps still
+cross a token at `u > 1`, and the interior ones change kind (§8) — which is the
+choice §9's lattice exists to make.
 
 ### 10.4 What does not follow
 
@@ -443,7 +460,7 @@ and the interior ones change kind (§8).
 python3 scripts/trapezoid_as_integration.py
 ```
 
-`numpy` only; float64 throughout; 72 checks; exits non-zero on failure. Section
+`numpy` only; float64 throughout; 74 checks; exits non-zero on failure. Section
 numbers in its output match this document's. The script encodes the recurrence from
 §2 directly and never imports the crate, so agreement between it and the
 implementation is asserted separately, by the Rust test suites

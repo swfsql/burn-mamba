@@ -13,8 +13,12 @@
 > [`rotation-as-optimization.md`](rotation-as-optimization.md),
 > [`mimo-as-batch.md`](mimo-as-batch.md). Those three cover the linear term, the
 > quadratic term, and the rank. Everything Mamba-3 changed that is *not* one of
-> those three is here, and the division is clean: this note never touches the state
-> update, and the other three never touch the block around it.
+> those three is here, and the division is by *what is being classified*: the trio
+> takes the **algebra** of the state update and never leaves it; this note takes
+> the block around it, plus the **parameterisation** of the scalar channels the
+> trio treats as given. §§5–6 are where that second half reaches into the
+> recurrence — for the sign of the trapezoid's taps, and for the locus
+> data-dependent `A` opens — and neither moves an algebraic claim the trio makes.
 >
 > Every numbered claim below is checked in float64 by
 > [`scripts/architecture_deltas.py`](../scripts/architecture_deltas.py) (35 checks,

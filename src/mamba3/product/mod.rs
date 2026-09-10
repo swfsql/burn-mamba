@@ -67,7 +67,12 @@
 //!   [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank) occupies
 //!   *jointly* — an epoch of `u` samples versus a minibatch of `M` — and it is
 //!   why this dial lives on Mamba-3 and not on Mamba-2, whose transition is
-//!   scalar by construction and for which `u` would buy nothing at all.
+//!   scalar by construction and for which `u` would buy nothing at all. The
+//!   containment is exact and one-way: `MambaProduct(u = M)` reproduces a whole
+//!   `MIMO(M)` trajectory, and the converse fails by a closed-form dimension
+//!   count, `M` having tied its values, step sizes and rotation where `u` leaves
+//!   them free (`info/mimo-as-batch.md` §9). What `M` buys back is the cost:
+//!   it is parallel and holds state bytes flat.
 //! - **On the abelian rotation it lifts a bound the block otherwise cannot
 //!   cross.** One step turns by at most
 //!   [`rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)`·π·Δ`,

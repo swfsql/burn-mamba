@@ -494,11 +494,12 @@ rationale.
   single-ssd's key scale; the augmented state as a feedforward buffer (`spec = spec(M)∪{0}`)
   and its exact difference from momentum; the token-level `A(x_i)`/`B(x_{i−1},x_i)` unroll,
   in which `λ` never appears in `A`; the collapse theorem for arbitrary tap lags and the
-  vertical/reset-horizontal/carry-over-horizontal lattice it opens at `u>1`.
+  closed 2×3 lattice (lag-1 tap absent/gated/free × lag-`u` tap absent/present) it opens
+  at `u>1`, each member's degeneracies and cost.
   Cite it rather than restating it. It prices the lattice's members but does not
   parameterise them — `mamba3/trapezoid.rs`'s header owns that.
 - **`scripts/trapezoid_as_integration.py`** — same contract as the above: float64 `numpy`,
-  72 checks, section numbers matching, standalone, non-zero exit on failure. §9 also checks
+  74 checks, section numbers matching, standalone, non-zero exit on failure. §9 also checks
   the crate's parameterisation: mass conservation, the closed tap's fallback, the two-tap
   collapse and its `strict scale − far band + γ diagonal` decomposition.
 - **`info/mimo-as-batch.md`** — the reference for `mimo_rank` and its interaction with

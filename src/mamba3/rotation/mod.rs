@@ -933,6 +933,11 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// a stride slice of it. See
 /// [the read axis](crate::mamba3::product).
 ///
+/// The `mimo_rank` axis is **broadcast**, never indexed — no rotation count
+/// carries it, in any branch. That is forced, not convenient: the `M` ranks
+/// share one state, so they share its transition, and per-rank angles have no
+/// state-space preimage at all (`info/mimo-as-batch.md` §7).
+///
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
 ///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators

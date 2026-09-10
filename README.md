@@ -241,11 +241,25 @@ single configuration.
 - **[API docs][docsurl]** — the rendered `rustdoc`; every public item is
   documented, and the per-block module headers carry the full math and notation.
 - **[DeepWiki][deepwikiurl]** — an explorable overview of the codebase.
-- **[Rotation as Optimization](info/rotation-as-optimization.md)** — a standalone
-  note deriving what a Mamba-3 step optimizes, in what sense its complex
-  transition is a learning rate (or a saddle, or momentum), and what
-  `micro_steps` composes versus DeltaProduct. Checked by
-  [`scripts/rotation_as_optimization.py`](scripts/rotation_as_optimization.py).
+- **[`info/`](info/)** — four standalone notes on what Mamba-3 changed and why,
+  each checked in float64 by its sibling in [`scripts/`](scripts/) (`numpy` only,
+  no import of the crate, non-zero exit on failure). Three classify the
+  recurrence, one classifies the block around it:
+  - **[Rotation as Optimization](info/rotation-as-optimization.md)** — the
+    *quadratic* term: what a step optimizes, in what sense the complex transition
+    is a learning rate (or a saddle, or momentum), and what `micro_steps`
+    composes versus DeltaProduct.
+  - **[Trapezoid as Integration](info/trapezoid-as-integration.md)** — the
+    *linear* term along time: `λ` as an operator-splitting parameter, the
+    two-installment collapse the single-SSD pathway is built on, and the tap
+    lattice `micro_steps > 1` opens.
+  - **[MIMO as Batch Size](info/mimo-as-batch.md)** — the linear term along
+    *rank*: the minibatch reading, what the value tying costs, and why the
+    rotation must be shared across ranks.
+  - **[Architecture Deltas](info/architecture-deltas.md)** — everything outside
+    the recurrence: BCNorm and the `B`/`C` biases (a fresh block is a
+    convolution), the deleted short conv, the output-norm placements, and the
+    chunk-length schedule.
 - Contributors: `CLAUDE.md` and `files.md` map the repository's structure,
   architecture, and conventions.
 

@@ -20,9 +20,12 @@
 //! MIMO tensors that deserves an argument, since their *shape* invites the
 //! opposite conclusion:
 //!
-//! MIMO's *math* is R independent SSMs summed together, so a `[nheads,
-//! mimo_rank, per_head_dim]` tensor looks like a stack of matrices that a
-//! stack-aware Muon could take a slice at a time. It is not: the paper
+//! MIMO's *math* does decompose along the rank — R write-channels summed into
+//! one state and read out R ways, each part a **standalone** SISO run, which
+//! holds because the transition is a function of no sample (`info/mimo-as-batch.md`
+//! §5; it is isotropy, not a property of MIMO, and no delta-rule shape has it).
+//! So a `[nheads, mimo_rank, per_head_dim]` tensor looks like a stack of
+//! matrices that a stack-aware Muon could take a slice at a time. It is not: the paper
 //! deliberately avoids instantiating the R maps, because that would multiply
 //! every per-head projection's parameter count by R (`DP → DPR` *per head*).
 //! Instead it keeps the SISO projection and element-wise scales its output to
@@ -30,7 +33,9 @@
 //! contraction notation `X = contract(PR, P → PR)(W_X, X')`, where `P` appears
 //! in both inputs *and* the output and so is never contracted. `mimo_x`/`mimo_z`
 //! /`mimo_o` are therefore **diagonals**, and their matrix shape is a layout
-//! coincidence; orthogonalising one would constrain a set of gains. The part of
+//! coincidence; orthogonalising one would constrain a set of gains — R fixed
+//! measurement gains on one value, never R maps (`info/mimo-as-batch.md` §4).
+//! The part of
 //! MIMO that really is an R-fold matrix expansion is B/C (`DN → DNR`), which
 //! lives in `in_proj` and is already Muon's. The remaining 3-D tensors are a
 //! bias (`b_bias_hmr`/`c_bias_hmr`), an initial condition (`init_state_hpr`), or
