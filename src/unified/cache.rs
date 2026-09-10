@@ -34,9 +34,7 @@ impl MambaCaches {
     /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
     /// not the family type.
     ///
-    /// # Panics
-    /// The caches must be on an autodiff device; see
-    /// [`CacheStack::cache_to_inner`].
+    /// Inert off the autodiff backend; see [`CacheStack::cache_to_inner`].
     pub fn detach(self) -> Self {
         match self {
             #[cfg(feature = "mamba1")]

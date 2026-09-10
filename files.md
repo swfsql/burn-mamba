@@ -64,6 +64,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   memory). `serial_recalculated.rs` defines `Mamba2BackendExt` (default body = `ssd_serial`
   on primitives; asserts `init_state_hpr.is_none()`); `backward.rs` registers the
   `Autodiff<B>` node; `combined_backward.rs` is the recompute gradient math (7 inputs).
+  Its `#[backend_extension]` list — the same at all four extension sites — is one
+  `Cube` arm covering every cubecl `backend-*` feature (mirroring burn's `cube_backend`
+  cfg), plus `Flex`/`NdArray`/`LibTorch`/`Autodiff`.
 
 ## Mamba-3 (`src/mamba3/`)
 
@@ -431,8 +434,8 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   Mamba{1,2,3}Config`. `cache_to_inner`/`cache_from_inner` are spelled out per family
   rather than derived: `Module::map` is a **no-op on plain `Tensor` fields**, which is
   all a cache holds, so a `Module`-based conversion would silently skip every one of
-  them — and `Tensor::inner` panics off autodiff, so `Layers::grad_horizon` must check
-  `Device::is_autodiff` first. `MambaCaches::detach()` is `CacheStack::detach` (values
+  them. `Tensor::inner` is idempotent off autodiff, so the conversion is inert there
+  and `Layers::grad_horizon`'s `Device::is_autodiff` check only skips the round-trip. `MambaCaches::detach()` is `CacheStack::detach` (values
   kept, graph dropped) dispatched over the runtime tag: the enum cannot implement
   `CacheStack` itself (its slot type would have to be a fourth enum), and a caller
   carrying a cache across a gradient boundary holds the enum, not the family type.

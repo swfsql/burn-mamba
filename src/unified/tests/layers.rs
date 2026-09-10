@@ -358,11 +358,11 @@ fn shared_weight_grad_counts_tracked_applications_only() {
 
 /// A horizon set on a model running without autodiff must be inert, not fatal.
 ///
-/// The mechanism is `Tensor::inner` / `AutodiffModule::valid`, and both **panic**
-/// on something that is already off the autodiff backend — unlike `detach`, which
-/// is a documented no-op there. So the cut is guarded on
-/// `Device::is_autodiff`, and inference with a horizon left set in the config has
-/// to come out identical to no horizon at all.
+/// The mechanism is `Tensor::inner` / `AutodiffModule::valid`, both idempotent on
+/// something that is already off the autodiff backend, so the cut is guarded on
+/// `Device::is_autodiff` to skip a round-trip that would save nothing. Inference
+/// with a horizon left set in the config has to come out identical to no horizon
+/// at all.
 #[test]
 fn horizon_is_inert_without_autodiff() {
     let device = Device::default();

@@ -13,40 +13,40 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
-| `mamba1` | 1321 | 795 |
-| `mamba2` | 103 | 73 |
-| `mamba3/siso` | 190 | 117 |
-| `mamba3/mimo-rank1` | 200 | 124 |
-| `mamba3/mimo-rank4` | 234 | 146 |
-| `mamba3/real1d` | 140 | 90 |
-| `mamba3/quaternion4d` | 625 | 261 |
-| `mamba3/rotor4d` | 707 | 337 |
-| `mamba3/siso-double-ssd` | 237 | 155 |
+| `mamba1` | 1321 | 797 |
+| `mamba2` | 103 | 78 |
+| `mamba3/siso` | 190 | 116 |
+| `mamba3/mimo-rank1` | 200 | 123 |
+| `mamba3/mimo-rank4` | 234 | 154 |
+| `mamba3/real1d` | 140 | 88 |
+| `mamba3/quaternion4d` | 625 | 297 |
+| `mamba3/rotor4d` | 707 | 325 |
+| `mamba3/siso-double-ssd` | 237 | 159 |
 
 ## `train` — forward + backward (autodiff device)
 
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
-| `mamba1` | 5258 | 3474 |
-| `mamba2` | 531 | 349 |
-| `mamba3/siso` | 682 | 411 |
-| `mamba3/mimo-rank1` | 706 | 428 |
-| `mamba3/mimo-rank4` | 822 | 501 |
-| `mamba3/real1d` | 549 | 341 |
-| `mamba3/quaternion4d` | 1792 | 722 |
-| `mamba3/rotor4d` | 2056 | 973 |
-| `mamba3/siso-double-ssd` | 905 | 567 |
+| `mamba1` | 5257 | 3753 |
+| `mamba2` | 551 | 362 |
+| `mamba3/siso` | 684 | 453 |
+| `mamba3/mimo-rank1` | 708 | 474 |
+| `mamba3/mimo-rank4` | 822 | 574 |
+| `mamba3/real1d` | 551 | 346 |
+| `mamba3/quaternion4d` | 1794 | 707 |
+| `mamba3/rotor4d` | 2058 | 837 |
+| `mamba3/siso-double-ssd` | 915 | 603 |
 
 ## `step` — one recurrent decode step
 
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
-| `mamba1` | 41 | 20 |
+| `mamba1` | 41 | 19 |
 | `mamba2` | 49 | 34 |
-| `mamba3/siso` | 118 | 63 |
-| `mamba3/mimo-rank1` | 128 | 70 |
-| `mamba3/mimo-rank4` | 133 | 75 |
-| `mamba3/real1d` | 73 | 40 |
-| `mamba3/quaternion4d` | 249 | 151 |
-| `mamba3/rotor4d` | 331 | 227 |
-| `mamba3/siso-double-ssd` | 118 | 63 |
+| `mamba3/siso` | 118 | 57 |
+| `mamba3/mimo-rank1` | 128 | 64 |
+| `mamba3/mimo-rank4` | 133 | 69 |
+| `mamba3/real1d` | 73 | 34 |
+| `mamba3/quaternion4d` | 249 | 166 |
+| `mamba3/rotor4d` | 331 | 242 |
+| `mamba3/siso-double-ssd` | 118 | 57 |

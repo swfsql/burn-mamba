@@ -16,7 +16,6 @@
 use crate::mamba2::prelude::*;
 use burn_stack::utils::fprim::{F, Mask, san};
 use burn::backend::tensor::FloatTensor;
-use burn::backend::*;
 use burn::backend::{Backend, Dispatch, backend_extension};
 use burn::tensor::Tensor;
 use burn::tensor::s;
@@ -71,13 +70,18 @@ impl Mamba2SsdInput {
 
 /// Extends the backend and wraps it for `burn`.
 #[backend_extension(
-    Cpu:  cfg(feature = "backend-cpu"),
-    Cuda: cfg(feature = "backend-cuda"),
-    Rocm:  cfg(feature = "backend-rocm"),
-    Metal:  cfg(feature = "backend-metal"),
-    Vulkan:  cfg(feature = "backend-vulkan"),
-    Wgpu:  cfg(feature = "backend-wgpu"),
-    WebGpu:  cfg(feature = "backend-webgpu"),
+    // Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
+    // this one backend; which of them a tensor runs on is what its device says.
+    // The cfg mirrors burn's own `cube_backend`.
+    Cube: cfg(any(
+        feature = "backend-cpu",
+        feature = "backend-cuda",
+        feature = "backend-rocm",
+        feature = "backend-metal",
+        feature = "backend-vulkan",
+        feature = "backend-wgpu",
+        feature = "backend-webgpu"
+    )),
     Flex:  cfg(feature = "backend-flex"),
     NdArray:  cfg(feature = "backend-ndarray"),
     LibTorch:  cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu")),
