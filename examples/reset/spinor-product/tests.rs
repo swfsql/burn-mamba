@@ -1,4 +1,4 @@
-//! The four claims this example rests on, measured.
+//! The five claims this example rests on, measured.
 //!
 //! 1. A **hand-built `micro_steps = 2` block solves the task exactly** — no
 //!    fitting, every weight written down in closed form. It is `reset-spinor`'s
@@ -18,16 +18,23 @@
 //!    lies in their plane, and `exp` of a vector in a plane has **no component**
 //!    along the axis orthogonal to it — which is exactly where the pair's
 //!    product (`ij = k`, and the five others) lives.
-//! 4. **No order-blind model can** either, so the gap is not something the
+//! 4. The obstruction is about **one block, not about depth**
+//!    ([`a_second_layer_only_helps_by_composing_the_pair`]): the same one-step
+//!    block is exact the moment its input names the pair's product, which is what
+//!    a second layer reads instead of the token. So depth is not blocked — it is
+//!    conditioned on the layer below computing that product, and what a run finds
+//!    there is an approximation of it (the trained rows in the README).
+//! 5. **No order-blind model can** either, so the gap is not something the
 //!    counts could have covered.
 //!
-//! The readouts in (2) and (4) are lookup tables **fitted on one split and
+//! The readouts in (2) and (5) are lookup tables **fitted on one split and
 //! scored on another**, so they are ceilings a model could actually reach.
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
-    EVAL_LENGTHS, Family, HOLD, INPUT_SIZE, NUM_CLASSES, NUM_SYMBOLS, PAIR, ProductDataset, RESET,
-    SEQ_LENGTH, TURN_I, TURN_J, TURN_K, apply, counts_since_reset, labels, quaternion, two_hot,
+    EVAL_LENGTHS, Family, HOLD, IDENTITY, INPUT_SIZE, NUM_CLASSES, NUM_SYMBOLS, PAIR,
+    ProductDataset, RESET, SEQ_LENGTH, TURN_I, TURN_J, TURN_K, apply, counts_since_reset, labels,
+    quaternion, two_hot,
 };
 use crate::model::D_MODEL;
 use burn::data::dataset::Dataset;
@@ -353,56 +360,70 @@ fn embedding(device: &Device) -> Tensor<2> {
 
 /// Build the block by hand at the given `micro_steps`.
 fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> MambaLatentNet {
-    let cfg = crate::model::model_config(micro_steps);
+    let cfg = crate::model::model_config(micro_steps, 1);
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
         unreachable!("spinor-product configures the Mamba-3 variant")
     };
     let mamba_block = mamba_block.clone();
     let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
+    {
+        let MambaLatentNet::Mamba3(net) = &mut model else {
+            unreachable!("spinor-product configures the Mamba-3 variant")
+        };
+
+        // ── network in_proj: two one-hot slots → the token embedding ─────────
+        net.in_proj.weight = Param::from_tensor(embedding(device));
+        net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+            Shape::new([D_MODEL]),
+            device,
+        )));
+
+        let layer = &mut net.layers.real_layers[0];
+        layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
+        let block = &mut layer.block;
+
+        // ── block in_proj: one affine functional per channel ─────────────────
+        // Channel order: [z | x·u | B·u | C | Δ·u | A·u | λ·u | ϑ·u], with every
+        // per-micro-step segment laid out micro-step by micro-step.
+        let channels = if micro_steps == 1 {
+            channels_single(gen_scale)
+        } else {
+            channels_product(micro_steps)
+        };
+        let n_ch = channels.len();
+        assert_eq!(
+            mamba_block.d_in_proj(),
+            n_ch,
+            "the hand-built channels must tile the fused in-projection"
+        );
+        let mut w = vec![0.0f64; D_MODEL * n_ch];
+        let mut bias = vec![0.0f64; n_ch];
+        for (ch, spec) in channels.iter().enumerate() {
+            // each slot's values are an affine functional of its own simplex; the
+            // two offsets share the channel's single bias, which is all they need
+            let (w_a, off_a) = functional(&spec.a);
+            let (w_b, off_b) = functional(&spec.b);
+            for d in 0..HALF {
+                w[d * n_ch + ch] = w_a[d];
+                w[(HALF + d) * n_ch + ch] = w_b[d];
+            }
+            bias[ch] = off_a + off_b;
+        }
+        block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
+        block.in_proj.bias = Some(Param::from_tensor(t1(&bias, [n_ch], device)));
+    }
+    finish(&mut model, head, device);
+    model
+}
+
+/// Everything in the construction that does not depend on how a token is
+/// encoded: the per-head Δ/`D`/QK-norm weights, the readout selector and the
+/// class head. Shared by [`handmade`] and [`handmade_composed`].
+fn finish(model: &mut MambaLatentNet, head: Head, device: &Device) {
+    let MambaLatentNet::Mamba3(net) = model else {
         unreachable!("spinor-product configures the Mamba-3 variant")
     };
-
-    // ── network in_proj: two one-hot slots → the token embedding ─────────────
-    net.in_proj.weight = Param::from_tensor(embedding(device));
-    net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
-        Shape::new([D_MODEL]),
-        device,
-    )));
-
-    let layer = &mut net.layers.real_layers[0];
-    layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
-    let block = &mut layer.block;
-
-    // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order: [z | x·u | B·u | C | Δ·u | A·u | λ·u | ϑ·u], with every
-    // per-micro-step segment laid out micro-step by micro-step.
-    let channels = if micro_steps == 1 {
-        channels_single(gen_scale)
-    } else {
-        channels_product(micro_steps)
-    };
-    let n_ch = channels.len();
-    assert_eq!(
-        mamba_block.d_in_proj(),
-        n_ch,
-        "the hand-built channels must tile the fused in-projection"
-    );
-    let mut w = vec![0.0f64; D_MODEL * n_ch];
-    let mut bias = vec![0.0f64; n_ch];
-    for (ch, spec) in channels.iter().enumerate() {
-        // each slot's values are an affine functional of its own simplex; the
-        // two offsets share the channel's single bias, which is all they need
-        let (w_a, off_a) = functional(&spec.a);
-        let (w_b, off_b) = functional(&spec.b);
-        for d in 0..HALF {
-            w[d * n_ch + ch] = w_a[d];
-            w[(HALF + d) * n_ch + ch] = w_b[d];
-        }
-        bias[ch] = off_a + off_b;
-    }
-    block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
-    block.in_proj.bias = Some(Param::from_tensor(t1(&bias, [n_ch], device)));
+    let block = &mut net.layers.real_layers.last_mut().expect("one layer").block;
 
     // ── Δ bias, D, QK-norm scales, B/C biases ────────────────────────────────
     // Δ and A are entirely data-dependent here, so the bias is zero.
@@ -457,8 +478,6 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
         Shape::new([NUM_CLASSES]),
         device,
     )));
-
-    model
 }
 
 // ---------------------------------------------------------------------------
@@ -476,10 +495,15 @@ const FIT: u64 = 0x51D3;
 /// Seed of the split everything is **scored** on.
 const EVAL: u64 = 0xE7A1;
 
+/// How a symbol stream reaches the network: the two one-hot slots a model really
+/// reads ([`two_hot`]), or the composed feature of §4 ([`composed_input`]).
+type Encode = fn(&[usize], &Device) -> Tensor<2>;
+
 /// Run `model` over `count` sequences of one family at `length` tokens; return
 /// the per-token output channels and the targets.
 fn run(
     model: &MambaLatentNet,
+    encode: Encode,
     family: Family,
     count: usize,
     length: usize,
@@ -493,7 +517,7 @@ fn run(
     let inputs = Tensor::stack(
         items
             .iter()
-            .map(|i| two_hot(&i.symbols, device))
+            .map(|i| encode(&i.symbols, device))
             .collect::<Vec<_>>(),
         0,
     );
@@ -520,12 +544,13 @@ fn run(
 /// Per-token accuracy of the model's own head (argmax over the class logits).
 fn accuracy(
     model: &MambaLatentNet,
+    encode: Encode,
     family: Family,
     count: usize,
     length: usize,
     device: &Device,
 ) -> f64 {
-    let (channels, targets) = run(model, family, count, length, EVAL, device);
+    let (channels, targets) = run(model, encode, family, count, length, EVAL, device);
     let hits = channels
         .iter()
         .zip(&targets)
@@ -607,8 +632,8 @@ fn channel_range(channels: &[[f64; NUM_CLASSES]]) -> [(f64, f64); N] {
 
 /// The best table over a fine partition of the block's output space.
 fn best_readout(probe: &MambaLatentNet, family: Family, device: &Device) -> f64 {
-    let (fit_ch, fit_t) = run(probe, family, 256, SEQ_LENGTH, FIT, device);
-    let (eval_ch, eval_t) = run(probe, family, 128, SEQ_LENGTH, EVAL, device);
+    let (fit_ch, fit_t) = run(probe, two_hot, family, 256, SEQ_LENGTH, FIT, device);
+    let (eval_ch, eval_t) = run(probe, two_hot, family, 128, SEQ_LENGTH, EVAL, device);
     let range = channel_range(&fit_ch);
     best_lookup(
         (&output_codes(&fit_ch, &range), &fit_t),
@@ -668,7 +693,7 @@ fn handmade_product_block_solves_every_family() {
     for length in EVAL_LENGTHS {
         print!("  {length:>3} tokens:");
         for (name, family) in FAMILIES {
-            let acc = accuracy(&model, family, 64, length, &device);
+            let acc = accuracy(&model, two_hot, family, 64, length, &device);
             print!("   {name} {:6.2}%", 100.0 * acc);
             worst = worst.min(acc);
         }
@@ -702,7 +727,7 @@ fn one_step_cannot_compose_a_token() {
         let decoder = handmade(&device, 1, Head::Decoder, scale);
         let accs: Vec<f64> = FAMILIES
             .iter()
-            .map(|(_, f)| accuracy(&decoder, *f, 128, SEQ_LENGTH, &device))
+            .map(|(_, f)| accuracy(&decoder, two_hot, *f, 128, SEQ_LENGTH, &device))
             .collect();
         println!(
             "      {scale:>5.2}   {:6.2}%    {:6.2}%    {:6.2}%",
@@ -841,7 +866,312 @@ fn dist(p: [f64; 4], q: [f64; 4]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// 4. the ceiling for everything order-blind
+// 4. the depth contrast: what a second layer would have to be handed
+// ---------------------------------------------------------------------------
+//
+// `micro_steps = 2` is not the only way to get two rotations into one token: a
+// second **layer** applies one too. What it cannot do is apply it to the same
+// state — each layer turns its own — so the word has to end up in the *last*
+// layer's state, and that layer's per-token rotation still has to be the whole
+// pair's product. Its generator, though, is affine in what the layer below
+// hands it rather than in the token, so §3's axis-pinning does not reach it:
+// depth is not blocked, it is *conditioned* on the layer below computing the
+// product (a table with no additive form — that is §3) and passing it on.
+//
+// This section builds the second half of that: the same one-step block, handed
+// exactly the feature such a first layer would have to emit. It reaches 100%,
+// which locates the whole difficulty in the first layer — and the trained rows
+// in `examples/reset/README.md` are what a run actually finds there.
+
+/// The norm a token's feature is scaled to: `√d_model`, so the layer's
+/// pre-`RmsNorm` (`γ = 1`) passes it through unchanged — the same convention
+/// [`RHO`] follows for the two-slot embedding.
+const RHO_F: f64 = 2.0 * std::f64::consts::SQRT_2;
+/// The length of the reset flag's own coordinate, before the feature is
+/// renormalised to [`RHO_F`]. Any positive length works; this one makes a
+/// resetting token's element part shrink by exactly `1/√2`.
+const PHI: f64 = RHO_F;
+/// The class index of `−1`, the one element a *single* step cannot reach at
+/// `Δ = 1`: it is a whole turn, i.e. `tanh`'s asymptote (see [`TURN_RAW`]).
+const MINUS_ONE: usize = 4;
+
+/// What a resetting token's element part is multiplied by, once the flag
+/// coordinate is added and the whole feature renormalised.
+fn reset_scale() -> f64 {
+    RHO_F / (RHO_F * RHO_F + PHI * PHI).sqrt()
+}
+
+/// The eight group elements, as the vertices of a regular 7-simplex of norm
+/// [`RHO_F`] in the **first seven** dimensions of `d_model` — the eighth is left
+/// to the reset flag, orthogonal to every one of them.
+///
+/// Same Helmert construction as [`simplex`], at `NUM_CLASSES` vertices.
+fn element_simplex() -> [[f64; D_MODEL]; NUM_CLASSES] {
+    let mut v = [[0.0f64; D_MODEL]; NUM_CLASSES];
+    for (col, row) in v.iter_mut().enumerate() {
+        for (k, coord) in row.iter_mut().take(NUM_CLASSES - 1).enumerate() {
+            let k = k + 1; // Helmert vectors are 1-indexed
+            let norm = (k * (k + 1)) as f64;
+            *coord = if col < k {
+                1.0 / norm.sqrt()
+            } else if col == k {
+                -(k as f64) / norm.sqrt()
+            } else {
+                0.0
+            };
+        }
+        let scale = RHO_F / (1.0 - 1.0 / NUM_CLASSES as f64).sqrt();
+        for coord in row.iter_mut() {
+            *coord *= scale;
+        }
+    }
+    v
+}
+
+/// The weight and offset realising the per-element values `vals` on
+/// [`element_simplex`] — [`functional`] at `NUM_CLASSES` vertices. The last
+/// coordinate stays zero, so the flag can be given its own weight afterwards.
+fn functional_elem(vals: &[f64; NUM_CLASSES]) -> ([f64; D_MODEL], f64) {
+    let mean = vals.iter().sum::<f64>() / NUM_CLASSES as f64;
+    let c = (NUM_CLASSES - 1) as f64 / (NUM_CLASSES as f64 * RHO_F * RHO_F);
+    let mut w = [0.0f64; D_MODEL];
+    for (e, v) in element_simplex().iter().enumerate() {
+        for (d, coord) in v.iter().enumerate() {
+            w[d] += c * (vals[e] - mean) * coord;
+        }
+    }
+    (w, mean)
+}
+
+/// The feature a first layer would have to hand a second one: the token's
+/// **effect** — the group element it multiplies the word by, and whether it
+/// resets — as one `d_model`-vector of RMS 1.
+///
+/// Both halves are needed and neither is more than the pair already implies:
+/// the element is `q_b ⊗ q_a` (the identity when slot `b` resets, `q_b` when
+/// only slot `a` does), and the flag is `a = R ∨ b = R`, which is all the write
+/// and the wipe ever ask.
+fn feature(a: usize, b: usize) -> [f64; D_MODEL] {
+    let element = apply(b, apply(a, IDENTITY)) as usize;
+    let mut v = element_simplex()[element];
+    if a == RESET || b == RESET {
+        v[D_MODEL - 1] = PHI;
+        let scale = reset_scale();
+        for coord in v.iter_mut() {
+            *coord *= scale;
+        }
+    }
+    v
+}
+
+/// [`two_hot`]'s twin: the composed feature per token, padded into the same
+/// `INPUT_SIZE` the model reads (its last two channels stay zero, and the
+/// network's in-projection is the identity on the rest).
+fn composed_input(symbols: &[usize], device: &Device) -> Tensor<2> {
+    let tokens = symbols.len() / PAIR;
+    let mut buf = vec![0.0f32; tokens * INPUT_SIZE];
+    for (t, pair) in symbols.chunks_exact(PAIR).enumerate() {
+        for (d, coord) in feature(pair[0], pair[1]).iter().enumerate() {
+            buf[t * INPUT_SIZE + d] = *coord as f32;
+        }
+    }
+    Tensor::<1>::from_floats(buf.as_slice(), device).reshape([tokens, INPUT_SIZE])
+}
+
+/// One in-projection channel of the composed-feature block: a value per group
+/// element, plus what a reset adds on top. The two are independent because the
+/// flag's coordinate is orthogonal to the element simplex — which is exactly the
+/// split the construction needs, since `x` and `A` read only the flag, `B` and
+/// the rotation only the element, and nothing reads both.
+#[derive(Clone, Copy)]
+struct ChF {
+    elem: [f64; NUM_CLASSES],
+    reset: f64,
+}
+
+impl ChF {
+    /// The same value at every token.
+    fn konst(v: f64) -> Self {
+        ChF {
+            elem: [v; NUM_CLASSES],
+            reset: 0.0,
+        }
+    }
+    /// A channel that reads the element alone. On a resetting token its
+    /// deviation from the mean shrinks by [`reset_scale`], which no channel of
+    /// this shape cares about: `B` is QK-normed, so only its direction is read,
+    /// and a resetting token's *rotation* is unobservable outright — `h` is
+    /// `α R h₋₁ + γ B x`, so the step's own turn lands on the state it just wiped
+    /// and the write enters after it.
+    fn elem(elem: [f64; NUM_CLASSES]) -> Self {
+        ChF { elem, reset: 0.0 }
+    }
+    /// A channel that reads the flag alone: `hold` everywhere, plus `reset` on a
+    /// token that resets.
+    fn gate(hold: f64, reset: f64) -> Self {
+        ChF {
+            elem: [hold; NUM_CLASSES],
+            reset,
+        }
+    }
+}
+
+/// The channels of the one-step block **given the token's product**: the
+/// `reset-spinor` construction with the rotation read off the element instead of
+/// summed out of the two slots.
+///
+/// Only two things differ from [`channels_single`] beyond that, and both are
+/// consequences of naming the product directly: `B` writes the element itself
+/// (rather than compensating for a turn it could not sit before), and the token
+/// whose product is `−1` gets `Δ = 2`, because `−1` is a **whole** turn and the
+/// block bounds one step to `rotation_range · π · Δ` — at `Δ = 1` it is `tanh`'s
+/// asymptote. Nothing else about the block changes.
+fn channels_composed() -> Vec<ChF> {
+    let mut chs = Vec::new();
+    // z — as everywhere else in this file
+    chs.extend([ChF::konst(Z_PRE); D_INNER]);
+    // x — head h's first value channel writes iff the token resets
+    for _h in 0..N {
+        chs.push(ChF::gate(0.0, X_WRITE));
+        chs.push(ChF::konst(0.0));
+    }
+    // B — the element the token ends on, component by component
+    for m in 0..N {
+        chs.push(ChF::elem(std::array::from_fn(|e| {
+            quaternion(e as i64)[m]
+        })));
+    }
+    // C — the unit; the per-head bias in `finish` moves head h onto e_h
+    chs.extend((0..N).map(|r| ChF::konst(f64::from(r == 0))));
+    // Δ — one, but two on the token whose product is a whole turn
+    chs.extend(
+        [ChF::elem(std::array::from_fn(|e| {
+            softplus_inv(if e == MINUS_ONE { 2.0 * DELTA } else { DELTA })
+        })); N],
+    );
+    // A — the flattest hold the block allows; a reset wipes
+    chs.extend([ChF::gate(A_HOLD_RAW, -A_HOLD_RAW + softplus_inv(A_WIPE)); N]);
+    // λ — as everywhere else: only the current step is written
+    chs.extend([ChF::konst(LAMBDA_RAW); N]);
+    // rotation — the generator of the token's own product, per head
+    for _h in 0..N {
+        for axis in 0..3 {
+            chs.push(ChF::elem(std::array::from_fn(|e| {
+                element_generator(e)[axis]
+            })));
+        }
+    }
+    chs
+}
+
+/// The generator whose exponential is group element `e`: a half-turn about the
+/// axis of `±i` / `±j` / `±k`, nothing at all for the identity, and a whole turn
+/// — any axis — for `−1`, which is what the `Δ = 2` above is for.
+fn element_generator(e: usize) -> [f64; 3] {
+    let mut g = [0.0; 3];
+    match (e % 4, e < 4) {
+        (0, true) => {}                // 1: no turn
+        (0, false) => g[0] = TURN_RAW, // −1: a whole turn, about x̂ by choice
+        (unit, positive) => g[unit - 1] = if positive { TURN_RAW } else { -TURN_RAW },
+    }
+    g
+}
+
+/// The one-step block, hand-built to read [`feature`] — i.e. the *second* layer
+/// of a two-layer model whose first layer does its job perfectly.
+fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
+    let cfg = crate::model::model_config(1, 1);
+    let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
+        unreachable!("spinor-product configures the Mamba-3 variant")
+    };
+    let mamba_block = mamba_block.clone();
+    let mut model = ModelConfigExt::init(&cfg, device);
+    {
+        let MambaLatentNet::Mamba3(net) = &mut model else {
+            unreachable!("spinor-product configures the Mamba-3 variant")
+        };
+
+        // ── network in_proj: the feature, verbatim ───────────────────────────
+        let mut w = vec![0.0f64; INPUT_SIZE * D_MODEL];
+        for d in 0..D_MODEL {
+            w[d * D_MODEL + d] = 1.0;
+        }
+        net.in_proj.weight = Param::from_tensor(t1(&w, [INPUT_SIZE, D_MODEL], device));
+        net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+            Shape::new([D_MODEL]),
+            device,
+        )));
+
+        let layer = &mut net.layers.real_layers[0];
+        layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
+        let block = &mut layer.block;
+
+        // ── block in_proj: one affine functional per channel ─────────────────
+        let channels = channels_composed();
+        let n_ch = channels.len();
+        assert_eq!(
+            mamba_block.d_in_proj(),
+            n_ch,
+            "the composed channels must tile the fused in-projection"
+        );
+        let mut w = vec![0.0f64; D_MODEL * n_ch];
+        let mut bias = vec![0.0f64; n_ch];
+        let scale = reset_scale();
+        for (ch, spec) in channels.iter().enumerate() {
+            let (w_e, offset) = functional_elem(&spec.elem);
+            for (d, weight) in w_e.iter().enumerate() {
+                w[d * n_ch + ch] = *weight;
+            }
+            // the flag's own coordinate, scaled so a resetting token adds
+            // exactly `spec.reset` and a plain one adds nothing at all
+            w[(D_MODEL - 1) * n_ch + ch] = spec.reset / (scale * PHI);
+            bias[ch] = offset;
+        }
+        block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
+        block.in_proj.bias = Some(Param::from_tensor(t1(&bias, [n_ch], device)));
+    }
+    finish(&mut model, head, device);
+    model
+}
+
+/// The one-step block solves the task **exactly** once its input names the
+/// pair's product — at every length, like the `u = 2` block and unlike every
+/// other one-step row.
+///
+/// So the two dials are not the same dial. `micro_steps = 2` hands the
+/// recurrence the two rotations and is done; a second layer has to be handed a
+/// *feature*, which means a layer below that computes `q_b ⊗ q_a` — a function
+/// of the pair with no additive form ([`one_step_generators_add_and_cannot_reach_k`]),
+/// so a bilinear one, and then a rotation read affinely off it. Nothing forbids
+/// that, and the `--layers 2 --micro-steps 1` runs in `examples/reset/README.md`
+/// do sometimes find it — as an *approximation*, exact at the trained length and
+/// 76% on `runs` at three times it, where `u = 2` is exact at both.
+#[test]
+fn a_second_layer_only_helps_by_composing_the_pair() {
+    let device = Device::default();
+    let model = handmade_composed(&device, Head::Decoder);
+    println!(
+        "one-step block handed the pair's product ({} params):",
+        model.num_params()
+    );
+    let mut worst = 1.0f64;
+    for length in EVAL_LENGTHS {
+        print!("  {length:>3} tokens:");
+        for (name, family) in FAMILIES {
+            let acc = accuracy(&model, composed_input, family, 64, length, &device);
+            print!("   {name} {:6.2}%", 100.0 * acc);
+            worst = worst.min(acc);
+        }
+        println!();
+    }
+    assert!(
+        worst > 0.995,
+        "the composed feature is not enough for one step: {worst}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 5. the ceiling for everything order-blind
 // ---------------------------------------------------------------------------
 
 /// The best predictors that see only the current token, or only the symbol
@@ -890,7 +1220,7 @@ fn counts_ceiling_is_the_order_blind_limit() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. the dataset
+// 6. the dataset
 // ---------------------------------------------------------------------------
 
 /// The labels really are the `Q₈` word problem read two symbols at a time: a

@@ -11,9 +11,15 @@
 //! token two recurrence steps, so its transition is the product itself. That
 //! one config change is the whole example.
 //!
-//! Carries a downstream `--micro-steps N` flag (default 2) after the trailing
-//! `--`; it selects the `u` baked into a **fresh** model config (a persisted one
-//! wins on reload).
+//! Carries two downstream flags after the trailing `--`, both baked into a
+//! **fresh** model config (a persisted one wins on reload): `--micro-steps N`
+//! (default 2) and `--layers N` (default 1). The second is the other way to get
+//! two rotations into one token — a second *layer* — and `--layers 2
+//! --micro-steps 1` is the contrast it exists for: a second layer turns a second
+//! state, so the product still has to be computed as a **feature** by the layer
+//! below. That is expressible (`tests.rs`) and occasionally found, but only
+//! approximately: it holds at the trained length and comes apart at three times
+//! it, where `u = 2` does not.
 //!
 //! The task, the measurements and how to run it: `examples/reset/README.md`.
 
@@ -46,9 +52,11 @@ use std::ffi::OsString;
 
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
-    // The only downstream argument: how many micro-steps a fresh model config
-    // runs per token. (Once a model config is persisted, it wins on reload.)
+    // The downstream arguments: how many micro-steps a fresh model config runs
+    // per token, and how many layers it stacks. (Once a model config is
+    // persisted, it wins on reload.)
     let micro_steps = parse_micro_steps(&app_args.extra_args);
+    let layers = parse_layers(&app_args.extra_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -80,8 +88,8 @@ pub fn launch(app_args: &AppArgs) {
         ))
     });
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
-        println!("Initializing new model config (micro_steps = {micro_steps})");
-        model::model_config(micro_steps)
+        println!("Initializing new model config (micro_steps = {micro_steps}, layers = {layers})");
+        model::model_config(micro_steps, layers)
     });
     app_args.save_training_config(&training_config);
     app_args.save_model_config(&model_config);
@@ -108,16 +116,27 @@ pub fn launch(app_args: &AppArgs) {
 /// `--micro-steps N`, defaulting to the 2 this example is about (`1` is the
 /// ablation: stock Mamba-3, one rotation per token).
 fn parse_micro_steps(extra_args: &[OsString]) -> usize {
+    parse_usize(extra_args, "--micro-steps", dataset::PAIR)
+}
+
+/// `--layers N`, defaulting to the one block the whole ladder runs. `2` is the
+/// depth contrast: a second rotation per token, applied to a second state.
+fn parse_layers(extra_args: &[OsString]) -> usize {
+    parse_usize(extra_args, "--layers", 1)
+}
+
+/// One `--flag N` argument out of the downstream arguments.
+fn parse_usize(extra_args: &[OsString], flag: &str, default: usize) -> usize {
     let value = extra_args
         .iter()
-        .position(|a| a == "--micro-steps")
+        .position(|a| a == flag)
         .and_then(|i| extra_args.get(i + 1))
         .map(|v| v.to_string_lossy().into_owned());
     match value {
-        None => dataset::PAIR,
+        None => default,
         Some(v) => v
             .parse()
-            .unwrap_or_else(|_| panic!("--micro-steps takes a positive integer, got {v:?}")),
+            .unwrap_or_else(|_| panic!("{flag} takes a positive integer, got {v:?}")),
     }
 }
 

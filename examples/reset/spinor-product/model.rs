@@ -58,9 +58,23 @@ pub const D_MODEL: usize = 8;
 ///   100% at the trained length, then loses the long column (83% at 96 tokens),
 ///   which is the column this rung exists to report. The other four rungs are
 ///   tapless.
-/// - `ignore_last_residual` zeroes the single layer's residual, so `out_proj`
+/// - `ignore_last_residual` zeroes the last layer's residual, so `out_proj`
 ///   reads the block's output alone.
-pub fn model_config(micro_steps: usize) -> MambaLatentNetConfig {
+///
+/// **The other dial the example varies: `layers`.** `micro_steps = 2` is not the
+/// only way to get two rotations into a token — a second *layer* also applies
+/// one, and its generator reads the layer below rather than the token, so the
+/// axis-pinning argument of `tests.rs` does not reach it. What a second layer
+/// cannot do is turn the *same* state: each layer carries its own, so the word
+/// has to end up in the last one's, whose per-token rotation is then the whole
+/// pair's product — leaving the layer below to compute that product as a
+/// **feature** (a function of the pair with no additive form, so a bilinear one,
+/// which its `C·B` term is). Expressible, and measured: at `--layers 2
+/// --micro-steps 1` one seed in four reaches 100% at the trained length and loses
+/// it at three times that, where `u = 2` — which hands the two rotations to the
+/// recurrence instead of learning their product — stays exact.
+/// `examples/reset/README.md` has the table.
+pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 8, per_head_dim = 2 ⇒ nheads = 4 (one per
     // quaternion component), each with its own Δ, A, λ and D — per micro-step.
     let mamba_block = Mamba3Config::new(D_MODEL)
@@ -82,14 +96,14 @@ pub fn model_config(micro_steps: usize) -> MambaLatentNetConfig {
         // no final norm: the state is a unit quaternion, so the block's output
         // is already O(1) and the head reads it directly.
         final_norm: false,
-        n_real_layers: 1,
+        n_real_layers: layers,
         n_virtual_layers: None,
         grad_horizon: None,
         mamba_block,
         class_tokens: Vec::new(),
         class_latents: Vec::new(),
         ignore_first_residual: false,
-        // the single layer's residual: dropped, so the head sees only the state
+        // the last layer's residual: dropped, so the head sees only the state
         ignore_last_residual: true,
         residuals: ResidualsConfig::Standard,
         // No feed-forward interleave: these examples are mixer-only.

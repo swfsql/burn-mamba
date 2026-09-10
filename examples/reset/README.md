@@ -69,11 +69,13 @@ cargo run --release --example reset-spinor -- --training --inference -- --rotati
 cargo run --release --example reset-swap   -- --training --inference -- --rotation quaternion
 ```
 
-The coda is its own target, with `--micro-steps` in place of `--rotation`:
+The coda is its own target, with `--micro-steps` in place of `--rotation`, plus
+`--layers` for the depth contrast (the other way to put two rotations in a token):
 
 ```bash
 cargo run --release --example spinor-product -- --training --inference
 cargo run --release --example spinor-product -- --training --inference -- --micro-steps 1
+cargo run --release --example spinor-product -- --training --inference -- --micro-steps 1 --layers 2
 ```
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
@@ -682,6 +684,7 @@ in-projection segments). Chance is 12.5%.
 | the same construction at `u = 1`, same head | 26.7% | 16.3% | 20.9% |
 | — the same, best readout of its state | 19.2% | 13.6% | 13.7% |
 | **hand-built** `u = 2` block, no training | **100%** | **100%** | **100%** |
+| **hand-built** `u = 1` block **handed the pair's product** | **100%** | **100%** | **100%** |
 | **trained**, `--micro-steps 2` | **100%** | **100%** | **100%** |
 | trained, `--micro-steps 1`, seed 0 | 73.8% | 44.3% | 62.0% |
 | trained, `--micro-steps 1`, seed 1 | 68.1% | 54.0% | 56.8% |
@@ -698,6 +701,7 @@ The same models at **96 tokens**, three times the length they were trained on:
 | at 96 tokens | random | shuffle | runs |
 |---|---|---|---|
 | **hand-built** `u = 2` block | **100%** | **100%** | **100%** |
+| **hand-built** `u = 1` block **handed the pair's product** | **100%** | **100%** | **100%** |
 | **trained**, `--micro-steps 2` | **100%** | **100%** (49150/49152) | **100%** |
 | trained, `--micro-steps 1`, seed 0 | 70.7% | 26.2% | 37.4% |
 | trained, `--micro-steps 1`, seed 1 | 66.3% | 41.5% | 41.2% |
@@ -705,6 +709,37 @@ The same models at **96 tokens**, three times the length they were trained on:
 The `u = 2` model extrapolates to two errors in fifty thousand positions, because
 what it learned is the group; both `u = 1` models lose ground exactly where the
 words get longer.
+
+**The other way to get two rotations into a token: a second layer.**
+`--layers 2 --micro-steps 1` — 1280 parameters against `u = 2`'s 1044, two blocks
+and two states against one. A second layer's rotation is `exp` of an affine
+functional of the layer *below*, not of the token, so the axis-pinning that closes
+`u = 1` does not reach it: the second layer only has to be *handed* the pair's
+product (the hand-built rows above, exact at both lengths once it is), leaving the
+layer below to compute it. Both schedules, and the one-layer model re-run at the
+gentler one as the control:
+
+| at 32 tokens | random | shuffle | runs |
+|---|---|---|---|
+| 2 layers, `max_lr` 3e-2 (the ladder's), seeds 0 / 1 | 43.6 / 49.7% | 29.4 / 31.1% | 35.3 / 33.6% |
+| **2 layers, `max_lr` 1e-2, seed 0** | **100%** | **100%** (16382/16384) | **100%** |
+| 2 layers, 1e-2, seeds 1 / 2 / 3 | 47.3 / 52.2 / 55.1% | 20.5 / 30.7 / 33.2% | 23.0 / 35.8 / 36.3% |
+| 1 layer, 1e-2, seeds 0 / 1 (control) | 49.9 / 74.3% | 30.5 / 56.4% | 33.5 / 63.4% |
+
+| at 96 tokens | random | shuffle | runs |
+|---|---|---|---|
+| **trained**, `--micro-steps 2` (from above) | **100%** | **100%** | **100%** |
+| 2 layers, 1e-2, seed 0 — the one that solved it | 99.9% | 89.4% | 75.8% |
+| 1 layer, 1e-2, seed 1 (the best control) | 71.8% | 37.4% | 38.8% |
+
+So depth does reach it — one seed in four, and only off the ladder's schedule,
+where no one-layer `u = 1` run at either schedule comes within twenty points of it.
+And it reaches it the way the obstruction above says a *learned* composition would:
+exactly at the length it trained on, then giving the long words back — 11 899 wrong
+positions in 49 152 on `runs`, where `u = 2` has two in the whole table. `u = 2`
+hands the two rotations to the recurrence; two layers have to learn the product as
+a feature, and an approximate product tracks the group only for as long as the
+words stay short.
 
 The two `u = 1` construction rows in the first table are the twin of the
 hand-built solution, swept over the generator scale and reported both through the
@@ -718,6 +753,9 @@ into a single step perfectly well. Only the composition does not.
 form (no fitting anywhere); `one_step_cannot_compose_a_token` re-runs that same
 construction at `micro_steps = 1`; `one_step_generators_add_and_cannot_reach_k`
 is the obstruction above, computed over all six ordered pairs of distinct units;
+`a_second_layer_only_helps_by_composing_the_pair` is the hand-built row for the
+depth contrast — the same one-step block reading the token's *effect* (its group
+element, plus whether it resets) instead of its two symbols;
 `counts_ceiling_is_the_order_blind_limit` needs no model at all;
 `labels_are_the_paired_quaternion_word_problem` checks the dataset really is the
 `Q₈` word problem read in pairs.
@@ -750,6 +788,19 @@ is the obstruction above, computed over all six ordered pairs of distinct units;
   scores well (at 16 tokens a `u = 1` model reaches 95%), and over a long word it
   compounds into the numbers above. The exact solution is the only one whose
   accuracy does not depend on how long you run it.
+- **Depth is a different resource, and a worse one here.** A second layer also
+  applies a second rotation per token, but to a **second state**: the word has to
+  end up in the last layer's, so that layer's per-token rotation still has to be
+  the whole product, and the layer below has to compute it as a *feature* — a
+  function of the pair with no additive form, hence a bilinear one, which is the
+  one thing the block's `C·B` term is. Nothing forbids it, and the measured rows
+  say so: two layers reach 100% at the trained length in one seed of four (and
+  only at the gentler schedule), where a one-layer `u = 1` model never gets close.
+  What they do not get is the group — the same solution is 76% on `runs` at three
+  times the length, because a learned product is an approximate one. `u = 2` costs
+  fewer parameters (1044 vs 1280), one state instead of two, and is exact at every
+  length. The dial and the depth are not interchangeable: one changes the
+  token→transition *map*, the other adds another map after it.
 - **What `u` buys is decided by the `RotationKind`.** This is the non-abelian
   case, where the gain is a per-token transition the parameterisation otherwise
   cannot name. Under `Complex2D` the same pairing would cost nothing — a sum of
