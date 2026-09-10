@@ -108,7 +108,7 @@ path = "examples/reset/swap/main.rs"
 
 [[example]]
 name = "spinor-product"
-path = "examples/reset/product/main.rs"
+path = "examples/reset/spinor-product/main.rs"
 
 # [patch."https://github.com/swfsql/burn-stack.git"]
 # burn-stack = { path = "../burn-stack" }
