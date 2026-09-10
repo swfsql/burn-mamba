@@ -3,7 +3,9 @@
 //! block's complex transition can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+};
 
 /// A single Mamba-3 block at `state_rank = 2`, unrolled, is one data-dependent
 /// **rotation** per head plus a data-dependent decay:
@@ -41,6 +43,9 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 ///   the whole state rotates. The rotor *is* the state.
 /// - `per_head_dim = 1`, `expand = 1` ⇒ `nheads = 2`: the cos axis and the sin
 ///   axis, and nothing else.
+/// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
+///   weight, and switching it off is structural — no `λ` segment in the
+///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the single layer's residual, so `out_proj`
 ///   reads the block's output *alone* — without it the head also sees the
 ///   embedding of the current token, which cannot give the answer but does
@@ -52,7 +57,7 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 /// so `ϑ` can read the turn direction while `x` and `A` read the reset flag.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (the cos head
-    // and the sin head), each with its own Δ, A, λ and D.
+    // and the sin head), each with its own Δ, A and D.
     // state_rank = 2 ⇒ the state is a single plane, and rope_fraction = 1.0
     // rotates all of it.
     let mamba_block = Mamba3Config::new(2)
@@ -63,6 +68,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_mimo_rank(1)
         .with_rope_fraction(1.0)
         .with_rotation(RotationKind::Complex2D)
+        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

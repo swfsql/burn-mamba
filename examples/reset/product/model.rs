@@ -47,8 +47,17 @@ pub const D_MODEL: usize = 8;
 ///   4-simplex of norm 2, so every token has RMS 1 (the layer's pre-`RmsNorm`
 ///   passes it through unchanged) and every in-projection channel has a
 ///   closed-form weight. `per_head_dim = 2` then keeps `nheads = 4` — one head
-///   per quaternion component, as in `reset-spinor` — and the construction uses
-///   each head's first value channel.
+///   per quaternion component — and the construction uses each head's first
+///   value channel. Two heads are enough for the *readout*, and are what the four
+///   `reset-*` rungs run at, but here the same schedule then finds nothing:
+///   61 / 52 / 53% with the trapezoid, 46 / 30 / 33% without it.
+/// - The **trapezoid stays on** here (the default
+///   [`Trapezoid::HorizontalCarryOver`](burn_mamba::prelude::Trapezoid)), and it
+///   is the one rung where it does. The hand-built solution pins `λ ≈ 1` and
+///   never uses the `β` tap, so `Trapezoid::None` looks free — and it does reach
+///   100% at the trained length, then loses the long column (83% at 96 tokens),
+///   which is the column this rung exists to report. The other four rungs are
+///   tapless.
 /// - `ignore_last_residual` zeroes the single layer's residual, so `out_proj`
 ///   reads the block's output alone.
 pub fn model_config(micro_steps: usize) -> MambaLatentNetConfig {

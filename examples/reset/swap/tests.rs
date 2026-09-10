@@ -37,7 +37,8 @@ use burn_mamba::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// `Δ` for every head and every symbol. Fixed at 1 so the rotation generator is
-/// `range·π·tanh(ϑ)` outright and `γ = λ·Δ = 1` writes `B` unscaled.
+/// `range·π·tanh(ϑ)` outright and `γ = Δ = 1` writes `B` unscaled — the block runs
+/// at `Trapezoid::None`, which spends the whole step on the current token.
 const DELTA: f64 = 1.0;
 /// `‖ϑ‖` for a **half-turn** — the same constant as `reset-spinor`, and for the
 /// same reason: the block bounds one step to `rotation_range · π · Δ` and the
@@ -52,20 +53,46 @@ const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a `RESET`: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`: the trapezoid's left-endpoint weight
-/// `β = (1−λ)Δᾱ` vanishes and only the current token is written.
-const LAMBDA_RAW: f64 = 20.0;
 /// `x(R) = 1` — the write. `x(s) = x(t) = 0` exactly (`silu(0) = 0`), so a swap
 /// writes nothing and only turns the state.
 const X_WRITE: f64 = 1.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// Class-logit gain on the readout axes.
+/// Class-logit gain on the plane the readout is folded onto.
 const OUT_GAIN: f64 = 3.0;
 
-/// `d_model`, `state_rank` and `nheads` all equal 4 here — one head per state
-/// component.
-const N: usize = 4;
+/// `state_rank` — the four components of the 4-block the rotation turns.
+const RANK: usize = 4;
+
+/// `nheads`, which at `per_head_dim = 1` is also `d_inner`.
+///
+/// Two, because two is what the *readout* needs: every head holds its own copy
+/// of the same rotated vector (same `B`, same `ᾱ`, same rotation) and differs
+/// only in the `C` it reads that copy with, so `nheads` counts **projections**,
+/// not state. Two projections separate the six orbit points — see
+/// [`PLANE_AXES`].
+const NHEADS: usize = 2;
+
+/// `d_model`. Two, the floor for a three-symbol alphabet: the layer's
+/// pre-`RmsNorm` sends a token to the unit sphere, so a 1-D token would carry
+/// only its sign. It equals `d_inner` here, so the block's `out_proj` is the
+/// identity and the two heads *are* the plane.
+const D_MODEL: usize = 2;
+
+/// The two state components the heads read: the rotation's `x` and `y`.
+///
+/// Conjugation fixes the real axis, so component 0 is constant; and the six
+/// orbit points [`point`] all have the *same* `z` up to its sign (a half-turn
+/// about an axis of the `xy`-plane flips it), so `z` carries only the parity the
+/// counts already give. What is left is six directions of one plane, all of norm
+/// `√2` and pairwise distinct — on a circle, hence in convex position, which is
+/// exactly what a linear six-way head needs.
+const PLANE_AXES: [usize; NHEADS] = [1, 2];
+
+/// [`PLANE_AXES`] applied to a state vector — where a permutation lands.
+fn plane_point(v: [f64; RANK]) -> [f64; D_MODEL] {
+    std::array::from_fn(|c| v[PLANE_AXES[c]])
+}
 
 // ---------------------------------------------------------------------------
 // scalar helpers
@@ -96,32 +123,57 @@ fn t1<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> Tensor<D
     Tensor::<1>::from_floats(f.as_slice(), device).reshape(shape)
 }
 
+/// Solve the 3×3 system `M·w = rhs` by Gaussian elimination with partial pivoting.
+fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> [f64; 3] {
+    for col in 0..3 {
+        let piv = (col..3)
+            .max_by(|&a, &b| m[a][col].abs().partial_cmp(&m[b][col].abs()).unwrap())
+            .unwrap();
+        m.swap(col, piv);
+        rhs.swap(col, piv);
+        assert!(m[col][col].abs() > 1e-12, "singular symbol embedding");
+        for row in 0..3 {
+            if row == col {
+                continue;
+            }
+            let f = m[row][col] / m[col][col];
+            let pivot = m[col];
+            for (k, entry) in m[row].iter_mut().enumerate().skip(col) {
+                *entry -= f * pivot[k];
+            }
+            rhs[row] -= f * rhs[col];
+        }
+    }
+    [rhs[0] / m[0][0], rhs[1] / m[1][1], rhs[2] / m[2][2]]
+}
+
 // ---------------------------------------------------------------------------
 // the hand-built model
 // ---------------------------------------------------------------------------
 
-/// The three symbol embeddings: **orthogonal** vectors of norm 2, indexed by
+/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
+/// (`γ = 1`) passes them through unchanged. Indexed by
 /// [`SWAP_S`] / [`SWAP_T`] / [`RESET`].
 ///
-/// Norm 2 in `d_model = 4` is what the layer's pre-`RmsNorm` (`γ = 1`) passes
-/// through unchanged, and orthogonality is what turns the block's in-projection
-/// into a lookup table: a channel that must take the values `(v_s, v_t, v_R)`
-/// gets the weight `(v_s/2, v_t/2, v_R/2, 0)` and no bias.
-const EMBED: [[f64; N]; NUM_SYMBOLS] = [
-    [2.0, 0.0, 0.0, 0.0],
-    [0.0, 2.0, 0.0, 0.0],
-    [0.0, 0.0, 2.0, 0.0],
+/// Three points of `ℝ²` are affinely independent, so a channel that must take
+/// the values `(v_s, v_t, v_R)` is one 3×3 [`solve3`] away — weight plus bias,
+/// exactly as `reset-majority` and `reset-rotor` do it.
+const EMBED: [[f64; D_MODEL]; NUM_SYMBOLS] = [
+    [std::f64::consts::SQRT_2, 0.0],
+    [0.0, std::f64::consts::SQRT_2],
+    [-1.0, -1.0],
 ];
 
 /// What the network's head reads out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
-    /// The nearest-point decoder: logit `g` ∝ `⟨state, point(g)⟩` over the six
-    /// permutations.
+    /// The nearest-point decoder: logit `g` ∝ `⟨p, plane_point(point(g))⟩` over
+    /// the six permutations, read on the plane [`PLANE_AXES`] keeps.
     Decoder,
-    /// Pass the block's four output axes through as the first four logits, so a
-    /// test can search over every readout the head could have expressed.
-    Probe,
+    /// Pass the two named state components through as the first two logits, so a
+    /// test can search over every readout the head could have expressed. Two at
+    /// a time is all `d_model = 2` carries, so [`probe`] runs the block twice.
+    Probe([usize; 2]),
 }
 
 /// Build the block by hand for the given rotation.
@@ -145,82 +197,107 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     };
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
-    net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, N], device));
-    net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([N]), device)));
-
-    let layer = &mut net.layers.real_layers[0];
-    layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
-    let block = &mut layer.block;
-
-    // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order: [z(4) | x(4) | B_raw(4) | C_raw(4) | Δ(4) | A(4) | λ(4) | ϑ(2, 12 or 24)].
-    // Each entry is the channel's value at (SWAP_S, SWAP_T, RESET), *before* its
-    // own activation.
-    let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
-    channels.extend([[Z_PRE; NUM_SYMBOLS]; N]); // z
-    channels.extend([[0.0, 0.0, silu_inv(X_WRITE)]; N]); // x — only R writes
-    channels.extend(b_channels(rotation)); // B_raw — the vector the write stores
-    channels.extend(basis_channels()); // C_raw (the per-head bias splits it)
-    channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; N]); // Δ
-    channels.extend([[A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)]; N]); // A
-    channels.extend([[LAMBDA_RAW; NUM_SYMBOLS]; N]); // λ
-    channels.extend(rotation_channels(rotation));
-
-    let n_ch = channels.len();
-    let mut w = vec![0.0f64; N * n_ch];
-    for (ch, target) in channels.iter().enumerate() {
-        // orthogonal embeddings of norm 2 ⇒ the weight is the target, halved
-        for (s, t) in target.iter().enumerate() {
-            w[s * n_ch + ch] = t / 2.0;
-        }
-    }
-    block.in_proj.weight = Param::from_tensor(t1(&w, [N, n_ch], device));
-    block.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
-        Shape::new([n_ch]),
+    net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, D_MODEL], device));
+    net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+        Shape::new([D_MODEL]),
         device,
     )));
 
+    let layer = &mut net.layers.real_layers[0];
+    layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
+    let block = &mut layer.block;
+
+    // ── block in_proj: one affine functional per channel ─────────────────────
+    // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
+    // The 2s are `nheads`, the 4s `state_rank`; `Trapezoid::None` projects no λ
+    // at all, so the step's whole mass is `γ = Δ`. Each entry is the channel's
+    // value at (SWAP_S, SWAP_T, RESET), *before* its own activation.
+    let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
+    channels.extend([[Z_PRE; NUM_SYMBOLS]; NHEADS]); // z
+    channels.extend([[0.0, 0.0, silu_inv(X_WRITE)]; NHEADS]); // x — only R writes
+    channels.extend(b_channels(rotation)); // B_raw — the vector the write stores
+    channels.extend(basis_channels()); // C_raw (the per-head bias aims it)
+    channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; NHEADS]); // Δ
+    channels.extend([[A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)]; NHEADS]); // A
+    channels.extend(rotation_channels(rotation));
+
+    let rows = [
+        [EMBED[SWAP_S][0], EMBED[SWAP_S][1], 1.0],
+        [EMBED[SWAP_T][0], EMBED[SWAP_T][1], 1.0],
+        [EMBED[RESET][0], EMBED[RESET][1], 1.0],
+    ];
+    let n_ch = channels.len();
+    let mut w = vec![0.0f64; D_MODEL * n_ch];
+    let mut b = vec![0.0f64; n_ch];
+    for (ch, target) in channels.iter().enumerate() {
+        // three symbols through a 2-D token plus a bias: one exact 3×3 solve
+        let [w0, w1, bias] = solve3(rows, *target);
+        w[ch] = w0; // weight is [d_model, out]: row d, column ch
+        w[n_ch + ch] = w1;
+        b[ch] = bias;
+    }
+    block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
+    block.in_proj.bias = Some(Param::from_tensor(t1(&b, [n_ch], device)));
+
     // ── Δ bias, D, QK-norm scales, B/C biases ────────────────────────────────
     // Δ and A are entirely data-dependent here, so the bias is zero.
-    block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([N]), device));
-    block.d_h = Param::from_tensor(Tensor::zeros(Shape::new([N]), device));
-    block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
-    block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
+    block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([NHEADS]), device));
+    block.d_h = Param::from_tensor(Tensor::zeros(Shape::new([NHEADS]), device));
+    block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
+    block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     // QK-Norm rescales B and C but cannot turn them; head h's bias moves C from
-    // the shared (1,0,0,0) to twice the h-th basis vector, so the four heads read
-    // the four components of one state. It is the only per-head weight here.
-    block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([N, 1, N]), device));
-    let c_bias: Vec<f64> = (0..N)
-        .flat_map(|h| (0..N).map(move |r| 2.0 * (f64::from(r == h) - f64::from(r == 0))))
+    // the shared (1,0,0,0) to twice one basis vector, which is what aims that
+    // head at one component of the state. It is the only per-head weight here,
+    // and it is the entire readout: `PLANE_AXES` for the decoder, and whichever
+    // two components a probe asks for.
+    block.b_bias_hmr = Param::from_tensor(Tensor::zeros(
+        Shape::new([NHEADS, 1, RANK]),
+        device,
+    ));
+    let kept = match head {
+        Head::Decoder => PLANE_AXES,
+        Head::Probe(axes) => axes,
+    };
+    let c_bias: Vec<f64> = (0..NHEADS)
+        .flat_map(|h| {
+            (0..RANK).map(move |r| 2.0 * (f64::from(r == kept[h]) - f64::from(r == 0)))
+        })
         .collect();
-    block.c_bias_hmr = Param::from_tensor(t1(&c_bias, [N, 1, N], device));
+    block.c_bias_hmr = Param::from_tensor(t1(&c_bias, [NHEADS, 1, RANK], device));
 
     // ── block out-projection: the identity ───────────────────────────────────
-    let eye: Vec<f64> = (0..N * N).map(|n| f64::from(n / N == n % N)).collect();
-    block.out_proj.weight = Param::from_tensor(t1(&eye, [N, N], device));
-    block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([N]), device)));
+    // `d_inner = d_model = 2`, and the two heads already *are* the plane.
+    let eye: Vec<f64> = (0..NHEADS * D_MODEL)
+        .map(|n| f64::from(n / D_MODEL == n % D_MODEL))
+        .collect();
+    block.out_proj.weight = Param::from_tensor(t1(&eye, [NHEADS, D_MODEL], device));
+    block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+        Shape::new([D_MODEL]),
+        device,
+    )));
 
     // ── the class head: nearest orbit point ──────────────────────────────────
-    // logit_g ∝ ⟨state, point(g)⟩ over the six permutations. `ignore_last_residual`
-    // means the block's output is all the head sees.
-    let mut w_out = vec![0.0f64; N * NUM_CLASSES];
+    // logit_g ∝ ⟨p, plane_point(point(g))⟩ over the six permutations, which sit
+    // on six distinct directions of one circle. `ignore_last_residual` means the
+    // block's output is all the head sees.
+    let mut w_out = vec![0.0f64; D_MODEL * NUM_CLASSES];
     match head {
         Head::Decoder => {
             for class in 0..NUM_CLASSES {
-                let p = point(class as i64);
-                for (r, pr) in p.iter().enumerate() {
-                    w_out[r * NUM_CLASSES + class] = OUT_GAIN * pr;
+                let p = plane_point(point(class as i64));
+                for (c, pc) in p.iter().enumerate() {
+                    w_out[c * NUM_CLASSES + class] = OUT_GAIN * pc;
                 }
             }
         }
-        // the four axes, verbatim, in the first four logits
-        Head::Probe => {
-            for r in 0..N {
-                w_out[r * NUM_CLASSES + r] = 1.0;
+        // the two selected axes, verbatim, in the first two logits
+        Head::Probe(_) => {
+            for c in 0..D_MODEL {
+                w_out[c * NUM_CLASSES + c] = 1.0;
             }
         }
     }
-    net.out_proj.weight = Param::from_tensor(t1(&w_out, [N, NUM_CLASSES], device));
+    net.out_proj.weight = Param::from_tensor(t1(&w_out, [D_MODEL, NUM_CLASSES], device));
     net.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(
         Shape::new([NUM_CLASSES]),
         device,
@@ -245,20 +322,22 @@ fn rotation_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
         RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // Left and right generators **equal** ⇒ v ↦ q v q̄, conjugation, SO(3).
         // Channels are laid out [head][left | right][x, y, z].
-        RotationKind::Rotor4D => (0..N)
+        RotationKind::Rotor4D => (0..NHEADS)
             .flat_map(|_| [axis(0), axis(1), axis(2), axis(0), axis(1), axis(2)])
             .collect(),
         // The left factor alone ⇒ v ↦ q v, whose square is −1: the double cover.
-        RotationKind::Quaternion4D => (0..N).flat_map(|_| [axis(0), axis(1), axis(2)]).collect(),
+        RotationKind::Quaternion4D => {
+            (0..NHEADS).flat_map(|_| [axis(0), axis(1), axis(2)]).collect()
+        }
         // one angle per state pair: `s` turns pair 0 by π, `t` turns pair 1 by π
         RotationKind::Complex2D => vec![[TURN_RAW, 0.0, 0.0], [0.0, TURN_RAW, 0.0]],
     }
 }
 
 /// The four `C` channels, carrying `(1, 0, 0, 0)` for every symbol; the per-head
-/// bias then moves head `h` to twice the `h`-th basis vector.
+/// bias then aims head `h` at one basis vector.
 fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
-    (0..N).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
+    (0..RANK).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
 }
 
 /// The four `B` channels — the vector `R` writes into the state.
@@ -271,7 +350,7 @@ fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
 /// pair, so its state carries both parities rather than one. As in
 /// `reset-spinor`, that is the fairest analogue rather than a detail.
 fn b_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
-    (0..N)
+    (0..RANK)
         .map(|r| match rotation {
             RotationKind::Complex2D => [f64::from(r % 2 == 0); NUM_SYMBOLS],
             _ => [REF_POINT[r]; NUM_SYMBOLS],
@@ -326,6 +405,43 @@ fn run(
         .map(|c| std::array::from_fn(|i| c[i] as f64))
         .collect();
     let targets = items.iter().flat_map(|i| i.targets.clone()).collect();
+    (channels, targets)
+}
+
+/// The block's **four** output axes, for one family — the state itself, not one
+/// projection of it.
+///
+/// `d_model = 2` lets two components through per run, so this runs the same
+/// hand-built block twice, once per half. Every ceiling below is meant to bound
+/// what a readout of the *state* could do, and the model's own readout is a
+/// linear map of these four numbers (`out_proj` then the head), so searching
+/// over all four is the conservative side.
+fn probe(
+    device: &Device,
+    rotation: RotationKind,
+    family: Family,
+    count: usize,
+    seed: u64,
+) -> (Vec<[f64; RANK]>, Vec<i64>) {
+    let (lo, targets) = run(
+        &handmade(device, rotation, Head::Probe([0, 1])),
+        family,
+        count,
+        seed,
+        device,
+    );
+    let (hi, _) = run(
+        &handmade(device, rotation, Head::Probe([2, 3])),
+        family,
+        count,
+        seed,
+        device,
+    );
+    let channels = lo
+        .iter()
+        .zip(&hi)
+        .map(|(a, b)| [a[0], a[1], b[0], b[1]])
+        .collect();
     (channels, targets)
 }
 
@@ -394,49 +510,46 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
 /// It is the column where the left-isoclinic twin's antipodal pairs bite, and
 /// the one the [`best_lookup`] over [`output_codes`] deliberately dominates
 /// (a table is not linear, and that gap is the finding).
-fn best_linear_readout(
-    fit: (&[[f64; NUM_CLASSES]], &[i64]),
-    eval: (&[[f64; NUM_CLASSES]], &[i64]),
-) -> f64 {
+fn best_linear_readout(fit: (&[[f64; RANK]], &[i64]), eval: (&[[f64; RANK]], &[i64])) -> f64 {
     // Standardise by the global RMS so one learning rate fits every block.
     let rms = {
-        let n = (fit.0.len() * N) as f64;
+        let n = (fit.0.len() * RANK) as f64;
         let sq: f64 = fit
             .0
             .iter()
-            .flat_map(|o| o[..N].iter().map(|v| v * v))
+            .flat_map(|o| o[..RANK].iter().map(|v| v * v))
             .sum();
         (sq / n).sqrt().max(1e-12)
     };
-    let feats = |o: &[f64; NUM_CLASSES]| {
-        let mut f = [0.0f64; N + 1];
-        for r in 0..N {
+    let feats = |o: &[f64; RANK]| {
+        let mut f = [0.0f64; RANK + 1];
+        for r in 0..RANK {
             f[r] = o[r] / rms;
         }
-        f[N] = 1.0; // bias
+        f[RANK] = 1.0; // bias
         f
     };
-    let mut w = [[0.0f64; N + 1]; NUM_CLASSES];
+    let mut w = [[0.0f64; RANK + 1]; NUM_CLASSES];
     let lr = 1.0;
     for _ in 0..1200 {
-        let mut grad = [[0.0f64; N + 1]; NUM_CLASSES];
+        let mut grad = [[0.0f64; RANK + 1]; NUM_CLASSES];
         for (o, &t) in fit.0.iter().zip(fit.1) {
             let f = feats(o);
             let logits: [f64; NUM_CLASSES] =
-                std::array::from_fn(|c| (0..=N).map(|k| w[c][k] * f[k]).sum());
+                std::array::from_fn(|c| (0..=RANK).map(|k| w[c][k] * f[k]).sum());
             let max = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let exp: [f64; NUM_CLASSES] = std::array::from_fn(|c| (logits[c] - max).exp());
             let sum: f64 = exp.iter().sum();
             for c in 0..NUM_CLASSES {
                 let d = exp[c] / sum - f64::from(c as i64 == t);
-                for k in 0..=N {
+                for k in 0..=RANK {
                     grad[c][k] += d * f[k];
                 }
             }
         }
         let scale = lr / fit.0.len() as f64;
         for c in 0..NUM_CLASSES {
-            for k in 0..=N {
+            for k in 0..=RANK {
                 w[c][k] -= scale * grad[c][k];
             }
         }
@@ -449,8 +562,8 @@ fn best_linear_readout(
             let f = feats(o);
             let pred = (0..NUM_CLASSES)
                 .max_by(|&a, &b| {
-                    let la: f64 = (0..=N).map(|k| w[a][k] * f[k]).sum();
-                    let lb: f64 = (0..=N).map(|k| w[b][k] * f[k]).sum();
+                    let la: f64 = (0..=RANK).map(|k| w[a][k] * f[k]).sum();
+                    let lb: f64 = (0..=RANK).map(|k| w[b][k] * f[k]).sum();
                     la.partial_cmp(&lb).unwrap()
                 })
                 .unwrap();
@@ -467,11 +580,11 @@ fn best_linear_readout(
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
 
-fn output_codes(channels: &[[f64; NUM_CLASSES]], range: &[(f64, f64); N]) -> Vec<usize> {
+fn output_codes(channels: &[[f64; RANK]], range: &[(f64, f64); RANK]) -> Vec<usize> {
     channels
         .iter()
         .map(|o| {
-            (0..N).fold(0, |code, r| {
+            (0..RANK).fold(0, |code, r| {
                 let (lo, hi) = range[r];
                 let span = (hi - lo).max(1e-12);
                 let level = ((((o[r] - lo) / span) * LEVELS as f64) as usize).min(LEVELS - 1);
@@ -481,7 +594,7 @@ fn output_codes(channels: &[[f64; NUM_CLASSES]], range: &[(f64, f64); N]) -> Vec
         .collect()
 }
 
-fn channel_range(channels: &[[f64; NUM_CLASSES]]) -> [(f64, f64); N] {
+fn channel_range(channels: &[[f64; RANK]]) -> [(f64, f64); RANK] {
     std::array::from_fn(|r| {
         channels
             .iter()
@@ -558,8 +671,6 @@ fn handmade_rotor_solves_every_family() {
 fn left_isoclinic_carries_a_double_cover() {
     let device = Device::default();
     let decoder = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
-    let probe = handmade(&device, RotationKind::Quaternion4D, Head::Probe);
-    let rotor_probe = handmade(&device, RotationKind::Rotor4D, Head::Probe);
     println!(
         "the same construction, left-isoclinic ({} params):",
         decoder.num_params()
@@ -570,8 +681,8 @@ fn left_isoclinic_carries_a_double_cover() {
     let mut best_head = 0.0f64;
     let mut worst_cancel = 1.0f64;
     for (name, family) in FAMILIES {
-        let (fit_ch, fit_t) = run(&probe, family, 256, FIT, &device);
-        let (eval_ch, eval_t) = run(&probe, family, 256, EVAL, &device);
+        let (fit_ch, fit_t) = probe(&device, RotationKind::Quaternion4D, family, 256, FIT);
+        let (eval_ch, eval_t) = probe(&device, RotationKind::Quaternion4D, family, 256, EVAL);
         let range = channel_range(&fit_ch);
         let table = best_lookup(
             (&output_codes(&fit_ch, &range), &fit_t),
@@ -580,8 +691,8 @@ fn left_isoclinic_carries_a_double_cover() {
         );
         let linear = best_linear_readout((&fit_ch, &fit_t), (&eval_ch, &eval_t));
         let cancel = mean_over_rms(&eval_ch, &eval_t);
-        let (rotor_fit, rotor_fit_t) = run(&rotor_probe, family, 256, FIT, &device);
-        let (rotor_ch, rotor_t) = run(&rotor_probe, family, 256, EVAL, &device);
+        let (rotor_fit, rotor_fit_t) = probe(&device, RotationKind::Rotor4D, family, 256, FIT);
+        let (rotor_ch, rotor_t) = probe(&device, RotationKind::Rotor4D, family, 256, EVAL);
         println!(
             "  {name:<9}      {:6.2}%       {:6.2}%       {:6.2}%      {cancel:5.3}         {:6.2}% / {:5.3}",
             100.0 * accuracy(&decoder, family, 256, &device),
@@ -610,14 +721,14 @@ fn left_isoclinic_carries_a_double_cover() {
 /// Per class, `‖mean of the output vectors‖ / rms of the output vectors`,
 /// averaged over classes: 1 when every position of a class lands on the same
 /// state, ~0 when they land on `±` the same state equally often.
-fn mean_over_rms(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64 {
-    let mut sum = vec![[0.0f64; N]; NUM_CLASSES];
+fn mean_over_rms(channels: &[[f64; RANK]], targets: &[i64]) -> f64 {
+    let mut sum = vec![[0.0f64; RANK]; NUM_CLASSES];
     let mut sq = vec![0.0f64; NUM_CLASSES];
     let mut n = vec![0.0f64; NUM_CLASSES];
     for (o, &t) in channels.iter().zip(targets) {
         let c = t as usize;
         n[c] += 1.0;
-        for r in 0..N {
+        for r in 0..RANK {
             sum[c][r] += o[r];
             sq[c] += o[r] * o[r];
         }
@@ -645,12 +756,11 @@ fn mean_over_rms(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64 {
 #[test]
 fn abelian_rotation_loses_the_order() {
     let device = Device::default();
-    let probe = handmade(&device, RotationKind::Complex2D, Head::Probe);
     println!("the same construction, abelian rotation:");
     let mut best = 0.0f64;
     for (name, family) in FAMILIES {
-        let (fit_ch, fit_t) = run(&probe, family, 512, FIT, &device);
-        let (eval_ch, eval_t) = run(&probe, family, 256, EVAL, &device);
+        let (fit_ch, fit_t) = probe(&device, RotationKind::Complex2D, family, 512, FIT);
+        let (eval_ch, eval_t) = probe(&device, RotationKind::Complex2D, family, 256, EVAL);
         let range = channel_range(&fit_ch);
         let ceiling = best_lookup(
             (&output_codes(&fit_ch, &range), &fit_t),

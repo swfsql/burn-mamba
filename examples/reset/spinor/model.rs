@@ -3,7 +3,9 @@
 //! non-abelian rotation can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+};
 
 /// A Mamba-3 block at `state_rank = 4` with [`RotationKind::Quaternion4D`]
 /// carries, per head, a cumulative **unit quaternion** built by an ordered
@@ -33,10 +35,15 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 ///   `ᾱ ≈ 1` holds; each contributes its own half-turn quaternion to the
 ///   product. `i` and `j` are half-turns about orthogonal axes, and they do not
 ///   commute — `ij = k`, `ji = −k`.
-/// - **The four heads read the four components.** They share `Δ` (hence the same
-///   rotation) and their `C` are the four basis quaternions, set apart by the
-///   per-head bias `c_bias_hmr` alone, so `(y₀, y₁, y₂, y₃) ∝ q_rel` and the
-///   eight-class head is a nearest-element decoder: logit `g` = `⟨q_rel, g⟩`.
+/// - **Two heads read that element on a plane.** Both hold a copy of the same
+///   quaternion — same `B`, same `ᾱ`, same rotation — and differ only in the `C`
+///   the per-head bias `c_bias_hmr` gives them, so `nheads` here counts
+///   *readouts*. Two suffice: under `e_k ↦ (cos kπ/4, sin kπ/4)` the eight
+///   elements of `Q₈` become eight **directions** `45°` apart, distinct,
+///   equidistant and in convex position, and head `h` reads the `h`-th
+///   coordinate of that map. `(y₀, y₁) ∝` the direction of `q_rel`, and the
+///   eight-class head is a sector decoder over them: still `logit g = ⟨·, g⟩`,
+///   read on the plane rather than on the quaternion.
 ///
 /// A half-turn is an ordinary interior point of the parameterisation, not a
 /// limit: the block bounds one step to `rotation_range · π · Δ`, defaulting to
@@ -45,17 +52,27 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 /// state differently). So `i` sits at `tanh(‖ϑ‖) = 1/2`, with a live gradient.
 /// The bound is on the generator's **magnitude**, so the axis is exactly the
 /// direction the projection names — and it is projected **per head**, so the
-/// four heads could turn about four different axes; this construction just
-/// wants them to agree.
+/// two heads could turn about two different axes; this construction just wants
+/// them to agree.
 ///
 /// Config choices that are load-bearing:
 ///
 /// - `state_rank = 4` is the smallest quaternion block — one `SU(2)` factor, and
 ///   `rope_fraction = 1.0` turns all of it. The group *is* the state.
-/// - `per_head_dim = 1`, `expand = 1`, `d_model = 4` ⇒ `nheads = 4`: one head
-///   per quaternion component, and nothing else. `d_model = 4` also carries the
-///   three symbol embeddings as **orthogonal** vectors, which is what makes the
-///   in-projection a plain lookup table (see `tests.rs`).
+/// - `per_head_dim = 1`, `expand = 1`, `d_model = 2` ⇒ `d_inner = 2`,
+///   `nheads = 2`: two readouts of the one state, which is what the eight-way
+///   label needs, and `d_inner = d_model` so `out_proj` is the identity. Four
+///   heads (two more copies of the state the head cannot use) cost 212
+///   parameters against 134 and buy nothing here. `reset-swap` reaches the same
+///   answer; `spinor-product` is the one rung that needs its four.
+/// - `d_model = 2`, the floor for a three-symbol alphabet: the layer's
+///   pre-`RmsNorm` sends a token to the unit sphere, so `d_model = 1` would
+///   leave two distinguishable symbols, and three points of `ℝ²` are already
+///   affinely independent — every in-projection channel can take any value it
+///   likes on the three symbols (a 3×3 solve; see `tests.rs`).
+/// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
+///   weight, and switching it off is structural — no `λ` segment in the
+///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the single layer's residual, so `out_proj`
 ///   reads the block's output alone.
 ///
@@ -64,9 +81,9 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 /// angles, which is a function of the symbol *counts* — and the counts cannot
 /// tell `ij` from `ji`.
 pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
-    // d_inner = expand·d_model = 4, per_head_dim = 1 ⇒ nheads = 4 (one per
-    // quaternion component), each with its own Δ, A, λ and D.
-    let mamba_block = Mamba3Config::new(4)
+    // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (one per plane
+    // coordinate the head reads), each with its own Δ, A and D.
+    let mamba_block = Mamba3Config::new(2)
         .with_state_rank(4) // one quaternion block — the group element itself
         .with_expand(1)
         .with_per_head_dim(1)
@@ -74,6 +91,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         .with_mimo_rank(1)
         .with_rope_fraction(1.0)
         .with_rotation(rotation)
+        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

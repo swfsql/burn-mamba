@@ -3,20 +3,22 @@
 //! *but* the block can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+};
 
 /// A single Mamba-3 block at `state_rank = 1` and [`RotationKind::Real1D`],
 /// unrolled, is two data-dependent scalar recurrences:
 ///
 /// ```ignore
 /// Δₕ(u) = softplus(⟨aₕ, u⟩ + bₕ)     Aₕ(u) = −softplus(⟨cₕ, u⟩)     ᾱₕ = exp(Δₕ Aₕ)
-/// γₕ(u) = λₕ(u)·Δₕ(u)                (λ ≈ 1 ⇒ β = 0: only the current token)
+/// γₕ(u) = Δₕ(u)                     (`Trapezoid::None`: β = 0, current token only)
 /// hₜ⁽ʰ⁾ = ᾱₕ(uₜ)·hₜ₋₁⁽ʰ⁾ + γₕ(uₜ)·B(uₜ)·xₕ(uₜ)
 /// yₜ⁽ʰ⁾ = C(uₜ)·hₜ⁽ʰ⁾ + Dₕ·xₕ(uₜ)
 /// ```
 ///
 /// with `x` `silu(affine(uₜ))`, `B`/`C` QK-normed affines of `uₜ`, and `Δ`, `A`,
-/// `λ`, `D` **per head**. The task is built around exactly that shape:
+/// `D` **per head**. The task is built around exactly that shape:
 ///
 /// - **head 0 is the ballot box.** `A₀` reads the reset flag: at the block's
 ///   `a_floor` on `±` (so `ᾱ₀ ≈ 1` and `h₀` is an unweighted running sum) and
@@ -42,6 +44,9 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 ///   admits an odd `state_rank`: there is no pair to rotate.)
 /// - Mamba-3 has no short convolution, so the SSM state is automatically the
 ///   model's only memory — there is no local window to shortcut through.
+/// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
+///   weight, and switching it off is structural — no `λ` segment in the
+///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the single layer's residual, so the head
 ///   reads the block's output *alone*. Without it it also sees the embedding of
 ///   the current token, which cannot give the answer but does muddy the claim.
@@ -52,7 +57,7 @@ use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, R
 /// they are all monotone functions of the same scalar.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (one head for
-    // the vote, one for the reference), each with its own Δ, A, λ and D.
+    // the vote, one for the reference), each with its own Δ, A and D.
     // state_rank = 1 ⇒ each head's state is a single scalar.
     let mamba_block = Mamba3Config::new(2)
         .with_state_rank(1) // a scalar state — nothing to rotate
@@ -61,6 +66,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_ngroups(1)
         .with_mimo_rank(1)
         .with_rotation(RotationKind::Real1D) // a real transition: decay only
+        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

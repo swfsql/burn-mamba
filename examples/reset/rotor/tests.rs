@@ -43,7 +43,8 @@ const DETENT: f64 = 2.0 * std::f64::consts::PI / MODULUS as f64;
 /// inside `tanh`'s slope.
 const MAX_ANGLE: f64 = 2.0 * std::f64::consts::PI;
 /// `Δ` for every head and every symbol. Fixed at 1 so the per-step angle is
-/// `π·tanh(ϑ)` outright and `γ = λ·Δ = 1` writes `B` unscaled.
+/// `π·tanh(ϑ)` outright and `γ = Δ = 1` writes `B` unscaled (`Trapezoid::None`
+/// spends the whole step on the current token).
 const DELTA: f64 = 1.0;
 /// `Â` on a `±` symbol. `A = −softplus(Â)` and the block floors `|A|` at its
 /// `a_floor` (`1e-4`), so any value this negative leaves the decay at
@@ -51,9 +52,6 @@ const DELTA: f64 = 1.0;
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a `RESET`: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`: the trapezoid's left-endpoint weight
-/// `β = (1−λ)Δᾱ` vanishes and only the current token is written.
-const LAMBDA_RAW: f64 = 20.0;
 /// `x(R) = 1` — the write. `x(±) = 0` exactly (`silu(0) = 0`), so a turn writes
 /// nothing and only advances the phase.
 const X_WRITE: f64 = 1.0;
@@ -269,7 +267,8 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
         }
         Turn::Fixed(omega) => [(omega / MAX_ANGLE).atanh(); 3],
     };
-    // Channel order: [z(2) | x(2) | B_raw(2) | C_raw(2) | dt(2) | A(2) | λ(2) | ϑ(1)].
+    // Channel order: [z(2) | x(2) | B_raw(2) | C_raw(2) | dt(2) | A(2) | ϑ(1)].
+    // `Trapezoid::None` projects no λ, as `Real1D` projects no ϑ.
     let channels: Vec<[f64; 3]> = vec![
         [Z_PRE; 3],                                                    // z, head 0
         [Z_PRE; 3],                                                    // z, head 1
@@ -283,8 +282,6 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
         [softplus_inv(DELTA); 3],                                      // Δ, head 1
         [A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)],              // A, head 0
         [A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)],              // A, head 1
-        [LAMBDA_RAW; 3],                                               // λ, head 0
-        [LAMBDA_RAW; 3],                                               // λ, head 1
         theta,                                                         // ϑ
     ];
     // C after QK-norm is (√2, 0) for both heads; head 1's bias turns it a
@@ -314,8 +311,7 @@ fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
         [softplus_inv(1e-6); 3],                                // Δ, head 1 — never writes
         [softplus_inv(a_hold), softplus_inv(a_hold), softplus_inv(A_WIPE)], // A, head 0
         [A_HOLD_RAW; 3],                                        // A, head 1
-        [LAMBDA_RAW; 3],                                        // λ, head 0
-        [LAMBDA_RAW; 3],                                        // λ, head 1
+        // No λ channel: `Trapezoid::None` projects none.
         // No ϑ channel: `Real1D` projects none.
     ];
     // D₀ = 0 (head 0 reads the state alone), D₁ = 1 (head 1 *is* its skip).

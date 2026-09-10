@@ -26,7 +26,8 @@ use burn_mamba::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// `Δ` for the ballot box, on every symbol. Fixed at 1, so `ᾱ = exp(A)` outright
-/// and `γ = λ·Δ = 1` writes `B·x` unscaled: the decay is carried by `A` alone.
+/// and `γ = Δ = 1` writes `B·x` unscaled (the block runs at `Trapezoid::None`,
+/// which spends the whole step on the current token): the decay is `A` alone.
 const DELTA: f64 = 1.0;
 /// The per-step decay the ballot box holds at: the block floors `|A|` at its
 /// `a_floor` (`1e-4`), so this is the flattest hold it allows — an (essentially)
@@ -37,9 +38,6 @@ const A_WIPE: f64 = 20.0;
 /// `Â` for the reference head: `A = −softplus(Â)` lands under the block's
 /// `a_floor`, so head 1 holds at the same flattest decay.
 const A_HOLD_RAW: f64 = -20.0;
-/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`: the trapezoid's left-endpoint weight
-/// `β = (1−λ)Δᾱ` vanishes and only the current token is written.
-const LAMBDA_RAW: f64 = 20.0;
 /// `Δ₁`, small enough that head 1's state never leaves its `D₁·x₁` reference.
 const DELTA_REF: f64 = 1e-12;
 /// `x₀(±) = ±V`. Mamba-3 has no activation on `x` (the gate's `silu(z)` is the
@@ -122,11 +120,12 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2) | λ(2)]` — no
-    // rotation segment at all, since `Real1D` projects none. Each entry is the
-    // channel's target value at (MINUS, PLUS, RESET), *before* the channel's own
-    // activation (none on `x`, softplus on `Δ` and `−A`, σ on `λ`; `B`/`C` are
-    // QK-normed instead, which at `state_rank = 1` fixes them at their `γ`).
+    // Channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2)]` — no rotation
+    // segment at all, since `Real1D` projects none, and no λ segment, since
+    // `Trapezoid::None` projects none. Each entry is the channel's target value
+    // at (MINUS, PLUS, RESET), *before* the channel's own activation (none on
+    // `x`, softplus on `Δ` and `−A`; `B`/`C` are QK-normed instead, which at
+    // `state_rank = 1` fixes them at their `γ`).
     // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
     let hold = softplus_inv(-alpha.ln());
     let a0 = if selective {
@@ -134,7 +133,7 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     } else {
         [hold; 3]
     };
-    let targets: [[f64; 3]; 12] = [
+    let targets: [[f64; 3]; 10] = [
         [Z_PRE; 3],                       // z, head 0
         [Z_PRE; 3],                       // z, head 1
         [-V, V, 0.0],                     // x, head 0 — the ballot
@@ -145,8 +144,6 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
         [softplus_inv(DELTA_REF); 3],     // Δ, head 1 — never writes
         a0,                               // A, head 0 — hold, hold, wipe
         [A_HOLD_RAW; 3],                  // A, head 1
-        [LAMBDA_RAW; 3],                  // λ, head 0
-        [LAMBDA_RAW; 3],                  // λ, head 1
     ];
     let rows = [
         [EMBED[MINUS][0], EMBED[MINUS][1], 1.0],

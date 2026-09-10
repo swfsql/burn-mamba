@@ -22,9 +22,11 @@
 //!
 //! The construction is the one derived in [`crate::model`]: `R` writes the
 //! identity quaternion into the state at the current cumulative rotation, `i`
-//! and `j` turn that rotation by non-commuting half-turns, and the four heads
-//! read the four components of the relative quaternion — the group element
-//! itself.
+//! and `j` turn that rotation by non-commuting half-turns, and the state is then
+//! the relative quaternion — the group element itself. Two heads read it, along
+//! the two coordinates of a [`plane`] on which the eight elements of `Q₈` are
+//! eight directions `45°` apart, so the head decodes a sector. The ceilings in
+//! (2) are still measured on all four components of the state (see [`probe`]).
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
@@ -41,7 +43,8 @@ use burn_mamba::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// `Δ` for every head and every symbol. Fixed at 1 so the rotation generator is
-/// `π·tanh(ϑ)` outright and `γ = λ·Δ = 1` writes `B` unscaled.
+/// `π·tanh(ϑ)` outright and `γ = Δ = 1` writes `B` unscaled — the block runs at
+/// `Trapezoid::None`, which spends the whole step on the current token.
 const DELTA: f64 = 1.0;
 /// `ϑ` for an axis a symbol turns about — a half-turn, i.e. the unit quaternion
 /// `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
@@ -60,20 +63,32 @@ const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a `RESET`: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`: the trapezoid's left-endpoint weight
-/// `β = (1−λ)Δᾱ` vanishes and only the current token is written.
-const LAMBDA_RAW: f64 = 20.0;
 /// `x(R) = 1` — the write. `x(i) = x(j) = 0` exactly (`silu(0) = 0`), so a turn
 /// writes nothing and only advances the rotation.
 const X_WRITE: f64 = 1.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// Class-logit gain on the four readout axes.
+/// Class-logit gain on the plane the readout is folded onto.
 const OUT_GAIN: f64 = 3.0;
 
-/// `d_model`, `state_rank` and `nheads` all equal 4 here — one head per
-/// quaternion component.
-const N: usize = 4;
+/// `state_rank` — the four components of the quaternion the state holds.
+const RANK: usize = 4;
+
+/// `nheads`, which at `per_head_dim = 1` is also `d_inner`.
+///
+/// Two, because two is what the *readout* needs: every head holds its own copy
+/// of the same quaternion (same `B`, same `ᾱ`, same rotation) and differs only
+/// in the `C` it reads that copy with, so `nheads` is a count of **projections**,
+/// not of state. Eight group elements fit on eight directions of a plane
+/// ([`plane`]), and two projections separate them; a third and a fourth would be
+/// duplicates the head cannot use.
+const NHEADS: usize = 2;
+
+/// `d_model`. Two, the floor for a three-symbol alphabet: the layer's
+/// pre-`RmsNorm` sends a token to the unit sphere, so a 1-D token would carry
+/// only its sign. It equals `d_inner` here, so the block's `out_proj` is the
+/// identity and the two heads *are* the plane.
+const D_MODEL: usize = 2;
 
 // ---------------------------------------------------------------------------
 // scalar helpers
@@ -104,34 +119,95 @@ fn t1<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> Tensor<D
     Tensor::<1>::from_floats(f.as_slice(), device).reshape(shape)
 }
 
+/// Solve the 3×3 system `M·w = rhs` by Gaussian elimination with partial pivoting.
+fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> [f64; 3] {
+    for col in 0..3 {
+        let piv = (col..3)
+            .max_by(|&a, &b| m[a][col].abs().partial_cmp(&m[b][col].abs()).unwrap())
+            .unwrap();
+        m.swap(col, piv);
+        rhs.swap(col, piv);
+        assert!(m[col][col].abs() > 1e-12, "singular symbol embedding");
+        for row in 0..3 {
+            if row == col {
+                continue;
+            }
+            let f = m[row][col] / m[col][col];
+            let pivot = m[col];
+            for (k, entry) in m[row].iter_mut().enumerate().skip(col) {
+                *entry -= f * pivot[k];
+            }
+            rhs[row] -= f * rhs[col];
+        }
+    }
+    [rhs[0] / m[0][0], rhs[1] / m[1][1], rhs[2] / m[2][2]]
+}
+
 // ---------------------------------------------------------------------------
 // the hand-built model
 // ---------------------------------------------------------------------------
 
-/// The three symbol embeddings: **orthogonal** vectors of norm 2, indexed by
+/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
+/// (`γ = 1`) passes them through unchanged. Indexed by
 /// [`TURN_I`] / [`TURN_J`] / [`RESET`].
 ///
-/// Norm 2 in `d_model = 4` is what the layer's pre-`RmsNorm` (`γ = 1`) passes
-/// through unchanged, and orthogonality is what turns the block's in-projection
-/// into a lookup table: a channel that must take the values `(t_i, t_j, t_R)`
-/// gets the weight `(t_i/2, t_j/2, t_R/2, 0)` and no bias, with no linear system
-/// to solve (`reset-majority` and `reset-rotor` need one only because three
-/// symbols do not fit orthogonally into their `d_model = 2`).
-const EMBED: [[f64; N]; NUM_SYMBOLS] = [
-    [2.0, 0.0, 0.0, 0.0],
-    [0.0, 2.0, 0.0, 0.0],
-    [0.0, 0.0, 2.0, 0.0],
+/// Three points of `ℝ²` are affinely independent, so a channel that must take
+/// the values `(t_i, t_j, t_R)` is one 3×3 [`solve3`] away — weight plus bias,
+/// exactly as `reset-majority` and `reset-rotor` do it. (Orthogonal embeddings
+/// would spare the solve, but they need `d_model = 3` at least, and the block is
+/// the thing being minimised.)
+const EMBED: [[f64; D_MODEL]; NUM_SYMBOLS] = [
+    [std::f64::consts::SQRT_2, 0.0],
+    [0.0, std::f64::consts::SQRT_2],
+    [-1.0, -1.0],
 ];
+
+/// The plane the two heads read the state on: state component `r` goes to the
+/// unit vector at `r · 45°`.
+///
+/// The eight elements of `Q₈` are `±eᵣ`, so they land on the eight directions
+/// `45°` apart: distinct, equidistant, and in convex position, which is exactly
+/// what a linear eight-way head needs. The block never forms this plane as a
+/// separate step — head `h` reads the state with [`c_axis`], the `h`-th
+/// coordinate of this map — so the block's own `out_proj` is the identity.
+fn plane(r: usize) -> [f64; D_MODEL] {
+    let angle = std::f64::consts::FRAC_PI_4 * r as f64;
+    [angle.cos(), angle.sin()]
+}
+
+/// [`plane`] applied to a quaternion — where a group element lands.
+fn plane_point(q: [f64; RANK]) -> [f64; D_MODEL] {
+    let mut p = [0.0; D_MODEL];
+    for (r, qr) in q.iter().enumerate() {
+        let axis = plane(r);
+        for (c, pc) in p.iter_mut().enumerate() {
+            *pc += qr * axis[c];
+        }
+    }
+    p
+}
+
+/// The `C` vector head `h` reads the state with: the `h`-th coordinate of
+/// [`plane`] over the four components, scaled to norm 2 — the length QK-Norm
+/// hands the construction, so the two heads share one positive factor and
+/// `(y₀, y₁) ∝ plane_point(q_rel)` exactly.
+fn c_axis(h: usize) -> [f64; RANK] {
+    let raw: [f64; RANK] = std::array::from_fn(|r| plane(r)[h]);
+    let norm = raw.iter().map(|v| v * v).sum::<f64>().sqrt();
+    raw.map(|v| 2.0 * v / norm)
+}
 
 /// What the network's head reads out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
-    /// The nearest-element decoder: logit `g` ∝ `⟨q, g⟩` over the eight
-    /// elements of `Q₈`.
+    /// The nearest-element decoder: logit `g` ∝ `⟨p, plane_point(g)⟩` over the
+    /// eight elements of `Q₈`, read on the plane [`plane`] puts them on.
     Decoder,
-    /// Pass the block's four output axes through as the first four logits, so a
-    /// test can search over every readout the head could have expressed.
-    Probe,
+    /// Point the two heads' `C` at the two named state components instead, and
+    /// pass them through as the first two logits, so a test can search over every
+    /// readout the head could have expressed. Two at a time is all two heads
+    /// carry, so [`probe`] runs the block twice.
+    Probe([usize; 2]),
 }
 
 /// Build the block by hand for the given rotation.
@@ -151,15 +227,19 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     };
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
-    net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, N], device));
-    net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([N]), device)));
+    net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, D_MODEL], device));
+    net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+        Shape::new([D_MODEL]),
+        device,
+    )));
 
     let layer = &mut net.layers.real_layers[0];
-    layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
+    layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
     let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order: [z(4) | x(4) | B_raw(4) | C_raw(4) | Δ(4) | A(4) | λ(4) | ϑ(2 or 3)].
+    // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
+    // The 2s are `nheads`, the 4s `state_rank`; `Trapezoid::None` projects no λ.
     // Each entry is the channel's value at (TURN_I, TURN_J, RESET), *before* its
     // own activation.
     let rotation_channels: Vec<[f64; NUM_SYMBOLS]> = match rotation {
@@ -167,9 +247,9 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
         RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // A scaled rotation axis per head: `i` turns π about x, `j` about y.
         // The block projects the generators **per head** (`nheads · 3` channels
-        // here), so every head gets its own copy — this construction wants all
-        // four to read the same rotation, but the block no longer forces that.
-        RotationKind::Quaternion4D => (0..N)
+        // here), so every head gets its own copy — this construction wants both
+        // to read the same rotation, but the block no longer forces that.
+        RotationKind::Quaternion4D => (0..NHEADS)
             .flat_map(|_| {
                 [
                     [TURN_RAW, 0.0, 0.0], // axis x
@@ -184,7 +264,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
         // and block (channels `[head][left|right][3]`). The quaternion solution
         // lives inside it at `p ≡ 1`, so the left generators are the ones above
         // and the right ones are zero.
-        RotationKind::Rotor4D => (0..N)
+        RotationKind::Rotor4D => (0..NHEADS)
             .flat_map(|_| {
                 [
                     [TURN_RAW, 0.0, 0.0], // left: axis x
@@ -198,72 +278,91 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
             .collect(),
     };
     let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
-    channels.extend([[Z_PRE; NUM_SYMBOLS]; N]); // z
-    channels.extend([[0.0, 0.0, silu_inv(X_WRITE)]; N]); // x — only R writes
+    channels.extend([[Z_PRE; NUM_SYMBOLS]; NHEADS]); // z
+    channels.extend([[0.0, 0.0, silu_inv(X_WRITE)]; NHEADS]); // x — only R writes
     channels.extend(b_channels(rotation)); // B_raw — the vector the write stores
     channels.extend(basis_channels()); // C_raw (the per-head bias splits it)
-    channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; N]); // Δ
-    channels.extend([[A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)]; N]); // A
-    channels.extend([[LAMBDA_RAW; NUM_SYMBOLS]; N]); // λ
+    channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; NHEADS]); // Δ
+    channels.extend([[A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)]; NHEADS]); // A
     channels.extend(rotation_channels);
 
+    let rows = [
+        [EMBED[TURN_I][0], EMBED[TURN_I][1], 1.0],
+        [EMBED[TURN_J][0], EMBED[TURN_J][1], 1.0],
+        [EMBED[RESET][0], EMBED[RESET][1], 1.0],
+    ];
     let n_ch = channels.len();
-    let mut w = vec![0.0f64; N * n_ch];
+    let mut w = vec![0.0f64; D_MODEL * n_ch];
+    let mut b = vec![0.0f64; n_ch];
     for (ch, target) in channels.iter().enumerate() {
-        // orthogonal embeddings of norm 2 ⇒ the weight is the target, halved
-        for (s, t) in target.iter().enumerate() {
-            w[s * n_ch + ch] = t / 2.0;
-        }
+        // three symbols through a 2-D token plus a bias: one exact 3×3 solve
+        let [w0, w1, bias] = solve3(rows, *target);
+        w[ch] = w0; // weight is [d_model, out]: row d, column ch
+        w[n_ch + ch] = w1;
+        b[ch] = bias;
     }
-    block.in_proj.weight = Param::from_tensor(t1(&w, [N, n_ch], device));
-    block.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
-        Shape::new([n_ch]),
-        device,
-    )));
+    block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
+    block.in_proj.bias = Some(Param::from_tensor(t1(&b, [n_ch], device)));
 
     // ── Δ bias, D, QK-norm scales, B/C biases ────────────────────────────────
     // Δ and A are entirely data-dependent here, so the bias is zero.
-    block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([N]), device));
-    block.d_h = Param::from_tensor(Tensor::zeros(Shape::new([N]), device));
-    block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
-    block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([N]), device));
+    block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([NHEADS]), device));
+    block.d_h = Param::from_tensor(Tensor::zeros(Shape::new([NHEADS]), device));
+    block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
+    block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     // QK-Norm over `state_rank = 4` maps (1,0,0,0) to (2,0,0,0), so B is twice
-    // the identity quaternion for every head. C starts there too; head h's bias
-    // moves it to twice the h-th basis quaternion — the only per-head weight in
-    // the whole construction, and what makes the four heads read four
-    // components of the same state.
-    block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([N, 1, N]), device));
-    let c_bias: Vec<f64> = (0..N)
-        .flat_map(|h| (0..N).map(move |r| 2.0 * (f64::from(r == h) - f64::from(r == 0))))
+    // the identity quaternion for both heads, and C starts there too. Head h's
+    // bias is what moves its C — to `c_axis(h)` for the decoder, or to twice a
+    // basis quaternion for a probe. It is the only per-head weight in the whole
+    // construction, and it is the entire readout: two projections of one state.
+    block.b_bias_hmr = Param::from_tensor(Tensor::zeros(
+        Shape::new([NHEADS, 1, RANK]),
+        device,
+    ));
+    let c_bias: Vec<f64> = (0..NHEADS)
+        .flat_map(|h| {
+            let target: [f64; RANK] = match head {
+                Head::Decoder => c_axis(h),
+                Head::Probe(axes) => std::array::from_fn(|r| 2.0 * f64::from(r == axes[h])),
+            };
+            (0..RANK).map(move |r| target[r] - 2.0 * f64::from(r == 0))
+        })
         .collect();
-    block.c_bias_hmr = Param::from_tensor(t1(&c_bias, [N, 1, N], device));
+    block.c_bias_hmr = Param::from_tensor(t1(&c_bias, [NHEADS, 1, RANK], device));
 
     // ── block out-projection: the identity ───────────────────────────────────
-    let eye: Vec<f64> = (0..N * N).map(|n| f64::from(n / N == n % N)).collect();
-    block.out_proj.weight = Param::from_tensor(t1(&eye, [N, N], device));
-    block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([N]), device)));
+    // `d_inner = d_model = 2`, and the two heads already *are* the plane.
+    let eye: Vec<f64> = (0..NHEADS * D_MODEL)
+        .map(|n| f64::from(n / D_MODEL == n % D_MODEL))
+        .collect();
+    block.out_proj.weight = Param::from_tensor(t1(&eye, [NHEADS, D_MODEL], device));
+    block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(
+        Shape::new([D_MODEL]),
+        device,
+    )));
 
     // ── the class head: nearest group element ────────────────────────────────
-    // logit_g ∝ ⟨q, g⟩ over the eight elements of Q₈. `ignore_last_residual`
-    // means the block's output is all the head sees.
-    let mut w_out = vec![0.0f64; N * NUM_CLASSES];
+    // logit_g ∝ ⟨p, plane_point(g)⟩ over the eight elements of Q₈, which sit on
+    // eight directions 45° apart. `ignore_last_residual` means the block's
+    // output is all the head sees.
+    let mut w_out = vec![0.0f64; D_MODEL * NUM_CLASSES];
     match head {
         Head::Decoder => {
             for class in 0..NUM_CLASSES {
-                let q = quaternion(class as i64);
-                for (r, qr) in q.iter().enumerate() {
-                    w_out[r * NUM_CLASSES + class] = OUT_GAIN * qr;
+                let p = plane_point(quaternion(class as i64));
+                for (c, pc) in p.iter().enumerate() {
+                    w_out[c * NUM_CLASSES + class] = OUT_GAIN * pc;
                 }
             }
         }
-        // the four axes, verbatim, in the first four logits
-        Head::Probe => {
-            for r in 0..N {
-                w_out[r * NUM_CLASSES + r] = 1.0;
+        // the two selected axes, verbatim, in the first two logits
+        Head::Probe(_) => {
+            for c in 0..D_MODEL {
+                w_out[c * NUM_CLASSES + c] = 1.0;
             }
         }
     }
-    net.out_proj.weight = Param::from_tensor(t1(&w_out, [N, NUM_CLASSES], device));
+    net.out_proj.weight = Param::from_tensor(t1(&w_out, [D_MODEL, NUM_CLASSES], device));
     net.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(
         Shape::new([NUM_CLASSES]),
         device,
@@ -274,9 +373,10 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
 /// The four `C` channels, carrying the identity quaternion `(1, 0, 0, 0)` for
 /// every symbol. QK-Norm scales it to `(2, 0, 0, 0)`; the per-head bias then
-/// moves head `h` to twice the `h`-th basis quaternion.
+/// moves head `h` to wherever that head reads — [`c_axis`], or a basis
+/// quaternion for a probe.
 fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
-    (0..N).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
+    (0..RANK).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
 }
 
 /// The four `B` channels — the vector `R` writes into the state.
@@ -292,7 +392,7 @@ fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
 /// — the entire abelianisation `Q₈/{±1}`, which is the most any sum of angles
 /// can hold.
 fn b_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
-    (0..N)
+    (0..RANK)
         .map(|r| match rotation {
             RotationKind::Quaternion4D | RotationKind::Rotor4D => [f64::from(r == 0); NUM_SYMBOLS],
             RotationKind::Complex2D => [f64::from(r % 2 == 0); NUM_SYMBOLS],
@@ -349,6 +449,43 @@ fn run(
         .map(|c| std::array::from_fn(|i| c[i] as f64))
         .collect();
     let targets = items.iter().flat_map(|i| i.targets.clone()).collect();
+    (channels, targets)
+}
+
+/// The block's **four** output axes, for one family — the state itself, not one
+/// projection of it.
+///
+/// `d_model = 2` lets two components through per run, so this runs the same
+/// hand-built block twice, once per half. The ceiling is meant to bound every
+/// readout the model could have carried, and the model's readout is a linear
+/// map of these four numbers (`out_proj` then the head), so a table over a fine
+/// partition of all four still dominates it.
+fn probe(
+    device: &Device,
+    rotation: RotationKind,
+    family: Family,
+    count: usize,
+    seed: u64,
+) -> (Vec<[f64; RANK]>, Vec<i64>) {
+    let (lo, targets) = run(
+        &handmade(device, rotation, Head::Probe([0, 1])),
+        family,
+        count,
+        seed,
+        device,
+    );
+    let (hi, _) = run(
+        &handmade(device, rotation, Head::Probe([2, 3])),
+        family,
+        count,
+        seed,
+        device,
+    );
+    let channels = lo
+        .iter()
+        .zip(&hi)
+        .map(|(a, b)| [a[0], a[1], b[0], b[1]])
+        .collect();
     (channels, targets)
 }
 
@@ -415,11 +552,11 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
 
-fn output_codes(channels: &[[f64; NUM_CLASSES]], range: &[(f64, f64); N]) -> Vec<usize> {
+fn output_codes(channels: &[[f64; RANK]], range: &[(f64, f64); RANK]) -> Vec<usize> {
     channels
         .iter()
         .map(|o| {
-            (0..N).fold(0, |code, r| {
+            (0..RANK).fold(0, |code, r| {
                 let (lo, hi) = range[r];
                 let span = (hi - lo).max(1e-12);
                 let level = ((((o[r] - lo) / span) * LEVELS as f64) as usize).min(LEVELS - 1);
@@ -429,7 +566,7 @@ fn output_codes(channels: &[[f64; NUM_CLASSES]], range: &[(f64, f64); N]) -> Vec
         .collect()
 }
 
-fn channel_range(channels: &[[f64; NUM_CLASSES]]) -> [(f64, f64); N] {
+fn channel_range(channels: &[[f64; RANK]]) -> [(f64, f64); RANK] {
     std::array::from_fn(|r| {
         channels
             .iter()
@@ -509,7 +646,6 @@ fn handmade_block_solves_every_family() {
 fn abelian_rotation_loses_the_order() {
     let device = Device::default();
     let decoder = handmade(&device, RotationKind::Complex2D, Head::Decoder);
-    let probe = handmade(&device, RotationKind::Complex2D, Head::Probe);
     println!(
         "the same construction, abelian rotation ({} params):",
         decoder.num_params()
@@ -517,8 +653,8 @@ fn abelian_rotation_loses_the_order() {
     println!("      family    same head   best readout");
     let mut best = 0.0f64;
     for (name, family) in FAMILIES {
-        let (fit_ch, fit_t) = run(&probe, family, 512, FIT, &device);
-        let (eval_ch, eval_t) = run(&probe, family, 256, EVAL, &device);
+        let (fit_ch, fit_t) = probe(&device, RotationKind::Complex2D, family, 512, FIT);
+        let (eval_ch, eval_t) = probe(&device, RotationKind::Complex2D, family, 256, EVAL);
         let range = channel_range(&fit_ch);
         let ceiling = best_lookup(
             (&output_codes(&fit_ch, &range), &fit_t),

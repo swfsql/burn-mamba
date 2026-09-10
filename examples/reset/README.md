@@ -21,6 +21,23 @@ the readout change; the skeleton does not. Each is one block at the smallest siz
 that admits an exact solution, with the residual switched off
 (`ignore_last_residual`) so the classification head sees the block alone.
 
+All four rungs run at **`d_model = 2`**, which is the floor for a three-symbol
+alphabet: the layer's pre-`RmsNorm` puts a 1-D token on `±1`, so one dimension
+carries two symbols, and three points of `ℝ²` are already affinely independent —
+every in-projection channel can take any value it likes on the three symbols. All
+four also run at `Trapezoid::None`: every construction below pins `λ ≈ 1`, so the
+`β` tap is dead weight, and switching it off is structural (no `λ` segment in the
+in-projection, no tap slot in the cache, one SSD call instead of two). So what
+changes up the ladder is the **state**, not the model width: `state_rank`
+1 → 2 → 4 → 4, and the rotation kind with it.
+
+All four also run at **`nheads = 2`**: a head is a *readout*, not a piece of state
+(every head holds its own copy of the same state and differs only in the `C` it
+reads that copy with), and two projections are what each of these labels needs. The
+rungs are otherwise independent — each takes the smallest setting that *it* admits,
+and `spinor-product` disagrees on both counts, keeping four heads and the trapezoid.
+Each `model.rs` records what its own floor is and what breaks below it.
+
 The three shortcuts every rung closes:
 
 | shortcut | why it is closed |
@@ -123,7 +140,7 @@ The eval set pins that down from both sides:
 <details> 
 <summary>Measured</summary>
 
-70 parameters. Chance is 50%.
+64 parameters. Chance is 50%.
 
 | | random | long-prefix | long-suffix |
 |---|---|---|---|
@@ -212,7 +229,7 @@ it is reported separately rather than averaged in.
 <details> 
 <summary>Measured</summary>
 
-86 parameters. Chance is 33.3%.
+80 parameters. Chance is 33.3%.
 
 | | random | drift | balanced |
 |---|---|---|---|
@@ -323,18 +340,18 @@ families put that under different pressure:
 <details> 
 <summary>Measured</summary>
 
-328 parameters (278 for the abelian twin — the quaternion block projects a rotation
-axis per head, twelve channels against the abelian two, which are shared across
+134 parameters (122 for the abelian twin — the quaternion block projects a rotation
+axis per head, six channels against the abelian two, which are shared across
 heads). Chance is 12.5%.
 
 | | random | shuffle | runs |
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 34.2% | 17.4% | 18.7% |
-| best readout of the **abelian twin's** state | 59.8% | 51.8% | 52.7% |
+| best readout of the **abelian twin's** state | 60.6% | 51.9% | 53.5% |
 | best predictor of `(#i, #j)` since the reset | 71.4% | 55.8% | 77.1% |
 | **hand-built** quaternion block, no training | **100%** | **100%** | **100%** |
 | trained, `--rotation quaternion` | **100%** | **100%** | **100%** |
-| trained, `--rotation complex` | 64.6% | 35.4% | 39.5% |
+| trained, `--rotation complex` | 71.3% | 53.6% | 58.1% |
 
 The last two rows are the same model, the same data and the same schedule, with one
 enum changed: the quaternion run is exact on all three families (`16384/16384` each,
@@ -347,8 +364,11 @@ A table handed the *exact* counts does better, because a `cumsum` of angles can
 resolve more of them than parity, but it too is stuck wherever both signs occur.
 Both are ceilings for a block that writes its state at the reset and reads the
 rotation accumulated since, which is what this construction does under either
-rotation; the trained `--rotation complex` row covers an abelian block free to do
-something else entirely, and lands between them.
+rotation. The trained `--rotation complex` row covers an abelian block free to do
+something else entirely, so it is *not* bound by them — it clears the counts ceiling
+on `random`, for the reason [`reset-swap`](#reset-swap) spells out. It is also the one
+row here that moves a lot with the seed (seed 1: 44.8 / 29.2 / 30.9); the ceilings
+above it are what actually bound the architecture.
 
 `handmade_block_solves_every_family` writes every weight down in closed form;
 `abelian_rotation_loses_the_order` rebuilds the same block with
@@ -367,21 +387,39 @@ through the best table over a fine partition of its output space;
   orthogonal, so a state written at step `τ` and read at step `t` gives
   `⟨C, (Qₜ ⊗ Q_τ*) ⊗ B⟩`, and `Qₜ ⊗ Q_τ* = qₜ ⊗ ⋯ ⊗ q_{τ+1}` is the group word
   itself — newest factor on the left, which is the convention the dataset's labels
-  use. Writing `B = 1` (the group's unit) makes the readout the four components of
-  that element, and the four heads — set apart only by the per-head bias
-  `c_bias_hmr` — read one component each.
+  use. Writing `B = 1` (the group's unit) makes the state that element, and the
+  heads — set apart only by the per-head bias `c_bias_hmr` — read it.
+- **Two heads, because `nheads` counts readouts and not state.** Every head holds
+  its own copy of the same quaternion (same `B`, same `ᾱ`, same rotation) and
+  differs only in the `C` it reads that copy with, so the question is how many
+  *projections* the label needs. Two: the eight elements of `Q₈` land on eight
+  directions `45°` apart in a plane (`eᵣ ↦` the unit vector at `r·45°`) — distinct,
+  equidistant, in convex position, which is exactly what a linear eight-way head
+  wants. Head `h` reads the `h`-th coordinate of that map, `d_inner = d_model = 2`
+  makes `out_proj` the identity, and the head is a sector decoder. Still exact, at
+  134 parameters against the 212 four heads would cost (and the 328 this rung used
+  to cost, at four heads and `d_model = 4`). `reset-swap` runs the same argument to
+  the same answer; `spinor-product` is where it fails.
+- **The ceilings above are still measured on all four components.** The model's
+  readout is a linear map of the state, so a table over a fine partition of the
+  whole 4-vector dominates every readout it could have carried; `tests.rs` gets
+  there by running the probe twice, aiming the two heads at two components each.
 - **The abelian twin is given the better `B`.** With `B = (1,0,0,0)` its second
   rotated pair would multiply zero and it would carry one parity instead of two; it
-  gets `(1,0,1,0)` so its state is the *whole* abelianisation. Its "same head" column
-  is near chance only because the nearest-element decoder is matched to a quaternion,
-  not to a pair of parities — the meaningful number is the best-readout column
-  beside it.
-- **Everything abelian stays under the counts ceiling.** The hand-built twin reads
-  parities and gets ~50–60%; the trained model, free to wire itself any way it likes,
-  gets 64.6% on `random` — better, and still under the 71.4% a table given the exact
-  counts reaches. Three mechanisms, one wall, and it is not at 100%: that wall is
-  what "the transition is abelian" costs, regardless of how the block is put
-  together.
+  gets `(1,0,1,0)` so its state is the *whole* abelianisation. Its "same head"
+  column is **0%**, and says nothing: the sector decoder is matched to a quaternion,
+  not to a pair of parities, and read on this plane a pair of parities can only land
+  on the four odd sectors, which its label never occupies. The meaningful number is
+  the best-readout column beside it.
+- **`shuffle` is the wall, and everything abelian hits it.** The hand-built twin reads
+  parities and gets ~50–60% on every family. The trained model, free to wire itself any
+  way it likes, does better on `random` — past even the 71.4% a table given the exact
+  counts reaches — because a *trained* block need not write only at the reset, and
+  writing at every token lets a decaying trace carry recency, which pins short words
+  down with no group structure at all. `shuffle` closes that escape: one reset, then a
+  long word whose counts are fixed by construction. There it sits at 53.6% while the
+  quaternion block is exact. Three mechanisms, one wall: that wall is what "the
+  transition is abelian" costs, regardless of how the block is put together.
 - **`Rotor4D` is a strict superset, and runs here too** (`-- --rotation rotor`). Left
   multiplication is *isoclinic* — it turns both invariant planes of a 4-block by the
   same angle — so `Quaternion4D` and `Complex2D` are actually **incomparable**: the
@@ -454,36 +492,37 @@ which is what makes it the family the counts come closest to deciding.
 <details> 
 <summary>Measured</summary>
 
-378 parameters (318 for the left-isoclinic twin — the rotor projects a left and a
-right axis per head, twelve channels each against six). Chance is 16.7%.
+146 parameters (128 for the left-isoclinic twin — the rotor projects a left and a
+right axis per head, six channels each against three). Chance is 16.7%.
 
 | | random | shuffle | runs |
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 40.7% | 22.7% | 29.7% |
 | best predictor of the **sign character** since the reset | 49.7% | 37.2% | 46.0% |
 | best predictor of `(#s, #t)` since the reset | 68.7% | 47.1% | 76.8% |
-| best readout of the **abelian twin's** state | 68.5% | 48.8% | 76.4% |
+| best readout of the **abelian twin's** state | 68.7% | 49.2% | 75.3% |
 | best **linear** readout of the **left-isoclinic twin's** state | 55.8% | 53.0% | 26.3% |
 | best **table** readout of that same state | **100%** | **100%** | **100%** |
 | **hand-built** `Rotor4D` block, no training | **100%** | **100%** | **100%** |
 | **trained**, `--rotation rotor` | **100%** | **100%** | **100%** |
-| trained, `--rotation quaternion` | 80.0% | 50.3% | 77.3% |
-| trained, `--rotation complex` | 79.0% | 46.5% | 71.7% |
+| trained, `--rotation quaternion` | 70.9% | 43.4% | 51.0% |
+| trained, `--rotation complex` | 75.4% | 45.9% | 70.9% |
 
 The last three rows are the same model, the same data and the same schedule, with
 one enum changed: the two-sided run is exact on all three families (`16384/16384`
-each, every permutation at 100%, and already exact by epoch 40), and neither of the
+each, every permutation at 100%, and already exact by epoch 20), and neither of the
 other two is close. Note how little the middle rung buys over the bottom one —
-80/50/77 against 79/46/72 — which is what the theory says it should be: on `S₃`,
-`SU(2)`'s only homomorphic image is the sign character, and the counts already
-contain it.
+71/43/51 against 75/46/71, i.e. less than nothing — which is what the theory says it
+should be: on `S₃`, `SU(2)`'s only homomorphic image is the sign character, and the
+counts already contain it, so the extra structure is only something more to get
+wrong.
 
-The trained rows clear the `(#s, #t)` ceiling on `random` and `runs` because a
-*trained* block need not write only at the reset: writing at every token lets a
-decaying trace carry recency, which pins short words down without any group
-structure at all. `shuffle` is the family that closes that escape — one reset, then a
-long word whose counts are fixed by construction — and there the two ablations sit at
-50% and 46% while the two-sided block is exact.
+The trained abelian row clears the `(#s, #t)` ceiling on `random` because a *trained*
+block need not write only at the reset: writing at every token lets a decaying trace
+carry recency, which pins short words down without any group structure at all.
+`shuffle` is the family that closes that escape — one reset, then a long word whose
+counts are fixed by construction — and there the two ablations sit at 43% and 46%
+while the two-sided block is exact.
 
 The middle three rows are the finding. The left-isoclinic state is not
 information-poor — a lookup table over a fine partition of its output recovers the
@@ -523,11 +562,27 @@ claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
   and the useful state is three-dimensional. `state_rank = 4` is not slack — it is the
   smallest block a quaternion rotation acts on, and `SO(3)` arrives inside it as the
   part that moves.
+- **And the head needs only two of the three.** `d_model = 2` (the floor for a
+  three-symbol alphabet), so the two heads read the rotation's `x` and `y`. A
+  half-turn about an axis of that plane flips `z`, so `z` carries only the parity
+  the counts already give; what is left is the six orbit points on one circle, in
+  six distinct directions — a nearest-point decoder over them is still exact. As in
+  `reset-spinor`, `nheads` is a count of readouts and not of state: both heads hold
+  the same rotated vector and differ only in the `C` aimed at it. The ceilings above
+  are nonetheless measured on all four components (`tests.rs` runs the probe twice),
+  because a table over four dominates every linear readout of them, which is what
+  the model's own head is.
+- **Two heads only work here because the trapezoid is off.** Measured with the `β`
+  tap still on, the same cut trained to 57 / 39 / 50%, which is what made four heads
+  look load-bearing; tapless it reaches 100% by epoch 20. Worth keeping in mind when
+  reading an ablation: it bounds the configuration it was run at, not the knob's
+  name. `spinor-product` is where two heads genuinely fail (61 / 52 / 53% with the
+  tap, 46 / 30 / 33% without).
 - **The extra factor is not always free.** In `reset-spinor` the same `Rotor4D` block
   trains *worse* than the quaternion one, because `Q₈` wants `p ≡ 1` exactly and a
   spurious right rotation compounds with the word. Here the task wants the right
   factor — tied to the left, as conjugation — and the same block, schedule and
-  optimiser reach 100% by epoch 40. Extra capacity pays where the task asks for it and
+  optimiser reach 100% by epoch 20. Extra capacity pays where the task asks for it and
   costs where it does not; both rungs are worth reading together.
 - **This is the one rung whose ablation is not about lost information.**
   `reset-rotor`'s real state and `reset-spinor`'s abelian state genuinely cannot
@@ -705,6 +760,17 @@ is the obstruction above, computed over all six ordered pairs of distinct units;
   length in symbols; only the packing changes. So this is not a harder word
   problem — it is the same one, asked at half the number of recurrence steps a
   stock block would take.
+- **This is the rung that keeps the trapezoid, and the one that cannot shrink.**
+  The four `reset-*` rungs run at `Trapezoid::None` (their constructions pin
+  `λ ≈ 1`, so the `β` tap is dead weight) and at two heads. Here the construction
+  pins `λ ≈ 1` too, and switching the tap off *still* reaches 100% at 32 tokens —
+  then drops to 83% at 96, which is the column this rung exists to report. Two heads
+  cost more (61 / 52 / 53% with the tap, 46 / 30 / 33% without). And
+  `d_model = 8` is a floor rather than a habit: each slot needs four independent
+  indicator channels (`i`, `j`, `k`, `R`, with `.` as the reference), so its five
+  symbols must be affinely independent — four dimensions — and the two slots'
+  direction spaces must not overlap, or one functional could not read a slot
+  alone.
 
 </details>
 
