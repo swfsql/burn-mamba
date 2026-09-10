@@ -168,16 +168,17 @@ impl From<Mamba3SingleSsdCache> for Mamba3Cache {
 // Conversions between the two pathway caches
 // ---------------------------------------------------------------------------
 //
-// At a cache boundary the look-ahead term `(1 − λₜ₊ₗₐ₉)·Δₜ₊ₗₐ₉` vanishes, so
-// `scaleₜ = γₜ` for the final `lag` positions — the ones whose second
-// installment the *next* call pays, out of the tap slots.
+// At a cache boundary the look-ahead term `νₜ₊ₗₐ₉` vanishes, so `scaleₜ = γₜ`
+// for the final `lag` positions — the ones whose second installment the *next*
+// call pays, out of the tap slots.
 // Substituting that into the single-ssd accumulator
 // `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` makes it coincide *exactly* with the
-// double-ssd state `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁⊗xₜ₋₁ + γₜ Bₜ⊗xₜ` — the deferred β
-// contribution of the next token is reconstructed on the following call from
-// the saved `k_state`/`v_state`, identically in both forms. The remaining
-// three fields (previous-token K/V history and cumulative RoPE angle) carry the
-// same meaning in both caches. Hence the conversion is a field-by-field move.
+// double-ssd state `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ` — the
+// deferred β contribution is reconstructed on the following call from the saved
+// `k_state`/`v_state`, identically in both forms. The remaining three fields
+// (the tap FIFO's K/V slots — the last `lag` positions — and the cumulative
+// rotation) carry the same meaning in both caches. Hence the conversion is a
+// field-by-field move.
 //
 // The accumulators differ only *mid-sequence*; since caches are only ever
 // produced and consumed at boundaries, the move is lossless there. The distinct

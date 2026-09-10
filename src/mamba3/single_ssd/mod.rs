@@ -2,14 +2,16 @@
 //!
 //! Realises the Mamba-3 trapezoidal recurrence as a **single SSD call** (the
 //! official Triton-SISO / Tilelang-MIMO form): a key scale
-//! `scaleₜ = γₜ + (1−λₜ₊ₗₐ₉)·Δₜ₊ₗₐ₉`, a strict lower-triangular intra-chunk
+//! `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`, a strict lower-triangular intra-chunk
 //! mask, a same-step γ correction, and a boundary-β seed folded into the initial
-//! state. At [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)'s
-//! lag `u` the correction widens to a band, which [`token_band`] adds outside
-//! the kernel.
+//! state. One call whatever the tap pattern — every tap collapses into that one
+//! scalar per sample — with the parenthesised term the two-tap members' second
+//! installment. Under the lag-`u` members the correction widens to a band, which
+//! [`token_band`] adds outside the kernel.
 //!
-//! Uses ≈ half the training memory of the
-//! [`double_ssd`](crate::mamba3::double_ssd) pathway.  Its cache's SSM
+//! Uses ≈ half the training memory of the two-call
+//! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less of a three-call
+//! one.  Its cache's SSM
 //! accumulator `h'` has **different mid-sequence semantics** than the double-SSD
 //! state (hence a distinct cache type), but the two coincide at sequence
 //! boundaries and inter-convert via field-identity `From` impls.

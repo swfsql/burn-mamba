@@ -48,9 +48,13 @@
 //! rotations (paper Prop. *Complex-to-Real SSM Equivalence*):
 //!
 //! ```text
-//!   ρₜ = R(Δₜ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}   — per-step rotation (data-dependent)
-//!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                — rotational state update
+//!   ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-step rotation (data-dependent)
+//!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                   — rotational state update
 //! ```
+//!
+//! `ϱ` is [`Mamba3Config::rotation_range`], the per-step bound in half-turns per
+//! unit `Δ`: `2` here (a whole turn of the group per unit `Δ`), `1` in the
+//! reference. It is a gradient budget, not a reach limit — see its own docs.
 //!
 //! The **exponential** discretisation is load-bearing here, not merely more
 //! accurate than forward Euler: `|exp(iΔϑ)| = 1` exactly, so the transition is
@@ -65,7 +69,7 @@
 //! the SSD core stays the plain scalar-decay kernel.
 //!
 //! ```text
-//!   θₜ = θₜ₋₁ + Δₜ · π · tanh(ϑₜ)        — cumulative angles (per-pair)
+//!   θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
 //!   Rₜ = R(θₜ) = ρₜ ⋯ ρ₁ ∈ SO(2)^{N/2}   — block-diagonal cumulative rotation
 //!   B̃ₜ = Rₜ Bₜ,   C̃ₜ = Rₜ Cₜ              — rotated state-space projections
 //! ```
@@ -84,7 +88,7 @@
 //!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
 //! ```
 //!
-//! `θⱼ − θᵢ` is not a position: it is `Σ Δ·π·tanh(ϑ)` over the intervening
+//! `θⱼ − θᵢ` is not a position: it is `Σ Δ·ϱ·π·tanh(ϑ)` over the intervening
 //! steps — how far the transition itself rotated, driven by the inputs. It would
 //! reduce to vanilla RoPE's relative position only in the degenerate case of an
 //! input-independent, constant per-step angle (`θⱼ − θᵢ = (j−i)·θ`). Data
@@ -111,7 +115,9 @@
 //! ## 4. Combined formulation (everything together)
 //!
 //! Putting trapezoid + RoPE + MIMO into a single expression — `B̃ₜ[m] = Rₜ Bₜ[m]`
-//! and `C̃ₜ[m] = Rₜ Cₜ[m]` denote the RoPE-rotated MIMO projections:
+//! and `C̃ₜ[m] = Rₜ Cₜ[m]` denote the RoPE-rotated MIMO projections, and the `β`
+//! tap is written at the default member's lag 1 (§1: it reads `t−l` for that
+//! member's own `l`, and a two-tap member adds a second such term):
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁
@@ -142,12 +148,15 @@
 //! different for the abelian and non-abelian ones.
 //!
 //! Implementation note: the trapezoidal recurrence (in the double-ssd pathway)
-//! is computed by splitting it into a γ-SSD (current-token contributions) and
-//! a β-SSD (previous-token contributions); see [`crate::mamba3::double_ssd::ssd::ssd_path`].
-//! RoPE is applied to B and C before the SSD calls
-//! (see [`crate::mamba3::rotation::rope::apply_rope`]),
-//! and MIMO expansion happens by augmenting the V tensor with the per-rank
-//! `mimo_x` projection.
+//! is computed by splitting it into a γ-SSD (the current sample) and one β-SSD
+//! per tap, at that tap's own lag; see
+//! [`crate::mamba3::double_ssd::ssd::ssd_path`]. The single-ssd pathway does the
+//! same work in one call. The rotation is applied to B and C before the SSD
+//! calls, through the one entry point
+//! [`rotate_bc_forward`](crate::mamba3::rotation::rotate_bc_forward) (which is
+//! [`apply_rope`](crate::mamba3::rotation::rope::apply_rope) for the abelian
+//! kind and a quaternion scan for the others), and MIMO expansion happens by
+//! augmenting the V tensor with the per-rank `mimo_x` projection.
 //!
 //! See also: [`crate::mamba3::double_ssd::double_ssd`] and [`crate::mamba3::single_ssd::single_ssd`].
 //!
@@ -157,12 +166,14 @@
 //! The letters used differ from the reference paper and the python implementation.
 //! The "Paper" column gives the symbol from the Mamba-3 paper; the "Python" column
 //! gives the field/variable name in the reference implementation
-//! (`refs/state-spaces/mamba/mamba_ssm/modules/mamba3.py`).
+//! (`../py/state-spaces/mamba/mamba_ssm/modules/mamba3.py`).
 //!
 //! | Letter | Dimension | Paper | Python | Typical value |
 //! |--------|-----------|-------|--------|---------------|
 //! | `b`    | `batch` | — | `batch` | varies |
-//! | `s`    | `sequence` length | `T` | `seqlen` | varies |
+//! | `s`    | `sequence` length, **folded** = `tokens · u` | `T` | `seqlen` | varies |
+//! | `t`    | `tokens` = `s`/`u` — the [read axis](crate::mamba3::product) | `T` | `seqlen` | varies |
+//! | `u`    | `micro_steps` (MambaProduct) | — | — | 1 (stock) |
 //! | `d`    | `d_model` | `D` | `d_model` | 768, 1024 |
 //! | `i`    | `d_inner` = `expand`·`d_model` | `E·D` | `d_inner` | 2·`d_model` |
 //! | `h`    | `nheads` | `H` | `nheads` | `d_inner` / `per_head_dim` |

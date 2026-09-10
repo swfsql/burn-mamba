@@ -491,7 +491,9 @@ comment; in commentary a shape may be underscore-style (`_bhl`) or expanded to
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|
 | `b` | `batch` | — | `batch` | varies |
-| `s` | `sequence` length | `T` | `seqlen` | varies |
+| `s` | `sequence` length, **folded** = `tokens`·`u` | `T` | `seqlen` | varies |
+| `t` | `tokens` = `s`/`u` — the read axis (Mamba-3) | `T` | `seqlen` | varies |
+| `u` | `micro_steps` (Mamba-3) | — | — | 1 (stock) |
 | `d` | `d_model` | `D` | `d_model` | 768, 1024 |
 | `i` | `d_inner` = `expand`·`d_model` | `E·D` | `d_inner` | 2·`d_model` |
 | `h` | `nheads` | `H` | `nheads` | `d_inner`/`per_head_dim` |

@@ -12,11 +12,15 @@
 //! The trapezoidal recurrence is realised by two interchangeable algorithms,
 //! selected at runtime by which **cache variant** is supplied:
 //!
-//! - [`double_ssd`](crate::mamba3::double_ssd) — splits the trapezoid into two standard SSD calls
-//!   (simple, easy to verify; ~2× the intra-chunk memory).
-//! - [`single_ssd`](crate::mamba3::single_ssd) — one SSD call in the official-kernel form
-//!   (≈ half the training memory; the cache's SSM accumulator has different
-//!   mid-sequence semantics).
+//! - [`double_ssd`](crate::mamba3::double_ssd) — splits the trapezoid into one
+//!   standard SSD call per term: the current sample's, plus one per `β` tap
+//!   ([`trapezoid`](crate::mamba3::trapezoid)), so **two** at the default and
+//!   three under a two-tap pattern (simple, easy to verify; ~2× the intra-chunk
+//!   memory, ~3× at two taps).
+//! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
+//!   official-kernel form, whatever the tap pattern (≈ half the double
+//!   pathway's training memory at the default, and less as taps are added; the
+//!   cache's SSM accumulator has different mid-sequence semantics).
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that dispatches between them; [`ssd_path`](crate::mamba3::ssd_path) selects
 //! the pathway-agnostic *algorithm* (Minimal / Serial / SerialRecalculated).
@@ -34,7 +38,7 @@
 //! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample(s) the
 //! write's second tap reads — a choice that only exists at `u > 1`, and one
 //! that changes the algorithm *and* the cache. Four of the six members are one
-//! tap at one lag ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
+//! lag apiece ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
 //! the default
 //! [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
 //! (lag 1) and [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)
