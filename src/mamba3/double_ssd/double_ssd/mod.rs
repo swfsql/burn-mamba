@@ -87,7 +87,7 @@ impl Mamba3 {
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
-        let proj_bsd = self.in_proj.forward(input_bsm);
+        let proj_bsd = self.project_in(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
         // [batch, tokens, *] split along channel dim; `u` = micro_steps widens
@@ -562,7 +562,7 @@ mod step {
             san(&input_bd);
 
             // ── In-projection ─────────────────────────────────────────────────
-            let proj_bd = self.in_proj.forward(input_bd);
+            let proj_bd = self.project_in(input_bd);
             san(&proj_bd);
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim; the per-micro-step segments

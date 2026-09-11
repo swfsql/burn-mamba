@@ -199,6 +199,7 @@ use burn::{
     module::{Module, Param},
     nn::{Initializer, Linear, LinearConfig},
 };
+use burn_stack::utils::{UntiedParam, untied};
 
 // ---------------------------------------------------------------------------
 // Mamba3  (the SSM block)
@@ -228,7 +229,16 @@ pub struct Mamba3 {
     /// read `C` are per token. At the default `u = 1` this is the stock
     /// `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
     /// + num_rotation_channels`.
+    ///
+    /// Under [`Mamba3Untied::InProjTail`] it stops at `C_raw`, the rest living in
+    /// [`Self::in_proj_tail`]; [`Self::project_in`] reads the two as one.
     pub in_proj: Linear,
+
+    /// `in_proj`'s trailing per-micro-step segments
+    /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u]`, split off when
+    /// [`Mamba3Untied::InProjTail`] unties them: one copy per application, along
+    /// the output axis. `None` ⇒ `in_proj` carries them.
+    pub in_proj_tail: Option<Linear>,
 
     /// Per-head bias for the discretisation step size Δ.
     /// Shape: `[nheads]`
@@ -359,6 +369,12 @@ pub struct Mamba3 {
     /// nature, opposite backend preference.
     #[module(skip)]
     pub siso_specialization_decode: bool,
+
+    /// The parameters held once per application instead of tied
+    /// ([`Mamba3Config::untied`]). A non-parameter constant, like
+    /// [`Self::rotation`].
+    #[module(skip)]
+    pub untied: Vec<Mamba3Untied>,
 }
 
 impl Mamba3 {
@@ -463,11 +479,87 @@ impl Mamba3 {
     pub fn use_siso_decode_kernels(&self) -> bool {
         self.mimo_rank == 1 && self.siso_specialization_decode
     }
+
+    /// The in-projection's output `[z | … | rotation·u]`: `in_proj` alone, or —
+    /// under [`Mamba3Untied::InProjTail`] — followed by [`Self::in_proj_tail`].
+    pub fn project_in<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
+        match &self.in_proj_tail {
+            None => self.in_proj.forward(x),
+            Some(tail) => Tensor::cat(vec![self.in_proj.forward(x.clone()), tail.forward(x)], D - 1),
+        }
+    }
+
+    /// The parameters held once per application ([`Self::untied`]), each with
+    /// the axis its copies lie along. See [`burn_stack::utils::untied`].
+    pub fn untied_params(&self) -> Vec<UntiedParam> {
+        let axis0 = |p: &Param<Tensor<1>>| UntiedParam::new(p, 0);
+        let axis0_hmx = |p: &Param<Tensor<3>>| UntiedParam::new(p, 0);
+        self.untied
+            .iter()
+            .flat_map(|part| -> Vec<UntiedParam> {
+                match part {
+                    Mamba3Untied::InProjTail => self
+                        .in_proj_tail
+                        .iter()
+                        .flat_map(|tail| {
+                            std::iter::once(UntiedParam::new(&tail.weight, 1))
+                                .chain(tail.bias.as_ref().map(axis0))
+                        })
+                        .collect(),
+                    Mamba3Untied::DtBias => vec![axis0(&self.dt_bias_h)],
+                    Mamba3Untied::D => vec![axis0(&self.d_h)],
+                    Mamba3Untied::BNorm => vec![axis0(&self.b_norm.gamma)],
+                    Mamba3Untied::CNorm => vec![axis0(&self.c_norm.gamma)],
+                    Mamba3Untied::BBias => vec![axis0_hmx(&self.b_bias_hmr)],
+                    Mamba3Untied::CBias => vec![axis0_hmx(&self.c_bias_hmr)],
+                    Mamba3Untied::MimoX => self.mimo_x_hmp.iter().map(axis0_hmx).collect(),
+                    Mamba3Untied::MimoZ => self.mimo_z_hmp.iter().map(axis0_hmx).collect(),
+                    Mamba3Untied::MimoO => self.mimo_o_hmp.iter().map(axis0_hmx).collect(),
+                    Mamba3Untied::OutNorm => self.out_norm.iter().map(|n| axis0(&n.gamma)).collect(),
+                    Mamba3Untied::InitState => self.init_state_hpr.iter().map(axis0_hmx).collect(),
+                }
+            })
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Mamba3Config  (hyperparameters and factory)
 // ---------------------------------------------------------------------------
+
+/// A [`Mamba3`] parameter that may be held once per application of its real
+/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
+/// big maps — `in_proj`'s `z|x|B|C` head and `out_proj` — always stay tied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Mamba3Untied {
+    /// `in_proj`'s trailing per-micro-step scalar and rotation segments
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u]`, split off into
+    /// [`Mamba3::in_proj_tail`] — a second, small GEMM.
+    InProjTail,
+    /// The Δ bias [`Mamba3::dt_bias_h`].
+    DtBias,
+    /// The skip [`Mamba3::d_h`].
+    D,
+    /// `B`'s QK-norm gain ([`Mamba3::b_norm`]).
+    BNorm,
+    /// `C`'s QK-norm gain ([`Mamba3::c_norm`]).
+    CNorm,
+    /// `B`'s bias [`Mamba3::b_bias_hmr`].
+    BBias,
+    /// `C`'s bias [`Mamba3::c_bias_hmr`].
+    CBias,
+    /// The MIMO value up-projection [`Mamba3::mimo_x_hmp`] (`mimo_rank > 1`).
+    MimoX,
+    /// The MIMO gate up-projection [`Mamba3::mimo_z_hmp`] (`mimo_rank > 1`).
+    MimoZ,
+    /// The MIMO output down-projection [`Mamba3::mimo_o_hmp`] (`mimo_rank > 1`).
+    MimoO,
+    /// The output norm's gain ([`Mamba3::out_norm`]; `has_outproj_norm`).
+    OutNorm,
+    /// The learnable initial state [`Mamba3::init_state_hpr`]
+    /// (`has_learnable_init_state`).
+    InitState,
+}
 
 /// Hyperparameters for the Mamba-3 SSM block.
 #[derive(Config, Debug)]
@@ -700,6 +792,15 @@ pub struct Mamba3Config {
     /// `mimo_rank > 1`.
     #[config(default = true)]
     pub siso_specialization_decode: bool,
+
+    /// The parameters held once per application of the block's real layer
+    /// instead of tied across them ([`Mamba3Untied`]); only virtual layers give
+    /// a real layer more than one. Each must exist in this config. The layout
+    /// follows the list alone — [`Mamba3Untied::InProjTail`] splits `in_proj` at
+    /// any count — so every real layer of a stack has the one Muon plan. See
+    /// [`burn_stack::utils::untied`].
+    #[config(default = "Vec::new()")]
+    pub untied: Vec<Mamba3Untied>,
 }
 
 impl Mamba3Config {
@@ -802,15 +903,18 @@ impl Mamba3Config {
     pub fn d_in_proj(&self) -> usize {
         let u = self.micro_steps;
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
+        self.d_inner() + u * self.d_inner() + u * bc + bc + self.d_in_proj_tail()
+    }
+
+    /// Width of the in-projection's trailing per-micro-step segments
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u]` — `(2 … 4)·u·nheads +
+    /// u·num_rotation_channels` — which [`Mamba3Untied::InProjTail`] splits off.
+    pub fn d_in_proj_tail(&self) -> usize {
+        let u = self.micro_steps;
         let scalars = 2
             + usize::from(self.trapezoid.has_beta_tap())
             + usize::from(self.trapezoid.has_interior_tap(u));
-        self.d_inner()
-            + u * self.d_inner()
-            + u * bc
-            + bc
-            + scalars * u * self.nheads()
-            + u * self.num_rotation_channels()
+        scalars * u * self.nheads() + u * self.num_rotation_channels()
     }
 
     /// The block's 2-D weights Muon may own, and how their fused columns split.
@@ -824,6 +928,11 @@ impl Mamba3Config {
     /// orthogonalise each on its own. They share a name, so
     /// [`MuonPlan::without_segment`](burn_stack::optim::MuonPlan::without_segment)
     /// still opts all of a stream's micro-steps out at once.
+    ///
+    /// Under [`Mamba3Untied::InProjTail`] the segments from `Δ` on are
+    /// `in_proj_tail`'s, one copy per application ([`ProjSpec::tiled`]).
+    ///
+    /// [`ProjSpec::tiled`]: burn_stack::optim::ProjSpec::tiled
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
         use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
@@ -833,11 +942,12 @@ impl Mamba3Config {
         let rot = self.num_rotation_channels();
         // One copy of `seg` per micro-step.
         let per_micro = |seg: Seg| std::iter::repeat_n(seg, self.micro_steps);
-        let segments = std::iter::once(Seg::muon("z", d_inner))
+        let head: Vec<Seg> = std::iter::once(Seg::muon("z", d_inner))
             .chain(per_micro(Seg::muon("x", d_inner)))
             .chain(per_micro(Seg::muon("b", bc)))
             .chain(std::iter::once(Seg::muon("c", bc)))
-            .chain(per_micro(Seg::adamw("dt", nheads)))
+            .collect();
+        let tail: Vec<Seg> = per_micro(Seg::adamw("dt", nheads))
             .chain(per_micro(Seg::adamw("a", nheads)))
             // `Trapezoid::None` projects no `λ`, as `Real1D` projects no rotation;
             // and only a two-tap pattern projects the second mass's mix `μ`.
@@ -864,14 +974,29 @@ impl Mamba3Config {
                     .flatten(),
             )
             .collect();
-        vec![
-            ProjSpec::block("in_proj.weight", segments),
-            ProjSpec::block_whole("out_proj.weight", self.d_model),
-        ]
+        let in_proj = match self.untied.contains(&Mamba3Untied::InProjTail) {
+            true => vec![
+                ProjSpec::block("in_proj.weight", head),
+                ProjSpec::block("in_proj_tail.weight", tail).tiled(),
+            ],
+            false => vec![ProjSpec::block("in_proj.weight", [head, tail].concat())],
+        };
+        in_proj
+            .into_iter()
+            .chain([ProjSpec::block_whole("out_proj.weight", self.d_model)])
+            .collect()
     }
 
-    /// Allocate and initialise all Mamba-3 block parameters on `device`.
+    /// Allocate and initialise all Mamba-3 block parameters on `device`, for a
+    /// single application.
     pub fn init(&self, device: &Device) -> Mamba3 {
+        self.init_applications(1, device)
+    }
+
+    /// Allocate and initialise all Mamba-3 block parameters on `device`, for a
+    /// real layer applied `n_applications` times: every [`Self::untied`]
+    /// parameter holds that many copies of one initialisation.
+    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba3 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
@@ -933,6 +1058,24 @@ impl Mamba3Config {
             );
         }
         assert!(self.rotation_range > 0.0, "rotation_range must be positive");
+        let unties = |part| self.untied.contains(&part);
+        assert!(
+            mimo_rank > 1
+                || ![Mamba3Untied::MimoX, Mamba3Untied::MimoZ, Mamba3Untied::MimoO]
+                    .into_iter()
+                    .any(unties),
+            "Mamba3Untied::Mimo* unties a MIMO projection, and mimo_rank = 1 has none"
+        );
+        assert!(
+            self.has_outproj_norm || !unties(Mamba3Untied::OutNorm),
+            "Mamba3Untied::OutNorm unties the output norm, and has_outproj_norm is off"
+        );
+        assert!(
+            self.has_learnable_init_state || !unties(Mamba3Untied::InitState),
+            "Mamba3Untied::InitState unties the initial state, and has_learnable_init_state is off"
+        );
+        // How many copies `part` holds: one per application if untied.
+        let copies = |part| if unties(part) { n_applications } else { 1 };
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -942,10 +1085,21 @@ impl Mamba3Config {
             }
         };
 
-        let in_proj = LinearConfig::new(self.d_model, self.d_in_proj())
+        let d_in_proj_tail = unties(Mamba3Untied::InProjTail).then(|| self.d_in_proj_tail());
+        let in_proj = LinearConfig::new(self.d_model, self.d_in_proj() - d_in_proj_tail.unwrap_or(0))
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(self.d_model))
             .init(device);
+        let in_proj_tail = d_in_proj_tail.map(|width| {
+            let Linear { weight, bias } = LinearConfig::new(self.d_model, width)
+                .with_bias(self.has_proj_bias)
+                .with_initializer(uniform_init(self.d_model))
+                .init(device);
+            Linear {
+                weight: untied::tile(weight, 1, n_applications),
+                bias: bias.map(|b| untied::tile(b, 0, n_applications)),
+            }
+        });
 
         // dt_bias: inverse-softplus initialisation
         let expm1 = |t: Tensor<1>| t.exp() - 1.;
@@ -957,16 +1111,25 @@ impl Mamba3Config {
         .exp();
         let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
-        let dt_bias_h = Param::from_tensor(inv_dt_h);
+        let dt_bias_h = untied::tile(
+            Param::from_tensor(inv_dt_h),
+            0,
+            copies(Mamba3Untied::DtBias),
+        );
 
         let d_h = Initializer::Ones.init::<1, _>([nheads], device);
+        let d_h = untied::tile(d_h, 0, copies(Mamba3Untied::D));
 
-        let b_norm = RmsNormConfig::new(state_rank).init(device);
-        let c_norm = RmsNormConfig::new(state_rank).init(device);
+        let mut b_norm = RmsNormConfig::new(state_rank).init(device);
+        b_norm.gamma = untied::tile(b_norm.gamma, 0, copies(Mamba3Untied::BNorm));
+        let mut c_norm = RmsNormConfig::new(state_rank).init(device);
+        c_norm.gamma = untied::tile(c_norm.gamma, 0, copies(Mamba3Untied::CNorm));
 
         // B/C biases: [nheads, mimo_rank, state_rank], init to ones
         let b_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
+        let b_bias_hmr = untied::tile(b_bias_hmr, 0, copies(Mamba3Untied::BBias));
         let c_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
+        let c_bias_hmr = untied::tile(c_bias_hmr, 0, copies(Mamba3Untied::CBias));
 
         // MIMO projections (only for mimo_rank > 1)
         let (mimo_x_hmp, mimo_z_hmp, mimo_o_hmp) = if mimo_rank > 1 {
@@ -983,16 +1146,22 @@ impl Mamba3Config {
                 1.0 / mimo_rank as f64,
                 device,
             ));
-            (Some(mx), Some(mz), Some(mo))
+            (
+                Some(untied::tile(mx, 0, copies(Mamba3Untied::MimoX))),
+                Some(untied::tile(mz, 0, copies(Mamba3Untied::MimoZ))),
+                Some(untied::tile(mo, 0, copies(Mamba3Untied::MimoO))),
+            )
         } else {
             (None, None, None)
         };
 
         // Gated RMSNorm applied per-head (group size = per_head_dim).
         let out_norm = self.has_outproj_norm.then(|| {
-            RmsNormGatedConfig::new(self.per_head_dim)
+            let mut norm = RmsNormGatedConfig::new(self.per_head_dim)
                 .with_norm_before_gate(true)
-                .init(device)
+                .init(device);
+            norm.gamma = untied::tile(norm.gamma, 0, copies(Mamba3Untied::OutNorm));
+            norm
         });
 
         let out_proj = LinearConfig::new(d_inner, self.d_model)
@@ -1001,11 +1170,13 @@ impl Mamba3Config {
             .init(device);
 
         let init_state_hpr = self.has_learnable_init_state.then(|| {
-            Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, state_rank], device)
+            let init = Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, state_rank], device);
+            untied::tile(init, 0, copies(Mamba3Untied::InitState))
         });
 
         Mamba3 {
             in_proj,
+            in_proj_tail,
             dt_bias_h,
             dt_limit: self.dt_limit,
             a_floor: self.a_floor,
@@ -1033,6 +1204,7 @@ impl Mamba3Config {
             num_quat_blocks: self.num_quat_blocks(),
             siso_specialization: self.siso_specialization,
             siso_specialization_decode: self.siso_specialization_decode,
+            untied: self.untied.clone(),
         }
     }
 }

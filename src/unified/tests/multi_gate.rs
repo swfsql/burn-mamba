@@ -346,6 +346,7 @@ fn bidi_multi_gate_forward_and_grads() {
             init_bias_step: 0.0,
             per_virtual_layer: false,
         },
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -894,6 +895,7 @@ fn bidi_multi_gate_class_latents_forward() {
             init_bias_step: 0.0,
             per_virtual_layer: false,
         },
+        untied: Vec::new(),
     }
     .init(&device);
 

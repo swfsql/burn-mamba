@@ -114,5 +114,6 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         residuals: ResidualsConfig::Standard,
         // No feed-forward interleave: these examples are mixer-only.
         mlp: None,
+        untied: Vec::new(),
     }
 }

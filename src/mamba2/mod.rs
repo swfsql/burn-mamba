@@ -20,7 +20,7 @@ pub mod ssd;
 pub mod prelude {
     use super::*;
     pub use cache::{Mamba2Cache, Mamba2CacheConfig, Mamba2Caches, Mamba2CachesConfig};
-    pub use mamba2::{Mamba2, Mamba2Config};
+    pub use mamba2::{Mamba2, Mamba2Config, Mamba2Untied};
     #[cfg(feature = "autodiff")]
     pub use ssd::Mamba2AutodiffBackendExt;
     pub use ssd::Mamba2BackendExt;

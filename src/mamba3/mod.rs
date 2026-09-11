@@ -102,7 +102,7 @@ pub mod prelude {
     use super::*;
 
     pub use cache::{Mamba3Cache, Mamba3Caches};
-    pub use mamba3::{Mamba3, Mamba3Config};
+    pub use mamba3::{Mamba3, Mamba3Config, Mamba3Untied};
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
     pub use ssd_path::Mamba3SsdPath;

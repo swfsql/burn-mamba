@@ -161,6 +161,7 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: Some(burn_stack::modules::GatedMlpConfig::new(32, 64).with_multiple_of(32)),
+        untied: Vec::new(),
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -192,6 +193,7 @@ fn mamba2_plan_fits_the_model() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -220,6 +222,7 @@ fn mamba1_plan_fits_the_model() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -251,6 +254,7 @@ fn bidi_plan_fits_the_model() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     };
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
@@ -434,6 +438,7 @@ fn build_assembles_groups_without_panicking() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     };
     let model = config.init(&device);
     let mut optim = config.muon_plan().build(&adamw(), &muon());
@@ -472,6 +477,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     };
     let plan = config.muon_plan();
     let model = config.init(&device);
@@ -531,6 +537,7 @@ fn describe_reports_every_parameter() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     };
     let model = config.init(&device);
     let report = config.muon_plan().describe(&model);

@@ -72,14 +72,17 @@ cross-variant agreement) — not listed individually. The composition layer is
 src/
 ├─ lib.rs            crate root: module decls, prelude, DENY_NAN/DENY_INF guards
 ├─ mamba1/           original selective SSM (conv1d + sequential selective scan)
-│  ├─ mamba1.rs      Mamba1 block + Config: forward()(selective_scan) / step()
+│  ├─ mamba1.rs      Mamba1 block + Config: forward()(selective_scan) / step();
+│  │                 Mamba1Untied
 │  └─ cache.rs       Mamba1Cache(s): conv window (bik) + SSM state (bir)
 ├─ mamba2/           SSD (Structured State Space Duality)
-│  ├─ mamba2.rs      Mamba2 block + Config: chunkwise forward() / recurrent step()
+│  ├─ mamba2.rs      Mamba2 block + Config: chunkwise forward() / recurrent step();
+│  │                 Mamba2Untied (InProjTail ⇒ in_proj_tail)
 │  ├─ cache.rs       Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
 │  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated
 ├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
-│  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant
+│  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant;
+│  │                 Mamba3Untied (InProjTail ⇒ in_proj_tail, project_in)
 │  ├─ helpers.rs     shared: trapezoid masses (ν, untransported), QK-norm+GQA+bias,
 │  │                 MIMO-V build, the tap gate, split_trailing (peels the in-proj's
 │  │                 optional tails: rotation, μ, λ), prefix_sum (the blocked
@@ -127,7 +130,8 @@ src/
    ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs)
    ├─ bidi.rs        MambaBidiLayers (+ Config)
    └─ tests/         the burn-stack containers exercised through real blocks:
-                     layer, layers (grad_horizon), multi_gate, bidi, class, optim
+                     layer, layers (grad_horizon), multi_gate, bidi, class, optim,
+                     untied
 ```
 
 The generic containers themselves (`Layer`/`Layers`/networks/bidi/multi_gate/
@@ -463,6 +467,13 @@ reimplementing them.
   1-D/3-D tensor, and the boundary weights stay on AdamW. Why the MIMO 3-D
   tensors are diagonals and not stacked matrices is argued in the
   `src/unified/mod.rs` header.
+- **Untied parameters are declared, not re-plumbed** — the mechanism is
+  `burn_stack::utils::untied`; each family lists what may be held once per
+  application (`Mamba{1,2,3}Untied` on its config), tiles it in
+  `init_applications`, and reports it via `untied_params`. Mamba-2/3's `InProjTail`
+  splits `in_proj`'s trailing scalar (+ rotation) segments into `in_proj_tail`
+  whatever the count, so one tiled Muon spec fits every real layer; `project_in`
+  rejoins them. `init_state_hpr` is untiable, but `step` never reads it.
 - **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
   as you add it. `cargo doc --all --no-deps` must be warning-free too.
 - The project root is `/shared/claude/burn-mamba/`; do not read/write outside it.

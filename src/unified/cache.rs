@@ -3,6 +3,7 @@
 
 use burn::prelude::*;
 use burn_stack::modules::{Block, BlockConfig, CacheStack};
+use burn_stack::utils::UntiedParam;
 
 
 /// Runtime-tagged caches: one variant per family, matching
@@ -110,6 +111,9 @@ mod impl_mamba2 {
             let [batch, _d] = x.dims();
             self.make_zero(batch, n_virtual, &x.device())
         }
+        fn untied_params(&self) -> Vec<UntiedParam> {
+            self.untied_params()
+        }
     }
 
     impl Mamba2 {
@@ -135,8 +139,8 @@ mod impl_mamba2 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, device: &Device) -> Mamba2 {
-            self.init(device)
+        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba2 {
+            self.init_applications(n_applications, device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
@@ -271,6 +275,9 @@ mod impl_mamba3 {
             let [batch, _d] = x.dims();
             zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()
         }
+        fn untied_params(&self) -> Vec<UntiedParam> {
+            self.untied_params()
+        }
     }
 
     impl BlockConfig for Mamba3Config {
@@ -278,8 +285,8 @@ mod impl_mamba3 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, device: &Device) -> Mamba3 {
-            self.init(device)
+        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba3 {
+            self.init_applications(n_applications, device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
@@ -347,6 +354,9 @@ mod impl_mamba1 {
             let [batch, _d] = x.dims();
             self.make_zero(batch, n_virtual, &x.device())
         }
+        fn untied_params(&self) -> Vec<UntiedParam> {
+            self.untied_params()
+        }
     }
 
     impl Mamba1 {
@@ -367,8 +377,8 @@ mod impl_mamba1 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, device: &Device) -> Mamba1 {
-            self.init(device)
+        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba1 {
+            self.init_applications(n_applications, device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {

@@ -42,6 +42,7 @@ use crate::mamba1::prelude::*;
 use burn_stack::modules::Silu;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::split_into;
+use burn_stack::utils::{UntiedParam, untied};
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -77,6 +78,28 @@ pub struct Mamba1 {
     /// Input channel: d_inner.
     /// Output channel: d_model.
     pub out_proj: Linear,
+
+    /// The parameters held once per application instead of tied
+    /// ([`Mamba1Config::untied`]).
+    #[module(skip)]
+    pub untied: Vec<Mamba1Untied>,
+}
+
+/// A [`Mamba1`] parameter that may be held once per application of its real
+/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
+/// big maps — `in_proj` and `out_proj` — always stay tied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Mamba1Untied {
+    /// The depthwise convolution [`Mamba1::conv1d`], kernel and bias.
+    Conv1d,
+    /// The selection projection [`Mamba1::x_proj`] (`[Δ_raw | B | C]`).
+    XProj,
+    /// The Δ projection [`Mamba1::dt_proj`], weight and bias.
+    DtProj,
+    /// The decay [`Mamba1::a_log`].
+    ALog,
+    /// The skip [`Mamba1::d`].
+    D,
 }
 
 /// Configuration / factory for [`Mamba1`].
@@ -132,11 +155,24 @@ pub struct Mamba1Config {
     ///
     /// By default, set to expand * d_model.
     pub d_inner: Option<usize>,
+
+    /// The parameters held once per application of the block's real layer
+    /// instead of tied across them ([`Mamba1Untied`]); only virtual layers give
+    /// a real layer more than one. See [`burn_stack::utils::untied`].
+    #[config(default = "Vec::new()")]
+    pub untied: Vec<Mamba1Untied>,
 }
 
 impl Mamba1Config {
-    /// Returns the initialized model.
+    /// Returns the initialized model, for a single application.
     pub fn init(&self, device: &Device) -> Mamba1 {
+        self.init_applications(1, device)
+    }
+
+    /// Returns the initialized model for a real layer applied `n_applications`
+    /// times: every [`Self::untied`] parameter holds that many copies of one
+    /// initialisation.
+    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba1 {
         let d_inner = self.d_inner();
         assert_ne!(self.state_rank, 0);
         assert!(self.d_model + self.state_rank > 0);
@@ -193,35 +229,63 @@ impl Mamba1Config {
             Param::from_tensor(a_log)
         };
 
+        // How many copies `part` holds: one per application if untied. A
+        // `Linear`'s copies lie along its output axis.
+        let copies = |part| {
+            if self.untied.contains(&part) {
+                n_applications
+            } else {
+                1
+            }
+        };
+        let mut conv1d = Conv1dConfig::new(d_inner, d_inner, self.conv_kernel)
+            // Causal left-padding is applied manually in `forward` (from the
+            // conv cache window), so the convolution itself uses no padding.
+            .with_padding(PaddingConfig1d::Valid)
+            .with_groups(d_inner)
+            .with_bias(self.has_conv_bias)
+            // follows PyTorch's default initializer
+            // fan_in = in_channels / groups * kernel_size
+            .with_initializer(uniform_init(self.conv_kernel))
+            .init(device);
+        conv1d.weight = untied::tile(conv1d.weight, 0, copies(Mamba1Untied::Conv1d));
+        conv1d.bias = conv1d
+            .bias
+            .map(|b| untied::tile(b, 0, copies(Mamba1Untied::Conv1d)));
+        let mut x_proj = LinearConfig::new(d_inner, dt_rank + 2 * self.state_rank)
+            .with_bias(false)
+            // follows PyTorch's default initializer
+            .with_initializer(uniform_init(d_inner))
+            .init(device);
+        x_proj.weight = untied::tile(x_proj.weight, 1, copies(Mamba1Untied::XProj));
+        let dt_proj = Linear {
+            weight: untied::tile(dt_proj.weight, 1, copies(Mamba1Untied::DtProj)),
+            bias: dt_proj
+                .bias
+                .map(|b| untied::tile(b, 0, copies(Mamba1Untied::DtProj))),
+        };
+
         Mamba1 {
             in_proj: LinearConfig::new(self.d_model, 2 * d_inner)
                 .with_bias(self.has_proj_bias)
                 // follows PyTorch's default initializer
                 .with_initializer(uniform_init(self.d_model))
                 .init(device),
-            conv1d: Conv1dConfig::new(d_inner, d_inner, self.conv_kernel)
-                // Causal left-padding is applied manually in `forward` (from the
-                // conv cache window), so the convolution itself uses no padding.
-                .with_padding(PaddingConfig1d::Valid)
-                .with_groups(d_inner)
-                .with_bias(self.has_conv_bias)
-                // follows PyTorch's default initializer
-                // fan_in = in_channels / groups * kernel_size
-                .with_initializer(uniform_init(self.conv_kernel))
-                .init(device),
-            x_proj: LinearConfig::new(d_inner, dt_rank + 2 * self.state_rank)
-                .with_bias(false)
-                // follows PyTorch's default initializer
-                .with_initializer(uniform_init(d_inner))
-                .init(device),
+            conv1d,
+            x_proj,
             dt_proj,
-            a_log,
-            d: Initializer::Ones.init([d_inner], device),
+            a_log: untied::tile(a_log, 0, copies(Mamba1Untied::ALog)),
+            d: untied::tile(
+                Initializer::Ones.init::<1, _>([d_inner], device),
+                0,
+                copies(Mamba1Untied::D),
+            ),
             out_proj: LinearConfig::new(d_inner, self.d_model)
                 .with_bias(self.has_proj_bias)
                 // follows PyTorch's default initializer
                 .with_initializer(uniform_init(d_inner))
                 .init(device),
+            untied: self.untied.clone(),
         }
     }
     /// Inner (expanded) channel width: the `d_inner` override if set, else
@@ -251,16 +315,53 @@ impl Mamba1Config {
                 "in_proj.weight",
                 vec![Seg::muon("x", d_inner), Seg::muon("res", d_inner)],
             ),
-            ProjSpec::block(
-                "x_proj.weight",
-                vec![
-                    Seg::adamw("dt", self.dt_rank()),
-                    Seg::muon("b", self.state_rank),
-                    Seg::muon("c", self.state_rank),
-                ],
-            ),
+            {
+                let x_proj = ProjSpec::block(
+                    "x_proj.weight",
+                    vec![
+                        Seg::adamw("dt", self.dt_rank()),
+                        Seg::muon("b", self.state_rank),
+                        Seg::muon("c", self.state_rank),
+                    ],
+                );
+                // Untied, it holds one copy per application.
+                match self.untied.contains(&Mamba1Untied::XProj) {
+                    true => x_proj.tiled(),
+                    false => x_proj,
+                }
+            },
             ProjSpec::block_whole("out_proj.weight", self.d_model),
         ]
+    }
+}
+
+impl Mamba1 {
+    /// The parameters held once per application ([`Self::untied`]), each with
+    /// the axis its copies lie along. See [`burn_stack::utils::untied`].
+    pub fn untied_params(&self) -> Vec<UntiedParam> {
+        fn weight_and_bias<const D: usize>(
+            weight: &Param<Tensor<D>>,
+            axis: usize,
+            bias: Option<&Param<Tensor<1>>>,
+        ) -> Vec<UntiedParam> {
+            std::iter::once(UntiedParam::new(weight, axis))
+                .chain(bias.map(|b| UntiedParam::new(b, 0)))
+                .collect()
+        }
+        self.untied
+            .iter()
+            .flat_map(|part| match part {
+                Mamba1Untied::Conv1d => {
+                    weight_and_bias(&self.conv1d.weight, 0, self.conv1d.bias.as_ref())
+                }
+                Mamba1Untied::XProj => weight_and_bias(&self.x_proj.weight, 1, None),
+                Mamba1Untied::DtProj => {
+                    weight_and_bias(&self.dt_proj.weight, 1, self.dt_proj.bias.as_ref())
+                }
+                Mamba1Untied::ALog => vec![UntiedParam::new(&self.a_log, 0)],
+                Mamba1Untied::D => vec![UntiedParam::new(&self.d, 0)],
+            })
+            .collect()
     }
 }
 

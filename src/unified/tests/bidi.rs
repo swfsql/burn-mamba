@@ -44,6 +44,7 @@ fn virtual_layers_share_per_real_pair_merge() {
         outputs_merge: OutputMergeConfig::cat_linear(n_real),
         class_latents: Vec::new(),
         residuals: ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -102,6 +103,7 @@ fn virtual_forward_is_deterministic() {
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
         residuals: ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 

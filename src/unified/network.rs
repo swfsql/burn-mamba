@@ -221,6 +221,9 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 latent network.
     #[cfg(feature = "mamba2")]
@@ -260,6 +263,9 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 latent network.
     #[cfg(feature = "mamba3")]
@@ -299,6 +305,9 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
@@ -346,7 +355,8 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaLatentNet::Mamba1(
+                untied,
+            } =>MambaLatentNet::Mamba1(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -356,7 +366,8 @@ impl MambaLatentNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
@@ -378,7 +389,8 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaLatentNet::Mamba2(
+                untied,
+            } =>MambaLatentNet::Mamba2(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -388,7 +400,8 @@ impl MambaLatentNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
@@ -410,7 +423,8 @@ impl MambaLatentNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaLatentNet::Mamba3(
+                untied,
+            } =>MambaLatentNet::Mamba3(
                 LatentNetworkBuilder {
                     input_size: *input_size,
                     layers: LayersBuilder::new(*n_real_layers, mamba_block.clone())
@@ -420,7 +434,8 @@ impl MambaLatentNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     output_size: *output_size,
                     final_norm: *final_norm,
                     class_tokens: class_tokens.clone(),
@@ -635,6 +650,9 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 language model.
     #[cfg(feature = "mamba2")]
@@ -671,6 +689,9 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 language model.
     #[cfg(feature = "mamba3")]
@@ -707,6 +728,9 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
+        /// The layer's own parameters held once per application instead of tied
+        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
@@ -753,7 +777,8 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaVocabNet::Mamba1(
+                untied,
+            } =>MambaVocabNet::Mamba1(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -764,7 +789,8 @@ impl MambaVocabNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -783,7 +809,8 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaVocabNet::Mamba2(
+                untied,
+            } =>MambaVocabNet::Mamba2(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -794,7 +821,8 @@ impl MambaVocabNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),
@@ -813,7 +841,8 @@ impl MambaVocabNetConfig {
                 ignore_last_residual,
                 residuals,
                 mlp,
-            } => MambaVocabNet::Mamba3(
+                untied,
+            } =>MambaVocabNet::Mamba3(
                 VocabNetworkBuilder {
                     vocab_size: *vocab_size,
                     pad_vocab_size_multiple: *pad_vocab_size_multiple,
@@ -824,7 +853,8 @@ impl MambaVocabNetConfig {
                         .with_ignore_first_residual(*ignore_first_residual)
                         .with_ignore_last_residual(*ignore_last_residual)
                         .with_class_latents(class_latents.clone())
-                        .with_mlp(mlp.clone()),
+                        .with_mlp(mlp.clone())
+                        .with_untied(untied.clone()),
                     missing_lm_head: *missing_lm_head,
                 }
                 .init(device),

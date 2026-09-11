@@ -115,7 +115,7 @@ impl Mamba3 {
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
-        let proj_bsd = self.in_proj.forward(input_bsm);
+        let proj_bsd = self.project_in(input_bsm);
         let bc_size = ngroups * state_rank * mimo_rank;
 
         // `u` = micro_steps widens every per-micro-step segment, and `unfold`

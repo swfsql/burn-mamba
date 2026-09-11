@@ -85,6 +85,7 @@
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
+use burn_stack::utils::{UntiedParam, untied};
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -114,7 +115,15 @@ pub struct Mamba2 {
     /// - `xbc    [batch, sequence, conv_dim]` — input to the causal convolution, which
     ///   is then split into (x, B, C) after activation
     /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) discretisation step Δ
+    ///
+    /// Under [`Mamba2Untied::InProjTail`] it stops at `xbc`, `dt_raw` living in
+    /// [`Self::in_proj_tail`]; [`Self::project_in`] reads the two as one.
     pub in_proj: Linear,
+
+    /// `in_proj`'s trailing `dt_raw` segment, split off when
+    /// [`Mamba2Untied::InProjTail`] unties it: one copy per application, along
+    /// the output axis. `None` ⇒ `in_proj` carries it.
+    pub in_proj_tail: Option<Linear>,
 
     /// Causal depthwise Conv1d applied to the `xbc` projection.
     ///
@@ -200,6 +209,11 @@ pub struct Mamba2 {
     ///
     /// Paper: `G`. Python: `ngroups`.
     pub ngroups: usize,
+
+    /// The parameters held once per application instead of tied
+    /// ([`Mamba2Config::untied`]).
+    #[module(skip)]
+    pub untied: Vec<Mamba2Untied>,
 }
 
 impl Mamba2 {
@@ -225,11 +239,76 @@ impl Mamba2 {
     pub fn conv_dim(&self) -> usize {
         self.d_inner() + 2 * self.ngroups * self.state_rank
     }
+
+    /// The in-projection's output `[z | xbc | dt_raw]`: `in_proj` alone, or —
+    /// under [`Mamba2Untied::InProjTail`] — followed by [`Self::in_proj_tail`].
+    pub fn project_in<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
+        match &self.in_proj_tail {
+            None => self.in_proj.forward(x),
+            Some(tail) => Tensor::cat(vec![self.in_proj.forward(x.clone()), tail.forward(x)], D - 1),
+        }
+    }
+
+    /// The parameters held once per application ([`Self::untied`]), each with
+    /// the axis its copies lie along. See [`burn_stack::utils::untied`].
+    pub fn untied_params(&self) -> Vec<UntiedParam> {
+        let bias = |b: &Param<Tensor<1>>| UntiedParam::new(b, 0);
+        self.untied
+            .iter()
+            .flat_map(|part| -> Vec<UntiedParam> {
+                match part {
+                    Mamba2Untied::InProjTail => self
+                        .in_proj_tail
+                        .iter()
+                        .flat_map(|tail| {
+                            std::iter::once(UntiedParam::new(&tail.weight, 1))
+                                .chain(tail.bias.as_ref().map(bias))
+                        })
+                        .collect(),
+                    Mamba2Untied::Conv1d => std::iter::once(UntiedParam::new(&self.conv1d.weight, 0))
+                        .chain(self.conv1d.bias.as_ref().map(bias))
+                        .collect(),
+                    Mamba2Untied::DtBias => vec![UntiedParam::new(&self.dt_bias_h, 0)],
+                    Mamba2Untied::ALog => vec![UntiedParam::new(&self.a_log_h, 0)],
+                    Mamba2Untied::D => vec![UntiedParam::new(&self.d_h, 0)],
+                    Mamba2Untied::Norm => vec![UntiedParam::new(&self.norm.gamma, 0)],
+                    Mamba2Untied::InitState => self
+                        .init_state_hpr
+                        .iter()
+                        .map(|p| UntiedParam::new(p, 0))
+                        .collect(),
+                }
+            })
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Mamba2Config  (hyperparameters and factory)
 // ---------------------------------------------------------------------------
+
+/// A [`Mamba2`] parameter that may be held once per application of its real
+/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
+/// big maps — `in_proj`'s `z|xbc` head and `out_proj` — always stay tied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Mamba2Untied {
+    /// `in_proj`'s trailing Δ segment, split off into [`Mamba2::in_proj_tail`] —
+    /// a second, small GEMM.
+    InProjTail,
+    /// The depthwise convolution [`Mamba2::conv1d`], kernel and bias.
+    Conv1d,
+    /// The Δ bias [`Mamba2::dt_bias_h`].
+    DtBias,
+    /// The decay [`Mamba2::a_log_h`].
+    ALog,
+    /// The skip [`Mamba2::d_h`].
+    D,
+    /// The gated output norm's gain ([`Mamba2::norm`]).
+    Norm,
+    /// The learnable initial state [`Mamba2::init_state_hpr`]
+    /// (`has_learnable_init_state`).
+    InitState,
+}
 
 /// Hyperparameters for the Mamba-2 SSM block.
 ///
@@ -331,6 +410,14 @@ pub struct Mamba2Config {
     /// parameter of shape `[nheads, per_head_dim, state_rank]`.
     #[config(default = false)]
     pub has_learnable_init_state: bool,
+
+    /// The parameters held once per application of the block's real layer
+    /// instead of tied across them ([`Mamba2Untied`]); only virtual layers give
+    /// a real layer more than one. Each must exist in this config. The layout
+    /// follows the list alone — [`Mamba2Untied::InProjTail`] splits `in_proj` at
+    /// any count. See [`burn_stack::utils::untied`].
+    #[config(default = "Vec::new()")]
+    pub untied: Vec<Mamba2Untied>,
 }
 
 impl Mamba2Config {
@@ -368,27 +455,41 @@ impl Mamba2Config {
         use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
         let d_inner = self.d_inner();
         let bc = self.ngroups * self.state_rank;
-        vec![
-            ProjSpec::block(
-                "in_proj.weight",
-                vec![
-                    Seg::muon("z", d_inner),
-                    Seg::muon("x", d_inner),
-                    Seg::muon("b", bc),
-                    Seg::muon("c", bc),
-                    Seg::adamw("dt", self.nheads()),
-                ],
-            ),
-            ProjSpec::block_whole("out_proj.weight", self.d_model),
-        ]
+        let head = vec![
+            Seg::muon("z", d_inner),
+            Seg::muon("x", d_inner),
+            Seg::muon("b", bc),
+            Seg::muon("c", bc),
+        ];
+        let tail = vec![Seg::adamw("dt", self.nheads())];
+        // Split off, the Δ segment is its own weight, one copy per application.
+        let in_proj = match self.untied.contains(&Mamba2Untied::InProjTail) {
+            true => vec![
+                ProjSpec::block("in_proj.weight", head),
+                ProjSpec::block("in_proj_tail.weight", tail).tiled(),
+            ],
+            false => vec![ProjSpec::block("in_proj.weight", [head, tail].concat())],
+        };
+        in_proj
+            .into_iter()
+            .chain([ProjSpec::block_whole("out_proj.weight", self.d_model)])
+            .collect()
     }
 
     // -----------------------------------------------------------------------
     // Initialisation
     // -----------------------------------------------------------------------
 
-    /// Allocate and initialise all Mamba-2 block parameters on `device`.
+    /// Allocate and initialise all Mamba-2 block parameters on `device`, for a
+    /// single application.
     pub fn init(&self, device: &Device) -> Mamba2 {
+        self.init_applications(1, device)
+    }
+
+    /// Allocate and initialise all Mamba-2 block parameters on `device`, for a
+    /// real layer applied `n_applications` times: every [`Self::untied`]
+    /// parameter holds that many copies of one initialisation.
+    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba2 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let conv_dim = self.conv_dim();
@@ -405,6 +506,14 @@ impl Mamba2Config {
             "nheads must be divisible by ngroups"
         );
 
+        let unties = |part| self.untied.contains(&part);
+        assert!(
+            self.has_learnable_init_state || !unties(Mamba2Untied::InitState),
+            "Mamba2Untied::InitState unties the initial state, and has_learnable_init_state is off"
+        );
+        // How many copies `part` holds: one per application if untied.
+        let copies = |part| if unties(part) { n_applications } else { 1 };
+
         // Uniform initialiser matching PyTorch's default: U(-1/√fan_in, 1/√fan_in).
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -418,21 +527,37 @@ impl Mamba2Config {
         // Projects d_model → (z, xbc, dt_raw).
         // Size:  d_inner  +  conv_dim  +  nheads
         let d_in_proj_out = d_inner + conv_dim + nheads;
-        let in_proj = LinearConfig::new(self.d_model, d_in_proj_out)
+        // Untied, the Δ segment is a `Linear` of its own.
+        let split_tail = unties(Mamba2Untied::InProjTail);
+        let in_proj = LinearConfig::new(self.d_model, d_in_proj_out - if split_tail { nheads } else { 0 })
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(self.d_model))
             .init(device);
+        let in_proj_tail = split_tail.then(|| {
+            let Linear { weight, bias } = LinearConfig::new(self.d_model, nheads)
+                .with_bias(self.has_proj_bias)
+                .with_initializer(uniform_init(self.d_model))
+                .init(device);
+            Linear {
+                weight: untied::tile(weight, 1, n_applications),
+                bias: bias.map(|b| untied::tile(b, 0, n_applications)),
+            }
+        });
 
         // ── conv1d ───────────────────────────────────────────────────────────
         // Causal depthwise convolution.  Left-padding is applied manually in
         // `forward` and `step`, so we request "Valid" (no automatic padding).
         // The initialiser fan_in is `in_channels / groups * kernel_size = 1 * conv_kernel`.
-        let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
+        let mut conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
             .with_padding(burn::nn::PaddingConfig1d::Valid)
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
             .with_initializer(uniform_init(self.conv_kernel))
             .init(device);
+        conv1d.weight = untied::tile(conv1d.weight, 0, copies(Mamba2Untied::Conv1d));
+        conv1d.bias = conv1d
+            .bias
+            .map(|b| untied::tile(b, 0, copies(Mamba2Untied::Conv1d)));
 
         // ── dt_bias ──────────────────────────────────────────────────────────
         // We want the initial Δ values (after softplus) to be log-uniformly
@@ -450,7 +575,11 @@ impl Mamba2Config {
         let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
         // Inverse softplus: softplus⁻¹(y) = y + log(1 - e^{-y}) = y + log(e^y - 1) - y = log(e^y - 1)
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
-        let dt_bias_h = Param::from_tensor(inv_dt_h);
+        let dt_bias_h = untied::tile(
+            Param::from_tensor(inv_dt_h),
+            0,
+            copies(Mamba2Untied::DtBias),
+        );
 
         // ── a_log ─────────────────────────────────────────────────────────────
         // A is constrained to be negative (decaying system).
@@ -469,16 +598,18 @@ impl Mamba2Config {
             burn::tensor::Distribution::Uniform(self.a_init_range.0, self.a_init_range.1),
             device,
         );
-        let a_log_h = Param::from_tensor(a_h.log());
+        let a_log_h = untied::tile(Param::from_tensor(a_h.log()), 0, copies(Mamba2Untied::ALog));
 
         // ── D (skip connection) ───────────────────────────────────────────────
         // Initialised to ones, adding a direct residual path from input to output.
         let d_h = Initializer::Ones.init::<1, _>([nheads], device);
+        let d_h = untied::tile(d_h, 0, copies(Mamba2Untied::D));
 
         // ── norm (gated RMSNorm) and out_proj ─────────────────────────────────
-        let norm = RmsNormGatedConfig::new(d_inner)
+        let mut norm = RmsNormGatedConfig::new(d_inner)
             .with_norm_before_gate(self.is_norm_before_gate)
             .init(device);
+        norm.gamma = untied::tile(norm.gamma, 0, copies(Mamba2Untied::Norm));
         let out_proj = LinearConfig::new(d_inner, self.d_model)
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(d_inner))
@@ -486,11 +617,13 @@ impl Mamba2Config {
 
         // ── learnable initial state (optional) ────────────────────────────────
         let init_state_hpr = self.has_learnable_init_state.then(|| {
-            Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, self.state_rank], device)
+            let init = Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, self.state_rank], device);
+            untied::tile(init, 0, copies(Mamba2Untied::InitState))
         });
 
         Mamba2 {
             in_proj,
+            in_proj_tail,
             conv1d,
             dt_bias_h,
             dt_limit: self.dt_limit,
@@ -501,6 +634,7 @@ impl Mamba2Config {
             init_state_hpr,
             state_rank: self.state_rank,
             ngroups: self.ngroups,
+            untied: self.untied.clone(),
         }
     }
 }
@@ -557,7 +691,8 @@ impl Mamba2 {
         let conv_dim = self.conv_dim();
         let state_rank = self.state_rank;
         let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
-        let [_d_model, d_in_proj_out] = self.in_proj.weight.dims();
+        // `in_proj`'s own width stops short of the Δ segment when it is untied.
+        let d_in_proj_out = d_inner + conv_dim + nheads;
         let device = input_bsm.device();
         assert_eq!(conv_dim, _conv_dim);
         assert_ne!(ngroups, 0);
@@ -588,7 +723,7 @@ impl Mamba2 {
         //   `xbc    [batch, sequence, conv_dim]` — will become (x, B, C) after conv + split
         //   `dt_raw [batch, sequence, nheads]`   — raw discretisation step (pre-softplus)
         let (z_gate_bsi, xbc_bsv, dt_raw_bsh) = {
-            let z_xbc_dt_bsd = self.in_proj.forward(input_bsm);
+            let z_xbc_dt_bsd = self.project_in(input_bsm);
             assert_eq!([batch, sequence, d_in_proj_out], z_xbc_dt_bsd.dims());
             assert_eq!(
                 [batch, sequence, d_inner + conv_dim + nheads],
@@ -830,7 +965,8 @@ mod step {
             let conv_dim = self.conv_dim();
             let state_rank = self.state_rank;
             let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
-            let [_d_model, d_in_proj_out] = self.in_proj.weight.dims();
+            // `in_proj`'s own width stops short of the Δ segment when it is untied.
+            let d_in_proj_out = d_inner + conv_dim + nheads;
 
             assert_eq!(conv_dim, _conv_dim);
             assert_eq!(nheads % ngroups, 0);
@@ -847,7 +983,7 @@ mod step {
 
             // ── In-projection ─────────────────────────────────────────────────
             let (z_gate_bi, xbc_bv, dt_raw_bh) = {
-                let z_xbc_dt_bd = self.in_proj.forward(input_bm);
+                let z_xbc_dt_bd = self.project_in(input_bm);
                 assert_eq!([batch, d_in_proj_out], z_xbc_dt_bd.dims());
                 assert_eq!([batch, d_inner + conv_dim + nheads], z_xbc_dt_bd.dims());
 

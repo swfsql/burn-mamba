@@ -39,6 +39,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `step` shares the cache. A init from `arange(1..=state_rank).log()`.
   `muon_projections()` (feature `optim`) names the Muon-eligible weights and their
   column seams: `in_proj [x|res]`, `x_proj [dt*|B|C]`, `out_proj` (`*` = AdamW's).
+  `untied: Vec<Mamba1Untied>` (`Conv1d|XProj|DtProj|ALog|D`): tiled by
+  `init_applications`, listed by `untied_params`; an untied `x_proj`'s spec is `tiled`.
 - **`cache.rs`** — `Mamba1Cache` (`conv_bik` window + `ssm_bir` state) / `Mamba1Caches`
   (`Vec`, one per virtual layer; `into_options`/`from_options`, zero-init factories).
 
@@ -50,6 +52,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   conv-window slide. Optional learnable `init_state_hpr`.
   `muon_projections()`: `in_proj [z|x|B|C|dt*]` (`xbc` split further — the conv is
   shared, the linear map is not), `out_proj`.
+  `untied: Vec<Mamba2Untied>` (`InProjTail|Conv1d|DtBias|ALog|D|Norm|InitState`);
+  `InProjTail` moves `dt` into `in_proj_tail` (`project_in` rejoins; its spec `tiled`).
 - **`cache.rs`** — `Mamba2Cache` = `conv_bvk` window + `ssm_bhpr` (the O(p·r) compressed
   state — the memory win over a growing KV-cache). Zero-init correct (`h₀=0`).
 - **`ssd/ssd_path.rs`** — `Mamba2SsdPath{Minimal|Serial|SerialRecalculated}(Option<chunk>)`,
@@ -98,6 +102,10 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `in_proj [z|x|B|C|dt*|A*|λ*|μ*|rotation]` with each `u`-wide stream emitted as `u`
   same-named segments (independent maps to Muon; `without_segment` still drops the whole
   stream) + `out_proj`.
+  `untied: Vec<Mamba3Untied>` (every tensor but `in_proj`'s `z|x|B|C` and `out_proj`):
+  tiled by `init_applications`, listed by `untied_params`; `InProjTail` moves the
+  `d_in_proj_tail()` segments into `in_proj_tail` at any count (`project_in` rejoins;
+  its Muon spec `tiled`).
   `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
   Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
   values/grads): `siso_specialization` for the chunkwise γ-correction (threaded down as a
@@ -431,7 +439,7 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   per-family plug-ins: `impl CacheStack for Mamba{1,2,3}Caches`, `impl Block for
   Mamba{1,2,3}` (`Options` = that family's `*SsdPath`; `()` for Mamba-1, which has no
   chunking), `impl BlockConfig for
-  Mamba{1,2,3}Config`. `cache_to_inner`/`cache_from_inner` are spelled out per family
+  Mamba{1,2,3}Config` (both forwarding the family's untied parameters). `cache_to_inner`/`cache_from_inner` are spelled out per family
   rather than derived: `Module::map` is a **no-op on plain `Tensor` fields**, which is
   all a cache holds, so a `Module`-based conversion would silently skip every one of
   them. `Tensor::inner` is idempotent off autodiff, so the conversion is inert there
@@ -440,8 +448,7 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   `CacheStack` itself (its slot type would have to be a fourth enum), and a caller
   carrying a cache across a gradient boundary holds the enum, not the family type.
 - **`network.rs`** — `MambaLatentNet`/`MambaVocabNet` + `#[derive(Config)]` `*Config`,
-  wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`. The variant field is
-  still named `mamba_block`, so saved `model_config.json` files keep loading.
+  wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`.
 - **`bidi.rs`** — `MambaBidiLayers` + `MambaBidiLayersConfig`, wrapping
   `burn_stack::modules::BidiLayers`.
 - **`tests/`** — the burn-stack containers exercised against **real** blocks (burn-stack
@@ -449,7 +456,9 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   layer), `layers` (`grad_horizon` reachability + shared-weight gradients),
   `multi_gate`, `bidi`, `class` (marker placement, forward/step/prime parity), `optim`
   (each family's plan fits its model and never selects a boundary weight — the
-  boundary test keys off `burn_stack::optim::BLOCK_CONTAINERS`, not a spelling).
+  boundary test keys off `burn_stack::optim::BLOCK_CONTAINERS`, not a spelling),
+  `untied` (every untiable tensor read at its application in `forward` and `step`;
+  the Mamba-3 tail's layout and per-copy training).
 
 ## Benchmarks (`benches/layer.rs`, `bench.sh`, `kernels.sh`)
 

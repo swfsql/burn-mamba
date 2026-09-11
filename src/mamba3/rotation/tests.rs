@@ -1571,6 +1571,7 @@ fn quaternion_bidi_forward_runs() {
         outputs_merge: OutputMergeConfig::mean(n_real),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 

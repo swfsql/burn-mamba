@@ -130,6 +130,10 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// The layers' own parameters held once per application instead of
+        /// tied (the block's are `mamba_block`'s); see
+        /// [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 bidirectional stack.
     #[cfg(feature = "mamba2")]
@@ -152,6 +156,10 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// The layers' own parameters held once per application instead of
+        /// tied (the block's are `mamba_block`'s); see
+        /// [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 bidirectional stack.
     #[cfg(feature = "mamba3")]
@@ -174,6 +182,10 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
+        /// The layers' own parameters held once per application instead of
+        /// tied (the block's are `mamba_block`'s); see
+        /// [`burn_stack::utils::untied`].
+        untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
@@ -219,6 +231,7 @@ impl MambaBidiLayersConfig {
                 outputs_merge,
                 class_latents,
                 residuals,
+                untied,
             } => MambaBidiLayers::Mamba1(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -229,6 +242,7 @@ impl MambaBidiLayersConfig {
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                     residuals: residuals.clone(),
+                    untied: untied.clone(),
                 }
                 .init(device),
             ),
@@ -242,6 +256,7 @@ impl MambaBidiLayersConfig {
                 outputs_merge,
                 class_latents,
                 residuals,
+                untied,
             } => MambaBidiLayers::Mamba2(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -252,6 +267,7 @@ impl MambaBidiLayersConfig {
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                     residuals: residuals.clone(),
+                    untied: untied.clone(),
                 }
                 .init(device),
             ),
@@ -265,6 +281,7 @@ impl MambaBidiLayersConfig {
                 outputs_merge,
                 class_latents,
                 residuals,
+                untied,
             } => MambaBidiLayers::Mamba3(
                 BidiLayersBuilder {
                     n_real_layers: *n_real_layers,
@@ -275,6 +292,7 @@ impl MambaBidiLayersConfig {
                     outputs_merge: outputs_merge.clone(),
                     class_latents: class_latents.clone(),
                     residuals: residuals.clone(),
+                    untied: untied.clone(),
                 }
                 .init(device),
             ),

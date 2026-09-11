@@ -66,6 +66,7 @@ fn unified_net_config_mamba2() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -116,6 +117,7 @@ fn unified_net_config_mamba3() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -149,6 +151,7 @@ fn unified_net_config_mamba1() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -185,6 +188,7 @@ fn bidi_layers_mamba2() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -216,6 +220,7 @@ fn bidi_layers_mamba3() {
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -243,6 +248,7 @@ fn bidi_layers_mamba1() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
     let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, (), None);
@@ -270,6 +276,7 @@ fn unified_bidi_config_mamba2() {
         outputs_merge: OutputMergeConfig::mean(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
     let (y, _c) = layers.forward(
@@ -303,6 +310,7 @@ fn bidi_forward_is_deterministic_mamba2() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -330,6 +338,7 @@ fn bidi_forward_is_deterministic_mamba1() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -363,6 +372,7 @@ fn bidi_forward_is_deterministic_mamba3() {
         outputs_merge: OutputMergeConfig::cat_linear(2),
         class_latents: Vec::new(),
         residuals: burn_stack::modules::ResidualsConfig::Standard,
+        untied: Vec::new(),
     }
     .init(&device);
 
@@ -1146,6 +1156,7 @@ fn prime_through_the_runtime_enums() {
         ignore_last_residual: false,
         residuals: burn_stack::modules::ResidualsConfig::Standard,
         mlp: None,
+        untied: Vec::new(),
     }
     .init(&device);
 

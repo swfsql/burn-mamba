@@ -239,6 +239,7 @@ impl AeConfig {
             outputs_merge: OutputMergeConfig::cat_linear(self.n_enc_layers),
             class_latents: self.enc_class_latents.clone(),
             residuals: burn_stack::modules::ResidualsConfig::Standard,
+            untied: Vec::new(),
         }
         .init(device);
         let dec_layers = MambaBidiLayersConfig::Mamba3 {
@@ -252,6 +253,7 @@ impl AeConfig {
             outputs_merge: OutputMergeConfig::cat_linear(self.n_dec_layers),
             class_latents: Vec::new(),
             residuals: burn_stack::modules::ResidualsConfig::Standard,
+            untied: Vec::new(),
         }
         .init(device);
 
