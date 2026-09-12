@@ -1,9 +1,10 @@
 //! The model configuration for the `mnist-class` example — a small Mamba-3
 //! classifier (2 real layers cycled to 8 virtual layers); see [`model_config`].
 
-use burn_mamba::prelude::MultiGateResidualConfig;
 use burn_mamba::prelude::{
-    ClassLatent, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind,
+    MultiGateResidualConfig,
+    ClassLatent, LayerUntied, Mamba3Config, Mamba3Untied, MambaLatentNetConfig, ResidualsConfig,
+    RotationKind,
 };
 use burn_stack::utils::{GradHorizon, Schedule};
 
@@ -51,17 +52,17 @@ pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 /// With a batch_size=16 in FP32, this requires ~2.2GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
-    let d_model = 32;
+    let d_model = 16;
     let mamba_block = Mamba3Config::new(d_model)
         // state_rank = 64 (time-wise expressivity, average impact on disk size)
         .with_state_rank(64)
-        .with_expand(4)
+        .with_expand(1)
         // d_inner = expand·d_model = 4·32 = 128
         // per_head_dim = 32
         // nheads = d_inner/per_head_dim = 128/32 = 4
-        .with_per_head_dim(32)
+        .with_per_head_dim(4)
         .with_ngroups(1)
-        .with_mimo_rank(1)
+        .with_mimo_rank(2)
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
         //
         // Rotation-kind ablation, at this stack and a 600-batch budget. A
@@ -76,7 +77,17 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Complex2D); // 2D rotations on B/C
+        .with_rotation(RotationKind::Quaternion4D)
+        // Some small tensors are forcibly untied to potentially improve acc.
+        .with_untied(Vec::new());
+        // .with_untied(vec![
+        //     Mamba3Untied::InProjTail,
+        //     Mamba3Untied::DtBias,
+        //     Mamba3Untied::D,
+        //     Mamba3Untied::BNorm,
+        //     Mamba3Untied::CNorm,
+        //     Mamba3Untied::OutNorm,
+        // ]);
 
     // for MultiGate residuals (commented-out)
     const N_STREAM: usize = 4;
@@ -93,7 +104,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // final_norm: true,
         final_norm: false,
         // two real layers, virtually cycled to 8 (each applied 4 times)
-        n_real_layers: 2,
+        n_real_layers: 1,
         n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)),
         grad_horizon: GRAD_HORIZON,
         mamba_block,
@@ -117,7 +128,9 @@ pub fn model_config() -> MambaLatentNetConfig {
         residuals: ResidualsConfig::Standard,
         // No feed-forward interleave: these examples are mixer-only.
         mlp: None,
-        untied: Vec::new(),
+        // The layer's own untied tensors (the block's are `mamba_block`'s, above):
+        // the mixer's pre-norm. `LayerUntied::Norm2` would need an `mlp`.
+        untied: vec![LayerUntied::Norm],
     }
 }
 // notes:
