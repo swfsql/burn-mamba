@@ -13,7 +13,7 @@ use burn_stack::utils::{GradHorizon, Schedule};
 /// Measured optimum for this task: 4, 6 and 8 all beat a deeper stack, and 8
 /// wins once the whole stack is back-propagated (see [`GRAD_HORIZON`]). 12 and
 /// 16 are worse *and* slower.
-const N_VIRTUAL_LAYERS: usize = 8;
+const N_VIRTUAL_LAYERS: usize = 4;
 
 /// Back-propagate only the last `K` applications of **each real layer** —
 /// [`GradHorizon::Depth`], counted per weight set — with everything below
@@ -51,16 +51,14 @@ pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 /// an epoch each, so well before the first epoch is out).
 /// With a batch_size=16 in FP32, this requires ~2.2GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
-    // d_model = 32 (intra/inter-layer expressivity, high impact on disk size)
     let d_model = 16;
     let mamba_block = Mamba3Config::new(d_model)
-        // state_rank = 64 (time-wise expressivity, average impact on disk size)
-        .with_state_rank(64)
+        .with_state_rank(16)
         .with_expand(1)
-        // d_inner = expand·d_model = 4·32 = 128
-        // per_head_dim = 32
-        // nheads = d_inner/per_head_dim = 128/32 = 4
-        .with_per_head_dim(4)
+        // d_inner = expand·d_model = 1·16 = 16
+        // per_head_dim = 8
+        // nheads = d_inner/per_head_dim = 16/8 = 2
+        .with_per_head_dim(8)
         .with_ngroups(1)
         .with_mimo_rank(2)
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
@@ -79,15 +77,15 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Quaternion4D)
         // Some small tensors are forcibly untied to potentially improve acc.
-        .with_untied(Vec::new());
-        // .with_untied(vec![
-        //     Mamba3Untied::InProjTail,
-        //     Mamba3Untied::DtBias,
-        //     Mamba3Untied::D,
-        //     Mamba3Untied::BNorm,
-        //     Mamba3Untied::CNorm,
-        //     Mamba3Untied::OutNorm,
-        // ]);
+        // .with_untied(Vec::new());
+        .with_untied(vec![
+            Mamba3Untied::InProjTail,
+            Mamba3Untied::DtBias,
+            Mamba3Untied::D,
+            Mamba3Untied::BNorm,
+            Mamba3Untied::CNorm,
+            Mamba3Untied::OutNorm,
+        ]);
 
     // for MultiGate residuals (commented-out)
     const N_STREAM: usize = 4;
@@ -105,7 +103,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         final_norm: false,
         // two real layers, virtually cycled to 8 (each applied 4 times)
         n_real_layers: 1,
-        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)),
+        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Stretched)),
         grad_horizon: GRAD_HORIZON,
         mamba_block,
         // Network-level class tokens would sit at `input_size = 1` (a single
