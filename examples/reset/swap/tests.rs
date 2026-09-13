@@ -16,6 +16,9 @@
 //!    in particular not the sign character `(−1)^(#s+#t)`, which is all a
 //!    *homomorphism* `S₃ → SU(2)` can carry, since `SU(2)` has exactly one
 //!    element of order two and `S₃` has three.
+//! 4. The wall in (2) is the **linear head**, so it is a config choice: behind
+//!    the network's final `RmsNorm` — even in its input once a constant sits
+//!    beside it — a hand-built `Quaternion4D` block is exact too.
 //!
 //! The readouts in (2) and (3) are lookup tables **fitted on one split and
 //! scored on another**, so they are ceilings a model could actually reach, not
@@ -911,4 +914,120 @@ fn the_lift_of_a_swap_squares_to_minus_one() {
 /// `q v q̄`, the two-sided step this example's block is built on.
 fn conjugate(q: [f64; 4], v: [f64; 4]) -> [f64; 4] {
     quat_mul(quat_mul(q, v), [q[0], -q[1], -q[2], -q[3]])
+}
+
+// ---------------------------------------------------------------------------
+// 4. what the linear head is load-bearing for
+// ---------------------------------------------------------------------------
+
+/// The left-isoclinic block **solves** the task once the network's final
+/// `RmsNorm` is switched on — which is why `model_config` keeps it off.
+///
+/// The state is still `±W ⊗ B`. One head reads `y = ⟨C, W ⊗ B⟩ = ⟨u, W⟩` and the
+/// block's out-proj bias puts a constant `e` beside it; `RmsNorm(e, y)` then has
+/// first coordinate `e / √((e² + y²)/2)`, **even** in `y`, so both lifts land on
+/// one point. `u` gives the six `|⟨u, W⟩|` distinct values (`15°` into both
+/// planes of `2D₃`, the odd one scaled), and the head cuts that one coordinate
+/// into six intervals. The same weights without the norm are near chance: behind
+/// a linear head, every class's outputs average to a point that depends only on
+/// the sign character, and three classes cannot share a convex region's point.
+#[test]
+fn left_isoclinic_with_final_norm() {
+    let phi = 15.0f64.to_radians();
+    const ODD_SCALE: f64 = 0.55;
+    const E: f64 = 0.35;
+    const SLOPE: f64 = 10.0;
+    let device = Device::default();
+
+    // both lifts of every class, by walking the group from the identity
+    let mut lifts: Vec<Vec<[f64; RANK]>> = vec![Vec::new(); NUM_CLASSES];
+    let mut frontier = vec![([1.0, 0.0, 0.0, 0.0], PERMS[0])];
+    while let Some((q, p)) = frontier.pop() {
+        let class = class_of(p) as usize;
+        if lifts[class].iter().any(|l| l.iter().zip(&q).all(|(a, b)| (a - b).abs() < 1e-9)) {
+            continue;
+        }
+        lifts[class].push(q);
+        for s in [SWAP_S, SWAP_T] {
+            frontier.push((quat_mul(symbol_quat(s), q), compose(symbol_perm(s), p)));
+        }
+    }
+    assert!(lifts.iter().all(|l| l.len() == 2), "expected the double cover");
+
+    // B as the block sees it (QK-normed), and C = u ⊗ B / |B|² so ⟨C, W⊗B⟩ = ⟨u, W⟩
+    let rms = (REF_POINT.iter().map(|v| v * v).sum::<f64>() / RANK as f64).sqrt();
+    let b = REF_POINT.map(|v| v / rms);
+    let u = [phi.cos(), ODD_SCALE * phi.cos(), ODD_SCALE * phi.sin(), phi.sin()];
+    let b_sq: f64 = b.iter().map(|v| v * v).sum();
+    let c = quat_mul(u, b).map(|v| v / b_sq);
+
+    // y's scale: the gate, times the write `x(R)` as projected (x takes no activation)
+    let gate = silu(Z_PRE) * silu_inv(X_WRITE);
+    let e = gate * E; // the out-proj bias, at the gated y's scale
+    let n0: Vec<f64> = lifts
+        .iter()
+        .map(|ls| {
+            let ys: Vec<f64> = ls
+                .iter()
+                .map(|w| gate * c.iter().zip(&quat_mul(*w, b)).map(|(x, y)| x * y).sum::<f64>())
+                .collect();
+            assert!((ys[0] + ys[1]).abs() < 1e-9, "lifts should be antipodal");
+            e / ((e * e + ys[0] * ys[0]) / 2.0).sqrt()
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..NUM_CLASSES).collect();
+    order.sort_by(|&a, &b| n0[a].partial_cmp(&n0[b]).unwrap());
+    let gap = order.windows(2).map(|w| n0[w[1]] - n0[w[0]]).fold(f64::MAX, f64::min);
+    println!("class n0 = {n0:.4?}, min gap {gap:.4}");
+
+    let build = |with_norm: bool| {
+        let mut model = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
+        let MambaLatentNet::Mamba3(net) = &mut model else { unreachable!() };
+        if with_norm {
+            net.norm_f = Some(RmsNormConfig::new(D_MODEL).init(&device));
+        }
+        let block = &mut net.layers.real_layers[0].block;
+        // every head's C: the QK-normed (1,0,0,0) is (2,0,0,0); the bias moves it to `c`
+        let c_bias: Vec<f64> = (0..NHEADS)
+            .flat_map(|_| (0..RANK).map(|r| c[r] - 2.0 * f64::from(r == 0)))
+            .collect();
+        block.c_bias_hmr = Param::from_tensor(t1(&c_bias, [NHEADS, 1, RANK], &device));
+        // head 0 → coordinate 1; coordinate 0 is the constant `e`
+        let w_block = [0.0, 1.0, 0.0, 0.0];
+        block.out_proj.weight = Param::from_tensor(t1(&w_block, [NHEADS, D_MODEL], &device));
+        block.out_proj.bias = Some(Param::from_tensor(t1(&[e, 0.0], [D_MODEL], &device)));
+        // the head: upper envelope of lines in the first normed coordinate
+        let mut w_out = vec![0.0f64; D_MODEL * NUM_CLASSES];
+        let mut b_out = vec![0.0f64; NUM_CLASSES];
+        for (i, &class) in order.iter().enumerate() {
+            w_out[class] = SLOPE * i as f64;
+            if i > 0 {
+                let prev = order[i - 1];
+                let cut = 0.5 * (n0[prev] + n0[class]);
+                b_out[class] = b_out[prev] - SLOPE * cut;
+            }
+        }
+        net.out_proj.weight = Param::from_tensor(t1(&w_out, [D_MODEL, NUM_CLASSES], &device));
+        net.out_proj.bias = Some(Param::from_tensor(t1(&b_out, [NUM_CLASSES], &device)));
+        model
+    };
+
+    let normed = build(true);
+    let plain = build(false);
+    println!(
+        "left-isoclinic, the same weights with / without norm_f ({} / {} params):",
+        normed.num_params(),
+        plain.num_params()
+    );
+    let mut worst = 1.0f64;
+    let mut best_plain = 0.0f64;
+    for (name, family) in FAMILIES {
+        let acc = accuracy(&normed, family, 256, &device);
+        let acc_plain = accuracy(&plain, family, 256, &device);
+        println!("  {name:<9} {:6.2}%   {:6.2}%", 100.0 * acc, 100.0 * acc_plain);
+        worst = worst.min(acc);
+        best_plain = best_plain.max(acc_plain);
+    }
+    assert!(worst > 0.995, "left-isoclinic + final norm is not exact: {worst}");
+    assert!(best_plain < 0.75, "without the norm it reached {best_plain:.4}");
 }

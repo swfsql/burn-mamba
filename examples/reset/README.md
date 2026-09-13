@@ -542,6 +542,7 @@ the state averages to zero on each class.
 through the best linear readout, through the best table, and by the cancellation
 statistic; `abelian_rotation_loses_the_order` does the same one rung further down;
 `counts_and_parity_ceilings` needs no model at all;
+`left_isoclinic_with_final_norm` shows the wall is the linear head (below);
 `labels_are_the_symmetric_group` and `the_lift_of_a_swap_squares_to_minus_one` check
 the dataset really is the `S₃` word problem and that the obstruction is what it is
 claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
@@ -592,6 +593,10 @@ claimed to be (`q² = −1`, yet `q v q̄` squares to the identity).
   readout. That makes it the sharper statement about the block: a Mamba block's output
   is linear in its state, so a state that needs unfolding is a state the block cannot
   report.
+- **So `final_norm: false` is load-bearing.** A final `RmsNorm` over the output `(e, y)`,
+  with `e` constant, is even in `y` and merges `±W`: the same hand-built
+  `Quaternion4D` block is then exact on all three families (130 parameters), and
+  near chance (10 / 15 / 10%) with the same weights and no norm.
 
 </details>
 

@@ -78,8 +78,9 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
     MambaLatentNetConfig::Mamba3 {
         input_size: NUM_SYMBOLS,
         output_size: NUM_CLASSES,
-        // no final norm: the state is a rotated fixed vector, so the block's
-        // output is already O(1) and the head reads it directly.
+        // no final norm, and this is load-bearing: a norm beside a constant is
+        // even in the state, which merges the two lifts `±W` and lets
+        // `Quaternion4D` solve the task too (`left_isoclinic_with_final_norm`).
         final_norm: false,
         n_real_layers: 1,
         n_virtual_layers: None,
