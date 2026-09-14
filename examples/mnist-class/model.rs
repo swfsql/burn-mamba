@@ -75,7 +75,8 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rotation(RotationKind::Quaternion4D)
+        // .with_rotation(RotationKind::Quaternion4D)
+        .with_rotation(RotationKind::Complex2D)
         // Some small tensors are forcibly untied to potentially improve acc.
         .with_untied(vec![
             Mamba3Untied::InProjTail,
