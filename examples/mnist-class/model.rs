@@ -51,14 +51,14 @@ pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 /// an epoch each, so well before the first epoch is out).
 /// With a batch_size=16 in FP32, this requires ~2.2GB vram during training.
 pub fn model_config() -> MambaLatentNetConfig {
-    let d_model = 16;
+    let d_model = 8;
     let mamba_block = Mamba3Config::new(d_model)
         .with_state_rank(16)
-        .with_expand(1)
-        // d_inner = expand·d_model = 1·16 = 16
-        // per_head_dim = 8
-        // nheads = d_inner/per_head_dim = 16/8 = 2
-        .with_per_head_dim(8)
+        .with_expand(2)
+        // d_inner = expand·d_model = 2·8 = 16
+        // per_head_dim = 4
+        // nheads = d_inner/per_head_dim = 16/4 = 4
+        .with_per_head_dim(4)
         .with_ngroups(1)
         .with_mimo_rank(2)
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
@@ -77,7 +77,6 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Quaternion4D)
         // Some small tensors are forcibly untied to potentially improve acc.
-        // .with_untied(Vec::new());
         .with_untied(vec![
             Mamba3Untied::InProjTail,
             Mamba3Untied::DtBias,
