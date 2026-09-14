@@ -3,7 +3,8 @@
 Four examples on the **same shape of stream**, each the smallest task its block
 is *needed* for and that the rung below cannot solve. Read together they isolate,
 one at a time, what each piece of the SSM recurrence actually buys — plus a fifth
-that keeps the stream and moves the *other* dial, `micro_steps`:
+that keeps the stream and moves the *other* dial, `micro_steps`, and a sixth that
+asks `reset-swap`'s question one group size up, where the answer splits:
 
 | rung | what only that block can do | the state it needs | the group it tracks |
 |---|---|---|---|
@@ -12,6 +13,7 @@ that keeps the stream and moves the *other* dial, `micro_steps`:
 | [`reset-spinor`](#reset-spinor) | compose in a non-abelian group | a **quaternion** transition, `Quaternion4D` | `Q₈` |
 | [`reset-swap`](#reset-swap) | hold a group with more than one involution | a **two-sided** `SO(4)` transition, `Rotor4D` | `S₃` |
 | [`spinor-product`](#spinor-product) | apply **two** group elements in one token | two recurrence steps, `micro_steps = 2` | `Q₈`, two generators per token |
+| [`reset-quintic`](#reset-quintic) | hold a **non-solvable** group — and one no single layer can | `Rotor4D`; for `S₅`, a **second layer** | `A₅`; `S₅` |
 
 ## The shared shape
 
@@ -827,6 +829,197 @@ element, plus whether it resets) instead of its two symbols;
   symbols must be affinely independent — four dimensions — and the two slots'
   direction spaces must not overlap, or one functional could not read a slot
   alone.
+
+</details>
+
+---
+
+## reset-quintic
+
+The ladder's question one size up. `reset-swap`'s block holds `S₃`; does a
+Mamba-3 block hold the symmetric group of **five** items, the group of the
+unsolvable quintic? Half of it. `A₅` — the sixty even arrangements, the rotation
+group of the icosahedron — is one `Rotor4D` block, exact at `reset-swap`'s own
+width. `S₅` is not the transition group of **any** Mamba-3 layer, of any rotation
+kind and any size: it takes a second one.
+
+Same shape of stream — two turns and a reset — over five items, in one of two
+alphabets (`--group`):
+
+```text
+  S₅ (the default):  s = (0 1),  c = (0 1 2 3 4)                        120 classes
+  symbols  R      s      c      s      c      c      R      c      s
+  order    abcde  bacde  cbdea  cadeb  dbeac  ecabd  abcde  bcdea  acdeb
+
+  A₅ (--group a5):   d = (0 1)(2 3),  t = (0 2 4),  d∘t of order 5       60 classes
+  symbols  R      d      t      d      t      t      R      t      d
+  order    abcde  badce  bcdea  adceb  cdeab  edacb  abcde  cbeda  daecb
+```
+
+Classes are the group's arrangements in lexicographic order (`abcde` is 0).
+Every position is scored, every sequence opens with an `R`, and sequences are
+**96** symbols long — three times the ladder's 32, for a reason in the notes.
+
+```bash
+cargo run --release --example reset-quintic -- --training --inference                 # S₅, two layers
+cargo run --release --example reset-quintic -- --training --inference -- --group a5   # A₅, one layer
+cargo run --release --example reset-quintic -- --training --inference -- --group s5 --layers 1
+cargo test --release --example reset-quintic -- --nocapture
+```
+
+<details>
+<summary>Why this task</summary>
+
+**`A₅` is the icosahedron.** `d` is a half-turn about an edge axis, `t` a
+third-turn about a face axis `20.9°` from it (`cos = φ/√3`), and their product a
+fifth-turn about a vertex: `⟨d, t | d² = t³ = (dt)⁵ = 1⟩`, which *is* `A₅`. So
+`reset-swap`'s construction carries over unchanged — conjugation `v ↦ q v q̄` is
+`SO(3)` inside a `Rotor4D` 4-block, `R` writes a reference vector, and the state
+is its orbit, sixty points instead of six. What changes is how much less every
+cheaper state can carry:
+
+| shortcut | why it is closed |
+|---|---|
+| an **abelian** rotation | `A₅` is perfect (`[A₅, A₅] = A₅`), so its only abelian image is trivial: an abelian state tracks *nothing* of it, not even `reset-swap`'s sign |
+| a **stack** of simpler layers | `A₅` is simple and non-abelian, so no cascade of solvable machines reaches it (Krohn–Rhodes) — its word problem is NC¹-complete (Barrington) |
+| a **left-isoclinic** rotation | the double cover `2I`: `d`'s lift squares to `−1`, every element arrives as `±W`, and a linear head cannot merge antipodes — `reset-swap`'s wall again |
+
+**`S₅` is not a group of block rotations.** A layer's per-token transition is a
+scalar times a block-diagonal rotation — a product of `SO(4)`s, of which
+`Complex2D` and `Quaternion4D` are subgroups — so a layer that tracks a group
+exactly, at every length, holds it as a *quotient* of a group of such rotations.
+`S₅` is none, and one pair of elements says why:
+
+- `c` and `s∘c∘s` are five-cycles conjugate in `S₅` (by `s`) but **not** in `A₅`.
+  In the icosahedron they turn by `72°` and `144°`.
+- Conjugating by a rotation never changes an angle: in a 4-block `v ↦ q v p̄`,
+  conjugating by another rotation keeps the angles of `q` and of `p` alike. Every
+  map that exchanges them is a reflection.
+- So in any group of block rotations an odd element can act on the `A₅` inside only
+  as some element of `A₅` already does, which `S₅`'s odd elements do not. And
+  `S₅`'s normal subgroups are `1`, `A₅`, `S₅`: a layer follows all of it or, at
+  most, its **sign**.
+
+This is not a matter of size — no `state_rank`, head count, `mimo_rank` or
+`micro_steps` (a product of rotations is a rotation) moves it. It is also exactly
+what a reflection buys: in `S₅`'s 4-D standard representation a swap *is* a
+reflection, which is the one-layer route a Householder transition (the delta
+rule's) has and a Mamba one does not.
+
+**Two layers do.** Write `σ = sᵉ ∘ a`, its sign `e` and its even part `a`. The
+first layer holds `e` (a half-turn on `s`). Then `a` steps by `a ← sᵉ'∘g∘sᵉ · a`:
+the identity on `s`, and on `c` either `c` (`e = 0`) or `s∘c∘s` (`e = 1`) — the
+`72°`/`144°` pair, chosen by the sign below. The second layer reads that sign and
+holds `a` as the `A₅` block does: the Krohn–Rhodes cascade `S₅ = A₅ ⋊ C₂`, one
+layer per factor.
+
+</details>
+
+<details>
+<summary>Measured</summary>
+
+**`A₅`** — chance 1.67%, at 96 symbols:
+
+| | random | shuffle | runs |
+|---|---|---|---|
+| best per-symbol lookup (no memory at all) | 30.8% | 4.9% | 11.2% |
+| best predictor of `(#d, #t)` since the reset | 57.4% | 11.7% | 41.6% |
+| **hand-built** `Rotor4D` block, `reset-swap`'s width (308 params) | **100%** | **100%** | **100%** |
+| the same construction, left-isoclinic, same head | 15.7% | 3.1% | 6.2% |
+| **trained**, `Rotor4D` (608 params) | **100%** | **100%** | **100%** (49151/49152) |
+| **trained**, `Rotor4D`, seed 1 | **100%** | **100%** | **100%** |
+| trained, `--rotation quaternion` | 66.0% | 14.2% | 43.3% |
+| trained, `--rotation complex` | 66.0% | 14.4% | 42.2% |
+| trained at the hand-built width (`--d-model 2 --heads 2 --mimo-rank 1`) | 98.3% | 76.3% | 89.6% |
+| trained on 32-symbol words (`--train-length 32`) | 100% | 97.9% | 97.9% |
+
+The same models at **288 symbols**:
+
+| at 288 symbols | random | shuffle | runs |
+|---|---|---|---|
+| **hand-built** | **100%** | **100%** | **100%** |
+| **trained**, `Rotor4D` | **100%** | 99.5% | 99.3% |
+| trained, `Rotor4D`, seed 1 | **100%** | 91.4% | 91.3% |
+| trained, `--rotation quaternion` / `complex` | 64.7 / 64.5% | 5.7 / 5.8% | 16.8 / 18.2% |
+| trained at the hand-built width | 98.1% | 34.5% | 42.7% |
+| trained on 32-symbol words | 100% | 56.1% | 56.5% |
+
+**`S₅`** — chance 0.83%, at 96 symbols:
+
+| | random | shuffle | runs |
+|---|---|---|---|
+| best per-symbol lookup (no memory at all) | 27.9% | 3.5% | 6.8% |
+| best predictor of the sign since the reset | 23.4% | 4.1% | 9.6% |
+| best predictor of `(#s, #c)` since the reset | 52.2% | 8.6% | 32.5% |
+| **hand-built** two-layer stack (902 params; also 100% at 288) | **100%** | **100%** | **100%** |
+| trained, two layers (1200 params) | 81.6% | 36.1% | 54.0% |
+| trained, `--layers 1` (908 params) | 78.0% | 14.0% | 33.6% |
+
+At 288 symbols the two trained rows fall to 76.3 / 12.7 / 23.4% and
+76.6 / 5.3 / 12.1%: neither tracks the group, the two-layer model only carries
+more recency. The trained rows clear the counts ceiling on `random` for
+`reset-swap`'s reason — a block that writes at every token keeps a decaying trace
+of the last few symbols, which pins short words down without any group at all.
+
+`handmade_a5_rotor_solves_every_family` and `handmade_s5_two_layers_solve_every_family`
+write every weight in closed form and score both lengths;
+`left_isoclinic_carries_the_binary_icosahedral_group` is the one-enum twin;
+`s5_needs_a_reflection_one_layer_does_not_have` checks the facts the obstruction
+is made of (`A₅` simple and perfect, `S₅`'s normal subgroups, the `72°`/`144°`
+pair conjugate in `S₅` alone, two-sided conjugation keeping both angles);
+`counts_and_sign_ceilings` needs no model; `labels_are_the_alternating_and_symmetric_groups`
+and `a5_is_the_icosahedral_rotation_group` check the datasets and the embedding.
+`learned_rotations` (ignored; point `QUINTIC_ARTIFACTS` at a run) reads a trained
+first layer's angles off its weights.
+
+</details>
+
+<details>
+<summary>Notes</summary>
+
+- **Training finds the group one head at a time — hence the trained width.** Every
+  head carries its own rotation, and in every trained `A₅` block inspected the
+  icosahedral one (`180.0°` and `120.0°`, axes `20.9°` or `69.1°` apart) sat on
+  one head, the others on something smaller (a `Z₃`, a recency trace). The
+  hand-built block had every head read the *same* state; a trained one hands the
+  class head a single projection of it, and at the hand-built width that stays
+  short of exact (98 / 76 / 90%). `mimo_rank` is the cure rather than more heads:
+  the ranks of one head share its state and its transition, so two channels at
+  rank two give the head that finds the group two readouts of it, and the second
+  head is room to miss. `model::DEFAULT_WIDTH` is `d_model 4`, two heads, rank 2.
+  (Four one-channel heads also got there, once, when two of them found it.)
+- **…and not always as conjugation.** The learned left and right axes are `69.1°`
+  apart on one side and `20.9°` on the other: `q` and `p` run in the two Galois-twin
+  copies of the binary icosahedral group, which is `A₅`'s *four*-dimensional
+  representation — `(−1, −1)` acts trivially, so the double cover still collapses.
+  Also `SO(4)`, also not `SU(2)`; `Rotor4D` holds both.
+- **Why 96 symbols.** Trained on the ladder's 32, the same model turns by the
+  right angles and holds with `ᾱ ≈ 0.99` a step — free over 32 steps, and a slow
+  shrink of the state that its head, which has biases, misreads on long words
+  (56% on `shuffle` at 288). At 96 the leak is priced in; what is left
+  (`ᾱ = 0.991` on `d`) costs half a point at 288. The hand-built head decodes
+  *directions* with no bias, so the block's own floor (`ᾱ = e^(−a_floor·Δ)`)
+  never reaches it: `REF_POINT` is chosen so the orbit's shadow on the two
+  readouts points in sixty distinct directions.
+- **The widths are floors, argued in `model::floor_width`.** `A₅` at `d_model = 2`
+  is the three-symbol alphabet's floor and two readouts suffice. `S₅` needs
+  `d_model = 3`: the second layer must tell `s`, `c` at either sign and `R` apart,
+  its write must vanish off `R`, its turn must vanish on `s` and take two
+  non-parallel values on the two `c`s, and four points of `ℝ²` are affinely
+  dependent. The construction also embeds `c` as the zero vector, so the sign
+  layer 1 hands over is, after the pre-norm, a pure direction — without that, the
+  sign's slow decay drifts the second layer's turns off `72°`/`144°`.
+- **`A₅` trains, the quotient does not.** `A₅` is exact at the trained length on
+  both seeds, and the left-isoclinic and abelian twins land on the same numbers,
+  as the double cover and perfectness say they should. `S₅` is expressible — the
+  hand-built stack is exact at every length — but no trained two-layer run found
+  it: seeds, `max_lr` 1e-2, 240 epochs, three layers, `d_model` 8, four
+  one-channel heads, and 32- or 96-symbol words all stalled between the
+  one-layer rows and `A₅`'s. `learned_rotations` shows why on the first layer: it
+  learns `c` as a fifth-turn and gives `s` no half-turn, i.e. it tries to hold the
+  group itself, which it cannot, instead of the sign the layer above would need.
+  Both layers start identical and the sign pays off only once the second one
+  reads it — a cascade gradient descent has to discover whole.
 
 </details>
 

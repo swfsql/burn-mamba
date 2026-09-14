@@ -107,6 +107,10 @@ name = "reset-swap"
 path = "examples/reset/swap/main.rs"
 
 [[example]]
+name = "reset-quintic"
+path = "examples/reset/quintic/main.rs"
+
+[[example]]
 name = "spinor-product"
 path = "examples/reset/spinor-product/main.rs"
 
