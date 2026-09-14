@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["step"],"struct":["Mamba1","Mamba1Config"]};
+window.SIDEBAR_ITEMS = {"enum":["Mamba1Untied"],"mod":["step"],"struct":["Mamba1","Mamba1Config"]};
