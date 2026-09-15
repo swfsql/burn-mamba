@@ -60,7 +60,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         // nheads = d_inner/per_head_dim = 16/4 = 4
         .with_per_head_dim(4)
         .with_ngroups(1)
-        .with_mimo_rank(2)
+        .with_mimo_rank(1)
         // rope_fraction = 1.0 (apply RoPE to 100% of the B/C projections)
         //
         // Rotation-kind ablation, at this stack and a 600-batch budget. A
@@ -75,8 +75,8 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_rope_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        // .with_rotation(RotationKind::Quaternion4D)
-        .with_rotation(RotationKind::Complex2D)
+        .with_rotation(RotationKind::Quaternion4D)
+        // .with_rotation(RotationKind::Complex2D)
         // Some small tensors are forcibly untied to potentially improve acc.
         .with_untied(vec![
             Mamba3Untied::InProjTail,
