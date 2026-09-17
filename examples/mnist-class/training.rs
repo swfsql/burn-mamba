@@ -199,8 +199,8 @@ impl Wrap {
         assert_eq!([batch_size], targets.dims());
 
         let (output, _caches) = model.forward(input.clone(), None, ssd_path(), None);
-        // The model's class latents lengthen the sequence; they are all `Start`,
-        // so the last position is still the last pixel — just further along.
+        // The model's class latents lengthen the sequence; the readout is its
+        // last position (see `OUTPUT_SEQUENCE_EXTRA`).
         let output_size = sequence_size + OUTPUT_SEQUENCE_EXTRA;
         assert_eq!([batch_size, output_size, 10], output.dims());
         let last_output = output.narrow(1, output_size - 1, 1).squeeze_dim(1);

@@ -58,8 +58,8 @@ pub fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
         .div_scalar(MnistBatch::STDDEV)
         .reshape([n, h * w, 1]);
     let (output, _caches) = model.forward(zscored, None, crate::training::ssd_path(), None);
-    // The class latents lengthen the sequence (all `Start`, so the last position
-    // is still the last pixel) — see `model::OUTPUT_SEQUENCE_EXTRA`.
+    // The class latents lengthen the sequence; the readout is its last position
+    // — see `model::OUTPUT_SEQUENCE_EXTRA`.
     let seq = h * w + crate::model::OUTPUT_SEQUENCE_EXTRA;
     let last = output.narrow(1, seq - 1, 1).squeeze_dim::<2>(1); // [n, 10]
     burn::tensor::activation::softmax(last, 1)

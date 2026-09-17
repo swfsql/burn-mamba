@@ -56,7 +56,7 @@ pub fn launch(app_args: &AppArgs) {
 
     // setup training and model configs
     let batch_size = 16;
-    let num_epochs = 3;
+    let num_epochs = 4;
     let training_items = 60_000;
     let iterations_per_epoch = training_items / batch_size;
     let training_config = app_args.load_training_config().unwrap_or_else(|| {
@@ -76,8 +76,8 @@ pub fn launch(app_args: &AppArgs) {
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
-                    .with_max_lr(8e-4)
-                    .with_min_lr(4e-4)
+                    .with_max_lr(9.6e-3)
+                    .with_min_lr(2.4e-4)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });

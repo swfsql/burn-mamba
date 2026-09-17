@@ -4,16 +4,20 @@ The dataset is mostly based on [burn-dataset/vision/mnist](https://github.com/tr
 
 Inference samples a few test digits and, for each, prints the digit as ASCII art beside a text bar chart of the 10 class probabilities, and writes a PNG (the digit next to its probability bars; the true label and prediction are in the file name). Training also dumps these prediction PNGs into `<artifacts>/epoch-{e}-batch-{b}/` at every small validation check.
 
+## Model
+
+`model.rs` configures a deliberately tiny Mamba-3 network (954 parameters): one real layer applied as 4 virtual layers, a quaternion transition rotation, one B/C group per head and multi-gate residuals, each knob commented where it is set. With the training config in `main.rs` (batch 16, fp32, one cosine LR schedule over 4 epochs) it reaches ~90% validation accuracy.
+
 ## Usage
 
-The dataset is first downloaded and stored in `${CACHEDIR}/burn-dataset/mnist/train/`. The files are the following:
+The dataset is first downloaded and stored in `${HOME}/.cache/burn-dataset/mnist/{train,test}/`. The files are the following:
 
 - train-images-idx3-ubyte (9.45 MB)
 - train-labels-idx1-ubyte (28.20 KB)
-- tk10-images-idx3-ubyte (1.57 MB)
-- tk10-labels-idx1-ubyte (4.44 KB)
+- t10k-images-idx3-ubyte (1.57 MB)
+- t10k-labels-idx1-ubyte (4.44 KB)
 
-Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cache_dir.html).
+Note: "HOME" per [`dirs::home_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.home_dir.html).
 
 ##### Usage Example
 
@@ -22,7 +26,6 @@ Note: "CACHEDIR" per [`dirs::cache_dir`](https://docs.rs/dirs/6.0.0/dirs/fn.cach
 cargo check --example mnist-class
 
 # training and running inference in wgpu (fp32)
-# note: the following requires ~7GB vram during training by default
 cargo run --release --example mnist-class --features "backend-wgpu" -- --training --inference
 ```
 
@@ -49,11 +52,10 @@ recorded in `<artifacts>/training_config.json`, so a resumed run keeps it — an
 persisted config wins over the flag on reload.
 
 Which weights move (see `burn_stack::optim`, and the `muon_plan()` on the model
-config): the block `out_proj`, and the Muon-owned segments of the fused
-`in_proj` — `z`, `x`, `B`, `C` and the rotation channels. The per-head Δ/`A`/`λ`
-channels of the same tensor stay on AdamW, as do every 1-D/3-D parameter, the
-network's own `in_proj`/`out_proj`, and any class-token table. For this config
-that is **~91% of the parameters** on Muon.
+config): the block `out_proj`, and the Muon-owned segments of its in-projection
+— `z`, `x`, `B`, `C` and the rotation channels. The per-head Δ/`A`/`λ` channels
+stay on AdamW, as do every 1-D/3-D parameter, the network's own
+`in_proj`/`out_proj`, and any class-token table.
 
 The fused `in_proj` is **split per sub-projection before Muon sees it** — the
 model keeps its single fused GEMM, but the optimizer orthogonalises each
