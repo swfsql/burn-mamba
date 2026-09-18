@@ -15,7 +15,7 @@
 
 #![allow(dead_code)]
 
-pub use burn_stack::examples::{cli, device, mnist, tiny_stories, training};
+pub use burn_stack::examples::{cli, device, mnist, session, tiny_stories, training};
 
 /// The `ModelConfigExt` seam, under its usual `common::model` path.
 pub mod model {

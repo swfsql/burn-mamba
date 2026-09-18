@@ -65,7 +65,7 @@ pub fn launch(app_args: &AppArgs) {
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     let (batch_size, num_epochs) = (64, 80);
-    let training_config = app_args.load_training_config().unwrap_or_else(|| {
+    let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As in `reset-rotor`: a large step to leave the order-blind solution,
         // a small one to settle the rotation onto exact half-turns.
@@ -83,6 +83,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(100),
         ))
     });
+    app_args.override_training_config(&mut training_config);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config ({rotation:?})");
         model::model_config(rotation)

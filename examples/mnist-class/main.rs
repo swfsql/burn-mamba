@@ -59,7 +59,7 @@ pub fn launch(app_args: &AppArgs) {
     let num_epochs = 4;
     let training_items = 60_000;
     let iterations_per_epoch = training_items / batch_size;
-    let training_config = app_args.load_training_config().unwrap_or_else(|| {
+    let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         let optimizer = common::training::OptimizerConfig::adamw_only(dtype);
         // Muon reuses AdamW's LR and weight decay (`MatchRmsAdamW` sizes its
@@ -81,6 +81,7 @@ pub fn launch(app_args: &AppArgs) {
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });
+    app_args.override_training_config(&mut training_config);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model::model_config()

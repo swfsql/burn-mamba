@@ -57,7 +57,14 @@ cargo run --example reset-majority --features "backend-flex" -- --inference --ar
 # (checkpoints and the end-of-epoch validation still happen before it stops)
 cargo run --example reset-majority --features "backend-flex" -- --training --max-batches 600
 
-# assume /some/path/ contains a different training config file, e.g. with a different seed:
+# continue it for another 600: the LR schedule, the epoch and the position in it pick up
+# where the checkpoint left them (the rest of that epoch drawn from a fresh shuffle)
+cargo run --example reset-majority --features "backend-flex" -- --training --artifacts-path "$ARTIFACTS" --max-batches 600 --resume
+
+# the per-step and per-validation metrics of every run so far, one JSON object per line:
+jq -c 'select(.event == "valid")' "$ARTIFACTS/metrics.jsonl"
+
+# assume /some/path/ contains a different training config file, e.g. with a different LR schedule:
 TCONFIG="/some/path/training_config.json"
 
 # continue training from another training config
@@ -74,7 +81,7 @@ A command-line tool for training and/or running inference with machine learning 
 Models, optimizers, and configurations are persisted in an artifacts directory.
 
 USAGE:
-    example-name [OPTIONS]
+    example-name [OPTIONS] [-- <EXTRA_ARGS>...]
 
 When no --training or --inference flag is provided, the program exits after handling configuration logic.
 
@@ -83,10 +90,15 @@ BEHAVIOR OVERVIEW
 - If --training-config or --model-config is given, the corresponding config is loaded from the specified file and saved to the artifacts directory (overwriting any existing file).
 - If no explicit config file is provided for a component, the program attempts to load it from the artifacts directory; if absent, a default configuration is created and saved.
 - The artifacts directory (--artifacts-path) is used to read/write model weights, optimizer state, and configurations. If not specified, a new temporary directory is created and its path is printed.
-- With --remove-artifacts, any existing model and optimizer files in the artifacts directory are deleted before training (if --training is active).
+- With --remove-artifacts, any existing model and optimizer files (and the saved progress) in the artifacts directory are deleted before training (if --training is active).
 - Model and optimizer weights are loaded from the artifacts directory if present; otherwise new ones are created and saved.
+- With --seed, --epochs or --max-lr, the given value replaces the training config's (loaded or created) before the config is saved, so later runs from the same artifacts directory inherit it. --epochs also rescales a cosine LR schedule's length by the same factor, so the schedule still spans the run.
+- The optimizer state is saved together with the run's progress: the LR-schedule step, the epoch, and the batch within it. A run that loads it starts over at step 0 of epoch 1, unless --resume is given, which continues from the saved progress. The interrupted epoch then trains only the batches it has left, drawn from a fresh shuffle (the dataloader workers' batch order cannot be replayed).
+- Training checkpoints at every epoch end and when it stops. --checkpoint-every adds a checkpoint every that many optimizer steps, --valid-every a periodic validation, and --valid-batches caps the batches that validation reads; each example has its own defaults for these three.
+- Every training step and validation is appended as one JSON line to metrics.jsonl in the artifacts directory; each run opens with a "start" line.
 - If both --training and --inference are specified, training executes first, followed by inference using the trained model.
-- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns.
+- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns. One mini-batch is one optimizer step, which for the character LM is one window of a run rather than one dataloader item.
+- Any arguments following -- are captured as-is and forwarded to downstream processing.
 
 FLAGS:
     -h, --help                  Show this help message and exit
@@ -101,8 +113,20 @@ OPTIONS:
     -m, --model-config <PATH>   Load model configuration from this file (overrides any config in artifacts directory)
     -b, --max-batches <N>       Stop training after N mini-batches in total (across epochs), regardless of the
                                 configured number of epochs. Unlimited when absent.
+    -s, --seed <N>              Replace the training config's RNG seed (model init, data shuffling, sampling)
+        --epochs <N>            Replace the training config's number of epochs (rescaling a cosine LR schedule)
+        --max-lr <LR>           Replace the LR schedule's peak rate (a constant schedule's only one)
+        --resume                Continue from the progress saved with the optimizer state (schedule step, epoch,
+                                batch) instead of from step 0 (has no effect on a new optimizer)
+        --checkpoint-every <N>  Also checkpoint every N optimizer steps (0: only at epoch ends)
+        --valid-every <N>       Validate every N optimizer steps (0: no periodic validation)
+        --valid-batches <N>     Batches a periodic validation reads
     -a, --artifacts-path <PATH>
                                 Directory where configurations, model weights, and optimizer state are saved and loaded.
                                 If the directory does not exist, it will be created.
                                 Defaults to a newly created temporary directory (path will be printed).
+
+ARGS:
+    -- <EXTRA_ARGS>             All arguments after -- are forwarded verbatim to further processing stages.
+                                If further processing is available, passing -h or --help will display its help information.
 ```

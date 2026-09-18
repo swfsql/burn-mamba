@@ -117,6 +117,9 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch
         );
     }
+    // After the sizing, so `--epochs` rescales the schedule and `--max-lr`
+    // replaces its peak on a fresh config too.
+    app_args.override_training_config(&mut config.training);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model::model_config()

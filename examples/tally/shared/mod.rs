@@ -37,7 +37,7 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     let (batch_size, num_epochs) = (64, 80);
-    let training_config = app_args.load_training_config().unwrap_or_else(|| {
+    let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As on the `reset` ladder: a large step to leave the memoryless basin,
         // a small one to settle into the exact construction.
@@ -55,6 +55,7 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
                 .with_warmup_steps(100),
         ))
     });
+    app_args.override_training_config(&mut training_config);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model_config

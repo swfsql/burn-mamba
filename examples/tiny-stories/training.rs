@@ -21,10 +21,8 @@ pub use crate::common::{
 use crate::dataset::TinyStoriesBatch;
 use burn::prelude::*;
 use burn::{
-    data::dataloader::Progress,
     module::AutodiffModule,
     optim::{GradientsParams, ModuleOptimizer},
-    train::metric::MetricMetadata,
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
@@ -52,23 +50,22 @@ pub fn train(
         // Which weights Muon took over (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
-    let mut optim = app_args.load_or_save_optim(config.training.optimizer.init(&muon_plan));
+    let (mut optim, progress) =
+        app_args.load_or_save_optim(config.training.optimizer.init(&muon_plan));
 
     let mut model = Wrap(model);
 
     // Create the dataloaders (downloading the corpus on the first run).
-    let (dataloader_train, dataloader_valid) = dataloaders(&config, &training_device);
+    let (dataloader_train, dataloader_valid) =
+        dataloaders(&config, &training_device, &progress);
 
-    let training_num_items = dataloader_train.num_items();
-
-    let mut metric_meta = MetricMetadata {
-        progress: Progress::new(0, training_num_items, None),
-        iteration: Some(0),
-        lr: Some(config.training.lr.get_lr(0).into()),
-    };
-
-    // `--max-batches`: an optional cap on the whole run, spent across epochs.
-    let mut batch_budget = app_args.batch_budget();
+    // Resume position, `--max-batches` budget, cadence and metrics log.
+    let mut session = app_args.session(
+        progress,
+        &config.training,
+        lm::CADENCE,
+        dataloader_train.num_items(),
+    );
 
     // The frontier gate outlives the epochs: its depth statistics are cumulative
     // over the whole run of training, not per epoch.
@@ -80,30 +77,29 @@ pub fn train(
         &model.valid(),
         &config,
         0,
-        Some(10),
+        session.cadence().valid_batches,
+        &mut session,
     );
 
     println!("Starting training...");
     // Iterate over our training for X epochs
-    for epoch in 1..config.training.num_epochs + 1 {
+    for epoch in session.epochs(config.training.num_epochs) {
         model = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
             model,
             &config,
             &mut optim,
-            &mut metric_meta,
+            &mut session,
             &mut frontier,
             epoch,
-            &mut batch_budget,
-            Some(10),
             app_args,
             training_device.clone().inner(),
         );
 
         // save assets
         app_args.save_model(&model.0);
-        app_args.save_optim(&optim);
+        app_args.save_optim(&optim, session.progress());
 
         println!("running full validation...");
         epoch_valid::<Wrap>(
@@ -112,9 +108,10 @@ pub fn train(
             &config,
             epoch,
             None,
+            &mut session,
         );
 
-        if batch_budget.is_exhausted() {
+        if session.is_exhausted() {
             println!("reached the --max-batches limit; stopping training");
             break;
         }

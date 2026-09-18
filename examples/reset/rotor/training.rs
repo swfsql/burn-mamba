@@ -6,7 +6,8 @@
 pub use crate::common::{
     cli::AppArgs,
     model::ModelConfigExt,
-    training::{BatchBudget, TrainingConfig, metric_current},
+    session::{Cadence, Session},
+    training::{TrainingConfig, metric_current},
 };
 use crate::dataset::{
     EVAL_SEED, Family, NUM_CLASSES, NUM_EVAL, NUM_TRAIN, ResetRotorBatch, ResetRotorBatcher,
@@ -54,7 +55,8 @@ pub fn train(
     if training_config.optimizer.muon.is_some() {
         print!("{}", muon_plan.describe(&model));
     }
-    let mut optim = app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
+    let (mut optim, progress) =
+        app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
     let mut model = Wrap(model, model_config.clone());
     let batcher = ResetRotorBatcher::default();
@@ -63,7 +65,7 @@ pub fn train(
     // validation runs on the inner backend.
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
-        .shuffle(training_config.seed)
+        .shuffle(progress.shuffle_seed(training_config.seed))
         .num_workers(training_config.num_workers)
         .set_device(training_device.clone())
         .build(ResetRotorDataset::new(
@@ -86,43 +88,50 @@ pub fn train(
         })
         .collect();
 
-    let mut metric_meta = MetricMetadata {
-        progress: Progress::new(0, dataloader_train.num_items(), None),
-        iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0).into()),
+    // Resume position, `--max-batches` budget, cadence and metrics log: by
+    // default a validation every five epochs and no mid-epoch checkpoint.
+    let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
+    let cadence = Cadence {
+        valid_every: Some(5 * batches),
+        ..Cadence::default()
     };
-
-    // `--max-batches`: an optional cap on the whole run, spent across epochs.
-    let mut batch_budget = app_args.batch_budget();
+    let mut session = app_args.session(
+        progress,
+        &training_config,
+        cadence,
+        dataloader_train.num_items(),
+    );
 
     println!(
         "running initial validation (chance ≈ {:.1}%)...",
         100.0 / NUM_CLASSES as f32
     );
-    validate_all(&valid_loaders, model.0.valid(), &model_config, 0);
+    validate_all(&valid_loaders, model.0.valid(), &model_config, 0, &mut session);
 
     println!("Starting training...");
-    for epoch in 1..training_config.num_epochs + 1 {
+    for epoch in session.epochs(training_config.num_epochs) {
         model.0 = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             model.0,
             &training_config,
             &model_config,
             &mut optim,
-            &mut metric_meta,
+            &mut session,
             epoch,
-            &mut batch_budget,
+            &valid_loaders,
+            app_args,
         );
 
         app_args.save_model(&model.0);
-        app_args.save_optim(&optim);
+        app_args.save_optim(&optim, session.progress());
 
-        if epoch % 5 == 0 || epoch == 1 || epoch == training_config.num_epochs {
-            println!("running validation...");
-            validate_all(&valid_loaders, model.0.valid(), &model_config, epoch);
+        let last = epoch == training_config.num_epochs || session.is_exhausted();
+        if last && !session.validated_now() {
+            println!("running final validation...");
+            validate_all(&valid_loaders, model.0.valid(), &model_config, epoch, &mut session);
         }
 
-        if batch_budget.is_exhausted() {
+        if session.is_exhausted() {
             println!("reached the --max-batches limit; stopping training");
             break;
         }
@@ -132,8 +141,10 @@ pub fn train(
 
 type Dataloader = std::sync::Arc<dyn DataLoader<ResetRotorBatch> + 'static>;
 
-/// Train for a single epoch, stepping the optimizer per batch; returns the
-/// updated model. Ends early once `batch_budget` (`--max-batches`) runs out.
+/// Train for (the rest of) one epoch, stepping the optimizer per batch and
+/// checkpointing and validating (on `valid_loaders`) at the `session`'s cadence;
+/// returns the updated model. Ends early once the session's budget
+/// (`--max-batches`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -141,48 +152,57 @@ pub fn epoch_train(
     training_config: &TrainingConfig,
     model_config: &MambaLatentNetConfig,
     optim: &mut ModuleOptimizer,
-    metric_meta: &mut MetricMetadata,
+    session: &mut Session,
     epoch: usize,
-    batch_budget: &mut BatchBudget,
-) -> MambaLatentNet {
-    let training_loop_limit = batch_budget.take_limit();
+    valid_loaders: &[(&str, Dataloader)],
+    app_args: &AppArgs,
+) ->MambaLatentNet {
+    let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
     let mut training_model = Wrap(training_model, model_config.clone());
 
-    for (mut b, batch) in dataloader_train
+    for batch in dataloader_train
         .iter()
         .map(|batch| batch.expect("dataloader batch"))
-        .enumerate()
-        .take(training_loop_limit)
+        .take(session.batch_limit(batches))
     {
-        b += 1;
-        batch_budget.spend();
+        let b = session.begin_batch();
         let [batch_size, _, _] = batch.inputs.dims();
-        metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
-        metric_meta.progress.items_processed += batch_size;
+        let (_step, lr) = session.begin_step(batch_size);
 
         let train_output = TrainStep::step(&training_model, batch);
         let pre_metrics = &train_output.item;
 
-        loss_metric.update(&pre_metrics.adapt(), metric_meta);
-        acc_metric.update(&pre_metrics.adapt(), metric_meta);
-        iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
+        loss_metric.update(&pre_metrics.adapt(), session.meta());
+        acc_metric.update(&pre_metrics.adapt(), session.meta());
+        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
 
-        let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
         training_model.0 = optim.step(lr, training_model.0, train_output.grads);
 
-        println!(
-            "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, Acc {:0>6.2}, lr {lr:0>6.2e}, it/s {:.2}",
-            epoch,
-            training_config.num_epochs,
-            dataloader_train.num_items() / training_config.batch_size + 1,
+        let (loss, acc) = (
             metric_current(loss_metric.value()),
             metric_current(acc_metric.value()),
+        );
+        session.log_train(&[("loss", loss), ("acc", acc)]);
+        println!(
+            "Epoch {}/{}, Batch {b:0>4}/{batches}, Loss {loss:.4}, Acc {acc:0>6.2}, lr {lr:0>6.2e}, it/s {:.2}",
+            epoch,
+            training_config.num_epochs,
             metric_current(iteration_speed_metric.value()),
         );
+
+        if session.checkpoint_due() {
+            app_args.save_model(&training_model.0);
+            app_args.save_optim(optim, session.progress());
+        }
+        if session.valid_due() {
+            println!("running validation...");
+            let valid_model = training_model.0.valid();
+            validate_all(valid_loaders, valid_model, model_config, epoch, session);
+        }
     }
 
     println!(
@@ -192,26 +212,32 @@ pub fn epoch_train(
         metric_current(loss_metric.running_value()),
         metric_current(acc_metric.running_value()),
     );
+    session.end_epoch(batches);
 
     training_model.0
 }
 
-/// Validate on every family in turn, one line each.
+/// Validate on every family in turn (each capped at the session's
+/// `valid_batches`), one line and one metrics-log entry each.
 pub fn validate_all(
     loaders: &[(&str, Dataloader)],
     valid_model: MambaLatentNet,
     model_config: &MambaLatentNetConfig,
     epoch: usize,
+    session: &mut Session,
 ) {
     let valid_model = Wrap(valid_model, model_config.clone());
+    let limit = session.cadence().valid_batches.unwrap_or(usize::MAX);
     for (name, loader) in loaders {
-        let (loss, acc) = evaluate(std::sync::Arc::clone(loader), &valid_model);
+        let (loss, acc) = evaluate(std::sync::Arc::clone(loader), &valid_model, limit);
+        session.log_valid(name, &[("loss", loss), ("acc", acc)]);
         println!("  epoch {epoch}, {name:<10} loss {loss:.4}, acc {acc:6.2}%");
     }
 }
 
-/// Average loss and accuracy of `model` over one dataloader.
-pub fn evaluate(dataloader: Dataloader, model: &Wrap) -> (f64, f64) {
+/// Average loss and accuracy of `model` over (up to `limit` batches of) one
+/// dataloader.
+pub fn evaluate(dataloader: Dataloader, model: &Wrap, limit: usize) -> (f64, f64) {
     let metric_meta = MetricMetadata {
         progress: Progress::new(0, dataloader.num_items(), None),
         iteration: Some(0),
@@ -220,7 +246,7 @@ pub fn evaluate(dataloader: Dataloader, model: &Wrap) -> (f64, f64) {
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut acc_metric = burn::train::metric::AccuracyMetric::new();
 
-    for batch in dataloader.iter().map(|b| b.expect("dataloader batch")) {
+    for batch in dataloader.iter().map(|b| b.expect("dataloader batch")).take(limit) {
         let pre_metrics = InferenceStep::step(model, batch);
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
         acc_metric.update(&pre_metrics.adapt(), &metric_meta);

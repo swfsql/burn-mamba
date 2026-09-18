@@ -8,7 +8,8 @@ pub use crate::common::{
     model::ModelConfigExt,
     cli::AppArgs,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
-    training::{BatchBudget, TrainingConfig, metric_current},
+    session::{Cadence, Session},
+    training::{TrainingConfig, metric_current},
 };
 use crate::model::{AeConfig, AeModel};
 use burn::prelude::*;
@@ -41,7 +42,8 @@ pub fn train(
         // Which weights Muon took over (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
-    let mut optim = app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
+    let (mut optim, progress) =
+        app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
     let mut model = Wrap(model, model_config.clone());
 
@@ -52,7 +54,7 @@ pub fn train(
     // (to match the model weights); validation runs on the inner backend.
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
-        .shuffle(training_config.seed)
+        .shuffle(progress.shuffle_seed(training_config.seed))
         .num_workers(training_config.num_workers)
         .set_device(training_device.clone())
         .build(MnistDataset::train());
@@ -63,16 +65,13 @@ pub fn train(
         .set_device(training_device.clone().inner())
         .build(MnistDataset::test());
 
-    let training_num_items = dataloader_train.num_items();
-
-    let mut metric_meta = MetricMetadata {
-        progress: Progress::new(0, training_num_items, None),
-        iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0).into()),
-    };
-
-    // `--max-batches`: an optional cap on the whole run, spent across epochs.
-    let mut batch_budget = app_args.batch_budget();
+    // Resume position, `--max-batches` budget, cadence and metrics log.
+    let mut session = app_args.session(
+        progress,
+        &training_config,
+        CADENCE,
+        dataloader_train.num_items(),
+    );
 
     println!("running small initial validation...");
     epoch_valid(
@@ -81,11 +80,12 @@ pub fn train(
         &training_config,
         &model_config,
         0,
-        Some(10),
+        session.cadence().valid_batches,
+        &mut session,
     );
 
     println!("Starting training...");
-    for epoch in 1..training_config.num_epochs + 1 {
+    for epoch in session.epochs(training_config.num_epochs) {
         model.0 = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
@@ -93,17 +93,15 @@ pub fn train(
             &training_config,
             &model_config,
             &mut optim,
-            &mut metric_meta,
+            &mut session,
             epoch,
-            &mut batch_budget,
-            Some(10),
             app_args,
             training_device.clone().inner(),
         );
 
         // save assets
         app_args.save_model(&model.0);
-        app_args.save_optim(&optim);
+        app_args.save_optim(&optim, session.progress());
 
         println!("running full validation...");
         epoch_valid(
@@ -113,9 +111,10 @@ pub fn train(
             &model_config,
             epoch,
             None,
+            &mut session,
         );
 
-        if batch_budget.is_exhausted() {
+        if session.is_exhausted() {
             println!("reached the --max-batches limit; stopping training");
             break;
         }
@@ -138,9 +137,18 @@ fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
     (images, labels)
 }
 
-/// Train for a single epoch, stepping the optimizer per batch and periodically
-/// validating + checkpointing; returns the updated model. Ends early once
-/// `batch_budget` (the `--max-batches` cap) runs out.
+/// Checkpoint and run a 10-batch validation (plus the reconstruction PNGs) every
+/// 100 steps.
+const CADENCE: Cadence = Cadence {
+    checkpoint_every: Some(100),
+    valid_every: Some(100),
+    valid_batches: Some(10),
+};
+
+/// Train for (the rest of) one epoch, stepping the optimizer per batch and
+/// checkpointing and validating at the `session`'s cadence; returns the updated
+/// model. Ends early once the session's budget (the `--max-batches` cap) runs
+/// out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -149,14 +157,12 @@ pub fn epoch_train(
     training_config: &TrainingConfig,
     model_config: &AeConfig,
     optim: &mut ModuleOptimizer,
-    metric_meta: &mut MetricMetadata,
+    session: &mut Session,
     epoch: usize,
-    batch_budget: &mut BatchBudget,
-    valid_loop_limit: Option<usize>,
     app_args: &AppArgs,
     valid_device: Device,
 ) -> AeModel {
-    let training_loop_limit = batch_budget.take_limit();
+    let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
@@ -167,42 +173,40 @@ pub fn epoch_train(
     let mut training_model = Wrap(training_model, model_config.clone());
 
     // training loop
-    for (mut b, batch) in dataloader_train
+    for batch in dataloader_train
         .iter()
         .map(|batch| batch.expect("dataloader batch"))
-        .enumerate()
-        .take(training_loop_limit)
+        .take(session.batch_limit(batches))
     {
-        b += 1;
-        batch_budget.spend();
+        let b = session.begin_batch();
         let [batch_size, _, _, _] = batch.images.dims();
-        metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
-        metric_meta.progress.items_processed += batch_size;
+        let (_step, lr) = session.begin_step(batch_size);
 
         let train_output = TrainStep::step(&training_model, batch);
         let pre_metrics = &train_output.item;
 
-        loss_metric.update(&pre_metrics.adapt(), metric_meta);
-        iteration_speed_metric.update(&pre_metrics.adapt(), metric_meta);
+        loss_metric.update(&pre_metrics.adapt(), session.meta());
+        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
 
-        let lr = training_config.lr.get_lr(metric_meta.iteration.unwrap());
         training_model.0 = optim.step(lr, training_model.0, train_output.grads);
 
+        let loss = metric_current(loss_metric.value());
+        session.log_train(&[("loss", loss)]);
         println!(
-            "Epoch {}/{}, Batch {b:0>4}/{}, Loss {:.4}, lr {lr:0>6.2e}, it/s {:.2}",
+            "Epoch {}/{}, Batch {b:0>4}/{batches}, Loss {loss:.4}, lr {lr:0>6.2e}, it/s {:.2}",
             epoch,
             training_config.num_epochs,
-            dataloader_train.num_items() / training_config.batch_size + 1,
-            metric_current(loss_metric.value()),
             metric_current(iteration_speed_metric.value()),
         );
 
-        if b % 100 == 0 {
-            // save assets
+        if session.checkpoint_due() {
             app_args.save_model(&training_model.0);
-            app_args.save_optim(optim);
+            app_args.save_optim(optim, session.progress());
+        }
 
-            println!("running validation (batch iteration limit: {valid_loop_limit:?})");
+        if session.valid_due() {
+            let valid_batches = session.cadence().valid_batches;
+            println!("running validation (batch iteration limit: {valid_batches:?})");
             let valid_model = training_model.0.valid();
             epoch_valid(
                 std::sync::Arc::clone(&dataloader_valid),
@@ -210,7 +214,8 @@ pub fn epoch_train(
                 training_config,
                 model_config,
                 epoch,
-                valid_loop_limit,
+                valid_batches,
+                session,
             );
 
             // Save original-vs-reconstruction PNGs into a fresh per-step dir.
@@ -233,12 +238,13 @@ pub fn epoch_train(
         training_config.num_epochs,
         metric_current(loss_metric.running_value()),
     );
+    session.end_epoch(batches);
 
     training_model.0
 }
 
-/// Run validation over (up to `valid_loop_limit`) batches and report the average
-/// reconstruction loss.
+/// Run validation over (up to `valid_loop_limit`) batches, report the average
+/// reconstruction loss, and log it into the `session`'s metrics log.
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
@@ -246,6 +252,7 @@ pub fn epoch_valid(
     model_config: &AeConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
+    session: &mut Session,
 ) {
     let valid_loop_limit = valid_loop_limit.unwrap_or(usize::MAX);
     let valid_num_items = dataloader_valid.num_items();
@@ -259,10 +266,9 @@ pub fn epoch_valid(
 
     let valid_model = Wrap(valid_model, model_config.clone());
 
-    for (_b, batch) in dataloader_valid
+    for batch in dataloader_valid
         .iter()
         .map(|batch| batch.expect("dataloader batch"))
-        .enumerate()
         .take(valid_loop_limit)
     {
         let [batch_size, _, _, _] = batch.images.dims();
@@ -273,11 +279,12 @@ pub fn epoch_valid(
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
     }
 
+    let loss = metric_current(loss_metric.running_value());
+    let batches = metric_meta.iteration.unwrap() as f64;
+    session.log_valid("valid", &[("loss", loss), ("batches", batches)]);
     println!(
-        "Epoch {}/{}, Avg Valid Loss {:.4}",
-        epoch,
-        training_config.num_epochs,
-        metric_current(loss_metric.running_value()),
+        "Epoch {}/{}, Avg Valid Loss {loss:.4}",
+        epoch, training_config.num_epochs,
     );
 }
 

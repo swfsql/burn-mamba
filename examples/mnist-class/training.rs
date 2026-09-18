@@ -15,7 +15,7 @@ pub use crate::common::{
 };
 use burn::prelude::*;
 use burn::{
-    data::dataloader::{DataLoaderBuilder, Progress},
+    data::dataloader::DataLoaderBuilder,
     module::AutodiffModule,
     optim::{GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
@@ -44,7 +44,8 @@ pub fn train(
         // Which weights Muon took over (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
-    let mut optim = app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
+    let (mut optim, progress) =
+        app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
     let mut model = Wrap(model);
 
@@ -55,7 +56,7 @@ pub fn train(
     // (to match the model weights); validation runs on the inner backend.
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
-        .shuffle(training_config.seed)
+        .shuffle(progress.shuffle_seed(training_config.seed))
         .num_workers(training_config.num_workers)
         .set_device(training_device.clone())
         .build(MnistDataset::train());
@@ -66,16 +67,13 @@ pub fn train(
         .set_device(training_device.clone().inner())
         .build(MnistDataset::test());
 
-    let training_num_items = dataloader_train.num_items();
-
-    let mut metric_meta = burn::train::metric::MetricMetadata {
-        progress: Progress::new(0, training_num_items, None),
-        iteration: Some(0),
-        lr: Some(training_config.lr.get_lr(0).into()),
-    };
-
-    // `--max-batches`: an optional cap on the whole run, spent across epochs.
-    let mut batch_budget = app_args.batch_budget();
+    // Resume position, `--max-batches` budget, cadence and metrics log.
+    let mut session = app_args.session(
+        progress,
+        &training_config,
+        classify::CADENCE,
+        dataloader_train.num_items(),
+    );
 
     println!("running small initial validation...");
     epoch_valid(
@@ -83,29 +81,28 @@ pub fn train(
         &model.valid(),
         &training_config,
         0,
-        Some(10),
+        session.cadence().valid_batches,
+        &mut session,
     );
 
     println!("Starting training...");
     // Iterate over our training for X epochs
-    for epoch in 1..training_config.num_epochs + 1 {
+    for epoch in session.epochs(training_config.num_epochs) {
         model = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
             model,
             &training_config,
             &mut optim,
-            &mut metric_meta,
+            &mut session,
             epoch,
-            &mut batch_budget,
-            Some(10),
             app_args,
             training_device.clone().inner(),
         );
 
         // save assets
         app_args.save_model(&model.0);
-        app_args.save_optim(&optim);
+        app_args.save_optim(&optim, session.progress());
 
         println!("running full validation...");
         epoch_valid(
@@ -114,9 +111,10 @@ pub fn train(
             &training_config,
             epoch,
             None,
+            &mut session,
         );
 
-        if batch_budget.is_exhausted() {
+        if session.is_exhausted() {
             println!("reached the --max-batches limit; stopping training");
             break;
         }
