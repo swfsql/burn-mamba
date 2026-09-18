@@ -115,6 +115,19 @@ pub struct Mamba3SingleSsdCache {
     /// Carries the same value as the double-ssd cache's field (the `From` impls
     /// move it across), so the two caches still inter-convert by field identity.
     pub rotation: RotationState,
+
+    /// **The Kalman gate's log-precision** `ln Λ` after the last position (see
+    /// [`Mamba3DoubleSsdCache::log_precision_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::log_precision_bh),
+    /// whose value this is).
+    ///
+    /// Shape: `[batch, nheads]`
+    pub log_precision_bh: Option<Tensor<2>>,
+
+    /// **The tropical register** `c` after the last position (see
+    /// [`Mamba3DoubleSsdCache::tropical_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::tropical_bh)).
+    ///
+    /// Shape: `[batch, nheads]`
+    pub tropical_bh: Option<Tensor<2>>,
 }
 
 impl Mamba3SingleSsdCache {
@@ -133,6 +146,9 @@ impl Mamba3SingleSsdCache {
             san(v_state_buhp);
         }
         self.rotation.sanity();
+        for slot in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
+            san(slot);
+        }
     }
 }
 
@@ -180,6 +196,14 @@ pub struct Mamba3SingleSsdCacheConfig {
     /// the tap FIFO's depth (see [`Trapezoid::tap_lag`]).
     #[config(default = 1)]
     pub micro_steps: usize,
+
+    /// The block's gain; a Kalman one keeps a `ln Λ` slot.
+    #[config(default = "crate::mamba3::positive::Gain::Projected")]
+    pub gain: crate::mamba3::positive::Gain,
+
+    /// The block's tropical register; `MaxPlus` keeps a `c` slot.
+    #[config(default = "crate::mamba3::positive::Tropical::None")]
+    pub tropical: crate::mamba3::positive::Tropical,
 }
 
 impl Mamba3SingleSsdCacheConfig {
@@ -196,6 +220,8 @@ impl Mamba3SingleSsdCacheConfig {
             num_quat_blocks: block_config.num_quat_blocks(),
             trapezoid: block_config.trapezoid,
             micro_steps: block_config.micro_steps,
+            gain: block_config.gain,
+            tropical: block_config.tropical,
         }
     }
 
@@ -233,11 +259,20 @@ impl Mamba3SingleSsdCacheConfig {
             self.num_quat_blocks,
             device,
         );
+        let slot = || {
+            Tensor::full(
+                [self.batch, self.nheads],
+                crate::mamba3::positive::LOG_ZERO,
+                device,
+            )
+        };
         Mamba3SingleSsdCache {
             ssm_bhpr,
             k_state_bumhr,
             v_state_buhp,
             rotation,
+            log_precision_bh: self.gain.is_kalman().then(slot),
+            tropical_bh: self.tropical.is_on().then(slot),
         }
     }
 }

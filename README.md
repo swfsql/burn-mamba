@@ -245,18 +245,18 @@ single configuration.
   each checked in float64 by its sibling in [`scripts/`](scripts/) (`numpy` only,
   no import of the crate, non-zero exit on failure). Three classify the
   recurrence, one classifies the block around it:
-  - **[Rotation as Optimization](info/rotation-as-optimization.md)** — the
+  - **[Rotation as Optimization](info/mamba-3/rotation-as-optimization.md)** — the
     *quadratic* term: what a step optimizes, in what sense the complex transition
     is a learning rate (or a saddle, or momentum), and what `micro_steps`
     composes versus DeltaProduct.
-  - **[Trapezoid as Integration](info/trapezoid-as-integration.md)** — the
+  - **[Trapezoid as Integration](info/mamba-3/trapezoid-as-integration.md)** — the
     *linear* term along time: `λ` as an operator-splitting parameter, the
     two-installment collapse the single-SSD pathway is built on, and the tap
     lattice `micro_steps > 1` opens.
-  - **[MIMO as Batch Size](info/mimo-as-batch.md)** — the linear term along
+  - **[MIMO as Batch Size](info/mamba-3/mimo-as-batch.md)** — the linear term along
     *rank*: the minibatch reading, what the value tying costs, and why the
     rotation must be shared across ranks.
-  - **[Architecture Deltas](info/architecture-deltas.md)** — everything outside
+  - **[Architecture Deltas](info/mamba-3/architecture-deltas.md)** — everything outside
     the recurrence: BCNorm and the `B`/`C` biases (a fresh block is a
     convolution), the deleted short conv, the output-norm placements, and the
     chunk-length schedule.

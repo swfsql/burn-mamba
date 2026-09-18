@@ -389,7 +389,7 @@ pub mod prim {
 /// `lag = 1` (where the gap has no interior).
 ///
 /// A tap at lag `L` is transported across its own gap, `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`
-/// (`info/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
+/// (`info/mamba-3/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
 /// `d = 0` factor, so this is the rest of it.
 ///
 /// The front is **zero-padded**, not clamped to what the call happens to hold:
@@ -468,7 +468,9 @@ pub fn token_start_gate(len: usize, micro_steps: usize, device: &Device) -> Tens
 pub struct TrapezoidCoeffs {
     /// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
     pub dt: Tensor<3>,
-    /// `Δₜ · Aₜ` (negative; the log-decay).
+    /// The log-decay: `Δₜ · Aₜ`, or under a
+    /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member the
+    /// decay that gate computes from it — every consumer reads this one.
     pub da: Tensor<3>,
     /// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
     pub alpha: Tensor<3>,
@@ -484,6 +486,9 @@ pub struct TrapezoidCoeffs {
     /// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
     /// no `λ` (the whole step is paid at the right endpoint).
     pub gamma: Tensor<3>,
+    /// `ℓₜ = ln Λₜ` at every position, when the decay is a Kalman gate's
+    /// ([`crate::mamba3::positive::kalman`]); its last entry is the next carry.
+    pub log_precision: Option<Tensor<3>>,
 }
 
 /// Compute the trapezoidal discretisation coefficients from the raw
@@ -508,6 +513,12 @@ pub struct TrapezoidCoeffs {
 /// `0` where the interior one is (so the far tap takes the left endpoint whole).
 /// Both are exact at the ends, so the degenerate members are their targets bit
 /// for bit.
+///
+/// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain): the
+/// decay is then computed ([`crate::mamba3::positive::kalman::gate`]) **here**,
+/// before `α` is formed from it, so no consumer — the taps' transports, the
+/// tap slots, single-SSD's key scale — can read the projected one by mistake.
+/// The masses keep the projected `Δ`.
 pub fn trapezoidal_coefficients(
     dd_dt: Tensor<3>,
     dd_a_raw: Tensor<3>,
@@ -515,6 +526,7 @@ pub fn trapezoidal_coefficients(
     mu_raw: Option<Tensor<3>>,
     dt_bias_h: Tensor<1>,
     spec: TrapezoidSpec,
+    gain: Option<crate::mamba3::positive::kalman::GainInput>,
 ) -> TrapezoidCoeffs {
     let (dt_limit, a_floor) = (spec.dt_limit, spec.a_floor);
     // Broadcast dt_bias_h [nheads] → [1, 1, nheads] so the addition aligns on
@@ -529,6 +541,13 @@ pub fn trapezoidal_coefficients(
     // dead `dd_A` projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
+    let (da, log_precision) = match gain {
+        Some(gain) => {
+            let out = crate::mamba3::positive::kalman::gate(dt.clone(), da, gain);
+            (out.da_bsh, Some(out.log_precision_bsh))
+        }
+        None => (da, None),
+    };
     let alpha = da.clone().exp();
     let gate = |crosses: bool| {
         (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
@@ -571,6 +590,7 @@ pub fn trapezoidal_coefficients(
         nu,
         nu_interior,
         gamma,
+        log_precision,
     }
 }
 

@@ -78,16 +78,22 @@ impl Mamba3 {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
             let rotation = self.zero_rotation_state(batch, &device);
+            let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, &device);
             Mamba3DoubleSsdCache {
                 ssm_bhpr,
                 k_state_bumhr,
                 v_state_buhp,
                 rotation,
+                log_precision_bh,
+                tropical_bh,
             }
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         let proj_bsd = self.project_in(input_bsm);
+        // The positive systems' segments are the outermost tail
+        // ([`crate::mamba3::positive`]); what remains is the stock layout.
+        let (proj_bsd, noise_btH, tropical_btH) = self.split_positive(proj_bsd, 2);
         let bc_size = ngroups * state_rank * mimo_rank;
 
         // [batch, tokens, *] split along channel dim; `u` = micro_steps widens
@@ -131,12 +137,15 @@ impl Mamba3 {
         let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
         let mu_raw_bsh = mu_raw_btH.map(|t| unfold_micro_bs(t, u));
         let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
+        let noise_bsh = noise_btH.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
         san(&x_bsi);
         san(&dd_dt_bsh);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
+        // Under a Kalman gain the decay is computed in here, before anything
+        // below reads it.
         let helpers::TrapezoidCoeffs {
             dt: dt_bsh,
             da: da_bsh,
@@ -144,6 +153,7 @@ impl Mamba3 {
             nu: nu_bsh,
             nu_interior: nu_interior_bsh,
             gamma: gamma_bsh,
+            log_precision: log_precision_bsh,
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
             dd_A_raw_bsh,
@@ -151,7 +161,19 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
+            self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
         );
+        // The tropical register, over the same folded axis.
+        let tropical_bsh = tropical_btH.map(|(a_btH, b_btH)| {
+            crate::mamba3::positive::tropical::register(
+                unfold_micro_bs(a_btH, u),
+                unfold_micro_bs(b_btH, u),
+                cache
+                    .tropical_bh
+                    .clone()
+                    .expect("a tropical register keeps its cache slot"),
+            )
+        });
 
         san(&dt_bsh);
         san(&da_bsh);
@@ -406,6 +428,16 @@ impl Mamba3 {
         } else {
             y_bTmhp.narrow(1, 0, tokens)
         };
+        // The positive systems' `C`/`D` ports read at the read rows, and their
+        // last position is the next call's carry.
+        let last_bh = |t_bsh: &Tensor<3>| t_bsh.clone().narrow(1, sequence - 1, 1).squeeze_dim::<2>(1);
+        cache.log_precision_bh = log_precision_bsh.as_ref().map(last_bh);
+        cache.tropical_bh = tropical_bsh.as_ref().map(last_bh);
+        let y_btmhp = self.positive_read(
+            y_btmhp,
+            log_precision_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+            tropical_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+        );
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
 
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
@@ -539,6 +571,11 @@ mod step {
         pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
+        /// `ln Λ` after each micro-step `[batch, u, nheads]`, under a Kalman
+        /// gain (whose decay `da_buh` already is).
+        pub log_precision_buh: Option<Tensor<3>>,
+        /// The tropical register's raw `(a, b)`, each `[batch, u, nheads]`.
+        pub tropical_ab_buh: Option<(Tensor<3>, Tensor<3>)>,
     }
 
     impl Mamba3 {
@@ -547,8 +584,14 @@ mod step {
         /// needs the cache's cumulative rotation).
         ///
         /// The per-micro-step streams keep a `u` axis; see [`StepProjection`].
+        /// `log_precision_bh` is the cache's `ln Λ`, which a Kalman gain's decay
+        /// is computed from (`None` under [`Gain::Projected`](crate::mamba3::positive::Gain::Projected)).
         #[allow(non_snake_case)]
-        pub(crate) fn step_project(&self, input_bd: Tensor<2>) -> StepProjection {
+        pub(crate) fn step_project(
+            &self,
+            input_bd: Tensor<2>,
+            log_precision_bh: Option<Tensor<2>>,
+        ) -> StepProjection {
             let [batch, _d_model] = input_bd.dims();
             let d_inner = self.d_inner();
             let nheads = self.nheads();
@@ -564,6 +607,7 @@ mod step {
             // ── In-projection ─────────────────────────────────────────────────
             let proj_bd = self.project_in(input_bd);
             san(&proj_bd);
+            let (proj_bd, noise_bH, tropical_bH) = self.split_positive(proj_bd, 1);
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along channel dim; the per-micro-step segments
             // are `u` times as wide and split onto a `u` axis of their own,
@@ -607,6 +651,7 @@ mod step {
                 nu: nu_buh,
                 nu_interior: nu_interior_buh,
                 gamma: gamma_buh,
+                log_precision: log_precision_buh,
             } = helpers::trapezoidal_coefficients(
                 unfold_micro_b(dd_dt_bH, u),
                 unfold_micro_b(dd_a_raw_bH, u),
@@ -614,7 +659,10 @@ mod step {
                 mu_raw_bH.map(|t| unfold_micro_b(t, u)),
                 self.dt_bias_h.val(),
                 self.trapezoid_spec(),
+                self.gain_input(noise_bH.map(|t| unfold_micro_b(t, u)), log_precision_bh),
             );
+            let tropical_ab_buh =
+                tropical_bH.map(|(a_bH, b_bH)| (unfold_micro_b(a_bH, u), unfold_micro_b(b_bH, u)));
             san(&dt_buh);
             san(&alpha_buh);
             for nu_buh in [&nu_buh, &nu_interior_buh].into_iter().flatten() {
@@ -656,6 +704,8 @@ mod step {
                 nu_buh,
                 nu_interior_buh,
                 gamma_buh,
+                log_precision_buh,
+                tropical_ab_buh,
             }
         }
 
@@ -815,16 +865,21 @@ mod step {
                 let ssm_bhpr = Tensor::zeros(ssm_shape, device);
                 let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
                 let rotation = self.zero_rotation_state(batch, device);
+                let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
                 Mamba3DoubleSsdCache {
                     ssm_bhpr,
                     k_state_bumhr,
                     v_state_buhp,
                     rotation,
+                    log_precision_bh,
+                    tropical_bh,
                 }
             });
 
             // ── In-projection → coefficients → QK-norm ────────────────────────
-            let proj = self.step_project(input_bd);
+            // A Kalman gain's decay is computed in here, from the cached `ln Λ`,
+            // over the token's `u` micro-steps — `forward`'s scan at `len = u`.
+            let proj = self.step_project(input_bd, cache.log_precision_bh.clone());
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let siso = self.use_siso_decode_kernels();
 
@@ -973,6 +1028,32 @@ mod step {
             // outₘ[b, m, h, p] = sumᵣ C[b, m, h, r] * state[b, h, p, r] + D * x_vals[b, m, h, p]
             let out_m_bmhp = Self::step_readout(state_bhpr.clone(), c_bmhr, siso);
             san(&out_m_bmhp);
+
+            // ── The positive systems' ports, at the block's one read row ──────
+            // `forward`'s `positive_read` on a one-token axis; the block's last
+            // micro-step is the read row and the next carry both.
+            let last_bh = |t_buh: Tensor<3>| t_buh.narrow(1, u - 1, 1).squeeze_dim::<2>(1);
+            let tropical_buh = proj.tropical_ab_buh.map(|(a_buh, b_buh)| {
+                crate::mamba3::positive::tropical::register(
+                    a_buh,
+                    b_buh,
+                    cache
+                        .tropical_bh
+                        .clone()
+                        .expect("a tropical register keeps its cache slot"),
+                )
+            });
+            let log_precision_bh = proj.log_precision_buh.map(last_bh);
+            let tropical_bh = tropical_buh.map(last_bh);
+            let out_m_bmhp = self
+                .positive_read(
+                    out_m_bmhp.unsqueeze_dim::<5>(1),
+                    log_precision_bh.clone().map(|t| t.unsqueeze_dim::<3>(1)),
+                    tropical_bh.clone().map(|t| t.unsqueeze_dim::<3>(1)),
+                )
+                .squeeze_dim::<4>(1);
+            cache.log_precision_bh = log_precision_bh;
+            cache.tropical_bh = tropical_bh;
 
             // ── D skip, gate (or gated norm), rank aggregation, out-projection ─
             let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, proj.z_bi);

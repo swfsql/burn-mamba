@@ -29,7 +29,7 @@
 //! So DeltaProduct's mechanism has no instance here (with isotropic curvature
 //! `u` micro-writes under a shared transition provably collapse into a rank-`u`
 //! write, which is [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank)),
-//! and this is the same construction reached by the other dial. `info/rotation-as-optimization.md`
+//! and this is the same construction reached by the other dial. `info/mamba-3/rotation-as-optimization.md`
 //! derives the above and everything in the table below.
 //!
 //! Mamba-3's transition is `αₜ Rₜ` (§*Complex-Valued SSMs*): a scalar decay
@@ -71,7 +71,7 @@
 //!   containment is exact and one-way: `MambaProduct(u = M)` reproduces a whole
 //!   `MIMO(M)` trajectory, and the converse fails by a closed-form dimension
 //!   count, `M` having tied its values, step sizes and rotation where `u` leaves
-//!   them free (`info/mimo-as-batch.md` §9). What `M` buys back is the cost:
+//!   them free (`info/mamba-3/mimo-as-batch.md` §9). What `M` buys back is the cost:
 //!   it is parallel and holds state bytes flat.
 //! - **On the abelian rotation it lifts a bound the block otherwise cannot
 //!   cross.** One step turns by at most

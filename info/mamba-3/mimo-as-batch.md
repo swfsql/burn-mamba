@@ -17,7 +17,7 @@
 > the three notes do not overlap.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/mimo_as_batch.py`](../scripts/mimo_as_batch.py) (54 checks, section
+> [`scripts/mamba-3/mimo_as_batch.py`](../scripts/mamba-3/mimo_as_batch.py) (54 checks, section
 > numbers match). The script depends only on `numpy` and on the equations
 > reproduced here — not on the crate — so the results stand independently of the
 > implementation.
@@ -461,7 +461,7 @@ pays `u×` the recurrence; `M` ties them and pays nothing in bytes. Documented w
 ## 11. Reproduction
 
 ```bash
-python3 scripts/mimo_as_batch.py
+python3 scripts/mamba-3/mimo_as_batch.py
 ```
 
 `numpy` only; float64 throughout; 54 checks; exits non-zero on failure. Section

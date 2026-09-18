@@ -936,7 +936,7 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// The `mimo_rank` axis is **broadcast**, never indexed — no rotation count
 /// carries it, in any branch. That is forced, not convenient: the `M` ranks
 /// share one state, so they share its transition, and per-rank angles have no
-/// state-space preimage at all (`info/mimo-as-batch.md` §7).
+/// state-space preimage at all (`info/mamba-3/mimo-as-batch.md` §7).
 ///
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection

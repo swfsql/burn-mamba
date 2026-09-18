@@ -175,10 +175,10 @@ impl From<Mamba3SingleSsdCache> for Mamba3Cache {
 // `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` makes it coincide *exactly* with the
 // double-ssd state `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ` — the
 // deferred β contribution is reconstructed on the following call from the saved
-// `k_state`/`v_state`, identically in both forms. The remaining three fields
-// (the tap FIFO's K/V slots — the last `lag` positions — and the cumulative
-// rotation) carry the same meaning in both caches. Hence the conversion is a
-// field-by-field move.
+// `k_state`/`v_state`, identically in both forms. The remaining fields (the tap
+// FIFO's K/V slots — the last `lag` positions — the cumulative rotation, and the
+// positive systems' `ln Λ` and `c`, which read only the inputs) carry the same
+// meaning in both caches. Hence the conversion is a field-by-field move.
 //
 // The accumulators differ only *mid-sequence*; since caches are only ever
 // produced and consumed at boundaries, the move is lossless there. The distinct
@@ -192,6 +192,8 @@ impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
             k_state_bumhr: cache.k_state_bumhr,
             v_state_buhp: cache.v_state_buhp,
             rotation: cache.rotation,
+            log_precision_bh: cache.log_precision_bh,
+            tropical_bh: cache.tropical_bh,
         }
     }
 }
@@ -203,6 +205,8 @@ impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
             k_state_bumhr: cache.k_state_bumhr,
             v_state_buhp: cache.v_state_buhp,
             rotation: cache.rotation,
+            log_precision_bh: cache.log_precision_bh,
+            tropical_bh: cache.tropical_bh,
         }
     }
 }

@@ -46,6 +46,16 @@
 //! [`HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
 //! and the tapless [`None`](crate::mamba3::trapezoid::Trapezoid::None). The
 //! remaining two carry both lags at once, mixed by a second per-head mass.
+//!
+//! ## Positive systems beside the plant
+//!
+//! [`positive`](crate::mamba3::positive) adds a per-head scalar system that
+//! reads only the inputs and sets the plant's coefficients: a Kalman gate that
+//! *computes* the decay from an accumulated precision
+//! ([`Gain`](crate::mamba3::positive::Gain)), and a soft max-plus register that
+//! feeds the readout ([`Tropical`](crate::mamba3::positive::Tropical)). Both
+//! are nonnegative 2×2 matrix recurrences, scanned in log coordinates, with a
+//! cache slot each and no kernel change.
 
 pub mod double_ssd;
 pub mod single_ssd;
@@ -53,6 +63,7 @@ pub mod single_ssd;
 pub mod cache;
 pub(crate) mod helpers;
 pub mod mamba3;
+pub mod positive;
 pub mod product;
 pub mod quat_scan;
 pub mod rotation;
@@ -103,6 +114,7 @@ pub mod prelude {
 
     pub use cache::{Mamba3Cache, Mamba3Caches};
     pub use mamba3::{Mamba3, Mamba3Config, Mamba3Untied};
+    pub use positive::{Gain, Tropical};
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
     pub use ssd_path::Mamba3SsdPath;

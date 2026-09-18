@@ -114,5 +114,19 @@ path = "examples/reset/quintic/main.rs"
 name = "spinor-product"
 path = "examples/reset/spinor-product/main.rs"
 
+# The `tally-*` ladder: what a second, positive system beside the plant buys
+# (`examples/tally/`, sharing one README).
+[[example]]
+name = "tally-depth"
+path = "examples/tally/depth/main.rs"
+
+[[example]]
+name = "tally-record"
+path = "examples/tally/record/main.rs"
+
+[[example]]
+name = "tally-drift"
+path = "examples/tally/drift/main.rs"
+
 # [patch."https://github.com/swfsql/burn-stack.git"]
 # burn-stack = { path = "../burn-stack" }

@@ -15,7 +15,7 @@
 > dials.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/trapezoid_as_integration.py`](../scripts/trapezoid_as_integration.py)
+> [`scripts/mamba-3/trapezoid_as_integration.py`](../scripts/mamba-3/trapezoid_as_integration.py)
 > (74 checks, section numbers match). The script depends only on `numpy` and on the
 > equations reproduced here — not on the crate — so the results stand independently
 > of the implementation.
@@ -457,7 +457,7 @@ choice §9's lattice exists to make.
 ## 11. Reproduction
 
 ```bash
-python3 scripts/trapezoid_as_integration.py
+python3 scripts/mamba-3/trapezoid_as_integration.py
 ```
 
 `numpy` only; float64 throughout; 74 checks; exits non-zero on failure. Section

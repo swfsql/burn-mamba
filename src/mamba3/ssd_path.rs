@@ -84,7 +84,7 @@ impl Mamba3SsdPath {
     /// and their rows a contiguous run); it is on the 32 grid exactly when
     /// `micro_steps` divides it.
     ///
-    /// `info/architecture-deltas.md` §8.
+    /// `info/mamba-3/architecture-deltas.md` §8.
     pub fn optimal_chunk_len(
         state_rank: usize,
         per_head_dim: usize,

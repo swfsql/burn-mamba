@@ -5,7 +5,7 @@
 //! `mimo_rank` fuses onto both of a chunk's axes and so divides it out, while
 //! `micro_steps` widens only the write axis and so subdivides a chunk of
 //! unchanged folded width. See [`Mamba3SsdPath::optimal_chunk_len`] and
-//! `info/architecture-deltas.md` §8.
+//! `info/mamba-3/architecture-deltas.md` §8.
 
 use super::*;
 

@@ -111,6 +111,8 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         k_state_bumhr: tap.then(|| mk5([batch, slots, mimo_rank, nheads, state_rank])),
         v_state_buhp: tap.then(|| mk4([batch, slots, nheads, per_head_dim])),
         rotation,
+        log_precision_bh: None,
+        tropical_bh: None,
     }
 }
 

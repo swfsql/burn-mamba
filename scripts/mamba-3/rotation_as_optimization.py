@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Numerical verification for `info/rotation-as-optimization.md`.
+"""Numerical verification for `info/mamba-3/rotation-as-optimization.md`.
 
 Every claim the document makes that can be checked numerically is checked here, in
 float64, with section numbers matching the document's. Pure `numpy`; no other

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Numerical verification for `info/mimo-as-batch.md`.
+"""Numerical verification for `info/mamba-3/mimo-as-batch.md`.
 
 Every claim the document makes that can be checked numerically is checked here, in
 float64, with section numbers matching the document's. Pure `numpy`; no other
@@ -12,7 +12,7 @@ Exits non-zero if any check fails.
 
 Conventions (document §2). The state is kept in the fast-weight orientation
 ``S``, shape ``[P, N]`` (rows indexed by value channel, columns by state channel),
-as `info/rotation-as-optimization.md` does; `info/trapezoid-as-integration.md`
+as `info/mamba-3/rotation-as-optimization.md` does; `info/mamba-3/trapezoid-as-integration.md`
 uses the transposed ``h``. Nothing below depends on which. One head throughout,
 and the rotation is carried in the gauge the implementation runs — transition the
 plain scalar ``alpha``, cumulative rotation absorbed into ``B``/``C`` — so every

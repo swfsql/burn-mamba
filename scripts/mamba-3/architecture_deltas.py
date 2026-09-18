@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Numerical verification for `info/architecture-deltas.md`.
+"""Numerical verification for `info/mamba-3/architecture-deltas.md`.
 
 Every claim the document makes that can be checked numerically is checked here, in
 float64, with section numbers matching the document's. Pure `numpy`; no other

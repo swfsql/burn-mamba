@@ -59,7 +59,7 @@
 //! The **exponential** discretisation is load-bearing here, not merely more
 //! accurate than forward Euler: `|exp(iΔϑ)| = 1` exactly, so the transition is
 //! orthogonal and a tracked rotation neither decays nor grows, where Euler's
-//! `|1 + iΔϑ| > 1` spirals outward (`info/rotation-as-optimization.md` §9.5).
+//! `|1 + iΔϑ| > 1` spirals outward (`info/mamba-3/rotation-as-optimization.md` §9.5).
 //!
 //! `αₜ` is a scalar (so it commutes with `ρₜ`) and each `ρₜ` is orthogonal, so
 //! the *cumulative* rotation telescopes out of the recurrence and can be absorbed
@@ -131,7 +131,7 @@
 //! ## 5. MambaProduct (`micro_steps = u > 1`)
 //!
 //! A fourth, independent dial (DeltaProduct's dial, not its mechanism — see
-//! [`crate::mamba3::product`] and `info/rotation-as-optimization.md`): `u`
+//! [`crate::mamba3::product`] and `info/mamba-3/rotation-as-optimization.md`): `u`
 //! recurrence micro-steps per token, each a full step of the above with its own
 //! projected `x`, `B`, `Δ`, `A`, `λ` and rotation. One *token*'s transition is
 //! then the **product**
@@ -189,6 +189,7 @@
 //! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
 //! `XY` may also represent `x+y`, `x*y`, etc.
 
+use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::trapezoid::Trapezoid;
@@ -218,11 +219,14 @@ pub struct Mamba3 {
     /// Input projection; width [`Mamba3Config::d_in_proj`].
     ///
     /// Output splits, with `u` = [`Self::micro_steps`]:
-    /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | rotation·u]`
+    /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u
+    /// | rotation·u | noise·u | tropical_a·u | tropical_b·u]`
     ///
-    /// The last two segments are optional and trail for that reason:
-    /// [`Trapezoid::None`] projects no `lambda_raw`,
-    /// [`RotationKind::Real1D`] no `rotation`.
+    /// The segments from `lambda_raw` on are optional and trail for that
+    /// reason: [`Trapezoid::None`] projects no `lambda_raw`, a one-tap pattern
+    /// no `mu_raw`, [`RotationKind::Real1D`] no `rotation`, every [`Gain`] but
+    /// [`Gain::KalmanProjectedNoise`] no `noise`, and [`Tropical::None`] no
+    /// `tropical_*`.
     ///
     /// Every **per-micro-step** stream is projected `u` times over and folded
     /// into the sequence by [`crate::mamba3::product`]; the gate `z` and the
@@ -235,7 +239,8 @@ pub struct Mamba3 {
     pub in_proj: Linear,
 
     /// `in_proj`'s trailing per-micro-step segments
-    /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u]`, split off when
+    /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u | noise·u |
+    /// tropical_a·u | tropical_b·u]`, split off when
     /// [`Mamba3Untied::InProjTail`] unties them: one copy per application, along
     /// the output axis. `None` ⇒ `in_proj` carries them.
     pub in_proj_tail: Option<Linear>,
@@ -299,6 +304,22 @@ pub struct Mamba3 {
     /// Shape: `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
+    /// `ln κₕ`, the Kalman gate's per-head noise scale (`qₜ = κₕ·Δₜ`; see
+    /// [`crate::mamba3::positive`]). `−∞` is the stock block.
+    /// Shape: `[nheads]`. `None` under [`Gain::Projected`].
+    pub kalman_log_kappa_h: Option<Param<Tensor<1>>>,
+
+    /// `ωₕ`, the read exponent: the SSD readout is scaled by `(Λₜ + ε)^(−ωₕ)`,
+    /// so `ω = 1` reads the estimate `η/Λ` and `ω = 0` (the init) the stock
+    /// information `η`. Shape: `[nheads]`. `None` unless the gain is a Kalman
+    /// one **and** there is no output norm, which would remove the scale.
+    pub kalman_read_h: Option<Param<Tensor<1>>>,
+
+    /// `eₕ`, the tropical register's readout: `yₜ,ₕ += cₜ,ₕ·eₕ`.
+    /// Shape: `[nheads, per_head_dim]`; initialised to zeros. `None` under
+    /// [`Tropical::None`].
+    pub tropical_readout_hp: Option<Param<Tensor<2>>>,
+
     /// State rank — the latent dimension of the SSM hidden state.
     ///
     /// Paper: `N`. Python: `d_state`.
@@ -340,6 +361,16 @@ pub struct Mamba3 {
     /// A non-parameter constant, like [`Self::rotation`].
     #[module(skip)]
     pub trapezoid: Trapezoid,
+
+    /// How the decay is formed ([`Gain`]). A non-parameter constant, like
+    /// [`Self::rotation`].
+    #[module(skip)]
+    pub gain: Gain,
+
+    /// Whether each head carries a tropical register ([`Tropical`]). A
+    /// non-parameter constant, like [`Self::rotation`].
+    #[module(skip)]
+    pub tropical: Tropical,
 
     /// How far one step may rotate, in half-turns per unit `Δ`
     /// (see [`Mamba3Config::rotation_range`]).
@@ -442,6 +473,130 @@ impl Mamba3 {
         }
     }
 
+    /// Width of the in-projection's Kalman noise segment `r` — one channel per
+    /// (head, micro-step) under [`Gain::KalmanProjectedNoise`], **`0`** for
+    /// every other gain. Peeled off the tail by `helpers::split_trailing`,
+    /// immediately inside the tropical segments.
+    pub fn noise_channels_total(&self) -> usize {
+        if self.gain.projects_noise() {
+            self.micro_steps * self.nheads()
+        } else {
+            0
+        }
+    }
+
+    /// Width of the in-projection's tropical segments `(a, b)` — two channels
+    /// per (head, micro-step) under [`Tropical::MaxPlus`], **`0`** otherwise.
+    /// The outermost trailing segment, so peeled off first.
+    pub fn tropical_channels_total(&self) -> usize {
+        if self.tropical.is_on() {
+            2 * self.micro_steps * self.nheads()
+        } else {
+            0
+        }
+    }
+
+    /// Peel the positive systems' trailing segments off an in-projection whose
+    /// channel axis is `dim`: `(rest, noise, tropical (a, b))`, each `None`
+    /// when the block projects it not. The two tropical halves come back
+    /// still `u`-wide, `a` first.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn split_positive<const D: usize>(
+        &self,
+        proj: Tensor<D>,
+        dim: usize,
+    ) -> (Tensor<D>, Option<Tensor<D>>, Option<(Tensor<D>, Tensor<D>)>) {
+        let (proj, tropical) = crate::mamba3::helpers::split_trailing(
+            proj,
+            self.tropical_channels_total(),
+            dim,
+        );
+        let (proj, noise) =
+            crate::mamba3::helpers::split_trailing(proj, self.noise_channels_total(), dim);
+        let tropical = tropical.map(|ab| {
+            let half = ab.dims()[dim] / 2;
+            (ab.clone().narrow(dim, 0, half), ab.narrow(dim, half, half))
+        });
+        (proj, noise, tropical)
+    }
+
+    /// What the Kalman gate reads besides the discretisation — `None` under
+    /// [`Gain::Projected`]. `carry_bh` is the cache's `ln Λ`.
+    ///
+    /// # Shapes
+    /// - `noise_bsh` : `[batch, len, nheads]`, present iff
+    ///   [`Gain::KalmanProjectedNoise`]
+    /// - `carry_bh`  : `[batch, nheads]`
+    pub(crate) fn gain_input(
+        &self,
+        noise_bsh: Option<Tensor<3>>,
+        carry_bh: Option<Tensor<2>>,
+    ) -> Option<crate::mamba3::positive::kalman::GainInput> {
+        let log_kappa_h = self.kalman_log_kappa_h.as_ref()?.val();
+        Some(crate::mamba3::positive::kalman::GainInput {
+            log_kappa_h,
+            noise_bsh,
+            carry_bh: carry_bh.expect("a Kalman gain keeps its ln Λ cache slot"),
+        })
+    }
+
+    /// The fresh-sequence positive-system slots: `(ln Λ, c)`, each
+    /// `[batch, nheads]` at [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO)
+    /// (no evidence; the max of nothing), or `None` when the block has no such
+    /// system.
+    pub fn zero_positive_state(
+        &self,
+        batch: usize,
+        device: &Device,
+    ) -> (Option<Tensor<2>>, Option<Tensor<2>>) {
+        let slot = || {
+            Tensor::full(
+                [batch, self.nheads()],
+                crate::mamba3::positive::LOG_ZERO,
+                device,
+            )
+        };
+        (self.gain.is_kalman().then(slot), self.tropical.is_on().then(slot))
+    }
+
+    /// The positive systems' two readout ports, on the SSD's readout — before
+    /// the `D` skip, the gate and the rank merge:
+    ///
+    /// - `C`: `y ← y·(Λ + ε)^(−ω)` when the block has [`Self::kalman_read_h`];
+    /// - `D`: `y ← y + c·e` when it has [`Self::tropical_readout_hp`].
+    ///
+    /// Both are broadcast over the mimo ranks, which share the state.
+    ///
+    /// # Shapes
+    /// - `y_btmhp`            : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
+    /// - `log_precision_bth`  : `[batch, tokens, nheads]`, `ln Λ` at the read rows
+    /// - `tropical_bth`       : `[batch, tokens, nheads]`, `c` at the read rows
+    pub(crate) fn positive_read(
+        &self,
+        y_btmhp: Tensor<5>,
+        log_precision_bth: Option<Tensor<3>>,
+        tropical_bth: Option<Tensor<3>>,
+    ) -> Tensor<5> {
+        let y_btmhp = match (&self.kalman_read_h, log_precision_bth) {
+            (Some(omega_h), Some(log_precision_bth)) => {
+                const LN_EPS: f32 = -13.815511; // ln 1e-6
+                let ln_lambda_bth = crate::mamba3::positive::scan::lse(
+                    log_precision_bth.clone(),
+                    log_precision_bth.full_like(LN_EPS),
+                );
+                let scale_bth = (-(ln_lambda_bth * omega_h.val().unsqueeze::<3>())).exp();
+                y_btmhp * scale_bth.unsqueeze_dims::<5>(&[2, 4])
+            }
+            _ => y_btmhp,
+        };
+        match (&self.tropical_readout_hp, tropical_bth) {
+            (Some(e_hp), Some(c_bth)) => {
+                y_btmhp + c_bth.unsqueeze_dims::<5>(&[2, 4]) * e_hp.val().unsqueeze::<5>()
+            }
+            _ => y_btmhp,
+        }
+    }
+
     /// Everything the discretisation needs, in one place — the tap pattern, the
     /// micro-steps its gates are periodic in, and the two clamps. Every site
     /// that forms the trapezoid's masses ([`forward`](Self::forward),
@@ -517,6 +672,13 @@ impl Mamba3 {
                     Mamba3Untied::MimoO => self.mimo_o_hmp.iter().map(axis0_hmx).collect(),
                     Mamba3Untied::OutNorm => self.out_norm.iter().map(|n| axis0(&n.gamma)).collect(),
                     Mamba3Untied::InitState => self.init_state_hpr.iter().map(axis0_hmx).collect(),
+                    Mamba3Untied::KalmanKappa => self.kalman_log_kappa_h.iter().map(axis0).collect(),
+                    Mamba3Untied::KalmanRead => self.kalman_read_h.iter().map(axis0).collect(),
+                    Mamba3Untied::TropicalReadout => self
+                        .tropical_readout_hp
+                        .iter()
+                        .map(|p| UntiedParam::new(p, 0))
+                        .collect(),
                 }
             })
             .collect()
@@ -533,7 +695,7 @@ impl Mamba3 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba3Untied {
     /// `in_proj`'s trailing per-micro-step scalar and rotation segments
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u]`, split off into
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`, split off into
     /// [`Mamba3::in_proj_tail`] — a second, small GEMM.
     InProjTail,
     /// The Δ bias [`Mamba3::dt_bias_h`].
@@ -559,6 +721,15 @@ pub enum Mamba3Untied {
     /// The learnable initial state [`Mamba3::init_state_hpr`]
     /// (`has_learnable_init_state`).
     InitState,
+    /// The Kalman gate's `ln κ` [`Mamba3::kalman_log_kappa_h`] (a Kalman
+    /// [`Gain`]).
+    KalmanKappa,
+    /// The Kalman read exponent [`Mamba3::kalman_read_h`] (a Kalman [`Gain`]
+    /// without `has_outproj_norm`).
+    KalmanRead,
+    /// The tropical register's readout [`Mamba3::tropical_readout_hp`]
+    /// ([`Tropical::MaxPlus`]).
+    TropicalReadout,
 }
 
 /// Hyperparameters for the Mamba-3 SSM block.
@@ -635,12 +806,39 @@ pub struct Mamba3Config {
     /// at `u = 1` every pattern either coincides with the default or switches
     /// the trapezoid off. It selects an *algorithm*, a *cache layout* and how
     /// many per-head masses the in-projection carries — not a coefficient's
-    /// value: see [`Trapezoid`] and `info/trapezoid-as-integration.md` §9.
+    /// value: see [`Trapezoid`] and `info/mamba-3/trapezoid-as-integration.md` §9.
     ///
     /// Defaults to [`Trapezoid::HorizontalCarryOver`], which is what the crate
     /// has always done.
     #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
     pub trapezoid: Trapezoid,
+
+    /// How each head's decay is formed ([`Gain`]): projected from the token
+    /// (stock), or **computed** by a per-head Kalman filter whose precision `Λ`
+    /// accumulates the evidence the head has written — a decay that reads the
+    /// head's history through a scalar that reads only the inputs, so the
+    /// chunkwise pass survives. See [`crate::mamba3::positive`].
+    ///
+    /// Structural: a Kalman member allocates `κ` per head (and `ω` without the
+    /// output norm), one cache slot, and under [`Gain::KalmanProjectedNoise`]
+    /// one in-projection channel per (head, micro-step). Defaults to
+    /// [`Gain::Projected`], the stock block.
+    #[config(default = "crate::mamba3::positive::Gain::Projected")]
+    pub gain: Gain,
+
+    /// The initial `κ` of a Kalman [`Gain`] (`qₜ = κ·Δₜ`). Small, so the
+    /// block starts next to stock (it is stock at `κ = 0`) with a live
+    /// gradient. Ignored under [`Gain::Projected`].
+    #[config(default = 1e-2)]
+    pub kalman_kappa_init: f64,
+
+    /// Whether each head carries a tropical register feeding its readout
+    /// ([`Tropical`]): `cₜ = lse(cₜ₋₁ + aₜ, bₜ)` with `(a, b)` projected — a
+    /// soft `max(cₜ₋₁ + aₜ, bₜ)`, i.e. counters clamped at a floor, running
+    /// maxima and resets, none of which a linear recurrence computes. See
+    /// [`crate::mamba3::positive`]. Defaults to [`Tropical::None`].
+    #[config(default = "crate::mamba3::positive::Tropical::None")]
+    pub tropical: Tropical,
 
     /// Minimum absolute value of A after clamping.
     #[config(default = "1e-4")]
@@ -907,13 +1105,16 @@ impl Mamba3Config {
     }
 
     /// Width of the in-projection's trailing per-micro-step segments
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u]` — `(2 … 4)·u·nheads +
-    /// u·num_rotation_channels` — which [`Mamba3Untied::InProjTail`] splits off.
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]` —
+    /// `(2 … 7)·u·nheads + u·num_rotation_channels` — which
+    /// [`Mamba3Untied::InProjTail`] splits off.
     pub fn d_in_proj_tail(&self) -> usize {
         let u = self.micro_steps;
         let scalars = 2
             + usize::from(self.trapezoid.has_beta_tap())
-            + usize::from(self.trapezoid.has_interior_tap(u));
+            + usize::from(self.trapezoid.has_interior_tap(u))
+            + usize::from(self.gain.projects_noise())
+            + 2 * usize::from(self.tropical.is_on());
         scalars * u * self.nheads() + u * self.num_rotation_channels()
     }
 
@@ -970,6 +1171,24 @@ impl Mamba3Config {
             .chain(
                 (rot > 0)
                     .then(|| per_micro(Seg::muon("rotation", rot)))
+                    .into_iter()
+                    .flatten(),
+            )
+            // The positive systems' channels are per-head scalars, like `Δ`.
+            .chain(
+                self.gain
+                    .projects_noise()
+                    .then(|| per_micro(Seg::adamw("kalman_noise", nheads)))
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                self.tropical
+                    .is_on()
+                    .then(|| {
+                        per_micro(Seg::adamw("tropical_a", nheads))
+                            .chain(per_micro(Seg::adamw("tropical_b", nheads)))
+                    })
                     .into_iter()
                     .flatten(),
             )
@@ -1074,6 +1293,23 @@ impl Mamba3Config {
             self.has_learnable_init_state || !unties(Mamba3Untied::InitState),
             "Mamba3Untied::InitState unties the initial state, and has_learnable_init_state is off"
         );
+        let has_kalman_read = self.gain.is_kalman() && !self.has_outproj_norm;
+        assert!(
+            self.gain.is_kalman() || !unties(Mamba3Untied::KalmanKappa),
+            "Mamba3Untied::KalmanKappa unties the Kalman gate's κ, and the gain is Gain::Projected"
+        );
+        assert!(
+            has_kalman_read || !unties(Mamba3Untied::KalmanRead),
+            "Mamba3Untied::KalmanRead unties the Kalman read exponent, which exists only for a Kalman gain without has_outproj_norm"
+        );
+        assert!(
+            self.tropical.is_on() || !unties(Mamba3Untied::TropicalReadout),
+            "Mamba3Untied::TropicalReadout unties the tropical readout, and tropical is Tropical::None"
+        );
+        assert!(
+            !self.gain.is_kalman() || self.kalman_kappa_init > 0.0,
+            "kalman_kappa_init must be positive (κ = 0 is Gain::Projected)"
+        );
         // How many copies `part` holds: one per application if untied.
         let copies = |part| if unties(part) { n_applications } else { 1 };
 
@@ -1174,6 +1410,19 @@ impl Mamba3Config {
             untied::tile(init, 0, copies(Mamba3Untied::InitState))
         });
 
+        let kalman_log_kappa_h = self.gain.is_kalman().then(|| {
+            let init = Param::from_tensor(Tensor::full([nheads], self.kalman_kappa_init.ln(), device));
+            untied::tile(init, 0, copies(Mamba3Untied::KalmanKappa))
+        });
+        let kalman_read_h = has_kalman_read.then(|| {
+            let init = Initializer::Zeros.init::<1, _>([nheads], device);
+            untied::tile(init, 0, copies(Mamba3Untied::KalmanRead))
+        });
+        let tropical_readout_hp = self.tropical.is_on().then(|| {
+            let init = Initializer::Zeros.init::<2, _>([nheads, self.per_head_dim], device);
+            untied::tile(init, 0, copies(Mamba3Untied::TropicalReadout))
+        });
+
         Mamba3 {
             in_proj,
             in_proj_tail,
@@ -1191,6 +1440,9 @@ impl Mamba3Config {
             out_norm,
             out_proj,
             init_state_hpr,
+            kalman_log_kappa_h,
+            kalman_read_h,
+            tropical_readout_hp,
             state_rank,
             ngroups,
             rope_dim: self.rope_dim(),
@@ -1199,6 +1451,8 @@ impl Mamba3Config {
             micro_steps: self.micro_steps,
             rotation: self.rotation,
             trapezoid: self.trapezoid,
+            gain: self.gain,
+            tropical: self.tropical,
             rotation_range: self.rotation_range,
             num_rotation_channels: self.num_rotation_channels(),
             num_quat_blocks: self.num_quat_blocks(),
@@ -1270,11 +1524,14 @@ impl Mamba3 {
         let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
         let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
         let rotation = self.zero_rotation_state(batch, device);
+        let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
         crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
             ssm_bhpr,
             k_state_bumhr,
             v_state_buhp,
             rotation,
+            log_precision_bh,
+            tropical_bh,
         }
         .into()
     }

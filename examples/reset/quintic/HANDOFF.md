@@ -120,7 +120,7 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
   reflections; quintic emulates the reflection's effect with rotations). **Error** at
   :1281: the full dodecahedral group is `I_h ≅ A₅×C₂`, not S₅ (the inversion fixes all
   five cubes; S₅ has trivial centre).
-- In `info/rotation-as-optimization.md` terms: a reflection is **real step × rank-one
+- In `info/mamba-3/rotation-as-optimization.md` terms: a reflection is **real step × rank-one
   curvature** (`α·H = (1−α)I + 2α·kkᵀ`); isotropic curvature has no non-central
   orientation reversal under any step algebra (§8's table). Hence "not a one-line change".
 

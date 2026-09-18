@@ -98,12 +98,16 @@ fn build_cross_caches(
         k_state_bumhr: Some(Tensor::from_inner(k.clone())),
         v_state_buhp: Some(Tensor::from_inner(v.clone())),
         rotation: rotation(),
+        log_precision_bh: None,
+        tropical_bh: None,
     };
     let cm = Mamba3SingleSsdCache {
         ssm_bhpr: Tensor::from_inner(ssm),
         k_state_bumhr: Some(Tensor::from_inner(k)),
         v_state_buhp: Some(Tensor::from_inner(v)),
         rotation: rotation(),
+        log_precision_bh: None,
+        tropical_bh: None,
     };
     (c3, cm)
 }
@@ -157,6 +161,8 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         k_state_bumhr: tap.then(|| mk5([batch, slots, mimo_rank, nheads, state_rank])),
         v_state_buhp: tap.then(|| mk4([batch, slots, nheads, per_head_dim])),
         rotation,
+        log_precision_bh: None,
+        tropical_bh: None,
     }
 }
 
@@ -929,6 +935,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             k_state_bumhr: Some(Tensor::from_inner(k_a)),
             v_state_buhp: Some(Tensor::from_inner(v_a)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
+            log_precision_bh: None,
+            tropical_bh: None,
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -955,6 +963,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             k_state_bumhr: Some(Tensor::from_inner(k_b)),
             v_state_buhp: Some(Tensor::from_inner(v_b)),
             rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
+            log_precision_bh: None,
+            tropical_bh: None,
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);

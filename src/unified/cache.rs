@@ -181,6 +181,8 @@ mod impl_mamba3 {
                 num_quat_blocks: mamba_block.num_quat_blocks,
                 trapezoid: mamba_block.trapezoid,
                 micro_steps: mamba_block.micro_steps,
+                gain: mamba_block.gain,
+                tropical: mamba_block.tropical,
             },
         )
         .init(device)
@@ -213,12 +215,16 @@ mod impl_mamba3 {
                     k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
                     v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
                     rotation: rot(c.rotation),
+                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
+                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: c.ssm_bhpr.inner(),
                     k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
                     v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
                     rotation: rot(c.rotation),
+                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
+                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
                 }),
             }
         }
@@ -240,12 +246,16 @@ mod impl_mamba3 {
                     k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
                     v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
                     rotation: rot(c.rotation),
+                    log_precision_bh: c.log_precision_bh.map(Tensor::from_inner),
+                    tropical_bh: c.tropical_bh.map(Tensor::from_inner),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
                     k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
                     v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
                     rotation: rot(c.rotation),
+                    log_precision_bh: c.log_precision_bh.map(Tensor::from_inner),
+                    tropical_bh: c.tropical_bh.map(Tensor::from_inner),
                 }),
             }
         }

@@ -106,16 +106,22 @@ impl Mamba3 {
             // Reached only with a β tap (`Trapezoid::None` delegated above).
             let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
             let rotation = self.zero_rotation_state(batch, &device);
+            let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, &device);
             Mamba3SingleSsdCache {
                 ssm_bhpr,
                 k_state_bumhr,
                 v_state_buhp,
                 rotation,
+                log_precision_bh,
+                tropical_bh,
             }
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         let proj_bsd = self.project_in(input_bsm);
+        // The positive systems' segments are the outermost tail
+        // ([`crate::mamba3::positive`]); what remains is the stock layout.
+        let (proj_bsd, noise_btH, tropical_btH) = self.split_positive(proj_bsd, 2);
         let bc_size = ngroups * state_rank * mimo_rank;
 
         // `u` = micro_steps widens every per-micro-step segment, and `unfold`
@@ -162,12 +168,15 @@ impl Mamba3 {
         let lambda_raw_bsh = unfold_micro_bs(lambda_raw_btH, u);
         let mu_raw_bsh = mu_raw_btH.map(|t| unfold_micro_bs(t, u));
         let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
+        let noise_bsh = noise_btH.map(|t| unfold_micro_bs(t, u));
 
         san(&z_bsi);
         san(&x_bsi);
         san(&dd_dt_bsh);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
+        // Under a Kalman gain the decay is computed in here, before the key
+        // scale, the band and the tap slots below read it.
         let helpers::TrapezoidCoeffs {
             dt: dt_bsh,
             da: da_bsh,
@@ -175,6 +184,7 @@ impl Mamba3 {
             nu: nu_bsh,
             nu_interior: nu_interior_bsh,
             gamma: gamma_bsh,
+            log_precision: log_precision_bsh,
         } = helpers::trapezoidal_coefficients(
             dd_dt_bsh,
             dd_A_raw_bsh,
@@ -182,7 +192,19 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
+            self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
         );
+        // The tropical register, over the same folded axis.
+        let tropical_bsh = tropical_btH.map(|(a_btH, b_btH)| {
+            crate::mamba3::positive::tropical::register(
+                unfold_micro_bs(a_btH, u),
+                unfold_micro_bs(b_btH, u),
+                cache
+                    .tropical_bh
+                    .clone()
+                    .expect("a tropical register keeps its cache slot"),
+            )
+        });
         let nu_bsh = nu_bsh.expect("a β tap has a mass");
         san(&dt_bsh);
         san(&da_bsh);
@@ -197,7 +219,7 @@ impl Mamba3 {
         //
         // `t+lag` is a later *folded* position: lag 1 is
         // [`Trapezoid::HorizontalCarryOver`], lag `u` is [`Trapezoid::Vertical`].
-        // This is the `Δ̃` collapse (`info/trapezoid-as-integration.md` §5), and
+        // This is the `Δ̃` collapse (`info/mamba-3/trapezoid-as-integration.md` §5), and
         // §9's collapse theorem is why it survives the wider lag — and a second
         // tap — unchanged: still one scalar per sample, hence one pass. Only the
         // same-step correction widens from the diagonal to a `lag`-wide band
@@ -430,6 +452,16 @@ impl Mamba3 {
             Some(correction_btmhp) => y_bsmhp - correction_btmhp,
             None => y_bsmhp,
         };
+        // The positive systems' `C`/`D` ports read at the read rows, and their
+        // last position is the next call's carry.
+        let last_bh = |t_bsh: &Tensor<3>| t_bsh.clone().narrow(1, sequence - 1, 1).squeeze_dim::<2>(1);
+        cache.log_precision_bh = log_precision_bsh.as_ref().map(last_bh);
+        cache.tropical_bh = tropical_bsh.as_ref().map(last_bh);
+        let y_bsmhp = self.positive_read(
+            y_bsmhp,
+            log_precision_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+            tropical_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+        );
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
         let sequence = tokens;
 

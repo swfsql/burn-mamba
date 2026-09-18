@@ -75,7 +75,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ## Mamba-3 (`src/mamba3/`)
 
 - **`mamba3.rs`** — `Mamba3` + `Mamba3Config` (`state_rank` **even** unless `Real1D`;
-  `mimo_rank` 1=SISO, the rank dial (`info/mimo-as-batch.md`; `mimo_{x,z,o}_hmp` init
+  `mimo_rank` 1=SISO, the rank dial (`info/mamba-3/mimo-as-batch.md`; `mimo_{x,z,o}_hmp` init
   `1/M`, `1`, `1/M`, so a MIMO block *is* its SISO block at init — key `mean_m B[m]`,
   query `mean_m C[m]`, `D/M`, and a rank-**one** write);
   `micro_steps` (`u`, default 1 = stock) — MambaProduct, see
@@ -83,7 +83,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   `rope_fraction` `0.5|1` (default 1, full); `rotation: RotationKind`;
   `rotation_range` (default 2, the per-step bound in half-turns per unit Δ, applied to
   **each** quaternion factor — both defaults ship the full rotation, and the reference's
-  narrower `1`/`0.5` are asked for explicitly); `a_floor`). `rotation_spec()` bundles the
+  narrower `1`/`0.5` are asked for explicitly); `a_floor`; `gain: Gain` +
+  `kalman_kappa_init` and `tropical: Tropical`, see `mamba3/positive/`). `rotation_spec()` bundles the
   three rotation fields; `num_rotation_blocks()` = `num_quat_blocks · quat_factors` (the
   projection/scan block axis, doubled for `Rotor4D`) drives `num_rotation_channels()`;
   `zero_rotation_state()` is the one fresh-cache accumulator, shared by every pathway;
@@ -101,7 +102,11 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   (`0` under `Trapezoid::None`)), mirrored by `muon_projections()` as
   `in_proj [z|x|B|C|dt*|A*|λ*|μ*|rotation]` with each `u`-wide stream emitted as `u`
   same-named segments (independent maps to Muon; `without_segment` still drops the whole
-  stream) + `out_proj`.
+  stream) + `out_proj`. The positive systems' `r·u|a·u|b·u` trail even those
+  (`split_positive` peels them first; AdamW), and their per-head params
+  `kalman_log_kappa_h` / `kalman_read_h` / `tropical_readout_hp` meet the SSD's readout in
+  `positive_read`, **before** the `D` skip; `gain_input` / `zero_positive_state` feed and
+  seed them.
   `untied: Vec<Mamba3Untied>` (every tensor but `in_proj`'s `z|x|B|C` and `out_proj`):
   tiled by `init_applications`, listed by `untied_params`; `InProjTail` moves the
   `d_in_proj_tail()` segments into `in_proj_tail` at any count (`project_in` rejoins;
@@ -120,7 +125,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   mass split — `Δ/A/da/α/γ` + the **optional, untransported** `nu`/`nu_interior` (the
   consumer multiplies in `α`, since the single-SSD key scale must not carry a transport);
   a `None` `lambda_raw` is `Trapezoid::None` and yields no mass, `γ = Δ` by sharing `Δ`'s
-  tensor. `token_start_gate` is the per-position `0/1` a pattern admits its taps by (`0` at
+  tensor. A `Some(gain)` computes the Kalman decay **between `da` and `α`** and returns
+  `log_precision`, so every consumer (tap transports, `tail_decay`, the single-SSD key
+  scale) reads the computed decay by construction; the masses keep the projected `Δ`. `token_start_gate` is the per-position `0/1` a pattern admits its taps by (`0` at
   `p ≡ 0 mod u`, hence all-zero at `u = 1`); a closed tap hands its mass **back** — `λ ← 1`
   for the far one, `μ ← 0` for the interior one — exactly at the ends, which is what makes
   the gated members bit-exact degeneracies. Also `qk_norm_expand_bias`, `build_v_with_mimo`,
@@ -158,7 +165,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 - **`cache.rs`** — the pathway-tagged `Mamba3Cache{DoubleSsd|SingleSsd}` / `Mamba3Caches`
   enums; extractors; `from_vec`/`from_options` (**empty ⇒ SingleSsd**). The cross-pathway
   `From` impls are field-identity, valid because at a boundary `scaleₜ=γₜ` so single-ssd
-  `h'` equals double-ssd `h`.
+  `h'` equals double-ssd `h` (the positive systems' slots read only inputs, so they agree
+  everywhere).
 - **`ssd_path.rs`** — pathway-agnostic `Mamba3SsdPath` (`Default=SerialRecalculated(None)`);
   `From` both sub-paths so it converts to whichever pathway the cache selects.
   `optimal_chunk_len(r, p, m, u)` divides the `√(r·p)` rule by `m` before the 32-grid
@@ -167,7 +175,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   the source's own `chunk_size` advice); `u` folds only the *writes*, so it subdivides a
   chunk of unchanged folded width into `chunk_tokens(chunk_len, u) = chunk_len/u` read rows.
   The score is then `C·m²` per token at every `u`, and `nchunks ∝ u` rather than `u²` —
-  `info/architecture-deltas.md` §8. `chunk_len_or_optimal` applies the same rounding to a
+  `info/mamba-3/architecture-deltas.md` §8. `chunk_len_or_optimal` applies the same rounding to a
   user-supplied chunk, which is what makes a chunk's read rows a contiguous run of tokens
   (a reshape, not a gather). `backward_chunk_group(nchunks) = ⌈n/2⌉` is the recompute
   backward's own schedule: its chunk-**local** gradients are batched (only K4's state
@@ -175,7 +183,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   score-shaped tensors under the forward K5's ~4 at full width — no dimension, no budget.
 - **`trapezoid.rs`** — `Trapezoid`, the trapezoid's **tap pattern**: which earlier sample(s)
   the `β` tap reads. A choice that exists only at `micro_steps > 1`
-  (`info/trapezoid-as-integration.md` §§8–9), and a structural one — it picks how many
+  (`info/mamba-3/trapezoid-as-integration.md` §§8–9), and a structural one — it picks how many
   masses the in-proj spends and, through `tap_lag()`, everything else. The lattice is
   **closed**: (horizontal lag-1 tap: none | `Reset`, gated to within a token | `CarryOver`)
   × (vertical lag-`u` tap: none | present) = `None`, `HorizontalReset`,
@@ -242,7 +250,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   the decay since that position** — which is what carries a lag-`u` gap across a call
   boundary, and is a no-op at lag 1. The two tap slots are `Option`s — absent, not zeroed,
   when the `Trapezoid` has no β tap (`sanity()` asserts they agree); the `*CacheConfig`s
-  carry `trapezoid` + `micro_steps` to size them.
+  carry `trapezoid` + `micro_steps` to size them. Likewise `log_precision_bh` (`ln Λ`) and
+  `tropical_bh` (`c`), present iff the `Gain` / `Tropical` is, fresh at `LOG_ZERO`.
 - **`ssd/ssd_path.rs` + `ssd/*`** — `Mamba3DoubleSsdPath`; `Mamba3DoubleSsdInput` is
   **MIMO-first** (`v_bnlmhp` already ×γ/β, `da_bnlh`, `b_bnlmhr` on the chunk's write axis;
   `c_bntmhr` + `read_stride` on its **read** axis, and `y_bntmhp` comes back there too).
@@ -258,7 +267,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 ### `mamba3/single_ssd/`
 - **`single_ssd/mod.rs`** — `forward_single_ssd`: one SSD call with key scale
   `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)` (a sample's trapezoid installments share a transport and
-  collapse to this one scalar — `info/trapezoid-as-integration.md` §5; the pathway exists
+  collapse to this one scalar — `info/mamba-3/trapezoid-as-integration.md` §5; the pathway exists
   because they do, and §9's collapse theorem is why neither the wider lag nor a second tap
   changes anything here — one pass either way), strict-lower-triangular intra-chunk mask +
   same-step γ correction (in-kernel) widened by `token_band` at lag > 1, and a **boundary-β
@@ -307,7 +316,7 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
 ### `mamba3/product/` (`mod.rs`)
 
-**MambaProduct** — DeltaProduct's *dial*, not its mechanism (`info/rotation-as-optimization.md`):
+**MambaProduct** — DeltaProduct's *dial*, not its mechanism (`info/mamba-3/rotation-as-optimization.md`):
 `u = Mamba3Config::micro_steps` full Mamba-3 steps
 per token, so a token's transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a
 sum of `u` outer products staggered along it. Evaluated by folding the micro-steps into the
@@ -341,7 +350,7 @@ scalar decay composes, so this costs nothing, and pinning `α ≡ 1` would silen
 rotation with it. What `u > 1` does change is the trapezoid's taps, which now live on the
 folded chain and so become a *choice* (`trapezoid.rs`): at the default lag 1 they straddle
 *micro-steps*, so only `1/u` still cross a token and the interior ones pair two projections
-of *one* token (`info/trapezoid-as-integration.md` §§8–9, with the tap lattice `u>1` opens;
+of *one* token (`info/mamba-3/trapezoid-as-integration.md` §§8–9, with the tap lattice `u>1` opens;
 `λ` is per micro-step, so `λ=1` on the interior recovers the `u=1` semantics); at
 `Vertical`'s lag `u` all of them cross, and the two-tap members carry both lags at once.
 The tap cache is the FIFO that choice needs.
@@ -410,6 +419,22 @@ zeroed (and projects/caches nothing), the half-turn is reachable with a live gra
 `range=1` it is not — f32's `tanh'` is exactly 0 there), a zero right generator reproduces
 `Quaternion4D` on B, C and the accumulator, a shared axis turns the two planes by `a∓b`,
 and gradient reaches the right factor's channels.
+
+### `mamba3/positive/`
+Per-head scalar systems beside the plant; math and audit in `info/kalman/gate-as-positive-system.md`.
+- **`mod.rs`** — `Gain::{Projected, Kalman, KalmanProjectedNoise}` / `Tropical::{None,
+  MaxPlus}` (structural, `#[module(skip)]` on the block); `LOG_ZERO`, `ln 0` kept finite
+  (an lse of two `−∞` is NaN; `2·LOG_ZERO` still fits f16).
+- **`scan.rs`** — `lse` (selects `hi`/`lo` rather than `max`, so it is exact beside
+  `LOG_ZERO` and splits a tie's gradient); `Element` with `Mobius` (projective, a
+  detached max-shift per combine — the read cancels it) and `Affine` (lower row fixed, so
+  no shift); `prefix` (Hillis–Steele doubling) and `fold`, the sequential reference.
+  Plain autodiff: `quat_scan`'s divide-out backward does not port, a log-semiring element
+  having no inverse.
+- **`kalman.rs`** — `gate`: elements `ln [[α(1+qm), m], [αq, 1]]` (`m = Δ`,
+  `q = κΔ·e^r`), the scan for `ℓ = ln Λ`, then `ln d = ln α − softplus(ln q + ln α +
+  ℓₜ₋₁)`, exactly `ln α` at `κ = 0`.
+- **`tropical.rs`** — `register`: the affine scan from `(a, b)`.
 
 ### `mamba3/quat_scan/`
 Memory-efficient cumprod scan (recompute backward, like SSD `SerialRecalculated`).
@@ -483,7 +508,7 @@ rationale.
 
 ## Notes (`info/`) and their checks (`scripts/`)
 
-- **`info/rotation-as-optimization.md`** — the reference for the `micro_steps`/DeltaProduct
+- **`info/mamba-3/rotation-as-optimization.md`** — the reference for the `micro_steps`/DeltaProduct
   relationship and for the optimization reading of the complex transition. Derives: a real
   step on any real loss cannot rotate; the three views of Mamba-3's rotation that can
   (complex step size / descent-ascent on a harmonic potential / momentum); DeltaProduct's
@@ -494,7 +519,7 @@ rationale.
   document's numbered claims, section numbers matching. Encodes the recurrence from the
   equations and never imports the crate, so it is independent of the implementation
   (which the Rust suites cover). Runs standalone; non-zero exit on failure.
-- **`info/trapezoid-as-integration.md`** — the reference for the trapezoidal
+- **`info/mamba-3/trapezoid-as-integration.md`** — the reference for the trapezoidal
   discretisation and its interaction with `micro_steps`; companion to the above, which
   classifies the *quadratic* term while this classifies the *linear* one. Derives: the
   rank-two target, and that `λ` touches only the linear term (so the isotropy arguments
@@ -511,7 +536,7 @@ rationale.
   74 checks, section numbers matching, standalone, non-zero exit on failure. §9 also checks
   the crate's parameterisation: mass conservation, the closed tap's fallback, the two-tap
   collapse and its `strict scale − far band + γ diagonal` decomposition.
-- **`info/mimo-as-batch.md`** — the reference for `mimo_rank` and its interaction with
+- **`info/mamba-3/mimo-as-batch.md`** — the reference for `mimo_rank` and its interaction with
   `micro_steps` and `RotationKind`; third of the trio, classifying the linear term along
   *rank* where the trapezoid note classifies it along *time*. Derives: the rank-`M`
   objective (a minibatch of `M`, ridge split `ρ/M`; `G` stays `(1−α)I`, so the isotropy
@@ -525,7 +550,7 @@ rationale.
   Cite it rather than restating it.
 - **`scripts/mimo_as_batch.py`** — same contract as the above: float64 `numpy`, 54 checks,
   section numbers matching, standalone, non-zero exit on failure.
-- **`info/architecture-deltas.md`** — the reference for the Mamba-3 block *outside* the
+- **`info/mamba-3/architecture-deltas.md`** — the reference for the Mamba-3 block *outside* the
   recurrence, where the trio above covers the recurrence itself; the only note that
   prices empirical ablations rather than deriving. Establishes: BCNorm pins `‖B‖=√N`, so
   the ones-initialised `B`/`C` biases add a score term of exactly `N` against a data term
@@ -545,3 +570,15 @@ rationale.
   checks, section numbers matching, standalone, non-zero exit on failure. Defines the
   `B`/`C` path and the trapezoid coefficients from scratch and never calls the crate, so
   a failure is a wrong claim, not a drifted implementation.
+- **`info/kalman/gate-as-positive-system.md`** — the reference for `mamba3/positive/`: a system
+  *beside* the plant rather than a term of its objective. Establishes: both members are
+  positive linear systems sharing one log-semiring scan; the Kalman member's information
+  form **is** the covariance-form filter, with a ceiling `Λ < 1/q + m` and a Birkhoff
+  contraction whose rate has no `α` in it; its ageing is hyperbolic, which no geometric
+  discount fits; the tropical member is max-plus within `ln(t+1)`. And the audit (§5–6):
+  a classifier gets a lot of this free — the gate cross-multiplies, the final norm divides,
+  a maximum is a sum in the exponential domain — so what survives is growth, range and a
+  discount inside the recurrence, each measured on `examples/tally/` against the best stock
+  arm. Cite it rather than restating it.
+- **`scripts/gate_as_positive_system.py`** — same contract as the above: float64 `numpy`,
+  22 checks, section numbers matching, standalone, non-zero exit on failure.

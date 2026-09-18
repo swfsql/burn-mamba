@@ -122,6 +122,10 @@ src/
 │  │                 Its module doc is where the chunk's read/write axis split
 │  │                 (`u` widens the writes only) is stated, and where `step`'s
 │  │                 closed form for one folded block is derived
+│  ├─ positive/      per-head scalar systems *beside* the plant, reading only the
+│  │                 in-proj: scan.rs (one log-semiring prefix scan, Mobius |
+│  │                 Affine, doubling + a `fold` reference), kalman.rs (the
+│  │                 computed decay + `ln Λ`), tropical.rs (the max-plus register)
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
@@ -203,7 +207,7 @@ capped 512 — Mamba-3 divides that by `mimo_rank`, then rounds it to a multiple
 `micro_steps`: the two dials widen a chunk *differently*, `m` on both its axes and
 `u` on the writes only, so `m` divides the chunk and `u` only subdivides it into
 `chunk_tokens = chunk_len/u` read rows. `nchunks` therefore grows like `u`, not
-`u²`, at u-invariant score memory: `info/architecture-deltas.md` §8):
+`u²`, at u-invariant score memory: `info/mamba-3/architecture-deltas.md` §8):
 
 | Variant | Algorithm | Backward |
 |---------|-----------|----------|
@@ -238,15 +242,15 @@ notation tables; the essentials:
   norm), then a learnable ones-init per-(head,rank) bias, then the rotation; no short
   conv. Why those two deletions are affordable, why the bias order and its init are
   mechanisms rather than decoration, and what data-dependent `A` buys:
-  `info/architecture-deltas.md` — cite it, don't restate it. The in-projection splits
+  `info/mamba-3/architecture-deltas.md` — cite it, don't restate it. The in-projection splits
   `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u]` — only the per-micro-step
   segments widen. The trapezoid touches only the *linear* term of the local objective
   (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two
   installments collapse), so it is orthogonal to the rotation and to `micro_steps`:
-  `info/trapezoid-as-integration.md` — cite it, don't restate it. MIMO widens that *same*
+  `info/mamba-3/trapezoid-as-integration.md` — cite it, don't restate it. MIMO widens that *same*
   linear term along **rank** — a minibatch of `M` with free keys and tied values, `G`
   untouched — which is why it composes with everything else and why a MIMO block *is* its
-  SISO block at init: `info/mimo-as-batch.md` — cite it, don't restate it.
+  SISO block at init: `info/mamba-3/mimo-as-batch.md` — cite it, don't restate it.
   *Which* earlier sample(s) the trapezoid's `β` tap reads is `Mamba3Config.trapezoid`
   (`mamba3/trapezoid.rs`) — a lattice that exists only at `u > 1`, selecting an algorithm
   and a cache layout, and **closed**: (lag-1 tap absent | `Reset`, gated to within a token |
@@ -306,7 +310,7 @@ rotation accumulated, never a position. Same argument for `Quaternion4D` below.
 
 The rotation is per (head, plane) and **broadcast over the MIMO ranks**, necessarily: the `M`
 ranks share one state, so they share its transition, and per-rank angles have no state-space
-preimage at all (`info/mimo-as-batch.md` §7).
+preimage at all (`info/mamba-3/mimo-as-batch.md` §7).
 
 Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
 `range·π·tanh(·)`, Δ-scaled per head, then **`helpers::prefix_sum`** along the sequence
@@ -377,7 +381,7 @@ rotate — the rotation must come from the **step size** leaving `ℝ`, which is
 `RotationKind` is. Hence DeltaProduct's mechanism has no instance here, and the
 `RotationKind` split below follows from the algebra of `η` alone. Derived, with the
 2×2 design space and the two other readings of the same recurrence (min–max on a harmonic
-potential; momentum), in `info/rotation-as-optimization.md` — cite it, don't restate it.
+potential; momentum), in `info/mamba-3/rotation-as-optimization.md` — cite it, don't restate it.
 
 Evaluated by folding the micro-steps into the **sequence axis** — the `u`-wide
 in-projection segments become `u` consecutive positions and the existing pipeline
@@ -410,6 +414,22 @@ Mamba-2. `Complex2D`: `u`× the per-token angle reach with a live gradient at ev
 lifting exactly the `tanh`-asymptote bound `rotation_range` documents. `Quaternion4D`/
 `Rotor4D`: a non-commuting product no single bounded step can express — DeltaProduct's own
 argument, with the group given directly rather than factored into reflections.
+
+### Mamba-3: positive systems beside the plant
+
+`positive/` adds a per-head **scalar** recurrence that reads only the in-projection and
+sets the plant's coefficients — a cascade, so the chunkwise pass survives (a gain that
+read the state would not). Both members are nonnegative 2×2 matrices acting
+projectively, carried in log coordinates, so one scan serves both:
+`Gain::{Projected (default), Kalman, KalmanProjectedNoise}` computes the decay from an
+accumulated precision `Λ` (`ln d = ln α − log1p(κΔαΛ)`, substituted inside
+`helpers::trapezoidal_coefficients` *before* `α` is formed, so every consumer follows),
+and `Tropical::{None (default), MaxPlus}` carries a soft `max(c + a, b)` register into
+the readout. Ports: the decay, the read `(Λ+ε)^(−ω)` (absent under `has_outproj_norm`,
+which would remove it), and `y += c·e`. Structural, stock exactly at `κ = 0` / `e = 0`;
+one cache slot each. What each buys — growth, range, a discount inside the recurrence —
+and what a classifier gets for free instead: `info/kalman/gate-as-positive-system.md`, cite it,
+don't restate it.
 
 ### Virtual layers, bidirectional, class tokens, multi-gate
 
@@ -461,10 +481,13 @@ reimplementing them.
   composes, so the uniform placement costs nothing. The `u` steps are full-size, so a
   token's effective interval is inflated `u`×, not subdivided — that is what buys the
   reach; the consistent alternative (`Δⱼ=Δ/u`) is reachable, so this is a superset.
+- **A gate may read the inputs, never the plant** — `positive/`'s systems are a cascade
+  before the LPV plant, which keeps the pass chunkwise; being positive linear systems,
+  one log-semiring scan carries both and the projective read renormalises for free.
 - **Muon sees split projections, the model does not** — the machinery is
   `burn_stack::optim`; what this crate owns is the **allowlist**, one
   `muon_projections()` per family config, listing the same column widths the
-  forward's `split_into` uses. Per-head *scalar* channels (Δ/`A`/`λ`/`μ`), every
+  forward's `split_into` uses. Per-head *scalar* channels (Δ/`A`/`λ`/`μ`/`r`/`a`/`b`), every
   1-D/3-D tensor, and the boundary weights stay on AdamW. Why the MIMO 3-D
   tensors are diagonals and not stacked matrices is argued in the
   `src/unified/mod.rs` header.

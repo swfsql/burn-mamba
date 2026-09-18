@@ -21,7 +21,7 @@
 > data-dependent `A` opens — and neither moves an algebraic claim the trio makes.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/architecture_deltas.py`](../scripts/architecture_deltas.py) (35 checks,
+> [`scripts/mamba-3/architecture_deltas.py`](../scripts/mamba-3/architecture_deltas.py) (35 checks,
 > section numbers match). The script depends only on `numpy` and on the definitions
 > reproduced here — not on the crate.
 
@@ -485,7 +485,7 @@ axis this crate deliberately gives up (`CLAUDE.md` → *No optimized kernels*).
 ## 10. Reproduction
 
 ```
-python3 scripts/architecture_deltas.py
+python3 scripts/mamba-3/architecture_deltas.py
 ```
 
 Pure `numpy`, float64, 35 checks, section numbers matching this document, non-zero

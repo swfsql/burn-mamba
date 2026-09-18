@@ -9,7 +9,7 @@
 //! ([`crate::mamba3::product`]) and the choice is real.
 //!
 //! [`Trapezoid`] names the members of that lattice.
-//! `info/trapezoid-as-integration.md` §§8–9 derives it, prices each member and
+//! `info/mamba-3/trapezoid-as-integration.md` §§8–9 derives it, prices each member and
 //! proves the invariant they all keep (each tap transported across *its own*
 //! gap, which is what preserves the single-SSD `Δ̃` collapse) — cite it, it is
 //! not restated here.
@@ -119,7 +119,7 @@ pub enum Trapezoid {
     /// promoted from rank 1 to rank `u`** — where
     /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) taps only the previous
     /// token's *last* micro-step. `A` is untouched, so it is still `λ`-free
-    /// (`info/trapezoid-as-integration.md` §7).
+    /// (`info/mamba-3/trapezoid-as-integration.md` §7).
     ///
     /// Costs (§9): key scale `γₛ + (1−λₛ₊ᵤ)Δₛ₊ᵤ`; the tap is transported across
     /// its own `u`-position gap; the cache's tap buffer becomes a `u`-deep FIFO
@@ -139,7 +139,7 @@ pub enum Trapezoid {
     /// The suppressed step has no admissible earlier sample, so its whole mass
     /// returns to `γ` (`λ = 1` there, module header): each token **starts** on
     /// plain exponential-Euler and is trapezoidal inside. That is exactly the
-    /// limit `info/trapezoid-as-integration.md` §8 shows is reachable by
+    /// limit `info/mamba-3/trapezoid-as-integration.md` §8 shows is reachable by
     /// learning under [`HorizontalCarryOver`](Self::HorizontalCarryOver), which
     /// makes this member that pattern's constrained **submodel** rather than a
     /// rival to it — and is why the mass is handed back rather than dropped.
@@ -225,7 +225,7 @@ impl Trapezoid {
     ///
     /// The tap must be transported across *its own* gap, so a lag-`L` tap
     /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`; that is the condition
-    /// `info/trapezoid-as-integration.md` §9 shows preserves the `Δ̃` collapse,
+    /// `info/mamba-3/trapezoid-as-integration.md` §9 shows preserves the `Δ̃` collapse,
     /// hence the single-SSD pathway.
     pub fn tap_lag(self, micro_steps: usize) -> usize {
         match self {
@@ -1171,7 +1171,7 @@ mod tests {
     /// i.e. `λ = 1` there — so `HorizontalReset` is exactly
     /// `HorizontalCarryOver` with each token's first micro-step saturated, and a
     /// *submodel* of it rather than a lossy version
-    /// (`info/trapezoid-as-integration.md` §8).
+    /// (`info/mamba-3/trapezoid-as-integration.md` §8).
     #[test]
     fn horizontal_reset_is_the_carry_over_with_lambda_saturated() {
         use burn::module::Param;

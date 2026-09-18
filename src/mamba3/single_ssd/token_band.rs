@@ -3,7 +3,7 @@
 //! [`Vertical`]: crate::mamba3::trapezoid::Trapezoid::Vertical
 //!
 //! The single-SSD pathway scales sample `s`'s key by the whole collapsed weight
-//! `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/trapezoid-as-integration.md` §5), which is right for
+//! `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/mamba-3/trapezoid-as-integration.md` §5), which is right for
 //! every read `t` that happens *after* the tap has been paid, i.e. `t − s ≥ lag`,
 //! and wrong for the `lag` reads before it, where the weight must still be `γₛ`.
 //! At lag 1 that exception is the diagonal alone and

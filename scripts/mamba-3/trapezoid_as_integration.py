@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Numerical verification for `info/trapezoid-as-integration.md`.
+"""Numerical verification for `info/mamba-3/trapezoid-as-integration.md`.
 
 Every claim the document makes that can be checked numerically is checked here, in
 float64, with section numbers matching the document's. Pure `numpy`; no other
@@ -12,7 +12,7 @@ Exits non-zero if any check fails.
 
 Conventions (document §2). The state is kept in the paper's `h`, shape ``[N, P]``
 (rows indexed by state channel, columns by value channel), because the trapezoid
-reads more easily there; `info/rotation-as-optimization.md` uses the transposed
+reads more easily there; `info/mamba-3/rotation-as-optimization.md` uses the transposed
 fast-weight ``S``. Nothing below depends on which. One head throughout.
 
     alpha[t] = exp(dt[t] * A[t])            decay, A[t] < 0
