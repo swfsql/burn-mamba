@@ -6,7 +6,7 @@ float64, with section numbers matching the document's. Pure `numpy`; no other
 dependency, no I/O, no reference to the model code — the point is that these are
 statements about the *recurrence*, reproducible from the equations alone.
 
-    python3 scripts/rotation_as_optimization.py
+    python3 scripts/mamba-3/rotation_as_optimization.py
 
 Exits non-zero if any check fails.
 

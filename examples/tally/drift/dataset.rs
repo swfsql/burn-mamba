@@ -1,12 +1,16 @@
-//! The tally-drift stream: nine value symbols on a grid from `−2` to `+2` and a
-//! gap `~`, whose per-position target is **whether this value is above the
-//! running estimate of the level** — an estimate that *ages* across gaps.
+//! The tally-drift stream: 33 value symbols on a grid from `−2` to `+2` in
+//! steps of `1/8` and a gap `~`, whose per-position target is **whether this
+//! value is above the running estimate of the level** — an estimate that
+//! *ages* across gaps, and that already includes the value it is compared to.
 //!
 //! ```text
-//!   symbols   +1  +1  +2  ~  ~  -1  +0
-//!   estimate  1.0 1.0 1.3 …  …  0.4 0.4
-//!   target     .   .   +   .  .   -   +
+//!   symbols   +1   +1   +2   ~    ~    -1   +1
+//!   estimate  1.0  1.0  1.33 1.33 1.33 0.0  0.36
+//!   target     .    .    +    .    .    -    +
 //! ```
+//!
+//! (`Q_GAP = 0.5`: the two gaps shrink three values' weight to `0.75`, so the
+//! `-1` pulls the estimate to `0`; a value on its estimate is unscored.)
 //!
 //! The level is a random walk that only moves during gaps, so a gap is elapsed
 //! time: it adds doubt without adding evidence. The optimal estimate is the
@@ -50,8 +54,9 @@ pub const Q_GAP: f64 = 0.5;
 /// How far the level walks per gap token.
 pub const JUMP: f64 = 0.8;
 /// Positions closer than this to the estimate are unscored: a near-tie tests
-/// calibration, not memory. Well under [`gen_knife`]'s probe offset, so the
-/// probes themselves are always scored.
+/// calibration, not memory. Well under [`gen_knife`]'s probe offset, though a
+/// probe can still land inside it: the aim is quantised onto the `1/8` value
+/// grid, which moves it by up to `1/16`.
 pub const MARGIN: f64 = 0.005;
 
 /// How far [`gen_knife`]'s probes sit from the estimate they test. Small enough

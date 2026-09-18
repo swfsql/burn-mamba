@@ -32,16 +32,28 @@ pub fn lse(a: Tensor<3>, b: Tensor<3>) -> Tensor<3> {
     hi.clone() + (lo - hi).exp().log1p()
 }
 
+/// The semiring's one and zero, `(0, LOG_ZERO)`, over `len` positions — shaped,
+/// placed and typed like `like`, so a scan follows its elements' dtype rather
+/// than the device's default.
+fn one_and_zero(like: &Tensor<3>, len: usize) -> (Tensor<3>, Tensor<3>) {
+    let [batch, _len, nheads] = like.dims();
+    let device = like.device();
+    let options = (&device, like.dtype());
+    (
+        Tensor::zeros([batch, len, nheads], options),
+        Tensor::full([batch, len, nheads], LOG_ZERO, options),
+    )
+}
+
 /// An associative element over `[batch, len, nheads]` tensors.
 pub trait Element: Sized + Clone {
     /// `later ∘ earlier` — apply `earlier` first.
     fn compose(later: Self, earlier: Self) -> Self;
-    /// The identity, shaped `[batch, len, nheads]`.
-    fn identity(batch: usize, len: usize, nheads: usize, device: &Device) -> Self;
+    /// The identity over `len` positions, on this element's batch, heads,
+    /// device and dtype.
+    fn identity_like(&self, len: usize) -> Self;
     /// `[batch, len, nheads]`.
     fn dims(&self) -> [usize; 3];
-    /// The device the element's tensors live on.
-    fn device(&self) -> Device;
     /// A run of positions along axis 1.
     fn narrow(self, start: usize, len: usize) -> Self;
     /// Concatenate along axis 1.
@@ -99,23 +111,18 @@ impl Element for Mobius {
         }
     }
 
-    fn identity(batch: usize, len: usize, nheads: usize, device: &Device) -> Self {
-        let zero = Tensor::zeros([batch, len, nheads], device);
-        let none = Tensor::full([batch, len, nheads], LOG_ZERO, device);
+    fn identity_like(&self, len: usize) -> Self {
+        let (one, zero) = one_and_zero(&self.m00, len);
         Mobius {
-            m00: zero.clone(),
-            m01: none.clone(),
-            m10: none,
-            m11: zero,
+            m00: one.clone(),
+            m01: zero.clone(),
+            m10: zero,
+            m11: one,
         }
     }
 
     fn dims(&self) -> [usize; 3] {
         self.m00.dims()
-    }
-
-    fn device(&self) -> Device {
-        self.m00.device()
     }
 
     fn narrow(self, start: usize, len: usize) -> Self {
@@ -170,19 +177,13 @@ impl Element for Affine {
         }
     }
 
-    fn identity(batch: usize, len: usize, nheads: usize, device: &Device) -> Self {
-        Affine {
-            a: Tensor::zeros([batch, len, nheads], device),
-            b: Tensor::full([batch, len, nheads], LOG_ZERO, device),
-        }
+    fn identity_like(&self, len: usize) -> Self {
+        let (one, zero) = one_and_zero(&self.a, len);
+        Affine { a: one, b: zero }
     }
 
     fn dims(&self) -> [usize; 3] {
         self.a.dims()
-    }
-
-    fn device(&self) -> Device {
-        self.a.device()
     }
 
     fn narrow(self, start: usize, len: usize) -> Self {
@@ -207,14 +208,32 @@ impl Element for Affine {
 /// Invariant after the round at `offset`: position `t` holds the product of
 /// the window `[max(t − 2·offset + 1, 0), t]`, the positions before the axis
 /// being the identity. `⌈log₂ len⌉` rounds cover every window.
+///
+/// # Why doubling, and what it costs
+///
+/// `helpers::prefix_sum` blocks its scan, and measures blocking beating
+/// doubling at every length — but its blocks run on `cumsum`, a one-launch
+/// in-block scan this element has no counterpart of: the log-semiring product
+/// is not `+`, and [`Mobius`]'s is not even commutative, so an in-block pass
+/// would itself be a doubling or a loop. The schedule is therefore
+/// `quat_scan`'s: `⌈log₂ len⌉` full-width rounds over the whole folded
+/// sequence, each some fifty kernels for [`Mobius`] (four [`lse`]s, the
+/// renormalising shift, the re-floors) and a dozen for [`Affine`]. The tensors
+/// are `[batch, len, nheads]`, with no `per_head_dim·state_rank` factor, so
+/// what grows with `len` is mostly launches, not bytes.
+///
+/// The backward is plain autodiff, which keeps every round's intermediates
+/// alive until it runs. A recompute backward like `quat_scan`'s is still open,
+/// and its divide-out trick does not port: a log-semiring element has no
+/// inverse. [`Affine`]'s `a` is a plain running sum riding the same rounds,
+/// which `prefix_sum` could produce on its own.
 pub fn prefix<E: Element>(elements: E) -> E {
-    let [batch, len, nheads] = elements.dims();
+    let [_batch, len, _nheads] = elements.dims();
     let mut acc = elements;
-    let device = acc.device();
     let mut offset = 1usize;
     while offset < len {
         let shifted = E::cat(vec![
-            E::identity(batch, offset, nheads, &device),
+            acc.identity_like(offset),
             acc.clone().narrow(0, len - offset),
         ]);
         acc = E::compose(acc, shifted);

@@ -1,6 +1,6 @@
 //! # tally-drift — a decay that reads how much evidence the head holds
 //!
-//! One Mamba-3 block reads nine values and a gap symbol, and reports at every
+//! One Mamba-3 block reads 33 values and a gap symbol, and reports at every
 //! value whether it is **above the running estimate of the level** — an
 //! estimate whose past must age across gaps, because the level walks while
 //! nothing is observed.

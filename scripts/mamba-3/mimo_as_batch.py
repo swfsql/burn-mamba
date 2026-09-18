@@ -6,7 +6,7 @@ float64, with section numbers matching the document's. Pure `numpy`; no other
 dependency, no I/O, no reference to the model code — the point is that these are
 statements about the *recurrence*, reproducible from the equations alone.
 
-    python3 scripts/mimo_as_batch.py
+    python3 scripts/mamba-3/mimo_as_batch.py
 
 Exits non-zero if any check fails.
 

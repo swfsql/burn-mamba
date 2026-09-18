@@ -241,9 +241,9 @@ single configuration.
 - **[API docs][docsurl]** — the rendered `rustdoc`; every public item is
   documented, and the per-block module headers carry the full math and notation.
 - **[DeepWiki][deepwikiurl]** — an explorable overview of the codebase.
-- **[`info/`](info/)** — four standalone notes on what Mamba-3 changed and why,
-  each checked in float64 by its sibling in [`scripts/`](scripts/) (`numpy` only,
-  no import of the crate, non-zero exit on failure). Three classify the
+- **[`info/`](info/)** — standalone notes, each checked in float64 by its sibling
+  in [`scripts/`](scripts/) (`numpy` only, no import of the crate, non-zero exit
+  on failure). Four on what Mamba-3 changed and why — three classify the
   recurrence, one classifies the block around it:
   - **[Rotation as Optimization](info/mamba-3/rotation-as-optimization.md)** — the
     *quadratic* term: what a step optimizes, in what sense the complex transition
@@ -260,6 +260,11 @@ single configuration.
     the recurrence: BCNorm and the `B`/`C` biases (a fresh block is a
     convolution), the deleted short conv, the output-norm placements, and the
     chunk-length schedule.
+
+  And one on what this crate adds beside the plant:
+  - **[Gate as Positive System](info/kalman/gate-as-positive-system.md)** — the
+    Kalman gate and the max-plus register: one log-semiring scan, the computed
+    decay's ceiling and contraction, and what a classifier gets for free.
 - Contributors: `CLAUDE.md` and `files.md` map the repository's structure,
   architecture, and conventions.
 

@@ -8,7 +8,7 @@
 > transition (`src/mamba3/rotation/`).
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/mamba-3/rotation_as_optimization.py`](../scripts/mamba-3/rotation_as_optimization.py)
+> [`scripts/mamba-3/rotation_as_optimization.py`](../../scripts/mamba-3/rotation_as_optimization.py)
 > (69 checks, section numbers match). The script depends only on `numpy` and on
 > the equations reproduced here — not on the crate — so the results stand
 > independently of the implementation.

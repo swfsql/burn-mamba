@@ -2,3 +2,4 @@
 .claude/
 tmp/
 bacon.toml
+__pycache__/

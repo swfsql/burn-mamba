@@ -472,7 +472,7 @@ pub struct TrapezoidCoeffs {
     /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member the
     /// decay that gate computes from it — every consumer reads this one.
     pub da: Tensor<3>,
-    /// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
+    /// `αₜ = exp(da) ∈ (0, 1]` — the decay, projected or computed as `da` is.
     pub alpha: Tensor<3>,
     /// `νₜ` — the mass of the tap at
     /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
@@ -518,7 +518,8 @@ pub struct TrapezoidCoeffs {
 /// decay is then computed ([`crate::mamba3::positive::kalman::gate`]) **here**,
 /// before `α` is formed from it, so no consumer — the taps' transports, the
 /// tap slots, single-SSD's key scale — can read the projected one by mistake.
-/// The masses keep the projected `Δ`.
+/// The masses keep the projected `Δ`; the gate reads them in logs, formed from
+/// the same pre-activations ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).
 pub fn trapezoidal_coefficients(
     dd_dt: Tensor<3>,
     dd_a_raw: Tensor<3>,
@@ -532,7 +533,8 @@ pub fn trapezoidal_coefficients(
     // Broadcast dt_bias_h [nheads] → [1, 1, nheads] so the addition aligns on
     // the last dim.
     let dt_bias_broadcast = dt_bias_h.unsqueeze::<3>();
-    let dt = softplus(dd_dt + dt_bias_broadcast).clamp(dt_limit.0, dt_limit.1);
+    let dt_raw = dd_dt + dt_bias_broadcast;
+    let dt = softplus(dt_raw.clone()).clamp(dt_limit.0, dt_limit.1);
     // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
     // applied to the (positive) softplus *before* negating: a method call
     // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
@@ -541,24 +543,31 @@ pub fn trapezoidal_coefficients(
     // dead `dd_A` projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
+    let gate = |crosses: bool| {
+        (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
+    };
+    // Where the far tap is closed — read by `λ` below and by the gate's masses.
+    let far_open_1s1 = lambda_raw
+        .as_ref()
+        .and_then(|_| gate(spec.pattern.far_tap_crosses_tokens()));
     let (da, log_precision) = match gain {
         Some(gain) => {
-            let out = crate::mamba3::positive::kalman::gate(dt.clone(), da, gain);
+            use crate::mamba3::positive::kalman;
+            let masses =
+                kalman::LogMasses::new(dt_raw, dt_limit, lambda_raw.clone(), far_open_1s1.clone());
+            let out = kalman::gate(da, masses, gain);
             (out.da_bsh, Some(out.log_precision_bsh))
         }
         None => (da, None),
     };
     let alpha = da.clone().exp();
-    let gate = |crosses: bool| {
-        (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
-    };
     let (nu, nu_interior, gamma) = match lambda_raw {
         Some(lambda_raw) => {
             let lambda = burn::tensor::activation::sigmoid(lambda_raw);
             // A closed far tap means λ = 1 there: the whole step is paid at the
             // right endpoint, which is what makes the gated pattern a submodel
             // of the ungated one rather than a lossy version of it.
-            let lambda = match gate(spec.pattern.far_tap_crosses_tokens()) {
+            let lambda = match far_open_1s1 {
                 Some(open_1s1) => lambda * open_1s1.clone() + (-open_1s1 + 1.0),
                 None => lambda,
             };

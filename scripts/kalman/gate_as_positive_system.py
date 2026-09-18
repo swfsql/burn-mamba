@@ -6,7 +6,7 @@ float64, with section numbers matching the document's. Pure `numpy`; no other
 dependency, no I/O, no reference to the model code — the point is that these are
 statements about the *recurrences*, reproducible from the equations alone.
 
-    python3 scripts/gate_as_positive_system.py
+    python3 scripts/kalman/gate_as_positive_system.py
 
 Exits non-zero if any check fails.
 
@@ -28,6 +28,9 @@ with `alpha = exp(dt*A)` the block's projected decay, `m = dt` the step's mass a
     Lambda[t] = d[t]*Lambda[t-1] + m[t]                         precision
     eta[t]    = d[t]*eta[t-1] + m[t]*T[t]                       information
     S[t]      = eta[t] / Lambda[t]                              the estimate
+
+§3.9 splits m into the trapezoid's two installments, gamma now and nu one step
+late: Lambda[t] = d[t]*(Lambda[t-1] + nu[t]) + gamma[t], d reading the same sum.
 """
 
 import sys
@@ -195,6 +198,94 @@ def check_kalman():
     ok("3.7 a geometric discount cannot be the filter's", best > 0.3)
 
 
+def gate_split(alpha, gamma, nu, q, lam0=0.0):
+    """§3.9: the gate under a trapezoid split; returns (d, Lambda)."""
+    lam = lam0
+    ds, lams = [], []
+    for t in range(len(alpha)):
+        big_l = lam + nu[t]
+        d = alpha[t] / (1.0 + q[t] * alpha[t] * big_l)
+        lam = d * big_l + gamma[t]
+        ds.append(d)
+        lams.append(lam)
+    return np.array(ds), np.array(lams)
+
+
+def check_split():
+    n = 60
+    alpha = np.exp(-RNG.random(n) * 0.3)
+    dt = RNG.random(n) + 0.2
+    lam_split = RNG.random(n)
+    gamma, nu = lam_split * dt, (1 - lam_split) * dt
+    q = RNG.random(n) * 0.4 + 0.01
+
+    # 3.9 One step is shift by nu, predict, shift by gamma: still one Möbius
+    # matrix, with the entries the implementation forms.
+    def shift(x):
+        return np.array([[1.0, x], [0.0, 1.0]])
+
+    composed = np.array([
+        shift(gamma[t]) @ np.array([[alpha[t], 0.0], [q[t] * alpha[t], 1.0]]) @ shift(nu[t])
+        for t in range(n)
+    ])
+    entries = np.array([
+        [[alpha[t] * (1 + q[t] * gamma[t]), alpha[t] * nu[t] + gamma[t] * (1 + q[t] * alpha[t] * nu[t])],
+         [alpha[t] * q[t], 1 + q[t] * alpha[t] * nu[t]]]
+        for t in range(n)
+    ])
+    ok("3.9 shift by nu, predict, shift by gamma is one Möbius matrix", close(composed, entries))
+
+    d, lam = gate_split(alpha, gamma, nu, q, lam0=1.3)
+    s = np.array([np.log(1.3), 0.0])
+    by_matrix = []
+    for t in range(n):
+        s = log_apply(np.log(entries[t]), s)
+        by_matrix.append(np.exp(s[0] - s[1]))
+    ok("3.9 ...and its scan is the gate's precision", close(by_matrix, lam, 1e-8))
+
+    # 3.9 The plant pays sample t-1's left installment at step t, transported by
+    # d[t] (beta = nu*d); every weight then decays by d. Bookkeeping per sample
+    # from a fresh start (sample -1 is the cache's tap slot) gives Lambda as the
+    # total weight and eta/Lambda as the weighted mean of what was written.
+    d, lam = gate_split(alpha, gamma, nu, q)
+    values = RNG.normal(size=n + 1)  # values[s + 1] is sample s
+    weights = np.zeros(n + 1)
+    eta = 0.0
+    total_ok = mean_ok = True
+    for t in range(n):
+        weights *= d[t]
+        weights[t] += nu[t] * d[t]
+        weights[t + 1] += gamma[t]
+        eta = d[t] * (eta + nu[t] * values[t]) + gamma[t] * values[t + 1]
+        total_ok &= close(np.sum(weights), lam[t])
+        mean_ok &= close(eta / lam[t], np.sum(weights * values) / np.sum(weights))
+    ok("3.9 with a lag-1 tap, Lambda is the total weight the plant writes", total_ok)
+    ok("3.9 ...and eta/Lambda the weighted mean of what it wrote", mean_ok)
+
+    # 3.9 The ceiling holds with gamma in m's place; the contraction bound
+    # tanh(1/4 ln(1 + 1/(q*gamma))) stays alpha-free (the exact rate uses
+    # gamma + alpha*nu*(1 + q*gamma) >= gamma).
+    _, lam_hi = gate_split(alpha, gamma, nu, q, lam0=1e6)
+    ok("3.9 Lambda[t] < 1/q[t] + gamma[t] from any start", bool(np.all(lam_hi < 1 / q + gamma)))
+    _, lam_a = gate_split(alpha, gamma, nu, q, lam0=0.5)
+    _, lam_b = gate_split(alpha, gamma, nu, q, lam0=50.0)
+    dist = np.abs(np.log(lam_a) - np.log(lam_b))
+    bound = np.abs(np.log(0.5) - np.log(50.0)) * np.cumprod(np.tanh(0.25 * np.log1p(1 / (q * gamma))))
+    ok("3.9 the contraction is at least tanh(1/4 ln(1 + 1/(q*gamma)))", bool(np.all(dist <= bound + 1e-12)))
+
+    # 3.9 A lag-u tap is transported across its whole gap, which no 2x2 map can
+    # read; the gate enters it like a lag-1 one and over-counts, never under.
+    lag = 3
+    w = 0.0
+    over, strict = True, False
+    for t in range(n):
+        transport = np.prod(d[max(0, t - lag + 1): t + 1])
+        w = d[t] * w + gamma[t] + nu[t] * transport
+        over &= bool(lam[t] >= w * (1 - 1e-12))
+        strict |= bool(lam[t] > w * (1 + 1e-6))
+    ok("3.9 a lag-u tap: Lambda bounds the plant's weight from above", over and strict)
+
+
 # ---------------------------------------------------------------------------
 # §4  The tropical member
 # ---------------------------------------------------------------------------
@@ -238,7 +329,8 @@ def check_tropical():
         d = max(d + int(step), 0)
         out.append(d)
     depth = np.array(out, float)
-    counter = tropical(s * opens, np.zeros(n), tau=1.0) / s
+    # The counter starts at its floor, 0, not at the max of nothing.
+    counter = tropical(s * opens, np.zeros(n), c0=0.0, tau=1.0) / s
     ok("4.4 (a, b) = (±1, 0) is the Lindley recursion (a counter with a floor)",
        close(np.round(counter), depth, 1e-9))
 
@@ -355,6 +447,7 @@ def check_ports():
 if __name__ == "__main__":
     check_semiring()
     check_kalman()
+    check_split()
     check_tropical()
     check_ports()
     print(f"\n{PASSED} passed, {FAILED} failed")

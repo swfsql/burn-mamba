@@ -11,7 +11,7 @@
 //!    register — but it needs the alphabet's whole span inside one channel, and
 //!    [`the_exponential_domain_arm_costs_range`] measures what f32 does with
 //!    `e^{45.8}`. It is why this rung is posed at twelve values rather than six,
-//!    where a trained stock block reached ~100%.
+//!    where a trained stock block solves it (~100%).
 //! 4. The width closes the third route, the latches: at `d_model = 3` a block can
 //!    make one function of the symbol an affine channel (the tests report the
 //!    residuals) but not the twelve threshold indicators one latch per value
@@ -53,10 +53,10 @@ const OUT_GAIN: f64 = 3.0;
 /// pre-`RmsNorm` (`γ = 1`) passes through unchanged.
 ///
 /// **Which** coordinate the values are spread by is the arm's choice, and it is
-/// the interesting part: an embedding is a free 7×3 map, so a block can make
+/// the interesting part: an embedding is a free 13×3 map, so a block can make
 /// **one** function of the symbol an affine channel — and only about three
-/// independent ones, which is what denies the latch route (six indicators) at
-/// this width. The register's arm spreads them by the value (`cos ∝ v`), the
+/// independent ones, which is what denies the latch route (twelve indicators)
+/// at this width. The register's arm spreads them by the value (`cos ∝ v`), the
 /// exponential arm by `u(v)`; a *trained* model picks for itself, and picks the
 /// second (see the README's trained row).
 fn embeddings(spread: &dyn Fn(usize) -> f64) -> Vec<Vec<f64>> {
@@ -363,12 +363,12 @@ fn no_decaying_comparison_solves_the_task() {
 /// linear in that domain, so the logarithm is never taken and the register is
 /// not needed.
 ///
-/// The identity is checked in f64 by `scripts/gate_as_positive_system.py` §5.4;
+/// The identity is checked in f64 by `scripts/kalman/gate_as_positive_system.py` §5.4;
 /// this test measures what it costs **in f32**, which is what makes the rung.
 ///
 /// The arm writes `u(v) = exp(S·(v − v_max))` through an embedding coordinate.
 /// At six values and 32 tokens that span is `e^{20}` and a trained stock block
-/// solved the task; at twelve and 64 it is `e^{45.8}`, the lower values collapse
+/// solves the task; at twelve and 64 it is `e^{45.8}`, the lower values collapse
 /// onto one embedding point, and the arm is nowhere near exact. More heads do
 /// not help: every channel is an affine read of the *same* embedding, so they
 /// share one mantissa's worth of resolution.
@@ -398,8 +398,8 @@ fn the_exponential_domain_arm_costs_range() {
 /// The memoryless ceiling, and what `d_model = 3` actually rules out.
 ///
 /// An embedding is a free map, so the block can make **one** function of the
-/// symbol an affine channel — the value, or `u(v)`, or another — but not six
-/// independent ones. The residuals below are against the *value-spread*
+/// symbol an affine channel — the value, or `u(v)`, or another — but not
+/// twelve independent ones. The residuals below are against the *value-spread*
 /// embedding: the value fits exactly, and every threshold indicator misses, so
 /// a latch construction (one per value, selected by the gate) does not fit at
 /// this width. The exponential route needs only one channel, and

@@ -21,8 +21,7 @@ The third rung is the one that says *why* the (max, +) semiring helps, because i
 is the one that can be switched off by shrinking the task. A maximum is a **sum
 in the exponential domain** — `Σ exp(S·vₛ)` at decay one, with the record test
 linear in that domain — so a linear state computes it exactly, and at six values
-and 32 tokens a trained stock block does (measured: ~100%, which is what the
-earlier version of this rung reported). What that route costs is **range**: it
+and 32 tokens a trained stock block does (~100%). What that route costs is **range**: it
 needs `e^{S·(v_max − v_min)}` inside one channel, which at twelve values and 64
 tokens is `e^{45.8} ≈ 8·10¹⁹` and f32 has seven digits. The register carries
 `S·v` instead, and the rung separates.
@@ -93,10 +92,9 @@ Same conventions as the `reset` ladder, plus two of this ladder's own:
   the number bounds the ablated *architecture* rather than one fitting of it;
 - the sweeps are coarse and each is one *family* of readouts, so an ablation
   column is a **lower bound** on the ablated block — which is why every rung also
-  carries a **trained** `--stock` row at equal budget. On `tally-record` that row
-  is what first overturned the rung, at six values: training found an arm the
-  sweeps had no term for, and the rung had to grow until that arm cost more than
-  f32 has;
+  carries a **trained** `--stock` row at equal budget. On `tally-record` training
+  finds an arm the sweeps have no term for (the exponential encoding below), and
+  the alphabet is sized so that arm costs more than f32 has;
 - where an ablation is not expressible in the block at all — a second head that
   cross-multiplies, say — it is computed in `f64` from the same streams and
   labelled as such.
@@ -302,14 +300,14 @@ use a register: a maximum is also a **sum in the exponential domain**, since
 `Σ exp(S·vₛ)` at decay one exceeds `exp(S·vₜ)` exactly when some earlier value
 matched or beat `vₜ`, provided `e^S` beats the sequence length. That test is
 linear in that domain, so no logarithm is ever taken —
-`scripts/gate_as_positive_system.py` §5.4 checks the identity in f64.
+`scripts/kalman/gate_as_positive_system.py` §5.4 checks the identity in f64.
 
 **The route is priced in range.** It must hold `e^{S·(v_max − v_min)}` inside one
 in-projection channel, and every channel is an affine read of the *same*
 embedding, so the whole block shares one mantissa's worth of resolution — more
 heads do not buy more. At six values and 32 tokens that span is `e^{20} ≈ 5·10⁸`
-and a trained stock block solves the task (~100%, the earlier version of this
-rung). At twelve values and 64 tokens it is `e^{45.8} ≈ 8·10¹⁹`, f32 holds about
+and a trained stock block solves the task (~100%). At twelve values and 64
+tokens it is `e^{45.8} ≈ 8·10¹⁹`, f32 holds about
 `10⁷`, and the hand-built arm collapses to 59.8% on `climb`.
 
 | shortcut | why it is closed |
@@ -338,9 +336,9 @@ The two trained rows are short runs at equal budget (1000 batches, ~4 minutes
 each), so they compare arms rather than establish ceilings — neither has
 converged, and only the register's arm has an exact solution to converge *to*.
 
-`edge` and `bands` are the families the rung gained when its first version tied:
-`edge` puts every token within one step of the maximum, so being approximately
-right stops paying, and `bands` confines each segment to a quarter of the
-alphabet, so resolution is needed at the bottom as well as the top.
+`edge` and `bands` are the families that make the arms part: `edge` puts every
+token within one step of the maximum, so being approximately right stops paying,
+and `bands` confines each segment to a quarter of the alphabet, so resolution is
+needed at the bottom as well as the top.
 
 </details>

@@ -27,7 +27,7 @@
 //!
 //! | member | `Mₜ` | carries | port |
 //! |---|---|---|---|
-//! | [`Gain::Kalman`] | `ln [[α(1+qm), m], [αq, 1]]` (projective, [`scan::Mobius`]) | `ℓ = ln Λ`, the head's precision | `A`, and `C` without the out-norm |
+//! | [`Gain::Kalman`] | shift by `ν`, predict, shift by `γ` (projective, [`scan::Mobius`]) | `ℓ = ln Λ`, the head's precision | `A` and `C` |
 //! | [`Tropical::MaxPlus`] | `[[a, b], [−∞, 0]]` (affine, [`scan::Affine`]) | `c`, a soft max-plus register | `D` |
 //!
 //! Log coordinates are forced, not convenient: the Kalman member's natural
@@ -43,31 +43,37 @@
 //! computed:
 //!
 //! ```text
-//!   dₜ = αₜ / (1 + qₜ·αₜ·Λₜ₋₁)
+//!   dₜ = αₜ / (1 + qₜ·αₜ·(Λₜ₋₁ + νₜ))
 //!   ηₜ = dₜ·ηₜ₋₁ + (the block's own write)        ← the plant, unchanged
-//!   Λₜ = dₜ·Λₜ₋₁ + mₜ                              ← the same recurrence on ones
+//!   Λₜ = dₜ·(Λₜ₋₁ + νₜ) + γₜ                       ← the same recurrence on ones
 //! ```
 //!
-//! with `mₜ = Δₜ` (the step's whole mass, whatever the trapezoid splits it
-//! into), stock's `αₜ` placed in the covariance (`a² = 1/α`), and `qₜ = κₕ·Δₜ`
-//! — Brownian: doubt grows with elapsed time. [`Gain::KalmanProjectedNoise`]
-//! multiplies `q` by a projected `exp(rₜ)`, so a token can add doubt without
-//! evidence (a gap). Only the decay changes: `dₜ` replaces `αₜ` where it is
-//! formed, before any consumer reads it, so the trapezoid's transports, the tap
-//! slots and single-SSD's key scale all follow. At `κ = 0` the block is stock
-//! bit for bit (`log1p(0) = 0`). Two facts carry the design:
+//! with the trapezoid's masses as the evidence — `γₜ` the right endpoint, `νₜ`
+//! the left one's installment, which the plant pays a step late and transports
+//! by that step's decay (exact for a lag-1 tap, an upper bound at lag `u`:
+//! [`kalman`]); without a tap, `γ = Δ` and `ν = 0`. Stock's `αₜ` sits in the
+//! covariance (`a² = 1/α`), and `qₜ = κₕ·Δₜ` — Brownian: doubt grows with
+//! elapsed time. [`Gain::KalmanProjectedNoise`] multiplies `q` by a projected
+//! `exp(rₜ)`, so a token can add doubt without evidence (a gap). Only the decay
+//! changes: `dₜ` replaces `αₜ` where it is formed, before any consumer reads
+//! it, so the trapezoid's transports, the tap slots and single-SSD's key scale
+//! all follow. At `κ = 0` the block is stock bit for bit (`log1p(0) = 0`). Two
+//! facts carry the design:
 //!
-//! - **a ceiling:** `Λₜ < 1/qₜ + mₜ` whatever the history, so strong evidence
+//! - **a ceiling:** `Λₜ < 1/qₜ + γₜ` whatever the history, so strong evidence
 //!   dominates for a bounded time rather than one growing with its strength;
-//! - **a contraction:** for `q, m > 0` the matrix is entrywise positive, so by
+//! - **a contraction:** for `q, γ > 0` the matrix is entrywise positive, so by
 //!   Birkhoff's theorem it contracts the Hilbert distance `|ln Λ − ln Λ'|` by at
-//!   least `tanh(¼·ln(1 + 1/(q·m)))` per step — the cache's initial `Λ`, and any
-//!   rounding in it, is forgotten geometrically.
+//!   least `tanh(¼·ln(1 + 1/(q·γ)))` per step, with no `α` in the bound — the
+//!   cache's initial `Λ`, and any rounding in it, is forgotten geometrically.
 //!
-//! Without the output norm the block may also read through `(Λₜ + ε)^(−ωₕ)`
-//! (`ω = 0` at init): `ω = 1` reads the estimate `S = η/Λ` instead of the
-//! information `η` — a mean rather than a sum. With the norm, that per-(token,
-//! head) scale is removed anyway, so the parameter does not exist.
+//! The block also reads through `(Λₜ + ε)^(−ωₕ)` (`ω = 0` at init): `ω = 1`
+//! reads the estimate `S = η/Λ` instead of the information `η` — a mean rather
+//! than a sum. The scale lands on the SSD's readout *before* the `D` skip and
+//! the register's `c·e`, so a per-head output norm does not remove it: it
+//! removes only what the three terms share, and `ω` sets the SSD's share
+//! against the other two (it cancels only when they vanish, and then only up
+//! to the norm's `ε`).
 //!
 //! ### The tropical register ([`tropical`])
 //!
@@ -101,6 +107,8 @@ pub mod kalman;
 /// The tropical register.
 pub mod tropical;
 
+use burn::prelude::*;
+
 /// `ln 0`, kept finite.
 ///
 /// A log-sum-exp of two `−∞` is `NaN`, and so is `0·(−∞)` in a zero-initialised
@@ -113,21 +121,21 @@ pub const LOG_ZERO: f32 = -3.0e4;
 /// per-head Kalman filter on top of that projection. See the module header.
 ///
 /// Structural, like [`Trapezoid`](crate::mamba3::trapezoid::Trapezoid): a
-/// Kalman member allocates the per-head `κ` (and, without the out-norm, `ω`),
-/// a cache slot for `ln Λ`, and under
-/// [`KalmanProjectedNoise`](Self::KalmanProjectedNoise) one in-projection
-/// channel per (head, micro-step).
+/// Kalman member allocates the per-head `κ` and `ω`, a cache slot for `ln Λ`,
+/// and under [`KalmanProjectedNoise`](Self::KalmanProjectedNoise) one
+/// in-projection channel per (head, micro-step).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Gain {
     /// Stock Mamba-3: `αₜ = exp(Δₜ·Aₜ)`, projected.
     #[default]
     Projected,
-    /// The tied arm: `qₜ = κₕ·Δₜ`, `mₜ = Δₜ`. No in-projection channel; stock
-    /// bit for bit at `κ = 0`.
+    /// The tied arm: `qₜ = κₕ·Δₜ`, the evidence the trapezoid's own masses. No
+    /// in-projection channel; stock bit for bit at `κ = 0`.
     Kalman,
     /// `qₜ = κₕ·Δₜ·exp(rₜ)` with `rₜ` projected per (head, micro-step): a token
     /// may add doubt without adding evidence, which the tied arm cannot (its
-    /// `q` and `m` both scale with `Δ`). `r ≡ 0` is [`Kalman`](Self::Kalman).
+    /// doubt and its evidence both scale with `Δ`). `r ≡ 0` is
+    /// [`Kalman`](Self::Kalman).
     KalmanProjectedNoise,
 }
 
@@ -160,6 +168,20 @@ impl Tropical {
     pub fn is_on(self) -> bool {
         matches!(self, Tropical::MaxPlus)
     }
+}
+
+/// The fresh-sequence slots `(ln Λ, c)`, each `[batch, nheads]` at
+/// [`LOG_ZERO`] — no evidence yet, the max of nothing — or `None` for a system
+/// the block does not carry. Every cache constructor goes through this.
+pub fn fresh_slots(
+    gain: Gain,
+    tropical: Tropical,
+    batch: usize,
+    nheads: usize,
+    device: &Device,
+) -> (Option<Tensor<2>>, Option<Tensor<2>>) {
+    let slot = || Tensor::full([batch, nheads], LOG_ZERO, device);
+    (gain.is_kalman().then(slot), tropical.is_on().then(slot))
 }
 
 #[cfg(all(test, feature = "_dev-test"))]

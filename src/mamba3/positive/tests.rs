@@ -4,18 +4,21 @@
 //!    doubling [`scan::prefix`] is the sequential [`scan::fold`], in values and
 //!    gradients; the projective read ignores a common shift.
 //! 2. **The members against their textbook recursions**, in f64: the gate is
-//!    the covariance-form Kalman filter (and `η/Λ` its mean); the register is
-//!    the hard max-plus recursion to within `ln(t + 1)`.
+//!    the covariance-form Kalman filter (and `η/Λ` its mean), and under a
+//!    trapezoid the plant's own recurrence on ones; the register is the hard
+//!    max-plus recursion to within `ln(t + 1)`.
 //! 3. **The invariants the design leans on**: the confidence ceiling, a decay
-//!    that only ever adds forgetting, and Birkhoff's contraction rate.
+//!    that only ever adds forgetting, Birkhoff's contraction rate, and finite
+//!    gradients where a mass underflows (f32 and f16).
 //! 4. **The block**: stock at `κ = 0` / `e = 0`, with live gradients into the
-//!    join; `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
+//!    join (the out-norm on or off), and finite ones when a head's `Δ`
+//!    vanishes; `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
 //!    SSD algorithm, on outputs, every cache slot and gradients, across the
 //!    lattice the two systems have to commute with (tap patterns, micro-steps,
 //!    rotation kinds, MIMO, the out-norm); the slots survive a no-grad region;
 //!    the in-projection's widths agree with the Muon plan.
 
-use super::kalman::{self, GainInput};
+use super::kalman::{self, GainInput, LogMasses};
 use super::scan::{self, Affine, Mobius};
 use super::{Gain, LOG_ZERO, Tropical};
 use crate::mamba3::cache::Mamba3Cache;
@@ -27,7 +30,7 @@ use crate::mamba3::trapezoid::Trapezoid;
 use burn::module::Param;
 use burn::nn::Linear;
 use burn::prelude::*;
-use burn::tensor::Distribution;
+use burn::tensor::{DType, Distribution};
 use burn_stack::utils::test_helpers::max_abs_diff;
 
 type Device = burn::prelude::Device;
@@ -173,10 +176,16 @@ fn gate_case(batch: usize, len: usize, device: &Device) -> GateCase {
     }
 }
 
+/// The gate with no trapezoid split (`γ = Δ`, no `ν`): the textbook filter.
 fn run_gate(case: &GateCase, carry: Tensor<2>) -> kalman::GainOutput {
+    let ln_dt = case.dt.clone().log();
     kalman::gate(
-        case.dt.clone(),
         case.da.clone(),
+        LogMasses {
+            dt_bsh: ln_dt.clone(),
+            gamma_bsh: ln_dt,
+            nu_bsh: None,
+        },
         GainInput {
             log_kappa_h: case.log_kappa.clone(),
             noise_bsh: Some(case.noise.clone()),
@@ -254,6 +263,85 @@ fn gate_matches_the_covariance_form_filter() {
     assert!(max_abs_diff(first(fresh.log_precision_bsh), first(case.dt.clone().log())) < 1e-5);
 }
 
+/// Under a trapezoid the evidence is the plant's own two installments, and `Λ`
+/// is the plant's recurrence on ones, run on the very coefficients the SSD
+/// consumes: `Wₜ = αₜ·Wₜ₋₁ + γₜ + αₜ·νⁱⁿᵗₜ + νₜ·Tₜ`, `Tₜ` the far tap's transport
+/// across its lag (front factors `1`, as `helpers::interior_gap_decay` pads).
+/// Equal for a lag-1 tap, an upper bound for a lag-`u` one; the ceiling
+/// `Λₜ < 1/qₜ + γₜ` holds either way.
+#[test]
+fn the_precision_is_the_plants_weight_on_ones() {
+    use crate::mamba3::helpers::trapezoidal_coefficients;
+    use crate::mamba3::trapezoid::TrapezoidSpec;
+    use Trapezoid as T;
+    let device: Device = Default::default();
+    let (batch, nheads) = (2, 3);
+    for (pattern, u, exact) in [
+        (T::HorizontalCarryOver, 1, true),
+        (T::HorizontalCarryOver, 3, true),
+        (T::HorizontalReset, 2, true),
+        (T::VerticalPlusHorizontalCarryOver, 1, true),
+        (T::Vertical, 2, false),
+        (T::VerticalPlusHorizontalCarryOver, 3, false),
+    ] {
+        let len = 8 * u;
+        let dims = [batch, len, nheads];
+        let spec = TrapezoidSpec {
+            pattern,
+            micro_steps: u,
+            dt_limit: (0.0, 6.5504e4),
+            a_floor: 1e-4,
+        };
+        let log_kappa = Tensor::<1>::from_floats([0.05f32.ln(), 0.5f32.ln(), 3.0f32.ln()], &device);
+        let carry = uniform([batch, nheads], -1.0, 2.0, &device);
+        let coeffs = trapezoidal_coefficients(
+            uniform(dims, -2.0, 1.0, &device),
+            uniform(dims, -3.0, 1.0, &device),
+            Some(uniform(dims, -3.0, 3.0, &device)),
+            pattern.has_interior_tap(u).then(|| uniform(dims, -3.0, 3.0, &device)),
+            Tensor::zeros([nheads], &device),
+            spec,
+            Some(GainInput {
+                log_kappa_h: log_kappa.clone(),
+                noise_bsh: None,
+                carry_bh: carry.clone(),
+            }),
+        );
+        let lag = pattern.tap_lag(u);
+        let (alpha, gamma, dt) = (floats(coeffs.alpha), floats(coeffs.gamma), floats(coeffs.dt));
+        let nu = floats(coeffs.nu.expect("a β tap"));
+        let nu_interior = coeffs.nu_interior.map(floats);
+        let lp = floats(coeffs.log_precision.expect("a Kalman gain"));
+        let (kappa, carry) = (floats(log_kappa.exp()), floats(carry));
+        for b in 0..batch {
+            for h in 0..nheads {
+                let at = |t: usize| (b * len + t) * nheads + h;
+                let mut w = (carry[b * nheads + h] as f64).exp();
+                for t in 0..len {
+                    let transport: f64 =
+                        (t.saturating_sub(lag - 1)..=t).map(|j| alpha[at(j)] as f64).product();
+                    let interior =
+                        nu_interior.as_ref().map_or(0.0, |n| alpha[at(t)] as f64 * n[at(t)] as f64);
+                    w = alpha[at(t)] as f64 * w
+                        + gamma[at(t)] as f64
+                        + nu[at(t)] as f64 * transport
+                        + interior;
+                    let lambda = (lp[at(t)] as f64).exp();
+                    let label = format!("{pattern:?} u{u} b{b} h{h} t{t}");
+                    if exact {
+                        assert!((lambda / w - 1.0).abs() < 1e-3, "{label}: Λ {lambda} vs plant {w}");
+                    } else {
+                        assert!(lambda >= w * (1.0 - 1e-3), "{label}: Λ {lambda} under plant {w}");
+                    }
+                    let q = kappa[h] as f64 * dt[at(t)] as f64;
+                    let ceiling = 1.0 / q + gamma[at(t)] as f64;
+                    assert!(lambda < ceiling * 1.0001, "{label}: Λ {lambda} above {ceiling}");
+                }
+            }
+        }
+    }
+}
+
 /// The soft register is the max-plus recursion `c = max(c + a, b)` from above,
 /// and by at most `ln(t + 1)` in projection units — the log-sum-exp over the
 /// `t + 1` ways the maximum can have been reached.
@@ -292,7 +380,7 @@ fn register_tracks_max_plus_within_its_log_bound() {
 // 3. Invariants
 // ---------------------------------------------------------------------------
 
-/// `Λₜ < 1/qₜ + mₜ` whatever came before, and `dₜ ≤ αₜ`: the gate can add
+/// `Λₜ < 1/qₜ + γₜ` (here `γ = Δ`) whatever came before, and `dₜ ≤ αₜ`: the gate can add
 /// forgetting, never remove it.
 #[test]
 fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
@@ -309,7 +397,7 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
 
 /// For `q, m > 0` every step is an entrywise-positive matrix, so it contracts
 /// the Hilbert distance `|ln Λ − ln Λ'|` by at least
-/// `tanh(¼·ln(1 + 1/(q·m)))` — with no `α` in it — and two caches that disagree
+/// `tanh(¼·ln(1 + 1/(q·γ)))` (here `γ = Δ`) — with no `α` in it — and two caches that disagree
 /// about the evidence held forget the disagreement.
 #[test]
 fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
@@ -333,6 +421,42 @@ fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
                 let dist = (a[i] - b[i]).abs() as f64;
                 assert!(dist <= bound + 2e-3, "b{bi} h{h} t{t}: {dist} > {bound}");
             }
+        }
+    }
+}
+
+fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
+    floats(t.cast(DType::F32)).iter().all(|v| v.is_finite())
+}
+
+/// A mass that underflows to `0` — `Δ` past softplus's range (≈ −104 of
+/// pre-activation in f32, ≈ −17 in f16) or a saturated `λ` — leaves the
+/// gradient finite, in both dtypes: the gate's masses are logs of
+/// pre-activations, never `ln` of a zero.
+#[test]
+fn an_underflowing_mass_keeps_the_gradient_finite() {
+    let device: Device = Default::default();
+    let ad = device.autodiff();
+    let dt_raw = [-1e4f32, -200.0, -40.0, -17.5, -8.0, 0.0, 30.0];
+    let lambda_raw = [0.0f32, 200.0, -200.0, 40.0, -40.0, 1.0, -1.0];
+    for dtype in [DType::F32, DType::F16] {
+        let on = |t: Tensor<3>| t.cast(dtype);
+        let lift = |v: [f32; 7]| Param::from_tensor(on(Tensor::<1>::from_floats(v, &ad).reshape([1, 7, 1])));
+        let (x, l) = (lift(dt_raw), lift(lambda_raw));
+        let masses = LogMasses::new(x.val(), (0.0, 6.5504e4), Some(l.val()), None);
+        let out = kalman::gate(
+            on(Tensor::full([1, 7, 1], -0.5, &ad)),
+            masses,
+            GainInput {
+                log_kappa_h: Tensor::<1>::full([1], 0.5f32.ln(), &ad).cast(dtype),
+                noise_bsh: None,
+                carry_bh: Tensor::<2>::full([1, 1], LOG_ZERO, &ad).cast(dtype),
+            },
+        );
+        assert!(all_finite(out.log_precision_bsh.clone()), "{dtype:?}: ln Λ");
+        let grads = (out.da_bsh.sum() + out.log_precision_bsh.sum()).backward();
+        for (name, g) in [("Δ", x.val().grad(&grads)), ("λ", l.val().grad(&grads))] {
+            assert!(all_finite(g.expect(name)), "{dtype:?}: the {name} gradient");
         }
     }
 }
@@ -627,39 +751,64 @@ fn zero_kappa_and_zero_readout_are_the_stock_block() {
 fn the_join_has_live_gradients_at_init() {
     let device: Device = Default::default();
     let ad = device.clone().autodiff();
-    let config = Case {
-        gain: Gain::KalmanProjectedNoise,
-        tropical: Tropical::MaxPlus,
-        trapezoid: Trapezoid::HorizontalCarryOver,
-        u: 1,
-        rotation: RotationKind::Complex2D,
-        mimo: 1,
-        norm: false,
+    // With the out-norm too: `ω` scales the SSD's share against the `D` skip,
+    // which the norm keeps.
+    for norm in [false, true] {
+        let config = Case {
+            gain: Gain::KalmanProjectedNoise,
+            tropical: Tropical::MaxPlus,
+            trapezoid: Trapezoid::HorizontalCarryOver,
+            u: 1,
+            rotation: RotationKind::Complex2D,
+            mimo: 1,
+            norm,
+        }
+        .config();
+        let model = config.init(&ad);
+        let input = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.5, 1.5, &device)).to_device(&ad);
+        let head = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.0, 1.0, &device)).to_device(&ad);
+        let (out, _) = model.forward(input, None, Mamba3SsdPath::default());
+        let grads = (out * head).sum().backward();
+        let live = |name: &str, g: Option<f32>| {
+            let g = g.unwrap_or_else(|| panic!("norm {norm}, {name}: no gradient"));
+            assert!(g > 0.0, "norm {norm}, {name}: dead gradient at init");
+        };
+        let norm1 = |t: Option<Tensor<1>>| t.map(|g| g.abs().sum().into_scalar::<f32>());
+        let norm2 = |t: Option<Tensor<2>>| t.map(|g| g.abs().sum().into_scalar::<f32>());
+        live("ln κ", norm1(model.kalman_log_kappa_h.as_ref().unwrap().val().grad(&grads)));
+        live("ω", norm1(model.kalman_read_h.as_ref().unwrap().val().grad(&grads)));
+        live("e", norm2(model.tropical_readout_hp.as_ref().unwrap().val().grad(&grads)));
+        // The noise rows are the in-projection's; they see `κ`'s gradient.
+        let noise = model.noise_channels_total();
+        let tropical = model.tropical_channels_total();
+        let w_grad = model.in_proj.weight.val().grad(&grads).unwrap();
+        let width = w_grad.dims()[1];
+        live(
+            "noise rows",
+            Some(w_grad.narrow(1, width - tropical - noise, noise).abs().sum().into_scalar::<f32>()),
+        );
     }
-    .config();
-    let model = config.init(&ad);
-    let input = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.5, 1.5, &device)).to_device(&ad);
-    let head = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.0, 1.0, &device)).to_device(&ad);
+}
+
+/// The block-level regression for [`an_underflowing_mass_keeps_the_gradient_finite`]:
+/// heads whose `Δ` underflows at every position (`dt_bias` far past softplus's
+/// range) still backpropagate finite gradients into every parameter.
+#[test]
+fn a_vanished_step_keeps_the_block_gradient_finite() {
+    let device: Device = Default::default();
+    let ad = device.clone().autodiff();
+    let config = lattice()[1].config();
+    let mut model = exercised(config.init(&ad), &ad);
+    let bias: Vec<f32> = (0..model.nheads()).map(|h| if h % 2 == 0 { -200.0 } else { 0.0 }).collect();
+    model.dt_bias_h = Param::from_tensor(Tensor::from_floats(bias.as_slice(), &ad));
+    let input = Tensor::<3>::from_inner(uniform([2, 5, config.d_model], -1.5, 1.5, &device)).to_device(&ad);
     let (out, _) = model.forward(input, None, Mamba3SsdPath::default());
-    let grads = (out * head).sum().backward();
-    let live = |name: &str, g: Option<f32>| {
-        let g = g.unwrap_or_else(|| panic!("{name}: no gradient"));
-        assert!(g > 0.0, "{name}: dead gradient at init");
-    };
-    let norm1 = |t: Option<Tensor<1>>| t.map(|g| g.abs().sum().into_scalar::<f32>());
-    let norm2 = |t: Option<Tensor<2>>| t.map(|g| g.abs().sum().into_scalar::<f32>());
-    live("ln κ", norm1(model.kalman_log_kappa_h.as_ref().unwrap().val().grad(&grads)));
-    live("ω", norm1(model.kalman_read_h.as_ref().unwrap().val().grad(&grads)));
-    live("e", norm2(model.tropical_readout_hp.as_ref().unwrap().val().grad(&grads)));
-    // The noise rows are the in-projection's; they see `κ`'s gradient.
-    let noise = model.noise_channels_total();
-    let tropical = model.tropical_channels_total();
-    let w_grad = model.in_proj.weight.val().grad(&grads).unwrap();
-    let width = w_grad.dims()[1];
-    live(
-        "noise rows",
-        Some(w_grad.narrow(1, width - tropical - noise, noise).abs().sum().into_scalar::<f32>()),
-    );
+    let grads = out.sum().backward();
+    let finite = |name: &str, g: Option<bool>| assert!(g.expect(name), "the {name} gradient");
+    finite("in_proj", model.in_proj.weight.val().grad(&grads).map(all_finite));
+    finite("dt_bias", model.dt_bias_h.val().grad(&grads).map(all_finite));
+    finite("ln κ", model.kalman_log_kappa_h.as_ref().unwrap().val().grad(&grads).map(all_finite));
+    finite("ω", model.kalman_read_h.as_ref().unwrap().val().grad(&grads).map(all_finite));
 }
 
 /// A no-grad region moves every cache tensor to the inner backend and back by

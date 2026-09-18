@@ -163,16 +163,9 @@ impl Mamba3 {
             self.trapezoid_spec(),
             self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
         );
-        // The tropical register, over the same folded axis.
-        let tropical_bsh = tropical_btH.map(|(a_btH, b_btH)| {
-            crate::mamba3::positive::tropical::register(
-                unfold_micro_bs(a_btH, u),
-                unfold_micro_bs(b_btH, u),
-                cache
-                    .tropical_bh
-                    .clone()
-                    .expect("a tropical register keeps its cache slot"),
-            )
+        // The tropical register's inputs, on the same folded axis.
+        let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
+            (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
         });
 
         san(&dt_bsh);
@@ -428,16 +421,14 @@ impl Mamba3 {
         } else {
             y_bTmhp.narrow(1, 0, tokens)
         };
-        // The positive systems' `C`/`D` ports read at the read rows, and their
-        // last position is the next call's carry.
-        let last_bh = |t_bsh: &Tensor<3>| t_bsh.clone().narrow(1, sequence - 1, 1).squeeze_dim::<2>(1);
-        cache.log_precision_bh = log_precision_bsh.as_ref().map(last_bh);
-        cache.tropical_bh = tropical_bsh.as_ref().map(last_bh);
-        let y_btmhp = self.positive_read(
+        let (y_btmhp, log_precision_bh, tropical_bh) = self.positive_tail(
             y_btmhp,
-            log_precision_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
-            tropical_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+            log_precision_bsh,
+            tropical_ab_bsh,
+            cache.tropical_bh.clone(),
         );
+        cache.log_precision_bh = log_precision_bh;
+        cache.tropical_bh = tropical_bh;
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
 
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
@@ -555,11 +546,12 @@ mod step {
         pub rot_bua: Option<Tensor<3>>,
         /// `Δ` `[batch, u, nheads]`.
         pub dt_buh: Tensor<3>,
-        /// `Δ·A` `[batch, u, nheads]`, the log-decay — the block's transport
+        /// The log-decay `[batch, u, nheads]` — `Δ·A`, or the Kalman gate's
+        /// computed one (`helpers::TrapezoidCoeffs::da`). The block's transport
         /// (both within it and into the tap slots it leaves behind) is a
         /// product of `α`s, i.e. a sum of these.
         pub da_buh: Tensor<3>,
-        /// `α = exp(Δ·A)` `[batch, u, nheads]`.
+        /// `α = exp(da)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
         /// The tap mass `ν` `[batch, u, nheads]`; `None` under
         /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
@@ -1030,28 +1022,15 @@ mod step {
             san(&out_m_bmhp);
 
             // ── The positive systems' ports, at the block's one read row ──────
-            // `forward`'s `positive_read` on a one-token axis; the block's last
-            // micro-step is the read row and the next carry both.
-            let last_bh = |t_buh: Tensor<3>| t_buh.narrow(1, u - 1, 1).squeeze_dim::<2>(1);
-            let tropical_buh = proj.tropical_ab_buh.map(|(a_buh, b_buh)| {
-                crate::mamba3::positive::tropical::register(
-                    a_buh,
-                    b_buh,
-                    cache
-                        .tropical_bh
-                        .clone()
-                        .expect("a tropical register keeps its cache slot"),
-                )
-            });
-            let log_precision_bh = proj.log_precision_buh.map(last_bh);
-            let tropical_bh = tropical_buh.map(last_bh);
-            let out_m_bmhp = self
-                .positive_read(
-                    out_m_bmhp.unsqueeze_dim::<5>(1),
-                    log_precision_bh.clone().map(|t| t.unsqueeze_dim::<3>(1)),
-                    tropical_bh.clone().map(|t| t.unsqueeze_dim::<3>(1)),
-                )
-                .squeeze_dim::<4>(1);
+            // `forward`'s tail on a one-token axis: the block's last micro-step
+            // is the read row and the next carry both.
+            let (out_b1mhp, log_precision_bh, tropical_bh) = self.positive_tail(
+                out_m_bmhp.unsqueeze_dim::<5>(1),
+                proj.log_precision_buh,
+                proj.tropical_ab_buh,
+                cache.tropical_bh.clone(),
+            );
+            let out_m_bmhp = out_b1mhp.squeeze_dim::<4>(1);
             cache.log_precision_bh = log_precision_bh;
             cache.tropical_bh = tropical_bh;
 

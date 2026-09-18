@@ -46,7 +46,7 @@ const A_HOLD_RAW: f64 = -20.0;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 
-/// The symbol embeddings: the nine values on a circle of radius `√2` at height
+/// The symbol embeddings: the 33 values on a circle of radius `√2` at height
 /// `1` (so the value is an affine read), the gap at the far pole. Norm `√3`, so
 /// the layer's pre-`RmsNorm` passes them through.
 fn embeddings() -> Vec<Vec<f64>> {

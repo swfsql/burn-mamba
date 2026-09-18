@@ -18,12 +18,12 @@
 //!
 //! - `Gain::KalmanProjectedNoise` — the computed decay, plus one in-projection
 //!   channel per (head, micro-step) for `r`.
-//! - `has_outproj_norm = false` — with the per-head norm on, `(Λ + ε)^(−ω)`
-//!   would be removed by it, and the block would hold `η`, not `S`.
+//! - `has_outproj_norm = false` (the default) — the construction is built on
+//!   the estimator head's raw output `v − S`.
 //! - `a_floor = 1e-8` — the estimator has to hold its sum *unweighted* across a
 //!   whole sequence; the block's floor on `|A|` is the only thing that decays
 //!   it, and at the default `1e-4` that leak is comparable to the margins here.
-//! - `d_model = 3` with the nine values on a circle, as in `tally-record`.
+//! - `d_model = 3` with the 33 values on a circle, as in `tally-record`.
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{

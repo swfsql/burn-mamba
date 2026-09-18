@@ -243,8 +243,8 @@ notation tables; the essentials:
   conv. Why those two deletions are affordable, why the bias order and its init are
   mechanisms rather than decoration, and what data-dependent `A` buys:
   `info/mamba-3/architecture-deltas.md` — cite it, don't restate it. The in-projection splits
-  `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u]` — only the per-micro-step
-  segments widen. The trapezoid touches only the *linear* term of the local objective
+  `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u|r·u|a·u|b·u]` — only the
+  per-micro-step segments widen (the last three: `positive/`, below). The trapezoid touches only the *linear* term of the local objective
   (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two
   installments collapse), so it is orthogonal to the rotation and to `micro_steps`:
   `info/mamba-3/trapezoid-as-integration.md` — cite it, don't restate it. MIMO widens that *same*
@@ -422,11 +422,13 @@ sets the plant's coefficients — a cascade, so the chunkwise pass survives (a g
 read the state would not). Both members are nonnegative 2×2 matrices acting
 projectively, carried in log coordinates, so one scan serves both:
 `Gain::{Projected (default), Kalman, KalmanProjectedNoise}` computes the decay from an
-accumulated precision `Λ` (`ln d = ln α − log1p(κΔαΛ)`, substituted inside
-`helpers::trapezoidal_coefficients` *before* `α` is formed, so every consumer follows),
+accumulated precision `Λ` (`ln d = ln α − log1p(qα(Λ+ν))`, substituted inside
+`helpers::trapezoidal_coefficients` *before* `α` is formed, so every consumer follows;
+`Λ` is the plant's own weight on ones, exact for a lag-1 tap, an upper bound at lag `u`),
 and `Tropical::{None (default), MaxPlus}` carries a soft `max(c + a, b)` register into
-the readout. Ports: the decay, the read `(Λ+ε)^(−ω)` (absent under `has_outproj_norm`,
-which would remove it), and `y += c·e`. Structural, stock exactly at `κ = 0` / `e = 0`;
+the readout. Ports: the decay, the read `(Λ+ε)^(−ω)` (before the `D` skip, so
+`has_outproj_norm` keeps it), and `y += c·e`. The gate's masses are logs of
+pre-activations, never `ln` of a mass (which underflows, and `0·∞` is a NaN gradient). Structural, stock exactly at `κ = 0` / `e = 0`;
 one cache slot each. What each buys — growth, range, a discount inside the recurrence —
 and what a classifier gets for free instead: `info/kalman/gate-as-positive-system.md`, cite it,
 don't restate it.

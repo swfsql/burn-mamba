@@ -21,7 +21,7 @@
 > data-dependent `A` opens — and neither moves an algebraic claim the trio makes.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/mamba-3/architecture_deltas.py`](../scripts/mamba-3/architecture_deltas.py) (35 checks,
+> [`scripts/mamba-3/architecture_deltas.py`](../../scripts/mamba-3/architecture_deltas.py) (35 checks,
 > section numbers match). The script depends only on `numpy` and on the definitions
 > reproduced here — not on the crate.
 

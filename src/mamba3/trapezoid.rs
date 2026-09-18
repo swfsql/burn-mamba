@@ -128,6 +128,14 @@ pub enum Trapezoid {
     /// token** at the only positions whose output survives (`j = u−1`), so it is
     /// one small intra-token contraction outside the chunked kernel rather than
     /// a wider mask (`crate::mamba3::single_ssd::token_band`).
+    ///
+    /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`** this
+    /// tap has no exact filter form: its installment arrives `u` steps late,
+    /// after `u − 1` predicts a filter would have had to make knowing it. The
+    /// gate counts it like a lag-1 installment, so `Λ` over-estimates the weight
+    /// the plant wrote and `η/Λ` is only approximately its weighted mean. The
+    /// block still runs, and its pathways still agree. The lag-1 patterns are
+    /// exact ([`crate::mamba3::positive::kalman`]).
     Vertical,
 
     /// **Lag 1, suppressed at each token's first micro-step**: taps pair
@@ -178,6 +186,9 @@ pub enum Trapezoid {
     /// [`Vertical`](Self::Vertical)'s unchanged. On the double-SSD pathway the
     /// two taps have different shifts and cannot share a pass, so that pathway
     /// runs **three** SSD calls; this pattern's home is the single one.
+    ///
+    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, inexact
+    /// through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
     VerticalPlusHorizontalReset,
 
     /// [`Vertical`](Self::Vertical) **and**
@@ -200,6 +211,9 @@ pub enum Trapezoid {
     /// slot, and it carries the empty decay product), and one extra term in the
     /// single-SSD boundary seed — the lag-1 tap now crosses a call boundary,
     /// which under the reset it never does.
+    ///
+    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, inexact
+    /// through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
     VerticalPlusHorizontalCarryOver,
 }
 

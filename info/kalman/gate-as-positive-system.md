@@ -7,15 +7,15 @@
 > scan, and the three ports those systems reach the plant through.
 >
 > The other three notes classify the terms of the *plant's* local objective:
-> [`rotation-as-optimization.md`](rotation-as-optimization.md) the quadratic term,
-> [`trapezoid-as-integration.md`](trapezoid-as-integration.md) the linear term along
-> time, [`mimo-as-batch.md`](mimo-as-batch.md) the linear term along rank. This one
+> [`rotation-as-optimization.md`](../mamba-3/rotation-as-optimization.md) the quadratic term,
+> [`trapezoid-as-integration.md`](../mamba-3/trapezoid-as-integration.md) the linear term along
+> time, [`mimo-as-batch.md`](../mamba-3/mimo-as-batch.md) the linear term along rank. This one
 > is about something else entirely: a system that is **not** the plant, running
 > beside it, whose output sets the plant's coefficients.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/kalman/gate_as_positive_system.py`](../scripts/kalman/gate_as_positive_system.py)
-> (22 checks, section numbers match). The script depends only on `numpy` and the
+> [`scripts/kalman/gate_as_positive_system.py`](../../scripts/kalman/gate_as_positive_system.py)
+> (29 checks, section numbers match). The script depends only on `numpy` and the
 > equations reproduced here — not on the crate — so the results stand
 > independently of the implementation. The accuracy tables are from
 > `examples/tally/`, whose tests recompute them.
@@ -58,7 +58,8 @@ to isolate it, against nothing at all on a task that is not.
 3. Its precision has a ceiling `Λₜ < 1/qₜ + mₜ` whatever the history (§3.4) and
    contracts the Hilbert distance at a rate with **no `α` in it** (§3.5); at
    `q = 0, α ≡ 1` the gain collapses like `1/t`, which is what the ceiling
-   prevents (§3.6).
+   prevents (§3.6). Under the trapezoid's two installments all of this holds
+   with `γ` for `m`, and `Λ` is the plant's own weight on ones (§3.9).
 4. Its ageing is hyperbolic in elapsed time and saturating in evidence held; no
    geometric discount fits the family (§3.7: best fit 0.89 relative error).
 5. The tropical member is the same scan with a positive log-decay: above the hard
@@ -125,8 +126,8 @@ computed:
   ηₜ = dₜ·ηₜ₋₁ + (the block's own write)   the plant, unchanged
 ```
 
-with `mₜ = Δₜ` the step's whole mass (whatever the trapezoid splits it into) and
-`qₜ = κₕ·Δₜ·exp(rₜ)` the doubt it injects. Its matrix is
+with `mₜ = Δₜ` the step's mass when it has no left endpoint (`Trapezoid::None`;
+§3.9 is the split) and `qₜ = κₕ·Δₜ·exp(rₜ)` the doubt it injects. Its matrix is
 
 ```text
   M = log [[α(1 + q·m),  m],
@@ -175,6 +176,35 @@ grows with elapsed time — and costs **zero in-projection channels**: one per-h
 evidence. `Gain::KalmanProjectedNoise` multiplies `q` by a projected `exp(rₜ)`,
 which buys exactly that separation — a gap — at one channel per (head,
 micro-step).
+
+### 3.9 Under the trapezoid
+
+With a `β` tap the plant pays each sample in two installments: `γₜ = λₜ·Δₜ` at
+its own step, and `νₜ₊₁ = (1 − λₜ₊₁)·Δₜ₊₁` one step later, transported by that
+step's decay (`β = ν·d`). Counting the late installment before the predict,
+
+```text
+  Lₜ = Λₜ₋₁ + νₜ,    dₜ = αₜ / (1 + qₜ·αₜ·Lₜ),    Λₜ = dₜ·Lₜ + γₜ
+```
+
+is still one Möbius map — shift by `ν`, predict, shift by `γ`:
+
+```text
+  M = log [[α(1 + qγ),  αν + γ(1 + qαν)],
+           [αq,         1 + qαν       ]]
+```
+
+and it makes `Λ` **exactly** the plant's recurrence on ones: the total weight of
+every sample written (a fresh cache's zero tap slot among them), with `η/Λ`
+their weighted mean. The ceiling becomes `Λₜ < 1/qₜ + γₜ`; the contraction's
+exact rate uses `γ + αν(1 + qγ) ≥ γ`, so `tanh(¼·ln(1 + 1/(q·γ)))` is still an
+`α`-free bound. Without a tap, `γ = Δ` and `ν = 0`, and this is §3's element.
+
+A **lag-`u`** tap (the `Vertical*` patterns at `u > 1`) is transported across
+its whole gap, `∏ d` over `u` steps, which reads `u` earlier precisions — no
+2×2 map does. The gate enters it like a lag-1 installment and over-counts by
+`νₜ·(dₜ − ∏ d)`, so `Λ` bounds the plant's weight from above instead of
+equalling it.
 
 ---
 
@@ -247,8 +277,8 @@ an affine read of one embedding is why more heads do not buy more digits.
 ### 6.1 What is structural
 
 `Gain` and `Tropical` are structural, like `Trapezoid` and `RotationKind`: a
-Kalman member allocates `κ` per head (and `ω` without the output norm), one cache
-slot, and — on the projected-noise arm — one in-projection channel per (head,
+Kalman member allocates `κ` and `ω` per head (the output norm keeps `ω`, which
+scales the SSD's readout against the `D` skip), one cache slot, and — on the projected-noise arm — one in-projection channel per (head,
 micro-step); a register allocates two channels, a slot and `eₕ`. Stock is the
 default and is recovered *exactly*, not approximately, at `κ = 0` / `e = 0`.
 
@@ -269,8 +299,8 @@ single-SSD's key scale all read the log-decay, and substituting it where it is
 
 The trained columns are short runs at equal budget, so they compare arms rather
 than establish ceilings; the hand-built column is the exactness claim. Two
-further numbers are the ladder's real content, both from rungs that first tied:
-the maximum ties at six values (a small enough alphabet fits the exponential
+further numbers are the ladder's real content, both ties: the maximum ties at
+six values (a small enough alphabet fits the exponential
 encoding), and the drift task ties everywhere except where the estimate actually
 decides — 98–99% on ordinary streams against 90.7% on the probe bursts. A
 capability that only shows under a family built for it is still a capability, but
@@ -295,7 +325,7 @@ rungs' tests recompute them.
 ## 7. Reproduction
 
 ```bash
-python3 scripts/kalman/gate_as_positive_system.py      # 22 checks, float64
+python3 scripts/kalman/gate_as_positive_system.py      # 29 checks, float64
 cargo test --lib positive -- --test-threads=1   # the implementation's own suite
 cargo test --release --example tally-depth -- --nocapture   # and the ladder's
 ```
@@ -316,7 +346,7 @@ cargo test --release --example tally-depth -- --nocapture   # and the ladder's
   belong to.
 - Prior art on the *scaled* member, which several architectures already build per
   key channel: ABC (Peng et al., 2022) and LightNet (2024) form a cumulative
-  log-normaliser and decay by its increment; RWKV-4's WKV is the same object with
-  a current-token bonus. The **added** member (feedback on confidence) and the
+  log-normaliser and decay by its increment; RWKV-4's WKV is (from memory,
+  unverified) the same object with a current-token bonus. The **added** member (feedback on confidence) and the
   tropical readout are what this note adds; a full literature check is still
   owed before any novelty claim beyond that.

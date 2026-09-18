@@ -6,7 +6,7 @@ float64, with section numbers matching the document's. Pure `numpy`; no other
 dependency, no I/O, no reference to the model code — the point is that these are
 statements about the *block*, reproducible from its definition alone.
 
-    python3 scripts/architecture_deltas.py
+    python3 scripts/mamba-3/architecture_deltas.py
 
 Exits non-zero if any check fails.
 

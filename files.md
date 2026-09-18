@@ -104,9 +104,11 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   same-named segments (independent maps to Muon; `without_segment` still drops the whole
   stream) + `out_proj`. The positive systems' `r·u|a·u|b·u` trail even those
   (`split_positive` peels them first; AdamW), and their per-head params
-  `kalman_log_kappa_h` / `kalman_read_h` / `tropical_readout_hp` meet the SSD's readout in
-  `positive_read`, **before** the `D` skip; `gain_input` / `zero_positive_state` feed and
-  seed them.
+  `kalman_log_kappa_h` (held in logs; stock is its `−∞` limit) / `kalman_read_h` (kept
+  under the out-norm) / `tropical_readout_hp` meet the SSD's readout in `positive_read`,
+  **before** the `D` skip; `gain_input` / `zero_positive_state` feed and seed them, and
+  `positive_tail` (register scan, carries, ports) is the one tail both pathways and
+  `step` share.
   `untied: Vec<Mamba3Untied>` (every tensor but `in_proj`'s `z|x|B|C` and `out_proj`):
   tiled by `init_applications`, listed by `untied_params`; `InProjTail` moves the
   `d_in_proj_tail()` segments into `in_proj_tail` at any count (`project_in` rejoins;
@@ -424,17 +426,23 @@ and gradient reaches the right factor's channels.
 Per-head scalar systems beside the plant; math and audit in `info/kalman/gate-as-positive-system.md`.
 - **`mod.rs`** — `Gain::{Projected, Kalman, KalmanProjectedNoise}` / `Tropical::{None,
   MaxPlus}` (structural, `#[module(skip)]` on the block); `LOG_ZERO`, `ln 0` kept finite
-  (an lse of two `−∞` is NaN; `2·LOG_ZERO` still fits f16).
+  (an lse of two `−∞` is NaN; `2·LOG_ZERO` still fits f16); `fresh_slots`, the one
+  fresh `(ln Λ, c)` every cache constructor uses.
 - **`scan.rs`** — `lse` (selects `hi`/`lo` rather than `max`, so it is exact beside
   `LOG_ZERO` and splits a tie's gradient); `Element` with `Mobius` (projective, a
   detached max-shift per combine — the read cancels it) and `Affine` (lower row fixed, so
-  no shift); `prefix` (Hillis–Steele doubling) and `fold`, the sequential reference.
-  Plain autodiff: `quat_scan`'s divide-out backward does not port, a log-semiring element
-  having no inverse.
-- **`kalman.rs`** — `gate`: elements `ln [[α(1+qm), m], [αq, 1]]` (`m = Δ`,
-  `q = κΔ·e^r`), the scan for `ℓ = ln Λ`, then `ln d = ln α − softplus(ln q + ln α +
-  ℓₜ₋₁)`, exactly `ln α` at `κ = 0`.
-- **`tropical.rs`** — `register`: the affine scan from `(a, b)`.
+  no shift); identities follow the elements' dtype; `prefix` (Hillis–Steele doubling —
+  why not `prefix_sum`'s blocking, and its cost, is its doc) and `fold`, the sequential
+  reference. Plain autodiff: `quat_scan`'s divide-out backward does not port, a
+  log-semiring element having no inverse.
+- **`kalman.rs`** — `LogMasses` (`ln Δ`, `ln γ`, `ln ν` from the **pre-activations**
+  via `log_softplus` / `ln σ`, f16-aware knee: `ln` of an underflowed mass is a NaN
+  gradient); `gate`: elements shift-by-`ν` ∘ predict ∘ shift-by-`γ` (`q = κΔ·e^r`), the
+  scan for `ℓ = ln Λ`, then `ln d = ln α − softplus(ln q + ln α + ln(Λₜ₋₁ + νₜ))`,
+  exactly `ln α` at `κ = 0`. `Λ` is the plant's weight on ones: exact for a lag-1 tap,
+  an upper bound for a lag-`u` one (its gap's transport reads `u` precisions).
+- **`tropical.rs`** — `register`: the affine scan from `(a, b)`; at `u > 1` it scans
+  every micro-step though only each token's last is read (the `1/u` fold is its doc).
 
 ### `mamba3/quat_scan/`
 Memory-efficient cumprod scan (recompute backward, like SSD `SerialRecalculated`).
@@ -515,7 +523,7 @@ rationale.
   fourth route (composing non-commuting rank-one curvatures) and why isotropy forbids it
   here; the (curvature rank × step algebra) 2×2 the `RotationKind` table follows from.
   Cite it rather than restating it.
-- **`scripts/rotation_as_optimization.py`** — float64 `numpy` check of all 69 of that
+- **`scripts/mamba-3/rotation_as_optimization.py`** — float64 `numpy` check of all 69 of that
   document's numbered claims, section numbers matching. Encodes the recurrence from the
   equations and never imports the crate, so it is independent of the implementation
   (which the Rust suites cover). Runs standalone; non-zero exit on failure.
@@ -532,7 +540,7 @@ rationale.
   at `u>1`, each member's degeneracies and cost.
   Cite it rather than restating it. It prices the lattice's members but does not
   parameterise them — `mamba3/trapezoid.rs`'s header owns that.
-- **`scripts/trapezoid_as_integration.py`** — same contract as the above: float64 `numpy`,
+- **`scripts/mamba-3/trapezoid_as_integration.py`** — same contract as the above: float64 `numpy`,
   74 checks, section numbers matching, standalone, non-zero exit on failure. §9 also checks
   the crate's parameterisation: mass conservation, the closed tap's fallback, the two-tap
   collapse and its `strict scale − far band + γ diagonal` decomposition.
@@ -548,7 +556,7 @@ rationale.
   preimage and break the time-invariance of the same-step `M²` Gram); and the containment
   `MambaProduct(u=M) ⊇ MIMO(M)`, the two dials being one dial with different things tied.
   Cite it rather than restating it.
-- **`scripts/mimo_as_batch.py`** — same contract as the above: float64 `numpy`, 54 checks,
+- **`scripts/mamba-3/mimo_as_batch.py`** — same contract as the above: float64 `numpy`, 54 checks,
   section numbers matching, standalone, non-zero exit on failure.
 - **`info/mamba-3/architecture-deltas.md`** — the reference for the Mamba-3 block *outside* the
   recurrence, where the trio above covers the recurrence itself; the only note that
@@ -566,7 +574,7 @@ rationale.
   placement erases (post-gate erases a gate rescaling, pre-gate keeps it), the mechanism
   behind the hybrid norm table; and §8, the argument behind `optimal_chunk_len`'s divisor.
   Cite it rather than restating it.
-- **`scripts/architecture_deltas.py`** — same contract as the above: float64 `numpy`, 35
+- **`scripts/mamba-3/architecture_deltas.py`** — same contract as the above: float64 `numpy`, 35
   checks, section numbers matching, standalone, non-zero exit on failure. Defines the
   `B`/`C` path and the trapezoid coefficients from scratch and never calls the crate, so
   a failure is a wrong claim, not a drifted implementation.
@@ -574,11 +582,13 @@ rationale.
   *beside* the plant rather than a term of its objective. Establishes: both members are
   positive linear systems sharing one log-semiring scan; the Kalman member's information
   form **is** the covariance-form filter, with a ceiling `Λ < 1/q + m` and a Birkhoff
-  contraction whose rate has no `α` in it; its ageing is hyperbolic, which no geometric
+  contraction whose rate has no `α` in it; under the trapezoid (§3.9) one Möbius step
+  still makes `Λ` the plant's weight on ones — exact at lag 1, an upper bound at lag `u`
+  — with `γ` for `m`; its ageing is hyperbolic, which no geometric
   discount fits; the tropical member is max-plus within `ln(t+1)`. And the audit (§5–6):
   a classifier gets a lot of this free — the gate cross-multiplies, the final norm divides,
   a maximum is a sum in the exponential domain — so what survives is growth, range and a
   discount inside the recurrence, each measured on `examples/tally/` against the best stock
   arm. Cite it rather than restating it.
-- **`scripts/gate_as_positive_system.py`** — same contract as the above: float64 `numpy`,
-  22 checks, section numbers matching, standalone, non-zero exit on failure.
+- **`scripts/kalman/gate_as_positive_system.py`** — same contract as the above: float64
+  `numpy`, 29 checks, section numbers matching, standalone, non-zero exit on failure.

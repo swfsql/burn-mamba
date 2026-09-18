@@ -194,16 +194,9 @@ impl Mamba3 {
             self.trapezoid_spec(),
             self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
         );
-        // The tropical register, over the same folded axis.
-        let tropical_bsh = tropical_btH.map(|(a_btH, b_btH)| {
-            crate::mamba3::positive::tropical::register(
-                unfold_micro_bs(a_btH, u),
-                unfold_micro_bs(b_btH, u),
-                cache
-                    .tropical_bh
-                    .clone()
-                    .expect("a tropical register keeps its cache slot"),
-            )
+        // The tropical register's inputs, on the same folded axis.
+        let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
+            (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
         });
         let nu_bsh = nu_bsh.expect("a β tap has a mass");
         san(&dt_bsh);
@@ -452,16 +445,14 @@ impl Mamba3 {
             Some(correction_btmhp) => y_bsmhp - correction_btmhp,
             None => y_bsmhp,
         };
-        // The positive systems' `C`/`D` ports read at the read rows, and their
-        // last position is the next call's carry.
-        let last_bh = |t_bsh: &Tensor<3>| t_bsh.clone().narrow(1, sequence - 1, 1).squeeze_dim::<2>(1);
-        cache.log_precision_bh = log_precision_bsh.as_ref().map(last_bh);
-        cache.tropical_bh = tropical_bsh.as_ref().map(last_bh);
-        let y_bsmhp = self.positive_read(
+        let (y_bsmhp, log_precision_bh, tropical_bh) = self.positive_tail(
             y_bsmhp,
-            log_precision_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
-            tropical_bsh.map(|t| helpers::read_rows::<3, 4>(t, 1, u)),
+            log_precision_bsh,
+            tropical_ab_bsh,
+            cache.tropical_bh.clone(),
         );
+        cache.log_precision_bh = log_precision_bh;
+        cache.tropical_bh = tropical_bh;
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
         let sequence = tokens;
 

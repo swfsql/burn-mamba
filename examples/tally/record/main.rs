@@ -7,7 +7,7 @@
 //! the plant's state unused. It is also a **sum in the exponential domain** —
 //! `Σ exp(S·vₛ)` at decay one, with the record test linear there — so a linear
 //! state computes it too, and at a small alphabet a trained stock block does
-//! (~100% at six values and 32 tokens, the first version of this rung).
+//! (~100% at six values and 32 tokens).
 //!
 //! What that route costs is **range**: it needs `e^{S·(v_max − v_min)}` inside
 //! one in-projection channel, and every channel is an affine read of the same

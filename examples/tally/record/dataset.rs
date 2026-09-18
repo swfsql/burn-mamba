@@ -1,11 +1,11 @@
-//! The tally-record stream: six value symbols `1`…`6` and a reset `R`, whose
+//! The tally-record stream: twelve value symbols `1`…`12` and a reset `R`, whose
 //! per-position target is **whether this value is a new maximum since the last
 //! `R`** (strictly above every earlier one).
 //!
 //! ```text
 //!   symbols   3  1  4  4  2  R  2  5  1  6
 //!   max       3  3  4  4  4  -  2  5  5  6
-//!   target    +  .  +  .  .  .  +  +  .  +
+//!   target    +  -  +  -  -  .  +  +  -  +
 //! ```
 //!
 //! A running maximum is `cₜ = max(cₜ₋₁, vₜ)` — the (max, +) recursion with
@@ -17,14 +17,14 @@
 //! The *width* argument is why the values are read off a circle rather than
 //! one-hot: a linear state could hold one **latch** per threshold
 //! ("has a value ≥ k been seen?"), and the per-token gate could select the
-//! latch the current value names, so at `d_model ≥ 6` a stock block would solve
-//! this exactly. At `d_model = 3` it cannot — every in-projection channel is an
-//! affine functional of a 3-D embedding, and the six indicators `[v ≥ k]` are
-//! not affine in one, while the register's `b = S·v` is.
+//! latch the current value names, so at `d_model ≥ 12` a stock block would
+//! solve this exactly. At `d_model = 3` it cannot — every in-projection channel
+//! is an affine functional of a 3-D embedding, and the twelve indicators
+//! `[v ≥ k]` are not affine in one, while the register's `b = S·v` is.
 
 use crate::shared::data::{Generator, IGNORE, Rng};
 
-/// Number of distinct values (`1`…`6`); symbol `i` carries value `i + 1`.
+/// Number of distinct values (`1`…`12`); symbol `i` carries value `i + 1`.
 pub const NUM_VALUES: usize = 12;
 /// Input symbol: clear the running maximum.
 pub const RESET: usize = NUM_VALUES;

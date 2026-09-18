@@ -15,7 +15,7 @@
 > dials.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/mamba-3/trapezoid_as_integration.py`](../scripts/mamba-3/trapezoid_as_integration.py)
+> [`scripts/mamba-3/trapezoid_as_integration.py`](../../scripts/mamba-3/trapezoid_as_integration.py)
 > (74 checks, section numbers match). The script depends only on `numpy` and on the
 > equations reproduced here — not on the crate — so the results stand independently
 > of the implementation.

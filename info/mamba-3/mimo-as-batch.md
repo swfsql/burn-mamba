@@ -17,7 +17,7 @@
 > the three notes do not overlap.
 >
 > Every numbered claim below is checked in float64 by
-> [`scripts/mamba-3/mimo_as_batch.py`](../scripts/mamba-3/mimo_as_batch.py) (54 checks, section
+> [`scripts/mamba-3/mimo_as_batch.py`](../../scripts/mamba-3/mimo_as_batch.py) (54 checks, section
 > numbers match). The script depends only on `numpy` and on the equations
 > reproduced here — not on the crate — so the results stand independently of the
 > implementation.

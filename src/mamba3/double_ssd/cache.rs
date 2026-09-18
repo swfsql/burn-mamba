@@ -276,20 +276,20 @@ impl Mamba3DoubleSsdCacheConfig {
             self.num_quat_blocks,
             device,
         );
-        let slot = || {
-            Tensor::full(
-                [self.batch, self.nheads],
-                crate::mamba3::positive::LOG_ZERO,
-                device,
-            )
-        };
+        let (log_precision_bh, tropical_bh) = crate::mamba3::positive::fresh_slots(
+            self.gain,
+            self.tropical,
+            self.batch,
+            self.nheads,
+            device,
+        );
         Mamba3DoubleSsdCache {
             ssm_bhpr,
             k_state_bumhr,
             v_state_buhp,
             rotation,
-            log_precision_bh: self.gain.is_kalman().then(slot),
-            tropical_bh: self.tropical.is_on().then(slot),
+            log_precision_bh,
+            tropical_bh,
         }
     }
 }
