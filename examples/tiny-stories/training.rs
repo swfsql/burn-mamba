@@ -21,6 +21,8 @@ pub use crate::common::{
 use crate::dataset::TinyStoriesBatch;
 use burn::prelude::*;
 use burn::{
+    data::dataloader::{DataLoader, DataLoaderIterator, Progress},
+    data::dataset::DatasetError,
     module::AutodiffModule,
     optim::{GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
@@ -30,6 +32,8 @@ use burn_stack::examples::tiny_stories::lm::{
     self, Frontier, LmModel, dataloaders, epoch_train, epoch_valid,
 };
 use burn_stack::utils::ClassCursors;
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating, sampling and checkpointing
@@ -58,6 +62,10 @@ pub fn train(
     // Create the dataloaders (downloading the corpus on the first run).
     let (dataloader_train, dataloader_valid) =
         dataloaders(&config, &training_device, &progress);
+    // Opt-in wall-clock budget: the train loader stops yielding runs once
+    // `TS_TRAIN_SECONDS` have passed since its first one.
+    let deadline = Deadline::from_env();
+    let dataloader_train = deadline.wrap(dataloader_train);
 
     // Resume position, `--max-batches` budget, cadence and metrics log.
     let mut session = app_args.session(
@@ -111,6 +119,10 @@ pub fn train(
             &mut session,
         );
 
+        if deadline.passed() {
+            println!("reached the TS_TRAIN_SECONDS limit; stopping training");
+            break;
+        }
         if session.is_exhausted() {
             println!("reached the --max-batches limit; stopping training");
             break;
@@ -142,9 +154,15 @@ impl LmModel for Wrap {
         caches: Option<Self::Caches>,
         class: &mut ClassCursors,
     ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
+        let device = batch.inputs.device();
+        let t0 = prof::window_start();
         let (pre_metrics, caches) = self.forward_lm(batch, caches, class);
+        let t1 = prof::mark(&device);
         let grads = pre_metrics.loss.backward();
-        (TrainOutput::new(&self.0, grads, pre_metrics), caches)
+        let t2 = prof::mark(&device);
+        let output = TrainOutput::new(&self.0, grads, pre_metrics);
+        prof::window_end(&device, t0, t1, t2);
+        (output, caches)
     }
 
     fn detach_caches(caches: Self::Caches) -> Self::Caches {
@@ -157,11 +175,15 @@ impl LmModel for Wrap {
         caches: Option<Self::Caches>,
         class: &mut ClassCursors,
     ) -> (ClassificationOutput, Self::Caches) {
-        valid.forward_lm(batch, caches, class)
+        let (output, caches) = valid.forward_lm(batch, caches, class);
+        (per_char_loss(output), caches)
     }
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
-        Wrap(optim.step(lr, self.0, grads))
+        let t3 = prof::opt_start();
+        let model = Wrap(optim.step(lr, self.0, grads));
+        prof::opt_end(t3);
+        model
     }
 
     fn save(&self, app_args: &AppArgs) {
@@ -177,6 +199,226 @@ impl LmModel for Wrap {
         seed: u64,
     ) -> String {
         crate::inference::generate(&valid.0, device, prompt, n_chars, temperature, seed)
+    }
+}
+
+/// Replace the window's scalar loss by its per-character losses, so Burn's
+/// `LossMetric` (which weights an update by the loss tensor's length) averages
+/// validation per **character** rather than per window — a late window holding a
+/// single long story would otherwise weigh as much as a full one, and the figure
+/// would move with the (per-call reshuffled) batch composition.
+fn per_char_loss(output: ClassificationOutput) -> ClassificationOutput {
+    let ClassificationOutput {
+        output: logits,
+        targets,
+        ..
+    } = output;
+    let [n, _vocab] = logits.dims();
+    let log_probs = burn::tensor::activation::log_softmax(logits.clone(), 1);
+    let loss = log_probs.gather(1, targets.clone().reshape([n, 1])).reshape([n]).neg();
+    ClassificationOutput::new(loss, logits, targets)
+}
+
+/// The opt-in wall-clock budget of one training invocation (`TS_TRAIN_SECONDS`),
+/// counted from the train loader's first run, so corpus loading and the initial
+/// validation are excluded.
+#[derive(Clone)]
+struct Deadline {
+    budget: Option<Duration>,
+    start: Arc<OnceLock<Instant>>,
+}
+
+impl Deadline {
+    fn from_env() -> Self {
+        let budget = std::env::var("TS_TRAIN_SECONDS").ok().map(|secs| {
+            Duration::from_secs_f64(secs.parse().expect("TS_TRAIN_SECONDS: seconds"))
+        });
+        Self {
+            budget,
+            start: Arc::default(),
+        }
+    }
+
+    fn passed(&self) -> bool {
+        match (self.budget, self.start.get()) {
+            (Some(budget), Some(start)) => start.elapsed() >= budget,
+            _ => false,
+        }
+    }
+
+    /// A loader that ends the epoch at the deadline: the loop then closes the
+    /// epoch, checkpoints and validates exactly as at its natural end (so a
+    /// resumed run continues in the next epoch — keep `num_epochs` large).
+    fn wrap(&self, inner: lm::Dataloader) -> lm::Dataloader {
+        match self.budget {
+            None => inner,
+            Some(_) => Arc::new(DeadlineLoader {
+                inner,
+                deadline: self.clone(),
+            }),
+        }
+    }
+}
+
+struct DeadlineLoader {
+    inner: lm::Dataloader,
+    deadline: Deadline,
+}
+
+impl DataLoader<TinyStoriesBatch> for DeadlineLoader {
+    fn iter<'a>(&'a self) -> Box<dyn DataLoaderIterator<TinyStoriesBatch> + 'a> {
+        self.deadline.start.get_or_init(Instant::now);
+        Box::new(DeadlineIter {
+            inner: self.inner.iter(),
+            deadline: &self.deadline,
+        })
+    }
+
+    fn num_items(&self) -> usize {
+        self.inner.num_items()
+    }
+
+    fn to_device(&self, device: &Device) -> Arc<dyn DataLoader<TinyStoriesBatch>> {
+        Arc::new(DeadlineLoader {
+            inner: self.inner.to_device(device),
+            deadline: self.deadline.clone(),
+        })
+    }
+
+    fn slice(&self, start: usize, end: usize) -> Arc<dyn DataLoader<TinyStoriesBatch>> {
+        Arc::new(DeadlineLoader {
+            inner: self.inner.slice(start, end),
+            deadline: self.deadline.clone(),
+        })
+    }
+}
+
+struct DeadlineIter<'a> {
+    inner: Box<dyn DataLoaderIterator<TinyStoriesBatch> + 'a>,
+    deadline: &'a Deadline,
+}
+
+impl Iterator for DeadlineIter<'_> {
+    type Item = Result<TinyStoriesBatch, DatasetError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.deadline.passed() {
+            true => None,
+            false => self.inner.next(),
+        }
+    }
+}
+
+impl DataLoaderIterator<TinyStoriesBatch> for DeadlineIter<'_> {
+    fn progress(&self) -> Progress {
+        self.inner.progress()
+    }
+}
+
+/// Opt-in wall-clock timers over the phases of a training step, to see where a
+/// step's time goes and whether a phase grows over a run. `TS_PROFILE=<N>`
+/// prints each phase's mean milliseconds once per `N` windows;
+/// `TS_PROFILE_SYNC=1` also syncs the device after each phase, so a phase then
+/// includes its GPU execution rather than only its enqueueing. Unset ⇒ inert.
+///
+/// Phases: `fwd` (forward + loss), `bwd` (backward), `gap` (window end → the
+/// optimizer: the loop's metric reads, i.e. its implicit sync), `opt` (the
+/// optimizer step), `out` (optimizer → next window: logging, next batch).
+mod prof {
+    use super::*;
+
+    struct State {
+        every: usize,
+        sync: bool,
+        n: usize,
+        sums: [f64; 5],
+        window_end: Option<Instant>,
+        opt_end: Option<Instant>,
+        device: Option<Device>,
+    }
+
+    static STATE: LazyLock<Option<Mutex<State>>> = LazyLock::new(|| {
+        let every = std::env::var("TS_PROFILE").ok()?.parse().ok()?;
+        let sync = std::env::var("TS_PROFILE_SYNC").is_ok_and(|v| v == "1");
+        Some(Mutex::new(State {
+            every,
+            sync,
+            n: 0,
+            sums: [0.0; 5],
+            window_end: None,
+            opt_end: None,
+            device: None,
+        }))
+    });
+
+    fn ms(from: Instant, to: Instant) -> f64 {
+        (to - from).as_secs_f64() * 1e3
+    }
+
+    pub fn window_start() -> Instant {
+        let now = Instant::now();
+        if let Some(state) = STATE.as_ref() {
+            let mut s = state.lock().unwrap();
+            if let Some(end) = s.opt_end.take() {
+                s.sums[4] += ms(end, now);
+            }
+        }
+        now
+    }
+
+    pub fn mark(device: &Device) -> Instant {
+        if let Some(state) = STATE.as_ref()
+            && state.lock().unwrap().sync
+        {
+            device.sync().expect("device sync");
+        }
+        Instant::now()
+    }
+
+    pub fn window_end(device: &Device, t0: Instant, t1: Instant, t2: Instant) {
+        if let Some(state) = STATE.as_ref() {
+            let mut s = state.lock().unwrap();
+            s.sums[0] += ms(t0, t1);
+            s.sums[1] += ms(t1, t2);
+            s.window_end = Some(Instant::now());
+            s.device = Some(device.clone());
+        }
+    }
+
+    pub fn opt_start() -> Instant {
+        let now = Instant::now();
+        if let Some(state) = STATE.as_ref() {
+            let mut s = state.lock().unwrap();
+            if let Some(end) = s.window_end.take() {
+                s.sums[2] += ms(end, now);
+            }
+        }
+        now
+    }
+
+    pub fn opt_end(t3: Instant) {
+        let Some(state) = STATE.as_ref() else {
+            return;
+        };
+        let mut s = state.lock().unwrap();
+        if s.sync
+            && let Some(device) = &s.device
+        {
+            device.sync().expect("device sync");
+        }
+        let now = Instant::now();
+        s.sums[3] += ms(t3, now);
+        s.opt_end = Some(now);
+        s.n += 1;
+        if s.n % s.every == 0 {
+            let [f, b, g, o, u] = s.sums.map(|sum| sum / s.every as f64);
+            println!(
+                "prof n={} fwd {f:.1} bwd {b:.1} gap {g:.1} opt {o:.1} out {u:.1} total {:.1} ms",
+                s.n,
+                f + b + g + o + u
+            );
+            s.sums = [0.0; 5];
+        }
     }
 }
 
