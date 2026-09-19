@@ -197,8 +197,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // Accessed via the AutodiffTensor wrappers (which own both .node
         // and .primitive).
         use burn::backend::TensorMetadata;
-        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive.shape().dims();
-        let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive.shape().dims();
+        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive().shape().dims();
+        let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive().shape().dims();
 
         let flat_len_y_BNLHP = batch * nchunks * chunk_len * nheads * per_head_dim;
         let flat_len_final_state_BHPR = batch * nheads * per_head_dim * state_rank;
@@ -216,13 +216,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         // ── Register backward / run forward ───────────────────────────────
         match CombinedKernelsBackward
             .prepare::<C>([
-                x_bnlhp.node.clone(),
-                dt_discretized_bhnl.node.clone(),
-                b_bnlhr.node.clone(),
-                c_bnlhr.node.clone(),
-                d_h.node.clone(),
-                initial_state_bhpr.node.clone(),
-                a_decay_h.node.clone(),
+                x_bnlhp.node(),
+                dt_discretized_bhnl.node(),
+                b_bnlhr.node(),
+                c_bnlhr.node(),
+                d_h.node(),
+                initial_state_bhpr.node(),
+                a_decay_h.node(),
             ])
             .compute_bound()
             .stateful() // requires compute_bound
@@ -230,13 +230,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             OpsKind::Tracked(prep) => {
                 // Run the inner (non-autodiff) forward pass.
                 let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
-                    x_bnlhp.primitive.clone(),
-                    dt_discretized_bhnl.primitive.clone(),
-                    b_bnlhr.primitive.clone(),
-                    c_bnlhr.primitive.clone(),
-                    d_h.primitive.clone(),
-                    initial_state_bhpr.primitive.clone(),
-                    a_decay_h.primitive.clone(),
+                    x_bnlhp.primitive().clone(),
+                    dt_discretized_bhnl.primitive().clone(),
+                    b_bnlhr.primitive().clone(),
+                    c_bnlhr.primitive().clone(),
+                    d_h.primitive().clone(),
+                    initial_state_bhpr.primitive().clone(),
+                    a_decay_h.primitive().clone(),
                 );
 
                 // prep.finish takes a single tensor, so pack both outputs into a
@@ -247,13 +247,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 );
 
                 let state = State {
-                    x_bnlhp: x_bnlhp.primitive.clone(),
-                    dt_discretized_bhnl: dt_discretized_bhnl.primitive.clone(),
-                    b_bnlhr: b_bnlhr.primitive.clone(),
-                    c_bnlhr: c_bnlhr.primitive.clone(),
-                    d_h: d_h.primitive.clone(),
-                    initial_state_bhpr: initial_state_bhpr.primitive.clone(),
-                    a_decay_h: a_decay_h.primitive.clone(),
+                    x_bnlhp: x_bnlhp.primitive().clone(),
+                    dt_discretized_bhnl: dt_discretized_bhnl.primitive().clone(),
+                    b_bnlhr: b_bnlhr.primitive().clone(),
+                    c_bnlhr: c_bnlhr.primitive().clone(),
+                    d_h: d_h.primitive().clone(),
+                    initial_state_bhpr: initial_state_bhpr.primitive().clone(),
+                    a_decay_h: a_decay_h.primitive().clone(),
                     //
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
@@ -286,13 +286,13 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             OpsKind::UnTracked(prep) => {
                 // No gradient tracking — just run the bare forward.
                 let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
-                    x_bnlhp.primitive,
-                    dt_discretized_bhnl.primitive,
-                    b_bnlhr.primitive,
-                    c_bnlhr.primitive,
-                    d_h.primitive,
-                    initial_state_bhpr.primitive,
-                    a_decay_h.primitive,
+                    x_bnlhp.into_primitive(),
+                    dt_discretized_bhnl.into_primitive(),
+                    b_bnlhr.into_primitive(),
+                    c_bnlhr.into_primitive(),
+                    d_h.into_primitive(),
+                    initial_state_bhpr.into_primitive(),
+                    a_decay_h.into_primitive(),
                 );
 
                 let (combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(

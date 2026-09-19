@@ -184,8 +184,8 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
 
         use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] =
-            v_bnlmhp.primitive.shape().dims();
-        let [.., state_rank] = b_bnlmhr.primitive.shape().dims::<6>();
+            v_bnlmhp.primitive().shape().dims();
+        let [.., state_rank] = b_bnlmhr.primitive().shape().dims::<6>();
 
         // `C`, `γ` and `y` live on the chunk's read axis; everything else on its
         // write axis. See [`Mamba3SingleSsdInput::read_stride`].
@@ -210,26 +210,26 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
 
         match CombinedKernelsBackward
             .prepare::<C>([
-                v_bnlmhp.node.clone(),
-                da_bnlh.node.clone(),
-                b_bnlmhr.node.clone(),
-                c_bntmhr.node.clone(),
-                gamma_bnth.node.clone(),
-                scale_bnlh.node.clone(),
-                initial_state_bhpr.node.clone(),
+                v_bnlmhp.node(),
+                da_bnlh.node(),
+                b_bnlmhr.node(),
+                c_bntmhr.node(),
+                gamma_bnth.node(),
+                scale_bnlh.node(),
+                initial_state_bhpr.node(),
             ])
             .compute_bound()
             .stateful()
         {
             OpsKind::Tracked(prep) => {
                 let (prim_y_bntmhp, prim_final_state_bhpr) = B::single_ssd_serial_recalculated(
-                    v_bnlmhp.primitive.clone(),
-                    da_bnlh.primitive.clone(),
-                    b_bnlmhr.primitive.clone(),
-                    c_bntmhr.primitive.clone(),
-                    gamma_bnth.primitive.clone(),
-                    scale_bnlh.primitive.clone(),
-                    initial_state_bhpr.primitive.clone(),
+                    v_bnlmhp.primitive().clone(),
+                    da_bnlh.primitive().clone(),
+                    b_bnlmhr.primitive().clone(),
+                    c_bntmhr.primitive().clone(),
+                    gamma_bnth.primitive().clone(),
+                    scale_bnlh.primitive().clone(),
+                    initial_state_bhpr.primitive().clone(),
                     read_stride,
                     siso_specialization,
                 );
@@ -240,13 +240,13 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                 );
 
                 let state = State {
-                    v_bnlmhp: v_bnlmhp.primitive.clone(),
-                    da_bnlh: da_bnlh.primitive.clone(),
-                    b_bnlmhr: b_bnlmhr.primitive.clone(),
-                    c_bntmhr: c_bntmhr.primitive.clone(),
-                    gamma_bnth: gamma_bnth.primitive.clone(),
-                    scale_bnlh: scale_bnlh.primitive.clone(),
-                    initial_state_bhpr: initial_state_bhpr.primitive.clone(),
+                    v_bnlmhp: v_bnlmhp.primitive().clone(),
+                    da_bnlh: da_bnlh.primitive().clone(),
+                    b_bnlmhr: b_bnlmhr.primitive().clone(),
+                    c_bntmhr: c_bntmhr.primitive().clone(),
+                    gamma_bnth: gamma_bnth.primitive().clone(),
+                    scale_bnlh: scale_bnlh.primitive().clone(),
+                    initial_state_bhpr: initial_state_bhpr.primitive().clone(),
                     read_stride,
                     siso_specialization,
                     flat_len_y_BNTMHP,
@@ -278,13 +278,13 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
 
             OpsKind::UnTracked(prep) => {
                 let (prim_y_bntmhp, prim_final_state_bhpr) = B::single_ssd_serial_recalculated(
-                    v_bnlmhp.primitive,
-                    da_bnlh.primitive,
-                    b_bnlmhr.primitive,
-                    c_bntmhr.primitive,
-                    gamma_bnth.primitive,
-                    scale_bnlh.primitive,
-                    initial_state_bhpr.primitive,
+                    v_bnlmhp.into_primitive(),
+                    da_bnlh.into_primitive(),
+                    b_bnlmhr.into_primitive(),
+                    c_bntmhr.into_primitive(),
+                    gamma_bnth.into_primitive(),
+                    scale_bnlh.into_primitive(),
+                    initial_state_bhpr.into_primitive(),
                     read_stride,
                     siso_specialization,
                 );

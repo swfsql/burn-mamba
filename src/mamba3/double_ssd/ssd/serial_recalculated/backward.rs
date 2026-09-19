@@ -167,8 +167,8 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         // ── Shape extraction (via the AutodiffTensor wrappers) ─────────────
         use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] =
-            v_bnlmhp.primitive.shape().dims();
-        let [.., state_rank] = b_bnlmhr.primitive.shape().dims::<6>();
+            v_bnlmhp.primitive().shape().dims();
+        let [.., state_rank] = b_bnlmhr.primitive().shape().dims::<6>();
 
         // `C` and `y` live on the chunk's read axis, everything else on its
         // write axis. See [`Mamba3DoubleSsdInput::read_stride`].
@@ -192,22 +192,22 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         // ── Register backward / run forward ───────────────────────────────
         match CombinedKernelsBackward
             .prepare::<C>([
-                v_bnlmhp.node.clone(),
-                da_bnlh.node.clone(),
-                b_bnlmhr.node.clone(),
-                c_bntmhr.node.clone(),
-                initial_state_bhpr.node.clone(),
+                v_bnlmhp.node(),
+                da_bnlh.node(),
+                b_bnlmhr.node(),
+                c_bntmhr.node(),
+                initial_state_bhpr.node(),
             ])
             .compute_bound()
             .stateful()
         {
             OpsKind::Tracked(prep) => {
                 let (prim_y_bntmhp, prim_final_state_bhpr) = B::double_ssd_serial_recalculated(
-                    v_bnlmhp.primitive.clone(),
-                    da_bnlh.primitive.clone(),
-                    b_bnlmhr.primitive.clone(),
-                    c_bntmhr.primitive.clone(),
-                    initial_state_bhpr.primitive.clone(),
+                    v_bnlmhp.primitive().clone(),
+                    da_bnlh.primitive().clone(),
+                    b_bnlmhr.primitive().clone(),
+                    c_bntmhr.primitive().clone(),
+                    initial_state_bhpr.primitive().clone(),
                     read_stride,
                 );
 
@@ -219,11 +219,11 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                 );
 
                 let state = State {
-                    v_bnlmhp: v_bnlmhp.primitive.clone(),
-                    da_bnlh: da_bnlh.primitive.clone(),
-                    b_bnlmhr: b_bnlmhr.primitive.clone(),
-                    c_bntmhr: c_bntmhr.primitive.clone(),
-                    initial_state_bhpr: initial_state_bhpr.primitive.clone(),
+                    v_bnlmhp: v_bnlmhp.primitive().clone(),
+                    da_bnlh: da_bnlh.primitive().clone(),
+                    b_bnlmhr: b_bnlmhr.primitive().clone(),
+                    c_bntmhr: c_bntmhr.primitive().clone(),
+                    initial_state_bhpr: initial_state_bhpr.primitive().clone(),
                     read_stride,
                     flat_len_y_BNTMHP,
                     flat_len_final_state_BHPR,
@@ -257,11 +257,11 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
             OpsKind::UnTracked(prep) => {
                 // No gradient tracking — just run the bare forward.
                 let (prim_y_bntmhp, prim_final_state_bhpr) = B::double_ssd_serial_recalculated(
-                    v_bnlmhp.primitive,
-                    da_bnlh.primitive,
-                    b_bnlmhr.primitive,
-                    c_bntmhr.primitive,
-                    initial_state_bhpr.primitive,
+                    v_bnlmhp.into_primitive(),
+                    da_bnlh.into_primitive(),
+                    b_bnlmhr.into_primitive(),
+                    c_bntmhr.into_primitive(),
+                    initial_state_bhpr.into_primitive(),
                     read_stride,
                 );
 

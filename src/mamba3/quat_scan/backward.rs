@@ -146,28 +146,28 @@ impl<B: Backend + Mamba3QuatScanBackendExt, C: CheckpointStrategy> Mamba3QuatSca
 
         // ── Shape extraction ───────────────────────────────────────────────
         use burn::backend::TensorMetadata;
-        let shape_q_bshj4: [usize; 5] = q_bshj4.primitive.shape().dims();
-        let shape_init_bhj4: [usize; 4] = init_bhj4.primitive.shape().dims();
+        let shape_q_bshj4: [usize; 5] = q_bshj4.primitive().shape().dims();
+        let shape_init_bhj4: [usize; 4] = init_bhj4.primitive().shape().dims();
 
         // ── Register backward / run forward ─────────────────────────────────
         match QuatScanBackward
-            .prepare::<C>([q_bshj4.node.clone(), init_bhj4.node.clone()])
+            .prepare::<C>([q_bshj4.node(), init_bhj4.node()])
             .compute_bound()
             .stateful()
         {
             OpsKind::Tracked(prep) => {
                 let prim_cum =
-                    B::quat_cumprod(q_bshj4.primitive.clone(), init_bhj4.primitive.clone());
+                    B::quat_cumprod(q_bshj4.primitive().clone(), init_bhj4.primitive().clone());
                 let state = State {
-                    q_bshj4: q_bshj4.primitive.clone(),
-                    init_bhj4: init_bhj4.primitive.clone(),
+                    q_bshj4: q_bshj4.primitive().clone(),
+                    init_bhj4: init_bhj4.primitive().clone(),
                     shape_q_bshj4,
                     shape_init_bhj4,
                 };
                 prep.finish(state, prim_cum)
             }
             OpsKind::UnTracked(prep) => {
-                let prim_cum = B::quat_cumprod(q_bshj4.primitive, init_bhj4.primitive);
+                let prim_cum = B::quat_cumprod(q_bshj4.into_primitive(), init_bhj4.into_primitive());
                 prep.finish(prim_cum)
             }
         }
