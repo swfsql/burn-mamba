@@ -131,9 +131,16 @@ pub fn train(
 }
 
 /// The SSD path used for both training and inference; the recalculated serial
-/// scan saves ~1/3 vram against `Minimal`.
+/// scan saves ~1/3 vram against `Minimal`. Opt-in override:
+/// `TS_SSD_PATH=serial|minimal|recalc` (the last is the default).
 pub fn ssd_path() -> MambaSsdPath {
-    MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None))
+    let path = match std::env::var("TS_SSD_PATH").as_deref() {
+        Ok("serial") => Mamba3SsdPath::Serial(None),
+        Ok("minimal") => Mamba3SsdPath::Minimal(None),
+        Ok("recalc") | Err(_) => Mamba3SsdPath::SerialRecalculated(None),
+        Ok(other) => panic!("TS_SSD_PATH: unknown path {other:?}"),
+    };
+    MambaSsdPath::Mamba3(path)
 }
 
 /// Wrapper over [`MambaVocabNet`] for custom implementations.

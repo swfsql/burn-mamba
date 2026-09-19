@@ -185,9 +185,9 @@ estimate of the level**. The level is a random walk that moves only during gaps:
 a gap is elapsed time, so it adds doubt without adding evidence.
 
 ```text
-  symbols   +1  +1  +2  ~  ~  -1  +0
-  estimate  1.0 1.0 1.3 …  …  0.4 0.4
-  target     .   -   +   .  .   -   +
+  symbols    +1  +1  +2   ~   ~  -1  +0
+  estimate  1.0 1.0 1.3   …   … 0.4 0.4
+  target      .   -   +   .   .   -   +
 ```
 
 <details>
