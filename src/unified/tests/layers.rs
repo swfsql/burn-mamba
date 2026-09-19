@@ -324,7 +324,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     let mut prefix = <Layers<_> as Clone>::clone(&layers);
     prefix.n_virtual_layers = Some((n_virtual - k, Schedule::Cyclic));
     prefix.grad_horizon = None;
-    let prefix: Layers<_> = burn::module::AutodiffModule::valid(&prefix);
+    let prefix: Layers<_> = burn::module::Module::valid(&prefix);
 
     let mut suffix = <Layers<_> as Clone>::clone(&layers);
     suffix.n_virtual_layers = Some((k, Schedule::Cyclic));

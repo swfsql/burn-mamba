@@ -23,7 +23,6 @@ use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderIterator, Progress},
     data::dataset::DatasetError,
-    module::AutodiffModule,
     optim::{GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };

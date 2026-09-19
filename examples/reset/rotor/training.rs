@@ -16,7 +16,6 @@ use crate::dataset::{
 use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
-    module::AutodiffModule,
     optim::ModuleOptimizer,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},

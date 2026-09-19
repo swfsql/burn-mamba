@@ -16,7 +16,6 @@ use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
     data::{dataloader::batcher::Batcher, dataset::Dataset},
-    module::AutodiffModule,
     optim::ModuleOptimizer,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},

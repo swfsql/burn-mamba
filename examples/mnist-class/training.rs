@@ -16,7 +16,6 @@ pub use crate::common::{
 use burn::prelude::*;
 use burn::{
     data::dataloader::DataLoaderBuilder,
-    module::AutodiffModule,
     optim::{GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
