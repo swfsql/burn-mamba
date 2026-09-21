@@ -507,9 +507,9 @@ mod tests {
                 // Single-ssd (the default cache) delegates to the double-ssd
                 // form here, so the two must agree *exactly*, not merely closely.
                 let (out_single, cache_single) =
-                    model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                    model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
                 let (out_double, cache_double) =
-                    model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                    model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
                 assert_eq!(
                     max_abs_diff(out_single.clone(), out_double),
                     0.0,
@@ -565,7 +565,7 @@ mod tests {
             };
             let x = Tensor::from_inner(x);
             let (fwd_w, fwd_dt) =
-                grads(model.forward(x.clone(), None, Mamba3SsdPath::default()).0);
+                grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
                 max_abs_diff(fwd_w, step_w) < 1e-4,
@@ -620,10 +620,10 @@ mod tests {
 
         let x = input(&config, 6);
         let path = Mamba3SsdPath::default();
-        let (out_none, _) = none.forward(x.clone(), None, path.clone());
+        let (out_none, _) = none.forward(x.clone(), None, path.clone(), None);
         for (label, out) in [
-            ("single", carry.forward_single_ssd(x.clone(), None, &path).0),
-            ("double", carry.forward_double_ssd(x.clone(), None, &path).0),
+            ("single", carry.forward_single_ssd(x.clone(), None, &path, None).0),
+            ("double", carry.forward_double_ssd(x.clone(), None, &path, None).0),
         ] {
             let d = max_abs_diff(out_none.clone(), out);
             assert!(d < 1e-6, "λ≡1 carry-over ({label}) vs None: {d:.3e}");
@@ -687,9 +687,9 @@ mod tests {
                     .expect("a missing cache defaults to the single-ssd pathway");
 
                 let (out_single, cache_single) =
-                    model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                    model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
                 let (out_double, cache_double) =
-                    model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                    model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
 
                 for (pathway, out, ssm) in [
                     ("single", out_single, cache_single.ssm_bhpr),
@@ -723,10 +723,10 @@ mod tests {
             let path = Mamba3SsdPath::default();
             let label = format!("{kind:?}");
 
-            let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path);
-            let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path);
+            let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path, None);
+            let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path, None);
             let (tail, split_cache) =
-                model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path);
+                model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path, None);
             let split = Tensor::cat(vec![head, tail], 1);
 
             let d = max_abs_diff(whole, split);
@@ -753,11 +753,11 @@ mod tests {
 
             for (pathway, (out, cache_ssm)) in [
                 ("single", {
-                    let (o, c) = model.forward_single_ssd(x.clone(), None, &path);
+                    let (o, c) = model.forward_single_ssd(x.clone(), None, &path, None);
                     (o, c.ssm_bhpr)
                 }),
                 ("double", {
-                    let (o, c) = model.forward_double_ssd(x.clone(), None, &path);
+                    let (o, c) = model.forward_double_ssd(x.clone(), None, &path, None);
                     (o, c.ssm_bhpr)
                 }),
             ] {
@@ -794,6 +794,7 @@ mod tests {
                     x.clone().narrow(1, 2, 3),
                     Some(stepped),
                     &Mamba3SsdPath::default(),
+                    None,
                 );
 
                 let (out_all, cache_all) = unrolled(&model, &x);
@@ -842,7 +843,7 @@ mod tests {
             };
             let x = Tensor::from_inner(x);
             let (fwd_w, fwd_dt) =
-                grads(model.forward(x.clone(), None, Mamba3SsdPath::default()).0);
+                grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
                 max_abs_diff(fwd_w, step_w) < 1e-4,
@@ -882,13 +883,13 @@ mod tests {
             for (label, a, b) in [
                 (
                     "single",
-                    carry.forward_single_ssd(x.clone(), None, &path).0,
-                    folded.forward_single_ssd(x.clone(), None, &path).0,
+                    carry.forward_single_ssd(x.clone(), None, &path, None).0,
+                    folded.forward_single_ssd(x.clone(), None, &path, None).0,
                 ),
                 (
                     "double",
-                    carry.forward_double_ssd(x.clone(), None, &path).0,
-                    folded.forward_double_ssd(x.clone(), None, &path).0,
+                    carry.forward_double_ssd(x.clone(), None, &path, None).0,
+                    folded.forward_double_ssd(x.clone(), None, &path, None).0,
                 ),
                 ("step", unrolled(&carry, &x).0, unrolled(&folded, &x).0),
             ] {
@@ -937,9 +938,9 @@ mod tests {
                     let cache_step = cache_step.single_ssd().expect("single-ssd by default");
 
                     let (out_single, cache_single) =
-                        model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                        model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
                     let (out_double, cache_double) =
-                        model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default());
+                        model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
 
                     for (pathway, out, ssm) in [
                         ("single", out_single, cache_single.ssm_bhpr),
@@ -977,11 +978,11 @@ mod tests {
 
                 for (pathway, (out, ssm)) in [
                     ("single", {
-                        let (o, c) = model.forward_single_ssd(x.clone(), None, &path);
+                        let (o, c) = model.forward_single_ssd(x.clone(), None, &path, None);
                         (o, c.ssm_bhpr)
                     }),
                     ("double", {
-                        let (o, c) = model.forward_double_ssd(x.clone(), None, &path);
+                        let (o, c) = model.forward_double_ssd(x.clone(), None, &path, None);
                         (o, c.ssm_bhpr)
                     }),
                 ] {
@@ -1008,10 +1009,10 @@ mod tests {
                 let path = Mamba3SsdPath::default();
                 let label = format!("{pattern:?} {kind:?}");
 
-                let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path);
-                let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path);
+                let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path, None);
+                let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path, None);
                 let (tail, split_cache) =
-                    model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path);
+                    model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path, None);
                 let split = Tensor::cat(vec![head, tail], 1);
 
                 let d = max_abs_diff(whole, split);
@@ -1045,6 +1046,7 @@ mod tests {
                     x.clone().narrow(1, 2, 3),
                     Some(stepped),
                     &Mamba3SsdPath::default(),
+                    None,
                 );
 
                 let (out_all, cache_all) = unrolled(&model, &x);
@@ -1087,7 +1089,7 @@ mod tests {
                 )
             };
             let x = Tensor::from_inner(x);
-            let (fwd_w, fwd_dt) = grads(model.forward(x.clone(), None, Mamba3SsdPath::default()).0);
+            let (fwd_w, fwd_dt) = grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
                 max_abs_diff(fwd_w, step_w) < 1e-4,
@@ -1161,8 +1163,8 @@ mod tests {
         // coefficient is exactly zero — so this one is bit for bit.
         assert_eq!(
             max_abs_diff(
-                none.forward_double_ssd(x.clone(), None, &path).0,
-                reset.forward_double_ssd(x.clone(), None, &path).0,
+                none.forward_double_ssd(x.clone(), None, &path, None).0,
+                reset.forward_double_ssd(x.clone(), None, &path, None).0,
             ),
             0.0,
             "double: HorizontalReset is None at u = 1"
@@ -1175,8 +1177,8 @@ mod tests {
         // The single pathway does not delegate here (the pattern *has* a tap),
         // so it reassembles the same numbers by a different route.
         let d = max_abs_diff(
-            none.forward_single_ssd(x.clone(), None, &path).0,
-            reset.forward_single_ssd(x, None, &path).0,
+            none.forward_single_ssd(x.clone(), None, &path, None).0,
+            reset.forward_single_ssd(x, None, &path, None).0,
         );
         assert!(d < 1e-6, "single: HorizontalReset is None at u = 1: {d:.3e}");
     }
@@ -1205,8 +1207,8 @@ mod tests {
         let path = Mamba3SsdPath::default();
         // Not vacuous: with the same weights the two patterns disagree.
         let d = max_abs_diff(
-            reset.forward_single_ssd(x.clone(), None, &path).0,
-            carry.forward_single_ssd(x.clone(), None, &path).0,
+            reset.forward_single_ssd(x.clone(), None, &path, None).0,
+            carry.forward_single_ssd(x.clone(), None, &path, None).0,
         );
         assert!(d > 1e-4, "the gate has to do something: {d:.3e}");
 
@@ -1239,13 +1241,13 @@ mod tests {
         for (label, a, b) in [
             (
                 "single",
-                reset.forward_single_ssd(x.clone(), None, &path).0,
-                carry.forward_single_ssd(x.clone(), None, &path).0,
+                reset.forward_single_ssd(x.clone(), None, &path, None).0,
+                carry.forward_single_ssd(x.clone(), None, &path, None).0,
             ),
             (
                 "double",
-                reset.forward_double_ssd(x.clone(), None, &path).0,
-                carry.forward_double_ssd(x.clone(), None, &path).0,
+                reset.forward_double_ssd(x.clone(), None, &path, None).0,
+                carry.forward_double_ssd(x.clone(), None, &path, None).0,
             ),
             ("step", unrolled(&reset, &x).0, unrolled(&carry, &x).0),
         ] {
@@ -1286,9 +1288,9 @@ mod tests {
             ] {
                 let label = format!("{pattern:?} {path:?}");
                 let (out_single, cache_single) =
-                    model.forward_single_ssd(x.clone(), None, &path);
+                    model.forward_single_ssd(x.clone(), None, &path, None);
                 let (out_double, cache_double) =
-                    model.forward_double_ssd(x.clone(), None, &path);
+                    model.forward_double_ssd(x.clone(), None, &path, None);
                 for (pathway, out, ssm) in [
                     ("single", out_single, cache_single.ssm_bhpr),
                     ("double", out_double, cache_double.ssm_bhpr),
@@ -1316,7 +1318,7 @@ mod tests {
         let vertical = config.clone().init(&device);
         let x = input(&config, 5);
         let path = Mamba3SsdPath::default();
-        let out_vertical = vertical.forward_single_ssd(x.clone(), None, &path).0;
+        let out_vertical = vertical.forward_single_ssd(x.clone(), None, &path, None).0;
 
         let two_tap: Vec<Tensor<3>> = [
             Trapezoid::VerticalPlusHorizontalReset,
@@ -1327,7 +1329,7 @@ mod tests {
             let mut block = config.clone().with_trapezoid(pattern).init(&device);
             share_weights_except_in_proj(&vertical, &mut block);
             append_dead_segment(&vertical, &mut block, u * config.nheads(), 0.0, &device);
-            let out = block.forward_single_ssd(x.clone(), None, &path).0;
+            let out = block.forward_single_ssd(x.clone(), None, &path, None).0;
             let d = max_abs_diff(out.clone(), out_vertical.clone());
             assert!(d > 1e-4, "{pattern:?} vs Vertical: {d:.3e}");
             out
@@ -1374,13 +1376,13 @@ mod tests {
             for (pathway, a, b) in [
                 (
                     "single",
-                    target.forward_single_ssd(x.clone(), None, &path).0,
-                    join.forward_single_ssd(x.clone(), None, &path).0,
+                    target.forward_single_ssd(x.clone(), None, &path, None).0,
+                    join.forward_single_ssd(x.clone(), None, &path, None).0,
                 ),
                 (
                     "double",
-                    target.forward_double_ssd(x.clone(), None, &path).0,
-                    join.forward_double_ssd(x.clone(), None, &path).0,
+                    target.forward_double_ssd(x.clone(), None, &path, None).0,
+                    join.forward_double_ssd(x.clone(), None, &path, None).0,
                 ),
                 ("step", unrolled(target, &x).0, unrolled(&join, &x).0),
             ] {

@@ -113,7 +113,7 @@ pub fn generate(
             );
             let ids: Vec<i32> = tokens.iter().map(|&t| t as i32).collect();
             let input = Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([1, ids.len()]);
-            let (logits, caches) = model.forward(input, None, ssd_path(), Some(&mut class));
+            let (logits, caches) = model.forward(input, None, ssd_path(), Some(&mut class), None);
             let last = logits.dims()[1] - 1;
             (logits.narrow(1, last, 1).squeeze_dim::<2>(1), Some(caches))
         }

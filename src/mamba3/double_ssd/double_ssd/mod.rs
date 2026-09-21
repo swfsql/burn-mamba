@@ -43,8 +43,11 @@ impl Mamba3 {
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels.
     /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
     ///
+    /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
+    ///
     /// # Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
+    /// - `pad_bt`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
     #[allow(non_snake_case)]
     pub fn forward_double_ssd(
@@ -52,6 +55,7 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3DoubleSsdCache>,
         ssd_path: &Mamba3SsdPath,
+        pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
         let [batch, tokens, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -72,6 +76,11 @@ impl Mamba3 {
         assert!(tokens > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
+
+        // A padded token pads all of its micro-steps; `end_b` is each slot's
+        // real length on the folded axis, where its cache fields are read.
+        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
+        let end_b = pad_bs.as_ref().map(crate::padding::real_len_b);
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -162,7 +171,8 @@ impl Mamba3 {
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
             self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
-        );
+        )
+        .padded(pad_bs.as_ref());
         // The tropical register's inputs, on the same folded axis.
         let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
             (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
@@ -292,8 +302,15 @@ impl Mamba3 {
         // prefill unchanged (at `lag = u` that window is precisely the last
         // token). With no β tap there is nothing to continue and the slots stay
         // empty. See [`Self::save_tap_slots`].
-        let (b_last_bumhr, x_last_buhp) =
-            self.save_tap_slots(&b_bsmhr, &x_bshp, &da_bsh, lag);
+        let (b_last_bumhr, x_last_buhp) = self.save_tap_slots(
+            &b_bsmhr,
+            &x_bshp,
+            &da_bsh,
+            lag,
+            end_b.clone().map(|end_b| {
+                (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
+            }),
+        );
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(self);
@@ -426,6 +443,7 @@ impl Mamba3 {
             log_precision_bsh,
             tropical_ab_bsh,
             cache.tropical_bh.clone(),
+            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
         );
         cache.log_precision_bh = log_precision_bh;
         cache.tropical_bh = tropical_bh;
@@ -1029,6 +1047,7 @@ mod step {
                 proj.log_precision_buh,
                 proj.tropical_ab_buh,
                 cache.tropical_bh.clone(),
+                None,
             );
             let out_m_bmhp = out_b1mhp.squeeze_dim::<4>(1);
             cache.log_precision_bh = log_precision_bh;
@@ -1042,7 +1061,7 @@ mod step {
             // since its own position — `forward`'s own helper, so the two write
             // the same slot layout under the same convention.
             let (k_state_bumhr, v_state_buhp) =
-                self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag);
+                self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag, None);
             cache.ssm_bhpr = state_bhpr;
             cache.k_state_bumhr = k_state_bumhr;
             cache.v_state_buhp = v_state_buhp;

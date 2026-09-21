@@ -127,6 +127,8 @@ src/
 │  │                 Affine, doubling + a `fold` reference), kalman.rs (the
 │  │                 computed decay + `ln Λ`), tropical.rs (the max-plus register)
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
+├─ padding.rs        right padding inside a block: per-slot `window` gather,
+│                    `fill_padded`, `repeat_rows` (token mask → folded axis)
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
    │                 not stacked matrices" argument (MIMO diagonals)
@@ -193,6 +195,15 @@ Layer containers and networks additionally expose **`prime()`** — `step()` wit
 a user token: it emits the class tokens/latents waiting for the next one and
 returns the last of them (`None` if none were), for seedless generation. `prime`
 then `step` runs exactly what that `step` alone would.
+
+`forward()` also takes `pad: Option<Tensor<2, Bool>>` (`true` at padding, **right**
+padding per slot): a padded row is absent — each slot's real outputs and cache are
+that slot run alone. Burn-stack keeps the mask right-padded around class markers; a
+family zeroes the step's decay and writes where its discretisation forms them
+(Mamba-1/2 `Δ = 0`; Mamba-3 `TrapezoidCoeffs::padded`, per token over the `u`
+micro-steps, which the Kalman gate, single-SSD's key scale and the Δ-paced rotation
+all follow) and reads every "last samples" cache field (conv window, tap FIFO,
+`positive/` carries) at each slot's own end (`padding::window`).
 
 ### Caches
 

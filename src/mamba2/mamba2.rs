@@ -672,8 +672,16 @@ impl Mamba2 {
     /// state is carried forward unchanged through the pad — making it safe to
     /// read the final state of the padded last chunk as the true final state.
     ///
+    /// ## Right padding
+    ///
+    /// `pad_bs` (`true` at padding, `None` ⇒ none) marks a right-padded batch:
+    /// a padded row is absent. It takes `Δ = 0` — the same identity step the
+    /// chunk padding above inserts — and the conv window is read at each
+    /// slot's own end (see [`burn_stack::modules::Block::block_forward`]).
+    ///
     /// ## Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
+    /// - `pad_bs`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
     /// - cache (out) : updated convolution window and SSM state
     #[allow(non_snake_case)]
@@ -682,6 +690,7 @@ impl Mamba2 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba2Cache>,
         ssd_path: Mamba2SsdPath,
+        pad_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba2Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -757,7 +766,7 @@ impl Mamba2 {
         let xbc_padded_bvS = if conv_kernel >= 2 {
             // Drop the oldest (leftmost) element of the cache, keeping the
             // last (conv_kernel - 1) columns.
-            let tail_bvK = cache.conv_bvk.slice(s![.., .., 1..]);
+            let tail_bvK = cache.conv_bvk.clone().slice(s![.., .., 1..]);
             assert_eq!([batch, conv_dim, conv_kernel - 1], tail_bvK.dims());
             Tensor::cat(vec![tail_bvK, xbc_bvs], 2)
         } else {
@@ -771,8 +780,21 @@ impl Mamba2 {
         san(&xbc_padded_bvS);
 
         // Update the cache: save the last `conv_kernel` columns of the padded
-        // input (i.e. starting at position `sequence - 1` from the new input).
-        cache.conv_bvk = xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]);
+        // input (i.e. starting at position `sequence - 1` from the new input) —
+        // under right padding, each slot's last real ones, read off the whole
+        // previous window followed by the input.
+        cache.conv_bvk = match &pad_bs {
+            None => xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]),
+            Some(pad_bs) => {
+                let input_bvs = xbc_padded_bvS.clone().narrow(2, conv_kernel - 1, sequence);
+                crate::padding::window(
+                    Tensor::cat(vec![cache.conv_bvk.clone(), input_bvs], 2),
+                    2,
+                    crate::padding::real_len_b(pad_bs),
+                    conv_kernel,
+                )
+            }
+        };
         assert_eq!([batch, conv_dim, conv_kernel], cache.conv_bvk.dims());
 
         // Apply the depthwise convolution and transpose back to [batch, sequence, conv_dim].
@@ -828,6 +850,11 @@ impl Mamba2 {
         assert_eq!([1, 1, nheads], dt_bias_11h.dims());
 
         let dt_bsh = softplus(dt_raw_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1);
+        // A padded row is the identity step the chunk padding below inserts.
+        let dt_bsh = match &pad_bs {
+            Some(pad_bs) => crate::padding::fill_padded(dt_bsh, pad_bs, 0.0),
+            None => dt_bsh,
+        };
         assert_eq!([batch, sequence, nheads], dt_bsh.dims());
         san(&dt_bsh);
 

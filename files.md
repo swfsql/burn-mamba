@@ -29,6 +29,14 @@ Feature-gated module decls (`mamba{1,2,3}`, `unified`) + `prelude` + crate overv
 `prelude` re-exports `burn_stack::prelude::*` alongside the `Mamba*` unified types.
 The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 
+## `src/padding.rs`
+The family half of right padding (`forward`'s `pad`): `window` (per-slot `narrow` as a
+fixed-shape gather — how every "last samples" cache field is read at a slot's own
+end), `fill_padded`, `repeat_rows` (token mask → folded axis). `tests.rs` pins every
+family, both Mamba-3 pathways across the dials, and a network closing with `End`
+against each slot run alone (outputs, caches, gradients; a fully padded slot hands
+its cache back).
+
 ---
 
 ## Mamba-1 (`src/mamba1/`) — simplest family: no SSD, no backend-ext trait
@@ -36,7 +44,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 - **`mamba1.rs`** — `Mamba1` block + `Mamba1Config`. A is input-**independent** (unlike
   Mamba-2/3). `forward`: in_proj → causal conv (left-padded from `cache.conv_bik`) →
   SiLU → sequential `selective_scan` (ZOH A, Euler B) → SiLU gate → out_proj.
-  `step` shares the cache. A init from `arange(1..=state_rank).log()`.
+  `step` shares the cache. A init from `arange(1..=state_rank).log()`. Padding
+  (`pad_bs`): `Δ = 0` in `ssm`, the conv window read at each slot's end.
   `muon_projections()` (feature `optim`) names the Muon-eligible weights and their
   column seams: `in_proj [x|res]`, `x_proj [dt*|B|C]`, `out_proj` (`*` = AdamW's).
   `untied: Vec<Mamba1Untied>` (`Conv1d|XProj|DtProj|ALog|D`): tiled by
@@ -49,7 +58,8 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
 - **`mamba2.rs`** — `Mamba2` + `Mamba2Config` (`state_rank` 128, `per_head_dim` 64,
   `ngroups` 1, `expand` 2). `forward` per CLAUDE.md; only `forward` touches the SSD
   path (via `Mamba2BackendExt`), `step` is the pure recurrence with a manual
-  conv-window slide. Optional learnable `init_state_hpr`.
+  conv-window slide. Optional learnable `init_state_hpr`. Padding (`pad_bs`): `Δ = 0`
+  (the chunk padding's own identity step), the conv window read at each slot's end.
   `muon_projections()`: `in_proj [z|x|B|C|dt*]` (`xbc` split further — the conv is
   shared, the linear map is not), `out_proj`.
   `untied: Vec<Mamba2Untied>` (`InProjTail|Conv1d|DtBias|ALog|D|Norm|InitState`);
@@ -113,7 +123,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   tiled by `init_applications`, listed by `untied_params`; `InProjTail` moves the
   `d_in_proj_tail()` segments into `in_proj_tail` at any count (`project_in` rejoins;
   its Muon spec `tiled`).
-  `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
+  `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd). `forward`'s
+  `pad_bs` is per token; `save_tap_slots(.., end)` / `positive_tail(.., end)` read the
+  FIFO and carries at each slot's own end (the incoming ones for a slot with none).
   Two performance-only `mimo_rank == 1` knobs (default on, `#[module(skip)]`, identical
   values/grads): `siso_specialization` for the chunkwise γ-correction (threaded down as a
   field of the SSD input bundle, into the ext trait and the `Backward` node's state) and
@@ -129,7 +141,9 @@ The `DENY_NAN`/`DENY_INF` guards live in `burn_stack`.
   a `None` `lambda_raw` is `Trapezoid::None` and yields no mass, `γ = Δ` by sharing `Δ`'s
   tensor. A `Some(gain)` computes the Kalman decay **between `da` and `α`** and returns
   `log_precision`, so every consumer (tap transports, `tail_decay`, the single-SSD key
-  scale) reads the computed decay by construction; the masses keep the projected `Δ`. `token_start_gate` is the per-position `0/1` a pattern admits its taps by (`0` at
+  scale) reads the computed decay by construction; the masses keep the projected `Δ`.
+  `TrapezoidCoeffs::padded` makes padded positions the identity step (`da = Δ = ν = νⁱⁿᵗ
+  = γ = 0`) after the gate, so every consumer follows. `token_start_gate` is the per-position `0/1` a pattern admits its taps by (`0` at
   `p ≡ 0 mod u`, hence all-zero at `u = 1`); a closed tap hands its mass **back** — `λ ← 1`
   for the far one, `μ ← 0` for the interior one — exactly at the ends, which is what makes
   the gated members bit-exact degeneracies. Also `qk_norm_expand_bias`, `build_v_with_mimo`,

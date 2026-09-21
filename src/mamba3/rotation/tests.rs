@@ -1033,7 +1033,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 
     // The loaded block still runs the quaternion forward.
     let x = Tensor::<3>::random([2, 4, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (out, _) = block2.forward(x, None, Mamba3SsdPath::Minimal(None));
+    let (out, _) = block2.forward(x, None, Mamba3SsdPath::Minimal(None), None);
     assert_eq!([2, 4, 32], out.dims());
 }
 
@@ -1059,7 +1059,7 @@ fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, m
     let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
 
     // Chunked forward (fresh cache ⇒ double-ssd quaternion pathway).
-    let (out_fwd, _cache) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (out_fwd, _cache) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None), None);
 
     // Recurrent step unrolling from a fresh cache.
     let mut cache = None;
@@ -1132,12 +1132,12 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     let (batch, seq, split) = (2, 6, 4);
     let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
 
-    let (out_full, cache_full) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (out_full, cache_full) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None), None);
 
     let prefix = input.clone().narrow(1, 0, split);
     let suffix = input.narrow(1, split, seq - split);
-    let (out_pre, mid) = model.forward(prefix, None, Mamba3SsdPath::Minimal(None));
-    let (out_suf, cache_split) = model.forward(suffix, Some(mid), Mamba3SsdPath::Minimal(None));
+    let (out_pre, mid) = model.forward(prefix, None, Mamba3SsdPath::Minimal(None), None);
+    let (out_suf, cache_split) = model.forward(suffix, Some(mid), Mamba3SsdPath::Minimal(None), None);
     let out_cat = Tensor::cat(vec![out_pre, out_suf], 1);
 
     let d_out = max_abs_diff(out_full, out_cat);
@@ -1194,7 +1194,7 @@ fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     let p_step = Param::from_tensor(Tensor::from_inner(input));
 
     // Chunked forward.
-    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None));
+    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None), None);
     let loss_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum();
     let g_fwd = loss_fwd.backward();
     let d_in_fwd = p_fwd.val().grad(&g_fwd).expect("grad input (forward)");
@@ -1329,7 +1329,7 @@ fn complex_angle_scan_forward_step_parity() {
         let p_step = Param::from_tensor(Tensor::from_inner(x));
 
         // Chunked: one scan over the whole folded axis.
-        let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3SsdPath::default());
+        let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3SsdPath::default(), None);
 
         // Recurrent: `micro_steps` plain adds per token, no scan anywhere.
         let mut cache = None;
@@ -1410,14 +1410,15 @@ fn complex_angle_scan_split_prefill_parity() {
     let p_split = Param::from_tensor(Tensor::from_inner(x));
     let path = Mamba3SsdPath::default();
 
-    let (out_whole, cache_whole) = model.forward(p_whole.val(), None, path.clone());
+    let (out_whole, cache_whole) = model.forward(p_whole.val(), None, path.clone(), None);
 
     let xs = p_split.val();
-    let (out_a, mid) = model.forward(xs.clone().narrow(1, 0, head_tokens), None, path.clone());
+    let (out_a, mid) = model.forward(xs.clone().narrow(1, 0, head_tokens), None, path.clone(), None);
     let (out_b, cache_split) = model.forward(
         xs.narrow(1, head_tokens, tail_tokens),
         Some(mid),
         path.clone(),
+        None,
     );
     let out_split = Tensor::cat(vec![out_a, out_b], 1);
 
@@ -1461,7 +1462,7 @@ fn rotor_right_factor_channels_receive_gradient() {
     let model = cfg.init(&device.clone().autodiff());
 
     let x = Tensor::<3>::random([2, 5, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (y, _) = model.forward(Tensor::from_inner(x), None, Mamba3SsdPath::Minimal(None));
+    let (y, _) = model.forward(Tensor::from_inner(x), None, Mamba3SsdPath::Minimal(None), None);
     let grads = y.sum().backward();
     let g = model
         .in_proj
@@ -1581,6 +1582,7 @@ fn quaternion_bidi_forward_runs() {
         x,
         None,
         MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+        None,
         None,
     );
     assert_eq!([batch, seq, 32], out.dims());
@@ -1771,8 +1773,8 @@ fn real1d_matches_zeroed_rotation(kind: RotationKind) {
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
     let (zeroed, _) = without_rotation_channels(block.clone())
-        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
-    let (real, _) = as_real1d(block).forward(x, None, Mamba3SsdPath::Minimal(None));
+        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
+    let (real, _) = as_real1d(block).forward(x, None, Mamba3SsdPath::Minimal(None), None);
     let diff = max_abs_diff(zeroed, real);
     assert!(
         diff < 1e-5,
@@ -1964,11 +1966,11 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         .load_record(default.clone().into_record());
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (y_default, _) = default.forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+    let (y_default, _) = default.forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
     let (y_widened, cache_widened) =
         widened
             .clone()
-            .forward(x.clone(), None, Mamba3SsdPath::Minimal(None));
+            .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
     assert!(
         max_abs_diff(y_default, y_widened.clone()) > 1e-4,
         "{kind:?}: rotation_range is ignored"

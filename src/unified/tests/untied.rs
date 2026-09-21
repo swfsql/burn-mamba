@@ -78,8 +78,8 @@ where
     };
     let x = Tensor::<3>::random([BATCH, SEQ, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
 
-    let (y, _) = layers.forward(x.clone(), None, options.clone(), None);
-    let (want, _) = unshared.forward(x.clone(), None, options.clone(), None);
+    let (y, _) = layers.forward(x.clone(), None, options.clone(), None, None);
+    let (want, _) = unshared.forward(x.clone(), None, options.clone(), None, None);
     let diff = max_abs_diff(y.clone(), want);
     assert!(diff < TOL, "forward reads the wrong copies: {diff}");
 
@@ -99,7 +99,7 @@ where
         real_layers: layers.real_layers.iter().map(|l| l.application(0).into_owned()).collect(),
         ..layers.clone()
     };
-    let (y_tied, _) = tied.forward(x, None, options, None);
+    let (y_tied, _) = tied.forward(x, None, options, None, None);
     assert!(max_abs_diff(y, y_tied) > TOL, "the jitter left the copies equal");
 }
 
@@ -197,7 +197,7 @@ fn mamba3_untied_tail_trains_one_copy_per_application() {
 
     let mut optim = plan.build(&AdamWConfig::new(), &muon_config(0.0));
     let x = Tensor::<3>::random([BATCH, SEQ, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
-    let (y, _) = layers.forward(x, None, Mamba3SsdPath::Minimal(Some(4)), None);
+    let (y, _) = layers.forward(x, None, Mamba3SsdPath::Minimal(Some(4)), None, None);
     let grads = GradientsParams::from_grads(y.sum().backward(), &layers);
     let layers = optim.step(1e-2, layers, grads);
 

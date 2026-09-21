@@ -70,8 +70,11 @@ Every position is scored against its next character (so the reported accuracy is
 per character), and a story is walked in windows — see
 [Runs and the frontier](#runs-and-the-frontier). Stories differ in length, so a
 batch is padded to a whole number of windows of its longest one; the batch
-carries how many positions of each slot are real, and the padding is gathered
-away before the loss, never reaching it or the accuracy.
+carries how many positions of each slot are real, and the padding is masked out
+of the loss and the accuracy — at the window's fixed shape, since a shape that
+varies per window slows every later CUDA allocation (tracel-ai/burn#5751).
+`TS_PROFILE=<N>` prints each phase's mean ms per `N` windows and the live device
+allocations, which stay flat while no launch shape varies.
 
 ## Runs and the frontier
 

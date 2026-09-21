@@ -195,7 +195,7 @@ impl Wrap {
         assert_eq!(input_size, 1);
         assert_eq!([batch_size], targets.dims());
 
-        let (output, _caches) = model.forward(input.clone(), None, ssd_path(), None);
+        let (output, _caches) = model.forward(input.clone(), None, ssd_path(), None, None);
         // The model's class latents lengthen the sequence; the readout is its
         // last position (see `OUTPUT_SEQUENCE_EXTRA`).
         let output_size = sequence_size + OUTPUT_SEQUENCE_EXTRA;

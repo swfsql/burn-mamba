@@ -39,7 +39,7 @@ pub fn infer(
             let batch = batcher.batch(items, &infer_device);
             let [batch_size, seq, _] = batch.inputs.dims();
 
-            let (output, _caches) = model.forward(batch.inputs, None, ssd_path(), None);
+            let (output, _caches) = model.forward(batch.inputs, None, ssd_path(), None, None);
             assert_eq!([batch_size, seq, num_classes], output.dims());
 
             let pred = argmax_classes(output);

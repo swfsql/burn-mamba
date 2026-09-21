@@ -373,10 +373,20 @@ impl Mamba1 {
     /// when `None`), and the updated cache is returned so a sequence can be
     /// processed in segments (prefill then decode, or chunked prefill).
     ///
+    /// `pad_bs` (`true` at padding, `None` ⇒ none) is right padding: a padded
+    /// row is absent — `Δ = 0` there, and the conv window is read at each slot's
+    /// own end (see [`burn_stack::modules::Block::block_forward`]).
+    ///
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
+    ///   - `pad_bs` `[batch, sequence]`
     ///   - Output `[batch, sequence, d_model]`
-    pub fn forward(&self, x: Tensor<3>, cache: Option<Mamba1Cache>) -> (Tensor<3>, Mamba1Cache) {
+    pub fn forward(
+        &self,
+        x: Tensor<3>,
+        cache: Option<Mamba1Cache>,
+        pad_bs: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba1Cache) {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
         let [_, _, conv_kernel] = self.conv1d.weight.dims();
@@ -422,8 +432,20 @@ impl Mamba1 {
             );
 
             // Update the conv window: the last conv_kernel columns of the padded
-            // input.
-            cache.conv_bik = conv_in_padded.clone().narrow(2, sequence - 1, conv_kernel);
+            // input — under padding, of each slot's real ones, read off the
+            // whole previous window followed by the input.
+            cache.conv_bik = match &pad_bs {
+                None => conv_in_padded.clone().narrow(2, sequence - 1, conv_kernel),
+                Some(pad_bs) => {
+                    let input_bis = conv_in_padded.clone().narrow(2, conv_kernel - 1, sequence);
+                    crate::padding::window(
+                        Tensor::cat(vec![cache.conv_bik.clone(), input_bis], 2),
+                        2,
+                        crate::padding::real_len_b(pad_bs),
+                        conv_kernel,
+                    )
+                }
+            };
             assert_eq!([batch, d_inner, conv_kernel], cache.conv_bik.dims());
 
             let xs = self.conv1d.forward(conv_in_padded);
@@ -441,7 +463,7 @@ impl Mamba1 {
         };
         assert_eq!([batch, sequence, d_inner], xs_bsi.dims());
 
-        let (scan_bsi, final_ssm) = self.ssm(xs_bsi, cache.ssm_bir.clone());
+        let (scan_bsi, final_ssm) = self.ssm(xs_bsi, cache.ssm_bir.clone(), pad_bs.as_ref());
         assert_eq!([batch, sequence, d_inner], scan_bsi.dims());
         cache.ssm_bir = final_ssm;
 
@@ -458,13 +480,21 @@ impl Mamba1 {
 
     /// Computes the selective-SSM parameters (Δ, A, B, C) from the conv output
     /// and runs the [`Self::selective_scan`] recurrence over the full sequence.
+    /// A padded row (`pad_bs`) takes `Δ = 0`: `exp(ΔA) = 1` and `ΔBu = 0`
+    /// carry the state through it untouched.
     ///
     /// # Shapes
     ///   - Input u `[batch, sequence, d_inner]`
     ///   - Input init_ssm `[batch, d_inner, state_rank]`
+    ///   - Input pad_bs `[batch, sequence]`
     ///   - Output `[batch, sequence, d_inner]`
     ///   - Output (final state) `[batch, d_inner, state_rank]`
-    pub fn ssm(&self, u: Tensor<3>, init_ssm: Tensor<3>) -> (Tensor<3>, Tensor<3>) {
+    pub fn ssm(
+        &self,
+        u: Tensor<3>,
+        init_ssm: Tensor<3>,
+        pad_bs: Option<&Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Tensor<3>) {
         let [batch, sequence, d_inner] = u.dims();
         let [_d_inner, state_rank] = self.a_log.dims();
         let [dt_rank, _d_inner] = self.dt_proj.weight.dims();
@@ -493,6 +523,10 @@ impl Mamba1 {
         assert_eq!([batch, sequence, d_inner], delta.dims());
 
         let delta = burn::tensor::activation::softplus(delta, 1.);
+        let delta = match pad_bs {
+            Some(pad_bs) => crate::padding::fill_padded(delta, pad_bs, 0.0),
+            None => delta,
+        };
 
         let delta = delta.swap_dims(0, 1);
         assert_eq!([sequence, batch, d_inner], delta.dims());

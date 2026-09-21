@@ -241,7 +241,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let input_fwd = param_input(&input);
     let cache_fwd = init_cache.clone();
     let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
-        m.forward(x, Some(cache_fwd))
+        m.forward(x, Some(cache_fwd), None)
     });
 
     let input_step = param_input(&input);
@@ -273,6 +273,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
         let (out_zero, _) = model.forward(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),
+            None,
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
         assert!(
@@ -406,7 +407,7 @@ fn run_split_matches_full(cfg: Mamba1Config) {
     let input_full = param_input(&input);
     let cache_full = init_cache.clone();
     let r_full = run_with_grads(&model, &input_full, &heads, |m, x| {
-        m.forward(x, Some(cache_full))
+        m.forward(x, Some(cache_full), None)
     });
 
     let input_split = param_input(&input);
@@ -414,8 +415,8 @@ fn run_split_matches_full(cfg: Mamba1Config) {
     let r_split = run_with_grads(&model, &input_split, &heads, |m, x| {
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid) = m.forward(prefix, Some(cache_split));
-        let (out_suffix, last) = m.forward(suffix, Some(mid));
+        let (out_prefix, mid) = m.forward(prefix, Some(cache_split), None);
+        let (out_suffix, last) = m.forward(suffix, Some(mid), None);
         (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
     });
 

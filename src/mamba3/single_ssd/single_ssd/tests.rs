@@ -419,6 +419,7 @@ fn guard_random_init_consumed(
         Tensor::from_inner(input.clone()),
         Some(build_single_ssd_cache(cfg, batch, false)),
         ssd_path,
+        None,
     );
     let d = max_abs_diff(random_out.clone(), out_zero.inner());
     assert!(
@@ -468,7 +469,7 @@ fn forward_match_tol(
     let c3c = c3;
     let path_a = ssd_path.clone();
     let r_fwd_double_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
-        let (out, _) = m.forward_double_ssd(x, Some(c3c), &path_a);
+        let (out, _) = m.forward_double_ssd(x, Some(c3c), &path_a, None);
         out
     });
 
@@ -476,7 +477,7 @@ fn forward_match_tol(
     let cmc = cm;
     let single_ssd_b = ssd_path.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_b, &head, |m, x| {
-        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_b);
+        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_b, None);
         out
     });
 
@@ -598,7 +599,7 @@ fn run_forward_single_ssd_matches_step(
     let cmc = cm.clone();
     let single_ssd_a = single_ssd_path.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
-        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_a);
+        let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_a, None);
         out
     });
 
@@ -728,7 +729,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let cache_full = init_cache.clone();
     let single_ssd_f = single_ssd_path.clone();
     let r_full = run_with_grads_single_ssd(&model, &input_full, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_full), &single_ssd_f)
+        m.forward_single_ssd(x, Some(cache_full), &single_ssd_f, None)
     });
 
     let input_split = param_input(&input);
@@ -737,8 +738,8 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let r_split = run_with_grads_single_ssd(&model, &input_split, &heads, |m, x| {
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid) = m.forward_single_ssd(prefix, Some(cache_split), &single_ssd_s);
-        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), &single_ssd_s);
+        let (out_prefix, mid) = m.forward_single_ssd(prefix, Some(cache_split), &single_ssd_s, None);
+        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid), &single_ssd_s, None);
         (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
     });
 
@@ -757,6 +758,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
             Tensor::from_inner(input.clone()),
             Some(build_single_ssd_cache(&cfg, batch, false)),
             &single_ssd_path,
+            None,
         );
         let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
         assert!(
@@ -940,9 +942,9 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), &pd_a);
+        let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), &pd_a, None);
         let mid_single = Mamba3SingleSsdCache::from(mid_double);
-        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), &ps_a);
+        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), &ps_a, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         (
             out,
@@ -968,9 +970,9 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), &ps_b);
+        let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), &ps_b, None);
         let mid_double = Mamba3DoubleSsdCache::from(mid_single);
-        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), &pd_b);
+        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), &pd_b, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         (
             out,
@@ -1056,11 +1058,11 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) 
 
     let path_d = ssd_path.clone();
     let r_double = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_double_ssd(x, None, &path_d).0
+        m.forward_double_ssd(x, None, &path_d, None).0
     });
     let path_s = ssd_path;
     let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_single_ssd(x, None, &path_s).0
+        m.forward_single_ssd(x, None, &path_s, None).0
     });
 
     let diff = (r_double.out.clone() - r_single.out.clone())
@@ -1088,7 +1090,7 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 
     let path_s = ssd_path;
     let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_single_ssd(x, None, &path_s).0
+        m.forward_single_ssd(x, None, &path_s, None).0
     });
     let r_step = run_with_grads(&model, &param_input(&input), &head, |m, x| {
         let mut cache: Option<Mamba3SingleSsdCache> = None;
@@ -1211,14 +1213,14 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
     let cache_spec = init_cache.clone();
     let path_spec = ssd_path.clone();
     let r_spec = run_with_grads_single_ssd(&specialized, &input_spec, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_spec), &path_spec)
+        m.forward_single_ssd(x, Some(cache_spec), &path_spec, None)
     });
 
     let input_gen = param_input(&input);
     let cache_gen = init_cache;
     let path_gen = ssd_path;
     let r_gen = run_with_grads_single_ssd(&general, &input_gen, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_gen), &path_gen)
+        m.forward_single_ssd(x, Some(cache_gen), &path_gen, None)
     });
 
     // Same tolerances as the other parity tests here — the branches differ only

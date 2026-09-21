@@ -491,6 +491,33 @@ pub struct TrapezoidCoeffs {
     pub log_precision: Option<Tensor<3>>,
 }
 
+impl TrapezoidCoeffs {
+    /// The coefficients with every padded position (`pad_bs`, `[batch, len]`,
+    /// `true` at padding; `None` ⇒ none) made the identity step: no decay
+    /// (`da = 0`, `α = 1`), no mass anywhere (`Δ = ν = νⁱⁿᵗ = γ = 0`). Each
+    /// consumer follows — the SSD core carries the state through untouched, a
+    /// real position's tap mass paid forward to a padded one is dropped exactly
+    /// as at a call boundary, and the rotation (which steps by `Δ`) holds still.
+    /// `log_precision` is left as is: it is read only where it is causal, and
+    /// its carry is taken at each slot's own end.
+    pub fn padded(self, pad_bs: Option<&Tensor<2, Bool>>) -> Self {
+        let Some(pad_bs) = pad_bs else {
+            return self;
+        };
+        let zero = |t: Tensor<3>| crate::padding::fill_padded(t, pad_bs, 0.0);
+        let da = zero(self.da);
+        Self {
+            dt: zero(self.dt),
+            alpha: da.clone().exp(),
+            da,
+            nu: self.nu.map(zero),
+            nu_interior: self.nu_interior.map(zero),
+            gamma: zero(self.gamma),
+            log_precision: self.log_precision,
+        }
+    }
+}
+
 /// Compute the trapezoidal discretisation coefficients from the raw
 /// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
 /// formulas and `trapezoid.rs`'s header for how the masses divide.

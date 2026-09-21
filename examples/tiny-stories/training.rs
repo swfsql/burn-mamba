@@ -181,8 +181,7 @@ impl LmModel for Wrap {
         caches: Option<Self::Caches>,
         class: &mut ClassCursors,
     ) -> (ClassificationOutput, Self::Caches) {
-        let (output, caches) = valid.forward_lm(batch, caches, class);
-        (per_char_loss(output), caches)
+        valid.forward_lm(batch, caches, class)
     }
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
@@ -206,23 +205,6 @@ impl LmModel for Wrap {
     ) -> String {
         crate::inference::generate(&valid.0, device, prompt, n_chars, temperature, seed)
     }
-}
-
-/// Replace the window's scalar loss by its per-character losses, so Burn's
-/// `LossMetric` (which weights an update by the loss tensor's length) averages
-/// validation per **character** rather than per window — a late window holding a
-/// single long story would otherwise weigh as much as a full one, and the figure
-/// would move with the (per-call reshuffled) batch composition.
-fn per_char_loss(output: ClassificationOutput) -> ClassificationOutput {
-    let ClassificationOutput {
-        output: logits,
-        targets,
-        ..
-    } = output;
-    let [n, _vocab] = logits.dims();
-    let log_probs = burn::tensor::activation::log_softmax(logits.clone(), 1);
-    let loss = log_probs.gather(1, targets.clone().reshape([n, 1])).reshape([n]).neg();
-    ClassificationOutput::new(loss, logits, targets)
 }
 
 /// The opt-in wall-clock budget of one training invocation (`TS_TRAIN_SECONDS`),
@@ -418,8 +400,19 @@ mod prof {
         s.n += 1;
         if s.n % s.every == 0 {
             let [f, b, g, o, u] = s.sums.map(|sum| sum / s.every as f64);
+            // Live allocations: flat unless some launch shape varies, each new
+            // one pinning a cached metadata buffer (burn#5751) — the bytes
+            // barely move.
+            let allocs = match s.device.as_ref().and_then(Device::memory_pool_usage) {
+                Some(usage) => format!(
+                    " allocs {} ({:.1} MB)",
+                    usage.number_allocs,
+                    usage.bytes_in_use as f64 / 1e6
+                ),
+                None => String::new(),
+            };
             println!(
-                "prof n={} fwd {f:.1} bwd {b:.1} gap {g:.1} opt {o:.1} out {u:.1} total {:.1} ms",
+                "prof n={} fwd {f:.1} bwd {b:.1} gap {g:.1} opt {o:.1} out {u:.1} total {:.1} ms{allocs}",
                 s.n,
                 f + b + g + o + u
             );
@@ -469,7 +462,7 @@ impl Wrap {
         } = batch;
         let (logits, caches) = self
             .0
-            .forward(inputs.clone(), caches, ssd_path(), Some(class));
+            .forward(inputs.clone(), caches, ssd_path(), Some(class), None);
         (lm::lm_output(logits, inputs, targets, &scored), caches)
     }
 }

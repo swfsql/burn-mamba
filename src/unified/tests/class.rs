@@ -36,6 +36,7 @@ fn latent_network_builder_mamba2() {
         None,
         Mamba2SsdPath::default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
     let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
@@ -76,6 +77,7 @@ fn unified_net_config_mamba2() {
         None,
         MambaSsdPath::mamba2_default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
 
@@ -84,6 +86,7 @@ fn unified_net_config_mamba2() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         Some(caches),
         MambaSsdPath::mamba2_default(),
+        None,
         None,
     );
     assert_eq!([2, 5, 2], y2.dims());
@@ -126,6 +129,7 @@ fn unified_net_config_mamba3() {
         None,
         MambaSsdPath::mamba3_default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 2], y.dims());
     let (yt, _c) = net.step(Tensor::<2>::zeros([2, 3], &device), None, None);
@@ -159,6 +163,7 @@ fn unified_net_config_mamba1() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         MambaSsdPath::Mamba1,
+        None,
         None,
     );
     assert_eq!([2, 5, 2], y.dims());
@@ -196,6 +201,7 @@ fn bidi_layers_mamba2() {
         None,
         Mamba2SsdPath::default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -228,6 +234,7 @@ fn bidi_layers_mamba3() {
         None,
         Mamba3SsdPath::default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -251,7 +258,7 @@ fn bidi_layers_mamba1() {
         untied: Vec::new(),
     }
     .init(&device);
-    let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, (), None);
+    let (y, _c) = layers.forward(Tensor::<3>::zeros([2, 5, 16], &device), None, (), None, None);
     assert_eq!([2, 5, 16], y.dims());
 }
 
@@ -284,6 +291,7 @@ fn unified_bidi_config_mamba2() {
         None,
         MambaSsdPath::mamba2_default(),
         None,
+        None,
     );
     assert_eq!([2, 5, 16], y.dims());
 }
@@ -315,8 +323,8 @@ fn bidi_forward_is_deterministic_mamba2() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
-    let (y2, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y1, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
+    let (y2, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -343,8 +351,8 @@ fn bidi_forward_is_deterministic_mamba1() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, (), None);
-    let (y2, _) = layers.forward(x.clone(), None, (), None);
+    let (y1, _) = layers.forward(x.clone(), None, (), None, None);
+    let (y2, _) = layers.forward(x.clone(), None, (), None, None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -377,8 +385,8 @@ fn bidi_forward_is_deterministic_mamba3() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, 16], Distribution::Normal(0.0, 1.0), &device);
-    let (y1, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
-    let (y2, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
+    let (y1, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
+    let (y2, _) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
     assert_eq!([2, 5, 16], y1.dims());
     assert_bidi_deterministic(y1, y2);
 }
@@ -427,6 +435,7 @@ fn class_latents_lengthen_and_index() {
         None,
         Mamba2SsdPath::default(),
         None,
+        None,
     );
     assert_eq!([2, 7, 16], y.dims()); // 4 original + 3 class latents
 }
@@ -464,6 +473,7 @@ fn class_tokens_on_latent_network() {
         Tensor::<3>::zeros([2, 5, 3], &device),
         None,
         Mamba2SsdPath::default(),
+        None,
         None,
     );
     assert_eq!([2, 6, 2], y.dims()); // 5 + 1 class token
@@ -515,7 +525,7 @@ fn class_latents_step_matches_forward() {
     );
 
     // forward → length seq + 2; class tokens at [0, 3], user tokens at [1,2,4,5].
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 2, 16]);
     let user_pos = [1usize, 2, 4, 5];
 
@@ -602,7 +612,7 @@ fn per_layer_class_latents_step_matches_forward() {
             }
             (Tensor::cat(outs, 1), caches.unwrap())
         } else {
-            let (out_full, caches) = layers.forward(x.val(), None, path.clone(), None);
+            let (out_full, caches) = layers.forward(x.val(), None, path.clone(), None, None);
             let parts: Vec<_> = user_pos
                 .iter()
                 .map(|&p| out_full.clone().narrow(1, p, 1))
@@ -830,7 +840,7 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
 
     // Same weights over the hand-built reference, markers cleared.
     layers.class_latents = Vec::new();
-    let (y_ref, c_ref) = layers.forward(reference, None, path, None);
+    let (y_ref, c_ref) = layers.forward(reference, None, path, None, None);
 
     let primed = [Some(0usize), None, Some(3)]; // S, (none), C
     let stepped = [1usize, 2, 5]; // u0, u1, E (closing the sequence)
@@ -897,7 +907,7 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
 
     // forward ⇒ the latent opens the sequence layer 1 sees, so the output is
     // [latent, u0, u1, u2].
-    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 1, d_model]);
 
     let mut class = ClassCursors::new(seq);
@@ -963,7 +973,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 1, d_model]);
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
@@ -1021,7 +1031,7 @@ fn prime_on_a_network_covers_every_class_level() {
 
     // forward ⇒ L S N u0 u1 u2: the layer-1 latent below the stack latent, both
     // below the network's class token (each level opens the one above it).
-    let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
@@ -1114,7 +1124,7 @@ fn layer_prime_returns_the_latent_and_its_delta() {
         vec![latent.unsqueeze_dim::<3>(1), x.clone().narrow(1, 0, 1)],
         1,
     );
-    let (y_ref, c_ref) = layer.forward(reference, None, Mamba2SsdPath::default());
+    let (y_ref, c_ref) = layer.forward(reference, None, Mamba2SsdPath::default(), None);
     assert!(
         max_abs_diff(delta, y_ref.clone().narrow(1, 0, 1).squeeze_dim::<2>(1)) < 1e-4,
         "the primed delta is not the latent's"
@@ -1312,7 +1322,7 @@ fn class_markers_split_forward_matches_single_forward() {
     let path = Mamba2SsdPath::default();
 
     // One call over the whole sequence (what `None` cursors mean).
-    let (y_full, c_full) = layers.forward(x.clone(), None, path.clone(), None);
+    let (y_full, c_full) = layers.forward(x.clone(), None, path.clone(), None, None);
     assert_eq!(y_full.dims(), [batch, seq + 5, d_model]);
 
     // The same sequence in two chunks, sharing one cursor set.
@@ -1322,12 +1332,14 @@ fn class_markers_split_forward_matches_single_forward() {
         None,
         path.clone(),
         Some(&mut class),
+        None,
     );
     let (y_b, c_split) = layers.forward(
         x.narrow(1, split, seq - split),
         Some(caches),
         path,
         Some(&mut class),
+        None,
     );
     // Chunk 1 carries Start, Custom and Middle; chunk 2 the trailing End.
     assert_eq!(y_a.dims(), [batch, split + 4, d_model]);
@@ -1386,7 +1398,7 @@ fn class_markers_step_matches_forward_with_full_len() {
 
     // forward ⇒ u0 u1 M u2 u3 E. Each step emits up to its last token: u0, u1,
     // then (M, u2), then (u3, E) — so the closing latent, not u3, ends the run.
-    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 2, d_model]);
     let last_pos = [0usize, 1, 3, 5];
 
@@ -1448,7 +1460,7 @@ fn class_tokens_split_forward_matches_single_forward() {
     let path = Mamba2SsdPath::default();
 
     // S u0 u1 u2 u3 u4 E, then the stack's own End latent after it.
-    let (y_full, _c) = net.forward(x.clone(), None, path.clone(), None);
+    let (y_full, _c) = net.forward(x.clone(), None, path.clone(), None, None);
     assert_eq!(y_full.dims(), [batch, seq + 3, 2]);
 
     let mut class = ClassCursors::new(seq);
@@ -1457,12 +1469,14 @@ fn class_tokens_split_forward_matches_single_forward() {
         None,
         path.clone(),
         Some(&mut class),
+        None,
     );
     let (y_b, _c) = net.forward(
         x.narrow(1, split, seq - split),
         Some(caches),
         path,
         Some(&mut class),
+        None,
     );
     let y_split = Tensor::cat(vec![y_a, y_b], 1);
     assert_eq!(y_split.dims(), y_full.dims());
@@ -1497,6 +1511,7 @@ fn class_markers_without_full_len_panic_in_forward() {
         None,
         Mamba2SsdPath::default(),
         Some(&mut class),
+        None,
     );
 }
 
@@ -1534,7 +1549,7 @@ fn class_markers_forward_then_step() {
 
     // forward ⇒ S u0 u1 M u2 u3 E; the decoded steps end on u2 (M opens that
     // step) and on E (which closes the sequence after u3).
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 3, d_model]);
     let last_pos = [1usize, 2, 4, 6];
 
@@ -1545,6 +1560,7 @@ fn class_markers_forward_then_step() {
         None,
         Mamba2SsdPath::default(),
         Some(&mut class),
+        None,
     );
     assert_eq!(y_pre.dims(), [batch, prefill + 1, d_model]);
     assert_eq!(class.stack, prefill + 1);
@@ -1594,7 +1610,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
 
     // forward ⇒ L S u0 u1 u2 E (the stack latent below the network's tokens);
     // the steps end on u0, u1, then E (the closing token, after u2).
-    let (y_fwd, _c) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
     let last_pos = [2usize, 3, 5];
 
@@ -1675,7 +1691,7 @@ fn end_closes_the_sequence_custom_never_does() {
     // `Custom(seq)` reports a position past the emitted sequence ⇒ it does not
     // land, and `forward` over the announced tokens is `u0 u1 u2 E1 E2`.
     assert_eq!(layers.class_latent_output_indices(seq), vec![3, 4, 5]);
-    let (y_marked, _c) = layers.forward(x.clone().narrow(1, 0, seq), None, path.clone(), None);
+    let (y_marked, _c) = layers.forward(x.clone().narrow(1, 0, seq), None, path.clone(), None, None);
     assert_eq!(y_marked.dims(), [batch, seq + 2, d_model]);
 
     // Step all four tokens — the last one runs past the announced length.
@@ -1693,7 +1709,7 @@ fn end_closes_the_sequence_custom_never_does() {
 
     // Same weights over the hand-built reference, markers cleared.
     layers.class_latents = Vec::new();
-    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None);
+    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None, None);
     assert!(
         max_abs_diff(y_marked, y_ref.clone().narrow(1, 0, seq + 2)) < 1e-4,
         "the markers did not land where the reference splices them"
@@ -1834,10 +1850,10 @@ fn step_output_and_state_follow_the_last_emitted_token() {
     }
 
     // The marked `forward` claims to *be* that reference sequence…
-    let (y_marked, c_marked) = layers.forward(x.clone(), None, path.clone(), None);
+    let (y_marked, c_marked) = layers.forward(x.clone(), None, path.clone(), None, None);
     // …so drop the markers (same weights) and run the reference itself.
     layers.class_latents = Vec::new();
-    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None);
+    let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None, None);
     assert!(
         max_abs_diff(y_marked, y_ref.clone()) < 1e-4,
         "the markers did not land where the reference splices them"
@@ -1866,6 +1882,7 @@ fn step_output_and_state_follow_the_last_emitted_token() {
             reference.clone().narrow(1, 0, consumed[t]),
             None,
             path.clone(),
+            None,
             None,
         );
         assert_state(&st, &state(&c), &format!("step {t}"));

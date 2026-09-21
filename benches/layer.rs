@@ -325,12 +325,12 @@ fn run_forward<M, B, C>(
 
         // Untimed: compile (and autotune) the kernels this case needs.
         for _ in 0..warmup_iters() {
-            let (_y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
+            let (_y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
             sync(device);
         }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
                 y
             })
         })
@@ -361,13 +361,13 @@ fn run_train<M, B, C>(
 
         // Untimed: the backward has kernels of its own to compile and tune.
         for _ in 0..warmup_iters() {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
             let _grads = y.powf_scalar(2.0).mean().backward();
             sync(device);
         }
         b.iter_custom(|iters| {
             timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone());
+                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
                 y.powf_scalar(2.0).mean().backward()
             })
         })

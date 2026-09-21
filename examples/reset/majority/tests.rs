@@ -213,7 +213,7 @@ fn accuracy(model: &MambaLatentNet, family: Family, count: usize, device: &Devic
             .collect::<Vec<_>>(),
         0,
     );
-    let (out, _c) = model.forward(inputs, None, crate::training::ssd_path(), None);
+    let (out, _c) = model.forward(inputs, None, crate::training::ssd_path(), None, None);
     let n = count * SEQ_LENGTH;
     let pred = out
         .reshape([n, NUM_CLASSES])

@@ -61,7 +61,7 @@ fn virtual_layers_share_per_real_pair_merge() {
         &device,
     );
     // Pre-fix: this panicked with an out-of-bounds merge index.
-    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None);
+    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y.dims(), [batch, seq, d_model]);
 
     // Every real pair's merge must receive gradient (each is hit by ≥1 virtual
@@ -108,8 +108,8 @@ fn virtual_forward_is_deterministic() {
     .init(&device);
 
     let x = Tensor::<3>::random([2, 5, d_model], Distribution::Normal(0.0, 1.0), &device);
-    let (y0, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
-    let (y1, _) = layers.forward(x, None, Mamba2SsdPath::default(), None);
+    let (y0, _) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
+    let (y1, _) = layers.forward(x, None, Mamba2SsdPath::default(), None, None);
     assert!(
         max_abs_diff(y0, y1) < 1e-6,
         "bidi forward is nondeterministic"

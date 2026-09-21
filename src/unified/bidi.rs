@@ -46,13 +46,15 @@ impl MambaBidiLayers {
     }
 
     /// Full-sequence bidirectional pass. The `ssd_path` must match the stack's
-    /// family; a mismatch is a caller error and panics.
+    /// family; a mismatch is a caller error and panics. `pad` marks a
+    /// right-padded batch ([`BidiLayers::forward`]).
     pub fn forward(
         &self,
         x: Tensor<3>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
         class: Option<&mut ClassCursors>,
+        pad: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -67,7 +69,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 bidi stack"),
                 }
-                let (y, c) = layers.forward(x, caches, (), class);
+                let (y, c) = layers.forward(x, caches, (), class, pad);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -82,7 +84,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 bidi stack"),
                 };
-                let (y, c) = layers.forward(x, caches, path, class);
+                let (y, c) = layers.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -97,7 +99,7 @@ impl MambaBidiLayers {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 bidi stack"),
                 };
-                let (y, c) = layers.forward(x, caches, path, class);
+                let (y, c) = layers.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba3(c))
             }
         }

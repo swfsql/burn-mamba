@@ -33,12 +33,14 @@ pub enum MambaLatentNet {
 impl MambaLatentNet {
     /// Full-sequence pass. The `ssd_path` must match the network's family; a
     /// mismatch is a caller error and panics with an explanatory message.
+    /// `pad` marks a right-padded batch ([`LatentNetwork::forward`]).
     pub fn forward(
         &self,
         x: Tensor<3>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
         class: Option<&mut ClassCursors>,
+        pad: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -53,7 +55,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c) = net.forward(x, caches, (), class);
+                let (y, c) = net.forward(x, caches, (), class, pad);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -68,7 +70,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c) = net.forward(x, caches, path, class);
+                let (y, c) = net.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -83,7 +85,7 @@ impl MambaLatentNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c) = net.forward(x, caches, path, class);
+                let (y, c) = net.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba3(c))
             }
         }
@@ -465,13 +467,15 @@ pub enum MambaVocabNet {
 impl MambaVocabNet {
     /// Full-sequence pass: token IDs `[batch, sequence]` → logits
     /// `[batch, sequence, padded_vocab]`. The `ssd_path`/`caches` family must
-    /// match the network; a mismatch is a caller error and panics.
+    /// match the network; a mismatch is a caller error and panics. `pad` marks
+    /// a right-padded batch ([`VocabNetwork::forward`]).
     pub fn forward(
         &self,
         x: Tensor<2, Int>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
         class: Option<&mut ClassCursors>,
+        pad: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, MambaCaches) {
         match self {
             #[cfg(feature = "mamba1")]
@@ -486,7 +490,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-1 network"),
                 }
-                let (y, c) = net.forward(x, caches, (), class);
+                let (y, c) = net.forward(x, caches, (), class, pad);
                 (y, MambaCaches::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
@@ -501,7 +505,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-2 network"),
                 };
-                let (y, c) = net.forward(x, caches, path, class);
+                let (y, c) = net.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
@@ -516,7 +520,7 @@ impl MambaVocabNet {
                     #[allow(unreachable_patterns)]
                     _ => panic!("ssd_path family does not match Mamba-3 network"),
                 };
-                let (y, c) = net.forward(x, caches, path, class);
+                let (y, c) = net.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba3(c))
             }
         }

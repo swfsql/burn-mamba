@@ -65,8 +65,14 @@ impl Mamba3 {
     /// not merely at boundaries — and the call delegates rather than run a
     /// strict-mask kernel plus a correction that reassembles what it masked.
     ///
+    /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
+    /// A real position's last tap installment, which a padded one would pay,
+    /// is then left to the tap slots exactly as at a call boundary — so `h'`
+    /// holds the double-SSD state from each slot's own end on.
+    ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
+    /// - `pad_bt`: `[batch, sequence]`
     /// - output: `[batch, sequence, d_model]`
     #[allow(non_snake_case)]
     pub fn forward_single_ssd(
@@ -74,10 +80,11 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
+        pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
         if !self.trapezoid.has_beta_tap() {
             let (out_bsm, cache) =
-                self.forward_double_ssd(input_bsm, cache.map(Into::into), ssd_path);
+                self.forward_double_ssd(input_bsm, cache.map(Into::into), ssd_path, pad_bt);
             return (out_bsm, cache.into());
         }
         let [batch, tokens, _d_model] = input_bsm.dims();
@@ -99,6 +106,11 @@ impl Mamba3 {
         assert!(tokens > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
+
+        // A padded token pads all of its micro-steps; `end_b` is each slot's
+        // real length on the folded axis, where its cache fields are read.
+        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
+        let end_b = pad_bs.as_ref().map(crate::padding::real_len_b);
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -193,7 +205,8 @@ impl Mamba3 {
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
             self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
-        );
+        )
+        .padded(pad_bs.as_ref());
         // The tropical register's inputs, on the same folded axis.
         let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
             (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
@@ -284,8 +297,15 @@ impl Mamba3 {
         // ── Save the last `lag` positions' B and x (raw, no MIMO_V) ───────────
         // The positions whose second installment the next call pays; at
         // `lag = u` that window is precisely the last token.
-        let (b_last_bumhr, x_last_buhp) =
-            self.save_tap_slots(&b_bsmhr, &x_bshp, &da_bsh, lag);
+        let (b_last_bumhr, x_last_buhp) = self.save_tap_slots(
+            &b_bsmhr,
+            &x_bshp,
+            &da_bsh,
+            lag,
+            end_b.clone().map(|end_b| {
+                (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
+            }),
+        );
 
         // ── Boundary β seed for initial state ─────────────────────────────────
         // Add Σⱼ νⱼ · Σₘ K_prev[j, m] ⊗ (x_prev[j] ⊙ mimo_xₘ) to the carried
@@ -450,6 +470,7 @@ impl Mamba3 {
             log_precision_bsh,
             tropical_ab_bsh,
             cache.tropical_bh.clone(),
+            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
         );
         cache.log_precision_bh = log_precision_bh;
         cache.tropical_bh = tropical_bh;

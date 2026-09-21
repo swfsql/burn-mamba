@@ -447,7 +447,7 @@ fn build_assembles_groups_without_panicking() {
     // group's optimizer, so a mis-targeted group (a 1-D or 3-D tensor handed to
     // Muon) would panic here.
     let x = Tensor::<3>::random([1, 8, 2], burn::tensor::Distribution::Default, &device);
-    let (y, _) = model.forward(x, None, MambaSsdPath::mamba3_default(), None);
+    let (y, _) = model.forward(x, None, MambaSsdPath::mamba3_default(), None, None);
     let grads = burn::optim::GradientsParams::from_grads(y.sum().backward(), &model);
     let _model = optim.step(1e-3, model, grads);
 }
@@ -485,7 +485,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
 
     // The same (deterministic) gradient drives every step below.
     let step = |model: MambaLatentNet, optim: &mut burn::optim::ModuleOptimizer| {
-        let (y, _) = model.forward(x.clone(), None, MambaSsdPath::mamba3_default(), None);
+        let (y, _) = model.forward(x.clone(), None, MambaSsdPath::mamba3_default(), None, None);
         let grads = burn::optim::GradientsParams::from_grads(y.sum().backward(), &model);
         optim.step(1e-3, model, grads)
     };

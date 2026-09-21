@@ -291,7 +291,7 @@ impl Wrap {
         let [batch_size, sequence_size, _num_symbols] = inputs.dims();
         assert_eq!([batch_size, sequence_size], targets.dims());
 
-        let (output, _caches) = model.forward(inputs, None, ssd_path(), None);
+        let (output, _caches) = model.forward(inputs, None, ssd_path(), None, None);
         assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
         let n = batch_size * sequence_size;

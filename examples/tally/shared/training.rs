@@ -233,7 +233,7 @@ impl InferenceStep for Wrap {
 
     fn step(&self, batch: Self::Input) -> Self::Output {
         let [batch_size, seq, _] = batch.inputs.dims();
-        let (output, _caches) = self.0.forward(batch.inputs, None, ssd_path(), None);
+        let (output, _caches) = self.0.forward(batch.inputs, None, ssd_path(), None, None);
         let n = batch_size * seq;
         let logits = output.reshape([n, NUM_CLASSES]).select(0, batch.scored.clone());
         let targets = batch.targets.reshape([n]).select(0, batch.scored);

@@ -133,8 +133,8 @@ fn full_horizon_matches_no_horizon() {
 
     let x = input(&device);
 
-    let (y_a, _) = plain.forward(x.clone(), None, path(), None);
-    let (y_b, _) = full.forward(x.clone(), None, path(), None);
+    let (y_a, _) = plain.forward(x.clone(), None, path(), None, None);
+    let (y_b, _) = full.forward(x.clone(), None, path(), None, None);
     assert!(max_abs_diff(y_a.clone(), y_b.clone()) < 1e-6, "outputs differ");
 
     let g_a = y_a.sum().backward();
@@ -179,7 +179,7 @@ fn nothing_tracked_reaches_the_prefix() {
 
     // ---- baseline: without a horizon the probe does reach the input --------
     let x0 = input(&device).require_grad();
-    let (_, caches0) = layers.forward(x0.clone(), None, path(), None);
+    let (_, caches0) = layers.forward(x0.clone(), None, path(), None, None);
     let a0 = anchor();
     let probe0 = (0..cut).fold(a0.clone().sum(), |acc, i| acc + slot_sum(&caches0, i));
     let g0 = probe0.backward();
@@ -194,12 +194,12 @@ fn nothing_tracked_reaches_the_prefix() {
     // pass whose graph is still intact — otherwise the leak this is meant to
     // catch would be invisible for the wrong reason.
     let x_carry = input(&device).require_grad();
-    let (_, caches_carry) = layers.forward(x_carry.clone(), None, path(), None);
+    let (_, caches_carry) = layers.forward(x_carry.clone(), None, path(), None, None);
 
     // ---- with a horizon, from zero caches ---------------------------------
     layers.grad_horizon = Some(GradHorizon::last(k, n));
     let x1 = input(&device).require_grad();
-    let (_, caches1) = layers.forward(x1.clone(), None, path(), None);
+    let (_, caches1) = layers.forward(x1.clone(), None, path(), None, None);
     let a1 = anchor();
     let probe1 = (0..cut).fold(a1.clone().sum(), |acc, i| acc + slot_sum(&caches1, i));
     let g1 = probe1.backward();
@@ -211,7 +211,7 @@ fn nothing_tracked_reaches_the_prefix() {
 
     // ---- with a horizon, carrying caches out of a tracked run -------------
     let x2 = input(&device).require_grad();
-    let (_, caches2) = layers.forward(x2.clone(), Some(caches_carry), path(), None);
+    let (_, caches2) = layers.forward(x2.clone(), Some(caches_carry), path(), None, None);
     let a2 = anchor();
     let probe2 = (0..cut).fold(a2.clone().sum(), |acc, i| acc + slot_sum(&caches2, i));
     let g2 = probe2.backward();
@@ -249,7 +249,7 @@ fn prefix_parameters_get_no_gradient() {
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     layers.grad_horizon = Some(GradHorizon::last(k, n));
 
-    let (y, _) = layers.forward(input(&device), None, path(), None);
+    let (y, _) = layers.forward(input(&device), None, path(), None, None);
     let grads = y.sum().backward();
 
     for i in 0..n {
@@ -316,7 +316,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     layers.grad_horizon = Some(GradHorizon::last(k, n_virtual));
 
     let x = input(&device);
-    let (y, _) = layers.forward(x.clone(), None, path(), None);
+    let (y, _) = layers.forward(x.clone(), None, path(), None, None);
     let grads = y.clone().sum().backward();
 
     // Reference: inner-backend 4-virtual prefix, then a tracked 2-virtual
@@ -330,8 +330,8 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     suffix.n_virtual_layers = Some((k, Schedule::Cyclic));
     suffix.grad_horizon = None;
 
-    let (h, _) = prefix.forward(x.inner(), None, path(), None);
-    let (y_ref, _) = suffix.forward(Tensor::from_inner(h), None, path(), None);
+    let (h, _) = prefix.forward(x.inner(), None, path(), None, None);
+    let (y_ref, _) = suffix.forward(Tensor::from_inner(h), None, path(), None, None);
     assert!(
         max_abs_diff(y.clone(), y_ref.clone()) < 1e-5,
         "the cut stack and the hand-split reference disagree on values",
@@ -374,8 +374,8 @@ fn horizon_is_inert_without_autodiff() {
     with_horizon.grad_horizon = Some(GradHorizon::last(2, n));
 
     let x = input(&device);
-    let (y_a, _) = plain.forward(x.clone(), None, path(), None);
-    let (y_b, _) = with_horizon.forward(x, None, path(), None);
+    let (y_a, _) = plain.forward(x.clone(), None, path(), None, None);
+    let (y_b, _) = with_horizon.forward(x, None, path(), None, None);
     assert!(
         max_abs_diff(y_a, y_b) < 1e-6,
         "a horizon changed the result on a non-autodiff device",
@@ -420,7 +420,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     );
 
     // ---- one long call ----------------------------------------------------
-    let (y_full, caches_full) = layers.forward(x.clone(), None, path(), None);
+    let (y_full, caches_full) = layers.forward(x.clone(), None, path(), None, None);
 
     // Fixed random heads, shaped from the full run and reused by both, so the
     // two losses are the same functional of the same quantities.
@@ -443,8 +443,8 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     // ---- two chunked calls, carrying the cache ----------------------------
     let head = x.clone().slice([0..BATCH, 0..head_len]);
     let tail = x.slice([0..BATCH, head_len..head_len + tail_len]);
-    let (y1, mid) = layers.forward(head, None, path(), None);
-    let (y2, caches_split) = layers.forward(tail, Some(mid), path(), None);
+    let (y1, mid) = layers.forward(head, None, path(), None, None);
+    let (y2, caches_split) = layers.forward(tail, Some(mid), path(), None, None);
     let y_split = Tensor::cat(vec![y1, y2], 1);
     let flat_split = all_slots_flat(&caches_split, n_virtual);
 
@@ -536,7 +536,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
     );
 
     // ---- one forward ------------------------------------------------------
-    let (y_fwd, caches_fwd) = layers.forward(x.clone(), None, path(), None);
+    let (y_fwd, caches_fwd) = layers.forward(x.clone(), None, path(), None, None);
 
     let normal = Distribution::Normal(0.0, 1.0);
     let y_head = Tensor::<3>::random(y_fwd.dims(), normal, &device);
@@ -785,7 +785,7 @@ fn boundary_weights_keep_their_gradient_under_a_cut() {
 
         let x = Tensor::<3>::random([BATCH, SEQ, 3], Distribution::Normal(0.0, 1.0), &device)
             .require_grad();
-        let (y, _) = net.forward(x.clone(), None, path(), None);
+        let (y, _) = net.forward(x.clone(), None, path(), None, None);
         let grads = y.sum().backward();
 
         assert!(
@@ -834,14 +834,14 @@ fn a_cut_changes_gradients_only() {
 
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     let x = input(&device);
-    let (want, want_caches) = plain.forward(x.clone(), None, path(), None);
+    let (want, want_caches) = plain.forward(x.clone(), None, path(), None, None);
     let want_flat = all_slots_flat(&want_caches, n);
 
     for k in [4, 3, 1, 0] {
         let horizon = Some(GradHorizon::last(k, n));
         let mut cut = <Layers<_> as Clone>::clone(&plain);
         cut.grad_horizon = horizon.clone();
-        let (got, got_caches) = cut.forward(x.clone(), None, path(), None);
+        let (got, got_caches) = cut.forward(x.clone(), None, path(), None, None);
         assert!(
             max_abs_diff(want.clone(), got) < 1e-6,
             "horizon {horizon:?} changed the output",
@@ -883,7 +883,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
 
     let x = input(&device).require_grad();
     let mut class = ClassCursors::new(SEQ);
-    let (y, _) = layers.forward(x.clone(), None, path(), Some(&mut class));
+    let (y, _) = layers.forward(x.clone(), None, path(), Some(&mut class), None);
     assert_eq!(y.dims()[1], SEQ + (n - k), "each prefix layer splices one row");
 
     let grads = y.sum().backward();
@@ -964,7 +964,7 @@ fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig
         let mut layers = <Layers<_> as Clone>::clone(&base);
         layers.grad_horizon = horizon.clone();
         let xr = x.clone().require_grad();
-        let (y, _) = layers.forward(xr.clone(), None, path(), None);
+        let (y, _) = layers.forward(xr.clone(), None, path(), None, None);
         let grads = (y * head.clone()).sum().backward();
         xr.grad(&grads).expect("input gradient")
     };
@@ -1031,7 +1031,7 @@ fn multi_gate_input_keeps_its_gradient_under_a_cut() {
         layers.grad_horizon = horizon.clone();
 
         let x = input(&device).require_grad();
-        let (y, _) = layers.forward(x.clone(), None, path(), None);
+        let (y, _) = layers.forward(x.clone(), None, path(), None, None);
         assert!(
             x.grad(&y.sum().backward()).is_some(),
             "MultiGate severed the input's gradient (horizon {horizon:?})",
@@ -1112,11 +1112,11 @@ fn grad_horizon_memory_probe() {
         suffix.n_virtual_layers = Some((k, Schedule::Cyclic));
         suffix.grad_horizon = None;
 
-        let (h, _) = prefix.forward(x.detach(), None, Mamba3SsdPath::default(), None);
-        let (y, _) = suffix.forward(h, None, Mamba3SsdPath::default(), None);
+        let (h, _) = prefix.forward(x.detach(), None, Mamba3SsdPath::default(), None, None);
+        let (y, _) = suffix.forward(h, None, Mamba3SsdPath::default(), None, None);
         y
     } else {
-        let (y, _) = layers.forward(x, None, Mamba3SsdPath::default(), None);
+        let (y, _) = layers.forward(x, None, Mamba3SsdPath::default(), None, None);
         y
     };
     if plain {

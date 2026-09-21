@@ -97,8 +97,9 @@ mod impl_mamba2 {
             x: Tensor<3>,
             cache: Option<Mamba2Cache>,
             options: Mamba2SsdPath,
+            pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba2Cache) {
-            self.forward(x, cache, options)
+            self.forward(x, cache, options, pad)
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
@@ -271,8 +272,9 @@ mod impl_mamba3 {
             x: Tensor<3>,
             cache: Option<Mamba3Cache>,
             options: Mamba3SsdPath,
+            pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba3Cache) {
-            self.forward(x, cache, options)
+            self.forward(x, cache, options, pad)
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
@@ -350,8 +352,9 @@ mod impl_mamba1 {
             x: Tensor<3>,
             cache: Option<Mamba1Cache>,
             _options: (),
+            pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba1Cache) {
-            self.forward(x, cache)
+            self.forward(x, cache, pad)
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
             self.step(x, cache)

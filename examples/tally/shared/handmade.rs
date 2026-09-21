@@ -103,7 +103,7 @@ pub fn affine_channels(
 /// Per-position predicted classes (row-major over `batch × seq`).
 pub fn predictions(model: &MambaLatentNet, inputs: &Tensor<3>) -> Vec<i64> {
     let [batch, seq, _] = inputs.dims();
-    let (out, _) = model.forward(inputs.clone(), None, training_ssd_path(), None);
+    let (out, _) = model.forward(inputs.clone(), None, training_ssd_path(), None, None);
     out.reshape([batch * seq, NUM_CLASSES])
         .argmax(1)
         .reshape([batch * seq])

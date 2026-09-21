@@ -568,7 +568,7 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
         let input = uniform([batch, tokens, config.d_model], -1.5, 1.5, &device);
         let path = Mamba3SsdPath::default();
 
-        let (out, cache) = model.forward_double_ssd(input.clone(), None, &path);
+        let (out, cache) = model.forward_double_ssd(input.clone(), None, &path, None);
         cache.sanity();
 
         let mut step_cache = None;
@@ -583,20 +583,20 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
         assert!(d < 1e-4, "{label}: forward vs step outputs {d}");
         assert_caches_match(&format!("{label} forward/step"), &cache, &step_cache.unwrap());
 
-        let (out_single, cache_single) = model.forward_single_ssd(input.clone(), None, &path);
+        let (out_single, cache_single) = model.forward_single_ssd(input.clone(), None, &path, None);
         let d = max_abs_diff(out.clone(), out_single);
         assert!(d < 1e-4, "{label}: double vs single outputs {d}");
         assert_caches_match(&format!("{label} double/single"), &cache, &cache_single.into());
 
-        let (head, mid) = model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &path);
+        let (head, mid) = model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &path, None);
         let (tail, last) =
-            model.forward_single_ssd(input.clone().narrow(1, split, tokens - split), Some(mid), &path);
+            model.forward_single_ssd(input.clone().narrow(1, split, tokens - split), Some(mid), &path, None);
         let d = max_abs_diff(out.clone(), Tensor::cat(vec![head, tail], 1));
         assert!(d < 1e-4, "{label}: split prefill outputs {d}");
         assert_caches_match(&format!("{label} split prefill"), &cache, &last.into());
 
         let (out_minimal, _) =
-            model.forward_double_ssd(input, None, &Mamba3SsdPath::Minimal(Some(2 * case.u)));
+            model.forward_double_ssd(input, None, &Mamba3SsdPath::Minimal(Some(2 * case.u)), None);
         let d = max_abs_diff(out, out_minimal);
         assert!(d < 1e-4, "{label}: SerialRecalculated vs Minimal outputs {d}");
     }
@@ -620,7 +620,7 @@ fn forward_and_step_gradients_agree() {
             .to_device(&ad);
 
         let p_fwd = Param::from_tensor(Tensor::<3>::from_inner(input.clone()).to_device(&ad));
-        let (out, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None));
+        let (out, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None), None);
         let g_fwd = (out * head.clone()).sum().backward();
 
         let p_step = Param::from_tensor(Tensor::<3>::from_inner(input).to_device(&ad));
@@ -729,13 +729,13 @@ fn zero_kappa_and_zero_readout_are_the_stock_block() {
         let input = uniform([2, 6, 16], -1.5, 1.5, &device);
         let path = Mamba3SsdPath::default();
 
-        let (a, ca) = model.forward_double_ssd(input.clone(), None, &path);
-        let (b, cb) = stock.forward_double_ssd(input.clone(), None, &path);
+        let (a, ca) = model.forward_double_ssd(input.clone(), None, &path, None);
+        let (b, cb) = stock.forward_double_ssd(input.clone(), None, &path, None);
         assert!(max_abs_diff(a, b) <= tol, "{label}: double-SSD output");
         assert!(max_abs_diff(ca.ssm_bhpr, cb.ssm_bhpr) <= tol, "{label}: state");
 
-        let (a, _) = model.forward_single_ssd(input.clone(), None, &path);
-        let (b, _) = stock.forward_single_ssd(input.clone(), None, &path);
+        let (a, _) = model.forward_single_ssd(input.clone(), None, &path, None);
+        let (b, _) = stock.forward_single_ssd(input.clone(), None, &path, None);
         assert!(max_abs_diff(a, b) <= tol, "{label}: single-SSD output");
 
         let x0 = input.narrow(1, 0, 1).squeeze_dim::<2>(1);
@@ -767,7 +767,7 @@ fn the_join_has_live_gradients_at_init() {
         let model = config.init(&ad);
         let input = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.5, 1.5, &device)).to_device(&ad);
         let head = Tensor::<3>::from_inner(uniform([2, 8, 16], -1.0, 1.0, &device)).to_device(&ad);
-        let (out, _) = model.forward(input, None, Mamba3SsdPath::default());
+        let (out, _) = model.forward(input, None, Mamba3SsdPath::default(), None);
         let grads = (out * head).sum().backward();
         let live = |name: &str, g: Option<f32>| {
             let g = g.unwrap_or_else(|| panic!("norm {norm}, {name}: no gradient"));
@@ -802,7 +802,7 @@ fn a_vanished_step_keeps_the_block_gradient_finite() {
     let bias: Vec<f32> = (0..model.nheads()).map(|h| if h % 2 == 0 { -200.0 } else { 0.0 }).collect();
     model.dt_bias_h = Param::from_tensor(Tensor::from_floats(bias.as_slice(), &ad));
     let input = Tensor::<3>::from_inner(uniform([2, 5, config.d_model], -1.5, 1.5, &device)).to_device(&ad);
-    let (out, _) = model.forward(input, None, Mamba3SsdPath::default());
+    let (out, _) = model.forward(input, None, Mamba3SsdPath::default(), None);
     let grads = out.sum().backward();
     let finite = |name: &str, g: Option<bool>| assert!(g.expect(name), "the {name} gradient");
     finite("in_proj", model.in_proj.weight.val().grad(&grads).map(all_finite));
@@ -823,7 +823,7 @@ fn the_slots_survive_a_no_grad_round_trip() {
     let config = lattice()[1].config();
     let model = exercised(config.init(&ad), &ad);
     let input = Tensor::<3>::from_inner(uniform([2, 3, 16], -1.5, 1.5, &device)).to_device(&ad);
-    let (_, cache) = model.forward(input, None, Mamba3SsdPath::default());
+    let (_, cache) = model.forward(input, None, Mamba3SsdPath::default(), None);
     let back = <Mamba3Caches as CacheStack>::cache_from_inner(
         <Mamba3Caches as CacheStack>::cache_to_inner(cache.clone()),
     );

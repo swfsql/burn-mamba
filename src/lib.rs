@@ -81,6 +81,8 @@ pub mod prelude {
 
 pub mod unified;
 
+mod padding;
+
 /// Re-export of the block-generic composition crate this one builds on, so a
 /// dependent can reach `Layer`/`Layers`/networks without naming it separately.
 pub use burn_stack;

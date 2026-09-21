@@ -126,7 +126,7 @@ fn layers_standard_ignore_residuals_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
@@ -175,7 +175,7 @@ fn layers_multi_gate_forward_step_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
@@ -227,7 +227,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
@@ -293,7 +293,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         &device,
     );
 
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq, d_model]);
 
     let mut caches = None;
@@ -362,7 +362,7 @@ fn bidi_multi_gate_forward_and_grads() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None);
+    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y.dims(), [batch, seq, d_model]);
 
     let grads = y.sum().backward();
@@ -458,7 +458,7 @@ fn layers_multi_gate_streams_are_distinct() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
 
     // Reference: the input is stream 1; each layer appends its output until
     // `n_stream` streams exist, and only then are they gate-mixed.
@@ -466,7 +466,7 @@ fn layers_multi_gate_streams_are_distinct() {
     let mut streams = x.clone().unsqueeze_dim::<4>(2);
     let mut h = x.clone();
     for i in 0..n_virtual {
-        let (out, _c) = layer.forward(h, None, Mamba2SsdPath::default());
+        let (out, _c) = layer.forward(h, None, Mamba2SsdPath::default(), None);
         let (new_h, new_streams) = if streams.dims()[2] < n_stream {
             mg.layers[i].accumulate(out, streams)
         } else {
@@ -485,7 +485,7 @@ fn layers_multi_gate_streams_are_distinct() {
     // identical forever, so the whole stack is one lerped stream.
     let mut h = x.clone();
     for i in 0..n_virtual {
-        let (out, _c) = layer.forward(h.clone(), None, Mamba2SsdPath::default());
+        let (out, _c) = layer.forward(h.clone(), None, Mamba2SsdPath::default(), None);
         let copies = h
             .unsqueeze_dim::<4>(2)
             .expand([batch, seq, n_stream, d_model]);
@@ -595,7 +595,7 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 2, d_model]);
     // Start, u0, u1, Custom, u2, u3.
     let user_pos = [1usize, 2, 4, 5];
@@ -689,7 +689,7 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
             }
             Tensor::cat(outs, 1)
         } else {
-            let (out_full, _c) = layers.forward(x.val(), None, path.clone(), None);
+            let (out_full, _c) = layers.forward(x.val(), None, path.clone(), None, None);
             assert_eq!(out_full.dims(), [batch, seq + 2, d_model]);
             let parts: Vec<_> = user_pos
                 .iter()
@@ -780,14 +780,14 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
         &device,
     );
     let path = Mamba2SsdPath::Minimal(None);
-    let (y_one, _c) = layers.forward(x.clone(), None, path.clone(), None);
+    let (y_one, _c) = layers.forward(x.clone(), None, path.clone(), None, None);
 
     let mut class = ClassCursors::new(seq);
     let mut caches = None;
     let mut outs = Vec::new();
     for (at, len) in [(0usize, 2usize), (2, 4)] {
         let chunk = x.clone().narrow(1, at, len);
-        let (y, c) = layers.forward(chunk, caches, path.clone(), Some(&mut class));
+        let (y, c) = layers.forward(chunk, caches, path.clone(), Some(&mut class), None);
         caches = Some(c);
         outs.push(y);
     }
@@ -905,7 +905,7 @@ fn bidi_multi_gate_class_latents_forward() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None);
+    let (y, _c) = layers.forward(x, None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y.dims(), [batch, seq + 2, d_model]);
 }
 
@@ -956,7 +956,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
     let x = Tensor::<3>::random([batch, seq, 3], Distribution::Normal(0.0, 1.0), &device);
 
     // forward ⇒ L S N u0 u1 u2 (each level opens the one above it).
-    let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+    let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
     assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
@@ -1042,7 +1042,7 @@ fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
 
         // Layer 1 sees the 4 user tokens and splices M@2 and E@4:
         // u0 u1 M u2 u3 E ⇒ the user tokens keep positions 0,1,3,4.
-        let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None);
+        let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
         assert_eq!(y_fwd.dims(), [batch, seq + 2, d_model]);
         let user_pos = [0usize, 1, 3, 4];
 

@@ -479,6 +479,7 @@ fn run(
         None,
         MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
         None,
+        None,
     );
     let classes = group.num_classes();
     let flat = out

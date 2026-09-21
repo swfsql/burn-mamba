@@ -570,11 +570,16 @@ impl Mamba3 {
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
+    /// `end` is a right-padded call's `(real folded positions per slot, the
+    /// incoming ln Λ carry)`: each carry is then taken at the slot's own last
+    /// real position — the incoming one for a slot with none.
+    ///
     /// # Shapes
     /// - `y_btmhp`           : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
     /// - `log_precision_bsh` : `[batch, tokens·u, nheads]`, from the discretisation
     /// - `tropical_ab_bsh`   : the register's `(a, b)`, each `[batch, tokens·u, nheads]`
     /// - `tropical_carry_bh` : the cache's `c`, `[batch, nheads]`
+    /// - `end`               : `[batch]`, and the cache's `ln Λ`, `[batch, nheads]`
     #[allow(clippy::type_complexity)]
     pub(crate) fn positive_tail(
         &self,
@@ -582,18 +587,35 @@ impl Mamba3 {
         log_precision_bsh: Option<Tensor<3>>,
         tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
         tropical_carry_bh: Option<Tensor<2>>,
+        end: Option<(Tensor<1, Int>, Option<Tensor<2>>)>,
     ) -> (Tensor<5>, Option<Tensor<2>>, Option<Tensor<2>>) {
         let u = self.micro_steps;
         let tropical_bsh = tropical_ab_bsh.map(|(a_bsh, b_bsh)| {
-            let carry_bh = tropical_carry_bh.expect("a tropical register keeps its cache slot");
+            let carry_bh = tropical_carry_bh
+                .clone()
+                .expect("a tropical register keeps its cache slot");
             crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh)
         });
-        let last_bh = |t_bsh: &Tensor<3>| {
-            let len = t_bsh.dims()[1];
-            t_bsh.clone().narrow(1, len - 1, 1).squeeze_dim::<2>(1)
+        let (end_b, log_precision_carry_bh) = end.unzip();
+        let last_bh = |t_bsh: &Tensor<3>, carry_bh: Option<Tensor<2>>| match (&end_b, carry_bh) {
+            (Some(end_b), Some(carry_bh)) => crate::padding::window(
+                Tensor::cat(vec![carry_bh.unsqueeze_dim::<3>(1), t_bsh.clone()], 1),
+                1,
+                end_b.clone(),
+                1,
+            )
+            .squeeze_dim::<2>(1),
+            _ => {
+                let len = t_bsh.dims()[1];
+                t_bsh.clone().narrow(1, len - 1, 1).squeeze_dim::<2>(1)
+            }
         };
-        let log_precision_bh = log_precision_bsh.as_ref().map(last_bh);
-        let tropical_bh = tropical_bsh.as_ref().map(last_bh);
+        let log_precision_bh = log_precision_bsh
+            .as_ref()
+            .map(|t_bsh| last_bh(t_bsh, log_precision_carry_bh.flatten()));
+        let tropical_bh = tropical_bsh
+            .as_ref()
+            .map(|t_bsh| last_bh(t_bsh, tropical_carry_bh));
         let read_rows = |t_bsh: Tensor<3>| crate::mamba3::helpers::read_rows::<3, 4>(t_bsh, 1, u);
         let y_btmhp = self.positive_read(
             y_btmhp,
@@ -1520,8 +1542,15 @@ impl Mamba3 {
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels.
     /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
     ///
+    /// `pad_bs` (`true` at padding, `None` ⇒ none) marks a right-padded batch of
+    /// **tokens**: a padded token is absent, all `u` of its micro-steps the
+    /// identity step (no decay, no mass: `TrapezoidCoeffs::padded`), and every
+    /// cache field that is a slot's last samples read at the slot's own end
+    /// (see [`burn_stack::modules::Block::block_forward`]).
+    ///
     /// # Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
+    /// - `pad_bs`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
     #[allow(non_snake_case)]
     pub fn forward(
@@ -1529,6 +1558,7 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3Cache>,
         ssd_path: Mamba3SsdPath,
+        pad_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
@@ -1551,11 +1581,13 @@ impl Mamba3 {
         // ── SSD Pathway Selection ─────────────────────────────────────────────
         match cache {
             Mamba3Cache::DoubleSsd(cache) => {
-                let (out_bsm, cache) = self.forward_double_ssd(input_bsm, Some(cache), &ssd_path);
+                let (out_bsm, cache) =
+                    self.forward_double_ssd(input_bsm, Some(cache), &ssd_path, pad_bs);
                 (out_bsm, cache.into())
             }
             Mamba3Cache::SingleSsd(cache) => {
-                let (out_bsm, cache) = self.forward_single_ssd(input_bsm, Some(cache), &ssd_path);
+                let (out_bsm, cache) =
+                    self.forward_single_ssd(input_bsm, Some(cache), &ssd_path, pad_bs);
                 (out_bsm, cache.into())
             }
         }
@@ -1628,24 +1660,55 @@ impl Mamba3 {
     /// empty and the slot is the plain last `x`. Shared by both pathways, whose
     /// caches therefore stay field-identical.
     ///
+    /// `end` is a right-padded call's `(real folded positions per slot, the
+    /// incoming FIFO)`: the slots are then each slot's own last `lag` real
+    /// positions, read off the incoming FIFO followed by this call's — which is
+    /// the incoming FIFO itself for a slot with none.
+    ///
     /// # Shapes
     /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
     /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
     /// - `da_bsh`  : `[batch, sequence, nheads]`
+    /// - `end`     : `[batch]`, and the incoming `(B, x)` slots
     pub(crate) fn save_tap_slots(
         &self,
         b_bsmhr: &Tensor<5>,
         x_bshp: &Tensor<4>,
         da_bsh: &Tensor<3>,
         lag: usize,
+        end: Option<(Tensor<1, Int>, Option<Tensor<5>>, Option<Tensor<4>>)>,
     ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
         if lag == 0 {
             return (None, None);
         }
+        let end = end.map(|(end_b, prev_b, prev_x)| {
+            let slots = "a β tap keeps its (B, x) cache slots";
+            (end_b, prev_b.expect(slots), prev_x.expect(slots))
+        });
         let sequence = x_bshp.dims()[1];
-        let b_last_bumhr = b_bsmhr.clone().narrow(1, sequence - lag, lag);
-        let x_last_buhp = x_bshp.clone().narrow(1, sequence - lag, lag);
-        let x_last_buhp = match crate::mamba3::helpers::tail_decay(da_bsh.clone(), lag) {
+        let (b_last_bumhr, x_last_buhp, da_bsh) = match end {
+            None => (
+                b_bsmhr.clone().narrow(1, sequence - lag, lag),
+                x_bshp.clone().narrow(1, sequence - lag, lag),
+                da_bsh.clone(),
+            ),
+            Some((end_b, prev_bumhr, prev_buhp)) => {
+                use crate::padding::window;
+                // The incoming slots already carry their decay to the old
+                // boundary, and a slot's padding adds none.
+                let [batch, _, nheads] = da_bsh.dims();
+                let prev_buh = Tensor::zeros([batch, lag, nheads], &da_bsh.device());
+                let b_all = Tensor::cat(vec![prev_bumhr, b_bsmhr.clone()], 1);
+                let x_all = Tensor::cat(vec![prev_buhp, x_bshp.clone()], 1);
+                let da_all = Tensor::cat(vec![prev_buh, da_bsh.clone()], 1);
+                (
+                    window(b_all, 1, end_b.clone(), lag),
+                    window(x_all, 1, end_b.clone(), lag),
+                    window(da_all, 1, end_b, lag),
+                )
+            }
+        };
+        let x_last_buhp = match crate::mamba3::helpers::tail_decay(da_bsh, lag) {
             Some(tail_buh) => x_last_buhp * tail_buh.unsqueeze_dim::<4>(3),
             None => x_last_buhp,
         };
