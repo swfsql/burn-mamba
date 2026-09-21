@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/helpers.rs`."><title>helpers.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (923c95cdf 2026-09-16)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>helpers.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Shared helpers used by both [`Mamba3::forward`](super::mamba3::Mamba3::forward)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/helpers.rs`."><title>helpers.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (bba531001 2026-09-20)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/</div>helpers.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Shared helpers used by both [`Mamba3::forward`](super::mamba3::Mamba3::forward)
 <a href=#2 id=2 data-nosnippet>2</a>//! and [`Mamba3::step`](super::mamba3::Mamba3::step). They isolate three blocks
 <a href=#3 id=3 data-nosnippet>3</a>//! that previously appeared in both methods at different ranks:
 <a href=#4 id=4 data-nosnippet>4</a>//!
@@ -389,7 +389,7 @@
 <a href=#389 id=389 data-nosnippet>389</a>/// `lag = 1` (where the gap has no interior).
 <a href=#390 id=390 data-nosnippet>390</a>///
 <a href=#391 id=391 data-nosnippet>391</a>/// A tap at lag `L` is transported across its own gap, `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`
-<a href=#392 id=392 data-nosnippet>392</a>/// (`info/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
+<a href=#392 id=392 data-nosnippet>392</a>/// (`info/mamba-3/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
 <a href=#393 id=393 data-nosnippet>393</a>/// `d = 0` factor, so this is the rest of it.
 <a href=#394 id=394 data-nosnippet>394</a>///
 <a href=#395 id=395 data-nosnippet>395</a>/// The front is **zero-padded**, not clamped to what the call happens to hold:
@@ -468,204 +468,233 @@
 <a href=#468 id=468 data-nosnippet>468</a></span><span class="kw">pub struct </span>TrapezoidCoeffs {
 <a href=#469 id=469 data-nosnippet>469</a>    <span class="doccomment">/// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
 <a href=#470 id=470 data-nosnippet>470</a>    </span><span class="kw">pub </span>dt: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#471 id=471 data-nosnippet>471</a>    <span class="doccomment">/// `Δₜ · Aₜ` (negative; the log-decay).
-<a href=#472 id=472 data-nosnippet>472</a>    </span><span class="kw">pub </span>da: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#473 id=473 data-nosnippet>473</a>    <span class="doccomment">/// `αₜ = exp(Δₜ · Aₜ) ∈ (0, 1]` — decay.
-<a href=#474 id=474 data-nosnippet>474</a>    </span><span class="kw">pub </span>alpha: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#475 id=475 data-nosnippet>475</a>    <span class="doccomment">/// `νₜ` — the mass of the tap at
-<a href=#476 id=476 data-nosnippet>476</a>    /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
-<a href=#477 id=477 data-nosnippet>477</a>    /// transport. `None` under
-<a href=#478 id=478 data-nosnippet>478</a>    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which has
-<a href=#479 id=479 data-nosnippet>479</a>    /// no left endpoint: the tensor is not formed rather than formed as zeros.
-<a href=#480 id=480 data-nosnippet>480</a>    </span><span class="kw">pub </span>nu: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#481 id=481 data-nosnippet>481</a>    <span class="doccomment">/// `νⁱⁿᵗₜ` — the mass of the extra lag-1 tap, `None` unless
-<a href=#482 id=482 data-nosnippet>482</a>    /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
-<a href=#483 id=483 data-nosnippet>483</a>    </span><span class="kw">pub </span>nu_interior: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#484 id=484 data-nosnippet>484</a>    <span class="doccomment">/// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
-<a href=#485 id=485 data-nosnippet>485</a>    /// no `λ` (the whole step is paid at the right endpoint).
-<a href=#486 id=486 data-nosnippet>486</a>    </span><span class="kw">pub </span>gamma: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#487 id=487 data-nosnippet>487</a>}
-<a href=#488 id=488 data-nosnippet>488</a>
-<a href=#489 id=489 data-nosnippet>489</a><span class="doccomment">/// Compute the trapezoidal discretisation coefficients from the raw
-<a href=#490 id=490 data-nosnippet>490</a>/// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
-<a href=#491 id=491 data-nosnippet>491</a>/// formulas and `trapezoid.rs`'s header for how the masses divide.
-<a href=#492 id=492 data-nosnippet>492</a>///
-<a href=#493 id=493 data-nosnippet>493</a>/// All data tensors are `[batch, len, nheads]`, `len` being the folded sequence
-<a href=#494 id=494 data-nosnippet>494</a>/// (`forward`) or the `u` micro-steps of one token (`step`); `dt_bias_h` is
-<a href=#495 id=495 data-nosnippet>495</a>/// broadcast to match. Axis 1 is what the patterns' gates are periodic in, in
-<a href=#496 id=496 data-nosnippet>496</a>/// both cases.
+<a href=#471 id=471 data-nosnippet>471</a>    <span class="doccomment">/// The log-decay: `Δₜ · Aₜ`, or under a
+<a href=#472 id=472 data-nosnippet>472</a>    /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member the
+<a href=#473 id=473 data-nosnippet>473</a>    /// decay that gate computes from it — every consumer reads this one.
+<a href=#474 id=474 data-nosnippet>474</a>    </span><span class="kw">pub </span>da: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#475 id=475 data-nosnippet>475</a>    <span class="doccomment">/// `αₜ = exp(da) ∈ (0, 1]` — the decay, projected or computed as `da` is.
+<a href=#476 id=476 data-nosnippet>476</a>    </span><span class="kw">pub </span>alpha: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#477 id=477 data-nosnippet>477</a>    <span class="doccomment">/// `νₜ` — the mass of the tap at
+<a href=#478 id=478 data-nosnippet>478</a>    /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
+<a href=#479 id=479 data-nosnippet>479</a>    /// transport. `None` under
+<a href=#480 id=480 data-nosnippet>480</a>    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which has
+<a href=#481 id=481 data-nosnippet>481</a>    /// no left endpoint: the tensor is not formed rather than formed as zeros.
+<a href=#482 id=482 data-nosnippet>482</a>    </span><span class="kw">pub </span>nu: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#483 id=483 data-nosnippet>483</a>    <span class="doccomment">/// `νⁱⁿᵗₜ` — the mass of the extra lag-1 tap, `None` unless
+<a href=#484 id=484 data-nosnippet>484</a>    /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+<a href=#485 id=485 data-nosnippet>485</a>    </span><span class="kw">pub </span>nu_interior: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#486 id=486 data-nosnippet>486</a>    <span class="doccomment">/// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
+<a href=#487 id=487 data-nosnippet>487</a>    /// no `λ` (the whole step is paid at the right endpoint).
+<a href=#488 id=488 data-nosnippet>488</a>    </span><span class="kw">pub </span>gamma: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#489 id=489 data-nosnippet>489</a>    <span class="doccomment">/// `ℓₜ = ln Λₜ` at every position, when the decay is a Kalman gate's
+<a href=#490 id=490 data-nosnippet>490</a>    /// ([`crate::mamba3::positive::kalman`]); its last entry is the next carry.
+<a href=#491 id=491 data-nosnippet>491</a>    </span><span class="kw">pub </span>log_precision: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#492 id=492 data-nosnippet>492</a>}
+<a href=#493 id=493 data-nosnippet>493</a>
+<a href=#494 id=494 data-nosnippet>494</a><span class="doccomment">/// Compute the trapezoidal discretisation coefficients from the raw
+<a href=#495 id=495 data-nosnippet>495</a>/// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
+<a href=#496 id=496 data-nosnippet>496</a>/// formulas and `trapezoid.rs`'s header for how the masses divide.
 <a href=#497 id=497 data-nosnippet>497</a>///
-<a href=#498 id=498 data-nosnippet>498</a>/// `lambda_raw` is `None` under
-<a href=#499 id=499 data-nosnippet>499</a>/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) — the block
-<a href=#500 id=500 data-nosnippet>500</a>/// projects no `λ` channels — and the coefficients then take their `λ ≡ 1`
-<a href=#501 id=501 data-nosnippet>501</a>/// values *by construction*: no mass is formed and `γ` **is** `Δ`, sharing its
-<a href=#502 id=502 data-nosnippet>502</a>/// tensor rather than recomputing `1 · Δ`. `mu_raw` is `None` unless the pattern
-<a href=#503 id=503 data-nosnippet>503</a>/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap),
-<a href=#504 id=504 data-nosnippet>504</a>/// and the same holds one level down: no `μ`, no second mass.
-<a href=#505 id=505 data-nosnippet>505</a>///
-<a href=#506 id=506 data-nosnippet>506</a>/// A gate closes by handing its mass back, not by dropping it: `λ` is set to `1`
-<a href=#507 id=507 data-nosnippet>507</a>/// where the far tap is inadmissible (so `γ` takes the step whole) and `μ` to
-<a href=#508 id=508 data-nosnippet>508</a>/// `0` where the interior one is (so the far tap takes the left endpoint whole).
-<a href=#509 id=509 data-nosnippet>509</a>/// Both are exact at the ends, so the degenerate members are their targets bit
-<a href=#510 id=510 data-nosnippet>510</a>/// for bit.
-<a href=#511 id=511 data-nosnippet>511</a></span><span class="kw">pub fn </span>trapezoidal_coefficients(
-<a href=#512 id=512 data-nosnippet>512</a>    dd_dt: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#513 id=513 data-nosnippet>513</a>    dd_a_raw: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#514 id=514 data-nosnippet>514</a>    lambda_raw: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#515 id=515 data-nosnippet>515</a>    mu_raw: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#516 id=516 data-nosnippet>516</a>    dt_bias_h: Tensor&lt;<span class="number">1</span>&gt;,
-<a href=#517 id=517 data-nosnippet>517</a>    spec: TrapezoidSpec,
-<a href=#518 id=518 data-nosnippet>518</a>) -&gt; TrapezoidCoeffs {
-<a href=#519 id=519 data-nosnippet>519</a>    <span class="kw">let </span>(dt_limit, a_floor) = (spec.dt_limit, spec.a_floor);
-<a href=#520 id=520 data-nosnippet>520</a>    <span class="comment">// Broadcast dt_bias_h [nheads] → [1, 1, nheads] so the addition aligns on
-<a href=#521 id=521 data-nosnippet>521</a>    // the last dim.
-<a href=#522 id=522 data-nosnippet>522</a>    </span><span class="kw">let </span>dt_bias_broadcast = dt_bias_h.unsqueeze::&lt;<span class="number">3</span>&gt;();
-<a href=#523 id=523 data-nosnippet>523</a>    <span class="kw">let </span>dt = softplus(dd_dt + dt_bias_broadcast).clamp(dt_limit.<span class="number">0</span>, dt_limit.<span class="number">1</span>);
-<a href=#524 id=524 data-nosnippet>524</a>    <span class="comment">// `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
-<a href=#525 id=525 data-nosnippet>525</a>    // applied to the (positive) softplus *before* negating: a method call
-<a href=#526 id=526 data-nosnippet>526</a>    // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
-<a href=#527 id=527 data-nosnippet>527</a>    // -a_floor)` would collapse the positive softplus to the constant
-<a href=#528 id=528 data-nosnippet>528</a>    // `-a_floor` and yield `A ≡ +a_floor` — a *growing* state (`α &gt; 1`) with a
-<a href=#529 id=529 data-nosnippet>529</a>    // dead `dd_A` projection.
-<a href=#530 id=530 data-nosnippet>530</a>    </span><span class="kw">let </span>a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
-<a href=#531 id=531 data-nosnippet>531</a>    <span class="kw">let </span>da = dt.clone() * a;
-<a href=#532 id=532 data-nosnippet>532</a>    <span class="kw">let </span>alpha = da.clone().exp();
-<a href=#533 id=533 data-nosnippet>533</a>    <span class="kw">let </span>gate = |crosses: bool| {
-<a href=#534 id=534 data-nosnippet>534</a>        (!crosses).then(|| token_start_gate(dt.dims()[<span class="number">1</span>], spec.micro_steps, <span class="kw-2">&amp;</span>dt.device()))
-<a href=#535 id=535 data-nosnippet>535</a>    };
-<a href=#536 id=536 data-nosnippet>536</a>    <span class="kw">let </span>(nu, nu_interior, gamma) = <span class="kw">match </span>lambda_raw {
-<a href=#537 id=537 data-nosnippet>537</a>        <span class="prelude-val">Some</span>(lambda_raw) =&gt; {
-<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">let </span>lambda = burn::tensor::activation::sigmoid(lambda_raw);
-<a href=#539 id=539 data-nosnippet>539</a>            <span class="comment">// A closed far tap means λ = 1 there: the whole step is paid at the
-<a href=#540 id=540 data-nosnippet>540</a>            // right endpoint, which is what makes the gated pattern a submodel
-<a href=#541 id=541 data-nosnippet>541</a>            // of the ungated one rather than a lossy version of it.
-<a href=#542 id=542 data-nosnippet>542</a>            </span><span class="kw">let </span>lambda = <span class="kw">match </span>gate(spec.pattern.far_tap_crosses_tokens()) {
-<a href=#543 id=543 data-nosnippet>543</a>                <span class="prelude-val">Some</span>(open_1s1) =&gt; lambda * open_1s1.clone() + (-open_1s1 + <span class="number">1.0</span>),
-<a href=#544 id=544 data-nosnippet>544</a>                <span class="prelude-val">None </span>=&gt; lambda,
-<a href=#545 id=545 data-nosnippet>545</a>            };
-<a href=#546 id=546 data-nosnippet>546</a>            <span class="kw">let </span>nu = (-lambda.clone() + <span class="number">1.0</span>) * dt.clone();
-<a href=#547 id=547 data-nosnippet>547</a>            <span class="kw">let </span>gamma = lambda * dt.clone();
-<a href=#548 id=548 data-nosnippet>548</a>            <span class="comment">// …and a closed interior tap means μ = 0 there: its share of the
-<a href=#549 id=549 data-nosnippet>549</a>            // left endpoint returns to the far tap, one level up.
-<a href=#550 id=550 data-nosnippet>550</a>            </span><span class="kw">let </span>(nu, nu_interior) = <span class="kw">match </span>mu_raw {
-<a href=#551 id=551 data-nosnippet>551</a>                <span class="prelude-val">Some</span>(mu_raw) =&gt; {
-<a href=#552 id=552 data-nosnippet>552</a>                    <span class="kw">let </span>mu = burn::tensor::activation::sigmoid(mu_raw);
-<a href=#553 id=553 data-nosnippet>553</a>                    <span class="kw">let </span>mu = <span class="kw">match </span>gate(spec.pattern.interior_tap_crosses_tokens()) {
-<a href=#554 id=554 data-nosnippet>554</a>                        <span class="prelude-val">Some</span>(open_1s1) =&gt; mu * open_1s1,
-<a href=#555 id=555 data-nosnippet>555</a>                        <span class="prelude-val">None </span>=&gt; mu,
-<a href=#556 id=556 data-nosnippet>556</a>                    };
-<a href=#557 id=557 data-nosnippet>557</a>                    <span class="kw">let </span>nu_interior = nu.clone() * mu.clone();
-<a href=#558 id=558 data-nosnippet>558</a>                    (nu * (-mu + <span class="number">1.0</span>), <span class="prelude-val">Some</span>(nu_interior))
-<a href=#559 id=559 data-nosnippet>559</a>                }
-<a href=#560 id=560 data-nosnippet>560</a>                <span class="prelude-val">None </span>=&gt; (nu, <span class="prelude-val">None</span>),
-<a href=#561 id=561 data-nosnippet>561</a>            };
-<a href=#562 id=562 data-nosnippet>562</a>            (<span class="prelude-val">Some</span>(nu), nu_interior, gamma)
-<a href=#563 id=563 data-nosnippet>563</a>        }
-<a href=#564 id=564 data-nosnippet>564</a>        <span class="comment">// λ ≡ 1: the left endpoint is unweighted and the right one takes Δ whole.
-<a href=#565 id=565 data-nosnippet>565</a>        </span><span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, dt.clone()),
-<a href=#566 id=566 data-nosnippet>566</a>    };
-<a href=#567 id=567 data-nosnippet>567</a>    TrapezoidCoeffs {
-<a href=#568 id=568 data-nosnippet>568</a>        dt,
-<a href=#569 id=569 data-nosnippet>569</a>        da,
-<a href=#570 id=570 data-nosnippet>570</a>        alpha,
-<a href=#571 id=571 data-nosnippet>571</a>        nu,
-<a href=#572 id=572 data-nosnippet>572</a>        nu_interior,
-<a href=#573 id=573 data-nosnippet>573</a>        gamma,
-<a href=#574 id=574 data-nosnippet>574</a>    }
-<a href=#575 id=575 data-nosnippet>575</a>}
-<a href=#576 id=576 data-nosnippet>576</a>
-<a href=#577 id=577 data-nosnippet>577</a><span class="doccomment">/// QK-Norm → GQA-expand groups→heads → add per-(head, mimo-rank) bias.
-<a href=#578 id=578 data-nosnippet>578</a>///
-<a href=#579 id=579 data-nosnippet>579</a>/// The input is the raw B/C projection already reshaped to expose the group
-<a href=#580 id=580 data-nosnippet>580</a>/// dim, with last dim = `state_rank`. The output replaces the group dim with
-<a href=#581 id=581 data-nosnippet>581</a>/// the head dim, leaving the last dim untouched.
-<a href=#582 id=582 data-nosnippet>582</a>///
-<a href=#583 id=583 data-nosnippet>583</a>/// `DP1 = D + 1` (required by [`gqa_expand_to_heads`]'s intermediate rank).
-<a href=#584 id=584 data-nosnippet>584</a></span><span class="kw">pub fn </span>qk_norm_expand_bias&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
-<a href=#585 id=585 data-nosnippet>585</a>    raw_mgr: Tensor&lt;D&gt;,
-<a href=#586 id=586 data-nosnippet>586</a>    norm: <span class="kw-2">&amp;</span>RmsNorm,
-<a href=#587 id=587 data-nosnippet>587</a>    bias_hmr: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#588 id=588 data-nosnippet>588</a>    group_dim: usize,
-<a href=#589 id=589 data-nosnippet>589</a>    nheads: usize,
-<a href=#590 id=590 data-nosnippet>590</a>) -&gt; Tensor&lt;D&gt; {
-<a href=#591 id=591 data-nosnippet>591</a>    <span class="comment">// RmsNorm operates on the last dim only, so the leading shape passes through.
-<a href=#592 id=592 data-nosnippet>592</a>    </span><span class="kw">let </span>normed = norm.forward(raw_mgr);
-<a href=#593 id=593 data-nosnippet>593</a>    <span class="kw">let </span>expanded = gqa_expand_to_heads::&lt;D, DP1&gt;(normed, group_dim, nheads);
-<a href=#594 id=594 data-nosnippet>594</a>    <span class="comment">// Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
-<a href=#595 id=595 data-nosnippet>595</a>    </span><span class="kw">let </span>bias = bias_hmr.swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;D&gt;();
-<a href=#596 id=596 data-nosnippet>596</a>    expanded + bias
-<a href=#597 id=597 data-nosnippet>597</a>}
-<a href=#598 id=598 data-nosnippet>598</a>
-<a href=#599 id=599 data-nosnippet>599</a><span class="doccomment">/// Rank-summed outer product `state[b, h, p, r] = Σₘ v[b, m, h, p] · k[b, m, h, r]`
-<a href=#600 id=600 data-nosnippet>600</a>/// (`einsum('bmhp,bmhr-&gt;bhpr')`).
-<a href=#601 id=601 data-nosnippet>601</a>///
-<a href=#602 id=602 data-nosnippet>602</a>/// This is the per-token state contribution: each MIMO rank contributes an
-<a href=#603 id=603 data-nosnippet>603</a>/// outer product `v[m] ⊗ k[m]` and the shared state accumulates their sum.
-<a href=#604 id=604 data-nosnippet>604</a>///
-<a href=#605 id=605 data-nosnippet>605</a>/// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1 and
-<a href=#606 id=606 data-nosnippet>606</a>/// the sum is a single outer product — [`mimo_outer_sum_siso`] writes it as a
-<a href=#607 id=607 data-nosnippet>607</a>/// broadcast multiply instead. Which form wins is backend-dependent, and by a
-<a href=#608 id=608 data-nosnippet>608</a>/// wide margin at these (tiny, decode-sized) shapes: the broadcast is the
-<a href=#609 id=609 data-nosnippet>609</a>/// faster one on CUDA and *much* slower on the portable CPU backends, whose
-<a href=#610 id=610 data-nosnippet>610</a>/// broadcast-elementwise path trails their matmul by more than an order of
-<a href=#611 id=611 data-nosnippet>611</a>/// magnitude here. The choice is therefore
-<a href=#612 id=612 data-nosnippet>612</a>/// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)'s
-<a href=#613 id=613 data-nosnippet>613</a>/// — the per-token flag, *not* the chunkwise one, whose verdict is the opposite;
-<a href=#614 id=614 data-nosnippet>614</a>/// both branches compute the same values and gradients.
-<a href=#615 id=615 data-nosnippet>615</a></span><span class="kw">pub fn </span>mimo_outer_sum(
-<a href=#616 id=616 data-nosnippet>616</a>    v_bmhp: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#617 id=617 data-nosnippet>617</a>    k_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#618 id=618 data-nosnippet>618</a>    siso_specialization: bool,
-<a href=#619 id=619 data-nosnippet>619</a>) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
-<a href=#620 id=620 data-nosnippet>620</a>    <span class="kw">let </span>[_batch, mimo_rank, _nheads, _per_head_dim] = v_bmhp.dims();
-<a href=#621 id=621 data-nosnippet>621</a>    <span class="kw">if </span>mimo_rank == <span class="number">1 </span>&amp;&amp; siso_specialization {
-<a href=#622 id=622 data-nosnippet>622</a>        mimo_outer_sum_siso(v_bmhp, k_bmhr)
-<a href=#623 id=623 data-nosnippet>623</a>    } <span class="kw">else </span>{
-<a href=#624 id=624 data-nosnippet>624</a>        mimo_outer_sum_mimo(v_bmhp, k_bmhr)
-<a href=#625 id=625 data-nosnippet>625</a>    }
+<a href=#498 id=498 data-nosnippet>498</a>/// All data tensors are `[batch, len, nheads]`, `len` being the folded sequence
+<a href=#499 id=499 data-nosnippet>499</a>/// (`forward`) or the `u` micro-steps of one token (`step`); `dt_bias_h` is
+<a href=#500 id=500 data-nosnippet>500</a>/// broadcast to match. Axis 1 is what the patterns' gates are periodic in, in
+<a href=#501 id=501 data-nosnippet>501</a>/// both cases.
+<a href=#502 id=502 data-nosnippet>502</a>///
+<a href=#503 id=503 data-nosnippet>503</a>/// `lambda_raw` is `None` under
+<a href=#504 id=504 data-nosnippet>504</a>/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) — the block
+<a href=#505 id=505 data-nosnippet>505</a>/// projects no `λ` channels — and the coefficients then take their `λ ≡ 1`
+<a href=#506 id=506 data-nosnippet>506</a>/// values *by construction*: no mass is formed and `γ` **is** `Δ`, sharing its
+<a href=#507 id=507 data-nosnippet>507</a>/// tensor rather than recomputing `1 · Δ`. `mu_raw` is `None` unless the pattern
+<a href=#508 id=508 data-nosnippet>508</a>/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap),
+<a href=#509 id=509 data-nosnippet>509</a>/// and the same holds one level down: no `μ`, no second mass.
+<a href=#510 id=510 data-nosnippet>510</a>///
+<a href=#511 id=511 data-nosnippet>511</a>/// A gate closes by handing its mass back, not by dropping it: `λ` is set to `1`
+<a href=#512 id=512 data-nosnippet>512</a>/// where the far tap is inadmissible (so `γ` takes the step whole) and `μ` to
+<a href=#513 id=513 data-nosnippet>513</a>/// `0` where the interior one is (so the far tap takes the left endpoint whole).
+<a href=#514 id=514 data-nosnippet>514</a>/// Both are exact at the ends, so the degenerate members are their targets bit
+<a href=#515 id=515 data-nosnippet>515</a>/// for bit.
+<a href=#516 id=516 data-nosnippet>516</a>///
+<a href=#517 id=517 data-nosnippet>517</a>/// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain): the
+<a href=#518 id=518 data-nosnippet>518</a>/// decay is then computed ([`crate::mamba3::positive::kalman::gate`]) **here**,
+<a href=#519 id=519 data-nosnippet>519</a>/// before `α` is formed from it, so no consumer — the taps' transports, the
+<a href=#520 id=520 data-nosnippet>520</a>/// tap slots, single-SSD's key scale — can read the projected one by mistake.
+<a href=#521 id=521 data-nosnippet>521</a>/// The masses keep the projected `Δ`; the gate reads them in logs, formed from
+<a href=#522 id=522 data-nosnippet>522</a>/// the same pre-activations ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).
+<a href=#523 id=523 data-nosnippet>523</a></span><span class="kw">pub fn </span>trapezoidal_coefficients(
+<a href=#524 id=524 data-nosnippet>524</a>    dd_dt: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#525 id=525 data-nosnippet>525</a>    dd_a_raw: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#526 id=526 data-nosnippet>526</a>    lambda_raw: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#527 id=527 data-nosnippet>527</a>    mu_raw: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#528 id=528 data-nosnippet>528</a>    dt_bias_h: Tensor&lt;<span class="number">1</span>&gt;,
+<a href=#529 id=529 data-nosnippet>529</a>    spec: TrapezoidSpec,
+<a href=#530 id=530 data-nosnippet>530</a>    gain: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::mamba3::positive::kalman::GainInput&gt;,
+<a href=#531 id=531 data-nosnippet>531</a>) -&gt; TrapezoidCoeffs {
+<a href=#532 id=532 data-nosnippet>532</a>    <span class="kw">let </span>(dt_limit, a_floor) = (spec.dt_limit, spec.a_floor);
+<a href=#533 id=533 data-nosnippet>533</a>    <span class="comment">// Broadcast dt_bias_h [nheads] → [1, 1, nheads] so the addition aligns on
+<a href=#534 id=534 data-nosnippet>534</a>    // the last dim.
+<a href=#535 id=535 data-nosnippet>535</a>    </span><span class="kw">let </span>dt_bias_broadcast = dt_bias_h.unsqueeze::&lt;<span class="number">3</span>&gt;();
+<a href=#536 id=536 data-nosnippet>536</a>    <span class="kw">let </span>dt_raw = dd_dt + dt_bias_broadcast;
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="kw">let </span>dt = softplus(dt_raw.clone()).clamp(dt_limit.<span class="number">0</span>, dt_limit.<span class="number">1</span>);
+<a href=#538 id=538 data-nosnippet>538</a>    <span class="comment">// `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
+<a href=#539 id=539 data-nosnippet>539</a>    // applied to the (positive) softplus *before* negating: a method call
+<a href=#540 id=540 data-nosnippet>540</a>    // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
+<a href=#541 id=541 data-nosnippet>541</a>    // -a_floor)` would collapse the positive softplus to the constant
+<a href=#542 id=542 data-nosnippet>542</a>    // `-a_floor` and yield `A ≡ +a_floor` — a *growing* state (`α &gt; 1`) with a
+<a href=#543 id=543 data-nosnippet>543</a>    // dead `dd_A` projection.
+<a href=#544 id=544 data-nosnippet>544</a>    </span><span class="kw">let </span>a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
+<a href=#545 id=545 data-nosnippet>545</a>    <span class="kw">let </span>da = dt.clone() * a;
+<a href=#546 id=546 data-nosnippet>546</a>    <span class="kw">let </span>gate = |crosses: bool| {
+<a href=#547 id=547 data-nosnippet>547</a>        (!crosses).then(|| token_start_gate(dt.dims()[<span class="number">1</span>], spec.micro_steps, <span class="kw-2">&amp;</span>dt.device()))
+<a href=#548 id=548 data-nosnippet>548</a>    };
+<a href=#549 id=549 data-nosnippet>549</a>    <span class="comment">// Where the far tap is closed — read by `λ` below and by the gate's masses.
+<a href=#550 id=550 data-nosnippet>550</a>    </span><span class="kw">let </span>far_open_1s1 = lambda_raw
+<a href=#551 id=551 data-nosnippet>551</a>        .as_ref()
+<a href=#552 id=552 data-nosnippet>552</a>        .and_then(|<span class="kw">_</span>| gate(spec.pattern.far_tap_crosses_tokens()));
+<a href=#553 id=553 data-nosnippet>553</a>    <span class="kw">let </span>(da, log_precision) = <span class="kw">match </span>gain {
+<a href=#554 id=554 data-nosnippet>554</a>        <span class="prelude-val">Some</span>(gain) =&gt; {
+<a href=#555 id=555 data-nosnippet>555</a>            <span class="kw">use </span><span class="kw">crate</span>::mamba3::positive::kalman;
+<a href=#556 id=556 data-nosnippet>556</a>            <span class="kw">let </span>masses =
+<a href=#557 id=557 data-nosnippet>557</a>                kalman::LogMasses::new(dt_raw, dt_limit, lambda_raw.clone(), far_open_1s1.clone());
+<a href=#558 id=558 data-nosnippet>558</a>            <span class="kw">let </span>out = kalman::gate(da, masses, gain);
+<a href=#559 id=559 data-nosnippet>559</a>            (out.da_bsh, <span class="prelude-val">Some</span>(out.log_precision_bsh))
+<a href=#560 id=560 data-nosnippet>560</a>        }
+<a href=#561 id=561 data-nosnippet>561</a>        <span class="prelude-val">None </span>=&gt; (da, <span class="prelude-val">None</span>),
+<a href=#562 id=562 data-nosnippet>562</a>    };
+<a href=#563 id=563 data-nosnippet>563</a>    <span class="kw">let </span>alpha = da.clone().exp();
+<a href=#564 id=564 data-nosnippet>564</a>    <span class="kw">let </span>(nu, nu_interior, gamma) = <span class="kw">match </span>lambda_raw {
+<a href=#565 id=565 data-nosnippet>565</a>        <span class="prelude-val">Some</span>(lambda_raw) =&gt; {
+<a href=#566 id=566 data-nosnippet>566</a>            <span class="kw">let </span>lambda = burn::tensor::activation::sigmoid(lambda_raw);
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="comment">// A closed far tap means λ = 1 there: the whole step is paid at the
+<a href=#568 id=568 data-nosnippet>568</a>            // right endpoint, which is what makes the gated pattern a submodel
+<a href=#569 id=569 data-nosnippet>569</a>            // of the ungated one rather than a lossy version of it.
+<a href=#570 id=570 data-nosnippet>570</a>            </span><span class="kw">let </span>lambda = <span class="kw">match </span>far_open_1s1 {
+<a href=#571 id=571 data-nosnippet>571</a>                <span class="prelude-val">Some</span>(open_1s1) =&gt; lambda * open_1s1.clone() + (-open_1s1 + <span class="number">1.0</span>),
+<a href=#572 id=572 data-nosnippet>572</a>                <span class="prelude-val">None </span>=&gt; lambda,
+<a href=#573 id=573 data-nosnippet>573</a>            };
+<a href=#574 id=574 data-nosnippet>574</a>            <span class="kw">let </span>nu = (-lambda.clone() + <span class="number">1.0</span>) * dt.clone();
+<a href=#575 id=575 data-nosnippet>575</a>            <span class="kw">let </span>gamma = lambda * dt.clone();
+<a href=#576 id=576 data-nosnippet>576</a>            <span class="comment">// …and a closed interior tap means μ = 0 there: its share of the
+<a href=#577 id=577 data-nosnippet>577</a>            // left endpoint returns to the far tap, one level up.
+<a href=#578 id=578 data-nosnippet>578</a>            </span><span class="kw">let </span>(nu, nu_interior) = <span class="kw">match </span>mu_raw {
+<a href=#579 id=579 data-nosnippet>579</a>                <span class="prelude-val">Some</span>(mu_raw) =&gt; {
+<a href=#580 id=580 data-nosnippet>580</a>                    <span class="kw">let </span>mu = burn::tensor::activation::sigmoid(mu_raw);
+<a href=#581 id=581 data-nosnippet>581</a>                    <span class="kw">let </span>mu = <span class="kw">match </span>gate(spec.pattern.interior_tap_crosses_tokens()) {
+<a href=#582 id=582 data-nosnippet>582</a>                        <span class="prelude-val">Some</span>(open_1s1) =&gt; mu * open_1s1,
+<a href=#583 id=583 data-nosnippet>583</a>                        <span class="prelude-val">None </span>=&gt; mu,
+<a href=#584 id=584 data-nosnippet>584</a>                    };
+<a href=#585 id=585 data-nosnippet>585</a>                    <span class="kw">let </span>nu_interior = nu.clone() * mu.clone();
+<a href=#586 id=586 data-nosnippet>586</a>                    (nu * (-mu + <span class="number">1.0</span>), <span class="prelude-val">Some</span>(nu_interior))
+<a href=#587 id=587 data-nosnippet>587</a>                }
+<a href=#588 id=588 data-nosnippet>588</a>                <span class="prelude-val">None </span>=&gt; (nu, <span class="prelude-val">None</span>),
+<a href=#589 id=589 data-nosnippet>589</a>            };
+<a href=#590 id=590 data-nosnippet>590</a>            (<span class="prelude-val">Some</span>(nu), nu_interior, gamma)
+<a href=#591 id=591 data-nosnippet>591</a>        }
+<a href=#592 id=592 data-nosnippet>592</a>        <span class="comment">// λ ≡ 1: the left endpoint is unweighted and the right one takes Δ whole.
+<a href=#593 id=593 data-nosnippet>593</a>        </span><span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>, dt.clone()),
+<a href=#594 id=594 data-nosnippet>594</a>    };
+<a href=#595 id=595 data-nosnippet>595</a>    TrapezoidCoeffs {
+<a href=#596 id=596 data-nosnippet>596</a>        dt,
+<a href=#597 id=597 data-nosnippet>597</a>        da,
+<a href=#598 id=598 data-nosnippet>598</a>        alpha,
+<a href=#599 id=599 data-nosnippet>599</a>        nu,
+<a href=#600 id=600 data-nosnippet>600</a>        nu_interior,
+<a href=#601 id=601 data-nosnippet>601</a>        gamma,
+<a href=#602 id=602 data-nosnippet>602</a>        log_precision,
+<a href=#603 id=603 data-nosnippet>603</a>    }
+<a href=#604 id=604 data-nosnippet>604</a>}
+<a href=#605 id=605 data-nosnippet>605</a>
+<a href=#606 id=606 data-nosnippet>606</a><span class="doccomment">/// QK-Norm → GQA-expand groups→heads → add per-(head, mimo-rank) bias.
+<a href=#607 id=607 data-nosnippet>607</a>///
+<a href=#608 id=608 data-nosnippet>608</a>/// The input is the raw B/C projection already reshaped to expose the group
+<a href=#609 id=609 data-nosnippet>609</a>/// dim, with last dim = `state_rank`. The output replaces the group dim with
+<a href=#610 id=610 data-nosnippet>610</a>/// the head dim, leaving the last dim untouched.
+<a href=#611 id=611 data-nosnippet>611</a>///
+<a href=#612 id=612 data-nosnippet>612</a>/// `DP1 = D + 1` (required by [`gqa_expand_to_heads`]'s intermediate rank).
+<a href=#613 id=613 data-nosnippet>613</a></span><span class="kw">pub fn </span>qk_norm_expand_bias&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
+<a href=#614 id=614 data-nosnippet>614</a>    raw_mgr: Tensor&lt;D&gt;,
+<a href=#615 id=615 data-nosnippet>615</a>    norm: <span class="kw-2">&amp;</span>RmsNorm,
+<a href=#616 id=616 data-nosnippet>616</a>    bias_hmr: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#617 id=617 data-nosnippet>617</a>    group_dim: usize,
+<a href=#618 id=618 data-nosnippet>618</a>    nheads: usize,
+<a href=#619 id=619 data-nosnippet>619</a>) -&gt; Tensor&lt;D&gt; {
+<a href=#620 id=620 data-nosnippet>620</a>    <span class="comment">// RmsNorm operates on the last dim only, so the leading shape passes through.
+<a href=#621 id=621 data-nosnippet>621</a>    </span><span class="kw">let </span>normed = norm.forward(raw_mgr);
+<a href=#622 id=622 data-nosnippet>622</a>    <span class="kw">let </span>expanded = gqa_expand_to_heads::&lt;D, DP1&gt;(normed, group_dim, nheads);
+<a href=#623 id=623 data-nosnippet>623</a>    <span class="comment">// Broadcast bias [nheads, mimo_rank, state_rank] → [1, ..., 1, mimo_rank, nheads, state_rank].
+<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="kw">let </span>bias = bias_hmr.swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;D&gt;();
+<a href=#625 id=625 data-nosnippet>625</a>    expanded + bias
 <a href=#626 id=626 data-nosnippet>626</a>}
 <a href=#627 id=627 data-nosnippet>627</a>
-<a href=#628 id=628 data-nosnippet>628</a><span class="doccomment">/// SISO (`mimo_rank == 1`) rank-summed outer product: the single `v ⊗ k` as a
-<a href=#629 id=629 data-nosnippet>629</a>/// broadcast multiply of `[b, h, p, 1]` by `[b, h, 1, r]`.
-<a href=#630 id=630 data-nosnippet>630</a></span><span class="kw">pub fn </span>mimo_outer_sum_siso(v_bmhp: Tensor&lt;<span class="number">4</span>&gt;, k_bmhr: Tensor&lt;<span class="number">4</span>&gt;) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
-<a href=#631 id=631 data-nosnippet>631</a>    <span class="kw">let </span>v_bhp1: Tensor&lt;<span class="number">4</span>&gt; = v_bmhp.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>).unsqueeze_dim(<span class="number">3</span>);
-<a href=#632 id=632 data-nosnippet>632</a>    <span class="kw">let </span>k_bh1r: Tensor&lt;<span class="number">4</span>&gt; = k_bmhr.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>).unsqueeze_dim(<span class="number">2</span>);
-<a href=#633 id=633 data-nosnippet>633</a>    v_bhp1 * k_bh1r
-<a href=#634 id=634 data-nosnippet>634</a>}
-<a href=#635 id=635 data-nosnippet>635</a>
-<a href=#636 id=636 data-nosnippet>636</a><span class="doccomment">/// General MIMO rank-summed outer product: a matmul contracting `mimo_rank`.
-<a href=#637 id=637 data-nosnippet>637</a></span><span class="kw">pub fn </span>mimo_outer_sum_mimo(v_bmhp: Tensor&lt;<span class="number">4</span>&gt;, k_bmhr: Tensor&lt;<span class="number">4</span>&gt;) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="comment">// v_bmhp [b, m, h, p] -&gt; v_bhpm [b, h, p, m]; k_bmhr [b, m, h, r] -&gt; k_bhmr.
-<a href=#639 id=639 data-nosnippet>639</a>    </span><span class="kw">let </span>v_bhpm = v_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
-<a href=#640 id=640 data-nosnippet>640</a>    <span class="kw">let </span>k_bhmr = k_bmhr.swap_dims(<span class="number">1</span>, <span class="number">2</span>);
-<a href=#641 id=641 data-nosnippet>641</a>    v_bhpm.matmul(k_bhmr)
-<a href=#642 id=642 data-nosnippet>642</a>}
-<a href=#643 id=643 data-nosnippet>643</a>
-<a href=#644 id=644 data-nosnippet>644</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#645 id=645 data-nosnippet>645</a></span><span class="kw">mod </span>tests;
-<a href=#646 id=646 data-nosnippet>646</a>
-<a href=#647 id=647 data-nosnippet>647</a><span class="doccomment">/// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
-<a href=#648 id=648 data-nosnippet>648</a>///
-<a href=#649 id=649 data-nosnippet>649</a>/// Inserts a `mimo_rank` axis at `insert_dim`. When `mimo_x_hmp` is `None`
-<a href=#650 id=650 data-nosnippet>650</a>/// (SISO), the inserted axis has size 1 and `x` is passed through; otherwise
-<a href=#651 id=651 data-nosnippet>651</a>/// broadcasting fills the inserted axis to size `mimo_rank`.
-<a href=#652 id=652 data-nosnippet>652</a>///
-<a href=#653 id=653 data-nosnippet>653</a>/// `DP1 = D + 1`.
-<a href=#654 id=654 data-nosnippet>654</a></span><span class="kw">pub fn </span>build_v_with_mimo&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
-<a href=#655 id=655 data-nosnippet>655</a>    x: Tensor&lt;D&gt;,
-<a href=#656 id=656 data-nosnippet>656</a>    mimo_x_hmp: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;&gt;,
-<a href=#657 id=657 data-nosnippet>657</a>    insert_dim: usize,
-<a href=#658 id=658 data-nosnippet>658</a>) -&gt; Tensor&lt;DP1&gt; {
-<a href=#659 id=659 data-nosnippet>659</a>    <span class="kw">let </span>x_with_rank_axis = x.unsqueeze_dim::&lt;DP1&gt;(insert_dim);
-<a href=#660 id=660 data-nosnippet>660</a>    <span class="kw">match </span>mimo_x_hmp {
-<a href=#661 id=661 data-nosnippet>661</a>        <span class="prelude-val">None </span>=&gt; x_with_rank_axis,
-<a href=#662 id=662 data-nosnippet>662</a>        <span class="prelude-val">Some</span>(mimo_x_hmp) =&gt; {
-<a href=#663 id=663 data-nosnippet>663</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → swap_dims to
-<a href=#664 id=664 data-nosnippet>664</a>            // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
-<a href=#665 id=665 data-nosnippet>665</a>            // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
-<a href=#666 id=666 data-nosnippet>666</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;DP1&gt;();
-<a href=#667 id=667 data-nosnippet>667</a>            x_with_rank_axis * mimo_x_broadcast
-<a href=#668 id=668 data-nosnippet>668</a>        }
-<a href=#669 id=669 data-nosnippet>669</a>    }
-<a href=#670 id=670 data-nosnippet>670</a>}
+<a href=#628 id=628 data-nosnippet>628</a><span class="doccomment">/// Rank-summed outer product `state[b, h, p, r] = Σₘ v[b, m, h, p] · k[b, m, h, r]`
+<a href=#629 id=629 data-nosnippet>629</a>/// (`einsum('bmhp,bmhr-&gt;bhpr')`).
+<a href=#630 id=630 data-nosnippet>630</a>///
+<a href=#631 id=631 data-nosnippet>631</a>/// This is the per-token state contribution: each MIMO rank contributes an
+<a href=#632 id=632 data-nosnippet>632</a>/// outer product `v[m] ⊗ k[m]` and the shared state accumulates their sum.
+<a href=#633 id=633 data-nosnippet>633</a>///
+<a href=#634 id=634 data-nosnippet>634</a>/// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1 and
+<a href=#635 id=635 data-nosnippet>635</a>/// the sum is a single outer product — [`mimo_outer_sum_siso`] writes it as a
+<a href=#636 id=636 data-nosnippet>636</a>/// broadcast multiply instead. Which form wins is backend-dependent, and by a
+<a href=#637 id=637 data-nosnippet>637</a>/// wide margin at these (tiny, decode-sized) shapes: the broadcast is the
+<a href=#638 id=638 data-nosnippet>638</a>/// faster one on CUDA and *much* slower on the portable CPU backends, whose
+<a href=#639 id=639 data-nosnippet>639</a>/// broadcast-elementwise path trails their matmul by more than an order of
+<a href=#640 id=640 data-nosnippet>640</a>/// magnitude here. The choice is therefore
+<a href=#641 id=641 data-nosnippet>641</a>/// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)'s
+<a href=#642 id=642 data-nosnippet>642</a>/// — the per-token flag, *not* the chunkwise one, whose verdict is the opposite;
+<a href=#643 id=643 data-nosnippet>643</a>/// both branches compute the same values and gradients.
+<a href=#644 id=644 data-nosnippet>644</a></span><span class="kw">pub fn </span>mimo_outer_sum(
+<a href=#645 id=645 data-nosnippet>645</a>    v_bmhp: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#646 id=646 data-nosnippet>646</a>    k_bmhr: Tensor&lt;<span class="number">4</span>&gt;,
+<a href=#647 id=647 data-nosnippet>647</a>    siso_specialization: bool,
+<a href=#648 id=648 data-nosnippet>648</a>) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
+<a href=#649 id=649 data-nosnippet>649</a>    <span class="kw">let </span>[_batch, mimo_rank, _nheads, _per_head_dim] = v_bmhp.dims();
+<a href=#650 id=650 data-nosnippet>650</a>    <span class="kw">if </span>mimo_rank == <span class="number">1 </span>&amp;&amp; siso_specialization {
+<a href=#651 id=651 data-nosnippet>651</a>        mimo_outer_sum_siso(v_bmhp, k_bmhr)
+<a href=#652 id=652 data-nosnippet>652</a>    } <span class="kw">else </span>{
+<a href=#653 id=653 data-nosnippet>653</a>        mimo_outer_sum_mimo(v_bmhp, k_bmhr)
+<a href=#654 id=654 data-nosnippet>654</a>    }
+<a href=#655 id=655 data-nosnippet>655</a>}
+<a href=#656 id=656 data-nosnippet>656</a>
+<a href=#657 id=657 data-nosnippet>657</a><span class="doccomment">/// SISO (`mimo_rank == 1`) rank-summed outer product: the single `v ⊗ k` as a
+<a href=#658 id=658 data-nosnippet>658</a>/// broadcast multiply of `[b, h, p, 1]` by `[b, h, 1, r]`.
+<a href=#659 id=659 data-nosnippet>659</a></span><span class="kw">pub fn </span>mimo_outer_sum_siso(v_bmhp: Tensor&lt;<span class="number">4</span>&gt;, k_bmhr: Tensor&lt;<span class="number">4</span>&gt;) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
+<a href=#660 id=660 data-nosnippet>660</a>    <span class="kw">let </span>v_bhp1: Tensor&lt;<span class="number">4</span>&gt; = v_bmhp.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>).unsqueeze_dim(<span class="number">3</span>);
+<a href=#661 id=661 data-nosnippet>661</a>    <span class="kw">let </span>k_bh1r: Tensor&lt;<span class="number">4</span>&gt; = k_bmhr.squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>).unsqueeze_dim(<span class="number">2</span>);
+<a href=#662 id=662 data-nosnippet>662</a>    v_bhp1 * k_bh1r
+<a href=#663 id=663 data-nosnippet>663</a>}
+<a href=#664 id=664 data-nosnippet>664</a>
+<a href=#665 id=665 data-nosnippet>665</a><span class="doccomment">/// General MIMO rank-summed outer product: a matmul contracting `mimo_rank`.
+<a href=#666 id=666 data-nosnippet>666</a></span><span class="kw">pub fn </span>mimo_outer_sum_mimo(v_bmhp: Tensor&lt;<span class="number">4</span>&gt;, k_bmhr: Tensor&lt;<span class="number">4</span>&gt;) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
+<a href=#667 id=667 data-nosnippet>667</a>    <span class="comment">// v_bmhp [b, m, h, p] -&gt; v_bhpm [b, h, p, m]; k_bmhr [b, m, h, r] -&gt; k_bhmr.
+<a href=#668 id=668 data-nosnippet>668</a>    </span><span class="kw">let </span>v_bhpm = v_bmhp.permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
+<a href=#669 id=669 data-nosnippet>669</a>    <span class="kw">let </span>k_bhmr = k_bmhr.swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#670 id=670 data-nosnippet>670</a>    v_bhpm.matmul(k_bhmr)
+<a href=#671 id=671 data-nosnippet>671</a>}
+<a href=#672 id=672 data-nosnippet>672</a>
+<a href=#673 id=673 data-nosnippet>673</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#674 id=674 data-nosnippet>674</a></span><span class="kw">mod </span>tests;
+<a href=#675 id=675 data-nosnippet>675</a>
+<a href=#676 id=676 data-nosnippet>676</a><span class="doccomment">/// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
+<a href=#677 id=677 data-nosnippet>677</a>///
+<a href=#678 id=678 data-nosnippet>678</a>/// Inserts a `mimo_rank` axis at `insert_dim`. When `mimo_x_hmp` is `None`
+<a href=#679 id=679 data-nosnippet>679</a>/// (SISO), the inserted axis has size 1 and `x` is passed through; otherwise
+<a href=#680 id=680 data-nosnippet>680</a>/// broadcasting fills the inserted axis to size `mimo_rank`.
+<a href=#681 id=681 data-nosnippet>681</a>///
+<a href=#682 id=682 data-nosnippet>682</a>/// `DP1 = D + 1`.
+<a href=#683 id=683 data-nosnippet>683</a></span><span class="kw">pub fn </span>build_v_with_mimo&lt;<span class="kw">const </span>D: usize, <span class="kw">const </span>DP1: usize&gt;(
+<a href=#684 id=684 data-nosnippet>684</a>    x: Tensor&lt;D&gt;,
+<a href=#685 id=685 data-nosnippet>685</a>    mimo_x_hmp: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;&gt;,
+<a href=#686 id=686 data-nosnippet>686</a>    insert_dim: usize,
+<a href=#687 id=687 data-nosnippet>687</a>) -&gt; Tensor&lt;DP1&gt; {
+<a href=#688 id=688 data-nosnippet>688</a>    <span class="kw">let </span>x_with_rank_axis = x.unsqueeze_dim::&lt;DP1&gt;(insert_dim);
+<a href=#689 id=689 data-nosnippet>689</a>    <span class="kw">match </span>mimo_x_hmp {
+<a href=#690 id=690 data-nosnippet>690</a>        <span class="prelude-val">None </span>=&gt; x_with_rank_axis,
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="prelude-val">Some</span>(mimo_x_hmp) =&gt; {
+<a href=#692 id=692 data-nosnippet>692</a>            <span class="comment">// mimo_x_hmp [nheads, mimo_rank, per_head_dim] → swap_dims to
+<a href=#693 id=693 data-nosnippet>693</a>            // [mimo_rank, nheads, per_head_dim] → unsqueeze leading 1s. The
+<a href=#694 id=694 data-nosnippet>694</a>            // result broadcasts against `x_with_rank_axis` over (batch, seq, …).
+<a href=#695 id=695 data-nosnippet>695</a>            </span><span class="kw">let </span>mimo_x_broadcast = mimo_x_hmp.clone().swap_dims(<span class="number">0</span>, <span class="number">1</span>).unsqueeze::&lt;DP1&gt;();
+<a href=#696 id=696 data-nosnippet>696</a>            x_with_rank_axis * mimo_x_broadcast
+<a href=#697 id=697 data-nosnippet>697</a>        }
+<a href=#698 id=698 data-nosnippet>698</a>    }
+<a href=#699 id=699 data-nosnippet>699</a>}
 </code></pre></div></section></main></body></html>

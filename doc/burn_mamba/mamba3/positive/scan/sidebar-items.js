@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["fold","lse","one_and_zero","prefix"],"struct":["Affine","Mobius"],"trait":["Element"]};
