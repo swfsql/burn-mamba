@@ -45,6 +45,9 @@
 /// A runtime-tagged cache collection + the per-family `Block` / `BlockConfig` /
 /// `CacheStack` impls.
 pub mod cache;
+/// Each family's `CacheTensors` traversal: a captured `step` writing its new
+/// cache in place.
+pub mod capture;
 /// Runtime-selectable networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod network;

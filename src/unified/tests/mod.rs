@@ -7,6 +7,7 @@
 //! a `grad_horizon` cut, class-marker placement, and the Muon allowlist.
 
 mod bidi;
+mod capture;
 mod class;
 mod layer;
 #[cfg(feature = "mamba3")]

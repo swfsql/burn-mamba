@@ -66,6 +66,11 @@ One `generate()` call is therefore one story. A second story wants a second call
 against a **reset** cache, which is the one place these examples genuinely reset
 one.
 
+On CUDA the decode `step`s are replayed from one captured graph (burn-stack's
+`CapturedStep`) instead of being launched anew — a model this small is bound by
+the host enqueueing its launches, not by the GPU. The text is the same either
+way; `TS_GRAPH=0` steps eagerly.
+
 Every position is scored against its next character (so the reported accuracy is
 per character), and a story is walked in windows — see
 [Runs and the frontier](#runs-and-the-frontier). Stories differ in length, so a

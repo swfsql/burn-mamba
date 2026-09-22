@@ -134,11 +134,13 @@ src/
    │                 not stacked matrices" argument (MIMO diagonals)
    ├─ cache.rs       MambaCaches enum (+ detach()) + impl Block / BlockConfig /
    │                 CacheStack for Mamba{1,2,3}(Config|Caches)
+   ├─ capture.rs     each family's CacheTensors traversal (burn-stack's trait),
+   │                 which a CapturedStep writes its new cache back through
    ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs)
    ├─ bidi.rs        MambaBidiLayers (+ Config)
    └─ tests/         the burn-stack containers exercised through real blocks:
                      layer, layers (grad_horizon), multi_gate, bidi, class, optim,
-                     untied
+                     untied, capture
 ```
 
 The generic containers themselves (`Layer`/`Layers`/networks/bidi/multi_gate/
@@ -190,6 +192,10 @@ prefill) and **`step()`** (recurrent: token-by-token decode, O(state)/token, no
 growing KV cache). `forward()` from any cache equals `step()` unrolled from that same
 cache — parity on **outputs, final cache, and gradients** is what the test suites
 assert.
+
+On CUDA a decode `step()` can be replayed from one captured graph (burn-stack's
+`CapturedStep`, through `unified/capture.rs`); tiny-stories' `generate` does
+(`TS_GRAPH=0` = eager), with the same text.
 
 Layer containers and networks additionally expose **`prime()`** — `step()` without
 a user token: it emits the class tokens/latents waiting for the next one and

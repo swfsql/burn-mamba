@@ -612,6 +612,19 @@ impl MambaVocabNet {
         }
     }
 
+    /// Whether every class latent is a `Start`, so that after the opening every
+    /// `step` runs the same launches — see
+    /// [`Layers::only_start_latents`](burn_stack::modules::Layers::only_start_latents).
+    pub fn only_start_latents(&self) -> bool {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => net.layers.only_start_latents(),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => net.layers.only_start_latents(),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => net.layers.only_start_latents(),
+        }
+    }
 }
 
 /// The serializable, documentation-friendly config for [`MambaVocabNet`]. Each

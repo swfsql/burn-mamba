@@ -494,8 +494,16 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   kept, graph dropped) dispatched over the runtime tag: the enum cannot implement
   `CacheStack` itself (its slot type would have to be a fourth enum), and a caller
   carrying a cache across a gradient boundary holds the enum, not the family type.
+- **`capture.rs`** — `impl CacheTensors` (burn-stack's; what a `CapturedStep` writes
+  its new cache back through) for every family's `Cache`/`Caches` and `MambaCaches`.
+  Mamba-3's single-ssd cache rides the double-ssd traversal via the field-move
+  `From`; `RotationState::Real` keeps the receiver's `NoRotation`; optional fields
+  must be present in both caches or neither, as must pathway, family and rotation
+  kind (else panic). Mamba-3's tap slots come back from `step` as `narrow`s, which
+  is why a stable cache is `into_owned_buffers` first.
 - **`network.rs`** — `MambaLatentNet`/`MambaVocabNet` + `#[derive(Config)]` `*Config`,
-  wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`.
+  wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`;
+  `MambaVocabNet::only_start_latents` (the capture gate) dispatches to the stack's.
 - **`bidi.rs`** — `MambaBidiLayers` + `MambaBidiLayersConfig`, wrapping
   `burn_stack::modules::BidiLayers`.
 - **`tests/`** — the burn-stack containers exercised against **real** blocks (burn-stack
@@ -505,7 +513,9 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   (each family's plan fits its model and never selects a boundary weight — the
   boundary test keys off `burn_stack::optim::BLOCK_CONTAINERS`, not a spelling),
   `untied` (every untiable tensor read at its application in `forward` and `step`;
-  the Mamba-3 tail's layout and per-copy training).
+  the Mamba-3 tail's layout and per-copy training), `capture` (every field moved,
+  checked field by field rather than through the traversal, on a Mamba-3 block
+  holding every optional field; pathway mismatch panics).
 
 ## Benchmarks (`benches/layer.rs`, `bench.sh`, `kernels.sh`)
 

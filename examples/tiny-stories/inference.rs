@@ -10,8 +10,12 @@
 //! `burn_stack`'s
 //! [`generate`](burn_stack::examples::tiny_stories::sample::generate) written
 //! over this crate's family enum, which the block-generic one cannot dispatch;
-//! the token sampler itself is shared. [`infer`] loads the checkpoint and prints
-//! a few stories at different temperatures.
+//! the decode loop itself is shared
+//! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)), and past its
+//! first few steps it replays one captured graph of the step instead of
+//! launching it anew (`TS_GRAPH=0` turns that off; the text is the same either
+//! way). [`infer`] loads the checkpoint and prints a few stories at different
+//! temperatures.
 //!
 //! One call is one story. A second one starts from a **zero** cache and primes
 //! again, which is the only place these examples genuinely reset a cache: the
@@ -23,10 +27,11 @@ use crate::dataset::VOCAB;
 use crate::training::ssd_path;
 use burn::prelude::*;
 use burn_mamba::prelude::{MambaVocabNet, MambaVocabNetConfig};
-use burn_stack::examples::tiny_stories::sample::sample_token;
+use burn_stack::examples::tiny_stories::sample::decode;
 use burn_stack::utils::ClassCursors;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use std::time::Instant;
 
 /// Temperatures sampled by [`infer`], from near-greedy to loose.
 const TEMPERATURES: &[f64] = &[0.5, 0.8, 1.0];
@@ -44,9 +49,13 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
     let out_dir = app_args.artifacts_path.join("inference");
     std::fs::create_dir_all(&out_dir).expect("failed to create the inference directory");
 
+    // Per-sample wall time, opening included.
+    let per_char = |t: Instant| t.elapsed().as_secs_f64() * 1e3 / SAMPLE_CHARS as f64;
+
     for (i, &temperature) in TEMPERATURES.iter().enumerate() {
         // Nothing is fed in: the class latents are the model's "a story starts
         // here", and `prime` replays them.
+        let t = Instant::now();
         let text = generate(
             &model,
             &infer_device,
@@ -55,12 +64,14 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
             temperature,
             i as u64,
         );
-        println!("\n--- unprompted, temperature {temperature} ---\n{text}");
+        let ms = per_char(t);
+        println!("\n--- unprompted, temperature {temperature} ({ms:.2} ms/char) ---\n{text}");
         let path = out_dir.join(format!("sample-t{temperature}.txt"));
         std::fs::write(&path, &text).expect("failed to write the sample");
     }
 
     let prompt = "once upon a time, there was a little girl named lily. she";
+    let t = Instant::now();
     let text = generate(
         &model,
         &infer_device,
@@ -69,7 +80,8 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
         0.8,
         TEMPERATURES.len() as u64,
     );
-    println!("\n--- prompted, temperature 0.8 ---\n{prompt}{text}");
+    let ms = per_char(t);
+    println!("\n--- prompted, temperature 0.8 ({ms:.2} ms/char) ---\n{prompt}{text}");
     let path = out_dir.join("sample-prompted.txt");
     std::fs::write(&path, format!("{prompt}{text}")).expect("failed to write the sample");
 
@@ -101,7 +113,7 @@ pub fn generate(
     // every call below, so the latents are emitted once.
     let mut class = ClassCursors::stream();
 
-    let (mut logits, mut caches) = match prompt {
+    let (logits, caches) = match prompt {
         // Prefill: one chunkwise pass over the latents and the whole prompt,
         // keeping its cache and the logits of its last character (what the next
         // character is drawn from).
@@ -128,15 +140,24 @@ pub fn generate(
         }
     };
 
-    // Decode: one `step` per character, against that same cache.
-    let mut out = String::with_capacity(n_chars);
-    for _ in 0..n_chars {
-        let token = sample_token(logits, temperature, &mut rng);
-        out.push(VOCAB.character(token));
-        let next = Tensor::<1, Int>::from_ints([token as i32], device);
-        let (next_logits, next_caches) = model.step(next, caches.take(), Some(&mut class));
-        logits = next_logits;
-        caches = Some(next_caches);
+    // Decode: one `step` per character, against that same cache — replayed from
+    // one captured graph after the first few, unless `TS_GRAPH=0` (or a class
+    // latent is still to land).
+    let caches = caches.expect("the opening leaves a cache");
+    let capture = model.only_start_latents() && !matches!(std::env::var("TS_GRAPH").as_deref(), Ok("0"));
+    // Safety: the step reads nothing but its arguments and `model`, which it
+    // borrows for the whole call.
+    unsafe {
+        decode(
+            device,
+            logits,
+            caches,
+            class,
+            n_chars,
+            temperature,
+            &mut rng,
+            capture,
+            |x, caches, class| model.step(x, Some(caches), class),
+        )
     }
-    out
 }
