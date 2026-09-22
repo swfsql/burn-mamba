@@ -35,8 +35,8 @@ use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 use burn_stack::modules::bidi::OutputMergeConfig;
 use burn_mamba::prelude::{
-    ClassLatent, Mamba3Config, Mamba3SsdPath, MambaBidiLayers, MambaBidiLayersConfig, MambaSsdPath,
-    RotationKind,
+    ClassLatent, Mamba3Config, Mamba3SsdPath, Mamba3Untied, MambaBidiLayers, MambaBidiLayersConfig,
+    MambaSsdPath, RotationKind,
 };
 use burn_stack::utils::BidiSchedule;
 
@@ -298,37 +298,49 @@ impl ModelConfigExt for AeConfig {
     }
 }
 
-/// The example model config: a **tiny** ViT/MAE-style patch AE (~460KB on disk)
-/// with a **16-wide latent** bottleneck.
+/// The example model config: a **tiny** ViT/MAE-style patch AE with a
+/// **16-wide latent** bottleneck, its Mamba-3 block the one `mnist-class` uses.
 ///
-/// The smallness comes from a narrow width (`d_model = 32`) and only **2 real**
-/// bidi layers per half; the expressivity that a tiny model would otherwise lack
-/// is bought back, parameter-free, with **6 virtual layers** (weight-shared over
-/// the 2 real, `StridedStretched`) and a **non-abelian `Quaternion4D`** rotation.
-/// `expand = 4` (`d_inner = 128`, `per_head_dim = 16` ⇒ `nheads = 8`),
-/// `state_rank = 64`, `patch = 4` (length-49 sequence), full RoPE, FiLM decoder
+/// Each half is a single bidi pair (**2 real** layers) applied as **4 virtual
+/// layers** (`StridedStretched`), with the in-projection's per-head tail and the
+/// small per-head and norm tensors untied per application. `d_model = 6`,
+/// `expand = 2` (`d_inner = 12`, `per_head_dim = 6` ⇒ `nheads = 2`, one group
+/// each), `state_rank = 8` with half of it turned by a non-abelian
+/// `Quaternion4D` rotation, `patch = 4` (length-49 sequence), FiLM decoder
 /// conditioning.
 ///
 /// `n_latent` is the caller-chosen bottleneck width (`-- --latents N`, default 16).
 /// Knobs to trade size for quality: `n_virtual_layers`, `d_model`/`expand`,
 /// `state_rank`, or `n_enc/dec_layers`.
 pub fn model_config(n_latent: usize) -> AeConfig {
-    let d_model = 32;
+    let d_model = 6;
     let mamba_block = Mamba3Config::new(d_model)
-        // state_rank = 64 (even, divisible by 4 for the quaternion blocks)
-        .with_state_rank(64)
-        .with_expand(4)
-        // d_inner = expand·d_model = 4·32 = 128
-        // per_head_dim = 16
-        // nheads = d_inner/per_head_dim = 128/16 = 8
-        .with_per_head_dim(16)
-        .with_ngroups(1)
-        .with_mimo_rank(2)
-        .with_rope_fraction(1.0)
-        .with_has_proj_bias(true)
+        .with_state_rank(8)
+        .with_expand(2)
+        // d_inner = expand·d_model = 2·6 = 12
+        // per_head_dim = 6
+        // nheads = d_inner/per_head_dim = 12/6 = 2
+        .with_per_head_dim(6)
+        // with ngroups = nheads every head has its own B/C
+        .with_ngroups(2)
+        .with_mimo_rank(1)
+        // one quaternion block per head turned, the other half unrotated
+        .with_rope_fraction(0.5)
+        .with_has_proj_bias(false)
         .with_has_outproj_norm(true)
         // Non-abelian quaternion rotation: more expressive per parameter.
-        .with_rotation(RotationKind::Quaternion4D);
+        .with_rotation(RotationKind::Quaternion4D)
+        // Held once per virtual layer instead of shared by all of them.
+        .with_untied(vec![
+            Mamba3Untied::InProjTail,
+            Mamba3Untied::DtBias,
+            Mamba3Untied::D,
+            Mamba3Untied::BNorm,
+            Mamba3Untied::CNorm,
+            Mamba3Untied::OutNorm,
+        ]);
 
-    AeConfig::new(d_model, n_latent, 2, 2, mamba_block).with_patch(4)
+    AeConfig::new(d_model, n_latent, 2, 2, mamba_block)
+        .with_patch(4)
+        .with_n_virtual_layers(4)
 }

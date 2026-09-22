@@ -2,7 +2,8 @@
 //! train/validate epochs, and checkpoints the model and optimizer. The [`Wrap`]
 //! newtype adapts [`AeModel`] to Burn's `TrainStep` / `InferenceStep` via a
 //! pixel-reconstruction objective (binary cross-entropy on the normalized image,
-//! computed from raw logits).
+//! computed from raw logits). Its validation side is [`Valid`], which replays
+//! the forward from a captured graph.
 
 pub use crate::common::{
     model::ModelConfigExt,
@@ -21,6 +22,8 @@ use burn::{
     train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
 };
 use burn_stack::modules::loss::bce::BinaryCrossEntropyLossConfig;
+use burn_stack::utils::CapturedStep;
+use std::cell::RefCell;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating and checkpointing along the
@@ -77,7 +80,6 @@ pub fn train(
         std::sync::Arc::clone(&dataloader_valid),
         model.0.valid(),
         &training_config,
-        &model_config,
         0,
         session.cadence().valid_batches,
         &mut session,
@@ -107,7 +109,6 @@ pub fn train(
             std::sync::Arc::clone(&dataloader_valid),
             model.0.valid(),
             &training_config,
-            &model_config,
             epoch,
             None,
             &mut session,
@@ -211,7 +212,6 @@ pub fn epoch_train(
                 std::sync::Arc::clone(&dataloader_valid),
                 valid_model.clone(),
                 training_config,
-                model_config,
                 epoch,
                 valid_batches,
                 session,
@@ -248,7 +248,6 @@ pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
     training_config: &TrainingConfig,
-    model_config: &AeConfig,
     epoch: usize,
     valid_loop_limit: Option<usize>,
     session: &mut Session,
@@ -263,7 +262,7 @@ pub fn epoch_valid(
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
 
-    let valid_model = Wrap(valid_model, model_config.clone());
+    let valid_model = Valid::new(valid_model);
 
     for batch in dataloader_valid
         .iter()
@@ -307,26 +306,83 @@ impl InferenceStep for Wrap {
 
     fn step(&self, batch: Self::Input) -> Self::Output {
         let input = batch.images_norm(); // [b, H, W, 1], pixels in [0, 1] (Bernoulli targets)
-        self.forward_reconstruction(input)
+        reconstruction_output(self.0.forward(input.clone()), input)
     }
 }
 
-impl Wrap {
-    /// Forward the autoencoder and compute the binary cross-entropy
-    /// reconstruction loss (from raw logits) against the normalized image.
-    pub fn forward_reconstruction(&self, input_bhw1: Tensor<4>) -> RegressionOutput {
-        let model = &self.0;
-        let [batch_size, height, width, _c] = input_bhw1.dims();
-        assert_eq!([height, width], [HEIGHT, WIDTH]);
+/// The validation-side autoencoder: [`Wrap`]'s model on the inner backend,
+/// whose forward is captured at the first batch's shape and replayed from the
+/// graph for every later batch of that shape (any other shape — a short last
+/// batch — runs eagerly). `MNIST_GRAPH=0` turns the capture off.
+///
+/// One capture per validation pass, since the weights change between them, each
+/// costing the 4 forwards `CapturedStep::capture` runs before it records.
+/// Without hardware graphs (flex) the capture falls back to eager, and the
+/// recording runs too: 5 forwards per pass is all it costs there.
+pub struct Valid {
+    model: AeModel,
+    captured: RefCell<Option<CapturedLogits>>,
+    capture: bool,
+}
 
-        let logits_flat = model.forward(input_bhw1.clone()); // [batch, H*W]
-        let targets_flat = input_bhw1.reshape([batch_size, HEIGHT * WIDTH]);
+/// [`AeModel::forward`] over a fixed-shape image batch, captured.
+type CapturedLogits = CapturedStep<'static, 4, Float, Tensor<2>, ()>;
 
-        let loss = BinaryCrossEntropyLossConfig::new()
-            .with_logits(true)
-            .init()
-            .forward::<2>(logits_flat.clone(), targets_flat.clone());
-
-        RegressionOutput::new(loss, logits_flat, targets_flat)
+impl Valid {
+    fn new(model: AeModel) -> Self {
+        let capture = !matches!(std::env::var("MNIST_GRAPH").as_deref(), Ok("0"));
+        Self {
+            model,
+            captured: RefCell::new(None),
+            capture,
+        }
     }
+
+    fn logits(&self, input_bhw1: Tensor<4>) -> Tensor<2> {
+        if !self.capture {
+            return self.model.forward(input_bhw1);
+        }
+        let mut slot = self.captured.borrow_mut();
+        let captured = slot.get_or_insert_with(|| {
+            let model = self.model.clone();
+            // Safety: the forward reads nothing but its argument and `model`,
+            // which it owns and never changes.
+            unsafe {
+                CapturedStep::capture(&input_bhw1.device(), input_bhw1.clone(), (), move |x, ()| {
+                    (model.forward(x), ())
+                })
+            }
+        });
+        if captured.input_dims() != input_bhw1.dims() {
+            return self.model.forward(input_bhw1);
+        }
+        // Copied out of the graph's output buffer, which the next replay overwrites.
+        let y = captured.step(input_bhw1);
+        y.empty_like().slice_assign(y.dims().map(|d| 0..d), y.clone())
+    }
+}
+
+impl InferenceStep for Valid {
+    type Input = MnistBatch;
+    type Output = RegressionOutput;
+
+    fn step(&self, batch: Self::Input) -> Self::Output {
+        let input = batch.images_norm(); // [b, H, W, 1], pixels in [0, 1] (Bernoulli targets)
+        reconstruction_output(self.logits(input.clone()), input)
+    }
+}
+
+/// The binary cross-entropy reconstruction loss of the flat pixel logits
+/// `[batch, H*W]` against the normalized image `[batch, H, W, 1]`.
+fn reconstruction_output(logits_flat: Tensor<2>, input_bhw1: Tensor<4>) -> RegressionOutput {
+    let [batch_size, height, width, _c] = input_bhw1.dims();
+    assert_eq!([height, width], [HEIGHT, WIDTH]);
+    let targets_flat = input_bhw1.reshape([batch_size, HEIGHT * WIDTH]);
+
+    let loss = BinaryCrossEntropyLossConfig::new()
+        .with_logits(true)
+        .init()
+        .forward::<2>(logits_flat.clone(), targets_flat.clone());
+
+    RegressionOutput::new(loss, logits_flat, targets_flat)
 }
