@@ -203,7 +203,7 @@ impl LmModel for Wrap {
         temperature: f64,
         seed: u64,
     ) -> String {
-        crate::inference::generate(&valid.0, device, prompt, n_chars, temperature, seed)
+        crate::inference::generate(&valid.0, device, prompt, n_chars, temperature, seed, None)
     }
 }
 

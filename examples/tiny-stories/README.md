@@ -68,8 +68,9 @@ one.
 
 On CUDA the decode `step`s are replayed from one captured graph (burn-stack's
 `CapturedStep`) instead of being launched anew — a model this small is bound by
-the host enqueueing its launches, not by the GPU. The text is the same either
-way; `TS_GRAPH=0` steps eagerly.
+the host enqueueing its launches, not by the GPU. So are a prompt's prefill
+chunks, from one graph shared by every prompt. The text is the same either way;
+`TS_GRAPH=0` runs both eagerly.
 
 Every position is scored against its next character (so the reported accuracy is
 per character), and a story is walked in windows — see
@@ -236,13 +237,15 @@ shapes rather than meanings. That is the honest ceiling for 39K parameters.
 `inference.rs` shows the library's three execution modes back to back: the class
 latents are replayed by one `prime()` (no input token, and it already answers with
 the first character's distribution), a prompt — when there is one — is consumed by
-one chunkwise `forward()` (prefill), and every generated character then costs one
-`step()` against that same cache — O(state) per token, with no growing KV cache.
+chunkwise `forward()`s (prefill: right-padded 256-character chunks after the
+latents, which run once and are kept), and every generated character then costs
+one `step()` against that same cache — O(state) per token, with no growing KV
+cache.
 Sampling is temperature-scaled multinomial over the full 48-way softmax
 (`temperature <= 0` is greedy), seeded by `ChaCha8Rng` so a run is reproducible.
 
 `--inference` writes one story per temperature (0.5 / 0.8 / 1.0), each primed and
-unprompted, plus one continuation of a fixed prompt into
+unprompted, plus one continuation of each of three fixed prompts into
 `<artifacts>/inference/`. Training samples a short story at every small validation
 check into `<artifacts>/sample-epoch-{e}-batch-{b}.txt`, so the text can be
 watched turning from noise into words into sentences. The checks are spaced in
