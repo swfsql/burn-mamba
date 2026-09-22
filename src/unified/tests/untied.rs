@@ -195,7 +195,7 @@ fn mamba3_untied_tail_trains_one_copy_per_application() {
         "{report}",
     );
 
-    let mut optim = plan.build(&AdamWConfig::new(), &muon_config(0.0));
+    let mut optim = plan.build(&AdamWConfig::new().into(), &muon_config(0.0));
     let x = Tensor::<3>::random([BATCH, SEQ, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
     let (y, _) = layers.forward(x, None, Mamba3SsdPath::Minimal(Some(4)), None, None);
     let grads = GradientsParams::from_grads(y.sum().backward(), &layers);

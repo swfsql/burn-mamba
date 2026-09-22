@@ -47,7 +47,7 @@ its cache back).
   `step` shares the cache. A init from `arange(1..=state_rank).log()`. Padding
   (`pad_bs`): `Δ = 0` in `ssm`, the conv window read at each slot's end.
   `muon_projections()` (feature `optim`) names the Muon-eligible weights and their
-  column seams: `in_proj [x|res]`, `x_proj [dt*|B|C]`, `out_proj` (`*` = AdamW's).
+  column seams: `in_proj [x|res]`, `x_proj [dt*|B|C]`, `out_proj` (`*` = the fallback's).
   `untied: Vec<Mamba1Untied>` (`Conv1d|XProj|DtProj|ALog|D`): tiled by
   `init_applications`, listed by `untied_params`; an untied `x_proj`'s spec is `tiled`.
 - **`cache.rs`** — `Mamba1Cache` (`conv_bik` window + `ssm_bir` state) / `Mamba1Caches`
@@ -113,7 +113,7 @@ its cache back).
   `in_proj [z|x|B|C|dt*|A*|λ*|μ*|rotation]` with each `u`-wide stream emitted as `u`
   same-named segments (independent maps to Muon; `without_segment` still drops the whole
   stream) + `out_proj`. The positive systems' `r·u|a·u|b·u` trail even those
-  (`split_positive` peels them first; AdamW), and their per-head params
+  (`split_positive` peels them first; the fallback), and their per-head params
   `kalman_log_kappa_h` (held in logs; stock is its `−∞` limit) / `kalman_read_h` (kept
   under the out-norm) / `tropical_readout_hp` meet the SSD's readout in `positive_read`,
   **before** the `D` skip; `gain_input` / `zero_positive_state` feed and seed them, and
@@ -511,7 +511,8 @@ family-mismatched cache or SSD path). The containers themselves are `burn-stack`
   layer), `layers` (`grad_horizon` reachability + shared-weight gradients),
   `multi_gate`, `bidi`, `class` (marker placement, forward/step/prime parity), `optim`
   (each family's plan fits its model and never selects a boundary weight — the
-  boundary test keys off `burn_stack::optim::BLOCK_CONTAINERS`, not a spelling),
+  boundary test keys off `burn_stack::optim::BLOCK_CONTAINERS`, not a spelling; an
+  SGD fallback's segments step statelessly),
   `untied` (every untiable tensor read at its application in `forward` and `step`;
   the Mamba-3 tail's layout and per-copy training), `capture` (every field moved,
   checked field by field rather than through the traversal, on a Mamba-3 block

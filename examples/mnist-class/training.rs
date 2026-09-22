@@ -7,8 +7,7 @@
 //! cross-entropy classification head on the last timestep, and supplies the
 //! `MnistModel` seam the shared loops build against. Under SGD its training
 //! step replays from a captured graph ([`Trainer`]), and its validation side is
-//! [`Valid`], which replays the forward from one. `MNIST_GRAPH=0` turns both
-//! off.
+//! [`Valid`], which replays the forward from one. `--no-graph` turns both off.
 
 pub use crate::common::{
     cli::AppArgs,
@@ -52,7 +51,7 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
-    let mut model = Wrap::new(model, &training_config);
+    let mut model = Wrap::new(model, &training_config, app_args.graphs());
 
     // Create the batcher
     let batcher = MnistBatcher::default();
@@ -72,7 +71,7 @@ pub fn train(
         .set_device(training_device.clone().inner())
         .build(MnistDataset::test());
 
-    // Resume position, `--max-batches` budget, cadence and metrics log.
+    // Resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &training_config,
@@ -120,7 +119,7 @@ pub fn train(
         );
 
         if session.is_exhausted() {
-            println!("reached the --max-batches limit; stopping training");
+            println!("reached the training budget; stopping training");
             break;
         }
     }
@@ -129,18 +128,21 @@ pub fn train(
 
 /// The training-side classifier: [`MambaLatentNet`] on the autodiff backend.
 ///
-/// Under SGD (and unless `MNIST_GRAPH=0`) its weights move into a [`Trainer`]
-/// at the first batch: the whole training step — forward, backward and the SGD
-/// update — captured at that batch's shape and replayed for every later batch
-/// of that shape (any other shape steps eagerly, into the same weights). It
-/// trains exactly as the eager steps would: the capture's own runs are rolled
-/// back, and the learning rate is an input. No other optimizer can be replayed
-/// (tracel-ai/burn#5779), so they train eagerly.
+/// Under plain SGD (and unless `--no-graph`) its weights move into a
+/// [`Trainer`] at the first batch: the whole training step — forward, backward
+/// and the SGD update — captured at that batch's shape and replayed for every
+/// later batch of that shape (any other shape steps eagerly, into the same
+/// weights). It trains exactly as the eager steps would: the capture's own runs
+/// are rolled back, and the learning rate is an input. No other optimizer can
+/// be replayed (tracel-ai/burn#5779), Muon + SGD included, so they train
+/// eagerly.
 pub struct Wrap {
     net: Net,
     /// The SGD a captured step replays; `None` ⇒ eager steps through the
     /// module optimizer.
     capture: Option<SgdConfig>,
+    /// Whether validation replays its forward from a graph ([`Valid`]).
+    graphs: bool,
 }
 
 /// Where [`Wrap`]'s weights are.
@@ -158,18 +160,15 @@ type Trainer = CapturedStep<
     Weights<MambaLatentNet>,
 >;
 
-/// Whether graphs are captured at all (`MNIST_GRAPH=0` turns them off).
-fn graphs() -> bool {
-    !matches!(std::env::var("MNIST_GRAPH").as_deref(), Ok("0"))
-}
-
 impl Wrap {
-    /// `net` trained under `training_config`'s optimizer.
-    pub fn new(net: MambaLatentNet, training_config: &TrainingConfig) -> Self {
-        let capture = graphs().then(|| training_config.optimizer.sgd.clone()).flatten();
+    /// `net` trained under `training_config`'s optimizer, replaying passes from
+    /// graphs if `graphs`.
+    pub fn new(net: MambaLatentNet, training_config: &TrainingConfig, graphs: bool) -> Self {
+        let capture = graphs.then(|| training_config.optimizer.plain_sgd().cloned()).flatten();
         Self {
             net: Net::Eager(net),
             capture,
+            graphs,
         }
     }
 
@@ -221,6 +220,7 @@ impl Wrap {
         let wrap = Self {
             net: Net::Captured(trainer),
             capture: Some(sgd),
+            graphs: self.graphs,
         };
         (wrap, ClassificationOutput::new(loss, logits, targets))
     }
@@ -259,7 +259,7 @@ impl MnistModel for Wrap {
     type Valid = Valid;
 
     fn valid(&self) -> Self::Valid {
-        Valid::new(self.net().valid())
+        Valid::new(self.net().valid(), self.graphs)
     }
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
@@ -268,7 +268,7 @@ impl MnistModel for Wrap {
         };
         Self {
             net: Net::Eager(optim.step(lr, net, grads)),
-            capture: self.capture,
+            ..self
         }
     }
 
@@ -321,7 +321,7 @@ impl InferenceStep for Wrap {
 /// The validation-side classifier: [`Wrap`]'s network on the inner backend,
 /// whose forward is captured at the first batch's shape and replayed from the
 /// graph for every later batch of that shape (any other shape — a short last
-/// batch — runs eagerly). `MNIST_GRAPH=0` turns the capture off.
+/// batch — runs eagerly). `--no-graph` turns the capture off.
 ///
 /// One capture per validation pass, since the weights change between them, each
 /// costing the 4 forwards `CapturedStep::capture` runs before it records.
@@ -337,11 +337,11 @@ pub struct Valid {
 type CapturedLogits = CapturedStep<'static, Tensor<3>, Tensor<2>, ()>;
 
 impl Valid {
-    fn new(net: MambaLatentNet) -> Self {
+    fn new(net: MambaLatentNet, capture: bool) -> Self {
         Self {
             net,
             captured: RefCell::new(None),
-            capture: graphs(),
+            capture,
         }
     }
 

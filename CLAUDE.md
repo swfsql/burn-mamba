@@ -195,11 +195,11 @@ assert.
 
 On CUDA a decode `step()` can be replayed from one captured graph (burn-stack's
 `CapturedStep`, through `unified/capture.rs`); tiny-stories' `generate` does
-(`TS_GRAPH=0` = eager), with the same text. A fixed-shape `forward` can too
-(caches `()`): mnist-class's and mnist-ae's validation, one capture per pass
-(`MNIST_GRAPH=0`). So can a prompt's prefill, as right-padded fixed-shape chunks
-carrying the cache (burn-stack's `Prefill`, in tiny-stories' `infer`). Under SGD
-(`-- --sgd`), so can mnist-class's whole training step (burn-stack's `Weights` +
+(`--no-graph` = eager, in every example), with the same text. A fixed-shape
+`forward` can too (caches `()`): mnist-class's and mnist-ae's validation, one
+capture per pass. So can a prompt's prefill, as right-padded fixed-shape chunks
+carrying the cache (burn-stack's `Prefill`, in tiny-stories' `infer`). Under plain
+SGD (`--sgd`), so can mnist-class's whole training step (burn-stack's `Weights` +
 `optim::SgdConfig`), replayed per batch, bit-identical to eager.
 
 Layer containers and networks additionally expose **`prime()`** — `step()` without
@@ -512,7 +512,7 @@ reimplementing them.
   `burn_stack::optim`; what this crate owns is the **allowlist**, one
   `muon_projections()` per family config, listing the same column widths the
   forward's `split_into` uses. Per-head *scalar* channels (Δ/`A`/`λ`/`μ`/`r`/`a`/`b`), every
-  1-D/3-D tensor, and the boundary weights stay on AdamW. Why the MIMO 3-D
+  1-D/3-D tensor, and the boundary weights stay on the fallback (AdamW or SGD). Why the MIMO 3-D
   tensors are diagonals and not stacked matrices is argued in the
   `src/unified/mod.rs` header.
 - **Untied parameters are declared, not re-plumbed** — the mechanism is

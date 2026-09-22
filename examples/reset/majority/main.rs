@@ -21,6 +21,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's own flags (none).
+pub mod cli;
 /// The reset-majority dataset and its adversarial families.
 pub mod dataset;
 /// Inference: per-family accuracy on fresh eval sets.
@@ -40,10 +42,7 @@ pub mod common;
 
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
-    assert!(
-        app_args.extra_args.is_empty(),
-        "no extra arguments required"
-    );
+    cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -62,9 +61,8 @@ pub fn launch(app_args: &AppArgs) {
         // memoryless basin, and a small one to settle into an exact hold once
         // there — a constant LR does one or the other, so this anneals.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
-        TrainingConfig::new(common::training::OptimizerConfig::new(
-            common::training::optimizer_config(dtype),
-        ))
+        let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
+        TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
@@ -75,7 +73,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(100),
         ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model::model_config()

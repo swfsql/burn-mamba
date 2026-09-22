@@ -31,6 +31,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's own flags (`--micro-steps`, `--layers`).
+pub mod cli;
 /// The paired-symbol dataset, its `Q₈` arithmetic and its families.
 pub mod dataset;
 /// Inference: per-family accuracy on fresh eval sets.
@@ -48,15 +50,12 @@ pub mod tests;
 #[path = "../../common/mod.rs"]
 pub mod common;
 
-use std::ffi::OsString;
-
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
-    // The downstream arguments: how many micro-steps a fresh model config runs
-    // per token, and how many layers it stacks. (Once a model config is
-    // persisted, it wins on reload.)
-    let micro_steps = parse_micro_steps(&app_args.extra_args);
-    let layers = parse_layers(&app_args.extra_args);
+    let cli::Cli {
+        micro_steps,
+        layers,
+    } = cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -74,9 +73,8 @@ pub fn launch(app_args: &AppArgs) {
         // As in the `reset-*` ladder: a large step to leave the order-blind
         // solutions, a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
-        TrainingConfig::new(common::training::OptimizerConfig::new(
-            common::training::optimizer_config(dtype),
-        ))
+        let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
+        TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
@@ -87,7 +85,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(100),
         ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config (micro_steps = {micro_steps}, layers = {layers})");
         model::model_config(micro_steps, layers)
@@ -111,33 +109,6 @@ pub fn launch(app_args: &AppArgs) {
     if !app_args.inference && !app_args.training {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
-    }
-}
-
-/// `--micro-steps N`, defaulting to the 2 this example is about (`1` is the
-/// ablation: stock Mamba-3, one rotation per token).
-fn parse_micro_steps(extra_args: &[OsString]) -> usize {
-    parse_usize(extra_args, "--micro-steps", dataset::PAIR)
-}
-
-/// `--layers N`, defaulting to the one block the whole ladder runs. `2` is the
-/// depth contrast: a second rotation per token, applied to a second state.
-fn parse_layers(extra_args: &[OsString]) -> usize {
-    parse_usize(extra_args, "--layers", 1)
-}
-
-/// One `--flag N` argument out of the downstream arguments.
-fn parse_usize(extra_args: &[OsString], flag: &str, default: usize) -> usize {
-    let value = extra_args
-        .iter()
-        .position(|a| a == flag)
-        .and_then(|i| extra_args.get(i + 1))
-        .map(|v| v.to_string_lossy().into_owned());
-    match value {
-        None => default,
-        Some(v) => v
-            .parse()
-            .unwrap_or_else(|_| panic!("{flag} takes a positive integer, got {v:?}")),
     }
 }
 

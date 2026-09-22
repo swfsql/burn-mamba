@@ -30,6 +30,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's own flags (`--rotation`).
+pub mod cli;
 /// The reset-swap dataset, its `S₃` arithmetic and its families.
 pub mod dataset;
 /// Inference: per-family accuracy on fresh eval sets.
@@ -47,14 +49,9 @@ pub mod tests;
 #[path = "../../common/mod.rs"]
 pub mod common;
 
-use burn_mamba::prelude::RotationKind;
-use std::ffi::OsString;
-
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
-    // The only downstream argument: which rotation to bake into a fresh model
-    // config. (Once a model config is persisted, it wins on reload — see HELP.)
-    let rotation = parse_rotation(&app_args.extra_args);
+    let rotation = cli::Cli::parse(app_args).rotation;
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -72,9 +69,8 @@ pub fn launch(app_args: &AppArgs) {
         // As in `reset-spinor`: a large step to leave the order-blind solution,
         // a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
-        TrainingConfig::new(common::training::OptimizerConfig::new(
-            common::training::optimizer_config(dtype),
-        ))
+        let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
+        TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
@@ -85,7 +81,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(100),
         ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config ({rotation:?})");
         model::model_config(rotation)
@@ -109,24 +105,6 @@ pub fn launch(app_args: &AppArgs) {
     if !app_args.inference && !app_args.training {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
-    }
-}
-
-/// `--rotation complex|quaternion|rotor`, defaulting to the full `SO(4)`
-/// rotation this example is about.
-fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
-    let value = extra_args
-        .iter()
-        .position(|a| a == "--rotation")
-        .and_then(|i| extra_args.get(i + 1))
-        .map(|v| v.to_string_lossy().into_owned());
-    match value.as_deref() {
-        Some("rotor") | Some("so4") | None => RotationKind::Rotor4D,
-        Some("quaternion") | Some("quat") => RotationKind::Quaternion4D,
-        Some("complex") => RotationKind::Complex2D,
-        Some(other) => {
-            panic!("--rotation must be 'complex', 'quaternion' or 'rotor', got {other:?}")
-        }
     }
 }
 

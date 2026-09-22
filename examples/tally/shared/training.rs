@@ -71,7 +71,7 @@ pub fn train(
         })
         .collect();
 
-    // Resume position, `--max-batches` budget, cadence and metrics log: by
+    // Resume position, budget, cadence and metrics log: by
     // default a validation every five epochs and no mid-epoch checkpoint.
     let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let cadence = Cadence {
@@ -110,7 +110,7 @@ pub fn train(
             validate_all(&valid_loaders, model.valid(), epoch, &mut session);
         }
         if session.is_exhausted() {
-            println!("reached the --max-batches limit; stopping training");
+            println!("reached the training budget; stopping training");
             break;
         }
     }
@@ -169,6 +169,9 @@ fn epoch_train(
         if session.valid_due() {
             println!("running validation...");
             validate_all(valid_loaders, training_model.0.valid(), epoch, session);
+        }
+        if session.is_exhausted() {
+            break;
         }
     }
     println!(

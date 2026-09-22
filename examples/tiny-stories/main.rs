@@ -18,7 +18,8 @@
 //! `forward`, and then samples one character per `step`.
 //!
 //! Corpus knobs are forwarded after the trailing `--` (they are written into the
-//! artifacts' `training_config.json`, so resuming a run keeps them):
+//! artifacts' `training_config.json`, so resuming a run keeps them), with the
+//! SSD path and the step profiler ([`cli`]):
 //!
 //! ```bash
 //! # train and then sample (downloads the 673MB parquet once, if not cached yet)
@@ -34,10 +35,12 @@
 pub use common::{
     cli::AppArgs,
     tiny_stories::dataset,
-    tiny_stories::lm::{Overrides, TinyStoriesConfig},
-    training::{CosineAnnealingLr, Lr, TrainingConfig},
+    tiny_stories::lm::TinyStoriesConfig,
+    training::{CosineAnnealingLr, Lr, OptimizerConfig, OptimizerKind, TrainingConfig},
 };
 
+/// The example's own flags (corpus knobs, SSD path, profiler).
+pub mod cli;
 /// Sampling from the trained LM.
 pub mod inference;
 /// The example's `model_config()`.
@@ -51,7 +54,7 @@ pub mod common;
 
 /// Wire up the device, configs, and the train/infer flow for the LM.
 pub fn launch(app_args: &AppArgs) {
-    let overrides = Overrides::parse(&app_args.extra_args);
+    let cli = cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -79,17 +82,17 @@ pub fn launch(app_args: &AppArgs) {
         // Muon on the block's hidden weight matrices, AdamW on everything else.
         // It is the smallest of this example's optimizer wins but it stacks with
         // the other two (higher LR, smaller batch) rather than overlapping them.
-        // `--no-muon` returns to plain AdamW.
-        let optimizer = common::training::OptimizerConfig::adamw_only(dtype)
-            .with_muon_defaults(ADAMW_WEIGHT_DECAY);
+        // `--adamw` returns to plain AdamW.
+        let optimizer = app_args.optimizer_or(OptimizerKind::MuonAdamW);
         TinyStoriesConfig::new(
-            TrainingConfig::new(optimizer)
+            TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
                 .with_num_epochs(num_epochs)
-                .with_batch_size(batch_size)
+                // The schedule below is sized from it.
+                .with_batch_size(app_args.batch_size.unwrap_or(batch_size))
                 .with_num_workers(2),
         )
     });
-    overrides.apply(&mut config);
+    cli.overrides.apply(&mut config);
     if is_fresh {
         // The cosine schedule spans the whole run, so it can only be sized once
         // the corpus knobs are settled. It is counted in *windows*, not in
@@ -119,7 +122,7 @@ pub fn launch(app_args: &AppArgs) {
     }
     // After the sizing, so `--epochs` rescales the schedule and `--max-lr`
     // replaces its peak on a fresh config too.
-    app_args.override_training_config(&mut config.training);
+    app_args.override_training_config(&mut config.training, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model::model_config()
@@ -128,17 +131,26 @@ pub fn launch(app_args: &AppArgs) {
     app_args.save_training_config(&config);
     app_args.save_model_config(&model_config);
 
+    let run = training::Run {
+        ssd_path: cli.ssd_path,
+        graphs: app_args.graphs(),
+    };
+    if let Some((every, sync)) = cli.profile {
+        training::prof::init(every, sync);
+    }
+
     if app_args.training {
         training::train(
             config.clone(),
             model_config.clone(),
             autodiff_device,
             app_args,
+            run.clone(),
         );
     }
 
     if app_args.inference {
-        inference::infer(model_config, device, app_args);
+        inference::infer(model_config, device, app_args, &run);
     }
 
     if !app_args.inference && !app_args.training {
@@ -146,10 +158,6 @@ pub fn launch(app_args: &AppArgs) {
         println!("{}", common::cli::HELP);
     }
 }
-
-/// AdamW's default weight decay, mirrored into the Muon group so the two arms
-/// decay the same weights by the same amount.
-const ADAMW_WEIGHT_DECAY: f32 = 1e-4;
 
 fn main() {
     let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();

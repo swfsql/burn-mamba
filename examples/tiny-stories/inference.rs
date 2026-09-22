@@ -16,7 +16,7 @@
 //! captured graph of the step and its draw instead of launching it anew. So is
 //! the prefill ([`prefill`]): the prompt follows the latents in right-padded
 //! fixed-shape chunks, one captured graph for every chunk of every prompt it is
-//! held across (`TS_GRAPH=0` turns both captures off; the text is the same
+//! held across (`--no-graph` turns both captures off; the text is the same
 //! either way). [`infer`] loads the checkpoint and prints a few stories at
 //! different temperatures, and a few continuations of fixed prompts.
 //!
@@ -27,7 +27,7 @@
 
 use crate::AppArgs;
 use crate::dataset::VOCAB;
-use crate::training::ssd_path;
+use crate::training::Run;
 use burn::prelude::*;
 use burn_mamba::prelude::{MambaCaches, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::examples::tiny_stories::sample::{Prefill, decode};
@@ -51,7 +51,12 @@ const PROMPTS: &[&str] = &[
 
 /// Load the trained LM and print one story per temperature, plus one
 /// continuation of each of [`PROMPTS`].
-pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: &AppArgs) {
+pub fn infer(
+    model_config: MambaVocabNetConfig,
+    infer_device: Device,
+    app_args: &AppArgs,
+    run: &Run,
+) {
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &infer_device)
         .expect("no trained model in the artifacts directory; run with --training first");
@@ -68,6 +73,7 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
         let t = Instant::now();
         let text = generate(
             &model,
+            run,
             &infer_device,
             None,
             SAMPLE_CHARS,
@@ -82,12 +88,13 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
     }
 
     // One prefill for every prompt: they share the latents' opening and, unless
-    // `TS_GRAPH=0`, one captured chunk.
-    let mut prefill = prefill(&model, &infer_device);
+    // `--no-graph`, one captured chunk.
+    let mut prefill = prefill(&model, run, &infer_device);
     for (i, prompt) in PROMPTS.iter().enumerate() {
         let t = Instant::now();
         let text = generate(
             &model,
+            run,
             &infer_device,
             Some(prompt),
             SAMPLE_CHARS,
@@ -117,8 +124,10 @@ pub fn infer(model_config: MambaVocabNetConfig, infer_device: Device, app_args: 
 /// (argmax). With a `prefill` (see [`prefill`]) the prompt follows the primed
 /// latents in fixed-shape chunks; with none, one `forward` takes the latents
 /// and the prompt. Returns only the generated characters, not the prompt.
+#[allow(clippy::too_many_arguments)]
 pub fn generate(
     model: &MambaVocabNet,
+    run: &Run,
     device: &Device,
     prompt: Option<&str>,
     n_chars: usize,
@@ -160,7 +169,7 @@ pub fn generate(
                     let input =
                         Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([1, ids.len()]);
                     let (logits, caches) =
-                        model.forward(input, None, ssd_path(), Some(&mut class), None);
+                        model.forward(input, None, run.ssd_path.clone(), Some(&mut class), None);
                     let last = logits.dims()[1] - 1;
                     (logits.narrow(1, last, 1).squeeze_dim::<2>(1), Some(caches))
                 }
@@ -178,10 +187,10 @@ pub fn generate(
     };
 
     // Decode: one `step` per character, against that same cache — replayed from
-    // one captured graph after the first few, unless `TS_GRAPH=0` (or a class
+    // one captured graph after the first few, unless `--no-graph` (or a class
     // latent is still to land).
     let caches = caches.expect("the opening leaves a cache");
-    let capture = model.only_start_latents() && graphs();
+    let capture = model.only_start_latents() && run.graphs;
     // Safety: the step reads nothing but its arguments and `model`, which it
     // borrows for the whole call.
     unsafe {
@@ -204,20 +213,15 @@ pub fn generate(
 /// in one replay.
 const PREFILL_CHUNK: usize = 256;
 
-/// Whether decode steps and prefill chunks replay captured graphs (`TS_GRAPH=0`
-/// runs them eagerly).
-fn graphs() -> bool {
-    !matches!(std::env::var("TS_GRAPH").as_deref(), Ok("0"))
-}
-
 /// A [`Prefill`] of `model` in chunks of [`PREFILL_CHUNK`], captured unless
-/// `TS_GRAPH=0`. Hold it across prompts: they share its opening and its graph.
-pub fn prefill<'a>(model: &'a MambaVocabNet, device: &Device) -> Prefill<'a, MambaCaches> {
-    // Safety: the chunk reads nothing but its arguments and `model`, borrowed
-    // for as long as the prefill lives.
+/// `--no-graph`. Hold it across prompts: they share its opening and its graph.
+pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
+    let ssd_path = run.ssd_path.clone();
+    // Safety: the chunk reads nothing but its arguments, `model`, borrowed for
+    // as long as the prefill lives, and `ssd_path`, which it owns.
     unsafe {
-        Prefill::new(device, PREFILL_CHUNK, graphs(), |x, caches, pad, class| {
-            model.forward(x, Some(caches), ssd_path(), Some(class), Some(pad))
+        Prefill::new(device, PREFILL_CHUNK, run.graphs, move |x, caches, pad, class| {
+            model.forward(x, Some(caches), ssd_path.clone(), Some(class), Some(pad))
         })
     }
 }

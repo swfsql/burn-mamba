@@ -70,7 +70,7 @@ On CUDA the decode `step`s are replayed from one captured graph (burn-stack's
 `CapturedStep`) instead of being launched anew — a model this small is bound by
 the host enqueueing its launches, not by the GPU. So are a prompt's prefill
 chunks, from one graph shared by every prompt. The text is the same either way;
-`TS_GRAPH=0` runs both eagerly.
+`--no-graph` runs both eagerly.
 
 Every position is scored against its next character (so the reported accuracy is
 per character), and a story is walked in windows — see
@@ -79,7 +79,7 @@ batch is padded to a whole number of windows of its longest one; the batch
 carries how many positions of each slot are real, and the padding is masked out
 of the loss and the accuracy — at the window's fixed shape, since a shape that
 varies per window slows every later CUDA allocation (tracel-ai/burn#5751).
-`TS_PROFILE=<N>` prints each phase's mean ms per `N` windows and the live device
+`-- --profile <N>` prints each phase's mean ms per `N` windows and the live device
 allocations, which stay flat while no launch shape varies.
 
 ## Runs and the frontier
@@ -137,9 +137,13 @@ cargo run --release --example tiny-stories --features "backend-cuda" -- --traini
 ```
 
 With the defaults (`seq_len = 256`, `batch_size = 8`) training needs ~1.2GB of
-vram. Downstream flags, all forwarded after the trailing `--` and persisted into
-the artifacts' `training_config.json` (the number of epochs is the shared CLI's
-`--epochs`, before the `--`):
+vram. Downstream flags, all forwarded after the trailing `--` (`-- --help` lists
+them); the corpus knobs are persisted into the artifacts' `training_config.json`.
+The number of epochs, the batch size (`--batch-size`, default 8 windows per
+optimizer step) and the optimizer (Muon + AdamW by default; `--adamw` keeps the
+hidden weight matrices on AdamW instead of
+[Muon](https://kellerjordan.github.io/posts/muon/), see `mnist-class`'s README)
+are the shared CLI's, before the `--`.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
@@ -149,8 +153,9 @@ the artifacts' `training_config.json` (the number of epochs is the shared CLI's
 | `--no-frontier` | off | carry the state through the whole story, ungated |
 | `--train-stories <n>` | 4096 | stories pulled from the train split |
 | `--valid-stories <n>` | 256 | stories pulled from the validation split |
-| `--batch-size <n>` | 8 | windows per optimizer step |
-| `--no-muon` | off | keep the hidden weight matrices on AdamW instead of [Muon](https://kellerjordan.github.io/posts/muon/) (see `mnist-class`'s README) |
+| `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal` (not persisted) |
+| `--profile <n>` | off | print each training-step phase's mean ms once per `n` windows (not persisted) |
+| `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.

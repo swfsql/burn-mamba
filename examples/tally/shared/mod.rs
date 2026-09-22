@@ -22,12 +22,14 @@ pub mod training;
 pub use data::{IGNORE, Rng, Task};
 
 use crate::common::cli::AppArgs;
-use crate::common::training::{CosineAnnealingLr, Lr, OptimizerConfig, TrainingConfig};
+use crate::common::training::{
+    CosineAnnealingLr, Lr, OptimizerConfig, OptimizerKind, TrainingConfig,
+};
 use burn_mamba::prelude::MambaLatentNetConfig;
 
 /// Wire up the device, configs, and the train/infer flow for one rung.
-/// The rung's own downstream flags are parsed by its `main.rs`, which bakes
-/// them into `model_config` before calling this.
+/// The rung's own downstream flags are parsed by its `cli.rs`, and its
+/// `main.rs` bakes them into `model_config` before calling this.
 pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfig) {
     app_args.create_artifact_dir();
 
@@ -42,9 +44,8 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
         // As on the `reset` ladder: a large step to leave the memoryless basin,
         // a small one to settle into the exact construction.
         let total_steps = num_epochs * data::NUM_TRAIN.div_ceil(batch_size);
-        TrainingConfig::new(OptimizerConfig::new(crate::common::training::optimizer_config(
-            dtype,
-        )))
+        let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
+        TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
@@ -55,7 +56,7 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
                 .with_warmup_steps(100),
         ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config");
         model_config

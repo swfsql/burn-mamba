@@ -20,7 +20,7 @@
 //! floor ([`model::floor_width`]) because training lands the group on one head at
 //! a time, and MIMO ranks give that head the readouts the floor spreads over heads.
 //!
-//! Downstream flags, after the trailing `--`:
+//! Downstream flags, after the trailing `--` ([`cli`]):
 //!
 //! - `--group a5|s5` — not persisted, so pass it on every run;
 //! - `--rotation complex|quaternion|rotor` (default `rotor`), `--layers N`
@@ -39,6 +39,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's own flags (group, rotation, depth, width, train length).
+pub mod cli;
 /// The reset-quintic dataset, its `A₅`/`S₅` arithmetic and its families.
 pub mod dataset;
 /// Inference: per-family accuracy on fresh eval sets.
@@ -56,21 +58,20 @@ pub mod tests;
 #[path = "../../common/mod.rs"]
 pub mod common;
 
-use burn_mamba::prelude::{MambaLatentNetConfig, RotationKind};
-use dataset::Group;
-use std::ffi::OsString;
+use burn_mamba::prelude::MambaLatentNetConfig;
 
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
-    let group = parse_group(&app_args.extra_args);
-    let rotation = parse_rotation(&app_args.extra_args);
-    let layers = parse_layers(&app_args.extra_args, group);
-    let train_length = parse_usize(&app_args.extra_args, "--train-length", dataset::SEQ_LENGTH);
-    let (default_d_model, default_heads, default_mimo_rank) = model::DEFAULT_WIDTH;
-    let d_model = parse_usize(&app_args.extra_args, "--d-model", default_d_model);
-    let expand = parse_usize(&app_args.extra_args, "--expand", 1);
-    let heads = parse_usize(&app_args.extra_args, "--heads", default_heads);
-    let mimo_rank = parse_usize(&app_args.extra_args, "--mimo-rank", default_mimo_rank);
+    let cli::Cli {
+        group,
+        rotation,
+        layers,
+        train_length,
+        d_model,
+        expand,
+        heads,
+        mimo_rank,
+    } = cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -88,9 +89,8 @@ pub fn launch(app_args: &AppArgs) {
         // The ladder's schedule: a large step to leave the order-blind solutions,
         // a small one to settle the rotation onto the exact turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
-        TrainingConfig::new(common::training::OptimizerConfig::new(
-            common::training::optimizer_config(dtype),
-        ))
+        let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
+        TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
@@ -101,7 +101,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_warmup_steps(100),
         ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!(
             "Initializing new model config ({group:?}, {rotation:?}, {layers} layers, d_model {d_model}, expand {expand}, {heads} heads, mimo_rank {mimo_rank})"
@@ -137,51 +137,6 @@ pub fn launch(app_args: &AppArgs) {
     if !app_args.inference && !app_args.training {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
-    }
-}
-
-/// The value following `flag` among the downstream arguments.
-fn flag_value(extra_args: &[OsString], flag: &str) -> Option<String> {
-    extra_args
-        .iter()
-        .position(|a| a == flag)
-        .and_then(|i| extra_args.get(i + 1))
-        .map(|v| v.to_string_lossy().into_owned())
-}
-
-/// `--group a5|s5`, defaulting to `S₅`, the one that needs the second layer.
-fn parse_group(extra_args: &[OsString]) -> Group {
-    match flag_value(extra_args, "--group").as_deref() {
-        Some("s5") | None => Group::Symmetric,
-        Some("a5") => Group::Alternating,
-        Some(other) => panic!("--group must be 'a5' or 's5', got {other:?}"),
-    }
-}
-
-/// `--rotation complex|quaternion|rotor`, defaulting to the full `SO(4)`.
-fn parse_rotation(extra_args: &[OsString]) -> RotationKind {
-    match flag_value(extra_args, "--rotation").as_deref() {
-        Some("rotor") | Some("so4") | None => RotationKind::Rotor4D,
-        Some("quaternion") | Some("quat") => RotationKind::Quaternion4D,
-        Some("complex") => RotationKind::Complex2D,
-        Some(other) => {
-            panic!("--rotation must be 'complex', 'quaternion' or 'rotor', got {other:?}")
-        }
-    }
-}
-
-/// `--layers N`, defaulting to the fewest that hold the group.
-fn parse_layers(extra_args: &[OsString], group: Group) -> usize {
-    parse_usize(extra_args, "--layers", model::default_layers(group))
-}
-
-/// One `--flag N` argument out of the downstream arguments.
-fn parse_usize(extra_args: &[OsString], flag: &str, default: usize) -> usize {
-    match flag_value(extra_args, flag) {
-        None => default,
-        Some(v) => v
-            .parse()
-            .unwrap_or_else(|_| panic!("{flag} takes a positive integer, got {v:?}")),
     }
 }
 

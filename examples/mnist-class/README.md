@@ -35,27 +35,28 @@ cargo run --release --example mnist-class --features "backend-wgpu" -- --trainin
 On CUDA each validation pass replays its forward from one graph captured at the
 pass's first batch (burn-stack's `CapturedStep`) instead of launching it anew — a
 model this small is bound by the host enqueueing its launches. The metrics are the
-same either way; the graph pins memory of its own, and `MNIST_GRAPH=0` runs the
+same either way; the graph pins memory of its own, and `--no-graph` runs the
 forward eagerly. Under SGD (below) the training step replays the same way.
 
 ## Optimizer: AdamW vs. AdamW + Muon vs. SGD
 
-This example carries one downstream flag (after the trailing `--`) choosing a
-fresh config's optimizer. `--muon` puts the block's hidden weight matrices on
+The shared optimizer flags choose it (AdamW by default). `--muon` puts the
+block's hidden weight matrices on
 [Muon](https://kellerjordan.github.io/posts/muon/) instead of AdamW:
 
 ```bash
 # baseline: AdamW on every parameter
 cargo run --release --example mnist-class --features "backend-wgpu" -- --training -a /tmp/mc-adamw
 # AdamW + Muon on the hidden matrices
-cargo run --release --example mnist-class --features "backend-wgpu" -- --training -a /tmp/mc-muon -- --muon
+cargo run --release --example mnist-class --features "backend-wgpu" -- --training -a /tmp/mc-muon --muon
 ```
 
 Everything else is identical: Muon uses the same LR schedule and weight decay
 (`AdjustLrFn::MatchRmsAdamW` sizes its orthogonalised update to AdamW's RMS), and
-every parameter the plan does not claim keeps its AdamW state. The flag is
-recorded in `<artifacts>/training_config.json`, so a resumed run keeps it — and a
-persisted config wins over the flag on reload.
+every parameter the plan does not claim keeps its AdamW state. The choice is
+recorded in `<artifacts>/training_config.json`, so a resumed run keeps it; a
+flag naming another optimizer replaces it, unless that would ignore the saved
+optimizer state (see the CLI overview).
 
 Which weights move (see `burn_stack::optim`, and the `muon_plan()` on the model
 config): the block `out_proj`, and the Muon-owned segments of its in-projection
@@ -75,10 +76,10 @@ are recorded once, at the first batch, and replayed for every batch of that
 shape, the learning rate an input so the schedule keeps moving. Burn's other
 optimizers bake their host-side state into a graph
 ([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so they
-train eagerly. A replayed run trains exactly as the eager one
-(`MNIST_GRAPH=0`); the graph holds a training step's memory for as long as it
-lives.
+train eagerly — Muon + SGD (`--muon --sgd`, SGD's rate) included, since Muon
+keeps momentum. A replayed run trains exactly as the eager one (`--no-graph`);
+the graph holds a training step's memory for as long as it lives.
 
 ```bash
-cargo run --release --example mnist-class --features "backend-cuda" -- --training -a /tmp/mc-sgd -- --sgd
+cargo run --release --example mnist-class --features "backend-cuda" -- --training -a /tmp/mc-sgd --sgd
 ```

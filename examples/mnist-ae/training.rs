@@ -67,7 +67,7 @@ pub fn train(
         .set_device(training_device.clone().inner())
         .build(MnistDataset::test());
 
-    // Resume position, `--max-batches` budget, cadence and metrics log.
+    // Resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &training_config,
@@ -83,6 +83,7 @@ pub fn train(
         0,
         session.cadence().valid_batches,
         &mut session,
+        app_args.graphs(),
     );
 
     println!("Starting training...");
@@ -112,10 +113,11 @@ pub fn train(
             epoch,
             None,
             &mut session,
+            app_args.graphs(),
         );
 
         if session.is_exhausted() {
-            println!("reached the --max-batches limit; stopping training");
+            println!("reached the training budget; stopping training");
             break;
         }
     }
@@ -147,8 +149,8 @@ const CADENCE: Cadence = Cadence {
 
 /// Train for (the rest of) one epoch, stepping the optimizer per batch and
 /// checkpointing and validating at the `session`'s cadence; returns the updated
-/// model. Ends early once the session's budget (the `--max-batches` cap) runs
-/// out.
+/// model. Ends early once the session's budget (`--max-batches` /
+/// `--max-seconds`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -215,6 +217,7 @@ pub fn epoch_train(
                 epoch,
                 valid_batches,
                 session,
+                app_args.graphs(),
             );
 
             // Save original-vs-reconstruction PNGs into a fresh per-step dir.
@@ -228,6 +231,10 @@ pub fn epoch_train(
                 &sample_dir,
             );
             println!("saved reconstruction samples to {sample_dir:?}");
+        }
+
+        if session.is_exhausted() {
+            break;
         }
     }
 
@@ -243,7 +250,8 @@ pub fn epoch_train(
 }
 
 /// Run validation over (up to `valid_loop_limit`) batches, report the average
-/// reconstruction loss, and log it into the `session`'s metrics log.
+/// reconstruction loss, and log it into the `session`'s metrics log. The
+/// forward replays from a graph if `graphs` ([`Valid`]).
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
@@ -251,6 +259,7 @@ pub fn epoch_valid(
     epoch: usize,
     valid_loop_limit: Option<usize>,
     session: &mut Session,
+    graphs: bool,
 ) {
     let valid_loop_limit = valid_loop_limit.unwrap_or(usize::MAX);
     let valid_num_items = dataloader_valid.num_items();
@@ -262,7 +271,7 @@ pub fn epoch_valid(
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
 
-    let valid_model = Valid::new(valid_model);
+    let valid_model = Valid::new(valid_model, graphs);
 
     for batch in dataloader_valid
         .iter()
@@ -313,7 +322,7 @@ impl InferenceStep for Wrap {
 /// The validation-side autoencoder: [`Wrap`]'s model on the inner backend,
 /// whose forward is captured at the first batch's shape and replayed from the
 /// graph for every later batch of that shape (any other shape — a short last
-/// batch — runs eagerly). `MNIST_GRAPH=0` turns the capture off.
+/// batch — runs eagerly). `--no-graph` turns the capture off.
 ///
 /// One capture per validation pass, since the weights change between them, each
 /// costing the 4 forwards `CapturedStep::capture` runs before it records.
@@ -329,8 +338,7 @@ pub struct Valid {
 type CapturedLogits = CapturedStep<'static, Tensor<4>, Tensor<2>, ()>;
 
 impl Valid {
-    fn new(model: AeModel) -> Self {
-        let capture = !matches!(std::env::var("MNIST_GRAPH").as_deref(), Ok("0"));
+    fn new(model: AeModel, capture: bool) -> Self {
         Self {
             model,
             captured: RefCell::new(None),

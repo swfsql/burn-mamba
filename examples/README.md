@@ -10,11 +10,11 @@
 
 #### Examples Structure
 
-Each example lives in its own directory (the `reset-*` ladder, `spinor-product` and `reset-quintic` one level deeper, under `reset/`, sharing one README — those six are declared as explicit `[[example]]` targets in `Cargo.toml`, since cargo only autodiscovers `examples/<name>/main.rs`; the three `tally-*` rungs likewise, under `tally/`, where they also share a `shared/` module holding the ladder's dataset, loops and hand-built helpers). An example usually defines a model in `model.rs`, a dataset (if applicable) in `dataset.rs`, a training procedure in `training.rs`, an inference procedure (if applicable) in `inference.rs` and a launching procedure in `main.rs`.
+Each example lives in its own directory (the `reset-*` ladder, `spinor-product` and `reset-quintic` one level deeper, under `reset/`, sharing one README — those six are declared as explicit `[[example]]` targets in `Cargo.toml`, since cargo only autodiscovers `examples/<name>/main.rs`; the three `tally-*` rungs likewise, under `tally/`, where they also share a `shared/` module holding the ladder's dataset, loops and hand-built helpers). An example usually defines a model in `model.rs`, a dataset (if applicable) in `dataset.rs`, a training procedure in `training.rs`, an inference procedure (if applicable) in `inference.rs`, its own command-line flags in `cli.rs` (empty when it has none) and a launching procedure in `main.rs`.
 
-The lauching procedure first triggers some basic command arguments parsing, which sets whether training and/or inference should run. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
+The lauching procedure first parses the command line — the shared flags, which set whether training and/or inference should run, and then the example's own, after `--` — reading no environment variables. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
 
-There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, and both datasets with their epoch loops (sequential-MNIST classification, character-level TinyStories language modelling) all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate.
+There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, and both datasets with their epoch loops (sequential-MNIST classification, character-level TinyStories language modelling) all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate, and `parse_rotation`, the `--rotation` value the rotating `reset-*` rungs share (a flag naming a `burn-mamba` type, which `burn-stack` cannot).
 
 ##### Model Definition
 
@@ -22,17 +22,17 @@ The overall model used throughout the examples is the lib-generic `MambaLatentNe
 
 ##### Optimizer
 
-`burn_stack::examples::training` defines `OptimizerConfig { adamw, muon, sgd }`,
-held by `TrainingConfig`. `muon = None` (the default) is plain AdamW on every
-parameter; `sgd` replaces both with plain SGD, the one optimizer a captured
-training step can replay (`mnist-class`'s `-- --sgd`).
-Setting `muon` moves the hidden weight matrices to
+`burn_stack::examples::training` defines `OptimizerConfig { fallback, muon }`,
+held by `TrainingConfig`. The fallback is AdamW or plain SGD, the one optimizer
+a captured training step can replay (`mnist-class` under `--sgd`); `muon = None`
+puts every parameter on it. Setting `muon` moves the hidden weight matrices to
 [Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
 `muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon
 only ever gets rank-2 hidden matrices, and each fused projection (`in_proj`,
 `fc1`, …) is split into its independent sub-projections first, so the
-orthogonalisation is per linear map rather than per allocation. The `mnist-class`
-example exposes this as a `-- --muon` flag; see its README.
+orthogonalisation is per linear map rather than per allocation. Every example
+takes the choice from the shared `--adamw` / `--sgd` / `--muon` flags (below);
+without them, `tiny-stories` trains Muon + AdamW and the rest AdamW.
 
 #### Backend Selection
 
@@ -41,7 +41,7 @@ If no backend is selected, you should get a compile error message.
 
 #### Examples CLI
 
-All examples use a CLI defined in `burn_stack::examples::cli`, re-exported as `common::cli`.
+All examples use a CLI defined in `burn_stack::examples::cli`, re-exported as `common::cli`: the flags every example shares (below). The arguments after a second `--` are the example's own, parsed by its `cli.rs`; `-- --help` lists them.
 
 ##### Usage Example
 
@@ -62,6 +62,18 @@ cargo run --example reset-majority --features "backend-flex" -- --training --max
 # continue it for another 600: the LR schedule, the epoch and the position in it pick up
 # where the checkpoint left them (the rest of that epoch drawn from a fresh shuffle)
 cargo run --example reset-majority --features "backend-flex" -- --training --artifacts-path "$ARTIFACTS" --max-batches 600 --resume
+
+# or stop after 10 minutes of training, wherever in the epoch that lands
+cargo run --example reset-majority --features "backend-flex" -- --training --max-seconds 600
+
+# Muon on the hidden matrices, plain SGD on the rest; and plain SGD alone, whose training
+# step replays from a captured CUDA graph (--no-graph steps it eagerly)
+cargo run --example mnist-class --features "backend-flex" -- --training --muon --sgd
+cargo run --release --example mnist-class --features "backend-cuda" -- --training --sgd
+
+# an example's own flags, after a second `--`, and their help
+cargo run --example reset-spinor --features "backend-flex" -- --training -- --rotation complex
+cargo run --example reset-spinor --features "backend-flex" -- -- --help
 
 # the per-step and per-validation metrics of every run so far, one JSON object per line:
 jq -c 'select(.event == "valid")' "$ARTIFACTS/metrics.jsonl"
@@ -94,13 +106,15 @@ BEHAVIOR OVERVIEW
 - The artifacts directory (--artifacts-path) is used to read/write model weights, optimizer state, and configurations. If not specified, a new temporary directory is created and its path is printed.
 - With --remove-artifacts, any existing model and optimizer files (and the saved progress) in the artifacts directory are deleted before training (if --training is active).
 - Model and optimizer weights are loaded from the artifacts directory if present; otherwise new ones are created and saved.
-- With --seed, --epochs or --max-lr, the given value replaces the training config's (loaded or created) before the config is saved, so later runs from the same artifacts directory inherit it. --epochs also rescales a cosine LR schedule's length by the same factor, so the schedule still spans the run.
+- With --seed, --epochs, --batch-size or --max-lr, the given value replaces the training config's (loaded or created) before the config is saved, so later runs from the same artifacts directory inherit it. --epochs also rescales a cosine LR schedule's length by the same factor, so the schedule still spans the run; --batch-size rescales its length and warmup by the inverse one (an epoch has that many fewer steps).
+- --adamw, --sgd and --muon choose the optimizer. --muon puts the model's hidden weight matrices on Muon and the other flag (default --adamw) optimizes every other parameter; --adamw and --sgd are exclusive. Without any of them a new training config gets the example's own default. A loaded config's optimizer is replaced by the flags' choice (its LR schedule is kept: see --max-lr), unless optimizer state saved under the old optimizer would then be ignored, which panics instead (the state is removed by --remove-artifacts with --training). Only plain SGD (--sgd alone) has a training step that replays from a captured graph.
+- An example that supports it replays its fixed-shape passes (training steps under plain SGD, validation, decoding) from captured CUDA graphs; --no-graph runs every pass eagerly.
 - The optimizer state is saved together with the run's progress: the LR-schedule step, the epoch, and the batch within it. A run that loads it starts over at step 0 of epoch 1, unless --resume is given, which continues from the saved progress. The interrupted epoch then trains only the batches it has left, drawn from a fresh shuffle (the dataloader workers' batch order cannot be replayed).
 - Training checkpoints at every epoch end and when it stops. --checkpoint-every adds a checkpoint every that many optimizer steps, --valid-every a periodic validation, and --valid-batches caps the batches that validation reads; each example has its own defaults for these three.
 - Every training step and validation is appended as one JSON line to metrics.jsonl in the artifacts directory; each run opens with a "start" line.
 - If both --training and --inference are specified, training executes first, followed by inference using the trained model.
-- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns. One mini-batch is one optimizer step, which for the character LM is one window of a run rather than one dataloader item.
-- Any arguments following -- are captured as-is and forwarded to downstream processing.
+- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns. One mini-batch is one optimizer step, which for the character LM is one window of a run rather than one dataloader item. --max-seconds stops it the same way once that much wall-clock time has passed since its first step.
+- Any arguments following -- are captured as-is and forwarded to the example's own flags (-- --help lists them).
 
 FLAGS:
     -h, --help                  Show this help message and exit
@@ -115,9 +129,15 @@ OPTIONS:
     -m, --model-config <PATH>   Load model configuration from this file (overrides any config in artifacts directory)
     -b, --max-batches <N>       Stop training after N mini-batches in total (across epochs), regardless of the
                                 configured number of epochs. Unlimited when absent.
+        --max-seconds <S>       Stop training once S seconds have passed since its first step. Unlimited when absent.
     -s, --seed <N>              Replace the training config's RNG seed (model init, data shuffling, sampling)
         --epochs <N>            Replace the training config's number of epochs (rescaling a cosine LR schedule)
+        --batch-size <N>        Replace the training config's mini-batch size (rescaling a cosine LR schedule)
         --max-lr <LR>           Replace the LR schedule's peak rate (a constant schedule's only one)
+        --adamw                 Optimize with AdamW (with --muon: every parameter Muon does not own)
+        --sgd                   Optimize with plain SGD (with --muon: every parameter Muon does not own)
+        --muon                  Put the hidden weight matrices on Muon
+        --no-graph              Run every pass eagerly instead of replaying captured CUDA graphs
         --resume                Continue from the progress saved with the optimizer state (schedule step, epoch,
                                 batch) instead of from step 0 (has no effect on a new optimizer)
         --checkpoint-every <N>  Also checkpoint every N optimizer steps (0: only at epoch ends)
@@ -129,6 +149,6 @@ OPTIONS:
                                 Defaults to a newly created temporary directory (path will be printed).
 
 ARGS:
-    -- <EXTRA_ARGS>             All arguments after -- are forwarded verbatim to further processing stages.
-                                If further processing is available, passing -h or --help will display its help information.
+    -- <EXTRA_ARGS>             All arguments after -- are forwarded verbatim to the example's own flags.
+                                Passing -h or --help there displays its help information.
 ```

@@ -23,6 +23,8 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, TrainingConfig},
 };
 
+/// The example's own flags (`--stock`).
+pub mod cli;
 /// The tally-drift stream, its filter and its adversarial families.
 pub mod dataset;
 /// The example's `model_config()`.
@@ -41,7 +43,7 @@ pub mod shared;
 
 fn main() {
     let app_args = AppArgs::parse(common::ARTIFACT_PREFIX).unwrap();
-    let kalman = !app_args.extra_args.iter().any(|a| a == "--stock");
+    let kalman = !cli::Cli::parse(&app_args).stock;
     if !kalman {
         println!("ablation: Gain::Projected (the computed decay removed)");
     }

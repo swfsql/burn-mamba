@@ -87,7 +87,7 @@ pub fn train(
         })
         .collect();
 
-    // Resume position, `--max-batches` budget, cadence and metrics log: by
+    // Resume position, budget, cadence and metrics log: by
     // default a validation every five epochs and no mid-epoch checkpoint.
     let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let cadence = Cadence {
@@ -131,7 +131,7 @@ pub fn train(
         }
 
         if session.is_exhausted() {
-            println!("reached the --max-batches limit; stopping training");
+            println!("reached the training budget; stopping training");
             break;
         }
     }
@@ -143,7 +143,7 @@ type Dataloader = std::sync::Arc<dyn DataLoader<ResetRotorBatch> + 'static>;
 /// Train for (the rest of) one epoch, stepping the optimizer per batch and
 /// checkpointing and validating (on `valid_loaders`) at the `session`'s cadence;
 /// returns the updated model. Ends early once the session's budget
-/// (`--max-batches`) runs out.
+/// (`--max-batches` / `--max-seconds`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -201,6 +201,9 @@ pub fn epoch_train(
             println!("running validation...");
             let valid_model = training_model.0.valid();
             validate_all(valid_loaders, valid_model, model_config, epoch, session);
+        }
+        if session.is_exhausted() {
+            break;
         }
     }
 

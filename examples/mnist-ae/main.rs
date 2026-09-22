@@ -8,8 +8,8 @@
 //! `z`** (a learned positional query FiLM-modulated by `z`). See [`model`] for
 //! the architecture and the design rationale.
 //!
-//! The latent width is chosen with `-- --latents N` (default 4). `Quaternion4D`
-//! rotation, heavy virtual layers, BCE reconstruction loss.
+//! The latent width is chosen with `-- --latents N` (default 16, [`cli`]).
+//! `Quaternion4D` rotation, heavy virtual layers, BCE reconstruction loss.
 //!
 //! ## Run
 //!
@@ -27,9 +27,11 @@
 pub use common::{
     cli::AppArgs,
     mnist::dataset,
-    training::{CosineAnnealingLr, Lr, TrainingConfig},
+    training::{CosineAnnealingLr, Lr, OptimizerConfig, OptimizerKind, TrainingConfig},
 };
 
+/// The example's own flags (`--latents`).
+pub mod cli;
 /// Inference: reconstruct a few test images and print them as ASCII art.
 pub mod inference;
 /// The example's model ([`AeModel`](model::AeModel)) and `model_config()`.
@@ -41,13 +43,9 @@ pub mod training;
 #[path = "../common/mod.rs"]
 pub mod common;
 
-use std::ffi::OsString;
-
 /// Wire up the device, configs, and the train/infer flow for the autoencoder.
 pub fn launch(app_args: &AppArgs) {
-    // The only downstream argument: the latent bottleneck width baked into a
-    // fresh model config. (Once a model config is persisted, it wins on reload.)
-    let n_latent = parse_latents(&app_args.extra_args);
+    let n_latent = cli::Cli::parse(app_args).latents;
     app_args.create_artifact_dir();
 
     // `Device::default()` resolves to the enabled `backend-*` feature (honouring
@@ -65,7 +63,8 @@ pub fn launch(app_args: &AppArgs) {
     let iterations_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        TrainingConfig::new(common::training::OptimizerConfig::adamw_only(dtype))
+        let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
+        TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
             .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
             .with_num_workers(2)
@@ -79,7 +78,7 @@ pub fn launch(app_args: &AppArgs) {
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });
-    app_args.override_training_config(&mut training_config);
+    app_args.override_training_config(&mut training_config, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {
         println!("Initializing new model config (n_latent={n_latent})");
         model::model_config(n_latent)
@@ -105,20 +104,6 @@ pub fn launch(app_args: &AppArgs) {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }
-}
-
-/// Parse `--latents N` from the forwarded `extra_args` (defaults to 16).
-fn parse_latents(extra_args: &[OsString]) -> usize {
-    extra_args
-        .iter()
-        .position(|a| a == "--latents")
-        .and_then(|i| extra_args.get(i + 1))
-        .map(|v| {
-            v.to_string_lossy()
-                .parse::<usize>()
-                .expect("--latents must be a positive integer")
-        })
-        .unwrap_or(16)
 }
 
 fn main() {

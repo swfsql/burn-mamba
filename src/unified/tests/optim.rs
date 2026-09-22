@@ -414,6 +414,47 @@ fn segmented_state_round_trips() {
     assert!(max_abs_diff(a, b) < 1e-6);
 }
 
+/// Under an SGD fallback the non-Muon blocks take plain SGD steps and hold no
+/// state: the state is the Muon blocks' alone, and pairs back with them.
+#[test]
+fn sgd_fallback_blocks_are_stateless_sgd() {
+    let device = Device::default();
+    let widths = vec![6, 4, 2];
+    let spec = ProjSpec::path(
+        "w",
+        vec![
+            ProjSegment::muon("a", 6),
+            ProjSegment::adamw("b", 4),
+            ProjSegment::muon("c", 2),
+        ],
+    );
+    let sgd = burn_stack::optim::SgdConfig::new().build();
+    let segmented = Segmented::new(&spec, muon().build(), sgd.clone(), 1);
+    let plain = muon().build();
+
+    let mut w = rand_2d([6, 12], &device);
+    let mut w_ref = w.clone().split_with_sizes(widths.clone(), 1);
+    let (mut state, mut s_a, mut s_c) = (None, None, None);
+    for _ in 0..3 {
+        let grad = rand_2d([6, 12], &device);
+        let (next, s) = segmented.step(1e-2, w, grad.clone(), state);
+        let s = s.expect("state");
+        assert_eq!(s.blocks.len(), 2, "no entry for the SGD block");
+        assert!(matches!(s.blocks[1], BlockState::Muon(_)));
+        (w, state) = (next, Some(s));
+
+        let g = grad.split_with_sizes(widths.clone(), 1);
+        let (a, s) = plain.step(1e-2, w_ref[0].clone(), g[0].clone(), s_a);
+        (w_ref[0], s_a) = (a, s);
+        w_ref[1] = sgd.step(1e-2, w_ref[1].clone(), g[1].clone(), None).0;
+        let (c, s) = plain.step(1e-2, w_ref[2].clone(), g[2].clone(), s_c);
+        (w_ref[2], s_c) = (c, s);
+    }
+
+    let diff = max_abs_diff(w, Tensor::cat(w_ref, 1));
+    assert!(diff < 1e-6, "segmented Muon + SGD diverged from its blocks: {diff}");
+}
+
 /// Building the module optimizer wires one group per Muon-owning spec, on top of
 /// the AdamW fallback.
 #[cfg(feature = "mamba3")]
@@ -441,7 +482,7 @@ fn build_assembles_groups_without_panicking() {
         untied: Vec::new(),
     };
     let model = config.init(&device);
-    let mut optim = config.muon_plan().build(&adamw(), &muon());
+    let mut optim = config.muon_plan().build(&adamw().into(), &muon());
 
     // One real step over the whole model: every parameter goes through its
     // group's optimizer, so a mis-targeted group (a 1-D or 3-D tensor handed to
@@ -494,14 +535,14 @@ fn module_optimizer_state_round_trips_through_a_record() {
         _ => panic!("expected a Mamba-3 network"),
     };
 
-    let mut live = plan.build(&adamw(), &muon());
+    let mut live = plan.build(&adamw().into(), &muon());
     let model = step(model, &mut live);
 
     let mut reloaded = plan
-        .build(&adamw(), &muon())
+        .build(&adamw().into(), &muon())
         .from_bytes(live.into_bytes().expect("serialize"))
         .expect("deserialize");
-    let mut fresh = plan.build(&adamw(), &muon());
+    let mut fresh = plan.build(&adamw().into(), &muon());
 
     // Same second step from the reloaded state vs. from no state at all.
     let from_record = step(model.clone(), &mut reloaded);

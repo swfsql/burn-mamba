@@ -67,4 +67,4 @@ Inference prints a few test digits as ASCII art and writes PNGs to disk
 On CUDA each validation pass replays its forward from one graph captured at the
 pass's first batch (burn-stack's `CapturedStep`), as in `mnist-class`; the
 reconstruction PNGs run eagerly. The loss is the same either way; the graph pins
-memory of its own, and `MNIST_GRAPH=0` runs the forward eagerly.
+memory of its own, and `--no-graph` runs the forward eagerly.

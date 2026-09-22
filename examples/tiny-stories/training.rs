@@ -4,7 +4,7 @@
 //! watched growing legible.
 //!
 //! The epoch loops themselves are `burn_stack::examples::tiny_stories::lm`,
-//! shared with `burn-deltanet`. What is Mamba's here is the [`Wrap`] newtype: it
+//! shared with `burn-deltanet`. What is Mamba's here is the [`Wrap`] type: it
 //! adapts the network to Burn's `TrainStep` / `InferenceStep` via
 //! next-character cross-entropy over **every** position of the window, and
 //! supplies the `LmModel` seam the shared loops build against — including the
@@ -21,8 +21,6 @@ pub use crate::common::{
 use crate::dataset::TinyStoriesBatch;
 use burn::prelude::*;
 use burn::{
-    data::dataloader::{DataLoader, DataLoaderIterator, Progress},
-    data::dataset::DatasetError,
     optim::{GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
@@ -31,8 +29,8 @@ use burn_stack::examples::tiny_stories::lm::{
     self, Frontier, LmModel, dataloaders, epoch_train, epoch_valid,
 };
 use burn_stack::utils::ClassCursors;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 /// Run the full training routine: load/init the model and optimizer, then train
 /// for the configured number of epochs (validating, sampling and checkpointing
@@ -42,6 +40,7 @@ pub fn train(
     model_config: MambaVocabNetConfig,
     training_device: Device,
     app_args: &AppArgs,
+    run: Run,
 ) {
     training_device.seed(config.training.seed);
 
@@ -56,17 +55,13 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(config.training.optimizer.init(&muon_plan));
 
-    let mut model = Wrap(model);
+    let mut model = Wrap(model, run);
 
     // Create the dataloaders (downloading the corpus on the first run).
     let (dataloader_train, dataloader_valid) =
         dataloaders(&config, &training_device, &progress);
-    // Opt-in wall-clock budget: the train loader stops yielding runs once
-    // `TS_TRAIN_SECONDS` have passed since its first one.
-    let deadline = Deadline::from_env();
-    let dataloader_train = deadline.wrap(dataloader_train);
 
-    // Resume position, `--max-batches` budget, cadence and metrics log.
+    // Resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &config.training,
@@ -118,40 +113,33 @@ pub fn train(
             &mut session,
         );
 
-        if deadline.passed() {
-            println!("reached the TS_TRAIN_SECONDS limit; stopping training");
-            break;
-        }
         if session.is_exhausted() {
-            println!("reached the --max-batches limit; stopping training");
+            println!("reached the training budget; stopping training");
             break;
         }
     }
     println!("Training finished.");
 }
 
-/// The SSD path used for both training and inference; the recalculated serial
-/// scan saves ~1/3 vram against `Minimal`. Opt-in override:
-/// `TS_SSD_PATH=serial|minimal|recalc` (the last is the default).
-pub fn ssd_path() -> MambaSsdPath {
-    let path = match std::env::var("TS_SSD_PATH").as_deref() {
-        Ok("serial") => Mamba3SsdPath::Serial(None),
-        Ok("minimal") => Mamba3SsdPath::Minimal(None),
-        Ok("recalc") | Err(_) => Mamba3SsdPath::SerialRecalculated(None),
-        Ok(other) => panic!("TS_SSD_PATH: unknown path {other:?}"),
-    };
-    MambaSsdPath::Mamba3(path)
+/// How the network runs, in training and inference alike.
+#[derive(Clone, Debug)]
+pub struct Run {
+    /// The SSD path of every chunkwise `forward` (`--ssd-path`).
+    pub ssd_path: MambaSsdPath,
+    /// Whether decode steps and prefill chunks replay captured graphs
+    /// (`--no-graph` runs them eagerly).
+    pub graphs: bool,
 }
 
-/// Wrapper over [`MambaVocabNet`] for custom implementations.
-pub struct Wrap(pub MambaVocabNet);
+/// Wrapper over [`MambaVocabNet`] for custom implementations, with how it runs.
+pub struct Wrap(pub MambaVocabNet, pub Run);
 
 impl LmModel for Wrap {
     type Valid = Wrap;
     type Caches = MambaCaches;
 
     fn valid(&self) -> Self::Valid {
-        Wrap(self.0.valid())
+        Wrap(self.0.valid(), self.1.clone())
     }
 
     fn train_window(
@@ -186,7 +174,7 @@ impl LmModel for Wrap {
 
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
         let t3 = prof::opt_start();
-        let model = Wrap(optim.step(lr, self.0, grads));
+        let model = Wrap(optim.step(lr, self.0, grads), self.1);
         prof::opt_end(t3);
         model
     }
@@ -203,116 +191,22 @@ impl LmModel for Wrap {
         temperature: f64,
         seed: u64,
     ) -> String {
-        crate::inference::generate(&valid.0, device, prompt, n_chars, temperature, seed, None)
-    }
-}
-
-/// The opt-in wall-clock budget of one training invocation (`TS_TRAIN_SECONDS`),
-/// counted from the train loader's first run, so corpus loading and the initial
-/// validation are excluded.
-#[derive(Clone)]
-struct Deadline {
-    budget: Option<Duration>,
-    start: Arc<OnceLock<Instant>>,
-}
-
-impl Deadline {
-    fn from_env() -> Self {
-        let budget = std::env::var("TS_TRAIN_SECONDS").ok().map(|secs| {
-            Duration::from_secs_f64(secs.parse().expect("TS_TRAIN_SECONDS: seconds"))
-        });
-        Self {
-            budget,
-            start: Arc::default(),
-        }
-    }
-
-    fn passed(&self) -> bool {
-        match (self.budget, self.start.get()) {
-            (Some(budget), Some(start)) => start.elapsed() >= budget,
-            _ => false,
-        }
-    }
-
-    /// A loader that ends the epoch at the deadline: the loop then closes the
-    /// epoch, checkpoints and validates exactly as at its natural end (so a
-    /// resumed run continues in the next epoch — keep `num_epochs` large).
-    fn wrap(&self, inner: lm::Dataloader) -> lm::Dataloader {
-        match self.budget {
-            None => inner,
-            Some(_) => Arc::new(DeadlineLoader {
-                inner,
-                deadline: self.clone(),
-            }),
-        }
-    }
-}
-
-struct DeadlineLoader {
-    inner: lm::Dataloader,
-    deadline: Deadline,
-}
-
-impl DataLoader<TinyStoriesBatch> for DeadlineLoader {
-    fn iter<'a>(&'a self) -> Box<dyn DataLoaderIterator<TinyStoriesBatch> + 'a> {
-        self.deadline.start.get_or_init(Instant::now);
-        Box::new(DeadlineIter {
-            inner: self.inner.iter(),
-            deadline: &self.deadline,
-        })
-    }
-
-    fn num_items(&self) -> usize {
-        self.inner.num_items()
-    }
-
-    fn to_device(&self, device: &Device) -> Arc<dyn DataLoader<TinyStoriesBatch>> {
-        Arc::new(DeadlineLoader {
-            inner: self.inner.to_device(device),
-            deadline: self.deadline.clone(),
-        })
-    }
-
-    fn slice(&self, start: usize, end: usize) -> Arc<dyn DataLoader<TinyStoriesBatch>> {
-        Arc::new(DeadlineLoader {
-            inner: self.inner.slice(start, end),
-            deadline: self.deadline.clone(),
-        })
-    }
-}
-
-struct DeadlineIter<'a> {
-    inner: Box<dyn DataLoaderIterator<TinyStoriesBatch> + 'a>,
-    deadline: &'a Deadline,
-}
-
-impl Iterator for DeadlineIter<'_> {
-    type Item = Result<TinyStoriesBatch, DatasetError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.deadline.passed() {
-            true => None,
-            false => self.inner.next(),
-        }
-    }
-}
-
-impl DataLoaderIterator<TinyStoriesBatch> for DeadlineIter<'_> {
-    fn progress(&self) -> Progress {
-        self.inner.progress()
+        let run = &valid.1;
+        crate::inference::generate(&valid.0, run, device, prompt, n_chars, temperature, seed, None)
     }
 }
 
 /// Opt-in wall-clock timers over the phases of a training step, to see where a
-/// step's time goes and whether a phase grows over a run. `TS_PROFILE=<N>`
+/// step's time goes and whether a phase grows over a run. `--profile <N>`
 /// prints each phase's mean milliseconds once per `N` windows;
-/// `TS_PROFILE_SYNC=1` also syncs the device after each phase, so a phase then
-/// includes its GPU execution rather than only its enqueueing. Unset ⇒ inert.
+/// `--profile-sync` also syncs the device after each phase, so a phase then
+/// includes its GPU execution rather than only its enqueueing. Inert until
+/// [`init`](prof::init).
 ///
 /// Phases: `fwd` (forward + loss), `bwd` (backward), `gap` (window end → the
 /// optimizer: the loop's metric reads, i.e. its implicit sync), `opt` (the
 /// optimizer step), `out` (optimizer → next window: logging, next batch).
-mod prof {
+pub mod prof {
     use super::*;
 
     struct State {
@@ -325,10 +219,12 @@ mod prof {
         device: Option<Device>,
     }
 
-    static STATE: LazyLock<Option<Mutex<State>>> = LazyLock::new(|| {
-        let every = std::env::var("TS_PROFILE").ok()?.parse().ok()?;
-        let sync = std::env::var("TS_PROFILE_SYNC").is_ok_and(|v| v == "1");
-        Some(Mutex::new(State {
+    static STATE: OnceLock<Mutex<State>> = OnceLock::new();
+
+    /// Start timing: print the phases' means once per `every` windows, syncing
+    /// the device after each phase if `sync`.
+    pub fn init(every: usize, sync: bool) {
+        let state = Mutex::new(State {
             every,
             sync,
             n: 0,
@@ -336,8 +232,9 @@ mod prof {
             window_end: None,
             opt_end: None,
             device: None,
-        }))
-    });
+        });
+        assert!(STATE.set(state).is_ok(), "the profiler starts once");
+    }
 
     fn ms(from: Instant, to: Instant) -> f64 {
         (to - from).as_secs_f64() * 1e3
@@ -345,7 +242,7 @@ mod prof {
 
     pub fn window_start() -> Instant {
         let now = Instant::now();
-        if let Some(state) = STATE.as_ref() {
+        if let Some(state) = STATE.get() {
             let mut s = state.lock().unwrap();
             if let Some(end) = s.opt_end.take() {
                 s.sums[4] += ms(end, now);
@@ -355,7 +252,7 @@ mod prof {
     }
 
     pub fn mark(device: &Device) -> Instant {
-        if let Some(state) = STATE.as_ref()
+        if let Some(state) = STATE.get()
             && state.lock().unwrap().sync
         {
             device.sync().expect("device sync");
@@ -364,7 +261,7 @@ mod prof {
     }
 
     pub fn window_end(device: &Device, t0: Instant, t1: Instant, t2: Instant) {
-        if let Some(state) = STATE.as_ref() {
+        if let Some(state) = STATE.get() {
             let mut s = state.lock().unwrap();
             s.sums[0] += ms(t0, t1);
             s.sums[1] += ms(t1, t2);
@@ -375,7 +272,7 @@ mod prof {
 
     pub fn opt_start() -> Instant {
         let now = Instant::now();
-        if let Some(state) = STATE.as_ref() {
+        if let Some(state) = STATE.get() {
             let mut s = state.lock().unwrap();
             if let Some(end) = s.window_end.take() {
                 s.sums[2] += ms(end, now);
@@ -385,7 +282,7 @@ mod prof {
     }
 
     pub fn opt_end(t3: Instant) {
-        let Some(state) = STATE.as_ref() else {
+        let Some(state) = STATE.get() else {
             return;
         };
         let mut s = state.lock().unwrap();
@@ -462,7 +359,7 @@ impl Wrap {
         } = batch;
         let (logits, caches) = self
             .0
-            .forward(inputs.clone(), caches, ssd_path(), Some(class), None);
+            .forward(inputs.clone(), caches, self.1.ssd_path.clone(), Some(class), None);
         (lm::lm_output(logits, inputs, targets, &scored), caches)
     }
 }
