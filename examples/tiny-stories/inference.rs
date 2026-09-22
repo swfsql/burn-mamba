@@ -11,10 +11,10 @@
 //! [`generate`](burn_stack::examples::tiny_stories::sample::generate) written
 //! over this crate's family enum, which the block-generic one cannot dispatch;
 //! the decode loop itself is shared
-//! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)), and past its
-//! first few steps it replays one captured graph of the step instead of
-//! launching it anew (`TS_GRAPH=0` turns that off; the text is the same either
-//! way). [`infer`] loads the checkpoint and prints a few stories at different
+//! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)): it draws
+//! every character on the device, and past its first few steps it replays one
+//! captured graph of the step and its draw instead of launching it anew
+//! (`TS_GRAPH=0` turns that off; the text is the same either way). [`infer`] loads the checkpoint and prints a few stories at different
 //! temperatures.
 //!
 //! One call is one story. A second one starts from a **zero** cache and primes
