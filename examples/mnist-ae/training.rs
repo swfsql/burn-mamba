@@ -326,7 +326,7 @@ pub struct Valid {
 }
 
 /// [`AeModel::forward`] over a fixed-shape image batch, captured.
-type CapturedLogits = CapturedStep<'static, 4, Float, Tensor<2>, ()>;
+type CapturedLogits = CapturedStep<'static, Tensor<4>, Tensor<2>, ()>;
 
 impl Valid {
     fn new(model: AeModel) -> Self {

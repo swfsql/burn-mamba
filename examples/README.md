@@ -22,8 +22,10 @@ The overall model used throughout the examples is the lib-generic `MambaLatentNe
 
 ##### Optimizer
 
-`burn_stack::examples::training` defines `OptimizerConfig { adamw, muon }`, held
-by `TrainingConfig`. `muon = None` (the default) is plain AdamW on every parameter.
+`burn_stack::examples::training` defines `OptimizerConfig { adamw, muon, sgd }`,
+held by `TrainingConfig`. `muon = None` (the default) is plain AdamW on every
+parameter; `sgd` replaces both with plain SGD, the one optimizer a captured
+training step can replay (`mnist-class`'s `-- --sgd`).
 Setting `muon` moves the hidden weight matrices to
 [Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
 `muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon

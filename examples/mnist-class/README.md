@@ -36,12 +36,12 @@ On CUDA each validation pass replays its forward from one graph captured at the
 pass's first batch (burn-stack's `CapturedStep`) instead of launching it anew — a
 model this small is bound by the host enqueueing its launches. The metrics are the
 same either way; the graph pins memory of its own, and `MNIST_GRAPH=0` runs the
-forward eagerly.
+forward eagerly. Under SGD (below) the training step replays the same way.
 
-## Optimizer: AdamW vs. AdamW + Muon
+## Optimizer: AdamW vs. AdamW + Muon vs. SGD
 
-This example carries one downstream flag, `--muon` (after the trailing `--`),
-which puts the block's hidden weight matrices on
+This example carries one downstream flag (after the trailing `--`) choosing a
+fresh config's optimizer. `--muon` puts the block's hidden weight matrices on
 [Muon](https://kellerjordan.github.io/posts/muon/) instead of AdamW:
 
 ```bash
@@ -66,3 +66,19 @@ stay on AdamW, as do every 1-D/3-D parameter, the network's own
 The fused `in_proj` is **split per sub-projection before Muon sees it** — the
 model keeps its single fused GEMM, but the optimizer orthogonalises each
 sub-matrix on its own, as if they had been separate `Linear`s.
+
+`--sgd` trains every parameter with plain SGD (`burn_stack::optim::SgdConfig`:
+gradient clipping at 1.0, no momentum or weight decay), on the same cosine
+schedule peaking at 5e-2 instead of AdamW's 9.6e-3. It is the one optimizer
+whose training step replays from a captured graph: forward, backward and update
+are recorded once, at the first batch, and replayed for every batch of that
+shape, the learning rate an input so the schedule keeps moving. Burn's other
+optimizers bake their host-side state into a graph
+([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so they
+train eagerly. A replayed run trains exactly as the eager one
+(`MNIST_GRAPH=0`); the graph holds a training step's memory for as long as it
+lives.
+
+```bash
+cargo run --release --example mnist-class --features "backend-cuda" -- --training -a /tmp/mc-sgd -- --sgd
+```
