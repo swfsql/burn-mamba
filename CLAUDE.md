@@ -195,7 +195,8 @@ assert.
 
 On CUDA a decode `step()` can be replayed from one captured graph (burn-stack's
 `CapturedStep`, through `unified/capture.rs`); tiny-stories' `generate` does
-(`TS_GRAPH=0` = eager), with the same text.
+(`TS_GRAPH=0` = eager), with the same text. A fixed-shape `forward` can too
+(caches `()`): mnist-class's validation, one capture per pass (`MNIST_GRAPH=0`).
 
 Layer containers and networks additionally expose **`prime()`** — `step()` without
 a user token: it emits the class tokens/latents waiting for the next one and

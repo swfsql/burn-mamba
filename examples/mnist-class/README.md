@@ -32,6 +32,12 @@ cargo run --release --example mnist-class --features "backend-wgpu" -- --trainin
 - See `burn-mamba/Cargo.toml` for other features or backend information.  
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
 
+On CUDA each validation pass replays its forward from one graph captured at the
+pass's first batch (burn-stack's `CapturedStep`) instead of launching it anew — a
+model this small is bound by the host enqueueing its launches. The metrics are the
+same either way; the graph pins memory of its own, and `MNIST_GRAPH=0` runs the
+forward eagerly.
+
 ## Optimizer: AdamW vs. AdamW + Muon
 
 This example carries one downstream flag, `--muon` (after the trailing `--`),
