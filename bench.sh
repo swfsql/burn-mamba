@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# bench.sh — run the single-block benchmarks in every backend configuration and
+# bench.sh: run the single-block benchmarks in every backend configuration, and
 # collect the results into a comparison report (bench.md).
 #
 # Configurations
@@ -11,20 +11,20 @@
 #
 # Two builds, three configurations
 # --------------------------------
-# `flex` and `cuda` share one build: several backends can be compiled in at once
-# and `BURN_DEVICE` chooses between them at runtime — in every group, including
-# the `train` one, whose custom backward dispatches through
+# `flex` and `cuda` share one build. Several backends can be compiled in at the
+# same time, and `BURN_DEVICE` selects one of them at runtime. This holds in
+# every group, also in `train`, whose custom backward dispatches through
 # `#[backend_extension]`.
 #
-# Fusion, however, is compile-time. `burn_cuda::Cuda` is a *type alias*:
-# `CubeBackend<CudaRuntime>` normally, `Fusion<CubeBackend<CudaRuntime>>` under
-# the `fusion` feature. `DispatchDevice::Cuda` is hard-bound to that alias (there
-# is no fusion *device* variant, unlike autodiff), so the fused build is
-# necessarily a different binary. Autotune is likewise a compile-time cubecl
-# feature — its runtime knobs set the tuning *level* and cache, never "off".
+# But fusion is compile-time. `burn_cuda::Cuda` is a *type alias*:
+# `CubeBackend<CudaRuntime>` usually, `Fusion<CubeBackend<CudaRuntime>>` under
+# the `fusion` feature. `DispatchDevice::Cuda` is bound to that alias (there is
+# no fusion *device* variant, unlike autodiff). So the fused build must be a
+# different binary. Autotune is also a compile-time cubecl feature. Its runtime
+# knobs set the tuning *level* and the cache, but they cannot turn it off.
 #
-# Each build keeps its own `CARGO_TARGET_DIR`, so re-running this script rebuilds
-# nothing and the criterion baseline histories stay separate.
+# Each build keeps its own `CARGO_TARGET_DIR`. So a second run of this script
+# rebuilds nothing, and the criterion baseline histories stay separate.
 #
 # Usage
 # -----
@@ -33,8 +33,8 @@
 #   BENCH_SEQ=1024 ./bench.sh     # any BENCH_* override the bench understands
 #   BENCH_SKIP=cuda,cuda-fusion ./bench.sh   # skip configurations by label
 #
-# A skipped configuration is left out of the report rather than carried over
-# from its previous log, which may have been taken at another filter or size.
+# The report leaves out a skipped configuration. It does not use the previous
+# log of that configuration, which can come from another filter or size.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -47,25 +47,25 @@ SKIP="${BENCH_SKIP:-}"
 mkdir -p "$LOG_DIR"
 
 # label | extra cargo features (on top of the defaults) | BURN_DEVICE | target dir
-# The first two rows are the same build (same features, same target dir), so it
-# compiles once and is then run on two devices.
+# The first two rows are the same build (same features, same target dir). So it
+# compiles once and then runs on two devices.
 CONFIGS=(
     "flex|backend-cuda|flex|target/bench-cuda"
     "cuda|backend-cuda|cuda|target/bench-cuda"
     "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion"
 )
 
-# With both GPU rows skipped there is nothing left to share, so flex goes back to
-# a build of its own — a machine without CUDA can still run
+# If both GPU rows are skipped, flex shares its build with nothing, so it gets a
+# build of its own. Then a machine without CUDA can still run
 # `BENCH_SKIP=cuda,cuda-fusion ./bench.sh`.
 if [[ ",$SKIP," == *",cuda,"* && ",$SKIP," == *",cuda-fusion,"* ]]; then
     CONFIGS[0]="flex||flex|target/bench-flex"
 fi
 
-# Only the configurations this invocation actually ran are reported: the log
-# directory may still hold a skipped label's log from an earlier run, taken at a
-# different filter or size, and silently mixing the two would be worse than
-# leaving the column out.
+# The report has only the configurations that this invocation ran. The log
+# directory can still hold the log of a skipped label from an earlier run, at a
+# different filter or size. To mix the two silently is worse than to leave the
+# column out.
 RAN=()
 
 for entry in "${CONFIGS[@]}"; do

@@ -1,52 +1,54 @@
 #!/usr/bin/env bash
 #
-# kernels.sh — count the GPU kernel launches each benchmark case costs, and
-# collect the counts into a comparison report (kernels.md).
+# kernels.sh: count the GPU kernel launches of each benchmark case, and collect
+# the counts into a comparison report (kernels.md).
 #
-# What is being counted
+# What the script counts
+# ----------------------
+# Every dispatch on a cubecl backend goes through one function,
+# `ComputeClient::launch_inner`, which reads the profiling logger. At level
+# `basic`, each `client.sync()` flushes a per-kernel summary table
+# (`Name | Duration | Num Computed | Ratio`) and resets it. So cubecl itself
+# counts the launches between two syncs. This needs no external profiler, and
+# it works on every cubecl backend, not only CUDA.
+#
+# Under `--test`, `benches/layer.rs` syncs exactly twice per case:
+#   1. after the warm-up loop (model construction + one iteration),
+#   2. at the end of `timed()` (the measured iteration, alone).
+# So each case emits a *pair* of tables, and the second table of each pair is
+# its per-iteration launch count.
+#
+# One run is sufficient
 # ---------------------
-# Every dispatch on a cubecl backend funnels through one function,
-# `ComputeClient::launch_inner`, which consults the profiling logger. At level
-# `basic` each `client.sync()` flushes a per-kernel summary table
-# (`Name | Duration | Num Computed | Ratio`) and resets it, so the launches
-# between two syncs are counted for us — no external profiler, and it works on
-# every cubecl backend, not just CUDA.
-#
-# `benches/layer.rs` syncs exactly twice per case under `--test`: once after the
-# warm-up loop (model construction + one iteration) and once at the end of
-# `timed()` (the measured iteration, alone). So each case emits a *pair* of
-# tables and the second of each pair is its per-iteration launch count.
-#
-# One run is enough
-# -----------------
-# A launch count is a property of the op graph, not of the machine: it is exact
-# and repeatable, with none of the variance that makes criterion sample a
-# benchmark hundreds of times. So this drives the same binary with criterion's
-# `--test` mode (one iteration per case) and `BENCH_WARMUP_ITERS=1`, and the
-# whole matrix takes about a minute per configuration — nearly all of it kernel
+# A launch count is a property of the op graph, not of the machine. It is exact
+# and repeatable, without the variance that makes criterion sample a benchmark
+# hundreds of times. So this script runs the same binary in the `--test` mode
+# of criterion (one iteration per case), with `BENCH_WARMUP_ITERS=1`. The whole
+# matrix takes about a minute per configuration, almost all of it kernel
 # compilation, not measurement.
 #
-# Two consequences of the `basic` level are worth knowing. It times every launch
-# with `submit_blocking`, which serialises the queue (trust the counts, never
-# the wall-clock, from this run). And autotuning measures each candidate behind
-# a sync of its own, so a *cold* tuner emits a table per candidate on top of the
-# pair: cubecl namespaces its cache by its own version (~/.cache/cubecl), which
-# makes the first run after a burn bump a re-tune of everything. That surplus is
-# detected and refused rather than parsed — those tables are indistinguishable
-# from real ones under fusion, where a candidate is a whole fused segment — so
-# the fix is to re-run once the tuner has written its results.
+# The `basic` level has two consequences that are worth knowing:
+#   - It times every launch with `submit_blocking`, which serialises the queue.
+#     So trust the counts of this run, but never its wall-clock times.
+#   - Autotuning measures each candidate behind a sync of its own. So a *cold*
+#     tuner emits one table per candidate, in addition to the pair. cubecl
+#     namespaces its cache by its own version (~/.cache/cubecl), so the first
+#     run after a burn upgrade tunes everything again. The script detects that
+#     surplus and refuses it: under fusion, a candidate is a whole fused
+#     segment, and its tables look the same as real ones. To fix it, run the
+#     script again after the tuner has written its results.
 #
 # Configurations
 # --------------
 #   cuda         + backend-cuda                          (no fusion, no autotune)
 #   cuda-fusion  + backend-cuda,fusion,dev-autotune       (as deployed)
 #
-# `flex` is absent on purpose: it is not a cubecl backend, so it launches no
-# kernels to count. Any other cubecl backend works — override the array below,
-# or point BURN_DEVICE/features at wgpu, vulkan, metal, rocm or cpu.
+# `flex` is intentionally absent: it is not a cubecl backend, so it launches no
+# kernels to count. Any other cubecl backend works. Change the array below, or
+# set BURN_DEVICE/features to wgpu, vulkan, metal, rocm or cpu.
 #
-# The target directories are shared with `bench.sh`, so if you have run that,
-# nothing is rebuilt here.
+# The target directories are shared with `bench.sh`. So if you ran that script,
+# this one rebuilds nothing.
 #
 # Usage
 # -----
@@ -65,9 +67,9 @@ SKIP="${KERNELS_SKIP:-}"
 
 mkdir -p "$LOG_DIR"
 
-# cubecl loads the nearest cubecl.toml walking up from the *current directory*,
-# so the runs happen in a scratch dir carrying a profiling-enabled one. That
-# leaves the repository's own cubecl.toml untouched.
+# cubecl loads the nearest cubecl.toml above the *current directory*. So the
+# runs occur in a scratch dir with a cubecl.toml that enables profiling. The
+# cubecl.toml of the repository does not change.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cat >"$WORK/cubecl.toml" <<'EOF'
@@ -82,10 +84,10 @@ CONFIGS=(
     "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion"
 )
 
-# Only the configurations this invocation actually ran are reported: the log
-# directory may still hold a skipped label's log from an earlier run, taken at a
-# different filter or size, and silently mixing the two would be worse than
-# leaving the column out.
+# The report has only the configurations that this invocation ran. The log
+# directory can still hold the log of a skipped label from an earlier run, at a
+# different filter or size. To mix the two silently is worse than to leave the
+# column out.
 RAN=()
 
 for entry in "${CONFIGS[@]}"; do
@@ -98,8 +100,8 @@ for entry in "${CONFIGS[@]}"; do
 
     echo "==> $label — BURN_DEVICE=$device, features: default${features:+,$features}"
 
-    # Build, then locate the binary: it has to be run from the scratch dir, and
-    # `cargo bench` would run it from the package root instead.
+    # Build, then find the binary. It must run from the scratch dir, and
+    # `cargo bench` runs it from the package root.
     bin=$(CARGO_TARGET_DIR="$target" \
         cargo bench ${features:+--features "$features"} --bench layer \
         --no-run --message-format=json 2>/dev/null |
@@ -115,8 +117,8 @@ for line in sys.stdin:
         exit 1
     fi
 
-    # The case list in the order criterion will run them, so the table pairs can
-    # be attributed without hardcoding the cases here.
+    # The case list, in the order of criterion. So the script can attribute the
+    # table pairs, and does not have to hardcode the cases.
     ( cd "$WORK" && BURN_DEVICE="$device" "$bin" --list ${FILTER:+"$FILTER"} ) \
         2>/dev/null | sed -n 's/: benchmark$//p' >"$LOG_DIR/$label.cases"
 
@@ -146,13 +148,14 @@ GROUP_TITLES = {
     "step": "`step` — one recurrent decode step",
 }
 
-# Two kinds of line are read, in the order they appear. `Testing <case>` is
-# criterion's per-case banner under `--test`, so the tables that follow one
-# belong to the case it names — attributing by banner rather than by position
-# keeps a case's surplus tables from being charged to its neighbours. The other
-# is the `| Total | <duration> | <num computed> | <ratio> |` line closing a
-# table; kernel names contain `|` themselves, so fields are counted from the
-# right.
+# The parser reads two kinds of line, in their order in the log:
+#   - `Testing <case>`: the per-case banner of criterion under `--test`. The
+#     tables after a banner belong to the case that it names. Attribution by
+#     banner (not by position) keeps the surplus tables of a case away from
+#     its neighbours.
+#   - `| Total | <duration> | <num computed> | <ratio> |`: the last line of a
+#     table. Kernel names can contain `|`, so the fields are counted from the
+#     right.
 EVENT = re.compile(
     r"^Testing (?P<case>\S+)\s*$"
     r"|^\| Total\s+\|.*?\|\s*(?P<total>\d+)\s*\|\s*\d+ %\s*\|",
@@ -169,8 +172,9 @@ for label, _ in CONFIGS:
     text = log.read_text(errors="replace")
     cases = cases_file.read_text().split()
 
-    # case -> its summary tables, in order. Tables before the first banner (the
-    # device throughput probe) belong to no case and are dropped.
+    # case -> its summary tables, in order. The tables before the first banner
+    # (the device throughput probe) belong to no case, and the parser drops
+    # them.
     tables, current = {c: [] for c in cases}, None
     for m in EVENT.finditer(text):
         case = m.group("case")
@@ -179,25 +183,24 @@ for label, _ in CONFIGS:
         elif current is not None:
             tables[current].append(int(m.group("total")))
 
-    # Which of the three ways this can go wrong is read off the *shape* of the
-    # per-case counts, not their total. Every case runs the same code, so a
-    # changed sync point moves all of them together; a cold tuner or a killed
-    # run leaves them ragged.
+    # The *shape* of the per-case counts (not their total) tells which of the
+    # three failures occurred. Every case runs the same code, so a changed sync
+    # point moves all of them together. A cold tuner or a killed run makes them
+    # uneven.
     counted = {c: len(t) for c, t in tables.items()}
     shape = set(counted.values())
 
     if shape == {0}:
         sys.exit(
-            f"{label}: no summary table could be attributed to any of the "
-            f"{len(cases)} cases — criterion's `Testing <case>` banners no "
-            f"longer match `--list`, or profiling is off; see {log}"
+            f"{label}: no summary table belongs to any of the {len(cases)} "
+            f"cases. The `Testing <case>` banners of criterion do not match "
+            f"`--list`, or profiling is off. See {log}"
         )
     if len(shape) == 1 and shape != {2}:
         n = shape.pop()
         sys.exit(
-            f"{label}: every case emitted {n} summary table{'s'[:n != 1]} "
-            f"instead of 2 — the sync points in benches/layer.rs changed; "
-            f"see {log}"
+            f"{label}: every case emitted {n} summary table{'s'[:n != 1]}, "
+            f"not 2. The sync points in benches/layer.rs changed. See {log}"
         )
     if shape != {2}:
         short = sorted(c for c, n in counted.items() if n < 2)
@@ -205,26 +208,26 @@ for label, _ in CONFIGS:
             sys.exit(
                 f"{label}: {len(short)} of {len(cases)} cases emitted fewer "
                 f"than the 2 expected summary tables "
-                f"({', '.join(short[:3])}) — the run was cut short; see {log}"
+                f"({', '.join(short[:3])}). The run stopped early. See {log}"
             )
         surplus = sorted((n, c) for c, n in counted.items() if n > 2)
         worst = ", ".join(f"{c} ({n})" for n, c in reversed(surplus[-3:]))
         sys.exit(
             f"{label}: {len(surplus)} of {len(cases)} cases emitted more than "
-            f"the 2 expected summary tables ({worst}) — the autotune cache was "
-            "cold, not a sync-point change. cubecl namespaces that cache by its "
-            "own version (~/.cache/cubecl), so the first run after a burn bump "
-            "re-measures every candidate, and each candidate's sync flushes a "
-            "table of its own. Those results are cached now: re-run this "
-            f"script. See {log}"
+            f"the 2 expected summary tables ({worst}). The autotune cache was "
+            "cold (this is not a sync-point change). cubecl namespaces that "
+            "cache by its own version (~/.cache/cubecl). So the first run after "
+            "a burn upgrade measures every candidate again, and the sync of "
+            "each candidate flushes its own table. The cache now holds those "
+            f"results: run this script again. See {log}"
         )
 
     present.append(label)
     for m in re.finditer(r"^bench-config: (.*)$", text, re.M):
         config_lines[label] = m.group(1)
         break
-    # Pairs are (model init + warm-up iteration, measured iteration); the
-    # second is the clean per-iteration count.
+    # A pair is (model init + warm-up iteration, measured iteration). The
+    # second table is the clean per-iteration count.
     for case in cases:
         group, _, name = case.partition("/")
         results[(group, name, label)] = tables[case][1]

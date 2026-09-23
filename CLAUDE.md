@@ -34,9 +34,10 @@ cargo run --example reset-majority -- --training --inference
 ./kernels.sh
 ```
 
-- **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,
-  rocm,tch-cpu,tch-gpu,remote,ndarray}`. Use flex for checks and tests (it is
-  on by default). Each feature enables the matching `burn/<backend>`. Several
+- **Feature flags select the backend**:
+  `backend-{flex,flex-rayon,cpu,wgpu,webgpu,metal,vulkan,cuda,rocm,tch-cpu,
+  tch-gpu,remote,ndarray}` and `backend-ndarray-blas-*`. Use flex for checks
+  and tests (it is on by default). Each feature enables the matching `burn/<backend>`. Several
   can be compiled in at once, and `Device::default()` resolves which one to use
   (it reads `BURN_DEVICE`).
 - `mamba1`/`mamba2`/`mamba3`/`autodiff`/`optim` are on by default.
@@ -565,7 +566,7 @@ in comments but **never in code identifiers**. Lower-case = base dimensions
 
 Under `../` (not analyzed here):
 
-- the **Mamba-3 paper** TeX (`../papers/mamba-3/`),
+- the **Mamba-3 paper** TeX (`../papers/mamba/mamba-3/`),
 - the **official Python impl** (`../py/state-spaces/mamba/`). It is
   authoritative, and its Triton SISO / Tilelang MIMO kernels are the
   single-ssd reference,

@@ -55,8 +55,8 @@ pub enum Mamba3SsdPath {
 
 impl Mamba3SsdPath {
     /// Optimal chunk length, in **folded positions**: `√(state_rank ·
-    /// per_head_dim)` divided by `mimo_rank`, on the 32 grid, clamped to
-    /// `32 ..= 512`. `micro_steps` does not change this width:
+    /// per_head_dim)` divided by `mimo_rank`, rounded up to a multiple of 32,
+    /// clamped to `32 ..= 512`. `micro_steps` does not change this width:
     /// [`Self::chunk_tokens`] absorbs it.
     ///
     /// The square root is the SISO rule of thumb: it balances the intra-chunk

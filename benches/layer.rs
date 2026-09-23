@@ -1,24 +1,28 @@
 //! # Single-block benchmarks (`cargo bench`)
 //!
-//! One SSM block per case — no `Layer`/`Layers`/network wrapper — measured in
-//! the three modes every block exposes:
+//! Each case is one SSM block, with no `Layer`/`Layers`/network wrapper. It is
+//! measured in the three modes of every block:
 //!
 //! | Group | What it runs |
 //! |-------|--------------|
 //! | `forward` | `block_forward` on a plain device (chunkwise prefill / inference) |
 //! | `train`   | `block_forward` + `loss.backward()` on an autodiff device |
-//! | `step`    | one recurrent `block_step` from the previous step's cache (decode) |
+//! | `step`    | one recurrent `block_step` from the cache of the previous step (decode) |
 //!
-//! Cases: Mamba-1, Mamba-2, and six Mamba-3 configurations covering the axes
-//! that have their own code paths — `mimo_rank`, the `siso_specialization`
-//! branch choice at `mimo_rank == 1`, the rotation algebra, and the SSD pathway.
+//! The cases are Mamba-1, Mamba-2, and seven Mamba-3 cases. The Mamba-3 cases
+//! cover the axes that have their own code paths:
+//!
+//! - `mimo_rank`,
+//! - the `siso_specialization` branch choice at `mimo_rank == 1`,
+//! - the rotation algebra,
+//! - the SSD pathway (`mamba3/siso-double-ssd`).
 //!
 //! ## Running
 //!
 //! ```bash
 //! cargo bench                                   # default features (flex)
 //!
-//! # CUDA as it is actually deployed — kernel fusion and autotuning on:
+//! # CUDA as deployed, with kernel fusion and autotuning:
 //! BURN_DEVICE=cuda cargo bench --features "backend-cuda,fusion,dev-autotune"
 //!
 //! # regression tracking (criterion stores baselines under target/criterion):
@@ -26,44 +30,46 @@
 //! cargo bench -- --baseline flex                # report % change vs. that run
 //! ```
 //!
-//! `BURN_DEVICE` picks the backend when several are compiled in, for every group
-//! — including `train`, whose custom backward dispatches through the
-//! `#[backend_extension(…)]` traits. So one build benches both flex and CUDA;
-//! only kernel fusion, being compile-time, needs a build of its own. [`bench.sh`]
-//! drives all three configurations that way.
+//! When several backends are compiled in, `BURN_DEVICE` selects the backend
+//! for every group. This includes `train`, whose custom backward dispatches
+//! through the `#[backend_extension(…)]` traits. So one build benches both flex
+//! and CUDA. Only kernel fusion is compile-time, so it needs a separate build.
+//! [`bench.sh`] runs all three configurations in that way.
 //!
 //! [`bench.sh`]: https://github.com/swfsql/burn-mamba/blob/main/bench.sh
 //! [`kernels.sh`]: https://github.com/swfsql/burn-mamba/blob/main/kernels.sh
 //!
-//! Every case runs [`warmup_iters`] untimed iterations first, so kernel
-//! compilation and autotuning are finished before criterion measures anything.
-//! Each measured *batch* then submits all its iterations and drains the device
-//! once at the end ([`timed`]) — an async backend is measured at steady state,
-//! not one submit-drain round trip at a time.
+//! Every case first runs [`warmup_iters`] untimed iterations. So kernel
+//! compilation and autotuning are complete before criterion measures anything.
+//! Each measured *batch* then submits all its iterations, and drains the device
+//! once at the end ([`timed`]). So the bench measures an async backend at
+//! steady state, not one submit-drain round trip at a time.
 //!
-//! The block, its input and that warm-up are built inside the closure criterion
-//! only calls for cases that pass its filter, so `-- mamba2` really does touch
-//! nothing else — which is also what lets [`kernels.sh`] attribute kernel
+//! The bench builds the block, its input and that warm-up inside the closure.
+//! Criterion calls the closure only for the cases that pass its filter. So
+//! `-- mamba2` touches nothing else, and [`kernels.sh`] can attribute kernel
 //! launches to a single case.
 //!
 //! ## Sizing
 //!
-//! Defaults are small enough to finish on the CPU backends and still large
-//! enough to be GEMM-bound on a GPU. Override per run with the environment:
-//! `BENCH_BATCH`, `BENCH_SEQ`, `BENCH_D_MODEL`, `BENCH_STATE_RANK`,
-//! `BENCH_HEAD_DIM`, plus `BENCH_SAMPLES` / `BENCH_TIME_MS` for criterion's
-//! sampling and `BENCH_WARMUP_ITERS` / `BENCH_SYNC_EVERY` for the warm-up and
-//! drain policy.
+//! The defaults are small enough to finish on the CPU backends, and large
+//! enough to be GEMM-bound on a GPU. To change them for one run, set these
+//! environment variables:
+//!
+//! - `BENCH_BATCH`, `BENCH_SEQ`, `BENCH_D_MODEL`, `BENCH_STATE_RANK`,
+//!   `BENCH_HEAD_DIM`: the shape,
+//! - `BENCH_SAMPLES` / `BENCH_TIME_MS`: the sampling of criterion,
+//! - `BENCH_WARMUP_ITERS` / `BENCH_SYNC_EVERY`: the warm-up and drain policy.
 //!
 //! ```bash
 //! BENCH_SEQ=2048 BENCH_D_MODEL=1024 cargo bench --features backend-cuda -- forward
 //! ```
 //!
-//! `train/mamba1` dominates a CPU-backend run: Mamba-1 backpropagates through a
-//! sequential per-token scan, and on the CPU backends that backward grows
-//! **quadratically** with `BENCH_SEQ` (its forward is linear). Filter it out
-//! while iterating — `cargo bench -- 'train/mamba[23]'` — or shorten the
-//! sequence for that group.
+//! `train/mamba1` dominates a CPU-backend run. Mamba-1 backpropagates through a
+//! sequential per-token scan. On the CPU backends, that backward grows
+//! **quadratically** with `BENCH_SEQ` (its forward is linear). While you
+//! iterate, filter it out (`cargo bench -- 'train/mamba[23]'`), or use a
+//! shorter sequence for that group.
 
 use burn::prelude::*;
 use burn_mamba::mamba1::prelude::*;
@@ -80,8 +86,8 @@ use std::time::{Duration, Instant};
 // Shapes
 // ---------------------------------------------------------------------------
 
-/// The problem size every case is measured at (shared, so the numbers are
-/// comparable across families).
+/// The problem size of every case (shared, so that the numbers of different
+/// families are comparable).
 #[derive(Clone, Copy, Debug)]
 struct Shape {
     batch: usize,
@@ -107,8 +113,8 @@ impl Shape {
         (self.batch * self.sequence) as u64
     }
 
-    /// Print the effective configuration once per process, so a bench log is
-    /// self-describing (`bench.sh` reads this line back into its report).
+    /// Print the effective configuration once per process, so that a bench log
+    /// describes itself (`bench.sh` reads this line back into its report).
     fn announce(&self, device: &Device) {
         use std::sync::Once;
         static ONCE: Once = Once::new();
@@ -120,11 +126,12 @@ impl Shape {
                 state_rank,
                 per_head_dim,
             } = self;
-            // `Backend::name` nests the wrappers that are *compiled in*, e.g.
-            // `dispatch<fusion<cubecl<cuda>>>` vs `dispatch<cubecl<cuda>>`, so
-            // the log proves which flavour ran instead of trusting the feature
-            // flags. (Fusion is a compile-time type alias in `burn_cuda`, not a
-            // device property — unlike autodiff, which is a device wrapper.)
+            // `Backend::name` nests the wrappers that are *compiled in*, for
+            // example `dispatch<fusion<cubecl<cuda>>>` vs `dispatch<cubecl<cuda>>`.
+            // So the log proves which flavour ran, and does not trust the
+            // feature flags. (Fusion is a compile-time type alias in
+            // `burn_cuda`, not a device property. Autodiff is different: it is
+            // a device wrapper.)
             let backend =
                 <burn::backend::Dispatch as burn::backend::Backend>::name(device.as_dispatch());
             eprintln!(
@@ -151,28 +158,28 @@ fn env_usize(key: &str, default: usize) -> usize {
 // Devices and timing
 // ---------------------------------------------------------------------------
 
-/// Block until every queued operation has actually run.
+/// Block until every queued operation has run.
 ///
-/// The GPU backends are asynchronous: without this a measured iteration would
-/// only time the op *submission*, and the real work would land in whichever
-/// iteration happens to synchronise next.
+/// The GPU backends are asynchronous. Without this, a measured iteration times
+/// only the *submission* of the ops. The real work then lands in the next
+/// iteration that synchronises.
 fn sync(device: &Device) {
     device.sync().expect("device sync failed");
 }
 
 /// Time `iters` iterations of `work`, draining the device **once at the end**.
 ///
-/// The cubecl backends are asynchronous. Syncing inside every iteration would
-/// measure submit-then-drain latency and serialise the queue — the CPU would
-/// wait for each kernel before submitting the next, which is not how a training
-/// loop feeds the GPU. Submitting the whole batch and draining once measures
-/// steady-state throughput instead; criterion divides the returned duration by
-/// `iters`. The drain stays *inside* the timed region, so no work escapes the
-/// measurement — it just amortises over the batch.
+/// The cubecl backends are asynchronous. A sync inside every iteration measures
+/// the submit-then-drain latency and serialises the queue: the CPU waits for
+/// each kernel before it submits the next. A training loop does not feed the
+/// GPU in that way. So this submits the whole batch and drains once, which
+/// measures the steady-state throughput. Criterion divides the returned
+/// duration by `iters`. The drain stays *inside* the timed region, so no work
+/// escapes the measurement: it only amortises over the batch.
 ///
-/// `BENCH_SYNC_EVERY=N` drains every `N` iterations instead (`0`, the default,
-/// drains only at the end). Use it if a case's queued intermediates exhaust
-/// device memory; `1` restores a sync per iteration.
+/// `BENCH_SYNC_EVERY=N` drains every `N` iterations (`0`, the default, drains
+/// only at the end). Use it if the queued intermediates of a case exhaust the
+/// device memory. `1` gives a sync per iteration.
 fn timed<T>(device: &Device, iters: u64, mut work: impl FnMut() -> T) -> Duration {
     let sync_every = env_usize("BENCH_SYNC_EVERY", 0) as u64;
     let start = Instant::now();
@@ -188,11 +195,11 @@ fn timed<T>(device: &Device, iters: u64, mut work: impl FnMut() -> T) -> Duratio
 
 /// How many untimed iterations to run before criterion starts measuring.
 ///
-/// A cubecl backend compiles a kernel on its first execution for a given shape,
-/// and with `dev-autotune` it also *tunes* it then — one-off costs that must not
-/// land in a measured sample. Criterion's own warm-up normally absorbs them, but
-/// it is time-bounded: on a slow case it may fit only a single iteration. This
-/// is the explicit floor (`BENCH_WARMUP_ITERS`, default 2).
+/// A cubecl backend compiles a kernel on its first execution for a given
+/// shape. With `dev-autotune`, it also *tunes* the kernel then. These one-off
+/// costs must not land in a measured sample. The warm-up of criterion usually
+/// absorbs them, but it has a time limit: on a slow case, it can fit only one
+/// iteration. This is the explicit minimum (`BENCH_WARMUP_ITERS`, default 2).
 fn warmup_iters() -> usize {
     env_usize("BENCH_WARMUP_ITERS", 2)
 }
@@ -213,8 +220,9 @@ fn configure(group: &mut BenchmarkGroup<'_, WallTime>, tokens: u64) {
 // ---------------------------------------------------------------------------
 
 fn mamba1_config(shape: Shape) -> Mamba1Config {
-    // Mamba-1's scan is sequential over the sequence and its state is small by
-    // design; `state_rank` stays at the paper's 16 rather than the shared one.
+    // The scan of Mamba-1 is sequential over the sequence, and its state is
+    // small by design. So `state_rank` stays at the 16 of the paper, not at the
+    // shared value.
     Mamba1Config::new(shape.d_model).with_state_rank(16)
 }
 
@@ -236,8 +244,8 @@ fn mamba3_config(
         .with_mimo_rank(mimo_rank)
         .with_rotation(rotation)
         // The chunkwise and per-token flags are independent knobs (their
-        // backend preferences differ); the bench pairs "all specialized"
-        // against "all general", so it moves them together.
+        // backend preferences are different). The bench compares "all
+        // specialized" with "all general", so it moves them together.
         .with_siso_specialization(siso_specialization)
         .with_siso_specialization_decode(siso_specialization)
 }
@@ -245,19 +253,19 @@ fn mamba3_config(
 /// The Mamba-3 cases, as `(name, config)`.
 ///
 /// - `siso` / `mimo-rank1`: the same SISO block, with the specialized
-///   `mimo_rank == 1` kernels on and off — the head-to-head that says whether
-///   the specialization pays off on this backend.
-/// - `mimo-rank4`: genuine MIMO, where only the general kernels exist.
+///   `mimo_rank == 1` kernels on and off. This comparison shows whether the
+///   specialization is worth it on this backend.
+/// - `mimo-rank4`: real MIMO, where only the general kernels exist.
 ///
-/// The last three sweep the rotation ladder against `siso`'s `Complex2D`:
+/// The last three sweep the rotation ladder against the `Complex2D` of `siso`:
 ///
-/// - `real1d`: no rotation at all — no in-projection columns, no cumulative
-///   accumulator, no `B`/`C` application. The floor the other kinds are priced
-///   against.
+/// - `real1d`: no rotation at all. No in-projection columns, no cumulative
+///   accumulator, no `B`/`C` application. The other kinds are priced against
+///   this floor.
 /// - `quaternion4d`: the non-abelian rotation (an associative scan over the
-///   sequence instead of a `cumsum`).
-/// - `rotor4d`: the full `SO(4)` rotation — the same scan over a doubled block
-///   axis, plus one extra quaternion product per `B`/`C` application.
+///   sequence, not a `cumsum`).
+/// - `rotor4d`: the full `SO(4)` rotation. The same scan over a doubled block
+///   axis, plus one more quaternion product per `B`/`C` application.
 fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
     use RotationKind::{Complex2D, Quaternion4D, Real1D, Rotor4D};
     vec![
@@ -279,8 +287,8 @@ fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
     ]
 }
 
-/// A zero double-SSD cache — passing one selects the double-SSD pathway, since
-/// a missing cache defaults to single-SSD.
+/// A zero double-SSD cache. It selects the double-SSD pathway, because a
+/// missing cache selects single-SSD.
 fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mamba3Cache {
     Mamba3DoubleSsdCacheConfig::new_from_block_config(batch, config.clone())
         .init(device)
@@ -291,18 +299,19 @@ fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mam
 // Runners
 // ---------------------------------------------------------------------------
 
-/// `forward` on a plain device. The call consumes its cache, so a fresh one is
-/// needed per iteration — but it is *built* once, before the timed region, and
-/// cloned in (a clone is a refcount bump; building one is an allocation and a
-/// zero-fill). Only `mamba3/siso-double-ssd` passes a real cache; for the
-/// single-SSD default it is just `None`, and every case is charged the same.
+/// `forward` on a plain device. The call consumes its cache, so each iteration
+/// needs a fresh one. But the bench *builds* it once, before the timed region,
+/// and clones it in. A clone is a refcount increment, and a build is an
+/// allocation and a zero-fill. Only `mamba3/siso-double-ssd` gives a real
+/// cache. For the single-SSD default the cache is `None`, and every case pays
+/// the same.
 ///
-/// The block, its input, and the warm-up are all built *inside* the closure,
-/// which criterion only calls when the case passes its filter — so `-- mamba2`
-/// neither allocates nor warms any other case, and one block is alive at a
-/// time. Anything hoisted out here would run on every invocation of the binary
-/// however narrow the filter, which is what makes a filtered run's kernel
-/// launches attributable to the case named (see `kernels.sh`).
+/// The bench builds the block, its input and the warm-up *inside* the closure.
+/// Criterion calls the closure only when the case passes its filter. So
+/// `-- mamba2` does not allocate or warm any other case, and one block is alive
+/// at a time. Code moved out of the closure runs on every invocation of the
+/// binary, for any filter. So the closure is what lets `kernels.sh` attribute
+/// the kernel launches of a filtered run to the named case.
 fn run_forward<M, B, C>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
@@ -374,8 +383,8 @@ fn run_train<M, B, C>(
     });
 }
 
-/// One decode step, fed by the cache the previous iteration produced (so the
-/// recurrence really advances, as it would while generating).
+/// One decode step, fed by the cache of the previous iteration (so the
+/// recurrence advances, as it does during generation).
 fn run_step<M, B, C>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
@@ -393,9 +402,8 @@ fn run_step<M, B, C>(
         let x = input_2d(shape, device);
         let mut cache = cache(device);
 
-        // Untimed: warm the decode kernels, advancing the cache as a real
-        // decode would (the steady state is what the measured iterations then
-        // see).
+        // Untimed: warm the decode kernels, and advance the cache as a real
+        // decode does (so the measured iterations see the steady state).
         for _ in 0..warmup_iters() {
             let (_y, next) = block.block_step(x.clone(), cache.take());
             cache = Some(next);
@@ -472,8 +480,8 @@ fn bench_forward(c: &mut Criterion) {
         );
     }
 
-    // The other SSD pathway: same block, selected by handing it a double-SSD
-    // cache instead of letting it default to single-SSD.
+    // The other SSD pathway: the same block, with a double-SSD cache that
+    // selects it (without a cache, the block selects single-SSD).
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
     run_forward(
         &mut group,
@@ -581,8 +589,8 @@ fn bench_step(c: &mut Criterion) {
         );
     }
 
-    // Decode on the double-SSD cache. (Single-SSD decoding round-trips through
-    // this same recurrence, so the two differ only by the cache conversion.)
+    // Decode on the double-SSD cache. (A single-SSD decode goes through this
+    // same recurrence, so the two differ only by the cache conversion.)
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
     run_step(
         &mut group,
