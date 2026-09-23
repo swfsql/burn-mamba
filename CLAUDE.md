@@ -45,6 +45,10 @@ cargo run --example reset-majority -- --training --inference
   `backend-*` cfgs are evaluated where `burn_stack::impl_backend_ext_for_burn_backends!`
   expands, i.e. in *this* crate. A backend added on one side and not the other
   silently loses its `BackendExt` impls.
+- `Cargo.toml` `[patch]`es every burn and cubecl crate to the swfsql forks
+  carrying the tracel-ai/burn#5772 memory fix (a captured graph holds one pass's
+  memory, not ~3), as burn-stack does; a crate missing from the list links a
+  second copy.
 
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
@@ -199,8 +203,10 @@ On CUDA a decode `step()` can be replayed from one captured graph (burn-stack's
 `forward` can too (caches `()`): mnist-class's and mnist-ae's validation, one
 capture per pass. So can a prompt's prefill, as right-padded fixed-shape chunks
 carrying the cache (burn-stack's `Prefill`, in tiny-stories' `infer`). Under plain
-SGD (`--sgd`), so can mnist-class's whole training step (burn-stack's `Weights` +
-`optim::SgdConfig`), replayed per batch, bit-identical to eager.
+SGD (`--sgd`), so can every example's whole training step but tiny-stories'
+(burn-stack's `examples::trainer::Trainer`), replayed per batch, bit-identical to
+eager. Dataloader workers build batches on the host (`loader_device`): one
+uploading from its own thread silently breaks a capture.
 
 Layer containers and networks additionally expose **`prime()`** — `step()` without
 a user token: it emits the class tokens/latents waiting for the next one and

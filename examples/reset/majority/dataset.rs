@@ -51,8 +51,8 @@ pub const NUM_CLASSES: usize = 2;
 /// Placeholder target for a position with **no sign to report** — the vote is
 /// exactly zero, which every reset and every tie produces.
 ///
-/// Those positions are dropped from the loss and from the accuracy (the batcher
-/// emits [`ResetMajorityBatch::scored`] for the rest). Asking for them as a
+/// Those positions are masked out of the loss and the accuracy
+/// (`training::forward_classification`). Asking for them as a
 /// third class instead is a much harder objective for no gain in what the task
 /// tests: it turns a *sign* readout into an exact-zero detector, and the model
 /// spends its capacity calibrating a band rather than holding a vote.
@@ -256,9 +256,18 @@ pub struct ResetMajorityBatch {
     /// Per-position target class, `[batch, seq]`; [`IGNORE`] where the vote is
     /// zero.
     pub targets: Tensor<2, Int>,
-    /// Flat indices (row-major over `batch × seq`) of the positions that carry a
-    /// sign — everything but the [`IGNORE`]s.
-    pub scored: Tensor<1, Int>,
+}
+
+impl ResetMajorityBatch {
+    /// The batch, built by a dataloader worker on the host, moved to `device`
+    /// by the thread that steps the model (see `device::loader_device`).
+    pub fn to_device(self, device: &Device) -> Self {
+        use crate::common::device::{batch_float, batch_int};
+        Self {
+            inputs: batch_float(self.inputs, device),
+            targets: batch_int(self.targets, device),
+        }
+    }
 }
 
 /// One-hot encode a symbol sequence into `[seq, NUM_SYMBOLS]`.
@@ -280,22 +289,9 @@ impl Batcher<ResetMajorityItem, ResetMajorityBatch> for ResetMajorityBatcher {
             .iter()
             .map(|item| Tensor::<1, Int>::from_ints(item.targets.as_slice(), device))
             .collect();
-        let seq = items[0].symbols.len();
-        let scored: Vec<i32> = items
-            .iter()
-            .enumerate()
-            .flat_map(|(b, item)| {
-                item.targets
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| **c != IGNORE)
-                    .map(move |(t, _)| (b * seq + t) as i32)
-            })
-            .collect();
         ResetMajorityBatch {
             inputs: Tensor::stack(inputs, 0),
             targets: Tensor::stack(targets, 0),
-            scored: Tensor::<1, Int>::from_ints(scored.as_slice(), device),
         }
     }
 }

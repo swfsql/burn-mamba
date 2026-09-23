@@ -11,6 +11,10 @@
 //! The latent width is chosen with `-- --latents N` (default 16, [`cli`]).
 //! `Quaternion4D` rotation, heavy virtual layers, BCE reconstruction loss.
 //!
+//! The optimizer is AdamW unless the shared flags say otherwise; `--sgd` trains
+//! with plain SGD, the one optimizer whose training step can replay from a
+//! captured CUDA graph (`--no-graph` steps it eagerly).
+//!
 //! ## Run
 //!
 //! ```bash
@@ -19,6 +23,9 @@
 //!
 //! # train + reconstruct on CUDA (long-running); 64-latent bottleneck
 //! cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference
+//!
+//! # SGD, the training step replayed from a graph
+//! cargo run --release --example mnist-ae --features backend-cuda -- --training --sgd
 //! ```
 
 #![allow(clippy::let_and_return)]
@@ -63,7 +70,14 @@ pub fn launch(app_args: &AppArgs) {
     let iterations_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
+        // Muon reuses its fallback's LR (`MatchRmsAdamW` sizes its update to
+        // AdamW's RMS), so the peak rate follows the fallback: SGD's raw
+        // gradient step wants a larger one, at the same peak-to-floor ratio.
         let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
+        let (max_lr, min_lr) = match optimizer {
+            OptimizerKind::AdamW | OptimizerKind::MuonAdamW => (1e-3, 5e-5),
+            OptimizerKind::Sgd | OptimizerKind::MuonSgd => (5e-2, 2.5e-3),
+        };
         TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
             .with_num_epochs(num_epochs)
             .with_batch_size(batch_size)
@@ -73,8 +87,8 @@ pub fn launch(app_args: &AppArgs) {
                 // collapsed the LR to its 1e-5 floor after one epoch and stalled
                 // further progress.
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
-                    .with_max_lr(1e-3)
-                    .with_min_lr(5e-5)
+                    .with_max_lr(max_lr)
+                    .with_min_lr(min_lr)
                     .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });

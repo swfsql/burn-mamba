@@ -345,6 +345,18 @@ pub struct ProductBatch {
     pub targets: Tensor<2, Int>,
 }
 
+impl ProductBatch {
+    /// The batch, built by a dataloader worker on the host, moved to `device`
+    /// by the thread that steps the model (see `device::loader_device`).
+    pub fn to_device(self, device: &Device) -> Self {
+        use crate::common::device::{batch_float, batch_int};
+        Self {
+            inputs: batch_float(self.inputs, device),
+            targets: batch_int(self.targets, device),
+        }
+    }
+}
+
 /// Two-hot encode a symbol stream into `[tokens, INPUT_SIZE]`: one one-hot slot
 /// per symbol of the pair, concatenated.
 pub fn two_hot(symbols: &[usize], device: &Device) -> Tensor<2> {

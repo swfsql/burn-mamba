@@ -146,8 +146,18 @@ pub struct TallyBatch {
     pub inputs: Tensor<3>,
     /// `[batch, seq]`, [`IGNORE`] where unscored.
     pub targets: Tensor<2, Int>,
-    /// Flat (row-major) indices of the scored positions.
-    pub scored: Tensor<1, Int>,
+}
+
+impl TallyBatch {
+    /// The batch, built by a dataloader worker on the host, moved to `device`
+    /// by the thread that steps the model (see `device::loader_device`).
+    pub fn to_device(self, device: &Device) -> Self {
+        use crate::common::device::{batch_float, batch_int};
+        Self {
+            inputs: batch_float(self.inputs, device),
+            targets: batch_int(self.targets, device),
+        }
+    }
 }
 
 impl Batcher<TallyItem, TallyBatch> for TallyBatcher {
@@ -160,22 +170,9 @@ impl Batcher<TallyItem, TallyBatch> for TallyBatcher {
             .iter()
             .map(|item| Tensor::<1, Int>::from_ints(item.targets.as_slice(), device))
             .collect();
-        let seq = items[0].symbols.len();
-        let scored: Vec<i32> = items
-            .iter()
-            .enumerate()
-            .flat_map(|(b, item)| {
-                item.targets
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| **c != IGNORE)
-                    .map(move |(t, _)| (b * seq + t) as i32)
-            })
-            .collect();
         TallyBatch {
             inputs: Tensor::stack(inputs, 0),
             targets: Tensor::stack(targets, 0),
-            scored: Tensor::<1, Int>::from_ints(scored.as_slice(), device),
         }
     }
 }

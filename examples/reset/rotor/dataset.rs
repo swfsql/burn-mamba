@@ -274,6 +274,18 @@ pub struct ResetRotorBatch {
     pub targets: Tensor<2, Int>,
 }
 
+impl ResetRotorBatch {
+    /// The batch, built by a dataloader worker on the host, moved to `device`
+    /// by the thread that steps the model (see `device::loader_device`).
+    pub fn to_device(self, device: &Device) -> Self {
+        use crate::common::device::{batch_float, batch_int};
+        Self {
+            inputs: batch_float(self.inputs, device),
+            targets: batch_int(self.targets, device),
+        }
+    }
+}
+
 /// One-hot encode a symbol sequence into `[seq, NUM_SYMBOLS]`.
 pub fn one_hot(symbols: &[usize], device: &Device) -> Tensor<2> {
     let mut buf = vec![0.0f32; symbols.len() * NUM_SYMBOLS];

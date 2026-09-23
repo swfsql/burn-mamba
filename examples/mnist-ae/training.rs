@@ -1,13 +1,15 @@
 //! Training loop for the MNIST autoencoder: builds the dataloaders, runs the
-//! train/validate epochs, and checkpoints the model and optimizer. The [`Wrap`]
-//! newtype adapts [`AeModel`] to Burn's `TrainStep` / `InferenceStep` via a
-//! pixel-reconstruction objective (binary cross-entropy on the normalized image,
-//! computed from raw logits). Its validation side is [`Valid`], which replays
-//! the forward from a captured graph.
+//! train/validate epochs, and checkpoints the model and optimizer. The objective
+//! is pixel reconstruction (binary cross-entropy on the normalized image,
+//! computed from raw logits), stepped by a `Trainer`: under plain SGD (unless
+//! `--no-graph`) the whole training step replays from a graph captured at the
+//! first batch, under any other optimizer it steps eagerly. The validation side
+//! is [`Valid`], which replays the forward from a captured graph.
 
 pub use crate::common::{
     model::ModelConfigExt,
     cli::AppArgs,
+    device::loader_device,
     mnist::dataset::{HEIGHT, MnistBatch, MnistBatcher, MnistDataset, WIDTH},
     session::{Cadence, Session},
     training::{TrainingConfig, metric_current},
@@ -19,8 +21,9 @@ use burn::{
     data::{dataloader::batcher::Batcher, dataset::Dataset},
     optim::ModuleOptimizer,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
-    train::{InferenceStep, RegressionOutput, TrainOutput, TrainStep},
+    train::{InferenceStep, RegressionOutput},
 };
+use burn_stack::examples::trainer::Trainer;
 use burn_stack::modules::loss::bce::BinaryCrossEntropyLossConfig;
 use burn_stack::utils::CapturedStep;
 use std::cell::RefCell;
@@ -47,24 +50,25 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
-    let mut model = Wrap(model, model_config.clone());
+    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.graphs());
 
     // Create the batcher
     let batcher = MnistBatcher::default();
 
-    // Create the dataloaders. Training batches must live on the autodiff device
-    // (to match the model weights); validation runs on the inner backend.
+    // Create the dataloaders. The workers build batches on the host, and the
+    // loops move them to the device: a worker uploading to the GPU from its own
+    // thread can invalidate a graph being captured (see `loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
         .num_workers(training_config.num_workers)
-        .set_device(training_device.clone())
+        .set_device(loader_device(&training_device))
         .build(MnistDataset::train());
     let dataloader_valid = DataLoaderBuilder::new(batcher)
         .batch_size(training_config.batch_size)
         .shuffle(training_config.seed)
         .num_workers(training_config.num_workers)
-        .set_device(training_device.clone().inner())
+        .set_device(loader_device(&training_device))
         .build(MnistDataset::test());
 
     // Resume position, budget, cadence and metrics log.
@@ -78,7 +82,7 @@ pub fn train(
     println!("running small initial validation...");
     epoch_valid(
         std::sync::Arc::clone(&dataloader_valid),
-        model.0.valid(),
+        trainer.module().valid(),
         &training_config,
         0,
         session.cadence().valid_batches,
@@ -88,12 +92,11 @@ pub fn train(
 
     println!("Starting training...");
     for epoch in session.epochs(training_config.num_epochs) {
-        model.0 = epoch_train(
+        epoch_train(
             std::sync::Arc::clone(&dataloader_train),
             std::sync::Arc::clone(&dataloader_valid),
-            model.0,
+            &mut trainer,
             &training_config,
-            &model_config,
             &mut optim,
             &mut session,
             epoch,
@@ -102,13 +105,13 @@ pub fn train(
         );
 
         // save assets
-        app_args.save_model(&model.0);
+        app_args.save_model(&trainer.module());
         app_args.save_optim(&optim, session.progress());
 
         println!("running full validation...");
         epoch_valid(
             std::sync::Arc::clone(&dataloader_valid),
-            model.0.valid(),
+            trainer.module().valid(),
             &training_config,
             epoch,
             None,
@@ -125,6 +128,10 @@ pub fn train(
 }
 
 type Dataloader = std::sync::Arc<dyn DataLoader<MnistBatch> + 'static>;
+
+/// What trains the autoencoder: a normalized image batch in, its flat pixel
+/// logits out ([`train_loss`]).
+pub type AeTrainer = Trainer<AeModel, Tensor<4>, Tensor<2>>;
 
 /// Number of fixed test images sampled for the periodic reconstruction PNGs.
 const NUM_SAMPLES: usize = 8;
@@ -147,23 +154,21 @@ const CADENCE: Cadence = Cadence {
     valid_batches: Some(10),
 };
 
-/// Train for (the rest of) one epoch, stepping the optimizer per batch and
-/// checkpointing and validating at the `session`'s cadence; returns the updated
-/// model. Ends early once the session's budget (`--max-batches` /
-/// `--max-seconds`) runs out.
+/// Train `trainer` for (the rest of) one epoch, one step per batch,
+/// checkpointing and validating at the `session`'s cadence. Ends early once the
+/// session's budget (`--max-batches` / `--max-seconds`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
     dataloader_valid: Dataloader,
-    training_model: AeModel,
+    trainer: &mut AeTrainer,
     training_config: &TrainingConfig,
-    model_config: &AeConfig,
     optim: &mut ModuleOptimizer,
     session: &mut Session,
     epoch: usize,
     app_args: &AppArgs,
     valid_device: Device,
-) -> AeModel {
+) {
     let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
@@ -171,8 +176,6 @@ pub fn epoch_train(
     // A fixed set of test images (on the validation backend) reconstructed at
     // every small val check, to watch reconstruction quality improve.
     let (sample_imgs, sample_labels) = sample_images(NUM_SAMPLES, &valid_device);
-
-    let mut training_model = Wrap(training_model, model_config.clone());
 
     // training loop
     for batch in dataloader_train
@@ -184,13 +187,13 @@ pub fn epoch_train(
         let [batch_size, _, _, _] = batch.images.dims();
         let (_step, lr) = session.begin_step(batch_size);
 
-        let train_output = TrainStep::step(&training_model, batch);
-        let pre_metrics = &train_output.item;
+        // Built on the host by a worker, moved here (see `loader_device`).
+        let input = batch.to_device(trainer.device()).images_norm(); // [b, H, W, 1], pixels in [0, 1]
+        let (loss, logits_flat) = trainer.step(input.clone(), optim, lr);
+        let pre_metrics = RegressionOutput::new(loss, logits_flat, input.reshape([batch_size, HEIGHT * WIDTH]));
 
         loss_metric.update(&pre_metrics.adapt(), session.meta());
         iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
-
-        training_model.0 = optim.step(lr, training_model.0, train_output.grads);
 
         let loss = metric_current(loss_metric.value());
         session.log_train(&[("loss", loss)]);
@@ -202,14 +205,14 @@ pub fn epoch_train(
         );
 
         if session.checkpoint_due() {
-            app_args.save_model(&training_model.0);
+            app_args.save_model(&trainer.module());
             app_args.save_optim(optim, session.progress());
         }
 
         if session.valid_due() {
             let valid_batches = session.cadence().valid_batches;
             println!("running validation (batch iteration limit: {valid_batches:?})");
-            let valid_model = training_model.0.valid();
+            let valid_model = trainer.module().valid();
             epoch_valid(
                 std::sync::Arc::clone(&dataloader_valid),
                 valid_model.clone(),
@@ -245,8 +248,6 @@ pub fn epoch_train(
         metric_current(loss_metric.running_value()),
     );
     session.end_epoch(batches);
-
-    training_model.0
 }
 
 /// Run validation over (up to `valid_loop_limit`) batches, report the average
@@ -271,6 +272,7 @@ pub fn epoch_valid(
 
     let mut loss_metric = burn::train::metric::LossMetric::new();
 
+    let device = valid_model.devices().remove(0);
     let valid_model = Valid::new(valid_model, graphs);
 
     for batch in dataloader_valid
@@ -282,7 +284,7 @@ pub fn epoch_valid(
         metric_meta.iteration = Some(metric_meta.iteration.unwrap() + 1);
         metric_meta.progress.items_processed += batch_size;
 
-        let pre_metrics = InferenceStep::step(&valid_model, batch);
+        let pre_metrics = InferenceStep::step(&valid_model, batch.to_device(&device));
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
     }
 
@@ -295,31 +297,15 @@ pub fn epoch_valid(
     );
 }
 
-/// Wrapper over [`AeModel`] for the train/infer step impls.
-pub struct Wrap(pub AeModel, pub AeConfig);
-
-impl TrainStep for Wrap {
-    type Input = MnistBatch;
-    type Output = RegressionOutput;
-
-    fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
-        let pre_metrics = InferenceStep::step(self, batch);
-        let grads = pre_metrics.loss.backward();
-        TrainOutput::new(&self.0, grads, pre_metrics)
-    }
+/// The training step's loss on a normalized image batch (inner backend), and
+/// the flat pixel logits it read.
+fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) {
+    let input_bhw1 = input_bhw1.autodiff();
+    let output = reconstruction_output(model.forward(input_bhw1.clone()), input_bhw1);
+    (output.loss, output.output.inner())
 }
 
-impl InferenceStep for Wrap {
-    type Input = MnistBatch;
-    type Output = RegressionOutput;
-
-    fn step(&self, batch: Self::Input) -> Self::Output {
-        let input = batch.images_norm(); // [b, H, W, 1], pixels in [0, 1] (Bernoulli targets)
-        reconstruction_output(self.0.forward(input.clone()), input)
-    }
-}
-
-/// The validation-side autoencoder: [`Wrap`]'s model on the inner backend,
+/// The validation-side autoencoder: the trained model on the inner backend,
 /// whose forward is captured at the first batch's shape and replayed from the
 /// graph for every later batch of that shape (any other shape — a short last
 /// batch — runs eagerly). `--no-graph` turns the capture off.

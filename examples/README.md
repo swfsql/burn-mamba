@@ -24,8 +24,10 @@ The overall model used throughout the examples is the lib-generic `MambaLatentNe
 
 `burn_stack::examples::training` defines `OptimizerConfig { fallback, muon }`,
 held by `TrainingConfig`. The fallback is AdamW or plain SGD, the one optimizer
-a captured training step can replay (`mnist-class` under `--sgd`); `muon = None`
-puts every parameter on it. Setting `muon` moves the hidden weight matrices to
+a captured training step can replay (under `--sgd`, every example but
+`tiny-stories`, through burn-stack's `examples::trainer::Trainer`: forward,
+backward and update captured at the first batch, the loss masked rather than
+gathered so the shapes never change); `muon = None` puts every parameter on it. Setting `muon` moves the hidden weight matrices to
 [Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
 `muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon
 only ever gets rank-2 hidden matrices, and each fused projection (`in_proj`,

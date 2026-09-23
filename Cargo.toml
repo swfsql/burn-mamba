@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.56.0"
+version = "0.57.0"
 edition = "2024"
 
 [features]
@@ -47,7 +47,7 @@ dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "0b6e359f65650f0aafde1cea329d97a88b20602a", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "b9ce3442df557716137efea68f550c5e3d73ace0", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 # burn-flex = { version = "0.22.0-pre.3", default-features = false, optional = true }
 burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "8f08fdad05e734918efd695b11ebe13d92a8714e", default-features = false, optional = true }
@@ -66,7 +66,7 @@ burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "8f08fdad05
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "0b6e359f65650f0aafde1cea329d97a88b20602a", default-features = false, features = ["test-helpers", "examples-common"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "b9ce3442df557716137efea68f550c5e3d73ace0", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 num-traits = "0.2.19"
 rand = "0.9.2"
@@ -127,6 +127,67 @@ path = "examples/tally/record/main.rs"
 [[example]]
 name = "tally-drift"
 path = "examples/tally/drift/main.rs"
+
+# tracel-ai/burn#5772 ("Related: a capture needs ~3x a pass's memory"): burn and
+# cubecl at the pinned revs plus one line each — burn's `capture` primes only
+# its last warm-up, cubecl pins only what the recording touched — so a captured
+# graph holds one pass's memory instead of three. Every burn and cubecl crate in
+# the dependency graph is patched (a missing one links a second copy).
+[patch."https://github.com/tracel-ai/burn.git"]
+burn = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-autodiff = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-backend = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-backend-extension = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-core = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-cpu = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-cubecl = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-cubecl-fusion = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-cuda = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-dataset = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-derive = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-dispatch = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-einsum = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-flex = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-fusion = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-ir = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-linalg = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-ndarray = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-nn = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-optim = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-pack = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-remote = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-rocm = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-router = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-signal = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-std = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-store = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-tch = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-tensor = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-train = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-vision = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+burn-wgpu = { git = "https://github.com/swfsql/burn.git", rev = "143bff617c988bdd3245fe0093f789fbdc5585cb" }
+
+[patch."https://github.com/tracel-ai/cubecl"]
+cubecl = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-common = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-core = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-cpp = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-cpu = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-cuda = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-environment = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-hip = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-ir = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-llvm = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-macros = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-macros-internal = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-metal = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-opt = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-runtime = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-server = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-spirv = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-std = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-wgpu = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
+cubecl-zspace = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
 
 # [patch."https://github.com/swfsql/burn-stack.git"]
 # burn-stack = { path = "../burn-stack" }

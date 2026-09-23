@@ -1,27 +1,31 @@
 //! Training loop for the reset-majority example: builds the dataloaders, runs
 //! the train/validate epochs, and checkpoints the model and optimizer. The
-//! [`Wrap`] newtype adapts the example network to Burn's `TrainStep` /
-//! `InferenceStep` via a cross-entropy head over **every** position (the
-//! running vote at each step).
+//! objective is a cross-entropy head over **every** position (the running vote
+//! at each step, [`forward_classification`]), stepped by a `Trainer`: under
+//! plain SGD (unless `--no-graph`) the whole training step replays from a graph
+//! captured at the first batch, under any other optimizer it steps eagerly.
 
 pub use crate::common::{
     cli::AppArgs,
+    device::loader_device,
     model::ModelConfigExt,
     session::{Cadence, Session},
     training::{TrainingConfig, metric_current},
 };
 use crate::dataset::{
-    EVAL_SEED, Family, NUM_CLASSES, NUM_EVAL, NUM_TRAIN, ResetMajorityBatch, ResetMajorityBatcher,
-    ResetMajorityDataset, SEQ_LENGTH, TRAIN_SEED,
+    EVAL_SEED, Family, IGNORE, NUM_CLASSES, NUM_EVAL, NUM_TRAIN, ResetMajorityBatch,
+    ResetMajorityBatcher, ResetMajorityDataset, SEQ_LENGTH, TRAIN_SEED,
 };
 use burn::prelude::*;
 use burn::{
     data::dataloader::{DataLoader, DataLoaderBuilder, Progress},
     optim::ModuleOptimizer,
+    tensor::activation::log_softmax,
     train::metric::{Adaptor, Metric, MetricMetadata, Numeric},
-    train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
+    train::{ClassificationOutput, InferenceStep},
 };
 use burn_mamba::prelude::*;
+use burn_stack::examples::trainer::Trainer;
 
 /// The evaluation splits, reported separately: the two adversarial families are
 /// where a non-selective state fails, so a single averaged number would hide the
@@ -58,16 +62,17 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
-    let mut model = Wrap(model, model_config.clone());
+    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.graphs());
     let batcher = ResetMajorityBatcher::default();
 
-    // Training batches live on the autodiff device (to match the weights);
-    // validation runs on the inner backend.
+    // The workers build batches on the host, and the loops move them to the
+    // device: a worker uploading to the GPU from its own thread can invalidate
+    // a graph being captured (see `device::loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
         .num_workers(training_config.num_workers)
-        .set_device(training_device.clone())
+        .set_device(loader_device(&training_device))
         .build(ResetMajorityDataset::new(
             NUM_TRAIN,
             SEQ_LENGTH,
@@ -80,7 +85,7 @@ pub fn train(
             let loader: Dataloader = DataLoaderBuilder::new(batcher.clone())
                 .batch_size(training_config.batch_size)
                 .num_workers(training_config.num_workers)
-                .set_device(training_device.clone().inner())
+                .set_device(loader_device(&training_device))
                 .build(ResetMajorityDataset::new(
                     NUM_EVAL, SEQ_LENGTH, *family, EVAL_SEED,
                 ));
@@ -106,13 +111,13 @@ pub fn train(
         "running initial validation (chance ≈ {:.1}%)...",
         100.0 / NUM_CLASSES as f32
     );
-    validate_all(&valid_loaders, model.0.valid(), &model_config, 0, &mut session);
+    validate_all(&valid_loaders, trainer.module().valid(), &model_config, 0, &mut session);
 
     println!("Starting training...");
     for epoch in session.epochs(training_config.num_epochs) {
-        model.0 = epoch_train(
+        epoch_train(
             std::sync::Arc::clone(&dataloader_train),
-            model.0,
+            &mut trainer,
             &training_config,
             &model_config,
             &mut optim,
@@ -122,13 +127,13 @@ pub fn train(
             app_args,
         );
 
-        app_args.save_model(&model.0);
+        app_args.save_model(&trainer.module());
         app_args.save_optim(&optim, session.progress());
 
         let last = epoch == training_config.num_epochs || session.is_exhausted();
         if last && !session.validated_now() {
             println!("running final validation...");
-            validate_all(&valid_loaders, model.0.valid(), &model_config, epoch, &mut session);
+            validate_all(&valid_loaders, trainer.module().valid(), &model_config, epoch, &mut session);
         }
 
         if session.is_exhausted() {
@@ -141,14 +146,19 @@ pub fn train(
 
 type Dataloader = std::sync::Arc<dyn DataLoader<ResetMajorityBatch> + 'static>;
 
-/// Train for (the rest of) one epoch, stepping the optimizer per batch and
-/// checkpointing and validating (on `valid_loaders`) at the `session`'s cadence;
-/// returns the updated model. Ends early once the session's budget
-/// (`--max-batches` / `--max-seconds`) runs out.
+/// What trains the model: `(inputs, targets)` in, the loss and the scored
+/// `(logits, targets)` out ([`train_loss`]).
+pub type ClassTrainer =
+    Trainer<MambaLatentNet, (Tensor<3>, Tensor<2, Int>), (Tensor<2>, Tensor<1, Int>)>;
+
+/// Train `trainer` for (the rest of) one epoch, one step per batch,
+/// checkpointing and validating (on `valid_loaders`) at the `session`'s
+/// cadence. Ends early once the session's budget (`--max-batches` /
+/// `--max-seconds`) runs out.
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
-    training_model: MambaLatentNet,
+    trainer: &mut ClassTrainer,
     training_config: &TrainingConfig,
     model_config: &MambaLatentNetConfig,
     optim: &mut ModuleOptimizer,
@@ -156,13 +166,11 @@ pub fn epoch_train(
     epoch: usize,
     valid_loaders: &[(&str, Dataloader)],
     app_args: &AppArgs,
-) ->MambaLatentNet {
+) {
     let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let mut loss_metric = burn::train::metric::LossMetric::new();
-    let mut acc_metric = burn::train::metric::AccuracyMetric::new();
+    let mut acc_metric = burn::train::metric::AccuracyMetric::new().with_pad_token(NUM_CLASSES);
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
-
-    let mut training_model = Wrap(training_model, model_config.clone());
 
     for batch in dataloader_train
         .iter()
@@ -173,14 +181,14 @@ pub fn epoch_train(
         let [batch_size, _, _] = batch.inputs.dims();
         let (_step, lr) = session.begin_step(batch_size);
 
-        let train_output = TrainStep::step(&training_model, batch);
-        let pre_metrics = &train_output.item;
+        let batch = batch.to_device(trainer.device());
+        let batch = (batch.inputs, batch.targets);
+        let (loss, (logits, targets)) = trainer.step(batch, optim, lr);
+        let pre_metrics = ClassificationOutput::new(loss, logits, targets);
 
         loss_metric.update(&pre_metrics.adapt(), session.meta());
         acc_metric.update(&pre_metrics.adapt(), session.meta());
         iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
-
-        training_model.0 = optim.step(lr, training_model.0, train_output.grads);
 
         let (loss, acc) = (
             metric_current(loss_metric.value()),
@@ -195,12 +203,12 @@ pub fn epoch_train(
         );
 
         if session.checkpoint_due() {
-            app_args.save_model(&training_model.0);
+            app_args.save_model(&trainer.module());
             app_args.save_optim(optim, session.progress());
         }
         if session.valid_due() {
             println!("running validation...");
-            let valid_model = training_model.0.valid();
+            let valid_model = trainer.module().valid();
             validate_all(valid_loaders, valid_model, model_config, epoch, session);
         }
         if session.is_exhausted() {
@@ -216,8 +224,6 @@ pub fn epoch_train(
         metric_current(acc_metric.running_value()),
     );
     session.end_epoch(batches);
-
-    training_model.0
 }
 
 /// Validate on every family in turn (each capped at the session's
@@ -241,16 +247,17 @@ pub fn validate_all(
 /// Average loss and accuracy of `model` over (up to `limit` batches of) one
 /// dataloader.
 pub fn evaluate(dataloader: Dataloader, model: &Wrap, limit: usize) -> (f64, f64) {
+    let device = model.0.devices().remove(0);
     let metric_meta = MetricMetadata {
         progress: Progress::new(0, dataloader.num_items(), None),
         iteration: Some(0),
         lr: None,
     };
     let mut loss_metric = burn::train::metric::LossMetric::new();
-    let mut acc_metric = burn::train::metric::AccuracyMetric::new();
+    let mut acc_metric = burn::train::metric::AccuracyMetric::new().with_pad_token(NUM_CLASSES);
 
     for batch in dataloader.iter().map(|b| b.expect("dataloader batch")).take(limit) {
-        let pre_metrics = InferenceStep::step(model, batch);
+        let pre_metrics = InferenceStep::step(model, batch.to_device(&device));
         loss_metric.update(&pre_metrics.adapt(), &metric_meta);
         acc_metric.update(&pre_metrics.adapt(), &metric_meta);
     }
@@ -260,54 +267,59 @@ pub fn evaluate(dataloader: Dataloader, model: &Wrap, limit: usize) -> (f64, f64
     )
 }
 
-/// Wrapper over [`MambaLatentNet`] for custom implementations.
+/// Wrapper over [`MambaLatentNet`] for the validation step.
 pub struct Wrap(pub MambaLatentNet, pub MambaLatentNetConfig);
-
-impl TrainStep for Wrap {
-    type Input = ResetMajorityBatch;
-    type Output = ClassificationOutput;
-
-    fn step(&self, batch: Self::Input) -> TrainOutput<Self::Output> {
-        let pre_metrics = InferenceStep::step(self, batch);
-        let grads = pre_metrics.loss.backward();
-        TrainOutput::new(&self.0, grads, pre_metrics)
-    }
-}
 
 impl InferenceStep for Wrap {
     type Input = ResetMajorityBatch;
     type Output = ClassificationOutput;
 
     fn step(&self, batch: Self::Input) -> Self::Output {
-        self.forward_classification(batch.inputs, batch.targets, batch.scored)
+        forward_classification(&self.0, batch.inputs, batch.targets)
     }
 }
 
-impl Wrap {
-    /// Forward the model and score the running vote at **every** position.
-    pub fn forward_classification(
-        &self,
-        inputs: Tensor<3>,
-        targets: Tensor<2, Int>,
-        scored: Tensor<1, Int>,
-    ) -> ClassificationOutput {
-        let model = &self.0;
-        let [batch_size, sequence_size, _num_symbols] = inputs.dims();
-        assert_eq!([batch_size, sequence_size], targets.dims());
+/// The training step's [`forward_classification`] on `(inputs, targets)`
+/// (inner backend): the loss, and the scored `(logits, targets)`.
+fn train_loss(
+    model: &MambaLatentNet,
+    (inputs, targets): (Tensor<3>, Tensor<2, Int>),
+) -> (Tensor<1>, (Tensor<2>, Tensor<1, Int>)) {
+    let output = forward_classification(model, inputs.autodiff(), targets.autodiff());
+    (output.loss, (output.output.inner(), output.targets.inner()))
+}
 
-        let (output, _caches) = model.forward(inputs, None, ssd_path(), None, None);
-        assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
+/// Forward the model and score the running vote at **every** position that has
+/// a sign to report.
+///
+/// The zero-vote ones reach neither the loss nor the accuracy (see
+/// `dataset::IGNORE`): masked out of the mean, and targeted at the pad class
+/// `NUM_CLASSES`, which no prediction matches and
+/// `AccuracyMetric::with_pad_token(NUM_CLASSES)` leaves out. Masked rather than
+/// dropped, so every shape is the batch's whatever its votes — a captured
+/// training step replays one.
+pub fn forward_classification(
+    model: &MambaLatentNet,
+    inputs: Tensor<3>,
+    targets: Tensor<2, Int>,
+) -> ClassificationOutput {
+    let [batch_size, sequence_size, _num_symbols] = inputs.dims();
+    assert_eq!([batch_size, sequence_size], targets.dims());
 
-        // Keep only the positions that have a sign to report; the zero-vote ones
-        // reach neither the loss nor the accuracy (see `dataset::IGNORE`).
-        let n = batch_size * sequence_size;
-        let logits = output.reshape([n, NUM_CLASSES]).select(0, scored.clone());
-        let targets = targets.reshape([n]).select(0, scored);
+    let (output, _caches) = model.forward(inputs, None, ssd_path(), None, None);
+    assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
-        let loss = burn::nn::loss::CrossEntropyLossConfig::new()
-            .init(&logits.device())
-            .forward(logits.clone(), targets.clone());
+    let n = batch_size * sequence_size;
+    let logits = output.reshape([n, NUM_CLASSES]);
+    let targets = targets.reshape([n]);
+    let ignored = targets.clone().equal_elem(IGNORE);
+    let nll = log_softmax(logits.clone(), 1)
+        .gather(1, targets.clone().mask_fill(ignored.clone(), 0).reshape([n, 1]))
+        .reshape([n])
+        .neg()
+        .mask_fill(ignored.clone(), 0);
+    let loss = nll.sum() / ignored.clone().bool_not().float().sum();
+    let targets = targets.mask_fill(ignored, NUM_CLASSES as i64);
 
-        ClassificationOutput::new(loss.clone(), logits, targets)
-    }
+    ClassificationOutput::new(loss, logits, targets)
 }

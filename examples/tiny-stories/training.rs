@@ -77,6 +77,7 @@ pub fn train(
     epoch_valid::<Wrap>(
         std::sync::Arc::clone(&dataloader_valid),
         &model.valid(),
+        &training_device.clone().inner(),
         &config,
         0,
         session.cadence().valid_batches,
@@ -107,6 +108,7 @@ pub fn train(
         epoch_valid::<Wrap>(
             std::sync::Arc::clone(&dataloader_valid),
             &model.valid(),
+            &training_device.clone().inner(),
             &config,
             epoch,
             None,
