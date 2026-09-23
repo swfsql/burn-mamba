@@ -193,64 +193,66 @@ cargo run --example reset-majority --features "backend-flex" -- --training --art
 ```txt
 Burn Example
 
-A command-line tool for training and/or running inference with machine learning models.
-Models, optimizers, and configurations are persisted in an artifacts directory.
+A command-line tool to train machine learning models and/or to run inference with them.
+An artifacts directory keeps the models, the optimizers and the configurations.
 
 USAGE:
     example-name [OPTIONS] [-- <EXTRA_ARGS>...]
 
-When no --training or --inference flag is provided, the program exits after handling configuration logic.
+Without --training or --inference, the program handles the configurations and then exits.
 
 BEHAVIOR OVERVIEW
-- The program manages two configurations: training config and model config.
-- If --training-config or --model-config is given, the corresponding config is loaded from the specified file and saved to the artifacts directory (overwriting any existing file).
-- If no explicit config file is provided for a component, the program attempts to load it from the artifacts directory; if absent, a default configuration is created and saved.
-- The artifacts directory (--artifacts-path) is used to read/write model weights, optimizer state, and configurations. If not specified, a new temporary directory is created and its path is printed.
-- With --remove-artifacts, any existing model and optimizer files (and the saved progress) in the artifacts directory are deleted before training (if --training is active).
-- Model and optimizer weights are loaded from the artifacts directory if present; otherwise new ones are created and saved.
-- With --seed, --epochs, --batch-size or --max-lr, the given value replaces the training config's (loaded or created) before the config is saved, so later runs from the same artifacts directory inherit it. --epochs also rescales a cosine LR schedule's length by the same factor, so the schedule still spans the run; --batch-size rescales its length and warmup by the inverse one (an epoch has that many fewer steps).
-- --adamw, --sgd and --muon choose the optimizer. --muon puts the model's hidden weight matrices on Muon and the other flag (default --adamw) optimizes every other parameter; --adamw and --sgd are exclusive. Without any of them a new training config gets the example's own default. A loaded config's optimizer is replaced by the flags' choice (its LR schedule is kept: see --max-lr), unless optimizer state saved under the old optimizer would then be ignored, which panics instead (the state is removed by --remove-artifacts with --training). Only plain SGD (--sgd alone) has a training step that replays from a captured graph.
-- An example that supports it replays its fixed-shape passes (training steps under plain SGD, validation, decoding) from captured CUDA graphs; --no-graph runs every pass eagerly.
-- The optimizer state is saved together with the run's progress: the LR-schedule step, the epoch, and the batch within it. A run that loads it starts over at step 0 of epoch 1, unless --resume is given, which continues from the saved progress. The interrupted epoch then trains only the batches it has left, drawn from a fresh shuffle (the dataloader workers' batch order cannot be replayed).
-- Training checkpoints at every epoch end and when it stops. --checkpoint-every adds a checkpoint every that many optimizer steps, --valid-every a periodic validation, and --valid-batches caps the batches that validation reads; each example has its own defaults for these three.
-- Every training step and validation is appended as one JSON line to metrics.jsonl in the artifacts directory; each run opens with a "start" line.
-- If both --training and --inference are specified, training executes first, followed by inference using the trained model.
-- With --max-batches, training stops after that many mini-batches in total (counted across epochs), checkpointing as usual before it returns. One mini-batch is one optimizer step, which for the character LM is one window of a run rather than one dataloader item. --max-seconds stops it the same way once that much wall-clock time has passed since its first step.
-- Any arguments following -- are captured as-is and forwarded to the example's own flags (-- --help lists them).
+- The program manages two configurations: the training config and the model config.
+- With --training-config or --model-config, the program loads that config from the given file and saves it to the artifacts directory (it overwrites the existing file).
+- Without an explicit config file, the program loads the config from the artifacts directory. If that file is absent, the program creates a default config and saves it.
+- The program reads and writes the model weights, the optimizer state and the configurations in the artifacts directory (--artifacts-path). Without --artifacts-path, the program creates a new temporary directory and prints its path.
+- With --remove-artifacts and --training, the program deletes the model and optimizer files (and the saved progress) in the artifacts directory before training.
+- The program loads the model and optimizer weights from the artifacts directory if they are present. Otherwise it creates new ones and saves them.
+- --seed, --epochs, --batch-size and --max-lr replace the value in the training config (loaded or created) before the program saves the config. So later runs from the same artifacts directory inherit the value. --epochs also rescales the length of a cosine LR schedule by the same factor, so the schedule still spans the run. --batch-size rescales its length and warmup by the inverse factor (an epoch has that many fewer steps).
+- --adamw, --sgd and --muon choose the optimizer. --muon puts the hidden weight matrices of the model on Muon, and the other flag (default --adamw) optimizes every other parameter. --adamw and --sgd are exclusive. Without these flags, a new training config gets the default optimizer of the example.
+- In a loaded config, these flags replace the optimizer and keep the LR schedule (see --max-lr). If the new optimizer would ignore the optimizer state that the old optimizer saved, the program panics. (--remove-artifacts with --training removes that state.)
+- Only plain SGD (--sgd alone) has a training step that replays from a captured graph.
+- An example that supports it replays its fixed-shape passes (training steps under plain SGD, validation, decoding) from captured CUDA graphs. --no-graph runs every pass eagerly.
+- The program saves the optimizer state together with the progress of the run: the LR-schedule step, the epoch, and the batch within it. A run that loads this state starts again at step 0 of epoch 1. With --resume, the run continues from the saved progress. The interrupted epoch then trains only its remaining batches, drawn from a new shuffle (the batch order of the dataloader workers cannot be replayed).
+- Training makes a checkpoint at every epoch end and when it stops. --checkpoint-every adds a checkpoint every N optimizer steps. --valid-every adds a validation every N optimizer steps. --valid-batches caps the batches that a validation reads. Each example has its own defaults for these three flags.
+- Every training step and every validation appends one JSON line to metrics.jsonl in the artifacts directory. Each run starts with a "start" line.
+- With both --training and --inference, training runs first. Inference then uses the trained model.
+- With --max-batches, training stops after that many mini-batches in total (counted across epochs), and makes a checkpoint as usual before it returns. One mini-batch is one optimizer step. For the character LM, this is one window of a run, not one dataloader item. --max-seconds stops training in the same way, when that much wall-clock time has passed since its first step.
+- The program forwards all the arguments after -- unchanged to the flags of the example (-- --help lists them).
 
 FLAGS:
     -h, --help                  Show this help message and exit
 
 OPTIONS:
-    -t, --training              Run training (creates or updates model / optimizer)
-    -i, --inference             Run inference after training (if both flags are used) or immediately (if only inference is requested)
-    -r, --remove-artifacts      Delete existing model and optimizer files from the artifacts directory before training
-                                (has no effect if --training is not used)
+    -t, --training              Run training (creates or updates the model and the optimizer)
+    -i, --inference             Run inference: after training (with both flags), or immediately (with this flag only)
+    -r, --remove-artifacts      Delete the model and optimizer files (and the progress) in the artifacts directory
+                                before training (no effect without --training)
     -c, --training-config <PATH>
-                                Load training configuration from this file (overrides any config in artifacts directory)
-    -m, --model-config <PATH>   Load model configuration from this file (overrides any config in artifacts directory)
-    -b, --max-batches <N>       Stop training after N mini-batches in total (across epochs), regardless of the
-                                configured number of epochs. Unlimited when absent.
-        --max-seconds <S>       Stop training once S seconds have passed since its first step. Unlimited when absent.
-    -s, --seed <N>              Replace the training config's RNG seed (model init, data shuffling, sampling)
-        --epochs <N>            Replace the training config's number of epochs (rescaling a cosine LR schedule)
-        --batch-size <N>        Replace the training config's mini-batch size (rescaling a cosine LR schedule)
-        --max-lr <LR>           Replace the LR schedule's peak rate (a constant schedule's only one)
-        --adamw                 Optimize with AdamW (with --muon: every parameter Muon does not own)
-        --sgd                   Optimize with plain SGD (with --muon: every parameter Muon does not own)
+                                Load the training config from this file (overrides the config in the artifacts directory)
+    -m, --model-config <PATH>   Load the model config from this file (overrides the config in the artifacts directory)
+    -b, --max-batches <N>       Stop training after N mini-batches in total (across epochs), for any configured
+                                number of epochs. Unlimited when absent.
+        --max-seconds <S>       Stop training when S seconds have passed since its first step. Unlimited when absent.
+    -s, --seed <N>              Replace the RNG seed of the training config (model init, data shuffle, sampling)
+        --epochs <N>            Replace the number of epochs of the training config (rescales a cosine LR schedule)
+        --batch-size <N>        Replace the mini-batch size of the training config (rescales a cosine LR schedule)
+        --max-lr <LR>           Replace the peak rate of the LR schedule (the only rate of a constant schedule)
+        --adamw                 Optimize with AdamW (with --muon: every parameter that Muon does not own)
+        --sgd                   Optimize with plain SGD (with --muon: every parameter that Muon does not own)
         --muon                  Put the hidden weight matrices on Muon
-        --no-graph              Run every pass eagerly instead of replaying captured CUDA graphs
+        --no-graph              Run every pass eagerly, not from captured CUDA graphs
         --resume                Continue from the progress saved with the optimizer state (schedule step, epoch,
-                                batch) instead of from step 0 (has no effect on a new optimizer)
-        --checkpoint-every <N>  Also checkpoint every N optimizer steps (0: only at epoch ends)
+                                batch), not from step 0 (no effect on a new optimizer)
+        --checkpoint-every <N>  Also make a checkpoint every N optimizer steps (0: only at epoch ends)
         --valid-every <N>       Validate every N optimizer steps (0: no periodic validation)
-        --valid-batches <N>     Batches a periodic validation reads
+        --valid-batches <N>     The batches that a periodic validation reads
     -a, --artifacts-path <PATH>
-                                Directory where configurations, model weights, and optimizer state are saved and loaded.
-                                If the directory does not exist, it will be created.
-                                Defaults to a newly created temporary directory (path will be printed).
+                                Directory to save and load the configs, the model weights and the optimizer state.
+                                The program creates it if it does not exist.
+                                Default: a new temporary directory (the program prints its path).
 
 ARGS:
-    -- <EXTRA_ARGS>             All arguments after -- are forwarded verbatim to the example's own flags.
-                                Passing -h or --help there displays its help information.
+    -- <EXTRA_ARGS>             The program forwards all the arguments after -- unchanged to the flags of the example.
+                                -h or --help there shows the help of the example.
 ```

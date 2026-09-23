@@ -185,7 +185,7 @@ pub fn generate(
             let (logits, caches) = model.prime(1, None, Some(&mut class));
             (
                 logits
-                    .expect("the model has no class latents to prime from; pass a prompt instead"),
+                    .expect("the model has no class latents to prime from. Pass a prompt."),
                 caches,
             )
         }
