@@ -1,117 +1,131 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE"><title>burn_mamba::mamba3::mamba3 - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (6bb1652a0 2026-09-22)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module mamba3</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.57.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module mamba3</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope" title="Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE">Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE</a><ul><li><a href="#1-trapezoidal-recurrence-siso-no-rope-no-mimo--proposition-1" title="1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)">1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)</a></li><li><a href="#2-complex-transition-aka-data-dependent-rope-no-trapezoid-no-mimo" title="2. Complex transition, a.k.a. “data-dependent RoPE” (no trapezoid, no MIMO">2. Complex transition, a.k.a. “data-dependent RoPE” (no trapezoid, no MIMO</a></li><li><a href="#3-mimo-extension-no-trapezoid-coefficients-no-rope--mimo_rank--m--1" title="3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M &#62; 1`)">3. MIMO Extension (no trapezoid coefficients, no RoPE — <code>mimo_rank = M &gt; 1</code>)</a></li><li><a href="#4-combined-formulation-everything-together" title="4. Combined formulation (everything together)">4. Combined formulation (everything together)</a></li><li><a href="#5-mambaproduct-micro_steps--u--1" title="5. MambaProduct (`micro_steps = u &#62; 1`)">5. MambaProduct (<code>micro_steps = u &gt; 1</code>)</a></li><li><a href="#notation--dimension-keys" title="Notation / Dimension Keys">Notation / Dimension Keys</a></li></ul></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>mamba3</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/mamba3.rs.html#1-1794">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope"><a class="doc-anchor" href="#mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope">§</a>Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE</h2>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE"><title>burn_mamba::mamba3::mamba3 - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (6bb1652a0 2026-09-22)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module mamba3</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.57.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module mamba3</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope" title="Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE">Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE</a><ul><li><a href="#1-trapezoidal-recurrence-siso-no-rope-no-mimo--proposition-1" title="1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)">1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)</a></li><li><a href="#2-complex-transition-aka-data-dependent-rope-no-trapezoid-no-mimo" title="2. Complex transition, a.k.a. “data-dependent RoPE” (no trapezoid, no MIMO">2. Complex transition, a.k.a. “data-dependent RoPE” (no trapezoid, no MIMO</a></li><li><a href="#3-mimo-extension-no-trapezoid-coefficients-no-rope--mimo_rank--m--1" title="3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M &#62; 1`)">3. MIMO Extension (no trapezoid coefficients, no RoPE — <code>mimo_rank = M &gt; 1</code>)</a></li><li><a href="#4-combined-formulation-everything-together" title="4. Combined formulation (everything together)">4. Combined formulation (everything together)</a></li><li><a href="#5-mambaproduct-micro_steps--u--1" title="5. MambaProduct (`micro_steps = u &#62; 1`)">5. MambaProduct (<code>micro_steps = u &gt; 1</code>)</a></li><li><a href="#notation--dimension-keys" title="Notation / Dimension Keys">Notation / Dimension Keys</a></li></ul></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>mamba3</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/mamba3.rs.html#1-1832">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope"><a class="doc-anchor" href="#mamba-3-ssm-block--exponential-trapezoidal-ssd-with-data-dependent-rope">§</a>Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE</h2>
 <p>This module implements the core <strong>Mamba-3 layer</strong> from the paper
 <em>“Mamba-3: Improved Sequence Modeling using State Space Principles”</em>.</p>
-<p>Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:
-(1) trapezoidal discretisation, (2) a <strong>complex-valued state transition</strong>,
-implemented as data-dependent rotary embeddings on B and C (the “RoPE
-trick”), and (3) MIMO (multiple-input multiple-output) projection.
-Each is shown in isolation below, then combined.</p>
+<p>Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:</p>
+<ol>
+<li>trapezoidal discretisation,</li>
+<li>a <strong>complex-valued state transition</strong>, implemented as data-dependent
+rotary embeddings on B and C (the “RoPE trick”),</li>
+<li>MIMO (multiple-input multiple-output) projection.</li>
+</ol>
+<p>Sections 1–3 show each one alone, and section 4 combines them. Section 5
+adds this crate’s fourth dial, MambaProduct.</p>
 <h3 id="1-trapezoidal-recurrence-siso-no-rope-no-mimo--proposition-1"><a class="doc-anchor" href="#1-trapezoidal-recurrence-siso-no-rope-no-mimo--proposition-1">§</a>1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)</h3><div class="example-wrap"><pre class="language-text"><code>  hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ xₜ₋₁ᵀ + γₜ Bₜ xₜᵀ   (state update)
   yₜ = Cₜᵀ hₜ + D xₜ                          (output)</code></pre></div>
 <p>where the trapezoidal coefficients are</p>
 <div class="example-wrap"><pre class="language-text"><code>  αₜ = exp(Δₜ Aₜ)                — decay (Aₜ &lt; 0, data-dependent)
   βₜ = (1 − λₜ) Δₜ αₜ            — left-endpoint weight (Bₜ₋₁ xₜ₋₁ contribution)
   γₜ = λₜ Δₜ                      — right-endpoint weight (Bₜ xₜ contribution)</code></pre></div>
-<p>with <code>λₜ = σ(λ̂ₜ) ∈ (0, 1)</code> controlling the left/right split of the trapezoid.
-Setting <code>λ ≡ 1</code> collapses this to the Mamba-2 (Euler / right-endpoint) form.</p>
-<p><em>Which</em> earlier sample the <code>βₜ</code> tap reads is <a href="struct.Mamba3Config.html#structfield.trapezoid" title="field burn_mamba::mamba3::mamba3::Mamba3Config::trapezoid"><code>Mamba3Config::trapezoid</code></a>; at
-<code>micro_steps = 1</code> (below) <code>t−1</code> is the only answer. At <code>u &gt; 1</code> the default
-<a href="../trapezoid/enum.Trapezoid.html#variant.HorizontalCarryOver" title="variant burn_mamba::mamba3::trapezoid::Trapezoid::HorizontalCarryOver"><code>Trapezoid::HorizontalCarryOver</code></a> keeps reading the immediately preceding
-recurrence step, and <a href="../trapezoid/enum.Trapezoid.html#variant.Vertical" title="variant burn_mamba::mamba3::trapezoid::Trapezoid::Vertical"><code>Trapezoid::Vertical</code></a> reads the previous <strong>token</strong>’s
-same micro-step instead — one lag, everywhere the tap appears. Two members
-read <strong>both</strong>, splitting <code>(1 − λₜ)Δₜ</code> between them by a second projected
-scalar <code>μₜ = σ(μ̂ₜ)</code>; one gates its lag-1 tap to within a token. The tap and
-its mass are one choice: a closed tap hands its share back (to the other tap,
-or to <code>γ</code>), so the step’s mass is <code>Δₜ</code> under every member. See
-<a href="../trapezoid/enum.Trapezoid.html" title="enum burn_mamba::mamba3::trapezoid::Trapezoid"><code>Trapezoid</code></a>’s header.</p>
+<p>with <code>λₜ = σ(λ̂ₜ) ∈ (0, 1)</code>, the left/right split of the trapezoid.
+<code>λ ≡ 1</code> gives the Mamba-2 (Euler / right-endpoint) form.</p>
+<p><a href="struct.Mamba3Config.html#structfield.trapezoid" title="field burn_mamba::mamba3::mamba3::Mamba3Config::trapezoid"><code>Mamba3Config::trapezoid</code></a> selects <em>which</em> earlier sample the <code>βₜ</code> tap
+reads. At <code>micro_steps = 1</code> (below), <code>t−1</code> is the only choice. At <code>u &gt; 1</code>:</p>
+<ul>
+<li>the default <a href="../trapezoid/enum.Trapezoid.html#variant.HorizontalCarryOver" title="variant burn_mamba::mamba3::trapezoid::Trapezoid::HorizontalCarryOver"><code>Trapezoid::HorizontalCarryOver</code></a> reads the recurrence step
+just before,</li>
+<li><a href="../trapezoid/enum.Trapezoid.html#variant.Vertical" title="variant burn_mamba::mamba3::trapezoid::Trapezoid::Vertical"><code>Trapezoid::Vertical</code></a> reads the same micro-step of the previous
+<strong>token</strong>, with one lag at every tap site,</li>
+<li>two members read <strong>both</strong>. A second projected scalar <code>μₜ = σ(μ̂ₜ)</code> splits
+<code>(1 − λₜ)Δₜ</code> between them. One of the two gates its lag-1 tap to within a
+token.</li>
+</ul>
+<p>The tap and its mass are one choice. A closed tap gives its share back (to
+the other tap, or to <code>γ</code>), so the mass of the step is <code>Δₜ</code> under every
+member. See the header of <a href="../trapezoid/enum.Trapezoid.html" title="enum burn_mamba::mamba3::trapezoid::Trapezoid"><code>Trapezoid</code></a>.</p>
 <h3 id="2-complex-transition-aka-data-dependent-rope-no-trapezoid-no-mimo"><a class="doc-anchor" href="#2-complex-transition-aka-data-dependent-rope-no-trapezoid-no-mimo">§</a>2. Complex transition, a.k.a. “data-dependent RoPE” (no trapezoid, no MIMO</h3>
 <p>— paper section <em>Complex-Valued SSMs</em>)</p>
-<p>Despite the name this is <strong>not a positional encoding</strong>: it is the <em>imaginary
-part of the state transition</em>. Mamba-3’s <code>A</code> is complex (<code>A + iϑ</code>), and under
-discretisation a complex SSM of state <code>N/2</code> is exactly a real SSM of state <code>N</code>
-whose transition is the scalar decay <code>α</code> times a block-diagonal of <code>2×2</code>
-rotations (paper Prop. <em>Complex-to-Real SSM Equivalence</em>):</p>
+<p>Despite the name, this is <strong>not a positional encoding</strong>. It is the
+<em>imaginary part of the state transition</em>. The <code>A</code> of Mamba-3 is complex
+(<code>A + iϑ</code>). After discretisation, a complex SSM of state <code>N/2</code> is exactly a
+real SSM of state <code>N</code> whose transition is the scalar decay <code>α</code> times a
+block-diagonal of <code>2×2</code> rotations (paper Prop. <em>Complex-to-Real SSM
+Equivalence</em>):</p>
 <div class="example-wrap"><pre class="language-text"><code>  ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-step rotation (data-dependent)
   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                   — rotational state update</code></pre></div>
-<p><code>ϱ</code> is <a href="struct.Mamba3Config.html#structfield.rotation_range" title="field burn_mamba::mamba3::mamba3::Mamba3Config::rotation_range"><code>Mamba3Config::rotation_range</code></a>, the per-step bound in half-turns per
-unit <code>Δ</code>: <code>2</code> here (a whole turn of the group per unit <code>Δ</code>), <code>1</code> in the
-reference. It is a gradient budget, not a reach limit — see its own docs.</p>
-<p>The <strong>exponential</strong> discretisation is load-bearing here, not merely more
-accurate than forward Euler: <code>|exp(iΔϑ)| = 1</code> exactly, so the transition is
-orthogonal and a tracked rotation neither decays nor grows, where Euler’s
-<code>|1 + iΔϑ| &gt; 1</code> spirals outward (<code>info/mamba-3/rotation-as-optimization.md</code> §9.5).</p>
-<p><code>αₜ</code> is a scalar (so it commutes with <code>ρₜ</code>) and each <code>ρₜ</code> is orthogonal, so
-the <em>cumulative</em> rotation telescopes out of the recurrence and can be absorbed
-into B/C instead — the <strong>“RoPE trick”</strong> (paper Prop. <em>Complex SSM,
-Data-Dependent RoPE Equivalence</em>). That is the form implemented here: the
-rotation never touches the state (the cached <code>h</code> is the rotated-frame one) and
-the SSD core stays the plain scalar-decay kernel.</p>
+<p><code>ϱ</code> is <a href="struct.Mamba3Config.html#structfield.rotation_range" title="field burn_mamba::mamba3::mamba3::Mamba3Config::rotation_range"><code>Mamba3Config::rotation_range</code></a>, the per-step bound in half-turns
+per unit <code>Δ</code>. It is <code>2</code> here (a whole turn of the group per unit <code>Δ</code>) and
+<code>1</code> in the reference. It is a gradient budget, not a reach limit (see its
+docs).</p>
+<p>The <strong>exponential</strong> discretisation is necessary here, not only more
+accurate than forward Euler. <code>|exp(iΔϑ)| = 1</code> exactly, so the transition is
+orthogonal, and a tracked rotation does not decay or grow. With Euler,
+<code>|1 + iΔϑ| &gt; 1</code> spirals outward (<code>info/mamba-3/rotation-as-optimization.md</code>
+§9.5).</p>
+<p><code>αₜ</code> is a scalar (so it commutes with <code>ρₜ</code>), and each <code>ρₜ</code> is orthogonal.
+So the <em>cumulative</em> rotation telescopes out of the recurrence, and B/C can
+absorb it: the <strong>“RoPE trick”</strong> (paper Prop. <em>Complex SSM, Data-Dependent
+RoPE Equivalence</em>). This module implements that form. The rotation never
+touches the state (the cached <code>h</code> is in the rotated frame), and the SSD core
+stays the plain scalar-decay kernel.</p>
 <div class="example-wrap"><pre class="language-text"><code>  θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
   Rₜ = R(θₜ) = ρₜ ⋯ ρ₁ ∈ SO(2)^{N/2}   — block-diagonal cumulative rotation
   B̃ₜ = Rₜ Bₜ,   C̃ₜ = Rₜ Cₜ              — rotated state-space projections</code></pre></div>
 <p>The standard recurrence then runs with <code>B̃ₜ</code>/<code>C̃ₜ</code> in place of <code>Bₜ</code>/<code>Cₜ</code>:</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = Āₜ hₜ₋₁ + B̄̃ₜ xₜᵀ                (scalar-decay state update)
   yₜ = C̃ₜᵀ hₜ + D xₜ                   (output)</code></pre></div>
-<p>Orthogonality makes the readout-vs-input similarity depend only on the
-rotation <em>accumulated between</em> the two steps:</p>
+<p>Because of orthogonality, the readout-vs-input similarity depends only on
+the rotation <em>accumulated between</em> the two steps:</p>
 <div class="example-wrap"><pre class="language-text"><code>  C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ</code></pre></div>
-<p><code>θⱼ − θᵢ</code> is not a position: it is <code>Σ Δ·ϱ·π·tanh(ϑ)</code> over the intervening
-steps — how far the transition itself rotated, driven by the inputs. It would
-reduce to vanilla RoPE’s relative position only in the degenerate case of an
-input-independent, constant per-step angle (<code>θⱼ − θᵢ = (j−i)·θ</code>). Data
-dependence is the whole point: it gives the layer rotational state dynamics,
-hence state-tracking (parity, mod-k) that a real, non-negative-eigenvalue SSM
-provably cannot express. See <a href="../rotation/index.html" title="mod burn_mamba::mamba3::rotation"><code>crate::mamba3::rotation</code></a>, whose <code>Quaternion4D</code>
-carries the same argument to a non-abelian rotation group.</p>
+<p><code>θⱼ − θᵢ</code> is not a position. It is <code>Σ Δ·ϱ·π·tanh(ϑ)</code> over the steps between:
+how far the transition itself rotated, driven by the inputs. It is the
+relative position of vanilla RoPE only in the degenerate case of an
+input-independent, constant per-step angle (<code>θⱼ − θᵢ = (j−i)·θ</code>). The data
+dependence is the point: it gives the layer rotational state dynamics, and
+thus state-tracking (parity, mod-k), which a real SSM with non-negative
+eigenvalues provably cannot express. See <a href="../rotation/index.html" title="mod burn_mamba::mamba3::rotation"><code>crate::mamba3::rotation</code></a>. Its
+<code>Quaternion4D</code> applies the same argument to a non-abelian rotation group.</p>
 <h3 id="3-mimo-extension-no-trapezoid-coefficients-no-rope--mimo_rank--m--1"><a class="doc-anchor" href="#3-mimo-extension-no-trapezoid-coefficients-no-rope--mimo_rank--m--1">§</a>3. MIMO Extension (no trapezoid coefficients, no RoPE — <code>mimo_rank = M &gt; 1</code>)</h3>
-<p>With MIMO, B/C carry M parallel rank channels and the state update is a sum
-of M outer-product contributions; the readout produces M outputs which are
-gated and combined back:</p>
+<p>With MIMO, B/C carry M parallel rank channels, and the state update is a
+sum of M outer products. The readout gives M outputs, which the gate
+combines back:</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = Āₜ hₜ₋₁ + Σₘ B̄ₜ[m] ⊗ (xₜ ⊙ mimo_x[m])                  (state update)
   yₜ[m] = Cₜ[m]ᵀ hₜ + D · (xₜ ⊙ mimo_x[m])                    (per-rank output)
   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]         (rank merge)</code></pre></div>
-<p>The hidden state hₜ is shared across ranks; each rank contributes to it
-independently but reads the full shared state when producing its output.</p>
+<p>All ranks share the hidden state hₜ. Each rank writes to it independently,
+and each rank reads the full shared state for its output.</p>
 <h3 id="4-combined-formulation-everything-together"><a class="doc-anchor" href="#4-combined-formulation-everything-together">§</a>4. Combined formulation (everything together)</h3>
-<p>Putting trapezoid + RoPE + MIMO into a single expression — <code>B̃ₜ[m] = Rₜ Bₜ[m]</code>
-and <code>C̃ₜ[m] = Rₜ Cₜ[m]</code> denote the RoPE-rotated MIMO projections, and the <code>β</code>
-tap is written at the default member’s lag 1 (§1: it reads <code>t−l</code> for that
-member’s own <code>l</code>, and a two-tap member adds a second such term):</p>
+<p>Trapezoid + RoPE + MIMO in one expression. <code>B̃ₜ[m] = Rₜ Bₜ[m]</code> and
+<code>C̃ₜ[m] = Rₜ Cₜ[m]</code> are the RoPE-rotated MIMO projections. The <code>β</code> tap is at
+the lag 1 of the default member (§1: a member with lag <code>l</code> reads <code>t−l</code>, and
+a two-tap member adds a second such term):</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = αₜ hₜ₋₁
      + βₜ Σₘ B̃ₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x[m])
      + γₜ Σₘ B̃ₜ[m]   ⊗ (xₜ   ⊙ mimo_x[m])
 
   yₜ[m] = C̃ₜ[m]ᵀ hₜ + D · (xₜ ⊙ mimo_x[m])
   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]</code></pre></div><h3 id="5-mambaproduct-micro_steps--u--1"><a class="doc-anchor" href="#5-mambaproduct-micro_steps--u--1">§</a>5. MambaProduct (<code>micro_steps = u &gt; 1</code>)</h3>
-<p>A fourth, independent dial (DeltaProduct’s dial, not its mechanism — see
-<a href="../product/index.html" title="mod burn_mamba::mamba3::product"><code>crate::mamba3::product</code></a> and <code>info/mamba-3/rotation-as-optimization.md</code>): <code>u</code>
-recurrence micro-steps per token, each a full step of the above with its own
-projected <code>x</code>, <code>B</code>, <code>Δ</code>, <code>A</code>, <code>λ</code> and rotation. One <em>token</em>’s transition is
-then the <strong>product</strong></p>
+<p>A fourth, independent dial: the dial of DeltaProduct, not its mechanism
+(see <a href="../product/index.html" title="mod burn_mamba::mamba3::product"><code>crate::mamba3::product</code></a> and
+<code>info/mamba-3/rotation-as-optimization.md</code>). There are <code>u</code> recurrence
+micro-steps per token. Each one is a full step of the above, with its own
+projected <code>x</code>, <code>B</code>, <code>Δ</code>, <code>A</code>, <code>λ</code> and rotation. The transition of one
+<em>token</em> is then the <strong>product</strong></p>
 <div class="example-wrap"><pre class="language-text"><code>  Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁</code></pre></div>
-<p>and its write a sum of <code>u</code> outer products staggered along it; the read <code>C</code>,
-the gate <code>z</code> and the <code>D</code> skip stay per token. It is evaluated by folding the
+<p>and its write is a sum of <code>u</code> outer products staggered along it. The read
+<code>C</code>, the gate <code>z</code> and the <code>D</code> skip stay per token. The block folds the
 micro-steps into the sequence axis, so nothing below this line changes. See
-<a href="../product/index.html" title="mod burn_mamba::mamba3::product"><code>crate::mamba3::product</code></a> for what <code>u</code> buys per
-<a href="../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind"><code>RotationKind</code></a> — the answer is very
-different for the abelian and non-abelian ones.</p>
-<p>Implementation note: the trapezoidal recurrence (in the double-ssd pathway)
-is computed by splitting it into a γ-SSD (the current sample) and one β-SSD
-per tap, at that tap’s own lag; see
-<a href="../double_ssd/ssd/ssd_path/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::ssd_path"><code>crate::mamba3::double_ssd::ssd::ssd_path</code></a>. The single-ssd pathway does the
-same work in one call. The rotation is applied to B and C before the SSD
-calls, through the one entry point
-<a href="../rotation/fn.rotate_bc_forward.html" title="fn burn_mamba::mamba3::rotation::rotate_bc_forward"><code>rotate_bc_forward</code></a> (which is
-<a href="../rotation/rope/fn.apply_rope.html" title="fn burn_mamba::mamba3::rotation::rope::apply_rope"><code>apply_rope</code></a> for the abelian
-kind and a quaternion scan for the others), and MIMO expansion happens by
-augmenting the V tensor with the per-rank <code>mimo_x</code> projection.</p>
+<a href="../product/index.html" title="mod burn_mamba::mamba3::product"><code>crate::mamba3::product</code></a> for what <code>u</code> buys per <a href="../rotation/enum.RotationKind.html" title="enum burn_mamba::mamba3::rotation::RotationKind"><code>RotationKind</code></a>. The
+answer is very different for the abelian and non-abelian kinds.</p>
+<p>Implementation notes:</p>
+<ul>
+<li>The double-ssd pathway splits the trapezoidal recurrence into a γ-SSD
+(the current sample) and one β-SSD per tap, at the lag of that tap (see
+<a href="../double_ssd/ssd/ssd_path/index.html" title="mod burn_mamba::mamba3::double_ssd::ssd::ssd_path"><code>crate::mamba3::double_ssd::ssd::ssd_path</code></a>). The single-ssd pathway
+does the same work in one call.</li>
+<li>The rotation applies to B and C before the SSD calls, through the one
+entry point <a href="../rotation/fn.rotate_bc_forward.html" title="fn burn_mamba::mamba3::rotation::rotate_bc_forward"><code>rotate_bc_forward</code></a>
+(<a href="../rotation/rope/fn.apply_rope.html" title="fn burn_mamba::mamba3::rotation::rope::apply_rope"><code>apply_rope</code></a> for the
+abelian kind, a quaternion scan for the others).</li>
+<li>The MIMO expansion multiplies the V tensor by the per-rank <code>mimo_x</code>
+projection.</li>
+</ul>
 <p>See also: <a href="../double_ssd/double_ssd/index.html" title="mod burn_mamba::mamba3::double_ssd::double_ssd"><code>crate::mamba3::double_ssd::double_ssd</code></a> and <a href="../single_ssd/single_ssd/index.html" title="mod burn_mamba::mamba3::single_ssd::single_ssd"><code>crate::mamba3::single_ssd::single_ssd</code></a>.</p>
 <h3 id="notation--dimension-keys"><a class="doc-anchor" href="#notation--dimension-keys">§</a>Notation / Dimension Keys</h3>
-<p>Throughout all Mamba-3 files, tensor names carry a suffix representing their shape.
-The letters used differ from the reference paper and the python implementation.
-The “Paper” column gives the symbol from the Mamba-3 paper; the “Python” column
-gives the field/variable name in the reference implementation
-(<code>../py/state-spaces/mamba/mamba_ssm/modules/mamba3.py</code>).</p>
+<p>In all Mamba-3 files, a tensor name has a suffix that gives its shape. The
+letters are different from those of the paper and of the Python
+implementation. The “Paper” column gives the symbol in the Mamba-3 paper.
+The “Python” column gives the name in the reference implementation
+(<code>mamba_ssm/modules/mamba3.py</code> in <code>state-spaces/mamba</code>).</p>
 <div class="table"><table><thead><tr><th>Letter</th><th>Dimension</th><th>Paper</th><th>Python</th><th>Typical value</th></tr></thead><tbody>
 <tr><td><code>b</code></td><td><code>batch</code></td><td>—</td><td><code>batch</code></td><td>varies</td></tr>
 <tr><td><code>s</code></td><td><code>sequence</code> length, <strong>folded</strong> = <code>tokens · u</code></td><td><code>T</code></td><td><code>seqlen</code></td><td>varies</td></tr>
@@ -129,9 +143,10 @@ gives the field/variable name in the reference implementation
 <tr><td><code>a</code></td><td><code>num_rope_angles</code> = <code>state_rank</code> / 2 (or <code>rope_dim</code> / 2)</td><td>—</td><td><code>num_rope_angles</code></td><td>varies</td></tr>
 </tbody></table>
 </div>
-<p>Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
-of the lowercase letters. e.g. <code>X</code> may represent <code>x+1</code>, <code>x-1</code>, <code>x*2</code>, etc.
-<code>XY</code> may also represent <code>x+y</code>, <code>x*y</code>, etc.</p>
-</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="step/index.html" title="mod burn_mamba::mamba3::mamba3::step">step</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Mamba3.html" title="struct burn_mamba::mamba3::mamba3::Mamba3">Mamba3</a></dt><dd>The Mamba-3 SSM block.</dd><dt><a class="struct" href="struct.Mamba3Config.html" title="struct burn_mamba::mamba3::mamba3::Mamba3Config">Mamba3<wbr>Config</a></dt><dd>Hyperparameters for the Mamba-3 SSM block.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Mamba3Untied.html" title="enum burn_mamba::mamba3::mamba3::Mamba3Untied">Mamba3<wbr>Untied</a></dt><dd>A <a href="struct.Mamba3.html" title="struct burn_mamba::mamba3::mamba3::Mamba3"><code>Mamba3</code></a> parameter that may be held once per application of its real
-layer instead of tied across them (see [<code>burn_stack::utils::untied</code>]). The
-big maps — <code>in_proj</code>’s <code>z|x|B|C</code> head and <code>out_proj</code> — always stay tied.</dd></dl></section></div></main></body></html>
+<p>An uppercase letter is a relation (offset, multiple, concat, stack) of
+lowercase letters. For example, <code>X</code> can be <code>x+1</code>, <code>x-1</code> or <code>x*2</code>, and <code>XY</code>
+can be <code>x+y</code> or <code>x*y</code>.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="step/index.html" title="mod burn_mamba::mamba3::mamba3::step">step</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Mamba3.html" title="struct burn_mamba::mamba3::mamba3::Mamba3">Mamba3</a></dt><dd>The Mamba-3 SSM block.</dd><dt><a class="struct" href="struct.Mamba3Config.html" title="struct burn_mamba::mamba3::mamba3::Mamba3Config">Mamba3<wbr>Config</a></dt><dd>Hyperparameters for the Mamba-3 SSM block.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Mamba3Untied.html" title="enum burn_mamba::mamba3::mamba3::Mamba3Untied">Mamba3<wbr>Untied</a></dt><dd>A <a href="struct.Mamba3.html" title="struct burn_mamba::mamba3::mamba3::Mamba3"><code>Mamba3</code></a> parameter that the block can hold once per application of its
+real layer instead of tied across them (see [<code>burn_stack::utils::untied</code>]).
+The big maps, the <code>z|x|B|C</code> head of <code>in_proj</code> and <code>out_proj</code>, are always
+tied.</dd></dl></section></div></main></body></html>

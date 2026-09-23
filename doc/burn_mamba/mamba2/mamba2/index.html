@@ -3,44 +3,45 @@
 <em>“Transformers are SSMs: Generalized Models and Efficient Algorithms
 through Structured State Space Duality”</em> (Dao &amp; Gu, 2024).</p>
 <h3 id="the-ssd-model"><a class="doc-anchor" href="#the-ssd-model">§</a>The SSD Model</h3>
-<p>The SSD layer is a multi-head selective SSM.  Each head processes a
-sequence of <code>per_head_dim</code>-dimensinal inputs <code>X ∈ ℝ^{sequence×per_head_dim}</code> through the recurrence
-(Eq. 1–2 of the paper):</p>
+<p>The SSD layer is a multi-head selective SSM. Each head sends a sequence of
+<code>per_head_dim</code>-dimensional inputs <code>X ∈ ℝ^{sequence×per_head_dim}</code> through
+the recurrence (Eq. 1–2 of the paper):</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ          (state update)
   yₜ = Cₜᵀ hₜ                  (output readout)</code></pre></div>
 <p>where:</p>
 <ul>
-<li><code>hₜ ∈ ℝ^{</code>state_rank<code>×per_head_dim}</code> is the hidden state</li>
-<li><code>Āₜ = exp(Δₜ A) ∈ ℝ</code> is a scalar decay (the key SSD constraint:
-Āₜ = αₜ · I, i.e. scalar times identity, rather than a diagonal matrix)</li>
+<li><code>hₜ ∈ ℝ^{state_rank×per_head_dim}</code> is the hidden state</li>
+<li><code>Āₜ = exp(Δₜ A) ∈ ℝ</code> is a scalar decay. This is the key SSD constraint:
+<code>Āₜ = αₜ · I</code> is a scalar times the identity, not a diagonal matrix.</li>
 <li><code>B̄ₜ = Δₜ Bₜ ∈ ℝᴺ</code>  is the (discretised) input projection</li>
 <li><code>Cₜ ∈ ℝᴺ</code>           is the output projection</li>
 <li><code>Δₜ &gt; 0</code>             is the (input-dependent) discretisation step size</li>
 <li><code>A &lt; 0</code>              is a learnable scalar decay rate per head</li>
 </ul>
 <h3 id="state-space-duality"><a class="doc-anchor" href="#state-space-duality">§</a>State Space Duality</h3>
-<p>Unrolling the recurrence yields an equivalent <strong>attention-like</strong> form
+<p>The unrolled recurrence has an equivalent <strong>attention-like</strong> form
 (Eq. 6–7):</p>
 <div class="example-wrap"><pre class="language-text"><code>  M = L ∘ (C Bᵀ)      ∈ ℝ^{sequence×sequence}
   Y = M · X</code></pre></div>
 <p>where <code>L</code> is the <strong>1-semiseparable mask</strong> (Eq. 4–5):</p>
 <div class="example-wrap"><pre class="language-text"><code>  Lᵢⱼ = āᵢ · āᵢ₋₁ · ... · āⱼ₊₁    (i ≥ j)
   Lᵢⱼ = 0                     (i &lt; j)</code></pre></div>
-<p>This makes the layer equivalent to causal linear attention
-<code>Y = (L ∘ QKᵀ) V</code> under the renaming <code>(C, B, X) ↦ (Q, K, V)</code>.</p>
+<p>So the layer is causal linear attention <code>Y = (L ∘ QKᵀ) V</code> with the
+renaming <code>(C, B, X) ↦ (Q, K, V)</code>.</p>
 <h3 id="the-chunkwise-ssd-algorithm"><a class="doc-anchor" href="#the-chunkwise-ssd-algorithm">§</a>The Chunkwise SSD Algorithm</h3>
-<p>See <a href="../ssd/minimal/index.html" title="mod burn_mamba::mamba2::ssd::minimal"><code>ssd::minimal</code></a> for more information.</p>
+<p>See <a href="../ssd/minimal/index.html" title="mod burn_mamba::mamba2::ssd::minimal"><code>ssd::minimal</code></a>.</p>
 <h3 id="relationship-to-the-other-families"><a class="doc-anchor" href="#relationship-to-the-other-families">§</a>Relationship to the other families</h3>
 <p><a href="../../mamba1/index.html" title="mod burn_mamba::mamba1"><code>Mamba-1</code></a> is the predecessor: a sequential selective scan
-with a diagonal (rather than scalar) state transition.  <a href="../../mamba3/index.html" title="mod burn_mamba::mamba3"><code>Mamba-3</code></a>
-extends the SSD layer below with trapezoidal discretisation, a complex-valued
-state transition (data-dependent RoPE on B/C), and MIMO rank expansion.</p>
+with a diagonal (not scalar) state transition. <a href="../../mamba3/index.html" title="mod burn_mamba::mamba3"><code>Mamba-3</code></a>
+extends this SSD layer with trapezoidal discretisation, a complex-valued
+state transition (data-dependent RoPE on B/C), MIMO rank expansion and
+MambaProduct.</p>
 <h3 id="notation--dimension-keys"><a class="doc-anchor" href="#notation--dimension-keys">§</a>Notation / Dimension Keys</h3>
-<p>Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.
-The letters used differ from the reference paper and the python implementation.
-The “Paper” column gives the symbol from the Mamba-2 paper (Dao &amp; Gu, 2024); the
-“Python” column gives the field/variable name in the reference implementation
-(<code>refs/state-spaces/mamba/mamba_ssm/modules/mamba2.py</code>).</p>
+<p>In all Mamba-2 files, a tensor name has a suffix that gives its shape. The
+letters are different from those of the paper and of the Python
+implementation. The “Paper” column gives the symbol in the Mamba-2 paper
+(Dao &amp; Gu, 2024). The “Python” column gives the name in the reference
+implementation (<code>mamba_ssm/modules/mamba2.py</code> in <code>state-spaces/mamba</code>).</p>
 <div class="table"><table><thead><tr><th>Letter</th><th>Dimension</th><th>Paper</th><th>Python</th><th>Typical value</th></tr></thead><tbody>
 <tr><td><code>b</code></td><td><code>batch</code></td><td>—</td><td><code>batch</code></td><td>varies</td></tr>
 <tr><td><code>s</code></td><td><code>sequence</code> length</td><td><code>T</code></td><td><code>seqlen</code></td><td>varies</td></tr>
@@ -56,9 +57,9 @@ The “Paper” column gives the symbol from the Mamba-2 paper (Dao &amp; Gu, 20
 <tr><td><code>l</code></td><td><code>chunk_len</code></td><td><code>Q</code></td><td><code>chunk_size</code></td><td>64, .., 256</td></tr>
 </tbody></table>
 </div>
-<p>Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
-of the lowercase letters. e.g. <code>X</code> may represent <code>x+1</code>, <code>x-1</code>, <code>x*2</code>, etc.
-<code>XY</code> may also represent <code>x+y</code>, <code>x*y</code>, etc.</p>
-</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="step/index.html" title="mod burn_mamba::mamba2::mamba2::step">step</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></dt><dd>The Mamba-2 SSM block.</dd><dt><a class="struct" href="struct.Mamba2Config.html" title="struct burn_mamba::mamba2::mamba2::Mamba2Config">Mamba2<wbr>Config</a></dt><dd>Hyperparameters for the Mamba-2 SSM block.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Mamba2Untied.html" title="enum burn_mamba::mamba2::mamba2::Mamba2Untied">Mamba2<wbr>Untied</a></dt><dd>A <a href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2"><code>Mamba2</code></a> parameter that may be held once per application of its real
-layer instead of tied across them (see [<code>burn_stack::utils::untied</code>]). The
-big maps — <code>in_proj</code>’s <code>z|xbc</code> head and <code>out_proj</code> — always stay tied.</dd></dl></section></div></main></body></html>
+<p>An uppercase letter is a relation (offset, multiple, concat, stack) of
+lowercase letters. For example, <code>X</code> can be <code>x+1</code>, <code>x-1</code> or <code>x*2</code>, and <code>XY</code>
+can be <code>x+y</code> or <code>x*y</code>.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="step/index.html" title="mod burn_mamba::mamba2::mamba2::step">step</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></dt><dd>The Mamba-2 SSM block.</dd><dt><a class="struct" href="struct.Mamba2Config.html" title="struct burn_mamba::mamba2::mamba2::Mamba2Config">Mamba2<wbr>Config</a></dt><dd>Hyperparameters for the Mamba-2 SSM block.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Mamba2Untied.html" title="enum burn_mamba::mamba2::mamba2::Mamba2Untied">Mamba2<wbr>Untied</a></dt><dd>A <a href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2"><code>Mamba2</code></a> parameter that the block can hold once per application of its
+real layer instead of tied across them (see [<code>burn_stack::utils::untied</code>]).
+The big maps, the <code>z|xbc</code> head of <code>in_proj</code> and <code>out_proj</code>, are always tied.</dd></dl></section></div></main></body></html>

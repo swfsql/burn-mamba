@@ -3,10 +3,9 @@
     init: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Tensor&lt;4&gt;&gt;,
 ) -&gt; (Tensor&lt;5&gt;, Tensor&lt;4&gt;)</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Cumulative (ordered, left-accumulating) quaternion product along the
 sequence axis, with a cross-chunk carry.</p>
-<p>This is the non-abelian analogue of the cumulative <em>sum of angles</em> used by
-RoPE: where complex rotations compose by adding angles (a <code>cumsum</code>),
-quaternions compose by multiplication, which is order-dependent, so a real
-scan is required.</p>
+<p>This is the non-abelian analogue of the cumulative <em>sum of angles</em> of
+RoPE. Complex rotations compose by adding angles. Quaternions compose by
+multiplication, which depends on the order, so a real scan is necessary.</p>
 <h2 id="shapes"><a class="doc-anchor" href="#shapes">§</a>Shapes</h2>
 <ul>
 <li><code>q_bshj4</code> : <code>[batch, sequence, nheads, J, 4]</code> per-step <strong>unit</strong> quaternions
@@ -19,17 +18,17 @@ with <code>cum[:, t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ ⊗ init</code> (new
 <code>Pₜ = Rₜ ⋯ R₁</code>), and <code>final_carry</code> <code>[batch, nheads, J, 4]</code> is <code>cum[:, −1]</code>
 to thread into the next chunk.</li>
 </ul>
-<p>Running this over a split sequence while threading <code>final_carry</code> is exactly
-equal to running it over the whole sequence (asserted in the tests) — the
-chunked-prefill / streaming guarantee, here for the rotation accumulator.</p>
-<p>Implemented as a <strong>Hillis–Steele</strong> inclusive associative scan: the quaternion
-product is associative (just not commutative), so a log-depth scan applies as
-long as operand order is preserved (newest-on-left). Each doubling step is a
-single full-tensor <a href="fn.quat_mul.html" title="fn burn_mamba::mamba3::rotation::quat_mul"><code>quat_mul</code></a> plus a sequence shift, so the <em>sequential
-dependency depth</em> is <code>O(log sequence)</code> rather than the <code>O(sequence)</code> of a
-token-by-token loop — the same values, but a handful of large batched kernels
-instead of thousands of serialized tiny ones (and a correspondingly shallow
-autodiff graph). The sequential reference it replaces is kept as a test oracle
-(<code>quat_cumprod_sequential</code> in the tests module) and asserted equal on values
-<strong>and</strong> gradients.</p>
+<p>A run over a split sequence, with <code>final_carry</code> passed between the parts,
+is exactly equal to a run over the whole sequence (asserted in the tests).
+This is the chunked-prefill / streaming guarantee for the rotation
+accumulator.</p>
+<p>The implementation is a <strong>Hillis–Steele</strong> inclusive associative scan. The
+quaternion product is associative (but not commutative), so a log-depth
+scan applies if the operand order stays newest-on-left. Each doubling step
+is one full-tensor <a href="fn.quat_mul.html" title="fn burn_mamba::mamba3::rotation::quat_mul"><code>quat_mul</code></a> plus a sequence shift. So the <em>sequential
+dependency depth</em> is <code>O(log sequence)</code>, not the <code>O(sequence)</code> of a
+token-by-token loop: the same values, from a few large batched kernels
+instead of thousands of small serialized ones (and a shallow autodiff
+graph). A sequential reference (<code>quat_cumprod_sequential</code> in the tests
+module) is the test oracle, asserted equal on values <strong>and</strong> gradients.</p>
 </div></details></section></div></main></body></html>

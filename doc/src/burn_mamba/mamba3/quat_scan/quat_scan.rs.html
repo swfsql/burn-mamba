@@ -1,40 +1,40 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/quat_scan/quat_scan.rs`."><title>quat_scan.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (6bb1652a0 2026-09-22)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/quat_scan/</div>quat_scan.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Quaternion cumulative-product scan with a custom, memory-efficient backward
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! The forward is the same Hillis–Steele parallel scan as
-<a href=#4 id=4 data-nosnippet>4</a>//! [`crate::mamba3::rotation::quat_cumprod`], but routed through the
-<a href=#5 id=5 data-nosnippet>5</a>//! [`Mamba3QuatScanBackendExt`] trait so that `Autodiff` backends substitute a
-<a href=#6 id=6 data-nosnippet>6</a>//! custom backward that recomputes the scan instead of retaining its
-<a href=#7 id=7 data-nosnippet>7</a>//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)). Plain backends use the trait's
-<a href=#8 id=8 data-nosnippet>8</a>//! default body, which runs the scan on `B`'s primitives.
-<a href=#9 id=9 data-nosnippet>9</a>//!
-<a href=#10 id=10 data-nosnippet>10</a>//! The default body runs under a generic backend `B`, where the high-level
-<a href=#11 id=11 data-nosnippet>11</a>//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is unavailable, so the quaternion algebra
-<a href=#12 id=12 data-nosnippet>12</a>//! goes through the rank-tagged `F` primitive wrapper, held in a
-<a href=#13 id=13 data-nosnippet>13</a>//! struct-of-arrays `Quat` (the four components as separate tensors) so the
-<a href=#14 id=14 data-nosnippet>14</a>//! Hamilton product is narrow/cat-free on the hot path. The same `Quat` helper
-<a href=#15 id=15 data-nosnippet>15</a>//! and `quat_prefix_product_soa` are reused by the recompute backward.
-<a href=#16 id=16 data-nosnippet>16</a>
-<a href=#17 id=17 data-nosnippet>17</a></span><span class="attr">#![allow(non_snake_case)]
-<a href=#18 id=18 data-nosnippet>18</a>
-<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">use </span>burn_stack::utils::fprim::F;
-<a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span>burn::backend::tensor::{Device, FloatTensor};
-<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
-<a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>burn::tensor::Tensor;
-<a href=#23 id=23 data-nosnippet>23</a>
-<a href=#24 id=24 data-nosnippet>24</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#25 id=25 data-nosnippet>25</a>// Primitive quaternion algebra — struct-of-arrays (SoA)
-<a href=#26 id=26 data-nosnippet>26</a>// ---------------------------------------------------------------------------
-<a href=#27 id=27 data-nosnippet>27</a>//
-<a href=#28 id=28 data-nosnippet>28</a>// The scan's workhorse is the Hamilton product, run ~10× in the forward prefix
-<a href=#29 id=29 data-nosnippet>29</a>// product and again in the backward. Holding a quaternion as one packed
-<a href=#30 id=30 data-nosnippet>30</a>// `[…, 4]` tensor forces every product to `narrow` out the four components and
-<a href=#31 id=31 data-nosnippet>31</a>// `cat` them back — fusion-breaking ops (strided reads + a concat kernel) on the
-<a href=#32 id=32 data-nosnippet>32</a>// hottest path. Instead, [`Quat`] keeps the four components `(w, x, y, z)` as
-<a href=#33 id=33 data-nosnippet>33</a>// separate `[batch, sequence, nheads, blocks]` tensors threaded through the
-<a href=#34 id=34 data-nosnippet>34</a>// whole scan; the product is then pure (fusible) element-wise arithmetic with no
-<a href=#35 id=35 data-nosnippet>35</a>// narrow/cat. Packing to/from the `[…, 4]` layout happens once, at the
-<a href=#36 id=36 data-nosnippet>36</a>// boundaries ([`Quat::from_rank5`] / [`Quat::pack`]). This is also the layout a
-<a href=#37 id=37 data-nosnippet>37</a>// future custom kernel would use (w,x,y,z in registers).
+<a href=#4 id=4 data-nosnippet>4</a>//! [`crate::mamba3::rotation::quat_cumprod`], but it goes through the
+<a href=#5 id=5 data-nosnippet>5</a>//! [`Mamba3QuatScanBackendExt`] trait. So an `Autodiff` backend can use a
+<a href=#6 id=6 data-nosnippet>6</a>//! custom backward that recomputes the scan instead of keeping its
+<a href=#7 id=7 data-nosnippet>7</a>//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)).
+<a href=#8 id=8 data-nosnippet>8</a>//! Plain backends use the default body of the trait, which runs the scan on
+<a href=#9 id=9 data-nosnippet>9</a>//! the primitives of `B`.
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! The default body runs under a generic backend `B`, where the high-level
+<a href=#12 id=12 data-nosnippet>12</a>//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is not available.
+<a href=#13 id=13 data-nosnippet>13</a>//! So the quaternion algebra uses the rank-tagged `F` primitive wrapper, held
+<a href=#14 id=14 data-nosnippet>14</a>//! in a struct-of-arrays `Quat` (the four components as separate tensors).
+<a href=#15 id=15 data-nosnippet>15</a>//! Thus the Hamilton product has no narrow/cat on the hot path. The recompute
+<a href=#16 id=16 data-nosnippet>16</a>//! backward uses the same `Quat` helper and `quat_prefix_product_soa`.
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="attr">#![allow(non_snake_case)]
+<a href=#19 id=19 data-nosnippet>19</a>
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">use </span>burn_stack::utils::fprim::F;
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>burn::backend::tensor::{Device, FloatTensor};
+<a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>burn::backend::{Backend, Dispatch, FloatDType, backend_extension};
+<a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span>burn::tensor::Tensor;
+<a href=#24 id=24 data-nosnippet>24</a>
+<a href=#25 id=25 data-nosnippet>25</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#26 id=26 data-nosnippet>26</a>// Primitive quaternion algebra — struct-of-arrays (SoA)
+<a href=#27 id=27 data-nosnippet>27</a>// ---------------------------------------------------------------------------
+<a href=#28 id=28 data-nosnippet>28</a>//
+<a href=#29 id=29 data-nosnippet>29</a>// The main op of the scan is the Hamilton product: ~10× in the forward prefix
+<a href=#30 id=30 data-nosnippet>30</a>// product, and again in the backward. If a quaternion is one packed `[…, 4]`
+<a href=#31 id=31 data-nosnippet>31</a>// tensor, every product must `narrow` out the four components and `cat` them
+<a href=#32 id=32 data-nosnippet>32</a>// back. Those ops break fusion (strided reads + a concat kernel) on the
+<a href=#33 id=33 data-nosnippet>33</a>// hottest path. Instead, [`Quat`] keeps the four components `(w, x, y, z)` as
+<a href=#34 id=34 data-nosnippet>34</a>// separate `[batch, sequence, nheads, blocks]` tensors through the whole scan.
+<a href=#35 id=35 data-nosnippet>35</a>// The product is then pure (fusible) element-wise arithmetic with no
+<a href=#36 id=36 data-nosnippet>36</a>// narrow/cat. The packing to/from the `[…, 4]` layout happens once, at the
+<a href=#37 id=37 data-nosnippet>37</a>// boundaries ([`Quat::from_rank5`] / [`Quat::pack`]).
 <a href=#38 id=38 data-nosnippet>38</a>
 <a href=#39 id=39 data-nosnippet>39</a></span><span class="doccomment">/// A quaternion field in struct-of-arrays form: the four components
 <a href=#40 id=40 data-nosnippet>40</a>/// `(w, x, y, z)` as separate rank-4 `[batch, sequence, nheads, blocks]` tensors
@@ -137,9 +137,9 @@
 <a href=#137 id=137 data-nosnippet>137</a>        }
 <a href=#138 id=138 data-nosnippet>138</a>    }
 <a href=#139 id=139 data-nosnippet>139</a>
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// Prepend `ident` along the sequence axis and re-narrow to `sequence` — the
-<a href=#141 id=141 data-nosnippet>141</a>    /// Hillis–Steile shift `shifted[t] = self[t-offset]` (identity before the
-<a href=#142 id=142 data-nosnippet>142</a>    /// start), with `offset = ident`'s sequence length.
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// Prepend `ident` along the sequence axis and narrow again to `sequence`:
+<a href=#141 id=141 data-nosnippet>141</a>    /// the Hillis–Steele shift `shifted[t] = self[t-offset]` (identity before
+<a href=#142 id=142 data-nosnippet>142</a>    /// the start), where `offset` is the sequence length of `ident`.
 <a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub fn </span>shift_prepend(<span class="self">self</span>, ident: Quat&lt;B&gt;, sequence: usize) -&gt; Quat&lt;B&gt; {
 <a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>shift =
 <a href=#145 id=145 data-nosnippet>145</a>            |head: F&lt;B, <span class="number">4</span>&gt;, tail: F&lt;B, <span class="number">4</span>&gt;| F::cat(<span class="macro">vec!</span>[head, tail], <span class="number">1</span>).narrow(<span class="number">1</span>, <span class="number">0</span>, sequence);
@@ -164,12 +164,12 @@
 <a href=#164 id=164 data-nosnippet>164</a>    }
 <a href=#165 id=165 data-nosnippet>165</a>}
 <a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a><span class="doccomment">/// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the sequence
-<a href=#168 id=168 data-nosnippet>168</a>/// axis, via Hillis–Steele doubling — `O(log seq)` dependency depth, all on SoA
-<a href=#169 id=169 data-nosnippet>169</a>/// [`Quat`] components (no per-step narrow/cat).
+<a href=#167 id=167 data-nosnippet>167</a><span class="doccomment">/// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the
+<a href=#168 id=168 data-nosnippet>168</a>/// sequence axis, by Hillis–Steele doubling: `O(log seq)` dependency depth, all
+<a href=#169 id=169 data-nosnippet>169</a>/// on SoA [`Quat`] components (no per-step narrow/cat).
 <a href=#170 id=170 data-nosnippet>170</a>///
-<a href=#171 id=171 data-nosnippet>171</a>/// The carry is folded in by the caller (one extra [`Quat::mul`]); keeping `P`
-<a href=#172 id=172 data-nosnippet>172</a>/// separate is what the recompute backward needs (`G[t] = P[t] ⊗ S[t]`).
+<a href=#171 id=171 data-nosnippet>171</a>/// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
+<a href=#172 id=172 data-nosnippet>172</a>/// backward needs `P` alone (`G[t] = P[t] ⊗ S[t]`).
 <a href=#173 id=173 data-nosnippet>173</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>quat_prefix_product_soa&lt;B: Backend&gt;(q: Quat&lt;B&gt;) -&gt; Quat&lt;B&gt; {
 <a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">let </span>[batch, sequence, nheads, blocks] = q.w.dims();
 <a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">let </span>device = q.w.device();
@@ -197,8 +197,8 @@
 <a href=#197 id=197 data-nosnippet>197</a>/// [`super::backward`]) that recomputes the scan instead of saving its
 <a href=#198 id=198 data-nosnippet>198</a>/// intermediates.
 <a href=#199 id=199 data-nosnippet>199</a></span><span class="attr">#[backend_extension(
-<a href=#200 id=200 data-nosnippet>200</a>    <span class="comment">// Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
-<a href=#201 id=201 data-nosnippet>201</a>    // this one backend; which of them a tensor runs on is what its device says.
+<a href=#200 id=200 data-nosnippet>200</a>    <span class="comment">// Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
+<a href=#201 id=201 data-nosnippet>201</a>    // this one backend. The device of a tensor tells which runtime it uses.
 <a href=#202 id=202 data-nosnippet>202</a>    // The cfg mirrors burn's own `cube_backend`.
 <a href=#203 id=203 data-nosnippet>203</a>    </span>Cube: cfg(any(
 <a href=#204 id=204 data-nosnippet>204</a>        feature = <span class="string">"backend-cpu"</span>,
@@ -218,8 +218,8 @@
 <a href=#218 id=218 data-nosnippet>218</a>    <span class="doccomment">/// Cumulative quaternion product `cum[t] = qₜ ⊗ ⋯ ⊗ q₀ ⊗ init` along the
 <a href=#219 id=219 data-nosnippet>219</a>    /// sequence axis (newest on the left), returning only `cum`.
 <a href=#220 id=220 data-nosnippet>220</a>    ///
-<a href=#221 id=221 data-nosnippet>221</a>    /// The caller derives `final_carry = cum[:, −1]` (a thin autodiff slice) in
-<a href=#222 id=222 data-nosnippet>222</a>    /// high-level land — see [`quat_cumprod_recalculated`].
+<a href=#221 id=221 data-nosnippet>221</a>    /// The caller takes `final_carry = cum[:, −1]` (a thin autodiff slice) on
+<a href=#222 id=222 data-nosnippet>222</a>    /// the high-level `Tensor` (see [`quat_cumprod_recalculated`]).
 <a href=#223 id=223 data-nosnippet>223</a>    ///
 <a href=#224 id=224 data-nosnippet>224</a>    /// # Shapes
 <a href=#225 id=225 data-nosnippet>225</a>    /// - `q_bshj4`   : `[batch, sequence, nheads, blocks, 4]` — per-step **unit**
@@ -238,57 +238,59 @@
 <a href=#238 id=238 data-nosnippet>238</a>    }
 <a href=#239 id=239 data-nosnippet>239</a>}
 <a href=#240 id=240 data-nosnippet>240</a>
-<a href=#241 id=241 data-nosnippet>241</a><span class="comment">// Per-backend impls delegate to the trait's default body; the custom autodiff
-<a href=#242 id=242 data-nosnippet>242</a>// backward lives in `super::backward` as a separate `Autodiff&lt;B&gt;` impl.
+<a href=#241 id=241 data-nosnippet>241</a><span class="comment">// Per-backend impls use the default body of the trait. The custom autodiff
+<a href=#242 id=242 data-nosnippet>242</a>// backward is a separate `Autodiff&lt;B&gt;` impl in `super::backward`.
 <a href=#243 id=243 data-nosnippet>243</a></span><span class="macro">burn_stack::impl_backend_ext_for_burn_backends!</span>(Mamba3QuatScanBackendExt);
 <a href=#244 id=244 data-nosnippet>244</a>
 <a href=#245 id=245 data-nosnippet>245</a><span class="comment">// ---------------------------------------------------------------------------
 <a href=#246 id=246 data-nosnippet>246</a>// High-level wrapper (Dispatch-pinned `Tensor`)
 <a href=#247 id=247 data-nosnippet>247</a>// ---------------------------------------------------------------------------
 <a href=#248 id=248 data-nosnippet>248</a>
-<a href=#249 id=249 data-nosnippet>249</a></span><span class="doccomment">/// Cumulative quaternion product with a custom, memory-efficient backward — the
-<a href=#250 id=250 data-nosnippet>250</a>/// drop-in for [`crate::mamba3::rotation::quat_cumprod`] used by the
-<a href=#251 id=251 data-nosnippet>251</a>/// Quaternion4D `forward`.
+<a href=#249 id=249 data-nosnippet>249</a></span><span class="doccomment">/// Cumulative quaternion product with a custom, memory-efficient backward. It
+<a href=#250 id=250 data-nosnippet>250</a>/// replaces [`crate::mamba3::rotation::quat_cumprod`] for both quaternion
+<a href=#251 id=251 data-nosnippet>251</a>/// kinds.
 <a href=#252 id=252 data-nosnippet>252</a>///
-<a href=#253 id=253 data-nosnippet>253</a>/// Routes the scan through [`Mamba3QuatScanBackendExt`] (so `Autodiff` gets the
-<a href=#254 id=254 data-nosnippet>254</a>/// recompute backward), then takes `final_carry = cum[:, −1]` as a thin autodiff
-<a href=#255 id=255 data-nosnippet>255</a>/// slice — its gradient folds back into `cum`'s gradient before the custom node
-<a href=#256 id=256 data-nosnippet>256</a>/// runs, so the node needs only the single `cum` output.
-<a href=#257 id=257 data-nosnippet>257</a>///
-<a href=#258 id=258 data-nosnippet>258</a>/// Mathematically identical to `quat_cumprod` (asserted on values and gradients
-<a href=#259 id=259 data-nosnippet>259</a>/// by the tests); only the backward's memory profile differs.
-<a href=#260 id=260 data-nosnippet>260</a>///
-<a href=#261 id=261 data-nosnippet>261</a>/// # Shapes
-<a href=#262 id=262 data-nosnippet>262</a>/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]` — per-step **unit**
-<a href=#263 id=263 data-nosnippet>263</a>///   quaternions (the recompute backward's gradient identities assume unit norm,
-<a href=#264 id=264 data-nosnippet>264</a>///   which holds for [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)
-<a href=#265 id=265 data-nosnippet>265</a>///   outputs and products thereof).
-<a href=#266 id=266 data-nosnippet>266</a>/// - `init`    : optional carry `[batch, nheads, blocks, 4]` (identity if `None`).
-<a href=#267 id=267 data-nosnippet>267</a>/// - returns `(cum, final_carry)` — `[batch, sequence, nheads, blocks, 4]` and
-<a href=#268 id=268 data-nosnippet>268</a>///   `[batch, nheads, blocks, 4]`.
-<a href=#269 id=269 data-nosnippet>269</a></span><span class="kw">pub fn </span>quat_cumprod_recalculated(
-<a href=#270 id=270 data-nosnippet>270</a>    q_bshj4: Tensor&lt;<span class="number">5</span>&gt;,
-<a href=#271 id=271 data-nosnippet>271</a>    init: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;,
-<a href=#272 id=272 data-nosnippet>272</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">let </span>[batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">let </span>device = q_bshj4.device();
-<a href=#275 id=275 data-nosnippet>275</a>
-<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>init_bhj4 = init.unwrap_or_else(|| {
-<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>w = Tensor::&lt;<span class="number">4</span>&gt;::ones([batch, nheads, blocks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
-<a href=#278 id=278 data-nosnippet>278</a>        <span class="kw">let </span>xyz = Tensor::&lt;<span class="number">4</span>&gt;::zeros([batch, nheads, blocks, <span class="number">3</span>], <span class="kw-2">&amp;</span>device);
-<a href=#279 id=279 data-nosnippet>279</a>        Tensor::cat(<span class="macro">vec!</span>[w, xyz], <span class="number">3</span>)
-<a href=#280 id=280 data-nosnippet>280</a>    });
-<a href=#281 id=281 data-nosnippet>281</a>
-<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>cum_bshj4 =
-<a href=#283 id=283 data-nosnippet>283</a>        Tensor::&lt;<span class="number">5</span>&gt;::from_dispatch(&lt;Dispatch <span class="kw">as </span>Mamba3QuatScanBackendExt&gt;::quat_cumprod(
-<a href=#284 id=284 data-nosnippet>284</a>            q_bshj4.into_dispatch(),
-<a href=#285 id=285 data-nosnippet>285</a>            init_bhj4.into_dispatch(),
-<a href=#286 id=286 data-nosnippet>286</a>        ));
-<a href=#287 id=287 data-nosnippet>287</a>
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">let </span>final_carry_bhj4 = cum_bshj4
-<a href=#289 id=289 data-nosnippet>289</a>        .clone()
-<a href=#290 id=290 data-nosnippet>290</a>        .narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>)
-<a href=#291 id=291 data-nosnippet>291</a>        .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>);
-<a href=#292 id=292 data-nosnippet>292</a>    (cum_bshj4, final_carry_bhj4)
-<a href=#293 id=293 data-nosnippet>293</a>}
+<a href=#253 id=253 data-nosnippet>253</a>/// It sends the scan through [`Mamba3QuatScanBackendExt`] (so `Autodiff` gets
+<a href=#254 id=254 data-nosnippet>254</a>/// the recompute backward), then takes `final_carry = cum[:, −1]` as a thin
+<a href=#255 id=255 data-nosnippet>255</a>/// autodiff slice. The gradient of that slice folds back into the gradient of
+<a href=#256 id=256 data-nosnippet>256</a>/// `cum` before the custom node runs, so the node needs only the one `cum`
+<a href=#257 id=257 data-nosnippet>257</a>/// output.
+<a href=#258 id=258 data-nosnippet>258</a>///
+<a href=#259 id=259 data-nosnippet>259</a>/// Mathematically identical to `quat_cumprod` (the tests assert it on values
+<a href=#260 id=260 data-nosnippet>260</a>/// and gradients). Only the memory profile of the backward is different.
+<a href=#261 id=261 data-nosnippet>261</a>///
+<a href=#262 id=262 data-nosnippet>262</a>/// # Shapes
+<a href=#263 id=263 data-nosnippet>263</a>/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]`, per-step **unit**
+<a href=#264 id=264 data-nosnippet>264</a>///   quaternions. The gradient identities of the recompute backward assume unit
+<a href=#265 id=265 data-nosnippet>265</a>///   norm, which holds for the outputs of
+<a href=#266 id=266 data-nosnippet>266</a>///   [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)
+<a href=#267 id=267 data-nosnippet>267</a>///   and their products.
+<a href=#268 id=268 data-nosnippet>268</a>/// - `init`    : optional carry `[batch, nheads, blocks, 4]` (identity if `None`).
+<a href=#269 id=269 data-nosnippet>269</a>/// - returns `(cum, final_carry)` — `[batch, sequence, nheads, blocks, 4]` and
+<a href=#270 id=270 data-nosnippet>270</a>///   `[batch, nheads, blocks, 4]`.
+<a href=#271 id=271 data-nosnippet>271</a></span><span class="kw">pub fn </span>quat_cumprod_recalculated(
+<a href=#272 id=272 data-nosnippet>272</a>    q_bshj4: Tensor&lt;<span class="number">5</span>&gt;,
+<a href=#273 id=273 data-nosnippet>273</a>    init: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;,
+<a href=#274 id=274 data-nosnippet>274</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">let </span>[batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">let </span>device = q_bshj4.device();
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">let </span>init_bhj4 = init.unwrap_or_else(|| {
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="kw">let </span>w = Tensor::&lt;<span class="number">4</span>&gt;::ones([batch, nheads, blocks, <span class="number">1</span>], <span class="kw-2">&amp;</span>device);
+<a href=#280 id=280 data-nosnippet>280</a>        <span class="kw">let </span>xyz = Tensor::&lt;<span class="number">4</span>&gt;::zeros([batch, nheads, blocks, <span class="number">3</span>], <span class="kw-2">&amp;</span>device);
+<a href=#281 id=281 data-nosnippet>281</a>        Tensor::cat(<span class="macro">vec!</span>[w, xyz], <span class="number">3</span>)
+<a href=#282 id=282 data-nosnippet>282</a>    });
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">let </span>cum_bshj4 =
+<a href=#285 id=285 data-nosnippet>285</a>        Tensor::&lt;<span class="number">5</span>&gt;::from_dispatch(&lt;Dispatch <span class="kw">as </span>Mamba3QuatScanBackendExt&gt;::quat_cumprod(
+<a href=#286 id=286 data-nosnippet>286</a>            q_bshj4.into_dispatch(),
+<a href=#287 id=287 data-nosnippet>287</a>            init_bhj4.into_dispatch(),
+<a href=#288 id=288 data-nosnippet>288</a>        ));
+<a href=#289 id=289 data-nosnippet>289</a>
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="kw">let </span>final_carry_bhj4 = cum_bshj4
+<a href=#291 id=291 data-nosnippet>291</a>        .clone()
+<a href=#292 id=292 data-nosnippet>292</a>        .narrow(<span class="number">1</span>, sequence - <span class="number">1</span>, <span class="number">1</span>)
+<a href=#293 id=293 data-nosnippet>293</a>        .squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>);
+<a href=#294 id=294 data-nosnippet>294</a>    (cum_bshj4, final_carry_bhj4)
+<a href=#295 id=295 data-nosnippet>295</a>}
 </code></pre></div></section></main></body></html>
