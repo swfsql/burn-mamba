@@ -1,7 +1,8 @@
 //! The reset-rotor dataset: the same three-symbol stream as `reset-majority`,
-//! read as a **rotor with three detents**. `+` turns it one detent forward, `-`
-//! one back, `R` snaps it to detent 0; the per-position target is the detent the
-//! rotor is on — the running turn count since the last reset, **mod 3**.
+//! read as a **rotor with three detents**. `+` turns the rotor one detent
+//! forward, and `-` turns it one detent back. `R` snaps it to detent 0. The
+//! target at each position is the detent of the rotor: the running turn count
+//! since the last reset, **mod 3**.
 //!
 //! ```text
 //!   symbols   R  +  +  +  -  +  +  R  -  -
@@ -9,32 +10,31 @@
 //!   target    0  1  2  0  2  0  1  0  2  1
 //! ```
 //!
-//! Every position is scored, and every sequence opens with an `R` — the reset
-//! that anchors the rotor (see [`crate::model`]: it is the token that gives the
-//! block its phase reference).
+//! Every position is scored. Every sequence starts with an `R`, the reset that
+//! anchors the rotor. It is the token that gives the block its phase reference
+//! (see [`crate::model`]).
 //!
-//! Three properties make this the task a single **Mamba-3** block is for:
+//! Four properties make this a task for a single **Mamba-3** block:
 //!
-//! - **It needs the SSM state.** The lookback is unbounded and the label is not
-//!   a function of the current symbol. Mamba-3 has no short convolution at all,
-//!   so the recurrent state is the model's only memory.
-//! - **It needs the decay to be selective** — the same requirement
-//!   `reset-majority` isolates: `R` must erase the past outright while the turns
-//!   after it stay unweighted.
-//! - **And it needs the transition to be *complex*.** The label is a *periodic*
-//!   function of the turn count, and a real state with non-negative eigenvalues
-//!   (every Mamba-1/Mamba-2 state, and Mamba-3 with the rotation switched off)
-//!   can only hold that count, not its residue: a linear readout cuts the count
-//!   axis into at most `NUM_CLASSES` intervals, while the answer alternates
-//!   along it.
-//! - **And the turn has to be data-dependent.** A fixed per-step angle is
-//!   vanilla RoPE: the phase it accumulates between the reset and the read
+//! - **It needs the SSM state.** The lookback has no bound, and the label is
+//!   not a function of the current symbol. Mamba-3 has no short convolution at
+//!   all, so the recurrent state is the only memory of the model.
+//! - **It needs the decay to be selective**, the same requirement that
+//!   `reset-majority` isolates. `R` must erase the past fully, and the turns
+//!   after it must keep equal weights.
+//! - **It needs the transition to be *complex*.** The label is a *periodic*
+//!   function of the turn count. A real state with non-negative eigenvalues
+//!   (every Mamba-1/Mamba-2 state, and Mamba-3 without the rotation) can hold
+//!   only that count, not its residue. A linear readout cuts the count axis
+//!   into at most `NUM_CLASSES` intervals, but the answer alternates along it.
+//! - **The turn must be data-dependent.** A fixed per-step angle is vanilla
+//!   RoPE: the phase that it accumulates between the reset and the read
 //!   measures *positions*, not turns.
 //!
-//! The two adversarial families close the two shortcuts those leave open —
-//! [`Family::Drift`] drives the count out of any three-interval readout's
-//! reach, [`Family::Balanced`] decorrelates it from the position — while
-//! [`Family::Random`] is the mixture where both are partly available.
+//! The two adversarial families close the two shortcuts that remain.
+//! [`Family::Drift`] drives the count out of the reach of any three-interval
+//! readout. [`Family::Balanced`] decorrelates the count from the position.
+//! [`Family::Random`] is the mixture where both shortcuts partly work.
 
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -53,7 +53,7 @@ pub const RESET: usize = 2;
 /// Input alphabet size.
 pub const NUM_SYMBOLS: usize = 3;
 
-/// Number of detents — the modulus of the readout.
+/// Number of detents: the modulus of the readout.
 pub const MODULUS: i64 = 3;
 /// Number of output classes: one per detent.
 pub const NUM_CLASSES: usize = MODULUS as usize;
@@ -72,8 +72,8 @@ pub const EVAL_SEED: u64 = 0xBEEF;
 
 /// The running turn count since the last reset, at every position.
 ///
-/// `RESET` clears it; `PLUS` / `MINUS` move it by one. The value is the count
-/// *after* consuming the symbol at that position.
+/// `RESET` clears it. `PLUS` / `MINUS` move it by one. The value is the count
+/// *after* the symbol at that position.
 pub fn turns(symbols: &[usize]) -> Vec<i64> {
     let mut count: i64 = 0;
     symbols
@@ -109,8 +109,8 @@ pub fn steps_since_reset(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// The per-position targets implied by a symbol sequence: the detent index,
-/// i.e. [`turns`] reduced mod [`MODULUS`].
+/// The per-position targets of a symbol sequence: the detent index, that is
+/// [`turns`] mod [`MODULUS`].
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     turns(symbols)
         .into_iter()
@@ -125,26 +125,27 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
 /// Which generator a split draws from. Every family opens with a `RESET`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~⅛, otherwise `±` evenly.
+    /// Independent symbols after the first `RESET`: `RESET` with probability
+    /// ⅛, `PLUS` ⅜ and `MINUS` ½.
     Random,
-    /// One reset, then a strongly biased walk: the turn count runs out to `±31`,
-    /// sweeping the detents over and over at large magnitude. This is what a
-    /// **real** state cannot follow — holding the count is easy, but no readout
-    /// that cuts the count axis into three intervals can report a residue that
-    /// alternates across thirty of them.
+    /// One reset, then a strongly biased walk. The turn count can reach `±31`,
+    /// and it passes each detent many times at large magnitude. A **real**
+    /// state cannot follow this. It holds the count easily, but no readout that
+    /// cuts the count axis into three intervals can report a residue that
+    /// alternates across thirty count values.
     Drift,
-    /// One reset, then a shuffled bag of equally many `+` and `-`: the count
-    /// stays inside `±9` while the position marches on, and the order is
-    /// random, so the two are decorrelated. This is what a **positional**
-    /// phase — a fixed rotation, or anything else keyed to the steps since the
-    /// reset — cannot follow.
+    /// One reset, then a shuffled bag of `+` and `-` in equal numbers (one
+    /// extra `+` when the tail length is odd). The count stays within `±10`
+    /// while the position advances, and the order is random, so the two are
+    /// decorrelated. A **positional** phase cannot follow this: a fixed
+    /// rotation, or anything else keyed to the steps since the reset.
     Balanced,
     /// The training mixture: half [`Self::Random`], a quarter of each
     /// adversarial family.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -175,8 +176,8 @@ fn gen_drift(rng: &mut Lcg, len: usize) -> Vec<usize> {
     } else {
         (MINUS, PLUS)
     };
-    // 7/8 of the steps go the same way, so the count leaves the range any
-    // three-interval readout could cover — but the sequence is not simply
+    // 7/8 of the steps go the same way, so the count leaves the range that
+    // any three-interval readout can cover. But the sequence is not simply
     // "position since the reset" either.
     let mut out = vec![RESET];
     out.extend((1..len).map(|_| if rng.below(8) == 0 { opp } else { run }));
@@ -184,8 +185,9 @@ fn gen_drift(rng: &mut Lcg, len: usize) -> Vec<usize> {
 }
 
 fn gen_balanced(rng: &mut Lcg, len: usize) -> Vec<usize> {
-    // Equally many `+` and `-` (a bridge walk), shuffled: the count stays small
-    // and says nothing about how far the sequence has advanced.
+    // Equally many `+` and `-` (one extra `+` at an odd tail), shuffled: a
+    // bridge walk. The count stays small and tells nothing about how far the
+    // sequence is.
     let tail = len - 1;
     let mut bag: Vec<usize> = (0..tail)
         .map(|i| if i * 2 < tail { PLUS } else { MINUS })
@@ -275,8 +277,9 @@ pub struct ResetRotorBatch {
 }
 
 impl ResetRotorBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

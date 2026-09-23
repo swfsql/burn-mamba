@@ -1,24 +1,24 @@
 //! The three claims this example rests on, measured.
 //!
-//! 1. A **hand-built** Mamba-3 block solves the task exactly — no fitting, every
-//!    weight written down in closed form from the unrolled recurrence.
+//! 1. A **hand-built** Mamba-3 block solves the task exactly. There is no
+//!    fitting: the unrolled recurrence gives every weight in closed form.
 //! 2. The **same block with an input-independent rotation** cannot, for *any*
-//!    per-step angle: a fixed rotation measures the position since the reset,
-//!    not the turns taken.
-//! 3. **No real state can**, for any decay: with the rotation switched off the
-//!    block is a Mamba-2-strength selective SSM, and the best readout its head
-//!    can express — the count axis cut into three intervals — cannot report a
-//!    residue that alternates along that axis.
+//!    per-step angle. A fixed rotation measures the position since the reset,
+//!    not the turns.
+//! 3. **No real state can**, for any decay. Without the rotation, the block is
+//!    a selective SSM of Mamba-2 strength. The best readout that its head can
+//!    express cuts the count axis into three intervals, and that cannot report
+//!    a residue that alternates along the axis.
 //!
-//! (2) and (3) are not grid sweeps of the readout: for each ablated block the
-//! **best readout it admits** is computed exactly from its own outputs — every
-//! 3-interval cut of the scalar channel, every 3-sector cut of the output plane.
-//! What is swept is the one knob the ablation leaves free (the angle, the
-//! decay).
+//! (2) and (3) are not grid sweeps of the readout. For each ablated block, the
+//! test computes the **best readout that the block admits** exactly, from its
+//! own outputs: every 3-interval cut of the scalar channel, and every 3-sector
+//! cut of the output plane. The sweep covers only the one knob that the
+//! ablation leaves free (the angle, the decay).
 //!
-//! The construction is the one derived in [`crate::model`]: `R` writes the
-//! rotor's zero detent into the state at the current phase, `±` turn the phase
-//! by one detent, and the two heads read the accumulated turn on two axes a
+//! The construction is the one that [`crate::model`] derives. `R` writes the
+//! zero detent of the rotor into the state at the current phase. `±` turn the
+//! phase by one detent. The two heads read the accumulated turn on two axes a
 //! quarter turn apart.
 
 use crate::common::model::ModelConfigExt;
@@ -37,51 +37,35 @@ use burn_mamba::prelude::*;
 
 /// One detent, in radians: the per-step rotation a `±` symbol applies.
 const DETENT: f64 = 2.0 * std::f64::consts::PI / MODULUS as f64;
-/// The block's per-step rotation bound, in radians per unit `Δ`
-/// (`Mamba3Config::rotation_range · π`, at its default of 2): an angle `θ` is
-/// asked for as `ϑ = atanh(θ / MAX_ANGLE)`, which for a detent is comfortably
-/// inside `tanh`'s slope.
+/// The per-step rotation bound of the block, in radians per unit `Δ`
+/// (`Mamba3Config::rotation_range · π`, at its default of 2). The construction
+/// asks for an angle `θ` as `ϑ = atanh(θ / MAX_ANGLE)`. For a detent, that is
+/// well inside the slope of `tanh`.
 const MAX_ANGLE: f64 = 2.0 * std::f64::consts::PI;
-/// `Δ` for every head and every symbol. Fixed at 1 so the per-step angle is
-/// `π·tanh(ϑ)` outright and `γ = Δ = 1` writes `B` unscaled (`Trapezoid::None`
-/// spends the whole step on the current token).
+/// `Δ` for every head and every symbol. It is fixed at 1, so the per-step
+/// angle is exactly `MAX_ANGLE·tanh(ϑ)`, and `γ = Δ = 1` writes `B` unscaled
+/// (`Trapezoid::None` gives the whole step to the current token).
 const DELTA: f64 = 1.0;
-/// `Â` on a `±` symbol. `A = −softplus(Â)` and the block floors `|A|` at its
-/// `a_floor` (`1e-4`), so any value this negative leaves the decay at
-/// `ᾱ = exp(−1e-4)` — the flattest hold the block allows.
+/// `Â` on a `±` symbol. `A = −softplus(Â)`, and the block floors `|A|` at its
+/// `a_floor` (`1e-4`). So any value this negative leaves the decay at
+/// `ᾱ = exp(−1e-4)`, the flattest hold that the block allows.
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a `RESET`: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `x(R) = 1` — the write. `x(±) = 0` exactly (`silu(0) = 0`), so a turn writes
-/// nothing and only advances the phase.
+/// `x(R) = 1`: the write. `x(±) = 0` (`x` takes no activation), so a turn
+/// writes nothing and only advances the phase.
 const X_WRITE: f64 = 1.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
 /// Class-logit gain on the two readout axes.
 const OUT_GAIN: f64 = 3.0;
-/// `x₀(±) = ±V` for the rotation-free counter of claim (3). Bounded by silu's
-/// floor (`min silu = -0.2785`), which is what lets the two turns be exactly
-/// symmetric.
+/// `x₀(±) = ±V` for the rotation-free counter of claim (3). `x` takes no
+/// activation, so the two turns are exactly symmetric.
 const V: f64 = 0.2;
 
 // ---------------------------------------------------------------------------
 // scalar helpers
 // ---------------------------------------------------------------------------
-
-fn silu(t: f64) -> f64 {
-    t / (1.0 + (-t).exp())
-}
-
-/// Inverse of `silu` on the branch containing 0 (`t > -1.2785`).
-fn silu_inv(v: f64) -> f64 {
-    assert!(v > -0.2784, "silu bottoms out at -0.2785, cannot reach {v}");
-    let (mut lo, mut hi) = (-1.2785f64, v.max(0.0) + 1.0);
-    for _ in 0..200 {
-        let mid = 0.5 * (lo + hi);
-        if silu(mid) < v { lo = mid } else { hi = mid }
-    }
-    0.5 * (lo + hi)
-}
 
 /// Inverse of `softplus`, stable for tiny `v`.
 fn softplus_inv(v: f64) -> f64 {
@@ -121,8 +105,9 @@ fn t1<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> Tensor<D
 // the hand-built models
 // ---------------------------------------------------------------------------
 
-/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
-/// (`γ = 1`) passes them through unchanged. Indexed by [`MINUS`]/[`PLUS`]/[`RESET`].
+/// The three symbol embeddings, each of norm `√2`, so the pre-`RmsNorm` of the
+/// layer (`γ = 1`) does not change them. Indexed by
+/// [`MINUS`]/[`PLUS`]/[`RESET`].
 const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
     [std::f64::consts::SQRT_2, 0.0],
     [0.0, std::f64::consts::SQRT_2],
@@ -136,24 +121,24 @@ enum Turn {
     /// detent and `R` does not turn it at all.
     Selective,
     /// The ablation: `ϑ` is a constant, so **every** symbol turns the state by
-    /// the same angle — vanilla RoPE, a phase that counts positions.
+    /// the same angle. This is vanilla RoPE, a phase that counts positions.
     Fixed(f64),
 }
 
-/// What the network's head reads out.
+/// What the head of the network reads.
 #[derive(Clone, Copy, Debug)]
 enum Head {
     /// The phase decoder: logit `j` ∝ `cos(φ − 2πj/MODULUS)`.
     Decoder,
-    /// Pass the block's two output axes through unchanged, so a test can search
-    /// over every readout the head could have expressed.
+    /// Pass the two output axes of the block through unchanged, so a test can
+    /// search over every readout that the head can express.
     Probe,
 }
 
-/// The model config with the rotation switched off (`RotationKind::Real1D`
-/// makes the transition real), everything else identical. The block then
-/// projects no rotation channels at all, so its `in_proj` is one column
-/// narrower than the rotating model's.
+/// The model config without the rotation (`RotationKind::Real1D` makes the
+/// transition real). Everything else is identical. The block then projects no
+/// rotation channels, so its `in_proj` is one column narrower than the
+/// `in_proj` of the rotating model.
 fn config_without_rotation() -> MambaLatentNetConfig {
     let mut cfg = crate::model::model_config();
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
@@ -168,9 +153,9 @@ fn config_without_rotation() -> MambaLatentNetConfig {
 /// Everything the two hand-built blocks share: the network in-projection, the
 /// layer norm, the (identity) block out-projection, and the class head.
 ///
-/// `channels` gives, for each of the block's `d_in_proj` channels, its target
-/// value at (`MINUS`, `PLUS`, `RESET`) *before* the channel's own
-/// activation — the in-projection is then solved for exactly, three symbols
+/// `channels` gives the target value of each of the `d_in_proj` channels of
+/// the block at (`MINUS`, `PLUS`, `RESET`), *before* the activation of the
+/// channel. The test then solves the in-projection exactly: three symbols
 /// through a 2-D token plus a bias.
 fn build(
     device: &Device,
@@ -217,8 +202,8 @@ fn build(
     block.d_h = Param::from_tensor(t1(&d_h, [2], device));
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
     block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
-    // B is the same unit vector for both heads; C differs per head through this
-    // bias alone — that is what puts the two readouts a quarter turn apart.
+    // B is the same unit vector for both heads. C differs per head only through
+    // this bias, and that puts the two readouts a quarter turn apart.
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([2, 1, 2]), device));
     block.c_bias_hmr = Param::from_tensor(t1(&c_bias.concat(), [2, 1, 2], device));
 
@@ -227,7 +212,7 @@ fn build(
     block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([2]), device)));
 
     // ── the class head ───────────────────────────────────────────────────────
-    // `ignore_last_residual` means the block's output is all the head sees.
+    // With `ignore_last_residual`, the head sees only the output of the block.
     let w_out: Vec<f64> = match head {
         // logit_j ∝ cos(φ − ψ_j): the phase decoder, ψ_j = 2πj/MODULUS.
         Head::Decoder => {
@@ -258,8 +243,8 @@ fn build(
 /// heads read `cos` and `−sin` of the turn since that write.
 fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config();
-    // ϑ, shared by both heads and scaled by each head's Δ (= 1 here): the
-    // per-step angle is π·tanh(ϑ).
+    // ϑ, shared by both heads and scaled by the Δ of each head (= 1 here): the
+    // per-step angle is MAX_ANGLE·tanh(ϑ).
     let theta = match turn {
         Turn::Selective => {
             let t = (DETENT / MAX_ANGLE).atanh();
@@ -272,8 +257,8 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
     let channels: Vec<[f64; 3]> = vec![
         [Z_PRE; 3],                                                    // z, head 0
         [Z_PRE; 3],                                                    // z, head 1
-        [0.0, 0.0, silu_inv(X_WRITE)],                                 // x, head 0
-        [0.0, 0.0, silu_inv(X_WRITE)],                                 // x, head 1
+        [0.0, 0.0, X_WRITE],                                           // x, head 0
+        [0.0, 0.0, X_WRITE],                                           // x, head 1
         [1.0; 3],                                                      // B, axis 0
         [0.0; 3],                                                      // B, axis 1
         [1.0; 3],                                                      // C, axis 0
@@ -284,16 +269,17 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
         [A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)],              // A, head 1
         theta,                                                         // ϑ
     ];
-    // C after QK-norm is (√2, 0) for both heads; head 1's bias turns it a
+    // After QK-norm, C is (√2, 0) for both heads. The bias of head 1 turns it a
     // quarter turn, to (0, √2).
     let c_bias = [[0.0, 0.0], [-std::f64::consts::SQRT_2, std::f64::consts::SQRT_2]];
     build(device, &cfg, &channels, c_bias, [0.0, 0.0], head)
 }
 
-/// The rotation-free counter: the strongest **real** state this block can hold.
-/// Head 0 accumulates `±V` per turn (decaying by `alpha` per step, wiped by
-/// `R`); head 1 is a constant reference. That is a Mamba-2-strength selective
-/// SSM — [`crate::model`]'s block with its complex transition removed.
+/// The rotation-free counter: the strongest **real** state that this block can
+/// hold. Head 0 accumulates `±V` per turn (it decays by `alpha` per step, and
+/// `R` wipes it). Head 1 is a constant reference. That is a selective SSM of
+/// Mamba-2 strength: the block of [`crate::model`] without its complex
+/// transition.
 fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
     let cfg = config_without_rotation();
     // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
@@ -301,8 +287,8 @@ fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
     let channels: Vec<[f64; 3]> = vec![
         [Z_PRE; 3],                                             // z, head 0
         [Z_PRE; 3],                                             // z, head 1
-        [silu_inv(-V), silu_inv(V), 0.0],                       // x, head 0 — the turn
-        [silu_inv(1.0); 3],                                     // x, head 1 — the reference
+        [-V, V, 0.0],                                           // x, head 0: the turn
+        [1.0; 3],                                               // x, head 1: the reference
         [1.0; 3],                                               // B, axis 0
         [0.0; 3],                                               // B, axis 1
         [1.0; 3],                                               // C, axis 0
@@ -335,7 +321,7 @@ const FAMILIES: [(&str, Family); 3] = [
     ("balanced", Family::Balanced),
 ];
 
-/// Run `model` over `count` sequences of one family; return the per-position
+/// Run `model` over `count` sequences of one family. Return the per-position
 /// output channels and the targets.
 fn run(
     model: &MambaLatentNet,
@@ -375,7 +361,8 @@ fn run(
     (channels, targets)
 }
 
-/// Per-position accuracy of the model's own head (argmax over the class logits).
+/// Per-position accuracy of the head of the model (argmax over the class
+/// logits).
 fn accuracy(model: &MambaLatentNet, family: Family, count: usize, device: &Device) -> f64 {
     let (channels, targets) = run(model, family, count, device);
     let hits = channels
@@ -428,10 +415,10 @@ fn prefix(codes: &[usize], targets: &[i64], bins: usize) -> Vec<[u64; NUM_CLASSE
     p
 }
 
-/// The best accuracy any readout of a **scalar** channel (plus a constant one)
-/// can reach: the argmax of `NUM_CLASSES` affine functions of a scalar cuts the
-/// axis into at most that many intervals, so this maximises over every such cut
-/// and every class assignment.
+/// The best accuracy that any readout of a **scalar** channel (plus a constant
+/// one) can reach. The argmax of `NUM_CLASSES` affine functions of a scalar
+/// cuts the axis into at most that many intervals. So this maximises over every
+/// such cut and every class assignment.
 fn best_interval_accuracy(values: &[f64], targets: &[i64]) -> f64 {
     const BINS: usize = 256;
     let p = prefix(&bin(values, BINS), targets, BINS);
@@ -451,10 +438,10 @@ fn best_interval_accuracy(values: &[f64], targets: &[i64]) -> f64 {
     best as f64 / total
 }
 
-/// The best accuracy any readout of the block's output **direction** can reach:
-/// the argmax of `NUM_CLASSES` linear functions of a 2-D vector cuts the plane
-/// into that many sectors, so this maximises over every triple of sector
-/// boundaries and every class assignment.
+/// The best accuracy that any readout of the output **direction** of the block
+/// can reach. The argmax of `NUM_CLASSES` linear functions of a 2-D vector cuts
+/// the plane into that many sectors. So this maximises over every triple of
+/// sector boundaries and every class assignment.
 fn best_sector_accuracy(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64 {
     const BINS: usize = 60;
     let two_pi = 2.0 * std::f64::consts::PI;
@@ -499,7 +486,7 @@ fn best_sector_accuracy(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight written down in closed form; no training anywhere.
+/// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = Device::default();
@@ -521,17 +508,17 @@ fn handmade_block_solves_every_family() {
 // 2. no fixed rotation reaches it
 // ---------------------------------------------------------------------------
 
-/// Sweep the per-step angle with `ϑ`'s **data dependence switched off** — the
-/// one changed knob — and give each angle the best readout its output plane
+/// Sweep the per-step angle with the **data dependence of `ϑ` disabled** (the
+/// one changed knob). Give each angle the best readout that its output plane
 /// admits.
 ///
-/// A fixed rotation is vanilla RoPE: the phase it accumulates between the reset
-/// and the read is `ω · (positions since the reset)`, which says nothing about
-/// how many turns those positions contained. `balanced` is built to show that
-/// directly — its turn count is decorrelated from the position — and `drift`,
-/// where a fixed rotation comes closest to being right (most steps really do
-/// turn the same way), is no better off once the few opposite ones have pushed
-/// the count off the position by more than a detent.
+/// A fixed rotation is vanilla RoPE. The phase that it accumulates between the
+/// reset and the read is `ω · (positions since the reset)`, and that tells
+/// nothing about the number of turns in those positions. `balanced` shows this
+/// directly: its turn count is decorrelated from the position. In `drift`, a
+/// fixed rotation comes closest to right, because most steps turn the same
+/// way. But it is no better once the few opposite steps move the count away
+/// from the position by more than a detent.
 #[test]
 fn no_fixed_rotation_solves_the_task() {
     let device = Device::default();
@@ -574,15 +561,16 @@ fn no_fixed_rotation_solves_the_task() {
 // 3. no real state reaches it
 // ---------------------------------------------------------------------------
 
-/// The rotation switched off entirely, leaving a Mamba-2-strength selective SSM
-/// that holds the turn count. Sweep its decay, and give each decay the best
-/// readout its scalar channel admits.
+/// No rotation at all, which leaves a selective SSM of Mamba-2 strength that
+/// holds the turn count. Sweep its decay, and give each decay the best readout
+/// that its scalar channel admits.
 ///
-/// The label is *periodic* in the count while any such readout is not: three
-/// intervals, three residues, and `drift` runs the count through sixty-odd
-/// values. Even `balanced`, which keeps it inside `±9`, is a dozen detents too
-/// wide. What is left is `random`, where frequent resets keep the count near
-/// zero often enough to lift the readout to ~59% — and no further.
+/// The label is *periodic* in the count, and no such readout is. It has three
+/// intervals for three residues, and `drift` moves the count through sixty-odd
+/// values. Even `balanced`, which keeps the count within `±10`, is more than a
+/// dozen detents too wide. In `random` and `balanced`, the count is often near
+/// zero, and that lifts the best readout to ~64% and ~59%. `drift` stays at
+/// ~38% for every decay.
 #[test]
 fn no_real_state_solves_the_task() {
     let device = Device::default();
@@ -627,15 +615,15 @@ fn no_real_state_solves_the_task() {
 
 /// Two ceilings that need no model at all.
 ///
-/// - **memoryless**: the best a predictor that sees only the current symbol can
-///   do. `R` is free (the rotor is at detent 0 whenever it appears); everything
-///   else is chance.
-/// - **positional**: the best a predictor that sees the current symbol *and how
-///   many steps have passed since the last reset* can do. That bounds every
-///   block which, like the one swept above, writes its state at the reset and
-///   reads what has accumulated since: under an input-independent rotation both
-///   the phase and the decay of what it reads are functions of exactly that
-///   number. It is still nowhere near the block.
+/// - **memoryless**: the best result of a predictor that sees only the current
+///   symbol. `R` is free (the rotor is at detent 0 each time it occurs).
+///   Everything else is chance.
+/// - **positional**: the best result of a predictor that sees the current
+///   symbol *and the number of steps since the last reset*. That bounds every
+///   block that, like the block swept above, writes its state at the reset and
+///   reads what accumulates after it. Under an input-independent rotation, both
+///   the phase and the decay of what the block reads are functions of exactly
+///   that number. It is still far below the block.
 #[test]
 fn memoryless_and_positional_ceilings() {
     let mut sym = [[0u64; NUM_CLASSES]; NUM_SYMBOLS];
@@ -661,8 +649,8 @@ fn memoryless_and_positional_ceilings() {
                 targets.push(t);
             }
         }
-        // the turn count's excursion: how many detents a readout that cuts the
-        // count axis into `NUM_CLASSES` intervals would have to cover
+        // The excursion of the turn count: the number of detents that a readout
+        // with `NUM_CLASSES` intervals on the count axis must cover.
         println!(
             "  {name:<10} memoryless {:6.2}%   positional {:6.2}%   turns in [{lo}, {hi}]",
             100.0 * best_lookup(&codes_sym, &targets, NUM_SYMBOLS),

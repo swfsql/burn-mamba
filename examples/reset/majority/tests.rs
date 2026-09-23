@@ -1,15 +1,18 @@
 //! The two claims this example rests on, measured.
 //!
-//! 1. A **hand-built** Mamba-3 block solves the task exactly — no fitting, every
-//!    weight written down in closed form from the unrolled recurrence.
+//! 1. A **hand-built** Mamba-3 block solves the task exactly. There is no
+//!    fitting: the unrolled recurrence gives every weight in closed form.
 //! 2. The **same block with a non-selective decay** cannot, for *any* decay and
-//!    *any* readout gain. That is what makes the task a selective-SSM task
-//!    rather than a plain linear-SSM one.
+//!    *any* readout gain. That makes the task a selective-SSM task, not a plain
+//!    linear-SSM task.
 //!
-//! The construction is the one derived in [`crate::model`]: head 0 is the ballot
-//! box (`A₀` at the block's floor on `±` so `ᾱ₀ ≈ 1`, large on `RESET` so
-//! `ᾱ₀ ≈ 0`), head 1 is a constant reference, and the network's final RMSNorm
-//! turns the pair into a direction the two-class head reads off.
+//! The construction is the one that [`crate::model`] derives:
+//!
+//! - Head 0 is the ballot box. `A₀` is at the floor of the block on `±`, so
+//!   `ᾱ₀ ≈ 1`, and large on `RESET`, so `ᾱ₀ ≈ 0`.
+//! - Head 1 is a constant reference.
+//! - The final RMSNorm of the network turns the pair into a direction, and the
+//!   two-class head reads it.
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
@@ -25,23 +28,25 @@ use burn_mamba::prelude::*;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `Δ` for the ballot box, on every symbol. Fixed at 1, so `ᾱ = exp(A)` outright
-/// and `γ = Δ = 1` writes `B·x` unscaled (the block runs at `Trapezoid::None`,
-/// which spends the whole step on the current token): the decay is `A` alone.
+/// `Δ` for the ballot box, on every symbol. It is fixed at 1, so `ᾱ = exp(A)`
+/// exactly, and `γ = Δ = 1` writes `B·x` unscaled. (The block runs at
+/// `Trapezoid::None`, which gives the whole step to the current token.) So the
+/// decay is `A` alone.
 const DELTA: f64 = 1.0;
-/// The per-step decay the ballot box holds at: the block floors `|A|` at its
-/// `a_floor` (`1e-4`), so this is the flattest hold it allows — an (essentially)
-/// unweighted running sum over a 32-token sequence.
+/// The per-step decay at which the ballot box holds. The block floors `|A|` at
+/// its `a_floor` (`1e-4`), so this is the flattest hold that it allows: an
+/// (essentially) unweighted running sum over a 32-token sequence.
 const HOLD_ALPHA: f64 = 0.9999; // = exp(-1e-4)
 /// `−A₀` on a `RESET`: `ᾱ₀ = e⁻²⁰` erases what the ballot box held.
 const A_WIPE: f64 = 20.0;
-/// `Â` for the reference head: `A = −softplus(Â)` lands under the block's
-/// `a_floor`, so head 1 holds at the same flattest decay.
+/// `Â` for the reference head. `|A| = softplus(Â)` is below the `a_floor` of
+/// the block, so head 1 holds at the same flattest decay.
 const A_HOLD_RAW: f64 = -20.0;
-/// `Δ₁`, small enough that head 1's state never leaves its `D₁·x₁` reference.
+/// `Δ₁`, small enough that head 1 writes almost nothing. So its output stays
+/// at its `D₁·x₁` reference.
 const DELTA_REF: f64 = 1e-12;
-/// `x₀(±) = ±V`. Mamba-3 has no activation on `x` (the gate's `silu(z)` is the
-/// block's only one), so the two votes are exactly symmetric.
+/// `x₀(±) = ±V`. Mamba-3 has no activation on `x` (the `silu(z)` of the gate is
+/// the only activation of the block), so the two votes are exactly symmetric.
 const V: f64 = 0.2;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
@@ -90,8 +95,9 @@ fn t1<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> Tensor<D
 // the hand-built model
 // ---------------------------------------------------------------------------
 
-/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
-/// (`γ = 1`) passes them through unchanged. Indexed by [`MINUS`]/[`PLUS`]/[`RESET`].
+/// The three symbol embeddings, each of norm `√2`, so the pre-`RmsNorm` of the
+/// layer (`γ = 1`) does not change them. Indexed by
+/// [`MINUS`]/[`PLUS`]/[`RESET`].
 const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
     [std::f64::consts::SQRT_2, 0.0],
     [0.0, std::f64::consts::SQRT_2],
@@ -100,10 +106,11 @@ const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
 
 /// Build the block by hand.
 ///
-/// `alpha` is the ballot box's per-step decay on a `±` symbol. When `selective`
-/// is false the `RESET` symbol gets that same decay instead of `e⁻²⁰` — the
-/// **only** difference, which turns the block into a fixed-decay (LTI) SSM.
-/// `gain` scales the `C` readout, i.e. the vote-to-reference ratio.
+/// `alpha` is the per-step decay of the ballot box on a `±` symbol. When
+/// `selective` is false, the `RESET` symbol gets that same decay instead of
+/// `e⁻²⁰`. That is the **only** difference, and it turns the block into a
+/// fixed-decay (LTI) SSM. `gain` scales the `C` readout, that is the
+/// vote-to-reference ratio.
 fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLatentNet {
     let cfg = crate::model::model_config();
     let mut model = ModelConfigExt::init(&cfg, device);
@@ -120,12 +127,12 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     let block = &mut layer.block;
 
     // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2)]` — no rotation
-    // segment at all, since `Real1D` projects none, and no λ segment, since
-    // `Trapezoid::None` projects none. Each entry is the channel's target value
-    // at (MINUS, PLUS, RESET), *before* the channel's own activation (none on
-    // `x`, softplus on `Δ` and `−A`; `B`/`C` are QK-normed instead, which at
-    // `state_rank = 1` fixes them at their `γ`).
+    // The channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2)]`. There is
+    // no rotation segment, because `Real1D` projects none, and no λ segment,
+    // because `Trapezoid::None` projects none. Each entry is the target value
+    // of the channel at (MINUS, PLUS, RESET), *before* the activation of the
+    // channel: none on `x`, softplus on `Δ` and `−A`. `B`/`C` get QK-norm
+    // instead, which at `state_rank = 1` fixes them at their `γ`.
     // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
     let hold = softplus_inv(-alpha.ln());
     let a0 = if selective {
@@ -168,7 +175,7 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     // D₀ = 0 (head 0 reads the state alone), D₁ = 1 (head 1 *is* its skip).
     block.d_h = Param::from_tensor(t1(&[0.0, 1.0], [2], device));
     // A scalar state has nothing to normalise *against*: QK-norm pins |B| = |C|
-    // = 1, so the readout gain lives in `c_norm`'s scale.
+    // = 1, so the readout gain is in the scale of `c_norm`.
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
     block.c_norm.gamma = Param::from_tensor(t1(&[gain], [1], device));
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([2, 1, 1]), device));
@@ -178,9 +185,9 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     block.out_proj.weight = Param::from_tensor(t1(&[1.0, 0.0, 0.0, 1.0], [2, 2], device));
     block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([2]), device)));
 
-    // logits [NEG, POS] = [-g·o₀, +g·o₀]; `ignore_last_residual` means `o` is
-    // all the head sees. `o₁` (the reference axis) enters only through the
-    // final norm, which is what keeps the margin proportional to the vote.
+    // logits [NEG, POS] = [-g·o₀, +g·o₀]. With `ignore_last_residual`, the head
+    // sees only `o`. `o₁` (the reference axis) enters only through the final
+    // norm, and that keeps the margin proportional to the vote.
     let norm_f = net.norm_f.as_mut().expect("final_norm is on");
     norm_f.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
     net.out_proj.weight = Param::from_tensor(t1(
@@ -244,7 +251,7 @@ const FAMILIES: [(&str, Family); 3] = [
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight written down in closed form; no training anywhere.
+/// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = Device::default();
@@ -263,12 +270,14 @@ fn handmade_block_solves_every_family() {
 // 2. no fixed decay reaches it
 // ---------------------------------------------------------------------------
 
-/// Sweep the ballot box's decay and readout gain with `RESET`'s selectivity
-/// switched **off** — the one changed knob — and report the best any of them do.
+/// Sweep the decay and the readout gain of the ballot box, with the selectivity
+/// of `RESET` **disabled** (the one changed knob). Report the best result of
+/// any of them.
 ///
-/// Both adversarial families are unreachable at once, and from opposite sides: a
-/// decay near 1 leaks the pre-reset run into `long-prefix`, a decay away from 1
-/// lets the late block outvote the early one in `long-suffix`.
+/// No decay reaches both adversarial families at once, and they fail from
+/// opposite sides. A decay near 1 leaks the pre-reset run into `long-prefix`. A
+/// decay away from 1 lets the late block outvote the early one in
+/// `long-suffix`.
 #[test]
 fn no_fixed_decay_solves_the_task() {
     let device = Device::default();
@@ -290,8 +299,8 @@ fn no_fixed_decay_solves_the_task() {
     println!("      ᾱ    random  long-prefix  long-suffix     worst");
     let mut best_worst = 0.0f64;
     for alpha in alphas {
-        // the readout gain is re-fitted per α, so this is the *best case* for a
-        // fixed decay, not one arbitrary calibration of it.
+        // The readout gain is fitted again for each α, so this is the *best
+        // case* for a fixed decay, not one arbitrary calibration of it.
         let mut best = (0.0f64, [0.0f64; 3]);
         for gain in gains {
             let model = handmade(&device, false, alpha, gain);
@@ -324,14 +333,14 @@ fn no_fixed_decay_solves_the_task() {
 // 3. the task itself
 // ---------------------------------------------------------------------------
 
-/// The **memoryless ceiling**: the best a model that sees only the current
-/// symbol can do. No residual or embedding gets past it (and Mamba-3 has no
-/// short convolution to widen the window with), while the hand-built block above
-/// is at 100%.
+/// The **memoryless ceiling**: the best result of a model that sees only the
+/// current symbol. No residual or embedding gets past it (and Mamba-3 has no
+/// short convolution to widen the window). The hand-built block above is at
+/// 100%.
 ///
-/// It is not chance — a `+` really does more often sit on a positive count, and
-/// the long same-sign runs in `long-prefix` sharpen that — but it is nowhere
-/// near solving the task, which is the point.
+/// It is not chance. A `+` is more often on a positive count, and the long
+/// same-sign runs in `long-prefix` make that stronger. But it is far from a
+/// solution of the task, which is the point.
 #[test]
 fn memoryless_ceiling_is_far_below_the_state() {
     let mut overall = [[0u64; NUM_CLASSES]; NUM_SYMBOLS];
@@ -365,7 +374,7 @@ fn memoryless_ceiling_is_far_below_the_state() {
     );
 }
 
-/// Accuracy of the best per-symbol lookup table implied by a tally.
+/// Accuracy of the best per-symbol lookup table that a tally gives.
 fn table_ceiling(tally: &[[u64; NUM_CLASSES]; NUM_SYMBOLS]) -> f64 {
     let total: u64 = tally.iter().flatten().sum();
     let best: u64 = tally

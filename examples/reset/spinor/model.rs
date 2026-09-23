@@ -12,7 +12,7 @@ use burn_mamba::prelude::{
 /// product (an associative scan, not a `cumsum`):
 ///
 /// ```ignore
-/// qₜ = quat(Δₕ · π · tanh(ϑ(uₜ)))        Qₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₁
+/// qₜ = quat(2π · Δₕ · tanh(‖ϑ(uₜ)‖) · ϑ̂(uₜ))    Qₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₁
 /// B̄ₜ = Qₜ* ⊗ B(uₜ)     C̄ₜ = Qₜ* ⊗ C(uₜ)   (the rotation, absorbed into B/C)
 /// hₜ = ᾱₕ hₜ₋₁ + γₕ B̄ₜ xₕ(uₜ)            yₜ⁽ʰ⁾ = ⟨C̄ₜ⁽ʰ⁾, hₜ⁽ʰ⁾⟩ + Dₕ xₕ(uₜ)
 /// ```

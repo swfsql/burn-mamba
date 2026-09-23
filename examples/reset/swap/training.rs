@@ -1,9 +1,9 @@
-//! Training loop for the reset-swap example: builds the dataloaders, runs the
-//! train/validate epochs, and checkpoints the model and optimizer. The objective
-//! is a cross-entropy head over **every** position (the group element at each
-//! step, [`forward_classification`]), stepped by a `Trainer`: under plain SGD
-//! (unless `--no-graph`) the whole training step replays from a graph captured
-//! at the first batch, under any other optimizer it steps eagerly.
+//! Training loop for the reset-swap example. It builds the dataloaders, runs
+//! the train and validation epochs, and saves the model and the optimizer. The
+//! objective is a cross-entropy head over **every** position (the group element
+//! at each step, [`forward_classification`]). A `Trainer` steps it. Under plain
+//! SGD (and without `--no-graph`), the whole training step replays from a graph
+//! captured at the first batch. Under any other optimizer, it steps eagerly.
 
 pub use crate::common::{
     cli::AppArgs,
@@ -26,24 +26,24 @@ use burn::{
 use burn_mamba::prelude::*;
 use burn_stack::examples::trainer::Trainer;
 
-/// The evaluation splits, reported separately: `shuffle` is where the order is
-/// everything and `runs` is where the counts come closest to sufficing, so a
-/// single averaged number would hide the whole point (see [`crate::dataset`]).
+/// The evaluation splits, reported separately. In `shuffle`, only the order
+/// counts. In `runs`, the counts come closest to enough. So one averaged number
+/// would hide the result (see [`crate::dataset`]).
 pub const EVAL_FAMILIES: [(&str, Family); 3] = [
     ("random", Family::Random),
     ("shuffle", Family::Shuffle),
     ("runs", Family::Runs),
 ];
 
-/// The SSD pathway used everywhere in this example. The model is tiny and the
-/// sequences are short, so the simplest (autodiff) variant is the right one.
+/// The SSD path of every call in this example. The model is tiny and the
+/// sequences are short, so the simplest variant (autodiff backward) is right.
 pub fn ssd_path() -> MambaSsdPath {
     MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
 }
 
-/// Run the full training routine: load/init the model and optimizer, then train
-/// for the configured number of epochs (validating and checkpointing along the
-/// way).
+/// Run the full training routine. Load or initialize the model and the
+/// optimizer, then train for the configured number of epochs, with validations
+/// and checkpoints on the way.
 pub fn train(
     training_config: TrainingConfig,
     model_config: MambaLatentNetConfig,
@@ -65,8 +65,8 @@ pub fn train(
     let batcher = ResetSwapBatcher::default();
 
     // The workers build batches on the host, and the loops move them to the
-    // device: a worker uploading to the GPU from its own thread can invalidate
-    // a graph being captured (see `device::loader_device`).
+    // device. A worker that uploads to the GPU from its own thread can
+    // invalidate a graph capture (see `device::loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
@@ -92,8 +92,9 @@ pub fn train(
         })
         .collect();
 
-    // Resume position, budget, cadence and metrics log: by
-    // default a validation every five epochs and no mid-epoch checkpoint.
+    // The session holds the resume position, the budget, the cadence and the
+    // metrics log. By default, it validates every five epochs and saves no
+    // mid-epoch checkpoint.
     let batches = dataloader_train.num_items().div_ceil(training_config.batch_size);
     let cadence = Cadence {
         valid_every: Some(5 * batches),
@@ -150,10 +151,10 @@ type Dataloader = std::sync::Arc<dyn DataLoader<ResetSwapBatch> + 'static>;
 pub type ClassTrainer =
     Trainer<MambaLatentNet, (Tensor<3>, Tensor<2, Int>), (Tensor<2>, Tensor<1, Int>)>;
 
-/// Train `trainer` for (the rest of) one epoch, one step per batch,
-/// checkpointing and validating (on `valid_loaders`) at the `session`'s
-/// cadence. Ends early once the session's budget (`--max-batches` /
-/// `--max-seconds`) runs out.
+/// Train `trainer` for (the rest of) one epoch, one step per batch. It saves
+/// checkpoints and validates (on `valid_loaders`) at the cadence of the
+/// `session`. It stops early at the end of the session budget
+/// (`--max-batches` / `--max-seconds`).
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -225,8 +226,8 @@ pub fn epoch_train(
     session.end_epoch(batches);
 }
 
-/// Validate on every family in turn (each capped at the session's
-/// `valid_batches`), one line and one metrics-log entry each.
+/// Validate on each family in turn, each one capped at the `valid_batches` of
+/// the session. Each family gets one line and one metrics-log entry.
 pub fn validate_all(
     loaders: &[(&str, Dataloader)],
     valid_model: MambaLatentNet,
@@ -278,8 +279,9 @@ impl InferenceStep for Wrap {
     }
 }
 
-/// The training step's [`forward_classification`] on `(inputs, targets)`
-/// (inner backend): the loss, and the scored `(logits, targets)`.
+/// [`forward_classification`] for the training step, on `(inputs, targets)`.
+/// It returns the loss, and the scored `(logits, targets)` on the inner
+/// backend.
 fn train_loss(
     model: &MambaLatentNet,
     (inputs, targets): (Tensor<3>, Tensor<2, Int>),
@@ -288,7 +290,7 @@ fn train_loss(
     (output.loss, (output.output.inner(), output.targets.inner()))
 }
 
-/// Forward the model and score the group element at **every** position.
+/// Forward the model, and score the group element at **every** position.
 pub fn forward_classification(
     model: &MambaLatentNet,
     inputs: Tensor<3>,

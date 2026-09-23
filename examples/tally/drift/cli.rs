@@ -5,13 +5,13 @@ use crate::common::cli::{AppArgs, finish_extra};
 /// `-- --help`.
 const HELP: &str = "\
 tally-drift's own flags (after --):
-    --stock    Replace the computed (Kalman) decay of a fresh model config by the projected one (the rung's ablation)";
+    --stock    Replace the computed (Kalman) decay of a fresh model config by the projected one (the ablation of the rung)";
 
 /// The parsed flags.
 pub struct Cli {
     /// `--stock`: a fresh model config with the stock projected decay instead
-    /// of the computed one, the ablation this rung is about. Once a model
-    /// config is persisted, it wins on reload.
+    /// of the computed one, the ablation that this rung is about. On reload, a
+    /// persisted model config wins.
     pub stock: bool,
 }
 

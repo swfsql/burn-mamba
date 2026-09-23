@@ -1,6 +1,6 @@
-//! The tally-record stream: twelve value symbols `1`…`12` and a reset `R`, whose
-//! per-position target is **whether this value is a new maximum since the last
-//! `R`** (strictly above every earlier one).
+//! The tally-record stream: twelve value symbols `1`…`12` and a reset `R`. The
+//! target at each position is **whether this value is a new maximum since the
+//! last `R`** (strictly above every earlier value).
 //!
 //! ```text
 //!   symbols   3  1  4  4  2  R  2  5  1  6
@@ -8,23 +8,25 @@
 //!   target    +  -  +  -  -  .  +  +  -  +
 //! ```
 //!
-//! A running maximum is `cₜ = max(cₜ₋₁, vₜ)` — the (max, +) recursion with
-//! `a = 0`, `b = v` — so one tropical register holds it whatever the alphabet.
-//! A linear state cannot: the best it can do is compare against a decaying
-//! average, which [`gen_plateau`] defeats by setting the maximum early and then
-//! never approaching it again.
+//! A running maximum is `cₜ = max(cₜ₋₁, vₜ)`: the (max, +) recursion with
+//! `a = 0`, `b = v`. So one tropical register holds it, whatever the alphabet.
+//! A linear state can hold it only as a sum in the exponential domain, and that
+//! route runs out of range (see the crate docs). Otherwise, the best that a
+//! linear state can do is to compare against a decaying average. [`gen_plateau`]
+//! defeats that: it sets the maximum early, and then it never comes near it
+//! again.
 //!
-//! The *width* argument is why the values are read off a circle rather than
-//! one-hot: a linear state could hold one **latch** per threshold
-//! ("has a value ≥ k been seen?"), and the per-token gate could select the
-//! latch the current value names, so at `d_model ≥ 12` a stock block would
-//! solve this exactly. At `d_model = 3` it cannot — every in-projection channel
-//! is an affine functional of a 3-D embedding, and the twelve indicators
-//! `[v ≥ k]` are not affine in one, while the register's `b = S·v` is.
+//! The *width* argument is why the values are read from a circle, not one-hot.
+//! A linear state can hold one **latch** per threshold ("was a value ≥ k
+//! seen?"), and the per-token gate can select the latch that the current value
+//! names. So at `d_model ≥ 12`, a stock block solves this exactly. At
+//! `d_model = 3`, it cannot. Every in-projection channel is an affine function
+//! of a 3-D embedding. The twelve indicators `[v ≥ k]` are not affine in one,
+//! but the `b = S·v` of the register is.
 
 use crate::shared::data::{Generator, IGNORE, Rng};
 
-/// Number of distinct values (`1`…`12`); symbol `i` carries value `i + 1`.
+/// Number of distinct values (`1`…`12`). Symbol `i` carries value `i + 1`.
 pub const NUM_VALUES: usize = 12;
 /// Input symbol: clear the running maximum.
 pub const RESET: usize = NUM_VALUES;
@@ -45,7 +47,7 @@ pub fn value(symbol: usize) -> Option<i64> {
 }
 
 /// Per-position targets: at every value, whether it exceeds the running maximum
-/// since the last reset; [`IGNORE`] at a reset.
+/// since the last reset. [`IGNORE`] at a reset.
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     let mut max = i64::MIN;
     symbols
@@ -77,10 +79,11 @@ pub fn gen_random(rng: &mut Rng, len: usize) -> Vec<usize> {
         .collect()
 }
 
-/// **The plateau family.** A high value early, then a long run that never
-/// reaches it (with ties, which are *not* records), then one value above it.
-/// Any comparison against a decaying average drifts down to the run and starts
-/// calling its ordinary values records.
+/// **The plateau family.** A high value early, then a run of 4 to 10 values
+/// that never exceed it (ties occur, and they are *not* records), then a climb
+/// of one or more records above it. Any comparison against a decaying average
+/// drifts down to the run, and then it calls the ordinary values of the run
+/// records.
 pub fn gen_plateau(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -99,9 +102,9 @@ pub fn gen_plateau(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// **The climb family.** A staircase: each new maximum is reached exactly once,
-/// interleaved with values below it, so telling a record from a tie is the
-/// whole task and the answer moves every few tokens.
+/// **The climb family.** A staircase. Each new maximum occurs exactly once as a
+/// record, with values at or below it between the records. So the whole task is
+/// to tell a record from a tie, and the answer changes every few tokens.
 pub fn gen_climb(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -120,15 +123,15 @@ pub fn gen_climb(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// **The bands family.** Each segment is confined to a narrow band of the
-/// alphabet — the bottom, the middle or the top — so a record is decided by
-/// neighbouring values wherever the band sits.
+/// **The bands family.** Each segment stays in a narrow band of four values of
+/// the alphabet (the bottom, the middle or the top). So neighbouring values
+/// decide a record, wherever the band is.
 ///
 /// This is the range adversary. The other way to hold a maximum is a sum of
-/// `exp(S·v)`, which needs `e^S` to exceed the sequence length *and* the whole
-/// alphabet's span to fit in one channel's precision; an arm that spends its
-/// resolution near the top of the alphabet is then blind at the bottom, and this
-/// family scores both ends equally.
+/// `exp(S·v)`. It needs `e^S` to exceed the sequence length, *and* the span of
+/// the whole alphabet to fit in the precision of one channel. An arm that uses
+/// its resolution near the top of the alphabet is then blind at the bottom, and
+/// this family scores both ends equally.
 pub fn gen_bands(rng: &mut Rng, len: usize) -> Vec<usize> {
     let width = 4;
     let mut out = Vec::with_capacity(len);
@@ -143,22 +146,22 @@ pub fn gen_bands(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// **The edge family.** Every token sits within one step of the running
-/// maximum: `v ∈ {max − 1, max, max + 1}`, so a record is exactly `v = max + 1`
-/// and *every scored position* is decided by knowing the maximum — not by the
-/// value being large, which is what carries the other families.
+/// **The edge family.** Every token is within one step of the running maximum:
+/// `v ∈ {max − 1, max, max + 1}`. So a record is exactly `v = max + 1`, and
+/// only the maximum decides *every scored position*. A large value alone does
+/// not, and that is what carries the other families.
 ///
-/// It is the analogue of `tally-drift`'s knife burst, and for the same reason:
-/// a comparison against a decaying **average** sits below the maximum, so it
-/// calls both `max` and `max + 1` a record and is wrong on a third of the
-/// stream however it is tuned.
+/// It is the analogue of the knife burst of `tally-drift`, for the same reason.
+/// A comparison against a decaying **average** is below the maximum. So it
+/// calls both `max` and `max + 1` a record, and it is wrong on a third of the
+/// stream, however it is tuned.
 pub fn gen_edge(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
         out.push(RESET);
         // start in the lower half, so the walk has room to climb
         let mut max: usize = 1 + rng.below(NUM_VALUES / 2);
-        out.push(max - 1); // the segment's first value, a record by definition
+        out.push(max - 1); // the first value of the segment, a record by definition
         for _ in 0..rng.range(6, 14) {
             // `max − 1`, `max` or `max + 1`, clipped to the alphabet
             let v = (max + rng.below(3)).saturating_sub(1).clamp(1, NUM_VALUES);
@@ -170,8 +173,8 @@ pub fn gen_edge(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// The training mixture: half [`gen_random`], the rest split over the
-/// adversarial families.
+/// The training mixture: a third [`gen_random`], and a sixth for each
+/// adversarial family.
 pub fn gen_mixed(rng: &mut Rng, len: usize) -> Vec<usize> {
     match rng.below(6) {
         0 => gen_plateau(rng, len),
@@ -191,7 +194,7 @@ pub const FAMILIES: &[(&str, Generator)] = &[
     ("edge", gen_edge as Generator),
 ];
 
-/// This rung's [`Task`](crate::shared::Task).
+/// The [`Task`](crate::shared::Task) of this rung.
 pub fn task() -> crate::shared::Task {
     crate::shared::Task {
         num_symbols: NUM_SYMBOLS,

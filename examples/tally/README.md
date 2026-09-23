@@ -331,7 +331,7 @@ do not buy more.
 
 - At six values and 32 tokens, the span is `e^{20} ≈ 5·10⁸`, and a trained
   stock block solves the task (~100%).
-- At twelve values and 64 tokens (this rung), the span is
+- At twelve values and 64 tokens (this rung), the span is at least
   `e^{45.8} ≈ 8·10¹⁹`. f32 holds about `10⁷`, and the hand-built arm falls to
   59.8% on `climb`.
 

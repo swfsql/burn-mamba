@@ -5,12 +5,12 @@ use crate::common::cli::{AppArgs, finish_extra};
 /// `-- --help`.
 const HELP: &str = "\
 mnist-ae's own flags (after --):
-    --latents <N>    The latent bottleneck width baked into a fresh model config (default 16)";
+    --latents <N>    The latent bottleneck width of a fresh model config (default 16)";
 
 /// The parsed flags.
 pub struct Cli {
-    /// `--latents`: the bottleneck width of a fresh model config. (Once a
-    /// model config is persisted, it wins on reload.)
+    /// `--latents`: the bottleneck width of a fresh model config. (On reload, a
+    /// persisted model config wins.)
     pub latents: usize,
 }
 

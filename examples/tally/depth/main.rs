@@ -1,13 +1,13 @@
-//! # tally-depth — the smallest task a *tropical register* is needed for
+//! # tally-depth: the smallest task that needs a *tropical register*
 //!
-//! One Mamba-3 block reads `(` / `)` / `R` and reports, at every `)`, whether
-//! the bracket depth is **still positive** — where a `)` at depth 0 closes
-//! nothing rather than going negative.
+//! One Mamba-3 block reads `(` / `)` / `R`. At every `)`, it reports whether
+//! the bracket depth is **still positive**. A `)` at depth 0 closes nothing:
+//! the depth does not go negative.
 //!
 //! That floor is the whole rung. A linear recurrence computes the *unclamped*
-//! sum, which the `floor` family misleads at a third of the scored positions;
-//! the clamp is `max(cₜ₋₁ + aₜ, 0)`, linear in the (max, +) semiring and exact
-//! for one tropical register, whose plant here does nothing at all.
+//! sum, and the `floor` family misleads it at a third of the scored positions.
+//! The clamp is `max(cₜ₋₁ + aₜ, 0)`. It is linear in the (max, +) semiring,
+//! and one tropical register computes it exactly. The plant does nothing here.
 //!
 //! The task, the measurements and how to run it: `examples/tally/README.md`.
 
@@ -33,7 +33,7 @@ pub mod tests;
 /// Shared example infrastructure (included by path).
 #[path = "../../common/mod.rs"]
 pub mod common;
-/// The `tally-*` ladder's shared dataset, loops and helpers.
+/// The shared dataset, loops and helpers of the `tally-*` ladder.
 #[path = "../shared/mod.rs"]
 pub mod shared;
 

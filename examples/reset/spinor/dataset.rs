@@ -1,34 +1,34 @@
-//! The reset-spinor dataset: a three-symbol stream whose per-position target is
-//! the **running product in the quaternion group `Q₈`** since the last reset.
+//! The reset-spinor dataset: a three-symbol stream. The target at each
+//! position is the **running product in the quaternion group `Q₈`** since the
+//! last reset.
 //!
-//! `i` and `j` each multiply the accumulated state **on the left**; `R` resets it
-//! to `1`. The eight states are `±1, ±i, ±j, ±k`:
+//! `i` and `j` each multiply the accumulated state **on the left**. `R` resets
+//! it to `1`. The eight states are `±1, ±i, ±j, ±k`:
 //!
 //! ```text
 //!   symbols   R   i   j   i   j   R   j   i   i
-//!   state     1   i   k  -j  -1   1   j  -k  -i
-//!   target    0   1   3   6   4   0   2   7   5
+//!   state     1   i  -k   j  -1   1   j   k  -j
+//!   target    0   1   7   2   4   0   2   3   6
 //! ```
 //!
 //! `Q₈` is the smallest non-abelian group of unit quaternions, and that is the
-//! whole point: `ij = k` but `ji = −k`, so **how many** `i`s and `j`s have gone
-//! by never determines the answer — only their **order** does. Formally the
-//! commutator subgroup is `{±1}`, so the symbol counts pin the state down to a
-//! sign and no further ([`counts_since_reset`] is what the ceilings in
-//! `tests.rs` are computed over).
+//! whole point. `ij = k` but `ji = −k`, so the **number** of `i`s and `j`s
+//! never determines the answer. Only their **order** does. Formally, the
+//! commutator subgroup is `{±1}`, so the symbol counts determine the state only
+//! up to a sign. (The ceilings in `tests.rs` use [`counts_since_reset`].)
 //!
-//! Three properties make this the task a **quaternion** Mamba-3 block is for:
+//! Three properties make this a task for a **quaternion** Mamba-3 block:
 //!
-//! - **It needs the SSM state.** The lookback is unbounded and the label is not
-//!   a function of the current symbol; Mamba-3 has no short convolution, so the
-//!   recurrent state is the model's only memory.
-//! - **It needs the state to turn.** The label is periodic in every direction —
-//!   `i⁴ = 1` — which no real, non-negative-eigenvalue state can report (the
-//!   argument of `reset-rotor`, one rung down).
-//! - **And it needs the turns to *not commute*.** An abelian (`Complex2D`)
-//!   rotation accumulates a **sum** of angles, and a sum forgets the order; the
-//!   quaternion accumulates an ordered **product**, which is exactly `Q₈`'s
-//!   composition. [`Family::Shuffle`] pins that down.
+//! - **It needs the SSM state.** The lookback has no bound, and the label is
+//!   not a function of the current symbol. Mamba-3 has no short convolution, so
+//!   the recurrent state is the only memory of the model.
+//! - **It needs the state to turn.** The label is periodic in every direction
+//!   (`i⁴ = 1`). No real state with non-negative eigenvalues can report that
+//!   (the argument of `reset-rotor`, one rung down).
+//! - **It needs the turns to *not commute*.** An abelian (`Complex2D`)
+//!   rotation accumulates a **sum** of angles, and a sum forgets the order. The
+//!   quaternion accumulates an ordered **product**, which is exactly the
+//!   composition of `Q₈`. [`Family::Shuffle`] tests this.
 
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -83,19 +83,19 @@ pub fn left_mul(unit: usize, state: i64) -> i64 {
     UNIT_MUL[unit][s_unit] as i64 + if neg { 4 } else { 0 }
 }
 
-/// The class as a unit quaternion `(w, x, y, z)` — the vector the block's own
-/// state holds, and the column the classifier head reads it with.
+/// The class as a unit quaternion `(w, x, y, z)`: the vector in the state of
+/// the block, and the column of the classifier head that reads it.
 pub fn quaternion(class: i64) -> [f64; 4] {
     let mut q = [0.0; 4];
     q[(class % 4) as usize] = if class >= 4 { -1.0 } else { 1.0 };
     q
 }
 
-/// The per-position targets implied by a symbol sequence: the running product
-/// since the last `RESET`, as a class index.
+/// The per-position targets of a symbol sequence: the running product since
+/// the last `RESET`, as a class index.
 ///
-/// The newest factor multiplies **on the left**, matching the block's own
-/// cumulative rotation (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
+/// The newest factor multiplies **on the left**, like the cumulative rotation
+/// of the block (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     let mut state = IDENTITY;
     symbols
@@ -112,11 +112,11 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// How many `i`s and `j`s have gone by since the last reset, at every position.
+/// The number of `i`s and `j`s since the last reset, at every position.
 ///
-/// This is everything an **abelian** transition can carry: a cumulative sum of
-/// per-symbol angles is a linear function of exactly these two numbers. It
-/// determines the answer only up to a sign — see the module docs.
+/// This is everything that an **abelian** transition can carry: a cumulative
+/// sum of per-symbol angles is a linear function of exactly these two numbers.
+/// It determines the answer only up to a sign (see the module docs).
 pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
     let (mut a, mut b) = (0, 0);
     symbols
@@ -140,25 +140,27 @@ pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
 /// Which generator a split draws from. Every family opens with a `RESET`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~⅛, otherwise `i` / `j`
-    /// evenly. Resets are frequent, so many positions carry a **short** word —
-    /// and a short word is often pinned down by its symbol counts alone.
+    /// Independent symbols after the first `RESET`: `RESET` with probability
+    /// ⅛, `i` ⅜ and `j` ½. Resets are frequent, so many positions carry a
+    /// **short** word, and the symbol counts alone often determine a short
+    /// word.
     Random,
-    /// One reset, then a shuffled bag of equally many `i`s and `j`s: the counts
-    /// are fixed by construction and only the **order** varies. This is where an
-    /// abelian state has nothing left to read.
+    /// One reset, then a shuffled bag of `i`s and `j`s in equal numbers (one
+    /// extra `i` when the tail length is odd). The construction fixes the
+    /// counts, and only the **order** varies. Here, an abelian state has
+    /// nothing left to read.
     Shuffle,
-    /// One reset, then long runs of one symbol (`i…i j…j i…i`). The word is
-    /// still non-commutative, but grouping it into blocks is the case where the
-    /// counts come closest to determining the product — the family every
-    /// order-blind model does best on.
+    /// One reset, then alternating runs of 3 to 8 copies of one symbol
+    /// (`i…i j…j i…i`). The word is still non-commutative. But in blocks, the
+    /// counts come closest to determining the product, so every order-blind
+    /// model does best on this family.
     Runs,
     /// The training mixture: half [`Self::Random`], a quarter of each of the
     /// other two.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -286,8 +288,9 @@ pub struct ResetSpinorBatch {
 }
 
 impl ResetSpinorBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

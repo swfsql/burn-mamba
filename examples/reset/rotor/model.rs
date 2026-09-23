@@ -12,7 +12,7 @@ use burn_mamba::prelude::{
 ///
 /// ```ignore
 /// Δₕ(u) = softplus(⟨aₕ, u⟩ + bₕ)     Aₕ(u) = −softplus(⟨cₕ, u⟩)     ᾱₕ = exp(Δₕ Aₕ)
-/// ϱ(u)  = Δₕ · π · tanh(ϑ(u))        θₜ = θₜ₋₁ + ϱ(uₜ)              (cumulative)
+/// ϱ(u)  = Δₕ · 2π · tanh(ϑ(u))       θₜ = θₜ₋₁ + ϱ(uₜ)              (cumulative)
 /// hₜ⁽ʰ⁾ = ᾱₕ hₜ₋₁⁽ʰ⁾ + γₕ R(θₜ)B(uₜ) xₕ(uₜ)
 /// yₜ⁽ʰ⁾ = (R(θₜ)Cₕ)ᵀ hₜ⁽ʰ⁾ + Dₕ xₕ(uₜ)
 /// ```

@@ -1,10 +1,11 @@
-//! Inference for the reset-swap example: loads the trained model and reports
-//! accuracy on each evaluation family, plus a decoded sample sequence.
+//! Inference for the reset-swap example. It loads the trained model, reports
+//! the accuracy on each evaluation family, and prints one decoded sample
+//! sequence.
 
 use crate::AppArgs;
 use crate::dataset::{
     EVAL_SEED, Family, NUM_CLASSES, NUM_EVAL, RESET, ResetSwapBatcher, ResetSwapDataset,
-    ResetSwapItem, SEQ_LENGTH, SWAP_S, SWAP_T,
+    ResetSwapItem, SEQ_LENGTH, SWAP_L, SWAP_R,
 };
 use crate::training::{EVAL_FAMILIES, ssd_path};
 use burn::{
@@ -13,7 +14,8 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-family accuracy on fresh eval sets.
+/// Load the trained model, and report the accuracy of each family on its
+/// evaluation set (generated from `EVAL_SEED`).
 pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args: &AppArgs) {
     let model: MambaLatentNet = app_args
         .load_model(&model_config, &infer_device)
@@ -58,7 +60,7 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
     }
 }
 
-/// Accuracy split by target group element, rendered as `1 99% i 99% …`.
+/// Accuracy split by target group element, rendered as `abc 99% acb 99% …`.
 fn per_class(pred: &[i32], target: &[i32]) -> String {
     let mut hit = [0u64; NUM_CLASSES];
     let mut all = [0u64; NUM_CLASSES];
@@ -92,26 +94,27 @@ fn argmax_classes(output: Tensor<3>) -> Vec<i32> {
         .unwrap()
 }
 
-/// The six classes, in index order: the order the three items are left in.
-const ELEMENTS: [&str; NUM_CLASSES] = ["abc", "acb", "bac", "bca", "cab", "cba"];
+/// The six classes, in index order: the final order of the three items (see
+/// `dataset::PERMS`).
+const ELEMENTS: [&str; NUM_CLASSES] = ["abc", "acb", "bac", "cab", "bca", "cba"];
 
 fn render_symbols(symbols: &[usize]) -> String {
     symbols
         .iter()
         .map(|&s| match s {
-            SWAP_S => 's',
-            SWAP_T => 't',
+            SWAP_L => 'l',
+            SWAP_R => 'r',
             RESET => 'R',
             _ => '?',
         })
         .collect()
 }
 
-/// One char per class: the item left in **first** position, upper-case for the
-/// three odd permutations (the swaps) and lower-case for the three even ones
-/// (identity and the two 3-cycles), so parity — all a left-isoclinic state can
-/// carry — is visible at a glance.
+/// One char per class: the item in the **first** position. It is upper-case
+/// for the three odd permutations (the swaps) and lower-case for the three even
+/// ones (the identity and the two 3-cycles). So the parity, which is all that a
+/// left-isoclinic state can carry, is easy to see.
 fn render_classes(classes: &[i64]) -> String {
-    const CHARS: [char; NUM_CLASSES] = ['a', 'A', 'B', 'b', 'c', 'C'];
+    const CHARS: [char; NUM_CLASSES] = ['a', 'A', 'B', 'c', 'b', 'C'];
     classes.iter().map(|&c| CHARS[c as usize]).collect()
 }

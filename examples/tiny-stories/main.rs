@@ -61,9 +61,9 @@ pub fn launch(app_args: &AppArgs) {
     let cli = cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
-    // `Device::default()` resolves to the enabled `backend-*` feature (honouring
-    // the `BURN_DEVICE` env override); `configure_dtype` installs fp16/i32 when
-    // `dev-f16` is on.
+    // `Device::default()` resolves to the enabled `backend-*` feature (and it
+    // honours the `BURN_DEVICE` env override). `configure_dtype` installs
+    // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
     let autodiff_device = device.clone().autodiff();

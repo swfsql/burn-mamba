@@ -1,21 +1,23 @@
 //! The four claims this rung rests on, measured.
 //!
-//! 1. A **hand-built** block solves the task exactly — every weight in closed
-//!    form, the plant's state unused: one tropical register per head is the
-//!    whole solution, at any alphabet size.
-//! 2. The **same block with the register removed** cannot, for any decaying
-//!    comparison on a four-dimensional grid (decay, write offset, current-token
-//!    gain, threshold) — the best it has is an average, which sits *below* a
-//!    maximum, and the `edge` family is built on exactly that.
+//! 1. A **hand-built** block solves the task exactly. Every weight is in closed
+//!    form, and the state of the plant is unused: one tropical register per
+//!    head is the whole solution, at any alphabet size.
+//! 2. The **same block without the register** cannot, for any decaying
+//!    comparison on a four-dimensional grid (decay, write offset,
+//!    current-token gain, threshold). The best that it has is an average,
+//!    which is *below* a maximum, and the `edge` family is built on exactly
+//!    that.
 //! 3. A maximum **is** a sum in the exponential domain, and that arm needs no
-//!    register — but it needs the alphabet's whole span inside one channel, and
+//!    register. But it needs the whole span of the alphabet inside one channel:
+//!    at least `e^{45.8}` at twelve values and 64 tokens.
 //!    [`the_exponential_domain_arm_costs_range`] measures what f32 does with
-//!    `e^{45.8}`. It is why this rung is posed at twelve values rather than six,
-//!    where a trained stock block solves it (~100%).
-//! 4. The width closes the third route, the latches: at `d_model = 3` a block can
-//!    make one function of the symbol an affine channel (the tests report the
-//!    residuals) but not the twelve threshold indicators one latch per value
-//!    needs.
+//!    such a span (it uses `S = 12`, so `e^{132}`). That is why this rung has
+//!    twelve values, not six, where a trained stock block solves it (~100%).
+//! 4. The width closes the third route, the latches. At `d_model = 3`, a block
+//!    can make one function of the symbol an affine channel (the tests report
+//!    the residuals), but not the twelve threshold indicators that one latch
+//!    per value needs.
 
 use crate::dataset::{FAMILIES, NUM_SYMBOLS, NUM_VALUES, RESET, labels, task, value};
 use crate::model::{NUM_CLASSES, model_config};
@@ -30,35 +32,37 @@ type Device = burn::prelude::Device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `S`: the register's units per value step. The soft maximum exceeds the hard
-/// one by at most `ln(T + 1)` (≈ 3.5 at `T = 32`) — in *register* units, so a
-/// value step has to be worth more than that plus the decision margin.
+/// `S`: the units of the register per value step. The soft maximum exceeds the
+/// hard maximum by at most `ln(T + 1)` (≈ 4.2 at `T = 64`), in *register*
+/// units. So a value step must be worth more than that plus the decision
+/// margin.
 const SCALE: f64 = 12.0;
-/// The decision offset, half of `ln 2`: a record clears `−n·e^(−S)` from below,
-/// a tie or a lower value sits at `−ln 2` or under.
+/// The decision offset, half of `ln 2`. A record clears `−n·e^(−S)` from below,
+/// and a tie or a lower value is at `−ln 2` or below.
 const THETA: f64 = std::f64::consts::LN_2 / 2.0;
-/// `a`/`b` on an `R`: enough to put the register below any value's own.
+/// `a`/`b` on an `R`: enough to put the register below the level of any value.
 const RESET_DROP: f64 = 1000.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// `Â` for a held state: `A = −softplus(Â)` lands under the block's `a_floor`.
+/// `Â` for a held state: `|A| = softplus(Â)` is below the `a_floor` of the
+/// block.
 const A_HOLD_RAW: f64 = -20.0;
-/// A `Δ` small enough that the plant's state never leaves zero.
+/// A `Δ` small enough that the state of the plant stays at zero.
 const DELTA_OFF: f64 = 1e-12;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 
 /// The symbol embeddings: the values on a circle of radius `√2` at height `1`,
-/// the reset at the far pole. Every embedding has norm `√3`, which the layer's
-/// pre-`RmsNorm` (`γ = 1`) passes through unchanged.
+/// and the reset at the far pole. Every embedding has norm `√3`, so the
+/// pre-`RmsNorm` of the layer (`γ = 1`) does not change it.
 ///
-/// **Which** coordinate the values are spread by is the arm's choice, and it is
-/// the interesting part: an embedding is a free 13×3 map, so a block can make
-/// **one** function of the symbol an affine channel — and only about three
-/// independent ones, which is what denies the latch route (twelve indicators)
-/// at this width. The register's arm spreads them by the value (`cos ∝ v`), the
-/// exponential arm by `u(v)`; a *trained* model picks for itself, and picks the
-/// second (see the README's trained row).
+/// **Which** coordinate spreads the values is the choice of the arm, and it is
+/// the interesting part. An embedding is a free 13×3 map, so a block can make
+/// **one** function of the symbol an affine channel, and only about three
+/// independent ones. That denies the latch route (twelve indicators) at this
+/// width. The arm of the register spreads the values by the value
+/// (`cos ∝ v`), and the exponential arm by `u(v)`. A *trained* model picks for
+/// itself, and it picks the second (see the trained row in the README).
 fn embeddings(spread: &dyn Fn(usize) -> f64) -> Vec<Vec<f64>> {
     let r = 2.0f64.sqrt();
     let mut out: Vec<Vec<f64>> = (0..NUM_VALUES)
@@ -86,9 +90,9 @@ fn by_exp() -> Vec<Vec<f64>> {
     embeddings(&|i| 2.0 * exp_write(i as f64 + 1.0, i) - 1.0)
 }
 
-/// `u(v) = exp(S·(v − v_max))`: one value step is worth `e^S = 2980`, more than
-/// a whole sequence of smaller ones (`T = 32`), so a sum of these is a maximum
-/// — and it never overflows, since the largest is 1.
+/// `u(v) = exp(S·(v − v_max))`. One value step is worth `e^S ≈ 1.6·10⁵`, more
+/// than a whole sequence of smaller values (`T = 64`), so a sum of these is a
+/// maximum. It never overflows, because the largest is 1.
 fn exp_write(v: f64, symbol: usize) -> f64 {
     if symbol == RESET {
         0.0
@@ -100,20 +104,20 @@ fn exp_write(v: f64, symbol: usize) -> f64 {
 /// Which arm to build.
 #[derive(Clone, Copy, Debug)]
 enum Arm {
-    /// The rung's own construction: a running maximum in one register.
+    /// The construction of the rung: a running maximum in one register.
     Register,
-    /// The ablation: no register; head 0 accumulates a decaying average of the
-    /// values, compared against the current one.
+    /// The ablation: no register. Head 0 accumulates a decaying average of the
+    /// values, compared against the current value.
     Stock {
         alpha: f64,
         offset: f64,
         gain: f64,
         theta: f64,
     },
-    /// The ablation that **works**: no register; head 0 holds the plain sum of
-    /// `u(v) = exp(S·(v − v_max))` — a running maximum in the exponential
-    /// domain, since one value step is worth more than a whole sequence of
-    /// smaller ones — read as `u(vₜ) − hₜ₋₁`.
+    /// The ablation that **works**: no register. Head 0 holds the plain sum of
+    /// `u(v) = exp(S·(v − v_max))`, read as `u(vₜ) − hₜ₋₁`. That is a running
+    /// maximum in the exponential domain, because one value step is worth more
+    /// than a whole sequence of smaller values.
     ExpWrite,
 }
 
@@ -140,16 +144,17 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let block = &mut layer.block;
 
     // ── block in_proj ────────────────────────────────────────────────────────
-    // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | a(3) | b(3)]`
-    // — the last six are the registers', absent in the ablation arm.
+    // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | a(3) | b(3)]`.
+    // The last six belong to the registers, and the ablation arms do not have
+    // them.
     let per_symbol = |f: &dyn Fn(usize) -> f64| (0..NUM_SYMBOLS).map(f).collect::<Vec<f64>>();
     let off = vec![softplus_inv(DELTA_OFF); NUM_SYMBOLS];
     let hold = vec![A_HOLD_RAW; NUM_SYMBOLS];
     let mut targets: Vec<Vec<f64>> = vec![vec![Z_PRE; NUM_SYMBOLS]; 3]; // z, three heads
     match arm {
         Arm::Register => {
-            // head 0 reads `S·v + θ` against its register; head 1 is the
-            // reference; head 2 is inert.
+            // Head 0 reads `S·v + θ` against its register. Head 1 is the
+            // reference. Head 2 is inert.
             targets.push(per_symbol(&|s| SCALE * values[s] + THETA));
             targets.push(vec![1.0; NUM_SYMBOLS]);
             targets.push(vec![0.0; NUM_SYMBOLS]);
@@ -157,8 +162,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
         Arm::Stock {
             offset, gain, ..
         } => {
-            // head 0 accumulates `v + offset` (and nothing on a reset), head 1
-            // is the reference, head 2 carries the current value's term.
+            // Head 0 accumulates `v + offset` (and nothing on a reset). Head 1
+            // is the reference. Head 2 carries the term of the current value.
             targets.push(per_symbol(&|s| {
                 if s == RESET { 0.0 } else { values[s] + offset }
             }));
@@ -166,7 +171,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.push(per_symbol(&|s| gain * values[s]));
         }
         Arm::ExpWrite => {
-            // head 0 writes `u(v)`, head 1 is the reference, head 2 is inert.
+            // Head 0 writes `u(v)`. Head 1 is the reference. Head 2 is inert.
             targets.push(per_symbol(&|s| exp_write(values[s], s)));
             targets.push(vec![1.0; NUM_SYMBOLS]);
             targets.push(vec![0.0; NUM_SYMBOLS]);
@@ -179,7 +184,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.extend([off.clone(), off.clone(), off.clone()]); // Δ: the plant never writes
             targets.extend([hold.clone(), hold.clone(), hold.clone()]); // A
             // The register: `a = 0` holds the maximum, `b = S·v` offers this
-            // value, and a reset drops both out of reach.
+            // value, and a reset drops both far below every value.
             targets.push(per_symbol(&|s| if s == RESET { -RESET_DROP } else { 0.0 }));
             targets.push(vec![0.0; NUM_SYMBOLS]); // a, head 1
             targets.push(vec![0.0; NUM_SYMBOLS]); // a, head 2
@@ -197,7 +202,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
                 if s == RESET {
                     softplus_inv(20.0) // a reset wipes the average
                 } else {
-                    // `α → 0` is "keep only the current token"; the clamp keeps
+                    // `α → 0` is "keep only the current token". The clamp keeps
                     // `−ln α` finite there.
                     softplus_inv((-alpha.max(1e-6).ln()).max(1e-9))
                 }
@@ -208,8 +213,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.push(vec![softplus_inv(1.0); NUM_SYMBOLS]); // Δ, head 0 = 1
             targets.push(off.clone()); // Δ, head 1
             targets.push(off); // Δ, head 2
-            // The sum is held (`α ≈ 1`) and wiped on a reset — a decay of one is
-            // the *only* growth rate the plant has, which is the whole of what
+            // The sum is held (`α ≈ 1`) and wiped on a reset. A decay of one is
+            // the *only* growth rate of the plant, and that decides all that
             // this arm can and cannot do.
             targets.push(per_symbol(&|s| {
                 if s == RESET { softplus_inv(20.0) } else { A_HOLD_RAW }
@@ -225,7 +230,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     block.dt_bias_h = param(&[0.0; 3], [3], device);
     block.d_h = match arm {
         Arm::Register => param(&[1.0, 1.0, 0.0], [3], device),
-        // head 0 reads its state alone (`C = −1` below), head 2 is its skip.
+        // Head 0 reads only its state (`C = −1` below). Head 2 is its skip.
         Arm::Stock { .. } => param(&[0.0, 1.0, 1.0], [3], device),
         // `y = −hₜ + 2·u(vₜ) = u(vₜ) − hₜ₋₁`, the state carrying its own write.
         Arm::ExpWrite => param(&[2.0, 1.0, 0.0], [3], device),
@@ -233,8 +238,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
     block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([3, 1, 1]), device));
-    // `C = −1` on head 0 in the ablation arm: its average is *subtracted* from
-    // the current value. QK-norm pins |C| = 1, so the sign lives in the bias.
+    // `C = −1` on head 0 in the ablation arms: its state is *subtracted* from
+    // the current value. QK-norm pins |C| = 1, so the sign is in the bias.
     block.c_bias_hmr = match arm {
         Arm::Register => Param::from_tensor(Tensor::zeros(Shape::new([3, 1, 1]), device)),
         Arm::Stock { .. } | Arm::ExpWrite => param(&[-2.0, 0.0, 0.0], [3, 1, 1], device),
@@ -245,8 +250,9 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     }
 
     // ── the two projections ──────────────────────────────────────────────────
-    // The block's `out_proj` keeps head 0 on dim 0 and the reference on dim 1;
-    // in the ablation arm head 2's current-value term joins head 0 on dim 0.
+    // The `out_proj` of the block keeps head 0 on dim 0 and the reference on
+    // dim 1. In the `Stock` arm, the current-value term of head 2 joins head 0
+    // on dim 0.
     let out_w = match arm {
         Arm::Register | Arm::ExpWrite => vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
         Arm::Stock { .. } => vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
@@ -281,8 +287,8 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight in closed form; no training anywhere. `Δ = 1e-12` in every
-/// head, so the SSM state is zero throughout: the register answers.
+/// Every weight is in closed form. There is no training. `Δ = 1e-12` in every
+/// head, so the SSM state stays at zero: the register gives the answer.
 #[test]
 fn handmade_register_solves_every_family() {
     let device = Device::default();
@@ -299,12 +305,12 @@ fn handmade_register_solves_every_family() {
 // 2. no decaying comparison reaches it
 // ---------------------------------------------------------------------------
 
-/// The same block with the register **removed** and head 0 turned into a
-/// decaying average of the values instead, compared against the current one:
-/// `y = gain·v − h + θ`, `h = α·h + (v + offset)`, a reset wiping `h`.
+/// The same block **without** the register, and with head 0 as a decaying
+/// average of the values instead, compared against the current value:
+/// `y = gain·v − h + θ`, `h = α·h + (v + offset)`, and a reset wipes `h`.
 ///
-/// The whole grid is swept and only the best point per decay is printed, so the
-/// number bounds the ablated *architecture* rather than one fitting of it.
+/// The test sweeps the whole grid and prints only the best point per decay. So
+/// the number bounds the ablated *architecture*, not one fitting of it.
 #[test]
 fn no_decaying_comparison_solves_the_task() {
     let device = Device::default();
@@ -356,26 +362,26 @@ fn no_decaying_comparison_solves_the_task() {
 // 2b. what the register does *not* buy
 // ---------------------------------------------------------------------------
 
-/// The ablation that works, and the reason this rung is a coda rather than a
+/// The ablation that works, and the reason why this rung is a coda, not a
 /// wall: a **maximum is a sum in the exponential domain**. A plain linear state
-/// holding `Σ exp(S·vₛ)` with a decay of one *is* the register's
-/// `log Σ exp(S·vₛ)`, and the comparison a record needs — `u(vₜ) > hₜ₋₁` — is
-/// linear in that domain, so the logarithm is never taken and the register is
-/// not needed.
+/// that holds `Σ exp(S·vₛ)` with a decay of one *is* the `log Σ exp(S·vₛ)` of
+/// the register. The comparison that a record needs, `u(vₜ) > hₜ₋₁`, is linear
+/// in that domain. So the logarithm is never taken, and the register is not
+/// needed.
 ///
-/// The identity is checked in f64 by `scripts/kalman/gate_as_positive_system.py` §5.4;
-/// this test measures what it costs **in f32**, which is what makes the rung.
+/// `scripts/kalman/gate_as_positive_system.py` §5.4 checks the identity in
+/// f64. This test measures what it costs **in f32**, and that makes the rung.
 ///
 /// The arm writes `u(v) = exp(S·(v − v_max))` through an embedding coordinate.
-/// At six values and 32 tokens that span is `e^{20}` and a trained stock block
-/// solves the task; at twelve and 64 it is `e^{45.8}`, the lower values collapse
-/// onto one embedding point, and the arm is nowhere near exact. More heads do
-/// not help: every channel is an affine read of the *same* embedding, so they
-/// share one mantissa's worth of resolution.
+/// At six values and 32 tokens, that span is `e^{20}`, and a trained stock
+/// block solves the task. At twelve values and 64 tokens, it is at least
+/// `e^{45.8}`. The lower values then collapse onto one embedding point, and the
+/// arm is far from exact. More heads do not help: every channel is an affine
+/// read of the *same* embedding, so they share the resolution of one mantissa.
 ///
-/// What the register has over it is that **range** — it carries `S·v` where the
-/// sum carries `e^{S·v}` — and, in `tally-depth`, **growth**: `a > 0` is a decay
-/// above one, which the plant's `α = exp(Δ·A) ≤ 1` cannot express at all.
+/// The register has that **range** over it: it carries `S·v` where the sum
+/// carries `e^{S·v}`. In `tally-depth`, it also has **growth**: `a > 0` is a
+/// decay above one, which the `α = exp(Δ·A) ≤ 1` of the plant cannot express.
 #[test]
 fn the_exponential_domain_arm_costs_range() {
     let device = Device::default();
@@ -398,12 +404,12 @@ fn the_exponential_domain_arm_costs_range() {
 /// The memoryless ceiling, and what `d_model = 3` actually rules out.
 ///
 /// An embedding is a free map, so the block can make **one** function of the
-/// symbol an affine channel — the value, or `u(v)`, or another — but not
-/// twelve independent ones. The residuals below are against the *value-spread*
-/// embedding: the value fits exactly, and every threshold indicator misses, so
+/// symbol an affine channel (the value, or `u(v)`, or another), but not twelve
+/// independent ones. The residuals below are against the *value-spread*
+/// embedding. The value fits exactly, and every threshold indicator misses. So
 /// a latch construction (one per value, selected by the gate) does not fit at
 /// this width. The exponential route needs only one channel, and
-/// [`a_linear_state_in_the_exponential_domain_solves_it_too`] takes it.
+/// [`the_exponential_domain_arm_costs_range`] takes it.
 #[test]
 fn the_width_denies_the_latches_but_not_one_nonlinear_channel() {
     let task = task();

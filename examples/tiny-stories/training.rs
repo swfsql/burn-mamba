@@ -1,16 +1,16 @@
-//! Training loop for the character-level TinyStories LM: builds the window
-//! dataloaders, runs the train/validate epochs, checkpoints the model and
-//! optimizer, and samples a story at every validation point so the text can be
-//! watched growing legible.
+//! Training loop for the character-level TinyStories LM. It builds the window
+//! dataloaders, runs the train and validation epochs, and saves the model and
+//! the optimizer. It samples a story at every validation point, so the text
+//! shows how the model improves.
 //!
 //! The epoch loops themselves are `burn_stack::examples::tiny_stories::lm`,
-//! shared with `burn-deltanet`. What is Mamba's here is the [`Wrap`] type: it
-//! adapts the network to Burn's `TrainStep` / `InferenceStep` via
-//! next-character cross-entropy over **every** position of the window, and
-//! supplies the `LmModel` seam the shared loops build against — including the
-//! two cache-aware halves of it, since the loops train a *run* of windows and
-//! carry [`MambaCaches`] from each window into the next (see that module's
-//! "Runs, carried state, and the frontier").
+//! shared with `burn-deltanet`. The Mamba part here is the [`Wrap`] type. It
+//! adapts the network to the `TrainStep` / `InferenceStep` of Burn, with a
+//! next-character cross-entropy over **every** position of the window. It also
+//! supplies the `LmModel` interface that the shared loops use, including its
+//! two cache-aware halves. The loops train a *run* of windows, and they carry
+//! [`MambaCaches`] from each window into the next (see "Runs, carried state,
+//! and the frontier" in that module).
 
 pub use crate::common::{
     cli::AppArgs,
@@ -32,9 +32,9 @@ use burn_stack::utils::ClassCursors;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-/// Run the full training routine: load/init the model and optimizer, then train
-/// for the configured number of epochs (validating, sampling and checkpointing
-/// along the way).
+/// Run the full training routine. Load or initialize the model and the
+/// optimizer, then train for the configured number of epochs, with validations,
+/// samples and checkpoints on the way.
 pub fn train(
     config: TinyStoriesConfig,
     model_config: MambaVocabNetConfig,
@@ -61,7 +61,7 @@ pub fn train(
     let (dataloader_train, dataloader_valid) =
         dataloaders(&config, &training_device, &progress);
 
-    // Resume position, budget, cadence and metrics log.
+    // The session: resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &config.training,
@@ -69,8 +69,8 @@ pub fn train(
         dataloader_train.num_items(),
     );
 
-    // The frontier gate outlives the epochs: its depth statistics are cumulative
-    // over the whole run of training, not per epoch.
+    // The frontier gate lives longer than the epochs: its depth statistics
+    // accumulate over the whole training run, not per epoch.
     let mut frontier = Frontier::new(config.frontier.clone());
 
     println!("running small initial validation...");
@@ -85,7 +85,7 @@ pub fn train(
     );
 
     println!("Starting training...");
-    // Iterate over our training for X epochs
+    // Train for the configured number of epochs.
     for epoch in session.epochs(config.training.num_epochs) {
         model = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
@@ -133,7 +133,8 @@ pub struct Run {
     pub graphs: bool,
 }
 
-/// Wrapper over [`MambaVocabNet`] for custom implementations, with how it runs.
+/// Wrapper over [`MambaVocabNet`] for custom implementations, with its [`Run`]
+/// settings.
 pub struct Wrap(pub MambaVocabNet, pub Run);
 
 impl LmModel for Wrap {
@@ -198,16 +199,21 @@ impl LmModel for Wrap {
     }
 }
 
-/// Opt-in wall-clock timers over the phases of a training step, to see where a
-/// step's time goes and whether a phase grows over a run. `--profile <N>`
-/// prints each phase's mean milliseconds once per `N` windows;
-/// `--profile-sync` also syncs the device after each phase, so a phase then
-/// includes its GPU execution rather than only its enqueueing. Inert until
+/// Opt-in wall-clock timers over the phases of a training step. They show where
+/// the time of a step goes, and whether a phase grows over a run.
+/// `--profile <N>` prints the mean milliseconds of each phase once per `N`
+/// windows. `--profile-sync` also syncs the device after each phase, so a phase
+/// then includes its GPU execution, not only its enqueueing. Inert until
 /// [`init`](prof::init).
 ///
-/// Phases: `fwd` (forward + loss), `bwd` (backward), `gap` (window end → the
-/// optimizer: the loop's metric reads, i.e. its implicit sync), `opt` (the
-/// optimizer step), `out` (optimizer → next window: logging, next batch).
+/// Phases:
+///
+/// - `fwd`: forward + loss.
+/// - `bwd`: backward.
+/// - `gap`: window end → the optimizer. These are the metric reads of the loop,
+///   that is its implicit sync.
+/// - `opt`: the optimizer step.
+/// - `out`: optimizer → next window (logging, next batch).
 pub mod prof {
     use super::*;
 
@@ -223,8 +229,8 @@ pub mod prof {
 
     static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
-    /// Start timing: print the phases' means once per `every` windows, syncing
-    /// the device after each phase if `sync`.
+    /// Start timing: print the means of the phases once per `every` windows,
+    /// and sync the device after each phase if `sync` is true.
     pub fn init(every: usize, sync: bool) {
         let state = Mutex::new(State {
             every,
@@ -299,8 +305,8 @@ pub mod prof {
         s.n += 1;
         if s.n % s.every == 0 {
             let [f, b, g, o, u] = s.sums.map(|sum| sum / s.every as f64);
-            // Live allocations: flat unless some launch shape varies, each new
-            // one pinning a cached metadata buffer (burn#5751) — the bytes
+            // Live allocations: flat unless some launch shape varies. Each new
+            // shape pins a cached metadata buffer (burn#5751), but the bytes
             // barely move.
             let allocs = match s.device.as_ref().and_then(Device::memory_pool_usage) {
                 Some(usage) => format!(
@@ -339,14 +345,15 @@ impl InferenceStep for Wrap {
 }
 
 impl Wrap {
-    /// Forward the LM from `caches` (`None` ⇒ a zero state) and score every
-    /// **real** position of the window against its next character — plus, in the
-    /// window that opened the story, the class latents' readout against its first
-    /// one (see [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output))
-    /// — returning the window's final state alongside.
+    /// Forward the LM from `caches` (`None` ⇒ a zero state), and score every
+    /// **real** position of the window against its next character. In the
+    /// window that opened the story, also score the readout of the class latents
+    /// against the first character (see
+    /// [`lm_output`](burn_stack::examples::tiny_stories::lm::lm_output)).
+    /// Return the final state of the window too.
     ///
-    /// `class` is the run's cursor: it splices the latents into the first window
-    /// of a story and into no other.
+    /// `class` is the cursor of the run: it splices the latents into the first
+    /// window of a story, and into no other window.
     pub fn forward_lm(
         &self,
         batch: TinyStoriesBatch,

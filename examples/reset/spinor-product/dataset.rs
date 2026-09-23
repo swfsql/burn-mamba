@@ -1,10 +1,9 @@
-//! The `spinor-product` dataset: `reset-spinor`'s `Q₈` stream, read **two
+//! The `spinor-product` dataset: the `Q₈` stream of `reset-spinor`, read **two
 //! symbols per token**.
 //!
 //! Every token carries an ordered *pair* of symbols from `i` / `j` / `k` /
-//! `.` (hold) / `R` (reset); the per-token target is the running product in the
-//! quaternion group `Q₈` after **both** of them have been applied, newest factor
-//! on the left:
+//! `.` (hold) / `R` (reset). The target of a token is the running product in
+//! the quaternion group `Q₈` after **both** symbols, newest factor on the left:
 //!
 //! ```text
 //!   token       R.      ij      .k      jk      ii      k.
@@ -12,29 +11,28 @@
 //!   target        1       -k       1      -i       i       j
 //! ```
 //!
-//! (`state` is the group element after each of the token's two symbols; the
-//! target is the second of them.)
+//! (`state` is the group element after each of the two symbols of the token.
+//! The target is the second of them.)
 //!
-//! The stream is [`reset-spinor`](../README.md#reset-spinor)'s, over the three units
-//! rather than two and with a hold, and the same length in *symbols* — only the
-//! packing changes. That is the whole example: what a token asks the recurrence
-//! for is now a **product of two group elements**, and a Mamba-3 step applies
-//! **one** rotation whose generator is an affine function of the token. At
-//! `micro_steps = 2` a token is two steps and the product is exact; at
-//! `micro_steps = 1` the two generators can only **add**, and `exp(v + w)` is
+//! The stream is the stream of [`reset-spinor`](../README.md#reset-spinor),
+//! with three units instead of two, and with a hold. A token now asks the
+//! recurrence for a **product of two group elements**. A Mamba-3 step applies
+//! **one** rotation, and its generator is an affine function of the token. At
+//! `micro_steps = 2`, a token is two steps, and the product is exact. At
+//! `micro_steps = 1`, the two generators can only **add**, and `exp(v + w)` is
 //! not `exp(w)·exp(v)` unless they commute.
 //!
-//! Two properties of the alphabet make that airtight rather than merely likely:
+//! Two properties of the alphabet make that a proof, not only a likely result:
 //!
-//! - the **hold** lets a token carry one turn alone, which pins each slot's
-//!   generator to the axis of the unit it turns by (`±x̂`, `±ŷ`, `±ẑ`);
-//! - the **third unit** keeps the two-turn tokens non-abelian. Over `i`/`j`
-//!   alone every two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes — one
-//!   rotation per token would then be enough, and a `micro_steps = 1` model
-//!   solves the task.
+//! - The **hold** lets a token carry one turn alone. This pins the generator of
+//!   each slot to the axis of the unit that it turns by (`±x̂`, `±ŷ`, `±ẑ`).
+//! - The **third unit** keeps the two-turn tokens non-abelian. Over `i`/`j`
+//!   alone, every two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes. Then
+//!   one rotation per token is enough, and a `micro_steps = 1` model solves the
+//!   task.
 //!
-//! Together they leave a token like `(i, j)` asking for a turn about `ẑ` from a
-//! generator confined to the `xy`-plane. See `tests.rs`
+//! Together, they leave a token like `(i, j)` that asks for a turn about `ẑ`
+//! from a generator in the `xy`-plane. See `tests.rs`
 //! (`one_step_generators_add_and_cannot_reach_k`).
 
 use burn::data::{
@@ -51,19 +49,19 @@ pub const TURN_I: usize = 0;
 pub const TURN_J: usize = 1;
 /// Input symbol: multiply the state by `k` (on the left).
 ///
-/// The **third** unit is what keeps a token's pair non-abelian: with two turn
-/// symbols every two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes, and
-/// one rotation per token would be enough. With three, `(i,j) ↦ k` and
-/// `(i,k) ↦ j` do not commute, so composing the pair is the whole job.
+/// The **third** unit keeps the pair of a token non-abelian. With two turn
+/// symbols, every two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes, and
+/// one rotation per token is enough. With three, `(i,j) ↦ k` and `(i,k) ↦ j`
+/// do not commute, so the whole job is to compose the pair.
 pub const TURN_K: usize = 2;
-/// Input symbol: do nothing — the group's identity, and the reason a single
-/// step provably cannot compose a token (see the module docs).
+/// Input symbol: do nothing. It is the identity of the group, and the reason
+/// why a single step provably cannot compose a token (see the module docs).
 pub const HOLD: usize = 3;
 /// Input symbol: reset the state to `1` (the selective-forget symbol).
 pub const RESET: usize = 4;
 /// Input alphabet size, per slot.
 pub const NUM_SYMBOLS: usize = 5;
-/// Symbols per token — the dial this example is about, mirrored in
+/// Symbols per token: the dial of this example, the same as
 /// `Mamba3Config::micro_steps`.
 pub const PAIR: usize = 2;
 /// Width of one input token: two one-hot slots.
@@ -78,20 +76,20 @@ pub const IDENTITY: i64 = 0;
 /// Length of every **training** sequence, in tokens (so `2 · SEQ_LENGTH`
 /// symbols).
 ///
-/// Long on purpose: a block that composes each token exactly holds the word for
-/// as long as you like, while one that only approximates the composition
-/// compounds its error with every token. At a handful of tokens an
-/// approximation still scores well; over a word this long it does not.
+/// It is long on purpose. A block that composes each token exactly holds the
+/// word for any length. A block that only approximates the composition adds
+/// to its error at every token. At a few tokens, an approximation still scores
+/// well. Over a word this long, it does not.
 pub const SEQ_LENGTH: usize = 32;
 
-/// The lengths inference reports, in tokens: the trained one, and three times
-/// it.
+/// The lengths that inference reports, in tokens: the trained length, and three
+/// times it.
 ///
-/// A block that composes each token exactly is a group tracker and does not
-/// care; one that approximates the composition compounds its error with every
-/// token, so the long column is where an approximation separates from a
-/// solution. Nothing about the model is length-specific — the recurrence just
-/// runs longer.
+/// A block that composes each token exactly is a group tracker, and the length
+/// does not change its result. A block that approximates the composition adds
+/// to its error at every token. So the long column separates an approximation
+/// from a solution. Nothing in the model depends on the length: the recurrence
+/// only runs longer.
 pub const EVAL_LENGTHS: [usize; 2] = [SEQ_LENGTH, 3 * SEQ_LENGTH];
 /// Number of training sequences.
 pub const NUM_TRAIN: usize = 4096;
@@ -121,8 +119,8 @@ pub fn left_mul(unit: usize, state: i64) -> i64 {
     UNIT_MUL[unit][s_unit] as i64 + if neg { 4 } else { 0 }
 }
 
-/// The class as a unit quaternion `(w, x, y, z)` — the vector the block's own
-/// state holds, and the column the classifier head reads it with.
+/// The class as a unit quaternion `(w, x, y, z)`: the vector in the state of
+/// the block, and the column of the classifier head that reads it.
 pub fn quaternion(class: i64) -> [f64; 4] {
     let mut q = [0.0; 4];
     q[(class % 4) as usize] = if class >= 4 { -1.0 } else { 1.0 };
@@ -141,11 +139,11 @@ pub fn apply(symbol: usize, state: i64) -> i64 {
     }
 }
 
-/// The three turn symbols, in the order their unit quaternions index.
+/// The three turn symbols, in the index order of their unit quaternions.
 pub const TURNS: [usize; 3] = [TURN_I, TURN_J, TURN_K];
 
-/// The per-**token** targets implied by a symbol stream: the running product
-/// since the last [`RESET`], sampled after every second symbol.
+/// The per-**token** targets of a symbol stream: the running product since the
+/// last [`RESET`], sampled after every second symbol.
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     assert_eq!(0, symbols.len() % PAIR, "the stream is read in pairs");
     let mut state = IDENTITY;
@@ -160,12 +158,12 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// How many `i`s, `j`s and `k`s have gone by since the last reset, at the end of
-/// every token.
+/// The number of `i`s, `j`s and `k`s since the last reset, at the end of every
+/// token.
 ///
-/// This is everything an order-blind model can key on, and the ceiling
-/// `tests.rs` computes over: `Q₈`'s commutator subgroup is `{±1}`, so the counts
-/// pin the element down to a sign and no further.
+/// This is everything that an order-blind model can key on, and `tests.rs`
+/// computes its ceiling over it. The commutator subgroup of `Q₈` is `{±1}`, so
+/// the counts determine the element only up to a sign.
 pub fn counts_since_reset(symbols: &[usize]) -> Vec<[i64; 3]> {
     let mut counts = [0i64; 3];
     symbols
@@ -191,32 +189,32 @@ pub fn counts_since_reset(symbols: &[usize]) -> Vec<[i64; 3]> {
 /// Which generator a split draws from. Every sequence opens with a [`RESET`].
 ///
 /// Every family mixes **holds** into the word, so single-turn tokens (`(i, .)`)
-/// occur beside two-turn ones (`(i, j)`). That mixture is deliberate: the holds
-/// pin each slot's rotation generator to the axis of the unit it turns by, and
-/// the two-turn tokens then ask for a composition no sum of those axes can
-/// reach.
+/// occur beside two-turn tokens (`(i, j)`). That mixture is deliberate. The
+/// holds pin the rotation generator of each slot to the axis of the unit that
+/// it turns by. The two-turn tokens then ask for a composition that no sum of
+/// those axes can reach.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~1/16, `HOLD` ~¼,
-    /// otherwise `i` / `j` / `k` evenly. Resets still happen inside the
-    /// sequence, so this is the family with the **shortest** words — and a short
-    /// word is the one a decaying trace can carry without any group structure.
+    /// Independent symbols after the first `RESET`: `RESET` with probability
+    /// 1/16, `HOLD` ¼, `i` ¼, `j` 3/16 and `k` ¼. Resets also occur inside the
+    /// sequence, so this family has the **shortest** words. A decaying trace
+    /// can carry a short word without any group structure.
     Random,
-    /// One reset, then a shuffled bag: equally many `i`s, `j`s and `k`s plus a
-    /// quarter holds. The counts are fixed by construction and the word runs the
-    /// whole sequence, so only the **order** varies. This is the family with
-    /// nothing in it but composition.
+    /// One reset, then a shuffled bag: equally many `i`s, `j`s and `k`s, and
+    /// about a quarter holds. The construction fixes the counts, and the word
+    /// fills the whole sequence, so only the **order** varies. This family
+    /// contains nothing but composition.
     Shuffle,
-    /// One reset, then runs of one symbol, holds included (`i…i . . k…k`). The
-    /// word is still non-commutative, but grouping it into blocks is the case
-    /// where the counts come closest to determining the product.
+    /// One reset, then runs of 2 to 6 copies of one symbol, holds included
+    /// (`i…i . . k…k`). The word is still non-commutative. But in blocks, the
+    /// counts come closest to determining the product.
     Runs,
     /// The training mixture: half [`Self::Random`], a quarter of each of the
     /// other two.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -346,8 +344,9 @@ pub struct ProductBatch {
 }
 
 impl ProductBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

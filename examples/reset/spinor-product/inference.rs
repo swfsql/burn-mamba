@@ -1,5 +1,6 @@
-//! Inference for the `spinor-product` example: loads the trained model and reports
-//! accuracy on each evaluation family, plus a decoded sample sequence.
+//! Inference for the `spinor-product` example. It loads the trained model,
+//! reports the accuracy on each evaluation family at each length, and prints
+//! one decoded sample sequence.
 
 use crate::AppArgs;
 use crate::dataset::{
@@ -14,7 +15,8 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-family accuracy on fresh eval sets.
+/// Load the trained model, and report the accuracy of each family on its
+/// evaluation sets (generated from `EVAL_SEED`).
 pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args: &AppArgs) {
     let model: MambaLatentNet = app_args
         .load_model(&model_config, &infer_device)
@@ -22,9 +24,9 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
     let batcher = ProductBatcher::default();
 
     println!("chance ≈ {:.1}%", 100.0 / NUM_CLASSES as f32);
-    // Each family at every length in `EVAL_LENGTHS`. The long column is the
-    // one that separates a block that composes each token from one that only
-    // approximates the composition: the error compounds with the word.
+    // Each family at every length in `EVAL_LENGTHS`. The long column separates
+    // a block that composes each token from a block that only approximates the
+    // composition: the error adds up along the word.
     for length in EVAL_LENGTHS {
         println!("— {length} tokens ({} symbols) —", length * PAIR);
         for (name, family) in EVAL_FAMILIES {
@@ -101,8 +103,8 @@ fn argmax_classes(output: Tensor<3>) -> Vec<i32> {
 /// The eight classes, in index order (`unit + 4·negative`).
 const ELEMENTS: [&str; NUM_CLASSES] = ["1", "i", "j", "k", "-1", "-i", "-j", "-k"];
 
-/// One group of `PAIR` characters per token, spaced — so a symbol lines up with
-/// the micro-step that reads it.
+/// One group of `PAIR` characters per token, with spaces between the groups.
+/// So a symbol lines up with the micro-step that reads it.
 fn render_symbols(symbols: &[usize]) -> String {
     symbols
         .chunks_exact(PAIR)
@@ -122,8 +124,8 @@ fn render_symbols(symbols: &[usize]) -> String {
         .join(" ")
 }
 
-/// One char per token, padded to the width of a rendered pair: `1 i j k` for the
-/// positives, upper-case (and `~` for `−1`) for their negatives.
+/// One char per token, padded to the width of a rendered pair: `1 i j k` for
+/// the positives, and upper-case (and `~` for `−1`) for their negatives.
 fn render_classes(classes: &[i64]) -> String {
     const CHARS: [char; NUM_CLASSES] = ['1', 'i', 'j', 'k', '~', 'I', 'J', 'K'];
     classes

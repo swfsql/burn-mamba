@@ -1,11 +1,11 @@
 //! What the `tally-*` rungs share: the symbol-stream dataset and batcher, the
-//! train/validate/infer loops, and the few scalar helpers the hand-built
-//! constructions use. A rung supplies a [`Task`] — its alphabet, its labels
-//! and its generators — and a model config; everything else is here.
+//! train/validate/infer loops, and the few scalar helpers of the hand-built
+//! constructions. A rung supplies a [`Task`] (its alphabet, its labels and its
+//! generators) and a model config. Everything else is here.
 //!
 //! Every rung reads one-hot symbols and classifies **every** position into two
-//! classes, with [`IGNORE`] marking positions whose target is not a function of
-//! the history (they reach neither the loss nor the accuracy).
+//! classes. [`IGNORE`] marks a position whose target is not a function of the
+//! history. Such a position reaches neither the loss nor the accuracy.
 
 #![allow(dead_code)]
 
@@ -14,7 +14,7 @@ pub mod data;
 /// Scalar helpers for the hand-built blocks: embeddings, the affine channel
 /// solve, tensor builders, accuracy.
 pub mod handmade;
-/// Inference: per-family accuracy on fresh eval sets.
+/// Inference: per-family accuracy on the evaluation sets.
 pub mod inference;
 /// Training loop.
 pub mod training;
@@ -27,9 +27,9 @@ use crate::common::training::{
 };
 use burn_mamba::prelude::MambaLatentNetConfig;
 
-/// Wire up the device, configs, and the train/infer flow for one rung.
-/// The rung's own downstream flags are parsed by its `cli.rs`, and its
-/// `main.rs` bakes them into `model_config` before calling this.
+/// Set up the device, the configs and the train/infer flow for one rung. The
+/// `cli.rs` of the rung parses its own downstream flags, and its `main.rs` puts
+/// them into `model_config` before it calls this.
 pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfig) {
     app_args.create_artifact_dir();
 
@@ -42,7 +42,7 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As on the `reset` ladder: a large step to leave the memoryless basin,
-        // a small one to settle into the exact construction.
+        // and a small step to reach the exact construction.
         let total_steps = num_epochs * data::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
         TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))

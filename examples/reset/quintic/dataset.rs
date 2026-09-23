@@ -1,7 +1,7 @@
-//! The reset-quintic dataset: a three-symbol stream whose per-position target is
-//! the **running arrangement of five items** since the last reset — the word
-//! problem in `A₅` (sixty classes) or in `S₅` (a hundred and twenty), chosen by
-//! [`Group`].
+//! The reset-quintic dataset: a three-symbol stream. The target at each
+//! position is the **running arrangement of five items** since the last reset:
+//! the word problem in `A₅` (sixty classes) or in `S₅` (a hundred and twenty).
+//! [`Group`] selects the group.
 //!
 //! ```text
 //!   A₅    d = (0 1)(2 3)   a double swap, order 2
@@ -10,22 +10,27 @@
 //!         c = (0 1 2 3 4)  a five-cycle, order 5
 //! ```
 //!
-//! `R` restores `abcde` in both. The two groups sit on either side of the one
-//! line this rung is about:
+//! A turn `g` moves the item at position `p` to position `g(p)` (see [`Perm`]).
+//! So `s` swaps the first two positions, and `c` moves every item one position
+//! to the right (the last item goes to the front). `R` restores `abcde` in both
+//! groups. The two groups are on the two sides of the one line that this rung
+//! is about:
 //!
 //! - `A₅` is the rotation group of the icosahedron. `d` is a half-turn about an
-//!   edge axis and `t` a third-turn about a face axis `20.9°` from it, whose
-//!   product is a fifth-turn about a vertex — so it lives in `SO(3) ⊂ SO(4)`,
-//!   which one conjugating ([`Rotor4D`](burn_mamba::prelude::RotationKind::Rotor4D))
-//!   block holds. It is also **perfect** (`[A₅, A₅] = A₅`), so no abelian state
-//!   carries any of it, and **simple and non-abelian**, so no stack of solvable
-//!   ones does either.
-//! - `S₅` is not a rotation group of anything a Mamba-3 block turns. Its odd
-//!   elements act on `A₅` by the outer automorphism, which carries a `72°`
-//!   rotation to a `144°` one ([`rotation_angle`] of `c` and of `s∘c∘s`), and
-//!   conjugation inside `SO(4)` never changes an angle — only a reflection, which
-//!   swaps the two `SU(2)` factors, does. One layer therefore tracks nothing of
-//!   `S₅` exactly but its sign; a second layer, reading that sign, tracks the rest.
+//!   edge axis, and `t` is a third-turn about a face axis `20.9°` from it. Their
+//!   product is a fifth-turn about a vertex. So `A₅` lives in `SO(3) ⊂ SO(4)`,
+//!   which one conjugating
+//!   ([`Rotor4D`](burn_mamba::prelude::RotationKind::Rotor4D)) block holds. It
+//!   is also **perfect** (`[A₅, A₅] = A₅`), so no abelian state carries any of
+//!   it. It is **simple and non-abelian**, so no stack of solvable states
+//!   carries it either.
+//! - `S₅` is not a rotation group of anything that a Mamba-3 block turns. Its
+//!   odd elements act on `A₅` by the outer automorphism, which carries a `72°`
+//!   rotation to a `144°` one ([`rotation_angle`] of `c` and of `s∘c∘s`).
+//!   Conjugation inside `SO(4)` never changes an angle. Only a reflection,
+//!   which swaps the two `SU(2)` factors, does. So one layer tracks nothing of
+//!   `S₅` exactly except its sign. A second layer reads that sign and tracks the
+//!   rest.
 
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -35,28 +40,29 @@ use burn::prelude::*;
 use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
 
-/// Input symbol: the group's order-2 generator (`d` in `A₅`, `s` in `S₅`).
+/// Input symbol: the order-2 generator of the group (`d` in `A₅`, `s` in `S₅`).
 pub const TURN_A: usize = 0;
-/// Input symbol: the group's other generator (`t` in `A₅`, `c` in `S₅`).
+/// Input symbol: the other generator of the group (`t` in `A₅`, `c` in `S₅`).
 pub const TURN_B: usize = 1;
 /// Input symbol: restore the original order (the selective-forget token).
 pub const RESET: usize = 2;
 /// Input alphabet size.
 pub const NUM_SYMBOLS: usize = 3;
 
-/// Number of items being permuted.
+/// Number of permuted items.
 pub const ITEMS: usize = 5;
 
 /// Length of every **training** sequence (`--train-length` overrides it).
 ///
-/// Three times the ladder's 32, because 32 is short enough to hide a leak: a
-/// trained block turns by exactly the right angles and still holds with
-/// `ᾱ ≈ 0.998` per step, which costs nothing in 32 steps and misreads a long
-/// word. At 96 the leak is priced in and training closes it.
+/// This is three times the 32 of the ladder, because 32 is short enough to hide
+/// a leak. A trained block turns by exactly the right angles and still holds
+/// with `ᾱ ≈ 0.998` per step. That costs nothing in 32 steps, but it misreads a
+/// long word. At 96, the leak increases the loss, and training closes it.
 pub const SEQ_LENGTH: usize = 96;
-/// The lengths inference reports: the trained one, and three times it — where a
-/// block that tracks the group stays exact and one that approximates it (a
-/// decaying trace of recent symbols, a nearly-right rotation) runs out.
+/// The lengths that inference reports: the trained length, and three times it.
+/// At the long length, a block that tracks the group stays exact. A block that
+/// approximates the group (a decaying trace of recent symbols, a nearly-right
+/// rotation) fails there.
 pub const EVAL_LENGTHS: [usize; 2] = [SEQ_LENGTH, 3 * SEQ_LENGTH];
 /// Number of training sequences.
 pub const NUM_TRAIN: usize = 4096;
@@ -68,7 +74,10 @@ pub const TRAIN_SEED: u64 = 0xC0FFEE;
 /// Dataset RNG seed for the evaluation splits (distinct from training).
 pub const EVAL_SEED: u64 = 0xBEEF;
 
-/// An arrangement of the five items: `perm[i]` is the item at position `i`.
+/// An arrangement of the five items: `perm[x]` is the position of item `x`.
+///
+/// A turn `g` moves the item at position `p` to position `g(p)`, so it maps
+/// `perm` to `g ∘ perm`, and [`labels`] composes each new turn on the left.
 pub type Perm = [usize; ITEMS];
 
 /// The identity arrangement `abcde`.
@@ -90,7 +99,7 @@ pub enum Group {
 }
 
 impl Group {
-    /// Number of output classes: the group's order.
+    /// Number of output classes: the order of the group.
     pub fn num_classes(self) -> usize {
         match self {
             Group::Alternating => 60,
@@ -98,8 +107,8 @@ impl Group {
         }
     }
 
-    /// The group's elements in class-index order: lexicographic over [`Perm`],
-    /// so class 0 is [`IDENTITY`] in both.
+    /// The elements of the group in class-index order: the lexicographic order
+    /// of the [`Perm`] arrays, so class 0 is [`IDENTITY`] in both groups.
     pub fn elements(self) -> Vec<Perm> {
         let mut all = Vec::with_capacity(120);
         permutations(&mut [0, 1, 2, 3, 4], 0, &mut all);
@@ -116,8 +125,8 @@ impl Group {
             .unwrap_or_else(|| panic!("{perm:?} is not an element of {self:?}")) as i64
     }
 
-    /// The arrangement a symbol applies. `RESET` returns the identity, but note
-    /// it *replaces* the state rather than composing with it (see [`labels`]).
+    /// The arrangement that a symbol applies. `RESET` returns the identity, but
+    /// it *replaces* the state instead of composing with it (see [`labels`]).
     pub fn symbol_perm(self, symbol: usize) -> Perm {
         match (self, symbol) {
             (Group::Alternating, TURN_A) => DOUBLE_SWAP,
@@ -129,7 +138,7 @@ impl Group {
         }
     }
 
-    /// The symbol's letter: `d`/`t`/`R` or `s`/`c`/`R`.
+    /// The letter of the symbol: `d`/`t`/`R` or `s`/`c`/`R`.
     pub fn symbol_char(self, symbol: usize) -> char {
         match (self, symbol) {
             (Group::Alternating, TURN_A) => 'd',
@@ -142,13 +151,17 @@ impl Group {
     }
 }
 
-/// `(0 1)(2 3)`: `A₅`'s order-2 generator, a half-turn about an edge axis.
+/// `(0 1)(2 3)`: swap the positions `0 ↔ 1` and `2 ↔ 3`. It is the order-2
+/// generator of `A₅`, a half-turn about an edge axis.
 pub const DOUBLE_SWAP: Perm = [1, 0, 3, 2, 4];
-/// `(0 2 4)`: `A₅`'s order-3 generator, a third-turn about a face axis.
+/// `(0 2 4)`: move the items at positions `0, 2, 4` to `2, 4, 0`. It is the
+/// order-3 generator of `A₅`, a third-turn about a face axis.
 pub const THREE_CYCLE: Perm = [2, 1, 4, 3, 0];
-/// `(0 1)`: `S₅`'s odd generator.
+/// `(0 1)`: swap the first two positions. It is the odd generator of `S₅`.
 pub const SWAP: Perm = [1, 0, 2, 3, 4];
-/// `(0 1 2 3 4)`: `S₅`'s even generator, a fifth-turn once inside `A₅`.
+/// `(0 1 2 3 4)`: move every item one position to the right (the last item
+/// goes to the front). It is the even generator of `S₅`. Inside `A₅`, it is a
+/// fifth-turn.
 pub const FIVE_CYCLE: Perm = [1, 2, 3, 4, 0];
 
 fn permutations(items: &mut Perm, k: usize, out: &mut Vec<Perm>) {
@@ -186,11 +199,12 @@ pub fn is_even(p: Perm) -> bool {
     inversions % 2 == 0
 }
 
-/// The per-position targets implied by a symbol sequence: the running
-/// composition since the last `RESET`, as a class index.
+/// The per-position targets of a symbol sequence: the running composition
+/// since the last `RESET`, as a class index.
 ///
-/// The newest symbol composes **on the left**, matching the block's own
-/// cumulative rotation (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
+/// The newest symbol composes **on the left** of the item-to-position array
+/// (see [`Perm`]), like the cumulative rotation of the block
+/// (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
 pub fn labels(group: Group, symbols: &[usize]) -> Vec<i64> {
     let elements = group.elements();
     let mut state = IDENTITY;
@@ -206,8 +220,8 @@ pub fn labels(group: Group, symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// How many of each turn have gone by since the last reset, at every position —
-/// everything an **abelian** transition can carry about the word.
+/// The number of each turn since the last reset, at every position: everything
+/// that an **abelian** transition can carry about the word.
 pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
     let (mut a, mut b) = (0, 0);
     symbols
@@ -225,7 +239,7 @@ pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
 }
 
 // ---------------------------------------------------------------------------
-// A₅ as rotations — what the block's state actually holds
+// A₅ as rotations: what the state of the block holds
 // ---------------------------------------------------------------------------
 
 /// The golden ratio `φ = (1 + √5)/2`.
@@ -246,27 +260,28 @@ pub fn quat_conj(q: [f64; 4]) -> [f64; 4] {
     [q[0], -q[1], -q[2], -q[3]]
 }
 
-/// `q v q*` — the two-sided step with both factors tied, i.e. `SO(3)`.
+/// `q v q*`: the two-sided step with both factors tied, that is `SO(3)`.
 pub fn conjugate(q: [f64; 4], v: [f64; 4]) -> [f64; 4] {
     quat_mul(quat_mul(q, v), quat_conj(q))
 }
 
-/// The unit quaternion turning by `angle` about the unit `axis`.
+/// The unit quaternion that turns by `angle` about the unit `axis`.
 pub fn axis_quat(axis: [f64; 3], angle: f64) -> [f64; 4] {
     let (c, s) = ((0.5 * angle).cos(), (0.5 * angle).sin());
     [c, s * axis[0], s * axis[1], s * axis[2]]
 }
 
-/// The axis of [`DOUBLE_SWAP`]'s half-turn: an edge axis of the icosahedron.
+/// The axis of the half-turn of [`DOUBLE_SWAP`]: an edge axis of the
+/// icosahedron.
 pub const EDGE_AXIS: [f64; 3] = [1.0, 0.0, 0.0];
 
-/// The axis of [`THREE_CYCLE`]'s third-turn: the face axis `(φ, 1/φ, 0)/√3`,
-/// `20.9°` from [`EDGE_AXIS`].
+/// The axis of the third-turn of [`THREE_CYCLE`]: the face axis
+/// `(φ, 1/φ, 0)/√3`, `20.9°` from [`EDGE_AXIS`].
 ///
 /// Two turns by `π` and `2π/3` about axes at angle `θ` compose to a turn by
-/// `2·acos(sin 60°·cos θ)`, and `d∘t` has order 5, so that must be `72°`:
+/// `2·acos(sin 60°·cos θ)`. `d∘t` has order 5, so that turn must be `72°`:
 /// `cos θ = cos 36°/sin 60° = φ/√3`. (The other root, `144°`, is the Galois
-/// twin — the other three-dimensional representation of `A₅`.)
+/// twin: the other three-dimensional representation of `A₅`.)
 pub fn face_axis() -> [f64; 3] {
     let r3 = 3f64.sqrt();
     [PHI / r3, 1.0 / (PHI * r3), 0.0]
@@ -274,9 +289,9 @@ pub fn face_axis() -> [f64; 3] {
 
 /// One lift in `SU(2)` of every element of `A₅`, in class order.
 ///
-/// Walks the group from the identity by left-multiplying the generators' lifts,
-/// so `lift(g∘h) = ±lift(g) ⊗ lift(h)` — the sign is the double cover, and the
-/// only thing a conjugating block never sees.
+/// It walks the group from the identity and left-multiplies by the lifts of
+/// the generators. So `lift(g∘h) = ±lift(g) ⊗ lift(h)`. The sign is the double
+/// cover, and it is the only thing that a conjugating block never sees.
 pub fn icosahedral_lifts() -> Vec<[f64; 4]> {
     let elements = Group::Alternating.elements();
     let mut lifts: Vec<Option<[f64; 4]>> = vec![None; elements.len()];
@@ -306,7 +321,7 @@ pub fn lift(perm: Perm) -> [f64; 4] {
 }
 
 /// The rotation vector `angle · axis` of a unit quaternion, with the angle in
-/// `[0, π]` — the sign of the lift is folded away, as conjugation folds it.
+/// `[0, π]`. It removes the sign of the lift, as conjugation does.
 pub fn rotation_vector(q: [f64; 4]) -> [f64; 3] {
     let s = (q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
     if s < 1e-12 {
@@ -317,21 +332,21 @@ pub fn rotation_vector(q: [f64; 4]) -> [f64; 3] {
     [0, 1, 2].map(|k| sign * angle * q[k + 1] / s)
 }
 
-/// The angle, in degrees, an even arrangement turns the icosahedron by.
+/// The angle, in degrees, by which an even arrangement turns the icosahedron.
 pub fn rotation_angle(perm: Perm) -> f64 {
     let v = rotation_vector(lift(perm));
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().to_degrees()
 }
 
-/// The reference vector the constructions write into the state: a point of the
-/// rotation's imaginary 3-space on none of the icosahedron's axes, so its orbit
-/// under `A₅` is **sixty distinct points**.
+/// The reference vector that the constructions write into the state. It is a
+/// point of the imaginary 3-space of the rotation, on none of the axes of the
+/// icosahedron, so its orbit under `A₅` is **sixty distinct points**.
 ///
-/// Chosen for what the two-head readout sees — the orbit's shadow on the
-/// `xy`-plane — to lie in sixty distinct **directions** (`1.58°` apart at the
-/// closest; a small-integer search's best). A decoder over directions ignores
-/// the state's scale, and the scale does drift: a hold is `ᾱ = e^(−a_floor·Δ)`,
-/// never exactly 1.
+/// The two-head readout sees the shadow of the orbit on the `xy`-plane. This
+/// point puts that shadow in sixty distinct **directions** (`1.58°` apart at
+/// the closest, the best result of a small-integer search). A decoder over
+/// directions ignores the scale of the state, and the scale does drift: a hold
+/// is `ᾱ = e^(−a_floor·Δ)`, never exactly 1.
 pub const REF_POINT: [f64; 4] = [0.0, 5.0, -5.0, 2.0];
 
 /// Where an even arrangement carries [`REF_POINT`]: the imaginary part of
@@ -343,7 +358,8 @@ pub fn orbit_point(perm: Perm) -> [f64; 3] {
 }
 
 /// An arrangement of `S₅` as `(e, a)` with `σ = sᵉ ∘ a`: its parity `e ∈ {0, 1}`
-/// and its even part `a ∈ A₅` — the two coordinates the two layers hold.
+/// and its even part `a ∈ A₅`. These are the two coordinates that the two
+/// layers hold.
 pub fn parity_split(perm: Perm) -> (usize, Perm) {
     match is_even(perm) {
         true => (0, perm),
@@ -358,23 +374,25 @@ pub fn parity_split(perm: Perm) -> (usize, Perm) {
 /// Which generator a split draws from. Every family opens with a `RESET`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~⅛, otherwise the two turns
-    /// evenly. Resets are frequent, so many positions carry a **short** word —
-    /// and a short word is often pinned down by its symbol counts alone.
+    /// Independent symbols after the first `RESET`: `RESET` with probability
+    /// ⅛, [`TURN_A`] ⅜ and [`TURN_B`] ½. Resets are frequent, so many
+    /// positions carry a **short** word, and the symbol counts alone often
+    /// determine a short word.
     Random,
-    /// One reset, then a shuffled bag of equally many of each turn: the counts
-    /// are fixed by construction and only the **order** varies.
+    /// One reset, then a shuffled bag of the two turns in equal numbers (one
+    /// extra [`TURN_A`] when the tail length is odd). The construction fixes
+    /// the counts, and only the **order** varies.
     Shuffle,
-    /// One reset, then long runs of one symbol. A run only cycles one generator,
-    /// which makes this the family where the counts come closest to determining
-    /// the answer.
+    /// One reset, then alternating runs of 3 to 8 copies of one symbol. A run
+    /// only cycles one generator. So in this family, the counts come closest to
+    /// determining the answer.
     Runs,
     /// The training mixture: half [`Self::Random`], a quarter of each of the
     /// other two.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -507,8 +525,9 @@ pub struct QuinticBatch {
 }
 
 impl QuinticBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

@@ -53,12 +53,12 @@ pub fn launch(app_args: &AppArgs) {
     let rotation = cli::Cli::parse(app_args).rotation;
     app_args.create_artifact_dir();
 
-    // `Device::default()` resolves to the enabled `backend-*` feature (honouring
-    // the `BURN_DEVICE` env override); `configure_dtype` installs fp16/i32 when
-    // `dev-f16` is on.
+    // `Device::default()` resolves to the enabled `backend-*` feature (and it
+    // honours the `BURN_DEVICE` env override). `configure_dtype` installs
+    // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
-    // training needs an autodiff-enabled device; inference uses the plain one.
+    // Training needs an autodiff-enabled device. Inference uses the plain one.
     let autodiff_device = device.clone().autodiff();
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 

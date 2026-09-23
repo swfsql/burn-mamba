@@ -1,28 +1,28 @@
-//! The reset-majority dataset: a three-symbol stream whose per-position target
-//! is the **sign of the running vote since the last reset**.
+//! The reset-majority dataset: a three-symbol stream. The target at each
+//! position is the **sign of the running vote since the last reset**.
 //!
 //! ```text
-//!   symbols   −  +  +  −  +  R  −  −  +  −
-//!   count     -1  0  1  0  1  0 -1 -2 -1 -2
-//!   target   Neg  .  Pos  .  Pos  .  Neg Neg Neg Neg
+//!   symbols    −    +    +    −    +    R    −    −    +    −
+//!   count     -1    0    1    0    1    0   -1   -2   -1   -2
+//!   target   Neg    .  Pos    .  Pos    .  Neg  Neg  Neg  Neg
 //! ```
 //!
-//! Positions where the vote is exactly zero (every reset, and every tie) have no
-//! sign to report and are **not scored** — see [`IGNORE`].
+//! A position where the vote is exactly zero (every reset, and every tie) has
+//! no sign to report, so it is **not scored** (see [`IGNORE`]).
 //!
-//! Two properties make this the task a single selective-decay block is for:
+//! Two properties make this a task for a single selective-decay block:
 //!
-//! - **It needs the SSM state.** The lookback is unbounded (a reset may be
-//!   arbitrarily far back) and the answer is not a function of the last symbol.
-//!   Mamba-3 has no short convolution, so the recurrent state is the model's
-//!   *only* memory.
+//! - **It needs the SSM state.** The lookback has no bound (a reset can be
+//!   arbitrarily far back), and the answer is not a function of the last
+//!   symbol. Mamba-3 has no short convolution, so the recurrent state is the
+//!   *only* memory of the model.
 //! - **It needs the state to be *selective*.** A fixed decay `ᾱ` cannot both
-//!   erase a reset's past outright and keep an unweighted vote afterwards.
+//!   erase the past at a reset and keep an unweighted vote after it.
 //!   [`Family::LongPrefix`] and [`Family::LongSuffix`] are the two adversarial
-//!   halves that pin that down: the first buries a 1-vote majority behind a long
-//!   pre-reset run (any `ᾱ` near 1 leaks it through), the second decides a long
-//!   post-reset vote on its *early* tokens (any small `ᾱ` votes with the recent
-//!   ones instead). See `tests.rs` for the sweep.
+//!   halves that show this. `LongPrefix` puts a 1-vote majority after a long
+//!   pre-reset run, and any `ᾱ` near 1 leaks the run into the vote.
+//!   `LongSuffix` decides a long post-reset vote on its *early* tokens, and any
+//!   small `ᾱ` votes with the recent tokens instead. `tests.rs` has the sweep.
 
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -48,14 +48,14 @@ pub const POS: i64 = 1;
 /// Number of output classes.
 pub const NUM_CLASSES: usize = 2;
 
-/// Placeholder target for a position with **no sign to report** — the vote is
-/// exactly zero, which every reset and every tie produces.
+/// Placeholder target for a position with **no sign to report**: the vote is
+/// exactly zero, as at every reset and every tie.
 ///
-/// Those positions are masked out of the loss and the accuracy
-/// (`training::forward_classification`). Asking for them as a
-/// third class instead is a much harder objective for no gain in what the task
-/// tests: it turns a *sign* readout into an exact-zero detector, and the model
-/// spends its capacity calibrating a band rather than holding a vote.
+/// The loss and the accuracy (`training::forward_classification`) mask these
+/// positions. A third class for them is a much harder objective, and it adds
+/// nothing to what the task tests. It turns a *sign* readout into an
+/// exact-zero detector, and the model spends its capacity to calibrate a band
+/// instead of holding a vote.
 pub const IGNORE: i64 = -1;
 
 /// Length of every generated sequence.
@@ -72,9 +72,9 @@ pub const EVAL_SEED: u64 = 0xBEEF;
 
 /// The per-position targets implied by a symbol sequence.
 ///
-/// `RESET` clears the running count; `PLUS` / `MINUS` move it by one. The label
-/// is the count's sign *after* consuming the symbol at that position, or
-/// [`IGNORE`] when the count is zero.
+/// `RESET` clears the running count. `PLUS` / `MINUS` move it by one. The label
+/// is the sign of the count *after* the symbol at that position, or [`IGNORE`]
+/// when the count is zero.
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     let mut count: i64 = 0;
     symbols
@@ -102,21 +102,23 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
 /// Which generator a split draws from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~⅛, otherwise `±` evenly.
+    /// Independent symbols: `RESET` with probability ⅛, `PLUS` ⅜ and `MINUS`
+    /// ½.
     Random,
     /// A long same-sign run, one `RESET`, then a majority of **one vote** the
-    /// other way. Defeats any decay close to 1 (the buried run leaks through).
+    /// other way. It defeats any decay close to 1 (the old run leaks through).
     LongPrefix,
-    /// An early `RESET`, then `b+1` votes one way followed by `b` the other, so
-    /// the majority is decided by the *oldest* post-reset tokens. Defeats any
-    /// decay far from 1 (the recent block outvotes them).
+    /// An early `RESET`, then `j − b` votes one way and `b = ⌊(j − 1)/2⌋` the
+    /// other way, for `j` post-reset tokens. So the *oldest* post-reset tokens
+    /// decide the majority. It defeats any decay far from 1 (the recent block
+    /// outvotes the old one).
     LongSuffix,
     /// The training mixture: half [`Self::Random`], a quarter of each
     /// adversarial family.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -154,8 +156,8 @@ fn gen_long_prefix(rng: &mut Lcg, len: usize) -> Vec<usize> {
     let mut out = vec![run; m];
     out.push(RESET);
     // The opposing ballots come first, so the vote is `opp` at *every* tail
-    // position, not just the last one: a decay that leaks the pre-reset run
-    // through is then wrong on the whole tail rather than half of it.
+    // position, not only the last one. A decay that leaks the pre-reset run
+    // is then wrong on the whole tail, not on half of it.
     out.extend(std::iter::repeat_n(opp, j / 2 + 1));
     out.extend(std::iter::repeat_n(run, j / 2));
     out
@@ -168,8 +170,9 @@ fn gen_long_suffix(rng: &mut Lcg, len: usize) -> Vec<usize> {
         .map(|_| if rng.below(2) == 0 { PLUS } else { MINUS })
         .collect();
     out.push(RESET);
-    // `b + 1` early votes one way, then `b` late votes the other: the majority
-    // is one ballot wide and sits at the *far* end of the post-reset window.
+    // `j − b` early votes one way, then `b` late votes the other way. The
+    // majority is one ballot wide at odd `j` and two at even `j`, and it sits
+    // at the *far* end of the post-reset window.
     let j = len - out.len();
     let b = (j - 1) / 2;
     let (early, late) = if rng.below(2) == 0 {
@@ -208,7 +211,7 @@ pub fn generate(family: Family, rng_state: &mut u64, len: usize) -> Vec<usize> {
 pub struct ResetMajorityItem {
     /// Input symbols, one of [`MINUS`] / [`PLUS`] / [`RESET`].
     pub symbols: Vec<usize>,
-    /// Per-position target class ([`NEG`] / [`ZERO`] / [`POS`]).
+    /// Per-position target class ([`NEG`] / [`POS`] / [`IGNORE`]).
     pub targets: Vec<i64>,
 }
 
@@ -253,14 +256,15 @@ pub struct ResetMajorityBatcher {}
 pub struct ResetMajorityBatch {
     /// One-hot input symbol at each position, `[batch, seq, NUM_SYMBOLS]`.
     pub inputs: Tensor<3>,
-    /// Per-position target class, `[batch, seq]`; [`IGNORE`] where the vote is
-    /// zero.
+    /// Per-position target class, `[batch, seq]`. It is [`IGNORE`] where the vote
+    /// is zero.
     pub targets: Tensor<2, Int>,
 }
 
 impl ResetMajorityBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

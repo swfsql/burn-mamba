@@ -1,24 +1,26 @@
 //! The claims this example rests on, measured.
 //!
-//! 1. A **hand-built one-layer `Rotor4D`** block solves `A₅` exactly at
-//!    `reset-swap`'s width (`d_model = 2`, two heads) — every weight in closed
-//!    form. Conjugation (`p = q`) is `SO(3)`, `d` a half-turn about an edge axis
-//!    of the icosahedron and `t` a third-turn about a face axis, and the two heads
-//!    read two coordinates of the sixty orbit points of one written vector.
+//! 1. A **hand-built one-layer `Rotor4D`** block solves `A₅` exactly at the
+//!    width of `reset-swap` (`d_model = 2`, two heads), with every weight in
+//!    closed form. Conjugation (`p = q`) is `SO(3)`. `d` is a half-turn about an
+//!    edge axis of the icosahedron, and `t` is a third-turn about a face axis.
+//!    The two heads read two coordinates of the sixty orbit points of one
+//!    written vector.
 //! 2. A **hand-built two-layer** stack of the same block solves `S₅` exactly at
-//!    `d_model = 3`. The first layer holds the sign `e` and hands it over on `c`;
-//!    the second holds the even part `a` of `σ = sᵉ ∘ a`, turning on `c` by `c` or
-//!    by `s∘c∘s` according to that sign, and tracks the sign again in a head of
-//!    its own.
+//!    `d_model = 3`. The first layer holds the sign `e` and passes it on `c`.
+//!    The second layer holds the even part `a` of `σ = sᵉ ∘ a`. On `c`, it turns
+//!    by `c` or by `s∘c∘s`, as that sign selects, and it tracks the sign again
+//!    in a head of its own.
 //! 3. The **left-isoclinic twin** of (1) carries the double cover `2I` (order
-//!    120), whose two lifts of an element are antipodal: its outputs cancel per
-//!    class and its head fails — `reset-swap`'s wall, at sixty classes.
-//! 4. Why `S₅` takes the second layer — the facts the obstruction is made of:
-//!    `A₅` is simple and perfect, `S₅`'s only proper quotient is its sign, and an
-//!    odd element carries the `72°` rotation `c` to the `144°` rotation `s∘c∘s`
-//!    (conjugate in `S₅`, not in `A₅`) while conjugation by rotations preserves
-//!    every rotation angle.
-//! 5. **No order-blind model can** — the ceilings from the symbol, the sign, and
+//!    120), whose two lifts of an element are antipodal. Its outputs cancel per
+//!    class, and its head fails: the wall of `reset-swap`, at sixty classes.
+//! 4. Why `S₅` takes the second layer. The obstruction comes from these facts:
+//!    - `A₅` is simple and perfect.
+//!    - The only proper quotient of `S₅` is its sign.
+//!    - An odd element carries the `72°` rotation `c` to the `144°` rotation
+//!      `s∘c∘s` (conjugate in `S₅`, not in `A₅`), but conjugation by rotations
+//!      keeps every rotation angle.
+//! 5. **No order-blind model can**: the ceilings from the symbol, the sign, and
 //!    the `(#a, #b)` counts, fitted on one split and scored on another.
 
 use crate::common::model::ModelConfigExt;
@@ -38,22 +40,22 @@ use burn_mamba::prelude::*;
 // the constructions' constants
 // ---------------------------------------------------------------------------
 
-/// `Δ` for every head and every input, so a step turns by `range·π·tanh(‖ϑ‖)`
-/// outright and `γ = Δ = 1` writes `B` unscaled.
+/// `Δ` for every head and every input, so a step turns by exactly
+/// `range·π·tanh(‖ϑ‖)`, and `γ = Δ = 1` writes `B` unscaled.
 const DELTA: f64 = 1.0;
-/// `Â` on a hold. `A = −softplus(Â)`, floored at the block's `a_floor`.
+/// `Â` on a hold. `A = −softplus(Â)`, floored at the `a_floor` of the block.
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a wipe: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
 /// `x` on a write (`x` takes no activation).
 const X_WRITE: f64 = 1.0;
-/// The gate `z` where a head speaks — positive, so it never flips a sign.
+/// The gate `z` where a head speaks: positive, so it never flips a sign.
 const Z_ON: f64 = 5.0;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 /// The rotation bound `Mamba3Config::rotation_range`, in half-turns per unit `Δ`.
 const ROTATION_RANGE: f64 = 2.0;
-/// `state_rank` — one quaternion block.
+/// `state_rank`: one quaternion block.
 const RANK: usize = 4;
 
 // ---------------------------------------------------------------------------
@@ -101,7 +103,7 @@ fn solve(mut m: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Vec<f64> {
 }
 
 /// The raw in-projection generator that makes one step turn by the rotation
-/// vector `v` (`angle · axis`): the block maps a raw `r` to
+/// vector `v` (`angle · axis`). The block maps a raw `r` to
 /// `range·π·tanh(‖r‖)·r̂`, so `r = atanh(angle/(range·π))·v̂`.
 fn raw_generator(v: [f64; 3]) -> [f64; 3] {
     let angle = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
@@ -113,9 +115,9 @@ fn raw_generator(v: [f64; 3]) -> [f64; 3] {
 }
 
 /// The per-head rotation channels for one input: `nheads` copies of the raw
-/// generator of `v`, laid out `[head][left | right][x, y, z]` for `Rotor4D`
-/// (both factors equal: conjugation) and `[head][x, y, z]` for `Quaternion4D`
-/// (the left factor alone).
+/// generator of `v`. The layout is `[head][left | right][x, y, z]` for
+/// `Rotor4D` (both factors equal: conjugation), and `[head][x, y, z]` for
+/// `Quaternion4D` (the left factor alone).
 fn rotation_values(rotation: RotationKind, v: [f64; 3], nheads: usize) -> Vec<f64> {
     let g = raw_generator(v);
     let per_head: Vec<f64> = match rotation {
@@ -136,25 +138,25 @@ fn qk_norm(v: [f64; RANK]) -> [f64; RANK] {
 // the hand-built models
 // ---------------------------------------------------------------------------
 
-/// What the network's head reads out.
+/// What the head of the network reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
-    /// The nearest-point decoder over the group's elements.
+    /// The nearest-point decoder over the elements of the group.
     Decoder,
-    /// The last block's outputs, verbatim, in the first `d_model` logits.
+    /// The outputs of the last block, verbatim, in the first `d_model` logits.
     Probe,
 }
 
-/// One in-projection channel: its value at each of the block's input points,
-/// before the channel's own activation.
+/// One in-projection channel: its value at each of the input points of the
+/// block, before the activation of the channel.
 type Channel = Vec<f64>;
 
-/// Write a block's in-projection so each channel takes its listed values at the
-/// listed input points — one exact affine solve per channel.
+/// Write the in-projection of a block, so each channel takes its listed values
+/// at the listed input points: one exact affine solve per channel.
 ///
-/// `points` are the block's inputs *after* the layer's pre-`RmsNorm` (`γ = 1`),
-/// and there are exactly `d_model + 1` of them, so each channel is a square
-/// solve; the solve refuses affinely dependent points.
+/// `points` are the inputs of the block *after* the pre-`RmsNorm` of the layer
+/// (`γ = 1`). There are exactly `d_model + 1` of them, so each channel is a
+/// square solve. The solve refuses affinely dependent points.
 fn write_in_proj(block: &mut Mamba3, points: &[Vec<f64>], channels: &[Channel], device: &Device) {
     let d = points[0].len();
     assert_eq!(points.len(), d + 1, "one affine solve per channel needs d_model + 1 points");
@@ -178,10 +180,15 @@ fn write_in_proj(block: &mut Mamba3, points: &[Vec<f64>], channels: &[Channel], 
     block.in_proj.bias = Some(Param::from_tensor(t1(&b, [n_ch], device)));
 }
 
-/// Everything in a block that is not its in-projection: `Δ`'s bias and `D` at
-/// zero, the QK-norm scales at one, no `B` bias, `C` aimed by head at the state
-/// component `aim[h]` (`C_raw = (1,0,0,0)` normalises to `(2,0,0,0)`; the bias
-/// moves it to `2·e_aim`), and an identity out-projection.
+/// Everything in a block that is not its in-projection:
+///
+/// - the bias of `Δ` and `D` at zero,
+/// - the QK-norm scales at one,
+/// - no `B` bias,
+/// - `C` aimed by head at the state component `aim[h]`
+///   (`C_raw = (1,0,0,0)` normalises to `(2,0,0,0)`, and the bias moves it to
+///   `2·e_aim`),
+/// - an identity out-projection.
 fn write_block_rest(block: &mut Mamba3, aim: &[usize], device: &Device) {
     let nheads = aim.len();
     block.dt_bias_h = Param::from_tensor(Tensor::zeros(Shape::new([nheads]), device));
@@ -203,14 +210,16 @@ fn identity_out_proj(block: &mut Mamba3, n: usize, device: &Device) {
     block.out_proj.bias = Some(Param::from_tensor(Tensor::zeros(Shape::new([n]), device)));
 }
 
-/// The network's input embedding (one row per symbol, each of norm `√d_model`
-/// so the layer's pre-`RmsNorm` passes it unchanged) and its class head: the
-/// direction decoder over `points[class]`, or the probe.
+/// The input embedding of the network and its class head. The embedding has one
+/// row per symbol, each of norm `√d_model`, so the pre-`RmsNorm` of the layer
+/// does not change it. The head is the direction decoder over `points[class]`,
+/// or the probe.
 ///
-/// The decoder's row for a class is its point's **unit** vector and there is no
-/// bias, so `argmax ⟨y, p̂⟩` picks the class whose direction is closest to `y`'s:
-/// exact whenever the points' directions are distinct, and blind to the state's
-/// scale — which drifts, since every hold decays by `a_floor`.
+/// The decoder row for a class is the **unit** vector of its point, and there
+/// is no bias. So `argmax ⟨y, p̂⟩` picks the class whose direction is closest
+/// to the direction of `y`. This is exact when the directions of the points are
+/// distinct, and it ignores the scale of the state. The scale drifts, because
+/// every hold decays by `a_floor`.
 fn write_ends(
     net: &mut burn_stack::modules::LatentNetwork<Mamba3>,
     embed: &[Vec<f64>],
@@ -250,9 +259,9 @@ fn head_gain() -> f64 {
     2.0 * X_WRITE * silu(Z_ON) * qk_norm(REF_POINT)[1] / REF_POINT[1]
 }
 
-/// The three symbols as `reset-swap`'s planar tokens, rescaled to norm `√d` (so
-/// the pre-norm passes them unchanged) and padded with zeros to `d`: three
-/// affinely independent points, spanning the first two axes.
+/// The three symbols as the planar tokens of `reset-swap`, rescaled to norm
+/// `√d` (so the pre-norm does not change them) and padded with zeros to `d`.
+/// These are three affinely independent points on the first two axes.
 fn embeddings(d: usize) -> Vec<Vec<f64>> {
     let r = (d as f64 / 2.0).sqrt();
     let planar = [[std::f64::consts::SQRT_2, 0.0], [0.0, std::f64::consts::SQRT_2], [-1.0, -1.0]];
@@ -262,14 +271,15 @@ fn embeddings(d: usize) -> Vec<Vec<f64>> {
         .collect()
 }
 
-/// The one-layer `A₅` block, by hand, at `reset-swap`'s width (`d_model = 2`,
-/// two heads), for `Rotor4D` (the solution) or `Quaternion4D` (its
-/// left-isoclinic twin: the same generators, left factor only).
+/// The one-layer `A₅` block, by hand, at the width of `reset-swap`
+/// (`d_model = 2`, two heads). It is built for `Rotor4D` (the solution) or for
+/// `Quaternion4D` (its left-isoclinic twin: the same generators, left factor
+/// only).
 ///
-/// `R` writes [`REF_POINT`] and wipes; `d` and `t` write nothing and turn — a
-/// half-turn about [`EDGE_AXIS`] and a third-turn about [`face_axis`]. The two
-/// heads read the orbit's `x` and `y`, where its sixty points stay distinct, and
-/// the head is the nearest-point decoder over them.
+/// `R` writes [`REF_POINT`] and wipes. `d` and `t` write nothing and turn: a
+/// half-turn about [`EDGE_AXIS`], and a third-turn about [`face_axis`]. The two
+/// heads read the `x` and `y` of the orbit, where its sixty points stay
+/// distinct, and the head is the nearest-point decoder over them.
 fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentNet {
     const H: usize = 2;
     let group = Group::Alternating;
@@ -312,29 +322,31 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
 
 /// The two-layer `S₅` stack, by hand (`Rotor4D`, `d_model = 3`, three heads).
 ///
-/// **Layer 1 — the sign, handed over on `c`.** `s` is a half-turn about `x̂`,
-/// `c` does not turn, `R` writes `ŷ` and wipes; head 0 reads `±ŷ`, gated open
-/// on `c` alone (`silu(0) = 0` shuts it elsewhere), and the out-projection puts
-/// it on the third stream axis. `c` itself embeds as the zero vector, so after
-/// the residual and the second layer's pre-norm its four inputs are
+/// **Layer 1: the sign, passed on `c`.** `s` is a half-turn about `x̂`. `c` does
+/// not turn. `R` writes `ŷ` and wipes. Head 0 reads `±ŷ`, and its gate opens on
+/// `c` alone (`silu(0) = 0` closes it elsewhere). The out-projection puts it on
+/// the third stream axis. `c` itself embeds as the zero vector. So after the
+/// residual and the pre-norm of the second layer, its four inputs are:
 ///
 /// ```text
 ///   s   √3·e₀        c, sign ±   ±√3·e₂        R   √3·e₁
 /// ```
 ///
-/// — affinely independent in `ℝ³`, which is all its in-projection needs, and
-/// exactly these at every length: the sign arrives scaled by how far layer 1's
-/// hold has decayed (`ᾱ = e^(−a_floor)` a step), and the norm removes the scale.
-/// Next to a nonzero `c` embedding it would not, and the turns would drift.
+/// These are affinely independent in `ℝ³`, which is all that its in-projection
+/// needs. They are exactly these points at every length. The sign arrives
+/// scaled by the decay of the hold of layer 1 (`ᾱ = e^(−a_floor)` per step),
+/// and the norm removes the scale. Next to a nonzero `c` embedding, the norm
+/// cannot remove it, and the turns drift.
 ///
-/// **Layer 2 — the even part, and a sign of its own.** With `σ = sᵉ ∘ a`, one step
-/// is `a ← sᵉ' ∘ g ∘ sᵉ · a` (`e`, `e'` the sign before and after `g`): the
-/// identity on `s`, and on `c` either `c` (`e = 0`) or `s∘c∘s` (`e = 1`) — the
-/// `72°` and the `144°` rotations, the pair no conjugation relates, which is why
-/// the sign must be read *here*. Heads 0–1 hold `a` as the `A₅` block does;
-/// head 2 repeats layer 1's half-turn on `s`, so it carries the sign itself and
-/// layer 1 never has to deliver it on `s`. The output is `(orbit(a)ₓ, orbit(a)ᵧ,
-/// ±REFᵧ)`, a hundred and twenty distinct points.
+/// **Layer 2: the even part, and a sign of its own.** With `σ = sᵉ ∘ a`, one
+/// step is `a ← sᵉ' ∘ g ∘ sᵉ · a` (`e`, `e'` the sign before and after `g`). It
+/// is the identity on `s`. On `c`, it is either `c` (`e = 0`) or `s∘c∘s`
+/// (`e = 1`): the `72°` and the `144°` rotations, a pair that no conjugation
+/// relates. That is why this layer must read the sign. Heads 0–1 hold `a` as
+/// the `A₅` block does. Head 2 repeats the half-turn of layer 1 on `s`, so it
+/// carries the sign itself, and layer 1 never needs to deliver it on `s`. The
+/// output is `(orbit(a)ₓ, orbit(a)ᵧ, ±REFᵧ)`, a hundred and twenty distinct
+/// points.
 fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     const H: usize = 3;
     const K1: f64 = 1.5; // the sign's amplitude on the stream
@@ -357,7 +369,8 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     let embed = vec![axis(0, r3), vec![0.0; d], axis(1, r3)];
 
     // ── layer 1: the sign ─────────────────────────────────────────────────────
-    // a fourth point off the symbols' plane; no channel is evaluated there
+    // A fourth point off the plane of the symbols. No channel is evaluated
+    // there.
     let mut points1 = embed.clone();
     points1.push(axis(2, r3));
     {
@@ -453,7 +466,7 @@ const FIT: u64 = 0x51D3;
 /// Seed of the split everything is **scored** on.
 const EVAL: u64 = 0xE7A1;
 
-/// Run `model` over `count` sequences of `len` symbols from one family; return
+/// Run `model` over `count` sequences of `len` symbols from one family. Return
 /// the per-position output channels and the targets.
 fn run(
     model: &MambaLatentNet,
@@ -495,8 +508,8 @@ fn run(
     (channels, targets)
 }
 
-/// Per-position accuracy of the model's own head (argmax over the class logits)
-/// on 128 sequences of `len` symbols.
+/// Per-position accuracy of the head of the model (argmax over the class
+/// logits) on 128 sequences of `len` symbols.
 fn accuracy(
     model: &MambaLatentNet,
     group: Group,
@@ -518,9 +531,9 @@ fn accuracy(
     hits as f64 / targets.len() as f64
 }
 
-/// Accuracy of the best lookup table from a discrete code to a class — fitted
-/// on one split, scored on another. Codes unseen while fitting fall back to the
-/// fit split's majority class.
+/// Accuracy of the best lookup table from a discrete code to a class, fitted on
+/// one split and scored on another. A code that the fit split does not contain
+/// gets the majority class of the fit split.
 fn best_lookup(
     fit: (&[usize], &[i64]),
     eval: (&[usize], &[i64]),
@@ -582,7 +595,7 @@ fn mean_over_rms(channels: &[Vec<f64>], targets: &[i64], width: usize, classes: 
 // ---------------------------------------------------------------------------
 
 /// Accuracy of `model` on every family at every [`EVAL_LENGTHS`] length,
-/// printed as a table; returns the worst.
+/// printed as a table. It returns the worst.
 fn exact_everywhere(model: &MambaLatentNet, group: Group, device: &Device) -> f64 {
     let mut worst = 1.0f64;
     println!("      family    {}", EVAL_LENGTHS.map(|l| format!("{l:>4} symbols")).join("   "));
@@ -618,14 +631,14 @@ fn handmade_s5_two_layers_solve_every_family() {
 // 3. the left-isoclinic twin
 // ---------------------------------------------------------------------------
 
-/// `Quaternion4D` — the same `A₅` construction with the left factor alone.
+/// `Quaternion4D`: the same `A₅` construction with the left factor alone.
 ///
-/// Its state runs in the binary icosahedral group `2I`: `d`'s lift squares to
-/// `−1`, so every element of `A₅` is reached as both `±W`, and the heads read
-/// `±(W ⊗ B)`. The two lifts occur about equally often and a linear functional
-/// takes opposite values on them, so each class's outputs cancel on average —
-/// `‖mean‖/rms` near 0 where the conjugating block sits at 1 — and the head that
-/// is exact for the conjugating block is near chance here.
+/// Its state runs in the binary icosahedral group `2I`. The lift of `d` squares
+/// to `−1`, so every element of `A₅` occurs as both `±W`, and the heads read
+/// `±(W ⊗ B)`. The two lifts occur about equally often, and a linear functional
+/// takes opposite values on them. So the outputs of each class cancel on
+/// average: `‖mean‖/rms` is near 0, where the conjugating block is at 1. The
+/// head that is exact for the conjugating block is near chance here.
 #[test]
 fn left_isoclinic_carries_the_binary_icosahedral_group() {
     let device = Device::default();
@@ -661,7 +674,8 @@ fn left_isoclinic_carries_the_binary_icosahedral_group() {
 // 4. the groups, and the obstruction
 // ---------------------------------------------------------------------------
 
-/// The dataset's labels are the two word problems, generated as claimed.
+/// The labels of the dataset are the two word problems, generated as the docs
+/// say.
 #[test]
 fn labels_are_the_alternating_and_symmetric_groups() {
     let a5 = Group::Alternating;
@@ -670,7 +684,7 @@ fn labels_are_the_alternating_and_symmetric_groups() {
     assert_eq!(s5.elements().len(), 120);
     assert!(a5.elements().iter().all(|&p| is_even(p)));
 
-    // A₅: d² = t³ = (d∘t)⁵ = 1 — the (2,3,5) triangle group, which *is* A₅
+    // A₅: d² = t³ = (d∘t)⁵ = 1, the (2,3,5) triangle group, which *is* A₅
     let last = |group: Group, word: &[usize]| {
         let mut seq = vec![RESET];
         seq.extend_from_slice(word);
@@ -685,7 +699,7 @@ fn labels_are_the_alternating_and_symmetric_groups() {
     assert_eq!(last(s5, &[TURN_B; 5]), 0, "c⁵ = 1");
     assert_ne!(last(s5, &[TURN_B, TURN_A]), last(s5, &[TURN_A, TURN_B]));
 
-    // the streams `examples/reset/README.md` shows
+    // The streams that `examples/reset/README.md` shows.
     let (s, c, d, t, r) = (TURN_A, TURN_B, TURN_A, TURN_B, RESET);
     assert_eq!(labels(s5, &[r, s, c, s, c, c, r, c, s]), [0, 24, 57, 51, 82, 108, 0, 33, 9]);
     assert_eq!(labels(a5, &[r, d, t, d, t, t, r, t, d]), [0, 13, 16, 7, 32, 57, 0, 29, 38]);
@@ -708,9 +722,9 @@ fn labels_are_the_alternating_and_symmetric_groups() {
     assert_eq!(a5.symbol_perm(TURN_B), THREE_CYCLE);
 }
 
-/// The icosahedral lifts are a homomorphism up to sign, and the orbit of
-/// [`REF_POINT`] is sixty points on one sphere whose `xy`-shadows point in sixty
-/// distinct directions — what makes the two-head `A₅` readout a decoder.
+/// The icosahedral lifts are a homomorphism up to sign. The orbit of
+/// [`REF_POINT`] is sixty points on one sphere, and their `xy`-shadows point in
+/// sixty distinct directions. That makes the two-head `A₅` readout a decoder.
 #[test]
 fn a5_is_the_icosahedral_rotation_group() {
     let elements = Group::Alternating.elements();
@@ -739,7 +753,7 @@ fn a5_is_the_icosahedral_rotation_group() {
     println!("closest pair of xy-directions: {gap:.2}°");
     assert!(gap > 1.0, "two orbit points share a direction on the readout plane ({gap}°)");
 
-    // the generators turn by what they should, about the axes they should
+    // The generators turn by the correct angles.
     let angles = [DOUBLE_SWAP, THREE_CYCLE, compose(DOUBLE_SWAP, THREE_CYCLE)].map(rotation_angle);
     println!("d, t, d∘t turn by {angles:.1?} degrees");
     for (got, want) in angles.iter().zip([180.0, 120.0, 72.0]) {
@@ -749,21 +763,23 @@ fn a5_is_the_icosahedral_rotation_group() {
 
 /// Why `S₅` needs the second layer, as four checkable facts.
 ///
-/// A layer's transition is a scalar times a block-diagonal rotation, so what it
-/// can follow of a group *exactly* is a quotient of a group of such rotations.
+/// The transition of a layer is a scalar times a block-diagonal rotation. So
+/// what a layer can follow of a group *exactly* is a quotient of a group of such
+/// rotations.
 ///
-/// 1. `A₅` is **simple** and **perfect**: an abelian transition follows none of
-///    it, and it cannot be split across a stack of solvable ones.
-/// 2. `S₅`'s normal subgroups are `1`, `A₅`, `S₅`, so its only proper quotient is
-///    the sign: a layer either follows all of `S₅` or at most its sign.
-/// 3. An odd element carries the five-cycle `c` to `s∘c∘s`, which is conjugate
-///    to `c` in `S₅` but **not** in `A₅` — the outer automorphism — and in the
-///    icosahedral rotations the two turn by `72°` and `144°`.
-/// 4. Conjugation by a rotation never changes a rotation angle: in a 4-block
+/// 1. `A₅` is **simple** and **perfect**. An abelian transition follows none of
+///    it, and no stack of solvable transitions can divide it among its layers.
+/// 2. The normal subgroups of `S₅` are `1`, `A₅`, `S₅`, so its only proper
+///    quotient is the sign. A layer either follows all of `S₅`, or at most its
+///    sign.
+/// 3. An odd element carries the five-cycle `c` to `s∘c∘s`. That is conjugate
+///    to `c` in `S₅` but **not** in `A₅` (the outer automorphism). In the
+///    icosahedral rotations, the two turn by `72°` and `144°`.
+/// 4. Conjugation by a rotation never changes a rotation angle: in a 4-block,
 ///    `(q, p)` conjugated by `(u, w)` keeps both `Re q` and `Re p`. So the `A₅`
 ///    inside any group of block rotations meets only inner automorphisms, and a
-///    transposition has nowhere to act — it would take the reflection that swaps
-///    `q` and `p`, which no Mamba-3 transition is.
+///    transposition has no way to act. It needs the reflection that swaps `q`
+///    and `p`, and no Mamba-3 transition is a reflection.
 #[test]
 fn s5_needs_a_reflection_one_layer_does_not_have() {
     let a5 = Group::Alternating.elements();
@@ -781,7 +797,7 @@ fn s5_needs_a_reflection_one_layer_does_not_have() {
         .collect();
     assert_eq!(closure(&commutators).len(), 60, "A₅ should be perfect");
 
-    // 2. S₅'s normal subgroups
+    // 2. the normal subgroups of S₅
     assert_eq!(normal_subgroup_orders(&s5), vec![1, 60, 120]);
 
     // 3. the outer automorphism moves a fifth-turn to two fifths
@@ -793,7 +809,7 @@ fn s5_needs_a_reflection_one_layer_does_not_have() {
     println!("c turns by {ac:.1}°, s∘c∘s by {ascs:.1}°");
     assert!((ac - 72.0).abs() < 1e-6 && (ascs - 144.0).abs() < 1e-6);
 
-    // 4. two-sided conjugation keeps both factors' real parts
+    // 4. two-sided conjugation keeps the real parts of both factors
     let (q, p) = (lift(c), lift(scs));
     for (u, w) in [(lift(THREE_CYCLE), lift(DOUBLE_SWAP)), (lift(scs), lift(IDENTITY))] {
         let q2 = quat_mul(quat_mul(u, q), quat_conj(u));
@@ -819,8 +835,8 @@ fn closure(generators: &[Perm]) -> Vec<Perm> {
     seen
 }
 
-/// The orders of a group's normal subgroups: unions of conjugacy classes that
-/// contain the identity and are closed under composition.
+/// The orders of the normal subgroups of a group: unions of conjugacy classes
+/// that contain the identity and are closed under composition.
 fn normal_subgroup_orders(group: &[Perm]) -> Vec<usize> {
     let mut classes: Vec<Vec<Perm>> = Vec::new();
     for &x in group {
@@ -855,14 +871,15 @@ fn normal_subgroup_orders(group: &[Perm]) -> Vec<usize> {
 }
 
 // ---------------------------------------------------------------------------
-// a tool: what a trained model's first layer turns by
+// a tool: the turns of the first layer of a trained model
 // ---------------------------------------------------------------------------
 
-/// Read a trained `Rotor4D` model's **first** layer off its weights: for every
-/// symbol and head, the step `Δ`, the hold `ᾱ = exp(Δ·A)` and the angles the
-/// left and right factors turn by; then, per head, the angle between the two
-/// turns' axes in each factor. The icosahedral generators read `180°`/`120°`
-/// with axes `20.9°` or `69.1°` apart (or their supplements).
+/// Read the **first** layer of a trained `Rotor4D` model from its weights. For
+/// every symbol and head, it prints the step `Δ`, the hold `ᾱ = exp(Δ·A)`, and
+/// the turn angles of the left and right factors. Then, per head, it prints the
+/// angle between the axes of the two turns in each factor. The icosahedral
+/// generators read `180°`/`120°`, with axes `20.9°` or `69.1°` apart (or their
+/// supplements).
 ///
 /// ```text
 /// QUINTIC_ARTIFACTS=<artifacts dir> cargo test --release --example reset-quintic \
@@ -904,7 +921,7 @@ fn learned_rotations() {
         cos.clamp(-1.0, 1.0).acos().to_degrees()
     };
     println!("first layer: d_model {d}, {nheads} heads, mimo_rank {mimo_rank}");
-    // gens[symbol][head][factor] — the rotation vector one step turns by
+    // gens[symbol][head][factor]: the rotation vector of one step
     let mut gens = vec![vec![[[0.0f64; 3]; 2]; nheads]; NUM_SYMBOLS];
     for s in 0..NUM_SYMBOLS {
         let token: Vec<f64> = (0..d).map(|k| embed_w[s * d + k] + embed_b[k]).collect();
@@ -941,8 +958,8 @@ fn learned_rotations() {
 // ---------------------------------------------------------------------------
 
 /// What an order-blind model can do: the best table from the symbol, from the
-/// sign `(−1)^#odd` (for `S₅`, everything a layer can follow *homomorphically*),
-/// and from the `(#a, #b)` counts since the reset.
+/// sign `(−1)^#odd`, and from the `(#a, #b)` counts since the reset. (For `S₅`,
+/// the sign is everything that a layer can follow *homomorphically*.)
 #[test]
 fn counts_and_sign_ceilings() {
     for group in [Group::Alternating, Group::Symmetric] {

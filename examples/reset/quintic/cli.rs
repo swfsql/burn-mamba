@@ -1,7 +1,7 @@
 //! The example's own flags, forwarded after the trailing `--` (listed in the
-//! crate docs). `--group` is not persisted, so pass it on every run; the width,
-//! depth and rotation shape a fresh model config, and a persisted one wins on
-//! reload.
+//! crate docs). `--group` is not persisted, so pass it on every run. The width,
+//! the depth and the rotation shape a fresh model config. On reload, a
+//! persisted model config wins.
 
 use crate::common::cli::{AppArgs, finish_extra};
 use crate::dataset::{self, Group};

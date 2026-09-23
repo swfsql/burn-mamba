@@ -1,33 +1,36 @@
-//! The reset-swap dataset: a three-symbol stream whose per-position target is
-//! the **running permutation of three items** since the last reset — the word
-//! problem in the symmetric group `S₃`.
+//! The reset-swap dataset: a three-symbol stream. The target at each position
+//! is the **running permutation of three items** since the last reset: the
+//! word problem in the symmetric group `S₃`.
 //!
-//! `s` swaps the first two items, `t` swaps the last two, and `R` restores the
-//! original order:
+//! `l` swaps the left pair of positions, `r` swaps the right pair, and `R`
+//! restores the original order:
 //!
 //! ```text
-//!   symbols   R   s   t   s   t   R   t   s   s
-//!   order    abc bac bca cba acb abc acb cab bca
-//!   target    0   2   3   5   1   0   1   4   3
+//!   symbols   R   l   r   l   r   R   r   l   l
+//!   order    abc bac bca cba cab abc acb cab acb
+//!   target    0   2   4   5   3   0   1   3   1
 //! ```
 //!
-//! `S₃` is the **smallest non-abelian group**, so — exactly as in `reset-spinor`
-//! — how many `s`s and `t`s went by never decides the answer: `st ≠ ts`. What
-//! makes it the *next* rung is a second property, which `Q₈` does not have:
+//! The classes are `abc, acb, bac, cab, bca, cba`, in that order (see
+//! [`PERMS`]).
 //!
-//! > `S₃` has **three** elements of order two (the three swaps), and every
-//! > finite subgroup of `SU(2)` has exactly **one** (`−1`, the unique element of
-//! > order 2 in the unit quaternions).
+//! `S₃` is the **smallest non-abelian group**. So, as in `reset-spinor`, the
+//! number of `l`s and `r`s never decides the answer: `lr ≠ rl`. A second
+//! property makes it the *next* rung, and `Q₈` does not have it:
+//!
+//! > `S₃` has **three** elements of order two (the three swaps). Every finite
+//! > subgroup of `SU(2)` has exactly **one** (`−1`, the unique element of order
+//! > 2 in the unit quaternions).
 //!
 //! So `S₃` does not embed in `SU(2)` at all. A left-isoclinic
 //! ([`Quaternion4D`](burn_mamba::prelude::RotationKind::Quaternion4D)) state can
-//! only carry the **double cover** `2D₃` (order 12) — the element *and* a
-//! spurious sign — where the two lifts `±W` of one permutation are **antipodal**
-//! state vectors that no linear readout can merge. Two-sided
-//! ([`Rotor4D`](burn_mamba::prelude::RotationKind::Rotor4D)) the block reaches
-//! `SO(3) ⊂ SO(4)` by conjugation `v ↦ q v q̄`, where `±q` act *identically* and
-//! the three swaps are three honest half-turns about three different axes. The
-//! group itself is then the state.
+//! carry only the **double cover** `2D₃` (order 12): the element *and* a
+//! spurious sign. The two lifts `±W` of one permutation are then **antipodal**
+//! state vectors, and no linear readout can merge them. A two-sided
+//! ([`Rotor4D`](burn_mamba::prelude::RotationKind::Rotor4D)) block reaches
+//! `SO(3) ⊂ SO(4)` by conjugation `v ↦ q v q̄`. There, `±q` act *identically*,
+//! and the three swaps are three true half-turns about three different axes.
+//! The group itself is then the state.
 
 use burn::data::{
     dataloader::batcher::Batcher,
@@ -37,10 +40,12 @@ use burn::prelude::*;
 use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
 
-/// Input symbol: swap the first two items (the transposition `(0 1)`).
-pub const SWAP_S: usize = 0;
-/// Input symbol: swap the last two items (the transposition `(1 2)`).
-pub const SWAP_T: usize = 1;
+/// Input symbol `l`: swap the left pair of positions (the transposition
+/// `(0 1)`).
+pub const SWAP_L: usize = 0;
+/// Input symbol `r`: swap the right pair of positions (the transposition
+/// `(1 2)`).
+pub const SWAP_R: usize = 1;
 /// Input symbol: restore the original order (the selective-forget token).
 pub const RESET: usize = 2;
 /// Input alphabet size.
@@ -68,15 +73,20 @@ pub const EVAL_SEED: u64 = 0xBEEF;
 // The group
 // ---------------------------------------------------------------------------
 
-/// The six permutations of three items, in class-index order. `PERMS[c][i]` is
-/// the item sitting at position `i`, so class 2 (`[1, 0, 2]`) reads `bac`.
+/// The six permutations of three items, in class-index order. `PERMS[c][x]` is
+/// the position of item `x`. So class 3 (`[1, 2, 0]`) puts `a` at position 1,
+/// `b` at 2 and `c` at 0: it reads `cab`.
+///
+/// A swap `τ` of two positions moves the item at position `p` to `τ(p)`. So
+/// it maps the array `PERMS[c]` to `τ ∘ PERMS[c]`, and [`labels`] composes
+/// each new swap on the left.
 pub const PERMS: [[usize; 3]; NUM_CLASSES] = [
-    [0, 1, 2], // 0: abc — identity
-    [0, 2, 1], // 1: acb — the swap `t`
-    [1, 0, 2], // 2: bac — the swap `s`
-    [1, 2, 0], // 3: bca — a 3-cycle (`s∘t`)
-    [2, 0, 1], // 4: cab — the other 3-cycle (`t∘s`)
-    [2, 1, 0], // 5: cba — the third swap (`s∘t∘s`)
+    [0, 1, 2], // 0: abc, the identity
+    [0, 2, 1], // 1: acb, the swap `r`
+    [1, 0, 2], // 2: bac, the swap `l`
+    [1, 2, 0], // 3: cab, a 3-cycle (`l∘r`: `r`, then `l`)
+    [2, 0, 1], // 4: bca, the other 3-cycle (`r∘l`: `l`, then `r`)
+    [2, 1, 0], // 5: cba, the third swap (`l∘r∘l`)
 ];
 
 /// Class index of a permutation array.
@@ -92,22 +102,23 @@ pub fn compose(p: [usize; 3], q: [usize; 3]) -> [usize; 3] {
     [p[q[0]], p[q[1]], p[q[2]]]
 }
 
-/// The permutation a symbol applies. `RESET` returns the identity, but note it
-/// *replaces* the state rather than composing with it (see [`labels`]).
+/// The permutation that a symbol applies. `RESET` returns the identity, but it
+/// *replaces* the state instead of composing with it (see [`labels`]).
 pub fn symbol_perm(symbol: usize) -> [usize; 3] {
     match symbol {
-        SWAP_S => PERMS[2],
-        SWAP_T => PERMS[1],
+        SWAP_L => PERMS[2],
+        SWAP_R => PERMS[1],
         RESET => PERMS[0],
         _ => panic!("symbol out of alphabet: {symbol}"),
     }
 }
 
-/// The per-position targets implied by a symbol sequence: the running
-/// composition since the last `RESET`, as a class index.
+/// The per-position targets of a symbol sequence: the running composition
+/// since the last `RESET`, as a class index.
 ///
-/// The newest swap composes **on the left**, matching the block's own
-/// cumulative rotation (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
+/// The newest swap composes **on the left** of the item-to-position array (see
+/// [`PERMS`]), like the cumulative rotation of the block
+/// (`Pₜ = qₜ ⊗ ⋯ ⊗ q₁`).
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     let mut state = PERMS[IDENTITY as usize];
     symbols
@@ -122,21 +133,22 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// How many `s`s and `t`s have gone by since the last reset, at every position.
+/// The number of `l`s and `r`s since the last reset, at every position.
 ///
-/// This is everything an **abelian** transition can carry, and — because the
-/// parity `(#s + #t) mod 2` is the sign character — it also bounds everything a
-/// left-isoclinic one can carry *linearly*: the only homomorphism from `S₃` into
-/// `SU(2)` sends the odd permutations to `−1` and nothing else, so the state is
-/// `±1` times a constant. See the module docs.
+/// This is everything that an **abelian** transition can carry. The parity
+/// `(#l + #r) mod 2` is the sign character, so the counts also bound
+/// everything that a left-isoclinic transition can carry *linearly*. The only
+/// nontrivial homomorphism from `S₃` into `SU(2)` sends the odd permutations
+/// to `−1` and the even ones to `1`. So the state is `±1` times a constant.
+/// See the module docs.
 pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
     let (mut a, mut b) = (0, 0);
     symbols
         .iter()
         .map(|&s| {
             match s {
-                SWAP_S => a += 1,
-                SWAP_T => b += 1,
+                SWAP_L => a += 1,
+                SWAP_R => b += 1,
                 RESET => (a, b) = (0, 0),
                 _ => panic!("symbol out of alphabet: {s}"),
             }
@@ -146,7 +158,7 @@ pub fn counts_since_reset(symbols: &[usize]) -> Vec<(i64, i64)> {
 }
 
 // ---------------------------------------------------------------------------
-// The group as rotations — what the block's state actually holds
+// The group as rotations: what the state of the block holds
 // ---------------------------------------------------------------------------
 
 /// Hamilton product of two quaternions `(w, x, y, z)`.
@@ -166,26 +178,27 @@ pub fn quat_conj(q: [f64; 4]) -> [f64; 4] {
 
 /// The **axis** each swap turns about, as a unit 3-vector.
 ///
-/// A transposition is an order-2 element, so it must be a **half-turn**; two
-/// half-turns about axes `θ` apart compose to a rotation by `2θ`, and `s∘t` has
-/// order 3, so the axes sit `60°` apart. That is the whole embedding
+/// A transposition is an order-2 element, so it must be a **half-turn**. Two
+/// half-turns about axes `θ` apart compose to a rotation by `2θ`. `l∘r` has
+/// order 3, so the axes are `60°` apart. That is the whole embedding
 /// `S₃ ≅ D₃ ⊂ SO(3)`.
 pub fn swap_axis(symbol: usize) -> [f64; 3] {
     const H: f64 = 0.866_025_403_784_438_6; // sin 60°
     match symbol {
-        SWAP_S => [1.0, 0.0, 0.0],
-        SWAP_T => [0.5, H, 0.0],
+        SWAP_L => [1.0, 0.0, 0.0],
+        SWAP_R => [0.5, H, 0.0],
         RESET => [0.0, 0.0, 0.0],
         _ => panic!("symbol out of alphabet: {symbol}"),
     }
 }
 
-/// The unit quaternion lifting a symbol's rotation: a half-turn about
+/// The unit quaternion that lifts the rotation of a symbol. A half-turn about
 /// [`swap_axis`] is the **pure** quaternion `(0, û)`, and `RESET` is the
 /// identity `(1, 0, 0, 0)`.
 ///
-/// Note `(0, û)² = −1`, not `1`: the lift of a swap has order **four**. That is
-/// the double cover, and the reason a left-isoclinic state cannot be the group.
+/// Note that `(0, û)² = −1`, not `1`: the lift of a swap has order **four**.
+/// That is the double cover, and it is why a left-isoclinic state cannot be
+/// the group.
 pub fn symbol_quat(symbol: usize) -> [f64; 4] {
     let u = swap_axis(symbol);
     match symbol {
@@ -194,30 +207,32 @@ pub fn symbol_quat(symbol: usize) -> [f64; 4] {
     }
 }
 
-/// A word for each class, newest factor first — the symbols whose composition
-/// (left-multiplying) reaches that permutation from the identity.
+/// A word for each class, newest factor first: the symbols whose composition
+/// (by left multiplication) reaches that permutation from the identity.
 const WORDS: [&[usize]; NUM_CLASSES] = [
     &[],
-    &[SWAP_T],
-    &[SWAP_S],
-    &[SWAP_S, SWAP_T],
-    &[SWAP_T, SWAP_S],
-    &[SWAP_S, SWAP_T, SWAP_S],
+    &[SWAP_R],
+    &[SWAP_L],
+    &[SWAP_L, SWAP_R],
+    &[SWAP_R, SWAP_L],
+    &[SWAP_L, SWAP_R, SWAP_L],
 ];
 
-/// The reference vector the construction writes into the state: a point in the
-/// rotation's imaginary 3-space whose orbit under the group is **six distinct
-/// points** (it lies on none of the group's axes).
+/// The reference vector that the construction writes into the state. It is a
+/// point in the imaginary 3-space of the rotation, and its orbit under the
+/// group is **six distinct points** (it lies on none of the axes of the
+/// group).
 pub const REF_POINT: [f64; 4] = [0.0, 1.0, 1.0, 1.0];
 
-/// Where the class `class` carries [`REF_POINT`] — i.e. `W v W*` for the
-/// element's lift `W`.
+/// Where the class `class` carries [`REF_POINT`]: `W v W*` for the lift `W` of
+/// the element.
 ///
-/// These six vectors are what the block's four heads read out, and the columns
-/// of the example's classifier head: `logit_g = ⟨state, point(g)⟩` is a
-/// nearest-point decoder, exact because the orbit is six distinct points and the
-/// action is orthogonal. Both lifts `±W` give the *same* point — that is what
-/// conjugation buys and left multiplication does not.
+/// The two heads of the block read the `x` and `y` of these six vectors. In
+/// `tests.rs`, those shadows are the columns of the classifier head:
+/// `logit_g ∝ ⟨p, plane_point(point(g))⟩` is a nearest-point decoder. It is
+/// exact because the six shadows lie on one circle, in six distinct
+/// directions. Both lifts `±W` give the *same* point. Conjugation gives this,
+/// and left multiplication does not.
 pub fn point(class: i64) -> [f64; 4] {
     let w = WORDS[class as usize]
         .iter()
@@ -234,23 +249,26 @@ pub fn point(class: i64) -> [f64; 4] {
 /// Which generator a split draws from. Every family opens with a `RESET`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
-    /// Independent symbols: `RESET` with probability ~⅛, otherwise `s` / `t`
-    /// evenly. Resets are frequent, so many positions carry a **short** word —
-    /// and a short word is often pinned down by its symbol counts alone.
+    /// Independent symbols after the first `RESET`: `RESET` with probability
+    /// ⅛, `l` ⅜ and `r` ½. Resets are frequent, so many positions carry a
+    /// **short** word, and the symbol counts alone often determine a short
+    /// word.
     Random,
-    /// One reset, then a shuffled bag of equally many `s`s and `t`s: the counts
-    /// are fixed by construction and only the **order** varies.
+    /// One reset, then a shuffled bag of `l`s and `r`s in equal numbers (one
+    /// extra `l` when the tail length is odd). The construction fixes the
+    /// counts, and only the **order** varies.
     Shuffle,
-    /// One reset, then long runs of one symbol. A run is nearly wasted motion
-    /// (`s² = 1`, so a run only alternates), which makes this the family where
-    /// the counts come closest to determining the answer.
+    /// One reset, then alternating runs of 3 to 8 copies of one symbol. A run
+    /// is nearly wasted motion (`l² = 1`, so a run only alternates between two
+    /// elements). So in this family, the counts come closest to determining the
+    /// answer.
     Runs,
     /// The training mixture: half [`Self::Random`], a quarter of each of the
     /// other two.
     Mixed,
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 struct Lcg(u64);
 impl Lcg {
     fn next_u64(&mut self) -> u64 {
@@ -269,8 +287,8 @@ fn gen_random(rng: &mut Lcg, len: usize) -> Vec<usize> {
     let mut out = vec![RESET];
     out.extend((1..len).map(|_| match rng.below(8) {
         0 => RESET,
-        n if n % 2 == 0 => SWAP_S,
-        _ => SWAP_T,
+        n if n % 2 == 0 => SWAP_L,
+        _ => SWAP_R,
     }));
     out
 }
@@ -278,7 +296,7 @@ fn gen_random(rng: &mut Lcg, len: usize) -> Vec<usize> {
 fn gen_shuffle(rng: &mut Lcg, len: usize) -> Vec<usize> {
     let tail = len - 1;
     let mut bag: Vec<usize> = (0..tail)
-        .map(|n| if n * 2 < tail { SWAP_S } else { SWAP_T })
+        .map(|n| if n * 2 < tail { SWAP_L } else { SWAP_R })
         .collect();
     for n in (1..bag.len()).rev() {
         bag.swap(n, rng.below(n + 1));
@@ -290,13 +308,13 @@ fn gen_shuffle(rng: &mut Lcg, len: usize) -> Vec<usize> {
 
 fn gen_runs(rng: &mut Lcg, len: usize) -> Vec<usize> {
     let mut out = vec![RESET];
-    let mut symbol = if rng.below(2) == 0 { SWAP_S } else { SWAP_T };
+    let mut symbol = if rng.below(2) == 0 { SWAP_L } else { SWAP_R };
     while out.len() < len {
         let run = 3 + rng.below(6);
         for _ in 0..run.min(len - out.len()) {
             out.push(symbol);
         }
-        symbol = if symbol == SWAP_S { SWAP_T } else { SWAP_S };
+        symbol = if symbol == SWAP_L { SWAP_R } else { SWAP_L };
     }
     out
 }
@@ -326,7 +344,7 @@ pub fn generate(family: Family, rng_state: &mut u64, len: usize) -> Vec<usize> {
 /// One generated sequence and its per-position target class.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResetSwapItem {
-    /// Input symbols, one of [`SWAP_S`] / [`SWAP_T`] / [`RESET`].
+    /// Input symbols, one of [`SWAP_L`] / [`SWAP_R`] / [`RESET`].
     pub symbols: Vec<usize>,
     /// Per-position target class, in `0..`[`NUM_CLASSES`].
     pub targets: Vec<i64>,
@@ -378,8 +396,9 @@ pub struct ResetSwapBatch {
 }
 
 impl ResetSwapBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

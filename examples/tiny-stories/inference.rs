@@ -1,29 +1,33 @@
 //! Sampling from the trained character LM.
 //!
-//! [`generate`] shows off the library's three execution modes back to back: the
-//! class latents a story opens with are replayed by one
-//! [`prime`](MambaVocabNet::prime) — no input token, and it already answers with
-//! the first character's distribution — a prompt, when there is one, is consumed
-//! by chunkwise [`forward`](MambaVocabNet::forward)s (prefill), and every
-//! generated character then costs one [`step`](MambaVocabNet::step) against the
-//! same cache — O(state) per token, with no growing KV cache. It is
-//! `burn_stack`'s
-//! [`generate`](burn_stack::examples::tiny_stories::sample::generate) written
-//! over this crate's family enum, which the block-generic one cannot dispatch;
-//! the decode loop itself is shared
-//! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)): it draws
-//! every character on the device, and past its first few steps it replays one
-//! captured graph of the step and its draw instead of launching it anew. So is
-//! the prefill ([`prefill`]): the prompt follows the latents in right-padded
-//! fixed-shape chunks, one captured graph for every chunk of every prompt it is
-//! held across (`--no-graph` turns both captures off; the text is the same
-//! either way). [`infer`] loads the checkpoint and prints a few stories at
-//! different temperatures, and a few continuations of fixed prompts.
+//! [`generate`] shows the three execution modes of the library, one after the
+//! other:
 //!
-//! One call is one story. A second one starts from a **zero** cache and primes
-//! again, which is the only place these examples genuinely reset a cache: the
-//! model never saw a story follow another, so continuing into a second one would
-//! be as out-of-distribution as the `"\n\n"` seed the latents replaced.
+//! 1. One [`prime`](MambaVocabNet::prime) replays the class latents that open a
+//!    story. It has no input token, and it already returns the distribution of
+//!    the first character.
+//! 2. Chunkwise [`forward`](MambaVocabNet::forward)s consume the prompt, if
+//!    there is one (the prefill).
+//! 3. Each generated character then costs one [`step`](MambaVocabNet::step)
+//!    against the same cache: O(state) per token, with no growing KV cache.
+//!
+//! It is the [`generate`](burn_stack::examples::tiny_stories::sample::generate)
+//! of `burn_stack`, written over the family enum of this crate, which the
+//! block-generic version cannot dispatch. The decode loop itself is shared
+//! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)). It draws
+//! every character on the device. After its first few steps, it replays one
+//! captured graph of the step and its draw, instead of a new launch. The
+//! prefill ([`prefill`]) also replays a graph. The prompt follows the latents
+//! in right-padded fixed-shape chunks, and one captured graph serves every
+//! chunk of every prompt across which the prefill is held. `--no-graph`
+//! disables both captures, and the text is the same either way. [`infer`]
+//! loads the checkpoint and prints a few stories at different temperatures,
+//! and a few continuations of fixed prompts.
+//!
+//! One call is one story. A second call starts from a **zero** cache and
+//! primes again. This is the only place where these examples really reset a
+//! cache. The model never saw a story follow another story, so a continuation
+//! into a second story is out-of-distribution.
 
 use crate::AppArgs;
 use crate::dataset::VOCAB;
@@ -68,8 +72,8 @@ pub fn infer(
     let per_char = |t: Instant| t.elapsed().as_secs_f64() * 1e3 / SAMPLE_CHARS as f64;
 
     for (i, &temperature) in TEMPERATURES.iter().enumerate() {
-        // Nothing is fed in: the class latents are the model's "a story starts
-        // here", and `prime` replays them.
+        // No input: the class latents are the "a story starts here" of the
+        // model, and `prime` replays them.
         let t = Instant::now();
         let text = generate(
             &model,
@@ -87,8 +91,8 @@ pub fn infer(
         std::fs::write(&path, &text).expect("failed to write the sample");
     }
 
-    // One prefill for every prompt: they share the latents' opening and, unless
-    // `--no-graph`, one captured chunk.
+    // One prefill for every prompt: they share the opening of the latents and
+    // (without `--no-graph`) one captured chunk.
     let mut prefill = prefill(&model, run, &infer_device);
     for (i, prompt) in PROMPTS.iter().enumerate() {
         let t = Instant::now();
@@ -110,20 +114,21 @@ pub fn infer(
     println!("\nsaved {} samples to {out_dir:?}", TEMPERATURES.len() + PROMPTS.len());
 }
 
-/// Sample `n_chars` characters of one story, continuing `prompt` when there is
+/// Sample `n_chars` characters of one story, and continue `prompt` if there is
 /// one.
 ///
-/// With `prompt: None` the model writes from its own opening: `prime` replays the
-/// class latents a story starts with and hands back the distribution of its first
-/// character, so nothing has to be fed in.
+/// With `prompt: None`, the model writes from its own opening. `prime` replays
+/// the class latents that start a story, and it returns the distribution of
+/// the first character, so no input is necessary.
 ///
 /// A prompt is case-folded and filtered through the alphabet (see
-/// [`VOCAB`](crate::dataset::VOCAB)) and must not come out empty; the latents are
-/// spliced in front of it by the same cursors, exactly as in training.
-/// `temperature` scales the logits before the softmax; `<= 0` samples greedily
-/// (argmax). With a `prefill` (see [`prefill`]) the prompt follows the primed
-/// latents in fixed-shape chunks; with none, one `forward` takes the latents
-/// and the prompt. Returns only the generated characters, not the prompt.
+/// [`VOCAB`](crate::dataset::VOCAB)), and it must not be empty after that. The
+/// same cursors splice the latents in front of it, exactly as in training.
+/// `temperature` scales the logits before the softmax, and `<= 0` samples
+/// greedily (argmax). With a `prefill` (see [`prefill`]), the prompt follows
+/// the primed latents in fixed-shape chunks. Without one, one `forward` takes
+/// the latents and the prompt. Returns only the generated characters, not the
+/// prompt.
 #[allow(clippy::too_many_arguments)]
 pub fn generate(
     model: &MambaVocabNet,
@@ -141,8 +146,8 @@ pub fn generate(
     let mut class = ClassCursors::stream();
 
     let (logits, caches) = match prompt {
-        // Prefill, keeping the cache and the logits of the prompt's last
-        // character (what the next character is drawn from).
+        // Prefill. Keep the cache, and the logits of the last character of the
+        // prompt (the next character is drawn from them).
         Some(prompt) => {
             let tokens = VOCAB.encode(prompt);
             assert!(
@@ -186,13 +191,13 @@ pub fn generate(
         }
     };
 
-    // Decode: one `step` per character, against that same cache — replayed from
-    // one captured graph after the first few, unless `--no-graph` (or a class
-    // latent is still to land).
+    // Decode: one `step` per character, against that same cache. After the
+    // first few steps, it replays one captured graph, unless `--no-graph` is
+    // set (or a class latent is still to come).
     let caches = caches.expect("the opening leaves a cache");
     let capture = model.only_start_latents() && run.graphs;
-    // Safety: the step reads nothing but its arguments and `model`, which it
-    // borrows for the whole call.
+    // Safety: the step reads only its arguments and `model`, which it borrows
+    // for the whole call.
     unsafe {
         decode(
             device,
@@ -208,17 +213,17 @@ pub fn generate(
     }
 }
 
-/// Prompt characters per [`prefill`] chunk: a training window. A replayed chunk
-/// costs about the same at any width up to it, so a wide one serves most prompts
-/// in one replay.
+/// Prompt characters per [`prefill`] chunk: one training window. A replayed
+/// chunk costs about the same at any width up to this one, so a wide chunk
+/// serves most prompts in one replay.
 const PREFILL_CHUNK: usize = 256;
 
 /// A [`Prefill`] of `model` in chunks of [`PREFILL_CHUNK`], captured unless
 /// `--no-graph`. Hold it across prompts: they share its opening and its graph.
 pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
     let ssd_path = run.ssd_path.clone();
-    // Safety: the chunk reads nothing but its arguments, `model`, borrowed for
-    // as long as the prefill lives, and `ssd_path`, which it owns.
+    // Safety: the chunk reads only its arguments, `model` (borrowed for as long
+    // as the prefill lives), and `ssd_path`, which it owns.
     unsafe {
         Prefill::new(device, PREFILL_CHUNK, run.graphs, move |x, caches, pad, class| {
             model.forward(x, Some(caches), ssd_path.clone(), Some(class), Some(pad))

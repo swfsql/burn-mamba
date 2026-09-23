@@ -1,23 +1,23 @@
-//! The tally-depth stream: `(` / `)` / `R`, whose per-position target is
-//! **whether the bracket depth is still positive** — with a `)` at depth 0
-//! ignored rather than going negative.
+//! The tally-depth stream: `(` / `)` / `R`. The target at each position is
+//! **whether the bracket depth is still positive**. A `)` at depth 0 has no
+//! effect: the depth does not go negative.
 //!
 //! ```text
-//!   symbols   (  (  )  )  )  (  )  R  )  (  )
-//!   depth     1  2  1  0  0  1  0  0  0  1  0
-//!   target    .  .  in out out  .  out  .  out  .  out
+//!   symbols    (    (    )    )    )    (    )    R    )    (    )
+//!   depth      1    2    1    0    0    1    0    0    0    1    0
+//!   target     .    .   in  out  out    .  out    .  out    .  out
 //! ```
 //!
-//! Only `)` positions are scored: after a `(` the depth is at least one
-//! whatever the history, so that target is one bit of the token class and a
-//! model can collect it without any memory at all (the mistake the handoff's
-//! own toy made first). `R` is unscored for the same reason.
+//! Only `)` positions are scored. After a `(`, the depth is at least one
+//! whatever the history, so that target is one bit of the token class, and a
+//! model can collect it without any memory at all. `R` is unscored for the same
+//! reason.
 //!
-//! The recursion is Lindley's, `cₜ = max(cₜ₋₁ + aₜ, 0)`: linear in the
-//! (max, +) semiring, so a tropical register computes it exactly — and no
-//! linear recurrence does, because the floor is where the two semirings differ.
-//! [`gen_floor`] is the family built on that difference: the **unclamped** sum
-//! is misled at a third of the scored positions there.
+//! The recursion is the recursion of Lindley, `cₜ = max(cₜ₋₁ + aₜ, 0)`. It is
+//! linear in the (max, +) semiring, so a tropical register computes it exactly.
+//! No linear recurrence does, because the floor is where the two semirings
+//! differ. [`gen_floor`] is the family built on that difference: there, the
+//! **unclamped** sum is wrong at a third of the scored positions.
 
 use crate::shared::data::{Generator, IGNORE, Rng};
 
@@ -30,7 +30,7 @@ pub const RESET: usize = 2;
 /// Input alphabet size.
 pub const NUM_SYMBOLS: usize = 3;
 
-/// Target class: the depth is 0 after this `)` — it closed nothing.
+/// Target class: the depth is 0 after this `)`, so it closed nothing.
 pub const EMPTY: i64 = 0;
 /// Target class: the depth is still positive after this `)`.
 pub const INSIDE: i64 = 1;
@@ -38,8 +38,8 @@ pub const INSIDE: i64 = 1;
 /// Length of every generated sequence.
 pub const SEQ_LENGTH: usize = 32;
 
-/// Per-position targets: the clamped depth's sign at every `)`, [`IGNORE`]
-/// elsewhere.
+/// Per-position targets: the sign of the clamped depth at every `)`, and
+/// [`IGNORE`] elsewhere.
 pub fn labels(symbols: &[usize]) -> Vec<i64> {
     let mut depth: i64 = 0;
     symbols
@@ -62,7 +62,7 @@ pub fn labels(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// The depth a plain (unclamped) running sum would report — what a linear
+/// The depth that a plain (unclamped) running sum reports: what a linear
 /// recurrence computes, and what [`gen_floor`] misleads.
 pub fn unclamped(symbols: &[usize]) -> Vec<i64> {
     let mut sum: i64 = 0;
@@ -80,7 +80,7 @@ pub fn unclamped(symbols: &[usize]) -> Vec<i64> {
         .collect()
 }
 
-/// Independent symbols: `R` with probability ⅛, otherwise `(` / `)` evenly.
+/// Independent symbols: `R` with probability ⅛, `(` ⅜ and `)` ½.
 pub fn gen_random(rng: &mut Rng, len: usize) -> Vec<usize> {
     (0..len)
         .map(|_| match rng.below(8) {
@@ -91,13 +91,14 @@ pub fn gen_random(rng: &mut Rng, len: usize) -> Vec<usize> {
         .collect()
 }
 
-/// **The floor family.** A run of `)` that goes past zero (ignored there, so the
-/// clamp forgets it while a running sum does not), then a matching `(`…`)`
-/// group: the clamp says `inside` until the group's last close, the sum — still
-/// in the red from the surplus — says `empty` throughout.
+/// **The floor family.** A run of `)` that goes past zero (where it has no
+/// effect, so the clamp forgets it, but a running sum does not), then a
+/// matching `(`…`)` group. The clamp says `inside` until the last close of the
+/// group. The sum is still negative from the surplus, so it says `empty` for
+/// the whole group.
 ///
-/// The group is never longer than the surplus, which is what keeps the sum
-/// wrong for the whole of it, and both classes present at every position.
+/// The group is never longer than the surplus. That keeps the sum wrong for
+/// the whole group, and it keeps both classes present.
 pub fn gen_floor(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -120,10 +121,10 @@ pub fn gen_floor(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// **The deep family.** A long `(` run, then a long `)` run that crosses zero
-/// exactly, then short alternations: telling depth 1 from depth 0 after a deep
-/// excursion is what a multiplicative decrement (which never reaches zero)
-/// cannot do.
+/// **The deep family.** A long `(` run, then a long `)` run that reaches zero
+/// (and can pass it by up to two), then short alternations. After a deep
+/// excursion, a multiplicative decrement (which never reaches zero) cannot tell
+/// depth 1 from depth 0.
 pub fn gen_deep(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
@@ -163,7 +164,7 @@ pub const FAMILIES: &[(&str, Generator)] = &[
     ("deep", gen_deep as Generator),
 ];
 
-/// This rung's [`Task`](crate::shared::Task).
+/// The [`Task`](crate::shared::Task) of this rung.
 pub fn task() -> crate::shared::Task {
     crate::shared::Task {
         num_symbols: NUM_SYMBOLS,

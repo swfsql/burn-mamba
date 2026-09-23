@@ -1,10 +1,11 @@
-//! Training loop for the MNIST autoencoder: builds the dataloaders, runs the
-//! train/validate epochs, and checkpoints the model and optimizer. The objective
-//! is pixel reconstruction (binary cross-entropy on the normalized image,
-//! computed from raw logits), stepped by a `Trainer`: under plain SGD (unless
-//! `--no-graph`) the whole training step replays from a graph captured at the
-//! first batch, under any other optimizer it steps eagerly. The validation side
-//! is [`Valid`], which replays the forward from a captured graph.
+//! Training loop for the MNIST autoencoder. It builds the dataloaders, runs the
+//! train and validation epochs, and saves the model and the optimizer. The
+//! objective is pixel reconstruction (binary cross-entropy on the normalized
+//! image, computed from raw logits). A `Trainer` steps it. Under plain SGD (and
+//! without `--no-graph`), the whole training step replays from a graph captured
+//! at the first batch. Under any other optimizer, it steps eagerly. The
+//! validation side is [`Valid`], which replays the forward from a captured
+//! graph.
 
 pub use crate::common::{
     model::ModelConfigExt,
@@ -28,9 +29,9 @@ use burn_stack::modules::loss::bce::BinaryCrossEntropyLossConfig;
 use burn_stack::utils::CapturedStep;
 use std::cell::RefCell;
 
-/// Run the full training routine: load/init the model and optimizer, then train
-/// for the configured number of epochs (validating and checkpointing along the
-/// way).
+/// Run the full training routine. Load or initialize the model and the
+/// optimizer, then train for the configured number of epochs, with validations
+/// and checkpoints on the way.
 pub fn train(
     training_config: TrainingConfig,
     model_config: AeConfig,
@@ -56,8 +57,8 @@ pub fn train(
     let batcher = MnistBatcher::default();
 
     // Create the dataloaders. The workers build batches on the host, and the
-    // loops move them to the device: a worker uploading to the GPU from its own
-    // thread can invalidate a graph being captured (see `loader_device`).
+    // loops move them to the device. A worker that uploads to the GPU from its
+    // own thread can invalidate a graph capture (see `loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
@@ -71,7 +72,7 @@ pub fn train(
         .set_device(loader_device(&training_device))
         .build(MnistDataset::test());
 
-    // Resume position, budget, cadence and metrics log.
+    // The session: resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &training_config,
@@ -136,8 +137,9 @@ pub type AeTrainer = Trainer<AeModel, Tensor<4>, Tensor<2>>;
 /// Number of fixed test images sampled for the periodic reconstruction PNGs.
 const NUM_SAMPLES: usize = 8;
 
-/// Grab the first `n` test images (normalized to `[0, 1]`) plus their labels on
-/// `device` — a fixed set so the saved reconstructions are comparable over time.
+/// Get the first `n` test images (normalized to `[0, 1]`) and their labels on
+/// `device`. It is a fixed set, so the saved reconstructions are comparable
+/// over time.
 fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
     let dataset = MnistDataset::test();
     let items: Vec<_> = (0..n).filter_map(|i| dataset.get(i).ok()).collect();
@@ -154,9 +156,9 @@ const CADENCE: Cadence = Cadence {
     valid_batches: Some(10),
 };
 
-/// Train `trainer` for (the rest of) one epoch, one step per batch,
-/// checkpointing and validating at the `session`'s cadence. Ends early once the
-/// session's budget (`--max-batches` / `--max-seconds`) runs out.
+/// Train `trainer` for (the rest of) one epoch, one step per batch. It saves
+/// checkpoints and validates at the cadence of the `session`. It stops early at
+/// the end of the session budget (`--max-batches` / `--max-seconds`).
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,
@@ -173,8 +175,9 @@ pub fn epoch_train(
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
-    // A fixed set of test images (on the validation backend) reconstructed at
-    // every small val check, to watch reconstruction quality improve.
+    // A fixed set of test images (on the validation backend), reconstructed at
+    // every small validation check, to show the reconstruction quality over
+    // time.
     let (sample_imgs, sample_labels) = sample_images(NUM_SAMPLES, &valid_device);
 
     // training loop
@@ -187,7 +190,8 @@ pub fn epoch_train(
         let [batch_size, _, _, _] = batch.images.dims();
         let (_step, lr) = session.begin_step(batch_size);
 
-        // Built on the host by a worker, moved here (see `loader_device`).
+        // A worker built it on the host. It moves to the device here (see
+        // `loader_device`).
         let input = batch.to_device(trainer.device()).images_norm(); // [b, H, W, 1], pixels in [0, 1]
         let (loss, logits_flat) = trainer.step(input.clone(), optim, lr);
         let pre_metrics = RegressionOutput::new(loss, logits_flat, input.reshape([batch_size, HEIGHT * WIDTH]));
@@ -223,7 +227,7 @@ pub fn epoch_train(
                 app_args.graphs(),
             );
 
-            // Save original-vs-reconstruction PNGs into a fresh per-step dir.
+            // Save original-vs-reconstruction PNGs into a new per-step dir.
             let sample_dir = app_args
                 .artifacts_path
                 .join(format!("epoch-{epoch}-batch-{b}"));
@@ -251,8 +255,8 @@ pub fn epoch_train(
 }
 
 /// Run validation over (up to `valid_loop_limit`) batches, report the average
-/// reconstruction loss, and log it into the `session`'s metrics log. The
-/// forward replays from a graph if `graphs` ([`Valid`]).
+/// reconstruction loss, and write it into the metrics log of the `session`.
+/// The forward replays from a graph if `graphs` is true ([`Valid`]).
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
@@ -297,23 +301,24 @@ pub fn epoch_valid(
     );
 }
 
-/// The training step's loss on a normalized image batch (inner backend), and
-/// the flat pixel logits it read.
+/// The loss of the training step on a normalized image batch (inner backend),
+/// and the flat pixel logits that it read.
 fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) {
     let input_bhw1 = input_bhw1.autodiff();
     let output = reconstruction_output(model.forward(input_bhw1.clone()), input_bhw1);
     (output.loss, output.output.inner())
 }
 
-/// The validation-side autoencoder: the trained model on the inner backend,
-/// whose forward is captured at the first batch's shape and replayed from the
-/// graph for every later batch of that shape (any other shape — a short last
-/// batch — runs eagerly). `--no-graph` turns the capture off.
+/// The validation-side autoencoder: the trained model on the inner backend. Its
+/// forward is captured at the shape of the first batch, and it replays from the
+/// graph for every later batch of that shape. Any other shape (a short last
+/// batch) runs eagerly. `--no-graph` disables the capture.
 ///
-/// One capture per validation pass, since the weights change between them, each
-/// costing the 4 forwards `CapturedStep::capture` runs before it records.
-/// Without hardware graphs (flex) the capture falls back to eager, and the
-/// recording runs too: 5 forwards per pass is all it costs there.
+/// There is one capture per validation pass, because the weights change
+/// between passes. Each capture costs the 4 forwards that
+/// `CapturedStep::capture` runs before it records. Without hardware graphs
+/// (flex), the capture falls back to eager, and the recording runs too: that
+/// costs only 5 forwards per pass.
 pub struct Valid {
     model: AeModel,
     captured: RefCell<Option<CapturedLogits>>,
@@ -339,8 +344,8 @@ impl Valid {
         let mut slot = self.captured.borrow_mut();
         let captured = slot.get_or_insert_with(|| {
             let model = self.model.clone();
-            // Safety: the forward reads nothing but its argument and `model`,
-            // which it owns and never changes.
+            // Safety: the forward reads only its argument and `model`, which it
+            // owns and never changes.
             unsafe {
                 CapturedStep::capture(&input_bhw1.device(), input_bhw1.clone(), (), move |x, ()| {
                     (model.forward(x), ())
@@ -350,7 +355,8 @@ impl Valid {
         if captured.input_dims() != input_bhw1.dims() {
             return self.model.forward(input_bhw1);
         }
-        // Copied out of the graph's output buffer, which the next replay overwrites.
+        // A copy of the output buffer of the graph, which the next replay
+        // overwrites.
         let y = captured.step(input_bhw1);
         y.empty_like().slice_assign(y.dims().map(|d| 0..d), y.clone())
     }

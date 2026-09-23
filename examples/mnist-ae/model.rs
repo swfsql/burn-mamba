@@ -191,20 +191,20 @@ impl AeModel {
 #[derive(Config, Debug)]
 pub struct AeConfig {
     /// Patch side length (must divide `HEIGHT`=`WIDTH`=28: 2, 4, 7, or 14).
-    /// `7` ⇒ 16 tokens of 49 px; `4` ⇒ 49 tokens of 16 px (finer detail).
+    /// `7` ⇒ 16 tokens of 49 px. `4` ⇒ 49 tokens of 16 px (finer detail).
     #[config(default = 7)]
     pub patch: usize,
     /// Model width shared by both stacks (must equal `mamba_block.d_model`).
     pub d_model: usize,
-    /// The latent bottleneck width — the configurable "number of latents".
+    /// The latent bottleneck width: the configurable "number of latents".
     pub n_latent: usize,
-    /// Number of real (weight-bearing) encoder layers (even — bidi pairs).
+    /// Number of real (weight-bearing) encoder layers (even: bidi pairs).
     pub n_enc_layers: usize,
-    /// Number of real (weight-bearing) decoder layers (even — bidi pairs).
+    /// Number of real (weight-bearing) decoder layers (even: bidi pairs).
     pub n_dec_layers: usize,
-    /// Virtual layers per stack — logical depth run over the real layers with
-    /// shared weights (must be even; `StridedStretched` schedule). The cheap way
-    /// to add depth/expressivity without adding parameters.
+    /// Virtual layers per stack: the logical depth, run over the real layers
+    /// with shared weights (must be even, `StridedStretched` schedule). It adds
+    /// depth and expressivity cheaply, without more parameters.
     #[config(default = 6)]
     pub n_virtual_layers: usize,
     /// Shared Mamba-3 block config for both stacks.
@@ -230,7 +230,7 @@ impl AeConfig {
         let pdim = self.patch * self.patch;
         let npatch = (HEIGHT / self.patch) * (WIDTH / self.patch);
 
-        // The encoder carries any class latents (its summary readout); the
+        // The encoder carries any class latents (its summary readout). The
         // decoder reconstructs at patch resolution, so it has none.
         let enc_layers = MambaBidiLayersConfig::Mamba3 {
             n_real_layers: self.n_enc_layers,

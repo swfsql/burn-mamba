@@ -1,11 +1,11 @@
-//! Inference / sampling for the MNIST autoencoder.
+//! Inference for the MNIST autoencoder.
 //!
-//! [`infer`] loads the trained model, reconstructs a handful of test images,
-//! prints each original next to its reconstruction as ASCII art, and writes them
-//! out as PNGs. [`save_reconstructions`] is the reusable PNG writer — the
-//! training loop calls it at every small validation check to dump
-//! original-vs-reconstruction samples into a fresh `epoch-{e}-batch-{b}/`
-//! directory, so the reconstruction quality can be watched over time.
+//! [`infer`] loads the trained model and reconstructs a few test images. It
+//! prints each original next to its reconstruction as ASCII art, and it writes
+//! them as PNGs. [`save_reconstructions`] is the reusable PNG writer. The
+//! training loop calls it at every small validation check, to write
+//! original-vs-reconstruction samples into a new `epoch-{e}-batch-{b}/`
+//! directory. So the reconstruction quality is visible over time.
 
 use crate::AppArgs;
 use crate::common::device::FloatElement;
@@ -70,9 +70,9 @@ pub fn infer(model_config: AeConfig, infer_device: Device, app_args: &AppArgs) {
 
 /// Run the model on `images_bhw1` and write one side-by-side
 /// (original | reconstruction) PNG per sample into `out_dir` (created if
-/// missing). Reusable by both [`infer`] and the training-time sampling.
+/// missing). Both [`infer`] and the training-time sampling use it.
 ///
-/// `images_bhw1`: `[n, HEIGHT, WIDTH, 1]` in `[0, 1]`; `labels`: one per sample.
+/// `images_bhw1`: `[n, HEIGHT, WIDTH, 1]` in `[0, 1]`. `labels`: one per sample.
 pub fn save_reconstructions(
     model: &AeModel,
     images_bhw1: Tensor<4>,

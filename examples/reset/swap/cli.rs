@@ -6,13 +6,13 @@ use burn_mamba::prelude::RotationKind;
 /// `-- --help`.
 const HELP: &str = "\
 reset-swap's own flags (after --):
-    --rotation <KIND>    The rotation baked into a fresh model config: rotor (default), quaternion or complex";
+    --rotation <KIND>    The rotation of a fresh model config: rotor (default), quaternion or complex";
 
 /// The parsed flags.
 pub struct Cli {
-    /// `--rotation`: the rotation of a fresh model config, defaulting to the
-    /// full `SO(4)` one this example is about. Once a model config is
-    /// persisted, it wins on reload.
+    /// `--rotation`: the rotation of a fresh model config. The default is the
+    /// full `SO(4)` kind, which this example is about. On reload, a persisted
+    /// model config wins.
     pub rotation: RotationKind,
 }
 

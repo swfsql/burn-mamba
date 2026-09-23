@@ -1,5 +1,6 @@
 //! The example's own flags, forwarded after the trailing `--`: none. (The
-//! optimizer and `--no-graph` are `AppArgs`', shared by every example.)
+//! optimizer flags and `--no-graph` belong to `AppArgs`, which every example
+//! shares.)
 
 use crate::common::cli::{AppArgs, finish_extra};
 

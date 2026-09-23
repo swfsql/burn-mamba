@@ -515,7 +515,8 @@ pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
 
 /// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
 /// (axis · angle) with the exponential map. This is the data-dependent
-/// "materialise `Rₜ`" step, the analogue of the RoPE angle `Δₜ · π · tanh(θₜ)`.
+/// "materialise `Rₜ`" step, the analogue of the RoPE angle
+/// `Δₜ · range·π·tanh(ϑₜ)`.
 ///
 /// With `‖g‖ = angle` and the axis `ĝ = g / angle`, it returns the unit
 /// quaternion `q = (cos(angle/2), sin(angle/2)·ĝ)`. A vanishing `g` maps to the
@@ -545,7 +546,7 @@ pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
 /// Bound the **magnitude** of a rotation vector and keep its direction:
 /// returns `max_angle · tanh(‖r‖) · r̂`.
 ///
-/// This is the quaternion counterpart of the abelian `π·tanh(ϑ)`, with a
+/// This is the quaternion counterpart of the abelian `range·π·tanh(ϑ)`, with a
 /// deliberate difference. A squash of each of the three raw channels
 /// *separately* would bound the rotation vector to a **cube**. The reachable
 /// angle would then depend on the axis (`max_angle` about a coordinate axis,

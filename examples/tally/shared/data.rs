@@ -9,8 +9,8 @@ use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
 
 /// Placeholder target for a position whose class is not a function of the
-/// history (a reset, a tie, a symbol that fixes the answer by itself). Dropped
-/// from the loss and the accuracy.
+/// history (a reset, a tie, a symbol that fixes the answer by itself). The loss
+/// and the accuracy leave it out.
 pub const IGNORE: i64 = -1;
 /// Number of output classes on every rung.
 pub const NUM_CLASSES: usize = 2;
@@ -26,13 +26,13 @@ pub const EVAL_SEED: u64 = 0xBEEF;
 /// A sequence generator.
 pub type Generator = fn(&mut Rng, usize) -> Vec<usize>;
 
-/// One rung's task: its alphabet, labels and families.
+/// The task of one rung: its alphabet, labels and families.
 pub struct Task {
     /// Input alphabet size.
     pub num_symbols: usize,
     /// Length of every generated sequence.
     pub seq_length: usize,
-    /// Per-position targets implied by a symbol sequence.
+    /// Per-position targets of a symbol sequence.
     pub labels: fn(&[usize]) -> Vec<i64>,
     /// The training mixture.
     pub train: Generator,
@@ -46,7 +46,7 @@ pub struct Task {
     pub class_names: [&'static str; NUM_CLASSES],
 }
 
-/// SplitMix64 — a small deterministic RNG so splits reproduce exactly.
+/// SplitMix64: a small deterministic RNG, so the splits reproduce exactly.
 pub struct Rng(pub u64);
 
 impl Rng {
@@ -149,8 +149,9 @@ pub struct TallyBatch {
 }
 
 impl TallyBatch {
-    /// The batch, built by a dataloader worker on the host, moved to `device`
-    /// by the thread that steps the model (see `device::loader_device`).
+    /// Moves the batch to `device`. A dataloader worker builds the batch on the
+    /// host, and the thread that steps the model moves it (see
+    /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};
         Self {

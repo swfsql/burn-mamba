@@ -9,7 +9,7 @@ use burn_mamba::prelude::*;
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
     "    --ssd-path <PATH>      The SSD path of every chunkwise forward: recalc (default), serial or minimal\n",
-    "    --profile <N>          Print each training-step phase's mean milliseconds once per N windows\n",
+    "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
     "    --profile-sync         Also sync the device after each phase (with --profile)",
 );
 
@@ -17,8 +17,8 @@ const HELP: &str = concat!(
 pub struct Cli {
     /// The corpus knobs, applied onto the training config.
     pub overrides: Overrides,
-    /// `--ssd-path`: the recalculated serial scan (the default) saves ~1/3 vram
-    /// against `Minimal`.
+    /// `--ssd-path`: the recalculated serial scan (the default) uses about 1/3
+    /// less vram than `Minimal`.
     pub ssd_path: MambaSsdPath,
     /// `--profile` (and `--profile-sync`): see `training::prof`.
     pub profile: Option<(usize, bool)>,

@@ -1,13 +1,14 @@
-//! Training loop for the sequential-MNIST classifier: builds the dataloaders,
-//! runs the train/validate epochs, and checkpoints the model and optimizer.
+//! Training loop for the sequential-MNIST classifier. It builds the
+//! dataloaders, runs the train and validation epochs, and saves the model and
+//! the optimizer.
 //!
 //! The epoch loops themselves are `burn_stack::examples::mnist::classify`,
-//! shared with `burn-deltanet`. What is Mamba's here is the [`Wrap`] type: it
+//! shared with `burn-deltanet`. The Mamba part here is the [`Wrap`] type. It
 //! trains the example network through a cross-entropy classification head on
-//! the last timestep, and supplies the `MnistModel` seam the shared loops build
-//! against. Under SGD its training step replays from a captured graph (a
-//! `Trainer`), and its validation side is [`Valid`], which replays the forward
-//! from one. `--no-graph` turns both off.
+//! the last timestep, and it supplies the `MnistModel` interface that the
+//! shared loops use. Under SGD, its training step replays from a captured graph
+//! (a `Trainer`). Its validation side is [`Valid`], which replays the forward
+//! from a graph. `--no-graph` disables both.
 
 pub use crate::common::{
     cli::AppArgs,
@@ -30,9 +31,9 @@ use std::cell::RefCell;
 
 use crate::model::OUTPUT_SEQUENCE_EXTRA;
 
-/// Run the full training routine: load/init the model and optimizer, then train
-/// for the configured number of epochs (validating and checkpointing along the
-/// way).
+/// Run the full training routine. Load or initialize the model and the
+/// optimizer, then train for the configured number of epochs, with validations
+/// and checkpoints on the way.
 pub fn train(
     training_config: TrainingConfig,
     model_config: MambaLatentNetConfig,
@@ -58,8 +59,8 @@ pub fn train(
     let batcher = MnistBatcher::default();
 
     // Create the dataloaders. The workers build batches on the host, and the
-    // loops move them to the device: a worker uploading to the GPU from its own
-    // thread can invalidate a graph being captured (see `loader_device`).
+    // loops move them to the device. A worker that uploads to the GPU from its
+    // own thread can invalidate a graph capture (see `loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
@@ -73,7 +74,7 @@ pub fn train(
         .set_device(loader_device(&training_device))
         .build(MnistDataset::test());
 
-    // Resume position, budget, cadence and metrics log.
+    // The session: resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
         progress,
         &training_config,
@@ -93,7 +94,7 @@ pub fn train(
     );
 
     println!("Starting training...");
-    // Iterate over our training for X epochs
+    // Train for the configured number of epochs.
     for epoch in session.epochs(training_config.num_epochs) {
         model = epoch_train(
             std::sync::Arc::clone(&dataloader_train),
@@ -131,9 +132,9 @@ pub fn train(
 }
 
 /// The training-side classifier: [`MambaLatentNet`] on the autodiff backend,
-/// stepped by a `Trainer` — under plain SGD (and unless `--no-graph`) the whole
-/// training step replays from a graph captured at the first batch, under any
-/// other optimizer it steps eagerly.
+/// stepped by a `Trainer`. Under plain SGD (and without `--no-graph`), the
+/// whole training step replays from a graph captured at the first batch. Under
+/// any other optimizer, it steps eagerly.
 pub struct Wrap {
     trainer: Trainer<MambaLatentNet, (Tensor<4>, Tensor<1, Int>), Tensor<2>>,
     /// Whether validation replays its forward from a graph ([`Valid`]).
@@ -141,8 +142,8 @@ pub struct Wrap {
 }
 
 impl Wrap {
-    /// `net` trained under `training_config`'s optimizer, replaying passes from
-    /// graphs if `graphs`.
+    /// `net`, trained under the optimizer of `training_config`. It replays
+    /// passes from graphs if `graphs` is true.
     pub fn new(net: MambaLatentNet, training_config: &TrainingConfig, graphs: bool) -> Self {
         Self {
             trainer: Trainer::new(net, train_loss, &training_config.optimizer, graphs),
@@ -156,8 +157,8 @@ impl Wrap {
     }
 }
 
-/// The training step's loss on `(images, targets)` (inner backend), and the
-/// logits it read.
+/// The loss of the training step on `(images, targets)` (inner backend), and
+/// the logits that it read.
 fn train_loss(net: &MambaLatentNet, (images, targets): (Tensor<4>, Tensor<1, Int>)) -> (Tensor<1>, Tensor<2>) {
     let batch = MnistBatch {
         images: images.autodiff(),
@@ -167,8 +168,8 @@ fn train_loss(net: &MambaLatentNet, (images, targets): (Tensor<4>, Tensor<1, Int
     (output.loss, output.output.inner())
 }
 
-/// The forward path used for both training and inference: it saves ~1/3 of the
-/// vram against `Minimal`.
+/// The SSD path for both training and inference. It uses about 1/3 less vram
+/// than `Minimal`.
 pub fn ssd_path() -> MambaSsdPath {
     MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None))
 }
@@ -195,15 +196,16 @@ impl MnistModel for Wrap {
     }
 }
 
-/// The validation-side classifier: [`Wrap`]'s network on the inner backend,
-/// whose forward is captured at the first batch's shape and replayed from the
-/// graph for every later batch of that shape (any other shape — a short last
-/// batch — runs eagerly). `--no-graph` turns the capture off.
+/// The validation-side classifier: the network of [`Wrap`] on the inner
+/// backend. Its forward is captured at the shape of the first batch, and it
+/// replays from the graph for every later batch of that shape. Any other shape
+/// (a short last batch) runs eagerly. `--no-graph` disables the capture.
 ///
-/// One capture per validation pass, since the weights change between them, each
-/// costing the 4 forwards `CapturedStep::capture` runs before it records.
-/// Without hardware graphs (flex) the capture falls back to eager, and the
-/// recording runs too: 5 forwards per pass is all it costs there.
+/// There is one capture per validation pass, because the weights change
+/// between passes. Each capture costs the 4 forwards that
+/// `CapturedStep::capture` runs before it records. Without hardware graphs
+/// (flex), the capture falls back to eager, and the recording runs too: that
+/// costs only 5 forwards per pass.
 pub struct Valid {
     net: MambaLatentNet,
     captured: RefCell<Option<CapturedLogits>>,
@@ -229,8 +231,8 @@ impl Valid {
         let mut slot = self.captured.borrow_mut();
         let captured = slot.get_or_insert_with(|| {
             let net = self.net.clone();
-            // Safety: the forward reads nothing but its argument and `net`,
-            // which it owns and never changes.
+            // Safety: the forward reads only its argument and `net`, which it
+            // owns and never changes.
             unsafe {
                 CapturedStep::capture(&input.device(), input.clone(), (), move |x, ()| {
                     (logits(&net, x), ())
@@ -240,7 +242,8 @@ impl Valid {
         if captured.input_dims() != input.dims() {
             return logits(&self.net, input);
         }
-        // Copied out of the graph's output buffer, which the next replay overwrites.
+        // A copy of the output buffer of the graph, which the next replay
+        // overwrites.
         let y = captured.step(input);
         y.empty_like().slice_assign(y.dims().map(|d| 0..d), y.clone())
     }
@@ -256,7 +259,7 @@ impl InferenceStep for Valid {
     }
 }
 
-/// A batch's z-scored pixels as a sequence of single-pixel tokens,
+/// The z-scored pixels of a batch, as a sequence of single-pixel tokens,
 /// `[batch, HEIGHT * WIDTH, 1]`.
 fn pixel_sequence(batch: &MnistBatch) -> Tensor<3> {
     let input = batch.images_z_score(); // values mean=0, stddev=1
@@ -266,15 +269,15 @@ fn pixel_sequence(batch: &MnistBatch) -> Tensor<3> {
     input.reshape([batch_size, HEIGHT * WIDTH, 1])
 }
 
-/// Forward the model and return the last timestep's `[batch, 10]` logits, which
-/// the cross-entropy classification loss reads.
+/// Forward the model, and return the `[batch, 10]` logits of the last
+/// timestep, which the cross-entropy classification loss reads.
 pub fn logits(model: &MambaLatentNet, input: Tensor<3>) -> Tensor<2> {
     let [batch_size, sequence_size, input_size] = input.dims();
     assert_eq!(sequence_size, HEIGHT * WIDTH);
     assert_eq!(input_size, 1);
 
     let (output, _caches) = model.forward(input, None, ssd_path(), None, None);
-    // The model's class latents lengthen the sequence; the readout is its
+    // The class latents of the model lengthen the sequence. The readout is its
     // last position (see `OUTPUT_SEQUENCE_EXTRA`).
     let output_size = sequence_size + OUTPUT_SEQUENCE_EXTRA;
     assert_eq!([batch_size, output_size, 10], output.dims());

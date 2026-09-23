@@ -1,17 +1,23 @@
 //! # Sequential-MNIST classifier example
 //!
-//! Classifies MNIST digits by reading each image as a length-784 sequence of
-//! single-pixel tokens with a Mamba-3 model (a classification head on the last
-//! timestep), trained with cosine-annealing LR. Inference samples a few test
-//! digits and shows each digit beside its 10-bin class-probability chart.
+//! Classifies MNIST digits with a Mamba-3 model that reads each image as a
+//! length-784 sequence of single-pixel tokens (a classification head on the
+//! last timestep). It trains with a cosine-annealing LR. Inference samples a
+//! few test digits and shows each digit next to its 10-bin class-probability
+//! chart.
 //!
-//! The optimizer is AdamW unless the shared flags say otherwise: `--muon` moves
-//! the block's hidden weight matrices to [Muon](burn_stack::optim) (the fused
-//! `in_proj` is split per sub-projection first); `--sgd` trains every weight
-//! with plain SGD instead, the one optimizer whose training step can replay from
-//! a captured CUDA graph (`--no-graph` steps it eagerly). The choice is written
-//! into the artifacts' `training_config.json`, so resuming a run keeps it. It
-//! takes no flags of its own after `--` ([`cli`]).
+//! The optimizer is AdamW unless the shared flags select another:
+//!
+//! - `--muon` moves the hidden weight matrices of the block to
+//!   [Muon](burn_stack::optim). It first splits the fused `in_proj` per
+//!   sub-projection.
+//! - `--sgd` trains every weight with plain SGD instead. It is the one
+//!   optimizer whose training step can replay from a captured CUDA graph
+//!   (`--no-graph` steps it eagerly).
+//!
+//! The choice goes into the `training_config.json` of the artifacts, so a
+//! resumed run keeps it. The example takes no flags of its own after `--`
+//! ([`cli`]).
 //!
 //! ```bash
 //! # baseline (AdamW everywhere)
@@ -44,14 +50,14 @@ pub mod training;
 #[path = "../common/mod.rs"]
 pub mod common;
 
-/// Wire up the device, configs, and the train/infer flow for the classifier.
+/// Set up the device, the configs and the train/infer flow for the classifier.
 pub fn launch(app_args: &AppArgs) {
     cli::Cli::parse(app_args);
     app_args.create_artifact_dir();
 
-    // `Device::default()` resolves to the enabled `backend-*` feature (honouring
-    // the `BURN_DEVICE` env override); `configure_dtype` installs fp16/i32 when
-    // `dev-f16` is on.
+    // `Device::default()` resolves to the enabled `backend-*` feature (and it
+    // honours the `BURN_DEVICE` env override). `configure_dtype` installs
+    // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
     let autodiff_device = device.clone().autodiff();
@@ -64,9 +70,10 @@ pub fn launch(app_args: &AppArgs) {
     let iterations_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // Muon reuses its fallback's LR (`MatchRmsAdamW` sizes its update to
-        // AdamW's RMS), so the peak rate follows the fallback: SGD's raw
-        // gradient step wants a larger one, at the same peak-to-floor ratio.
+        // Muon reuses the LR of its fallback (`MatchRmsAdamW` sizes its update
+        // to the RMS of AdamW), so the peak rate follows the fallback. The raw
+        // gradient step of SGD needs a larger peak, at the same peak-to-floor
+        // ratio.
         let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
         let (max_lr, min_lr) = match optimizer {
             OptimizerKind::AdamW | OptimizerKind::MuonAdamW => (9.6e-3, 2.4e-4),

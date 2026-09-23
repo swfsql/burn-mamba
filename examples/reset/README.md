@@ -139,9 +139,10 @@ The eval set tests that from both sides:
 
 - **`long-prefix`**: a long same-sign run, one `R`, then a majority of one vote
   the other way. Any decay near 1 lets the buried run leak through.
-- **`long-suffix`**: an early `R`, then `b+1` votes one way and `b` the other.
-  So the *oldest* post-reset tokens decide the majority. Any decay away from 1
-  lets the recent block outvote them.
+- **`long-suffix`**: an early `R`, then a block of votes one way and a block
+  one or two votes shorter the other way. So the *oldest* post-reset tokens
+  decide the majority. Any decay away from 1 lets the recent block outvote
+  them.
 
 </details>
 
@@ -226,9 +227,10 @@ The eval set tests these from both sides:
   far as `±31`, and passes each detent many times. It is easy to hold that
   count. But no three-interval readout of it can report a residue that
   alternates across more than sixty values.
-- **`balanced`**: one reset, then a shuffled bag of equally many `+` and `-`.
-  The count stays inside `±9`, but its order is random. So nothing that depends
-  on the position since the reset predicts it.
+- **`balanced`**: one reset, then a shuffled bag of equally many `+` and `-`
+  (one extra `+` at an odd length). The count stays within `±10`, but its
+  order is random. So nothing that depends on the position since the reset
+  predicts it.
 
 In `random` (resets at ~⅛ of positions), both shortcuts partly work: after a
 reset, "three steps in" almost gives the answer. So this family is reported
@@ -246,14 +248,15 @@ separately and not averaged in.
 | best per-symbol lookup (no memory at all) | 49.1% | 36.5% | 37.4% |
 | best predictor of (symbol, steps since the reset) | 59.0% | 46.5% | 46.0% |
 | best **fixed-rotation** block (12 angles) | 51.8% | 40.7% | 42.1% |
-| best **rotation-free** block (7 decays) | 59.5% | 37.4% | 41.9% |
+| best **rotation-free** block (7 decays) | 63.8% | 37.7% | 59.3% |
 | **hand-built** rotating block, no training | **100%** | **100%** | **100%** |
 | trained, 80 epochs | **100%** | **100%** | **100%** |
 
-The two ablation rows are per-family *best cases*. Neither gets more than 43% on
-the adversarial families, which is only slightly above the memoryless table.
-Switch the rotation on, let one in-projection channel drive it, and the same
-block gets 100%.
+The two ablation rows are per-family *best cases*. On `drift`, neither gets
+more than 41%, only slightly above the memoryless table. The rotation-free
+block gets 59% on `balanced`, where the count stays small, but at the same
+decays it stays at 38% on `drift`. Switch the rotation on, let one
+in-projection channel drive it, and the same block gets 100%.
 
 - `handmade_block_solves_every_family` writes every weight in closed form.
 - `no_fixed_rotation_solves_the_task` runs that block without the data
@@ -286,7 +289,7 @@ reads are functions of exactly that number.
 - **The reset is inherited, not new.** Erasing on `R` is the selectivity of
   `reset-majority`. Mamba-3 gets it through the data-dependent `A`, not through
   `Δ`. Here `Δ` stays at 1 for every symbol, so the per-step angle is
-  `π·tanh(ϑ)` directly.
+  `2π·tanh(ϑ)` directly (at the default `rotation_range = 2`).
 - **Training finds it** with the cosine schedule of `reset-majority`, and with
   no seed search. The rotation can lock onto the detents late. So a run below
   100% at the halfway mark has not necessarily stalled.
@@ -310,8 +313,8 @@ quaternion group `Q₈` since the last reset:
 
 ```text
   symbols   R   i   j   i   j   R   j   i   i
-  state     1   i   k  -j  -1   1   j  -k  -i
-  target    0   1   3   6   4   0   2   7   5
+  state     1   i  -k   j  -1   1   j   k  -j
+  target    0   1   7   2   4   0   2   3   6
 ```
 
 The classes are `1, i, j, k, -1, -i, -j, -k`, in that order. Every position is
@@ -335,8 +338,9 @@ counts fix the answer only up to a sign. An abelian state can carry exactly the
 abelianisation `Q₈/{±1} ≅ Z₂×Z₂`, and the missing bit *is* the task. The eval
 families test that with different pressure:
 
-- **`shuffle`**: one reset, then a shuffled bag of equally many `i`s and `j`s.
-  The construction fixes the counts, so only the order is left. 91% of positions
+- **`shuffle`**: one reset, then a shuffled bag of equally many `i`s and `j`s
+  (one extra `i` at an odd length). The construction fixes the counts, so only
+  the order is left. 91% of positions
   are on a `(#i, #j)` cell that carries both signs.
 - **`runs`**: one reset, then long blocks of one symbol. The word is still
   non-commutative. But its counts nearly decide a word of a few blocks, so every
@@ -462,18 +466,20 @@ rotation can solve. The left-isoclinic quaternion of the rung below cannot give
 the answer to its own readout.
 
 The stream has the same shape, two turns and a reset. But the turns are
-**swaps**. The model reads `s` / `t` / `R` and reports the order of three items:
+**swaps**. The model reads `l` / `r` / `R` and reports the order of three items:
 the running word in the symmetric group `S₃` since the last reset.
 
 ```text
-  symbols   R   s   t   s   t   R   t   s   s
-  order    abc bac bca cba acb abc acb cab bca
-  target    0   2   3   5   1   0   1   4   3
+  symbols   R   l   r   l   r   R   r   l   l
+  order    abc bac bca cba cab abc acb cab acb
+  target    0   2   4   5   3   0   1   3   1
 ```
 
-The classes are the six orders `abc, acb, bac, bca, cab, cba`, in that order.
-Every position is scored. Every sequence starts with an `R`, the token that
-writes the identity into the state.
+`l` swaps the left pair of positions, and `r` swaps the right pair. The
+classes are the six orders `abc, acb, bac, cab, bca, cba`, in that order (the
+lexicographic order of the arrays `perm`, where `perm[x]` is the position of
+item `x`). Every position is scored. Every sequence starts with an `R`, the
+token that writes the identity into the state.
 
 <details> 
 <summary>Why this task</summary>
@@ -483,7 +489,7 @@ applies here too:
 
 - The label is not a function of the current symbol.
 - It is periodic in each generator.
-- It is not a function of the counts of `s` and `t`, because `st ≠ ts`.
+- It is not a function of the counts of `l` and `r`, because `lr ≠ rl`.
 
 One more fact makes it the *next* rung:
 
@@ -504,8 +510,8 @@ There `±q` act *identically*, so the double cover collapses. The three swaps ar
 then true half-turns about three axes `60°` apart. The group itself is the state,
 and a linear head reads it directly.
 
-The eval families are the three of `reset-spinor`, with `s`/`t` for `i`/`j`. One
-difference: here `s² = 1`, so a run only alternates, and most of `runs` does
+The eval families are the three of `reset-spinor`, with `l`/`r` for `i`/`j`. One
+difference: here `l² = 1`, so a run only alternates, and most of `runs` does
 nothing. That is why the counts come closest to deciding `runs`.
 
 </details>
@@ -521,7 +527,7 @@ Chance is 16.7%.
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 40.7% | 22.7% | 29.7% |
 | best predictor of the **sign character** since the reset | 49.7% | 37.2% | 46.0% |
-| best predictor of `(#s, #t)` since the reset | 68.7% | 47.1% | 76.8% |
+| best predictor of `(#l, #r)` since the reset | 68.7% | 47.1% | 76.8% |
 | best readout of the **abelian twin's** state | 68.7% | 49.2% | 75.3% |
 | best **linear** readout of the **left-isoclinic twin's** state | 55.8% | 53.0% | 26.3% |
 | best **table** readout of that same state | **100%** | **100%** | **100%** |
@@ -538,7 +544,7 @@ one: 71/43/51 against 75/46/71. The theory predicts that. On `S₃`, the only
 homomorphic image in `SU(2)` is the sign character, and the counts already
 contain it. So the extra structure only adds something more to get wrong.
 
-The trained abelian row gets more than the `(#s, #t)` ceiling on `random`. A
+The trained abelian row gets more than the `(#l, #r)` ceiling on `random`. A
 *trained* block can write at every token, not only at the reset. Then a decaying
 trace carries recency, and recency identifies short words with no group
 structure at all. `shuffle` closes that escape: one reset, then a long word whose
@@ -583,7 +589,7 @@ The tests:
   of one rotation, and conjugation cannot tell them apart. A left-multiplying
   state cannot resolve exactly that ambiguity.
 - **Why `60°`.** The two axes must be a *third* of a turn apart. Two half-turns
-  about axes `θ` apart compose to a rotation by `2θ`, and `s∘t` has order 3, so
+  about axes `θ` apart compose to a rotation by `2θ`, and `l∘r` has order 3, so
   `2θ = 120°`. A wrong angle gives a different (usually infinite) group, and the
   dataset test would catch it.
 - **The real axis is dead weight.** Conjugation fixes it, so head 0 reports a
@@ -715,8 +721,8 @@ in-projection segments). Chance is 12.5%.
 |---|---|---|---|
 | best per-token lookup (no memory at all) | 30.9% | 16.4% | 21.1% |
 | best predictor of `(#i, #j, #k)` since the reset | 62.9% | 52.0% | 66.6% |
-| the same construction at `u = 1`, same head | 26.7% | 16.3% | 20.9% |
-| — the same, best readout of its state | 19.2% | 13.6% | 13.7% |
+| the same construction at `u = 1`, same head | 39.6% | 18.5% | 27.6% |
+| — the same, best readout of its state | 40.9% | 18.1% | 26.0% |
 | **hand-built** `u = 2` block, no training | **100%** | **100%** | **100%** |
 | **hand-built** `u = 1` block **handed the pair's product** | **100%** | **100%** | **100%** |
 | **trained**, `--micro-steps 2` | **100%** | **100%** | **100%** |
@@ -867,15 +873,21 @@ one of two alphabets (`--group`):
 ```text
   S₅ (the default):  s = (0 1),  c = (0 1 2 3 4)                        120 classes
   symbols  R      s      c      s      c      c      R      c      s
-  order    abcde  bacde  cbdea  cadeb  dbeac  ecabd  abcde  bcdea  acdeb
+  order    abcde  bacde  ebacd  beacd  dbeac  cdbea  abcde  eabcd  aebcd
 
   A₅ (--group a5):   d = (0 1)(2 3),  t = (0 2 4),  d∘t of order 5       60 classes
   symbols  R      d      t      d      t      t      R      t      d
-  order    abcde  badce  bcdea  adceb  cdeab  edacb  abcde  cbeda  daecb
+  order    abcde  badce  eabcd  aecbd  deabc  cedba  abcde  ebadc  bedac
 ```
 
-The classes are the arrangements of the group in lexicographic order (`abcde`
-is 0). Every position is scored. Every sequence starts with an `R`. A sequence is
+A turn `g` moves the item at position `p` to position `g(p)`. So `s` swaps the
+first two positions, and `c` moves every item one position to the right (the
+last item goes to the front). `d` swaps the positions `0 ↔ 1` and `2 ↔ 3`, and
+`t` moves the items at positions `0, 2, 4` to `2, 4, 0`.
+
+The classes are the elements of the group in the lexicographic order of the
+arrays `perm`, where `perm[x]` is the position of item `x` (`abcde` is 0).
+Every position is scored. Every sequence starts with an `R`. A sequence is
 **96** symbols long, three times the 32 of the ladder (the notes give the
 reason).
 

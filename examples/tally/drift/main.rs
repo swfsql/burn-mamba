@@ -1,17 +1,17 @@
-//! # tally-drift — a decay that reads how much evidence the head holds
+//! # tally-drift: a decay that reads how much evidence the head holds
 //!
-//! One Mamba-3 block reads 33 values and a gap symbol, and reports at every
-//! value whether it is **above the running estimate of the level** — an
-//! estimate whose past must age across gaps, because the level walks while
-//! nothing is observed.
+//! One Mamba-3 block reads 33 values and a gap symbol. At every value, it
+//! reports whether the value is **above the running estimate of the level**.
+//! The past of that estimate must age across gaps, because the level walks
+//! while nothing is observed.
 //!
 //! The optimal ageing is `Λ ← Λ/(1 + k·q·Λ)`: hyperbolic in the number of gap
-//! tokens and saturating in the evidence held, which is exactly what a Kalman
-//! gate computes and what a projected decay (`αᵏ·Λ`, a product of the two)
-//! cannot be. It is the ladder's **modest** rung, and deliberately reported as
-//! such: a stock block with a second head and its per-token gate gets within a
-//! few points, because a *decision* only needs the ratio cross-multiplied, and
-//! a geometric discount approximates a hyperbolic one over a narrow range.
+//! tokens, and saturating in the evidence held. A Kalman gate computes exactly
+//! this, and a projected decay (`αᵏ·Λ`, a product of the two) cannot. It is the
+//! **modest** rung of the ladder, and it is reported as such on purpose. A
+//! stock block with a second head and its per-token gate gets within a few
+//! points. A *decision* needs only the ratio, cross-multiplied, and a geometric
+//! discount approximates a hyperbolic one over a narrow range.
 //!
 //! The task, the measurements and how to run it: `examples/tally/README.md`.
 
@@ -37,7 +37,7 @@ pub mod tests;
 /// Shared example infrastructure (included by path).
 #[path = "../../common/mod.rs"]
 pub mod common;
-/// The `tally-*` ladder's shared dataset, loops and helpers.
+/// The shared dataset, loops and helpers of the `tally-*` ladder.
 #[path = "../shared/mod.rs"]
 pub mod shared;
 

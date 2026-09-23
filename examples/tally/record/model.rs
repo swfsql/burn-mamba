@@ -1,27 +1,27 @@
-//! The model configuration for tally-record — `reset-majority`'s plant (a
-//! single real scalar per head) plus **one tropical register per head**, which
-//! holds the running maximum the task asks for.
+//! The model configuration for tally-record: the plant of `reset-majority` (a
+//! single real scalar per head), plus **one tropical register per head**. The
+//! register holds the running maximum that the task asks for.
 //!
 //! ```ignore
 //! cₜ = τ·log(exp((cₜ₋₁ + aₜ)/τ) + exp(bₜ/τ))   →   max(cₜ₋₁ + aₜ, bₜ)
 //! yₜ = Cₜ·hₜ + D·xₜ + cₜ·eₕ
 //! ```
 //!
-//! The construction (`tests.rs`) spends one head's register on `a = 0`,
-//! `b = S·v` — a running maximum in units of `S` — and reads
-//! `y = S·v + θ − c`, which is positive exactly on a record. The plant's state
-//! is unused (`Δ ≈ 0`), which is the rung: nothing but the register moves.
+//! The construction (`tests.rs`) sets the register of one head to `a = 0`,
+//! `b = S·v`: a running maximum in units of `S`. It reads `y = S·v + θ − c`,
+//! which is positive exactly on a record. The state of the plant is unused
+//! (`Δ ≈ 0`), and that is the rung: only the register moves.
 //!
-//! `d_model = 3` is the load-bearing width, against both routes a stock block
-//! has. It is *not* the floor for a thirteen-symbol alphabet (that would be 12);
-//! it is the width at which the values still fit — on a circle, so that one
-//! function of the symbol is an affine read of the embedding — while twelve
-//! *independent* channels do not, which closes the **latch** route (one state
-//! scalar per value, selected by the gate). The other route, a sum in the
-//! exponential domain, needs a single channel but a span of `e^{45.8}`, and
-//! every channel reads the same 3-D embedding, so f32's seven digits are all the
-//! block gets however many heads it spends. See `tests.rs` and the README.
-//!
+//! `d_model = 3` is the load-bearing width, against both routes of a stock
+//! block. It is *not* the floor for a thirteen-symbol alphabet (that is 12). It
+//! is the width at which the values still fit, on a circle, so that one
+//! function of the symbol is an affine read of the embedding. But twelve
+//! *independent* channels do not fit, and that closes the **latch** route (one
+//! state scalar per value, selected by the gate). The other route, a sum in the
+//! exponential domain, needs a single channel but a span of `e^{45.8}`. Every
+//! channel reads the same 3-D embedding, so the block gets only the seven
+//! digits of f32, however many heads it uses. See `tests.rs` and the README.
+
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{
     Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid, Tropical,
@@ -30,7 +30,8 @@ use burn_mamba::prelude::{
 /// Number of output classes (see [`crate::dataset`]).
 pub const NUM_CLASSES: usize = 2;
 
-/// The rung's config; `tropical = false` is the ablation arm (`-- --stock`).
+/// The config of the rung. `tropical = false` is the ablation arm
+/// (`-- --stock`).
 pub fn model_config(tropical: bool) -> MambaLatentNetConfig {
     let mamba_block = Mamba3Config::new(3)
         .with_state_rank(1) // a scalar state — nothing to rotate

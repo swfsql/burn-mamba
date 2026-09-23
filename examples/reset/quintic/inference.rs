@@ -1,5 +1,6 @@
-//! Inference for the reset-quintic example: loads the trained model and reports
-//! accuracy on each evaluation family, plus a decoded sample sequence.
+//! Inference for the reset-quintic example. It loads the trained model, reports
+//! the accuracy on each evaluation family at each length, and prints one sample
+//! sequence with its wrong positions.
 
 use crate::AppArgs;
 use crate::dataset::{
@@ -13,7 +14,8 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-family accuracy on fresh eval sets.
+/// Load the trained model, and report the accuracy of each family on its
+/// evaluation sets (generated from `EVAL_SEED`).
 pub fn infer(
     group: Group,
     model_config: MambaLatentNetConfig,
@@ -72,8 +74,8 @@ pub fn infer(
     }
 }
 
-/// The lowest per-element accuracy, over the elements that occur at all, and
-/// how many do.
+/// The lowest per-element accuracy over the elements that occur, and the
+/// number of elements that occur.
 fn worst_class(pred: &[i32], target: &[i32], num_classes: usize) -> (f32, usize) {
     let mut hit = vec![0u64; num_classes];
     let mut all = vec![0u64; num_classes];

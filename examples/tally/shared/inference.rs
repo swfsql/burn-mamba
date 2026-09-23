@@ -7,7 +7,8 @@ use crate::common::cli::AppArgs;
 use burn::{data::dataloader::batcher::Batcher, prelude::*};
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-family accuracy on fresh eval sets.
+/// Load the trained model, and report the accuracy of each family on its
+/// evaluation set (generated from `EVAL_SEED`).
 pub fn infer(task: &Task, model_config: MambaLatentNetConfig, device: Device, app_args: &AppArgs) {
     let model: MambaLatentNet = app_args
         .load_model(&model_config, &device)

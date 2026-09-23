@@ -5,13 +5,13 @@ use crate::common::cli::{AppArgs, finish_extra};
 /// `-- --help`.
 const HELP: &str = "\
 tally-depth's own flags (after --):
-    --stock    Remove the tropical register from a fresh model config (the rung's ablation)";
+    --stock    Remove the tropical register from a fresh model config (the ablation of the rung)";
 
 /// The parsed flags.
 pub struct Cli {
     /// `--stock`: a fresh model config without the tropical register, the
-    /// ablation this rung is about. Once a model config is persisted, it wins
-    /// on reload.
+    /// ablation that this rung is about. On reload, a persisted model config
+    /// wins.
     pub stock: bool,
 }
 

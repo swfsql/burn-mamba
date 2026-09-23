@@ -1,17 +1,18 @@
-//! The three claims this rung rests on, measured — including the one that makes
-//! it the ladder's modest rung.
+//! The three claims this rung rests on, measured. One of them makes it the
+//! modest rung of the ladder.
 //!
-//! 1. A **hand-built** block solves the task exactly: the Kalman gate *is* the
-//!    filter the labels come from, so the block computes the optimal estimate
-//!    rather than approximating it.
-//! 2. The **same block with `κ = 0`** — the scaled member, whose decay is
-//!    projected — cannot, at any gap decay on a grid: a geometric discount is
+//! 1. A **hand-built** block solves the task exactly. The Kalman gate *is* the
+//!    filter that gives the labels, so the block computes the optimal estimate,
+//!    and does not approximate it.
+//! 2. The **same block with `κ = 0`** (the scaled member, whose decay is
+//!    projected) cannot, at any gap decay on a grid: a geometric discount is
 //!    not a hyperbolic one.
-//! 3. The **honest bound**: a stock block may spend a second head on a count and
-//!    let its per-token gate cross-multiply, deciding `v·n − Σ > 0` without ever
-//!    dividing. That is a linear state with a nonlinear readout, and it comes
-//!    within a few points. The Kalman gate's exactness is real; the *decision*
-//!    gap it buys on this task is small, and this test is what says so.
+//! 3. The **honest bound**: a stock block can use a second head for a count and
+//!    let its per-token gate cross-multiply. It then decides `v·n − Σ > 0`
+//!    without a division. That is a linear state with a nonlinear readout, and
+//!    it comes within a few points. The exactness of the Kalman gate is real,
+//!    but the *decision* gap that it gives on this task is small. This test
+//!    shows it.
 
 use crate::dataset::{
     FAMILIES, GAP, MARGIN, NUM_SYMBOLS, NUM_VALUES, Q_GAP, SEQ_LENGTH, labels, posterior, task,
@@ -30,25 +31,26 @@ type Device = burn::prelude::Device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// The gate's `κ`, so that `q = Δ·exp(r)` and `r` alone names the doubt.
+/// The `κ` of the gate, so that `q = Δ·exp(r)`, and `r` alone names the doubt.
 const KAPPA: f64 = 1.0;
-/// The estimator's `Δ` on a gap: evidence worth (almost) nothing, which is what
+/// The `Δ` of the estimator on a gap: evidence worth (almost) nothing. That
 /// lets the same token carry doubt worth `Q_GAP`.
 const DELTA_GAP: f64 = 1e-4;
 /// `r` where no time passes: `q = Δ·e^r` underflows to zero.
 const R_QUIET: f64 = -40.0;
-/// A `Δ` small enough that a head's state never leaves zero.
+/// A `Δ` small enough that the state of a head stays at zero.
 const DELTA_OFF: f64 = 1e-12;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// `Â` for a held state: `A = −softplus(Â)` lands under the block's `a_floor`.
+/// `Â` for a held state: `|A| = softplus(Â)` is below the `a_floor` of the
+/// block.
 const A_HOLD_RAW: f64 = -20.0;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 
 /// The symbol embeddings: the 33 values on a circle of radius `√2` at height
-/// `1` (so the value is an affine read), the gap at the far pole. Norm `√3`, so
-/// the layer's pre-`RmsNorm` passes them through.
+/// `1` (so the value is an affine read), and the gap at the far pole. Their
+/// norm is `√3`, so the pre-`RmsNorm` of the layer does not change them.
 fn embeddings() -> Vec<Vec<f64>> {
     let r = 2.0f64.sqrt();
     let mut out: Vec<Vec<f64>> = (0..NUM_VALUES)
@@ -65,10 +67,10 @@ fn embeddings() -> Vec<Vec<f64>> {
 /// Which arm to build.
 #[derive(Clone, Copy, Debug)]
 enum Arm {
-    /// The rung's own construction: the gate computes the discount.
+    /// The construction of the rung: the gate computes the discount.
     Kalman,
     /// The join at `κ = 0`: the same block, the same read of `η/Λ`, but the
-    /// decay is projected — the gap discounts geometrically by `alpha_gap`.
+    /// decay is projected. The gap discounts geometrically by `alpha_gap`.
     Scaled { alpha_gap: f64 },
 }
 
@@ -89,12 +91,12 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([3]), device));
     let block = &mut layer.block;
 
-    // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | r(3)]` — the
-    // last three are the Kalman gate's projected noise.
+    // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | r(3)]`. The
+    // last three are the projected noise of the Kalman gate.
     let hold = vec![A_HOLD_RAW; NUM_SYMBOLS];
     let off = vec![softplus_inv(DELTA_OFF); NUM_SYMBOLS];
     let mut targets: Vec<Vec<f64>> = vec![vec![Z_PRE; NUM_SYMBOLS]; 3]; // z
-    // head 0 writes the value (nothing on a gap); head 1 is the reference.
+    // Head 0 writes the value (nothing on a gap). Head 1 is the reference.
     targets.push(per_symbol(&|s| values[s]));
     targets.push(vec![1.0; NUM_SYMBOLS]);
     targets.push(vec![0.0; NUM_SYMBOLS]);
@@ -111,8 +113,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.push(hold.clone()); // A, head 0 — a held sum
         }
         Arm::Scaled { alpha_gap } => {
-            // The discount has to come from the decay instead: `α = exp(Δ·A)`
-            // with the gap's own `Δ`.
+            // The discount must come from the decay instead: `α = exp(Δ·A)`,
+            // with the `Δ` of the gap.
             targets.push(per_symbol(&|s| {
                 if s == GAP {
                     softplus_inv((-alpha_gap.max(1e-9).ln() / DELTA_GAP).max(1e-9))
@@ -146,7 +148,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([3, 1, 1]), device));
     // `C = −1` on the estimator: its estimate is subtracted from the value.
     block.c_bias_hmr = param(&[-2.0, 0.0, 0.0], [3, 1, 1], device);
-    // `κ`: one, or zero — the join where the block is stock's decay again.
+    // `κ`: one, or zero, the join where the block has the stock decay again.
     block.kalman_log_kappa_h = Some(param(
         &match arm {
             Arm::Kalman => [KAPPA.ln(), R_QUIET, R_QUIET],
@@ -189,8 +191,9 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// The gate's recurrence **is** the labels' filter: `Δ = 1` and `q ≈ 0` at a
-/// value, `Δ ≈ 0` and `q = Q_GAP` at a gap, read at `ω = 1`. No fitting.
+/// The recurrence of the gate **is** the filter of the labels: `Δ = 1` and
+/// `q ≈ 0` at a value, `Δ ≈ 0` and `q = Q_GAP` at a gap, read at `ω = 1`. No
+/// fitting.
 #[test]
 fn handmade_gate_solves_every_family() {
     let device = Device::default();
@@ -207,9 +210,10 @@ fn handmade_gate_solves_every_family() {
 // 2. the join at κ = 0 does not
 // ---------------------------------------------------------------------------
 
-/// The same block at `κ = 0` — the scaled member, reading the same `η/Λ` — with
-/// the gap's discount swept over a grid of decays. This is the ablation the
-/// crate's own structure makes available: one parameter changed, nothing else.
+/// The same block at `κ = 0` (the scaled member, which reads the same `η/Λ`),
+/// with the discount of the gap swept over a grid of decays. The structure of
+/// the crate makes this ablation available: one parameter changed, nothing
+/// else.
 #[test]
 fn no_projected_decay_solves_the_task() {
     let device = Device::default();
@@ -225,8 +229,8 @@ fn no_projected_decay_solves_the_task() {
         best_worst = best_worst.max(worst);
     }
     println!("best worst-family accuracy over the sweep: {:.2}%", 100.0 * best_worst);
-    // ~97½%, against the gate's 100. A projected decay gets *close* here and
-    // the bound says so: the rung is an exactness claim, not a chasm.
+    // ~97½%, against 100% for the gate. A projected decay gets *close* here,
+    // and the bound says so: the rung claims exactness, not a large margin.
     assert!(
         best_worst < 0.98,
         "a projected decay reached {best_worst:.4} — the task does not need the gate"
@@ -237,16 +241,16 @@ fn no_projected_decay_solves_the_task() {
 // 3. the honest bound: a linear state that cross-multiplies
 // ---------------------------------------------------------------------------
 
-/// What a stock block can still do without dividing: hold a **sum** and a
-/// **count** in two heads, each with its own decay on a gap, and let the
-/// per-token gate form `v·n − Σ`, whose sign is the comparison. Swept over both
-/// gap decays and the value decay, in f64 — a *lower* bound on stock, since it
-/// is one family of readouts rather than all of them.
+/// What a stock block can still do without a division. It holds a **sum** and
+/// a **count** in two heads, each with its own decay on a gap, and the
+/// per-token gate forms `v·n − Σ`, whose sign is the comparison. The test
+/// sweeps both gap decays and the value decay, in f64. This is a *lower* bound
+/// on stock, because it is one family of readouts, not all of them.
 ///
-/// It lands a few points under the gate. That is the rung's honest size: the
-/// Kalman gate is exact where this is not, but a decision only needs the ratio
-/// cross-multiplied, and a geometric discount sits close to a hyperbolic one
-/// over the range of gap lengths a 32-token sequence holds.
+/// It lands a few points below the gate. That is the true size of the rung. The
+/// Kalman gate is exact where this is not. But a decision needs only the ratio,
+/// cross-multiplied, and a geometric discount is close to a hyperbolic one over
+/// the range of gap lengths in a 32-token sequence.
 #[test]
 fn a_cross_multiplying_linear_state_comes_close() {
     let task = task();
@@ -300,18 +304,18 @@ fn a_cross_multiplying_linear_state_comes_close() {
             knife = best.0;
         }
     }
-    // On the ordinary families it is within a point of the gate; the `knife`
-    // family — where the probe sits at the estimate's edge — is the one that
-    // separates them, and even there by about two points.
+    // On the ordinary families, it is within a point of the gate. The `knife`
+    // family (where the probes are at the edge of the estimate) separates
+    // them, and even there, the difference is about two points.
     assert!(
         knife < 0.99,
         "the linear state matched the gate on knife ({knife:.4}) — this rung has no content"
     );
 }
 
-/// The task's own numbers: the memoryless ceiling, and how often a gap actually
-/// changes the answer (the share of scored positions where ignoring the gaps
-/// entirely — a plain running mean — disagrees with the filter).
+/// The numbers of the task itself: the memoryless ceiling, and how often a gap
+/// changes the answer. That is the share of scored positions where a plain
+/// running mean (which ignores the gaps) disagrees with the filter.
 #[test]
 fn the_gaps_are_what_the_task_tests() {
     let task = task();
@@ -341,13 +345,13 @@ fn the_gaps_are_what_the_task_tests() {
         assert!(ceiling < 0.85, "{name}: the current symbol nearly gives the answer");
     }
 
-    // The labels: a gap is unscored, and so is a near-tie — including the first
-    // value of a sequence, which *is* its own posterior mean (an empty prior
-    // holds no evidence to be above or below).
+    // The labels: a gap is unscored, and so is a near-tie. This includes the
+    // first value of a sequence, which *is* its own posterior mean (an empty
+    // prior holds no evidence to be above or below).
     let symbols = vec![8, GAP, 0, 8];
     let out = labels(&symbols);
     assert_eq!(out[0], IGNORE);
     assert_eq!(out[1], IGNORE);
-    assert_eq!(out[2], crate::dataset::BELOW); // −2 against a prior at +2
+    assert_eq!(out[2], crate::dataset::BELOW); // −2 against a prior at −1
     assert_eq!(out[3], crate::dataset::ABOVE);
 }

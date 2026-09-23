@@ -22,7 +22,7 @@ use burn_mamba::prelude::{
 ///
 /// - A transposition has order 2, so it must be a **half-turn**.
 /// - Two half-turns about axes `60°` apart compose to a `120°` rotation, so
-///   `s∘t` has order 3. Two axes at `60°` generate the group correctly.
+///   `l∘r` has order 3. Two axes at `60°` generate the group correctly.
 /// - `±q` conjugate identically, so the double cover collapses. The state *is*
 ///   the permutation, and a linear head can read it.
 ///
@@ -37,7 +37,7 @@ use burn_mamba::prelude::{
 ///   which is the sign character and no more.
 ///
 /// [`RotationKind::Complex2D`] loses even that: a `cumsum` of angles is a
-/// function of the symbol counts, and `st ≠ ts`.
+/// function of the symbol counts, and `lr ≠ rl`.
 ///
 /// Necessary config choices:
 ///

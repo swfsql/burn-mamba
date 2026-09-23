@@ -1,6 +1,6 @@
-//! The model configuration for tally-drift — `reset-majority`'s plant with a
-//! **Kalman gate** on its decay: the block's own precision `Λ` decides how much
-//! of the past survives a gap.
+//! The model configuration for tally-drift: the plant of `reset-majority`, with
+//! a **Kalman gate** on its decay. The precision `Λ` of the block decides how
+//! much of the past survives a gap.
 //!
 //! ```ignore
 //! dₜ = αₜ / (1 + qₜ·αₜ·Λₜ₋₁)      qₜ = κₕ·Δₜ·exp(rₜ)     (rₜ projected)
@@ -9,21 +9,22 @@
 //! ```
 //!
 //! The construction (`tests.rs`) gives the estimator head `Δ = 1` and `q ≈ 0`
-//! on a value (evidence, no doubt) and `Δ ≈ 0`, `q = Q_GAP` on a gap (doubt, no
-//! evidence) — which is what [`Gain::KalmanProjectedNoise`] is for, the tied arm
-//! having no way to separate the two — and reads `ω = 1`, the estimate `η/Λ`
-//! rather than the information `η`. The output is then `v − S`.
+//! on a value (evidence, no doubt), and `Δ ≈ 0`, `q = Q_GAP` on a gap (doubt,
+//! no evidence). [`Gain::KalmanProjectedNoise`] exists for this: the tied arm
+//! cannot separate the two. The head reads `ω = 1`, that is the estimate
+//! `η/Λ`, not the information `η`. The output is then `v − S`.
 //!
-//! Config choices that are load-bearing:
+//! These config choices are load-bearing:
 //!
-//! - `Gain::KalmanProjectedNoise` — the computed decay, plus one in-projection
+//! - `Gain::KalmanProjectedNoise`: the computed decay, plus one in-projection
 //!   channel per (head, micro-step) for `r`.
-//! - `has_outproj_norm = false` (the default) — the construction is built on
-//!   the estimator head's raw output `v − S`.
-//! - `a_floor = 1e-8` — the estimator has to hold its sum *unweighted* across a
-//!   whole sequence; the block's floor on `|A|` is the only thing that decays
-//!   it, and at the default `1e-4` that leak is comparable to the margins here.
-//! - `d_model = 3` with the 33 values on a circle, as in `tally-record`.
+//! - `has_outproj_norm = false` (the default): the construction uses the raw
+//!   output `v − S` of the estimator head.
+//! - `a_floor = 1e-8`: the estimator must hold its sum *unweighted* across a
+//!   whole sequence. The floor of the block on `|A|` is the only thing that
+//!   decays it, and at the default `1e-4`, that leak is comparable to the
+//!   margins here.
+//! - `d_model = 3`, with the 33 values on a circle, as in `tally-record`.
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{
@@ -33,8 +34,8 @@ use burn_mamba::prelude::{
 /// Number of output classes (see [`crate::dataset`]).
 pub const NUM_CLASSES: usize = 2;
 
-/// The rung's config; `kalman = false` is the ablation arm (`-- --stock`), the
-/// same block with a projected decay.
+/// The config of the rung. `kalman = false` is the ablation arm
+/// (`-- --stock`): the same block with a projected decay.
 pub fn model_config(kalman: bool) -> MambaLatentNetConfig {
     let mamba_block = Mamba3Config::new(3)
         .with_state_rank(1)

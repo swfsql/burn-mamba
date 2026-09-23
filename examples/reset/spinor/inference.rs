@@ -1,5 +1,6 @@
-//! Inference for the reset-spinor example: loads the trained model and reports
-//! accuracy on each evaluation family, plus a decoded sample sequence.
+//! Inference for the reset-spinor example. It loads the trained model, reports
+//! the accuracy on each evaluation family, and prints one decoded sample
+//! sequence.
 
 use crate::AppArgs;
 use crate::dataset::{
@@ -13,7 +14,8 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 
-/// Load the trained model and report per-family accuracy on fresh eval sets.
+/// Load the trained model, and report the accuracy of each family on its
+/// evaluation set (generated from `EVAL_SEED`).
 pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args: &AppArgs) {
     let model: MambaLatentNet = app_args
         .load_model(&model_config, &infer_device)

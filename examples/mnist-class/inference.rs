@@ -1,12 +1,12 @@
-//! Inference / sampling for the sequential-MNIST classifier.
+//! Inference for the sequential-MNIST classifier.
 //!
-//! [`infer`] loads the trained model, classifies a handful of test digits,
-//! prints each digit as ASCII art beside its 10-bin class-probability bar chart,
-//! and writes a PNG per digit (the image plus the probability bars). The
-//! rendering itself is `burn_stack::examples::mnist::render`, shared with
-//! `burn-deltanet`; what is Mamba's here is [`predict`], which the training
-//! loop also calls at every small validation check to dump labelled samples
-//! into a fresh `epoch-{e}-batch-{b}/` directory.
+//! [`infer`] loads the trained model and classifies a few test digits. It
+//! prints each digit as ASCII art next to its 10-bin class-probability bar
+//! chart, and it writes one PNG per digit (the image plus the probability
+//! bars). The rendering itself is `burn_stack::examples::mnist::render`,
+//! shared with `burn-deltanet`. The Mamba part here is [`predict`]. The
+//! training loop also calls it at every small validation check, to write
+//! labelled samples into a new `epoch-{e}-batch-{b}/` directory.
 
 use crate::AppArgs;
 use crate::common::mnist::dataset::{MnistBatch, MnistBatcher, MnistDataset};
@@ -48,8 +48,9 @@ pub fn infer(model_config: MambaLatentNetConfig, infer_device: Device, app_args:
 
 /// Forward the classifier and return per-class probabilities `[n, 10]`.
 ///
-/// `images_norm`: `[n, H, W, 1]` in `[0, 1]`; the model is fed the z-scored
-/// pixels (matching training), the last timestep's logits are softmaxed.
+/// `images_norm`: `[n, H, W, 1]` in `[0, 1]`. The model gets the z-scored
+/// pixels (as in training), and the logits of the last timestep go through a
+/// softmax.
 pub fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
     let [n, h, w, _c] = images_norm.dims();
     // z-score to match training (see `MnistBatch::images_z_score`).
@@ -58,8 +59,8 @@ pub fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
         .div_scalar(MnistBatch::STDDEV)
         .reshape([n, h * w, 1]);
     let (output, _caches) = model.forward(zscored, None, crate::training::ssd_path(), None, None);
-    // The class latents lengthen the sequence; the readout is its last position
-    // — see `model::OUTPUT_SEQUENCE_EXTRA`.
+    // The class latents lengthen the sequence. The readout is its last
+    // position (see `model::OUTPUT_SEQUENCE_EXTRA`).
     let seq = h * w + crate::model::OUTPUT_SEQUENCE_EXTRA;
     let last = output.narrow(1, seq - 1, 1).squeeze_dim::<2>(1); // [n, 10]
     burn::tensor::activation::softmax(last, 1)

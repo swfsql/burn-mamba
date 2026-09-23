@@ -1,32 +1,31 @@
 //! The three claims this example rests on, measured.
 //!
-//! 1. A **hand-built** quaternion Mamba-3 block solves the task exactly — no
-//!    fitting, every weight written down in closed form from the unrolled
-//!    recurrence.
+//! 1. A **hand-built** quaternion Mamba-3 block solves the task exactly. There
+//!    is no fitting: the unrolled recurrence gives every weight in closed form.
 //! 2. The **same construction with the abelian rotation** (`Complex2D`, one enum
 //!    knob) does not. A `cumsum` of angles is a function of the symbol counts,
-//!    and what its state ends up carrying is exactly the abelianisation
-//!    `Q₈/{±1} ≅ Z₂×Z₂` — the commutator, which is the whole content of the
-//!    task, is gone. Measured twice: through the identical head, and through the
-//!    **best readout its output admits**.
-//! 3. **No order-blind model can**, whatever it does with those counts: the best
-//!    lookup table from `(#i, #j)` since the reset is far below the block. It
-//!    bounds every block that, like this one, writes its state at the reset and
-//!    reads the rotation accumulated since — under an abelian rotation that
-//!    accumulation *is* a function of the two counts, whatever the angles and
-//!    whatever the decoder.
+//!    and its state carries exactly the abelianisation `Q₈/{±1} ≅ Z₂×Z₂`. The
+//!    commutator, which is the whole content of the task, is gone. The test
+//!    measures this twice: through the identical head, and through the **best
+//!    readout that its output admits**.
+//! 3. **No order-blind model can**, whatever it does with those counts. The
+//!    best lookup table from `(#i, #j)` since the reset is far below the block.
+//!    It bounds every block that, like this one, writes its state at the reset
+//!    and reads the rotation accumulated after it. Under an abelian rotation,
+//!    that accumulation *is* a function of the two counts, whatever the angles
+//!    and whatever the decoder.
 //!
 //! The readouts in (2) and (3) are lookup tables **fitted on one split and
-//! scored on another**, so they are ceilings a model could actually reach, not
+//! scored on another**. So they are ceilings that a model can reach, not
 //! memorised labels.
 //!
-//! The construction is the one derived in [`crate::model`]: `R` writes the
-//! identity quaternion into the state at the current cumulative rotation, `i`
-//! and `j` turn that rotation by non-commuting half-turns, and the state is then
-//! the relative quaternion — the group element itself. Two heads read it, along
-//! the two coordinates of a [`plane`] on which the eight elements of `Q₈` are
-//! eight directions `45°` apart, so the head decodes a sector. The ceilings in
-//! (2) are still measured on all four components of the state (see [`probe`]).
+//! The construction is the one that [`crate::model`] derives. `R` writes the
+//! identity quaternion into the state at the current cumulative rotation. `i`
+//! and `j` turn that rotation by non-commuting half-turns. The state is then the
+//! relative quaternion: the group element itself. Two heads read it, along the
+//! two coordinates of a [`plane`] on which the eight elements of `Q₈` are eight
+//! directions `45°` apart, so the head decodes a sector. The ceilings in (2)
+//! still use all four components of the state (see [`probe`]).
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
@@ -42,72 +41,58 @@ use burn_mamba::prelude::*;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `Δ` for every head and every symbol. Fixed at 1 so the rotation generator is
-/// `π·tanh(ϑ)` outright and `γ = Δ = 1` writes `B` unscaled — the block runs at
-/// `Trapezoid::None`, which spends the whole step on the current token.
+/// `Δ` for every head and every symbol. It is fixed at 1, so the rotation
+/// generator is exactly `2π·tanh(‖ϑ‖)`, and `γ = Δ = 1` writes `B` unscaled.
+/// (The block runs at `Trapezoid::None`, which gives the whole step to the
+/// current token.)
 const DELTA: f64 = 1.0;
-/// `ϑ` for an axis a symbol turns about — a half-turn, i.e. the unit quaternion
-/// `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
+/// `ϑ` for the axis that a symbol turns about: a half-turn, that is the unit
+/// quaternion `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
 ///
-/// The block bounds one step to `rotation_range · π · Δ`, and the default range
-/// of 2 makes a half-turn `tanh(‖ϑ‖) = 1/2`: interior, where `tanh` is steep
-/// and the gradient is alive. (At `range = 1` the same half-turn would sit
-/// exactly on `tanh`'s asymptote, reachable only by saturating a channel — a
-/// place no optimiser can arrive at, since f32's `tanh` derivative there is
+/// The block bounds one step to `rotation_range · π · Δ`. At the default range
+/// of 2, a half-turn is `tanh(‖ϑ‖) = 1/2`: in the interior, where `tanh` is
+/// steep and the gradient is alive. (At `range = 1`, the same half-turn is
+/// exactly on the asymptote of `tanh`, and only a saturated channel reaches it.
+/// No optimiser can arrive there, because the f32 derivative of `tanh` there is
 /// exactly zero.) The abelian twin below reads the same constant through the
-/// same bound, so it too turns by a half — which is what makes what it computes
-/// exactly the abelianisation.
+/// same bound, so it also turns by a half. That makes its result exactly the
+/// abelianisation.
 const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
-/// `Â` on a turn. `A = −softplus(Â)`, floored at the block's `a_floor` (`1e-4`),
-/// so this is the flattest hold the block allows.
+/// `Â` on a turn. `A = −softplus(Â)`, floored at the `a_floor` of the block
+/// (`1e-4`), so this is the flattest hold that the block allows.
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a `RESET`: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `x(R) = 1` — the write. `x(i) = x(j) = 0` exactly (`silu(0) = 0`), so a turn
+/// `x(R) = 1`: the write. `x(i) = x(j) = 0` (`x` takes no activation), so a turn
 /// writes nothing and only advances the rotation.
 const X_WRITE: f64 = 1.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// Class-logit gain on the plane the readout is folded onto.
+/// Class-logit gain on the plane that the readout folds onto.
 const OUT_GAIN: f64 = 3.0;
 
-/// `state_rank` — the four components of the quaternion the state holds.
+/// `state_rank`: the four components of the quaternion in the state.
 const RANK: usize = 4;
 
 /// `nheads`, which at `per_head_dim = 1` is also `d_inner`.
 ///
-/// Two, because two is what the *readout* needs: every head holds its own copy
-/// of the same quaternion (same `B`, same `ᾱ`, same rotation) and differs only
-/// in the `C` it reads that copy with, so `nheads` is a count of **projections**,
-/// not of state. Eight group elements fit on eight directions of a plane
-/// ([`plane`]), and two projections separate them; a third and a fourth would be
-/// duplicates the head cannot use.
+/// Two, because the *readout* needs two. Every head holds its own copy of the
+/// same quaternion (same `B`, same `ᾱ`, same rotation). The heads differ only in
+/// the `C` with which they read that copy, so `nheads` counts **projections**,
+/// not state. Eight group elements fit on eight directions of a plane
+/// ([`plane`]), and two projections separate them. A third and a fourth would
+/// be duplicates that the head cannot use.
 const NHEADS: usize = 2;
 
-/// `d_model`. Two, the floor for a three-symbol alphabet: the layer's
-/// pre-`RmsNorm` sends a token to the unit sphere, so a 1-D token would carry
-/// only its sign. It equals `d_inner` here, so the block's `out_proj` is the
-/// identity and the two heads *are* the plane.
+/// `d_model`. Two, the floor for a three-symbol alphabet: the pre-`RmsNorm` of
+/// the layer sends a token to the unit sphere, so a 1-D token carries only its
+/// sign. It equals `d_inner` here, so the `out_proj` of the block is the
+/// identity, and the two heads *are* the plane.
 const D_MODEL: usize = 2;
 
 // ---------------------------------------------------------------------------
 // scalar helpers
 // ---------------------------------------------------------------------------
-
-fn silu(t: f64) -> f64 {
-    t / (1.0 + (-t).exp())
-}
-
-/// Inverse of `silu` on the branch containing 0 (`t > -1.2785`).
-fn silu_inv(v: f64) -> f64 {
-    assert!(v > -0.2784, "silu bottoms out at -0.2785, cannot reach {v}");
-    let (mut lo, mut hi) = (-1.2785f64, v.max(0.0) + 1.0);
-    for _ in 0..200 {
-        let mid = 0.5 * (lo + hi);
-        if silu(mid) < v { lo = mid } else { hi = mid }
-    }
-    0.5 * (lo + hi)
-}
 
 /// Inverse of `softplus`, stable for tiny `v`.
 fn softplus_inv(v: f64) -> f64 {
@@ -147,35 +132,36 @@ fn solve3(mut m: [[f64; 3]; 3], mut rhs: [f64; 3]) -> [f64; 3] {
 // the hand-built model
 // ---------------------------------------------------------------------------
 
-/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
-/// (`γ = 1`) passes them through unchanged. Indexed by
+/// The three symbol embeddings, each of norm `√2`, so the pre-`RmsNorm` of the
+/// layer (`γ = 1`) does not change them. Indexed by
 /// [`TURN_I`] / [`TURN_J`] / [`RESET`].
 ///
-/// Three points of `ℝ²` are affinely independent, so a channel that must take
-/// the values `(t_i, t_j, t_R)` is one 3×3 [`solve3`] away — weight plus bias,
-/// exactly as `reset-majority` and `reset-rotor` do it. (Orthogonal embeddings
-/// would spare the solve, but they need `d_model = 3` at least, and the block is
-/// the thing being minimised.)
+/// Three points of `ℝ²` are affinely independent. So a channel that must take
+/// the values `(t_i, t_j, t_R)` needs only one 3×3 [`solve3`] (weight plus
+/// bias), as in `reset-majority` and `reset-rotor`. (Orthogonal embeddings need
+/// no solve, but they need `d_model = 3` at least, and this construction
+/// minimises the block.)
 const EMBED: [[f64; D_MODEL]; NUM_SYMBOLS] = [
     [std::f64::consts::SQRT_2, 0.0],
     [0.0, std::f64::consts::SQRT_2],
     [-1.0, -1.0],
 ];
 
-/// The plane the two heads read the state on: state component `r` goes to the
-/// unit vector at `r · 45°`.
+/// The plane on which the two heads read the state: state component `r` goes to
+/// the unit vector at `r · 45°`.
 ///
 /// The eight elements of `Q₈` are `±eᵣ`, so they land on the eight directions
-/// `45°` apart: distinct, equidistant, and in convex position, which is exactly
-/// what a linear eight-way head needs. The block never forms this plane as a
-/// separate step — head `h` reads the state with [`c_axis`], the `h`-th
-/// coordinate of this map — so the block's own `out_proj` is the identity.
+/// `45°` apart. These are distinct, equidistant, and in convex position, which
+/// is exactly what a linear eight-way head needs. The block never forms this
+/// plane as a separate step. Head `h` reads the state with [`c_axis`], the
+/// `h`-th coordinate of this map, so the `out_proj` of the block is the
+/// identity.
 fn plane(r: usize) -> [f64; D_MODEL] {
     let angle = std::f64::consts::FRAC_PI_4 * r as f64;
     [angle.cos(), angle.sin()]
 }
 
-/// [`plane`] applied to a quaternion — where a group element lands.
+/// [`plane`] applied to a quaternion: where a group element lands.
 fn plane_point(q: [f64; RANK]) -> [f64; D_MODEL] {
     let mut p = [0.0; D_MODEL];
     for (r, qr) in q.iter().enumerate() {
@@ -187,38 +173,41 @@ fn plane_point(q: [f64; RANK]) -> [f64; D_MODEL] {
     p
 }
 
-/// The `C` vector head `h` reads the state with: the `h`-th coordinate of
-/// [`plane`] over the four components, scaled to norm 2 — the length QK-Norm
-/// hands the construction, so the two heads share one positive factor and
-/// `(y₀, y₁) ∝ plane_point(q_rel)` exactly.
+/// The `C` vector with which head `h` reads the state: the `h`-th coordinate of
+/// [`plane`] over the four components, scaled to norm 2. That is the length
+/// that QK-Norm gives the construction. So the two heads share one positive
+/// factor, and `(y₀, y₁) ∝ plane_point(q_rel)` exactly.
 fn c_axis(h: usize) -> [f64; RANK] {
     let raw: [f64; RANK] = std::array::from_fn(|r| plane(r)[h]);
     let norm = raw.iter().map(|v| v * v).sum::<f64>().sqrt();
     raw.map(|v| 2.0 * v / norm)
 }
 
-/// What the network's head reads out.
+/// What the head of the network reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
     /// The nearest-element decoder: logit `g` ∝ `⟨p, plane_point(g)⟩` over the
-    /// eight elements of `Q₈`, read on the plane [`plane`] puts them on.
+    /// eight elements of `Q₈`, read on the plane where [`plane`] puts them.
     Decoder,
-    /// Point the two heads' `C` at the two named state components instead, and
-    /// pass them through as the first two logits, so a test can search over every
-    /// readout the head could have expressed. Two at a time is all two heads
-    /// carry, so [`probe`] runs the block twice.
+    /// Point the `C` of the two heads at the two named state components
+    /// instead, and pass them through as the first two logits. A test can then
+    /// search over every readout that the head can express. Two heads carry
+    /// only two components at a time, so [`probe`] runs the block twice.
     Probe([usize; 2]),
 }
 
 /// Build the block by hand for the given rotation.
 ///
-/// The two rotations differ in what the rotation channels mean:
-/// [`RotationKind::Quaternion4D`] takes three of them — a scaled rotation axis,
-/// so `i` and `j` become half-turns about two orthogonal axes, which do not
-/// commute — while [`RotationKind::Complex2D`] takes two, one angle per state
-/// pair, so `i` and `j` become half-turns of the two pairs, which do. The only
-/// other difference is the vector the write stores; see [`b_channels`] for why
-/// the abelian twin gets a different (and better) one.
+/// The two rotations differ in the meaning of the rotation channels:
+///
+/// - [`RotationKind::Quaternion4D`] takes three per head: a scaled rotation
+///   axis. So `i` and `j` become half-turns about two orthogonal axes, which do
+///   not commute.
+/// - [`RotationKind::Complex2D`] takes two, one angle per state pair. So `i`
+///   and `j` become half-turns of the two pairs, which commute.
+///
+/// The only other difference is the vector that the write stores. [`b_channels`]
+/// tells why the abelian twin gets a different (and better) one.
 fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(rotation);
     let mut model = ModelConfigExt::init(&cfg, device);
@@ -239,11 +228,11 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
-    // The 2s are `nheads`, the 4s `state_rank`; `Trapezoid::None` projects no λ.
-    // Each entry is the channel's value at (TURN_I, TURN_J, RESET), *before* its
-    // own activation.
+    // The 2s are `nheads`, and the 4s are `state_rank`. `Trapezoid::None`
+    // projects no λ. Each entry is the value of the channel at
+    // (TURN_I, TURN_J, RESET), *before* its activation.
     let rotation_channels: Vec<[f64; NUM_SYMBOLS]> = match rotation {
-        // `Real1D` has no rotation to hand-build; the ladder starts above it.
+        // `Real1D` has no rotation to hand-build. The ladder starts above it.
         RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // A scaled rotation axis per head: `i` turns π about x, `j` about y.
         // The block projects the generators **per head** (`nheads · 3` channels
@@ -279,7 +268,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     };
     let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
     channels.extend([[Z_PRE; NUM_SYMBOLS]; NHEADS]); // z
-    channels.extend([[0.0, 0.0, silu_inv(X_WRITE)]; NHEADS]); // x — only R writes
+    channels.extend([[0.0, 0.0, X_WRITE]; NHEADS]); // x: only R writes
     channels.extend(b_channels(rotation)); // B_raw — the vector the write stores
     channels.extend(basis_channels()); // C_raw (the per-head bias splits it)
     channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; NHEADS]); // Δ
@@ -311,10 +300,10 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     // QK-Norm over `state_rank = 4` maps (1,0,0,0) to (2,0,0,0), so B is twice
-    // the identity quaternion for both heads, and C starts there too. Head h's
-    // bias is what moves its C — to `c_axis(h)` for the decoder, or to twice a
-    // basis quaternion for a probe. It is the only per-head weight in the whole
-    // construction, and it is the entire readout: two projections of one state.
+    // the identity quaternion for both heads, and C starts there too. The bias
+    // of head h moves its C: to `c_axis(h)` for the decoder, or to twice a
+    // basis quaternion for a probe. It is the only per-head weight in the
+    // construction, and it is the whole readout: two projections of one state.
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(
         Shape::new([NHEADS, 1, RANK]),
         device,
@@ -343,8 +332,8 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     // ── the class head: nearest group element ────────────────────────────────
     // logit_g ∝ ⟨p, plane_point(g)⟩ over the eight elements of Q₈, which sit on
-    // eight directions 45° apart. `ignore_last_residual` means the block's
-    // output is all the head sees.
+    // eight directions 45° apart. With `ignore_last_residual`, the head sees
+    // only the output of the block.
     let mut w_out = vec![0.0f64; D_MODEL * NUM_CLASSES];
     match head {
         Head::Decoder => {
@@ -372,31 +361,31 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 }
 
 /// The four `C` channels, carrying the identity quaternion `(1, 0, 0, 0)` for
-/// every symbol. QK-Norm scales it to `(2, 0, 0, 0)`; the per-head bias then
-/// moves head `h` to wherever that head reads — [`c_axis`], or a basis
-/// quaternion for a probe.
+/// every symbol. QK-Norm scales it to `(2, 0, 0, 0)`. The per-head bias then
+/// moves head `h` to where that head reads: [`c_axis`], or a basis quaternion
+/// for a probe.
 fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
     (0..RANK).map(|r| [f64::from(r == 0); NUM_SYMBOLS]).collect()
 }
 
-/// The four `B` channels — the vector `R` writes into the state.
+/// The four `B` channels: the vector that `R` writes into the state.
 ///
-/// For the quaternion rotation it is the group's unit, `(1, 0, 0, 0)`: the
-/// state then holds the group element itself.
+/// For the quaternion rotation, it is the unit of the group, `(1, 0, 0, 0)`.
+/// The state then holds the group element itself.
 ///
-/// The abelian twin gets `(1, 0, 1, 0)` instead — one unit in **each** rotated
-/// pair. This is the fairest analogue rather than a detail: `Complex2D` turns
-/// the two pairs by two independent cumulative angles, and with `B = (1,0,0,0)`
-/// the second pair would multiply zero, so the twin would carry one parity
-/// instead of two. With a unit in both, its state carries `(#i mod 2, #j mod 2)`
-/// — the entire abelianisation `Q₈/{±1}`, which is the most any sum of angles
-/// can hold.
+/// The abelian twin gets `(1, 0, 1, 0)` instead: one unit in **each** rotated
+/// pair. This is not a detail. It is the fairest analogue. `Complex2D` turns
+/// the two pairs by two independent cumulative angles. With `B = (1,0,0,0)`,
+/// the second pair multiplies zero, so the twin carries one parity instead of
+/// two. With a unit in both pairs, its state carries `(#i mod 2, #j mod 2)`:
+/// the whole abelianisation `Q₈/{±1}`, which is the most that any sum of
+/// angles can hold.
 fn b_channels(rotation: RotationKind) -> Vec<[f64; NUM_SYMBOLS]> {
     (0..RANK)
         .map(|r| match rotation {
             RotationKind::Quaternion4D | RotationKind::Rotor4D => [f64::from(r == 0); NUM_SYMBOLS],
             RotationKind::Complex2D => [f64::from(r % 2 == 0); NUM_SYMBOLS],
-            // `Real1D` has no rotation to hand-build; the ladder starts above it.
+            // `Real1D` has no rotation to hand-build. The ladder starts above it.
             RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         })
         .collect()
@@ -412,7 +401,7 @@ const FAMILIES: [(&str, Family); 3] = [
     ("runs", Family::Runs),
 ];
 
-/// Run `model` over `count` sequences of one family; return the per-position
+/// Run `model` over `count` sequences of one family. Return the per-position
 /// output channels and the targets.
 fn run(
     model: &MambaLatentNet,
@@ -453,14 +442,14 @@ fn run(
     (channels, targets)
 }
 
-/// The block's **four** output axes, for one family — the state itself, not one
-/// projection of it.
+/// The **four** output axes of the block, for one family: the state itself, not
+/// one projection of it.
 ///
 /// `d_model = 2` lets two components through per run, so this runs the same
-/// hand-built block twice, once per half. The ceiling is meant to bound every
-/// readout the model could have carried, and the model's readout is a linear
-/// map of these four numbers (`out_proj` then the head), so a table over a fine
-/// partition of all four still dominates it.
+/// hand-built block twice, once per half. The ceiling must bound every readout
+/// that the model can carry. The readout of the model is a linear map of these
+/// four numbers (`out_proj`, then the head). So a table over a fine partition
+/// of all four still dominates it.
 fn probe(
     device: &Device,
     rotation: RotationKind,
@@ -490,7 +479,8 @@ fn probe(
     (channels, targets)
 }
 
-/// Per-position accuracy of the model's own head (argmax over the class logits).
+/// Per-position accuracy of the head of the model (argmax over the class
+/// logits).
 fn accuracy(model: &MambaLatentNet, family: Family, count: usize, device: &Device) -> f64 {
     let (channels, targets) = run(model, family, count, EVAL, device);
     let hits = channels
@@ -511,11 +501,12 @@ const FIT: u64 = 0x51D3;
 /// Seed of the split everything is **scored** on.
 const EVAL: u64 = 0xE7A1;
 
-/// Accuracy of the best lookup table from a discrete code to a class — fitted
-/// on one split, scored on another, so it is a ceiling a model could actually
-/// reach rather than a memorised answer key.
+/// Accuracy of the best lookup table from a discrete code to a class. It is
+/// fitted on one split and scored on another, so it is a ceiling that a model
+/// can reach, not a memorised answer key.
 ///
-/// Codes unseen while fitting fall back to the fit split's majority class.
+/// A code that the fit split does not contain gets the majority class of the
+/// fit split.
 fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usize) -> f64 {
     let mut tally = vec![[0u64; NUM_CLASSES]; num_codes];
     let mut overall = [0u64; NUM_CLASSES];
@@ -547,9 +538,9 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
 }
 
 /// Quantise each output channel into `LEVELS` equal-width bins over the range
-/// observed on the fit split, and pack the four into one code — a finite
-/// partition of the block's output space, so the best table over it dominates
-/// every linear head the model could have carried.
+/// of the fit split, and pack the four into one code. That is a finite
+/// partition of the output space of the block, so the best table over it
+/// dominates every linear head that the model can carry.
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
 
@@ -577,9 +568,9 @@ fn channel_range(channels: &[[f64; RANK]]) -> [(f64, f64); RANK] {
     })
 }
 
-/// Collect, for one family, the per-position codes an order-blind model could
-/// key on — the symbol, and the `(#i, #j)` counts since the reset — with the
-/// targets.
+/// Collect the per-position codes that an order-blind model can key on, for
+/// one family: the symbol, and the `(#i, #j)` counts since the reset. Also
+/// collect the targets.
 fn codes(family: Family, count: usize, seed: u64) -> (Vec<usize>, Vec<usize>, Vec<i64>) {
     let (mut sym, mut cnt, mut targets) = (vec![], vec![], vec![]);
     for item in ResetSpinorDataset::new(count, SEQ_LENGTH, family, seed).iter() {
@@ -605,7 +596,7 @@ const NUM_COUNT_CODES: usize = SEQ_LENGTH * SEQ_LENGTH;
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight written down in closed form; no training anywhere.
+/// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = Device::default();
@@ -627,22 +618,22 @@ fn handmade_block_solves_every_family() {
 // 2. the abelian twin of the same construction
 // ---------------------------------------------------------------------------
 
-/// The identical construction with `RotationKind::Complex2D` — the one enum
-/// knob — reported two ways.
+/// The identical construction with `RotationKind::Complex2D` (the one enum
+/// knob), reported in two ways.
 ///
 /// Both rotations read the same `ϑ` through the same bound, so the abelian twin
-/// turns each of its two state pairs by a half-turn per symbol: what reaches
-/// the head is the pair of **parities**, which is precisely the abelianisation
-/// `Q₈/{±1} ≅ Z₂×Z₂`. Half the group is folded onto the other half, and no
-/// readout can unfold it — hence the second column, which hands the block the
-/// best table over a fine partition of its whole output space (fitted on a
-/// separate split) and still lands near the 50% that guessing the commutator's
-/// sign implies.
+/// turns each of its two state pairs by a half-turn per symbol. What reaches
+/// the head is the pair of **parities**, which is exactly the abelianisation
+/// `Q₈/{±1} ≅ Z₂×Z₂`. Half the group folds onto the other half, and no readout
+/// can unfold it. The second column shows this. It gives the block the best
+/// table over a fine partition of its whole output space (fitted on a separate
+/// split), and the result is still near the 50% of a guess of the sign of the
+/// commutator.
 ///
-/// A `cumsum` of angles is a function of the symbol counts however the angles
-/// are chosen, so this is one point on a curve whose ceiling is
-/// [`counts_ceiling_is_the_abelian_limit`]; what no point on it has is the
-/// order.
+/// A `cumsum` of angles is a function of the symbol counts for any choice of
+/// angles. So this is one point on a curve, and
+/// [`counts_ceiling_is_the_abelian_limit`] is its ceiling. No point on the
+/// curve has the order.
 #[test]
 fn abelian_rotation_loses_the_order() {
     let device = Device::default();
@@ -686,18 +677,18 @@ fn abelian_rotation_loses_the_order() {
 /// The best predictor that sees only the symbol **counts** since the reset.
 ///
 /// A block that writes its state at the reset and reads the rotation
-/// accumulated since — this construction, under either rotation — can see no
-/// more than this: an abelian accumulation is a `cumsum`, hence a linear
+/// accumulated after it (this construction, under an abelian rotation) can see
+/// no more than this. An abelian accumulation is a `cumsum`, so it is a linear
 /// function of exactly these two numbers, whatever the angles and whatever the
-/// decoder. (A block that instead wrote on every symbol could carry an
-/// order-dependent sum; the trained `--rotation complex` run in the README is
-/// what covers that, and it does not clear this ceiling either.) The gap the
-/// counts leave is
-/// the commutator: the counts fix the element only up to `{±1}`, so wherever
-/// both signs occur the table has to guess. `runs` is the family where they come
-/// closest to sufficing (the word is a few long blocks, so its reduction is
-/// nearly pinned by how many of each symbol went by); `shuffle` is where they
-/// say the least.
+/// decoder. (A block that writes on every symbol can carry an order-dependent
+/// sum. The trained `--rotation complex` run in the README covers that case,
+/// and it does not clear this ceiling either.)
+///
+/// The gap that the counts leave is the commutator. The counts fix the element
+/// only up to `{±1}`, so where both signs occur, the table must guess. In
+/// `runs`, the counts come closest to enough: the word is a few long blocks, so
+/// the number of each symbol nearly fixes its reduction. In `shuffle`, the
+/// counts tell the least.
 #[test]
 fn counts_ceiling_is_the_abelian_limit() {
     println!("order-blind ceilings, accuracy per family:");
@@ -706,7 +697,7 @@ fn counts_ceiling_is_the_abelian_limit() {
     for (name, family) in FAMILIES {
         let (fit_sym, fit_cnt, fit_t) = codes(family, 2048, FIT);
         let (eval_sym, eval_cnt, eval_t) = codes(family, 512, EVAL);
-        // how much of the mass sits on a (counts) cell that carries both signs
+        // The share of the mass on a (counts) cell that carries both signs.
         let mut tally = vec![[0u64; NUM_CLASSES]; NUM_COUNT_CODES];
         for (&c, &t) in fit_cnt.iter().zip(&fit_t) {
             tally[c][t as usize] += 1;
@@ -743,7 +734,7 @@ fn counts_ceiling_is_the_abelian_limit() {
 // 4. the group itself
 // ---------------------------------------------------------------------------
 
-/// The dataset's labels really are the `Q₈` word problem: the product is
+/// The labels of the dataset are the `Q₈` word problem: the product is
 /// non-commutative (`ij ≠ ji`), the generators have order 4, and `R` restarts
 /// the word.
 #[test]

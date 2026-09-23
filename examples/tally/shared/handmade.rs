@@ -1,9 +1,9 @@
 //! Scalar helpers for the hand-built blocks and for measuring them.
 //!
-//! The constructions all follow `reset-majority`'s recipe: pick one embedding
-//! per symbol on the sphere the layer's pre-`RmsNorm` leaves unchanged, then
-//! solve every in-projection channel as an affine functional of that embedding
-//! from its target value on each symbol.
+//! All the constructions follow the recipe of `reset-majority`. Pick one
+//! embedding per symbol on the sphere that the pre-`RmsNorm` of the layer does
+//! not change. Then solve every in-projection channel as an affine function of
+//! that embedding, from its target value on each symbol.
 
 use super::data::{Generator, IGNORE, NUM_CLASSES, TallyBatcher, TallyDataset, Task};
 use super::training::ssd_path as training_ssd_path;
@@ -12,9 +12,9 @@ use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
 
-/// Inverse of `softplus`, stable at both ends: `ln(eᵛ − 1)` underflows for tiny
-/// `v` unless written with `exp_m1`, and overflows for large `v`, where
-/// `softplus` is the identity to well under f32's resolution.
+/// Inverse of `softplus`, stable at both ends. `ln(eᵛ − 1)` underflows for tiny
+/// `v` unless it uses `exp_m1`. It overflows for large `v`, where `softplus` is
+/// the identity to well below the resolution of f32.
 pub fn softplus_inv(v: f64) -> f64 {
     if v > 30.0 { v } else { v.exp_m1().ln() }
 }
@@ -31,9 +31,9 @@ pub fn param<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> P
 }
 
 /// Least-squares solve of `rows · w = rhs` (normal equations, Gaussian
-/// elimination with partial pivoting), asserting the fit is **exact**: a
-/// construction whose channel is not an affine function of the embedding is a
-/// bug in the construction, not an approximation to accept.
+/// elimination with partial pivoting). It asserts that the fit is **exact**: a
+/// channel that is not an affine function of the embedding is a bug in the
+/// construction, not an approximation to accept.
 pub fn solve_affine(rows: &[Vec<f64>], rhs: &[f64]) -> Vec<f64> {
     let n = rows[0].len();
     let mut a = vec![vec![0.0; n]; n];
@@ -74,8 +74,8 @@ pub fn solve_affine(rows: &[Vec<f64>], rhs: &[f64]) -> Vec<f64> {
 }
 
 /// An affine in-projection `d_model → channels` from per-channel targets on
-/// each symbol: `targets[ch][symbol]`. Returns `Linear`'s `(weight, bias)` as
-/// `[d_model, channels]` and `[channels]`.
+/// each symbol: `targets[ch][symbol]`. Returns the `(weight, bias)` of a
+/// `Linear` as `[d_model, channels]` and `[channels]`.
 pub fn affine_channels(
     embeddings: &[Vec<f64>],
     targets: &[Vec<f64>],
@@ -145,7 +145,7 @@ pub fn scored_accuracy(pred: &[i64], want: &[i64]) -> f64 {
     hit as f64 / all.max(1) as f64
 }
 
-/// The best per-symbol lookup table's accuracy: the memoryless ceiling.
+/// The accuracy of the best per-symbol lookup table: the memoryless ceiling.
 pub fn memoryless_ceiling(task: &Task, generator: Generator, count: usize, seed: u64) -> f64 {
     let mut tally = vec![[0u64; NUM_CLASSES]; task.num_symbols];
     for item in TallyDataset::new(task, generator, count, seed).items() {

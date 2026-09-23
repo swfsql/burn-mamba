@@ -1,14 +1,14 @@
 //! The three claims this rung rests on, measured.
 //!
-//! 1. A **hand-built** block solves the task exactly — every weight written
-//!    down in closed form, nothing fitted, and the plant's state unused: one
-//!    tropical register per head is the whole solution.
-//! 2. The **same block with the register removed** cannot, for any selective
-//!    gate on a grid: a linear recurrence has no floor, and a multiplicative
-//!    decrement (the trick the handoff's toy found stock using) never reaches
-//!    zero, so it degrades exactly where the depth returns to it.
-//! 3. The task is not solvable from the current symbol, and the *unclamped*
-//!    sum — what any linear state computes — is misled where the floor bites.
+//! 1. A **hand-built** block solves the task exactly. Every weight is written
+//!    in closed form, nothing is fitted, and the state of the plant is unused:
+//!    one tropical register per head is the whole solution.
+//! 2. The **same block without the register** cannot, for any selective gate on
+//!    a grid. A linear recurrence has no floor. A multiplicative decrement (a
+//!    trick that a stock block can find) never reaches zero, so it fails
+//!    exactly where the depth comes back to zero.
+//! 3. The current symbol does not solve the task. The *unclamped* sum (what any
+//!    linear state computes) is wrong where the floor has an effect.
 
 use crate::dataset::{
     CLOSE, EMPTY, FAMILIES, INSIDE, NUM_SYMBOLS, OPEN, RESET, SEQ_LENGTH, gen_random, labels, task,
@@ -27,10 +27,10 @@ type Device = burn::prelude::Device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `S`: the register's units per bracket. The soft `max` overshoots the hard
-/// one by at most `ln(T + 1)` (≈ 3.5 at `T = 32`), so a bracket has to be worth
-/// more than twice that for the threshold at `S/2` to separate depth 0 from
-/// depth 1 — see [`crate::shared`]'s log-sum-exp bound.
+/// `S`: the units of the register per bracket. The soft `max` overshoots the
+/// hard `max` by at most `ln(T + 1)` (≈ 3.5 at `T = 32`). So a bracket must be
+/// worth more than twice that, for the threshold at `S/2` to separate depth 0
+/// from depth 1. The log-sum-exp bound is in `burn_mamba::mamba3::positive`.
 const SCALE: f64 = 12.0;
 /// The decision threshold, `S/2`.
 const THETA: f64 = SCALE / 2.0;
@@ -38,28 +38,29 @@ const THETA: f64 = SCALE / 2.0;
 const RESET_DROP: f64 = 1000.0;
 /// The gate `z`, constant and positive so it never flips a sign.
 const Z_PRE: f64 = 5.0;
-/// `Â` for a held state: `A = −softplus(Â)` lands under the block's `a_floor`.
+/// `Â` for a held state: `|A| = softplus(Â)` is below the `a_floor` of the
+/// block.
 const A_HOLD_RAW: f64 = -20.0;
-/// A `Δ` small enough that the plant's state never leaves zero.
+/// A `Δ` small enough that the state of the plant stays at zero.
 const DELTA_OFF: f64 = 1e-12;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 
-/// The three symbol embeddings, each of norm `√2` so the layer's pre-`RmsNorm`
-/// passes them through unchanged. Indexed by [`OPEN`] / [`CLOSE`] / [`RESET`].
+/// The three symbol embeddings, each of norm `√2`, so the pre-`RmsNorm` of the
+/// layer does not change them. Indexed by [`OPEN`] / [`CLOSE`] / [`RESET`].
 const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
     [std::f64::consts::SQRT_2, 0.0],
     [0.0, std::f64::consts::SQRT_2],
     [-1.0, -1.0],
 ];
 
-/// Which arm to build: the register, or the same block with it removed and a
-/// selective gate in its place.
+/// Which arm to build: the register, or the same block without it and with a
+/// selective gate instead.
 #[derive(Clone, Copy, Debug)]
 enum Arm {
-    /// The rung's own construction: one tropical register, no plant state.
+    /// The construction of the rung: one tropical register, no plant state.
     Register,
-    /// The ablation: no register; head 0 is a selective-decay accumulator
+    /// The ablation: no register. Head 0 is a selective-decay accumulator
     /// (`α` on `)`, a hold on `(`, a wipe on `R`, write `w` on `)`), read
     /// against a threshold.
     Stock {
@@ -91,9 +92,9 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order (see `Mamba3::in_proj`): `[z(2) | x(2) | B(1) | C(1) |
-    // Δ(2) | A(2) | a(2) | b(2)]` — no λ (`Trapezoid::None`), no rotation
-    // (`Real1D`), no noise (`Gain::Projected`); the last four are the tropical
-    // register's, and are absent entirely in the ablation arm.
+    // Δ(2) | A(2) | a(2) | b(2)]`. There is no λ (`Trapezoid::None`), no
+    // rotation (`Real1D`) and no noise (`Gain::Projected`). The last four
+    // belong to the tropical register, and the ablation arm does not have them.
     let hold = [A_HOLD_RAW; NUM_SYMBOLS];
     let off = [softplus_inv(DELTA_OFF); NUM_SYMBOLS];
     let mut targets: Vec<Vec<f64>> = vec![
@@ -110,11 +111,11 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.push(off.to_vec()); // Δ, head 1
             targets.push(hold.to_vec()); // A, head 0
             targets.push(hold.to_vec()); // A, head 1
-            // The register: `a = ±S` on the brackets and a drop on `R`, while
-            // `b` is the floor the token itself guarantees — `S` after a `(`
-            // (the depth is at least one), `0` after a `)` or an `R`. So `c` is
-            // `S ×` the clamped depth at every position, including the first,
-            // where the carry is still "the max of nothing".
+            // The register: `a = ±S` on the brackets and a drop on `R`. `b` is
+            // the floor that the token itself guarantees: `S` after a `(` (the
+            // depth is at least one), and `0` after a `)` or an `R`. So `c` is
+            // `S ×` the clamped depth at every position. This includes the
+            // first position, where the carry is still "the max of nothing".
             targets.push(vec![SCALE, -SCALE, -RESET_DROP]); // a, head 0
             targets.push(vec![0.0; NUM_SYMBOLS]); // a, head 1
             targets.push(vec![SCALE, 0.0, 0.0]); // b, head 0
@@ -125,8 +126,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             w_close,
             ..
         } => {
-            // head 0 accumulates `+1` per `(` and `w_close` per `)`, decaying by
-            // `alpha_close` on a `)` and holding on a `(`; `R` wipes.
+            // Head 0 accumulates `+1` per `(` and `w_close` per `)`. It decays
+            // by `alpha_close` on a `)` and holds on a `(`. `R` wipes.
             targets.push(vec![1.0, w_close, 0.0]); // x, head 0 — the write
             targets.push(vec![1.0; NUM_SYMBOLS]); // x, head 1 — the reference
             targets.push(vec![1.0; NUM_SYMBOLS]); // B
@@ -150,7 +151,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     block.d_h = match arm {
         // head 0 reads `−θ` through its skip, head 1 *is* its skip.
         Arm::Register => param(&[1.0, 1.0], [2], device),
-        // head 0 reads the state alone; the threshold rides `out_proj`'s bias.
+        // Head 0 reads only the state. The threshold is in the bias of
+        // `out_proj`.
         Arm::Stock { .. } => param(&[0.0, 1.0], [2], device),
     };
     // A scalar state has nothing to normalise against: QK-norm pins |B| = |C| = 1.
@@ -194,9 +196,9 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight in closed form; no training anywhere. The plant's `Δ` is
-/// `1e-12` in both heads, so the SSM state is zero throughout: what answers is
-/// the register.
+/// Every weight is in closed form. There is no training. The `Δ` of the plant
+/// is `1e-12` in both heads, so the SSM state stays at zero: the register gives
+/// the answer.
 #[test]
 fn handmade_register_solves_every_family() {
     let device = Device::default();
@@ -213,15 +215,15 @@ fn handmade_register_solves_every_family() {
 // 2. no selective gate reaches it
 // ---------------------------------------------------------------------------
 
-/// The same block with the register **removed** (`Tropical::None`, the one
-/// changed knob) and head 0 turned into a selective accumulator instead: sweep
-/// its decay on `)`, its write on `)` and the readout threshold, and report the
-/// best any of them do.
+/// The same block **without** the register (`Tropical::None`, the one changed
+/// knob), and with head 0 as a selective accumulator instead. Sweep its decay
+/// on `)`, its write on `)` and the readout threshold. Report the best result of
+/// any of them.
 ///
-/// A decay of 1 is the unclamped sum, which the `floor` family defeats; a decay
-/// below 1 imitates the clamp by never crossing zero, which the `deep` family
-/// defeats (after a deep excursion the decayed surplus is indistinguishable
-/// from an empty stack).
+/// A decay of 1 is the unclamped sum, and the `floor` family defeats it. A
+/// decay below 1 imitates the clamp, because it never crosses zero, and the
+/// `deep` family defeats it. (After a deep excursion, the decayed surplus looks
+/// the same as an empty stack.)
 #[test]
 fn no_stock_gate_solves_the_task() {
     let device = Device::default();
@@ -272,10 +274,10 @@ fn no_stock_gate_solves_the_task() {
 // 3. the task itself
 // ---------------------------------------------------------------------------
 
-/// The memoryless ceiling — the best a model that sees only the current symbol
-/// can do — and the share of scored positions where the **unclamped** sum (what
-/// a linear state holds) disagrees with the clamped depth. The second number is
-/// what the `floor` family is for.
+/// The memoryless ceiling (the best result of a model that sees only the
+/// current symbol), and the share of scored positions where the **unclamped**
+/// sum (what a linear state holds) disagrees with the clamped depth. The
+/// `floor` family exists for the second number.
 #[test]
 fn the_floor_is_what_the_task_tests() {
     let task = task();
