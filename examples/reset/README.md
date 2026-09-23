@@ -1,10 +1,10 @@
 # The `reset` ladder
 
-Four examples on the **same shape of stream**, each the smallest task its block
-is *needed* for and that the rung below cannot solve. Read together they isolate,
-one at a time, what each piece of the SSM recurrence actually buys — plus a fifth
-that keeps the stream and moves the *other* dial, `micro_steps`, and a sixth that
-asks `reset-swap`'s question one group size up, where the answer splits:
+Four examples on the **same shape of stream**. Each is the smallest task that
+its block is *needed* for, and that the rung below cannot solve. Together they
+isolate, one at a time, what each piece of the SSM recurrence buys. A fifth
+example keeps the stream and moves the *other* dial, `micro_steps`. A sixth
+asks the question of `reset-swap` one group size up, where the answer splits:
 
 | rung | what only that block can do | the state it needs | the group it tracks |
 |---|---|---|---|
@@ -17,30 +17,32 @@ asks `reset-swap`'s question one group size up, where the answer splits:
 
 ## The shared shape
 
-Every rung reads a stream of two "turn" symbols plus a reset `R`, and reports at
-**every** position what the turns have done since the last `R`. The alphabet and
-the readout change; the skeleton does not. Each is one block at the smallest size
-that admits an exact solution, with the residual switched off
-(`ignore_last_residual`) so the classification head sees the block alone.
+Every rung reads a stream of two "turn" symbols plus a reset `R`. At **every**
+position, it reports what the turns did since the last `R`. The alphabet and
+the readout change, but the skeleton does not. Each rung is one block, at the
+smallest size that allows an exact solution, with the residual switched off
+(`ignore_last_residual`), so the classification head sees only the block.
 
-All four rungs run at **`d_model = 2`**, which is the floor for a three-symbol
-alphabet: the layer's pre-`RmsNorm` puts a 1-D token on `±1`, so one dimension
-carries two symbols, and three points of `ℝ²` are already affinely independent —
-every in-projection channel can take any value it likes on the three symbols. All
-four also run at `Trapezoid::None`: every construction below pins `λ ≈ 1`, so the
-`β` tap is dead weight, and switching it off is structural (no `λ` segment in the
-in-projection, no tap slot in the cache, one SSD call instead of two). So what
-changes up the ladder is the **state**, not the model width: `state_rank`
-1 → 2 → 4 → 4, and the rotation kind with it.
+The four ladder rungs share three settings:
 
-All four also run at **`nheads = 2`**: a head is a *readout*, not a piece of state
-(every head holds its own copy of the same state and differs only in the `C` it
-reads that copy with), and two projections are what each of these labels needs. The
-rungs are otherwise independent — each takes the smallest setting that *it* admits,
-and `spinor-product` disagrees on both counts, keeping four heads and the trapezoid.
-Each `model.rs` records what its own floor is and what breaks below it.
+- **`d_model = 2`**, the floor for a three-symbol alphabet. The pre-`RmsNorm`
+  of the layer puts a 1-D token on `±1`, so one dimension carries only two
+  symbols. Three points of `ℝ²` are affinely independent, so every
+  in-projection channel can take any value on the three symbols.
+- **`Trapezoid::None`**. Every construction below pins `λ ≈ 1`, so the `β` tap
+  does nothing useful. Switching it off is structural: no `λ` segment in the
+  in-projection, no tap slot in the cache, one SSD call instead of two.
+- **`nheads = 2`**. A head is a *readout*, not a piece of state: every head
+  holds its own copy of the same state, and differs only in the `C` that reads
+  that copy. Each of these labels needs two projections.
 
-The three shortcuts every rung closes:
+So what changes up the ladder is the **state**, not the model width:
+`state_rank` 1 → 2 → 4 → 4, and the rotation kind with it. Otherwise the rungs
+are independent: each takes the smallest setting that *it* allows.
+`spinor-product` differs on two counts: it keeps four heads and the trapezoid.
+Each `model.rs` records its own floor and what breaks below it.
+
+The three shortcuts that every rung closes:
 
 | shortcut | why it is closed |
 |---|---|
@@ -48,23 +50,23 @@ The three shortcuts every rung closes:
 | read a fixed window | Mamba-3 has no short convolution at all |
 | read the residual | `ignore_last_residual` — the head sees the block alone |
 
-Each rung then closes one more, and *that* is what the rung is about. It is the
+Each rung then closes one more, and *that* is the point of the rung. It is the
 last row of each "Why this task" table below.
 
 ## Usage
 
 ```bash
-# training and running inference in flex (fp32) — <rung> ∈ majority|rotor|spinor|swap
+# training and running inference in flex (fp32) — <rung> ∈ majority|rotor|spinor|swap|quintic
 cargo run --release --example reset-<rung> -- --training --inference
 
 # the claims below, measured: the hand-built exact solution and the ablations
 cargo test --release --example reset-<rung> -- --nocapture
 ```
 
-All four rungs are one Mamba-3 block; the upper three (whose transition actually
-rotates) also take a downstream `--rotation` flag, forwarded after
-a second `--`; it selects the rotation baked into a **fresh** model config (a
-persisted one wins on reload), so each rung can be run as its own ablation:
+`reset-spinor`, `reset-swap` and `reset-quintic` also take their own
+`--rotation` flag, after a second `--`. It selects the rotation of a **fresh**
+model config (on reload, the saved config wins). So each of these rungs can
+run as its own ablation:
 
 ```bash
 cargo run --release --example reset-spinor -- --training --inference -- --rotation complex

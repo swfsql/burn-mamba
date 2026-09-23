@@ -1,49 +1,148 @@
 # Mamba Examples
 
-#### List of Examples:
+#### List of Examples
 
-- `reset-*`: A four-rung ladder on the same `+`/`-`/`R`-shaped stream, each rung the smallest task its block is *needed* for and that the rung below cannot solve: `reset-majority` (the selective decay alone, `Real1D`), `reset-rotor` (the complex transition, `Z₃`), `reset-spinor` (the non-abelian quaternion one, `Q₈`), `reset-swap` (the full two-sided `SO(4)`, `S₃`). Each carries a hand-built exact solution and the ablations that wall off the rung below. `spinor-product` is the coda that moves the *other* dial: `reset-spinor`'s `Q₈` stream read **two symbols per token**, the smallest task `Mamba3Config::micro_steps` (MambaProduct's `u`) is needed for — one step's rotation generator is affine in the token, so a pair's two generators can only *add* where the group multiplies, while `u = 2` makes the token two recurrence steps and its transition the product. It also contrasts against the other way to put two rotations in a token — a second layer (`-- --layers 2 --micro-steps 1`), which turns a second state and so has to *learn* the product instead of being handed it. `reset-quintic` asks `reset-swap`'s question over five items: `A₅` (the icosahedron's rotations, the smallest non-solvable group) is one `Rotor4D` block at `reset-swap`'s width, while `S₅` is the transition group of no single Mamba-3 layer at any size — its swaps would have to be reflections — and takes two. The single [`reset/README.md`](reset/README.md) covers all six.
-- `tally-*`: A three-rung ladder on the *other* axis from `reset-*`: the plant is held at `reset-majority`'s floor (a scalar real state) and what climbs is the **positive system** beside it — the per-head scalar recurrence of `src/mamba3/positive/` that reads only the input and sets the plant's coefficients. `tally-depth` (a counter with a floor) needs a `Tropical::MaxPlus` register for its **growth**, a decay above one, which the plant's `α = exp(Δ·A) ≤ 1` cannot be; `tally-record` (a running maximum over twelve values) needs the same register for its **range**, since the one route that needs no register — a sum of `exp(S·v)` — asks for `e^{45.8}` inside a single channel; `tally-drift` (age evidence by how much of it there is) needs the `Gain::KalmanProjectedNoise` filter, whose hyperbolic discount no projected decay matches. Each rung carries a hand-built exact solution, ablation sweeps, and a trained ablation at equal budget — the row that sizes the second rung's alphabet, since at six values a trained stock block solves it. The single [`tally/README.md`](tally/README.md) covers all three.
-- `mnist-class`: A small Mamba-3 model training to classify mnist digits.
-- `mnist-ae`: A symmetric bidirectional Mamba-3 autoencoder over the 784-pixel MNIST sequence; the decoder reconstructs the whole image in one parallel pass reading only from a configurable latent (`-- --latents N`).
-- `tiny-stories`: A tiny character-level Mamba-3 language model on the cleaned [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) corpus, with a tied 48-character embedding at both ends. Its README covers the case-folded alphabet (the corpus's own inventory), the whole-parquet download, the class latents that mark a story's start (and that `prime()` replays for seedless sampling), the prefill-`forward()` / decode-`step()` sampler, the runs of windows that carry the state across a story behind a frontier gate, and a measured table on what truncated BPTT costs a language model.
+- **`reset-*`** ([`reset/README.md`](reset/README.md), six examples): a ladder
+  on one `+`/`-`/`R`-shaped stream. Each rung is the smallest task that its
+  block is *needed* for, and that the rung below cannot solve:
+  - `reset-majority`: the selective decay alone (`Real1D`).
+  - `reset-rotor`: the complex transition (`Z₃`).
+  - `reset-spinor`: the non-abelian quaternion transition (`Q₈`).
+  - `reset-swap`: the full two-sided `SO(4)` (`S₃`).
+  - `spinor-product`: the *other* dial, `Mamba3Config::micro_steps`
+    (MambaProduct's `u`). It reads the `Q₈` stream of `reset-spinor` **two
+    symbols per token**. The rotation generator of one step is affine in the
+    token, so the two generators of a pair can only *add* where the group
+    multiplies. `u = 2` makes the token two recurrence steps, and its
+    transition the product. A second layer (`-- --layers 2 --micro-steps 1`)
+    is the contrast: it turns a second state, so it has to *learn* the product.
+  - `reset-quintic`: the question of `reset-swap` over five items. `A₅` (the
+    rotations of the icosahedron, the smallest non-solvable group) is one
+    `Rotor4D` block at the width of `reset-swap`. `S₅` is the transition group
+    of no single Mamba-3 layer at any size (its swaps would have to be
+    reflections), and it takes two.
+
+  Each rung has a hand-built exact solution and the ablations that separate
+  it from the rung below.
+- **`tally-*`** ([`tally/README.md`](tally/README.md), three examples): a ladder
+  on the *other* axis. The plant stays at the floor of `reset-majority` (a
+  scalar real state). What climbs is the **positive system** beside it: the
+  per-head scalar recurrence of `src/mamba3/positive/`, which reads only the
+  input and sets the coefficients of the plant.
+  - `tally-depth` (a counter with a floor) needs a `Tropical::MaxPlus`
+    register for its **growth**: a decay above one, which the plant's
+    `α = exp(Δ·A) ≤ 1` cannot give.
+  - `tally-record` (a running maximum over twelve values) needs the same
+    register for its **range**. The one route without a register, a sum of
+    `exp(S·v)`, needs `e^{45.8}` inside a single channel.
+  - `tally-drift` (age evidence by how much of it there is) needs the
+    `Gain::KalmanProjectedNoise` filter. No projected decay matches its
+    hyperbolic discount.
+
+  Each rung has a hand-built exact solution, ablation sweeps, and a trained
+  ablation at equal budget. That last row sets the alphabet of the second
+  rung: at six values, a trained stock block solves it.
+- **`mnist-class`**: a small Mamba-3 model that classifies MNIST digits.
+- **`mnist-ae`**: a symmetric bidirectional Mamba-3 autoencoder over the
+  784-pixel MNIST sequence. The decoder rebuilds the whole image in one
+  parallel pass, and reads only a configurable latent (`-- --latents N`).
+- **`tiny-stories`**: a tiny character-level Mamba-3 language model on the
+  cleaned [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean)
+  corpus, with a tied 48-character embedding at both ends. Its README covers
+  the case-folded alphabet, the download, the class latents that mark the
+  start of a story (and that `prime()` replays for seedless sampling), the
+  prefill-`forward()` / decode-`step()` sampler, the runs of windows that
+  carry the state across a story, and a measured table of what truncated
+  BPTT costs a language model.
 
 #### Examples Structure
 
-Each example lives in its own directory (the `reset-*` ladder, `spinor-product` and `reset-quintic` one level deeper, under `reset/`, sharing one README — those six are declared as explicit `[[example]]` targets in `Cargo.toml`, since cargo only autodiscovers `examples/<name>/main.rs`; the three `tally-*` rungs likewise, under `tally/`, where they also share a `shared/` module holding the ladder's dataset, loops and hand-built helpers). An example usually defines a model in `model.rs`, a dataset (if applicable) in `dataset.rs`, a training procedure in `training.rs`, an inference procedure (if applicable) in `inference.rs`, its own command-line flags in `cli.rs` (empty when it has none) and a launching procedure in `main.rs`.
+Each example has its own directory. The `reset-*` examples are one level
+deeper, under `reset/`, with one shared README. The three `tally-*` examples
+are under `tally/`, and they also share a `shared/` module (the dataset,
+loops and hand-built helpers of the ladder). Cargo autodiscovers only
+`examples/<name>/main.rs`, so `Cargo.toml` declares these nine as explicit
+`[[example]]` targets.
 
-The lauching procedure first parses the command line — the shared flags, which set whether training and/or inference should run, and then the example's own, after `--` — reading no environment variables. The training often run validations every couple of batches, and each example's README may inform what the training goal is. The `model.rs` may also indicate the training requirements and expected resulting accuracy.
+An example usually has:
 
-There are shared definitions in `common/mod.rs`, imported as an outside module by each example. It is a thin shim: the CLI, the runtime device selection, the training config, and both datasets with their epoch loops (sequential-MNIST classification, character-level TinyStories language modelling) all live in **`burn_stack::examples`** (feature `examples-common`, dev-only), shared verbatim with `burn-deltanet`, and the `config → module` seam is `burn_stack::modules::ModelConfigExt`, implemented by this crate's network configs. `common/mod.rs` re-exports those under the `common::*` paths and adds `ARTIFACT_PREFIX`, which has to be expanded in the example crate, and `parse_rotation`, the `--rotation` value the rotating `reset-*` rungs share (a flag naming a `burn-mamba` type, which `burn-stack` cannot).
+- `model.rs`: the model (it can also give the training requirements and the
+  expected accuracy),
+- `dataset.rs`: the dataset (if applicable),
+- `training.rs`: the training procedure,
+- `inference.rs`: the inference procedure (if applicable),
+- `cli.rs`: its own command-line flags (empty when it has none),
+- `main.rs`: the launch procedure.
+
+`main.rs` parses the command line: first the shared flags (training and/or
+inference, and more), then the flags of the example, after `--`. The examples
+read no environment variables of their own (Burn itself reads `BURN_DEVICE`,
+see below). Training usually validates every few batches. The README of each
+example gives the training goal.
+
+`common/mod.rs` holds the shared definitions, imported as an outside module by
+each example. It is a thin shim. The CLI, the runtime device selection, the
+training config, and both datasets with their epoch loops (sequential-MNIST
+classification, character-level TinyStories language modelling) are in
+**`burn_stack::examples`** (feature `examples-common`, dev-only), shared with
+`burn-deltanet`. The `config → module` seam is
+`burn_stack::modules::ModelConfigExt`, which the network configs of this crate
+implement. `common/mod.rs` re-exports those under the `common::*` paths, and
+adds:
+
+- `ARTIFACT_PREFIX`, which must expand in the example crate,
+- `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs (a
+  flag that names a `burn-mamba` type, which `burn-stack` cannot do).
 
 ##### Model Definition
 
-The overall model used throughout the examples is the lib-generic `MambaLatentNet` (configured via `MambaLatentNetConfig`), defined in `burn-mamba`'s `src/unified/network.rs`. It is a continuous-I/O network: input and output projections (linear layers) around a generic `Layers<M>` stack, where `M` is the chosen SSM core (`Mamba1`/`Mamba2`/`Mamba3`). Token-based examples (`tiny-stories`) use the lib's `MambaVocabNet` (embedding → `Layers<M>` → LM head) instead. `ModelConfigExt` (config enum → `Module`, plus the Muon plan) is implemented on those configs in `src/unified/network.rs`; examples no longer define their own network types.
+Most examples use the lib-generic `MambaLatentNet` (configured by
+`MambaLatentNetConfig`, in `src/unified/network.rs`). It is a continuous-I/O
+network: input and output projections (linear layers) around a generic
+`Layers<M>` stack, where `M` is the SSM core (`Mamba1`/`Mamba2`/`Mamba3`). The
+token-based example (`tiny-stories`) uses `MambaVocabNet` (embedding →
+`Layers<M>` → LM head). `src/unified/network.rs` implements `ModelConfigExt`
+(config enum → `Module`, plus the Muon plan) on those configs. Examples do not
+define their own network types.
 
 ##### Optimizer
 
 `burn_stack::examples::training` defines `OptimizerConfig { fallback, muon }`,
-held by `TrainingConfig`. The fallback is AdamW or plain SGD, the one optimizer
-a captured training step can replay (under `--sgd`, every example but
-`tiny-stories`, through burn-stack's `examples::trainer::Trainer`: forward,
-backward and update captured at the first batch, the loss masked rather than
-gathered so the shapes never change); `muon = None` puts every parameter on it. Setting `muon` moves the hidden weight matrices to
-[Muon](https://kellerjordan.github.io/posts/muon/), driven by the model config's
-`muon_plan()` (`ModelConfigExt::muon_plan`, backed by `burn_stack::optim`): Muon
-only ever gets rank-2 hidden matrices, and each fused projection (`in_proj`,
-`fc1`, …) is split into its independent sub-projections first, so the
-orthogonalisation is per linear map rather than per allocation. Every example
-takes the choice from the shared `--adamw` / `--sgd` / `--muon` flags (below);
-without them, `tiny-stories` trains Muon + AdamW and the rest AdamW.
+held by `TrainingConfig`:
+
+- The fallback is AdamW or plain SGD. `muon = None` puts every parameter on
+  it. Plain SGD is the one optimizer that a captured training step can replay:
+  under `--sgd`, every example except `tiny-stories` runs through the
+  `examples::trainer::Trainer` of burn-stack. It captures the forward, backward
+  and update at the first batch, and masks the loss (not a gather), so the
+  shapes never change.
+- `muon` moves the hidden weight matrices to
+  [Muon](https://kellerjordan.github.io/posts/muon/), driven by the
+  `muon_plan()` of the model config (`ModelConfigExt::muon_plan`, backed by
+  `burn_stack::optim`). Muon gets only rank-2 hidden matrices. Each fused
+  projection (`in_proj`, `fc1`, …) is first split into its independent
+  sub-projections, so the orthogonalisation is per linear map, not per
+  allocation.
+
+Every example takes the choice from the shared `--adamw` / `--sgd` / `--muon`
+flags (below). Without them, `tiny-stories` trains Muon + AdamW and the other
+examples train AdamW.
 
 #### Backend Selection
 
-A single backend must be enabled, and features are used to select it -- e.g. `backend-flex`. See `burn-mamba/Cargo.toml` > `[features]` section for the backend list. Some extra "dev" features are also available for selection, them being the float precision selection (default f32 vs `dev-f16`) and whether fusion and/or autotune should be enabled.  
-If no backend is selected, you should get a compile error message.
+Features select the backend, for example `backend-flex` (the default). See the
+`[features]` section of `burn-mamba/Cargo.toml` for the backend list. You can
+compile in several backends at once. `Device::default()` resolves which one to
+use (the `BURN_DEVICE` environment variable can override it). Other "dev"
+features select the float precision (default f32, or `dev-f16`) and whether
+fusion and/or autotune are enabled.
 
 #### Examples CLI
 
-All examples use a CLI defined in `burn_stack::examples::cli`, re-exported as `common::cli`: the flags every example shares (below). The arguments after a second `--` are the example's own, parsed by its `cli.rs`; `-- --help` lists them.
+All examples use the CLI of `burn_stack::examples::cli`, re-exported as
+`common::cli`: the flags that every example shares (below). The arguments
+after a second `--` belong to the example, and its `cli.rs` parses them.
+`-- --help` lists them.
 
 ##### Usage Example
 

@@ -1,29 +1,26 @@
 //! # Mamba-2 Inference Caches
 //!
-//! This module defines the state that must be preserved between calls during
-//! autoregressive (token-by-token) generation.  During *training* or *prefill*
-//! the full sequence is available at once and the chunked SSD algorithm is used
-//! (see [`Mamba2::forward`]).  During *decoding* the model
-//! processes one token per step and the SSM operates in its pure recurrent
-//! form (see [`Mamba2::step`]):
+//! The state that the block keeps between calls. In *training* or *prefill*,
+//! the full sequence is available at once and [`Mamba2::forward`] uses the
+//! chunked SSD algorithm. In *decoding*, [`Mamba2::step`] processes one token
+//! per call with the pure recurrent form:
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ        (state update)
 //!   yₜ = Cₜᵀ hₜ + D xₜ            (output)
 //! ```
 //!
-//! Two pieces of state are required per layer:
+//! Each layer keeps two pieces of state:
 //!
 //! 1. **Convolution cache** — the last `conv_kernel` inputs to the depthwise
-//!    Conv1d, kept so that every decoding step can apply the causal filter
-//!    without re-processing previous tokens.
+//!    Conv1d. With it, each decoding step applies the causal filter without
+//!    processing earlier tokens again.
 //!
-//! 2. **SSM hidden state** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` (per head), which
-//!    compresses the entire past context into a fixed-size representation
-//!    regardless of how many tokens have been generated.  This is the key
-//!    memory-efficiency advantage of SSMs over attention: the KV-cache of a
-//!    Transformer grows as O(sequence·state_rank) with sequence length, whereas the SSM state
-//!    is always O(per_head_dim·state_rank).
+//! 2. **SSM hidden state** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` per
+//!    head. It compresses the full past into a fixed size, for any number of
+//!    tokens. This is the memory advantage of SSMs over attention: the
+//!    KV-cache of a Transformer grows linearly with the sequence length, but
+//!    the SSM state is always O(per_head_dim·state_rank).
 
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
@@ -36,26 +33,25 @@ use burn::prelude::*;
 
 /// A collection of per-layer caches for a complete Mamba-2 network.
 ///
-/// During autoregressive decoding, a [`Mamba2Caches`] instance is threaded
-/// through every layer-stack `step` call (the family-generic
-/// [`burn_stack::modules::Layers`]).  Each element of `caches` corresponds to one
-/// (virtual) layer in the network.
+/// Every `step` of the family-generic [`burn_stack::modules::Layers`] stack
+/// takes and returns one [`Mamba2Caches`]. Each element of `caches` is the
+/// cache of one (virtual) layer of the network.
 #[derive(Module, Debug)]
 pub struct Mamba2Caches {
     /// Per-layer caches.
     ///
-    /// Length: `n_real_caches` (the number of *virtual* layers, which may
-    /// exceed the number of *real* weight layers when weight-sharing / layer
-    /// scheduling is in use).
+    /// Length: `n_caches`, the number of *virtual* layers. With shared weights
+    /// (a layer schedule), it can be larger than the number of *real* weight
+    /// layers.
     pub caches: Vec<Mamba2Cache>,
 }
 
 /// Configuration / factory for [`Mamba2Caches`].
 #[derive(Config, Debug)]
 pub struct Mamba2CachesConfig {
-    /// Number of cache slots.  Equals the number of virtual layers in the
-    /// network (one cache per layer, even when layers share weights).
-    pub n_real_caches: usize,
+    /// Number of cache slots: the number of virtual layers in the network (one
+    /// cache per layer, also when layers share weights).
+    pub n_caches: usize,
 
     /// Shared configuration that determines the shape of each individual
     /// cache tensor.
@@ -66,19 +62,19 @@ impl Mamba2CachesConfig {
     /// Convenience constructor that derives cache shapes directly from a
     /// [`Mamba2Config`] block configuration.
     pub fn new_from_block_config(
-        n_real_caches: usize,
+        n_caches: usize,
         batch: usize,
         block_config: Mamba2Config,
     ) -> Self {
         Self {
-            n_real_caches,
+            n_caches,
             cache: Mamba2CacheConfig::new_from_block_config(batch, block_config),
         }
     }
 
     /// Allocate all cache tensors (zero-initialised) on `device`.
     pub fn init(&self, device: &Device) -> Mamba2Caches {
-        let caches = (0..self.n_real_caches)
+        let caches = (0..self.n_caches)
             .map(|_| self.cache.clone().init(device))
             .collect();
         Mamba2Caches { caches }
@@ -89,19 +85,17 @@ impl Mamba2CachesConfig {
 // Mamba2Cache  (state for a single layer)
 // ---------------------------------------------------------------------------
 
-/// The mutable state carried between decoding steps for a **single** Mamba-2
-/// layer.
+/// The state carried between calls for a **single** Mamba-2 layer.
 ///
-/// Both tensors are updated in-place (via Burn's functional clone) at every
-/// call to [`Mamba2::step`].
+/// Each call to [`Mamba2::step`] or [`Mamba2::forward`] returns a new cache
+/// with both tensors updated.
 #[derive(Module, Debug)]
 pub struct Mamba2Cache {
     /// **Convolution rolling window.**
     ///
-    /// Stores the last `conv_kernel` pre-activation feature vectors fed into
-    /// the depthwise Conv1d.  At each step, the oldest column is discarded and
-    /// the new token's projection is appended (a left-shift followed by an
-    /// insert into the rightmost column), maintaining strict causality.
+    /// The last `conv_kernel` pre-activation feature vectors that went into
+    /// the depthwise Conv1d. Each step removes the oldest column and appends
+    /// the projection of the new token on the right.
     ///
     /// Shape: `[batch, conv_dim, conv_kernel]`
     ///   - `conv_dim  = d_inner + 2 · ngroups · state_rank`
@@ -110,12 +104,11 @@ pub struct Mamba2Cache {
 
     /// **SSM hidden state** `hₜ`.
     ///
-    /// This is the O(per_head_dim·state_rank) compressed summary of all tokens seen so far.
-    /// Updated via `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ` at each decoding step.
+    /// The O(per_head_dim·state_rank) compressed summary of all earlier
+    /// tokens. Each decoding step applies `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ`.
     ///
-    /// The tensor is indexed as `[batch, nheads, per_head_dim, state_rank]`
-    /// (i.e. `[batch, nheads, per_head_dim, state_rank]` in the paper's notation), which is the transpose
-    /// of the mathematical `hₜ ∈ ℝ^{state_rank×per_head_dim}` but equivalent in content.
+    /// The layout `[…, per_head_dim, state_rank]` is the transpose of the
+    /// paper's `hₜ ∈ ℝ^{state_rank×per_head_dim}`. The content is the same.
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
@@ -173,12 +166,12 @@ impl Mamba2CacheConfig {
 
     /// Allocate zero-initialised cache tensors on `device`.
     ///
-    /// Zero initialisation is correct because:
-    /// - The convolution cache represents "no previous tokens" (identity padding).
-    /// - The SSM state represents `h₀ = 0` (zero initial condition), which is
-    ///   the standard default.  Learnable initial state (if configured) are
-    ///   added on top of this inside [`Mamba2::forward`] /
-    ///   [`Mamba2::step`].
+    /// Zeros are correct:
+    /// - A zero convolution cache means "no previous tokens" (the causal zero
+    ///   padding).
+    /// - A zero SSM state is the standard initial condition `h₀ = 0`. If the
+    ///   block has a learnable initial state, [`Mamba2::forward`] adds it to
+    ///   this state.
     pub fn init(&self, device: &Device) -> Mamba2Cache {
         let conv_bvk = Tensor::zeros(
             Shape::new([self.batch, self.conv_dim, self.conv_kernel]),
@@ -203,8 +196,8 @@ impl Mamba2Caches {
         Self { caches: vec }
     }
 
-    /// Wrap each per-layer cache in `Some` so the layer loop can `take` it
-    /// without cloning (Burn tensors are reference-counted).
+    /// Wrap each per-layer cache in `Some`, so the layer loop can `take` it
+    /// without a clone.
     pub fn into_options(self) -> Vec<Option<Mamba2Cache>> {
         self.caches.into_iter().map(Some).collect()
     }

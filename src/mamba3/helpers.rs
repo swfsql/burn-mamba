@@ -1,23 +1,29 @@
-//! Shared helpers used by both [`Mamba3::forward`](super::mamba3::Mamba3::forward)
-//! and [`Mamba3::step`](super::mamba3::Mamba3::step). They isolate three blocks
-//! that previously appeared in both methods at different ranks:
+//! Helpers that [`Mamba3::forward`](super::mamba3::Mamba3::forward) (both
+//! pathways) and [`Mamba3::step`](super::mamba3::Mamba3::step) share, so the
+//! two modes cannot drift:
 //!
-//! 1. Trapezoidal discretisation: `dt`, `α`, `β`, `γ`, `da`.
-//! 2. QK-norm + GQA expansion + per-(head, mimo-rank) bias on B / C.
-//! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`.
-//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` feeding the SSM state
-//!    (SISO-branched).
-//! 5. Peeling the rotation channels off the in-projection.
-//! 6. The trapezoid tap's lag arithmetic: the shift, the gap transport, the
-//!    decay a cached slot carries across a call boundary, and the per-position
-//!    gate a tap pattern admits its taps by.
-//! 7. [`prefix_sum`]: the log-depth inclusive scan every sequence-length
-//!    cumulative sum goes through instead of `Tensor::cumsum`.
+//! 1. Trapezoidal discretisation ([`trapezoidal_coefficients`]): `Δ`, `da`,
+//!    `α`, the tap masses `ν`, and `γ`.
+//! 2. QK-norm + GQA expansion + per-(head, mimo-rank) bias on B / C
+//!    ([`qk_norm_expand_bias`]).
+//! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`
+//!    ([`build_v_with_mimo`]).
+//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the SSM state
+//!    ([`mimo_outer_sum`], SISO-branched).
+//! 5. [`split_trailing`]: removes an optional trailing segment from the
+//!    in-projection.
+//! 6. The lag arithmetic of the trapezoid tap: the shift, the gap transport,
+//!    the decay that a cached slot carries across a call boundary, and the
+//!    per-position gate of a tap pattern.
+//! 7. [`prefix_sum`]: the blocked inclusive scan that replaces
+//!    `Tensor::cumsum` for every sequence-length cumulative sum.
+//! 8. The **read axis** ([`read_rows`], [`read_causal_mask`], and their
+//!    primitive twins in [`prim`]).
 //!
-//! Most helpers are generic over the rank `D` of the data tensors so a single
-//! definition serves both the sequence-aware (`forward`) and single-token
-//! (`step`) code paths. The discretisation is the exception: MambaProduct gives
-//! `step` a `u` axis of its own, so both paths reach it at rank 3.
+//! Most helpers are generic over the rank `D` of the data tensors, so one
+//! definition serves both the sequence (`forward`) and single-token (`step`)
+//! code paths. The discretisation is the exception: MambaProduct gives `step`
+//! its own `u` axis, so both paths call it at rank 3.
 
 use crate::mamba3::trapezoid::TrapezoidSpec;
 use burn_stack::modules::RmsNorm;
@@ -25,19 +31,21 @@ use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
 use burn::prelude::*;
 
-/// Peel a **trailing** in-projection segment of `width` channels off `proj`,
-/// yielding `None` for it when the block projects none.
+/// Remove a **trailing** in-projection segment of `width` channels from
+/// `proj`. The segment is `None` when the block projects none.
 ///
-/// Used for the two segments a block may omit entirely — the rotation channels
+/// It serves the segments that a block can omit: the tropical `(a, b)` and the
+/// Kalman noise ([`Mamba3::split_positive`](crate::mamba3::mamba3::Mamba3)),
+/// then the rotation channels
 /// ([`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
-/// projects none) and then `λ`
+/// projects none), `μ` (a one-tap pattern projects none) and `λ`
 /// ([`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) projects
-/// none) — which is why the in-projection lays them out last, in that order.
+/// none). That is why the in-projection puts them last.
 ///
-/// An optional slice cannot simply be one more entry in the main `split_into`:
-/// Burn has no zero-width tensors, and `split_with_sizes` *drops* a zero-length
-/// segment rather than returning an empty one, so the destructuring would come
-/// up one part short.
+/// An optional slice cannot be one more entry in the main `split_into`. Burn
+/// has no zero-width tensors, and `split_with_sizes` *drops* a zero-length
+/// segment instead of returning an empty one. The destructuring would then
+/// have one part too few.
 ///
 /// # Shapes
 /// - `proj` : `[..., w]` along `dim`
@@ -55,14 +63,14 @@ pub fn split_trailing<const D: usize>(
     (proj.narrow(dim, 0, rest), Some(tail))
 }
 
-/// Shift a per-position stream back by `lag`, seeding the first `lag` positions
-/// from the cache's tap slots: `out[p] = stream[p − lag]`, and `prefix[p]` where
+/// Shift a per-position stream back by `lag`. The tap slots of the cache fill
+/// the first `lag` positions: `out[p] = stream[p − lag]`, or `prefix[p]` where
 /// that index is before the call.
 ///
-/// This is the "shift-before-chunking" of the double-SSD pathway generalised
+/// This is the "shift-before-chunking" of the double-SSD pathway, generalised
 /// from lag 1 to [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag).
-/// A folded sequence is `tokens · u` long and `lag ∈ {1, u}`, so `sequence ≥
-/// lag` always holds; at equality the whole call is prefix.
+/// A folded sequence is `tokens · u` long and `lag ∈ {1, u}`, so
+/// `sequence ≥ lag` always. At equality, the whole call is prefix.
 ///
 /// # Shapes
 /// - `stream` : `[batch, sequence, …]`
@@ -85,16 +93,16 @@ pub fn shift_stream<const D: usize>(
 
 /// The in-block length [`prefix_sum`] scans directly.
 ///
-/// A `cumsum` of length `L` over `N` elements costs `∝ N·L` (below), so a
-/// blocked scan costs `∝ N·(block + len/block²)` — one pass inside each block
-/// plus one over the `len/block` block totals. That is least at
-/// `block = ∛(2·len)`, which this walks up to on a power-of-two grid. The floor
-/// of 16 keeps the fixed cost (a reshape, a subtract, a broadcast add) amortised
-/// on short axes; the ceiling bounds the in-block quadratic.
+/// A `cumsum` of length `L` over `N` elements costs `∝ N·L` (below). So a
+/// blocked scan costs `∝ N·(block + len/block²)`: one pass inside each block,
+/// plus one over the `len/block` block totals. The minimum is at
+/// `block = ∛(2·len)`, which this function approaches on a power-of-two grid.
+/// The floor of 16 amortises the fixed cost (a reshape, a subtract, a
+/// broadcast add) on short axes. The ceiling bounds the in-block quadratic.
 ///
-/// `scan_block(len) < len` is exactly "this length takes the blocked branch",
-/// which the parity tests assert so that re-tuning the rule cannot silently stop
-/// covering it.
+/// `scan_block(len) < len` means exactly "this length takes the blocked
+/// branch". The parity tests assert it, so a new tuning of the rule cannot
+/// silently stop covering that branch.
 pub(crate) fn scan_block(len: usize) -> usize {
     let mut block = 16;
     while block < 256 && block * block * block < 2 * len {
@@ -106,40 +114,44 @@ pub(crate) fn scan_block(len: usize) -> usize {
 /// Inclusive prefix sum along `dim`, continued from `init`:
 /// `out[i] = init + Σ_{j ≤ i} t[j]`.
 ///
-/// The values [`Tensor::cumsum`] computes, but **blocked**: the scanned axis is
-/// split into runs of [`scan_block`], each run scanned on its own, then offset
-/// by the exclusive prefix of the run totals. Both of those scans are short and
-/// bounded, and the whole thing is a handful of ops whatever `len` is.
+/// The values of [`Tensor::cumsum`], but **blocked**:
 ///
-/// `init` is the scan's carry-in — for the cumulative rotation angle, the one
-/// the cache brings from the previous call, exactly as `quat_cumprod` takes its
-/// `init` quaternion. It rides the block offset rather than costing a pass of
-/// its own, which is what keeps this at parity with a plain `cumsum` **plus the
-/// caller's add** on a backend whose `cumsum` is already linear.
+/// 1. split the scanned axis into runs of [`scan_block`],
+/// 2. scan each run alone,
+/// 3. add the exclusive prefix of the run totals.
+///
+/// Both scans are short and bounded, and the whole is a few ops for any `len`.
+///
+/// `init` is the carry-in of the scan. For the cumulative rotation angle, it
+/// is the angle that the cache brings from the previous call, as
+/// `quat_cumprod` takes its `init` quaternion. It joins the block offset and
+/// needs no pass of its own. So on a backend whose `cumsum` is already linear,
+/// this costs the same as a plain `cumsum` **plus the add of the caller**.
 ///
 /// It exists because Burn's `cumsum` is **quadratic in the scanned length** on
-/// the cubecl backends: measured on CUDA over `[2, len, 32, 32]` along `dim 1`,
-/// 0.27 ms at `len = 256` rising to 143 ms at 4096, ≈4× per doubling — and the
-/// same scan on the trailing, contiguous axis is only 2.6× cheaper and still
-/// ≈4× per doubling, so it is the scan and not the stride. Every other scan in
-/// this crate runs over `chunk_len`, `lag` or `micro_steps`, all bounded, which
-/// is the regime this restores the angle scan to: the cumulative rotation angle
-/// is the one that runs over the whole **folded** sequence, and `micro_steps`
-/// multiplies that axis, so `u > 1` reaches the quadratic `u`× sooner. Blocked,
-/// the same case is 1.9× / 6.7× / 23× / 46× faster at `len = 256 / 512 / 1024 /
-/// 2048`, and the forward is near-flat in `len` (0.14 → 0.51 ms over that span).
+/// the cubecl backends. Measured on CUDA over `[2, len, 32, 32]` along `dim 1`:
+/// 0.27 ms at `len = 256`, 143 ms at 4096, ≈4× per doubling. The same scan on
+/// the trailing, contiguous axis is only 2.6× cheaper and still ≈4× per
+/// doubling, so the cause is the scan, not the stride.
 ///
-/// The non-abelian sibling ([`quat_scan`](crate::mamba3::quat_scan)) solves the
-/// same problem with a Hillis–Steele doubling instead, having no `cumprod` to
-/// block with. Doubling works here too, and blocking beats it at **every** length
-/// measured (256 … 8192): 4.8× → 6.6× on CUDA forward, 2.3× → 3.3× with the
-/// backward, and 15× → 41× on the CPU backend. `O(len·log len)` work in
-/// `3·⌈log₂ len⌉` full-tensor kernels loses to `O(len·∛len)` in six, on hardware
-/// that is bandwidth- and launch-bound rather than FLOP-bound. So there is
-/// nothing here for a runtime knob to pick between.
+/// Every other scan in this crate runs over `chunk_len`, `lag` or
+/// `micro_steps`, all bounded. The cumulative rotation angle is the one scan
+/// over the whole **folded** sequence, and `micro_steps` multiplies that axis,
+/// so `u > 1` reaches the quadratic `u`× sooner. Blocked, the same case is
+/// 1.9× / 6.7× / 23× / 46× faster at `len = 256 / 512 / 1024 / 2048`, and the
+/// forward is almost flat in `len` (0.14 → 0.51 ms over that span).
 ///
-/// The additions associate differently from a sequential scan, so the two agree
-/// to rounding rather than bit-for-bit.
+/// The non-abelian sibling ([`quat_scan`](crate::mamba3::quat_scan)) solves
+/// the same problem with a Hillis–Steele doubling, because it has no
+/// `cumprod` to block with. Doubling also works here, but blocking is faster
+/// at **every** measured length (256 … 8192): 4.8× → 6.6× on CUDA forward,
+/// 2.3× → 3.3× with the backward, and 15× → 41× on the CPU backend. On
+/// bandwidth- and launch-bound hardware, `O(len·log len)` work in
+/// `3·⌈log₂ len⌉` full-tensor kernels loses to `O(len·∛len)` in six. So a
+/// runtime knob would have nothing to choose.
+///
+/// The additions associate differently from a sequential scan, so the two
+/// agree to rounding, not bit-for-bit.
 ///
 /// # Shapes
 /// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
@@ -205,20 +217,20 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 // The read axis
 // ---------------------------------------------------------------------------
 //
-// A chunk has two axes, and `micro_steps` widens only one of them. Every one of
-// a token's `u` micro-steps **writes** to the state, so the source axis is the
-// folded `chunk_len`; the token is **read** once, at its last micro-step, so
-// the target axis is `chunk_len / u` — the rows whose `y` survives, everything
-// else being multiplied by a zero gradient. `read_stride` is that `u` (and `1`
-// wherever there is no fold: Mamba-2, `micro_steps = 1`), which makes both
-// helpers below the identity there. `step` reads the axis too, its token being
-// a block of `u` positions with one read row.
+// A chunk has two axes, and `micro_steps` widens only one of them. Each of the
+// `u` micro-steps of a token **writes** to the state, so the source axis is
+// the folded `chunk_len`. The block **reads** the token once, at its last
+// micro-step, so the target axis is `chunk_len / u`: the rows whose `y`
+// survives (a zero gradient multiplies all the others). `read_stride` is that
+// `u`, or `1` where there is no fold (Mamba-2, `micro_steps = 1`), where both
+// helpers below are the identity. `step` also reads this axis: its token is a
+// block of `u` positions with one read row.
 //
-// The alignment is what keeps this a reshape rather than a gather:
-// `chunk_len` is a multiple of `read_stride`
+// The alignment keeps this a reshape, not a gather. `chunk_len` is a multiple
+// of `read_stride`
 // ([`Mamba3SsdPath::chunk_len_or_optimal`](crate::mamba3::ssd_path::Mamba3SsdPath::chunk_len_or_optimal)),
 // so chunk `c` covers folded positions `[c·L, (c+1)·L)` = tokens
-// `[c·T, (c+1)·T)` and its read rows are a **contiguous run** of them.
+// `[c·T, (c+1)·T)`, and its read rows are a **contiguous run** of them.
 
 /// The read rows of a folded axis: index `i·stride + (stride − 1)` for each
 /// `i`, i.e. the last position of every run of `stride`.
@@ -260,14 +272,14 @@ pub fn read_rows<const D: usize, const DP1: usize>(
 /// The additive causal mask over `(read row, folded source)`:
 /// `0` where the source is early enough to contribute, `−∞` where it is not.
 ///
-/// `diagonal` is passed to [`Tensor::triu`] on the **folded** grid, so it says
-/// the same thing it says today: `0` excludes the same position (the single-SSD
-/// strict mask, whose diagonal `ssd::diag` adds back with `γ`), `1` keeps it
-/// (the double-SSD inclusive mask).
+/// `diagonal` goes to [`Tensor::triu`] on the **folded** grid, so it has the
+/// usual meaning. `0` excludes the same position (the single-SSD strict mask,
+/// whose diagonal `ssd::diag` adds back with `γ`). `1` keeps it (the
+/// double-SSD inclusive mask).
 ///
-/// `−∞` rather than a `0/1` multiply because the mask is added *before* the
-/// `exp`: for a source after the row the decay difference is positive and would
-/// overflow.
+/// The mask is `−∞`, not a `0/1` multiply, because it is added *before* the
+/// `exp`. For a source after the row, the decay difference is positive and the
+/// `exp` would overflow.
 ///
 /// # Shapes
 /// - out : `[chunk_len / stride, chunk_len]`
@@ -277,20 +289,20 @@ pub fn read_causal_mask(
     diagonal: i64,
     device: &Device,
 ) -> Tensor<2> {
-    // Rows of the full folded mask, at the positions the readout happens at —
-    // which is the same statement as `read_rows`, so it is the same op.
+    // The rows of the full folded mask at the readout positions. That is what
+    // `read_rows` selects, so it is the same op.
     let full = Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, device).triu(diagonal);
     read_rows::<2, 3>(full, 0, stride)
 }
 
 /// The read axis on primitives, for the recompute-backward math.
 ///
-/// Same definitions as [`read_rows`] / [`read_causal_mask`] one module up, on
-/// [`F`] instead of `Tensor` — the split every kernel in this crate already has
-/// between its `Tensor` body and the `F<B, _>` one a
+/// The same definitions as [`read_rows`] / [`read_causal_mask`] one module up,
+/// on [`F`] instead of `Tensor`. Every kernel in this crate has this split: a
+/// `Tensor` body, and an `F<B, _>` body that a
 /// [`Backward`](burn::backend::autodiff::ops::Backward) node can run (see
 /// [`fprim`](burn_stack::utils::fprim)). Both are reshape-and-narrow, so
-/// neither needs an op `F` does not carry.
+/// neither needs an op that `F` does not have.
 pub mod prim {
     use burn_stack::utils::fprim::F;
     use burn::backend::Backend;
@@ -327,11 +339,11 @@ pub mod prim {
     }
 
     /// The transpose of [`read_rows`]: scatter a read-row tensor back onto the
-    /// folded axis, zero at the positions no readout happens at.
+    /// folded axis, with zeros at the positions that have no readout.
     ///
-    /// The gradient of `read_rows` — the hand-written backward's counterpart to
-    /// what autodiff does for the `Minimal` / `Serial` paths. The identity at
-    /// `stride = 1`.
+    /// This is the gradient of `read_rows`. The hand-written backward uses it
+    /// where autodiff does the same for the `Minimal` / `Serial` paths. The
+    /// identity at `stride = 1`.
     ///
     /// # Shapes
     /// - `t`  : `[…, len / stride, …]` at `dim`
@@ -385,16 +397,17 @@ pub mod prim {
     }
 }
 
-/// The **interior** of a lag-`lag` tap's gap: `Πᵈ⁼¹..ˡᵃᵍ⁻¹ αₚ₋ᵈ`, or `None` at
-/// `lag = 1` (where the gap has no interior).
+/// The **interior** of the gap of a lag-`lag` tap: `Πᵈ⁼¹..ˡᵃᵍ⁻¹ αₚ₋ᵈ`, or
+/// `None` at `lag = 1` (where the gap has no interior).
 ///
 /// A tap at lag `L` is transported across its own gap, `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`
-/// (`info/mamba-3/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already carries the
-/// `d = 0` factor, so this is the rest of it.
+/// (`info/mamba-3/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already
+/// holds the `d = 0` factor, so this is the rest.
 ///
-/// The front is **zero-padded**, not clamped to what the call happens to hold:
-/// for `p < L` the missing factors are exactly the ones the cache's `v` slots
-/// were already scaled by when they were stored (see [`tail_decay`]).
+/// The front is **zero-padded** (in log space), not clamped to what the call
+/// holds. For `p < L`, the missing factors are exactly those that already
+/// scaled the `v` slots of the cache when they were stored (see
+/// [`tail_decay`]).
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, sequence, nheads]` (`Δ·A`, the log-decay)
@@ -414,13 +427,13 @@ pub fn interior_gap_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
     Some(window_bsh.exp())
 }
 
-/// The decay each cached tap slot has already accumulated: `Πᵣ₌q₊₁^{S−1} αᵣ` for
-/// the last `lag` positions `q` (oldest first), or `None` at `lag = 1` (the one
-/// slot *is* the last position, so the product is empty).
+/// The decay that each cached tap slot already accumulated:
+/// `Πᵣ₌q₊₁^{S−1} αᵣ` for the last `lag` positions `q` (oldest first). `None` at
+/// `lag = 1`: the one slot *is* the last position, so the product is empty.
 ///
-/// Storing the tap slots pre-scaled by this is what lets a lag-`L` tap span a
-/// call boundary: the next call supplies the in-call part of the gap
-/// ([`interior_gap_decay`], front-zero-padded) and the slot carries the rest.
+/// The tap slots are stored pre-scaled by this, so a lag-`L` tap can cross a
+/// call boundary. The next call supplies the in-call part of the gap
+/// ([`interior_gap_decay`], front-zero-padded), and the slot carries the rest.
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, sequence, nheads]`
@@ -430,26 +443,26 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
         return None;
     }
     let sequence = da_bsh.dims()[1];
-    // Only the tail window matters, so the cumulative sum is over `lag` terms
-    // and never accumulates the whole sequence's decay.
+    // Only the tail window matters, so the cumulative sum is over `lag` terms,
+    // never over the decay of the whole sequence.
     let tail_blh = da_bsh.narrow(1, sequence - lag, lag);
     let cumulative_blh = tail_blh.cumsum(1);
     let total_b1h = cumulative_blh.clone().narrow(1, lag - 1, 1);
     Some((total_b1h - cumulative_blh).exp())
 }
 
-/// A `[1, len, 1]` gate over a folded axis: `0` at each token's **first**
-/// micro-step (`p ≡ 0 mod u`) and `1` elsewhere.
+/// A `[1, len, 1]` gate over a folded axis: `0` at the **first** micro-step of
+/// each token (`p ≡ 0 mod u`) and `1` elsewhere.
 ///
-/// Broadcasts against any `[batch, len, nheads]` stream, in `forward` (`len` is
-/// the folded sequence, which starts at a token boundary) and in `step` (`len`
-/// is `u` itself, so the gate is its first entry). At `u = 1` every position is
-/// a token start and the gate is all zeros — which is the whole of why
+/// It broadcasts against any `[batch, len, nheads]` stream, in `forward`
+/// (`len` is the folded sequence, which starts at a token boundary) and in
+/// `step` (`len` is `u`, so the gate is its first entry). At `u = 1` every
+/// position is a token start, and the gate is all zeros. That alone is why
 /// [`Trapezoid::HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
-/// degenerates to [`None`](crate::mamba3::trapezoid::Trapezoid::None) there.
+/// becomes [`None`](crate::mamba3::trapezoid::Trapezoid::None) there.
 ///
-/// This is where a pattern's admissibility rule becomes a tensor; *which* mass
-/// it applies to is the caller's — `λ` for
+/// Here, the admissibility rule of a pattern becomes a tensor. The caller
+/// decides *which* mass it applies to: `λ` for
 /// [`Trapezoid::far_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::far_tap_crosses_tokens),
 /// `μ` for
 /// [`interior_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::interior_tap_crosses_tokens).
@@ -460,46 +473,49 @@ pub fn token_start_gate(len: usize, micro_steps: usize, device: &Device) -> Tens
     Tensor::<1>::from_floats(open.as_slice(), device).reshape([1, len, 1])
 }
 
-/// Output of [`trapezoidal_coefficients`] — the step's mass `Δₜ`, split.
+/// Output of [`trapezoidal_coefficients`]: the mass `Δₜ` of the step, split.
 ///
-/// The masses are **untransported**: `α` and any wider gap decay are the
-/// consumer's to apply, since which one a tap needs depends on the pathway (the
-/// double-SSD pass multiplies them in, the single-SSD key scale never does).
+/// The masses are **untransported**: the consumer applies `α` and any wider
+/// gap decay, because the pathway decides which one a tap needs. The
+/// double-SSD pass multiplies them in. The single-SSD key scale never does.
 pub struct TrapezoidCoeffs {
     /// `Δₜ = softplus(dd_dt + dt_bias)`, clamped.
     pub dt: Tensor<3>,
-    /// The log-decay: `Δₜ · Aₜ`, or under a
-    /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member the
-    /// decay that gate computes from it — every consumer reads this one.
+    /// The log-decay: `Δₜ · Aₜ`, or, under a
+    /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member, the
+    /// decay that the gate computes from it. Every consumer reads this one.
     pub da: Tensor<3>,
-    /// `αₜ = exp(da) ∈ (0, 1]` — the decay, projected or computed as `da` is.
+    /// `αₜ = exp(da) ∈ (0, 1]`: the decay, projected or computed (as `da`).
     pub alpha: Tensor<3>,
-    /// `νₜ` — the mass of the tap at
+    /// `νₜ`: the mass of the tap at
     /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
     /// transport. `None` under
-    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which has
-    /// no left endpoint: the tensor is not formed rather than formed as zeros.
+    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which
+    /// has no left endpoint: the tensor is not formed (not formed as zeros).
     pub nu: Option<Tensor<3>>,
-    /// `νⁱⁿᵗₜ` — the mass of the extra lag-1 tap, `None` unless
+    /// `νⁱⁿᵗₜ`: the mass of the extra lag-1 tap. `None` unless
     /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
     pub nu_interior: Option<Tensor<3>>,
-    /// `γₜ = λₜ · Δₜ` — right-endpoint weight, and **`Δₜ` itself** when there is
-    /// no `λ` (the whole step is paid at the right endpoint).
+    /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
+    /// there is no `λ` (all of the step is paid at the right endpoint).
     pub gamma: Tensor<3>,
-    /// `ℓₜ = ln Λₜ` at every position, when the decay is a Kalman gate's
-    /// ([`crate::mamba3::positive::kalman`]); its last entry is the next carry.
+    /// `ℓₜ = ln Λₜ` at every position, when the decay comes from a Kalman gate
+    /// ([`crate::mamba3::positive::kalman`]). Its last entry is the next carry.
     pub log_precision: Option<Tensor<3>>,
 }
 
 impl TrapezoidCoeffs {
-    /// The coefficients with every padded position (`pad_bs`, `[batch, len]`,
-    /// `true` at padding; `None` ⇒ none) made the identity step: no decay
-    /// (`da = 0`, `α = 1`), no mass anywhere (`Δ = ν = νⁱⁿᵗ = γ = 0`). Each
-    /// consumer follows — the SSD core carries the state through untouched, a
-    /// real position's tap mass paid forward to a padded one is dropped exactly
-    /// as at a call boundary, and the rotation (which steps by `Δ`) holds still.
-    /// `log_precision` is left as is: it is read only where it is causal, and
-    /// its carry is taken at each slot's own end.
+    /// Makes every padded position (`pad_bs`, `[batch, len]`, `true` at
+    /// padding, `None` ⇒ no padding) the identity step: no decay (`da = 0`,
+    /// `α = 1`) and no mass (`Δ = ν = νⁱⁿᵗ = γ = 0`). Each consumer follows:
+    ///
+    /// - the SSD core carries the state through unchanged,
+    /// - a tap mass that a real position pays forward to a padded one is
+    ///   dropped, exactly as at a call boundary,
+    /// - the rotation (which steps by `Δ`) does not move.
+    ///
+    /// `log_precision` stays as is. Only causal sites read it, and each slot
+    /// takes its carry at its own end.
     pub fn padded(self, pad_bs: Option<&Tensor<2, Bool>>) -> Self {
         let Some(pad_bs) = pad_bs else {
             return self;
@@ -519,34 +535,35 @@ impl TrapezoidCoeffs {
 }
 
 /// Compute the trapezoidal discretisation coefficients from the raw
-/// (data-dependent) projections. See the top-of-`mamba3.rs` docs for the
-/// formulas and `trapezoid.rs`'s header for how the masses divide.
+/// (data-dependent) projections. See the header of `mamba3.rs` for the
+/// formulas and the header of `trapezoid.rs` for how the masses divide.
 ///
-/// All data tensors are `[batch, len, nheads]`, `len` being the folded sequence
-/// (`forward`) or the `u` micro-steps of one token (`step`); `dt_bias_h` is
-/// broadcast to match. Axis 1 is what the patterns' gates are periodic in, in
-/// both cases.
+/// All data tensors are `[batch, len, nheads]`, where `len` is the folded
+/// sequence (`forward`) or the `u` micro-steps of one token (`step`).
+/// `dt_bias_h` broadcasts to match. In both cases, the gates of the patterns
+/// are periodic along axis 1.
 ///
 /// `lambda_raw` is `None` under
-/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) — the block
-/// projects no `λ` channels — and the coefficients then take their `λ ≡ 1`
-/// values *by construction*: no mass is formed and `γ` **is** `Δ`, sharing its
-/// tensor rather than recomputing `1 · Δ`. `mu_raw` is `None` unless the pattern
-/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap),
-/// and the same holds one level down: no `μ`, no second mass.
+/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), whose block
+/// projects no `λ` channels. The coefficients then have their `λ ≡ 1` values
+/// *by construction*: no mass is formed, and `γ` **is** `Δ` (the same tensor,
+/// not a new `1 · Δ`). `mu_raw` is `None` unless the pattern
+/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+/// The same holds one level down: no `μ`, no second mass.
 ///
-/// A gate closes by handing its mass back, not by dropping it: `λ` is set to `1`
-/// where the far tap is inadmissible (so `γ` takes the step whole) and `μ` to
-/// `0` where the interior one is (so the far tap takes the left endpoint whole).
-/// Both are exact at the ends, so the degenerate members are their targets bit
-/// for bit.
+/// A gate closes by giving its mass back, not by dropping it. `λ` is `1` where
+/// the far tap is not admissible (so `γ` takes all of the step). `μ` is `0`
+/// where the interior tap is not admissible (so the far tap takes all of the
+/// left endpoint). Both are exact at the ends, so the degenerate members equal
+/// their targets bit for bit.
 ///
-/// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain): the
-/// decay is then computed ([`crate::mamba3::positive::kalman::gate`]) **here**,
-/// before `α` is formed from it, so no consumer — the taps' transports, the
-/// tap slots, single-SSD's key scale — can read the projected one by mistake.
-/// The masses keep the projected `Δ`; the gate reads them in logs, formed from
-/// the same pre-activations ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).
+/// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain).
+/// This function then computes the decay
+/// ([`crate::mamba3::positive::kalman::gate`]) **before** it forms `α`. So no
+/// consumer (the tap transports, the tap slots, the single-SSD key scale) can
+/// read the projected decay by mistake. The masses keep the projected `Δ`. The
+/// gate reads them in logs, formed from the same pre-activations
+/// ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).
 pub fn trapezoidal_coefficients(
     dd_dt: Tensor<3>,
     dd_a_raw: Tensor<3>,
@@ -562,12 +579,12 @@ pub fn trapezoidal_coefficients(
     let dt_bias_broadcast = dt_bias_h.unsqueeze::<3>();
     let dt_raw = dd_dt + dt_bias_broadcast;
     let dt = softplus(dt_raw.clone()).clamp(dt_limit.0, dt_limit.1);
-    // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. The floor must be
-    // applied to the (positive) softplus *before* negating: a method call
-    // binds tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
-    // -a_floor)` would collapse the positive softplus to the constant
-    // `-a_floor` and yield `A ≡ +a_floor` — a *growing* state (`α > 1`) with a
-    // dead `dd_A` projection.
+    // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. Apply the floor to
+    // the (positive) softplus *before* the negation. A method call binds
+    // tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
+    // -a_floor)` would clamp the positive softplus to the constant `-a_floor`
+    // and give `A ≡ +a_floor`: a *growing* state (`α > 1`) with a dead `dd_A`
+    // projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
     let gate = |crosses: bool| {
@@ -591,9 +608,9 @@ pub fn trapezoidal_coefficients(
     let (nu, nu_interior, gamma) = match lambda_raw {
         Some(lambda_raw) => {
             let lambda = burn::tensor::activation::sigmoid(lambda_raw);
-            // A closed far tap means λ = 1 there: the whole step is paid at the
-            // right endpoint, which is what makes the gated pattern a submodel
-            // of the ungated one rather than a lossy version of it.
+            // A closed far tap means λ = 1 there: all of the step is paid at
+            // the right endpoint. This makes the gated pattern a submodel of
+            // the ungated one, not a lossy version of it.
             let lambda = match far_open_1s1 {
                 Some(open_1s1) => lambda * open_1s1.clone() + (-open_1s1 + 1.0),
                 None => lambda,
@@ -655,19 +672,19 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
 /// Rank-summed outer product `state[b, h, p, r] = Σₘ v[b, m, h, p] · k[b, m, h, r]`
 /// (`einsum('bmhp,bmhr->bhpr')`).
 ///
-/// This is the per-token state contribution: each MIMO rank contributes an
-/// outer product `v[m] ⊗ k[m]` and the shared state accumulates their sum.
+/// This is the per-token state contribution: each MIMO rank adds an outer
+/// product `v[m] ⊗ k[m]`, and the shared state accumulates their sum.
 ///
-/// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1 and
-/// the sum is a single outer product — [`mimo_outer_sum_siso`] writes it as a
-/// broadcast multiply instead. Which form wins is backend-dependent, and by a
-/// wide margin at these (tiny, decode-sized) shapes: the broadcast is the
-/// faster one on CUDA and *much* slower on the portable CPU backends, whose
-/// broadcast-elementwise path trails their matmul by more than an order of
-/// magnitude here. The choice is therefore
-/// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)'s
-/// — the per-token flag, *not* the chunkwise one, whose verdict is the opposite;
-/// both branches compute the same values and gradients.
+/// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1
+/// and the sum is one outer product. [`mimo_outer_sum_siso`] writes it as a
+/// broadcast multiply instead. The faster form depends on the backend, by a
+/// wide margin at these (tiny, decode-sized) shapes. The broadcast is faster
+/// on CUDA and *much* slower on the portable CPU backends, whose
+/// broadcast-elementwise path is more than 10× slower than their matmul here.
+/// So the per-token flag
+/// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)
+/// selects it, not the chunkwise flag (whose trade-off is the opposite). Both
+/// branches compute the same values and gradients.
 pub fn mimo_outer_sum(
     v_bmhp: Tensor<4>,
     k_bmhr: Tensor<4>,
@@ -697,14 +714,11 @@ pub fn mimo_outer_sum_mimo(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
     v_bhpm.matmul(k_bhmr)
 }
 
-#[cfg(all(test, feature = "_dev-test"))]
-mod tests;
-
 /// Build the MIMO value tensor `v = x ⊙ mimo_x` with broadcasting.
 ///
 /// Inserts a `mimo_rank` axis at `insert_dim`. When `mimo_x_hmp` is `None`
-/// (SISO), the inserted axis has size 1 and `x` is passed through; otherwise
-/// broadcasting fills the inserted axis to size `mimo_rank`.
+/// (SISO), the new axis has size 1 and `x` goes through unchanged. Otherwise,
+/// broadcasting fills the new axis to size `mimo_rank`.
 ///
 /// `DP1 = D + 1`.
 pub fn build_v_with_mimo<const D: usize, const DP1: usize>(
@@ -724,3 +738,6 @@ pub fn build_v_with_mimo<const D: usize, const DP1: usize>(
         }
     }
 }
+
+#[cfg(all(test, feature = "_dev-test"))]
+mod tests;

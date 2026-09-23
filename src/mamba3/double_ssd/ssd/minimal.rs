@@ -1,9 +1,8 @@
 //! ## The Chunkwise MIMO-SSD Algorithm (Minimal/Segsum variant)
 //!
-//! During training (and prefill), a naive sequential recurrence cannot
-//! exploit GPU tensor cores.  The **chunkwise SSD algorithm** achieves this
-//! by splitting the sequence into chunks of length chunk_len and decomposing the
-//! computation into four steps.
+//! In training (and prefill), a naive sequential recurrence cannot use GPU
+//! tensor cores. The **chunkwise SSD algorithm** can. It splits the sequence
+//! into chunks of length `chunk_len` and computes four steps.
 //!
 //! ```text
 //!   Step 1  (intra-chunk, MIMO quadratic form)  →  Y_diag   [batch, nchunks, chunk_len*mimo_rank, nheads, per_head_dim]
@@ -14,9 +13,10 @@
 //!   Y = Y_diag + Y_off   →  reshape to [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]
 //! ```
 //!
-//! The MIMO causal mask `LM_mimo[i,j] = exp(cumA[i//m] - cumA[j//m])` for `i//m >= j//m`
-//! allows all mimo_ranks ranks at the same time step to attend to each other while
-//! maintaining causal ordering across time steps.
+//! The MIMO causal mask `LM_mimo[i,j] = exp(cumA[i//m] - cumA[j//m])` for
+//! `i//m >= j//m` lets all `mimo_rank` ranks at the same time step attend to
+//! each other, and keeps the causal order across time steps. (At
+//! `read_stride > 1` the Y shapes use `chunk_tokens` rows, not `chunk_len`.)
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
@@ -27,14 +27,15 @@ use burn::prelude::*;
 impl Mamba3DoubleSsdInput {
     /// MIMO-first chunkwise SSD — minimal/segsum variant.
     ///
-    /// Implements the four-step decomposition for the MIMO (double-ssd) trapezoidal recurrence.
-    /// SISO (mimo_rank=1) is the degenerate case where the fused length equals the chunk length.
+    /// The four-step decomposition for the MIMO (double-ssd) trapezoidal
+    /// recurrence. SISO (mimo_rank=1) is the degenerate case where the fused
+    /// length equals the chunk length.
     ///
-    /// No D skip is applied here — the caller handles it.
+    /// This function applies no D skip: the caller adds it.
     ///
     /// # Shapes
     /// - input: see [`Mamba3DoubleSsdInput`]
-    /// - output.0 `y_bntrhp`:       `[batch, nchunks, chunk_tokens, R, nheads, per_head_dim]`
+    /// - output.0 `y_bntmhp`:       `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - output.1 `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     #[allow(non_snake_case)]
     pub fn double_ssd_minimal(self) -> (Tensor<6>, Tensor<4>) {

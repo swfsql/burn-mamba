@@ -1,30 +1,31 @@
-//! The log-semiring prefix product every positive member runs on.
+//! The log-semiring prefix product that every positive member runs on.
 //!
 //! An element is a 2×2 nonnegative matrix in log coordinates, one per
-//! `[batch, position, head]`. Two shapes of it exist:
+//! `[batch, position, head]`. It has two shapes:
 //!
-//! - [`Mobius`](scan::Mobius) — all four entries, acting **projectively** on `(ℓ, 0)`: the
-//!   read is `σ₀ − σ₁`, so the product may be shifted by any constant and is,
-//!   after every combine, to keep its entries bounded;
-//! - [`Affine`](scan::Affine) — the lower row fixed at `(−∞, 0)`, so only `(a, b)` is carried
-//!   and the read `lse(a + c₀, b)` is absolute: no shift is allowed, and none
-//!   is needed.
+//! - [`Mobius`](scan::Mobius) — all four entries, acting **projectively** on
+//!   `(ℓ, 0)`. The read is `σ₀ − σ₁`, so any constant shift of the product is
+//!   allowed. The scan applies one after every combine, to keep the entries
+//!   bounded.
+//! - [`Affine`](scan::Affine) — the lower row is fixed at `(−∞, 0)`, so only
+//!   `(a, b)` is carried. The read `lse(a + c₀, b)` is absolute: no shift is
+//!   allowed, and none is necessary.
 //!
-//! [`prefix`](scan::prefix) composes them by Hillis–Steele doubling, the same schedule as the
-//! quaternion scan (`rotation::quat_cumprod`): `⌈log₂ len⌉` full-width
-//! combines. [`fold`](scan::fold) is the sequential left fold, kept as the reference the
-//! tests hold [`prefix`](scan::prefix) to.
+//! [`prefix`](scan::prefix) composes them by Hillis–Steele doubling, the same
+//! schedule as the quaternion scan (`rotation::quat_cumprod`): `⌈log₂ len⌉`
+//! full-width combines. [`fold`](scan::fold) is the sequential left fold, the
+//! reference for [`prefix`](scan::prefix) in the tests.
 
 use super::LOG_ZERO;
 use burn::prelude::*;
 
 /// `ln(eᵃ + eᵇ)`, elementwise.
 ///
-/// Written as `hi + ln(1 + e^(lo − hi))` with `hi`/`lo` *selected* rather than
-/// `max`/`abs`ed: the result is exact to the larger operand when the other is
-/// [`LOG_ZERO`] (an `a + softplus(b − a)` form would round `b` through
-/// `b − LOG_ZERO`), and its gradient is `σ(a − b)` on `a` even at a tie, where
-/// a `max`-based form hands the whole of it to one side.
+/// Written as `hi + ln(1 + e^(lo − hi))`, with `hi`/`lo` *selected*, not
+/// computed by `max`/`abs`. So the result is exactly the larger operand when
+/// the other is [`LOG_ZERO`] (an `a + softplus(b − a)` form would round `b`
+/// through `b − LOG_ZERO`). Its gradient on `a` is `σ(a − b)`, also at a tie,
+/// where a `max`-based form gives all of it to one side.
 pub fn lse(a: Tensor<3>, b: Tensor<3>) -> Tensor<3> {
     let a_wins = a.clone().greater_equal(b.clone());
     let hi = b.clone().mask_where(a_wins.clone(), a.clone());
@@ -32,9 +33,9 @@ pub fn lse(a: Tensor<3>, b: Tensor<3>) -> Tensor<3> {
     hi.clone() + (lo - hi).exp().log1p()
 }
 
-/// The semiring's one and zero, `(0, LOG_ZERO)`, over `len` positions — shaped,
-/// placed and typed like `like`, so a scan follows its elements' dtype rather
-/// than the device's default.
+/// The one and zero of the semiring, `(0, LOG_ZERO)`, over `len` positions,
+/// with the shape, device and dtype of `like`. So a scan follows the dtype of
+/// its elements, not the default of the device.
 fn one_and_zero(like: &Tensor<3>, len: usize) -> (Tensor<3>, Tensor<3>) {
     let [batch, _len, nheads] = like.dims();
     let device = like.device();
@@ -49,8 +50,8 @@ fn one_and_zero(like: &Tensor<3>, len: usize) -> (Tensor<3>, Tensor<3>) {
 pub trait Element: Sized + Clone {
     /// `later ∘ earlier` — apply `earlier` first.
     fn compose(later: Self, earlier: Self) -> Self;
-    /// The identity over `len` positions, on this element's batch, heads,
-    /// device and dtype.
+    /// The identity over `len` positions, with the batch, heads, device and
+    /// dtype of this element.
     fn identity_like(&self, len: usize) -> Self;
     /// `[batch, len, nheads]`.
     fn dims(&self) -> [usize; 3];
@@ -94,8 +95,8 @@ impl Element for Mobius {
         let m10 = lse(x.m10.clone() + y.m00, x.m11.clone() + y.m10);
         let m11 = lse(x.m10 + y.m01, x.m11 + y.m11);
         // Projective: the read cancels any common shift, in value and in
-        // gradient, so the largest entry is taken out (detached — its gradient
-        // would cancel anyway) and the structural zeros re-floored.
+        // gradient. So subtract the largest entry (detached, because its
+        // gradient would cancel anyway), and floor the structural zeros again.
         let shift = m00
             .clone()
             .max_pair(m01.clone())
@@ -206,27 +207,27 @@ impl Element for Affine {
 /// doubling.
 ///
 /// Invariant after the round at `offset`: position `t` holds the product of
-/// the window `[max(t − 2·offset + 1, 0), t]`, the positions before the axis
-/// being the identity. `⌈log₂ len⌉` rounds cover every window.
+/// the window `[max(t − 2·offset + 1, 0), t]`, where the positions before the
+/// axis are the identity. `⌈log₂ len⌉` rounds cover every window.
 ///
 /// # Why doubling, and what it costs
 ///
-/// `helpers::prefix_sum` blocks its scan, and measures blocking beating
-/// doubling at every length — but its blocks run on `cumsum`, a one-launch
-/// in-block scan this element has no counterpart of: the log-semiring product
-/// is not `+`, and [`Mobius`]'s is not even commutative, so an in-block pass
-/// would itself be a doubling or a loop. The schedule is therefore
-/// `quat_scan`'s: `⌈log₂ len⌉` full-width rounds over the whole folded
-/// sequence, each some fifty kernels for [`Mobius`] (four [`lse`]s, the
-/// renormalising shift, the re-floors) and a dozen for [`Affine`]. The tensors
-/// are `[batch, len, nheads]`, with no `per_head_dim·state_rank` factor, so
-/// what grows with `len` is mostly launches, not bytes.
+/// `helpers::prefix_sum` blocks its scan, and its measurements show blocking
+/// faster than doubling at every length. But its blocks run on `cumsum`, a
+/// one-launch in-block scan that this element does not have: the log-semiring
+/// product is not `+`, and the [`Mobius`] one is not even commutative. So an
+/// in-block pass would itself be a doubling or a loop. The schedule is thus
+/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole folded
+/// sequence. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
+/// the renormalising shift, the new floors) and a dozen for [`Affine`]. The
+/// tensors are `[batch, len, nheads]`, with no `per_head_dim·state_rank`
+/// factor, so the cost that grows with `len` is mostly launches, not bytes.
 ///
-/// The backward is plain autodiff, which keeps every round's intermediates
-/// alive until it runs. A recompute backward like `quat_scan`'s is still open,
-/// and its divide-out trick does not port: a log-semiring element has no
-/// inverse. [`Affine`]'s `a` is a plain running sum riding the same rounds,
-/// which `prefix_sum` could produce on its own.
+/// The backward is plain autodiff, which keeps the intermediates of every
+/// round alive until it runs. A recompute backward like that of `quat_scan` is
+/// still an open item, and its divide-out trick does not port: a log-semiring
+/// element has no inverse. The `a` of [`Affine`] is a plain running sum on the
+/// same rounds, which `prefix_sum` could compute alone.
 pub fn prefix<E: Element>(elements: E) -> E {
     let [_batch, len, _nheads] = elements.dims();
     let mut acc = elements;
@@ -242,8 +243,8 @@ pub fn prefix<E: Element>(elements: E) -> E {
     acc
 }
 
-/// The same prefix products by a sequential left fold — one combine per
-/// position. The reference [`prefix`] is tested against.
+/// The same prefix products by a sequential left fold: one combine per
+/// position. The tests compare [`prefix`] against it.
 pub fn fold<E: Element>(elements: E) -> E {
     let [_batch, len, _nheads] = elements.dims();
     let mut out = vec![elements.clone().narrow(0, 1)];

@@ -4,10 +4,14 @@
 //! *"Mamba-3: Improved Sequence Modeling using State Space Principles"*.
 //!
 //! Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:
-//! (1) trapezoidal discretisation, (2) a **complex-valued state transition**,
-//! implemented as data-dependent rotary embeddings on B and C (the "RoPE
-//! trick"), and (3) MIMO (multiple-input multiple-output) projection.
-//! Each is shown in isolation below, then combined.
+//!
+//! 1. trapezoidal discretisation,
+//! 2. a **complex-valued state transition**, implemented as data-dependent
+//!    rotary embeddings on B and C (the "RoPE trick"),
+//! 3. MIMO (multiple-input multiple-output) projection.
+//!
+//! Sections 1–3 show each one alone, and section 4 combines them. Section 5
+//! adds this crate's fourth dial, MambaProduct.
 //!
 //! ## 1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)
 //!
@@ -24,49 +28,56 @@
 //!   γₜ = λₜ Δₜ                      — right-endpoint weight (Bₜ xₜ contribution)
 //! ```
 //!
-//! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)` controlling the left/right split of the trapezoid.
-//! Setting `λ ≡ 1` collapses this to the Mamba-2 (Euler / right-endpoint) form.
+//! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)`, the left/right split of the trapezoid.
+//! `λ ≡ 1` gives the Mamba-2 (Euler / right-endpoint) form.
 //!
-//! *Which* earlier sample the `βₜ` tap reads is [`Mamba3Config::trapezoid`]; at
-//! `micro_steps = 1` (below) `t−1` is the only answer. At `u > 1` the default
-//! [`Trapezoid::HorizontalCarryOver`] keeps reading the immediately preceding
-//! recurrence step, and [`Trapezoid::Vertical`] reads the previous **token**'s
-//! same micro-step instead — one lag, everywhere the tap appears. Two members
-//! read **both**, splitting `(1 − λₜ)Δₜ` between them by a second projected
-//! scalar `μₜ = σ(μ̂ₜ)`; one gates its lag-1 tap to within a token. The tap and
-//! its mass are one choice: a closed tap hands its share back (to the other tap,
-//! or to `γ`), so the step's mass is `Δₜ` under every member. See
-//! [`Trapezoid`]'s header.
+//! [`Mamba3Config::trapezoid`] selects *which* earlier sample the `βₜ` tap
+//! reads. At `micro_steps = 1` (below), `t−1` is the only choice. At `u > 1`:
+//!
+//! - the default [`Trapezoid::HorizontalCarryOver`] reads the recurrence step
+//!   just before,
+//! - [`Trapezoid::Vertical`] reads the same micro-step of the previous
+//!   **token**, with one lag at every tap site,
+//! - two members read **both**. A second projected scalar `μₜ = σ(μ̂ₜ)` splits
+//!   `(1 − λₜ)Δₜ` between them. One of the two gates its lag-1 tap to within a
+//!   token.
+//!
+//! The tap and its mass are one choice. A closed tap gives its share back (to
+//! the other tap, or to `γ`), so the mass of the step is `Δₜ` under every
+//! member. See the header of [`Trapezoid`].
 //!
 //! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
 //! — paper section *Complex-Valued SSMs*)
 //!
-//! Despite the name this is **not a positional encoding**: it is the *imaginary
-//! part of the state transition*. Mamba-3's `A` is complex (`A + iϑ`), and under
-//! discretisation a complex SSM of state `N/2` is exactly a real SSM of state `N`
-//! whose transition is the scalar decay `α` times a block-diagonal of `2×2`
-//! rotations (paper Prop. *Complex-to-Real SSM Equivalence*):
+//! Despite the name, this is **not a positional encoding**. It is the
+//! *imaginary part of the state transition*. The `A` of Mamba-3 is complex
+//! (`A + iϑ`). After discretisation, a complex SSM of state `N/2` is exactly a
+//! real SSM of state `N` whose transition is the scalar decay `α` times a
+//! block-diagonal of `2×2` rotations (paper Prop. *Complex-to-Real SSM
+//! Equivalence*):
 //!
 //! ```text
 //!   ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-step rotation (data-dependent)
 //!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                   — rotational state update
 //! ```
 //!
-//! `ϱ` is [`Mamba3Config::rotation_range`], the per-step bound in half-turns per
-//! unit `Δ`: `2` here (a whole turn of the group per unit `Δ`), `1` in the
-//! reference. It is a gradient budget, not a reach limit — see its own docs.
+//! `ϱ` is [`Mamba3Config::rotation_range`], the per-step bound in half-turns
+//! per unit `Δ`. It is `2` here (a whole turn of the group per unit `Δ`) and
+//! `1` in the reference. It is a gradient budget, not a reach limit (see its
+//! docs).
 //!
-//! The **exponential** discretisation is load-bearing here, not merely more
-//! accurate than forward Euler: `|exp(iΔϑ)| = 1` exactly, so the transition is
-//! orthogonal and a tracked rotation neither decays nor grows, where Euler's
-//! `|1 + iΔϑ| > 1` spirals outward (`info/mamba-3/rotation-as-optimization.md` §9.5).
+//! The **exponential** discretisation is necessary here, not only more
+//! accurate than forward Euler. `|exp(iΔϑ)| = 1` exactly, so the transition is
+//! orthogonal, and a tracked rotation does not decay or grow. With Euler,
+//! `|1 + iΔϑ| > 1` spirals outward (`info/mamba-3/rotation-as-optimization.md`
+//! §9.5).
 //!
-//! `αₜ` is a scalar (so it commutes with `ρₜ`) and each `ρₜ` is orthogonal, so
-//! the *cumulative* rotation telescopes out of the recurrence and can be absorbed
-//! into B/C instead — the **"RoPE trick"** (paper Prop. *Complex SSM,
-//! Data-Dependent RoPE Equivalence*). That is the form implemented here: the
-//! rotation never touches the state (the cached `h` is the rotated-frame one) and
-//! the SSD core stays the plain scalar-decay kernel.
+//! `αₜ` is a scalar (so it commutes with `ρₜ`), and each `ρₜ` is orthogonal.
+//! So the *cumulative* rotation telescopes out of the recurrence, and B/C can
+//! absorb it: the **"RoPE trick"** (paper Prop. *Complex SSM, Data-Dependent
+//! RoPE Equivalence*). This module implements that form. The rotation never
+//! touches the state (the cached `h` is in the rotated frame), and the SSD core
+//! stays the plain scalar-decay kernel.
 //!
 //! ```text
 //!   θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
@@ -81,27 +92,27 @@
 //!   yₜ = C̃ₜᵀ hₜ + D xₜ                   (output)
 //! ```
 //!
-//! Orthogonality makes the readout-vs-input similarity depend only on the
-//! rotation *accumulated between* the two steps:
+//! Because of orthogonality, the readout-vs-input similarity depends only on
+//! the rotation *accumulated between* the two steps:
 //!
 //! ```text
 //!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
 //! ```
 //!
-//! `θⱼ − θᵢ` is not a position: it is `Σ Δ·ϱ·π·tanh(ϑ)` over the intervening
-//! steps — how far the transition itself rotated, driven by the inputs. It would
-//! reduce to vanilla RoPE's relative position only in the degenerate case of an
-//! input-independent, constant per-step angle (`θⱼ − θᵢ = (j−i)·θ`). Data
-//! dependence is the whole point: it gives the layer rotational state dynamics,
-//! hence state-tracking (parity, mod-k) that a real, non-negative-eigenvalue SSM
-//! provably cannot express. See [`crate::mamba3::rotation`], whose `Quaternion4D`
-//! carries the same argument to a non-abelian rotation group.
+//! `θⱼ − θᵢ` is not a position. It is `Σ Δ·ϱ·π·tanh(ϑ)` over the steps between:
+//! how far the transition itself rotated, driven by the inputs. It is the
+//! relative position of vanilla RoPE only in the degenerate case of an
+//! input-independent, constant per-step angle (`θⱼ − θᵢ = (j−i)·θ`). The data
+//! dependence is the point: it gives the layer rotational state dynamics, and
+//! thus state-tracking (parity, mod-k), which a real SSM with non-negative
+//! eigenvalues provably cannot express. See [`crate::mamba3::rotation`]. Its
+//! `Quaternion4D` applies the same argument to a non-abelian rotation group.
 //!
 //! ## 3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M > 1`)
 //!
-//! With MIMO, B/C carry M parallel rank channels and the state update is a sum
-//! of M outer-product contributions; the readout produces M outputs which are
-//! gated and combined back:
+//! With MIMO, B/C carry M parallel rank channels, and the state update is a
+//! sum of M outer products. The readout gives M outputs, which the gate
+//! combines back:
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + Σₘ B̄ₜ[m] ⊗ (xₜ ⊙ mimo_x[m])                  (state update)
@@ -109,15 +120,15 @@
 //!   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]         (rank merge)
 //! ```
 //!
-//! The hidden state hₜ is shared across ranks; each rank contributes to it
-//! independently but reads the full shared state when producing its output.
+//! All ranks share the hidden state hₜ. Each rank writes to it independently,
+//! and each rank reads the full shared state for its output.
 //!
 //! ## 4. Combined formulation (everything together)
 //!
-//! Putting trapezoid + RoPE + MIMO into a single expression — `B̃ₜ[m] = Rₜ Bₜ[m]`
-//! and `C̃ₜ[m] = Rₜ Cₜ[m]` denote the RoPE-rotated MIMO projections, and the `β`
-//! tap is written at the default member's lag 1 (§1: it reads `t−l` for that
-//! member's own `l`, and a two-tap member adds a second such term):
+//! Trapezoid + RoPE + MIMO in one expression. `B̃ₜ[m] = Rₜ Bₜ[m]` and
+//! `C̃ₜ[m] = Rₜ Cₜ[m]` are the RoPE-rotated MIMO projections. The `β` tap is at
+//! the lag 1 of the default member (§1: a member with lag `l` reads `t−l`, and
+//! a two-tap member adds a second such term):
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁
@@ -130,43 +141,45 @@
 //!
 //! ## 5. MambaProduct (`micro_steps = u > 1`)
 //!
-//! A fourth, independent dial (DeltaProduct's dial, not its mechanism — see
-//! [`crate::mamba3::product`] and `info/mamba-3/rotation-as-optimization.md`): `u`
-//! recurrence micro-steps per token, each a full step of the above with its own
-//! projected `x`, `B`, `Δ`, `A`, `λ` and rotation. One *token*'s transition is
-//! then the **product**
+//! A fourth, independent dial: the dial of DeltaProduct, not its mechanism
+//! (see [`crate::mamba3::product`] and
+//! `info/mamba-3/rotation-as-optimization.md`). There are `u` recurrence
+//! micro-steps per token. Each one is a full step of the above, with its own
+//! projected `x`, `B`, `Δ`, `A`, `λ` and rotation. The transition of one
+//! *token* is then the **product**
 //!
 //! ```text
 //!   Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁
 //! ```
 //!
-//! and its write a sum of `u` outer products staggered along it; the read `C`,
-//! the gate `z` and the `D` skip stay per token. It is evaluated by folding the
+//! and its write is a sum of `u` outer products staggered along it. The read
+//! `C`, the gate `z` and the `D` skip stay per token. The block folds the
 //! micro-steps into the sequence axis, so nothing below this line changes. See
-//! [`crate::mamba3::product`] for what `u` buys per
-//! [`RotationKind`] — the answer is very
-//! different for the abelian and non-abelian ones.
+//! [`crate::mamba3::product`] for what `u` buys per [`RotationKind`]. The
+//! answer is very different for the abelian and non-abelian kinds.
 //!
-//! Implementation note: the trapezoidal recurrence (in the double-ssd pathway)
-//! is computed by splitting it into a γ-SSD (the current sample) and one β-SSD
-//! per tap, at that tap's own lag; see
-//! [`crate::mamba3::double_ssd::ssd::ssd_path`]. The single-ssd pathway does the
-//! same work in one call. The rotation is applied to B and C before the SSD
-//! calls, through the one entry point
-//! [`rotate_bc_forward`](crate::mamba3::rotation::rotate_bc_forward) (which is
-//! [`apply_rope`](crate::mamba3::rotation::rope::apply_rope) for the abelian
-//! kind and a quaternion scan for the others), and MIMO expansion happens by
-//! augmenting the V tensor with the per-rank `mimo_x` projection.
+//! Implementation notes:
+//!
+//! - The double-ssd pathway splits the trapezoidal recurrence into a γ-SSD
+//!   (the current sample) and one β-SSD per tap, at the lag of that tap (see
+//!   [`crate::mamba3::double_ssd::ssd::ssd_path`]). The single-ssd pathway
+//!   does the same work in one call.
+//! - The rotation applies to B and C before the SSD calls, through the one
+//!   entry point [`rotate_bc_forward`](crate::mamba3::rotation::rotate_bc_forward)
+//!   ([`apply_rope`](crate::mamba3::rotation::rope::apply_rope) for the
+//!   abelian kind, a quaternion scan for the others).
+//! - The MIMO expansion multiplies the V tensor by the per-rank `mimo_x`
+//!   projection.
 //!
 //! See also: [`crate::mamba3::double_ssd::double_ssd`] and [`crate::mamba3::single_ssd::single_ssd`].
 //!
 //! ## Notation / Dimension Keys
 //!
-//! Throughout all Mamba-3 files, tensor names carry a suffix representing their shape.
-//! The letters used differ from the reference paper and the python implementation.
-//! The "Paper" column gives the symbol from the Mamba-3 paper; the "Python" column
-//! gives the field/variable name in the reference implementation
-//! (`../py/state-spaces/mamba/mamba_ssm/modules/mamba3.py`).
+//! In all Mamba-3 files, a tensor name has a suffix that gives its shape. The
+//! letters are different from those of the paper and of the Python
+//! implementation. The "Paper" column gives the symbol in the Mamba-3 paper.
+//! The "Python" column gives the name in the reference implementation
+//! (`mamba_ssm/modules/mamba3.py` in `state-spaces/mamba`).
 //!
 //! | Letter | Dimension | Paper | Python | Typical value |
 //! |--------|-----------|-------|--------|---------------|
@@ -185,9 +198,9 @@
 //! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
 //! | `a`    | `num_rope_angles` = `state_rank` / 2 (or `rope_dim` / 2) | — | `num_rope_angles` | varies |
 //!
-//! Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
-//! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
-//! `XY` may also represent `x+y`, `x*y`, etc.
+//! An uppercase letter is a relation (offset, multiple, concat, stack) of
+//! lowercase letters. For example, `X` can be `x+1`, `x-1` or `x*2`, and `XY`
+//! can be `x+y` or `x*y`.
 
 use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
@@ -208,11 +221,12 @@ use burn_stack::utils::{UntiedParam, untied};
 
 /// The Mamba-3 SSM block.
 ///
-/// Implements the full Mamba-3 layer with exponential-trapezoidal discretization
-/// and data-dependent RoPE.  Supports SISO (mimo_rank=1) and MIMO (mimo_rank>1).
-/// Supports two execution modes:
+/// The full Mamba-3 layer with exponential-trapezoidal discretization and
+/// data-dependent RoPE, for SISO (mimo_rank=1) and MIMO (mimo_rank>1). It has
+/// two execution modes:
 ///
-/// - [`Self::forward`] — chunkwise double-SSD algorithm for training / prefill
+/// - [`Self::forward`] — chunkwise SSD for training / prefill (the cache
+///   variant selects the double- or single-SSD pathway)
 /// - [`Self::step`]    — recurrent form for token-by-token decoding
 #[derive(Module, Debug)]
 pub struct Mamba3 {
@@ -222,27 +236,30 @@ pub struct Mamba3 {
     /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u
     /// | rotation·u | noise·u | tropical_a·u | tropical_b·u]`
     ///
-    /// The segments from `lambda_raw` on are optional and trail for that
-    /// reason: [`Trapezoid::None`] projects no `lambda_raw`, a one-tap pattern
-    /// no `mu_raw`, [`RotationKind::Real1D`] no `rotation`, every [`Gain`] but
-    /// [`Gain::KalmanProjectedNoise`] no `noise`, and [`Tropical::None`] no
-    /// `tropical_*`.
+    /// The segments from `lambda_raw` on are optional, so they are at the end:
     ///
-    /// Every **per-micro-step** stream is projected `u` times over and folded
-    /// into the sequence by [`crate::mamba3::product`]; the gate `z` and the
-    /// read `C` are per token. At the default `u = 1` this is the stock
-    /// `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
+    /// - [`Trapezoid::None`] projects no `lambda_raw`,
+    /// - a one-tap pattern projects no `mu_raw`,
+    /// - [`RotationKind::Real1D`] projects no `rotation`,
+    /// - every [`Gain`] except [`Gain::KalmanProjectedNoise`] projects no `noise`,
+    /// - [`Tropical::None`] projects no `tropical_*`.
+    ///
+    /// The block projects each **per-micro-step** stream `u` times, and
+    /// [`crate::mamba3::product`] folds them into the sequence. The gate `z`
+    /// and the read `C` are per token. At the default `u = 1`, this is the
+    /// stock `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
     /// + num_rotation_channels`.
     ///
-    /// Under [`Mamba3Untied::InProjTail`] it stops at `C_raw`, the rest living in
-    /// [`Self::in_proj_tail`]; [`Self::project_in`] reads the two as one.
+    /// Under [`Mamba3Untied::InProjTail`], `in_proj` stops at `C_raw`, and the
+    /// rest is in [`Self::in_proj_tail`]. [`Self::project_in`] reads the two
+    /// as one.
     pub in_proj: Linear,
 
-    /// `in_proj`'s trailing per-micro-step segments
+    /// The trailing per-micro-step segments of `in_proj`,
     /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u | noise·u |
-    /// tropical_a·u | tropical_b·u]`, split off when
-    /// [`Mamba3Untied::InProjTail`] unties them: one copy per application, along
-    /// the output axis. `None` ⇒ `in_proj` carries them.
+    /// tropical_a·u | tropical_b·u]`, when [`Mamba3Untied::InProjTail`] unties
+    /// them: one copy per application, along the output axis. `None` ⇒
+    /// `in_proj` holds them.
     pub in_proj_tail: Option<Linear>,
 
     /// Per-head bias for the discretisation step size Δ.
@@ -292,9 +309,9 @@ pub struct Mamba3 {
 
     /// Optional gated RMSNorm applied before the output projection.
     ///
-    /// When `Some`, the SiLU gate at the block tail is replaced by
-    /// `RmsNormGated(y, z)` which normalises `y` over `per_head_dim` and
-    /// gates with `SiLU(z)`. Created when `has_outproj_norm = true`.
+    /// When `Some`, `RmsNormGated(y, z)` replaces the SiLU gate at the block
+    /// tail. It normalises `y` over `per_head_dim` and gates with `SiLU(z)`.
+    /// Present when `has_outproj_norm = true`.
     pub out_norm: Option<RmsNormGated>,
 
     /// Output projection: maps `d_inner → d_model`.
@@ -302,28 +319,34 @@ pub struct Mamba3 {
 
     /// Optional learnable initial hidden state `h₀`.
     /// Shape: `[nheads, per_head_dim, state_rank]`
+    ///
+    /// Each `forward` adds it to the incoming cache state. Only the `Minimal`
+    /// SSD path supports it: the two serial paths panic. `step` does not read
+    /// it.
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
-    /// `ln κₕ`, the Kalman gate's per-head noise scale (`qₜ = κₕ·Δₜ`; see
+    /// `ln κₕ`, the per-head noise scale of the Kalman gate (`qₜ = κₕ·Δₜ`, see
     /// [`crate::mamba3::positive`]). `−∞` is the stock block.
     /// Shape: `[nheads]`. `None` under [`Gain::Projected`].
     ///
-    /// Held in logs, not as `softplus` of a raw parameter: `κ` is a scale on
-    /// `q` spanning decades (a gap's doubt against a value's), and an AdamW
-    /// step in `ln κ` is a relative change at every one of them. The price is
-    /// where the stock join sits — at `ln κ = −∞`, a limit training
-    /// approaches but never lands on, with `∂/∂ln κ ∝ κ` fading on the way.
-    /// The join is live at the init ([`Mamba3Config::kalman_kappa_init`]) and
+    /// The block holds `κ` in logs, not as `softplus` of a raw parameter. `κ`
+    /// scales `q` over many decades (the doubt of a gap against that of a
+    /// value), and an AdamW step in `ln κ` is a relative change at each of
+    /// them. The cost: the stock block is at `ln κ = −∞`, a limit that training
+    /// approaches but never reaches, and `∂/∂ln κ ∝ κ` fades on the way. The
+    /// join is live at the init ([`Mamba3Config::kalman_kappa_init`]). It is
     /// exact only by assignment, which is how the tests reach it.
     pub kalman_log_kappa_h: Option<Param<Tensor<1>>>,
 
-    /// `ωₕ`, the read exponent: the SSD readout is scaled by `(Λₜ + ε)^(−ωₕ)`,
-    /// so `ω = 1` reads the estimate `η/Λ` and `ω = 0` (the init) the stock
-    /// information `η`. Shape: `[nheads]`. `None` under [`Gain::Projected`].
+    /// `ωₕ`, the read exponent: the block scales the SSD readout by
+    /// `(Λₜ + ε)^(−ωₕ)`. So `ω = 1` reads the estimate `η/Λ`, and `ω = 0` (the
+    /// init) reads the stock information `η`. Shape: `[nheads]`. `None` under
+    /// [`Gain::Projected`].
     ///
-    /// Kept under `has_outproj_norm` too: the scale meets the SSD's readout
-    /// before the `D` skip and the register's `c·e` are added, so the per-head
-    /// norm cannot divide it out — `ω` sets the SSD's share against theirs.
+    /// It stays under `has_outproj_norm` too. The scale applies to the SSD
+    /// readout before the `D` skip and the `c·e` of the register are added, so
+    /// the per-head norm cannot divide it out: `ω` sets the share of the SSD
+    /// against theirs.
     pub kalman_read_h: Option<Param<Tensor<1>>>,
 
     /// `eₕ`, the tropical register's readout: `yₜ,ₕ += cₜ,ₕ·eₕ`.
@@ -347,9 +370,9 @@ pub struct Mamba3 {
     pub num_rope_angles: usize,
 
     /// Effective RoPE dimension (= `2 · num_rope_angles`). Always even and
-    /// `≤ state_rank`. Only the first `rope_dim` entries of B/C are rotated.
-    /// `0` — like every other rotation count here — for
-    /// [`RotationKind::Real1D`], which rotates nothing.
+    /// `≤ state_rank`. The rotation turns only the first `rope_dim` entries of
+    /// B/C. `0` for [`RotationKind::Real1D`], which rotates nothing (like every
+    /// other rotation count here).
     pub rope_dim: usize,
 
     /// MIMO rank. 1 = SISO (standard Mamba-3).
@@ -363,8 +386,8 @@ pub struct Mamba3 {
     pub micro_steps: usize,
 
     /// Which transition rotation the block applies to `B`/`C` ([`RotationKind`]).
-    /// A non-parameter constant — `#[module(skip)]` keeps it out of the record and
-    /// carries it through `load_record`/`to_device`/… unchanged.
+    /// A non-parameter constant: `#[module(skip)]` keeps it out of the record
+    /// and keeps it unchanged through `load_record`/`to_device`/….
     #[module(skip)]
     pub rotation: RotationKind,
 
@@ -387,22 +410,22 @@ pub struct Mamba3 {
     /// (see [`Mamba3Config::rotation_range`]).
     pub rotation_range: f64,
 
-    /// Number of in-projection channels devoted to the rotation parameters
-    /// (`num_rope_angles` for `Complex2D`, `nheads·3·num_rotation_blocks` for
-    /// the quaternion kinds, `0` for `Real1D`); the size of the trailing
-    /// `in_proj` segment, which is absent entirely when it is `0`.
+    /// Number of in-projection channels for the rotation parameters, per
+    /// micro-step: `num_rope_angles` for `Complex2D`,
+    /// `nheads·3·num_rotation_blocks` for the quaternion kinds, `0` for
+    /// `Real1D`. At `0`, `in_proj` has no rotation segment.
     pub num_rotation_channels: usize,
 
-    /// Number of quaternion blocks (`rope_dim / 4`); only used for
-    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
+    /// Number of quaternion blocks (`rope_dim / 4`). Only
+    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`] use it.
     pub num_quat_blocks: usize,
 
     /// Whether the `mimo_rank == 1` specialized *chunkwise* kernel is enabled
     /// (see [`Mamba3Config::siso_specialization`]).
     ///
     /// A performance knob, not a semantic one: both branches compute the same
-    /// values and gradients. A non-parameter constant — `#[module(skip)]` keeps
-    /// it out of the record.
+    /// values and gradients. A non-parameter constant (`#[module(skip)]` keeps
+    /// it out of the record).
     #[module(skip)]
     pub siso_specialization: bool,
 
@@ -444,25 +467,25 @@ impl Mamba3 {
         self.rotation
     }
 
-    /// Number of quaternion blocks the rotation projection and its cumulative
-    /// scan run over: `num_quat_blocks · quat_factors` — twice the state's
-    /// 4-block count for [`RotationKind::Rotor4D`], whose left and right
-    /// factors share one stacked block axis.
+    /// Number of quaternion blocks of the rotation projection and of its
+    /// cumulative scan: `num_quat_blocks · quat_factors`. For
+    /// [`RotationKind::Rotor4D`] this is twice the 4-block count of the state,
+    /// because its left and right factors share one stacked block axis.
     pub fn num_rotation_blocks(&self) -> usize {
         self.num_quat_blocks * self.rotation.quat_factors()
     }
 
-    /// Width of the in-projection's trailing rotation segment: the per-step
-    /// [`Self::num_rotation_channels`] once per micro-step, since each
-    /// micro-step turns the state by a rotation of its own.
+    /// Width of the trailing rotation segment of the in-projection: the
+    /// per-step [`Self::num_rotation_channels`] once per micro-step, because
+    /// each micro-step turns the state by its own rotation.
     pub fn rotation_channels_total(&self) -> usize {
         self.micro_steps * self.num_rotation_channels
     }
 
-    /// Width of the in-projection's `λ` segment — one channel per (head,
-    /// micro-step), or **`0`** under [`Trapezoid::None`], which has no `λ` to
-    /// project. Peeled off the tail by `helpers::split_trailing`, immediately
-    /// inside the rotation segment.
+    /// Width of the `λ` segment of the in-projection: one channel per (head,
+    /// micro-step), or **`0`** under [`Trapezoid::None`], which has no `λ`.
+    /// `helpers::split_trailing` removes it from the tail, just inside the
+    /// rotation segment.
     pub fn lambda_channels_total(&self) -> usize {
         if self.trapezoid.has_beta_tap() {
             self.micro_steps * self.nheads()
@@ -471,11 +494,12 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the in-projection's `μ` segment — the second tap's mix, one
-    /// channel per (head, micro-step) for the two-tap patterns and **`0`** for
-    /// every other, including a two-tap one at `u = 1`, where the taps fold
-    /// ([`Trapezoid::has_interior_tap`]). Peeled off the tail by
-    /// `helpers::split_trailing`, immediately inside the `λ` segment.
+    /// Width of the `μ` segment of the in-projection (the mix of the second
+    /// tap): one channel per (head, micro-step) for the two-tap patterns.
+    /// **`0`** for every other pattern, and for a two-tap one at `u = 1`,
+    /// where the taps fold ([`Trapezoid::has_interior_tap`]).
+    /// `helpers::split_trailing` removes it from the tail, just inside the `λ`
+    /// segment.
     pub fn mu_channels_total(&self) -> usize {
         if self.trapezoid.has_interior_tap(self.micro_steps) {
             self.micro_steps * self.nheads()
@@ -484,10 +508,10 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the in-projection's Kalman noise segment `r` — one channel per
-    /// (head, micro-step) under [`Gain::KalmanProjectedNoise`], **`0`** for
-    /// every other gain. Peeled off the tail by `helpers::split_trailing`,
-    /// immediately inside the tropical segments.
+    /// Width of the Kalman noise segment `r` of the in-projection: one channel
+    /// per (head, micro-step) under [`Gain::KalmanProjectedNoise`], **`0`** for
+    /// every other gain. [`Self::split_positive`] removes it from the tail,
+    /// just inside the tropical segments.
     pub fn noise_channels_total(&self) -> usize {
         if self.gain.projects_noise() {
             self.micro_steps * self.nheads()
@@ -496,9 +520,10 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the in-projection's tropical segments `(a, b)` — two channels
-    /// per (head, micro-step) under [`Tropical::MaxPlus`], **`0`** otherwise.
-    /// The outermost trailing segment, so peeled off first.
+    /// Width of the tropical segments `(a, b)` of the in-projection: two
+    /// channels per (head, micro-step) under [`Tropical::MaxPlus`], **`0`**
+    /// otherwise. It is the outermost trailing segment, so
+    /// [`Self::split_positive`] removes it first.
     pub fn tropical_channels_total(&self) -> usize {
         if self.tropical.is_on() {
             2 * self.micro_steps * self.nheads()
@@ -507,10 +532,10 @@ impl Mamba3 {
         }
     }
 
-    /// Peel the positive systems' trailing segments off an in-projection whose
-    /// channel axis is `dim`: `(rest, noise, tropical (a, b))`, each `None`
-    /// when the block projects it not. The two tropical halves come back
-    /// still `u`-wide, `a` first.
+    /// Remove the trailing segments of the positive systems from an
+    /// in-projection whose channel axis is `dim`. Returns
+    /// `(rest, noise, tropical (a, b))`, each `None` when the block does not
+    /// project it. The two tropical halves are still `u`-wide, `a` first.
     #[allow(clippy::type_complexity)]
     pub(crate) fn split_positive<const D: usize>(
         &self,
@@ -531,8 +556,8 @@ impl Mamba3 {
         (proj, noise, tropical)
     }
 
-    /// What the Kalman gate reads besides the discretisation — `None` under
-    /// [`Gain::Projected`]. `carry_bh` is the cache's `ln Λ`.
+    /// What the Kalman gate reads in addition to the discretisation. `None`
+    /// under [`Gain::Projected`]. `carry_bh` is the `ln Λ` of the cache.
     ///
     /// # Shapes
     /// - `noise_bsh` : `[batch, len, nheads]`, present iff
@@ -563,16 +588,20 @@ impl Mamba3 {
         crate::mamba3::positive::fresh_slots(self.gain, self.tropical, batch, self.nheads(), device)
     }
 
-    /// The positive systems' tail, shared by both pathways' `forward` and by
-    /// `step` (whose folded run is one token's `u` micro-steps): the register's
-    /// scan, each system's carry for the next call (its run's last position),
-    /// and the two readout ports at the read rows ([`Self::positive_read`]).
+    /// The tail of the positive systems. The `forward` of both pathways and
+    /// `step` (whose folded run is the `u` micro-steps of one token) share it.
+    /// It computes:
+    ///
+    /// - the scan of the register,
+    /// - the carry of each system for the next call (the last position of the
+    ///   run),
+    /// - the two readout ports at the read rows ([`Self::positive_read`]).
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
-    /// `end` is a right-padded call's `(real folded positions per slot, the
-    /// incoming ln Λ carry)`: each carry is then taken at the slot's own last
-    /// real position — the incoming one for a slot with none.
+    /// `end` is `(real folded positions per slot, the incoming ln Λ carry)`
+    /// for a right-padded call. Each carry then comes from the last real
+    /// position of its slot, or is the incoming one for a slot with none.
     ///
     /// # Shapes
     /// - `y_btmhp`           : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
@@ -625,13 +654,13 @@ impl Mamba3 {
         (y_btmhp, log_precision_bh, tropical_bh)
     }
 
-    /// The positive systems' two readout ports, on the SSD's readout — before
-    /// the `D` skip, the gate and the rank merge:
+    /// The two readout ports of the positive systems, on the SSD readout,
+    /// before the `D` skip, the gate and the rank merge:
     ///
-    /// - `C`: `y ← y·(Λ + ε)^(−ω)` when the block has [`Self::kalman_read_h`];
+    /// - `C`: `y ← y·(Λ + ε)^(−ω)` when the block has [`Self::kalman_read_h`],
     /// - `D`: `y ← y + c·e` when it has [`Self::tropical_readout_hp`].
     ///
-    /// Both are broadcast over the mimo ranks, which share the state.
+    /// Both broadcast over the mimo ranks, which share the state.
     ///
     /// # Shapes
     /// - `y_btmhp`            : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
@@ -663,10 +692,10 @@ impl Mamba3 {
         }
     }
 
-    /// Everything the discretisation needs, in one place — the tap pattern, the
-    /// micro-steps its gates are periodic in, and the two clamps. Every site
-    /// that forms the trapezoid's masses ([`forward`](Self::forward),
-    /// [`step`](Self::step)) goes through this.
+    /// Everything the discretisation needs, in one place: the tap pattern, the
+    /// micro-steps (the period of its gates), and the two clamps. Every site
+    /// that computes the masses of the trapezoid ([`forward`](Self::forward),
+    /// [`step`](Self::step)) uses this.
     pub fn trapezoid_spec(&self) -> crate::mamba3::trapezoid::TrapezoidSpec {
         crate::mamba3::trapezoid::TrapezoidSpec {
             pattern: self.trapezoid,
@@ -676,10 +705,9 @@ impl Mamba3 {
         }
     }
 
-    /// Everything the rotation needs, in one place — the algebra, the rotated
-    /// width, and the per-step bound. Every site that materialises a per-step
-    /// rotation ([`forward`](Self::forward), [`step`](Self::step)) goes
-    /// through this.
+    /// Everything the rotation needs, in one place: the algebra, the rotated
+    /// width, and the per-step bound. Every site that computes a per-step
+    /// rotation ([`forward`](Self::forward), [`step`](Self::step)) uses this.
     pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
         crate::mamba3::rotation::RotationSpec {
             kind: self.rotation,
@@ -688,22 +716,23 @@ impl Mamba3 {
         }
     }
 
-    /// Whether the specialized `mimo_rank == 1` **per-token** kernels should run:
-    /// the block is SISO **and** [`Mamba3Config::siso_specialization_decode`] is
+    /// Whether the specialized `mimo_rank == 1` **per-token** kernels run: the
+    /// block is SISO **and** [`Mamba3Config::siso_specialization_decode`] is
     /// enabled.
     ///
-    /// The chunkwise counterpart is [`Mamba3Config::siso_specialization`], which
-    /// travels to its kernel as a field of the SSD input bundle rather than
-    /// through a method.
+    /// The chunkwise counterpart is [`Mamba3Config::siso_specialization`]. It
+    /// goes to its kernel as a field of the SSD input bundle, not through a
+    /// method.
     ///
-    /// Purely a performance choice — see [`Mamba3Config::siso_specialization_decode`].
+    /// Only a performance choice (see
+    /// [`Mamba3Config::siso_specialization_decode`]).
     pub fn use_siso_decode_kernels(&self) -> bool {
         self.mimo_rank == 1 && self.siso_specialization_decode
     }
 
-    /// The in-projection's output, laid out as [`Self::in_proj`] documents
-    /// (`[z | … | tropical_b·u]`): `in_proj` alone, or —
-    /// under [`Mamba3Untied::InProjTail`] — followed by [`Self::in_proj_tail`].
+    /// The output of the in-projection, in the layout that [`Self::in_proj`]
+    /// documents (`[z | … | tropical_b·u]`): `in_proj` alone, or `in_proj`
+    /// then [`Self::in_proj_tail`] under [`Mamba3Untied::InProjTail`].
     pub fn project_in<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
         match &self.in_proj_tail {
             None => self.in_proj.forward(x),
@@ -756,26 +785,27 @@ impl Mamba3 {
 // Mamba3Config  (hyperparameters and factory)
 // ---------------------------------------------------------------------------
 
-/// A [`Mamba3`] parameter that may be held once per application of its real
-/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
-/// big maps — `in_proj`'s `z|x|B|C` head and `out_proj` — always stay tied.
+/// A [`Mamba3`] parameter that the block can hold once per application of its
+/// real layer instead of tied across them (see [`burn_stack::utils::untied`]).
+/// The big maps, the `z|x|B|C` head of `in_proj` and `out_proj`, are always
+/// tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba3Untied {
-    /// `in_proj`'s trailing per-micro-step scalar and rotation segments
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`, split off into
-    /// [`Mamba3::in_proj_tail`] — a second, small GEMM.
+    /// The trailing per-micro-step scalar and rotation segments of `in_proj`,
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`, moved
+    /// into [`Mamba3::in_proj_tail`] (a second, small GEMM).
     InProjTail,
     /// The Δ bias [`Mamba3::dt_bias_h`].
     DtBias,
     /// The skip [`Mamba3::d_h`].
     D,
-    /// `B`'s QK-norm gain ([`Mamba3::b_norm`]).
+    /// The QK-norm gain of `B` ([`Mamba3::b_norm`]).
     BNorm,
-    /// `C`'s QK-norm gain ([`Mamba3::c_norm`]).
+    /// The QK-norm gain of `C` ([`Mamba3::c_norm`]).
     CNorm,
-    /// `B`'s bias [`Mamba3::b_bias_hmr`].
+    /// The bias of `B`, [`Mamba3::b_bias_hmr`].
     BBias,
-    /// `C`'s bias [`Mamba3::c_bias_hmr`].
+    /// The bias of `C`, [`Mamba3::c_bias_hmr`].
     CBias,
     /// The MIMO value up-projection [`Mamba3::mimo_x_hmp`] (`mimo_rank > 1`).
     MimoX,
@@ -783,17 +813,17 @@ pub enum Mamba3Untied {
     MimoZ,
     /// The MIMO output down-projection [`Mamba3::mimo_o_hmp`] (`mimo_rank > 1`).
     MimoO,
-    /// The output norm's gain ([`Mamba3::out_norm`]; `has_outproj_norm`).
+    /// The gain of the output norm ([`Mamba3::out_norm`], `has_outproj_norm`).
     OutNorm,
     /// The learnable initial state [`Mamba3::init_state_hpr`]
     /// (`has_learnable_init_state`).
     InitState,
-    /// The Kalman gate's `ln κ` [`Mamba3::kalman_log_kappa_h`] (a Kalman
-    /// [`Gain`]).
+    /// The `ln κ` of the Kalman gate, [`Mamba3::kalman_log_kappa_h`] (a
+    /// Kalman [`Gain`]).
     KalmanKappa,
     /// The Kalman read exponent [`Mamba3::kalman_read_h`] (a Kalman [`Gain`]).
     KalmanRead,
-    /// The tropical register's readout [`Mamba3::tropical_readout_hp`]
+    /// The readout of the tropical register, [`Mamba3::tropical_readout_hp`]
     /// ([`Tropical::MaxPlus`]).
     TropicalReadout,
 }
@@ -807,8 +837,8 @@ pub struct Mamba3Config {
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
-    /// **Must be even** for every rotating [`RotationKind`] (RoPE pairing);
-    /// [`RotationKind::Real1D`] pairs nothing, so it also admits an odd rank
+    /// **Must be even** for every rotating [`RotationKind`] (RoPE pairing).
+    /// [`RotationKind::Real1D`] makes no pairs, so it also accepts an odd rank
     /// (down to the scalar state `1`).
     ///
     /// Paper: `N`. Python: `d_state`.
@@ -835,9 +865,10 @@ pub struct Mamba3Config {
 
     /// MIMO rank. `1` = standard SISO Mamba-3.
     ///
-    /// When `mimo_rank > 1`, the B/C projections have `mimo_rank` parallel rank channels.
-    /// Three extra weight matrices (`mimo_x_hmp`, `mimo_z_hmp`, `mimo_o_hmp`) provide
-    /// element-wise up/down projections in head-space across ranks.
+    /// When `mimo_rank > 1`, the B/C projections have `mimo_rank` parallel rank
+    /// channels. Three extra weights (`mimo_x_hmp`, `mimo_z_hmp`, `mimo_o_hmp`)
+    /// give element-wise up/down projections in head-space across ranks. At
+    /// init, a MIMO block is its SISO block (`info/mamba-3/mimo-as-batch.md`).
     ///
     /// Paper: `M`. Python: `mimo_rank`.
     #[config(default = 1)]
@@ -846,62 +877,70 @@ pub struct Mamba3Config {
     /// **MambaProduct**: recurrence micro-steps per token — DeltaProduct's `u`.
     /// `1` (the default) is stock Mamba-3, byte for byte.
     ///
-    /// Each micro-step is a full Mamba-3 step with its own projected
-    /// `x`, `B`, `Δ`, `A`, `λ` and rotation, so one *token*'s transition is the
-    /// **product** `(∏ⱼ αⱼ)·Rᵤ⋯R₁` and its write is `u` staggered outer
+    /// Each micro-step is a full Mamba-3 step with its own projected `x`, `B`,
+    /// `Δ`, `A`, `λ` and rotation. So the transition of one *token* is the
+    /// **product** `(∏ⱼ αⱼ)·Rᵤ⋯R₁`, and its write is `u` staggered outer
     /// products. The read `C`, the gate `z`, the `D` skip and the output are
-    /// per token. Cost is `u`× the recurrence; the state does not grow.
+    /// per token. The cost is `u`× the recurrence. The state does not grow.
     ///
-    /// What it buys depends on [`Self::rotation`], and the split is sharp: with
-    /// [`Real1D`](crate::mamba3::rotation::RotationKind::Real1D) the factors are
-    /// scalars and commute, so `u` widens only the write (the sequential
-    /// reading of what [`Self::mimo_rank`] does jointly); with
-    /// [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D) it also
-    /// multiplies the per-token angle reach by `u` *without* pushing any single
-    /// factor onto `tanh`'s flat region (see [`Self::rotation_range`]); with the
-    /// non-abelian kinds it composes generators that no single step can express.
+    /// What it buys depends on [`Self::rotation`]:
+    ///
+    /// - [`Real1D`](crate::mamba3::rotation::RotationKind::Real1D): the factors
+    ///   are scalars and commute, so `u` widens only the write (the sequential
+    ///   reading of what [`Self::mimo_rank`] does jointly).
+    /// - [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D): it
+    ///   also multiplies the per-token angle reach by `u`, *without* putting
+    ///   any single factor on the flat region of `tanh` (see
+    ///   [`Self::rotation_range`]).
+    /// - The non-abelian kinds: it composes generators that no single step can
+    ///   express.
+    ///
     /// See [`crate::mamba3::product`] for the full argument and the folding.
     #[config(default = 1)]
     pub micro_steps: usize,
 
-    /// Which earlier sample(s) the trapezoid's `β` tap reads — the **tap
+    /// Which earlier sample(s) the `β` tap of the trapezoid reads: the **tap
     /// pattern** ([`Trapezoid`]).
     ///
-    /// A choice that only exists at [`Self::micro_steps`] `> 1`, where "the
-    /// previous step" may mean the previous micro-step or the previous token;
-    /// at `u = 1` every pattern either coincides with the default or switches
-    /// the trapezoid off. It selects an *algorithm*, a *cache layout* and how
-    /// many per-head masses the in-projection carries — not a coefficient's
-    /// value: see [`Trapezoid`] and `info/mamba-3/trapezoid-as-integration.md` §9.
+    /// This choice exists only at [`Self::micro_steps`] `> 1`, where "the
+    /// previous step" can mean the previous micro-step or the previous token.
+    /// At `u = 1`, every pattern is equal to the default or switches the
+    /// trapezoid off. It selects an *algorithm*, a *cache layout* and the
+    /// number of per-head masses in the in-projection, not the value of a
+    /// coefficient. See [`Trapezoid`] and
+    /// `info/mamba-3/trapezoid-as-integration.md` §9.
     ///
-    /// Defaults to [`Trapezoid::HorizontalCarryOver`], which is what the crate
-    /// has always done.
+    /// Defaults to [`Trapezoid::HorizontalCarryOver`] (one lag-1 tap).
     #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
     pub trapezoid: Trapezoid,
 
-    /// How each head's decay is formed ([`Gain`]): projected from the token
-    /// (stock), or **computed** by a per-head Kalman filter whose precision `Λ`
-    /// accumulates the evidence the head has written — a decay that reads the
-    /// head's history through a scalar that reads only the inputs, so the
-    /// chunkwise pass survives. See [`crate::mamba3::positive`].
+    /// How the decay of each head is formed ([`Gain`]):
     ///
-    /// Structural: a Kalman member allocates `κ` and `ω` per head, one cache
-    /// slot, and under [`Gain::KalmanProjectedNoise`] one in-projection channel
-    /// per (head, micro-step). Defaults to [`Gain::Projected`], the stock block.
+    /// - projected from the token (stock), or
+    /// - **computed** by a per-head Kalman filter. Its precision `Λ` adds up
+    ///   the evidence that the head wrote. So the decay reads the history of
+    ///   the head through a scalar that reads only the inputs, and the
+    ///   chunkwise pass still works.
+    ///
+    /// See [`crate::mamba3::positive`]. Structural: a Kalman member allocates
+    /// `κ` and `ω` per head and one cache slot. Under
+    /// [`Gain::KalmanProjectedNoise`], it also adds one in-projection channel
+    /// per (head, micro-step). Defaults to [`Gain::Projected`], the stock
+    /// block.
     #[config(default = "crate::mamba3::positive::Gain::Projected")]
     pub gain: Gain,
 
-    /// The initial `κ` of a Kalman [`Gain`] (`qₜ = κ·Δₜ`). Small, so the
-    /// block starts next to stock with a live gradient; stock itself is
-    /// `κ = 0`, the unreachable end of `κ`'s log parameterisation (see
+    /// The initial `κ` of a Kalman [`Gain`] (`qₜ = κ·Δₜ`). It is small, so the
+    /// block starts near stock with a live gradient. Stock itself is `κ = 0`,
+    /// which the log parameterisation of `κ` cannot reach (see
     /// [`Mamba3::kalman_log_kappa_h`]). Ignored under [`Gain::Projected`].
     #[config(default = 1e-2)]
     pub kalman_kappa_init: f64,
 
-    /// Whether each head carries a tropical register feeding its readout
-    /// ([`Tropical`]): `cₜ = lse(cₜ₋₁ + aₜ, bₜ)` with `(a, b)` projected — a
-    /// soft `max(cₜ₋₁ + aₜ, bₜ)`, i.e. counters clamped at a floor, running
-    /// maxima and resets, none of which a linear recurrence computes. See
+    /// Whether each head has a tropical register that adds to its readout
+    /// ([`Tropical`]): `cₜ = lse(cₜ₋₁ + aₜ, bₜ)` with `(a, b)` projected. This
+    /// is a soft `max(cₜ₋₁ + aₜ, bₜ)`: counters clamped at a floor, running
+    /// maxima and resets. A linear recurrence computes none of these. See
     /// [`crate::mamba3::positive`]. Defaults to [`Tropical::None`].
     #[config(default = "crate::mamba3::positive::Tropical::None")]
     pub tropical: Tropical,
@@ -930,41 +969,39 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_proj_bias: bool,
 
-    /// Whether to allocate a learnable initial SSM state `h₀`.
+    /// Whether to allocate a learnable initial SSM state `h₀`. Only the
+    /// `Minimal` SSD path supports it (see [`Mamba3::init_state_hpr`]).
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
-    /// Fraction of `state_rank` the transition rotation turns (must be `0.5`
-    /// or `1.0`).
+    /// Fraction of `state_rank` that the transition rotation turns (must be
+    /// `0.5` or `1.0`).
     ///
-    /// To disable the rotation, pick the *kind* [`RotationKind::Real1D`] rather
-    /// than a fraction of zero: a real transition projects no rotation channels
-    /// and caches no accumulator, where a zero fraction used to keep both alive
-    /// around a rotation nobody applied. Ignored by `Real1D`, which turns
-    /// nothing whatever this says.
+    /// To disable the rotation, select the *kind* [`RotationKind::Real1D`], not
+    /// a fraction of zero. A real transition projects no rotation channels and
+    /// caches no accumulator. `Real1D` ignores this field.
     ///
-    /// - `0.5`: partial rotation — only `state_rank / 2` dimensions are turned;
-    ///   the rest pass through unchanged. This is the reference's value in
-    ///   `mamba3.py`; set it explicitly to reproduce that model.
-    /// - `1.0` (default): full rotation — every B/C dimension is turned.
+    /// - `0.5`: partial rotation. Only `state_rank / 2` dimensions turn, and
+    ///   the rest are unchanged. This is the reference value in `mamba3.py`.
+    ///   Set it explicitly to reproduce that model.
+    /// - `1.0` (default): full rotation. Every B/C dimension turns.
     ///
-    /// The default turns everything, for both rotation kinds: a partial
-    /// rotation is a capacity trade (keeping "content" channels out of the
-    /// turn), which is a deliberate choice a config should have to ask for
-    /// rather than get by omission. For
+    /// The default turns everything, for all rotation kinds. A partial
+    /// rotation is a capacity trade (it keeps "content" channels out of the
+    /// turn), so a config must ask for it explicitly. For
     /// [`Quaternion4D`](RotationKind::Quaternion4D) and
-    /// [`Rotor4D`](RotationKind::Rotor4D) it is also what keeps the smallest
-    /// legal `state_rank` (4 — a single quaternion block) usable, since a
-    /// partial quaternion rotation must land on whole 4-blocks.
+    /// [`Rotor4D`](RotationKind::Rotor4D), the default also keeps the smallest
+    /// legal `state_rank` (4, one quaternion block) usable, because a partial
+    /// quaternion rotation must cover whole 4-blocks.
     #[config(default = 1.0)]
     pub rope_fraction: f64,
 
     /// Whether to apply a gated RMSNorm before the output projection.
     ///
-    /// When `true`, the SiLU gate at the end of the block is replaced by a
-    /// per-head [`RmsNormGated`] (group size = `per_head_dim`) which both
-    /// normalises `y` and gates it with `SiLU(z)`. Matches the reference's
-    /// `is_outproj_norm` argument in `mamba3.py`.
+    /// When `true`, a per-head [`RmsNormGated`] (group size = `per_head_dim`)
+    /// replaces the SiLU gate at the end of the block. It normalises `y` and
+    /// gates it with `SiLU(z)`. Same as the `is_outproj_norm` argument of the
+    /// reference `mamba3.py`.
     #[config(default = false)]
     pub has_outproj_norm: bool,
 
@@ -989,32 +1026,32 @@ pub struct Mamba3Config {
     /// How far a single step may rotate the state, in **half-turns per unit
     /// `Δ`**: the per-step angle is bounded by `rotation_range · π · Δ`.
     ///
-    /// The default of `2.0` is "one unit of `Δ` may traverse the whole rotation
-    /// group once", which means the same thing for both kinds even though their
-    /// periods differ:
+    /// The default `2.0` means "one unit of `Δ` can go once around the whole
+    /// rotation group". This means the same for every kind, although their
+    /// periods are different:
     ///
     /// - [`Complex2D`](RotationKind::Complex2D): `2π` is a full turn of
     ///   `SO(2)`.
     /// - [`Quaternion4D`](RotationKind::Quaternion4D): `2π` reaches every
-    ///   element of `SU(2)`, whose period is `4π` — `q` and `−q` are the two
-    ///   lifts of one `SO(3)` rotation and turn the state differently.
+    ///   element of `SU(2)`, whose period is `4π`. `q` and `−q` are the two
+    ///   lifts of one `SO(3)` rotation, and they turn the state differently.
     /// - [`Rotor4D`](RotationKind::Rotor4D): the bound applies to **each
-    ///   factor**, so at the default each of `q` and `p` independently sweeps
-    ///   all of `SU(2)` and the pair reaches every element of
-    ///   `SO(4) ≅ (SU(2)×SU(2))/±1`. Bounding the composite instead (halving
-    ///   the per-factor angle) would cost reach for nothing: the two plane
+    ///   factor**. So at the default, each of `q` and `p` independently covers
+    ///   all of `SU(2)`, and the pair reaches every element of
+    ///   `SO(4) ≅ (SU(2)×SU(2))/±1`. A bound on the composite (half the
+    ///   per-factor angle) would lose reach and gain nothing: the two plane
     ///   angles `a∓b` are periodic in `2π` anyway.
     ///
-    /// What the bound buys is not reach but **gradients**. A rotation of exactly
-    /// `range·π` sits at `tanh`'s asymptote, where the gradient is not merely
-    /// small but **exactly zero** in f32 (`tanh(10) == 1.0`). Half-turns are
-    /// what state-tracking wants, so at `range = 1` — where `π` *is* the
-    /// bound — the most useful rotation is the one the optimiser can never
-    /// reach. At `2.0` it sits at `tanh = 1/2`, in the interior.
+    /// The bound buys **gradients**, not reach. A rotation of exactly
+    /// `range·π` is at the asymptote of `tanh`, where the gradient is
+    /// **exactly zero** in f32 (`tanh(10) == 1.0`), not only small.
+    /// State-tracking wants half-turns. At `range = 1`, where `π` *is* the
+    /// bound, the optimiser can never reach the most useful rotation. At `2.0`
+    /// it is at `tanh = 1/2`, in the interior.
     ///
-    /// `1.0` is the reference implementation's abelian bound (`Δ·π·tanh(ϑ)`);
-    /// set it explicitly to reproduce that model. Ignored by
-    /// [`Real1D`](RotationKind::Real1D), which never turns.
+    /// `1.0` is the abelian bound of the reference implementation
+    /// (`Δ·π·tanh(ϑ)`). Set it explicitly to reproduce that model.
+    /// [`Real1D`](RotationKind::Real1D) ignores it, because it never turns.
     #[config(default = 2.0)]
     pub rotation_range: f64,
 
@@ -1023,17 +1060,17 @@ pub struct Mamba3Config {
     /// ([`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)),
     /// forward *and* its analytic backward.
     ///
-    /// At `mimo_rank == 1` the `m × m` Gram is a scalar, so the general form
+    /// At `mimo_rank == 1` the `m × m` Gram is a scalar. The general form then
     /// issues a `1×r×1` and a `1×1×p` GEMM per `(batch, nchunks, chunk_len,
-    /// nheads)` — thousands of degenerate products. The SISO branch replaces all
-    /// of them with one elementwise multiply and a `state_rank` reduction over
-    /// the whole tensor, which is why deleting the tiny GEMMs helps everywhere:
-    /// ≈ neutral to ~9 % faster across the backends in `bench.md`. Leave it on.
+    /// nheads)`: thousands of degenerate products. The SISO branch replaces all
+    /// of them with one elementwise multiply and one `state_rank` reduction over
+    /// the whole tensor. Removing the tiny GEMMs helps on every backend in
+    /// `bench.md` (from ≈ neutral to ~9 % faster). Leave it on.
     ///
-    /// **Values and gradients are identical either way** — this only selects the
+    /// **Values and gradients are identical either way.** This only selects the
     /// op mix. Ignored when `mimo_rank > 1`, where only the general branch
     /// applies. See also [`Self::siso_specialization_decode`], the per-token
-    /// counterpart, whose trade-off is *not* the same.
+    /// counterpart, which has a *different* trade-off.
     #[config(default = true)]
     pub siso_specialization: bool,
 
@@ -1043,14 +1080,14 @@ pub struct Mamba3Config {
     /// boundary-β seed.
     ///
     /// **Set this to `false` on the CPU backends.** Unlike the chunkwise flag,
-    /// this one replaces a *single, already efficient* batched matmul with a
-    /// broadcast multiply, so the verdict flips with the backend: at
-    /// `benches/layer.rs`'s default size the `step` group is ~12 % faster on CUDA
-    /// and about **3× slower on flex**, whose broadcast-elementwise path trails
-    /// its matmul by more than an order of magnitude at these shapes. The default
-    /// (`true`) suits the GPU backends; a CPU deployment that decodes should turn
-    /// it off — and can do so while keeping [`Self::siso_specialization`] on,
-    /// which is the point of having two flags.
+    /// this one replaces *one, already efficient* batched matmul with a
+    /// broadcast multiply, so the result depends on the backend. At the default
+    /// size of `benches/layer.rs`, the `step` group is ~12 % faster on CUDA and
+    /// about **3× slower on flex**. At these shapes, the broadcast-elementwise
+    /// path of flex is more than 10× slower than its matmul. The default
+    /// (`true`) suits the GPU backends. A CPU deployment that decodes should
+    /// turn it off, and it can keep [`Self::siso_specialization`] on. That is
+    /// why there are two flags.
     ///
     /// **Values and gradients are identical either way.** Ignored when
     /// `mimo_rank > 1`.
@@ -1058,10 +1095,11 @@ pub struct Mamba3Config {
     pub siso_specialization_decode: bool,
 
     /// The parameters held once per application of the block's real layer
-    /// instead of tied across them ([`Mamba3Untied`]); only virtual layers give
-    /// a real layer more than one. Each must exist in this config. The layout
-    /// follows the list alone — [`Mamba3Untied::InProjTail`] splits `in_proj` at
-    /// any count — so every real layer of a stack has the one Muon plan. See
+    /// instead of tied across them ([`Mamba3Untied`]). Only virtual layers
+    /// apply a real layer more than once. Each listed parameter must exist in
+    /// this config. The layout depends only on this list:
+    /// [`Mamba3Untied::InProjTail`] splits `in_proj` also for one application.
+    /// So every real layer of a stack has the same Muon plan. See
     /// [`burn_stack::utils::untied`].
     #[config(default = "Vec::new()")]
     pub untied: Vec<Mamba3Untied>,
@@ -1077,10 +1115,10 @@ impl Mamba3Config {
         self.d_inner() / self.per_head_dim
     }
 
-    /// Effective RoPE dimension: the number of B/C channels actually rotated.
+    /// Effective RoPE dimension: the number of B/C channels that turn.
     /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
-    /// `rope_fraction = 0.5` — and `0` for [`RotationKind::Real1D`], which
-    /// rotates nothing at all.
+    /// `rope_fraction = 0.5`, and `0` for [`RotationKind::Real1D`], which
+    /// rotates nothing.
     pub fn rope_dim(&self) -> usize {
         if self.rotation == RotationKind::Real1D {
             return 0;
@@ -1093,38 +1131,38 @@ impl Mamba3Config {
     }
 
     /// Number of RoPE rotation angles projected per head: `rope_dim / 2` (`0`
-    /// for [`RotationKind::Real1D`]). `init` asserts every rotating kind turns
-    /// at least one pair, so this is `> 0` wherever it is read.
+    /// for [`RotationKind::Real1D`]). `init` asserts that every rotating kind
+    /// turns at least one pair, so this is `> 0` wherever the block reads it.
     pub fn num_rope_angles(&self) -> usize {
         self.rope_dim() / 2
     }
 
     /// Number of **state** quaternion blocks for the quaternion kinds:
-    /// `rope_dim / 4`, which `init` asserts is a whole number (and non-zero)
-    /// for them. `0` for [`RotationKind::Real1D`]; meaningless, and unread, for
+    /// `rope_dim / 4`. For them, `init` asserts that it is a whole non-zero
+    /// number. `0` for [`RotationKind::Real1D`]. Meaningless (and not read) for
     /// [`RotationKind::Complex2D`].
     pub fn num_quat_blocks(&self) -> usize {
         self.rope_dim() / 4
     }
 
-    /// Number of in-projection channels devoted to the rotation parameters,
-    /// per the configured [`RotationKind`]:
+    /// Number of in-projection channels for the rotation parameters, per
+    /// [`RotationKind`]:
     ///
-    /// - [`Real1D`](RotationKind::Real1D): none — the trailing `in_proj`
+    /// - [`Real1D`](RotationKind::Real1D): none. The trailing `in_proj`
     ///   segment is absent, not zero-width (Burn has no zero-width tensors).
     /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle
-    ///   channels, shared across heads and scaled per-head by `Δ`, as in the
+    ///   channels, shared across heads and scaled per head by `Δ`, as in the
     ///   reference.
     /// - [`Quaternion4D`](RotationKind::Quaternion4D) /
     ///   [`Rotor4D`](RotationKind::Rotor4D):
-    ///   `nheads · 3 · num_rotation_blocks` quaternion-generator channels — an
-    ///   axis·angle generator **per head** and block (and, for `Rotor4D`, per
-    ///   *factor*: one generator for the left quaternion and one for the
-    ///   right), fed through
+    ///   `nheads · 3 · num_rotation_blocks` quaternion-generator channels. This
+    ///   is one axis·angle generator **per head** and block (and, for
+    ///   `Rotor4D`, per *factor*: one generator for the left quaternion and one
+    ///   for the right), sent through
     ///   [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis).
-    ///   For a non-abelian transition the axis is where the expressiveness
-    ///   lives: heads sharing one axis and differing only in `Δ` track one word
-    ///   at different speeds instead of different words. See
+    ///   For a non-abelian transition, the axis holds the expressiveness. Heads
+    ///   that share one axis and differ only in `Δ` track one word at different
+    ///   speeds, not different words. See
     ///   [`generator_increment`](crate::mamba3::rotation::generator_increment).
     pub fn num_rotation_channels(&self) -> usize {
         match self.rotation {
@@ -1139,8 +1177,8 @@ impl Mamba3Config {
         }
     }
 
-    /// Number of quaternion blocks the *rotation projection and scan* run over:
-    /// [`Self::num_quat_blocks`] times [`RotationKind::quat_factors`] — i.e.
+    /// Number of quaternion blocks of the *rotation projection and scan*:
+    /// [`Self::num_quat_blocks`] times [`RotationKind::quat_factors`]. That is
     /// `2 · blocks` for [`RotationKind::Rotor4D`], whose left and right factors
     /// share one stacked block axis.
     pub fn num_rotation_blocks(&self) -> usize {
@@ -1153,29 +1191,27 @@ impl Mamba3Config {
     ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]
     /// ```
     ///
-    /// i.e. `d_inner + u·d_inner + u·bc + bc + (2 … 7)·u·nheads +
-    /// u·num_rotation_channels` with `bc = ngroups·state_rank·mimo_rank` and `u` =
-    /// [`Self::micro_steps`]. Only the **per-micro-step** segments widen; the
-    /// gate `z` and the read `C` are per token (see [`crate::mamba3::product`]).
-    /// At `u = 1` the stock block (the default trapezoid, no positive system) is
+    /// That is `d_inner + u·d_inner + u·bc + bc + (2 … 7)·u·nheads +
+    /// u·num_rotation_channels`, with `bc = ngroups·state_rank·mimo_rank` and
+    /// `u` = [`Self::micro_steps`]. Only the **per-micro-step** segments widen.
+    /// The gate `z` and the read `C` are per token (see
+    /// [`crate::mamba3::product`]). At `u = 1`, the stock block (the default
+    /// trapezoid, no positive system) has
     /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
     ///
-    /// Every segment from `λ` on is one a block may omit outright:
-    /// [`Trapezoid::None`] projects no `λ`, a one-tap pattern no `μ`,
-    /// [`RotationKind::Real1D`] no rotation, every [`Gain`] but
-    /// [`Gain::KalmanProjectedNoise`] no noise `r`, and [`Tropical::None`] no
-    /// register `(a, b)` (`helpers::split_trailing` peels them in the reverse
-    /// of that order).
+    /// A block can omit every segment from `λ` on (see [`Mamba3::in_proj`] for
+    /// which setting omits which). `helpers::split_trailing` removes them in
+    /// the reverse order.
     pub fn d_in_proj(&self) -> usize {
         let u = self.micro_steps;
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
         self.d_inner() + u * self.d_inner() + u * bc + bc + self.d_in_proj_tail()
     }
 
-    /// Width of the in-projection's trailing per-micro-step segments
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]` —
-    /// `(2 … 7)·u·nheads + u·num_rotation_channels` — which
-    /// [`Mamba3Untied::InProjTail`] splits off.
+    /// Width of the trailing per-micro-step segments of the in-projection,
+    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`:
+    /// `(2 … 7)·u·nheads + u·num_rotation_channels`.
+    /// [`Mamba3Untied::InProjTail`] moves them into `in_proj_tail`.
     pub fn d_in_proj_tail(&self) -> usize {
         let u = self.micro_steps;
         let scalars = 2
@@ -1188,19 +1224,19 @@ impl Mamba3Config {
 
     /// The block's 2-D weights Muon may own, and how their fused columns split.
     ///
-    /// `in_proj`'s segments mirror the `split_into` in the SSD pathways
+    /// The segments of `in_proj` mirror the `split_into` in the SSD pathways
     /// (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u |
-    /// b·u]`); the per-head *scalar* channels stay on AdamW. See
-    /// [`burn_stack::optim`].
+    /// b·u]`). The per-head *scalar* channels stay on the fallback optimizer.
+    /// See [`burn_stack::optim`].
     ///
-    /// Each micro-step gets its **own** segment rather than sharing one `u`-wide
-    /// slab: they are `u` independent `d_model → width` maps, and Muon should
-    /// orthogonalise each on its own. They share a name, so
+    /// Each micro-step gets its **own** segment, not a share of one `u`-wide
+    /// slab: they are `u` independent `d_model → width` maps, and Muon must
+    /// orthogonalise each one alone. They share a name, so
     /// [`MuonPlan::without_segment`](burn_stack::optim::MuonPlan::without_segment)
-    /// still opts all of a stream's micro-steps out at once.
+    /// still removes all the micro-steps of a stream at once.
     ///
-    /// Under [`Mamba3Untied::InProjTail`] the segments from `Δ` on are
-    /// `in_proj_tail`'s, one copy per application ([`ProjSpec::tiled`]).
+    /// Under [`Mamba3Untied::InProjTail`], the segments from `Δ` on belong to
+    /// `in_proj_tail`, one copy per application ([`ProjSpec::tiled`]).
     ///
     /// [`ProjSpec::tiled`]: burn_stack::optim::ProjSpec::tiled
     #[cfg(feature = "optim")]
@@ -1219,8 +1255,9 @@ impl Mamba3Config {
             .collect();
         let tail: Vec<Seg> = per_micro(Seg::adamw("dt", nheads))
             .chain(per_micro(Seg::adamw("a", nheads)))
-            // `Trapezoid::None` projects no `λ`, as `Real1D` projects no rotation;
-            // and only a two-tap pattern projects the second mass's mix `μ`.
+            // `Trapezoid::None` projects no `λ` (as `Real1D` projects no
+            // rotation). Only a two-tap pattern projects `μ`, the mix of the
+            // second mass.
             .chain(
                 self.trapezoid
                     .has_beta_tap()
@@ -1235,15 +1272,15 @@ impl Mamba3Config {
                     .into_iter()
                     .flatten(),
             )
-            // `Real1D` has no rotation columns, and a zero-width segment is
-            // not a thing (see `num_rotation_channels`).
+            // `Real1D` has no rotation columns, and a segment cannot have
+            // zero width (see `num_rotation_channels`).
             .chain(
                 (rot > 0)
                     .then(|| per_micro(Seg::muon("rotation", rot)))
                     .into_iter()
                     .flatten(),
             )
-            // The positive systems' channels are per-head scalars, like `Δ`.
+            // The channels of the positive systems are per-head scalars, like `Δ`.
             .chain(
                 self.gain
                     .projects_noise()
@@ -1293,8 +1330,8 @@ impl Mamba3Config {
         let num_rope_angles = self.num_rope_angles();
 
         assert!(state_rank > 0, "state_rank must be positive");
-        // Evenness is a RoPE-pairing requirement; `Real1D` pairs nothing, so it
-        // is the one kind that admits an odd (in particular, scalar) state.
+        // RoPE pairing needs an even rank. `Real1D` makes no pairs, so it is
+        // the one kind that accepts an odd (for example, scalar) state.
         assert!(
             self.rotation == RotationKind::Real1D || state_rank.is_multiple_of(2),
             "state_rank must be even for RoPE pairing"
@@ -1315,8 +1352,8 @@ impl Mamba3Config {
             "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
         );
         if self.rotation != RotationKind::Real1D {
-            // Every rotating kind must actually turn something; the ablation is
-            // a kind of its own now, not a fraction of zero.
+            // Every rotating kind must turn something. The no-rotation
+            // ablation is its own kind (`Real1D`), not a fraction of zero.
             assert!(
                 num_rope_angles > 0,
                 "{:?} rotates nothing at state_rank = {} and rope_fraction = {} — use RotationKind::Real1D",
@@ -1335,9 +1372,9 @@ impl Mamba3Config {
                 self.rotation
             );
             // The rotated width is a whole number of quaternion blocks, so a
-            // partial rotation has to land on a multiple of 4. Without this the
-            // block would quietly round `num_quat_blocks` up to its floor of 1
-            // and rotate *everything* when asked for half.
+            // partial rotation must cover a multiple of 4. Without this check,
+            // the block would silently round `num_quat_blocks` up to its floor
+            // of 1 and rotate *everything* when asked for half.
             assert!(
                 self.rope_dim().is_multiple_of(4),
                 "{:?} rotates whole 4-blocks: rope_fraction·state_rank = {} is not a multiple of 4",
@@ -1532,21 +1569,27 @@ impl Mamba3Config {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba3::forward  (chunkwise double-SSD — training / prefill)
+// Mamba3::forward  (chunkwise SSD — training / prefill)
 // ---------------------------------------------------------------------------
 
 impl Mamba3 {
-    /// Process a full input sequence using the trapezoidal double-SSD algorithm.
+    /// Process a full input sequence with the chunkwise trapezoidal SSD.
     ///
-    /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
-    /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels.
-    /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
+    /// The cache variant selects the pathway: [`Mamba3Cache::DoubleSsd`] runs
+    /// `forward_double_ssd`, and [`Mamba3Cache::SingleSsd`] (also the choice
+    /// for a missing cache) runs `forward_single_ssd`. Both give the same
+    /// output and final cache.
     ///
-    /// `pad_bs` (`true` at padding, `None` ⇒ none) marks a right-padded batch of
-    /// **tokens**: a padded token is absent, all `u` of its micro-steps the
-    /// identity step (no decay, no mass: `TrapezoidCoeffs::padded`), and every
-    /// cache field that is a slot's last samples read at the slot's own end
-    /// (see [`burn_stack::modules::Block::block_forward`]).
+    /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
+    /// ranks share the hidden state, and each rank writes to it independently.
+    ///
+    /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
+    /// batch of **tokens**. A padded token is absent:
+    ///
+    /// - all `u` of its micro-steps are the identity step (no decay, no mass:
+    ///   `TrapezoidCoeffs::padded`),
+    /// - each slot reads every "last samples" cache field at its own end (see
+    ///   [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
@@ -1563,10 +1606,6 @@ impl Mamba3 {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
-        let _per_head_dim = self.per_head_dim();
-        let _state_rank = self.state_rank;
-        let _num_rope_angles = self.num_rope_angles;
-        let _mimo_rank = self.mimo_rank;
         let device = input_bsm.device();
 
         assert!(sequence > 0, "sequence length must be at least 1");
@@ -1574,8 +1613,8 @@ impl Mamba3 {
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        // A missing cache implies the single-ssd pathway (both rotation kinds are
-        // supported there; see [`forward_single_ssd`]).
+        // A missing cache selects the single-ssd pathway (every rotation kind
+        // runs on it).
         let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
         // ── SSD Pathway Selection ─────────────────────────────────────────────
@@ -1593,7 +1632,7 @@ impl Mamba3 {
         }
     }
 
-    /// Build the default per-call cache (single-ssd pathway, for either rotation
+    /// Build the default per-call cache (single-ssd pathway, for every rotation
     /// kind). The rotation accumulator is the matching [`RotationState`] variant.
     fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
         let nheads = self.nheads();
@@ -1614,16 +1653,16 @@ impl Mamba3 {
         .into()
     }
 
-    /// How far back this block's `β` tap reaches, in folded positions —
-    /// [`Trapezoid::tap_lag`] at this block's `micro_steps`. `0` when the
+    /// How far back the `β` tap of this block reaches, in folded positions:
+    /// [`Trapezoid::tap_lag`] at the `micro_steps` of this block. `0` when the
     /// pattern has no tap.
     pub fn tap_lag(&self) -> usize {
         self.trapezoid.tap_lag(self.micro_steps)
     }
 
-    /// The trapezoid's tap FIFO, zero-filled: [`Self::tap_lag`] slots of
-    /// `(B, x)`, oldest first — or `None` under a pattern with no `β` tap, in
-    /// which case nothing is allocated at all.
+    /// The tap FIFO of the trapezoid, filled with zeros: [`Self::tap_lag`]
+    /// slots of `(B, x)`, oldest first. `None` (no allocation) under a pattern
+    /// with no `β` tap.
     ///
     /// # Shapes
     /// - `.0` : `[batch, tap_slots, mimo_rank, nheads, state_rank]`
@@ -1650,20 +1689,19 @@ impl Mamba3 {
         )
     }
 
-    /// The tap FIFO to hand to the next call: the last `lag` folded positions'
-    /// `(B, x)`, oldest first — or `(None, None)` when the pattern has no `β`
-    /// tap.
+    /// The tap FIFO for the next call: the `(B, x)` of the last `lag` folded
+    /// positions, oldest first. `(None, None)` when the pattern has no `β` tap.
     ///
     /// `x` is pre-scaled by the decay accumulated since its own position
-    /// ([`crate::mamba3::helpers::tail_decay`]), which is what lets a lag-`u`
-    /// tap's gap transport span the call boundary; at `lag = 1` that product is
-    /// empty and the slot is the plain last `x`. Shared by both pathways, whose
-    /// caches therefore stay field-identical.
+    /// ([`crate::mamba3::helpers::tail_decay`]). This lets the gap transport of
+    /// a lag-`u` tap cross the call boundary. At `lag = 1` that product is
+    /// empty, and the slot is the plain last `x`. Both pathways use this
+    /// function, so their caches stay field-identical.
     ///
-    /// `end` is a right-padded call's `(real folded positions per slot, the
-    /// incoming FIFO)`: the slots are then each slot's own last `lag` real
-    /// positions, read off the incoming FIFO followed by this call's — which is
-    /// the incoming FIFO itself for a slot with none.
+    /// `end` is `(real folded positions per slot, the incoming FIFO)` for a
+    /// right-padded call. The slots then hold the last `lag` real positions of
+    /// each slot, read from the incoming FIFO followed by this call. For a slot
+    /// with no real position, that is the incoming FIFO itself.
     ///
     /// # Shapes
     /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
@@ -1715,9 +1753,8 @@ impl Mamba3 {
         (Some(b_last_bumhr), Some(x_last_buhp))
     }
 
-    /// The fresh-sequence rotation accumulator for this block's
-    /// [`RotationKind`] — the identity rotation, in the matching
-    /// [`RotationState`] variant.
+    /// The fresh-sequence rotation accumulator for the [`RotationKind`] of this
+    /// block: the identity rotation, in the matching [`RotationState`] variant.
     pub fn zero_rotation_state(&self, batch: usize, device: &Device) -> RotationState {
         RotationState::identity(
             self.rotation,
@@ -1738,9 +1775,9 @@ mod step {
     use super::*;
 
     impl Mamba3 {
-        /// Process a **single token** using the pure recurrent form.
+        /// Process a **single token** with the pure recurrent form.
         ///
-        /// For SISO (mimo_rank=1):
+        /// For SISO (mimo_rank=1), at `u = 1` and the default lag-1 tap:
         /// ```text
         ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
         ///   yₜ = Cₜᵀ hₜ + D xₜ
@@ -1749,9 +1786,14 @@ mod step {
         /// For MIMO (mimo_rank>1):
         /// ```text
         ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
-        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
+        ///   yₜ[m] = Cₜ[m]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[m]
         ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
         /// ```
+        ///
+        /// At `u > 1`, one call solves the `u` micro-steps of the token in
+        /// closed form (see [`crate::mamba3::product`]). Both cache variants
+        /// decode through the double-ssd recurrence. A missing cache starts a
+        /// single-ssd one.
         ///
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
@@ -1765,17 +1807,13 @@ mod step {
             let [batch, _d_model] = input_bd.dims();
             let nheads = self.nheads();
             let ngroups = self.ngroups;
-            let _per_head_dim = self.per_head_dim();
-            let _state_rank = self.state_rank;
-            let _num_rope_angles = self.num_rope_angles;
-            let _mimo_rank = self.mimo_rank;
             let device = input_bd.device();
 
             assert_eq!(nheads % ngroups, 0);
             san(&input_bd);
 
             // ── Initialise cache if not provided ──────────────────────────────────
-            // Implies single-ssd pathway if missing (double-ssd for Quaternion4D).
+            // A missing cache selects the single-ssd pathway.
             let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
             // ── SSD Pathway Selection ─────────────────────────────────────────────

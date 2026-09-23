@@ -1,11 +1,14 @@
 //! # Single-Pass SSD (Minimal / segsum variant)
 //!
-//! This is the MIMO-first, single SSD pass implementation of the
-//! Mamba-3 trapezoid recurrence. It is the Burn analogue of the official
-//! Tilelang MIMO kernel and Triton SISO kernel; SISO is the `mimo_rank = 1`
-//! degenerate case.
+//! The MIMO-first, single-pass SSD of the Mamba-3 trapezoid recurrence. It is
+//! the Burn analogue of the official Tilelang MIMO and Triton SISO kernels.
+//! SISO is the degenerate case `mimo_rank = 1`.
 //!
 //! ## Background — the single-ssd recurrence
+//!
+//! This section derives it at the default lag 1. The other tap patterns only
+//! change `scaleₜ` (see [`Mamba3SingleSsdInput::scale_bnlh`]) and, at lag `u`,
+//! widen the correction (see [`crate::mamba3::single_ssd::token_band`]).
 //!
 //! The double-ssd trapezoid hidden state is
 //!
@@ -17,16 +20,16 @@
 //! `(Πᵣ₌ₛ₊₁ᵗ αᵣ) · [γₛ + (1−λₛ₊₁)·Δₛ₊₁]` for the contribution of step `s` to
 //! state `t` (for `s < t`). At `s = t` the coefficient is just `γₜ`.
 //!
-//! Define `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁` (with `scaleₜ = γₜ` at the last
-//! position). The single-SSD
+//! Define `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁ = γₜ + νₜ₊₁` (with `scaleₜ = γₜ` at the
+//! last position). The single-SSD
 //!
 //! ```text
 //!   h'ₜ = αₜ h'ₜ₋₁ + scaleₜ (Bₜ ⊗ xₜ)
 //! ```
 //!
-//! produces the same outputs `yₜ = Cₜᵀ h'ₜ` as the double-ssd one **except**
-//! at the same-step diagonal (`s = t`), where the single-ssd form has `scaleₜ`
-//! instead of `γₜ`. We compensate by:
+//! gives the same outputs `yₜ = Cₜᵀ h'ₜ` as the double-ssd one, **except** at
+//! the same-step diagonal (`s = t`), where the single-ssd form has `scaleₜ`
+//! instead of `γₜ`. The kernel compensates:
 //!
 //! 1. Using a **strict** lower-triangular mask in the intra-chunk path (the
 //!    `s = t` block is excluded from the trapezoid sum).
@@ -47,12 +50,12 @@
 //!                + K_scaled · exp(da_cs_rev)ᵀ · PsiV   // standard state update
 //! ```
 //!
-//! The MIMO causal mask is identical to [`crate::mamba3::double_ssd::ssd::minimal`] but
-//! with a stricter inequality (`i_time > j_time` rather than `i_time ≥ j_time`).
+//! The MIMO causal mask is that of [`crate::mamba3::double_ssd::ssd::minimal`],
+//! with a strict inequality (`i_time > j_time`, not `i_time ≥ j_time`).
 //!
-//! Reference implementations:
-//! - SISO: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
-//! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
+//! Reference implementations, in `state-spaces/mamba`:
+//! - SISO: `mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
+//! - MIMO: `mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 use crate::mamba3::helpers;
 use crate::mamba3::prelude::Mamba3SsdPath;

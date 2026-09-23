@@ -835,11 +835,12 @@ fn the_slots_survive_a_no_grad_round_trip() {
     assert!(after.log_precision_bh.is_some() && after.tropical_bh.is_some());
 }
 
-/// The in-projection's width is what the Muon plan splits, segment for segment,
-/// with the new scalar channels on AdamW — tied and untied tail alike.
+/// The Muon plan splits the width of the in-projection segment for segment,
+/// with the positive-system scalar channels on the fallback (tied and untied
+/// tail alike).
 #[cfg(feature = "optim")]
 #[test]
-fn the_muon_plan_covers_the_new_channels() {
+fn the_muon_plan_covers_the_positive_channels() {
     use crate::mamba3::mamba3::Mamba3Untied;
     for untied in [vec![], vec![Mamba3Untied::InProjTail]] {
         let config = lattice()[1].config().with_untied(untied.clone());

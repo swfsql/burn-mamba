@@ -1,19 +1,25 @@
 //! # Recompute-based gradient math for the Mamba-3 double-SSD
 //!
-//! The analytic backward of the MIMO-first serial scan used by each pass of the
-//! double-SSD decomposition.  The forward intermediates (K1–K4) are recomputed
-//! from the saved leaf inputs rather than stashed, then the chunk-**local** K5
-//! backward runs batched, a chunk group at a time
-//! ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)); only the K4 state-passing
-//! backward, the one recurrence, is a walk.  K1/K2/K3 backwards run batched
-//! after it.  The fused `L·M` length carries the `mimo_rank` axis through the
-//! intra-chunk products.
+//! The analytic backward of the MIMO-first serial scan of each pass of the
+//! double-SSD decomposition:
 //!
-//! Everything operates on backend **primitives** through the rank-tagged `F`
-//! wrapper: the custom [`Backward`](burn::backend::autodiff::ops::Backward) node
-//! runs with a generic backend `B`, so the high-level `Tensor` is unavailable
-//! and the math uses `B`'s `float_*` ops.  The recomputed K1/K2/K4 kernels are
-//! local primitive ports of the high-level [`super::super::serial`](crate::mamba3::double_ssd::ssd::serial) kernels.
+//! 1. Recompute the forward intermediates (K1–K4) from the saved leaf inputs.
+//!    They are not stored.
+//! 2. Run the chunk-**local** K5 backward batched, one chunk group at a time
+//!    ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
+//! 3. Walk the K4 state-passing backward: the one recurrence, and the only
+//!    walk.
+//! 4. Run the K1/K2/K3 backwards batched.
+//!
+//! The fused `L·M` length carries the `mimo_rank` axis through the intra-chunk
+//! products.
+//!
+//! All the math is on backend **primitives**, through the rank-tagged `F`
+//! wrapper. The custom [`Backward`](burn::backend::autodiff::ops::Backward) node
+//! runs with a generic backend `B`, where the high-level `Tensor` is not
+//! available, so the math uses the `float_*` ops of `B`. The recomputed
+//! K1/K2/K4 kernels are primitive ports of the high-level
+//! [`serial`](crate::mamba3::double_ssd::ssd::serial) kernels.
 
 #![allow(non_snake_case)]
 
@@ -37,20 +43,20 @@ pub struct CombinedGrads<B: Backend> {
     pub d_da_bnlh: F<B, 4>,
     /// Gradient of the input projection `B`.
     pub d_b_bnlmhr: F<B, 6>,
-    /// Gradient of the output projection `C`, on the chunk's read axis.
+    /// Gradient of the output projection `C`, on the read axis of the chunk.
     pub d_c_bntmhr: F<B, 6>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
 }
 
 // ─── Recomputed forward kernels ──────────────────────────────────────────────
-// The recompute backward replays the forward's K1/K2/K4 (imported above from
-// [`super::serial_recalculated`]) plus the extended K3 below, which returns the
-// extra intermediates the gradient math needs.
+// The recompute backward replays K1/K2/K4 of the forward (imported above from
+// [`super::serial_recalculated`]), plus the extended K3 below. The extended K3
+// also returns the intermediates that the gradient math needs.
 
-/// Same as `k3_ssd_chunk_state` but
-/// also returns intermediates needed by the custom backward:
-/// - `intra_chunk_state_bnhpr` — the chunk-end state assuming zero initial state
+/// Same as `k3_ssd_chunk_state`, but it also returns the intermediates that
+/// the custom backward needs:
+/// - `intra_chunk_state_bnhpr` — the chunk-end state from a zero initial state
 /// - `decay_bhnLM` — the fused-length K3 decay factor `exp(cumA_last − cumA_fused)`
 /// - `decayed_v_bnLMhp` — V already scaled by `decay_bnLMh1`
 pub fn k3_ssd_chunk_state_extended<B: Backend>(
@@ -89,19 +95,20 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 
 /// Memory-efficient backward for the Mamba-3 MIMO-first chunkwise SSD.
 ///
-/// Recomputes the forward intermediates (K1-K4) from the saved inputs, then
-/// runs a reverse per-chunk loop that fuses the K5 (BLUE + ORANGE) backward
-/// with the K4 state-passing backward.  K3/K2/K1 backwards run as single
-/// batched ops once the loop has collected all per-chunk slices.
+/// Recomputes the forward intermediates (K1-K4) from the saved inputs. Then
+/// the chunk-local K5 (BLUE + ORANGE) backward runs batched over chunk groups,
+/// and the K4 state-passing backward walks the chunks in reverse. The K3/K2/K1
+/// backwards run as single batched ops.
 ///
 /// # Arguments
-/// - `d_y_bnlmhp` — upstream gradient of the SSD output
+/// - `d_y_bntmhp` — upstream gradient of the SSD output (read axis)
 /// - `d_final_bhpr` — upstream gradient of the final SSM state
-/// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bnlmhr`, `initial_state_bhpr` —
+/// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
+/// - `read_stride` — folded positions per read row (`micro_steps`)
 ///
 /// # Returns
-/// One [`CombinedGrads`] struct containing gradients for all 5 inputs.
+/// One [`CombinedGrads`] struct with the gradients of all 5 inputs.
 pub fn combined_backward<B: Backend>(
     d_y_bntmhp: F<B, 6>,
     d_final_bhpr: F<B, 4>,
@@ -185,10 +192,11 @@ pub fn combined_backward<B: Backend>(
     //
     // Neither term is recurrent: both need chunk `i`'s own slices plus
     // `chunk_input_state[i]`, which the recomputed K4 already produced batched.
-    // So this side mirrors the forward's own batched K5, `group` chunks at a
-    // time — the group being what prices the score `[b, group, h, TM, LM]`
-    // against that forward's peak (see [`Mamba3SsdPath::backward_chunk_group`]).
-    // The state gradient, the one part that *is* a scan, follows below.
+    // So this side mirrors the batched K5 of the forward, `group` chunks at a
+    // time. The group size sets the memory of the score `[b, group, h, TM, LM]`
+    // against the peak of that forward (see
+    // [`Mamba3SsdPath::backward_chunk_group`]). The state gradient, the one
+    // part that *is* a scan, comes below.
     // ═══════════════════════════════════════════════════════════════════════
     let group = Mamba3SsdPath::backward_chunk_group(nchunks);
     let ngroups = nchunks.div_ceil(group);
@@ -200,8 +208,8 @@ pub fn combined_backward<B: Backend>(
     let mut vec_d_chunk_input_state_bnhpr: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
 
     for start in (0..nchunks).step_by(group) {
-        // The group's own chunk count — `group`, short at the tail. It is the
-        // same `n` axis throughout, just narrowed, so the names do not change.
+        // The chunk count of this group: `group`, or fewer at the tail. It is
+        // the same `n` axis, only narrowed, so the names do not change.
         let n = group.min(nchunks - start);
 
         // ── Group slices (fused chunk_len · mimo_rank) ─────────────────

@@ -1,22 +1,27 @@
 //! # Serial-over-chunks SSD (Mamba-2)
 //!
-//! The chunkwise SSD scan expressed as a serial loop over chunks, mirroring the
-//! five Triton kernels of the reference `ssd_combined.py` (`ssd_chunk_state.py`,
-//! `ssd_bmm.py`, `ssd_state_passing.py`, `ssd_chunk_scan.py`):
+//! The chunkwise SSD scan as a serial loop over chunks. It mirrors the five
+//! Triton kernels that the reference `ssd_combined.py` calls (from
+//! `ssd_chunk_state.py`, `ssd_bmm.py`, `ssd_state_passing.py` and
+//! `ssd_chunk_scan.py`):
 //!
-//! - **K1** [`k1_ssd_chunk_cumsum`](crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum) — per-chunk cumulative `Δ·A` decays.
-//! - **K2** [`k2_ssd_bmm`](crate::mamba2::ssd::serial::k2_ssd_bmm) — the intra-chunk `C·Bᵀ` block matmul.
-//! - **K3** [`k3_ssd_chunk_state`](crate::mamba2::ssd::serial::k3_ssd_chunk_state) — each chunk's contribution to its end state
-//!   (assuming a zero state at the chunk's start).
-//! - **K4** `k4_ssd_state_passing` — the serial inter-chunk scan that carries the
-//!   running state across chunk boundaries.
-//! - **K5** [`k5_ssd_chunk_scan`](crate::mamba2::ssd::serial::k5_ssd_chunk_scan) — combines the intra-chunk (attention-like) and
+//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul.
+//! - **K3** [`k3_ssd_chunk_state`] — the contribution of each chunk to its end
+//!   state (from a zero state at the chunk start).
+//! - **K4** [`k4_ssd_state_passing`] — the serial inter-chunk scan that carries
+//!   the running state across chunk boundaries.
+//! - **K5** [`k5_ssd_chunk_scan`] — adds the intra-chunk (attention-like) and
 //!   inter-chunk (state-carried) contributions into the output `y`.
 //!
-//! This produces identical values and gradients to [`super::minimal`](crate::mamba2::ssd::minimal); the
-//! serial form keeps per-chunk tensors small (lower peak memory) and is the
-//! basis of the recompute backward in [`super::serial_recalculated`](crate::mamba2::ssd::serial_recalculated).  Gradients
-//! here still flow through plain autodiff.
+//! The values and gradients are identical to those of
+//! [`minimal`](crate::mamba2::ssd::minimal). The serial form keeps per-chunk
+//! tensors small (lower peak memory). It is also the base of the recompute
+//! backward in [`serial_recalculated`](crate::mamba2::ssd::serial_recalculated).
+//! Here, the gradients use plain autodiff.
+//!
+//! Each kernel lists its operations as numbered comments
+//! (`- i/n: op: (inputs) -> (outputs)`), to compare with the backward.
 
 #![allow(unused_variables)]
 
@@ -51,7 +56,8 @@ impl Mamba2SsdInput {
         );
 
         // ── Permutes ──────────────────────────────────────────────────────────────────
-        // Note: dt_bnlh calculation (originally in Kernel 1) moved to Step 4 (before padding).
+        // The reference computes Δ in Kernel 1. Here `Mamba2::forward` computes
+        // it (step 4), before the chunk padding.
         let dt_discretized_bhnl = input.dt_bnlh.permute([0, 3, 1, 2]);
         assert_eq!(
             [batch, nheads, nchunks, chunk_len],
@@ -187,8 +193,8 @@ pub fn k2_ssd_bmm(c_bnlhr: Tensor<5>, b_bnlhr: Tensor<5>) -> Tensor<5> {
 /// Based on the Kernel 3 Triton reference `_chunk_state_fwd_kernel` (`ssd_chunk_state.py`).
 ///
 /// Returns:
-/// - cb_bngll `[used in K5][!]` - state assuming zero initial state at each chunk boundary.
-/// - b_bar_scale_bhnl `[*]` - intermediary
+/// - intra_chunk_state_bnhpr `[used in K4][!]` - the end state of each chunk,
+///   from a zero state at the chunk start.
 pub fn k3_ssd_chunk_state(
     x_bnlhp: Tensor<5>,
     b_bnlhr: Tensor<5>,
@@ -409,23 +415,22 @@ pub fn k5_ssd_chunk_scan(
         .unsqueeze_dim::<5>(4) // da_cumsum_bnhl1
         // - 18: expand: (da_cumsum_bnhl1) -> (da_cumsum_target_bnhll)
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    // println!("{}", da_cumsum_target_bnhll);
     san(&da_cumsum_target_bnhll);
     let da_cumsum_source_bnhll = da_cumsum_bnhl
         // - 19: unsqueeze: (da_cumsum_bnhl) -> (da_cumsum_bnh1l)
         .unsqueeze_dim::<5>(3) // da_cumsum_bnh1l
         // - 20: expand: (da_cumsum_bnh1l) -> (da_cumsum_source_bnhll)
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    // println!("{}", da_cumsum_source_bnhll);
     san(&da_cumsum_source_bnhll);
     // - 21: sub: (da_cumsum_target_bnhll, da_cumsum_source_bnhll) -> (da_cumsum_diff_bnhll)
     let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll;
     san(&da_cumsum_diff_bnhll);
 
-    // note: overflow instability at step 22, a `minimal::segsum`-like upper triangle protection is necessary.
+    // Above the diagonal, step 22's `exp` can overflow. Like `segsum` in
+    // `minimal`, the upper triangle must be -inf before the `exp`.
     // - 21.1: tril-mask: (0) -> (causal_mask_ll), expanded as a view to causal_mask_bnhll.
     // true above the main diagonal, false at diagonal and below.
-    // Built at [L,L] and broadcast — the mask values do not depend on (b,n,h).
+    // Built at [L,L] and broadcast: the mask values do not depend on (b,n,h).
     let causal_mask_bnhll: Tensor<5, burn::prelude::Bool> =
         Tensor::<2, burn::prelude::Bool>::tril_mask([chunk_len, chunk_len], 0, &device)
             .reshape([1, 1, 1, chunk_len, chunk_len])
@@ -445,13 +450,8 @@ pub fn k5_ssd_chunk_scan(
         .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
     san(&dt_source_bnhll);
 
-    // note: steps 25, 26 and 29 are no longer necessary.
-    // // Causal mask (0 above the main diagonal, 1 elsewhere).
-    // let causal_mask_bnhll =
-    //     // - 25: ones: (1) -> (ones_bnhll)
-    //     Tensor::ones([batch, nchunks, nheads, chunk_len, chunk_len], &device)
-    //     // - 26: tril: (ones_bnhll, 0) -> (causal_mask_bnhll)
-    //     .tril(0);
+    // Steps 25, 26 and 29 (a multiplicative causal mask) are gone: the -inf of
+    // step 21.2 already zeroes the upper triangle.
 
     //   [b,n,h,l,l] @ [b,n,h,l,p]  →  [b,n,h,l,p]
     // - 27: mul: (cb_bnhll, da_cumsum_diff_exp_bnhll) -> (orange_lhs_partial1_bnhll)
@@ -460,10 +460,6 @@ pub fn k5_ssd_chunk_scan(
     // - 28: mul: (orange_lhs_partial1_bnhll, dt_source_bnhll) -> (orange_lhs_partial2_bnhll)
     let orange_lhs_partial2_bnhll = orange_lhs_partial1_bnhll * dt_source_bnhll;
     san(&orange_lhs_partial2_bnhll);
-    // // - 29: mul: (orange_lhs_partial2_bnhll, causal_mask_bnhll) -> (orange_lhs_partial3_bnhll)
-    // let orange_lhs_partial3_bnhll = orange_lhs_partial2_bnhll * causal_mask_bnhll;
-    // san(&orange_lhs_partial3_bnhll);
-    // - 30: matmul: (orange_lhs_partial3_bnhll, x_bnhlp) -> (orange_bnhlp)
     // - 30: matmul: (orange_lhs_partial2_bnhll, x_bnhlp) -> (orange_bnhlp)
     let orange_bnhlp = orange_lhs_partial2_bnhll.matmul(x_bnhlp);
     san(&orange_bnhlp);
@@ -487,7 +483,7 @@ pub fn k5_ssd_chunk_scan(
     * x_bnlhp;
     san(&skip_bnlhp);
 
-    // Permute BLUE + ORANGE from [b,n,h,l,p] back to [b,n,l,h,p], then add SKIP.
+    // Add BLUE + ORANGE, permute from [b,n,h,l,p] back to [b,n,l,h,p], then add SKIP.
     // - 34: add: (blue_scaled_bnhlp, orange_bnhlp) -> (y_partial_bnhlp)
     let y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
     san(&y_partial_bnhlp);

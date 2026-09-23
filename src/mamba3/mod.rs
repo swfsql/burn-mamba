@@ -1,61 +1,70 @@
 //! # Mamba-3
 //!
-//! Mamba-3 extends Mamba-2 with three independent additions (each works alone
-//! or combined): **trapezoidal discretisation**, a **complex-valued state
-//! transition** — realised as **data-dependent RoPE** on the B/C projections,
-//! which is a re-factoring of the transition and *not* a positional encoding —
-//! and **MIMO** (multiple-input multiple-output) rank expansion.  See [`mamba3`](crate::mamba3::mamba3)
-//! for the full combined math.
+//! Mamba-3 extends Mamba-2 with four independent additions. Each one works
+//! alone or with the others:
+//!
+//! 1. **Trapezoidal discretisation** of the recurrence.
+//! 2. A **complex-valued state transition**, applied as **data-dependent RoPE**
+//!    on the B/C projections ([`rotation`](crate::mamba3::rotation)). This is a
+//!    re-factoring of the transition, *not* a positional encoding.
+//! 3. **MIMO** (multiple-input multiple-output) rank expansion.
+//! 4. **MambaProduct** ([`product`](crate::mamba3::product)):
+//!    [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)
+//!    recurrence steps per token, so the transition of one token is a
+//!    **product** of `u` steps. The micro-steps fold into the sequence axis, so
+//!    MambaProduct needs no new kernel.
+//!
+//! See [`mamba3`](crate::mamba3::mamba3) for the full combined math.
 //!
 //! ## Two SSD pathways
 //!
-//! The trapezoidal recurrence is realised by two interchangeable algorithms,
-//! selected at runtime by which **cache variant** is supplied:
+//! Two interchangeable algorithms compute the trapezoidal recurrence. The
+//! **cache variant** that the caller supplies selects one at runtime:
 //!
-//! - [`double_ssd`](crate::mamba3::double_ssd) — splits the trapezoid into one
-//!   standard SSD call per term: the current sample's, plus one per `β` tap
-//!   ([`trapezoid`](crate::mamba3::trapezoid)), so **two** at the default and
-//!   three under a two-tap pattern (simple, easy to verify; ~2× the intra-chunk
-//!   memory, ~3× at two taps).
+//! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per
+//!   trapezoid term: one for the current sample, plus one per `β` tap
+//!   ([`trapezoid`](crate::mamba3::trapezoid)). That is **two** calls at the
+//!   default and three under a two-tap pattern. It is simple and easy to
+//!   verify, but it uses ~2× the intra-chunk memory (~3× at two taps).
 //! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
-//!   official-kernel form, whatever the tap pattern (≈ half the double
-//!   pathway's training memory at the default, and less as taps are added; the
-//!   cache's SSM accumulator has different mid-sequence semantics).
+//!   official-kernel form, for every tap pattern. It uses ≈ half the training
+//!   memory of the double pathway at the default, and less when there are more
+//!   taps. Its SSM accumulator has different semantics mid-sequence.
 //!
-//! [`cache`](crate::mamba3::cache) holds the enum that dispatches between them; [`ssd_path`](crate::mamba3::ssd_path) selects
-//! the pathway-agnostic *algorithm* (Minimal / Serial / SerialRecalculated).
+//! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway.
+//! [`ssd_path`](crate::mamba3::ssd_path) selects the pathway-agnostic
+//! *algorithm* (Minimal / Serial / SerialRecalculated).
 //!
-//! ## A fourth addition: MambaProduct
+//! ## The tap pattern of the trapezoid
 //!
-//! [`product`](crate::mamba3::product) adds DeltaProduct's dial —
-//! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) recurrence
-//! steps per token, so one token's transition is a **product** of `u` of them.
-//! It rides both pathways and needs no kernel: the micro-steps fold into the
-//! sequence axis.
+//! [`trapezoid`](crate::mamba3::trapezoid) names the earlier sample(s) that the
+//! second tap of the write reads. This choice exists only at `u > 1`, and it
+//! changes the algorithm *and* the cache. Four of the six members have one lag
+//! each ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
 //!
-//! ## The trapezoid's tap pattern
+//! - the default
+//!   [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
+//!   (lag 1),
+//! - [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical) (lag `u`),
+//!   which is equal to the default at `u = 1`,
+//! - the gated
+//!   [`HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset),
+//! - the tapless [`None`](crate::mamba3::trapezoid::Trapezoid::None).
 //!
-//! [`trapezoid`](crate::mamba3::trapezoid) names which earlier sample(s) the
-//! write's second tap reads — a choice that only exists at `u > 1`, and one
-//! that changes the algorithm *and* the cache. Four of the six members are one
-//! lag apiece ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
-//! the default
-//! [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
-//! (lag 1) and [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)
-//! (lag `u`), which coincide at `u = 1`, plus the gated
-//! [`HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
-//! and the tapless [`None`](crate::mamba3::trapezoid::Trapezoid::None). The
-//! remaining two carry both lags at once, mixed by a second per-head mass.
+//! The two other members have both lags. A second per-head mass mixes them.
 //!
 //! ## Positive systems beside the plant
 //!
-//! [`positive`](crate::mamba3::positive) adds a per-head scalar system that
-//! reads only the inputs and sets the plant's coefficients: a Kalman gate that
-//! *computes* the decay from an accumulated precision
-//! ([`Gain`](crate::mamba3::positive::Gain)), and a soft max-plus register that
-//! feeds the readout ([`Tropical`](crate::mamba3::positive::Tropical)). Both
-//! are nonnegative 2×2 matrix recurrences, scanned in log coordinates, with a
-//! cache slot each and no kernel change.
+//! [`positive`](crate::mamba3::positive) adds a per-head scalar system. It
+//! reads only the inputs and sets the coefficients of the plant:
+//!
+//! - a Kalman gate ([`Gain`](crate::mamba3::positive::Gain)) *computes* the
+//!   decay from an accumulated precision,
+//! - a soft max-plus register ([`Tropical`](crate::mamba3::positive::Tropical))
+//!   adds to the readout.
+//!
+//! Both are nonnegative 2×2 matrix recurrences, scanned in log coordinates.
+//! Each has one cache slot, and neither changes a kernel.
 
 pub mod double_ssd;
 pub mod single_ssd;
@@ -77,9 +86,9 @@ use burn::backend::Backend;
 /// Backend capability required to run Mamba-3.
 ///
 /// Aggregates the per-pathway extension traits ([`Mamba3DoubleSsdBackendExt`]
-/// and [`Mamba3SingleSsdBackendExt`]); every plain Burn backend satisfies it
-/// via the default implementations, and `Autodiff<B>` additionally gets the
-/// custom memory-efficient backward.
+/// and [`Mamba3SingleSsdBackendExt`]). Every plain Burn backend satisfies it
+/// through the default implementations. `Autodiff<B>` also gets the custom
+/// memory-efficient backward.
 pub trait Mamba3BackendExt:
     Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
 {

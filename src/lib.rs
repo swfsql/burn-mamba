@@ -6,39 +6,36 @@
 //! [Mamba-3](https://arxiv.org/abs/2603.15569) SSM architectures on top of the
 //! [Burn](https://github.com/tracel-ai/burn/) deep learning framework.
 //!
-//! The goal is clarity: the official CUDA/Triton kernels are ported down to
-//! standard, portable Burn tensor operations, so the same code runs on every
-//! backend (CPU, WGPU, CUDA, Metal, LibTorch, …).  There are **no custom
-//! kernels**.
+//! The crate ports the official CUDA/Triton kernels to standard, portable Burn
+//! tensor operations. It has **no custom kernels**, so the same code runs on
+//! every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
 //!
 //! ## Module families
 //!
-//! Each family lives in its own module and follows the same composition
-//! (`Network` → `Layers` → `Layer` → `Block`):
+//! Each family has its own module and supplies one
+//! [`Block`](burn_stack::modules::Block):
 //!
 //! - [`mamba1`] — the original selective SSM (conv1d + sequential selective
 //!   scan).
-//! - [`mamba2`] — Structured State Space Duality (SSD): the recurrence is recast
-//!   as a chunkwise, GEMM-friendly algorithm.
-//! - [`mamba3`] — SSD extended with trapezoidal discretisation, a complex-valued
-//!   state transition (data-dependent RoPE on B/C), and MIMO rank expansion.
+//! - [`mamba2`] — Structured State Space Duality (SSD). It recasts the
+//!   recurrence as a chunkwise algorithm made of matrix multiplications.
+//! - [`mamba3`] — SSD with trapezoidal discretisation, a complex-valued state
+//!   transition (data-dependent RoPE on B/C), and MIMO rank expansion.
 //!
-//! Everything *around* the block — the Pre-LN [`Layer`](burn_stack::modules::Layer),
-//! the (virtual-)layer [`Layers`](burn_stack::modules::Layers) stack,
-//! bidirectional pairs, latent/vocab networks, multi-gate residuals, class
-//! tokens, LR/virtual-layer scheduling and the Muon parameter groups — lives in
-//! the block-agnostic [`burn_stack`] crate. This crate supplies the three
-//! [`Block`](burn_stack::modules::Block) implementations and, in [`unified`],
-//! the runtime-selectable enums that pick a family at run time.
+//! The block-agnostic [`burn_stack`] crate holds everything around the block:
+//! the Pre-LN [`Layer`](burn_stack::modules::Layer), the (virtual-)layer
+//! [`Layers`](burn_stack::modules::Layers) stack, bidirectional pairs,
+//! latent/vocab networks, multi-gate residuals, class tokens, LR and
+//! virtual-layer schedules, and the Muon parameter groups. The [`unified`]
+//! module holds the enums that select a family at run time.
 //!
 //! ## Two execution modes
 //!
-//! Every block, layer, and network exposes both a parallel `forward()` (used
-//! for training and prompt prefill) and a recurrent `step()` (used for
-//! token-by-token decoding).  The two are mathematically equivalent: a
-//! `forward()` over a sequence equals unrolling `step()` token by token from the
-//! same initial cache — a parity property the test suites assert on outputs,
-//! final cache, and gradients.
+//! Every block, layer, and network has a parallel `forward()` (training and
+//! prompt prefill) and a recurrent `step()` (token-by-token decoding). A
+//! `forward()` over a sequence equals `step()` unrolled token by token from the
+//! same initial cache. The test suites assert this parity on outputs, final
+//! cache, and gradients.
 
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]

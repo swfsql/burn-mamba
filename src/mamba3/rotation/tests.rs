@@ -688,8 +688,8 @@ fn single_axis_collapses_to_cumsum() {
 /// So restricting the quaternion machinery to a single fixed axis (the abelian
 /// case) and locking each block's two RoPE pairs to a shared angle, the two
 /// pathways must agree **exactly** — and the non-abelian `quat_cumprod`
-/// collapses to RoPE's cumulative-angle `cumsum`.  This pins the new code to the
-/// battle-tested current implementation at `k = 2`.
+/// collapses to the cumulative angle of RoPE. This ties the quaternion code
+/// to the abelian RoPE implementation at `k = 2`.
 #[test]
 fn k2_quaternion_matches_production_rope() {
     let device: Device = Default::default();
@@ -1925,10 +1925,10 @@ fn half_turn_is_reachable_with_a_live_gradient() {
 }
 
 /// `rotation_range = 1.0` must stay bit-for-bit the reference formula
-/// `Δ · π · tanh(ϑ)`, so a model that needs the Mamba-3 the paper and the
-/// official kernels describe can ask for it in one line. (It is no longer the
-/// default: the block defaults to the whole rotation group per unit `Δ`, which
-/// keeps the half-turn differentiable.)
+/// `Δ · π · tanh(ϑ)`, so a model that needs the Mamba-3 of the paper and the
+/// official kernels can ask for it in one line. (It is not the default: the
+/// default is the whole rotation group per unit `Δ`, which keeps the half-turn
+/// differentiable.)
 #[test]
 fn complex_range_one_matches_the_reference_angle() {
     let device: Device = Default::default();
@@ -2103,8 +2103,8 @@ fn bounded_generator_survives_a_huge_projection() {
 
 /// Each head turns about **its own** axis: the generator channels are laid out
 /// `[head][block][xyz]`, and head `h`'s rotation reads head `h`'s channels
-/// only. `Δ` still scales per head, but it can no longer be the *only* thing
-/// that separates two heads' rotations.
+/// only. `Δ` still scales per head, but it is not the *only* thing that
+/// separates the rotations of two heads.
 #[test]
 fn quaternion_generators_are_per_head() {
     let device: Device = Default::default();

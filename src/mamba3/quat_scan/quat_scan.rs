@@ -1,18 +1,19 @@
 //! # Quaternion cumulative-product scan with a custom, memory-efficient backward
 //!
 //! The forward is the same Hillis–Steele parallel scan as
-//! [`crate::mamba3::rotation::quat_cumprod`], but routed through the
-//! [`Mamba3QuatScanBackendExt`] trait so that `Autodiff` backends substitute a
-//! custom backward that recomputes the scan instead of retaining its
-//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)). Plain backends use the trait's
-//! default body, which runs the scan on `B`'s primitives.
+//! [`crate::mamba3::rotation::quat_cumprod`], but it goes through the
+//! [`Mamba3QuatScanBackendExt`] trait. So an `Autodiff` backend can use a
+//! custom backward that recomputes the scan instead of keeping its
+//! intermediates (see [`super::backward`](crate::mamba3::quat_scan::backward)).
+//! Plain backends use the default body of the trait, which runs the scan on
+//! the primitives of `B`.
 //!
 //! The default body runs under a generic backend `B`, where the high-level
-//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is unavailable, so the quaternion algebra
-//! goes through the rank-tagged `F` primitive wrapper, held in a
-//! struct-of-arrays `Quat` (the four components as separate tensors) so the
-//! Hamilton product is narrow/cat-free on the hot path. The same `Quat` helper
-//! and `quat_prefix_product_soa` are reused by the recompute backward.
+//! [`Tensor`](burn::tensor::Tensor) (pinned to `Dispatch`) is not available.
+//! So the quaternion algebra uses the rank-tagged `F` primitive wrapper, held
+//! in a struct-of-arrays `Quat` (the four components as separate tensors).
+//! Thus the Hamilton product has no narrow/cat on the hot path. The recompute
+//! backward uses the same `Quat` helper and `quat_prefix_product_soa`.
 
 #![allow(non_snake_case)]
 
@@ -25,16 +26,15 @@ use burn::tensor::Tensor;
 // Primitive quaternion algebra — struct-of-arrays (SoA)
 // ---------------------------------------------------------------------------
 //
-// The scan's workhorse is the Hamilton product, run ~10× in the forward prefix
-// product and again in the backward. Holding a quaternion as one packed
-// `[…, 4]` tensor forces every product to `narrow` out the four components and
-// `cat` them back — fusion-breaking ops (strided reads + a concat kernel) on the
+// The main op of the scan is the Hamilton product: ~10× in the forward prefix
+// product, and again in the backward. If a quaternion is one packed `[…, 4]`
+// tensor, every product must `narrow` out the four components and `cat` them
+// back. Those ops break fusion (strided reads + a concat kernel) on the
 // hottest path. Instead, [`Quat`] keeps the four components `(w, x, y, z)` as
-// separate `[batch, sequence, nheads, blocks]` tensors threaded through the
-// whole scan; the product is then pure (fusible) element-wise arithmetic with no
-// narrow/cat. Packing to/from the `[…, 4]` layout happens once, at the
-// boundaries ([`Quat::from_rank5`] / [`Quat::pack`]). This is also the layout a
-// future custom kernel would use (w,x,y,z in registers).
+// separate `[batch, sequence, nheads, blocks]` tensors through the whole scan.
+// The product is then pure (fusible) element-wise arithmetic with no
+// narrow/cat. The packing to/from the `[…, 4]` layout happens once, at the
+// boundaries ([`Quat::from_rank5`] / [`Quat::pack`]).
 
 /// A quaternion field in struct-of-arrays form: the four components
 /// `(w, x, y, z)` as separate rank-4 `[batch, sequence, nheads, blocks]` tensors
@@ -137,9 +137,9 @@ impl<B: Backend> Quat<B> {
         }
     }
 
-    /// Prepend `ident` along the sequence axis and re-narrow to `sequence` — the
-    /// Hillis–Steile shift `shifted[t] = self[t-offset]` (identity before the
-    /// start), with `offset = ident`'s sequence length.
+    /// Prepend `ident` along the sequence axis and narrow again to `sequence`:
+    /// the Hillis–Steele shift `shifted[t] = self[t-offset]` (identity before
+    /// the start), where `offset` is the sequence length of `ident`.
     pub fn shift_prepend(self, ident: Quat<B>, sequence: usize) -> Quat<B> {
         let shift =
             |head: F<B, 4>, tail: F<B, 4>| F::cat(vec![head, tail], 1).narrow(1, 0, sequence);
@@ -164,12 +164,12 @@ impl<B: Backend> Quat<B> {
     }
 }
 
-/// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the sequence
-/// axis, via Hillis–Steele doubling — `O(log seq)` dependency depth, all on SoA
-/// [`Quat`] components (no per-step narrow/cat).
+/// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the
+/// sequence axis, by Hillis–Steele doubling: `O(log seq)` dependency depth, all
+/// on SoA [`Quat`] components (no per-step narrow/cat).
 ///
-/// The carry is folded in by the caller (one extra [`Quat::mul`]); keeping `P`
-/// separate is what the recompute backward needs (`G[t] = P[t] ⊗ S[t]`).
+/// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
+/// backward needs `P` alone (`G[t] = P[t] ⊗ S[t]`).
 pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
     let [batch, sequence, nheads, blocks] = q.w.dims();
     let device = q.w.device();
@@ -197,8 +197,8 @@ pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
 /// [`super::backward`]) that recomputes the scan instead of saving its
 /// intermediates.
 #[backend_extension(
-    // Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
-    // this one backend; which of them a tensor runs on is what its device says.
+    // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
+    // this one backend. The device of a tensor tells which runtime it uses.
     // The cfg mirrors burn's own `cube_backend`.
     Cube: cfg(any(
         feature = "backend-cpu",
@@ -218,8 +218,8 @@ pub trait Mamba3QuatScanBackendExt: Backend {
     /// Cumulative quaternion product `cum[t] = qₜ ⊗ ⋯ ⊗ q₀ ⊗ init` along the
     /// sequence axis (newest on the left), returning only `cum`.
     ///
-    /// The caller derives `final_carry = cum[:, −1]` (a thin autodiff slice) in
-    /// high-level land — see [`quat_cumprod_recalculated`].
+    /// The caller takes `final_carry = cum[:, −1]` (a thin autodiff slice) on
+    /// the high-level `Tensor` (see [`quat_cumprod_recalculated`]).
     ///
     /// # Shapes
     /// - `q_bshj4`   : `[batch, sequence, nheads, blocks, 4]` — per-step **unit**
@@ -238,31 +238,33 @@ pub trait Mamba3QuatScanBackendExt: Backend {
     }
 }
 
-// Per-backend impls delegate to the trait's default body; the custom autodiff
-// backward lives in `super::backward` as a separate `Autodiff<B>` impl.
+// Per-backend impls use the default body of the trait. The custom autodiff
+// backward is a separate `Autodiff<B>` impl in `super::backward`.
 burn_stack::impl_backend_ext_for_burn_backends!(Mamba3QuatScanBackendExt);
 
 // ---------------------------------------------------------------------------
 // High-level wrapper (Dispatch-pinned `Tensor`)
 // ---------------------------------------------------------------------------
 
-/// Cumulative quaternion product with a custom, memory-efficient backward — the
-/// drop-in for [`crate::mamba3::rotation::quat_cumprod`] used by the
-/// Quaternion4D `forward`.
+/// Cumulative quaternion product with a custom, memory-efficient backward. It
+/// replaces [`crate::mamba3::rotation::quat_cumprod`] for both quaternion
+/// kinds.
 ///
-/// Routes the scan through [`Mamba3QuatScanBackendExt`] (so `Autodiff` gets the
-/// recompute backward), then takes `final_carry = cum[:, −1]` as a thin autodiff
-/// slice — its gradient folds back into `cum`'s gradient before the custom node
-/// runs, so the node needs only the single `cum` output.
+/// It sends the scan through [`Mamba3QuatScanBackendExt`] (so `Autodiff` gets
+/// the recompute backward), then takes `final_carry = cum[:, −1]` as a thin
+/// autodiff slice. The gradient of that slice folds back into the gradient of
+/// `cum` before the custom node runs, so the node needs only the one `cum`
+/// output.
 ///
-/// Mathematically identical to `quat_cumprod` (asserted on values and gradients
-/// by the tests); only the backward's memory profile differs.
+/// Mathematically identical to `quat_cumprod` (the tests assert it on values
+/// and gradients). Only the memory profile of the backward is different.
 ///
 /// # Shapes
-/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]` — per-step **unit**
-///   quaternions (the recompute backward's gradient identities assume unit norm,
-///   which holds for [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)
-///   outputs and products thereof).
+/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]`, per-step **unit**
+///   quaternions. The gradient identities of the recompute backward assume unit
+///   norm, which holds for the outputs of
+///   [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)
+///   and their products.
 /// - `init`    : optional carry `[batch, nheads, blocks, 4]` (identity if `None`).
 /// - returns `(cum, final_carry)` — `[batch, sequence, nheads, blocks, 4]` and
 ///   `[batch, nheads, blocks, 4]`.

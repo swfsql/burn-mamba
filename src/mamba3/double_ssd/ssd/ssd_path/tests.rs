@@ -367,19 +367,19 @@ fn paths_agree_with_a_read_stride_mimo() {
     run_minimal_matches_serial(2, 2, 6, 3, 2, 2, 8, 8, true);
 }
 
-/// The read axis against the **undecimated** kernel it replaces.
+/// The read axis against the **undecimated** kernel.
 ///
-/// `read_stride = 1` is that kernel: `read_rows` and `scatter_read_rows` are the
-/// identity there and the rectangular mask reduces to the `triu` the kernel
-/// always built, so running one set of inputs both ways compares the new
-/// algorithm against the old one rather than against a sibling of itself.
+/// `read_stride = 1` is that kernel: `read_rows` and `scatter_read_rows` are
+/// the identity there, and the rectangular mask reduces to the full `triu`. So
+/// one set of inputs run both ways compares the decimated algorithm against
+/// the undecimated one, not against a sibling of itself.
 ///
-/// The claim being pinned is the whole of the change: at the positions the
-/// readout happens at, the decimated kernel computes *exactly* what the full one
-/// did — output, final state and every input gradient — and at the positions in
-/// between (which `u > 1` used to compute and then discard) the full kernel's own
-/// `C` gradient is identically zero. That second half is why the deleted work was
-/// deletable. The single-SSD twin of this test carries `γ` as well.
+/// The claim: at the readout positions, the decimated kernel computes
+/// *exactly* what the full one computes (output, final state and every input
+/// gradient). At the positions between the reads (which the full kernel
+/// computes and then discards at `u > 1`), the `C` gradient of the full kernel
+/// is identically zero. That second half is why the decimated kernel can skip
+/// them. The single-SSD twin of this test also carries `γ`.
 #[test]
 fn read_axis_matches_the_undecimated_kernel() {
     use burn_stack::utils::test_helpers::max_abs_diff;

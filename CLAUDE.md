@@ -4,21 +4,22 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## What This Project Is
 
-A Rust library implementing [Mamba-1](https://arxiv.org/abs/2312.00752),
+A Rust library that implements [Mamba-1](https://arxiv.org/abs/2312.00752),
 [Mamba-2](https://arxiv.org/abs/2405.21060), and
 [Mamba-3](https://arxiv.org/abs/2603.15569) SSM (Structured State Space Model)
 architectures on top of the [Burn](https://github.com/tracel-ai/burn/) framework.
-The goal is a **minimal, readable reference** that ports the official CUDA/Triton
-kernels down to standard, portable Burn tensor ops — **no custom kernels**, so the
-same code runs on every backend (CPU, WGPU, CUDA, Metal, LibTorch, …).
+The goal is a **minimal, readable reference**. It ports the official
+CUDA/Triton kernels to standard, portable Burn tensor ops, with **no custom
+kernels**, so the same code runs on every backend (CPU, WGPU, CUDA, Metal,
+LibTorch, …).
 
-Everything *around* the block — layers, (virtual-)layer stacks, bidirectional
-pairs, latent/vocab networks, multi-gate residuals, class tokens, schedules, the
-Muon plan — lives in **[`burn-stack`](../burn-stack)** (`../burn-stack/CLAUDE.md`),
-which is block-agnostic by construction. This crate supplies the three `Block`
-implementations plus the runtime-selectable `Mamba*` enums in `src/unified/`.
-**Never push anything mamba-specific into `burn-stack`** — a name, a shape
-assumption, or a doc reference. If it needs one, it belongs here.
+**[`burn-stack`](../burn-stack)** (`../burn-stack/CLAUDE.md`) holds everything
+*around* the block: layers, (virtual-)layer stacks, bidirectional pairs,
+latent/vocab networks, multi-gate residuals, class tokens, schedules, the Muon
+plan. It is block-agnostic by construction. This crate supplies the three
+`Block` implementations and the runtime-selectable `Mamba*` enums in
+`src/unified/`. **Never put anything mamba-specific into `burn-stack`**: no
+name, no shape assumption, no doc reference. If it needs one, it belongs here.
 
 ## Build & Test Commands
 
@@ -34,50 +35,55 @@ cargo run --example reset-majority -- --training --inference
 ```
 
 - **Feature flags select the backend**: `backend-{flex,cpu,wgpu,metal,vulkan,cuda,
-  rocm,tch-cpu,tch-gpu,remote,ndarray}` (flex preferred for checks/tests, enabled 
-  by default). Each just enables the matching `burn/<backend>`; several may be
-  compiled in at once and `Device::default()` resolves which to use (honouring `BURN_DEVICE`).
-- `mamba1`/`mamba2`/`mamba3`/`autodiff`/`optim` are default-on; `mamba2`/`mamba3` imply
-  `autodiff`, and `optim` (Muon parameter groups) implies `burn/optim`+`burn/std`.
-  `cubecl`/`fusion` enable the memory-saving custom backward on those backend families.
-  `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
-- Every feature above **forwards to `burn-stack`** (see `Cargo.toml`). It must: the
-  `backend-*` cfgs are evaluated where `burn_stack::impl_backend_ext_for_burn_backends!`
-  expands, i.e. in *this* crate. A backend added on one side and not the other
-  silently loses its `BackendExt` impls.
-- `Cargo.toml` `[patch]`es every burn and cubecl crate to the swfsql forks
-  carrying the tracel-ai/burn#5772 memory fix (a captured graph holds one pass's
-  memory, not ~3), as burn-stack does; a crate missing from the list links a
-  second copy.
+  rocm,tch-cpu,tch-gpu,remote,ndarray}`. Use flex for checks and tests (it is
+  on by default). Each feature enables the matching `burn/<backend>`. Several
+  can be compiled in at once, and `Device::default()` resolves which one to use
+  (it reads `BURN_DEVICE`).
+- `mamba1`/`mamba2`/`mamba3`/`autodiff`/`optim` are on by default.
+  `mamba2`/`mamba3` imply `autodiff`. `optim` (Muon parameter groups) implies
+  `burn/optim` + `burn/std`. `cubecl`/`fusion` enable the memory-saving custom
+  backward on those backend families. `check-nan`/`check-inf` enable the NaN/Inf
+  guards. `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
+- Every feature above **forwards to `burn-stack`** (see `Cargo.toml`), and it
+  must. The `backend-*` cfgs are evaluated where
+  `burn_stack::impl_backend_ext_for_burn_backends!` expands, which is in *this*
+  crate. If a backend is added on one side only, it silently loses its
+  `BackendExt` impls.
+- `Cargo.toml` `[patch]`es every burn and cubecl crate to the swfsql forks with
+  the tracel-ai/burn#5772 memory fix (a captured graph holds the memory of one
+  pass, not ~3), as burn-stack does. A crate that is missing from the list
+  links a second copy.
 
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
-- Keep **both files as minimal as possible while still viable**. Prefer pointing to
-  the source (per-file module headers carry the detailed math/notation) over
-  duplicating it here. When a source file changes, update its one entry — don't grow
+- Keep **both files as small as possible**, but still usable. Point to the
+  source (each module header carries the detailed math and notation). Do not
+  copy it here. When a source file changes, update its one entry. Do not grow
   these files.
-- **Never use either file as a changelog.** They describe the code as it *is now*;
-  they must not record individual changes, migrations, "used to be / now", "verified
-  by", dates, or PR history. If you catch changelog-style prose, delete it.
-- Always be **extremely succint** when adding content to either file.
-- `examples/` is documented by `examples/README.md`, not here.
-- **Commit messages**: the user may ask for a commit message for the session. 
-  **Just write the message as text** (a title line + a short body) for the user to copy
-  — do NOT run `git commit` or any git command to create the commit.
+- **Never use either file as a changelog.** They describe the code as it *is
+  now*. They must not record individual changes, migrations, "used to be /
+  now", "verified by", dates, or PR history. If you find changelog-style prose,
+  delete it.
+- Always be **extremely succinct** when you add content to either file.
+- `examples/README.md` documents `examples/`, not this file.
+- **Commit messages**: the user can ask for a commit message for the session.
+  **Write the message as text only** (a title line + a short body) for the user
+  to copy. Do NOT run `git commit` or any git command to create the commit.
   End the message with the `Co-Authored-By:` trailer.
 
 ## File Map
 
-`../` contain external reference material (see [Extra References](#extra-references)).
-Every leaf module has a sibling `tests.rs` (forward/step parity, gradients,
-cross-variant agreement) — not listed individually. The composition layer is
-`../burn-stack/` and has its own File Map.
+`../` contains external reference material (see
+[Extra References](#extra-references)). Every leaf module has a sibling
+`tests.rs` (forward/step parity, gradients, cross-variant agreement). This map
+does not list them. The composition layer is `../burn-stack/`, with its own
+File Map.
 
 ```text
 src/
-├─ lib.rs            crate root: module decls, prelude, DENY_NAN/DENY_INF guards
+├─ lib.rs            crate root: module decls, prelude, `pub use burn_stack`
 ├─ mamba1/           original selective SSM (conv1d + sequential selective scan)
-│  ├─ mamba1.rs      Mamba1 block + Config: forward()(selective_scan) / step();
+│  ├─ mamba1.rs      Mamba1 block + Config: forward() (selective_scan) / step();
 │  │                 Mamba1Untied
 │  └─ cache.rs       Mamba1Cache(s): conv window (bik) + SSM state (bir)
 ├─ mamba2/           SSD (Structured State Space Duality)
@@ -85,70 +91,51 @@ src/
 │  │                 Mamba2Untied (InProjTail ⇒ in_proj_tail)
 │  ├─ cache.rs       Mamba2Cache(s): conv window (bvk) + SSM state (bhpr)
 │  └─ ssd/           ssd_path.rs selector; minimal / serial / serial_recalculated
-├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO
-│  ├─ mamba3.rs      Mamba3 block + Config; forward()/step() dispatch by cache variant;
-│  │                 Mamba3Untied (InProjTail ⇒ in_proj_tail, project_in)
-│  ├─ helpers.rs     shared: trapezoid masses (ν, untransported), QK-norm+GQA+bias,
-│  │                 MIMO-V build, the tap gate, split_trailing (peels the in-proj's
-│  │                 optional tails: rotation, μ, λ), prefix_sum (the blocked
-│  │                 inclusive scan every sequence-length cumsum goes through),
-│  │                 and the **read axis** (read_rows / read_causal_mask, + a
-│  │                 `prim` twin on `F<B,_>` adding scatter_read_rows), which
-│  │                 `step` reads too — its token is a `u`-block with one read row
-│  ├─ cache.rs       Mamba3Cache(s) ENUMS dispatching DoubleSsd vs SingleSsd
-│  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths)
-│  ├─ trapezoid.rs   Trapezoid: which earlier sample(s) the β tap reads — the
-│  │                 closed 2×3 lattice (lag-1 tap: none | Reset | CarryOver
-│  │                 (default)) × (lag-u tap: none | Vertical). Structural:
-│  │                 `tap_lag(u)` (0|1|u) is the shift, the γ-correction width,
-│  │                 the key-scale offset and the cache's FIFO depth at once;
-│  │                 `has_interior_tap(u)` adds the second tap and its μ in-proj
-│  │                 segment (folded away at u=1). One mass rule: λ splits Δ, μ
-│  │                 splits the left endpoint, a closed tap hands its share back.
-│  │                 + TrapezoidSpec, the one per-step definition
-│  ├─ double_ssd/    two-pass trapezoid (γ-SSD + one β-SSD per tap); cache.rs +
-│  │                 ssd/ kernels
-│  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') + ssd/
-│  │                 (ssd/diag.rs: same-step γ-correction, SISO-branched) +
-│  │                 token_band.rs (its lag-u widening, outside the kernel)
-│  ├─ rotation/      transition rotation (Real1D | Complex2D | Quaternion4D | Rotor4D)
-│  │                 + rope.rs (the mechanical pairwise rotation of the abelian path)
-│  │                 + quat algebra; RotationSpec {kind,rope_dim,range}: the one
-│  │                 per-step definition, consumed by the one entry point
-│  │                 rotate_bc_forward (`step` hands it its `u` positions).
-│  │                 Real1D = the trivial group: no in-proj
-│  │                 channels, no cache accumulator, odd state_rank ok (scalar 1).
-│  │                 Rotor4D = full SO(4), two-sided q⊗v⊗p̄ (both factors stacked
-│  │                 on one block axis ⇒ one scan). The abelian angle scan is
-│  │                 helpers::prefix_sum, not cumsum (§Mamba-3: rotation)
-│  ├─ product/       MambaProduct: `micro_steps` (u) recurrence steps per token,
-│  │                 folded into the sequence axis (no new kernel); u=1 is stock.
-│  │                 Its module doc is where the chunk's read/write axis split
-│  │                 (`u` widens the writes only) is stated, and where `step`'s
-│  │                 closed form for one folded block is derived
-│  ├─ positive/      per-head scalar systems *beside* the plant, reading only the
-│  │                 in-proj: scan.rs (one log-semiring prefix scan, Mobius |
-│  │                 Affine, doubling + a `fold` reference), kalman.rs (the
-│  │                 computed decay + `ln Λ`), tropical.rs (the max-plus register)
+├─ mamba3/           trapezoidal SSD + data-dependent RoPE + MIMO + MambaProduct
+│  ├─ mamba3.rs      Mamba3 block + Config (header = the math reference);
+│  │                 forward()/step() dispatch by cache variant; Mamba3Untied
+│  ├─ helpers.rs     shared by both pathways and both modes: trapezoid masses,
+│  │                 QK-norm+GQA+bias, MIMO-V, mimo_outer_sum, split_trailing,
+│  │                 the tap-lag helpers, prefix_sum (the blocked scan for every
+│  │                 sequence-length cumsum), and the read axis (read_rows /
+│  │                 read_causal_mask, + `prim` twins with scatter_read_rows)
+│  ├─ cache.rs       Mamba3Cache(s) ENUMS: DoubleSsd | SingleSsd, + From moves
+│  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths);
+│  │                 optimal_chunk_len, chunk_tokens, backward_chunk_group
+│  ├─ trapezoid.rs   Trapezoid (the β tap pattern, a closed 2×3 lattice),
+│  │                 tap_lag / has_interior_tap, TrapezoidSpec
+│  ├─ double_ssd/    one SSD pass per trapezoid term; cache.rs + ssd/ kernels;
+│  │                 step_double_ssd is the decode for both cache variants
+│  ├─ single_ssd/    one-pass official-kernel form (≈½ memory); cache.rs (h') +
+│  │                 ssd/ (ssd/diag.rs: same-step γ-correction, SISO-branched) +
+│  │                 token_band.rs (the lag-u band, outside the kernel)
+│  ├─ rotation/      RotationKind (Real1D | Complex2D | Quaternion4D | Rotor4D),
+│  │                 RotationState, RotationSpec, rotate_bc_forward (the one
+│  │                 entry point, also for step), quat algebra; rope.rs
+│  ├─ product/       MambaProduct: `micro_steps` (u) steps per token, folded into
+│  │                 the sequence axis; header = the reference for the dial
+│  ├─ positive/      per-head scalar systems beside the plant: scan.rs (one
+│  │                 log-semiring scan), kalman.rs (the computed decay),
+│  │                 tropical.rs (the max-plus register)
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
-├─ padding.rs        right padding inside a block: per-slot `window` gather,
+├─ padding.rs        right padding in a block: per-slot `window` gather,
 │                    `fill_padded`, `repeat_rows` (token mask → folded axis)
 └─ unified/          the runtime-selectable API + where the families plug in
-   ├─ mod.rs         MambaSsdPath; module doc carries the Muon "3-D tensors are
-   │                 not stacked matrices" argument (MIMO diagonals)
-   ├─ cache.rs       MambaCaches enum (+ detach()) + impl Block / BlockConfig /
-   │                 CacheStack for Mamba{1,2,3}(Config|Caches)
-   ├─ capture.rs     each family's CacheTensors traversal (burn-stack's trait),
-   │                 which a CapturedStep writes its new cache back through
-   ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs)
+   ├─ mod.rs         MambaSsdPath; header = why the MIMO 3-D tensors are not
+   │                 stacked matrices for Muon
+   ├─ cache.rs       MambaCaches (+ detach()) + impl Block / BlockConfig /
+   │                 CacheStack for each family
+   ├─ capture.rs     CacheTensors traversal of each family (burn-stack's trait),
+   │                 through which a CapturedStep writes its new cache back
+   ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs, ModelConfigExt)
    ├─ bidi.rs        MambaBidiLayers (+ Config)
-   └─ tests/         the burn-stack containers exercised through real blocks:
-                     layer, layers (grad_horizon), multi_gate, bidi, class, optim,
-                     untied, capture
+   └─ tests/         the burn-stack containers with real blocks: layer, layers
+                     (grad_horizon), multi_gate, bidi, class, optim, untied,
+                     capture
 ```
 
-The generic containers themselves (`Layer`/`Layers`/networks/bidi/multi_gate/
-class tokens/schedules/norms/losses/Muon) are `burn-stack`; see its File Map.
+The generic containers (`Layer`/`Layers`/networks/bidi/multi_gate/class
+tokens/schedules/norms/losses/Muon) are in `burn-stack` (see its File Map).
 
 ```text
 benches/layer.rs     single-block benches (forward/train/step) — see bench.sh
@@ -159,8 +146,9 @@ scripts/             their numerical checks (python3 + numpy, standalone)
 ```
 
 `files.md` is the per-file signature reference for **this** crate (what each
-important file defines + the non-obvious decisions). The detailed per-family math lives in the `mamba2.rs` /
-`mamba3.rs` module headers. Always consider starting-off searching from `files.md`.
+important file defines + the non-obvious decisions). The `mamba2.rs` /
+`mamba3.rs` module headers hold the detailed math. Start a search from
+`files.md`.
 
 ---
 
@@ -168,8 +156,8 @@ important file defines + the non-obvious decisions). The detailed per-family mat
 
 ### Layer → Network hierarchy (all families)
 
-All three families share **one** set of generic composition types, which live in
-`burn-stack` and are parameterised by the SSM core block `M`
+All three families share **one** set of generic composition types. They are
+in `burn-stack`, parameterised by the SSM core block `M`
 (`Mamba1`/`Mamba2`/`Mamba3`):
 
 ```text
@@ -180,62 +168,70 @@ Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
 M (Block)         the SSM core (mamba1.rs / mamba2.rs / mamba3.rs) — this crate
 ```
 
-A family joins the stack by implementing `burn_stack::modules::{Block,
-BlockConfig}` and `CacheStack` on its `Caches` (all three impls live in
-`src/unified/cache.rs`). `Block::Options` is the per-call SSD-path selector.
+A family joins the stack when it implements `burn_stack::modules::{Block,
+BlockConfig}` and `CacheStack` on its `Caches` (all in `src/unified/cache.rs`).
+`Block::Options` is the per-call SSD-path selector.
 
-`VocabNetwork`'s LM head is tied to the embeddingᵀ (`missing_lm_head`) or a separate
-`Linear`. Runtime-dispatch enums `MambaVocabNet` / `MambaLatentNet` /
-`MambaBidiLayers` (each with a `#[derive(Config)]` `*Config`) pick the family at
-construction and panic on a family-mismatched cache/ssd_path.
+The LM head of `VocabNetwork` is tied to the embeddingᵀ (`missing_lm_head`) or
+is a separate `Linear`. The runtime enums `MambaVocabNet` / `MambaLatentNet` /
+`MambaBidiLayers` (each with a `#[derive(Config)]` `*Config`) select the family
+at construction. They panic on a cache or SSD path of the wrong family.
 
 ### Dual execution modes
 
-Every block/layer/network exposes **`forward()`** (parallel chunkwise: training +
-prefill) and **`step()`** (recurrent: token-by-token decode, O(state)/token, no
-growing KV cache). `forward()` from any cache equals `step()` unrolled from that same
-cache — parity on **outputs, final cache, and gradients** is what the test suites
-assert.
+Every block/layer/network has **`forward()`** (parallel chunkwise: training +
+prefill) and **`step()`** (recurrent: token-by-token decode, O(state) per
+token, no growing KV cache). `forward()` from any cache equals `step()`
+unrolled from that same cache. The test suites assert parity on **outputs,
+final cache, and gradients**.
 
-On CUDA a decode `step()` can be replayed from one captured graph (burn-stack's
-`CapturedStep`, through `unified/capture.rs`); tiny-stories' `generate` does
-(`--no-graph` = eager, in every example), with the same text. A fixed-shape
-`forward` can too (caches `()`): mnist-class's and mnist-ae's validation, one
-capture per pass. So can a prompt's prefill, as right-padded fixed-shape chunks
-carrying the cache (burn-stack's `Prefill`, in tiny-stories' `infer`). Under plain
-SGD (`--sgd`), so can every example's whole training step but tiny-stories'
-(burn-stack's `examples::trainer::Trainer`), replayed per batch, bit-identical to
-eager. Dataloader workers build batches on the host (`loader_device`): one
-uploading from its own thread silently breaks a capture.
+CUDA graph capture (burn-stack) replays fixed-shape work from one captured
+graph:
 
-Layer containers and networks additionally expose **`prime()`** — `step()` without
-a user token: it emits the class tokens/latents waiting for the next one and
-returns the last of them (`None` if none were), for seedless generation. `prime`
-then `step` runs exactly what that `step` alone would.
+- A decode `step()` (`CapturedStep`, through `unified/capture.rs`), in the
+  `generate` of tiny-stories. `--no-graph` runs eagerly in every example, with
+  the same text.
+- A fixed-shape `forward` with caches `()`: the validation of mnist-class and
+  mnist-ae, one capture per pass.
+- A prompt prefill as right-padded fixed-shape chunks that carry the cache
+  (burn-stack's `Prefill`, in the `infer` of tiny-stories).
+- Under plain SGD (`--sgd`), the whole training step of every example except
+  tiny-stories (burn-stack's `examples::trainer::Trainer`), bit-identical to
+  eager.
 
-`forward()` also takes `pad: Option<Tensor<2, Bool>>` (`true` at padding, **right**
-padding per slot): a padded row is absent — each slot's real outputs and cache are
-that slot run alone. Burn-stack keeps the mask right-padded around class markers; a
-family zeroes the step's decay and writes where its discretisation forms them
-(Mamba-1/2 `Δ = 0`; Mamba-3 `TrapezoidCoeffs::padded`, per token over the `u`
-micro-steps, which the Kalman gate, single-SSD's key scale and the Δ-paced rotation
-all follow) and reads every "last samples" cache field (conv window, tap FIFO,
-`positive/` carries) at each slot's own end (`padding::window`).
+Dataloader workers build batches on the host (`loader_device`). A worker that
+uploads from its own thread silently breaks a capture.
+
+Layer containers and networks also have **`prime()`**: `step()` without a user
+token. It emits the class tokens/latents that wait for the next token and
+returns the last of them (`None` if there were none), for seedless generation.
+`prime` then `step` runs exactly what that `step` alone would run.
+
+`forward()` also takes `pad: Option<Tensor<2, Bool>>` (`true` at padding,
+**right** padding per slot). A padded row is absent: the real outputs and the
+cache of each slot are those of that slot run alone. Burn-stack keeps the mask
+right-padded around class markers. A family zeroes the decay and the writes of
+the step where its discretisation forms them:
+
+- Mamba-1/2: `Δ = 0`.
+- Mamba-3: `TrapezoidCoeffs::padded`, per token over the `u` micro-steps. The
+  Kalman gate, the single-SSD key scale and the Δ-paced rotation all follow.
+
+A family reads every "last samples" cache field (conv window, tap FIFO,
+`positive/` carries) at the end of each slot (`padding::window`).
 
 ### Caches
 
-Carry streaming state between calls. Mamba-1/2 caches hold a conv window + SSM state.
-**Mamba-3 has no conv cache** (the short conv is removed).
+Caches carry streaming state between calls. Mamba-1/2 caches hold a conv
+window + SSM state. **Mamba-3 has no conv cache** (it removes the short conv).
 
 ### SSD algorithm selection (Mamba-2 & Mamba-3)
 
-The chunkwise scan is pluggable via an `…SsdPath` enum; each variant carries an
-optional chunk length (`None` ⇒ optimal ≈ `√(state_rank·per_head_dim)`, mult-of-32,
-capped 512 — Mamba-3 divides that by `mimo_rank`, then rounds it to a multiple of
-`micro_steps`: the two dials widen a chunk *differently*, `m` on both its axes and
-`u` on the writes only, so `m` divides the chunk and `u` only subdivides it into
-`chunk_tokens = chunk_len/u` read rows. `nchunks` therefore grows like `u`, not
-`u²`, at u-invariant score memory: `info/mamba-3/architecture-deltas.md` §8):
+An `…SsdPath` enum makes the chunkwise scan pluggable. Each variant carries an
+optional chunk length. `None` ⇒ the optimum ≈ `√(state_rank·per_head_dim)`, a
+multiple of 32, capped at 512. Mamba-3 divides that by `mimo_rank`, then rounds
+it up to a multiple of `micro_steps`: `m` widens both chunk axes, `u` only the
+write axis (`info/mamba-3/architecture-deltas.md` §8).
 
 | Variant | Algorithm | Backward |
 |---------|-----------|----------|
@@ -243,315 +239,303 @@ capped 512 — Mamba-3 divides that by `mimo_rank`, then rounds it to a multiple
 | `Serial` | serial loop over chunks (mirrors Triton K1–K5) | autodiff |
 | `SerialRecalculated` | serial loop, recompute backward | **custom** (~⅓ less memory) |
 
-`Default = SerialRecalculated(None)`. All three are exact reformulations and must
-agree on values **and** gradients (asserted by `ssd_path` tests). Each family has a
-`…BackendExt` trait whose default body works for any plain backend; only `Autodiff<B>`
-gets the custom backward. `backend_macros.rs` emits the per-backend impls;
-`combined_grad.rs` flattens `(y, final_state)` into the one tracked tensor Burn's
-`prep.finish` wants.
+`Default = SerialRecalculated(None)`. All three are exact reformulations and
+must agree on values **and** gradients (the `ssd_path` tests assert this). A
+learnable initial state works only with `Minimal`. Each family has a
+`…BackendExt` trait whose default body works for any plain backend. Only
+`Autodiff<B>` gets the custom backward. `backend_macros.rs` (burn-stack) emits
+the per-backend impls. `combined_grad.rs` (burn-stack) flattens
+`(y, final_state)` into the one tracked tensor that Burn's `prep.finish` wants.
 
 ### The three families
 
-Read the `mamba2.rs` and `mamba3.rs` module headers for the full math + per-file
-notation tables; the essentials:
+Read the `mamba2.rs` and `mamba3.rs` module headers for the full math and the
+notation. The essentials:
 
-- **Mamba-1** — selective SSM: in-proj → causal conv → SiLU → `x_proj`/`dt_proj` →
-  **sequential `selective_scan`** (ZOH A, Euler B) → SiLU gate → out-proj. A is
-  input-independent.
-- **Mamba-2** — SSD: in-proj `[z|xbc|dt]` → conv+SiLU → split `(x,B,C)` → discretise
-  (`Ā=exp(Δ·A)`, `B̄=Δ·B`) → zero-pad to a `chunk_len` multiple (exact) → GQA-expand
-  B/C → SSD path → gated RMSNorm(z) → out-proj. `step()` is the recurrence
-  `hₜ = Āₜhₜ₋₁ + B̄ₜxₜᵀ`, `yₜ = Cₜᵀhₜ + Dxₜ`.
-- **Mamba-3** — Mamba-2 plus four independent additions: **trapezoidal**
-  discretisation (3-term `h = αh + βB₋₁x₋₁ + γBₜxₜ`, data-dependent `A`/`λ`; `λ≡1`
-  collapses to Mamba-2), a **complex transition** (`A+iθ`) realised as
-  **data-dependent RoPE** on B/C, **MIMO** (`mimo_rank>1`), and **MambaProduct**
-  (`micro_steps=u>1`, below). B/C use **QK-Norm before** the SSD (not a post gated
-  norm), then a learnable ones-init per-(head,rank) bias, then the rotation; no short
-  conv. Why those two deletions are affordable, why the bias order and its init are
-  mechanisms rather than decoration, and what data-dependent `A` buys:
-  `info/mamba-3/architecture-deltas.md` — cite it, don't restate it. The in-projection splits
-  `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u|r·u|a·u|b·u]` — only the
-  per-micro-step segments widen (the last three: `positive/`, below). The trapezoid touches only the *linear* term of the local objective
-  (`λ` is an operator-splitting parameter; `Δ̃ₛ`, single-ssd's key scale, is where its two
-  installments collapse), so it is orthogonal to the rotation and to `micro_steps`:
-  `info/mamba-3/trapezoid-as-integration.md` — cite it, don't restate it. MIMO widens that *same*
-  linear term along **rank** — a minibatch of `M` with free keys and tied values, `G`
-  untouched — which is why it composes with everything else and why a MIMO block *is* its
-  SISO block at init: `info/mamba-3/mimo-as-batch.md` — cite it, don't restate it.
-  *Which* earlier sample(s) the trapezoid's `β` tap reads is `Mamba3Config.trapezoid`
-  (`mamba3/trapezoid.rs`) — a lattice that exists only at `u > 1`, selecting an algorithm
-  and a cache layout, and **closed**: (lag-1 tap absent | `Reset`, gated to within a token |
-  `CarryOver`) × (lag-`u` tap absent | present) gives `None`, `HorizontalReset`,
-  `HorizontalCarryOver` (the default, so `1/u` of the taps cross a token), `Vertical` (the
-  same micro-step of the previous token, so all of them cross) and
-  `VerticalPlusHorizontal{Reset,CarryOver}`. The single-tap members are **one algorithm at
-  two lags** — `Trapezoid::tap_lag(u)`, which every tap site reads instead of branching —
-  and the two-tap ones add a lag-1 tap mixed in by a second per-head mass `μ`: still one
-  scalar per sample (the `Δ̃` collapse), so single-ssd stays **one** pass while double-ssd
-  needs one per tap. A closed tap hands its mass back (interior → far, far → `γ`), which is
-  what makes `HorizontalReset` *be* `HorizontalCarryOver` with `λ = 1` at each token's start
-  and `VerticalPlusHorizontalCarryOver` *contain* both single-tap members at `μ ≡ 1`/`μ ≡ 0`
-  — the join, learnable per (head, micro-step). At `u = 1` everything folds, bit-exactly:
-  the lag-`u` members are the carry-over (spending no `μ`), `HorizontalReset` is `None`.
-  `None` is structural, and the branch runs
-  deep: no `λ` in-proj segment or Muon segment, no `β` tensor, no tap slots in either
-  cache, **one** SSD call in `forward` (so the pathways coincide and `forward_single_ssd`
-  delegates), and one outer product in `step`.
+- **Mamba-1**: selective SSM. in-proj → causal conv → SiLU →
+  `x_proj`/`dt_proj` → **sequential `selective_scan`** (ZOH A, Euler B) → SiLU
+  gate → out-proj. A is input-independent.
+- **Mamba-2**: SSD. in-proj `[z|xbc|dt]` → conv+SiLU → split `(x,B,C)` →
+  discretise (`Ā=exp(Δ·A)`, `B̄=Δ·B`) → zero-pad to a `chunk_len` multiple
+  (exact) → GQA-expand B/C → SSD path → gated RMSNorm(z) → out-proj. `step()` is
+  the recurrence `hₜ = Āₜhₜ₋₁ + B̄ₜxₜᵀ`, `yₜ = Cₜᵀhₜ + Dxₜ`.
+- **Mamba-3**: Mamba-2 plus four independent additions:
+  1. **trapezoidal** discretisation (`h = αh + βB₋₁x₋₁ + γBₜxₜ`,
+     data-dependent `A`/`λ`; `λ ≡ 1` gives Mamba-2),
+  2. a **complex transition** (`A+iθ`), applied as **data-dependent RoPE** on
+     B/C,
+  3. **MIMO** (`mimo_rank > 1`),
+  4. **MambaProduct** (`micro_steps = u > 1`).
+
+  B/C get **QK-Norm before** the SSD (not a post gated norm), then a learnable
+  ones-init per-(head, rank) bias, then the rotation. There is no short conv.
+  The in-projection is
+  `[z|x·u|B_raw·u|C_raw|dd_dt·u|dd_A·u|λ_raw·u|μ_raw·u|θ·u|r·u|a·u|b·u]`: only
+  the per-micro-step segments widen (the last three are `positive/`).
+
+  Cite these notes, do not restate them:
+  - `info/mamba-3/architecture-deltas.md`: why the deleted conv and output
+    norm are affordable, why the bias order and init are mechanisms, what
+    data-dependent `A` buys.
+  - `info/mamba-3/trapezoid-as-integration.md`: the trapezoid changes only the
+    *linear* term of the local objective (`λ` is an operator-splitting
+    parameter, and the single-SSD key scale `Δ̃ₛ` is where its two
+    installments collapse). So it is orthogonal to the rotation and to
+    `micro_steps`.
+  - `info/mamba-3/mimo-as-batch.md`: MIMO widens the same linear term along
+    **rank** (a minibatch of `M`, free keys, tied values, `G` unchanged). So it
+    composes with everything, and a MIMO block *is* its SISO block at init.
+
+  `Mamba3Config.trapezoid` (`mamba3/trapezoid.rs`) selects *which* earlier
+  sample(s) the `β` tap reads. The choice exists only at `u > 1`, and it selects
+  an algorithm and a cache layout. The lattice is **closed**: (lag-1 tap absent
+  | `Reset`, gated to within a token | `CarryOver`) × (lag-`u` tap absent |
+  present) gives `None`, `HorizontalReset`, `HorizontalCarryOver` (default),
+  `Vertical`, and `VerticalPlusHorizontal{Reset,CarryOver}`. Key facts (the
+  module header has the rest):
+  - The single-tap members are **one algorithm at two lags**:
+    `Trapezoid::tap_lag(u)` is what every tap site reads.
+  - The two-tap members add a lag-1 tap, mixed in by a second per-head mass
+    `μ`. That is still one scalar per sample, so single-ssd stays **one** pass,
+    and double-ssd needs one pass per tap.
+  - A closed tap gives its mass back (interior → far, far → `γ`). So
+    `HorizontalReset` *is* `HorizontalCarryOver` with `λ = 1` at the start of
+    each token, and `VerticalPlusHorizontalCarryOver` *contains* both
+    single-tap members (`μ ≡ 1` / `μ ≡ 0`).
+  - At `u = 1` everything folds bit-exactly: the lag-`u` members are the
+    carry-over (with no `μ`), and `HorizontalReset` is `None`.
+  - `None` is structural: no `λ` segment in the in-proj or Muon, no `β`
+    tensor, no tap slots in either cache, **one** SSD call in `forward` (so
+    the pathways are the same and `forward_single_ssd` delegates), and one
+    outer product in `step`.
 
 ### Mamba-3: two SSD pathways (the central design point)
 
-The trapezoidal recurrence is realised by **two interchangeable algorithms**, chosen
-at runtime by which **cache variant** is supplied (`Mamba3Cache`/`Mamba3Caches` are
-`DoubleSsd | SingleSsd` enums; a missing cache defaults to SingleSsd):
+Two **interchangeable algorithms** compute the trapezoidal recurrence. The
+**cache variant** that the caller supplies selects one at runtime.
+`Mamba3Cache`/`Mamba3Caches` are `DoubleSsd | SingleSsd` enums. A missing cache
+selects SingleSsd.
 
-- **Double-SSD** (`double_ssd/`) — splits the trapezoid into two **standard** SSD calls
-  (γ-SSM current-token + β-SSM previous-token, "shift-before-chunking"), summed.
-  Simple/verifiable, ~2× memory. `step()` runs this recurrence directly.
-- **Single-SSD** (`single_ssd/`) — one SSD call (official Triton/Tilelang form) with a
-  composite key scale, strict-lower-triangular mask, same-step γ correction, and a
-  boundary-β seed. ≈½ the training memory. Its accumulator `h'` has different
-  semantics mid-sequence (distinct cache type so the two can't be mixed in a chunked
-  pass), but coincides with the double-ssd state at boundaries — hence the
-  field-identity `From` conversions in `mamba3/cache.rs`. `step_single_ssd` decodes by
-  round-tripping through the double-ssd cache. Under a lag-`u` pattern the γ
-  correction widens to a `u`-band (of the lag-`u` mass alone: a second tap's lag-1
-  installment is already paid at every read the band covers) — which *is* the token at the
-  only reads that survive, so it runs outside the kernel (`single_ssd/token_band.rs`): the pathways
-  then agree on everything a caller observes (output + every cache field) and the
-  mid-token partial sums they would have disagreed on are no longer computed at all
-  (the read axis never asks for them).
+- **Double-SSD** (`double_ssd/`): the trapezoid as **standard** SSD calls: a
+  γ-SSM for the current token + one β-SSM per tap ("shift-before-chunking"),
+  summed. Simple and easy to verify, ~2× memory. `step()` runs this recurrence
+  directly, for both cache variants.
+- **Single-SSD** (`single_ssd/`): one SSD call (the official Triton/Tilelang
+  form) with a composite key scale, a strict lower-triangular mask, a
+  same-step γ correction, and a boundary-β seed. ≈½ the training memory. Its
+  accumulator `h'` has different semantics mid-sequence (a distinct cache
+  type, so a chunked pass cannot mix the two). It is equal to the double-ssd
+  state at call boundaries, hence the field-identity `From` conversions in
+  `mamba3/cache.rs`. `step_single_ssd` decodes through the double-ssd cache.
+  Under a lag-`u` pattern the γ correction widens to a `u`-band (of the lag-`u`
+  mass only), which *is* the token at the reads that survive. So it runs
+  outside the kernel (`single_ssd/token_band.rs`). The pathways then agree on
+  everything that a caller observes (output + every cache field). The
+  mid-token partial sums that would differ are never computed.
 
-`Mamba3SsdPath` is pathway-agnostic and `From`-converts to either. The inputs differ:
-double feeds pre-scaled `v_bnlmhp`; single feeds raw `v` + `gamma_bnth` + `scale_bnlh`.
-Both take `C` on the read axis (`c_bntmhr`) and a `read_stride`, and return `y` at token
-resolution.
+`Mamba3SsdPath` is pathway-agnostic and `From`-converts to either. The inputs
+are different: double takes pre-scaled `v_bnlmhp`, and single takes raw `v` +
+`gamma_bnth` + `scale_bnlh`. Both take `C` on the read axis (`c_bntmhr`) and a
+`read_stride`, and return `y` at token resolution.
 
 ### Mamba-3: rotation (complex transition, a.k.a. "RoPE")
 
-**Not a positional encoding** — it is the imaginary part of the *state transition*
-(`hₜ = αₜRₜhₜ₋₁ + …`). Since `α` is scalar and `R` orthogonal, the cumulative rotation
-telescopes out of the state and is absorbed into B/C ("RoPE trick"), leaving the plain
-scalar-decay SSD core. The angles are data-dependent, not a fixed frequency schedule —
-that is what buys state-tracking (parity/mod-k), and why a step difference `θⱼ−θᵢ` is
-rotation accumulated, never a position. Same argument for `Quaternion4D` below.
+**Not a positional encoding.** It is the imaginary part of the *state
+transition* (`hₜ = αₜRₜhₜ₋₁ + …`). `α` is scalar and `R` orthogonal, so the
+cumulative rotation telescopes out of the state, and B/C absorb it (the "RoPE
+trick"). The SSD core stays the plain scalar-decay kernel. The angles are
+data-dependent, not a fixed frequency schedule. That buys state-tracking
+(parity, mod-k), and it is why a step difference `θⱼ−θᵢ` is accumulated
+rotation, never a position. The same argument holds for the quaternion kinds.
 
-The rotation is per (head, plane) and **broadcast over the MIMO ranks**, necessarily: the `M`
-ranks share one state, so they share its transition, and per-rank angles have no state-space
-preimage at all (`info/mamba-3/mimo-as-batch.md` §7).
+The rotation is per (head, plane) and is **broadcast over the MIMO ranks**.
+This is necessary: the `M` ranks share one state, so they share its
+transition, and per-rank angles have no state-space preimage
+(`info/mamba-3/mimo-as-batch.md` §7).
 
-Default **`Complex2D`** (abelian `SO(2)`): angles projected, squashed to
-`range·π·tanh(·)`, Δ-scaled per head, then **`helpers::prefix_sum`** along the sequence
-(a *blocked* inclusive scan, the cache's angle as its carry-in — Burn's `cumsum` costs
-`O(len²)` and this is the crate's only scan over the whole folded sequence), absorbed
-into B/C. `wrap_angle` reduces mod `2π` (value-exact, the
-offset `detach`ed) to stay fp16-stable over long sequences. `rope_fraction` (0.5/1,
-default 1) rotates a prefix; SISO uses interleaved/NeoX pairing, MIMO half-and-half/GPT-J.
+`mamba3/rotation/` has the details. Key points:
 
-**`Real1D`** is the bottom rung: the trivial group, i.e. a real transition. Switching the
-rotation off is a choice of *kind*, not a fraction of zero — `rope_fraction` only narrows a
-rotation that exists, and `init` asserts a rotating kind turns at least one pair. The kind
-is structural: every rotation count is `0`, so the in-projection has no rotation segment at
-all (Burn drops a zero-length `split_with_sizes` part, hence `split_trailing`), the
-cache slot is the tensor-less `RotationState::Real`, `B`/`C` reach the SSD core untouched,
-and `muon_projections()` omits the rotation segment. It has no pair to make, so it is also
-the only kind `init` lets carry an **odd** `state_rank` — down to the scalar state `1`, the
-`reset-majority` example. Ladder: `Real1D ⊂ Complex2D ⊂ Rotor4D`
-and `Real1D ⊂ Quaternion4D ⊂ Rotor4D`.
-
-`rotation_range` bounds one step to `range·π·Δ` and defaults to **2** for every kind:
-one full traverse of the rotation group per unit Δ (`2π` is a whole turn of `SO(2)`, and
-reaches every element of `SU(2)`, whose period is `4π`; for `Rotor4D` the bound applies
-per factor, so the pair reaches all of `SO(4)`). The bound buys gradients, not
-reach — a rotation *at* it sits on `tanh`'s asymptote, where f32's derivative is exactly
-zero, so at `range=1` the half-turn state-tracking wants is unreachable by descent.
-`rotation_range=1` + `rope_fraction=0.5` is the reference model.
-
-`mamba3/rotation/` adds the two **non-abelian** kinds. `Quaternion4D` (`SU(2)`): the
-cumulative rotation becomes an associative **scan** (with cross-chunk carry) instead
-of a `cumsum`, while the B/C-factoring (so the scalar-decay SSD core) is unchanged.
-Selected by `Mamba3Config.rotation: RotationKind`; the cache accumulator is a
-`RotationState`. It runs on **both** SSD pathways (applied to B/C before chunking).
-`quat_scan/` provides the memory-efficient recompute-backward version of the scan.
-Two further differences from the abelian path: the generator's **magnitude** is bounded
-(not each channel), so the axis is exactly the direction the projection names; and the
-axis is projected **per head** (`nheads·3·num_rotation_blocks` channels), because for a
-non-abelian transition the axis is the expressive part — heads sharing one and differing
-only in Δ track one word at different speeds instead of different words.
-
-`Rotor4D` is the **whole** rotation group of a 4-block, `SO(4) ≅ (SU(2)×SU(2))/±1`: the
-two-sided `v ↦ q⊗v⊗p̄`. The factoring needs only that the per-step maps compose and are
-orthogonal, so it survives verbatim — `Pₜ(v) = Qₜ v T̄ₜ` and `B̄ᵢ = Qᵢ*⊗Bᵢ⊗Tᵢ` — and the
-conjugation reverses the right-hand order *twice*, so `T` accumulates by the **same left
-fold** as `Q`. Both factors therefore stack on one block axis and every quaternion
-primitive (generator split, exp map, scan, renormalise) runs once over `2·blocks`,
-unbranched; only the application to B/C differs, at one extra `quat_mul`. Its cache
-accumulator is `RotationState::Rotor`, and `rotation_range` bounds **each** factor, so
-the default reaches every element of the group. Why it exists: `L_q` is *isoclinic* —
-it turns both invariant planes by the same angle — so `Quaternion4D` cannot express two
-independent per-pair angles and does **not** contain `Complex2D`; the two middle kinds
-are incomparable and `Rotor4D` contains both (plane angles `a∓b`). It also contains the
-adjoint `SO(3)` (`p=q`), where `±q` act identically — the difference between tracking a
-group and tracking its double cover. `SO(4)` is the ceiling for `k=4`; `k=8` would break
-the scan (octonions are non-associative).
+- **`Complex2D`** (default, abelian `SO(2)`): angles projected, squashed to
+  `range·π·tanh(·)`, Δ-scaled per head, then **`helpers::prefix_sum`** along
+  the sequence (not `cumsum`, which costs `O(len²)` on cubecl), absorbed into
+  B/C. `wrap_angle` reduces mod `2π` for fp16 stability. `rope_fraction`
+  (0.5 | 1, default 1) rotates a prefix. SISO uses interleaved pairs, MIMO
+  half-and-half.
+- **`Real1D`** is the trivial group (a real transition). To switch the
+  rotation off, select this *kind* (`rope_fraction` has no 0). It is
+  structural: no rotation segment in the in-proj (hence `split_trailing`), the
+  tensor-less `RotationState::Real`, B/C unchanged, and no rotation segment in
+  `muon_projections()`. It is the only kind that accepts an **odd**
+  `state_rank` (down to the scalar `1` of `reset-majority`). Ladder:
+  `Real1D ⊂ Complex2D ⊂ Rotor4D` and `Real1D ⊂ Quaternion4D ⊂ Rotor4D`.
+- `rotation_range` bounds one step to `range·π·Δ`. The default is **2** for
+  every kind: one full traverse of the group per unit Δ (per factor for
+  `Rotor4D`). The bound buys gradients, not reach: a rotation *at* the bound
+  is on the asymptote of `tanh`, where the f32 derivative is exactly zero. So
+  at `range = 1`, descent cannot reach the half-turn. `rotation_range = 1` +
+  `rope_fraction = 0.5` is the reference model.
+- **`Quaternion4D`** (`SU(2)`, non-abelian): the cumulative rotation is an
+  associative **scan** with a cross-chunk carry (`quat_scan/` has the
+  recompute backward). The B/C factoring is unchanged. It runs on **both**
+  pathways. The generator bounds its **magnitude** (so the axis is the
+  direction of the projection), and the axis is projected **per head** (heads
+  with one shared axis track one word at different speeds).
+- **`Rotor4D`** is the **whole** `SO(4)` of a 4-block, the two-sided
+  `v ↦ q⊗v⊗p̄`. The conjugation reverses the right-hand order *twice*, so `T`
+  accumulates by the **same left fold** as `Q`. Both factors stack on one block
+  axis, and every quaternion primitive runs once over `2·blocks`. `L_q` is
+  *isoclinic*, so `Quaternion4D` cannot express two independent plane angles
+  and does **not** contain `Complex2D`. `Rotor4D` contains both (plane angles
+  `a∓b`) and the adjoint `SO(3)` (`p = q`). `SO(4)` is the ceiling for `k = 4`
+  (`k = 8` would break the scan: octonions are non-associative).
 
 ### Mamba-3: MambaProduct (`micro_steps`)
 
-DeltaProduct's **dial**, not its mechanism (`mamba3/product/`): `u = micro_steps` full
-Mamba-3 steps per token, each with its own `x`, `B`, `Δ`, `A`, `λ` and rotation, so a
-*token*'s transition is the **product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀` and its write a sum of `u`
-outer products staggered along it. `u=1` is stock, byte for byte.
+The dial of DeltaProduct, not its mechanism (`mamba3/product/`, whose header is
+the reference). `u = micro_steps` full Mamba-3 steps per token, each with its
+own `x`, `B`, `Δ`, `A`, `λ` and rotation. The transition of a *token* is the
+**product** `(∏ⱼαⱼ)·R_{u−1}⋯R₀`. `u = 1` is stock, byte for byte.
 
-Both families are `Mₜ = ∏ⱼ (I − ηⱼ∇²Lⱼ)`; they turn different dials in it. DeltaProduct
-turns the **curvature** (rank-one `kⱼkⱼᵀ`, so factors with different `kⱼ` don't commute);
-Mamba's curvature is isotropic, so every factor is a scalar and no product of them can
-rotate — the rotation must come from the **step size** leaving `ℝ`, which is what
-`RotationKind` is. Hence DeltaProduct's mechanism has no instance here, and the
-`RotationKind` split below follows from the algebra of `η` alone. Derived, with the
-2×2 design space and the two other readings of the same recurrence (min–max on a harmonic
-potential; momentum), in `info/mamba-3/rotation-as-optimization.md` — cite it, don't restate it.
-
-Evaluated by folding the micro-steps into the **sequence axis** — the `u`-wide
-in-projection segments become `u` consecutive positions and the existing pipeline
-(trapezoid, rotation scan, chunked SSD, padding, caches) runs at length `sequence·u`.
-No kernel, no cache change: the state is one matrix at every `u`. The fold is on the
-**writes only**: every micro-step writes to the state, so `x`/`B`/`Δ`/`A`/`λ` and the
-rotation ride the folded axis, while the read `C` — and the gate `z`, the `D` skip and
-the output — stay at token resolution. That is the chunk's **read axis**
-(`helpers::read_rows`, `Mamba3*SsdInput::read_stride`): a chunk is `chunk_len` writes by
-`chunk_tokens = chunk_len/u` reads, so the score, the state-to-output product and `C`'s
-own QK-norm/rotation are u-invariant instead of `u`× computed and discarded. `chunk_len`
-is a multiple of `u`, which makes a chunk's read rows a contiguous run of tokens — a
-reshape, not a gather. Cost is `u`× the recurrence plus `(u−1)·(d_inner+bc+3·nheads+
-rot)` in-proj columns (`4·nheads` under a two-tap `Trapezoid`).
-
-`step` folds the same way, over a **block** of `u` positions, and solves it in closed form
-rather than walking it: the transition inside a token is the scalar `α`, so
-`h = (∏ⱼαⱼ)·h₋₁ + Σⱼwⱼ·writeⱼ` (`wⱼ = ∏_{r>j}αᵣ`, which is `helpers::tail_decay` over the
-whole block), and every write is an outer product into one state, so transporting them and
-fusing `(u, mimo_rank)` into one contracted axis makes each side a single
-`helpers::mimo_outer_sum`. A decode step therefore costs the same launches at every `u`,
-and its taps, FIFO and rotation are `forward`'s own helpers, so the two cannot drift.
-
-What `u` buys is decided by the `RotationKind`, and the split is sharp. `Real1D`: the
-factors are scalars and commute, so it widens only the write — the *sequential* reading of
-the cell `mimo_rank` occupies *jointly* (exactly: `MambaProduct(u=M)` reproduces a whole
-`MIMO(M)` trajectory and the converse fails — `u` is MIMO with the values, step sizes and
-rotation *untied*, at `u`× the recurrence), which is also why the dial does not exist on
-Mamba-2. `Complex2D`: `u`× the per-token angle reach with a live gradient at every factor,
-lifting exactly the `tanh`-asymptote bound `rotation_range` documents. `Quaternion4D`/
-`Rotor4D`: a non-commuting product no single bounded step can express — DeltaProduct's own
-argument, with the group given directly rather than factored into reflections.
+- Both families are `Mₜ = ∏ⱼ (I − ηⱼ∇²Lⱼ)`, but they turn different dials:
+  DeltaProduct turns the **curvature** (non-commuting rank-one factors). The
+  curvature of Mamba is isotropic, so every factor is a scalar and cannot
+  rotate. The rotation must come from the **step size** leaving `ℝ`, which is
+  `RotationKind` (`info/mamba-3/rotation-as-optimization.md`).
+- Evaluation: the micro-steps fold into the **sequence axis** (the existing
+  pipeline runs at length `sequence·u`). No new kernel, no cache change. The
+  fold is on the **writes only**: `C`, the gate `z`, the `D` skip and the
+  output stay at token resolution. That is the **read axis** of the chunk
+  (`helpers::read_rows`, `read_stride`): a chunk is `chunk_len` writes by
+  `chunk_tokens = chunk_len/u` reads, so the score and the readout are
+  u-invariant.
+- `step` solves the `u`-position block **in closed form**, so a decode step
+  costs the same launches at every `u`. Its taps, FIFO and rotation are
+  `forward`'s own helpers.
+- What `u` buys depends on the `RotationKind`:
+  - `Real1D` widens only the write (`MambaProduct(u=M)` ⊇ `MIMO(M)`, which is
+    also why the dial is not on Mamba-2).
+  - `Complex2D` gets `u`× the angle reach, with a live gradient at every
+    factor.
+  - The non-abelian kinds get a product that no single bounded step can
+    express.
 
 ### Mamba-3: positive systems beside the plant
 
-`positive/` adds a per-head **scalar** recurrence that reads only the in-projection and
-sets the plant's coefficients — a cascade, so the chunkwise pass survives (a gain that
-read the state would not). Both members are nonnegative 2×2 matrices acting
-projectively, carried in log coordinates, so one scan serves both:
-`Gain::{Projected (default), Kalman, KalmanProjectedNoise}` computes the decay from an
-accumulated precision `Λ` (`ln d = ln α − log1p(qα(Λ+ν))`, substituted inside
-`helpers::trapezoidal_coefficients` *before* `α` is formed, so every consumer follows;
-`Λ` is the plant's own weight on ones, exact for a lag-1 tap, an upper bound at lag `u`),
-and `Tropical::{None (default), MaxPlus}` carries a soft `max(c + a, b)` register into
-the readout. Ports: the decay, the read `(Λ+ε)^(−ω)` (before the `D` skip, so
-`has_outproj_norm` keeps it), and `y += c·e`. The gate's masses are logs of
-pre-activations, never `ln` of a mass (which underflows, and `0·∞` is a NaN gradient). Structural, stock exactly at `κ = 0` / `e = 0`;
-one cache slot each. What each buys — growth, range, a discount inside the recurrence —
-and what a classifier gets for free instead: `info/kalman/gate-as-positive-system.md`, cite it,
-don't restate it.
+`positive/` adds a per-head **scalar** recurrence that reads only the
+in-projection and sets the coefficients of the plant. It is a cascade, so the
+chunkwise pass still works (a gain that read the state would not). Both members
+are nonnegative 2×2 matrices that act projectively, in log coordinates, so one
+scan serves both:
+
+- `Gain::{Projected (default), Kalman, KalmanProjectedNoise}` computes the
+  decay from an accumulated precision `Λ`. The block substitutes it inside
+  `helpers::trapezoidal_coefficients` *before* `α` is formed, so every consumer
+  follows. `Λ` is exact for a lag-1 tap, an upper bound at lag `u`.
+- `Tropical::{None (default), MaxPlus}` adds a soft `max(c + a, b)` register
+  to the readout.
+
+The ports are the decay, the read `(Λ+ε)^(−ω)` (before the `D` skip, so
+`has_outproj_norm` keeps it), and `y += c·e`. The masses of the gate are logs
+of pre-activations, never `ln` of a mass (it underflows, and `0·∞` is a NaN
+gradient). Both are structural, stock exactly at `κ = 0` / `e = 0`, with one
+cache slot each. What each buys: `info/kalman/gate-as-positive-system.md`
+(cite it, do not restate it).
 
 ### Virtual layers, bidirectional, class tokens, multi-gate
 
-All four are `burn-stack` features and documented in `../burn-stack/CLAUDE.md`.
-What matters here: they are family-agnostic, every one of them is exercised
-against real blocks by `src/unified/tests/`, and the runtime enums
-(`MambaLatentNet` / `MambaBidiLayers`) wrap the generic containers rather than
-reimplementing them.
+These are `burn-stack` features, documented in `../burn-stack/CLAUDE.md`. Here:
+they are family-agnostic, `src/unified/tests/` tests each one against real
+blocks, and the runtime enums (`MambaLatentNet` / `MambaBidiLayers`) wrap the
+generic containers (they do not reimplement them).
 
 ---
 
 ## Key Design Decisions
 
-- **No optimized kernels** — only Burn's portable tensor ops, so one code path runs on
-  every backend.
-- **Dispatch backend (Burn 0.22+)** — the high-level `Tensor` (every `Module`) is pinned
-  to the global `Dispatch` backend, so library types are **not backend-generic**
-  (`Mamba2`, `Mamba2Cache`, … carry no `<B>`). The backend is a runtime `Device`;
-  autodiff and dtype are device properties. Only the custom-backward internals stay
-  generic over `B` (`F<B,D>`, the `Backward<B,_>` nodes, `Autodiff<B>` ext impls).
-- **A no-grad region means the inner backend, not `detach`** (`burn-stack`, see
-  its `utils/detach.rs`). The consequence *here* is that each family's `Caches`
-  must implement `CacheStack::cache_to_inner`/`cache_from_inner` **by hand**:
-  `Module::map` is a no-op on plain `Tensor` fields, which is all a cache holds,
-  so a `Module`-based conversion would silently skip every one of them.
-- **Two Mamba-3 SSD pathways** — cache type selects double-ssd (simple) vs single-ssd
-  (~½ memory); accumulators coincide at boundaries so caches inter-convert.
-- **SISO is `mimo_rank = 1`, not a separate implementation** — the fused `L·M` axis is
-  then `chunk_len`, so each kernel already *is* its SISO form. Only where `m` is a real
-  matmul dimension do scopes branch on it: RoPE pairing (semantic), plus two
-  **performance-only** flags (identical values and gradients) whose backend preferences
-  differ — `Mamba3Config.siso_specialization` for the chunkwise γ-correction
-  (`single_ssd/ssd/diag.rs`; deletes thousands of tiny GEMMs, wins everywhere) and
-  `siso_specialization_decode` for the per-token sites (`helpers::mimo_outer_sum`,
-  `step_readout`, via `Mamba3::use_siso_decode_kernels`; replaces
-  one good GEMM with a broadcast, so it wins on GPU and loses badly on CPU).
-- **Three SSD algorithm variants**, the last with a custom recompute backward; proven
-  equal on values + gradients by tests.
-- **MambaProduct is a sequence fold, not a kernel** — `u` micro-steps per token are `u`
-  consecutive positions of the existing recurrence, so only the per-micro-step in-proj
-  segments widen and the state and caches are untouched. What the SSD kernels take from
-  it is one number, `read_stride`: the fold is on a chunk's *write* axis, its *read* axis
-  stays at token resolution (above). `step` takes the same fold with no chunk at all — one
-  block of `u` positions, solved in closed form, so decode's launch count does not move
-  with `u`. Unlike DeltaProduct every
-  micro-step carries its own decay: Mamba has no forget gate separate from its step size
-  (`α=exp(ΔA)`, and `Δ` also weights the write and paces the rotation), and pinning
-  `α ≡ 1` on the interior steps would silence the rotation with it. A scalar decay
-  composes, so the uniform placement costs nothing. The `u` steps are full-size, so a
-  token's effective interval is inflated `u`×, not subdivided — that is what buys the
-  reach; the consistent alternative (`Δⱼ=Δ/u`) is reachable, so this is a superset.
-- **A gate may read the inputs, never the plant** — `positive/`'s systems are a cascade
-  before the LPV plant, which keeps the pass chunkwise; being positive linear systems,
-  one log-semiring scan carries both and the projective read renormalises for free.
-- **Muon sees split projections, the model does not** — the machinery is
-  `burn_stack::optim`; what this crate owns is the **allowlist**, one
-  `muon_projections()` per family config, listing the same column widths the
-  forward's `split_into` uses. Per-head *scalar* channels (Δ/`A`/`λ`/`μ`/`r`/`a`/`b`), every
-  1-D/3-D tensor, and the boundary weights stay on the fallback (AdamW or SGD). Why the MIMO 3-D
-  tensors are diagonals and not stacked matrices is argued in the
-  `src/unified/mod.rs` header.
-- **Untied parameters are declared, not re-plumbed** — the mechanism is
-  `burn_stack::utils::untied`; each family lists what may be held once per
+- **No optimized kernels**: only the portable tensor ops of Burn, so one code
+  path runs on every backend.
+- **Dispatch backend (Burn 0.22+)**: the high-level `Tensor` (every `Module`)
+  is pinned to the global `Dispatch` backend, so library types are **not
+  backend-generic** (`Mamba2`, `Mamba2Cache`, … have no `<B>`). The backend is
+  a runtime `Device`. Autodiff and dtype are device properties. Only the
+  custom-backward internals stay generic over `B` (`F<B,D>`, the
+  `Backward<B,_>` nodes, the `Autodiff<B>` ext impls).
+- **A no-grad region means the inner backend, not `detach`** (`burn-stack`,
+  see its `utils/detach.rs`). So each family's `Caches` must implement
+  `CacheStack::cache_to_inner`/`cache_from_inner` **by hand**. `Module::map`
+  does nothing on plain `Tensor` fields, which is all a cache holds, so a
+  `Module`-based conversion would silently skip every field.
+- **Two Mamba-3 SSD pathways**: the cache type selects double-ssd (simple) or
+  single-ssd (~½ memory). The accumulators are equal at boundaries, so the
+  caches convert.
+- **SISO is `mimo_rank = 1`, not a separate implementation.** The fused `L·M`
+  axis is then `chunk_len`, so each kernel already *is* its SISO form. Code
+  branches on `m` only where it is a real matmul dimension: RoPE pairing
+  (semantic), and two **performance-only** flags (identical values and
+  gradients) with different backend preferences:
+  - `Mamba3Config.siso_specialization`, for the chunkwise γ-correction
+    (`single_ssd/ssd/diag.rs`). It deletes thousands of tiny GEMMs and wins
+    everywhere.
+  - `siso_specialization_decode`, for the per-token sites
+    (`helpers::mimo_outer_sum`, `step_readout`, through
+    `Mamba3::use_siso_decode_kernels`). It replaces one good GEMM with a
+    broadcast, so it wins on GPU and loses badly on CPU.
+- **Three SSD algorithm variants**, the last with a custom recompute backward.
+  Tests prove them equal on values + gradients.
+- **MambaProduct is a sequence fold, not a kernel.** The `u` micro-steps of a
+  token are `u` consecutive positions of the existing recurrence, so only the
+  per-micro-step in-proj segments widen, and the state and caches do not
+  change. The SSD kernels take one number from it, `read_stride`. Unlike
+  DeltaProduct, every micro-step has its own decay: Mamba has no forget gate
+  separate from its step size (`α = exp(ΔA)`, and `Δ` also weights the write
+  and paces the rotation), so `α ≡ 1` on the interior steps would also stop
+  the rotation. The `u` steps are full-size: the effective interval of a token
+  is `u`× longer, not subdivided. That buys the reach. The consistent
+  alternative (`Δⱼ = Δ/u`) stays reachable, so this is a superset.
+- **A gate can read the inputs, never the plant.** The systems of `positive/`
+  are a cascade before the LPV plant, which keeps the pass chunkwise.
+- **Muon sees split projections, the model does not.** The machinery is
+  `burn_stack::optim`. This crate owns the **allowlist**: one
+  `muon_projections()` per family config, with the same column widths as the
+  `split_into` of the forward. Per-head *scalar* channels
+  (Δ/`A`/`λ`/`μ`/`r`/`a`/`b`), every 1-D/3-D tensor, and the boundary weights
+  stay on the fallback (AdamW or SGD). The `src/unified/mod.rs` header argues
+  why the MIMO 3-D tensors are diagonals, not stacked matrices.
+- **Untied parameters are declared, not re-plumbed.** The mechanism is
+  `burn_stack::utils::untied`. Each family lists what it can hold once per
   application (`Mamba{1,2,3}Untied` on its config), tiles it in
-  `init_applications`, and reports it via `untied_params`. Mamba-2/3's `InProjTail`
-  splits `in_proj`'s trailing scalar (+ rotation) segments into `in_proj_tail`
-  whatever the count, so one tiled Muon spec fits every real layer; `project_in`
-  rejoins them. `init_state_hpr` is untiable, but `step` never reads it.
-- **`#![warn(missing_docs)]`** — keep the crate warning-clean; document public surface
-  as you add it. `cargo doc --all --no-deps` must be warning-free too.
-- The project root is `/shared/claude/burn-mamba/`; do not read/write outside it.
-- When a source file is added/removed/changed, prepare an update to its entry for the
-  [File Map](#file-map) and `files.md` (per the maintenance rules above).
-  A change to a composition type instead updates `../burn-stack/CLAUDE.md`.
-  Important rule: this is reserved to the end of your workload, and if by then you
-  haven't yet read those files, **do not** read them. Your context then is still big
-  from the work and it is expensive to read big files then. Instead, just prepare a
-  `tmp.md` file containing what would be the new [File Map](#file-map) entry, and do
-  an overview containing the most important aspects about the created/removed/updated
-  files, while being succint. After a full context reset, manually triggered by me, we
-  actually update those files.
+  `init_applications`, and reports it with `untied_params`. The `InProjTail`
+  of Mamba-2/3 moves the trailing scalar (+ rotation) segments of `in_proj`
+  into `in_proj_tail` for any application count, so one tiled Muon spec fits
+  every real layer. `project_in` joins them again. `init_state_hpr` is
+  untiable, but `step` never reads it.
+- **`#![warn(missing_docs)]`**: keep the crate free of warnings. Document the
+  public surface when you add it. `cargo doc --all --no-deps` must also be free
+  of warnings.
+- The project root is `/shared/claude/burn-mamba/`. Do not read or write
+  outside it.
+- When a source file is added, removed or changed, prepare an update to its
+  entry in the [File Map](#file-map) and in `files.md` (per the maintenance
+  rules above). A change to a composition type updates
+  `../burn-stack/CLAUDE.md` instead. Important rule: do this at the end of the
+  work. If you have not read those files by then, **do not** read them: the
+  context is still big from the work, and reading big files then is expensive.
+  Instead, write a `tmp.md` file with the new [File Map](#file-map) entry and
+  a short overview of the most important aspects of the created/removed/
+  updated files. After a full context reset (the user triggers it), those
+  files get their update.
 
 ---
 
 ## Notation
 
-Tensor names carry a shape suffix; the codebase is **deliberately verbose** about it
-(backed by shape `assert`s). A name whose suffix encodes its shape needs no extra
-comment; in commentary a shape may be underscore-style (`_bhl`) or expanded to
-`[...]`. **Paper** style (upper-case `A,B,C,H,Y,L,…`) may appear in comments but
-**never in code identifiers**. Lower-case = base dimensions (below); upper-case = a
-*relation* of them (offset/multiple/concat): `X` may be `x±1`/`x*2`/etc, `XY` may be `x+y`/`x*y`/etc.
+Tensor names carry a shape suffix. The codebase is **deliberately verbose**
+about this (backed by shape `assert`s). A name whose suffix encodes its shape
+needs no extra comment. In commentary, a shape can be underscore-style (`_bhl`)
+or expanded to `[...]`. **Paper** style (upper-case `A,B,C,H,Y,L,…`) can appear
+in comments but **never in code identifiers**. Lower-case = base dimensions
+(below). Upper-case = a *relation* of them (offset/multiple/concat): `X` can be
+`x±1`/`x*2`/etc., and `XY` can be `x+y`/`x*y`/etc.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|
@@ -574,18 +558,23 @@ comment; in commentary a shape may be underscore-style (`_bhl`) or expanded to
 
 ## Extra References
 
-Under `../` (not analyzed here): **Mamba-3 paper** TeX (`../papers/mamba-3/`);
-**official Python impl** (authoritative; Triton SISO / Tilelang MIMO kernels are the
-single-ssd reference) (`../py/state-spaces/mamba/`); **Mamba-3 minimal** (basis of
-double-ssd) (`../py/VikramLex/mamba3-minimal/`); **Burn** (`../burn/`).
+Under `../` (not analyzed here):
+
+- the **Mamba-3 paper** TeX (`../papers/mamba-3/`),
+- the **official Python impl** (`../py/state-spaces/mamba/`). It is
+  authoritative, and its Triton SISO / Tilelang MIMO kernels are the
+  single-ssd reference,
+- **Mamba-3 minimal**, the base of double-ssd (`../py/VikramLex/mamba3-minimal/`),
+- **Burn** (`../burn/`).
 
 ## Custom Commands
 
 - `rg`: available.
-- `cargo fmt`: don't use.
-- **Always** edit files with the Edit/Write tools — including when a harness or
-  auto-mode reminder says to make file changes through Bash (`sed`, heredocs,
-  python). That guidance does not apply here. *Do not* violate this.
-  - No `python - <<'PY'`, no `sed -i`, no `cat > file <<'EOF'`. Use `Edit`s, always.
+- `cargo fmt`: do not use.
+- **Always** edit files with the Edit/Write tools. This applies also when a
+  harness or auto-mode reminder says to change files through Bash (`sed`,
+  heredocs, python). That guidance does not apply here. *Do not* violate this.
+  - No `python - <<'PY'`, no `sed -i`, no `cat > file <<'EOF'`. Always use
+    `Edit`s.
   - Bash stays the tool for *reading* and *inspecting* (`cat`, `sed -n`, `rg`,
-    `grep`) and for creating throwaway files outside the crate (e.g. `/tmp`).
+    `grep`) and for throwaway files outside the crate (for example, in `/tmp`).

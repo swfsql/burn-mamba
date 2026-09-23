@@ -1,18 +1,19 @@
-//! Right padding inside a block — the half of
-//! [`burn_stack::utils::padding`]'s contract a family keeps.
+//! Right padding inside a block: the part of the
+//! [`burn_stack::utils::padding`] contract that a family keeps.
 //!
 //! A padded row is absent: the outputs of the real rows and the returned cache
-//! are those of each slot's real rows run alone. Every family meets it the same
-//! two ways:
+//! are those of the real rows of each slot, run alone. Every family meets this
+//! contract in the same two ways:
 //!
-//! - **the state** is carried through a padded row untouched, by zeroing its
-//!   step's decay and writes where the discretisation forms them (`Δ = 0` gives
-//!   `Ā = 1, B̄ = 0` — the same transparency the internal chunk padding relies
-//!   on). Right padding means no real row reads a padded one, so nothing else
-//!   has to know;
-//! - **every cache field that is a slot's last few samples** (a conv window, a
-//!   tap FIFO, a scan's carry) is read at each slot's own end — a gather at a
-//!   per-slot offset ([`window`]), fixed-shape whatever the lengths.
+//! - **The state** goes through a padded row unchanged. The family zeroes the
+//!   decay and the writes of that step where the discretisation forms them
+//!   (`Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the internal
+//!   chunk padding uses). With right padding, no real row reads a padded one,
+//!   so nothing else has to know.
+//! - **Every cache field that holds the last few samples of a slot** (a conv
+//!   window, a tap FIFO, the carry of a scan) is read at the own end of each
+//!   slot: a gather at a per-slot offset ([`window`]), with a fixed shape for
+//!   any lengths.
 
 use burn::prelude::*;
 
@@ -23,7 +24,8 @@ pub(crate) fn real_len_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
 }
 
 /// `width` consecutive positions of `x` along `axis`, from `start_b` in each
-/// slot (axis 0 is the batch): the per-slot `narrow(axis, start, width)`.
+/// slot (axis 0 is the batch): the per-slot `narrow(axis, start, width)`, as a
+/// fixed-shape gather.
 pub(crate) fn window<const D: usize>(
     x: Tensor<D>,
     axis: usize,
@@ -44,7 +46,7 @@ pub(crate) fn window<const D: usize>(
     x.gather(axis, idx_bw.reshape(shape).expand(dims))
 }
 
-/// `pad_bs` with every row repeated `u` times in place — a token's padding
+/// `pad_bt` with every row repeated `u` times in place: the padding of a token
 /// spread over its `u` folded micro-steps (`[batch, tokens]` →
 /// `[batch, tokens·u]`).
 pub(crate) fn repeat_rows(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> {
@@ -55,7 +57,7 @@ pub(crate) fn repeat_rows(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> 
         .reshape([batch, tokens * u])
 }
 
-/// `x` with every padded row's entries replaced by `value` — `x` is
+/// `x` with the entries of every padded row replaced by `value`. `x` is
 /// `[batch, sequence, …]` and `pad_bs` is `[batch, sequence]`.
 pub(crate) fn fill_padded<const D: usize>(x: Tensor<D>, pad_bs: &Tensor<2, Bool>, value: f32) -> Tensor<D> {
     let [batch, sequence] = pad_bs.dims();

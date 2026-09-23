@@ -1,18 +1,22 @@
 //! # Recompute-based gradient math for the Mamba-2 SSD
 //!
-//! The analytic backward of the five-kernel serial scan, mirroring
-//! `_mamba_chunk_scan_combined_bwd` in the reference `ssd_combined.py`.  The
-//! forward intermediates (K1–K4) are **recomputed** from the saved leaf inputs
-//! rather than stashed, then a reverse per-chunk loop fuses the K5 and K4
-//! backwards; K1/K2/K3 backwards run as batched ops once the loop has gathered
-//! the per-chunk slices.  Comment colours (BLUE / ORANGE / …) tag the
-//! corresponding terms of the chunk-scan gradient, matching the reference.
+//! The analytic backward of the five-kernel serial scan. It mirrors
+//! `_mamba_chunk_scan_combined_bwd` in the reference `ssd_combined.py`:
 //!
-//! Everything here operates on backend **primitives** through the rank-tagged
-//! `F` wrapper: a custom [`Backward`](burn::backend::autodiff::ops::Backward)
-//! node runs with a generic backend `B`, so the high-level `Tensor` (pinned to
-//! the global `Dispatch` backend) is unavailable and the math must use `B`'s
-//! `float_*` ops.  The recomputed K1/K2/K4 kernels are local primitive ports of
+//! 1. **Recompute** the forward intermediates (K1–K4) from the saved leaf
+//!    inputs. They are not stored.
+//! 2. A reverse per-chunk loop fuses the K5 and K4 backwards.
+//! 3. The K1/K2/K3 backwards run as batched ops on the per-chunk slices that
+//!    the loop collected.
+//!
+//! The comment colours (BLUE / ORANGE / …) tag the terms of the chunk-scan
+//! gradient, as in the reference.
+//!
+//! All the math here is on backend **primitives**, through the rank-tagged `F`
+//! wrapper. A custom [`Backward`](burn::backend::autodiff::ops::Backward) node
+//! runs with a generic backend `B`, where the high-level `Tensor` (pinned to
+//! the global `Dispatch` backend) is not available. So the math uses the
+//! `float_*` ops of `B`. The recomputed K1/K2/K4 kernels are primitive ports of
 //! the high-level [`crate::mamba2::ssd::serial`] kernels.
 
 #![allow(non_snake_case)]
@@ -41,26 +45,25 @@ pub struct CombinedGrads<B: Backend> {
     /// Gradient of the per-head decay rate `A` (as `a_decay_h`).
     pub d_a_decay_h: F<B, 1>,
     /// Local same-chunk contribution to `d_da_cumsum` from BLUE+ORANGE only
-    /// (excludes K3 and K4 cross-chunk contributions). Exposed for the
+    /// (without the K3 and K4 cross-chunk contributions). The
     /// `out_x · dout − ddt · dt` oracle test from Tri Dao's reference
-    /// (`_chunk_scan_bwd_ddAcs_unstable`). Test-only; absent in release builds.
+    /// (`_chunk_scan_bwd_ddAcs_unstable`) reads it. Test builds only.
     #[cfg(test)]
     pub d_da_local_bhnl: F<B, 4>,
-    /// Same-chunk d_dt contribution from ORANGE only (= what Tri Dao calls
-    /// `ddt` in `_chunk_scan_bwd_ddAcs_unstable`). Test-only; absent in release
-    /// builds.
+    /// Same-chunk d_dt contribution from ORANGE only (Tri Dao's `ddt` in
+    /// `_chunk_scan_bwd_ddAcs_unstable`). Test builds only.
     #[cfg(test)]
     pub d_dt_orange_bhnl: F<B, 4>,
 }
 
 // ─── Recomputed forward kernels ──────────────────────────────────────────────
-// The recompute backward replays the forward's K1/K2/K4 (imported above from
-// [`super::serial_recalculated`]) plus the extended K3 below, which returns the
-// extra intermediates the gradient math needs.
+// The recompute backward replays K1/K2/K4 of the forward (imported above from
+// [`super::serial_recalculated`]), plus the extended K3 below. The extended K3
+// also returns the intermediates that the gradient math needs.
 
-/// Same as `k3_ssd_chunk_state`
-/// but also returns intermediates needed by the custom backward:
-/// - `intra_chunk_state_bnhpr` — chunk-end state assuming zero initial state
+/// Same as `k3_ssd_chunk_state`, but it also returns the intermediates that
+/// the custom backward needs:
+/// - `intra_chunk_state_bnhpr` — chunk-end state from a zero initial state
 /// - `b_bar_scale_bhnl` — the K3 scaling factor `dt · exp(cumA_last − cumA)`
 /// - `forward_decay_to_chunk_end_bhnl` — the decay factor `exp(cumA_last − cumA)`
 /// - `b_scaled_bnhlr` — B already scaled by `b_bar_scale`
@@ -109,10 +112,10 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 
 /// Memory-efficient backward for the Mamba-2 chunkwise SSD.
 ///
-/// Recomputes the forward intermediates (K1-K4) from the saved inputs, then
-/// runs a reverse per-chunk loop that fuses the K5 (BLUE + ORANGE) backward
-/// with the K4 state-passing backward. K3/K2/K1 backwards run as single
-/// batched ops once the loop has collected all per-chunk slices.
+/// Recomputes the forward intermediates (K1-K4) from the saved inputs. Then a
+/// reverse per-chunk loop fuses the K5 (BLUE + ORANGE) backward with the K4
+/// state-passing backward. The K3/K2/K1 backwards run as single batched ops on
+/// the per-chunk slices that the loop collected.
 ///
 /// # Arguments
 /// - `d_y_bnlhp` — upstream gradient of the SSD output
@@ -517,9 +520,9 @@ pub fn combined_backward<B: Backend>(
     // SUM GRADIENT CONTRIBUTIONS + K1 BACKWARD
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Test-only: local same-chunk d_da contribution (BLUE + ORANGE) snapshot
-    // for the `out_x · dout − ddt · dt` oracle. Production builds skip the
-    // extra add and the retained _bhnl tensor.
+    // Test-only: a copy of the local same-chunk d_da contribution (BLUE +
+    // ORANGE), for the `out_x · dout − ddt · dt` oracle. Production builds do
+    // not compute the extra add or keep the _bhnl tensor.
     #[cfg(test)]
     let d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
     #[cfg(test)]
@@ -546,10 +549,10 @@ pub fn combined_backward<B: Backend>(
     san(&d_da_bhnl);
 
     // d_dt from K1: d_dt = d_da · a_decay
-    let a_decay_111h1 = a_decay_h
-        .unsqueeze_dims::<4>(&[0, 2, 3])
+    let a_decay_bhnl = a_decay_h
+        .unsqueeze_dims::<4>(&[0, 2, 3]) // a_decay_1h11
         .expand([batch, nheads, nchunks, chunk_len]);
-    let d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_111h1;
+    let d_dt_k1_bhnl = d_da_bhnl.clone() * a_decay_bhnl;
     san(&d_dt_k1_bhnl);
 
     // d_a_decay[h] = Σ_{b,n,l} d_da[b,h,n,l] · dt[b,h,n,l]

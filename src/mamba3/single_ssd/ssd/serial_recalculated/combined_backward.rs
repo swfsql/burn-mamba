@@ -1,20 +1,23 @@
 //! # Recompute-based gradient math for the Mamba-3 single-SSD
 //!
-//! The analytic backward of the single-pass MIMO-first scan.  Forward
-//! intermediates (K1–K4) are recomputed from the saved leaf inputs, then every
-//! chunk-**local** gradient — the K5 state-to-output (BLUE), the strict
-//! lower-triangular intra-chunk (LOWER) and the γ-weighted same-step (DIAG)
-//! terms — is computed batched, the first two a chunk group at a time
-//! ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).  Only the K4 state-passing
-//! backward is a walk, being the one recurrence.  Because this pathway applies
-//! the trapezoid weights internally, it additionally returns `d_gamma` and
-//! `d_scale`.  The shared K3 extended helper (and K1/K2/K4, forward and
-//! backward) are reused from the double-SSD module.
+//! The analytic backward of the single-pass MIMO-first scan:
 //!
-//! Everything operates on backend **primitives** through the rank-tagged `F`
-//! wrapper: the custom [`Backward`](burn::backend::autodiff::ops::Backward) node
-//! runs with a generic backend `B`, so the high-level `Tensor` is unavailable
-//! and the math uses `B`'s `float_*` ops.
+//! 1. Recompute the forward intermediates (K1–K4) from the saved leaf inputs.
+//! 2. Compute every chunk-**local** gradient batched: the K5 state-to-output
+//!    (BLUE), the strict lower-triangular intra-chunk (LOWER) and the
+//!    γ-weighted same-step (DIAG) terms. BLUE and LOWER run one chunk group at
+//!    a time
+//!    ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
+//! 3. Walk the K4 state-passing backward, the one recurrence.
+//!
+//! This pathway applies the trapezoid weights inside the kernel, so it also
+//! returns `d_gamma` and `d_scale`. The extended K3 helper and K1/K2/K4
+//! (forward and backward) come from the double-SSD module.
+//!
+//! All the math is on backend **primitives**, through the rank-tagged `F`
+//! wrapper. The custom [`Backward`](burn::backend::autodiff::ops::Backward) node
+//! runs with a generic backend `B`, where the high-level `Tensor` is not
+//! available, so the math uses the `float_*` ops of `B`.
 
 #![allow(non_snake_case)]
 
@@ -32,21 +35,21 @@ use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
 
 /// Per-input gradients produced by [`combined_backward`] for the Single-SSD.
-/// Adds `d_gamma_bnlh` and `d_scale_bnlh` over the double-ssd form
+/// It adds `d_gamma_bnth` and `d_scale_bnlh` to the fields of the double-ssd
 /// [`crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::CombinedGrads`].
 #[non_exhaustive]
 pub struct CombinedSingleSsdGrads<B: Backend> {
     /// Gradient of the raw input `v`.
     pub d_v_bnlmhp: F<B, 6>,
-    /// Gradient of `Δ·A` (`da`).
+    /// Gradient of the log-decay `da`.
     pub d_da_bnlh: F<B, 4>,
     /// Gradient of the input projection `B`.
     pub d_b_bnlmhr: F<B, 6>,
-    /// Gradient of the output projection `C`, on the chunk's read axis.
+    /// Gradient of the output projection `C`, on the read axis of the chunk.
     pub d_c_bntmhr: F<B, 6>,
     /// Gradient of the same-step trapezoid weight `γ`, on the read axis.
     pub d_gamma_bnth: F<B, 4>,
-    /// Gradient of the key scale `scale = γ + (1−λ₊₁)·Δ₊₁`.
+    /// Gradient of the key scale `scale` (at lag 1, `γ + (1−λ₊₁)·Δ₊₁`).
     pub d_scale_bnlh: F<B, 4>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
@@ -56,12 +59,12 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 ///
 /// Recomputes the forward intermediates (K1–K4) from the saved inputs, then:
 /// - computes the K5 BLUE (state-to-output) and strict lower-triangular LOWER
-///   (intra-chunk) backwards a chunk group at a time (the score is what that
-///   group prices — see [`Mamba3SsdPath::backward_chunk_group`]),
+///   (intra-chunk) backwards one chunk group at a time (the group size sets
+///   the memory of the score, see [`Mamba3SsdPath::backward_chunk_group`]),
 /// - computes the γ-weighted same-step DIAG backward batched (its `m × m`
-///   working tensors are tiny), and
-/// - walks the K4 state-passing backward, the one recurrence, over the
-///   chunk-input-state gradient the first step produced.
+///   working tensors are tiny),
+/// - walks the K4 state-passing backward (the one recurrence) over the
+///   chunk-input-state gradient from the first step.
 ///
 /// K3/K2/K1 backwards then run as single batched ops.
 ///

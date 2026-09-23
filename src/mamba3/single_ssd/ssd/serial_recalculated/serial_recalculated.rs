@@ -1,18 +1,19 @@
 //! # Serial SSD with a custom, memory-efficient backward (Mamba-3 single-SSD)
 //!
-//! The `SerialRecalculated` path for the single-SSD pathway.  The forward is the
-//! same serial scan as [`super::super::serial`], routed through the
-//! [`Mamba3SingleSsdBackendExt`] trait so `Autodiff` backends substitute a
-//! custom backward that recomputes per-chunk intermediates rather than storing
-//! them (see [`super::backward`] / [`super::combined_backward`]).  Unlike the
-//! double-SSD form, the kernels here apply the trapezoid `gamma`/`scale` and the
-//! boundary-β seed internally, so the backward also returns `d_gamma`/`d_scale`.
+//! The `SerialRecalculated` path of the single-SSD pathway. The forward is the
+//! same serial scan as [`super::super::serial`], but it goes through the
+//! [`Mamba3SingleSsdBackendExt`] trait. So an `Autodiff` backend can use a
+//! custom backward that recomputes per-chunk intermediates instead of storing
+//! them (see [`super::backward`] / [`super::combined_backward`]). Unlike the
+//! double-SSD form, the kernels here apply the trapezoid `gamma`/`scale`
+//! themselves, so the backward also returns `d_gamma`/`d_scale`. (The caller
+//! folds the boundary-β seed into the initial state.)
 //!
 //! The default body runs under a generic backend `B`, where the high-level
-//! `Tensor` (pinned to `Dispatch`) is unavailable, so the K1–K5 math goes
-//! through the rank-tagged [`F`] primitive wrapper.  K1–K4 are mode-agnostic and
-//! reused from the double-SSD forward; only the single-SSD K5 (strict-lower
-//! intra-chunk + γ-correction) is owned here, and it is forward-only.
+//! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
+//! the rank-tagged [`F`] primitive wrapper. K1–K4 do not depend on the form,
+//! and come from the double-SSD forward. Only the single-SSD K5 (strict-lower
+//! intra-chunk + γ-correction) is defined here, and it is forward-only.
 
 #![allow(non_snake_case)]
 
@@ -30,10 +31,10 @@ use burn::tensor::Tensor;
 impl Mamba3SingleSsdInput {
     /// MIMO-first single-ssd form Serial SSD with recalculated backward.
     ///
-    /// Delegates the full K1–K5 (single-ssd) computation to
-    /// [`Mamba3SingleSsdBackendExt::single_ssd_serial_recalculated`], which can provide
-    /// a memory-efficient custom backward for supported backends (the Autodiff
-    /// wrapper) and falls back to the standard K1–K5 forward on others.
+    /// Sends the full K1–K5 (single-ssd) computation to
+    /// [`Mamba3SingleSsdBackendExt::single_ssd_serial_recalculated`]. An
+    /// autodiff backend adds the memory-efficient custom backward. A plain
+    /// backend runs the standard K1–K5 forward.
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -66,14 +67,13 @@ impl Mamba3SingleSsdInput {
 
 /// Extends the backend for the memory-efficient single-ssd form serial SSD.
 ///
-/// The default implementation runs K1–K5 using primitive tensor operations,
-/// reusing the mode-agnostic K1/K2/K3/K4 from the double-SSD forward and the
-/// single-ssd form K5 below. Backends that support a custom memory-efficient
-/// backward (the Autodiff wrapper) override this to recompute forward
-/// intermediates during backward instead of saving them.
+/// The default implementation runs K1–K5 with primitive tensor operations:
+/// K1/K2/K3/K4 of the double-SSD forward (they do not depend on the form) and
+/// the single-ssd K5 below. The Autodiff wrapper overrides it: its backward
+/// recomputes the forward intermediates instead of saving them.
 #[backend_extension(
-    // Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
-    // this one backend; which of them a tensor runs on is what its device says.
+    // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
+    // this one backend. The device of a tensor tells which runtime it uses.
     // The cfg mirrors burn's own `cube_backend`.
     Cube: cfg(any(
         feature = "backend-cpu",
@@ -94,11 +94,12 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     ///
     /// # Arguments
     /// - `v_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
-    /// - `da_bnlh`:            `[batch, nchunks, chunk_len, nheads]` — pre-combined Δ·A
+    /// - `da_bnlh`:            `[batch, nchunks, chunk_len, nheads]` — the log-decay
     /// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     /// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
     /// - `gamma_bnth`:         `[batch, nchunks, chunk_tokens, nheads]` — `γₜ = λₜ Δₜ`
-    /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ = γₜ + (1−λₜ₊₁)Δₜ₊₁`
+    /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ` (see
+    ///   [`Mamba3SingleSsdInput::scale_bnlh`])
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     /// - `read_stride`:        `micro_steps` — folded positions per read row, so
     ///   `chunk_tokens = chunk_len / read_stride` (see

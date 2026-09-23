@@ -31,9 +31,9 @@ pub enum MambaLatentNet {
 }
 
 impl MambaLatentNet {
-    /// Full-sequence pass. The `ssd_path` must match the network's family; a
-    /// mismatch is a caller error and panics with an explanatory message.
-    /// `pad` marks a right-padded batch ([`LatentNetwork::forward`]).
+    /// Full-sequence pass. The `ssd_path` must match the family of the
+    /// network. A mismatch is a caller error and panics with a message. `pad`
+    /// marks a right-padded batch ([`LatentNetwork::forward`]).
     pub fn forward(
         &self,
         x: Tensor<3>,
@@ -91,10 +91,10 @@ impl MambaLatentNet {
         }
     }
 
-    /// Single-token step. No path argument (decoding is recurrent for all
-    /// families). Cache family must match the network. `class` — the cursors of
-    /// all three class levels — is threaded to the inner network, see
-    /// [`LatentNetwork::step`].
+    /// Single-token step. It has no path argument (decoding is recurrent for
+    /// all families). The cache family must match the network. `class` (the
+    /// cursors of all three class levels) goes to the inner network (see
+    /// [`LatentNetwork::step`]).
     pub fn step(
         &self,
         x: Tensor<2>,
@@ -135,9 +135,10 @@ impl MambaLatentNet {
         }
     }
 
-    /// Class-only step: emits the class markers waiting for the next user token
-    /// without one, returning the last of them (`None` when none were waiting).
-    /// Cache family must match the network — see [`LatentNetwork::prime`].
+    /// Class-only step: emits the class markers that wait for the next user
+    /// token, without one. Returns the last of them (`None` when none were
+    /// waiting). The cache family must match the network (see
+    /// [`LatentNetwork::prime`]).
     pub fn prime(
         &self,
         batch: usize,
@@ -177,12 +178,11 @@ impl MambaLatentNet {
             }
         }
     }
-
 }
 
-/// The serializable, documentation-friendly config for [`MambaLatentNet`]. Each
-/// variant is concrete (per-family), so `#[derive(Config)]` applies; `init`
-/// builds the matching network variant.
+/// The serializable config for [`MambaLatentNet`]. Each variant is concrete
+/// (per family), so `#[derive(Config)]` applies. `init` builds the matching
+/// network variant.
 #[derive(Config, Debug)]
 pub enum MambaLatentNetConfig {
     /// Build a Mamba-1 latent network.
@@ -194,7 +194,7 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -211,11 +211,11 @@ pub enum MambaLatentNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -223,8 +223,9 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 latent network.
@@ -236,7 +237,7 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -253,11 +254,11 @@ pub enum MambaLatentNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -265,8 +266,9 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 latent network.
@@ -278,7 +280,7 @@ pub enum MambaLatentNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -295,11 +297,11 @@ pub enum MambaLatentNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`, unlike the class tokens above).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -307,19 +309,20 @@ pub enum MambaLatentNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
 impl MambaLatentNetConfig {
-    /// The [`MuonPlan`] for this network: the block's
-    /// (and the optional MLP's) fused projections.
+    /// The [`MuonPlan`] for this network: the fused projections of the block
+    /// (and of the optional MLP).
     ///
-    /// The network's own boundary weights — `in_proj`/`out_proj` (or the
-    /// embedding and LM head) and any class-token table — are deliberately left
-    /// out; see [`burn_stack::optim`].
+    /// The plan deliberately leaves out the own boundary weights of the
+    /// network: `in_proj`/`out_proj` (or the embedding and LM head) and any
+    /// class-token table. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
         let (specs, mlp) = match self {
@@ -467,7 +470,7 @@ pub enum MambaVocabNet {
 impl MambaVocabNet {
     /// Full-sequence pass: token IDs `[batch, sequence]` → logits
     /// `[batch, sequence, padded_vocab]`. The `ssd_path`/`caches` family must
-    /// match the network; a mismatch is a caller error and panics. `pad` marks
+    /// match the network. A mismatch is a caller error and panics. `pad` marks
     /// a right-padded batch ([`VocabNetwork::forward`]).
     pub fn forward(
         &self,
@@ -527,8 +530,8 @@ impl MambaVocabNet {
     }
 
     /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
-    /// Cache family must match the network. `class` — the inner [`Layers`]
-    /// cursors — is forwarded, see [`VocabNetwork::step`].
+    /// The cache family must match the network. `class` (the cursors of the
+    /// inner [`Layers`]) goes to the inner network (see [`VocabNetwork::step`]).
     pub fn step(
         &self,
         x: Tensor<1, Int>,
@@ -569,9 +572,10 @@ impl MambaVocabNet {
         }
     }
 
-    /// Class-only step: emits the class latents waiting for the next token
-    /// without one, returning the logits of the last of them (`None` when none
-    /// were waiting). Cache family must match — see [`VocabNetwork::prime`].
+    /// Class-only step: emits the class latents that wait for the next token,
+    /// without one. Returns the logits of the last of them (`None` when none
+    /// were waiting). The cache family must match (see
+    /// [`VocabNetwork::prime`]).
     pub fn prime(
         &self,
         batch: usize,
@@ -612,9 +616,9 @@ impl MambaVocabNet {
         }
     }
 
-    /// Whether every class latent is a `Start`, so that after the opening every
-    /// `step` runs the same launches — see
-    /// [`Layers::only_start_latents`](burn_stack::modules::Layers::only_start_latents).
+    /// Whether every class latent is a `Start`. Then, after the opening, every
+    /// `step` runs the same launches (the condition for a captured step, see
+    /// [`Layers::only_start_latents`](burn_stack::modules::Layers::only_start_latents)).
     pub fn only_start_latents(&self) -> bool {
         match self {
             #[cfg(feature = "mamba1")]
@@ -627,9 +631,9 @@ impl MambaVocabNet {
     }
 }
 
-/// The serializable, documentation-friendly config for [`MambaVocabNet`]. Each
-/// variant is concrete (per-family), so `#[derive(Config)]` applies; `init`
-/// builds the matching network variant.
+/// The serializable config for [`MambaVocabNet`]. Each variant is concrete (per
+/// family), so `#[derive(Config)]` applies. `init` builds the matching network
+/// variant.
 #[derive(Config, Debug)]
 pub enum MambaVocabNetConfig {
     /// Build a Mamba-1 language model.
@@ -639,7 +643,7 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -655,11 +659,11 @@ pub enum MambaVocabNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -667,8 +671,9 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 language model.
@@ -678,7 +683,7 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -694,11 +699,11 @@ pub enum MambaVocabNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -706,8 +711,9 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 language model.
@@ -717,7 +723,7 @@ pub enum MambaVocabNetConfig {
         n_real_layers: usize,
         /// Optional virtual-layer scheduling.
         n_virtual_layers: Option<(usize, Schedule)>,
-        /// Which virtual layers back-propagate; everything else runs on the
+        /// Which virtual layers back-propagate. All other layers run on the
         /// inner backend (truncated BPTT for deep recursion). `None` ⇒ track the
         /// whole stack. See
         /// [`Layers::grad_horizon`](burn_stack::modules::Layers::grad_horizon).
@@ -733,11 +739,11 @@ pub enum MambaVocabNetConfig {
         /// Stack-level class latents, spliced into the sequence before the
         /// first layer (width `d_model`).
         class_latents: Vec<ClassLatent>,
-        /// Suppress the first virtual layer's residual (Pre-LN skip / MultiGate
-        /// seed carry). See [`Layers`].
+        /// Remove the residual of the first virtual layer (Pre-LN skip /
+        /// MultiGate seed carry). See [`Layers`].
         ignore_first_residual: bool,
-        /// Suppress the last virtual layer's residual (output is the last
-        /// layer's transform alone). See [`Layers`].
+        /// Remove the residual of the last virtual layer (the output is only
+        /// the transform of the last layer). See [`Layers`].
         ignore_last_residual: bool,
         /// Inter-layer residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
@@ -745,19 +751,20 @@ pub enum MambaVocabNetConfig {
         /// the reference configs), with its own pre-norm and inner residual.
         /// `None` ⇒ mixer-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
-        /// The layer's own parameters held once per application instead of tied
-        /// (the block's are `mamba_block`'s); see [`burn_stack::utils::untied`].
+        /// The own parameters of the layer that are held once per application
+        /// instead of tied (the block has its own list, in `mamba_block`). See
+        /// [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
 impl MambaVocabNetConfig {
-    /// The [`MuonPlan`] for this network: the block's
-    /// (and the optional MLP's) fused projections.
+    /// The [`MuonPlan`] for this network: the fused projections of the block
+    /// (and of the optional MLP).
     ///
-    /// The network's own boundary weights — `in_proj`/`out_proj` (or the
-    /// embedding and LM head) and any class-token table — are deliberately left
-    /// out; see [`burn_stack::optim`].
+    /// The plan deliberately leaves out the own boundary weights of the
+    /// network: `in_proj`/`out_proj` (or the embedding and LM head) and any
+    /// class-token table. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
         let (specs, mlp) = match self {
@@ -884,13 +891,13 @@ impl MambaVocabNetConfig {
 // The `config → module` seam
 // ===========================================================================
 
-/// The [`ModelConfigExt`] impls: what a model-agnostic driver (an example's
-/// training loop, artifact loading) needs from a whole-model config, namely how
-/// to build it on a device and which weights Muon may own.
+/// The [`ModelConfigExt`] impls: what a model-agnostic driver (the training
+/// loop of an example, artifact loading) needs from a whole-model config: how
+/// to build it on a device, and which weights Muon can own.
 ///
-/// Both methods forward to the inherent ones just above — `self.init(..)`
-/// resolves to `MambaLatentNetConfig::init` (inherent methods win over trait
-/// methods in method-call syntax), so this delegates rather than recurses.
+/// Both methods forward to the inherent methods just above. `self.init(..)`
+/// resolves to `MambaLatentNetConfig::init` (in method-call syntax, inherent
+/// methods win over trait methods), so this delegates and does not recurse.
 mod model_config_ext {
     use super::*;
     use burn_stack::modules::ModelConfigExt;

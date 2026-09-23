@@ -1,15 +1,14 @@
 //! # Mamba-2 chunkwise SSD algorithms
 //!
-//! Three exact reformulations of the same Structured State Space Duality scan,
-//! all agreeing on values **and** gradients (asserted by the `ssd_path` tests):
+//! Three exact reformulations of the same Structured State Space Duality scan.
+//! They agree on values **and** gradients (the `ssd_path` tests assert it):
 //!
-//! - [`minimal`] — mostly batched matmuls + a `segsum` mask; plain autodiff
-//!   backward.
-//! - [`serial`] — a serial loop over chunks (mirrors the Triton kernels K1–K5);
-//!   plain autodiff backward.
-//! - [`serial_recalculated`] — the same serial loop with a **custom,
-//!   memory-efficient backward** that recomputes intermediates (saves ~⅓
-//!   training memory).
+//! - [`minimal`] — mostly batched matmuls and a `segsum` mask, with the plain
+//!   autodiff backward.
+//! - [`serial`] — a serial loop over chunks (it mirrors the Triton kernels
+//!   K1–K5), with the plain autodiff backward.
+//! - [`serial_recalculated`] — the same serial loop with a **custom backward**
+//!   that recomputes intermediates. It uses ~⅓ less training memory.
 //!
 //! [`ssd_path`] holds the [`Mamba2SsdPath`] selector and the [`Mamba2SsdInput`]
 //! bundle whose `run()` dispatches to one of the three.

@@ -2,49 +2,50 @@
 //!
 //! [`Vertical`]: crate::mamba3::trapezoid::Trapezoid::Vertical
 //!
-//! The single-SSD pathway scales sample `s`'s key by the whole collapsed weight
-//! `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/mamba-3/trapezoid-as-integration.md` §5), which is right for
-//! every read `t` that happens *after* the tap has been paid, i.e. `t − s ≥ lag`,
-//! and wrong for the `lag` reads before it, where the weight must still be `γₛ`.
-//! At lag 1 that exception is the diagonal alone and
-//! [`ssd::diag`](crate::mamba3::single_ssd::ssd::diag) handles it inside the
-//! kernel; at lag `u` it is a `u`-wide **band** (§9).
+//! The single-SSD pathway scales the key of sample `s` by the whole collapsed
+//! weight `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/mamba-3/trapezoid-as-integration.md` §5).
+//! That is right for every read `t` *after* the tap is paid (`t − s ≥ lag`). It
+//! is wrong for the `lag` reads before it, where the weight must still be
+//! `γₛ`. At lag 1 that exception is only the diagonal, and
+//! [`ssd::diag`](crate::mamba3::single_ssd::ssd::diag) corrects it inside the
+//! kernel. At lag `u` it is a `u`-wide **band** (§9).
 //!
-//! The excess is passed in rather than recomputed from `scale − γ`, because a
-//! two-tap pattern's scale also carries a **lag-1** installment, and that one has
-//! already landed at every read the band covers except the diagonal — which the
-//! kernel replaces outright. So what belongs here is the lag-`u` mass alone.
+//! The caller passes the excess in. It is not recomputed from `scale − γ`,
+//! because the scale of a two-tap pattern also holds a **lag-1** installment.
+//! That installment has already landed at every read that the band covers,
+//! except the diagonal, which the kernel replaces anyway. So only the lag-`u`
+//! mass belongs here.
 //!
 //! ## Why the band never has to enter the kernel
 //!
-//! The band would straddle chunk boundaries, and the part of it that arrived
-//! through the chunk's initial state could not be un-weighted. It does not have
-//! to: the only outputs `forward` ever asks for are each token's **last**
-//! micro-step (the chunk's [read axis](crate::mamba3::product)), and for a read
-//! at folded position `p = τ·u + (u−1)` the band `{p−u+1 … p}` is *exactly token
-//! `τ`*. So the correction is one small contraction per token, applied after the
-//! kernel at token resolution, with no mask change, no chunk-length constraint
-//! and no cross-chunk term.
+//! The band would cross chunk boundaries, and the part of it that arrived
+//! through the initial state of the chunk could not be un-weighted. But it
+//! does not have to enter the kernel. The only outputs of `forward` are at the
+//! **last** micro-step of each token (the [read axis](crate::mamba3::product)
+//! of the chunk). For a read at folded position `p = τ·u + (u−1)`, the band
+//! `{p−u+1 … p}` is *exactly token `τ`*. So the correction is one small
+//! contraction per token, applied after the kernel at token resolution. It
+//! needs no mask change, no chunk-length constraint and no cross-chunk term.
 //!
-//! What this gives up is worth stating exactly, because it is the one place the
-//! two pathways stop agreeing pointwise. The two remain equivalent on
-//! **everything a caller can observe** — the block's output and every field of
-//! the returned cache — and that is all `forward_single_ssd` ever promised. What
-//! is not corrected is the intermediate `y` at the `u−1` folded positions per
-//! token the read axis never asks for (and, since the read axis, never computes):
-//! partial sums on the way to the read, never a value the block computes. The
-//! **state** is exact at every position in both pathways, which is what the
-//! caches carry and what a split prefill continues from.
+//! This is the one place where the two pathways do not agree pointwise. They
+//! stay equivalent on **everything that a caller can observe**: the output of
+//! the block and every field of the returned cache. That is all that
+//! `forward_single_ssd` promises. The correction does not apply to the
+//! intermediate `y` at the `u−1` folded positions per token that the read axis
+//! does not read (and does not compute): partial sums on the way to the read,
+//! never a value that the block returns. The **state** is exact at every
+//! position in both pathways. The caches carry it, and a split prefill
+//! continues from it.
 //!
-//! Correcting those positions too is possible, not free: their band reaches back
-//! over a token boundary, so part of it arrives through the chunk's initial state
-//! (or, in the call's first token, through the boundary β seed) already weighted
-//! by `scale`, where it can no longer be un-weighted. That is the cost this
-//! module declines to pay.
+//! A correction of those positions too is possible, but not free. Their band
+//! reaches back over a token boundary. So part of it arrives through the
+//! initial state of the chunk (or, in the first token of the call, through the
+//! boundary β seed), already weighted by `scale`, where it cannot be
+//! un-weighted. This module does not pay that cost.
 //!
 //! ## The term
 //!
-//! The kernel's diagonal is already `γ`, so what is left over is `j < u−1`:
+//! The diagonal of the kernel is already `γ`, so what is left is `j < u−1`:
 //!
 //! ```text
 //!   corr[τ, m_out, h, p] = Σ_{j<u−1} νᵗᵃᵖ[τ,j] · dcy[τ,j]
@@ -53,20 +54,21 @@
 //!   νᵗᵃᵖ[τ,j] = νᶠᵃʳₛ₊ᵤ at s = (τ,j)     dcy[τ,j] = exp(Σ_{r=j+1}^{u−1} da[τ,r])
 //! ```
 //!
-//! `dcy` is the scalar decay from the tapped position to the read; the relative
-//! *rotation* needs no factor at all, being already carried by `C̄`/`B̄`.
+//! `dcy` is the scalar decay from the tapped position to the read. The
+//! relative *rotation* needs no factor, because `C̄`/`B̄` already carry it.
 
 use burn::prelude::*;
 
 /// The intra-token part of the `lag`-wide correction band, to be **subtracted**
 /// from the single-SSD output at token resolution.
 ///
-/// `None` at `micro_steps == 1` (the band is the diagonal, already the kernel's)
-/// — and callers only reach it at `lag == micro_steps`, i.e. under one of the
-/// lag-`u` patterns
+/// `None` at `micro_steps == 1` (the band is the diagonal, which the kernel
+/// already corrects). Callers use it only at `lag == micro_steps`, under one
+/// of the lag-`u` patterns
 /// ([`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical) and
-/// the two that add a tap to it). `excess_bsh` is the **lag-`u`** mass shifted
-/// back to the sample that owes it (`νₛ₊ᵤ`), never the whole `scaleₛ − γₛ`.
+/// the two that add a tap to it). `excess_bsh` is the **lag-`u`** mass,
+/// shifted back to the sample that owes it (`νₛ₊ᵤ`), never the whole
+/// `scaleₛ − γₛ`.
 ///
 /// # Shapes
 /// - `b_bsmhr`             : `[batch, sequence, mimo_rank, nheads, state_rank]`

@@ -1,26 +1,29 @@
-//! # Mamba-3 Single-pass SSD Inference Cache
+//! # Mamba-3 Caches (single-SSD pathway)
 //!
-//! The cache used by [`crate::mamba3::mamba3::Mamba3::forward_single_ssd`]
-//! (the single-pass SSD algorithm — see the Triton SISO and Tilelang MIMO
-//! reference kernels).
-//! The four tensor fields mirror those of [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache) but their
-//! **SSM accumulator carries different semantics**:
+//! The cache of [`crate::mamba3::mamba3::Mamba3::forward_single_ssd`] (the
+//! single-pass SSD algorithm of the Triton SISO and Tilelang MIMO reference
+//! kernels). Its fields mirror those of
+//! [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache),
+//! but the **SSM accumulator has different semantics** mid-sequence:
 //!
-//! - [`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache): `ssm_bhpr` holds the double-ssd trapezoidal hidden state
-//!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ`.
-//! - [`Mamba3SingleSsdCache`](crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache): `ssm_bhpr` holds the **trapezoid accumulator** `h'ₜ`
-//!   defined by `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, where
-//!   `scaleₜ = γₜ + (1 − λₜ₊₁) · Δₜ₊₁`. The single-ssd form gives the correct output
-//!   `yₜ = Cₜᵀ h'ₜ` for all positions except the diagonal (s = t), which is
-//!   patched by an explicit `γₜ · (Cₜᵀ Bₜ) · xₜ` correction term in the kernel.
+//! - double-SSD: `ssm_bhpr` holds the trapezoidal hidden state
+//!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ` (at the default lag 1).
+//! - single-SSD: `ssm_bhpr` holds the **trapezoid accumulator**
+//!   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, with
+//!   `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`. With it, `yₜ = Cₜᵀ h'ₜ` is correct at
+//!   all positions except the `lag`-wide band before a tap is paid. The kernel
+//!   patches the diagonal (lag 1) with an explicit `γₜ · (Cₜᵀ Bₜ) · xₜ` term,
+//!   and `token_band` patches the wider band (lag `u`).
 //!
-//! Under [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) that
-//! difference disappears — `scaleₜ = γₜ` everywhere, so `h' ≡ h` at every
-//! position and the tap slots are absent from both caches.
+//! The two states are equal at call boundaries, where caches are produced and
+//! consumed (see [`crate::mamba3::cache`]). Under
+//! [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) the difference
+//! disappears everywhere: `scaleₜ = γₜ`, so `h' ≡ h` at every position, and
+//! neither cache has tap slots.
 //!
-//! Because the two accumulators differ, the two caches are not interchangeable.
-//! The distinct type prevents accidentally feeding a `forward_double_ssd` cache into
-//! `forward_single_ssd` (or vice versa) mid-sequence — that would silently corrupt state.
+//! The distinct type prevents a `forward_double_ssd` cache from going into
+//! `forward_single_ssd` (or the reverse) mid-sequence, which would silently
+//! corrupt the state.
 
 use crate::mamba3::prelude::*;
 use burn_stack::modules::sanity as san;
@@ -31,10 +34,10 @@ use burn::prelude::*;
 // Mamba3SingleSsdCaches  (one cache entry per layer)
 // ---------------------------------------------------------------------------
 
-/// A collection of per-layer single-ssd form caches for a complete Mamba-3 network.
+/// A collection of per-layer single-ssd caches for a complete Mamba-3 network.
 #[derive(Module, Debug)]
 pub struct Mamba3SingleSsdCaches {
-    /// Per-layer caches. Length equals the number of virtual layers.
+    /// Per-layer caches. The length is the number of virtual layers.
     pub caches: Vec<Mamba3SingleSsdCache>,
 }
 
@@ -42,7 +45,7 @@ pub struct Mamba3SingleSsdCaches {
 #[derive(Config, Debug)]
 pub struct Mamba3SingleSsdCachesConfig {
     /// Number of cache slots (= number of virtual layers).
-    pub n_real_caches: usize,
+    pub n_caches: usize,
 
     /// Shared configuration that determines the shape of each cache.
     pub cache: Mamba3SingleSsdCacheConfig,
@@ -51,19 +54,19 @@ pub struct Mamba3SingleSsdCachesConfig {
 impl Mamba3SingleSsdCachesConfig {
     /// Convenience constructor from a block config.
     pub fn new_from_block_config(
-        n_real_caches: usize,
+        n_caches: usize,
         batch: usize,
         block_config: Mamba3Config,
     ) -> Self {
         Self {
-            n_real_caches,
+            n_caches,
             cache: Mamba3SingleSsdCacheConfig::new_from_block_config(batch, block_config),
         }
     }
 
     /// Allocate all cache tensors (zero-initialised) on `device`.
     pub fn init(&self, device: &Device) -> Mamba3SingleSsdCaches {
-        let caches = (0..self.n_real_caches)
+        let caches = (0..self.n_caches)
             .map(|_| self.cache.clone().init(device))
             .collect();
         Mamba3SingleSsdCaches { caches }
@@ -74,36 +77,38 @@ impl Mamba3SingleSsdCachesConfig {
 // Mamba3SingleSsdCache  (state for a single layer)
 // ---------------------------------------------------------------------------
 
-/// Mutable state for a single Mamba-3 layer running the single-ssd form algorithm.
+/// The state of one Mamba-3 layer that runs the single-ssd algorithm.
 ///
-/// Tensor shapes match [`Mamba3Cache`]. The semantic difference lives entirely
-/// in `ssm_bhpr` (see the module-level documentation).
+/// The fields and shapes match
+/// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache).
+/// The semantic difference is only in `ssm_bhpr` (see the module header).
 #[derive(Module, Debug)]
 pub struct Mamba3SingleSsdCache {
-    /// **SingleSsd-form SSM accumulator** `h'ₜ`.
+    /// **Single-SSD SSM accumulator** `h'ₜ`.
     ///
     /// Update rule: `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ · sumₘ Bₜ[m] ⊗ (xₜ ⊙ mimo_xₘ)`.
-    /// Different from `Mamba3Cache::ssm_bhpr`.
+    /// Mid-sequence, it is different from the double-ssd `ssm_bhpr`.
     ///
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The tap FIFO's K** (post-RoPE, post-bias `B`), one slot per lagged
-    /// position, **oldest first**.
+    /// **The K of the tap FIFO** (post-RoPE, post-bias `B`), one slot per
+    /// lagged position, **oldest first**.
     ///
-    /// Used at the start of the next forward_single_ssd call to seed the deferred
-    /// boundary β contributions `Σⱼ (1 − λⱼ) · Δⱼ · Bₚ₋ₗₐ₉₊ⱼ ⊗ xₚ₋ₗₐ₉₊ⱼ` (which the
-    /// previous call could not yet add because it did not know the `λ, Δ` of the
-    /// `lag` positions that pay them).
+    /// At the start of the next `forward_single_ssd` call, it seeds the
+    /// deferred boundary β contributions
+    /// `Σⱼ (1 − λⱼ) · Δⱼ · Bₚ₋ₗₐ₉₊ⱼ ⊗ xₚ₋ₗₐ₉₊ⱼ`. The previous call could not add
+    /// them, because it did not know the `λ, Δ` of the `lag` positions that pay
+    /// them.
     ///
     /// `None` under [`Trapezoid::None`], which has no boundary β term to defer.
     ///
     /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
     pub k_state_bumhr: Option<Tensor<5>>,
 
-    /// **The tap FIFO's x**, matching [`Self::k_state_bumhr`] slot for slot, and
-    /// `None` with it. Pre-scaled by the decay accumulated since its own
-    /// position, exactly as in the double-SSD cache (whose field this is).
+    /// **The x of the tap FIFO**, matching [`Self::k_state_bumhr`] slot for
+    /// slot, and `None` with it. Pre-scaled by the decay accumulated since its
+    /// own position, exactly as in the double-SSD cache.
     ///
     /// Shape: `[batch, tap_slots, nheads, per_head_dim]`
     pub v_state_buhp: Option<Tensor<4>>,
@@ -111,14 +116,13 @@ pub struct Mamba3SingleSsdCache {
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]).
     ///
-    /// Same role as in [`Mamba3Cache`]: continued across calls for streaming.
-    /// Carries the same value as the double-ssd cache's field (the `From` impls
-    /// move it across), so the two caches still inter-convert by field identity.
+    /// The same value as the field of the double-ssd cache (the `From` impls
+    /// move it across), so the two caches convert by field identity.
     pub rotation: RotationState,
 
-    /// **The Kalman gate's log-precision** `ln Λ` after the last position (see
-    /// [`Mamba3DoubleSsdCache::log_precision_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::log_precision_bh),
-    /// whose value this is).
+    /// **The log-precision of the Kalman gate**, `ln Λ` after the last position
+    /// (the same value as
+    /// [`Mamba3DoubleSsdCache::log_precision_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::log_precision_bh)).
     ///
     /// Shape: `[batch, nheads]`
     pub log_precision_bh: Option<Tensor<2>>,
@@ -182,26 +186,26 @@ pub struct Mamba3SingleSsdCacheConfig {
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
-    /// Number of quaternion blocks (`rope_dim / 4`); only used for
-    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`].
+    /// Number of quaternion blocks (`rope_dim / 4`). Only
+    /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`] use it.
     #[config(default = 1)]
     pub num_quat_blocks: usize,
 
-    /// The block's tap pattern (see
+    /// The tap pattern of the block (see
     /// [`Mamba3DoubleSsdCacheConfig::trapezoid`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::trapezoid)).
     #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
     pub trapezoid: Trapezoid,
 
-    /// Recurrence micro-steps per token (`u`); with [`Self::trapezoid`] it fixes
-    /// the tap FIFO's depth (see [`Trapezoid::tap_lag`]).
+    /// Recurrence micro-steps per token (`u`). With [`Self::trapezoid`], it
+    /// sets the depth of the tap FIFO (see [`Trapezoid::tap_lag`]).
     #[config(default = 1)]
     pub micro_steps: usize,
 
-    /// The block's gain; a Kalman one keeps a `ln Λ` slot.
+    /// The gain of the block. A Kalman gain keeps a `ln Λ` slot.
     #[config(default = "crate::mamba3::positive::Gain::Projected")]
     pub gain: crate::mamba3::positive::Gain,
 
-    /// The block's tropical register; `MaxPlus` keeps a `c` slot.
+    /// The tropical register of the block. `MaxPlus` keeps a `c` slot.
     #[config(default = "crate::mamba3::positive::Tropical::None")]
     pub tropical: crate::mamba3::positive::Tropical,
 }

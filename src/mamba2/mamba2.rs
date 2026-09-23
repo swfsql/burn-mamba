@@ -6,9 +6,9 @@
 //!
 //! ## The SSD Model
 //!
-//! The SSD layer is a multi-head selective SSM.  Each head processes a
-//! sequence of `per_head_dim`-dimensinal inputs `X ∈ ℝ^{sequence×per_head_dim}` through the recurrence
-//! (Eq. 1–2 of the paper):
+//! The SSD layer is a multi-head selective SSM. Each head sends a sequence of
+//! `per_head_dim`-dimensional inputs `X ∈ ℝ^{sequence×per_head_dim}` through
+//! the recurrence (Eq. 1–2 of the paper):
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ          (state update)
@@ -16,9 +16,9 @@
 //! ```
 //!
 //! where:
-//! - `hₜ ∈ ℝ^{`state_rank`×per_head_dim}` is the hidden state
-//! - `Āₜ = exp(Δₜ A) ∈ ℝ` is a scalar decay (the key SSD constraint:
-//!   Āₜ = αₜ · I, i.e. scalar times identity, rather than a diagonal matrix)
+//! - `hₜ ∈ ℝ^{state_rank×per_head_dim}` is the hidden state
+//! - `Āₜ = exp(Δₜ A) ∈ ℝ` is a scalar decay. This is the key SSD constraint:
+//!   `Āₜ = αₜ · I` is a scalar times the identity, not a diagonal matrix.
 //! - `B̄ₜ = Δₜ Bₜ ∈ ℝᴺ`  is the (discretised) input projection
 //! - `Cₜ ∈ ℝᴺ`           is the output projection
 //! - `Δₜ > 0`             is the (input-dependent) discretisation step size
@@ -26,7 +26,7 @@
 //!
 //! ## State Space Duality
 //!
-//! Unrolling the recurrence yields an equivalent **attention-like** form
+//! The unrolled recurrence has an equivalent **attention-like** form
 //! (Eq. 6–7):
 //!
 //! ```text
@@ -41,27 +41,28 @@
 //!   Lᵢⱼ = 0                     (i < j)
 //! ```
 //!
-//! This makes the layer equivalent to causal linear attention
-//! `Y = (L ∘ QKᵀ) V` under the renaming `(C, B, X) ↦ (Q, K, V)`.
+//! So the layer is causal linear attention `Y = (L ∘ QKᵀ) V` with the
+//! renaming `(C, B, X) ↦ (Q, K, V)`.
 //!
 //! ## The Chunkwise SSD Algorithm
 //!
-//! See [`ssd::minimal`](crate::mamba2::ssd::minimal) for more information.
+//! See [`ssd::minimal`](crate::mamba2::ssd::minimal).
 //!
 //! ## Relationship to the other families
 //!
 //! [`Mamba-1`](crate::mamba1) is the predecessor: a sequential selective scan
-//! with a diagonal (rather than scalar) state transition.  [`Mamba-3`](crate::mamba3)
-//! extends the SSD layer below with trapezoidal discretisation, a complex-valued
-//! state transition (data-dependent RoPE on B/C), and MIMO rank expansion.
+//! with a diagonal (not scalar) state transition. [`Mamba-3`](crate::mamba3)
+//! extends this SSD layer with trapezoidal discretisation, a complex-valued
+//! state transition (data-dependent RoPE on B/C), MIMO rank expansion and
+//! MambaProduct.
 //!
 //! ## Notation / Dimension Keys
 //!
-//! Throughout all Mamba-2 files, tensor names carry a suffix representing their shape.
-//! The letters used differ from the reference paper and the python implementation.
-//! The "Paper" column gives the symbol from the Mamba-2 paper (Dao & Gu, 2024); the
-//! "Python" column gives the field/variable name in the reference implementation
-//! (`refs/state-spaces/mamba/mamba_ssm/modules/mamba2.py`).
+//! In all Mamba-2 files, a tensor name has a suffix that gives its shape. The
+//! letters are different from those of the paper and of the Python
+//! implementation. The "Paper" column gives the symbol in the Mamba-2 paper
+//! (Dao & Gu, 2024). The "Python" column gives the name in the reference
+//! implementation (`mamba_ssm/modules/mamba2.py` in `state-spaces/mamba`).
 //!
 //! | Letter | Dimension | Paper | Python | Typical value |
 //! |--------|-----------|-------|--------|---------------|
@@ -78,9 +79,9 @@
 //! | `n`    | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
 //! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
 //!
-//! Uppercase letters represent a relation (e.g. offset, multiple, concat, stacking)
-//! of the lowercase letters. e.g. `X` may represent `x+1`, `x-1`, `x*2`, etc.
-//! `XY` may also represent `x+y`, `x*y`, etc.
+//! An uppercase letter is a relation (offset, multiple, concat, stack) of
+//! lowercase letters. For example, `X` can be `x+1`, `x-1` or `x*2`, and `XY`
+//! can be `x+y` or `x*y`.
 
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
@@ -99,11 +100,10 @@ use burn::{
 
 /// The Mamba-2 SSM block.
 ///
-/// Implements the full SSD layer as described in §5 of the paper.  Supports
-/// two execution modes:
+/// The full SSD layer of §5 of the paper, in two execution modes:
 ///
-/// - [`Self::forward`] — chunkwise SSD for training / prefill
-///   (exploits tensor cores; linear in sequence length)
+/// - [`Self::forward`] — chunkwise SSD for training / prefill (it uses tensor
+///   cores, and its cost is linear in sequence length)
 /// - [`Self::step`]    — pure recurrent form for token-by-token decoding
 ///   (O(`nheads`·`per_head_dim`·`state_rank`) per step)
 #[derive(Module, Debug)]
@@ -116,13 +116,14 @@ pub struct Mamba2 {
     ///   is then split into (x, B, C) after activation
     /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) discretisation step Δ
     ///
-    /// Under [`Mamba2Untied::InProjTail`] it stops at `xbc`, `dt_raw` living in
-    /// [`Self::in_proj_tail`]; [`Self::project_in`] reads the two as one.
+    /// Under [`Mamba2Untied::InProjTail`], `in_proj` stops at `xbc`, and
+    /// `dt_raw` is in [`Self::in_proj_tail`]. [`Self::project_in`] reads the
+    /// two as one.
     pub in_proj: Linear,
 
-    /// `in_proj`'s trailing `dt_raw` segment, split off when
+    /// The trailing `dt_raw` segment of `in_proj`, when
     /// [`Mamba2Untied::InProjTail`] unties it: one copy per application, along
-    /// the output axis. `None` ⇒ `in_proj` carries it.
+    /// the output axis. `None` ⇒ `in_proj` holds it.
     pub in_proj_tail: Option<Linear>,
 
     /// Causal depthwise Conv1d applied to the `xbc` projection.
@@ -130,57 +131,53 @@ pub struct Mamba2 {
     /// - Input/output channels: `conv_dim`
     /// - Kernel size: `conv_kernel` (typically 4)
     /// - Groups: `conv_dim` (fully depthwise — each channel is independent)
-    /// - Padding: **none** (left-padding is applied manually so the convolution
-    ///   is strictly causal)
+    /// - Padding: **none**. `forward` adds the causal left padding itself, from
+    ///   the cache window.
     ///
-    /// The convolution provides a local `conv_kernel`-token context window
-    /// before the SSM, which helps the model capture short-range dependencies
-    /// that the SSM's recurrent form handles less efficiently.
+    /// The convolution gives a local context of `conv_kernel` tokens before the
+    /// SSM. It helps with short-range dependencies.
     pub conv1d: Conv1d,
 
     /// Per-head bias for the discretisation step size Δ.
     ///
     /// Shape: `[nheads]`
     ///
-    /// At inference time, `Δₜ = softplus(dt_rawₜ + dt_bias)`.
-    /// Initialised such that the corresponding initial `Δ` values are
-    /// log-uniformly distributed in `[dt_min, dt_max]`.
+    /// `Δₜ = softplus(dt_rawₜ + dt_bias)`. The initial values make the initial
+    /// `Δ` log-uniform in `[dt_min, dt_max]`.
     pub dt_bias_h: Param<Tensor<1>>,
 
-    /// Hard clamp applied to Δ after softplus:  `Δ ∈ [dt_limit.0, dt_limit.1]`.
+    /// Hard clamp applied to Δ after softplus: `Δ ∈ [dt_limit.0, dt_limit.1]`.
     ///
-    /// Prevents degenerate discretisations (e.g. Δ → 0 causes Ā → 1, meaning
-    /// the state never decays; Δ → ∞ causes Ā → 0, meaning the state is
-    /// immediately wiped each step).
+    /// It prevents degenerate discretisations. At Δ → 0, Ā → 1 and the state
+    /// never decays. At Δ → ∞, Ā → 0 and each step erases the state.
     pub dt_limit: (f64, f64),
 
     /// Per-head log-magnitude of the continuous-time decay parameter A.
     ///
     /// Shape: `[nheads]`
     ///
-    /// The actual (negative) decay rate is `A = -exp(a_log)`.  The discrete
-    /// decay is `Āₜ = exp(Δₜ · A) = exp(-Δₜ · exp(a_log)) ∈ (0, 1)`.
+    /// The (negative) decay rate is `A = -exp(a_log)`. The discrete decay is
+    /// `Āₜ = exp(Δₜ · A) = exp(-Δₜ · exp(a_log)) ∈ (0, 1)`.
     ///
-    /// Storing the *log* of the magnitude and negating ensures A < 0
-    /// (decaying system) unconditionally and avoids any sign-constraint
-    /// during gradient descent.
+    /// The block stores the *log* of the magnitude and negates it. Thus
+    /// A < 0 (a decaying system) always, with no sign constraint during
+    /// gradient descent.
     pub a_log_h: Param<Tensor<1>>,
 
     /// Per-head skip (D) coefficient.
     ///
     /// Shape: `[nheads]`
     ///
-    /// Adds a direct path from the (post-convolution, pre-SSM) input to the
-    /// output:  `yₜ += D · xₜ`.  Initialised to ones.
+    /// A direct path from the (post-convolution, pre-SSM) input to the output:
+    /// `yₜ += D · xₜ`. Initialised to ones.
     pub d_h: Param<Tensor<1>>,
 
-    /// Gated RMSNorm applied to the SSM output, conditioned on the gate `z`.
+    /// Gated RMSNorm on the SSM output, with the gate `z`.
     ///
     /// Input channel dimension: `d_inner`.
     ///
-    /// This combines the multiplicative gate (from `z`) and a normalisation
-    /// step into a single fused operation, matching the architecture in §5.2
-    /// of the paper.
+    /// One fused operation does the multiplicative gate (from `z`) and the
+    /// normalisation, as in §5.2 of the paper.
     pub norm: RmsNormGated,
 
     /// Output projection: maps `d_inner → d_model`.
@@ -190,10 +187,10 @@ pub struct Mamba2 {
     ///
     /// Shape: `[nheads, per_head_dim, state_rank]`.
     ///
-    /// When `None`, the initial state is zero (the standard default).
-    /// When `Some`, the stored tensor is used as the initial condition for
-    /// *every* forward call (not per-batch; it is broadcast over the batch
-    /// dimension).
+    /// `None` ⇒ the initial state is zero (the standard default). `Some` ⇒
+    /// each `forward` call adds this tensor, broadcast over the batch, to the
+    /// incoming cache state. Only [`Mamba2SsdPath::Minimal`] supports it: the
+    /// two serial paths panic. [`Self::step`] does not read it.
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
     /// `state_rank` — the number of latent dimensions in the SSM hidden
@@ -202,10 +199,10 @@ pub struct Mamba2 {
     /// Paper: `N`. Python: `d_state`.
     pub state_rank: usize,
 
-    /// Number of B/C groups `ngroups` for grouped SSM heads (analogous to
-    /// grouped-query attention). `ngroups` divides `nheads`; all `nheads/ngroups` heads
-    /// within a group share the same B and C projections while having
-    /// independent X, A, and Z projections.
+    /// Number of B/C groups `ngroups` for grouped SSM heads (as in
+    /// grouped-query attention). `ngroups` divides `nheads`. The
+    /// `nheads/ngroups` heads of a group share the same B and C projections,
+    /// but each head has its own X, A, and Z projections.
     ///
     /// Paper: `G`. Python: `ngroups`.
     pub ngroups: usize,
@@ -240,8 +237,9 @@ impl Mamba2 {
         self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 
-    /// The in-projection's output `[z | xbc | dt_raw]`: `in_proj` alone, or —
-    /// under [`Mamba2Untied::InProjTail`] — followed by [`Self::in_proj_tail`].
+    /// The output of the in-projection, `[z | xbc | dt_raw]`: `in_proj` alone,
+    /// or `in_proj` then [`Self::in_proj_tail`] under
+    /// [`Mamba2Untied::InProjTail`].
     pub fn project_in<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
         match &self.in_proj_tail {
             None => self.in_proj.forward(x),
@@ -287,13 +285,13 @@ impl Mamba2 {
 // Mamba2Config  (hyperparameters and factory)
 // ---------------------------------------------------------------------------
 
-/// A [`Mamba2`] parameter that may be held once per application of its real
-/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
-/// big maps — `in_proj`'s `z|xbc` head and `out_proj` — always stay tied.
+/// A [`Mamba2`] parameter that the block can hold once per application of its
+/// real layer instead of tied across them (see [`burn_stack::utils::untied`]).
+/// The big maps, the `z|xbc` head of `in_proj` and `out_proj`, are always tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba2Untied {
-    /// `in_proj`'s trailing Δ segment, split off into [`Mamba2::in_proj_tail`] —
-    /// a second, small GEMM.
+    /// The trailing Δ segment of `in_proj`, moved into
+    /// [`Mamba2::in_proj_tail`] (a second, small GEMM).
     InProjTail,
     /// The depthwise convolution [`Mamba2::conv1d`], kernel and bias.
     Conv1d,
@@ -312,20 +310,21 @@ pub enum Mamba2Untied {
 
 /// Hyperparameters for the Mamba-2 SSM block.
 ///
-/// All computed quantities (e.g. `nheads`, `d_inner`, `conv_dim`) are derived
-/// from the stored fields; see the helper methods on [`Mamba2Config`].
+/// The helper methods on [`Mamba2Config`] derive the computed quantities
+/// (`nheads`, `d_inner`, `conv_dim`, …) from the stored fields.
 #[derive(Config, Debug)]
 pub struct Mamba2Config {
-    /// Model (hidden) dimension. Every token is represented as a
-    /// `d_model`-dimensional vector at the input and output of the block.
+    /// Model (hidden) dimension: the width of each token vector at the input
+    /// and output of the block.
     ///
     /// Paper: `D`. Python: `d_model`.
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
     ///
-    /// Larger `state_rank` gives a more expressive state but increases memory and compute
-    /// per step. The paper uses N ∈ {64, 128, 256} for most experiments.
+    /// A larger `state_rank` gives a more expressive state, but more memory
+    /// and compute per step. The paper uses N ∈ {64, 128, 256} in most
+    /// experiments.
     ///
     /// Paper: `N`. Python: `d_state`.
     #[config(default = 128)]
@@ -339,14 +338,14 @@ pub struct Mamba2Config {
 
     /// Expansion factor for `d_inner = expand · d_model`.
     ///
-    /// An expansion of 2 doubles the internal width, keeping the parameter
-    /// count of the SSM block comparable to a standard attention layer.
+    /// An expansion of 2 doubles the internal width. The parameter count of
+    /// the SSM block is then comparable to that of a standard attention layer.
     ///
     /// Paper: `E`. Python: `expand`.
     #[config(default = 2)]
     pub expand: usize,
 
-    /// Head dimension. The total `d_inner` is split into
+    /// Head dimension. The block splits `d_inner` into
     /// `nheads = d_inner / per_head_dim` independent SSM heads.
     ///
     /// Typical values: 64 or 128.
@@ -357,8 +356,8 @@ pub struct Mamba2Config {
 
     /// Number of B/C groups. Must divide `nheads`.
     ///
-    /// Setting `ngroups < nheads` reduces the B and C projection sizes (analogous to
-    /// GQA in attention), saving memory without a large accuracy cost.
+    /// `ngroups < nheads` makes the B and C projections smaller (as GQA does in
+    /// attention). This saves memory without a large accuracy cost.
     ///
     /// Paper: `G`. Python: `ngroups`.
     #[config(default = 1)]
@@ -371,27 +370,28 @@ pub struct Mamba2Config {
     #[config(default = "(1., 16.)")]
     pub a_init_range: (f64, f64),
 
-    /// Gated RMSNorm mode: when `true` the norm is applied *before* the gate;
-    /// when `false` (default) the gate is applied first (SiLU-gated norm).
+    /// Gated RMSNorm mode. `true` ⇒ the norm comes *before* the gate.
+    /// `false` (default) ⇒ the gate comes first (SiLU-gated norm).
     #[config(default = false)]
     pub is_norm_before_gate: bool,
 
-    /// Minimum value of the initial Δ distribution.  Used to set `dt_bias`.
+    /// Minimum value of the initial Δ distribution. It sets `dt_bias`.
     #[config(default = 1e-3)]
     pub dt_min: f64,
 
-    /// Maximum value of the initial Δ distribution.  Used to set `dt_bias`.
+    /// Maximum value of the initial Δ distribution. It sets `dt_bias`.
     #[config(default = 0.1)]
     pub dt_max: f64,
 
-    /// Floor clamped onto the sampled initial Δ values before inverting to
-    /// obtain `dt_bias`.  Prevents numerical issues with very small Δ.
+    /// Floor on the sampled initial Δ values, applied before the inversion
+    /// that gives `dt_bias`. It prevents numerical problems with very small Δ.
     #[config(default = 1e-4)]
     pub dt_init_floor: f64,
 
     /// Hard clamp limits for Δ at runtime: `Δ ∈ [dt_limit.0, dt_limit.1]`.
     ///
-    /// Defaults to `(0, f16::MAX ≈ 65504)`, effectively only clamping at 0.
+    /// Defaults to `(0, f16::MAX ≈ 65504)`, so in practice only the clamp at
+    /// 0 has an effect.
     #[config(default = "(0., 6.5504e+4)")]
     pub dt_limit: (f64, f64),
 
@@ -405,17 +405,19 @@ pub struct Mamba2Config {
 
     /// Whether to allocate a learnable initial SSM state `h₀`.
     ///
-    /// When `false` (default), the hidden state starts at zero for every
-    /// sequence.  When `true`, `init_state_hpr` is allocated as a trainable
-    /// parameter of shape `[nheads, per_head_dim, state_rank]`.
+    /// `false` (default) ⇒ the hidden state starts at zero for every sequence.
+    /// `true` ⇒ the block has a trainable `init_state_hpr` of shape
+    /// `[nheads, per_head_dim, state_rank]`. Only
+    /// [`Mamba2SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
     /// The parameters held once per application of the block's real layer
-    /// instead of tied across them ([`Mamba2Untied`]); only virtual layers give
-    /// a real layer more than one. Each must exist in this config. The layout
-    /// follows the list alone — [`Mamba2Untied::InProjTail`] splits `in_proj` at
-    /// any count. See [`burn_stack::utils::untied`].
+    /// instead of tied across them ([`Mamba2Untied`]). Only virtual layers
+    /// apply a real layer more than once. Each listed parameter must exist in
+    /// this config. The layout depends only on this list:
+    /// [`Mamba2Untied::InProjTail`] splits `in_proj` also for one application.
+    /// See [`burn_stack::utils::untied`].
     #[config(default = "Vec::new()")]
     pub untied: Vec<Mamba2Untied>,
 }
@@ -438,18 +440,18 @@ impl Mamba2Config {
     /// `conv_dim = d_inner + 2 · ngroups · state_rank`.
     ///
     /// The depthwise convolution processes `x`, `B`, and `C` concatenated:
-    /// x contributes `d_inner` channels, B and C each contribute
-    /// `ngroups · state_rank` channels.
+    /// `d_inner` channels for x, and `ngroups · state_rank` channels each for
+    /// B and C.
     pub fn conv_dim(&self) -> usize {
         self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 
     /// The block's 2-D weights Muon may own, and how their fused columns split.
     ///
-    /// `in_proj` is `[z | xbc | dt]`; `xbc` is split further into its own
-    /// `x`/`B`/`C` maps (they only share the depthwise conv, not a linear map),
-    /// and the per-head dt channels stay on AdamW. The conv weight is 3-D, so it
-    /// is never listed. See [`burn_stack::optim`].
+    /// `in_proj` is `[z | xbc | dt]`. The list splits `xbc` into its own
+    /// `x`/`B`/`C` maps: they share the depthwise conv, not a linear map. The
+    /// per-head dt channels stay on the fallback optimizer. The conv weight is
+    /// 3-D, so the list never has it. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
         use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
@@ -545,8 +547,9 @@ impl Mamba2Config {
         });
 
         // ── conv1d ───────────────────────────────────────────────────────────
-        // Causal depthwise convolution.  Left-padding is applied manually in
-        // `forward` and `step`, so we request "Valid" (no automatic padding).
+        // Causal depthwise convolution. `forward` prepends the cache window as
+        // left padding and `step` slides that window, so the conv itself uses
+        // "Valid" (no automatic padding).
         // The initialiser fan_in is `in_channels / groups * kernel_size = 1 * conv_kernel`.
         let mut conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
             .with_padding(burn::nn::PaddingConfig1d::Valid)
@@ -560,11 +563,11 @@ impl Mamba2Config {
             .map(|b| untied::tile(b, 0, copies(Mamba2Untied::Conv1d)));
 
         // ── dt_bias ──────────────────────────────────────────────────────────
-        // We want the initial Δ values (after softplus) to be log-uniformly
-        // distributed in [dt_min, dt_max].  The inverse softplus (inverse of
-        // softplus(x) = ln(1 + exp(x))) is used to back-solve for the bias:
-        //   dt_bias = softplus⁻¹(dt) = dt + ln(1 - exp(-dt)) ≈ dt + ln(dt)
-        // which simplifies to `dt + log(exp(dt) - 1)` in the formula below.
+        // The initial Δ values (after softplus) must be log-uniform in
+        // [dt_min, dt_max]. The inverse of softplus(x) = ln(1 + exp(x)) gives
+        // the bias:
+        //   dt_bias = softplus⁻¹(dt) = ln(exp(dt) - 1) = dt + ln(1 - exp(-dt))
+        // The code uses the last form.
         let expm1 = |t: Tensor<1>| t.exp() - 1.;
         let dt_h = Tensor::random(
             [nheads],
@@ -573,7 +576,6 @@ impl Mamba2Config {
         )
         .exp();
         let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
-        // Inverse softplus: softplus⁻¹(y) = y + log(1 - e^{-y}) = y + log(e^y - 1) - y = log(e^y - 1)
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
         let dt_bias_h = untied::tile(
             Param::from_tensor(inv_dt_h),
@@ -582,9 +584,9 @@ impl Mamba2Config {
         );
 
         // ── a_log ─────────────────────────────────────────────────────────────
-        // A is constrained to be negative (decaying system).
-        // We store a_log = log(|A|) and recover A = -exp(a_log) at runtime.
-        // This parameterisation ensures A < 0 unconditionally.
+        // A must be negative (a decaying system). The block stores
+        // a_log = log(|A|) and computes A = -exp(a_log) at runtime, so A < 0
+        // always.
         assert!(
             self.a_init_range.0 > 0.0,
             "a_init_range lower bound must be > 0"
@@ -601,7 +603,7 @@ impl Mamba2Config {
         let a_log_h = untied::tile(Param::from_tensor(a_h.log()), 0, copies(Mamba2Untied::ALog));
 
         // ── D (skip connection) ───────────────────────────────────────────────
-        // Initialised to ones, adding a direct residual path from input to output.
+        // Ones: a direct residual path from input to output.
         let d_h = Initializer::Ones.init::<1, _>([nheads], device);
         let d_h = untied::tile(d_h, 0, copies(Mamba2Untied::D));
 
@@ -644,40 +646,41 @@ impl Mamba2Config {
 // ---------------------------------------------------------------------------
 
 impl Mamba2 {
-    /// Process a full input sequence using the chunkwise SSD algorithm.
+    /// Process a full input sequence with the chunkwise SSD algorithm.
     ///
-    /// This is the primary training and prefill path.  The computation is
-    /// **linear in sequence** but uses batched matrix multiplications (GEMMs) that
-    /// can exploit GPU tensor cores — unlike the naive sequential recurrence,
-    /// which requires O(sequence) serial steps.
+    /// This is the main training and prefill path. The cost is **linear in
+    /// sequence**, and the work is batched matrix multiplications (GEMMs) that
+    /// use GPU tensor cores. The naive sequential recurrence needs O(sequence)
+    /// serial steps.
     ///
     /// ## Full dataflow
     ///
-    /// 1. **In-projection**: `u → (z, xbc, dt_raw)` via a single linear layer.
+    /// 1. **In-projection**: `u → (z, xbc, dt_raw)` with one linear layer.
     /// 2. **Causal Conv1d + SiLU**: local context mixing over `xbc`.
     /// 3. **Split**: `xbc → (x, B, C)`.
-    /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`;
-    ///    `Ā = exp(Δ · A)`;  `B̄ = Δ · B`.
-    /// 5. **Padding**: sequence padding.
-    /// 6. **SSD Algorithm**: chunkwise selective scan algorithm selection.
-    ///    See [`Mamba2SsdPath`] for more info.
-    /// 7. **Gated RMSNorm**: `y = RMSNorm(y) · σ(z)`.
+    /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`,
+    ///    `Ā = exp(Δ · A)`, `B̄ = Δ · B`.
+    /// 5. **Padding**: pad the sequence to a multiple of `chunk_len`.
+    /// 6. **SSD Algorithm**: the chunkwise scan that `ssd_path` selects (see
+    ///    [`Mamba2SsdPath`]).
+    /// 7. **Gated RMSNorm**: `y = RMSNorm(y · SiLU(z))`, or
+    ///    `RMSNorm(y) · SiLU(z)` under `is_norm_before_gate`.
     /// 8. **Out-projection**: `y → output`.
     ///
     /// ## Sequence padding
     ///
-    /// If `sequence_unpadded % chunk_len ≠ 0`, the sequence is zero-padded
-    /// to the next multiple of chunk_len.  Zero-padding is equivalent to inserting
-    /// identity steps (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`), so the SSM
-    /// state is carried forward unchanged through the pad — making it safe to
-    /// read the final state of the padded last chunk as the true final state.
+    /// If `sequence % chunk_len ≠ 0`, the block pads the sequence with zeros
+    /// to the next multiple of `chunk_len`. A zero pad is an identity step
+    /// (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`): the SSM state goes through it
+    /// unchanged. Thus the final state of the padded last chunk is the true
+    /// final state.
     ///
     /// ## Right padding
     ///
-    /// `pad_bs` (`true` at padding, `None` ⇒ none) marks a right-padded batch:
-    /// a padded row is absent. It takes `Δ = 0` — the same identity step the
-    /// chunk padding above inserts — and the conv window is read at each
-    /// slot's own end (see [`burn_stack::modules::Block::block_forward`]).
+    /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
+    /// batch. A padded row is absent. It gets `Δ = 0` (the same identity step
+    /// as the chunk padding above), and each slot reads its conv window at its
+    /// own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// ## Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
@@ -700,12 +703,11 @@ impl Mamba2 {
         let conv_dim = self.conv_dim();
         let state_rank = self.state_rank;
         let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
-        // `in_proj`'s own width stops short of the Δ segment when it is untied.
+        // The width of `project_in` (with `in_proj_tail`, if Δ is untied).
         let d_in_proj_out = d_inner + conv_dim + nheads;
         let device = input_bsm.device();
         assert_eq!(conv_dim, _conv_dim);
         assert_ne!(ngroups, 0);
-        assert_eq!(conv_dim, _conv_dim);
         assert_eq!(nheads % ngroups, 0);
         assert!(sequence > 0, "sequence length must be at least 1");
         san(&input_bsm);
@@ -723,9 +725,8 @@ impl Mamba2 {
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         // One linear layer projects the input to all SSM parameters at once.
-        // This "parallel projection" structure (vs. Mamba-1's sequential
-        // projections) enables tensor parallelism with only 1 all-reduce per
-        // layer instead of 2.
+        // With this "parallel projection" (Mamba-1 has sequential projections),
+        // tensor parallelism needs 1 all-reduce per layer instead of 2.
         //
         // Projection output:  [z | xbc | dt_raw]
         //   `z      [batch, sequence, d_inner]`  — gate for the output RMSNorm
@@ -751,11 +752,11 @@ impl Mamba2 {
         san(&dt_raw_bsh);
 
         // ── Step 2: Causal depthwise Conv1d ───────────────────────────────────
-        // Apply the causal 1-dimensional depthwise convolution to `xbc`.  To maintain
-        // strict causality, the input is left-padded with the last
-        // `(conv_kernel - 1)` columns from the cache (the tail of the previous
-        // chunk), giving a padded input of length `(conv_kernel-1) + sequence`.
-        // After the convolution the output has length `sequence` (Valid padding).
+        // The causal 1-D depthwise convolution over `xbc`. For strict
+        // causality, the last `(conv_kernel - 1)` columns of the cache (the
+        // tail of the previous call) go on the left of the input. The padded
+        // input has length `(conv_kernel-1) + sequence`, and the output
+        // (Valid padding) has length `sequence`.
         //
         // The right-most `conv_kernel` columns of the padded input become the
         // new convolution cache for the next call.
@@ -779,10 +780,10 @@ impl Mamba2 {
         );
         san(&xbc_padded_bvS);
 
-        // Update the cache: save the last `conv_kernel` columns of the padded
-        // input (i.e. starting at position `sequence - 1` from the new input) —
-        // under right padding, each slot's last real ones, read off the whole
-        // previous window followed by the input.
+        // Update the cache: keep the last `conv_kernel` columns of the padded
+        // input (from position `sequence - 1`). Under right padding, keep the
+        // last real columns of each slot, read from the full previous window
+        // followed by the input.
         cache.conv_bvk = match &pad_bs {
             None => xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]),
             Some(pad_bs) => {
@@ -811,12 +812,12 @@ impl Mamba2 {
         san(&xbc_bsv);
 
         // ── Step 3: Split xbc into (x, B, C) ──────────────────────────────────
-        // After activation, xbc is partitioned along the channel dimension:
-        //   x_bsi          → reshaped to x_bshp   (input)
-        //   b_bsGR        → reshaped to b_bsgr   (state input proj)
-        //   c_bsGR        → reshaped to c_bsgr   (state output proj)
+        // After activation, split xbc along the channel dimension:
+        //   x_bsi   → reshaped to x_bshp   (input)
+        //   b_bsGR  → reshaped to b_bsgr   (state input proj)
+        //   c_bsGR  → reshaped to c_bsgr   (state output proj)
         //
-        // Note: in the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
+        // In the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
             let [x_bsi, b_bsGR, c_bsGR] = burn_stack::modules::split_into(
                 xbc_bsv,
@@ -839,13 +840,12 @@ impl Mamba2 {
         //   Āₜ = exp(Δₜ · A)                       ∈ (0, 1)   [scalar per head]
         //   B̄ₜ = Δₜ · Bₜ                           ∈ ℝᴺ       [Euler approx]
         //
-        // The Euler approximation B̄ ≈ ΔB (instead of the exact ZOH formula)
-        // is standard in Mamba-1 and Mamba-2 (see §4.5 of the reference).
+        // The Euler approximation B̄ ≈ ΔB (not the exact ZOH formula) is
+        // standard in Mamba-1 and Mamba-2 (see §4.5 of the reference).
         //
-        // `a_head_decay_h` = A = -exp(a_log) < 0 (negative, one scalar per head).
-        // Note: we pass this negative value to the ssd algo; inside
-        // that function it is multiplied by Δ > 0, giving a negative exponent
-        // which produces Āₜ = exp(Δₜ·A) ∈ (0,1) as required.
+        // `a_head_decay_h` = A = -exp(a_log) < 0 (one scalar per head). The SSD
+        // algorithm gets this negative value and multiplies it by Δ > 0. The
+        // exponent is negative, so Āₜ = exp(Δₜ·A) ∈ (0,1).
         let dt_bias_11h = self.dt_bias_h.val().unsqueeze_dims(&[0, 1]);
         assert_eq!([1, 1, nheads], dt_bias_11h.dims());
 
@@ -864,8 +864,8 @@ impl Mamba2 {
 
         // ── Step 5: Pad sequence to a multiple of chunk_len ───────────────────
         // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
-        // The state is thus carried through unchanged, so the final state of
-        // the padded last chunk equals the state after the last real token.
+        // The state goes through the pad unchanged, so the final state of the
+        // padded last chunk equals the state after the last real token.
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
         assert!(chunk_len > 0);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
@@ -958,8 +958,8 @@ mod step {
     impl Mamba2 {
         /// Process a **single token** using the pure recurrent SSM form.
         ///
-        /// This is the O(nheads·per_head_dim·state_rank)-per-token decoding path.  It runs one tick of
-        /// the discretised Mamba-2 recurrence:
+        /// This is the decoding path, at O(nheads·per_head_dim·state_rank) per
+        /// token. It runs one tick of the discretised Mamba-2 recurrence:
         ///
         /// ```text
         ///   Āₜ  = exp(Δₜ · A)           scalar per head, ∈ (0, 1)
@@ -968,12 +968,12 @@ mod step {
         ///   yₜ  = Cₜᵀ · hₜ + D · xₜ     ∈ ℝᴾ   (output)
         /// ```
         ///
-        /// The convolution is handled by manually sliding the cache window:
-        /// the oldest input column is dropped and the new token's projection
-        /// is appended.
+        /// For the convolution, `step` slides the cache window: it removes the
+        /// oldest input column and appends the projection of the new token.
+        /// The returned cache holds the new `ssm_bhpr`.
         ///
-        /// The SSM hidden state `cache.ssm_bhpr` is updated in-place via
-        /// the recurrence above.
+        /// `step` does not read [`Self::init_state_hpr`]. A missing cache
+        /// starts from zeros.
         ///
         /// # Shapes
         /// - `input_bm` : `[batch, d_model]`
@@ -992,7 +992,7 @@ mod step {
             let conv_dim = self.conv_dim();
             let state_rank = self.state_rank;
             let [_conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
-            // `in_proj`'s own width stops short of the Δ segment when it is untied.
+            // The width of `project_in` (with `in_proj_tail`, if Δ is untied).
             let d_in_proj_out = d_inner + conv_dim + nheads;
 
             assert_eq!(conv_dim, _conv_dim);
@@ -1039,8 +1039,8 @@ mod step {
                 updated_bvk
             };
 
-            // Apply the depthwise convolution manually (one step = dot product
-            // of the cached window with the conv weight along the kernel axis).
+            // The depthwise convolution for one step: the dot product of the
+            // cached window with the conv weight along the kernel axis.
             let xbc_bv = {
                 let conv1d_v1k = self.conv1d.weight.val(); // [conv_dim, 1, conv_kernel]
                 assert_eq!([conv_dim, 1, conv_kernel], conv1d_v1k.dims());
@@ -1097,8 +1097,8 @@ mod step {
 
             // ── SSM state update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────
             // The cache holds h_{t-1} with shape _bhpr.
-            // Āₜ is a scalar per head, so we broadcast it over per_head_dim and state_rank.
-            // B̄ₜ xₜᵀ is an outer product producing a _pr matrix per _bh.
+            // Āₜ is a scalar per head, broadcast over per_head_dim and state_rank.
+            // B̄ₜ xₜᵀ is an outer product: one _pr matrix per _bh.
 
             let ssm_shape_bhpr = [batch, nheads, per_head_dim, state_rank];
 
@@ -1109,9 +1109,9 @@ mod step {
             let dtbx_bhpr = {
                 let x_bhpr = x_bhp.clone().unsqueeze_dim::<4>(3).expand(ssm_shape_bhpr);
 
-                // Expand B from _bgr → _bhpr, matching the SSD forward path:
-                // each group's projection is replicated across the heads_per_group heads of
-                // that group so that heads 0..(nheads/ngroups) belong to group 0, etc.
+                // Expand B from _bgr → _bhpr, as the SSD forward path does:
+                // copy the projection of each group to its heads_per_group
+                // heads, so heads 0..(nheads/ngroups) belong to group 0, etc.
                 let b_bhpr = b_bgr
                     .unsqueeze_dim::<4>(2) // b_bg1r
                     .expand([batch, ngroups, heads_per_group, state_rank]) // b_bgHr
@@ -1131,8 +1131,8 @@ mod step {
 
             // ── Output:  yₜ = Cₜ hₜ + D xₜ ──────────────────────────────────
             let y_bi = {
-                // Cₜ hₜ:  element-wise multiply C
-                // with hₜ, then sum over state_rank.
+                // Cₜ hₜ: multiply C with hₜ element-wise, then sum over
+                // state_rank.
                 let c_bhpr = c_bgr
                     .unsqueeze_dim::<4>(2) // c_bg1r
                     .expand([batch, ngroups, heads_per_group, state_rank]) // c_bgHr

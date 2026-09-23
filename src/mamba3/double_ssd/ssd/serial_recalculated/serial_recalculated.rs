@@ -1,16 +1,17 @@
 //! # Serial SSD with a custom, memory-efficient backward (Mamba-3 double-SSD)
 //!
-//! The `SerialRecalculated` path for the double-SSD pathway.  The forward is the
-//! same serial scan as [`super::super::serial`], routed through the
-//! [`Mamba3DoubleSsdBackendExt`] trait so that `Autodiff` backends substitute a
+//! The `SerialRecalculated` path of the double-SSD pathway. The forward is the
+//! same serial scan as [`super::super::serial`], but it goes through the
+//! [`Mamba3DoubleSsdBackendExt`] trait. So an `Autodiff` backend can use a
 //! custom backward that recomputes per-chunk intermediates instead of storing
-//! them (see [`super::backward`] / [`super::combined_backward`]).  Plain
-//! backends use the trait's default body, which replays the serial kernels.
+//! them (see [`super::backward`] / [`super::combined_backward`]). Plain
+//! backends use the default body of the trait, which replays the serial
+//! kernels.
 //!
 //! The default body runs under a generic backend `B`, where the high-level
-//! `Tensor` (pinned to `Dispatch`) is unavailable, so the K1–K5 math goes
-//! through the rank-tagged [`F`] primitive wrapper.  K1/K2/K4 are reused by the
-//! recompute backward in [`super::combined_backward`]; K5 is forward-only.
+//! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
+//! the rank-tagged [`F`] primitive wrapper. The recompute backward in
+//! [`super::combined_backward`] uses K1/K2/K4 again. K5 is forward-only.
 
 #![allow(non_snake_case)]
 
@@ -25,10 +26,10 @@ use burn::tensor::s;
 impl Mamba3DoubleSsdInput {
     /// MIMO-first Serial SSD with recalculated backward.
     ///
-    /// Delegates the full K1-K5 computation to [`Mamba3DoubleSsdBackendExt::double_ssd_serial_recalculated`]
-    /// which can provide a memory-efficient custom backward for supported backends.
-    ///
-    /// Falls back to the standard K1-K5 serial computation on unsupported backends.
+    /// Sends the full K1-K5 computation to
+    /// [`Mamba3DoubleSsdBackendExt::double_ssd_serial_recalculated`]. An
+    /// autodiff backend adds the memory-efficient custom backward. A plain
+    /// backend runs the standard K1-K5 serial computation.
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -57,13 +58,12 @@ impl Mamba3DoubleSsdInput {
 
 /// Extends the backend for the memory-efficient serial recalculated SSD.
 ///
-/// The default implementation runs K1-K5 using primitive tensor operations.
-/// Backends that support a custom memory-efficient backward (specifically the
-/// Autodiff wrapper) override this to recompute forward intermediates during
-/// the backward pass instead of saving them.
+/// The default implementation runs K1-K5 with primitive tensor operations.
+/// The Autodiff wrapper overrides it: its backward recomputes the forward
+/// intermediates instead of saving them.
 #[backend_extension(
-    // Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
-    // this one backend; which of them a tensor runs on is what its device says.
+    // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
+    // this one backend. The device of a tensor tells which runtime it uses.
     // The cfg mirrors burn's own `cube_backend`.
     Cube: cfg(any(
         feature = "backend-cpu",
@@ -147,17 +147,17 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
 burn_stack::decl_autodiff_backend_ext!(Mamba3DoubleSsdAutodiffBackendExt, Mamba3DoubleSsdBackendExt);
 
 // ---------------------------------------------------------------------------
-// Per-backend impls: each delegates to the trait's default (K1-K5) body. The
-// custom autodiff backward lives in `super::backward` as a separate impl.
+// Per-backend impls: each one uses the default (K1-K5) body of the trait. The
+// custom autodiff backward is a separate impl in `super::backward`.
 // ---------------------------------------------------------------------------
 burn_stack::impl_backend_ext_for_burn_backends!(Mamba3DoubleSsdBackendExt);
 
 // ─── Primitive forward kernels (K1–K5) ───────────────────────────────────────
-// Primitive ports of the high-level [`super::super::serial`] kernels, expressed
-// on `B`'s primitives via [`F`] so the trait default body can run under a
-// generic backend. K1/K2/K4 are reused by the recompute backward in
-// [`super::combined_backward`]; K5 is forward-only (the backward computes K5's
-// gradient analytically rather than recomputing it).
+// Primitive ports of the high-level [`super::super::serial`] kernels, on the
+// primitives of `B` through [`F`], so the default trait body can run under a
+// generic backend. The recompute backward in [`super::combined_backward`] uses
+// K1/K2/K4 again. K5 is forward-only: the backward computes the gradient of K5
+// analytically instead of recomputing it.
 
 /// Primitive port of [`super::super::serial::k1_ssd_chunk_cumsum`].
 ///
@@ -175,10 +175,11 @@ pub(crate) fn k1_ssd_chunk_cumsum<B: Backend>(da_bnlh: F<B, 4>) -> (F<B, 4>, F<B
 
 /// Primitive port of [`super::super::serial::k2_ssd_bmm`] (fused `L·M`).
 ///
-/// Returns the intra-chunk `C·Bᵀ` block matrix `cb_bnhLMLM`.
+/// Returns the intra-chunk `C·Bᵀ` block matrix `cb_bnhTMLM`.
 pub(crate) fn k2_ssd_bmm<B: Backend>(c_bntmhr: F<B, 6>, b_bnlmhr: F<B, 6>) -> F<B, 5> {
-    // `C` carries the chunk's read axis, `B` its write axis; they coincide
-    // unless `micro_steps > 1`. See the `Tensor` twin in `super::super::serial`.
+    // `C` has the read axis of the chunk, and `B` its write axis. They are
+    // equal unless `micro_steps > 1`. See the `Tensor` twin in
+    // `super::super::serial`.
     let [batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank] = c_bntmhr.dims();
     let [.., chunk_len, _, _, _] = b_bnlmhr.dims();
     let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, chunk_tokens * mimo_rank, nheads, state_rank]);
@@ -191,8 +192,8 @@ pub(crate) fn k2_ssd_bmm<B: Backend>(c_bntmhr: F<B, 6>, b_bnlmhr: F<B, 6>) -> F<
 /// Primitive port of [`super::super::serial::k3_ssd_chunk_state`] (lean:
 /// returns only the chunk-end state).
 ///
-/// Returns `intra_chunk_state_bnhpr` — each chunk's contribution to its end
-/// state assuming a zero state at the chunk's start. `v_bnlmhp` is pre-scaled.
+/// Returns `intra_chunk_state_bnhpr`: the contribution of each chunk to its
+/// end state, from a zero state at the chunk start. `v_bnlmhp` is pre-scaled.
 pub(crate) fn k3_ssd_chunk_state<B: Backend>(
     v_bnlmhp: F<B, 6>,
     b_bnlmhr: F<B, 6>,
@@ -259,15 +260,16 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     (chunk_input_state_bnhpr, final_state_bhpr)
 }
 
-/// Backward of [`k4_ssd_state_passing`] — the reverse of its scalar-decay scan,
-/// and the only part of the recompute backward that is still a walk (which is
-/// the forward's own choice, and measured there).
+/// Backward of [`k4_ssd_state_passing`]: the reverse of its scalar-decay scan.
+/// It is the only part of the recompute backward that is still a walk (as the
+/// forward is, where it was measured).
 ///
-/// Forward, writing `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
-/// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and `d_sᵢ = decayᵢ·d_sᵢ₊₁ +
-/// d_chunk_input_stateᵢ`, which the walk ends on as `d_initial`. `d_decayᵢ =
-/// d_sᵢ₊₁·sᵢ` needs no walk — `decay` is one scalar per `(b, h, n)`, so it comes
-/// out of the `(p, r)` sum and the whole stream is one batched product.
+/// Forward, with `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
+/// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and
+/// `d_sᵢ = decayᵢ·d_sᵢ₊₁ + d_chunk_input_stateᵢ`. The walk ends on `d_initial`.
+/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk: `decay` is one scalar per `(b, h, n)`,
+/// so it comes out of the `(p, r)` sum, and the whole stream is one batched
+/// product.
 ///
 /// # Returns
 /// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
@@ -319,9 +321,9 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
     )
 }
 
-/// Concatenate a chunk-group pass's per-group outputs back along the chunk
-/// axis — and nothing at all when the pass ran in one group, which a short
-/// enough chunk axis leaves it in (see
+/// Concatenate the per-group outputs of a chunk-group pass back along the
+/// chunk axis. Nothing to do when the pass ran in one group, which is the case
+/// for a short enough chunk axis (see
 /// [`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
 pub(crate) fn cat_chunk_groups<B: Backend, const D: usize>(
     mut groups: Vec<F<B, D>>,
@@ -335,9 +337,9 @@ pub(crate) fn cat_chunk_groups<B: Backend, const D: usize>(
 
 /// Primitive port of [`super::super::serial::k5_ssd_chunk_scan`].
 ///
-/// Combines the intra-chunk (ORANGE, MIMO causal) and inter-chunk (BLUE,
-/// state-carried) contributions into the output `y_bnlmhp`. No `D` skip is
-/// applied — the caller handles it. Forward-only.
+/// Adds the intra-chunk (ORANGE, MIMO causal) and inter-chunk (BLUE,
+/// state-carried) contributions into the output `y_bntmhp`. It applies no `D`
+/// skip: the caller adds it. Forward-only.
 fn k5_ssd_chunk_scan<B: Backend>(
     da_cumsum_bhnl: F<B, 4>,
     v_bnlmhp: F<B, 6>,

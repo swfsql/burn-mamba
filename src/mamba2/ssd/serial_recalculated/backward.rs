@@ -1,15 +1,15 @@
 //! # Custom autodiff node for the Mamba-2 recompute backward
 //!
-//! Implements [`Mamba2BackendExt`] for `Autodiff<B>` by registering a single
-//! Burn [`Backward`](burn::backend::autodiff::ops::Backward) node.  The forward stores only its (small) leaf inputs;
-//! during backprop those are replayed through the K1–K5 kernels and the
-//! analytic gradient math in [`combined_backward`], so the large intermediate
-//! tensors never have to be kept alive — the ~⅓ training-memory saving of the
-//! `SerialRecalculated` path.
+//! Implements [`Mamba2BackendExt`] for `Autodiff<B>` with one Burn
+//! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward
+//! stores only its (small) leaf inputs. The backward replays them through the
+//! K1–K5 kernels and the analytic gradient math in [`combined_backward`]. So
+//! the large intermediate tensors are never kept alive. This is the ~⅓
+//! training-memory saving of the `SerialRecalculated` path.
 //!
-//! The two forward outputs (`y` and `final_state`) are flattened into one
-//! tracked 1-D tensor (via [`burn_stack::utils::combined_grad`]) so that a single
-//! `Backward<B, 7>` node — one per the 7 differentiable inputs — covers both.
+//! [`burn_stack::utils::combined_grad`] flattens the two forward outputs (`y`
+//! and `final_state`) into one tracked 1-D tensor. Thus one `Backward<B, 7>`
+//! node (7 = the number of differentiable inputs) covers both outputs.
 
 #![allow(non_snake_case)]
 
@@ -29,11 +29,10 @@ use burn::backend::{Backend, BackendTypes};
 impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
     /// Memory-efficient combined forward+backward.
     ///
-    /// The two output tensors are concatenated into a single 1-dimensional tracked tensor
-    /// so that one `Backward<B, 7>` node covers both outputs.  The caller
-    /// receives split+reshaped slices of that combined tensor; burn's autodiff
-    /// accumulates their upstream gradients back into a single gradient vector
-    /// before firing this backward.
+    /// The two output tensors go into one tracked 1-D tensor, so one
+    /// `Backward<B, 7>` node covers both outputs. The caller gets split and
+    /// reshaped slices of that tensor. Burn's autodiff adds their upstream
+    /// gradients into one gradient vector before it runs this backward.
     fn ssd_serial_recalculated(
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
@@ -47,6 +46,10 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         #[derive(Debug)]
         struct CombinedKernelsBackward;
 
+        /// State carried across the forward→backward boundary.
+        ///
+        /// Only the 7 original inputs are saved. The backward recomputes all
+        /// intermediates (cb, intra state, chunk_input_state).
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
             x_bnlhp: <B as BackendTypes>::FloatTensorPrimitive,
@@ -56,7 +59,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             d_h: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
             a_decay_h: <B as BackendTypes>::FloatTensorPrimitive,
-            // flat byte-sizes for splitting the combined gradient vector
+            // flat element counts, to split the combined gradient vector
             flat_len_y_BNLHP: usize,
             flat_len_final_state_BHPR: usize,
             // shapes needed to reconstruct tensors in the right ranks
@@ -71,10 +74,6 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             shape_final_state_bhpr: [usize; 4], // (output 2)
         }
 
-        /// State carried across the forward→backward boundary.
-        ///
-        /// Only the 7 original inputs are saved; all intermediates (cb, intra
-        /// state, chunk_input_state) are recomputed during `backward`.
         #[allow(clippy::type_complexity)]
         impl<B: Backend + Mamba2BackendExt> Backward<B, 7> for CombinedKernelsBackward {
             type State = State<B>;
@@ -194,8 +193,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         } // end impl Backward
 
         // ── Shape extraction helpers ───────────────────────────────────────
-        // Accessed via the AutodiffTensor wrappers (which own both .node
-        // and .primitive).
+        // Read through the AutodiffTensor wrappers (they own both .node and
+        // .primitive).
         use burn::backend::TensorMetadata;
         let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive().shape().dims();
         let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive().shape().dims();
@@ -239,8 +238,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     a_decay_h.primitive().clone(),
                 );
 
-                // prep.finish takes a single tensor, so pack both outputs into a
-                // single 1-D tensor; one Backward node then covers both.
+                // prep.finish takes one tensor, so pack both outputs into one
+                // 1-D tensor. Then one Backward node covers both.
                 let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
                     prim_y_bnlhp,
                     prim_final_state_bhpr,
@@ -265,8 +264,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     prep.finish(state, prim_combined);
 
                 // Split the tracked combined tensor back into the two outputs.
-                // The narrow/reshape ops are thin autodiff pass-throughs whose
-                // backwards accumulate into the combined gradient vector that
+                // The narrow/reshape ops are thin autodiff pass-throughs. Their
+                // backwards add into the combined gradient vector that
                 // `backward` above consumes.
                 let (tracked_y_bnlhp, tracked_final_state_bhpr) =
                     burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(

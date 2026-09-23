@@ -7,29 +7,29 @@
 //!   Λₜ = dₜ·Lₜ + γₜ                      the right endpoint's measurement
 //! ```
 //!
-//! `γ`/`ν` are the trapezoid's two endpoint masses (`γ = Δ`, no `ν`, under
-//! [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None)). The plant
-//! pays a sample's left-endpoint installment one step late, transported by that
-//! step's decay (`β = ν·α`, with `d` for `α`), so `Λ` **is** the plant's own
-//! recurrence on ones — the total weight of every sample it has written, a
-//! fresh cache's zero tap slot included — and `η/Λ` a weighted mean of what it
-//! wrote. Each step is
-//! still one Möbius map — shift by `ν`, predict, shift by `γ` compose to
-//! `ln [[α(1+qγ), αν + γ(1+qαν)], [αq, 1+qαν]]` — so the scan is unchanged.
+//! `γ`/`ν` are the two endpoint masses of the trapezoid (`γ = Δ` and no `ν`
+//! under [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None)). The
+//! plant pays the left-endpoint installment of a sample one step late,
+//! transported by the decay of that step (`β = ν·α`, with `d` for `α`). So `Λ`
+//! **is** the recurrence of the plant on ones: the total weight of every
+//! sample it wrote (the zero tap slot of a fresh cache included). And `η/Λ` is
+//! a weighted mean of what it wrote. Each step is still one Möbius map: shift
+//! by `ν`, predict, and shift by `γ` compose to
+//! `ln [[α(1+qγ), αν + γ(1+qαν)], [αq, 1+qαν]]`. So the scan is unchanged.
 //!
-//! That identity is exact for a **lag-1** tap, which is every pattern at
-//! `u = 1` and the default at any `u`. A lag-`u` tap (the `Vertical*`
-//! patterns at `u > 1`) is transported across its whole gap, `∏ d` over `u`
-//! steps, which reads `u` earlier precisions and so is no 2×2 map; its
-//! installment enters `L` like a lag-1 one, transported by `dₜ` alone, and `Λ`
-//! over-counts the plant by `νₜ·(dₜ − ∏ d)` per step. `Λ` is then an upper
-//! bound on the plant's weight rather than the weight itself; every other
-//! property (the ceiling, the contraction, the stock join) holds unchanged.
+//! That identity is exact for a **lag-1** tap: every pattern at `u = 1`, and
+//! the default at any `u`. A lag-`u` tap (the `Vertical*` patterns at `u > 1`)
+//! is transported across its whole gap, `∏ d` over `u` steps. That reads `u`
+//! earlier precisions, so it is not a 2×2 map. Its installment enters `L` like
+//! a lag-1 installment, transported by `dₜ` alone, and `Λ` over-counts the
+//! plant by `νₜ·(dₜ − ∏ d)` per step. `Λ` is then an upper bound on the weight
+//! of the plant, not the weight itself. Every other property (the ceiling, the
+//! contraction, the stock join) holds unchanged.
 //!
-//! Everything is in log coordinates: `ℓ = ln Λ`, and the decay is formed as a
-//! log-decay correction, `ln dₜ = ln αₜ − softplus(ln qₜ + ln αₜ + ln Lₜ)`, so
-//! that `κ = 0` (`ln q = −∞`, floored to [`LOG_ZERO`]) leaves `ln αₜ`
-//! untouched bit for bit.
+//! Everything is in log coordinates: `ℓ = ln Λ`. The decay is a log-decay
+//! correction, `ln dₜ = ln αₜ − softplus(ln qₜ + ln αₜ + ln Lₜ)`. So `κ = 0`
+//! (`ln q = −∞`, floored to [`LOG_ZERO`]) leaves `ln αₜ` unchanged, bit for
+//! bit.
 
 use super::LOG_ZERO;
 use super::scan::{self, Mobius};
@@ -37,54 +37,55 @@ use burn::prelude::*;
 use burn::tensor::DType;
 use burn_stack::modules::softplus;
 
-/// What the gate reads besides the discretisation: the per-head `ln κ`, the
-/// projected noise (if any) and the carried `ℓ`.
+/// What the gate reads in addition to the discretisation: the per-head `ln κ`,
+/// the projected noise (if any) and the carried `ℓ`.
 pub struct GainInput {
     /// `ln κₕ`, `[nheads]`. `−∞` is the stock block.
     pub log_kappa_h: Tensor<1>,
     /// `rₜ`, `[batch, len, nheads]`, under
     /// [`Gain::KalmanProjectedNoise`](super::Gain::KalmanProjectedNoise).
     pub noise_bsh: Option<Tensor<3>>,
-    /// `ℓ` before the first position, `[batch, nheads]` — [`LOG_ZERO`] for a
+    /// `ℓ` before the first position, `[batch, nheads]`: [`LOG_ZERO`] for a
     /// fresh sequence (`Λ₀ = 0`: no evidence yet).
     pub carry_bh: Tensor<2>,
 }
 
-/// The gate's per-position quantities.
+/// The per-position quantities of the gate.
 pub struct GainOutput {
     /// `ln dₜ`, which replaces `Δₜ·Aₜ` wherever the block reads a log-decay.
     pub da_bsh: Tensor<3>,
-    /// `ℓₜ = ln Λₜ` after position `t`'s update, `[batch, len, nheads]`; the
-    /// last one is the next call's carry.
+    /// `ℓₜ = ln Λₜ` after the update of position `t`, `[batch, len, nheads]`.
+    /// The last one is the carry of the next call.
     pub log_precision_bsh: Tensor<3>,
 }
 
-/// The step's masses in log coordinates, each `[batch, len, nheads]` and
+/// The masses of the step in log coordinates, each `[batch, len, nheads]` and
 /// floored at [`LOG_ZERO`].
 ///
-/// Formed from the **pre-activations**, never as `ln` of the masses the plant
-/// multiplies by. A mass underflows to `0` — `softplus`/`σ` of a large
-/// negative pre-activation: below ≈ −104 in f32, ≈ −17 in f16 — and there
-/// `ln`'s forward can be floored but its backward cannot: `∂ ln x/∂x = 1/x`
-/// meets the floor's zero gradient as `0·∞ = NaN` (and a denormal `x`
-/// overflows `1/x` first). `ln softplus` and `ln σ` of the pre-activation have
-/// derivatives in `(0, 1]` everywhere instead.
+/// They come from the **pre-activations**, never as `ln` of the masses that
+/// the plant multiplies by. A mass underflows to `0` (`softplus`/`σ` of a
+/// large negative pre-activation: below ≈ −104 in f32, ≈ −17 in f16). There,
+/// the forward of `ln` can be floored, but its backward cannot:
+/// `∂ ln x/∂x = 1/x` meets the zero gradient of the floor as `0·∞ = NaN` (and
+/// a denormal `x` overflows `1/x` first). `ln softplus` and `ln σ` of the
+/// pre-activation have derivatives in `(0, 1]` everywhere.
 pub struct LogMasses {
-    /// `ln Δₜ` — the elapsed time, which paces the doubt `q`.
+    /// `ln Δₜ`: the elapsed time, which paces the doubt `q`.
     pub dt_bsh: Tensor<3>,
-    /// `ln γₜ` — the right endpoint: this position's own measurement.
+    /// `ln γₜ`: the right endpoint, the own measurement of this position.
     pub gamma_bsh: Tensor<3>,
-    /// `ln νₜ` — the left endpoint: an earlier sample's installment, paid at
-    /// this position. Every tap together (a two-tap `μ` split sums back to
-    /// `(1 − λ)·Δ`); `None` under
+    /// `ln νₜ`: the left endpoint, the installment of an earlier sample, paid
+    /// at this position. All taps together (a two-tap `μ` split sums back to
+    /// `(1 − λ)·Δ`). `None` under
     /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
     pub nu_bsh: Option<Tensor<3>>,
 }
 
 impl LogMasses {
-    /// The masses of `helpers::trapezoidal_coefficients`, in logs: `Δ =
-    /// clamp(softplus(dt_raw), dt_limit)`, `γ = λ'·Δ`, `ν = (1 − λ')·Δ`, where
-    /// `λ' = σ(lambda_raw)`, set to `1` where `far_open_1s1` closes the far tap.
+    /// The masses of `helpers::trapezoidal_coefficients`, in logs:
+    /// `Δ = clamp(softplus(dt_raw), dt_limit)`, `γ = λ'·Δ`, `ν = (1 − λ')·Δ`,
+    /// where `λ' = σ(lambda_raw)`, set to `1` where `far_open_1s1` closes the
+    /// far tap.
     ///
     /// # Shapes
     /// - `dt_raw_bsh`, `lambda_raw_bsh` : `[batch, len, nheads]` (`dd_dt + dt_bias`; `λ`'s logit)
@@ -129,29 +130,31 @@ impl LogMasses {
     }
 }
 
-/// `ln softplus(x)`, finite everywhere with a derivative `σ(x)/softplus(x)` in
-/// `(0, 1]` — including where `softplus(x)` itself underflows to `0`.
+/// `ln softplus(x)`, finite everywhere, with a derivative
+/// `σ(x)/softplus(x)` in `(0, 1]`. This also holds where `softplus(x)` itself
+/// underflows to `0`.
 ///
-/// Below a knee `softplus(x) = eˣ·(1 − eˣ/2 + …)`, so `ln softplus(x) = x − eˣ/2
-/// + O(e²ˣ)`. The knee keeps `softplus` a normal number above it (f16's
-/// smallest is `e^−9.7`) and the dropped `e²ˣ` term under the dtype's
-/// resolution below it: `−8` in f16, `−20` otherwise.
+/// Below a knee, `softplus(x) = eˣ·(1 − eˣ/2 + …)`, so
+/// `ln softplus(x) = x − eˣ/2 + O(e²ˣ)`. Above the knee, `softplus` stays a
+/// normal number (the smallest f16 normal is `e^−9.7`). Below it, the dropped
+/// `e²ˣ` term is under the resolution of the dtype. The knee is `−8` in f16
+/// and `−20` otherwise.
 pub fn log_softplus<const D: usize>(x: Tensor<D>) -> Tensor<D> {
     let knee = match x.dtype() {
         DType::F16 => -8.0,
         _ => -20.0,
     };
     let below = x.clone().lower_elem(knee);
-    // Each branch is fed only its own side of the knee: a branch `mask_where`
-    // discards still backpropagates, and `ln 0` or an overflowing `eˣ` there
-    // would reach the gradient as `0·∞ = NaN`.
+    // Each branch gets only its own side of the knee. A branch that
+    // `mask_where` discards still backpropagates, and a `ln 0` or an
+    // overflowing `eˣ` there would reach the gradient as `0·∞ = NaN`.
     let above = softplus(x.clone().clamp_min(knee)).log();
     let x_below = x.clamp_max(knee);
     let series = x_below.clone() - x_below.exp() * 0.5;
     above.mask_where(below, series)
 }
 
-/// The per-position Möbius elements — shift by `ν`, predict, shift by `γ`:
+/// The per-position Möbius elements (shift by `ν`, predict, shift by `γ`):
 ///
 /// ```text
 ///   ln [[α(1 + qγ),  αν + γ(1 + qαν)],
@@ -161,7 +164,7 @@ pub fn log_softplus<const D: usize>(x: Tensor<D>) -> Tensor<D> {
 /// which is `ln [[α(1+qγ), γ], [αq, 1]]` without a `ν`.
 ///
 /// # Shapes
-/// - every input : `[batch, len, nheads]` (`da_bsh` is stock's `ln α = Δ·A`)
+/// - every input : `[batch, len, nheads]` (`da_bsh` is the stock `ln α = Δ·A`)
 fn elements(da_bsh: &Tensor<3>, ln_q_bsh: &Tensor<3>, masses: &LogMasses) -> Mobius {
     let floor = |t: Tensor<3>| t.clamp_min(LOG_ZERO);
     let ln_gamma = masses.gamma_bsh.clone();
@@ -179,10 +182,10 @@ fn elements(da_bsh: &Tensor<3>, ln_q_bsh: &Tensor<3>, masses: &LogMasses) -> Mob
 }
 
 /// Run the gate over a folded run of positions (the whole sequence in
-/// `forward`, one token's `u` micro-steps in `step`).
+/// `forward`, the `u` micro-steps of one token in `step`).
 ///
 /// # Shapes
-/// - `da_bsh` : `[batch, len, nheads]`, stock's `Δ·A`
+/// - `da_bsh` : `[batch, len, nheads]`, the stock `Δ·A`
 pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutput {
     let [batch, len, nheads] = da_bsh.dims();
     let ln_q = input.log_kappa_h.clone().unsqueeze::<3>() + masses.dt_bsh.clone();
@@ -200,8 +203,9 @@ pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
     } else {
         Tensor::cat(vec![carry_b1h, log_precision_bsh.clone().narrow(1, 0, len - 1)], 1)
     };
-    // `ln Lₜ`: the predict acts on everything known about the samples before
-    // this position, including the installment of one that is paid only now.
+    // `ln Lₜ`: the predict acts on all that is known about the samples before
+    // this position, including the installment of a sample that is paid only
+    // now.
     let ln_l_bsh = match masses.nu_bsh {
         Some(ln_nu) => scan::lse(prev_bsh, ln_nu),
         None => prev_bsh,

@@ -1,6 +1,6 @@
 //! Runtime-selectable bidirectional stacks: one enum (plus a serializable
-//! `Config`) over the three families'
-//! [`BidiLayers`](burn_stack::modules::BidiLayers) monomorphisations.
+//! `Config`) over the [`BidiLayers`](burn_stack::modules::BidiLayers)
+//! monomorphisations of the three families.
 
 use crate::prelude::*;
 use burn::config::Config;
@@ -31,9 +31,10 @@ pub enum MambaBidiLayers {
 
 impl MambaBidiLayers {
     /// Output positions of the stack-level class latents for an `orig_len`
-    /// input (so a caller can read a class latent back out of the lengthened
-    /// `forward` output — e.g. as a pooled summary). A marker that never lands
-    /// (a `Custom` at or past the end) reports a position past that output.
+    /// input. With them, a caller can read a class latent back out of the
+    /// longer `forward` output (for example, as a pooled summary). A marker
+    /// that never lands (a `Custom` at or past the end) reports a position
+    /// past that output.
     pub fn class_latent_output_indices(&self, orig_len: usize) -> Vec<usize> {
         match self {
             #[cfg(feature = "mamba1")]
@@ -45,8 +46,8 @@ impl MambaBidiLayers {
         }
     }
 
-    /// Full-sequence bidirectional pass. The `ssd_path` must match the stack's
-    /// family; a mismatch is a caller error and panics. `pad` marks a
+    /// Full-sequence bidirectional pass. The `ssd_path` must match the family
+    /// of the stack. A mismatch is a caller error and panics. `pad` marks a
     /// right-padded batch ([`BidiLayers::forward`]).
     pub fn forward(
         &self,
@@ -107,23 +108,23 @@ impl MambaBidiLayers {
 }
 
 /// The serializable config for [`MambaBidiLayers`]. Each variant is concrete
-/// (per-family), so `#[derive(Config)]` applies; `init` builds the matching
+/// (per family), so `#[derive(Config)]` applies. `init` builds the matching
 /// stack variant.
 #[derive(Config, Debug)]
 pub enum MambaBidiLayersConfig {
     /// Build a Mamba-1 bidirectional stack.
     #[cfg(feature = "mamba1")]
     Mamba1 {
-        /// Number of real layers (must be even — used in pairs).
+        /// Number of real layers (must be even: the layers work in pairs).
         n_real_layers: usize,
-        /// Optional virtual-layer scheduling (pairs; must be even).
+        /// Optional virtual-layer scheduling (in pairs, so it must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba1::prelude::Mamba1Config,
-        /// Suppress the first virtual pair's residual.
+        /// Remove the residual of the first virtual pair.
         ignore_first_residual: bool,
-        /// Suppress the last virtual pair's residual (the stack outputs that
-        /// pair's merged transform alone).
+        /// Remove the residual of the last virtual pair (the stack output is
+        /// only the merged transform of that pair).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
@@ -132,24 +133,24 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
-        /// The layers' own parameters held once per application instead of
-        /// tied (the block's are `mamba_block`'s); see
-        /// [`burn_stack::utils::untied`].
+        /// The own parameters of the layers that are held once per
+        /// application instead of tied (the block has its own list, in
+        /// `mamba_block`). See [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-2 bidirectional stack.
     #[cfg(feature = "mamba2")]
     Mamba2 {
-        /// Number of real layers (must be even — used in pairs).
+        /// Number of real layers (must be even: the layers work in pairs).
         n_real_layers: usize,
-        /// Optional virtual-layer scheduling (pairs; must be even).
+        /// Optional virtual-layer scheduling (in pairs, so it must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba2::prelude::Mamba2Config,
-        /// Suppress the first virtual pair's residual.
+        /// Remove the residual of the first virtual pair.
         ignore_first_residual: bool,
-        /// Suppress the last virtual pair's residual (the stack outputs that
-        /// pair's merged transform alone).
+        /// Remove the residual of the last virtual pair (the stack output is
+        /// only the merged transform of that pair).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
@@ -158,24 +159,24 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
-        /// The layers' own parameters held once per application instead of
-        /// tied (the block's are `mamba_block`'s); see
-        /// [`burn_stack::utils::untied`].
+        /// The own parameters of the layers that are held once per
+        /// application instead of tied (the block has its own list, in
+        /// `mamba_block`). See [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
     /// Build a Mamba-3 bidirectional stack.
     #[cfg(feature = "mamba3")]
     Mamba3 {
-        /// Number of real layers (must be even — used in pairs).
+        /// Number of real layers (must be even: the layers work in pairs).
         n_real_layers: usize,
-        /// Optional virtual-layer scheduling (pairs; must be even).
+        /// Optional virtual-layer scheduling (in pairs, so it must be even).
         n_virtual_layers: Option<(usize, BidiSchedule)>,
         /// Shared block config.
         mamba_block: crate::mamba3::prelude::Mamba3Config,
-        /// Suppress the first virtual pair's residual.
+        /// Remove the residual of the first virtual pair.
         ignore_first_residual: bool,
-        /// Suppress the last virtual pair's residual (the stack outputs that
-        /// pair's merged transform alone).
+        /// Remove the residual of the last virtual pair (the stack output is
+        /// only the merged transform of that pair).
         ignore_last_residual: bool,
         /// One merge config per pair, length `n_real_layers / 2`.
         outputs_merge: Vec<OutputMergeConfig>,
@@ -184,17 +185,17 @@ pub enum MambaBidiLayersConfig {
         class_latents: Vec<ClassLatent>,
         /// Inter-pair residual scheme (plain additive vs Multi-Gate).
         residuals: ResidualsConfig,
-        /// The layers' own parameters held once per application instead of
-        /// tied (the block's are `mamba_block`'s); see
-        /// [`burn_stack::utils::untied`].
+        /// The own parameters of the layers that are held once per
+        /// application instead of tied (the block has its own list, in
+        /// `mamba_block`). See [`burn_stack::utils::untied`].
         untied: Vec<burn_stack::modules::LayerUntied>,
     },
 }
 
 impl MambaBidiLayersConfig {
-    /// The [`MuonPlan`] for this stack: the block's fused
-    /// projections plus each pair's `CatLinear` merge (a plain hidden matrix;
-    /// `Mean` merges have no parameters). See [`burn_stack::optim`].
+    /// The [`MuonPlan`] for this stack: the fused projections of the block,
+    /// plus the `CatLinear` merge of each pair (a plain hidden matrix; `Mean`
+    /// merges have no parameters). See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
         use burn_stack::modules::BlockConfig;

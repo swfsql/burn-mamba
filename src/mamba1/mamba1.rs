@@ -7,24 +7,24 @@
 //! ## Pipeline
 //!
 //! ```text
-//!   in_proj      d_model → [x | z]                (split into two d_inner halves)
-//!   conv1d       causal depthwise conv over x + SiLU
+//!   in_proj      d_model → [x | res]              (two d_inner halves; `res` is the paper's z)
+//!   conv1d       causal depthwise conv over x, then SiLU
 //!   x_proj       x → [Δ_raw | B | C]
-//!   dt_proj      Δ_raw → Δ;  Δ = softplus(Δ)
+//!   dt_proj      Δ = softplus(dt_proj(Δ_raw))
 //!   scan         selective scan (ZOH for A, Euler for B) → y
-//!   gate         y = y · SiLU(z)
+//!   gate         y = y · SiLU(res)
 //!   out_proj     d_inner → d_model
 //! ```
 //!
-//! Unlike Mamba-2/3, the recurrence is run as a plain **sequential selective
-//! scan** rather than a chunkwise SSD; there is no pluggable SSD path.  Both
-//! [`Mamba1::forward`] (full sequence) and [`Mamba1::step`] (single token)
-//! thread the same [`Mamba1Cache`] (convolution window + SSM state).
+//! Unlike Mamba-2/3, the recurrence is a plain **sequential selective scan**,
+//! not a chunkwise SSD. There is no pluggable SSD path. [`Mamba1::forward`]
+//! (full sequence) and [`Mamba1::step`] (single token) carry the same
+//! [`Mamba1Cache`] (convolution window + SSM state).
 //!
 //! ## Notation / Dimension Keys
 //!
-//! Tensor names carry a shape suffix (see the crate-level notation table).
-//! The letters used here:
+//! Tensor names carry a shape suffix (see the notation table of
+//! [`mamba2`](crate::mamba2::mamba2)). This module uses these letters:
 //!
 //! | Letter | Dimension                         | Typical |
 //! |--------|-----------------------------------|---------|
@@ -35,8 +35,8 @@
 //! | `k`    | `conv_kernel`                     | 4       |
 //! | `r`    | `state_rank` (latent SSM state)   | 16      |
 //!
-//! The Δ-projection rank `dt_rank` has no single-letter key; tensors carrying
-//! it are annotated with an explicit shape comment.
+//! The Δ-projection rank `dt_rank` has no single-letter key. A tensor with a
+//! `dt_rank` axis has an explicit shape comment.
 
 use crate::mamba1::prelude::*;
 use burn_stack::modules::Silu;
@@ -85,9 +85,9 @@ pub struct Mamba1 {
     pub untied: Vec<Mamba1Untied>,
 }
 
-/// A [`Mamba1`] parameter that may be held once per application of its real
-/// layer instead of tied across them (see [`burn_stack::utils::untied`]). The
-/// big maps — `in_proj` and `out_proj` — always stay tied.
+/// A [`Mamba1`] parameter that the block can hold once per application of its
+/// real layer instead of tied across them (see [`burn_stack::utils::untied`]).
+/// The big maps, `in_proj` and `out_proj`, are always tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba1Untied {
     /// The depthwise convolution [`Mamba1::conv1d`], kernel and bias.
@@ -157,8 +157,8 @@ pub struct Mamba1Config {
     pub d_inner: Option<usize>,
 
     /// The parameters held once per application of the block's real layer
-    /// instead of tied across them ([`Mamba1Untied`]); only virtual layers give
-    /// a real layer more than one. See [`burn_stack::utils::untied`].
+    /// instead of tied across them ([`Mamba1Untied`]). Only virtual layers
+    /// apply a real layer more than once. See [`burn_stack::utils::untied`].
     #[config(default = "Vec::new()")]
     pub untied: Vec<Mamba1Untied>,
 }
@@ -199,9 +199,9 @@ impl Mamba1Config {
             };
             assert_eq!([dt_rank, d_inner], weight.dims());
             let bias: Tensor<1> = {
-                // note: this placeholder impl may lose precision for very small values,
-                // and a Taylor series could approximate it: e^x - 1 = x + x^2/2! + x^3/3! + ⋯
-                // but with the clamp at dt_init_floor, this isn't necessary
+                // `exp(x) - 1` may lose precision for very small `x`, where a
+                // Taylor series (x + x²/2! + x³/3! + ⋯) is more accurate. The
+                // clamp at `dt_init_floor` keeps `x` large enough.
                 let expm1 = |t: Tensor<1>| t.exp() - 1.;
                 let dt = Tensor::random([d_inner], Distribution::Uniform(0.0, 1.0), device)
                     * (f64::ln(self.dt_max) - f64::ln(self.dt_min))
@@ -302,10 +302,11 @@ impl Mamba1Config {
 
     /// The block's 2-D weights Muon may own, and how their fused columns split.
     ///
-    /// `in_proj` is `[x | res]` and `x_proj` is `[dt_raw | B | C]`; the `dt_raw`
-    /// block and the whole of `dt_proj` stay on AdamW — they carry the Δ path,
-    /// whose careful initialisation (`dt_proj`) is a scale, not a feature map.
-    /// The conv weight is 3-D, so it is never listed. See [`burn_stack::optim`].
+    /// `in_proj` is `[x | res]` and `x_proj` is `[dt_raw | B | C]`. The
+    /// `dt_raw` block and all of `dt_proj` stay on the fallback optimizer. They
+    /// carry the Δ path, and the initialisation of `dt_proj` sets a scale, not a
+    /// feature map. The conv weight is 3-D, so the list never has it. See
+    /// [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
         use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
@@ -368,14 +369,14 @@ impl Mamba1 {
 impl Mamba1 {
     /// See also [`Self::step`].
     ///
-    /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]: an optional `cache`
-    /// supplies the initial convolution window and SSM state (zero-initialised
-    /// when `None`), and the updated cache is returned so a sequence can be
-    /// processed in segments (prefill then decode, or chunked prefill).
+    /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]. An optional `cache`
+    /// supplies the initial convolution window and SSM state (zeros when
+    /// `None`). The function returns the updated cache, so a caller can process
+    /// a sequence in segments (prefill then decode, or chunked prefill).
     ///
-    /// `pad_bs` (`true` at padding, `None` ⇒ none) is right padding: a padded
-    /// row is absent — `Δ = 0` there, and the conv window is read at each slot's
-    /// own end (see [`burn_stack::modules::Block::block_forward`]).
+    /// `pad_bs` (`true` at padding, `None` ⇒ no padding) is right padding. A
+    /// padded row is absent: it has `Δ = 0`, and each slot reads its conv
+    /// window at its own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
@@ -480,8 +481,8 @@ impl Mamba1 {
 
     /// Computes the selective-SSM parameters (Δ, A, B, C) from the conv output
     /// and runs the [`Self::selective_scan`] recurrence over the full sequence.
-    /// A padded row (`pad_bs`) takes `Δ = 0`: `exp(ΔA) = 1` and `ΔBu = 0`
-    /// carry the state through it untouched.
+    /// A padded row (`pad_bs`) gets `Δ = 0`. Then `exp(ΔA) = 1` and `ΔBu = 0`,
+    /// so the state goes through that row unchanged.
     ///
     /// # Shapes
     ///   - Input u `[batch, sequence, d_inner]`
@@ -501,24 +502,21 @@ impl Mamba1 {
 
         // Compute ∆ A B C D, the state space parameters.
 
-        // A
-        // this is input independent (see Section 3.5.2 "Interpretation of A" form the Mamba paper for why A isn't selective)
+        // A is input-independent. Section 3.5.2 "Interpretation of A" of the
+        // Mamba paper tells why A is not selective.
         let a = self.a_log.val().exp().neg();
         assert_eq!([d_inner, state_rank], a.dims());
 
         let x_dbl = self.x_proj.forward(u.clone());
         assert_eq!([batch, sequence, dt_rank + 2 * state_rank], x_dbl.dims());
 
-        // ∆ (part 1/2)
-        // ∆ is input-dependent
-        // B and C are input-dependent
+        // ∆ (part 1/2), B and C are input-dependent.
         let [delta, b, c] = split_into(x_dbl, [dt_rank, state_rank, state_rank], 2);
         assert_eq!([batch, sequence, dt_rank], delta.dims()); // [batch, sequence, dt_rank]
         assert_eq!([batch, sequence, state_rank], b.dims());
         assert_eq!([batch, sequence, state_rank], c.dims());
 
         // ∆ (part 2/2)
-        // ∆ is input-dependent
         let delta = self.dt_proj.forward(delta);
         assert_eq!([batch, sequence, d_inner], delta.dims());
 
@@ -537,12 +535,10 @@ impl Mamba1 {
         Self::selective_scan(delta, a, b, c, self.d.val(), u, init_ssm)
     }
 
-    /// Selective Scan.
-    ///
-    /// Does selective scan algorithm. See:
-    /// - Section 2 State Space Models from the Mamba paper;
-    /// - Algorithm 2 in Section 3.2 from the Mamba paper;
-    /// - run_SSM(A, B, C, u) from The Annotated S4.
+    /// The sequential selective scan over the full sequence. See:
+    /// - Section 2 "State Space Models" of the Mamba paper,
+    /// - Algorithm 2 in Section 3.2 of the Mamba paper,
+    /// - `run_SSM(A, B, C, u)` in The Annotated S4.
     ///
     /// # Shapes
     ///   - Input delta `[sequence, batch, d_inner]`
@@ -567,10 +563,11 @@ impl Mamba1 {
         let [_d_inner, state_rank] = a.dims();
         let outer_shape = [sequence, batch, d_inner, state_rank];
 
-        // Discretize continuous parameters (A, B)
-        //  - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper)
-        //  - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
-        //    "A is the more important term and the performance doesn't change much with the simplification on B"
+        // Discretize the continuous parameters (A, B):
+        //  - A uses zero-order hold (ZOH), Section 2 Equation 4 of the Mamba paper.
+        //  - B uses a simplified Euler step instead of ZOH. The authors said: "A is
+        //    the more important term and the performance doesn't change much with
+        //    the simplification on B".
         let (delta_a, delta_bu) = {
             let delta = delta.unsqueeze_dim(3);
             assert_eq!([sequence, batch, d_inner, 1], delta.dims());
@@ -607,9 +604,9 @@ impl Mamba1 {
         assert_eq!(outer_shape, delta_a.dims());
         assert_eq!(outer_shape, delta_bu.dims());
 
-        // Perform selective scan (see scan_SSM() from The Annotated S4)
-        // Note that the below is sequential, while the official implementation does a much faster parallel scan that
-        // is additionally hardware-aware (like FlashAttention).
+        // The selective scan (see `scan_SSM()` in The Annotated S4). This loop is
+        // sequential. The official implementation uses a much faster parallel
+        // scan that is also hardware-aware (like FlashAttention).
 
         // unstack the Sequence axis
 
@@ -662,6 +659,9 @@ mod step {
     use super::*;
 
     impl Mamba1 {
+        /// One recurrent step: advances `cache` by one token. A missing cache
+        /// starts from zeros, as in [`Mamba1::forward`].
+        ///
         /// # Shapes
         ///   - Input `[batch, d_model]`
         ///   - Output `[batch, d_model]`
@@ -673,8 +673,7 @@ mod step {
             let device = x.device();
 
             // Zero-initialise the cache (conv window + SSM state) when not
-            // provided, mirroring `forward` so `step` is `Option`-coherent with
-            // the Mamba-2/3 blocks.
+            // provided, as `forward` and the Mamba-2/3 blocks do.
             let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
                 conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),
                 ssm_bir: Tensor::zeros([batch, d_inner, state_rank], &device),
@@ -716,13 +715,18 @@ mod step {
                 let xs = xs.squeeze_dim(2);
                 assert_eq!([batch, d_inner], xs.dims());
 
-                // conv1d bias
-                let conv1d_bias = self.conv1d.bias.as_ref().unwrap().val();
-                // [channels_out]
-                assert_eq!([d_inner], conv1d_bias.dims());
-                let conv1d_bias = conv1d_bias.unsqueeze();
-                assert_eq!([1, d_inner], conv1d_bias.dims());
-                let xs = xs + conv1d_bias;
+                // conv1d bias (absent when `has_conv_bias` is false)
+                let xs = match &self.conv1d.bias {
+                    Some(conv1d_bias) => {
+                        let conv1d_bias = conv1d_bias.val();
+                        // [channels_out]
+                        assert_eq!([d_inner], conv1d_bias.dims());
+                        let conv1d_bias = conv1d_bias.unsqueeze();
+                        assert_eq!([1, d_inner], conv1d_bias.dims());
+                        xs + conv1d_bias
+                    }
+                    None => xs,
+                };
 
                 // activation
                 let xs = Silu::new().forward(xs);
@@ -758,24 +762,20 @@ mod step {
 
             // Compute ∆ A B C D, the state space parameters.
 
-            // A
-            // this is input independent (see Section 3.5.2 "Interpretation of A" form the Mamba paper for why A isn't selective)
+            // A is input-independent (see `Mamba1::ssm`).
             let a = self.a_log.val().exp().neg();
             assert_eq!([d_inner, state_rank], a.dims());
 
             let x_dbl = self.x_proj.forward(u.clone());
             assert_eq!([batch, dt_rank + 2 * state_rank], x_dbl.dims());
 
-            // ∆ (part 1/2)
-            // ∆ is input-dependent
-            // B and C are input-dependent
+            // ∆ (part 1/2), B and C are input-dependent.
             let [delta, b, c] = split_into(x_dbl, [dt_rank, state_rank, state_rank], 1);
             assert_eq!([batch, dt_rank], delta.dims()); // [batch, dt_rank]
             assert_eq!([batch, state_rank], b.dims());
             assert_eq!([batch, state_rank], c.dims());
 
             // ∆ (part 2/2)
-            // ∆ is input-dependent
             let delta = self.dt_proj.forward(delta);
             assert_eq!([batch, d_inner], delta.dims());
             let delta = burn::tensor::activation::softplus(delta, 1.);
@@ -783,12 +783,8 @@ mod step {
             Self::selective_scan_step(delta, a, b, c, self.d.val(), u, cache)
         }
 
-        /// Selective Scan.
-        ///
-        /// Does selective scan algorithm. See:
-        /// - Section 2 State Space Models from the Mamba paper;
-        /// - Algorithm 2 in Section 3.2 from the Mamba paper;
-        /// - run_SSM(A, B, C, u) from The Annotated S4.
+        /// One step of [`Mamba1::selective_scan`]: advances `cache.ssm_bir` by
+        /// one token and reads it out.
         ///
         /// # Shapes
         ///   - Input delta `[batch, d_inner]`
@@ -810,10 +806,8 @@ mod step {
             let [batch, d_inner, state_rank] = cache.ssm_bir.dims();
             let outer_shape = [batch, d_inner, state_rank];
 
-            // Discretize continuous parameters (A, B)
-            //  - A is discretized using zero-order hold (ZOH) discretization (see Section 2 Equation 4 in the Mamba paper)
-            //  - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
-            //    "A is the more important term and the performance doesn't change much with the simplification on B"
+            // Discretize the continuous parameters (A, B) as in
+            // `Mamba1::selective_scan`: ZOH for A, Euler for B.
             let (delta_a, delta_bu) = {
                 let delta = delta.unsqueeze_dim(2);
                 assert_eq!([batch, d_inner, 1], delta.dims());

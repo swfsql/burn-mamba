@@ -1,17 +1,21 @@
-//! Runtime-tagged cache collection, and where each family plugs into the
-//! block-generic stack: `impl Block`, `impl BlockConfig`, `impl CacheStack`.
+//! The runtime-tagged cache collection, and the place where each family
+//! connects to the block-generic stack: `impl Block`, `impl BlockConfig`,
+//! `impl CacheStack`.
+//!
+//! Each family implements `CacheStack::cache_to_inner`/`cache_from_inner` by
+//! hand. `Module::map` does nothing on plain `Tensor` fields, which is all a
+//! cache holds, so a `Module`-based conversion would silently skip every field.
 
 use burn::prelude::*;
 use burn_stack::modules::{Block, BlockConfig, CacheStack};
 use burn_stack::utils::UntiedParam;
 
-
 /// Runtime-tagged caches: one variant per family, matching
 /// [`MambaLatentNet`](crate::unified::MambaLatentNet).
 ///
-/// This is plain runtime state (not a `Module`): caches are threaded through
-/// `forward`/`step`, never recorded or optimised. (`Mamba3Caches` is itself a
-/// non-`Module` enum, so a `Module` derive here would not even apply.)
+/// This is plain runtime state (not a `Module`): `forward`/`step` take and
+/// return caches, and nothing records or optimises them. (`Mamba3Caches` is
+/// itself a non-`Module` enum, so a `Module` derive here would not apply.)
 #[derive(Debug, Clone)]
 pub enum MambaCaches {
     /// Mamba-1 caches.
@@ -29,13 +33,14 @@ impl MambaCaches {
     /// Round-trip every slot of the tagged family through the inner backend:
     /// same values, no graph.
     ///
-    /// What [`CacheStack::detach`] is, dispatched over the runtime tag — the
-    /// enum cannot implement [`CacheStack`] itself (its slot type would have to
-    /// be a fourth enum), and a caller carrying a cache across a gradient
+    /// This is [`CacheStack::detach`], dispatched over the runtime tag. The enum
+    /// cannot implement [`CacheStack`] itself (its slot type would have to be a
+    /// fourth enum). And a caller that carries a cache across a gradient
     /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
     /// not the family type.
     ///
-    /// Inert off the autodiff backend; see [`CacheStack::cache_to_inner`].
+    /// It has no effect off the autodiff backend (see
+    /// [`CacheStack::cache_to_inner`]).
     pub fn detach(self) -> Self {
         match self {
             #[cfg(feature = "mamba1")]
@@ -51,6 +56,99 @@ impl MambaCaches {
 // ===========================================================================
 // Per-family impls
 // ===========================================================================
+
+#[cfg(feature = "mamba1")]
+mod impl_mamba1 {
+    use super::*;
+    use crate::mamba1::prelude::{
+        Mamba1, Mamba1Cache, Mamba1CacheConfig, Mamba1Caches, Mamba1CachesConfig, Mamba1Config,
+    };
+
+    impl CacheStack for Mamba1Caches {
+        type Cache = Mamba1Cache;
+        fn slot_count(&self) -> usize {
+            self.caches.len()
+        }
+        fn into_slots(self) -> Vec<Option<Mamba1Cache>> {
+            self.caches.into_iter().map(Some).collect()
+        }
+        fn from_slots(slots: Vec<Option<Mamba1Cache>>) -> Self {
+            Self {
+                caches: slots.into_iter().map(Option::unwrap).collect(),
+            }
+        }
+        fn cache_to_inner(c: Mamba1Cache) -> Mamba1Cache {
+            Mamba1Cache {
+                conv_bik: c.conv_bik.inner(),
+                ssm_bir: c.ssm_bir.inner(),
+            }
+        }
+        fn cache_from_inner(c: Mamba1Cache) -> Mamba1Cache {
+            Mamba1Cache {
+                conv_bik: Tensor::from_inner(c.conv_bik),
+                ssm_bir: Tensor::from_inner(c.ssm_bir),
+            }
+        }
+    }
+
+    impl Block for Mamba1 {
+        type Cache = Mamba1Cache;
+        type Caches = Mamba1Caches;
+        /// Mamba-1 has no SSD chunking, so there is no path selector.
+        type Options = ();
+
+        fn block_forward(
+            &self,
+            x: Tensor<3>,
+            cache: Option<Mamba1Cache>,
+            _options: (),
+            pad: Option<Tensor<2, Bool>>,
+        ) -> (Tensor<3>, Mamba1Cache) {
+            self.forward(x, cache, pad)
+        }
+        fn block_step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
+            self.step(x, cache)
+        }
+        fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba1Caches {
+            let [batch, _seq, _d] = x.dims();
+            self.make_zero(batch, n_virtual, &x.device())
+        }
+        fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba1Caches {
+            let [batch, _d] = x.dims();
+            self.make_zero(batch, n_virtual, &x.device())
+        }
+        fn untied_params(&self) -> Vec<UntiedParam> {
+            self.untied_params()
+        }
+    }
+
+    impl Mamba1 {
+        fn cache_config(&self, batch: usize) -> Mamba1CacheConfig {
+            let [d_inner, state_rank] = self.a_log.dims();
+            let [_, _, conv_kernel] = self.conv1d.weight.dims();
+            Mamba1CacheConfig::new(batch, d_inner)
+                .with_state_rank(state_rank)
+                .with_conv_kernel(conv_kernel)
+        }
+        fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba1Caches {
+            Mamba1CachesConfig::new(n_virtual, self.cache_config(batch)).init(device)
+        }
+    }
+
+    impl BlockConfig for Mamba1Config {
+        type Block = Mamba1;
+        fn d_model(&self) -> usize {
+            self.d_model
+        }
+        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba1 {
+            self.init_applications(n_applications, device)
+        }
+        #[cfg(feature = "optim")]
+        fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
+            self.muon_projections()
+        }
+    }
+}
 
 #[cfg(feature = "mamba2")]
 mod impl_mamba2 {
@@ -160,9 +258,9 @@ mod impl_mamba3 {
         Mamba3SingleSsdCachesConfig,
     };
 
-    /// Zero single-ssd caches sized from a `[batch, sequence, d_model]` input.
-    /// (A missing cache defaults to the single-ssd pathway — ≈½ the SSD memory
-    /// of double-ssd — for either rotation kind.)
+    /// Zero single-ssd caches for a batch of `batch`. (A missing cache selects
+    /// the single-ssd pathway, with ≈½ the SSD memory of double-ssd, for every
+    /// rotation kind.)
     fn zero_single_ssd_caches(
         mamba_block: &Mamba3,
         batch: usize,
@@ -298,99 +396,6 @@ mod impl_mamba3 {
             self.d_model
         }
         fn init_block(&self, n_applications: usize, device: &Device) -> Mamba3 {
-            self.init_applications(n_applications, device)
-        }
-        #[cfg(feature = "optim")]
-        fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-            self.muon_projections()
-        }
-    }
-}
-
-#[cfg(feature = "mamba1")]
-mod impl_mamba1 {
-    use super::*;
-    use crate::mamba1::prelude::{
-        Mamba1, Mamba1Cache, Mamba1CacheConfig, Mamba1Caches, Mamba1CachesConfig, Mamba1Config,
-    };
-
-    impl CacheStack for Mamba1Caches {
-        type Cache = Mamba1Cache;
-        fn slot_count(&self) -> usize {
-            self.caches.len()
-        }
-        fn into_slots(self) -> Vec<Option<Mamba1Cache>> {
-            self.caches.into_iter().map(Some).collect()
-        }
-        fn from_slots(slots: Vec<Option<Mamba1Cache>>) -> Self {
-            Self {
-                caches: slots.into_iter().map(Option::unwrap).collect(),
-            }
-        }
-        fn cache_to_inner(c: Mamba1Cache) -> Mamba1Cache {
-            Mamba1Cache {
-                conv_bik: c.conv_bik.inner(),
-                ssm_bir: c.ssm_bir.inner(),
-            }
-        }
-        fn cache_from_inner(c: Mamba1Cache) -> Mamba1Cache {
-            Mamba1Cache {
-                conv_bik: Tensor::from_inner(c.conv_bik),
-                ssm_bir: Tensor::from_inner(c.ssm_bir),
-            }
-        }
-    }
-
-    impl Block for Mamba1 {
-        type Cache = Mamba1Cache;
-        type Caches = Mamba1Caches;
-        /// Mamba-1 has no SSD chunking, so there is no path selector.
-        type Options = ();
-
-        fn block_forward(
-            &self,
-            x: Tensor<3>,
-            cache: Option<Mamba1Cache>,
-            _options: (),
-            pad: Option<Tensor<2, Bool>>,
-        ) -> (Tensor<3>, Mamba1Cache) {
-            self.forward(x, cache, pad)
-        }
-        fn block_step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
-            self.step(x, cache)
-        }
-        fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba1Caches {
-            let [batch, _seq, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
-        }
-        fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba1Caches {
-            let [batch, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
-        }
-        fn untied_params(&self) -> Vec<UntiedParam> {
-            self.untied_params()
-        }
-    }
-
-    impl Mamba1 {
-        fn cache_config(&self, batch: usize) -> Mamba1CacheConfig {
-            let [d_inner, state_rank] = self.a_log.dims();
-            let [_, _, conv_kernel] = self.conv1d.weight.dims();
-            Mamba1CacheConfig::new(batch, d_inner)
-                .with_state_rank(state_rank)
-                .with_conv_kernel(conv_kernel)
-        }
-        fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba1Caches {
-            Mamba1CachesConfig::new(n_virtual, self.cache_config(batch)).init(device)
-        }
-    }
-
-    impl BlockConfig for Mamba1Config {
-        type Block = Mamba1;
-        fn d_model(&self) -> usize {
-            self.d_model
-        }
-        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba1 {
             self.init_applications(n_applications, device)
         }
         #[cfg(feature = "optim")]

@@ -12,17 +12,17 @@ use burn::prelude::*;
 
 /// Reduce angles modulo `2π` into `[−π, π]`, leaving the autodiff graph intact.
 ///
-/// `sin`/`cos` are `2π`-periodic, so subtracting an integer multiple of `2π` is
-/// value-exact. Keeping `|angle| ≤ π` preserves precision in low-bit floats —
-/// roughly half of `f16`'s representable values lie in `|x| ≤ 1`, and the
-/// periodic `sin`/`cos` only lose accuracy when the argument is allowed to drift
-/// to large magnitudes. The same applies to the cumulative angle accumulator,
-/// which would otherwise grow without bound across a long sequence / many decode
+/// `sin`/`cos` are `2π`-periodic, so a subtraction of an integer multiple of
+/// `2π` is value-exact. `|angle| ≤ π` keeps precision in low-bit floats: about
+/// half of the representable `f16` values are in `|x| ≤ 1`, and the periodic
+/// `sin`/`cos` lose accuracy only when the argument drifts to large
+/// magnitudes. The same applies to the cumulative angle accumulator. Without
+/// this, it would grow without bound over a long sequence or many decode
 /// steps.
 ///
-/// The integer multiple `k` is `detach`ed, so it is a constant with respect to
-/// autodiff: `d/dx (x − k·2π) = 1`, i.e. the backward pass is identical to the
-/// un-wrapped angle. This mirrors the detached `max` rescaling in
+/// The integer multiple `k` is `detach`ed, so autodiff sees it as a constant:
+/// `d/dx (x − k·2π) = 1`, and the backward pass is the same as for the
+/// unwrapped angle. This mirrors the detached `max` rescaling in
 /// [`RmsNormGated`](burn_stack::modules::norm::rms_norm_gated::RmsNormGated).
 pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     let two_pi = 2.0 * std::f32::consts::PI;
@@ -96,25 +96,24 @@ pub fn apply_rope<const D: usize>(
     }
 }
 
-/// Apply RoPE to only the rotation-active entries of the last dimension; the
-/// remainder passes through unchanged. Falls back to [`apply_rope`] when
-/// `rope_dim == state_rank` (full RoPE). `rope_dim` must be positive — a block
-/// that rotates nothing is
-/// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
-/// which never reaches here.
+/// Apply RoPE to only the rotation-active entries of the last dimension. The
+/// rest is unchanged. When `rope_dim == state_rank` (full RoPE), this is
+/// [`apply_rope`]. `rope_dim` must be positive: a block that rotates nothing
+/// is [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
+/// which never comes here.
 ///
-/// Pairing scheme (must match the reference kernels — see Section
+/// Pairing scheme (it must match the reference kernels: see Section
 /// "Data-Dependent RoPE" in the paper, and `mamba3_siso_fwd.py` /
 /// `mamba3_mimo_fwd.py`):
 ///
 /// - `rotate_pairwise = true` (SISO, interleaved/NeoX): pairs `(0,1), (2,3), …`.
-///   Only pairs `0..num_rope_angles` are rotated; pairs beyond are passed
-///   through. Equivalent to slicing the first `rope_dim` entries and rotating
-///   them.
-/// - `rotate_pairwise = false` (MIMO, half-and-half/GPT-J): pair distance is
-///   always `state_rank/2`, i.e. element `n` is paired with element
-///   `state_rank/2 + n`. With partial RoPE only the first `num_rope_angles`
-///   pairs are rotated; the remaining elements in both halves pass through.
+///   Only pairs `0..num_rope_angles` turn, and the pairs after them are
+///   unchanged. This is the same as a rotation of the first `rope_dim`
+///   entries.
+/// - `rotate_pairwise = false` (MIMO, half-and-half/GPT-J): the pair distance
+///   is always `state_rank/2`: element `n` pairs with element
+///   `state_rank/2 + n`. With partial RoPE, only the first `num_rope_angles`
+///   pairs turn. The other elements in both halves are unchanged.
 pub fn apply_rope_partial<const D: usize>(
     x: Tensor<D>,
     angles: Tensor<D>,
@@ -129,8 +128,8 @@ pub fn apply_rope_partial<const D: usize>(
     }
 
     if rotate_pairwise {
-        // Pairs are local — slicing the first rope_dim entries gives the same
-        // result as the reference (which rotates the whole headdim but with
+        // Pairs are local. A slice of the first rope_dim entries gives the
+        // same result as the reference (which rotates the whole headdim, with
         // identity cos/sin for the tail pairs).
         let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
         let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
@@ -138,9 +137,9 @@ pub fn apply_rope_partial<const D: usize>(
         return Tensor::cat(vec![x_rope_rotated, x_rest], D - 1);
     }
 
-    // Half-and-half partial RoPE: pair distance must be `state_rank/2`, not
-    // `rope_dim/2`. Slicing the first `rope_dim` entries and calling
-    // `apply_rope` would pair within the slice and produce the wrong rotation.
+    // Half-and-half partial RoPE: the pair distance must be `state_rank/2`,
+    // not `rope_dim/2`. `apply_rope` on a slice of the first `rope_dim`
+    // entries would pair within the slice and give the wrong rotation.
     let half = state_rank / 2;
     let num_rope_angles = rope_dim / 2;
     debug_assert!(

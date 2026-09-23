@@ -1,13 +1,12 @@
-//! [`mimo_outer_sum`] is shared by the Mamba-3 decode state update (both β and
-//! γ terms) and the single-SSD boundary-β seed, which previously each spelled
-//! the same permute+matmul out. These guard the shared form against the
-//! einsum it stands for.
+//! The Mamba-3 decode state update (both β and γ terms) and the single-SSD
+//! boundary-β seed share [`mimo_outer_sum`]. These tests check the shared form
+//! against the einsum that it stands for.
 //!
-//! [`prefix_sum`] is the log-depth replacement for `Tensor::cumsum` on the
-//! cumulative rotation angle. Its tests are written against the **definition**,
-//! computed on the host, so that they keep pinning it if `cumsum` ever stops
-//! being the thing it replaced — there is one cross-check against `cumsum`, and
-//! it is the only test here that would have to go with it.
+//! [`prefix_sum`] is the blocked scan that the cumulative rotation angle uses
+//! instead of `Tensor::cumsum`. Its tests compare it against the
+//! **definition**, computed on the host, so they stay valid if `cumsum`
+//! changes. One cross-check against `cumsum` exists, and only that test
+//! depends on `cumsum`.
 
 use super::*;
 use burn::module::Param;

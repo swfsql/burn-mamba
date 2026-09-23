@@ -1,15 +1,15 @@
-//! Graph-capture support for the caches: each family's
-//! [`CacheTensors`](burn_stack::modules::CacheTensors) traversal, which is what
-//! lets a captured `step`
-//! ([`CapturedStep`](burn_stack::utils::graph::CapturedStep)) write its new
+//! Graph-capture support for the caches: the
+//! [`CacheTensors`](burn_stack::modules::CacheTensors) traversal of each
+//! family. With it, a captured `step`
+//! ([`CapturedStep`](burn_stack::utils::graph::CapturedStep)) writes its new
 //! cache **into** the buffers of the old one.
 //!
-//! One traversal per cache type, visiting every tensor field — optional ones
-//! must be present in both caches or in neither. Why the stable cache has to be
-//! copied into buffers of its own first
-//! ([`into_owned_buffers`](burn_stack::modules::CacheTensors::into_owned_buffers))
-//! is visible here: Mamba-3's tap slots come back from `step` as `narrow`s of
-//! its own tensors.
+//! There is one traversal per cache type, and it visits every tensor field. An
+//! optional field must be present in both caches or in neither. This module
+//! also shows why the stable cache must first be copied into buffers of its
+//! own ([`into_owned_buffers`](burn_stack::modules::CacheTensors::into_owned_buffers)):
+//! the Mamba-3 tap slots come back from `step` as `narrow`s of its own
+//! tensors.
 
 use burn::prelude::*;
 use burn_stack::modules::{CacheTensors, TensorZip};

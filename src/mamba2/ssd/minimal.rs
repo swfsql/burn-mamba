@@ -1,9 +1,9 @@
 //! ## The Chunkwise SSD Algorithm
 //!
-//! During training (and prefill), a naive sequential recurrence cannot
-//! exploit GPU tensor cores.  The **chunkwise SSD algorithm** (§4 of the
-//! paper) achieves this by splitting the sequence into chunks of length chunk_len
-//! and decomposing the computation into four steps:
+//! In training (and prefill), a naive sequential recurrence cannot use GPU
+//! tensor cores. The **chunkwise SSD algorithm** (§4 of the paper) can. It
+//! splits the sequence into chunks of length `chunk_len` and computes four
+//! steps:
 //!
 //! ```text
 //!   Step 1  (intra-chunk, quadratic form)   →  Y_diag
@@ -14,9 +14,9 @@
 //!   Y = Y_diag + Y_off
 //! ```
 //!
-//! Steps 1, 2, 4 are fully parallel across chunks and use batched matrix
-//! multiplications (exploiting tensor cores).  Step 3 is a short sequential
-//! scan over `sequence/chunk_len` elements rather than `sequence`.
+//! Steps 1, 2 and 4 are fully parallel across chunks and use batched matrix
+//! multiplications (on tensor cores). Step 3 is a short scan over
+//! `sequence/chunk_len` elements, not `sequence`.
 
 use crate::mamba2::prelude::*;
 use burn_stack::modules::{sanity as san, segsum};
@@ -29,39 +29,39 @@ impl Mamba2SsdInput {
 
     /// Minimal chunkwise SSD algorithm.
     ///
-    /// Implements the four-step decomposition of the semiseparable matrix
-    /// multiplication described in §4 of the paper.  The sequence of length
-    /// is split into `nchunks = ⌈sequence/chunk_len⌉` chunks of length chunk_len.
+    /// The four-step decomposition of the semiseparable matrix multiplication
+    /// in §4 of the paper. The caller already padded the sequence into
+    /// `nchunks = sequence/chunk_len` chunks of length `chunk_len`.
     ///
     /// ## The four steps
     ///
     /// ### Step 1 — Intra-chunk outputs (Y_diag)
     ///
-    /// Within each chunk, compute the output assuming the initial hidden state
-    /// is zero.  This is the *quadratic attention form* of the SSD layer
-    /// restricted to a window of chunk_len tokens (§4.1):
+    /// In each chunk, compute the output as if the initial hidden state were
+    /// zero. This is the *quadratic attention form* of the SSD layer, on a
+    /// window of `chunk_len` tokens (§4.1):
     ///
     /// ```text
     ///   Y_diag[n] = (L[n] ∘ C[n] B[n]ᵀ) · X[n]
     /// ```
     ///
-    /// where `L[n]` is the chunk_len×chunk_len 1-semiseparable mask for chunk n.
-    /// This step is a batched GEMM (exploits tensor cores).
+    /// where `L[n]` is the chunk_len×chunk_len 1-semiseparable mask of chunk n.
+    /// This step is a batched GEMM (on tensor cores).
     ///
     /// ### Step 2 — Chunk state (state_bnhpr)
     ///
-    /// Compute the final SSM state of each chunk assuming zero initial state
+    /// Compute the final SSM state of each chunk, from a zero initial state
     /// (§4.1, Eq. 20):
     ///
     /// ```text
     ///   s[n] = Σ_{t ∈ chunk n}  exp(A_cum[end] - A_cum[t]) · B̄[t] · x[t]ᵀ
     /// ```
     ///
-    /// This is also a batched GEMM and is fully parallel across chunks.
+    /// This is also a batched GEMM, fully parallel across chunks.
     ///
     /// ### Step 3 — Inter-chunk state scan (state passing)
     ///
-    /// Propagate the true hidden state across chunk boundaries using the
+    /// Carry the true hidden state across chunk boundaries with the
     /// recurrence (§4.1, Eq. 22):
     ///
     /// ```text
@@ -69,16 +69,16 @@ impl Mamba2SsdInput {
     /// ```
     ///
     /// where `Ā[n]_chunk = exp(Σ_{t ∈ chunk n} Δₜ · A)` is the cumulative
-    /// decay over the whole chunk.  This step is implemented as a single
-    /// batched matrix multiplication using the 1-semiseparable structure of
-    /// the inter-chunk decay matrix (same `segsum` trick, now over chunks).
-    /// The scan has length `nchunks = sequence/chunk_len` rather than sequence, so its cost is
-    /// negligible for typical chunk sizes.
+    /// decay over the whole chunk. This step is one batched matrix
+    /// multiplication with the 1-semiseparable inter-chunk decay matrix (the
+    /// same `segsum` trick, now over chunks). The scan has length
+    /// `nchunks = sequence/chunk_len`, not `sequence`, so its cost is small
+    /// for typical chunk sizes.
     ///
     /// ### Step 4 — State-to-output (Y_off)
     ///
     /// For each chunk n, compute the contribution of the true initial state
-    /// `h[n-1]` to the outputs within that chunk (§4.1, Eq. 23):
+    /// `h[n-1]` to the outputs in that chunk (§4.1, Eq. 23):
     ///
     /// ```text
     ///   Y_off[n, t] = C[n, t]ᵀ · exp(A_cum[t]) · h[n-1]
@@ -102,8 +102,8 @@ impl Mamba2SsdInput {
         assert!(chunk_len > 0, "chunk_len must be positive");
 
         // ── Compute discretised parameters ────────────────────────────────────
-        // Ā = exp(Δ · A)   stored in log-space as  a_bnlh = Δ · A  (negative)
-        // B̄ = Δ · B        (Euler/ZOH approximation)
+        // Ā = exp(Δ · A)   kept in log-space as  a_bnlh = Δ · A  (negative)
+        // B̄ = Δ · B        (Euler approximation)
 
         // B/C are already GQA-expanded to per-head.
         let b_bnlhr = input.b_bnlhr.clone();
@@ -134,8 +134,8 @@ impl Mamba2SsdInput {
 
         // Cumulative sum of log-decays within each chunk.
         // a_cumsum_bhnl[b, h, n, t] = Σ_{k=0..t} Δ_{n,k} · A
-        // This is the log of the cumulative decay factor from the start of the
-        // chunk to position t (inclusive).
+        // This is the log of the cumulative decay from the start of the chunk
+        // to position t (inclusive).
         let a_cumsum_bhnl = a_bhnl.clone().cumsum(3);
         assert_eq!([batch, nheads, nchunks, chunk_len], a_cumsum_bhnl.dims());
         san(&a_cumsum_bhnl);
@@ -150,10 +150,10 @@ impl Mamba2SsdInput {
         // L[n]_{i,j} = exp(Σ_{k=j+1..i} a_{n,k})  for i ≥ j
         //            = exp(a_cumsum[n,i] - a_cumsum[n,j])   (using segsum trick)
         //
-        // Implementation uses three batched matmuls:
-        //   (a) C[n] · B[n]ᵀ  (contract over state_rank state_rank)  → temp1
-        //   (b) temp1 ∘ L[n]                                 → temp2
-        //   (c) temp2 · X[n]  (contract over chunk_len)              → Y_diag
+        // Three batched operations:
+        //   (a) C[n] · B[n]ᵀ  (contract over state_rank)  → temp1
+        //   (b) temp1 ∘ L[n]                              → temp2
+        //   (c) temp2 · X[n]  (contract over chunk_len)   → Y_diag
         let y_diag_bnlhp = {
             // Permute for the matmul along chunk_len and state_rank.
             let b_bnhlr = delta_b_bnlhr.clone().swap_dims(2, 3);
@@ -235,8 +235,8 @@ impl Mamba2SsdInput {
         // STEP 2: Compute chunk state (input → state)
         // =============================================================
         //
-        // For each chunk n, compute the SSM state at the end of the chunk
-        // assuming the initial state is zero (Eq. 20):
+        // For each chunk n, compute the SSM state at the end of the chunk,
+        // from a zero initial state (Eq. 20):
         //
         //   s[n] = Σ_{t ∈ [0, chunk_len)} exp(a_cumsum[n,-1] - a_cumsum[n,t]) · B̄[n,t] · x[n,t]ᵀ
         //
@@ -292,20 +292,19 @@ impl Mamba2SsdInput {
         // STEP 3: Inter-chunk state scan (state passing)
         // =============================================================
         //
-        // Propagate hidden state across chunk boundaries.  The recurrence is
+        // Carry the hidden state across chunk boundaries. The recurrence is
         //
         //   h[n] = Ā_chunk[n] · h[n-1] + s[n]     (Eq. 22)
         //
         // where Ā_chunk[n] = exp(Σ_{t ∈ chunk n} Δₜ · A) = exp(a_cum[n, chunk_len-1]).
         //
-        // Unrolling the recurrence gives a matrix form identical to Step 2 but
-        // at the chunk level: each new state is a weighted sum of all previous
-        // chunk state.  We implement this with the same 1-SS segsum trick,
-        // now applied over the nchunks dimension.
+        // The unrolled recurrence has the same matrix form as Step 1, at the
+        // chunk level: each new state is a weighted sum of all previous chunk
+        // states. The same 1-SS segsum trick applies, over the nchunks axis.
         //
         // The result is `new_state[n]`, the true hidden state entering chunk n,
         // for n ∈ {0, ..., nchunks-1}, plus the final state after all chunks.
-        let (state_bnhpr, final_state_bnpr) = {
+        let (state_bnhpr, final_state_bhpr) = {
             // Prepend the initial state h₀ to the array of chunk state.
             let initial_state_b1hpr = input.initial_state_bhpr.unsqueeze_dim(1);
             assert_eq!(
@@ -313,7 +312,7 @@ impl Mamba2SsdInput {
                 initial_state_b1hpr.dims()
             );
 
-            // Optionally add learnable initial state (broadcast over batch).
+            // Add the learnable initial state, if any (broadcast over batch).
             let initial_state_b1hpr = if let Some(init_hpr) = input.init_state_hpr {
                 let init_b1hpr = init_hpr.unsqueeze_dim::<4>(0).expand([
                     batch,
@@ -354,8 +353,8 @@ impl Mamba2SsdInput {
 
             // 1-SS inter-chunk decay matrix.
             //   decay_chunk[i, j] = exp(Σ_{k=j+1..i} a_cum_last[k])  (i ≥ j)
-            // Row i of this matrix, when multiplied by the state vector,
-            // gives the true hidden state entering chunk i.
+            // Row i times the state vector gives the true hidden state
+            // entering chunk i.
             let decay_chunk_bhNN = segsum(a_chunk_pad_bhN).exp();
             assert_eq!(
                 [batch, nheads, 1 + nchunks, 1 + nchunks],
@@ -388,9 +387,9 @@ impl Mamba2SsdInput {
             //   state[0..nchunks]  — the initial state entering each chunk
             //   state[nchunks]     — the final state after the last real token
             //
-            // For padded sequences the padding steps are identity operations
-            // (Δ=0 ⇒ Ā=1, B̄=0), so the state is carried unchanged through the
-            // pad region, and `state[nchunks]` is the correct final state.
+            // In a padded sequence, the padding steps are identity steps
+            // (Δ=0 ⇒ Ā=1, B̄=0). The state goes through the pad unchanged, so
+            // `state[nchunks]` is the correct final state.
             let state_bhnpr = new_state_bhNpr
                 .clone()
                 .slice(s![.., .., 0..nchunks, .., ..]);
@@ -409,7 +408,7 @@ impl Mamba2SsdInput {
         );
         assert_eq!(
             [batch, nheads, per_head_dim, state_rank],
-            final_state_bnpr.dims()
+            final_state_bhpr.dims()
         );
 
         // =============================================================
@@ -417,7 +416,7 @@ impl Mamba2SsdInput {
         // =============================================================
         //
         // For each chunk n, compute the contribution of the true initial state
-        // h[n-1] to the outputs within that chunk (Eq. 23):
+        // h[n-1] to the outputs in that chunk (Eq. 23):
         //
         //   Y_off[n, t] = C[n, t]ᵀ · exp(a_cumsum[n, t]) · h[n-1]
         //               = exp(a_cum[n,t]) · (C[n,t]ᵀ · h[n-1])
@@ -478,13 +477,13 @@ impl Mamba2SsdInput {
             y_off_bnlhp.dims()
         );
 
-        // ── Combine Y_diag and Y_off, undo padding ────────────────────────────
+        // ── Combine Y_diag and Y_off ──────────────────────────────────────────
         let y_bnlhp = y_diag_bnlhp + y_off_bnlhp;
         san(&y_bnlhp);
 
         // ── D skip connection ─────────────────────────────────────────────────
         // yₜ += D · xₜ
-        // D is a per-head scalar; broadcast over batch, sequence, and per_head_dim.
+        // D is a per-head scalar, broadcast over batch, sequence, and per_head_dim.
         let d_bnlhp = input
             .d_h
             .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // d_111h1
@@ -492,6 +491,6 @@ impl Mamba2SsdInput {
         let y_bnlhp = y_bnlhp + d_bnlhp * input.x_bnlhp;
         san(&y_bnlhp);
 
-        (y_bnlhp, final_state_bnpr)
+        (y_bnlhp, final_state_bhpr)
     }
 }

@@ -1,7 +1,9 @@
 //! # Mamba-3 — Double-Pass SSD Forward
 //!
-//! This module provides the [`Mamba3::forward_double_ssd`](crate::mamba3::mamba3::Mamba3::forward_double_ssd) method:
-//! The burn-mamba implementation of the [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal) decomposition:
+//! [`Mamba3::forward_double_ssd`](crate::mamba3::mamba3::Mamba3::forward_double_ssd)
+//! and [`Mamba3::step_double_ssd`](crate::mamba3::mamba3::Mamba3::step_double_ssd):
+//! the decomposition of
+//! [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal).
 //!
 //! ```text
 //!   hₚ = αₚ hₚ₋₁ + βₚ Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉ + γₚ Bₚ ⊗ xₚ   (original double-ssd trapezoidal)
@@ -14,13 +16,13 @@
 //! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)), and
 //! `β = ν·α` carries the transport across that whole gap.
 //!
-//! A two-tap pattern adds a second `β` side at lag 1. The two shifts differ, so
-//! the passes cannot be fused and this pathway runs **three** SSD calls — the
-//! single-SSD one collapses them into its key scale and stays at one, which is
-//! where such a pattern wants to run.
+//! A two-tap pattern adds a second `β` side at lag 1. The two shifts are
+//! different, so the passes cannot fuse, and this pathway runs **three** SSD
+//! calls. The single-SSD pathway collapses them into its key scale and stays at
+//! one call, so it suits such a pattern better.
 //!
-//! This is simple to derive and to verify (everything reuses the standard SSD)
-//! but increases the intra-chunk and chunk-state memory during training.
+//! This is simple to derive and to verify (everything uses the standard SSD),
+//! but it increases the intra-chunk and chunk-state memory during training.
 //!
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::single_ssd::single_ssd`].
 
@@ -37,11 +39,11 @@ use burn::prelude::*;
 // ---------------------------------------------------------------------------
 
 impl Mamba3 {
-    /// Process a full input sequence using the (double-ssd) trapezoidal algorithm.
+    /// Process a full input sequence with the (double-ssd) trapezoidal
+    /// algorithm.
     ///
-    /// For SISO (mimo_rank=1), this is the standard double-SSD decomposition.
-    /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels.
-    /// The hidden state is shared across mimo ranks; each mimo rank contributes independently.
+    /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
+    /// ranks share the hidden state, and each rank writes to it independently.
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     ///
@@ -68,17 +70,18 @@ impl Mamba3 {
         let device = input_bsm.device();
 
         // MambaProduct: from the split below down to the readout, one sequence
-        // position *is* one micro-step — the `s` in every shape suffix counts
-        // micro-steps, and `tokens` is the only name still at token resolution.
-        // See [`crate::mamba3::product`].
+        // position *is* one micro-step. The `s` in every shape suffix counts
+        // micro-steps, and `tokens` (`t`) is at token resolution. See
+        // [`crate::mamba3::product`].
         let sequence = tokens * micro_steps;
 
         assert!(tokens > 0, "sequence length must be at least 1");
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
 
-        // A padded token pads all of its micro-steps; `end_b` is each slot's
-        // real length on the folded axis, where its cache fields are read.
+        // A padded token pads all of its micro-steps. `end_b` is the real
+        // length of each slot on the folded axis, where its cache fields are
+        // read.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_len_b);
 
@@ -100,21 +103,20 @@ impl Mamba3 {
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
         let proj_bsd = self.project_in(input_bsm);
-        // The positive systems' segments are the outermost tail
-        // ([`crate::mamba3::positive`]); what remains is the stock layout.
+        // The segments of the positive systems are the outermost tail
+        // ([`crate::mamba3::positive`]). The rest is the stock layout.
         let (proj_bsd, noise_btH, tropical_btH) = self.split_positive(proj_bsd, 2);
         let bc_size = ngroups * state_rank * mimo_rank;
 
-        // [batch, tokens, *] split along channel dim; `u` = micro_steps widens
-        // every per-micro-step segment, and `unfold` reinterprets each of them
+        // [batch, tokens, *] split along the channel dim. `u` = micro_steps
+        // widens every per-micro-step segment, and `unfold` reads each of them
         // as `u` consecutive sequence positions. `z` (per-token gate) and `C`
-        // (per-token read) do not widen — `C` is instead broadcast across the
-        // group so its *last* copy carries the right cumulative rotation.
-        // b_raw_bsMGR / c_raw_bsMGR have channel size `mimo_rank * ngroups * state_rank`.
-        // The three optional segments come off the tail first — `Real1D` projects
-        // no rotation, a one-tap pattern no `μ` and `Trapezoid::None` no `λ` —
-        // since a zero-width segment would silently vanish from the fixed-arity
-        // split below.
+        // (per-token read) do not widen.
+        // b_raw_bsMGR / c_raw_btMGR have channel size `mimo_rank * ngroups * state_rank`.
+        // The three optional segments come off the tail first (`Real1D`
+        // projects no rotation, a one-tap pattern no `μ`, `Trapezoid::None` no
+        // `λ`), because a zero-width segment would silently vanish from the
+        // fixed-arity split below.
         let u = micro_steps;
         let (proj_bsd, rot_btA) =
             helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
@@ -139,8 +141,8 @@ impl Mamba3 {
         use crate::mamba3::product::unfold_micro_bs;
         let x_bsi = unfold_micro_bs(x_btI, u);
         let b_raw_bsMGR = unfold_micro_bs(b_raw_btMGRU, u);
-        // `C` stays at token resolution: the readout happens once per token, at
-        // its last micro-step. See [`Mamba3DoubleSsdInput::c_bntmhr`].
+        // `C` stays at token resolution: the readout is once per token, at its
+        // last micro-step. See [`Mamba3DoubleSsdInput::c_bntmhr`].
         let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
         let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
         let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
@@ -153,7 +155,7 @@ impl Mamba3 {
         san(&dd_dt_bsh);
 
         // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
-        // Under a Kalman gain the decay is computed in here, before anything
+        // Under a Kalman gain, this call computes the decay before anything
         // below reads it.
         let helpers::TrapezoidCoeffs {
             dt: dt_bsh,
@@ -173,7 +175,7 @@ impl Mamba3 {
             self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
         )
         .padded(pad_bs.as_ref());
-        // The tropical register's inputs, on the same folded axis.
+        // The inputs of the tropical register, on the same folded axis.
         let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
             (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
         });
@@ -216,11 +218,11 @@ impl Mamba3 {
         );
 
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
-        // Complex2D: abelian RoPE (cumulative angle). Quaternion4D: cumulative
-        // unit quaternion. The new cache accumulator is returned for Step (cache
-        // update) below. See [`rotate_bc_forward`].
-        // `C` is rotated at token resolution too: it needs the cumulative
-        // rotation of the micro-step it is read at.
+        // Per `RotationKind`: nothing (Real1D), the cumulative angle
+        // (Complex2D), or the cumulative quaternion(s) (Quaternion4D, Rotor4D).
+        // The new cache accumulator goes to the cache update below. See
+        // [`rotate_bc_forward`]. `C` turns at token resolution: it needs the
+        // cumulative rotation of the micro-step where it is read.
         let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh.clone(),
@@ -236,30 +238,31 @@ impl Mamba3 {
         // ── Steps 6–7: the β term's shifted, β-scaled inputs ──────────────────
         //
         // "Shift-Before-Chunking": prepend the cached xₜ₋₁ / Bₜ₋₁ at the
-        // sequence level (before SSD chunking) so the β term at t=0 sees the
-        // prior token from a continued cache. For a fresh (zero) cache this is
-        // equivalent to zero-padding.
+        // sequence level (before SSD chunking), so the β term at t=0 sees the
+        // prior token of a continued cache. For a fresh (zero) cache this is
+        // the same as zero-padding.
         //
-        // The shift is [`Trapezoid::tap_lag`] *folded* positions — 1 for the
+        // The shift is [`Trapezoid::tap_lag`] *folded* positions: 1 for the
         // default [`Trapezoid::HorizontalCarryOver`], `u` for
-        // [`Trapezoid::Vertical`] — matching `step`'s FIFO depth exactly.
+        // [`Trapezoid::Vertical`]. That is exactly the FIFO depth of `step`.
         //
-        // A lag-`L` tap must be transported across *its own* gap (§9), i.e. by
-        // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`. `β = ν·α` carries the `d = 0` factor
-        // and `interior_gap_decay` the rest; for the first `L` positions the
-        // missing factors are the ones the cache's `v` slots already carry.
+        // A lag-`L` tap must be transported across *its own* gap (§9): by
+        // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`. `β = ν·α` holds the `d = 0` factor, and
+        // `interior_gap_decay` the rest. For the first `L` positions, the
+        // missing factors are those that the `v` slots of the cache already
+        // carry.
         //
-        // A two-tap pattern adds a second, lag-1 side. The two shifts differ, so
-        // they cannot share a pass and this pathway runs three SSD calls; the
-        // single-SSD one fuses them into its key scale and stays at one. The
-        // interior tap's prefix is the FIFO's newest slot — which *is* the lag-1
-        // slot, undecayed — and is inert under
+        // A two-tap pattern adds a second, lag-1 side. The two shifts are
+        // different, so they cannot share a pass, and this pathway runs three
+        // SSD calls. The single-SSD pathway fuses them into its key scale and
+        // stays at one. The prefix of the interior tap is the newest slot of
+        // the FIFO, which *is* the lag-1 slot, undecayed. It has no effect under
         // [`Trapezoid::VerticalPlusHorizontalReset`], whose `νⁱⁿᵗ` is zero at
         // every position that would read it.
         //
-        // Under [`Trapezoid::None`] there is no left endpoint at all: no shift,
-        // no β-scaled copy of `x`, and (below) no second SSD call — `forward`
-        // becomes one standard SSD pass whose keys are scaled by `γ = Δ`.
+        // Under [`Trapezoid::None`] there is no left endpoint: no shift, no
+        // β-scaled copy of `x`, and (below) no second SSD call. `forward` is
+        // then one standard SSD pass, with keys scaled by `γ = Δ`.
         let lag = self.tap_lag();
         let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
             let slots_buhp = cache
@@ -270,8 +273,9 @@ impl Mamba3 {
                 .k_state_bumhr
                 .clone()
                 .expect("a β tap keeps its (B, x) cache slots");
-            // A lag-`L` tap's prefix is the FIFO's newest `L` slots — all of it
-            // for the pattern's own tap, the last one alone for an interior tap.
+            // The prefix of a lag-`L` tap is the newest `L` slots of the FIFO:
+            // all of it for the own tap of the pattern, only the last slot for
+            // an interior tap.
             let newest = slots_buhp.dims()[1] - lag;
             let x_prev_bshp =
                 helpers::shift_stream(x_bshp.clone(), slots_buhp.narrow(1, newest, lag), lag);
@@ -296,12 +300,12 @@ impl Mamba3 {
         let gamma_bsh1 = gamma_bsh.unsqueeze_dim::<4>(3);
         let x_gamma_bshp = x_bshp.clone() * gamma_bsh1; // γₜ · xₜ
 
-        // ── Save the last `lag` positions' B and x for the cache ──────────────
-        // The last `lag` *micro-steps* — exactly the positions whose taps the
-        // next call has to pay, so the trapezoid continues across a split
-        // prefill unchanged (at `lag = u` that window is precisely the last
-        // token). With no β tap there is nothing to continue and the slots stay
-        // empty. See [`Self::save_tap_slots`].
+        // ── Save the B and x of the last `lag` positions for the cache ────────
+        // The last `lag` *micro-steps* are exactly the positions whose taps the
+        // next call must pay. So the trapezoid continues unchanged across a
+        // split prefill (at `lag = u`, that window is exactly the last token).
+        // With no β tap there is nothing to continue, and the slots stay empty.
+        // See [`Self::save_tap_slots`].
         let (b_last_bumhr, x_last_buhp) = self.save_tap_slots(
             &b_bsmhr,
             &x_bshp,
@@ -317,8 +321,8 @@ impl Mamba3 {
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
-        // The zero blocks are built at most once each and shared by the streams
-        // that need them (a `Tensor` clone is a handle, not a copy).
+        // Each zero block is built at most once, and the streams that need it
+        // share it (a `Tensor` clone is a handle, not a copy).
         let pads = (pad > 0).then(|| {
             (
                 Tensor::<4>::zeros([batch, pad, nheads, per_head_dim], &device),
@@ -339,8 +343,8 @@ impl Mamba3 {
             None => t,
         };
 
-        // `C` rides the chunk's read axis, so it pads by whole tokens.
-        // `chunk_len` is a multiple of `u`, hence so is `pad`.
+        // `C` is on the read axis of the chunk, so it pads by whole tokens.
+        // `chunk_len` is a multiple of `u`, so `pad` is too.
         let tokens_padded = sequence_padded / u;
         let pad_tmhr = |t: Tensor<5>| match pad {
             0 => t,
@@ -375,10 +379,11 @@ impl Mamba3 {
             c_bTmhr.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]);
 
         // ── Step 9: the MIMO-SSD call(s) ─────────────────────────────────────────
-        // Build V tensors — insert the mimo_rank axis at position 3 of `_bnlhp`.
-        // With a β tap this is the pair of standard SSD passes the pathway is
-        // named for (γ-SSM + β-SSM, summed); under [`Trapezoid::None`] the second
-        // one does not exist and a "double"-SSD forward is a single pass.
+        // Build the V tensors: insert the mimo_rank axis at position 3 of
+        // `_bnlhp`. With a β tap, these are the two standard SSD passes that
+        // give the pathway its name (γ-SSM + β-SSM, summed). Under
+        // [`Trapezoid::None`] the second pass does not exist, and a
+        // "double"-SSD forward is one pass.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
             helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
@@ -429,9 +434,9 @@ impl Mamba3 {
         cache.ssm_bhpr = final_state_bhpr;
 
         // ── Step 10: Unpad ────────────────────────────────────────────────────
-        // The SSD returns token resolution: the readout happens after all `u`
-        // writes, and the kernel only ever computed the row it happens at. From
-        // this point `t` (`tokens`) is the sequence axis again.
+        // The SSD returns token resolution: the readout is after all `u`
+        // writes, and the kernel computed only that row. From here, `t`
+        // (`tokens`) is the sequence axis again.
         let y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
         let y_btmhp = if pad == 0 {
             y_bTmhp
@@ -450,8 +455,8 @@ impl Mamba3 {
         let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
 
         // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
-        // D skip uses raw x * mimo_x_hmp (not gamma-scaled), at the micro-step
-        // the readout is contemporaneous with.
+        // The D skip uses the raw x * mimo_x_hmp (not gamma-scaled), at the
+        // micro-step of the readout.
         // Insert the mimo_rank axis at position 2 of `_bthp`.
         let v_raw_bsmhp = helpers::build_v_with_mimo::<4, 5>(x_bthp, mimo_x_hmp.as_ref(), 2);
         let y_bsmhp = y_btmhp;
@@ -461,8 +466,8 @@ impl Mamba3 {
         let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
 
         // ── Gate (or gated norm) and rank aggregation ─────────────────────────
-        // When `out_norm` is set, the SiLU gate is replaced by a per-head
-        // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
+        // When `out_norm` is set, a per-head gated RMSNorm replaces the SiLU
+        // gate: `RmsNormGated(y, z) = norm(y) * silu(z)`.
         let y_bsi = if mimo_rank > 1 {
             let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
             let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
@@ -516,13 +521,13 @@ impl Mamba3 {
         san(&out_bsm);
 
         // ── Update remaining cache fields ─────────────────────────────────────
-        // k_state / v_state = the tap FIFO's last `lag` positions (both `None`
-        // when the pattern has no β tap).
+        // k_state / v_state = the last `lag` positions of the tap FIFO (both
+        // `None` when the pattern has no β tap).
         cache.k_state_bumhr = b_last_bumhr;
         cache.v_state_buhp = x_last_buhp;
 
-        // Cumulative rotation at the last micro-step (angle wrapped to [−π, π], or
-        // the cumulative quaternion), to continue a longer sequence.
+        // The cumulative rotation at the last micro-step (the angle wrapped to
+        // [−π, π], or the cumulative quaternions), to continue the sequence.
         cache.rotation = new_rotation;
 
         (out_bsm, cache)
@@ -536,66 +541,67 @@ impl Mamba3 {
 mod step {
     use super::*;
 
-    /// One token's in-projection unpacked into the step-shaped pieces
-    /// [`Mamba3::step_double_ssd`] works from: the gate/value streams, the
+    /// The in-projection of one token, unpacked into the step-shaped pieces
+    /// that [`Mamba3::step_double_ssd`] uses: the gate/value streams, the
     /// **pre-rotation** QK-normed B/C, the raw rotation channels, and the
     /// trapezoid coefficients.
     ///
-    /// Every per-micro-step stream carries a `u` axis (MambaProduct; `u = 1` for
-    /// stock Mamba-3) — the token's whole folded block, which
-    /// [`Mamba3::step_double_ssd`] consumes at once rather than a position at a
+    /// Every per-micro-step stream has a `u` axis (MambaProduct, `u = 1` for
+    /// stock Mamba-3): the whole folded block of the token.
+    /// [`Mamba3::step_double_ssd`] uses it at once, not one position at a
     /// time.
     pub(crate) struct StepProjection {
         /// Per-token gate stream `[batch, d_inner]`.
         pub z_bi: Tensor<2>,
-        /// Per-token QK-normed, GQA-expanded, biased C — **before** the
-        /// rotation. The read happens once, after all `u` writes, so this is
-        /// the chunk's read axis with a single row: `[batch, 1, mimo_rank,
-        /// nheads, state_rank]`.
+        /// Per-token QK-normed, GQA-expanded, biased C, **before** the
+        /// rotation. The read is once, after all `u` writes, so this is the
+        /// read axis of a chunk with one row: `[batch, 1, mimo_rank, nheads,
+        /// state_rank]`.
         pub c_b1mhr: Tensor<5>,
         /// Value stream `[batch, u, nheads, per_head_dim]`.
         pub x_buhp: Tensor<4>,
-        /// QK-normed, GQA-expanded, biased B — **before** the rotation.
+        /// QK-normed, GQA-expanded, biased B, **before** the rotation.
         /// `[batch, u, mimo_rank, nheads, state_rank]`.
         pub b_bumhr: Tensor<5>,
-        /// Raw rotation channels `[batch, u, num_rotation_channels]`; `None` for
+        /// Raw rotation channels `[batch, u, num_rotation_channels]`. `None` for
         /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
         /// which projects none.
         pub rot_bua: Option<Tensor<3>>,
         /// `Δ` `[batch, u, nheads]`.
         pub dt_buh: Tensor<3>,
-        /// The log-decay `[batch, u, nheads]` — `Δ·A`, or the Kalman gate's
-        /// computed one (`helpers::TrapezoidCoeffs::da`). The block's transport
-        /// (both within it and into the tap slots it leaves behind) is a
-        /// product of `α`s, i.e. a sum of these.
+        /// The log-decay `[batch, u, nheads]`: `Δ·A`, or the decay that the
+        /// Kalman gate computes (`helpers::TrapezoidCoeffs::da`). The transport
+        /// of the block (within it, and into the tap slots it leaves) is a
+        /// product of `α`s, so a sum of these.
         pub da_buh: Tensor<3>,
         /// `α = exp(da)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
-        /// The tap mass `ν` `[batch, u, nheads]`; `None` under
+        /// The tap mass `ν` `[batch, u, nheads]`. `None` under
         /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
-        /// `β = ν·α` is formed where it is spent.
+        /// `β = ν·α` is formed where it is used.
         pub nu_buh: Option<Tensor<3>>,
-        /// The interior (lag-1) tap's mass `[batch, u, nheads]`; `None` unless
-        /// the pattern
+        /// The mass of the interior (lag-1) tap `[batch, u, nheads]`. `None`
+        /// unless the pattern
         /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
         pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
         /// `ln Λ` after each micro-step `[batch, u, nheads]`, under a Kalman
-        /// gain (whose decay `da_buh` already is).
+        /// gain (`da_buh` is already its decay).
         pub log_precision_buh: Option<Tensor<3>>,
-        /// The tropical register's raw `(a, b)`, each `[batch, u, nheads]`.
+        /// The raw `(a, b)` of the tropical register, each `[batch, u, nheads]`.
         pub tropical_ab_buh: Option<(Tensor<3>, Tensor<3>)>,
     }
 
     impl Mamba3 {
-        /// In-projection → split → trapezoid coefficients → QK-norm for a
-        /// single token, **stopping before** the rotation (which
-        /// needs the cache's cumulative rotation).
+        /// In-projection → split → trapezoid coefficients → QK-norm for one
+        /// token. It **stops before** the rotation, which needs the cumulative
+        /// rotation of the cache.
         ///
-        /// The per-micro-step streams keep a `u` axis; see [`StepProjection`].
-        /// `log_precision_bh` is the cache's `ln Λ`, which a Kalman gain's decay
-        /// is computed from (`None` under [`Gain::Projected`](crate::mamba3::positive::Gain::Projected)).
+        /// The per-micro-step streams keep a `u` axis (see [`StepProjection`]).
+        /// `log_precision_bh` is the `ln Λ` of the cache, from which a Kalman
+        /// gain computes its decay (`None` under
+        /// [`Gain::Projected`](crate::mamba3::positive::Gain::Projected)).
         #[allow(non_snake_case)]
         pub(crate) fn step_project(
             &self,
@@ -619,13 +625,13 @@ mod step {
             san(&proj_bd);
             let (proj_bd, noise_bH, tropical_bH) = self.split_positive(proj_bd, 1);
             let bc_size = ngroups * state_rank * mimo_rank;
-            // [batch, *] split along channel dim; the per-micro-step segments
-            // are `u` times as wide and split onto a `u` axis of their own,
-            // matching `forward`'s fold into the sequence.
+            // [batch, *] split along the channel dim. The per-micro-step
+            // segments are `u` times as wide and go onto their own `u` axis,
+            // as the fold into the sequence does in `forward`.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
             // See the note in `forward`: the three trailing segments are the
-            // optional ones (`Real1D` projects no rotation, a one-tap pattern no
-            // `μ`, `Trapezoid::None` no `λ`).
+            // optional ones (`Real1D` projects no rotation, a one-tap pattern
+            // no `μ`, `Trapezoid::None` no `λ`).
             let (proj_bd, rot_bA) =
                 helpers::split_trailing(proj_bd, self.rotation_channels_total(), 1);
             let (proj_bd, mu_raw_bH) =
@@ -681,9 +687,9 @@ mod step {
             san(&gamma_buh);
 
             // ── QK-Norm on B and C ────────────────────────────────────────────
-            // Both carry a leading axis — `u` writes for B, the token's one read
-            // for C — so this is `forward`'s pair of calls at `sequence = u`,
-            // `tokens = 1`, group dim 3.
+            // Both have a leading axis (`u` writes for B, the one read of the
+            // token for C). So this is the pair of calls of `forward` at
+            // `sequence = u`, `tokens = 1`, group dim 3.
             let b_bumhr = helpers::qk_norm_expand_bias::<5, 6>(
                 b_raw_bMGRU.reshape([batch, u, mimo_rank, ngroups, state_rank]),
                 &self.b_norm,
@@ -724,11 +730,11 @@ mod step {
         /// (`einsum('bhpr,bmhr->bmhp', state, C)`).
         ///
         /// At `mimo_rank == 1` the output axis of the GEMM is 1, so the matmul
-        /// is a matrix–vector product; [`step_readout_siso`](Mamba3::step_readout_siso)
+        /// is a matrix–vector product. [`step_readout_siso`](Mamba3::step_readout_siso)
         /// writes it as a broadcast multiply plus a `state_rank` reduction.
-        /// Selected by
         /// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)
-        /// — both branches compute the same values and gradients.
+        /// selects the branch. Both branches compute the same values and
+        /// gradients.
         pub(crate) fn step_readout(
             state_bhpr: Tensor<4>,
             c_bmhr: Tensor<4>,
@@ -757,11 +763,11 @@ mod step {
             out_bhpm.permute([0, 3, 1, 2])
         }
 
-        /// Shared block tail: `D` skip, gate (or gated RMSNorm), MIMO rank
-        /// aggregation, and the output projection.
+        /// The block tail of `step`: `D` skip, gate (or gated RMSNorm), MIMO
+        /// rank aggregation, and the output projection.
         ///
-        /// `out_m_bmhp` is the raw SSM readout (see [`Mamba3::step_readout`]);
-        /// `x_vals_bmhp` the MIMO-expanded values; `z_bi` the gate stream.
+        /// `out_m_bmhp` is the raw SSM readout (see [`Mamba3::step_readout`]),
+        /// `x_vals_bmhp` the MIMO-expanded values, and `z_bi` the gate stream.
         pub(crate) fn step_finish(
             &self,
             out_m_bmhp: Tensor<4>,
@@ -781,8 +787,8 @@ mod step {
             san(&out_m_bmhp);
 
             // ── Gate (or gated norm) and rank aggregation ─────────────────────
-            // When `out_norm` is set, the SiLU gate is replaced by a per-head
-            // gated RMSNorm: `RmsNormGated(y, z) = norm(y) * silu(z)`.
+            // When `out_norm` is set, a per-head gated RMSNorm replaces the SiLU
+            // gate: `RmsNormGated(y, z) = norm(y) * silu(z)`.
             let z_bhp = z_bi.reshape([batch, nheads, per_head_dim]);
             let y_bi = if mimo_rank > 1 {
                 let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
@@ -834,24 +840,13 @@ mod step {
             out_bm
         }
 
-        /// Process a **single token** using the pure recurrent form.
-        ///
-        /// For SISO (mimo_rank=1):
-        /// ```text
-        ///   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ
-        ///   yₜ = Cₜᵀ hₜ + D xₜ
-        /// ```
-        ///
-        /// For MIMO (mimo_rank>1):
-        /// ```text
-        ///   hₜ = αₜ hₜ₋₁ + Σₘ βₜ Bₜ₋₁[m] ⊗ (xₜ₋₁ ⊙ mimo_x_hmp[m]) + Σₘ γₜ Bₜ[m] ⊗ (xₜ ⊙ mimo_x_hmp[m])
-        ///   yₜ[r] = Cₜ[r]ᵀ hₜ + D xₜ ⊙ mimo_x_hmp[r]
-        ///   outₜ = Σₘ mimo_o_hmp[m] ⊙ silu(zₜ ⊙ mimo_z_hmp[m]) ⊙ yₜ[m]
-        /// ```
+        /// Process a **single token** with the pure recurrent form (the
+        /// formulas are in [`Mamba3::step`]). Both cache variants decode here:
+        /// `step_single_ssd` converts its cache and calls this function.
         ///
         /// At `micro_steps = u > 1` the token is `u` of those steps
-        /// ([`crate::mamba3::product`]) and they are evaluated **together**, not
-        /// one at a time — see the body.
+        /// ([`crate::mamba3::product`]). They are evaluated **together**, not one
+        /// at a time (see the body).
         ///
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
@@ -887,51 +882,52 @@ mod step {
             });
 
             // ── In-projection → coefficients → QK-norm ────────────────────────
-            // A Kalman gain's decay is computed in here, from the cached `ln Λ`,
-            // over the token's `u` micro-steps — `forward`'s scan at `len = u`.
+            // A Kalman gain computes its decay in here, from the cached `ln Λ`,
+            // over the `u` micro-steps of the token: the scan of `forward` at
+            // `len = u`.
             let proj = self.step_project(input_bd, cache.log_precision_bh.clone());
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let siso = self.use_siso_decode_kernels();
 
-            // ── The token's `u` micro-steps at once, then one readout ────────────
+            // ── The `u` micro-steps of the token at once, then one readout ──────
             // MambaProduct evaluates a token as `u` consecutive positions of the
-            // ordinary recurrence, so a `step` call is a **folded block** of
-            // length `u` — and one is `forward` on a one-token sequence, which
-            // is what the parity tests assert. It is not walked a position at a
-            // time, because it need not be: after the RoPE factoring the
-            // transition inside the block is the *scalar* `α`, so the block has
-            // a closed form,
+            // ordinary recurrence. So a `step` call is a **folded block** of
+            // length `u`, and one call is `forward` on a one-token sequence
+            // (the parity tests assert this). The block is not walked one
+            // position at a time, because that is not necessary. After the RoPE
+            // factoring, the transition inside the block is the *scalar* `α`,
+            // so the block has a closed form:
             //
             //     h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ · writeⱼ ,    wⱼ = ∏_{r>j} αᵣ
             //
-            // whose transport `wⱼ` — a write's decay to the end of the block —
-            // is the very quantity [`crate::mamba3::helpers::tail_decay`]
-            // already computes for the tap slots the call leaves behind, over
-            // the whole block instead of its last `lag`.
+            // Its transport `wⱼ` (the decay of a write to the end of the block)
+            // is the same quantity that [`crate::mamba3::helpers::tail_decay`]
+            // computes for the tap slots, over the whole block instead of its
+            // last `lag`.
             //
-            // Every `writeⱼ` is an outer product into one shared state, so
-            // transporting them and fusing `(u, mimo_rank)` into a single
-            // contracted axis makes each **side** of the recurrence one
-            // [`helpers::mimo_outer_sum`] — the collapse the single-SSD boundary
-            // seed already makes over its slots. The op count is therefore
-            // independent of `u`, and at `u = 1` the fused axis is `mimo_rank`
-            // and this is stock Mamba-3's op graph unchanged.
+            // Every `writeⱼ` is an outer product into one shared state. So with
+            // the transport, and with `(u, mimo_rank)` fused into one
+            // contracted axis, each **side** of the recurrence is one
+            // [`helpers::mimo_outer_sum`] (the same collapse as the single-SSD
+            // boundary seed over its slots). Thus the op count does not depend
+            // on `u`. At `u = 1` the fused axis is `mimo_rank`, and this is the
+            // unchanged op graph of stock Mamba-3.
             //
-            // The trapezoid is untouched by any of it: a tap at
-            // [`Trapezoid::tap_lag`] reads folded position `p − lag`, which is
-            // `forward`'s [`helpers::shift_stream`] over this block with the
-            // cache's FIFO as the prefix, and `β = ν·α` times
+            // The trapezoid is unchanged by all of this. A tap at
+            // [`Trapezoid::tap_lag`] reads folded position `p − lag`: the
+            // [`helpers::shift_stream`] of `forward` over this block, with the
+            // FIFO of the cache as the prefix. `β = ν·α` times
             // [`helpers::interior_gap_decay`] is the same gap transport (§9). At
-            // lag 1 that gap has no interior and the FIFO is one slot deep; at
+            // lag 1 that gap has no interior, and the FIFO is one slot deep. At
             // lag `u` the block is exactly as long as the lag, so every tap
-            // reads the FIFO and none of them reads within the block.
+            // reads the FIFO, and none reads within the block.
             let lag = self.tap_lag();
 
             // ── Cumulative rotation, applied to B at every write and to C ─────
-            // at the one read: `forward`'s routine at `sequence = u`,
+            // at the one read: the routine of `forward` at `sequence = u`,
             // `tokens = 1`, `read_stride = u`. The read row is the last
-            // micro-step, so `C` picks up exactly the cumulative rotation the
-            // readout happens at.
+            // micro-step, so `C` gets exactly the cumulative rotation of the
+            // readout.
             let (b_bumhr, c_b1mhr, new_rotation) = rotate_bc_forward(
                 proj.rot_bua,
                 proj.dt_buh,
@@ -945,10 +941,10 @@ mod step {
             san(&c_b1mhr);
             new_rotation.sanity();
 
-            // ── The block's two transports ────────────────────────────────────
+            // ── The two transports of the block ───────────────────────────────
             // `w` carries a write to the end of the block (`None` at `u = 1`,
-            // where that product is empty); `α_total` is the token's whole
-            // transition, the one factor the carried state takes.
+            // where that product is empty). `α_total` is the whole transition
+            // of the token, the one factor on the carried state.
             let w_buh = helpers::tail_decay(proj.da_buh.clone(), u);
             let alpha_total_bh11 = proj
                 .da_buh
@@ -962,8 +958,8 @@ mod step {
             //
             //   write[b, h, p, r] = Σ_{j,m} massⱼ·wⱼ · v[j, m, h, p] · K[j, m, h, r]
             //
-            // i.e. `einsum('bfhp,bfhr->bhpr', mass·w·v, K)` over the fused
-            // `f = u · mimo_rank` axis — one matmul, whatever `u` is.
+            // that is `einsum('bfhp,bfhr->bhpr', mass·w·v, K)` over the fused
+            // `f = u · mimo_rank` axis: one matmul, for any `u`.
             let write = |mass_buh: Tensor<3>, x_buhp: Tensor<4>, k_bumhr: Tensor<5>| {
                 let mass_buh = match &w_buh {
                     Some(w_buh) => mass_buh * w_buh.clone(),
@@ -981,13 +977,13 @@ mod step {
                 write_bhpr
             };
 
-            // A tapped side at its own lag — `forward`'s `beta_side`, over this
-            // block. The prefix is the FIFO's newest `lag` slots: all of it for
-            // the pattern's own tap, the newest slot alone for a two-tap
-            // pattern's lag-1 one, which by the FIFO's convention carries the
-            // empty decay product. Under [`Trapezoid::None`] there is no tapped
-            // side at all — no shifted stream, no second outer product, one
-            // fewer term in the state update.
+            // A tapped side at its own lag: the `beta_side` of `forward`, over
+            // this block. The prefix is the newest `lag` slots of the FIFO: all
+            // of it for the own tap of the pattern, only the newest slot for the
+            // lag-1 tap of a two-tap pattern (by the FIFO convention, that slot
+            // has the empty decay product). Under [`Trapezoid::None`] there is
+            // no tapped side: no shifted stream, no second outer product, one
+            // term less in the state update.
             let tap_write = |nu_buh: Tensor<3>, lag: usize| {
                 let slots_buhp = cache
                     .v_state_buhp
@@ -1025,9 +1021,9 @@ mod step {
             .fold(state_bhpr, |state, write| state + write);
             san(&state_bhpr);
 
-            // The readout's own inputs: `C` at the block's one read row, and the
-            // `D` skip's value at the micro-step that read is contemporaneous
-            // with — the last one.
+            // The inputs of the readout: `C` at the one read row of the block,
+            // and the value of the `D` skip at the micro-step of that read (the
+            // last one).
             let c_bmhr = c_b1mhr.squeeze_dim::<4>(1);
             let x_last_bhp = proj.x_buhp.clone().narrow(1, u - 1, 1).squeeze_dim::<3>(1);
             let x_vals_bmhp =
@@ -1039,9 +1035,9 @@ mod step {
             let out_m_bmhp = Self::step_readout(state_bhpr.clone(), c_bmhr, siso);
             san(&out_m_bmhp);
 
-            // ── The positive systems' ports, at the block's one read row ──────
-            // `forward`'s tail on a one-token axis: the block's last micro-step
-            // is the read row and the next carry both.
+            // ── The ports of the positive systems, at the one read row ────────
+            // The tail of `forward` on a one-token axis: the last micro-step of
+            // the block is both the read row and the next carry.
             let (out_b1mhp, log_precision_bh, tropical_bh) = self.positive_tail(
                 out_m_bmhp.unsqueeze_dim::<5>(1),
                 proj.log_precision_buh,
@@ -1057,9 +1053,9 @@ mod step {
             let out_bm = self.step_finish(out_m_bmhp, x_vals_bmhp, proj.z_bi);
 
             // ── Update cache ──────────────────────────────────────────────────
-            // The block's last `lag` positions, `x` pre-scaled by the decay
-            // since its own position — `forward`'s own helper, so the two write
-            // the same slot layout under the same convention.
+            // The last `lag` positions of the block, with `x` pre-scaled by the
+            // decay since its own position. This is the helper of `forward`, so
+            // both write the same slot layout with the same convention.
             let (k_state_bumhr, v_state_buhp) =
                 self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag, None);
             cache.ssm_bhpr = state_bhpr;

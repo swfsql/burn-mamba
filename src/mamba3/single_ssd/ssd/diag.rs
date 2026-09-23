@@ -1,34 +1,35 @@
 //! # Same-step γ-correction (the single-SSD diagonal term)
 //!
-//! The single-SSD recurrence scales `K` by `scaleₜ = γₜ + (1−λₜ₊₁)Δₜ₊₁`, which is
-//! the right weight for every source step `s < t` but *not* for the same step
-//! `s = t`, where the weight must be `γₜ`. The intra-chunk path therefore masks
-//! the diagonal out (strict lower triangle) and this module adds it back:
+//! The single-SSD recurrence scales `K` by `scaleₜ` (at lag 1,
+//! `scaleₜ = γₜ + νₜ₊₁`). That is the right weight for every source step
+//! `s < t`, but *not* for the same step `s = t`, where the weight must be
+//! `γₜ`. So the intra-chunk path masks the diagonal out (strict lower
+//! triangle), and this module adds it back:
 //!
 //! ```text
 //!   y_diag[t, m_out, h, p] = γₜ · Σ_{m_in} (Σ_r C[t, m_out, h, r] · B[t, m_in, h, r])
 //!                                        · V[t, m_in, h, p]
 //! ```
 //!
-//! It is computed fresh (a small same-step product) rather than extracted from
-//! the block diagonal of the fused `L·M` CB matrix, which would need a fiddly
-//! reshape.
+//! It is computed as a new small same-step product. An extraction from the
+//! block diagonal of the fused `L·M` CB matrix would need a complex reshape.
 //!
 //! ## SISO fast path
 //!
-//! The inner `m × m` Gram matrix is what makes this a pair of matmuls. At
+//! The inner `m × m` Gram matrix makes this a pair of matmuls. At
 //! `mimo_rank == 1` it collapses to the **scalar** `Cₜ·Bₜ`, so both matmuls
-//! degenerate into `1×r×1` and `1×1×p` GEMMs — thousands of tiny batched
+//! degenerate into `1×r×1` and `1×1×p` GEMMs: thousands of tiny batched
 //! products, one per `(batch, nchunks, chunk_len, nheads)`.
 //! `y_diag_correction_siso` instead contracts `state_rank` with a reduction
-//! and folds the result (together with `γₜ`) in as a per-`(b, n, l, h)` scalar
-//! broadcast. Both branches compute the same quantity; only the op mix differs,
-//! so [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
+//! and folds the result (with `γₜ`) in as a per-`(b, n, l, h)` scalar
+//! broadcast. Both branches compute the same quantity, and only the op mix is
+//! different. So
+//! [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization)
 //! can force the general branch at `mimo_rank == 1` to measure the difference.
 //!
-//! Reference kernels:
-//! - SISO: `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
-//! - MIMO: `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
+//! Reference kernels, in `state-spaces/mamba`:
+//! - SISO: `mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
+//! - MIMO: `mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 #![allow(non_snake_case)]
 

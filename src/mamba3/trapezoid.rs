@@ -1,26 +1,25 @@
-//! # The trapezoid's tap pattern — which earlier sample the `β` tap reads
+//! # The tap pattern of the trapezoid — which earlier sample the `β` tap reads
 //!
-//! Mamba-3's write is a two-tap filter on the state input: the current sample
-//! at `γₜ = λₜΔₜ` and an earlier one at `βₜ = (1−λₜ)Δₜαₜ`, transported across
-//! the gap between them (`helpers::trapezoidal_coefficients`). At
-//! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) `= 1`
-//! "earlier" can only mean the previous token and there is nothing to choose;
-//! at `u > 1` the folded sequence carries `u` positions per token
-//! ([`crate::mamba3::product`]) and the choice is real.
+//! The write of Mamba-3 is a two-tap filter on the state input: the current
+//! sample at `γₜ = λₜΔₜ`, and an earlier one at `βₜ = (1−λₜ)Δₜαₜ`, transported
+//! across the gap between them (`helpers::trapezoidal_coefficients`). At
+//! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) `= 1`,
+//! "earlier" can only mean the previous token, so there is no choice. At
+//! `u > 1`, the folded sequence has `u` positions per token
+//! ([`crate::mamba3::product`]), and the choice is real.
 //!
 //! [`Trapezoid`] names the members of that lattice.
-//! `info/mamba-3/trapezoid-as-integration.md` §§8–9 derives it, prices each member and
-//! proves the invariant they all keep (each tap transported across *its own*
-//! gap, which is what preserves the single-SSD `Δ̃` collapse) — cite it, it is
-//! not restated here.
+//! `info/mamba-3/trapezoid-as-integration.md` §§8–9 derives it, prices each
+//! member, and proves the invariant that all members keep: each tap is
+//! transported across *its own* gap, which keeps the single-SSD `Δ̃` collapse.
+//! This module cites the note and does not restate it.
 //!
 //! ## One rule for every member
 //!
 //! A pattern says which earlier samples are **admissible** at each folded
-//! position; what they are *worth* is not a second thing to decide. The step's
-//! mass `Δₚ` is split by two learned per-(head, micro-step) scalars, and a tap
-//! that is not admissible hands its mass back one level — interior → far,
-//! far → `γ`:
+//! position. Their *weight* is not a second decision. Two learned per-(head,
+//! micro-step) scalars split the mass `Δₚ` of the step. A tap that is not
+//! admissible gives its mass back one level (interior → far, far → `γ`):
 //!
 //! ```text
 //!   γ = λΔ            the right endpoint, what the read sees   (λ = σ(λ̂))
@@ -29,35 +28,40 @@
 //!   νᶠᵃʳ = ν − νⁱⁿᵗ   at the lag-`u` tap — the same micro-step of the previous token
 //! ```
 //!
-//! so `γ + νⁱⁿᵗ + νᶠᵃʳ = Δ` at every position, whatever is gated. `λ` keeps the
-//! meaning the note gives it (the splitting parameter of §4); `μ` — the one
-//! channel the two-tap members add — says **which earlier sample the left
-//! endpoint is**, interpolating between the two candidates. The quadrature
-//! weights therefore stay non-negative and still sum to `Δ`, so §5's
-//! "top-up, never a rollback" reading survives the wider tap set, and so does
-//! the collapse: sample `s` carries the one scalar `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`.
+//! So `γ + νⁱⁿᵗ + νᶠᵃʳ = Δ` at every position, for every gate. `λ` keeps the
+//! meaning that the note gives it (the splitting parameter of §4). `μ`, the
+//! one channel that the two-tap members add, says **which earlier sample is
+//! the left endpoint**: it interpolates between the two candidates. Thus the
+//! quadrature weights stay non-negative and still sum to `Δ`. The "top-up,
+//! never a rollback" reading of §5 holds for the wider tap set, and so does the
+//! collapse: sample `s` carries the one scalar `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`.
 //!
-//! The fallback is what makes the gated members *submodels* rather than
-//! different animals: [`HorizontalReset`](Trapezoid::HorizontalReset) is
-//! [`HorizontalCarryOver`](Trapezoid::HorizontalCarryOver) with `λ = 1` at each
-//! token's first micro-step (§8's own limit), and
-//! [`VerticalPlusHorizontalCarryOver`](Trapezoid::VerticalPlusHorizontalCarryOver)
-//! *contains* both implemented single-tap patterns at `μ ≡ 1` and `μ ≡ 0`.
-//! Dropping the mass instead of handing it back would make both statements
-//! false and would quietly weaken the write at `1/u` of the positions.
+//! Because of this fallback, the gated members are *submodels*, not different
+//! models:
+//!
+//! - [`HorizontalReset`](Trapezoid::HorizontalReset) is
+//!   [`HorizontalCarryOver`](Trapezoid::HorizontalCarryOver) with `λ = 1` at
+//!   the first micro-step of each token (the limit of §8).
+//! - [`VerticalPlusHorizontalCarryOver`](Trapezoid::VerticalPlusHorizontalCarryOver)
+//!   *contains* both implemented single-tap patterns, at `μ ≡ 1` and `μ ≡ 0`.
+//!
+//! If a closed tap dropped its mass instead of giving it back, both statements
+//! would be false, and the write would silently be weaker at `1/u` of the
+//! positions.
 
-/// Which earlier sample(s) the trapezoid's `β` tap reads.
+/// Which earlier sample(s) the `β` tap of the trapezoid reads.
 ///
-/// The choice is **structural**, not a knob on one common algorithm: it decides
-/// the shift(s) the chunkwise pathways apply before chunking, the width of the
-/// single-SSD γ-correction band, whether the in-projection spends `λ` and `μ`
-/// channels at all, and how many `(B, x)` tap slots the cache carries
-/// ([`tap_slots`](Self::tap_slots)).
+/// The choice is **structural**, not a knob on one common algorithm. It
+/// decides:
 ///
-/// The lattice is the product of the two taps' settings — the lag-1
-/// (*horizontal*) one being absent, gated to within a token, or unrestricted,
-/// times the lag-`u` (*vertical*) one being absent or present — and all six
-/// cells exist:
+/// - the shift(s) that the chunkwise pathways apply before chunking,
+/// - the width of the single-SSD γ-correction band,
+/// - whether the in-projection has `λ` and `μ` channels,
+/// - how many `(B, x)` tap slots the cache holds ([`tap_slots`](Self::tap_slots)).
+///
+/// The lattice is the product of the settings of the two taps. The lag-1
+/// (*horizontal*) tap is absent, gated to within a token, or unrestricted. The
+/// lag-`u` (*vertical*) tap is absent or present. All six cells exist:
 ///
 /// ```text
 ///                   no vertical                 + vertical (lag u)
@@ -66,162 +70,174 @@
 ///   carry (all j)   HorizontalCarryOver         VerticalPlusHorizontalCarryOver
 /// ```
 ///
-/// The left column is one algorithm read at two lags
-/// ([`tap_lag`](Self::tap_lag)) — the lag-`u` cell of that column *is*
-/// [`Vertical`](Self::Vertical) — and the right column adds one lag-1 tap to
-/// it, mixed in by `μ` (module header). At `u = 1` the column collapses: every
-/// row's two taps coincide, so [`Vertical`](Self::Vertical) *is*
-/// [`HorizontalCarryOver`](Self::HorizontalCarryOver), the two-tap members are
-/// it as well (they fold, and spend no `μ` channels —
-/// [`has_interior_tap`](Self::has_interior_tap)), and
-/// [`HorizontalReset`](Self::HorizontalReset) *is* [`None`](Self::None).
+/// The single-tap members are one algorithm at two lags
+/// ([`tap_lag`](Self::tap_lag)). The right column adds one lag-1 tap, mixed in
+/// by `μ` (module header). At `u = 1` the lags are equal, so:
+///
+/// - [`Vertical`](Self::Vertical) *is*
+///   [`HorizontalCarryOver`](Self::HorizontalCarryOver),
+/// - the two-tap members are also `HorizontalCarryOver` (they fold and have no
+///   `μ` channels, see [`has_interior_tap`](Self::has_interior_tap)),
+/// - [`HorizontalReset`](Self::HorizontalReset) *is* [`None`](Self::None).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Trapezoid {
-    /// **No second tap.** `λ ≡ 1`, hence `β = 0` and `γ = Δ`: the write is plain
-    /// exponential-Euler, i.e. Mamba-2's (the note's §4 Lie–Trotter row).
+    /// **No second tap.** `λ ≡ 1`, so `β = 0` and `γ = Δ`: the write is plain
+    /// exponential-Euler, as in Mamba-2 (the §4 Lie–Trotter row of the note).
     ///
-    /// Structural in the same sense as
-    /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
-    /// and nothing is paid for the absent term: the in-projection spends no `λ`
-    /// channels (so Muon sees no `λ` segment), no `β` is formed, the caches'
-    /// tap slots are `None`, `forward` makes **one** SSD call, and `step` drops
-    /// the second outer product. The two SSD pathways coincide here — with no second
-    /// pass to fuse, single-SSD's composite key scale is `γ` and its
-    /// same-step correction is the whole diagonal — so
+    /// Structural, as
+    /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
+    /// is. The absent term costs nothing:
+    ///
+    /// - the in-projection has no `λ` channels (so Muon sees no `λ` segment),
+    /// - no `β` is formed, and the tap slots of the caches are `None`,
+    /// - `forward` makes **one** SSD call, and `step` has no second outer
+    ///   product.
+    ///
+    /// The two SSD pathways are the same here. With no second pass to fuse, the
+    /// composite key scale of single-SSD is `γ`, and its same-step correction
+    /// is the whole diagonal. So
     /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
-    /// runs the double-SSD code and the caches convert by field identity at
-    /// *every* position, not just at boundaries.
+    /// runs the double-SSD code, and the caches convert by field identity at
+    /// *every* position, not only at boundaries.
     None,
 
     /// **Lag `u`, always**: the tap reads the *same* micro-step of the previous
-    /// **token**, so every tap crosses a token boundary and the pattern is `u`
-    /// parallel token-rate filters, one per micro-step channel. Restores the
+    /// **token**. So every tap crosses a token boundary, and the pattern is `u`
+    /// parallel token-rate filters, one per micro-step channel. It restores the
     /// `u = 1` tap semantics at every micro-step.
     ///
-    /// What is "vertical" is the **tap graph**, not the scan order: the state
-    /// still runs the one flattened chain
-    /// ([`crate::mamba3::product`]), which is what keeps the pattern causal and
-    /// `forward` equal to an unrolled `step`. A scan that truly took every token
-    /// at micro-step `0` before micro-step `1` would have to read token `t+1`
-    /// before finishing token `t` — or keep `u` separate states, which is a
-    /// layer stack (`burn_stack::Layers`), not a tap pattern.
+    /// The **tap graph** is "vertical", not the scan order. The state still
+    /// runs the one flattened chain ([`crate::mamba3::product`]), which keeps
+    /// the pattern causal and `forward` equal to an unrolled `step`. A scan
+    /// that really took every token at micro-step `0` before micro-step `1`
+    /// would have to read token `t+1` before it finished token `t`. The
+    /// alternative, `u` separate states, is a layer stack (`burn_stack::Layers`),
+    /// not a tap pattern.
     ///
-    /// At token resolution the pattern has a closed form: with `Aᵗ` the token
-    /// transition and `ṽᵗⱼ` micro-step `j`'s write transported to the end of its
-    /// own token, the tap's transport `M₍ₜ₋₁,ⱼ₊₁₎:₍ₜ,ⱼ₎` factors through the
-    /// state's own, and the whole `β` side lands **at the token boundary**:
+    /// At token resolution the pattern has a closed form. Let `Aᵗ` be the
+    /// token transition and `ṽᵗⱼ` the write of micro-step `j`, transported to
+    /// the end of its own token. The transport of the tap,
+    /// `M₍ₜ₋₁,ⱼ₊₁₎:₍ₜ,ⱼ₎`, factors through that of the state, and the whole
+    /// `β` side lands **at the token boundary**:
     ///
     /// ```text
     ///   hₜ = Aₜ · ( hₜ₋₁ + Σⱼ νₜ,ⱼ ṽₜ₋₁,ⱼ ) + Σⱼ γₜ,ⱼ ṽₜ,ⱼ ,     ν = (1−λ)Δ
     /// ```
     ///
-    /// i.e. **the `u = 1` trapezoid at token resolution, its left endpoint
-    /// promoted from rank 1 to rank `u`** — where
-    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) taps only the previous
-    /// token's *last* micro-step. `A` is untouched, so it is still `λ`-free
-    /// (`info/mamba-3/trapezoid-as-integration.md` §7).
+    /// This is **the `u = 1` trapezoid at token resolution, with its left
+    /// endpoint promoted from rank 1 to rank `u`**.
+    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) taps only the *last*
+    /// micro-step of the previous token. `A` is unchanged, so it is still
+    /// `λ`-free (`info/mamba-3/trapezoid-as-integration.md` §7).
     ///
-    /// Costs (§9): key scale `γₛ + (1−λₛ₊ᵤ)Δₛ₊ᵤ`; the tap is transported across
-    /// its own `u`-position gap; the cache's tap buffer becomes a `u`-deep FIFO
-    /// (exactly the previous token). The single-SSD same-step correction widens
-    /// from the diagonal to a `u`-wide band — and that band is **exactly the
-    /// token** at the only positions whose output survives (`j = u−1`), so it is
-    /// one small intra-token contraction outside the chunked kernel rather than
-    /// a wider mask (`crate::mamba3::single_ssd::token_band`).
+    /// Costs (§9):
     ///
-    /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`** this
-    /// tap has no exact filter form: its installment arrives `u` steps late,
-    /// after `u − 1` predicts a filter would have had to make knowing it. The
-    /// gate counts it like a lag-1 installment, so `Λ` over-estimates the weight
-    /// the plant wrote and `η/Λ` is only approximately its weighted mean. The
-    /// block still runs, and its pathways still agree. The lag-1 patterns are
-    /// exact ([`crate::mamba3::positive::kalman`]).
+    /// - the key scale is `γₛ + (1−λₛ₊ᵤ)Δₛ₊ᵤ`,
+    /// - the tap is transported across its own `u`-position gap,
+    /// - the tap buffer of the cache becomes a `u`-deep FIFO (exactly the
+    ///   previous token),
+    /// - the single-SSD same-step correction widens from the diagonal to a
+    ///   `u`-wide band. At the only positions whose output survives
+    ///   (`j = u−1`), that band is **exactly the token**. So it is one small
+    ///   intra-token contraction outside the chunked kernel, not a wider mask
+    ///   (`crate::mamba3::single_ssd::token_band`).
+    ///
+    /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`**,
+    /// this tap has no exact filter form. Its installment arrives `u` steps
+    /// late, after `u − 1` predicts that a filter would have made with it. The
+    /// gate counts it as a lag-1 installment, so `Λ` over-estimates the weight
+    /// that the plant wrote, and `η/Λ` is only approximately its weighted mean.
+    /// The block still runs, and its pathways still agree. The lag-1 patterns
+    /// are exact ([`crate::mamba3::positive::kalman`]).
     Vertical,
 
-    /// **Lag 1, suppressed at each token's first micro-step**: taps pair
-    /// micro-steps *within* a token and never cross a token boundary. Having no
-    /// cross-token path at all, it cannot do the job the trapezoid was
-    /// introduced for — it is a component of a pattern rather than an
-    /// alternative to one.
+    /// **Lag 1, closed at the first micro-step of each token**: taps pair
+    /// micro-steps *within* a token and never cross a token boundary. With no
+    /// cross-token path, it cannot do the job that the trapezoid exists for. It
+    /// is a component of a pattern, not an alternative to one.
     ///
-    /// The suppressed step has no admissible earlier sample, so its whole mass
-    /// returns to `γ` (`λ = 1` there, module header): each token **starts** on
-    /// plain exponential-Euler and is trapezoidal inside. That is exactly the
-    /// limit `info/mamba-3/trapezoid-as-integration.md` §8 shows is reachable by
-    /// learning under [`HorizontalCarryOver`](Self::HorizontalCarryOver), which
-    /// makes this member that pattern's constrained **submodel** rather than a
-    /// rival to it — and is why the mass is handed back rather than dropped.
+    /// The closed step has no admissible earlier sample, so all its mass
+    /// returns to `γ` (`λ = 1` there, module header). Each token **starts** on
+    /// plain exponential-Euler and is trapezoidal inside. This is exactly the
+    /// limit that `info/mamba-3/trapezoid-as-integration.md` §8 shows learning
+    /// can reach under [`HorizontalCarryOver`](Self::HorizontalCarryOver). So
+    /// this member is a constrained **submodel** of that pattern, not a rival.
+    /// That is also why the mass goes back instead of being dropped.
     ///
     /// Caches like [`HorizontalCarryOver`](Self::HorizontalCarryOver): the same
-    /// one-slot lag-1 buffer, ignored at each token's first micro-step. (That is
-    /// what makes the carried value inert across a call boundary — the slot is
-    /// layout, not information.)
+    /// one-slot lag-1 buffer, ignored at the first micro-step of each token.
+    /// So the carried value has no effect across a call boundary: the slot is
+    /// layout, not information.
     HorizontalReset,
 
-    /// **Lag 1, always** — the default: one
-    /// tap per position of the folded sequence, so `1/u` of the taps cross a
-    /// token boundary and `(u−1)/u` pair two projections of the same token
-    /// (§8). The cache carries one `(B, x)` slot, the last micro-step of the
-    /// last token.
+    /// **Lag 1, always** (the default): one tap per position of the folded
+    /// sequence. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
+    /// pair two projections of the same token (§8). The cache holds one
+    /// `(B, x)` slot: the last micro-step of the last token.
     #[default]
     HorizontalCarryOver,
 
     /// [`Vertical`](Self::Vertical) **and**
-    /// [`HorizontalReset`](Self::HorizontalReset) at once, the left-endpoint
-    /// mass shared between them by `μ` instead of the two jobs sharing one `λ`.
-    /// The first of the two members whose tap graph is not a single lag on the
-    /// folded chain: on the `token × micro-step` grid, cell `(t, j)` is written
-    /// by *two* taps — `(t−1, j)` above it and `(t, j−1)` beside it, the latter
-    /// only for `j ≥ 1`.
+    /// [`HorizontalReset`](Self::HorizontalReset) at once. `μ` shares the
+    /// left-endpoint mass between them, so the two jobs do not share one `λ`.
+    /// Its tap graph is not a single lag on the folded chain. On the
+    /// `token × micro-step` grid, *two* taps write cell `(t, j)`: `(t−1, j)`
+    /// above it, and `(t, j−1)` beside it (for `j ≥ 1` only).
     ///
-    /// What is 2-D is that graph, not the algorithm. Both taps are transported
-    /// across their own gap (`1` and `u` positions of the same folded chain), so
-    /// §9's collapse still applies term by term: the state stays one matrix and
-    /// sample `s` still carries **one** scalar, `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into
-    /// every later step, hence one single-SSD pass. Costs over
-    /// [`Vertical`](Self::Vertical): one more per-micro-step scalar channel
-    /// (`μ`) and a third nonzero per row of the mask's banded factor — the band
-    /// itself is already `u` wide, and the within-token tap never crosses a
-    /// token boundary, so the cache and the boundary seed are
-    /// [`Vertical`](Self::Vertical)'s unchanged. On the double-SSD pathway the
-    /// two taps have different shifts and cannot share a pass, so that pathway
-    /// runs **three** SSD calls; this pattern's home is the single one.
+    /// Only the graph is 2-D, not the algorithm. Each tap is transported
+    /// across its own gap (`1` and `u` positions of the same folded chain), so
+    /// the collapse of §9 still applies term by term. The state stays one
+    /// matrix, and sample `s` still carries **one** scalar,
+    /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later step. So single-SSD still
+    /// needs one pass.
     ///
-    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, inexact
-    /// through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
+    /// Costs over [`Vertical`](Self::Vertical):
+    ///
+    /// - one more per-micro-step scalar channel (`μ`),
+    /// - a third nonzero per row of the banded factor of the mask.
+    ///
+    /// The band is already `u` wide, and the within-token tap never crosses a
+    /// token boundary. So the cache and the boundary seed are those of
+    /// [`Vertical`](Self::Vertical). On the double-SSD pathway, the two taps
+    /// have different shifts and cannot share a pass, so that pathway runs
+    /// **three** SSD calls. The single pathway suits this pattern better.
+    ///
+    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, it is
+    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
     VerticalPlusHorizontalReset,
 
     /// [`Vertical`](Self::Vertical) **and**
-    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) at once — the same two
-    /// taps as [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset)
-    /// with the lag-1 one left unrestricted, so at `j = 0` it reads the previous
-    /// token's *last* micro-step while the lag-`u` tap reads its *first*. Both
-    /// candidates for the step's left endpoint are then always available, and
-    /// `μ` interpolates between them everywhere.
+    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) at once. It has the
+    /// same two taps as
+    /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset), with
+    /// the lag-1 tap unrestricted. So at `j = 0`, the lag-1 tap reads the
+    /// *last* micro-step of the previous token, and the lag-`u` tap reads its
+    /// *first*. Both candidates for the left endpoint of the step are always
+    /// available, and `μ` interpolates between them everywhere.
     ///
-    /// Hence the member that **contains** the two single-tap patterns rather
-    /// than sitting beside them: `μ ≡ 1` is
+    /// So this member **contains** the two single-tap patterns: `μ ≡ 1` is
     /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) and `μ ≡ 0` is
-    /// [`Vertical`](Self::Vertical), both exactly, and `μ` is per (head,
-    /// micro-step) — so the choice the rest of this enum makes at configuration
-    /// time is made here by descent instead.
+    /// [`Vertical`](Self::Vertical), both exactly. `μ` is per (head,
+    /// micro-step), so descent makes here the choice that the rest of this enum
+    /// makes at configuration time.
     ///
     /// Costs over [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset):
-    /// nothing in the cache (the `u`-deep FIFO's **newest** slot *is* the lag-1
-    /// slot, and it carries the empty decay product), and one extra term in the
-    /// single-SSD boundary seed — the lag-1 tap now crosses a call boundary,
-    /// which under the reset it never does.
     ///
-    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, inexact
-    /// through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
+    /// - nothing in the cache: the **newest** slot of the `u`-deep FIFO *is*
+    ///   the lag-1 slot, with the empty decay product,
+    /// - one extra term in the single-SSD boundary seed: the lag-1 tap now
+    ///   crosses a call boundary, which it never does under the reset.
+    ///
+    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, it is
+    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
     VerticalPlusHorizontalCarryOver,
 }
 
 impl Trapezoid {
-    /// Whether the pattern has a second (`β`) tap at all — `false` only for
-    /// [`None`](Self::None). The predicate every site branches on: no tap means
-    /// no `λ` channels, no `β` coefficient, no tap slots in the cache, and no
-    /// previous-sample term anywhere in the recurrence.
+    /// Whether the pattern has a second (`β`) tap. `false` only for
+    /// [`None`](Self::None). Every site branches on this predicate: no tap
+    /// means no `λ` channels, no `β` coefficient, no tap slots in the cache,
+    /// and no previous-sample term in the recurrence.
     pub fn has_beta_tap(self) -> bool {
         self != Trapezoid::None
     }
@@ -230,17 +246,17 @@ impl Trapezoid {
     /// ([`crate::mamba3::product`]): `0` with no tap, `1` for the lag-1
     /// patterns, `u` for the lag-`u` ones.
     ///
-    /// This is the crate's single knob for the two implemented tapping
-    /// patterns — [`HorizontalCarryOver`](Self::HorizontalCarryOver) is `lag =
-    /// 1` and [`Vertical`](Self::Vertical) is `lag = u`, and every site that
-    /// touches the tap (the double-SSD shift, the single-SSD key scale, `step`'s
-    /// FIFO depth, the cache) reads it rather than branching on the pattern. At
-    /// `u = 1` they return the same `1`, which is why the two coincide there.
+    /// This is the one knob for the single-tap patterns:
+    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) is `lag = 1` and
+    /// [`Vertical`](Self::Vertical) is `lag = u`. Every site that touches the
+    /// tap (the double-SSD shift, the single-SSD key scale, the FIFO depth of
+    /// `step`, the cache) reads it instead of branching on the pattern. At
+    /// `u = 1` both return `1`, which is why the two are equal there.
     ///
     /// The tap must be transported across *its own* gap, so a lag-`L` tap
-    /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` rather than `αₚ`; that is the condition
-    /// `info/mamba-3/trapezoid-as-integration.md` §9 shows preserves the `Δ̃` collapse,
-    /// hence the single-SSD pathway.
+    /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`.
+    /// `info/mamba-3/trapezoid-as-integration.md` §9 shows that this condition
+    /// keeps the `Δ̃` collapse, and thus the single-SSD pathway.
     pub fn tap_lag(self, micro_steps: usize) -> usize {
         match self {
             Trapezoid::None => 0,
@@ -252,17 +268,16 @@ impl Trapezoid {
     }
 
     /// Whether the pattern adds a **second**, lag-1 tap beside the one at
-    /// [`tap_lag`](Self::tap_lag) — the two-tap members, and only while the two
-    /// lags differ.
+    /// [`tap_lag`](Self::tap_lag). True for the two-tap members, and only when
+    /// the two lags are different.
     ///
-    /// At `u = 1` they do not: both taps read the same sample, so the split is
-    /// a decomposition of one coefficient and the pair **folds** back into a
-    /// single tap. The fold is structural, as
-    /// [`None`](Self::None)'s missing `λ` is — no `μ` channels in the
-    /// in-projection, no `μ` segment for Muon, one shift, one SSD pass — which
-    /// is what makes a two-tap member at `u = 1` *be*
-    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) rather than an
-    /// expensive spelling of it.
+    /// At `u = 1` the lags are equal: both taps read the same sample, so the
+    /// split is a decomposition of one coefficient, and the pair **folds** back
+    /// into one tap. The fold is structural, as the missing `λ` of
+    /// [`None`](Self::None) is: no `μ` channels in the in-projection, no `μ`
+    /// segment for Muon, one shift, one SSD pass. Thus a two-tap member at
+    /// `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not an
+    /// expensive form of it.
     pub fn has_interior_tap(self, micro_steps: usize) -> bool {
         micro_steps > 1
             && matches!(
@@ -272,53 +287,53 @@ impl Trapezoid {
             )
     }
 
-    /// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at a token's
-    /// **first** micro-step, where it is the only tap that would cross a token
-    /// boundary. `false` for [`HorizontalReset`](Self::HorizontalReset) alone,
-    /// whose left-endpoint mass then returns to `γ` (module header).
+    /// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at the
+    /// **first** micro-step of a token, where it is the only tap that would
+    /// cross a token boundary. `false` only for
+    /// [`HorizontalReset`](Self::HorizontalReset), whose left-endpoint mass
+    /// then returns to `γ` (module header).
     pub fn far_tap_crosses_tokens(self) -> bool {
         self != Trapezoid::HorizontalReset
     }
 
-    /// Whether the *interior* (lag-1) tap of a two-tap member is admissible at a
-    /// token's first micro-step, where it would cross a token boundary — the
-    /// only difference between
+    /// Whether the *interior* (lag-1) tap of a two-tap member is admissible at
+    /// the first micro-step of a token, where it would cross a token boundary.
+    /// This is the only difference between
     /// [`VerticalPlusHorizontalCarryOver`](Self::VerticalPlusHorizontalCarryOver)
     /// (`true`) and
     /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset)
-    /// (`false`). Where it is closed, `μ`'s share returns to the far tap.
+    /// (`false`). Where it is closed, the share of `μ` returns to the far tap.
     ///
-    /// Only consulted when [`has_interior_tap`](Self::has_interior_tap).
+    /// Read only when [`has_interior_tap`](Self::has_interior_tap).
     pub fn interior_tap_crosses_tokens(self) -> bool {
         self == Trapezoid::VerticalPlusHorizontalCarryOver
     }
 
-    /// How many `(B, x)` tap slots a cache carries for this pattern at
-    /// `micro_steps` — the depth of the FIFO the tap reads from, hence
-    /// [`tap_lag`](Self::tap_lag) exactly: a lag-`L` tap needs the last `L`
-    /// positions live. The SSM state is one matrix whatever this says — only the
-    /// trapezoid's tap buffer changes.
+    /// How many `(B, x)` tap slots a cache holds for this pattern at
+    /// `micro_steps`: the depth of the FIFO that the tap reads, so exactly
+    /// [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L` positions.
+    /// The SSM state is always one matrix. Only the tap buffer of the trapezoid
+    /// changes.
     ///
-    /// A slot is a *layout*, not a claim that something crosses the call
+    /// A slot is a *layout*. It does not mean that something crosses the call
     /// boundary through it: [`HorizontalReset`](Self::HorizontalReset) shares
-    /// the carry-over's slot and ignores it per token. Nor does a second tap
-    /// need a second buffer — the `u`-deep FIFO's **newest** slot *is* the
-    /// lag-1 slot, carrying the empty decay product, so the two-tap members read
-    /// one FIFO twice.
+    /// the slot of the carry-over and ignores it per token. Also, a second tap
+    /// needs no second buffer. The **newest** slot of the `u`-deep FIFO *is*
+    /// the lag-1 slot, with the empty decay product, so the two-tap members
+    /// read one FIFO twice.
     pub fn tap_slots(self, micro_steps: usize) -> usize {
         self.tap_lag(micro_steps)
     }
 }
 
 /// Everything the discretisation needs from the block: the tap pattern, the
-/// micro-steps its gates are periodic in, and the two clamps the coefficients
-/// are formed under.
+/// micro-steps (the period of its gates), and the two clamps on the
+/// coefficients.
 ///
-/// Carried by [`Mamba3`](crate::mamba3::mamba3::Mamba3)
-/// ([`trapezoid_spec`](crate::mamba3::mamba3::Mamba3::trapezoid_spec)) and
-/// handed to `helpers::trapezoidal_coefficients`, so `forward` and `step` derive
-/// the masses from **one** definition — the same reason
-/// [`RotationSpec`](crate::mamba3::rotation::RotationSpec) exists.
+/// [`Mamba3::trapezoid_spec`](crate::mamba3::mamba3::Mamba3::trapezoid_spec)
+/// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`
+/// and `step` compute the masses from **one** definition. The same reason
+/// makes [`RotationSpec`](crate::mamba3::rotation::RotationSpec) exist.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrapezoidSpec {
     /// Which earlier sample(s) the `β` tap reads ([`Trapezoid`]).
@@ -399,8 +414,7 @@ mod tests {
             .with_trapezoid(pattern)
     }
 
-    /// The default must stay the pattern the crate has always run, so an
-    /// untouched config keeps building.
+    /// The default is the lag-1 carry-over, and an untouched config builds.
     #[test]
     fn default_is_the_carry_over() {
         assert_eq!(Trapezoid::default(), Trapezoid::HorizontalCarryOver);

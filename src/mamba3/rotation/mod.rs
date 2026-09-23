@@ -1,45 +1,49 @@
-//! # Quaternion (k=4) rotational state — the non-abelian generalisation of RoPE
+//! # The transition rotation — from real, through RoPE, to `SO(4)`
 //!
-//! Mamba-3's data-dependent RoPE realises a **complex-valued** SSM: the state
-//! transition factors as a per-head scalar decay times a block-diagonal of
-//! `2×2` rotations (paper Prop. *Complex-to-Real SSM Equivalence*), and because
-//! `SO(2) ≅ U(1)` is **abelian** the cumulative rotation collapses to a
-//! `cumsum` of angles and is absorbed into `B`/`C` (the "RoPE trick", Prop.
-//! *Complex SSM, Data-Dependent RoPE Equivalence*).  See
+//! This module owns the data-dependent rotation of the Mamba-3 transition:
+//! the four [`RotationKind`]s, their cache accumulator ([`RotationState`]),
+//! their per-step definition ([`RotationSpec`]) and the one entry point that
+//! applies them to `B`/`C` ([`rotate_bc_forward`]).
+//!
+//! The data-dependent RoPE of Mamba-3 gives a **complex-valued** SSM. The
+//! state transition factors as a per-head scalar decay times a block-diagonal
+//! of `2×2` rotations (paper Prop. *Complex-to-Real SSM Equivalence*).
+//! `SO(2) ≅ U(1)` is **abelian**, so the cumulative rotation collapses to a
+//! sum of angles, and `B`/`C` absorb it (the "RoPE trick", Prop. *Complex SSM,
+//! Data-Dependent RoPE Equivalence*). See
 //! [`crate::mamba3::rotation::rope::apply_rope`].
 //!
-//! This module implements the next rung of the ladder: a **quaternion**
-//! (`k = 4`) rotational state, i.e. the transition's rotation lives in the
-//! left-isoclinic subgroup `SU(2) ⊂ SO(4)` instead of `SO(2)`.  Unit
-//! quaternions under multiplication are `SU(2)`, which is **non-abelian** and
-//! contains non-solvable finite subgroups (the binary icosahedral group
-//! `2I = SL(2,5)`, a double cover of `A₅`).  By Barrington's theorem this lifts
-//! the layer's reachable state-tracking from the solvable/`TC⁰` regime (parity,
-//! mod-k) toward `NC¹`, which abelian rotations provably cannot reach.
+//! The next rung of the ladder is a **quaternion** (`k = 4`) rotational state:
+//! the rotation of the transition is in the left-isoclinic subgroup
+//! `SU(2) ⊂ SO(4)` instead of `SO(2)`. Unit quaternions under multiplication
+//! are `SU(2)`, which is **non-abelian** and has non-solvable finite subgroups
+//! (the binary icosahedral group `2I = SL(2,5)`, a double cover of `A₅`). By
+//! Barrington's theorem, this lifts the state-tracking that the layer can
+//! reach from the solvable/`TC⁰` regime (parity, mod-k) toward `NC¹`, which
+//! abelian rotations provably cannot reach.
 //!
 //! ## What survives, what changes
 //!
-//! The key fact (derivable purely from telescoping + orthogonality, **without**
-//! commutativity — see the crate discussion) is that the RoPE *factoring*
-//! survives intact: with the **ordered** cumulative rotation
-//! `Pₜ = Rₜ Rₜ₋₁ ⋯ R₁`,
+//! The key fact follows from telescoping and orthogonality only, **without**
+//! commutativity: the RoPE *factoring* survives intact. With the **ordered**
+//! cumulative rotation `Pₜ = Rₜ Rₜ₋₁ ⋯ R₁`,
 //!
 //! ```text
 //!   Cₜᵀ (Rₜ⋯Rᵢ₊₁) Bᵢ  =  (Pₜᵀ Cₜ)ᵀ (Pᵢᵀ Bᵢ)  =  C̄ₜᵀ B̄ᵢ ,
 //! ```
 //!
-//! so the scalar-decay SSD core (`L ⊙ C̄B̄ᵀ`) is **unchanged** — only the
-//! projections `B̄ᵢ = Pᵢᵀ Bᵢ`, `C̄ₜ = Pₜᵀ Cₜ` are rotated.  What is lost is the
-//! closed-form `cumsum`: the cumulative rotation must be built by an
-//! **associative scan over the per-step quaternions** ([`quat_cumprod`]) rather
-//! than a sum of angles.  Because a product of unit quaternions is again a unit
-//! quaternion, the scan stays exactly orthogonal (no drift, no `wrap_angle`
-//! needed), and the cross-chunk carry is a single quaternion per block/head —
-//! the exact analogue of `cum_angle` in the existing caches.
+//! so the scalar-decay SSD core (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
+//! projections `B̄ᵢ = Pᵢᵀ Bᵢ`, `C̄ₜ = Pₜᵀ Cₜ` turn. What is lost is the
+//! closed-form sum of angles. The cumulative rotation comes from an
+//! **associative scan over the per-step quaternions** ([`quat_cumprod`]). A
+//! product of unit quaternions is again a unit quaternion, so the scan needs no
+//! `wrap_angle`. Its rounding drift is small, and [`rotate_bc_forward`]
+//! renormalises the prefixes. The cross-chunk carry is one quaternion per
+//! block/head, the analogue of [`RotationState::Angle`].
 //!
-//! `SO(2)` (today's `apply_rope`) is the abelian collapse: restricting each
-//! quaternion to a single fixed axis makes them commute and reduces
-//! [`quat_cumprod`] to a `cumsum` of half-angles (asserted in the tests).
+//! `SO(2)` ([`apply_rope`](rope::apply_rope)) is the abelian collapse. If each
+//! quaternion has one fixed axis, they commute, and [`quat_cumprod`] reduces to
+//! a sum of half-angles (asserted in the tests).
 //!
 //! ## Pipeline (the `k = 4` instantiation of the rotation block)
 //!
@@ -53,70 +57,69 @@
 //!   B̄, C̄  ──►  standard scalar-decay SSD  (unchanged)
 //! ```
 //!
-//! For [`RotationKind::Rotor4D`] the same pipeline runs with the two factors
-//! stacked along the block axis, and the last step becomes the two-sided
+//! For [`RotationKind::Rotor4D`], the same pipeline runs with the two factors
+//! stacked along the block axis. The last step becomes the two-sided
 //! `rotate_state_rank_blocks_two_sided(B, conj(Qₜ), Tₜ)`.
 //!
 //! ## `SO(4)`: the whole rotation group of a block ([`RotationKind::Rotor4D`])
 //!
-//! `SU(2)` is only half of what a 4-block can turn by. The general element of
+//! `SU(2)` is only half of the rotations of a 4-block. The general element of
 //! `SO(4) ≅ (SU(2)×SU(2))/±1` is the **two-sided** product
 //!
 //! ```text
 //!   Rₜ(v) = qₜ ⊗ v ⊗ p̄ₜ            (a rotor; left factor q, right factor p)
 //! ```
 //!
-//! and everything above survives it, because the factoring never used more
-//! than "the per-step maps compose, and each is orthogonal". Composing,
+//! and everything above survives it, because the factoring uses only "the
+//! per-step maps compose, and each is orthogonal". Composing,
 //!
 //! ```text
 //!   Pₜ(v) = Qₜ ⊗ v ⊗ T̄ₜ ,   Qₜ = qₜ⊗⋯⊗q₁ ,  Tₜ = pₜ⊗⋯⊗p₁
 //!   Pₜ⁻¹(v) = Qₜ* ⊗ v ⊗ Tₜ    ⇒   B̄ᵢ = Qᵢ* ⊗ Bᵢ ⊗ Tᵢ ,  C̄ₜ likewise
 //! ```
 //!
-//! — note the conjugation reverses the right-hand order **twice**, so `T`
-//! accumulates by the *same* left fold as `Q`: one [`quat_cumprod`] over a
-//! doubled block axis, not a second, reversed scan. The cost over
+//! The conjugation reverses the right-hand order **twice**, so `T` accumulates
+//! by the *same* left fold as `Q`: one [`quat_cumprod`] over a doubled block
+//! axis, not a second, reversed scan. The cost over
 //! [`Quaternion4D`](RotationKind::Quaternion4D) is twice the generator
-//! channels, twice the scan's block axis, and one extra [`quat_mul`] per
-//! `B`/`C` application; the SSD core is still untouched.
+//! channels, twice the block axis of the scan, and one extra [`quat_mul`] per
+//! `B`/`C` application. The SSD core is still unchanged.
 //!
-//! Why bother, when left and right factors *commute* with each other and so add
-//! no "more non-abelianness": left multiplication is **isoclinic** — `L_q` turns
-//! both invariant planes of the block by the same angle — so `SU(2)` cannot
-//! produce two independent plane angles, and in particular does not contain the
-//! abelian `SO(2)²` rotation it was introduced to generalise. The right factor
-//! is exactly what opens the maximal torus (plane angles `a−b`, `a+b` for the
-//! half-angles of `q`, `p`), making the ladder
-//! `Complex2D ⊂ Rotor4D ⊃ Quaternion4D` a real one. It also contains the
-//! adjoint action `v ↦ q ⊗ v ⊗ q̄`, i.e. a faithful `SO(3)` on the block's
-//! imaginary part — so a group like `A₅` can be tracked as itself rather than
-//! through its double cover `2I`, where `±g` denote one element but two
-//! different states. And as a representation of `SU(2)×SU(2)`, `ℍ` is the
-//! irreducible tensor product `(½,½)`, not `(½,0) ⊕ (0,½)`: no arrangement of
-//! left-only blocks reproduces it.
+//! Why do this, when the left and right factors *commute* with each other and
+//! so add no "more non-abelianness"? Left multiplication is **isoclinic**:
+//! `L_q` turns both invariant planes of the block by the same angle. So `SU(2)`
+//! cannot give two independent plane angles, and it does not contain the
+//! abelian `SO(2)²` rotation that it generalises. The right factor opens the
+//! maximal torus (plane angles `a−b`, `a+b` for the half-angles of `q`, `p`),
+//! so the ladder `Complex2D ⊂ Rotor4D ⊃ Quaternion4D` is real. It also contains
+//! the adjoint action `v ↦ q ⊗ v ⊗ q̄`, a faithful `SO(3)` on the imaginary part
+//! of the block. So a group like `A₅` can be tracked as itself, not through its
+//! double cover `2I`, where `±g` are one element but two different states.
+//! Also, as a representation of `SU(2)×SU(2)`, `ℍ` is the irreducible tensor
+//! product `(½,½)`, not `(½,0) ⊕ (0,½)`: no arrangement of left-only blocks
+//! reproduces it.
 //!
 //! `SO(4)` is the ceiling for `k = 4` (the largest norm-preserving transition
-//! group of a block), and `k = 4` is the last rung with a cheap closed form —
-//! at `k = 8` the octonions are non-associative and the scan itself breaks.
+//! group of a block). `k = 4` is the last rung with a cheap closed form: at
+//! `k = 8` the octonions are non-associative, and the scan itself breaks.
 //!
 //! ## The bottom rung: [`RotationKind::Real1D`]
 //!
 //! `k = 1`, the trivial group: no rotation, a purely real transition. It is the
-//! ablation the ladder is measured against, and it is *structural* rather than a
-//! zeroed knob — the in-projection spends no channels on rotation, the cache
-//! carries no accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD
-//! core untouched. Switching the rotation off is therefore a choice of *kind*;
-//! `rope_fraction` only ever narrows a rotation that exists. It is also the one
-//! kind with no pair to make, hence the only one that admits an **odd**
-//! `state_rank` — down to the scalar state `state_rank = 1`.
+//! ablation that the ladder is measured against. It is *structural*, not a
+//! zeroed knob: the in-projection has no rotation channels, the cache holds no
+//! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD core
+//! unchanged. So to switch the rotation off, select the *kind*.
+//! `rope_fraction` only narrows a rotation that exists. `Real1D` is also the
+//! one kind that makes no pairs, so it is the only one that accepts an **odd**
+//! `state_rank`, down to the scalar state `state_rank = 1`.
 //!
-//! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)` with
-//! `w` the real part.  A `state_rank` of `r = 4·J` is treated as `J` independent
-//! quaternion blocks; the rotation acts within each block, exactly as RoPE acts
-//! within each `2`-pair.  [`Mamba3`](crate::mamba3::mamba3::Mamba3) selects it
-//! with [`RotationKind::Quaternion4D`] and drives it through one
-//! [`RotationSpec`] (the SSD kernels themselves need no edits).
+//! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)`, with
+//! `w` the real part. A `state_rank` of `r = 4·J` is `J` independent quaternion
+//! blocks. The rotation acts within each block, exactly as RoPE acts within
+//! each `2`-pair. [`Mamba3`](crate::mamba3::mamba3::Mamba3) selects a kind with
+//! [`RotationKind`] and applies it through one [`RotationSpec`]. The SSD
+//! kernels do not depend on the kind.
 
 /// Rotary (RoPE) application: the mechanical pairwise rotation the abelian
 /// pathway factors into B/C.
@@ -133,42 +136,42 @@ use burn::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Which rotational-state algebra the block uses for the data-dependent
-/// transition rotation absorbed into `B`/`C`.
+/// transition rotation that `B`/`C` absorb.
 ///
-/// - [`Real1D`](RotationKind::Real1D) — the trivial group: no rotation at all.
-///   The transition is the plain scalar decay, i.e. a **real** SSM (Mamba-2's
-///   transition under Mamba-3's trapezoid). The in-projection spends *no*
-///   channels on rotation and the cache carries no accumulator
-///   ([`RotationState::Real`]) — this is the rotation ablation, which is why
+/// - [`Real1D`](RotationKind::Real1D) — the trivial group: no rotation. The
+///   transition is the plain scalar decay, a **real** SSM (the transition of
+///   Mamba-2 under the trapezoid of Mamba-3). The in-projection has *no*
+///   rotation channels, and the cache holds no accumulator
+///   ([`RotationState::Real`]). This is the rotation ablation, which is why
 ///   `rope_fraction` has no `0.0` setting.
 /// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
-///   that Mamba-3 ships: cumulative *angles* via `cumsum`, applied by
-///   [`apply_rope`](crate::mamba3::rotation::rope::apply_rope). The default; behaviourally unchanged.
+///   of Mamba-3: cumulative *angles* (a prefix sum), applied by
+///   [`apply_rope`](crate::mamba3::rotation::rope::apply_rope). The default.
 /// - [`Quaternion4D`](RotationKind::Quaternion4D) — the non-abelian
-///   `SU(2) ⊂ SO(4)` quaternion rotation of this module: cumulative *product*
-///   via [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
-///   state-tracking; selects the [`RotationState::Quaternion`] cache accumulator.
+///   `SU(2) ⊂ SO(4)` quaternion rotation: a cumulative *product* by
+///   [`quat_cumprod`], applied by [`rotate_state_rank_blocks`]. Richer
+///   state-tracking. It uses the [`RotationState::Quaternion`] accumulator.
 /// - [`Rotor4D`](RotationKind::Rotor4D) — the **whole** rotation group of a
 ///   4-block, `SO(4) ≅ (SU(2)×SU(2))/±1`: a *two-sided* quaternion product
 ///   `v ↦ q ⊗ v ⊗ p̄`. Two per-step quaternions instead of one (twice the
-///   generator channels, one scan over a doubled block axis); selects the
+///   generator channels, one scan over a doubled block axis). It uses the
 ///   [`RotationState::Rotor`] accumulator.
 ///
-/// The kinds are a ladder — `Real1D ⊂ Complex2D ⊂ Rotor4D` and
-/// `Real1D ⊂ Quaternion4D ⊂ Rotor4D` — but the middle two are
-/// **incomparable**, which is why `Rotor4D` exists.
-/// Left multiplication is *isoclinic*: `L_q` turns both invariant planes of the
-/// block by the same angle (`L_i` sends `1↦i` **and** `j↦k`), so
-/// `Quaternion4D` cannot express two independent per-pair angles — it does not
-/// contain the abelian rotation it generalises. The right factor opens the full
-/// maximal torus (plane angles `a−b` and `a+b` for half-angles `a`, `b`), and
-/// with it every element of `SO(4)`.
+/// The kinds are a ladder, `Real1D ⊂ Complex2D ⊂ Rotor4D` and
+/// `Real1D ⊂ Quaternion4D ⊂ Rotor4D`, but the middle two are
+/// **incomparable**, which is why `Rotor4D` exists. Left multiplication is
+/// *isoclinic*: `L_q` turns both invariant planes of the block by the same
+/// angle (`L_i` sends `1↦i` **and** `j↦k`). So `Quaternion4D` cannot express
+/// two independent per-pair angles: it does not contain the abelian rotation
+/// that it generalises. The right factor opens the full maximal torus (plane
+/// angles `a−b` and `a+b` for half-angles `a`, `b`), and with it every element
+/// of `SO(4)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum RotationKind {
     /// No rotation: a real transition (the trivial group). No rotation
-    /// channels, no cumulative accumulator, `B`/`C` pass through untouched.
+    /// channels, no cumulative accumulator, `B`/`C` go through unchanged.
     Real1D,
-    /// Abelian complex (`SO(2)`) RoPE — the current default behaviour.
+    /// Abelian complex (`SO(2)`) RoPE. The default.
     #[default]
     Complex2D,
     /// Non-abelian quaternion (`SU(2)`, left-isoclinic) rotation.
@@ -178,18 +181,18 @@ pub enum RotationKind {
 }
 
 impl RotationKind {
-    /// How many cumulative-rotation quaternions the accumulator carries per
+    /// How many cumulative-rotation quaternions the accumulator holds per
     /// (head, 4-block): one for [`Quaternion4D`](RotationKind::Quaternion4D),
     /// **two** for [`Rotor4D`](RotationKind::Rotor4D) (the left and right
     /// factors). Meaningless for the non-quaternion kinds
     /// ([`Complex2D`](RotationKind::Complex2D) accumulates angles,
-    /// [`Real1D`](RotationKind::Real1D) accumulates nothing) — reported as 1.
+    /// [`Real1D`](RotationKind::Real1D) accumulates nothing), where it is 1.
     ///
-    /// The factors are stacked along one block axis, so every quaternion
-    /// primitive — the generator split, [`quat_from_scaled_axis`], the
-    /// [`quat_cumprod`] scan, [`quat_normalize`] — runs **once** over
-    /// `quat_factors · blocks` blocks and needs no `Rotor4D` branch of its own.
-    /// Only the *application* to `B`/`C` differs.
+    /// The factors are stacked along one block axis. So every quaternion
+    /// primitive (the generator split, [`quat_from_scaled_axis`], the
+    /// [`quat_cumprod`] scan, [`quat_normalize`]) runs **once** over
+    /// `quat_factors · blocks` blocks and needs no `Rotor4D` branch. Only the
+    /// *application* to `B`/`C` is different.
     pub fn quat_factors(self) -> usize {
         match self {
             RotationKind::Rotor4D => 2,
@@ -199,20 +202,20 @@ impl RotationKind {
 }
 
 /// Everything the rotation needs from the block: which algebra, how much of
-/// `state_rank` it turns, and how far one step may turn it.
+/// `state_rank` it turns, and how far one step can turn it.
 ///
-/// Carried by [`Mamba3`](crate::mamba3::mamba3::Mamba3) and handed to
-/// [`rotate_bc_forward`], the one site that derives the per-step rotation —
-/// `step` reaches it too, its token being a sequence of `micro_steps`
-/// positions, so `forward` and `step` cannot drift apart here by construction.
+/// [`Mamba3::rotation_spec`](crate::mamba3::mamba3::Mamba3::rotation_spec)
+/// makes it, and [`rotate_bc_forward`], the one site that computes the
+/// per-step rotation, takes it. `step` calls it too (its token is a sequence of
+/// `micro_steps` positions), so `forward` and `step` cannot drift apart here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RotationSpec {
     /// Which rotational-state algebra ([`RotationKind`]).
     pub kind: RotationKind,
-    /// How many leading `state_rank` entries are rotated (see
+    /// How many leading `state_rank` entries turn (see
     /// [`Mamba3Config::rope_fraction`](crate::mamba3::mamba3::Mamba3Config::rope_fraction)).
-    /// For [`RotationKind::Quaternion4D`] this is a multiple of 4; for
-    /// [`RotationKind::Real1D`] it is `0` and nothing reads it.
+    /// For the quaternion kinds this is a multiple of 4. For
+    /// [`RotationKind::Real1D`] it is `0`, and nothing reads it.
     pub rope_dim: usize,
     /// The per-step rotation bound in half-turns per unit `Δ`
     /// ([`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)):
@@ -220,32 +223,31 @@ pub struct RotationSpec {
     pub range: f64,
 }
 
-/// The stateless payload of [`RotationState::Real`] — a [`Module`] holding no
-/// tensors, so a real transition's cache slot allocates nothing and converts
-/// between backends by `Clone`.
+/// The stateless payload of [`RotationState::Real`]: a [`Module`] with no
+/// tensors. So the cache slot of a real transition allocates nothing and
+/// converts between backends by `Clone`.
 #[derive(Module, Debug, Default)]
 pub struct NoRotation;
 
-/// The cumulative-rotation accumulator carried between calls in a Mamba-3 cache
-/// — the variant matching the block's [`RotationKind`].
+/// The cumulative-rotation accumulator that a Mamba-3 cache carries between
+/// calls: the variant that matches the [`RotationKind`] of the block.
 ///
-/// - [`Real`](RotationState::Real) — nothing at all: a real transition has no
+/// - [`Real`](RotationState::Real) — nothing: a real transition has no
 ///   cumulative rotation to carry.
 /// - [`Angle`](RotationState::Angle) — abelian per-pair cumulative RoPE angle,
-///   shape `[batch, nheads, num_rope_angles]` (today's `cum_angle`).
+///   shape `[batch, nheads, num_rope_angles]`.
 /// - [`Quaternion`](RotationState::Quaternion) — per-block cumulative unit
-///   quaternion, shape `[batch, nheads, blocks, 4]`, produced by
-///   [`quat_cumprod`].
+///   quaternion, shape `[batch, nheads, blocks, 4]`, from [`quat_cumprod`].
+/// - [`Rotor`](RotationState::Rotor) — both `SO(4)` factors, shape
+///   `[batch, nheads, 2·blocks, 4]`.
 ///
-/// This is the cache-level counterpart of [`RotationKind`]. It is defined here
-/// (the rotation module owns the accumulator type); substituting it for the
-/// pathway caches' `cum_angle_bha` field happens together with the forward/step
-/// wiring that consumes it.
+/// This is the cache-level counterpart of [`RotationKind`].
+/// [`RotationState::identity`] builds the fresh accumulator of any kind.
 #[derive(Module, Debug)]
 pub enum RotationState {
-    /// [`RotationKind::Real1D`]'s empty accumulator: a real transition composes
-    /// nothing between calls. It carries a [`NoRotation`] only because Burn's
-    /// `Module` derive takes exactly one field per enum variant.
+    /// The empty accumulator of [`RotationKind::Real1D`]: a real transition
+    /// composes nothing between calls. It holds a [`NoRotation`] only because
+    /// the Burn `Module` derive takes exactly one field per enum variant.
     Real(NoRotation),
     /// Abelian RoPE cumulative angle, shape `[batch, nheads, num_rope_angles]`.
     Angle(Tensor<3>),
@@ -256,10 +258,10 @@ pub enum RotationState {
     /// axis, the right factors `Tₜ = pₜ⊗⋯⊗p₁` in the second (see
     /// [`split_rotor`]).
     ///
-    /// One tensor rather than two so the scan, the normalisation and the cache
-    /// plumbing stay single-call; the conjugation in `v ↦ q v p̄` reverses the
-    /// right-hand order **twice**, so `T` accumulates with the very same
-    /// left-fold as `Q` and no reversed scan is needed.
+    /// One tensor, not two, so the scan, the normalisation and the cache
+    /// plumbing stay single-call. The conjugation in `v ↦ q v p̄` reverses the
+    /// right-hand order **twice**, so `T` accumulates with the same left-fold
+    /// as `Q`, and no reversed scan is necessary.
     Rotor(Tensor<4>),
 }
 
@@ -302,9 +304,9 @@ impl RotationState {
         }
     }
 
-    /// Check this is the empty [`Real`](RotationState::Real) accumulator and
-    /// hand it back; panics on any other variant, so a cache built for a
-    /// rotating kind cannot be fed to a [`Real1D`](RotationKind::Real1D) block.
+    /// Check that this is the empty [`Real`](RotationState::Real) accumulator,
+    /// and return it. Panics on any other variant, so a cache built for a
+    /// rotating kind cannot go into a [`Real1D`](RotationKind::Real1D) block.
     pub fn expect_real(self) -> Self {
         match self {
             RotationState::Real(_) => self,
@@ -312,7 +314,7 @@ impl RotationState {
         }
     }
 
-    /// Unwrap the abelian angle accumulator; panics if this is a quaternion.
+    /// Unwrap the abelian angle accumulator. Panics on any other variant.
     pub fn angle(self) -> Tensor<3> {
         match self {
             RotationState::Angle(a) => a,
@@ -352,7 +354,7 @@ impl RotationState {
         }
     }
 
-    /// Unwrap the quaternion accumulator; panics if this is an angle.
+    /// Unwrap the quaternion accumulator. Panics on any other variant.
     pub fn quaternion(self) -> Tensor<4> {
         match self {
             RotationState::Quaternion(q) => q,
@@ -361,7 +363,7 @@ impl RotationState {
     }
 
     /// Unwrap the `SO(4)` accumulator (`[batch, nheads, 2·blocks, 4]`, both
-    /// factors stacked); panics for any other variant.
+    /// factors stacked). Panics on any other variant.
     pub fn rotor(self) -> Tensor<4> {
         match self {
             RotationState::Rotor(q) => q,
@@ -369,13 +371,13 @@ impl RotationState {
         }
     }
 
-    /// The stacked quaternion accumulator for `kind`, together with the number
-    /// of **state** 4-blocks it covers — half its block axis for
+    /// The stacked quaternion accumulator for `kind`, and the number of
+    /// **state** 4-blocks it covers: half its block axis for
     /// [`RotationKind::Rotor4D`], which stacks two factors there.
     ///
-    /// Panics on a variant the kind does not use: the two are the same rank and
-    /// differ only in the length of one axis, so a mismatched cache would
-    /// otherwise be reinterpreted rather than rejected.
+    /// Panics on a variant that the kind does not use. The two variants have
+    /// the same rank and differ only in the length of one axis. Without the
+    /// check, a mismatched cache would be silently reinterpreted.
     fn quat_stack(self, kind: RotationKind) -> (Tensor<4>, usize) {
         match (kind, self) {
             (RotationKind::Quaternion4D, RotationState::Quaternion(q)) => {
@@ -410,14 +412,14 @@ impl RotationState {
 
 /// Hamilton product `a ⊗ b` of two quaternion tensors.
 ///
-/// Both inputs have shape `[..., 4]` with the last axis ordered `(w, x, y, z)`;
-/// the product is computed component-wise and broadcasts over the leading dims.
-/// Quaternion multiplication is **non-commutative** (`a ⊗ b ≠ b ⊗ a` in
-/// general) but associative.
+/// Both inputs have shape `[..., 4]`, with the last axis ordered
+/// `(w, x, y, z)`. The product is component-wise and broadcasts over the
+/// leading dims. Quaternion multiplication is **non-commutative**
+/// (`a ⊗ b ≠ b ⊗ a` in general) but associative.
 ///
-/// Identifying `ℝ⁴` with the quaternions, left-multiplication `v ↦ a ⊗ v` is
-/// exactly the action of the `4×4` rotation matrix [`quat_to_rot4`]`(a)`, so
-/// this is also how a rotation is *applied* to a state/`B`/`C` block (see
+/// With `ℝ⁴` identified with the quaternions, left-multiplication `v ↦ a ⊗ v`
+/// is exactly the action of the `4×4` rotation matrix [`quat_to_rot4`]`(a)`.
+/// So this is also how a rotation is *applied* to a state/`B`/`C` block (see
 /// [`rotate_state_rank_blocks`]).
 pub fn quat_mul<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
@@ -447,9 +449,9 @@ pub fn quat_mul<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
 
 /// Quaternion conjugate `q* = (w, −x, −y, −z)` (shape `[..., 4]`).
 ///
-/// For a **unit** quaternion `q* = q⁻¹`, and the corresponding rotation matrix
-/// satisfies `Lₚ⋆ = Lₚᵀ = Lₚ⁻¹`.  Hence rotating by the *inverse* cumulative
-/// rotation (`B̄ = Pᵀ B`) is `rotate_state_rank_blocks(B, conj(Q))`.
+/// For a **unit** quaternion, `q* = q⁻¹`, and the rotation matrix satisfies
+/// `Lₚ⋆ = Lₚᵀ = Lₚ⁻¹`. So the rotation by the *inverse* cumulative rotation
+/// (`B̄ = Pᵀ B`) is `rotate_state_rank_blocks(B, conj(Q))`.
 pub fn quat_conj<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
     let w = q.clone().narrow(n, 0, 1);
@@ -459,44 +461,44 @@ pub fn quat_conj<const D: usize>(q: Tensor<D>) -> Tensor<D> {
 
 /// Normalise quaternions to unit norm along the last axis (shape `[..., 4]`).
 ///
-/// The per-step rotation is materialised from a raw, unconstrained projection
-/// and normalised here so it is a genuine unit quaternion (an element of
-/// `SU(2)`), the analogue of `tanh(θ)·π` bounding the RoPE angle.  A tiny floor
-/// guards the zero-quaternion.
+/// The block normalises each materialised quaternion here, so it is a real
+/// unit quaternion (an element of `SU(2)`). A tiny floor guards the zero
+/// quaternion.
 pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    // Clamp the sum-of-squares *before* `sqrt`: at a zero quaternion the forward
-    // `sqrt(0)=0` is fine, but `sqrt`'s backward is `1/(2·0)=∞`, and `∞·(2·0)=NaN`.
-    // Clamping pre-`sqrt` puts the degenerate point in `clamp_min`'s flat region,
-    // so its gradient is a finite 0 (and a genuine unit quaternion, sumsq=1, is
-    // untouched). The floor also keeps `norm` away from 0 for the division.
+    // Clamp the sum-of-squares *before* `sqrt`. At a zero quaternion the
+    // forward `sqrt(0)=0` is fine, but the `sqrt` backward is `1/(2·0)=∞`, and
+    // `∞·(2·0)=NaN`. A pre-`sqrt` clamp puts the degenerate point in the flat
+    // region of `clamp_min`, so its gradient is a finite 0 (and a unit
+    // quaternion, sumsq=1, is unchanged). The floor also keeps `norm` away
+    // from 0 for the division.
     //
-    // The floor is the dtype-aware `div_eps` applied to the *sum-of-squares*
-    // (giving a norm floor of `√div_eps`). It must engage as a representable
-    // normal in the working dtype: in f16 a `div_eps²`-sized floor (~5e-7) would
-    // underflow below the min-normal (~6.1e-5) and silently no-op, so we floor
-    // the squared quantity at `div_eps` itself, which sits above each format's
-    // denormal floor by construction.
+    // The floor is the dtype-aware `div_eps` on the *sum-of-squares* (a norm
+    // floor of `√div_eps`). It must be a representable normal in the working
+    // dtype. In f16 a `div_eps²`-sized floor (~5e-7) would underflow below the
+    // min-normal (~6.1e-5) and silently do nothing. So the floor on the
+    // squared quantity is `div_eps` itself, which is above the denormal floor
+    // of each format by construction.
     let eps = burn_stack::utils::div_eps(q.dtype());
     let norm = (q.clone() * q.clone()).sum_dim(n).clamp_min(eps).sqrt();
     q / norm
 }
 
-/// Euclidean norm over the last axis, formed **scale-free** so it cannot
-/// overflow: the components are divided by their (detached) largest magnitude
-/// before squaring, and the result is scaled back.
+/// Euclidean norm over the last axis, computed **scale-free** so it cannot
+/// overflow. The components are divided by their (detached) largest magnitude
+/// before the squaring, and the result is scaled back.
 ///
-/// Squaring the raw components is the obvious way and the wrong one here,
-/// because the inputs are raw in-projection channels: `‖r‖²` overflows f32 at
-/// `|r| ≈ 2e19` and **f16 at `|r| ≈ 250`**, which is an ordinary activation.
-/// The overflow does not announce itself — `∞` divides back to `0`, so a very
-/// large generator would silently produce *no* rotation, the exact opposite of
-/// the intended "turn as far as the bound allows". Same trick, same reason, as
-/// [`RmsNorm`](burn_stack::modules::RmsNorm)'s fp16 path.
+/// A square of the raw components is the obvious way, and the wrong one here,
+/// because the inputs are raw in-projection channels. `‖r‖²` overflows f32 at
+/// `|r| ≈ 2e19` and **f16 at `|r| ≈ 250`**, an ordinary activation. The
+/// overflow is silent: `∞` divides back to `0`, so a very large generator
+/// would give *no* rotation, the opposite of the intended "turn as far as the
+/// bound allows". The fp16 path of [`RmsNorm`](burn_stack::modules::RmsNorm)
+/// uses the same trick for the same reason.
 ///
-/// The sum of squares is floored by `div_eps` before the `sqrt`, so a zero
-/// vector lands in `clamp_min`'s flat region and backprops to a finite `0`
-/// instead of `sqrt`'s singular `1/(2·0)`.
+/// A `div_eps` floor applies to the sum of squares before the `sqrt`. So a
+/// zero vector is in the flat region of `clamp_min` and backpropagates a
+/// finite `0`, not the singular `1/(2·0)` of `sqrt`.
 ///
 /// # Shapes
 /// - `t`  : `[..., n]`
@@ -512,51 +514,51 @@ pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
 }
 
 /// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
-/// (axis · angle) via the exponential map — the data-dependent "materialise
-/// `Rₜ`" step, analogous to RoPE's `Δₜ · π · tanh(θₜ)` angle.
+/// (axis · angle) with the exponential map. This is the data-dependent
+/// "materialise `Rₜ`" step, the analogue of the RoPE angle `Δₜ · π · tanh(θₜ)`.
 ///
-/// With `‖g‖ = angle` and `ĝ = g / angle` the axis, returns the unit quaternion
-/// `q = (cos(angle/2), sin(angle/2)·ĝ)`.  A vanishing `g` maps to the identity
-/// `(1, 0, 0, 0)`, so scaling `g` by a small `Δₜ` (the discretisation step)
-/// yields a near-identity rotation — exactly the regime where a small step
-/// barely rotates the state.  The `sin(angle/2)/angle` factor is the numerically
-/// stable form of the (otherwise `0/0`) per-component scale near `g = 0`.
+/// With `‖g‖ = angle` and the axis `ĝ = g / angle`, it returns the unit
+/// quaternion `q = (cos(angle/2), sin(angle/2)·ĝ)`. A vanishing `g` maps to the
+/// identity `(1, 0, 0, 0)`. So when a small `Δₜ` (the discretisation step)
+/// scales `g`, the rotation is near the identity: a small step barely turns
+/// the state. The `sin(angle/2)/angle` factor is the numerically stable form
+/// of the per-component scale near `g = 0` (otherwise `0/0`).
 ///
 /// # Shapes
 /// - `g` : `[..., 3]`
 /// - out : `[..., 4]` (ordered `(w, x, y, z)`), unit norm.
 pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
     let n = D - 1;
-    // `safe_norm` both guards the origin (a zero generator would otherwise hit
-    // `sqrt`'s singular backward and yield NaN — the FiLM-triggered decoder
-    // NaN) and keeps the sum of squares from overflowing at large `g`.
+    // `safe_norm` guards the origin (a zero generator would otherwise hit the
+    // singular `sqrt` backward and give NaN). It also keeps the sum of squares
+    // from an overflow at large `g`.
     let angle = safe_norm(g.clone()); // [..., 1]
     let half = angle.clone() * 0.5;
     let w = half.clone().cos(); // [..., 1]
-    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation); `angle ≥ √div_eps`
-    // after the pre-`sqrt` clamp above, so the division is already guarded.
+    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation). `angle ≥ √div_eps`
+    // after the pre-`sqrt` clamp, so the division is already guarded.
     let scale = half.sin() / angle; // [..., 1]
     let v = g * scale; // [..., 3]
     quat_normalize(Tensor::cat(vec![w, v], n))
 }
 
-/// Bound a rotation vector's **magnitude**, leaving its direction alone:
+/// Bound the **magnitude** of a rotation vector and keep its direction:
 /// returns `max_angle · tanh(‖r‖) · r̂`.
 ///
-/// This is the quaternion counterpart of the abelian path's `π·tanh(ϑ)`, and
-/// the difference is deliberate. Squashing each of the three raw channels
-/// *separately* would bound the rotation vector to a **cube**: the reachable
-/// angle would depend on the axis (`max_angle` about a coordinate axis but
-/// `√3·max_angle` about the diagonal), and — worse — `tanh` applied per
-/// component moves the *direction* too, so the axis a given projection selects
-/// would depend on how large the projection is. Bounding the norm keeps the
-/// axis exactly `r̂` and the angle a function of `‖r‖` alone, so axis and angle
-/// are independent knobs.
+/// This is the quaternion counterpart of the abelian `π·tanh(ϑ)`, with a
+/// deliberate difference. A squash of each of the three raw channels
+/// *separately* would bound the rotation vector to a **cube**. The reachable
+/// angle would then depend on the axis (`max_angle` about a coordinate axis,
+/// but `√3·max_angle` about the diagonal). Worse, a per-component `tanh` also
+/// moves the *direction*, so the axis that a projection selects would depend
+/// on the size of the projection. A bound on the norm keeps the axis exactly
+/// `r̂` and makes the angle a function of `‖r‖` only, so axis and angle are
+/// independent knobs.
 ///
-/// Near `r = 0` the map is `≈ max_angle · r` (the `tanh(n)/n → 1` limit); the
-/// `sum-of-squares` floor is the same pre-`sqrt` clamp
-/// [`quat_from_scaled_axis`] uses, and puts the degenerate point in the flat
-/// region of `clamp_min` with the correct finite gradient.
+/// Near `r = 0` the map is `≈ max_angle · r` (the `tanh(n)/n → 1` limit). The
+/// sum-of-squares floor is the same pre-`sqrt` clamp as in
+/// [`quat_from_scaled_axis`]. It puts the degenerate point in the flat region
+/// of `clamp_min`, with the correct finite gradient.
 ///
 /// # Shapes
 /// - `r`  : `[..., 3]`
@@ -580,10 +582,10 @@ pub fn bound_rotation_vector<const D: usize>(r: Tensor<D>, max_angle: f64) -> Te
 ///   ⎣ z  -y   x   w ⎦
 /// ```
 ///
-/// For a unit `q` this is orthogonal with `det = 1` (a left-isoclinic rotation).
-/// Provided mainly for the generic / verification path; the cheap way to apply a
+/// For a unit `q` this is orthogonal with `det = 1` (a left-isoclinic
+/// rotation). It exists mainly for verification. The cheap way to apply a
 /// rotation is [`rotate_state_rank_blocks`] (a quaternion product, no `4×4`
-/// materialisation).  `DR` must equal `D + 1`.
+/// matrix). `DR` must equal `D + 1`.
 pub fn quat_to_rot4<const D: usize, const DR: usize>(q: Tensor<D>) -> Tensor<DR> {
     assert_eq!(D + 1, DR, "quat_to_rot4 maps rank D to rank D+1");
     let n = D - 1;
@@ -616,16 +618,15 @@ pub fn quat_to_rot4<const D: usize, const DR: usize>(q: Tensor<D>) -> Tensor<DR>
 
 /// Apply a per-block quaternion rotation to the `state_rank` axis of `v`.
 ///
-/// `v` has shape `[..., state_rank]` with `state_rank = 4·J`, viewed as `J`
-/// independent quaternion blocks; `q` has shape `[..., J, 4]` (one unit
-/// quaternion per block, same leading dims as `v`).  Returns `q ⊗ v` per block,
-/// i.e. the rotation `L_q` applied within each `4`-block, reshaped back to
+/// `v` has shape `[..., state_rank]` with `state_rank = 4·J`, seen as `J`
+/// independent quaternion blocks. `q` has shape `[..., J, 4]` (one unit
+/// quaternion per block, the same leading dims as `v`). Returns `q ⊗ v` per
+/// block (the rotation `L_q` within each `4`-block), reshaped back to
 /// `[..., state_rank]`.
 ///
-/// This is the generalisation of RoPE's per-pair `2×2` rotation to per-block
-/// `4×4`.  To rotate by the *inverse* cumulative rotation when absorbing into
-/// `B`/`C` (`B̄ = Pᵀ B`), pass `q = conj(Qcum)`:
-/// `rotate_state_rank_blocks(b, conj(qcum))`.
+/// This generalises the per-pair `2×2` rotation of RoPE to per-block `4×4`.
+/// To absorb the *inverse* cumulative rotation into `B`/`C` (`B̄ = Pᵀ B`), pass
+/// `q = conj(Qcum)`: `rotate_state_rank_blocks(b, conj(qcum))`.
 ///
 /// `DB` must equal `D + 1` (the block-split inserts the `J` axis).
 pub fn rotate_state_rank_blocks<const D: usize, const DB: usize>(
@@ -661,10 +662,10 @@ pub fn rotate_state_rank_blocks<const D: usize, const DB: usize>(
 /// Apply a per-block **two-sided** quaternion rotation to the `state_rank` axis
 /// of `v`: `v ↦ ql ⊗ v ⊗ qr` per 4-block.
 ///
-/// This is the general `SO(4)` element ([`RotationKind::Rotor4D`]); pass
-/// `qr = (1,0,0,0)` to recover [`rotate_state_rank_blocks`]. Absorbing the
+/// This is the general `SO(4)` element ([`RotationKind::Rotor4D`]). Pass
+/// `qr = (1,0,0,0)` to get [`rotate_state_rank_blocks`]. To absorb the
 /// *inverse* cumulative rotation into `B`/`C` (`B̄ = P⁻¹B` with
-/// `P(v) = Q v T̄`) is `ql = conj(Q)`, `qr = T` — note the conjugate is on the
+/// `P(v) = Q v T̄`), pass `ql = conj(Q)`, `qr = T`. The conjugate is on the
 /// **left** factor only.
 ///
 /// Shapes as [`rotate_state_rank_blocks`]: `v` is `[..., state_rank]`, both
@@ -715,10 +716,9 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 /// Cumulative (ordered, left-accumulating) quaternion product along the
 /// sequence axis, with a cross-chunk carry.
 ///
-/// This is the non-abelian analogue of the cumulative *sum of angles* used by
-/// RoPE: where complex rotations compose by adding angles (a `cumsum`),
-/// quaternions compose by multiplication, which is order-dependent, so a real
-/// scan is required.
+/// This is the non-abelian analogue of the cumulative *sum of angles* of
+/// RoPE. Complex rotations compose by adding angles. Quaternions compose by
+/// multiplication, which depends on the order, so a real scan is necessary.
 ///
 /// # Shapes
 /// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-step **unit** quaternions
@@ -731,20 +731,20 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 ///   `Pₜ = Rₜ ⋯ R₁`), and `final_carry` `[batch, nheads, J, 4]` is `cum[:, −1]`
 ///   to thread into the next chunk.
 ///
-/// Running this over a split sequence while threading `final_carry` is exactly
-/// equal to running it over the whole sequence (asserted in the tests) — the
-/// chunked-prefill / streaming guarantee, here for the rotation accumulator.
+/// A run over a split sequence, with `final_carry` passed between the parts,
+/// is exactly equal to a run over the whole sequence (asserted in the tests).
+/// This is the chunked-prefill / streaming guarantee for the rotation
+/// accumulator.
 ///
-/// Implemented as a **Hillis–Steele** inclusive associative scan: the quaternion
-/// product is associative (just not commutative), so a log-depth scan applies as
-/// long as operand order is preserved (newest-on-left). Each doubling step is a
-/// single full-tensor [`quat_mul`] plus a sequence shift, so the *sequential
-/// dependency depth* is `O(log sequence)` rather than the `O(sequence)` of a
-/// token-by-token loop — the same values, but a handful of large batched kernels
-/// instead of thousands of serialized tiny ones (and a correspondingly shallow
-/// autodiff graph). The sequential reference it replaces is kept as a test oracle
-/// (`quat_cumprod_sequential` in the tests module) and asserted equal on values
-/// **and** gradients.
+/// The implementation is a **Hillis–Steele** inclusive associative scan. The
+/// quaternion product is associative (but not commutative), so a log-depth
+/// scan applies if the operand order stays newest-on-left. Each doubling step
+/// is one full-tensor [`quat_mul`] plus a sequence shift. So the *sequential
+/// dependency depth* is `O(log sequence)`, not the `O(sequence)` of a
+/// token-by-token loop: the same values, from a few large batched kernels
+/// instead of thousands of small serialized ones (and a shallow autodiff
+/// graph). A sequential reference (`quat_cumprod_sequential` in the tests
+/// module) is the test oracle, asserted equal on values **and** gradients.
 pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, Tensor<4>) {
     let [batch, sequence, nheads, blocks, _four] = q_bshj4.dims();
     let device = q_bshj4.device();
@@ -790,7 +790,7 @@ pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, 
 // ---------------------------------------------------------------------------
 
 /// Apply a per-block quaternion rotation to the first `rope_width` entries of
-/// the `state_rank` axis (a multiple of 4); the remainder passes through. The
+/// the `state_rank` axis (a multiple of 4). The rest is unchanged. The
 /// quaternion analogue of [`apply_rope_partial`].
 ///
 /// `q` has one quaternion per rotated block (`rope_width / 4` of them). `DB`
@@ -816,8 +816,8 @@ pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
 }
 
 /// Two-sided counterpart of [`rotate_blocks_partial`]: rotates the first
-/// `rope_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`, passing
-/// the remainder through.
+/// `rope_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`. The
+/// rest is unchanged.
 pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
     v: Tensor<D>,
     ql: Tensor<DB>,
@@ -859,18 +859,17 @@ pub fn angle_increment<const D: usize, const DP1: usize>(
 /// The quaternion per-step rotation vector `gₜ = Δₜ · range·π·tanh(‖r‖)·r̂`, one
 /// per head and quaternion block (feed it to [`quat_from_scaled_axis`]).
 ///
-/// The magnitude — not each component — is bounded, so the axis is exactly the
-/// direction of the projection; see [`bound_rotation_vector`].
+/// The bound is on the magnitude, not on each component, so the axis is
+/// exactly the direction of the projection (see [`bound_rotation_vector`]).
 ///
 /// Unlike the abelian [`angle_increment`], the generators are projected **per
-/// head**: `rot` carries `nheads · 3 · J` channels, so every head turns about
-/// its own data-dependent axis rather than sharing one axis and differing only
-/// in `Δ`. Sharing would make the heads' rotations a one-parameter family of
-/// each other — the abelian path can afford that (its rotations commute, so a
-/// per-head angle is the only freedom there is), but for a non-abelian
-/// transition the axis *is* the expressive part: two heads turning about
-/// different axes track different words, which is the whole point of having
-/// more than one.
+/// head**: `rot` has `nheads · 3 · J` channels. So every head turns about its
+/// own data-dependent axis, instead of one shared axis with only a different
+/// `Δ`. A shared axis would make the rotations of the heads a one-parameter
+/// family. The abelian path can accept that: its rotations commute, so a
+/// per-head angle is the only freedom. For a non-abelian transition, the axis
+/// *is* the expressive part. Two heads that turn about different axes track
+/// different words, which is why there is more than one head.
 ///
 /// `DP1 = D + 1`, `DP2 = D + 2`: a sequence-shaped call (`rot [b, s, h·3·J]`,
 /// `dt [b, s, h]`) yields `[b, s, h, J, 3]` and a single-token call
@@ -910,38 +909,40 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 // ---------------------------------------------------------------------------
 
 /// Rotate `B`/`C` for a **full sequence** by the data-dependent transition
-/// rotation, returning the rotated projections and the new cumulative
-/// [`RotationState`] to store in the cache.
+/// rotation. Returns the rotated projections and the new cumulative
+/// [`RotationState`] for the cache. `step` calls it too, with the `u`
+/// positions of its token.
 ///
 /// Branches on [`RotationKind`]:
-/// - [`Real1D`](RotationKind::Real1D): nothing happens — `B`/`C` pass through
-///   and the (empty) accumulator is handed back. `rot` is `None` there, since
-///   the block projects no rotation channels at all.
-/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE — cumulative
-///   angle `cumsum` continued from `prev`, then [`apply_rope_partial`]. Exactly
-///   the original Mamba-3 behaviour.
-/// - [`Quaternion4D`](RotationKind::Quaternion4D): per-step unit quaternion
-///   [`quat_from_scaled_axis`] (the in-projection generators scaled per-head by
-///   `Δ`), composed by [`quat_cumprod`] continuing the cached quaternion, then
-///   applied to `B`/`C` as `rotate(·, conj(Qₜ))` over the first `4·blocks`
-///   state-rank entries.
+/// - [`Real1D`](RotationKind::Real1D): nothing happens. `B`/`C` go through,
+///   and the (empty) accumulator comes back. `rot` is `None` there, because
+///   the block projects no rotation channels.
+/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE of the
+///   reference. The cumulative angle ([`prefix_sum`], continued from `prev`),
+///   then [`apply_rope_partial`].
+/// - [`Quaternion4D`](RotationKind::Quaternion4D): the per-step unit quaternion
+///   [`quat_from_scaled_axis`] (the in-projection generators, scaled per head
+///   by `Δ`), composed by [`quat_cumprod`] from the cached quaternion. Then
+///   `rotate(·, conj(Qₜ))` on the first `4·blocks` state-rank entries of
+///   `B`/`C`.
+/// - [`Rotor4D`](RotationKind::Rotor4D): the same scan over both stacked
+///   factors, then the two-sided `Q* ⊗ · ⊗ T`.
 ///
-/// `B` is rotated at every position of the folded sequence — it writes at all of
-/// them — while `C` is rotated only where it is **read**, one position per
-/// `read_stride` (`micro_steps`; `1` leaves the two axes equal). The cumulative
-/// rotation is accumulated over the whole folded axis either way; `C` just takes
-/// a stride slice of it. See
-/// [the read axis](crate::mamba3::product).
+/// `B` turns at every position of the folded sequence, because it writes at
+/// all of them. `C` turns only where it is **read**: one position per
+/// `read_stride` (`micro_steps`, where `1` keeps the two axes equal). The
+/// cumulative rotation covers the whole folded axis either way. `C` takes a
+/// stride slice of it. See [the read axis](crate::mamba3::product).
 ///
-/// The `mimo_rank` axis is **broadcast**, never indexed — no rotation count
-/// carries it, in any branch. That is forced, not convenient: the `M` ranks
+/// The `mimo_rank` axis is **broadcast**, never indexed: no rotation count has
+/// it, in any branch. This is necessary, not a convenience. The `M` ranks
 /// share one state, so they share its transition, and per-rank angles have no
-/// state-space preimage at all (`info/mamba-3/mimo-as-batch.md` §7).
+/// state-space preimage (`info/mamba-3/mimo-as-batch.md` §7).
 ///
 /// # Shapes
-/// - `rot_bsa` : `[batch, sequence, num_rotation_channels]` — the in-projection
-///   rotation channels (angles for Complex2D, `3·blocks` quaternion generators
-///   for Quaternion4D), `None` for Real1D, which projects none.
+/// - `rot_bsa` : `[batch, sequence, num_rotation_channels]`: the in-projection
+///   rotation channels (angles for Complex2D, quaternion generators for the
+///   quaternion kinds). `None` for Real1D, which projects none.
 /// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
 /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
 /// - `c_btmhr` : `[batch, sequence / read_stride, mimo_rank, nheads, state_rank]`.
@@ -970,11 +971,11 @@ pub fn rotate_bc_forward(
             let prev_angle_bha = prev.angle();
             let num_rope_angles = prev_angle_bha.dims()[2];
             let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
-            // The abelian scan — blocked, like the quaternion one below is
-            // log-depth, and *not* `Tensor::cumsum`, whose cost is quadratic in
-            // the sequence length it is handed here. The cache's angle is the
-            // scan's carry-in, so it rides the block offset instead of costing
-            // an add of its own. See [`prefix_sum`].
+            // The abelian scan is blocked (the quaternion scan below is
+            // log-depth). It is *not* `Tensor::cumsum`, whose cost is
+            // quadratic in the sequence length here. The angle of the cache
+            // is the carry-in of the scan, so it joins the block offset and
+            // needs no add of its own. See [`prefix_sum`].
             let cum_angles_bsha = prefix_sum::<4, 5>(
                 raw_angles_bsha,
                 1,
@@ -994,9 +995,9 @@ pub fn rotate_bc_forward(
                 rope_dim,
                 rotate_pairwise,
             );
-            // `C` reads at one folded position per token, so it is rotated by
-            // that position's cumulative angle and nowhere else — `u`× less
-            // work than rotating a broadcast copy at every micro-step.
+            // `C` reads at one folded position per token, so it turns by the
+            // cumulative angle of that position only. That is `u`× less work
+            // than a turn of a broadcast copy at every micro-step.
             let cum_angles_btmha =
                 helpers::read_rows::<5, 6>(cum_angles_bsmha, 1, read_stride);
             let c = apply_rope_partial::<5>(c_btmhr, cum_angles_btmha, rope_dim, rotate_pairwise);
@@ -1018,28 +1019,26 @@ pub fn rotate_bc_forward(
             // the cache was sized for exactly that many.
             assert_eq!(rope_dim, blocks * 4, "cache/block rotation width mismatch");
             let rope_width = rope_dim;
-            // Generators [b,s,h,stack,3]: the raw channels bounded to an angle
-            // of at most `range·π` (see `generator_increment`) and scaled
-            // per-head by Δ. The bound is load-bearing, not cosmetic: an
-            // unbounded `g = rot·Δ` overflows f32 to `inf` for a large
-            // in-projection activation, and `quat_from_scaled_axis`'s `cos(∞)`
-            // then yields a forward NaN.
+            // Generators [b,s,h,stack,3]: the raw channels, bounded to an
+            // angle of at most `range·π` (see `generator_increment`) and scaled
+            // per head by Δ. The bound is necessary: an unbounded `g = rot·Δ`
+            // overflows f32 to `inf` for a large in-projection activation, and
+            // the `cos(∞)` in `quat_from_scaled_axis` then gives a forward NaN.
             let g_bshk3 = generator_increment::<3, 4, 5>(rot(rot_bsa), dt_bsh, stack, range);
             let q_step_bshk4 = quat_from_scaled_axis::<5>(g_bshk3);
-            // Memory-efficient scan: a custom recompute backward (saves only the
-            // leaf inputs) instead of retaining the scan's intermediates. Equal
-            // to [`quat_cumprod`] on values and gradients (asserted in tests).
+            // Memory-efficient scan: a custom recompute backward (it saves only
+            // the leaf inputs), not the intermediates of the scan. Equal to
+            // [`quat_cumprod`] on values and gradients (asserted in tests).
             let (cum_bshk4, final_bhk4) = crate::mamba3::quat_scan::quat_cumprod_recalculated(
                 q_step_bshk4,
                 Some(prev_q_bhk4),
             );
-            // Renormalise the prefixes. A product of unit quaternions is a unit
-            // quaternion in exact arithmetic, but the scan composes each prefix
-            // out of `⌈log₂ L⌉` multiplies, so the norm drifts — negligibly in
-            // f32, by ~1% over a long f16 sequence, and a non-unit rotation
-            // rescales B/C instead of only turning them. `step` already
-            // normalises every step; this is the chunkwise counterpart, and it
-            // keeps the two numerically alike as well as exactly orthogonal.
+            // Renormalise the prefixes. In exact arithmetic, a product of unit
+            // quaternions is a unit quaternion. But the scan composes each
+            // prefix from `⌈log₂ L⌉` multiplies, so the norm drifts: very
+            // little in f32, ~1% over a long f16 sequence. A non-unit rotation
+            // rescales B/C instead of only turning them. `forward` and `step`
+            // both come here, so they stay numerically alike and orthogonal.
             let cum_bshk4 = quat_normalize(cum_bshk4);
             let over_mimo = |q_bshj4: Tensor<5>| {
                 q_bshj4

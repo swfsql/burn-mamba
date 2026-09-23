@@ -1,16 +1,16 @@
 //! # Serial SSD with a custom, memory-efficient backward (Mamba-2)
 //!
-//! This is the `SerialRecalculated` path.  The forward is the same five-kernel
-//! serial scan as [`super::super::serial`], but it is routed through the
-//! [`Mamba2BackendExt`] trait so that `Autodiff` backends can substitute a
-//! **custom backward** that recomputes the per-chunk intermediates instead of
-//! storing them (see [`super::backward`] / [`super::combined_backward`]),
-//! trading a little extra compute for ~⅓ less training memory.
+//! This is the `SerialRecalculated` path. The forward is the same five-kernel
+//! serial scan as [`super::super::serial`], but it goes through the
+//! [`Mamba2BackendExt`] trait. Thus an `Autodiff` backend can use a **custom
+//! backward** that recomputes the per-chunk intermediates instead of storing
+//! them (see [`super::backward`] / [`super::combined_backward`]). This costs a
+//! little extra compute and saves ~⅓ of the training memory.
 //!
-//! Every plain (non-autodiff) backend uses the trait's default body, which
-//! simply replays the [`super::super::serial`] kernels K1–K5.  The
+//! Every plain (non-autodiff) backend uses the default body of the trait,
+//! which replays the [`super::super::serial`] kernels K1–K5. The
 //! [`burn_stack::impl_backend_ext_for_burn_backends!`] /
-//! [`burn_stack::decl_autodiff_backend_ext!`] macros wire up the per-backend
+//! [`burn_stack::decl_autodiff_backend_ext!`] macros make the per-backend
 //! impls and the autodiff marker trait.
 
 use crate::mamba2::prelude::*;
@@ -29,10 +29,9 @@ impl Mamba2SsdInput {
     #[allow(non_snake_case)]
     pub fn ssd_serial_recalculated(self) -> (Tensor<5>, Tensor<4>) {
         let input = self;
-        // Must use a backend-dependent method.
-        //
-        // For inference, this will ultimately replicate Mamba2::ssd_serial;
-        // For autodiff, this will call the custom implementation.
+        // This must be a backend-dependent method. On a plain backend, it
+        // replays `Mamba2SsdInput::ssd_serial`. On an autodiff backend, it
+        // calls the custom backward.
 
         let [batch, nchunks, chunk_len, nheads, _per_head_dim] = input.x_bnlhp.dims();
         assert!(nchunks > 0, "sequence length must be at least 1");
@@ -43,16 +42,17 @@ impl Mamba2SsdInput {
         );
 
         // ── Permutes ──────────────────────────────────────────────────────────────────
-        // Note: dt_bnlh calculation (originally in Kernel 1) moved to Step 4 (before padding).
+        // The reference computes Δ in Kernel 1. Here `Mamba2::forward` computes
+        // it (step 4), before the chunk padding.
         let dt_discretized_bhnl = input.dt_bnlh.permute([0, 3, 1, 2]);
         assert_eq!(
             [batch, nheads, nchunks, chunk_len],
             dt_discretized_bhnl.dims()
         );
 
-        // K1 is now computed inside the custom op (both forward and backward).
-        // a_decay_h is passed directly; da_cumsum is no longer an autodiff-tracked
-        // intermediate crossing the boundary.
+        // The custom op computes K1 itself (in forward and backward). It gets
+        // `a_decay_h` directly, so `da_cumsum` is not an autodiff-tracked
+        // intermediate that crosses the op boundary.
         let (y_bnlhp, final_state_bhpr) = <Dispatch as Mamba2BackendExt>::ssd_serial_recalculated(
             input.x_bnlhp.into_dispatch(),
             dt_discretized_bhnl.into_dispatch(),
@@ -68,10 +68,13 @@ impl Mamba2SsdInput {
     }
 }
 
-/// Extends the backend and wraps it for `burn`.
+/// Backend extension for the Mamba-2 SSD with a recompute backward.
+///
+/// The default body runs the forward on backend primitives. The `Autodiff<B>`
+/// impl (in [`super::backward`]) adds the custom backward node.
 #[backend_extension(
-    // Every cubecl runtime — CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU — is
-    // this one backend; which of them a tensor runs on is what its device says.
+    // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
+    // this one backend. The device of a tensor tells which runtime it uses.
     // The cfg mirrors burn's own `cube_backend`.
     Cube: cfg(any(
         feature = "backend-cpu",
@@ -100,11 +103,11 @@ pub trait Mamba2BackendExt: Backend {
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        // Default impl essentially replicates Mamba2SsdInput::ssd_serial, but on
-        // backend primitives: this body runs under a generic `B`, where the
-        // high-level `Tensor` (pinned to `Dispatch`) is unavailable, so the math
-        // goes through the rank-tagged [`F`] primitive wrapper and the local
-        // primitive K-kernels below.
+        // The default impl replicates Mamba2SsdInput::ssd_serial on backend
+        // primitives. This body runs under a generic `B`, where the high-level
+        // `Tensor` (pinned to `Dispatch`) is not available. So the math uses
+        // the rank-tagged [`F`] primitive wrapper and the primitive K-kernels
+        // below.
         let x_bnlhp = F::<Self, 5>::new(x_bnlhp);
         let dt_discretized_bhnl = F::<Self, 4>::new(dt_discretized_bhnl);
         let b_bnlhr = F::<Self, 5>::new(b_bnlhr);
@@ -160,11 +163,11 @@ pub trait Mamba2BackendExt: Backend {
 }
 
 // ─── Primitive forward kernels (K1–K5) ───────────────────────────────────────
-// Primitive ports of the high-level [`crate::mamba2::ssd::serial`] kernels,
-// expressed on `B`'s primitives via [`F`] so the trait default body can run
-// under a generic backend. K1/K2/K4 are reused by the recompute backward in
-// [`super::combined_backward`]; K5 is forward-only (the backward computes K5's
-// gradient analytically rather than recomputing it).
+// Primitive ports of the high-level [`crate::mamba2::ssd::serial`] kernels, on
+// the primitives of `B` through [`F`], so the default trait body can run under
+// a generic backend. The recompute backward in [`super::combined_backward`]
+// uses K1/K2/K4 again. K5 is forward-only: the backward computes the gradient
+// of K5 analytically instead of recomputing it.
 
 /// Primitive port of [`crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum`].
 ///
@@ -200,8 +203,8 @@ pub(crate) fn k2_ssd_bmm<B: Backend>(c_bnlhr: F<B, 5>, b_bnlhr: F<B, 5>) -> F<B,
 /// Primitive port of [`crate::mamba2::ssd::serial::k3_ssd_chunk_state`] (lean:
 /// returns only the chunk-end state).
 ///
-/// Returns `intra_chunk_state_bnhpr` — each chunk's contribution to its end
-/// state assuming a zero state at the chunk's start.
+/// Returns `intra_chunk_state_bnhpr`: the contribution of each chunk to its
+/// end state, from a zero state at the chunk start.
 pub(crate) fn k3_ssd_chunk_state<B: Backend>(
     x_bnlhp: F<B, 5>,
     b_bnlhr: F<B, 5>,
@@ -344,10 +347,10 @@ fn k5_ssd_chunk_scan<B: Backend>(
     y_bnlhp
 }
 
-// Per-backend impls: each delegates to the trait's default body. The custom
-// autodiff backward lives in `super::backward` as a separate impl.
+// Per-backend impls: each one uses the default body of the trait. The custom
+// autodiff backward is a separate impl in `super::backward`.
 //
-// TODO: somehow avoid leaking backend-* features into the library.
+// TODO: find a way to keep the backend-* features out of the library.
 burn_stack::impl_backend_ext_for_burn_backends!(Mamba2BackendExt);
 
 burn_stack::decl_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);

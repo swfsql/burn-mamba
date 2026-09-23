@@ -1,20 +1,24 @@
 //! # Single-SSD pathway (official-kernel form)
 //!
-//! Realises the Mamba-3 trapezoidal recurrence as a **single SSD call** (the
-//! official Triton-SISO / Tilelang-MIMO form): a key scale
-//! `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`, a strict lower-triangular intra-chunk
-//! mask, a same-step γ correction, and a boundary-β seed folded into the initial
-//! state. One call whatever the tap pattern — every tap collapses into that one
-//! scalar per sample — with the parenthesised term the two-tap members' second
-//! installment. Under the lag-`u` members the correction widens to a band, which
-//! [`token_band`] adds outside the kernel.
+//! The Mamba-3 trapezoidal recurrence as a **single SSD call** (the official
+//! Triton-SISO / Tilelang-MIMO form):
 //!
-//! Uses ≈ half the training memory of the two-call
-//! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less of a three-call
-//! one.  Its cache's SSM
-//! accumulator `h'` has **different mid-sequence semantics** than the double-SSD
-//! state (hence a distinct cache type), but the two coincide at sequence
-//! boundaries and inter-convert via field-identity `From` impls.
+//! - a key scale `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`, where the term in
+//!   parentheses is the second installment of the two-tap members,
+//! - a strict lower-triangular intra-chunk mask,
+//! - a same-step γ correction,
+//! - a boundary-β seed, folded into the initial state.
+//!
+//! It is one call for every tap pattern: every tap collapses into that one
+//! scalar per sample. Under the lag-`u` members the correction widens to a
+//! band, which [`token_band`] adds outside the kernel.
+//!
+//! It uses ≈ half the training memory of the two-call
+//! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less than a third of
+//! a three-call one. The SSM accumulator `h'` of its cache has **different
+//! mid-sequence semantics** from the double-SSD state (so the cache type is
+//! distinct). The two are equal at call boundaries and convert with
+//! field-identity `From` impls.
 
 /// The single-SSD cache (same fields as double-SSD, different `ssm` semantics).
 pub mod cache;

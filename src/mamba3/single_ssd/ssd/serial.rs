@@ -1,31 +1,30 @@
-//! # SingleSsd Serial (K1–K5) SSD
+//! # Single-SSD Serial (K1–K5) SSD
 //!
-//! Chunk-serial counterpart to [`crate::mamba3::single_ssd::ssd::minimal`].
-//! Whereas the Minimal variant uses a segsum-based quadratic state passing,
-//! this one reuses the K1–K4 helpers from [`crate::mamba3::double_ssd::ssd::serial`]
-//! (which run a sequential loop for K4) and supplies a **new K5** that bakes
-//! in the single-ssd logic:
+//! Chunk-serial counterpart of [`crate::mamba3::single_ssd::ssd::minimal`].
+//! The Minimal variant uses a segsum-based quadratic state passing. This one
+//! uses the K1–K4 helpers of [`crate::mamba3::double_ssd::ssd::serial`] (with a
+//! sequential loop for K4), and adds its own K5 with the single-ssd logic:
 //!
-//! - Strict lower-triangular intra-chunk path (the same-time-step block is
-//!   excluded from the SSM sum; it is the “diagonal correction” territory).
-//! - K is scaled by `scaleₜ = γₜ + (1−λₜ₊₁) Δₜ₊₁` per source-time column.
-//! - Same-time-step block contributes via an explicit `γₜ · (C·Bᵀ at t) · Vₜ`
-//!   correction term, restoring the right diagonal weighting.
+//! - a strict lower-triangular intra-chunk path (the same-time-step block is
+//!   out of the SSM sum: the "diagonal correction" handles it),
+//! - K scaled by `scaleₜ` per source-time column,
+//! - the same-time-step block through an explicit `γₜ · (C·Bᵀ at t) · Vₜ`
+//!   correction term, which restores the right diagonal weight.
 //!
-//! K1–K4 are identical to the double-SSD because:
-//! - K1 (`da_cumsum`, `da_chunk_end`) depends only on `da = Δ·A`.
-//! - K2 (`cb = C · Bᵀ`) is computed on **unscaled** B / C; the single-ssd
-//!   algorithm wants the unscaled CB so it can apply `scaleₜ` per-column
-//!   (lower triangular) and reuse the same-step block for the γ-correction.
-//! - K3 (chunk-end state from V·decay·K) is form-invariant: passing the
-//!   scale-multiplied K (`K_scaled = scaleₜ · B`) recovers the single-ssd
-//!   chunk state, with no other changes needed.
-//! - K4 (sequential state passing across chunks) operates on a `[H, P, R]`
-//!   per-chunk state and a per-chunk decay total; both are mode-agnostic.
+//! K1–K4 are the same as in the double-SSD, because:
+//! - K1 (`da_cumsum`, `da_chunk_end`) depends only on `da`.
+//! - K2 (`cb = C · Bᵀ`) uses the **unscaled** B / C. The single-ssd algorithm
+//!   needs the unscaled CB to apply `scaleₜ` per column (lower triangular)
+//!   and to use the same-step block for the γ-correction.
+//! - K3 (chunk-end state from V·decay·K) does not depend on the form: with
+//!   the scaled K (`K_scaled = scaleₜ · B`) it gives the single-ssd chunk
+//!   state, with no other change.
+//! - K4 (sequential state passing across chunks) uses a `[H, P, R]` per-chunk
+//!   state and a per-chunk decay total. Both do not depend on the form.
 //!
-//! Reference kernels (same as `single_ssd_minimal`):
-//! - `refs/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
-//! - `refs/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
+//! Reference kernels (as for `single_ssd_minimal`), in `state-spaces/mamba`:
+//! - `mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`
+//! - `mamba_ssm/ops/tilelang/mamba3/mamba3_mimo_fwd.py`
 
 #![allow(non_snake_case)]
 

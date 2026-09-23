@@ -1,25 +1,28 @@
 //! # Double-SSD pathway (VikramLex-style)
 //!
-//! Realises the Mamba-3 trapezoidal recurrence as **one standard SSD call per
-//! term**, reusing the Mamba-2-like kernels:
+//! The Mamba-3 trapezoidal recurrence as **one standard SSD call per term**,
+//! with Mamba-2-like kernels:
 //!
 //! - γ-SSM: `hᵞₜ = αₜ hᵞₜ₋₁ + γₜ Bₜ xₜ`   (the current sample)
-//! - β-SSM: `hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋ₗ xₜ₋ₗ`, one per `β` tap, at that tap's own
-//!   lag `l` = [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
-//!   and transported across its own gap
+//! - β-SSM: `hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋ₗ xₜ₋ₗ`, one per `β` tap, at the own lag
+//!   `l` = [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
+//!   of that tap, transported across its own gap
 //! - `hₜ = hᵞₜ + Σ hᵝₜ`.
 //!
-//! So **two** calls at the default, one under
+//! So there are **two** calls at the default, one under
 //! [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) (no tap to
-//! shift) and three under a two-tap pattern, whose lags differ and so cannot
-//! share a pass. Simple and easy to verify, at the cost of ~2× the intra-chunk
-//! and chunk-state memory of the [`single_ssd`](crate::mamba3::single_ssd)
-//! pathway — which stays at one call however many taps there are, and is where a
-//! two-tap pattern belongs.
+//! shift), and three under a two-tap pattern (its lags are different, so they
+//! cannot share a pass). It is simple and easy to verify. The cost is ~2× the
+//! intra-chunk and chunk-state memory of the
+//! [`single_ssd`](crate::mamba3::single_ssd) pathway, which stays at one call
+//! for any number of taps and suits a two-tap pattern better.
+//!
+//! `step` always uses this recurrence, for both cache variants.
 
-/// The double-SSD cache (`ssm`/`k_state`/`v_state`/`cum_angle`; no conv cache).
+/// The double-SSD cache (SSM state, tap FIFO, rotation, positive-system slots;
+/// no conv cache).
 pub mod cache;
-/// `forward_double_ssd` / `step_double_ssd` and the RoPE helpers.
+/// `forward_double_ssd` / `step_double_ssd` and their step helpers.
 pub mod double_ssd;
 /// The standard SSD kernels reused by both the γ and β passes.
 pub mod ssd;

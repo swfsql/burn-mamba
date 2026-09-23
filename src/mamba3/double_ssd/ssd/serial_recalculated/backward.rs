@@ -1,11 +1,14 @@
 //! # Custom autodiff node for the Mamba-3 double-SSD recompute backward
 //!
 //! Implements [`Mamba3DoubleSsdBackendExt`](crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdBackendExt)
-//! for `Autodiff<B>` via a single Burn [`Backward`](burn::backend::autodiff::ops::Backward) node.  The forward keeps only
-//! its leaf inputs; backprop replays the serial kernels and the gradient math in
-//! [`super::combined_backward`](crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward), so the large intermediates are never retained.
-//! The two outputs (`y`, `final_state`) are flattened into one tracked tensor
-//! (via [`burn_stack::utils::combined_grad`]) so one node covers both.
+//! for `Autodiff<B>` with one Burn
+//! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward keeps
+//! only its leaf inputs. The backprop replays the serial kernels and the
+//! gradient math in
+//! [`super::combined_backward`](crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward),
+//! so the large intermediates are never kept.
+//! [`burn_stack::utils::combined_grad`] flattens the two outputs (`y`,
+//! `final_state`) into one tracked tensor, so one node covers both.
 
 #![allow(non_snake_case)]
 
@@ -29,11 +32,10 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
 {
     /// Memory-efficient combined forward+backward for the Mamba-3 MIMO SSD.
     ///
-    /// The two output tensors (`y_bntmhp`, `final_state_bhpr`) are flattened
-    /// and concatenated into a single 1-dimensional tracked tensor so a single
-    /// `Backward<B, 5>` node covers both. The caller receives split+reshaped
-    /// slices of that combined tensor; burn's autodiff accumulates their
-    /// upstream gradients back into one gradient vector before invoking
+    /// The two output tensors (`y_bntmhp`, `final_state_bhpr`) go into one
+    /// tracked 1-D tensor, so one `Backward<B, 5>` node covers both. The caller
+    /// gets split and reshaped slices of that tensor. Burn's autodiff adds
+    /// their upstream gradients into one gradient vector before it calls
     /// `backward`.
     fn double_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
