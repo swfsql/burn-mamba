@@ -54,6 +54,11 @@ cargo run --example reset-majority -- --training --inference
   pass, not ~3), as burn-stack does. A crate that is missing from the list
   links a second copy.
 
+## Writing Style
+
+- **Always load the `asd-ste100` skill** before you write code comments,
+  rustdoc or markdown documents. Write all of them in its style.
+
 ## Documentation Maintenance (CLAUDE.md & files.md)
 
 - Keep **both files as small as possible**, but still usable. Point to the

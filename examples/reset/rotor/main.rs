@@ -1,20 +1,22 @@
-//! # Reset-rotor — the smallest task a Mamba-3 block is *needed* for
+//! # Reset-rotor: the smallest task that *needs* a Mamba-3 block
 //!
-//! The corollary of `reset-majority`, one family up. Same three symbols, same
-//! reset: the model reads `+` / `-` / `R` and must report, at **every**
-//! position, where a three-detent rotor stands — the running turn count since
-//! the last `R`, **mod 3**.
+//! The same argument as `reset-majority`, one family up. The symbols and the
+//! reset are the same. The model reads `+` / `-` / `R`. At **every** position,
+//! it must report the position of a three-detent rotor: the running turn count
+//! since the last `R`, **mod 3**.
 //!
-//! The rung isolates the one thing a Mamba-3 block has that a Mamba-2 block does
-//! not: a **complex transition**, the data-dependent rotation absorbed into
-//! `B`/`C`. It adds two requirements, one per adversarial family — the state has
-//! to *turn*, since the label is periodic in a count that a real state can hold
-//! but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)); and the
-//! turn has to be data-dependent, since a fixed per-step angle is vanilla RoPE,
-//! whose phase measures position rather than turns
-//! ([`Family::Balanced`](crate::dataset::Family::Balanced)).
+//! The rung isolates the one thing that a Mamba-3 block has and a Mamba-2 block
+//! does not: a **complex transition**, the data-dependent rotation absorbed into
+//! `B`/`C`. It adds two requirements, one per adversarial family:
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! - The state must *turn*. The label is periodic in a count that a real state
+//!   can hold but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)).
+//! - The turn must be data-dependent. A fixed per-step angle is vanilla RoPE,
+//!   whose phase measures position, not turns
+//!   ([`Family::Balanced`](crate::dataset::Family::Balanced)).
+//!
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -60,9 +62,9 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // Turning the state on is a basin to find, not a slope to descend: the
-        // run needs a large step to leave the memoryless solution and a small
-        // one to settle the angle onto an exact detent, so this anneals.
+        // A turning state is a basin to find, not a slope to descend. The run
+        // needs a large step to leave the memoryless solution, and then a small
+        // one to settle the angle onto an exact detent. So this schedule anneals.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

@@ -242,9 +242,10 @@ synthetic or canonical data (see [`examples/README.md`](examples/README.md)):
   the recurrence (the max-plus register and the Kalman gate).
 - **`mnist-class`**: a Mamba-3 classifier that reads each MNIST image as a
   sequence of pixels.
-- **`mnist-ae`**: a bidirectional Mamba-3 autoencoder over the same pixel
-  sequence.
-- **`tiny-stories`**: a tiny character-level Mamba-3 language model.
+- **`mnist-ae`** (work in progress): a bidirectional Mamba-3 autoencoder over a
+  sequence of MNIST patches.
+- **`tiny-stories`** (work in progress): a tiny character-level Mamba-3
+  language model.
 
 ```bash
 # train the smallest example (flex backend, fp32), then run inference

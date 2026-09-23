@@ -1,27 +1,30 @@
-//! # spinor-product — the smallest task `micro_steps = 2` is needed for
+//! # spinor-product: the smallest task that needs `micro_steps = 2`
 //!
-//! `reset-spinor`'s stream, read **two symbols per token**: the model sees an
-//! ordered pair from `i` / `j` / `.` / `R` at every position and must report the
-//! running product in the quaternion group `Q₈` after both of them.
+//! The stream of `reset-spinor`, read **two symbols per token**. At every
+//! position, the model sees an ordered pair from `i` / `j` / `k` / `.` / `R`. It
+//! must report the running product in the quaternion group `Q₈` after both
+//! symbols.
 //!
-//! A Mamba-3 step applies one rotation, whose generator is an affine functional
-//! of the token — so at `micro_steps = 1` the two symbols' generators can only
-//! **add**, and `exp(v + w) ≠ exp(w) ⊗ exp(v)` for the non-commuting pairs.
-//! `micro_steps = 2` (`MambaProduct`, `burn_mamba::mamba3::product`) makes a
-//! token two recurrence steps, so its transition is the product itself. That
-//! one config change is the whole example.
+//! A Mamba-3 step applies one rotation, and its generator is an affine
+//! functional of the token. So at `micro_steps = 1`, the generators of the two
+//! symbols can only **add**, and `exp(v + w) ≠ exp(w) ⊗ exp(v)` for the
+//! non-commuting pairs. `micro_steps = 2` (`MambaProduct`,
+//! `burn_mamba::mamba3::product`) makes a token two recurrence steps, so its
+//! transition is the product itself. That one config change is the whole
+//! example.
 //!
-//! Carries two downstream flags after the trailing `--`, both baked into a
-//! **fresh** model config (a persisted one wins on reload): `--micro-steps N`
-//! (default 2) and `--layers N` (default 1). The second is the other way to get
-//! two rotations into one token — a second *layer* — and `--layers 2
-//! --micro-steps 1` is the contrast it exists for: a second layer turns a second
-//! state, so the product still has to be computed as a **feature** by the layer
-//! below. That is expressible (`tests.rs`) and occasionally found, but only
-//! approximately: it holds at the trained length and comes apart at three times
-//! it, where `u = 2` does not.
+//! After the trailing `--`, the example takes two flags. Both set a **fresh**
+//! model config (on reload, the saved config wins):
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! - `--micro-steps N` (default 2).
+//! - `--layers N` (default 1). A second *layer* is the other way to put two
+//!   rotations in one token, and `--layers 2 --micro-steps 1` is the contrast.
+//!   A second layer turns a second state. So the layer below must still compute
+//!   the product as a **feature**. That is expressible (`tests.rs`), but a
+//!   learned product is only approximate, and `u = 2` is exact.
+//!
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -71,7 +74,8 @@ pub fn launch(app_args: &AppArgs) {
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As in the `reset-*` ladder: a large step to leave the order-blind
-        // solutions, a small one to settle the rotation onto exact half-turns.
+        // solutions, then a small one to settle the rotation onto exact
+        // half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

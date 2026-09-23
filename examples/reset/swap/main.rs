@@ -1,26 +1,29 @@
-//! # Reset-swap — the smallest task an `SO(4)` Mamba-3 block is needed for
+//! # Reset-swap: the smallest task that needs an `SO(4)` Mamba-3 block
 //!
-//! The corollary of `reset-spinor`, one rung further up. Same shape of stream —
-//! two kinds of turn and a reset — but now the turns are **swaps**: the model
-//! reads `s` / `t` / `R` and must report, at every position, how the three items
-//! `abc` are ordered, i.e. the running word in the symmetric group `S₃`.
+//! The same argument as `reset-spinor`, one rung up. The stream has the same
+//! shape, two kinds of turn and a reset. But the turns are **swaps**. The model
+//! reads `s` / `t` / `R`. At every position, it must report the order of the
+//! three items `abc`: the running word in the symmetric group `S₃`.
 //!
-//! Where `reset-spinor` needs the transition to be **non-abelian**, this needs it
-//! to be *the group itself rather than a double cover*. A transposition has order
-//! 2, but in `SU(2)` the *only* element of order 2 is `−1`: a half-turn lifts to
-//! `(0, û)`, whose square is `−1`. So a left-isoclinic
-//! ([`RotationKind::Quaternion4D`]) state runs in the double cover `2D₃`, and the
-//! two lifts of one permutation are **antipodal** state vectors carrying the same
-//! label — which no linear readout can merge. Two-sided
-//! ([`RotationKind::Rotor4D`]) the block reaches conjugation `v ↦ q v q̄`, i.e.
-//! `SO(3) ⊂ SO(4)`, where `±q` act identically, the three swaps are three honest
-//! half-turns about three axes `60°` apart, and the state *is* the permutation.
+//! `reset-spinor` needs a **non-abelian** transition. This rung needs *the group
+//! itself, not a double cover*:
 //!
-//! Carries a downstream `--rotation complex|quaternion|rotor` flag (default
-//! `rotor`) after the trailing `--`; it selects the rotation baked into a
-//! **fresh** model config (a persisted one wins on reload).
+//! - A transposition has order 2. But in `SU(2)`, the *only* element of order 2
+//!   is `−1`: a half-turn lifts to `(0, û)`, whose square is `−1`.
+//! - So a left-isoclinic ([`RotationKind::Quaternion4D`]) state runs in the
+//!   double cover `2D₃`. The two lifts of one permutation are **antipodal**
+//!   state vectors with the same label, and no linear readout can merge them.
+//! - A two-sided ([`RotationKind::Rotor4D`]) block reaches conjugation
+//!   `v ↦ q v q̄`, which is `SO(3) ⊂ SO(4)`. There `±q` act identically, the
+//!   three swaps are true half-turns about three axes `60°` apart, and the state
+//!   *is* the permutation.
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! After the trailing `--`, the example takes a `--rotation
+//! complex|quaternion|rotor` flag (default `rotor`). It selects the rotation of
+//! a **fresh** model config (on reload, the saved config wins).
+//!
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -67,7 +70,7 @@ pub fn launch(app_args: &AppArgs) {
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As in `reset-spinor`: a large step to leave the order-blind solution,
-        // a small one to settle the rotation onto exact half-turns.
+        // then a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

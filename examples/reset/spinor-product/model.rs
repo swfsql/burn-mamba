@@ -48,32 +48,29 @@ pub const D_MODEL: usize = 8;
 ///   passes it through unchanged) and every in-projection channel has a
 ///   closed-form weight. `per_head_dim = 2` then keeps `nheads = 4` — one head
 ///   per quaternion component — and the construction uses each head's first
-///   value channel. Two heads are enough for the *readout*, and are what the four
-///   `reset-*` rungs run at, but here the same schedule then finds nothing:
-///   61 / 52 / 53% with the trapezoid, 46 / 30 / 33% without it.
+///   value channel. Two heads are enough for the *readout*, and the five
+///   `reset-*` rungs run at two heads. But here the same schedule then finds
+///   nothing: 61 / 52 / 53% with the trapezoid, 46 / 30 / 33% without it.
 /// - The **trapezoid stays on** here (the default
-///   [`Trapezoid::HorizontalCarryOver`](burn_mamba::prelude::Trapezoid)), and it
-///   is the one rung where it does. The hand-built solution pins `λ ≈ 1` and
-///   never uses the `β` tap, so `Trapezoid::None` looks free — and it does reach
-///   100% at the trained length, then loses the long column (83% at 96 tokens),
-///   which is the column this rung exists to report. The other four rungs are
-///   tapless.
+///   [`Trapezoid::HorizontalCarryOver`](burn_mamba::prelude::Trapezoid)). This
+///   is the only rung that keeps it. The hand-built solution pins `λ ≈ 1` and
+///   never uses the `β` tap, so `Trapezoid::None` looks free. It does reach
+///   100% at the trained length, but loses the long column (83% at 96 tokens),
+///   and this rung reports that column. The five `reset-*` rungs are tapless.
 /// - `ignore_last_residual` zeroes the last layer's residual, so `out_proj`
 ///   reads the block's output alone.
 ///
-/// **The other dial the example varies: `layers`.** `micro_steps = 2` is not the
-/// only way to get two rotations into a token — a second *layer* also applies
-/// one, and its generator reads the layer below rather than the token, so the
-/// axis-pinning argument of `tests.rs` does not reach it. What a second layer
-/// cannot do is turn the *same* state: each layer carries its own, so the word
-/// has to end up in the last one's, whose per-token rotation is then the whole
-/// pair's product — leaving the layer below to compute that product as a
-/// **feature** (a function of the pair with no additive form, so a bilinear one,
-/// which its `C·B` term is). Expressible, and measured: at `--layers 2
-/// --micro-steps 1` one seed in four reaches 100% at the trained length and loses
-/// it at three times that, where `u = 2` — which hands the two rotations to the
-/// recurrence instead of learning their product — stays exact.
-/// `examples/reset/README.md` has the table.
+/// **The other dial of the example: `layers`.** `micro_steps = 2` is not the
+/// only way to put two rotations in a token. A second *layer* also applies one,
+/// and its generator reads the layer below, not the token. So the axis-pinning
+/// argument of `tests.rs` does not apply to it. But a second layer cannot turn
+/// the *same* state: each layer carries its own state. So the word must end in
+/// the state of the last layer, and the per-token rotation of that layer is the
+/// product of the whole pair. The layer below must compute that product as a
+/// **feature** (a function of the pair with no additive form, so a bilinear
+/// one, which its `C·B` term is). That is expressible, but a learned product is
+/// approximate. `u = 2` gives the two rotations to the recurrence instead, and
+/// stays exact. `examples/reset/README.md` has the measured rows.
 pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 8, per_head_dim = 2 ⇒ nheads = 4 (one per
     // quaternion component), each with its own Δ, A, λ and D — per micro-step.

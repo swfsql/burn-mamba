@@ -1,126 +1,145 @@
 # TinyStories (character-level LM)
 
 An auto-regressive Mamba-3 language model over single **characters** of
-[karpathy/tinystories-gpt4-clean](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean),
-a cleaned 2.7M-story subset of [TinyStories](https://arxiv.org/abs/2305.07759)
-(GPT-4-generated children's stories, plain ASCII).
+[karpathy/tinystories-gpt4-clean](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean).
+That dataset is a cleaned 2.7M-story subset of
+[TinyStories](https://arxiv.org/abs/2305.07759): children's stories that GPT-4
+wrote, in plain ASCII.
 
-The model is deliberately tiny: two Mamba-3 blocks (`d_model = 32`,
-`state_rank = 64`, `expand = 4`), cycled to an 8-deep virtual stack over
+The model is small: a few Mamba-3 blocks, cycled to a virtual stack over
 Multi-Gate residuals, between a tied character embedding and its transpose.
-39,632 parameters, of which the embedding is 1,536.
+
+This example is a work in progress. It works, but its sizes and hyperparameters
+are placeholders until a parameter search. `model.rs` and `main.rs` hold the
+current values.
 
 ## Vocabulary
 
-The dataset's cleaning pipeline guarantees exactly 74 distinct ASCII characters:
-the 52 cased letters plus ``\n !"$',-.0123456789:;?``. Case-folding the letters
-leaves **48** tokens, and every one of them actually occurs — so the alphabet is
-the corpus's own inventory, not a slice of ASCII:
+The cleaning pipeline of the dataset guarantees exactly 74 distinct ASCII
+characters: the 52 cased letters plus ``\n !"$',-.0123456789:;?``. Case folding
+leaves **48** tokens, and each of them occurs in the corpus. So the alphabet is
+the inventory of the corpus, not a slice of ASCII:
 
 ```text
 \n !"$',-.0123456789:;?abcdefghijklmnopqrstuvwxyz
 ```
 
-There is no `<unk>`, no `<bos>` and no padding class (`pad_vocab_size_multiple =
-1`), so every logit the model emits is a character the decoder understands. The
-embedding is **tied** (`missing_lm_head = true`): one table answers both "which
-character is this" and "which character comes next".
+There is no `<unk>`, no `<bos>` and no padding class
+(`pad_vocab_size_multiple = 1`). So every logit of the model is a character that
+the decoder knows. The embedding is **tied** (`missing_lm_head = true`): one table
+answers both "which character is this" and "which character comes next".
 
-A story's start is marked out of band, by four learnable **class latents**, not by
-a character — see [Story boundaries](#story-boundaries).
+Four learnable **class latents** mark the start of a story, not a character (see
+[Story boundaries](#story-boundaries)).
 
 ## Data
 
 The dataset is a single 673MB parquet file: one column (`text`), one row per
-story, 2,669 ZSTD row groups of 1,024 rows. It is downloaded **whole**, once, the
-same way `mnist-*` downloads its IDX files, into
-`~/.cache/burn-dataset/tinystories-gpt4-clean/`; only the row groups a request
-touches are decompressed. The stories that come out are normalized and cached
-again as text, one file per `(split, story count)` — so every later run reads a
-few MB of text and never opens the parquet at all. The loader, the windowing and
-the epoch loops are `burn_stack::examples::tiny_stories`.
+story, 2,669 ZSTD row groups of 1,024 rows.
 
-Splits follow the dataset card's suggested row ranges (the rows are pre-shuffled,
-so a contiguous range is already a random sample): rows `0..10k` are test,
-`10k..20k` validation, `20k..` training. The defaults pull 4,096 train and 256
-validation stories (~3.4MB of text); `--train-stories` scales that up at no extra
-download.
+- The first run downloads it **whole**, once, into
+  `~/.cache/burn-dataset/tinystories-gpt4-clean/` (as `mnist-*` downloads its IDX
+  files).
+- A request decompresses only the row groups that it reads.
+- The normalized stories go into a second cache as text, one file per
+  `(split, story count)`. So every later run reads a few MB of text and never
+  opens the parquet.
+
+`burn_stack::examples::tiny_stories` holds the loader, the windowing and the
+epoch loops.
+
+The splits use the row ranges that the dataset card suggests. The rows are
+pre-shuffled, so a contiguous range is already a random sample:
+
+- rows `0..10k`: test,
+- rows `10k..20k`: validation,
+- rows `20k..`: training.
+
+The defaults take 4,096 train and 256 validation stories (~3.4MB of text).
+`--train-stories` takes more, with no extra download.
 
 ## Story boundaries
 
-**One item is one story** (303–4,149 characters, median 724), stripped of its
-surrounding whitespace, and nothing is spliced between two of them: a story is a
-self-contained example. What marks its start is four `ClassLatent::Start`
-registers — learnable `d_model`-wide rows the stack prepends to the sequence — and
-the **last of them is scored against the story's first character**. So the model
-is trained to answer "what does a story open with?" from the latents alone.
+**One item is one story** (303–4,149 characters, median 724), without its
+surrounding whitespace. Nothing goes between two stories: a story is a
+self-contained example.
 
-That is what unconditional sampling then does: `prime()` replays the latents
-against a zero cache, with no input token, and hands back the first character's
-distribution; generation continues from there with plain `step()`s. The
-alternative — the `"\n\n"` that used to join the stories, fed in as a seed — is out
-of distribution, because that sequence only ever occurred *between* two stories,
-i.e. always on a state still carrying the previous one.
+- Four `ClassLatent::Start` registers mark its start. They are learnable
+  `d_model`-wide rows that the stack puts in front of the sequence.
+- The **last of them is scored against the first character of the story**. So
+  the model learns "what does a story start with?" from the latents alone.
 
-One `generate()` call is therefore one story. A second story wants a second call
-against a **reset** cache, which is the one place these examples genuinely reset
-one.
+Unconditional sampling uses exactly that. `prime()` replays the latents against a
+zero cache, with no input token, and returns the distribution of the first
+character. Generation then continues with plain `step()`s. The alternative is a
+separator character between stories, given as a seed. That seed is out of
+distribution: in a joined stream it occurs only *between* two stories, so always
+on a state that still carries the previous story.
 
-On CUDA the decode `step`s are replayed from one captured graph (burn-stack's
-`CapturedStep`) instead of being launched anew — a model this small is bound by
-the host enqueueing its launches, not by the GPU. So are a prompt's prefill
-chunks, from one graph shared by every prompt. The text is the same either way;
-`--no-graph` runs both eagerly.
+So one `generate()` call is one story. A second story needs a second call
+against a **reset** cache. That is the one place where these examples really
+reset a cache.
 
-Every position is scored against its next character (so the reported accuracy is
-per character), and a story is walked in windows — see
-[Runs and the frontier](#runs-and-the-frontier). Stories differ in length, so a
-batch is padded to a whole number of windows of its longest one; the batch
-carries how many positions of each slot are real, and the padding is masked out
-of the loss and the accuracy — at the window's fixed shape, since a shape that
-varies per window slows every later CUDA allocation (tracel-ai/burn#5751).
-`-- --profile <N>` prints each phase's mean ms per `N` windows and the live device
-allocations, which stay flat while no launch shape varies.
+On CUDA, the decode `step`s replay from one captured graph (burn-stack's
+`CapturedStep`), and are not launched again. A model this small is bound by the
+host that enqueues its launches, not by the GPU. The prefill chunks of a prompt
+also replay, from one graph that every prompt shares. The text is the same in
+both modes. `--no-graph` runs both eagerly.
+
+Every position is scored against its next character, so the reported accuracy is
+per character. A story is walked in windows (see
+[Runs and the frontier](#runs-and-the-frontier)).
+
+- Stories differ in length. So a batch is padded to a whole number of windows of
+  its longest story.
+- The batch carries the number of real positions of each slot. The loss and the
+  accuracy mask the padding out, at the fixed shape of the window. A shape that
+  changes per window slows every later CUDA allocation (tracel-ai/burn#5751).
+- `-- --profile <N>` prints the mean ms of each phase per `N` windows, and the
+  live device allocations. These stay flat while no launch shape changes.
 
 ## Runs and the frontier
 
-A window is `seq_len` characters, but a story is not: it continues past the cut,
-and so does the state that generation would have there. Dropping the rest — what
-`--run-len 1` does — trains the model only on story openings, so it never sees the
-state a story is in past its first `seq_len` characters.
+A window is `seq_len` characters, but a story continues past the cut. So does
+the state that generation would have there. `--run-len 1` drops the rest of the
+story. Then the model trains only on story openings, and it never sees the state
+of a story past its first `seq_len` characters.
 
-So the loop walks a story's windows in order — the *run* — takes one optimizer
-step per window, and **carries the final state into the next window**:
+So the loop walks the windows of a story in order (the *run*). It takes one
+optimizer step per window, and **carries the final state into the next window**:
 
-- The run's length is the **story's**. `--run-len` is only a cap on it, and its
-  default (`usize::MAX`) imposes none, leaving the depth entirely to the gate.
-- The carry is *earned*. After each window the **frontier gate** scores it, and a
-  failing window ends the run — the rest of the story is discarded rather than
-  trained on a state the model got lost in. The gate is trainer-side: it reads
-  one scalar and decides whether a cache is passed on; no gradient goes near it.
-  The default is absolute: advance while the window scored at most
-  `--frontier-bits` (1.6) bits per character. That acts from the first window of
-  the first epoch, and depth grows out of the training curve by itself. A closed
-  gate is not a *wrong* regime — window 0 is the story's own beginning, so its
-  zero state is the right one and the recurrence still runs the whole window;
-  what a closed gate costs is **reach**, the model seeing only each story's first
-  `seq_len` characters. The threshold has to sit *above* where the model settles
-  (this one reaches ~1.4-1.5 bits/char), or the curriculum never starts.
-- The carry is **detached** (a round trip through the inner backend, not
-  `Tensor::detach`, which frees nothing): gradients never cross a window
-  boundary, and peak memory is one window's activations regardless of how deep
-  the run goes. Back-propagation *within* the window is untouched.
+- The length of the run is the length of the **story**. `--run-len` is only a
+  cap. Its default (`usize::MAX`) sets no cap, and leaves the depth to the gate.
+- The carry is *earned*. After each window, the **frontier gate** scores it. A
+  window that fails ends the run: the rest of the story is discarded, and not
+  trained on a state where the model is lost.
+  - The gate is on the trainer side. It reads one scalar and decides if a cache
+    goes to the next window. No gradient goes through it.
+  - The default is absolute: continue while the window scored at most
+    `--frontier-bits` (1.6) bits per character. That applies from the first
+    window of the first epoch, and the depth grows with the training curve.
+  - A closed gate is not a *wrong* regime. Window 0 is the start of the story, so
+    its zero state is correct, and the recurrence still runs the whole window. A
+    closed gate costs **reach**: the model sees only the first `seq_len`
+    characters of each story.
+  - The threshold must be *above* the level where the model settles, or the
+    curriculum never starts.
+- The carry is **detached**. It makes a round trip through the inner backend, not
+  `Tensor::detach` (which frees nothing). Gradients never cross a window
+  boundary, and the peak memory is the activations of one window, however deep
+  the run goes. Back-propagation *within* the window does not change.
 
-Every slot of a mini-batch walks its own story in lockstep, so one training
-iteration is still one batch and the log line stays `Batch b/N` — with
-`Windows k/n (mean m)` added, `n` being the windows the batch's longest story
-spans and `m` the epoch's mean depth so far, which is the number that says
-whether the curriculum is moving. `1.0` is a frontier that never opens (each
-story trained to its first window and no further); `n` is a gate that never fires
-(`--no-frontier`, plain stateful TBPTT).
+Every slot of a mini-batch walks its own story in lockstep. So one training
+iteration is still one batch, and the log line stays `Batch b/N`. It adds
+`Windows k/n (mean m)`:
 
-Validation runs the one regime that exists: the state threaded through each whole
-story, ungated, which is exactly what generation has.
+- `n` is the number of windows of the longest story of the batch.
+- `m` is the mean depth of the epoch so far. It shows if the curriculum moves.
+  `1.0` is a frontier that never opens (each story trained to its first window
+  only). `n` is a gate that never closes (`--no-frontier`, plain stateful TBPTT).
+
+Validation runs the only regime that generation has: the state goes through each
+whole story, ungated.
 
 ## Usage
 
@@ -136,134 +155,64 @@ cargo run --release --example tiny-stories --features "backend-cuda" -- --traini
     -- --train-stories 32768 --seq-len 512
 ```
 
-With the defaults (`seq_len = 256`, `batch_size = 8`) training needs ~1.2GB of
-vram. Downstream flags, all forwarded after the trailing `--` (`-- --help` lists
-them); the corpus knobs are persisted into the artifacts' `training_config.json`.
-The number of epochs, the batch size (`--batch-size`, default 8 windows per
-optimizer step) and the optimizer (Muon + AdamW by default; `--adamw` keeps the
-hidden weight matrices on AdamW instead of
-[Muon](https://kellerjordan.github.io/posts/muon/), see `mnist-class`'s README)
-are the shared CLI's, before the `--`.
+The flags of the example go after the trailing `--` (`-- --help` lists them).
+The corpus knobs persist in the `training_config.json` of the artifacts. The
+shared CLI, before the `--`, sets:
+
+- the number of epochs,
+- the batch size (`--batch-size`, the number of windows per optimizer step),
+- the optimizer. The default is Muon + AdamW. `--adamw` keeps the hidden weight
+  matrices on AdamW instead of [Muon](https://kellerjordan.github.io/posts/muon/)
+  (see the README of `mnist-class`).
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--seq-len <n>` | 256 | characters per window (the BPTT length) |
-| `--run-len <n>` | `usize::MAX` | cap on the windows one story may spend (`1` ⇒ openings only) |
-| `--frontier-bits <f>` | 1.6 | the frontier gate's threshold, in bits per character |
+| `--run-len <n>` | `usize::MAX` | cap on the windows that one story can use (`1` ⇒ openings only) |
+| `--frontier-bits <f>` | 1.6 | the threshold of the frontier gate, in bits per character |
 | `--no-frontier` | off | carry the state through the whole story, ungated |
-| `--train-stories <n>` | 4096 | stories pulled from the train split |
-| `--valid-stories <n>` | 256 | stories pulled from the validation split |
+| `--train-stories <n>` | 4096 | stories taken from the train split |
+| `--valid-stories <n>` | 256 | stories taken from the validation split |
 | `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal` (not persisted) |
-| `--profile <n>` | off | print each training-step phase's mean ms once per `n` windows (not persisted) |
+| `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
 
-## Results
-
-16 epochs over the default corpus (3.36M characters), measured on the held-out
-validation split. Uniform baseline: `log2(48) = 5.58` bits/char.
-
-Every number below was measured on the **previous** corpus layout: one continuous
-`"\n\n"`-joined character stream, cut into stateless windows (what is now
-`--run-len 1`), with no class latents. Story-per-item scoring changes what the
-average is over, so the table is a record of the *levers*, not a current
-measurement; the ranking is what it is here for.
-
-| Setting | Valid bits/char | Valid char accuracy |
-|---|---|---|
-| **the default** | **1.386** | **70.2%** |
-| the same model, 4 epochs | 1.475 | 68.3% |
-| batch 16, `lr = 2e-3`, no Muon, 4 epochs | 1.749 | 63.2% |
-
-The last row is what the obvious defaults give. Closing that gap took no extra
-parameters worth mentioning (39,496 → 39,632, still under 40K) — this model is
-**optimization-limited, not capacity-limited**, and the cheapest evidence is that
-two unrelated optimizer changes each beat *every* architectural reallocation that
-fits the budget. In decreasing order the levers were:
-
-| Lever | Effect |
-|---|---|
-| `batch_size` 16 → 8 | the largest single win; worth more than the whole LR ladder |
-| `max_lr` 2e-3 → 12e-3 | monotone to 16e-3, flat to 24e-3, turns over at 32e-3 |
-| virtual layers 4 → 8 | free in parameters; peaks at 8 (12 is worse) |
-| `MultiGate` residuals, `n_stream = 4` | +136 parameters; peaks at 4 (8 is worse) |
-| 4 → 16 epochs | still improving at epoch 14, flat by 15-16 |
-| Muon | the smallest, but it stacks with the other two optimizer changes |
-
-Depth and `MultiGate` are worth a note: both are essentially free in parameters,
-and both *lost* when screened at the original `lr = 2e-3` (8 virtual layers gave
-1.758 against 4 layers' 1.749). They only pay once the optimizer can use them —
-which is the same finding as the LR ladder, seen from the architecture side.
-Nothing that trades one part of the budget for another ever won: a SwiGLU MLP,
-more real layers at lower `expand`, `Quaternion4D`, and the library's reference
-`rotation_range = 1` + `rope_fraction = 0.5` all scored at or below the default.
-The model also never overfits — at epoch 14 validation is *ahead* of the epoch's
-running training average — so `--train-stories` is not the lever either.
-
-### Truncated BPTT
-
-`grad_horizon` back-propagates only the top `K` virtual layers. It is a bad deal
-here, at the same parameter count (measured at the older 4-epoch, 4-layer setting):
-
-| Virtual layers | `grad_horizon` | Valid bits/char | Valid char accuracy | it/s |
-|---|---|---|---|---|
-| 4 | `None` | 1.749 | 63.2% | ~7 |
-| 16 | 4 | 3.208 | 36.1% | ~3.2 |
-
-A language model is scored at *every* position, so leaving 12 of the 16
-applications of a shared weight undifferentiated biases every one of those
-readouts — unlike a task that reads out once, at the end of the sequence. The
-16-layer arm also plateaued at epoch 2 and then regressed, on training loss as
-well as validation.
-
-At 1.39 bits/char the samples are real words with real spelling, a consistent
-character, and clauses that mostly parse — about what 39K parameters buys. Four
-consecutive **unprompted** samples from the last epoch (seeded only with the
-document boundary, `sample_temperature = 0.8`, first 100 characters of each):
-
-```text
-once upon a time, there was a little girl named lucy. she loved to drop and saw a small fruit gold c
-once upon a time, there was a little girl named looks. she liked to play with her toys and walked on
-once upon a time, there was a little girl named kitty. she liked to play with it. she climbed in her
-once upon a time, there was a little girl named lucy. she loved to cry ahead and started to eat it.
-```
-
-Nothing supplies that opening — the model reconstructs the corpus's stock first
-sentence from the sequence's own start alone, then keeps one subject and its
-pronoun consistent to the end of the sample. Its grip is on syntax rather than
-sense: the clauses parse and the sentence boundaries land, but "loved to drop",
-"loved to cry ahead", and the name "looks" show it is still assembling plausible
-shapes rather than meanings. That is the honest ceiling for 39K parameters.
-
 ## Sampling
 
-`inference.rs` shows the library's three execution modes back to back: the class
-latents are replayed by one `prime()` (no input token, and it already answers with
-the first character's distribution), a prompt — when there is one — is consumed by
-chunkwise `forward()`s (prefill: right-padded 256-character chunks after the
-latents, which run once and are kept), and every generated character then costs
-one `step()` against that same cache — O(state) per token, with no growing KV
-cache.
-Sampling is temperature-scaled multinomial over the full 48-way softmax
-(`temperature <= 0` is greedy), seeded by `ChaCha8Rng` so a run is reproducible.
+`inference.rs` shows the three execution modes of the library, one after the
+other:
 
-`--inference` writes one story per temperature (0.5 / 0.8 / 1.0), each primed and
-unprompted, plus one continuation of each of three fixed prompts into
-`<artifacts>/inference/`. Training samples a short story at every small validation
-check into `<artifacts>/sample-epoch-{e}-batch-{b}.txt`, so the text can be
-watched turning from noise into words into sentences. The checks are spaced in
-optimizer steps (every 300), so their cadence does not move with the run lengths
-the corpus happens to hand out.
+1. One `prime()` replays the class latents. It has no input token, and it already
+   returns the distribution of the first character.
+2. Chunkwise `forward()`s read a prompt, if there is one. This is the prefill:
+   right-padded 256-character chunks after the latents. The latents run once, and
+   their state is kept.
+3. Every generated character then costs one `step()` against that same cache:
+   O(state) per token, with no growing KV cache.
+
+Sampling is temperature-scaled multinomial over the full 48-way softmax
+(`temperature <= 0` is greedy). `ChaCha8Rng` seeds it, so a run is reproducible.
+
+`--inference` writes into `<artifacts>/inference/`:
+
+- one primed, unprompted story per temperature (0.5 / 0.8 / 1.0),
+- one continuation of each of three fixed prompts.
+
+Training samples a short story at every small validation check, into
+`<artifacts>/sample-epoch-{e}-batch-{b}.txt`. So you can see the text change from
+noise to words to sentences. The checks are spaced in optimizer steps (every
+300), so their rate does not change with the run lengths that the corpus gives.
 
 ## Notes
 
-- Loss is reported both in nats (Burn's cross-entropy) and as **bits per
-  character**; the uniform baseline is `log2(48) = 5.58` bits.
-- The tied head starts *badly*: Burn initialises an `Embedding` from `N(0, 1)`,
-  so at `d_model = 32` the initial logits have variance ~32 and the first batches
-  score 25-40 bits/char instead of 5.58. It is a transient — the opening steps
-  are spent shrinking the embedding — but it does eat the start of the LR
-  schedule. An untied head (`missing_lm_head = false`) does not have it, and the
-  proper fix would be an initializer knob on the library's `VocabNetworkBuilder`.
+- The loss is reported in nats (the cross-entropy of Burn) and as **bits per
+  character**. The uniform baseline is `log2(48) = 5.58` bits.
+- The tied head starts *badly*. Burn initialises an `Embedding` from `N(0, 1)`. So
+  at a `d_model` of 32, the initial logits have a variance of ~32, and the first
+  batches score 25–40 bits/char instead of 5.58. This is a transient: the first
+  steps shrink the embedding. But it uses the start of the LR schedule. An untied
+  head (`missing_lm_head = false`) does not have this problem. The correct fix
+  would be an initializer knob on the `VocabNetworkBuilder` of the library.

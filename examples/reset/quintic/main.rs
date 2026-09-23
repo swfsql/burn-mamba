@@ -1,35 +1,38 @@
 //! # Reset-quintic — `A₅` in one Mamba-3 block, `S₅` in two
 //!
-//! `reset-swap`'s stream over **five** items. The model reads two turns and a
-//! reset and reports, at every position, how `abcde` are arranged: the running
-//! word in `A₅` (`--group a5`: `d = (0 1)(2 3)`, `t = (0 2 4)`, sixty classes) or
-//! in `S₅` (`--group s5`, the default: `s = (0 1)`, `c = (0 1 2 3 4)`, a hundred
-//! and twenty).
+//! The stream of `reset-swap`, over **five** items. The model reads two turns
+//! and a reset. At every position, it reports the arrangement of `abcde`: the
+//! running word in `A₅` (`--group a5`: `d = (0 1)(2 3)`, `t = (0 2 4)`, sixty
+//! classes) or in `S₅` (`--group s5`, the default: `s = (0 1)`,
+//! `c = (0 1 2 3 4)`, a hundred and twenty classes).
 //!
-//! `A₅` is the icosahedron's rotation group — the smallest non-solvable group,
-//! the one behind the unsolvable quintic — and it is `reset-swap`'s block that
-//! holds it: a conjugating ([`RotationKind::Rotor4D`]) 4-block is `SO(3)`, and
-//! `d`/`t` are a half-turn and a third-turn about axes `20.9°` apart. `S₅` is
-//! not a rotation group of anything the block turns: its transpositions act on
-//! `A₅` by the automorphism that swaps the `72°` and `144°` rotations, and only a
-//! reflection does that. No single layer, at any size, of any rotation kind,
-//! tracks `S₅` exactly beyond its sign; two layers do — the first holds the sign,
-//! the second the even part, turned by a step that reads both.
+//! - `A₅` is the rotation group of the icosahedron: the smallest non-solvable
+//!   group, the one behind the unsolvable quintic. The block of `reset-swap`
+//!   holds it. A conjugating ([`RotationKind::Rotor4D`]) 4-block is `SO(3)`, and
+//!   `d`/`t` are a half-turn and a third-turn about axes `20.9°` apart.
+//! - `S₅` is not a rotation group of anything that the block turns. Its
+//!   transpositions act on `A₅` by the automorphism that swaps the `72°` and
+//!   `144°` rotations, and only a reflection does that. No single layer, at any
+//!   size, of any rotation kind, tracks more of `S₅` than its sign. Two layers
+//!   do: the first holds the sign, and the second holds the even part, turned by
+//!   a step that reads both.
 //!
 //! The trained width ([`model::DEFAULT_WIDTH`]) is wider than the hand-built
-//! floor ([`model::floor_width`]) because training lands the group on one head at
-//! a time, and MIMO ranks give that head the readouts the floor spreads over heads.
+//! floor ([`model::floor_width`]). Training puts the group on one head at a
+//! time, and MIMO ranks give that head the readouts that the floor spreads over
+//! heads.
 //!
-//! Downstream flags, after the trailing `--` ([`cli`]):
+//! Flags after the trailing `--` ([`cli`]):
 //!
-//! - `--group a5|s5` — not persisted, so pass it on every run;
+//! - `--group a5|s5`. It is not persisted, so pass it on every run.
 //! - `--rotation complex|quaternion|rotor` (default `rotor`), `--layers N`
 //!   (default 1 for `a5`, 2 for `s5`), and the width `--d-model N --heads N
-//!   --mimo-rank N --expand N` (default `4 2 2 1`, [`model::DEFAULT_WIDTH`]) —
-//!   baked into a **fresh** model config (a persisted one wins on reload);
+//!   --mimo-rank N --expand N` (default `4 2 2 1`, [`model::DEFAULT_WIDTH`]).
+//!   These set a **fresh** model config (on reload, the saved config wins).
 //! - `--train-length N` (default [`dataset::SEQ_LENGTH`]).
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -86,8 +89,9 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // The ladder's schedule: a large step to leave the order-blind solutions,
-        // a small one to settle the rotation onto the exact turns.
+        // The schedule of the ladder: a large step to leave the order-blind
+        // solutions, then a small one to settle the rotation onto the exact
+        // turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

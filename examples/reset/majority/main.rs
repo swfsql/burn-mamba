@@ -1,17 +1,19 @@
-//! # Reset-majority — the smallest task a *selective decay* is needed for
+//! # Reset-majority: the smallest task that needs a *selective decay*
 //!
 //! One Mamba-3 block with a **real** transition (`RotationKind::Real1D`), two
-//! scalar states, no residual: the model reads a stream of `+` / `-` / `R`
-//! symbols and must report, at **every** position, the sign of the running vote
+//! scalar states, and no residual. The model reads a stream of `+` / `-` / `R`
+//! symbols. At **every** position, it must report the sign of the running vote
 //! **since the last `R`**.
 //!
-//! The bottom rung of the `reset-*` ladder — the trivial rotation group, so all
-//! the block has left is its decay — and the one requirement it adds is that
-//! that decay be **data-dependent**: a reset must erase its past outright while
-//! the votes after it stay unweighted. Two adversarial families in the eval set
-//! pin that down from both sides — see [`dataset`](crate::dataset).
+//! This is the bottom rung of the `reset-*` ladder. The rotation group is
+//! trivial, so the decay is all that the block has. The one requirement of the
+//! rung is that the decay is **data-dependent**: a reset must erase its past
+//! fully, and the votes after it must keep equal weights. Two adversarial
+//! families in the eval set test that from both sides (see
+//! [`dataset`](crate::dataset)).
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -57,9 +59,9 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // Finding the selective solution needs a *large* step to leave the
-        // memoryless basin, and a small one to settle into an exact hold once
-        // there — a constant LR does one or the other, so this anneals.
+        // The selective solution needs a *large* step to leave the memoryless
+        // basin, and then a small one to settle into an exact hold. A constant
+        // LR does only one of the two, so this schedule anneals.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

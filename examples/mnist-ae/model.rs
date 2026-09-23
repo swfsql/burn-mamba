@@ -2,11 +2,15 @@
 //! **patch** autoencoder over MNIST (a ViT/MAE-style design with the attention
 //! blocks replaced by Mamba-3 blocks).
 //!
-//! Instead of a 784-long sequence of single-pixel tokens, the 28×28 image is cut
-//! into non-overlapping `patch×patch` tiles (default 7×7 ⇒ a length-16 sequence
-//! of 49-pixel tokens). Short, content-rich tokens are far easier for the SSD
-//! scan to route — and the ~16× shorter sequence frees the VRAM the old
-//! single-pixel design spent on length.
+//! The 28×28 image is cut into non-overlapping `patch×patch` tiles, not into a
+//! 784-long sequence of single-pixel tokens. For example, 7×7 tiles give a
+//! sequence of 16 tokens of 49 pixels, and 4×4 tiles give 49 tokens of 16
+//! pixels. The SSD scan routes short, content-rich tokens much more easily. The
+//! much shorter sequence also frees the VRAM that a single-pixel sequence
+//! spends on length.
+//!
+//! This example is a work in progress. The sizes and hyperparameters in
+//! [`model_config`] are placeholders until a parameter search.
 //!
 //! Both halves are [`MambaBidiLayers`] stacks of Mamba-3 layers.
 //!

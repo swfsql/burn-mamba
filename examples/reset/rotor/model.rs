@@ -1,6 +1,6 @@
-//! The model configuration for the reset-rotor example — one Mamba-3 block with
-//! a **single rotating pair** as its whole state, sized so that nothing but the
-//! block's complex transition can solve the task (see [`model_config`]).
+//! The model configuration for the reset-rotor example: one Mamba-3 block whose
+//! whole state is a **single rotating pair**. Its size makes sure that only the
+//! complex transition of the block can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
@@ -17,44 +17,45 @@ use burn_mamba::prelude::{
 /// yₜ⁽ʰ⁾ = (R(θₜ)Cₕ)ᵀ hₜ⁽ʰ⁾ + Dₕ xₕ(uₜ)
 /// ```
 ///
-/// Orthogonality makes the readout see only the rotation *accumulated between*
-/// the injection and the read: if the state was last written at step `τ`, then
-/// `yₜ = Cₕᵀ R(θ_τ − θₜ) B · (what was written)` — a function of `θₜ − θ_τ`
-/// alone. The task is built around exactly that:
+/// Because the rotation is orthogonal, the readout sees only the rotation
+/// *accumulated between* the write and the read. If the state was last written
+/// at step `τ`, then `yₜ = Cₕᵀ R(θ_τ − θₜ) B · (what was written)`: a function
+/// of `θₜ − θ_τ` alone. The task uses exactly that:
 ///
-/// - **`R` writes the state.** `x(R) ≠ 0` and `A(R) ≈ −20` (so `ᾱ ≈ 0` wipes
-///   what was there), leaving `h = R(θ_R)B` — the rotor's zero detent, recorded
-///   at whatever phase the sequence happens to be at.
-/// - **`±` only turn it.** `x(±) = 0`, so nothing is written and `ᾱ ≈ 1` holds
-///   the state; all that happens is `θ` advancing by `±2π/3` — one detent.
-/// - **The two heads read the same phase on two axes.** They share `Δ` (hence
-///   the same angle), and their `C` differ by a quarter turn through the
-///   per-head bias `c_bias_hmr`, so `(y₀, y₁) ∝ (cos φ, −sin φ)` with
+/// - **`R` writes the state.** `x(R) ≠ 0` and `A(R) ≈ −20` (so `ᾱ ≈ 0` erases
+///   the old state). That leaves `h = R(θ_R)B`: the zero detent of the rotor,
+///   recorded at the current phase of the sequence.
+/// - **`±` only turn it.** `x(±) = 0`, so nothing is written, and `ᾱ ≈ 1` holds
+///   the state. Only `θ` changes, by `±2π/3` (one detent).
+/// - **The two heads read the same phase on two axes.** They share `Δ` (so the
+///   same angle). The per-head bias `c_bias_hmr` puts their `C` a quarter turn
+///   apart. So `(y₀, y₁) ∝ (cos φ, −sin φ)`, with
 ///   `φ = θₜ − θ_R = (2π/3)·turns`. The three-class head is then a phase
 ///   decoder: logit `j` ∝ `cos(φ − 2πj/3)`.
 ///
-/// The absolute phase drifts forever (it is never reset, and `wrap_angle` only
-/// folds it mod `2π`); only the *difference* since the last write is read, which
-/// is what makes the construction exact rather than approximate.
+/// The absolute phase drifts forever. It is never reset, and `wrap_angle` only
+/// folds it mod `2π`. The readout reads only the *difference* since the last
+/// write, and that makes the construction exact, not approximate.
 ///
-/// Config choices that are load-bearing:
+/// Necessary config choices:
 ///
-/// - `state_rank = 2` ⇒ exactly one rotation pair, and with `rope_fraction = 1`
-///   the whole state rotates. The rotor *is* the state.
+/// - `state_rank = 2` ⇒ exactly one rotation pair. With `rope_fraction = 1`, the
+///   whole state rotates. The rotor *is* the state.
 /// - `per_head_dim = 1`, `expand = 1` ⇒ `nheads = 2`: the cos axis and the sin
 ///   axis, and nothing else.
 /// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
-///   weight, and switching it off is structural — no `λ` segment in the
+///   weight. Switching it off is structural: no `λ` segment in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
-/// - `ignore_last_residual` zeroes the single layer's residual, so `out_proj`
-///   reads the block's output *alone* — without it the head also sees the
-///   embedding of the current token, which cannot give the answer but does
-///   muddy the claim. (Mamba-3 has no short convolution, so there is no local
-///   window to close off: `conv_kernel` has no counterpart here.)
+/// - `ignore_last_residual` zeroes the residual of the single layer, so
+///   `out_proj` reads the output of the block *alone*. Without it, the head also
+///   sees the embedding of the current token. That embedding cannot give the
+///   answer, but it makes the claim less clear. (Mamba-3 has no short
+///   convolution, so there is no local window to close: `conv_kernel` has no
+///   counterpart here.)
 ///
-/// `d_model = 2` (rather than 1) is what keeps this constructible in closed
-/// form: with a 2-D token every projection is an independent affine functional,
-/// so `ϑ` can read the turn direction while `x` and `A` read the reset flag.
+/// `d_model = 2` (not 1) keeps this constructible in closed form. With a 2-D
+/// token, every projection is an independent affine functional, so `ϑ` can read
+/// the turn direction while `x` and `A` read the reset flag.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (the cos head
     // and the sin head), each with its own Δ, A and D.

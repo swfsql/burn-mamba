@@ -918,7 +918,7 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 ///   and the (empty) accumulator comes back. `rot` is `None` there, because
 ///   the block projects no rotation channels.
 /// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE of the
-///   reference. The cumulative angle ([`prefix_sum`], continued from `prev`),
+///   reference. The cumulative angle (`helpers::prefix_sum`, continued from `prev`),
 ///   then [`apply_rope_partial`].
 /// - [`Quaternion4D`](RotationKind::Quaternion4D): the per-step unit quaternion
 ///   [`quat_from_scaled_axis`] (the in-projection generators, scaled per head

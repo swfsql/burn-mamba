@@ -247,8 +247,8 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
         RotationKind::Real1D => unreachable!("{rotation:?} has no rotation channels"),
         // A scaled rotation axis per head: `i` turns π about x, `j` about y.
         // The block projects the generators **per head** (`nheads · 3` channels
-        // here), so every head gets its own copy — this construction wants both
-        // to read the same rotation, but the block no longer forces that.
+        // here), so every head gets its own copy. This construction wants both
+        // heads to read the same rotation, but the block does not force that.
         RotationKind::Quaternion4D => (0..NHEADS)
             .flat_map(|_| {
                 [

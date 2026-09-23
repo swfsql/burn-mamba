@@ -15,7 +15,8 @@
 //!    [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag) (`1` for the
 //!    default, `u` for
 //!    [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)).
-//! 4. **Cumulative rotation** ([`RotationState`]): the rotation accumulated up
+//! 4. **Cumulative rotation**
+//!    ([`RotationState`](crate::mamba3::rotation::RotationState)): the rotation accumulated up
 //!    to position `t`, to continue the data-dependent rotation.
 //! 5. **Positive-system slots**: `ln Λ` of a Kalman gain and `c` of a tropical
 //!    register, when the block has them.

@@ -5,14 +5,19 @@
 //! `ssd_chunk_state.py`, `ssd_bmm.py`, `ssd_state_passing.py` and
 //! `ssd_chunk_scan.py`):
 //!
-//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
-//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul.
-//! - **K3** [`k3_ssd_chunk_state`] — the contribution of each chunk to its end
-//!   state (from a zero state at the chunk start).
-//! - **K4** [`k4_ssd_state_passing`] — the serial inter-chunk scan that carries
-//!   the running state across chunk boundaries.
-//! - **K5** [`k5_ssd_chunk_scan`] — adds the intra-chunk (attention-like) and
-//!   inter-chunk (state-carried) contributions into the output `y`.
+//! - **K1** [`k1_ssd_chunk_cumsum`](crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum)
+//!   — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`](crate::mamba2::ssd::serial::k2_ssd_bmm) — the
+//!   intra-chunk `C·Bᵀ` block matmul.
+//! - **K3** [`k3_ssd_chunk_state`](crate::mamba2::ssd::serial::k3_ssd_chunk_state)
+//!   — the contribution of each chunk to its end state (from a zero state at
+//!   the chunk start).
+//! - **K4** [`k4_ssd_state_passing`](crate::mamba2::ssd::serial::k4_ssd_state_passing)
+//!   — the serial inter-chunk scan that carries the running state across chunk
+//!   boundaries.
+//! - **K5** [`k5_ssd_chunk_scan`](crate::mamba2::ssd::serial::k5_ssd_chunk_scan)
+//!   — adds the intra-chunk (attention-like) and inter-chunk (state-carried)
+//!   contributions into the output `y`.
 //!
 //! The values and gradients are identical to those of
 //! [`minimal`](crate::mamba2::ssd::minimal). The serial form keeps per-chunk

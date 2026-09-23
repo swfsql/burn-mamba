@@ -1,24 +1,25 @@
-//! # Reset-spinor — the smallest task a *quaternion* Mamba-3 block is needed for
+//! # Reset-spinor: the smallest task that needs a *quaternion* Mamba-3 block
 //!
-//! The corollary of `reset-rotor`, one rung further up the ladder. Same shape of
-//! stream — two kinds of turn and a reset — but the two turns **do not commute**:
-//! the model reads `i` / `j` / `R` and must report, at every position, the
-//! running product in the quaternion group `Q₈` since the last reset (one of
+//! The same argument as `reset-rotor`, one rung up the ladder. The stream has
+//! the same shape, two kinds of turn and a reset. But the two turns **do not
+//! commute**. The model reads `i` / `j` / `R`. At every position, it must report
+//! the running product in the quaternion group `Q₈` since the last reset (one of
 //! `±1, ±i, ±j, ±k`).
 //!
-//! Where `reset-rotor` needs the transition to be *complex* — a rotation, so the
-//! state can be periodic — this needs it to be **non-abelian**: `ij = k` but
-//! `ji = −k`, so only the *order* decides, while an abelian rotation accumulates
-//! a `cumsum` of angles and a sum forgets order, computing exactly the
-//! abelianisation `Q₈/{±1}`. `Q₈` is the smallest group that the block's own
-//! [`RotationKind::Quaternion4D`] state contains and its
+//! `reset-rotor` needs a *complex* transition: a rotation, so the state can be
+//! periodic. This rung needs a **non-abelian** transition. `ij = k` but
+//! `ji = −k`, so only the *order* decides. An abelian rotation accumulates a
+//! `cumsum` of angles, and a sum forgets order: it computes exactly the
+//! abelianisation `Q₈/{±1}`. `Q₈` is the smallest group that the
+//! [`RotationKind::Quaternion4D`] state of the block contains and its
 //! [`RotationKind::Complex2D`] state does not.
 //!
-//! Carries a downstream `--rotation complex|quaternion|rotor` flag (default
-//! `quaternion`) after the trailing `--`; it selects the rotation baked into a
-//! **fresh** model config (a persisted one wins on reload).
+//! After the trailing `--`, the example takes a `--rotation
+//! complex|quaternion|rotor` flag (default `quaternion`). It selects the
+//! rotation of a **fresh** model config (on reload, the saved config wins).
 //!
-//! The task, the measurements and how to run it: `examples/reset/README.md`.
+//! `examples/reset/README.md` gives the task, the measurements and how to run
+//! it.
 
 #![allow(clippy::let_and_return)]
 #![allow(clippy::module_inception)]
@@ -65,7 +66,7 @@ pub fn launch(app_args: &AppArgs) {
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // As in `reset-rotor`: a large step to leave the order-blind solution,
-        // a small one to settle the rotation onto exact half-turns.
+        // then a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

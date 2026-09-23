@@ -1,25 +1,29 @@
 //! # TinyStories character-level language model
 //!
 //! An auto-regressive Mamba-3 LM over single **characters** of the
-//! [TinyStories-GPT4-clean] corpus: two Mamba-3 blocks (cycled to an 8-deep
-//! virtual stack over Multi-Gate residuals) between a **tied** 48-character
-//! embedding and its transpose, 39,632 parameters all told.
+//! [TinyStories-GPT4-clean] corpus: Mamba-3 blocks (cycled to a virtual stack
+//! over Multi-Gate residuals) between a **tied** 48-character embedding and its
+//! transpose. This example is a work in progress: its sizes and
+//! hyperparameters are placeholders until a parameter search.
 //!
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
 //!
-//! One item is one **story**, opened by four class latents rather than by a
-//! separator character. Training scores every position of a 256-character window
-//! against its next character — plus, in the story's first window, the latents'
-//! readout against its first character — and walks the story's windows carrying
-//! the (detached) state from each into the next for as long as the frontier gate
-//! admits it; see the README's "Story boundaries" and "Runs and the frontier".
-//! Inference replays those latents with one `prime` (which is already the first
-//! character's distribution), optionally prefills a prompt with one chunkwise
-//! `forward`, and then samples one character per `step`.
+//! One item is one **story**. Four class latents start it, not a separator
+//! character.
 //!
-//! Corpus knobs are forwarded after the trailing `--` (they are written into the
-//! artifacts' `training_config.json`, so resuming a run keeps them), with the
-//! SSD path and the step profiler ([`cli`]):
+//! - Training scores every position of a window against its next character. In
+//!   the first window of the story, it also scores the readout of the latents
+//!   against the first character.
+//! - Training walks the windows of the story. It carries the (detached) state of
+//!   each window into the next, while the frontier gate accepts it. See
+//!   "Story boundaries" and "Runs and the frontier" in the README.
+//! - Inference replays the latents with one `prime` (which already returns the
+//!   distribution of the first character). It prefills an optional prompt with
+//!   chunkwise `forward`s, then samples one character per `step`.
+//!
+//! The corpus knobs, the SSD path and the step profiler ([`cli`]) go after the
+//! trailing `--`. The corpus knobs are written into the `training_config.json`
+//! of the artifacts, so a resumed run keeps them:
 //!
 //! ```bash
 //! # train and then sample (downloads the 673MB parquet once, if not cached yet)
@@ -65,24 +69,15 @@ pub fn launch(app_args: &AppArgs) {
     let autodiff_device = device.clone().autodiff();
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
-    // setup training and model configs
-    // Batch size is the single largest lever on this model's final loss, and it
-    // is *not* a capacity knob: halving it from 16 to 8 beat the entire learning
-    // rate ladder (a 6x increase), and it kept paying at 4. 8 is where the
-    // accuracy-per-minute stops being worth it — batch 4 costs twice the wall
-    // clock for a fraction of the gain.
+    // setup training and model configs (placeholder values, see the header)
     let batch_size = 8;
-    // The validation curve is still improving at epoch 14 and flattens at 15-16,
-    // so this is the schedule's own natural length, not an arbitrary budget.
     let num_epochs = 16;
     let loaded = app_args.load_training_config::<TinyStoriesConfig>();
     let is_fresh = loaded.is_none();
     let mut config = loaded.unwrap_or_else(|| {
         println!("Initializing new training config");
-        // Muon on the block's hidden weight matrices, AdamW on everything else.
-        // It is the smallest of this example's optimizer wins but it stacks with
-        // the other two (higher LR, smaller batch) rather than overlapping them.
-        // `--adamw` returns to plain AdamW.
+        // Muon on the hidden weight matrices of the block, AdamW on everything
+        // else. `--adamw` selects plain AdamW.
         let optimizer = app_args.optimizer_or(OptimizerKind::MuonAdamW);
         TinyStoriesConfig::new(
             TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
@@ -94,27 +89,23 @@ pub fn launch(app_args: &AppArgs) {
     });
     cli.overrides.apply(&mut config);
     if is_fresh {
-        // The cosine schedule spans the whole run, so it can only be sized once
-        // the corpus knobs are settled. It is counted in *windows*, not in
-        // dataloader items, and the training loop charges the schedule for the
-        // windows the frontier gate skipped too — so a stalling gate shortens
-        // the run rather than leaving the cosine unfinished.
+        // The cosine schedule spans the whole run, so it can be sized only after
+        // the corpus knobs are known. It counts *windows*, not dataloader items.
+        // The training loop also charges the schedule for the windows that the
+        // frontier gate skipped. So a stalling gate shortens the run, and the
+        // cosine still finishes.
         //
         // One item is one story, and a batch runs the windows of its *longest*
-        // story — so the schedule is sized from that maximum, not from the mean:
-        // ~1200 characters is the expected longest of `batch_size = 8` draws
-        // (the corpus's mean is ~820, its 90th percentile 1103, its longest
-        // story 4149).
+        // story. So the schedule uses that maximum, not the mean: ~1200
+        // characters is the expected longest of `batch_size = 8` draws (the mean
+        // of the corpus is ~820, its 90th percentile 1103, its longest story
+        // 4149).
         const CHARS_PER_LONGEST_STORY: usize = 1200;
         let batches_per_epoch = config.train_stories / config.training.batch_size;
         let iterations_per_epoch =
             batches_per_epoch * CHARS_PER_LONGEST_STORY.div_ceil(config.seq_len);
         config.training.lr = Lr::CosineAnnealing(
             CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
-                // The model is optimization-limited, not capacity-limited, and
-                // this is where that shows: 2e-3 (the obvious default) leaves a
-                // lot on the table. The ladder improves monotonically to 16e-3,
-                // is flat to 24e-3, and only turns over at 32e-3.
                 .with_max_lr(12e-3)
                 .with_min_lr(12e-4)
                 .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch

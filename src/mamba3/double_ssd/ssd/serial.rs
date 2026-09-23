@@ -7,12 +7,16 @@
 //! β-pass of the double-SSD decomposition use these kernels (the caller
 //! pre-scales `v` by γ or β and shifts the β inputs).
 //!
-//! - **K1** [`k1_ssd_chunk_cumsum`] — per-chunk cumulative `Δ·A` decays.
-//! - **K2** [`k2_ssd_bmm`] — the intra-chunk `C·Bᵀ` block matmul (fused `L·M`).
-//! - **K3** [`k3_ssd_chunk_state`] — the end-state contribution of each chunk.
-//! - **K4** [`k4_ssd_state_passing`] — the serial inter-chunk scan.
-//! - **K5** [`k5_ssd_chunk_scan`] — adds the intra- and inter-chunk parts into
-//!   `y`.
+//! - **K1** [`k1_ssd_chunk_cumsum`](crate::mamba3::double_ssd::ssd::serial::k1_ssd_chunk_cumsum)
+//!   — per-chunk cumulative `Δ·A` decays.
+//! - **K2** [`k2_ssd_bmm`](crate::mamba3::double_ssd::ssd::serial::k2_ssd_bmm)
+//!   — the intra-chunk `C·Bᵀ` block matmul (fused `L·M`).
+//! - **K3** [`k3_ssd_chunk_state`](crate::mamba3::double_ssd::ssd::serial::k3_ssd_chunk_state)
+//!   — the end-state contribution of each chunk.
+//! - **K4** [`k4_ssd_state_passing`](crate::mamba3::double_ssd::ssd::serial::k4_ssd_state_passing)
+//!   — the serial inter-chunk scan.
+//! - **K5** [`k5_ssd_chunk_scan`](crate::mamba3::double_ssd::ssd::serial::k5_ssd_chunk_scan)
+//!   — adds the intra- and inter-chunk parts into `y`.
 //!
 //! The values and gradients are identical to those of
 //! [`minimal`](crate::mamba3::double_ssd::ssd::minimal). SISO

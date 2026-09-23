@@ -1,6 +1,6 @@
-//! The model configuration for the reset-majority example — one Mamba-3 block
-//! whose whole state is a **single real scalar** per head, sized so that nothing
-//! *but* the block can solve the task (see [`model_config`]).
+//! The model configuration for the reset-majority example: one Mamba-3 block
+//! whose whole state is a **single real scalar** per head. Its size makes sure
+//! that only the block can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
@@ -18,43 +18,44 @@ use burn_mamba::prelude::{
 /// ```
 ///
 /// with `x` `silu(affine(uₜ))`, `B`/`C` QK-normed affines of `uₜ`, and `Δ`, `A`,
-/// `D` **per head**. The task is built around exactly that shape:
+/// `D` **per head**. The task uses exactly that shape:
 ///
-/// - **head 0 is the ballot box.** `A₀` reads the reset flag: at the block's
-///   `a_floor` on `±` (so `ᾱ₀ ≈ 1` and `h₀` is an unweighted running sum) and
-///   large on `RESET` (so `ᾱ₀ ≈ 0` wipes it). `x₀(±) = ±v`, `x₀(RESET) = 0`,
-///   `D₀ = 0`, so `y₀ = C·h₀` is the running vote.
-/// - **head 1 is a fixed reference.** `Δ₁ ≈ 0` always, so `h₁ ≈ 0` and
+/// - **Head 0 is the ballot box.** `A₀` reads the reset flag. On `±` it is at
+///   the `a_floor` of the block, so `ᾱ₀ ≈ 1` and `h₀` is an unweighted running
+///   sum. On `RESET` it is large, so `ᾱ₀ ≈ 0` erases the sum. `x₀(±) = ±v`,
+///   `x₀(RESET) = 0` and `D₀ = 0`, so `y₀ = C·h₀` is the running vote.
+/// - **Head 1 is a fixed reference.** `Δ₁ ≈ 0` always, so `h₁ ≈ 0` and
 ///   `y₁ = D₁·x₁ = c > 0`, a constant.
 ///
-/// The network's `final_norm` then keeps only the **direction** of `(y₀, y₁)`.
-/// That is exactly the right shape for the task: the direction's sign is the
-/// answer, and the reference axis keeps it well defined (and the margin
-/// proportional to the vote) when `y₀` is near zero. A bounded, sign-like output
-/// is all this block *can* emit at this width, which is why the task is a
+/// The `final_norm` of the network then keeps only the **direction** of
+/// `(y₀, y₁)`. That is the right shape for the task. The sign of the direction
+/// is the answer. When `y₀` is near zero, the reference axis keeps the direction
+/// well defined, and the margin proportional to the vote. At this width, the
+/// block *can* emit only a bounded, sign-like output. That is why the task is a
 /// classification and not a regression.
 ///
-/// Config choices that are load-bearing:
+/// Necessary config choices:
 ///
-/// - `state_rank = 1` with [`RotationKind::Real1D`] — the bottom rung of the
-///   rotation ladder, the trivial group. The transition is a plain real decay,
-///   so the block projects no rotation channels and caches no rotation
-///   accumulator: a *scalar* state, and the ladder's other three rungs are
-///   exactly what this one cannot do. (`Real1D` is also the one kind that
-///   admits an odd `state_rank`: there is no pair to rotate.)
-/// - Mamba-3 has no short convolution, so the SSM state is automatically the
-///   model's only memory — there is no local window to shortcut through.
+/// - `state_rank = 1` with [`RotationKind::Real1D`]: the bottom rung of the
+///   rotation ladder, the trivial group. The transition is a plain real decay.
+///   So the block projects no rotation channels and caches no rotation
+///   accumulator. The state is a *scalar*, and the other rungs of the ladder do
+///   exactly what this one cannot. (`Real1D` is also the one kind that accepts
+///   an odd `state_rank`: there is no pair to rotate.)
+/// - Mamba-3 has no short convolution, so the SSM state is the only memory of
+///   the model. There is no local window to use as a shortcut.
 /// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
-///   weight, and switching it off is structural — no `λ` segment in the
+///   weight. Switching it off is structural: no `λ` segment in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
-/// - `ignore_last_residual` zeroes the single layer's residual, so the head
-///   reads the block's output *alone*. Without it it also sees the embedding of
-///   the current token, which cannot give the answer but does muddy the claim.
+/// - `ignore_last_residual` zeroes the residual of the single layer, so the
+///   head reads the output of the block *alone*. Without it, the head also sees
+///   the embedding of the current token. That embedding cannot give the answer,
+///   but it makes the claim less clear.
 ///
-/// `d_model = 2` (rather than 1) is what keeps this constructible in closed
-/// form: with a 2-D token every projection is an independent affine functional,
-/// so `A` can read the reset flag while `x` reads the vote. At `d_model = 1`
-/// they are all monotone functions of the same scalar.
+/// `d_model = 2` (not 1) keeps this constructible in closed form. With a 2-D
+/// token, every projection is an independent affine functional, so `A` can read
+/// the reset flag while `x` reads the vote. At `d_model = 1`, they are all
+/// monotone functions of the same scalar.
 pub fn model_config() -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (one head for
     // the vote, one for the reference), each with its own Δ, A and D.

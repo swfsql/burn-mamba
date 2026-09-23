@@ -43,17 +43,18 @@
   ablation at equal budget. That last row sets the alphabet of the second
   rung: at six values, a trained stock block solves it.
 - **`mnist-class`**: a small Mamba-3 model that classifies MNIST digits.
-- **`mnist-ae`**: a symmetric bidirectional Mamba-3 autoencoder over the
-  784-pixel MNIST sequence. The decoder rebuilds the whole image in one
-  parallel pass, and reads only a configurable latent (`-- --latents N`).
-- **`tiny-stories`**: a tiny character-level Mamba-3 language model on the
-  cleaned [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean)
+- **`mnist-ae`** (work in progress): a symmetric bidirectional Mamba-3
+  autoencoder over a sequence of MNIST patches. The decoder rebuilds the whole
+  image in one parallel pass, and reads only a configurable latent
+  (`-- --latents N`).
+- **`tiny-stories`** (work in progress): a tiny character-level Mamba-3
+  language model on the cleaned
+  [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean)
   corpus, with a tied 48-character embedding at both ends. Its README covers
   the case-folded alphabet, the download, the class latents that mark the
   start of a story (and that `prime()` replays for seedless sampling), the
-  prefill-`forward()` / decode-`step()` sampler, the runs of windows that
-  carry the state across a story, and a measured table of what truncated
-  BPTT costs a language model.
+  prefill-`forward()` / decode-`step()` sampler, and the runs of windows that
+  carry the state across a story.
 
 #### Examples Structure
 

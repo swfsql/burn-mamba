@@ -510,7 +510,7 @@ impl Mamba3 {
 
     /// Width of the Kalman noise segment `r` of the in-projection: one channel
     /// per (head, micro-step) under [`Gain::KalmanProjectedNoise`], **`0`** for
-    /// every other gain. [`Self::split_positive`] removes it from the tail,
+    /// every other gain. `split_positive` removes it from the tail,
     /// just inside the tropical segments.
     pub fn noise_channels_total(&self) -> usize {
         if self.gain.projects_noise() {
@@ -522,8 +522,8 @@ impl Mamba3 {
 
     /// Width of the tropical segments `(a, b)` of the in-projection: two
     /// channels per (head, micro-step) under [`Tropical::MaxPlus`], **`0`**
-    /// otherwise. It is the outermost trailing segment, so
-    /// [`Self::split_positive`] removes it first.
+    /// otherwise. It is the outermost trailing segment, so `split_positive`
+    /// removes it first.
     pub fn tropical_channels_total(&self) -> usize {
         if self.tropical.is_on() {
             2 * self.micro_steps * self.nheads()

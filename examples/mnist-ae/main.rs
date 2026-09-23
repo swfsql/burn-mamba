@@ -1,19 +1,25 @@
 //! # MNIST autoencoder example
 //!
 //! A symmetric, fully **bidirectional** ViT/MAE-style **patch** autoencoder over
-//! MNIST (attention blocks replaced by Mamba-3). The 28×28 image is cut into
-//! `patch×patch` tiles (default 7×7 ⇒ a length-16 sequence); the encoder
-//! compresses it to a small latent `z` (the configurable bottleneck); the
-//! decoder reconstructs every patch in one parallel pass **reading only from
-//! `z`** (a learned positional query FiLM-modulated by `z`). See [`model`] for
-//! the architecture and the design rationale.
+//! MNIST (attention blocks replaced by Mamba-3).
 //!
-//! The latent width is chosen with `-- --latents N` (default 16, [`cli`]).
-//! `Quaternion4D` rotation, heavy virtual layers, BCE reconstruction loss.
+//! - The 28×28 image is cut into `patch×patch` tiles.
+//! - The encoder compresses it to a small latent `z` (the configurable
+//!   bottleneck).
+//! - The decoder reconstructs every patch in one parallel pass that **reads only
+//!   from `z`** (a learned positional query, FiLM-modulated by `z`).
 //!
-//! The optimizer is AdamW unless the shared flags say otherwise; `--sgd` trains
-//! with plain SGD, the one optimizer whose training step can replay from a
-//! captured CUDA graph (`--no-graph` steps it eagerly).
+//! See [`model`] for the architecture and the design rationale. This example is
+//! a work in progress: its sizes and hyperparameters are placeholders until a
+//! parameter search.
+//!
+//! `-- --latents N` sets the latent width (default 16, [`cli`]). The block uses
+//! the `Quaternion4D` rotation and virtual layers. The loss is a BCE
+//! reconstruction loss.
+//!
+//! The optimizer is AdamW, unless the shared flags select a different one.
+//! `--sgd` trains with plain SGD, the one optimizer whose training step can
+//! replay from a captured CUDA graph (`--no-graph` runs it eagerly).
 //!
 //! ## Run
 //!
@@ -21,7 +27,7 @@
 //! # quick type-check on flex (fp32)
 //! cargo check --example mnist-ae --features "backend-flex"
 //!
-//! # train + reconstruct on CUDA (long-running); 64-latent bottleneck
+//! # train + reconstruct on CUDA (long-running), 16-latent bottleneck
 //! cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference
 //!
 //! # SGD, the training step replayed from a graph
@@ -63,16 +69,17 @@ pub fn launch(app_args: &AppArgs) {
     let autodiff_device = device.clone().autodiff();
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
-    // setup training and model configs
+    // setup training and model configs (placeholder values, see the header)
     let batch_size = 16;
     let num_epochs = 3;
     let training_items = 60_000;
     let iterations_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // Muon reuses its fallback's LR (`MatchRmsAdamW` sizes its update to
-        // AdamW's RMS), so the peak rate follows the fallback: SGD's raw
-        // gradient step wants a larger one, at the same peak-to-floor ratio.
+        // Muon uses the LR of its fallback (`MatchRmsAdamW` scales its update to
+        // the RMS of AdamW), so the peak rate follows the fallback. The raw
+        // gradient step of SGD needs a larger peak, at the same peak-to-floor
+        // ratio.
         let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
         let (max_lr, min_lr) = match optimizer {
             OptimizerKind::AdamW | OptimizerKind::MuonAdamW => (1e-3, 5e-5),
@@ -83,9 +90,8 @@ pub fn launch(app_args: &AppArgs) {
             .with_batch_size(batch_size)
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
-                // Span the cosine decay over the whole run — a 1-epoch period
-                // collapsed the LR to its 1e-5 floor after one epoch and stalled
-                // further progress.
+                // The cosine decay spans the whole run. A 1-epoch period would
+                // drop the LR to its floor after one epoch.
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
                     .with_max_lr(max_lr)
                     .with_min_lr(min_lr)
