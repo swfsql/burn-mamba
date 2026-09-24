@@ -25,14 +25,28 @@ use burn::prelude::*;
 /// scanned length. This function scans the folded axis instead: the axis that
 /// the Kalman gate needs, because every micro-step reads its decay.
 ///
+/// # In a packed row
+///
+/// `start_bs` (`[batch, len]`) is the first position of the segment of each
+/// position in a packed row (`-1` before the first reset), or `None`. Each
+/// segment then scans alone, from `carry_bh`.
+///
 /// # Shapes
 /// - `a_bsh`, `b_bsh` : `[batch, len, nheads]`
 /// - `carry_bh`       : `[batch, nheads]`
 /// - out              : `[batch, len, nheads]`
-pub fn register(a_bsh: Tensor<3>, b_bsh: Tensor<3>, carry_bh: Tensor<2>) -> Tensor<3> {
+pub fn register(
+    a_bsh: Tensor<3>,
+    b_bsh: Tensor<3>,
+    carry_bh: Tensor<2>,
+    start_bs: Option<&Tensor<2, Int>>,
+) -> Tensor<3> {
     let elements = Affine {
         a: a_bsh.clamp_min(LOG_ZERO),
         b: b_bsh.clamp_min(LOG_ZERO),
     };
-    scan::prefix(elements).apply(carry_bh)
+    match start_bs {
+        None => scan::prefix(elements).apply(carry_bh),
+        Some(start_bs) => scan::prefix_in_segments(elements, start_bs).apply(carry_bh),
+    }
 }

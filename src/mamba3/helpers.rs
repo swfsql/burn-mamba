@@ -153,6 +153,22 @@ pub(crate) fn scan_block(len: usize) -> usize {
 /// The additions associate differently from a sequential scan, so the two
 /// agree to rounding, not bit-for-bit.
 ///
+/// # On the circle
+///
+/// `period = Some(p)` scans on the circle `ℝ/pℤ`. The cumulative rotation
+/// angle uses `p = 2π`, because it only goes into `sin`/`cos`. The result is
+/// then the prefix sum **modulo `p`**, not reduced into one range. What changes
+/// is the size of the partial sums:
+///
+/// - the block totals are reduced mod `p`,
+/// - their exclusive prefix is this same scan one level up, so it is reduced
+///   too.
+///
+/// So each output is one in-block prefix plus a carry of at most `p/2`, for any
+/// `len`. With `None`, the carry grows with `len`, and so does its f32
+/// rounding: at `|θ| = 10⁵`, one f32 step is `0.008`. The reduction subtracts a
+/// detached multiple of `p`, so the gradient is that of the plain sum.
+///
 /// # Shapes
 /// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
 /// - `init` : `t`'s shape with `1` along `dim` (it broadcasts along it)
@@ -161,6 +177,7 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     t: Tensor<D>,
     dim: usize,
     init: Option<Tensor<D>>,
+    period: Option<f32>,
 ) -> Tensor<D> {
     let len = t.dims()[dim];
     let block = scan_block(len);
@@ -199,10 +216,30 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     // axis so the carry broadcasts back over the block. `init` joins the carry
     // here, for free — one add serves both.
     let totals = inner.clone().narrow(dim + 1, block - 1, 1);
-    let carry = totals.clone().cumsum(dim) - totals;
-    let carry = match init {
-        Some(init) => carry + init.unsqueeze_dim::<DP1>(dim + 1),
-        None => carry,
+    let carry = match period {
+        None => {
+            let carry = totals.clone().cumsum(dim) - totals;
+            match init {
+                Some(init) => carry + init.unsqueeze_dim::<DP1>(dim + 1),
+                None => carry,
+            }
+        }
+        Some(period) => {
+            // `x − k·p` with a detached `k`: the value moves by whole
+            // periods, and the gradient is 1.
+            let reduce = |x: Tensor<D>| {
+                let k = (x.clone().detach() / period).round();
+                x - k * period
+            };
+            // The run totals are one more sequence on the circle. So their
+            // exclusive prefix is the inclusive one of this same scan, minus
+            // the own total, and every partial sum on the way stays reduced.
+            let mut totals_dims = dims;
+            totals_dims[dim] = nblocks;
+            let totals = reduce(totals.reshape(totals_dims));
+            let inclusive = prefix_sum::<D, DP1>(totals.clone(), dim, init, Some(period));
+            reduce(inclusive - totals).unsqueeze_dim::<DP1>(dim + 1)
+        }
     };
 
     let joined = (inner + carry).reshape(dims);
@@ -407,12 +444,17 @@ pub mod prim {
 /// The front is **zero-padded** (in log space), not clamped to what the call
 /// holds. For `p < L`, the missing factors are exactly those that already
 /// scaled the `v` slots of the cache when they were stored (see
-/// [`tail_decay`]).
+/// [`tail_decay`]). A packed row (`segments`) pads the front of each segment
+/// the same way: the segment reads the cache slots there.
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, sequence, nheads]` (`Δ·A`, the log-decay)
 /// - out      : `[batch, sequence, nheads]`
-pub fn interior_gap_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
+pub fn interior_gap_decay(
+    da_bsh: Tensor<3>,
+    lag: usize,
+    segments: Option<&crate::packing::Segments>,
+) -> Option<Tensor<3>> {
     if lag <= 1 {
         return None;
     }
@@ -422,6 +464,10 @@ pub fn interior_gap_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
     for d in 1..lag {
         let zeros_bdh = Tensor::zeros([batch, d, nheads], &device);
         let shifted = Tensor::cat(vec![zeros_bdh, da_bsh.clone().narrow(1, 0, sequence - d)], 1);
+        let shifted = match segments {
+            Some(segments) => crate::padding::fill_padded(shifted, &segments.heads(d), 0.0),
+            None => shifted,
+        };
         window_bsh = window_bsh + shifted;
     }
     Some(window_bsh.exp())

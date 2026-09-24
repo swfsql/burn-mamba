@@ -567,12 +567,14 @@ impl Mamba3 {
         &self,
         noise_bsh: Option<Tensor<3>>,
         carry_bh: Option<Tensor<2>>,
+        segments: Option<&crate::packing::Segments>,
     ) -> Option<crate::mamba3::positive::kalman::GainInput> {
         let log_kappa_h = self.kalman_log_kappa_h.as_ref()?.val();
         Some(crate::mamba3::positive::kalman::GainInput {
             log_kappa_h,
             noise_bsh,
             carry_bh: carry_bh.expect("a Kalman gain keeps its ln Λ cache slot"),
+            start_bs: segments.map(|s| s.start_bs.clone()),
         })
     }
 
@@ -603,6 +605,10 @@ impl Mamba3 {
     /// for a right-padded call. Each carry then comes from the last real
     /// position of its slot, or is the incoming one for a slot with none.
     ///
+    /// `segments` marks the resets of a packed call ([`crate::packing`]). The
+    /// register then restarts at each of them from the incoming carry. A carry
+    /// from before the last reset of a slot is the incoming one.
+    ///
     /// # Shapes
     /// - `y_btmhp`           : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
     /// - `log_precision_bsh` : `[batch, tokens·u, nheads]`, from the discretisation
@@ -617,23 +623,37 @@ impl Mamba3 {
         tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
         tropical_carry_bh: Option<Tensor<2>>,
         end: Option<(Tensor<1, Int>, Option<Tensor<2>>)>,
+        segments: Option<&crate::packing::Segments>,
     ) -> (Tensor<5>, Option<Tensor<2>>, Option<Tensor<2>>) {
         let u = self.micro_steps;
         let tropical_bsh = tropical_ab_bsh.map(|(a_bsh, b_bsh)| {
             let carry_bh = tropical_carry_bh
                 .clone()
                 .expect("a tropical register keeps its cache slot");
-            crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh)
+            crate::mamba3::positive::tropical::register(
+                a_bsh,
+                b_bsh,
+                carry_bh,
+                segments.map(|s| &s.start_bs),
+            )
         });
         let (end_b, log_precision_carry_bh) = end.unzip();
         let last_bh = |t_bsh: &Tensor<3>, carry_bh: Option<Tensor<2>>| match (&end_b, carry_bh) {
-            (Some(end_b), Some(carry_bh)) => crate::padding::window(
-                Tensor::cat(vec![carry_bh.unsqueeze_dim::<3>(1), t_bsh.clone()], 1),
-                1,
-                end_b.clone(),
-                1,
-            )
-            .squeeze_dim::<2>(1),
+            (Some(end_b), Some(carry_bh)) => {
+                // The incoming carry, then the run.
+                let all_bsh = Tensor::cat(vec![carry_bh.unsqueeze_dim::<3>(1), t_bsh.clone()], 1);
+                match segments {
+                    None => crate::padding::window(all_bsh, 1, end_b.clone(), 1),
+                    Some(segments) => crate::packing::restart_window(
+                        all_bsh,
+                        1,
+                        end_b.clone(),
+                        1,
+                        segments.last_start_b(),
+                    ),
+                }
+                .squeeze_dim::<2>(1)
+            }
             _ => {
                 let len = t_bsh.dims()[1];
                 t_bsh.clone().narrow(1, len - 1, 1).squeeze_dim::<2>(1)
@@ -1595,13 +1615,40 @@ impl Mamba3 {
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - `pad_bs`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
-    #[allow(non_snake_case)]
     pub fn forward(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3Cache>,
         ssd_path: Mamba3SsdPath,
         pad_bs: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba3Cache) {
+        self.forward_packed(input_bsm, cache, ssd_path, pad_bs, None)
+    }
+
+    /// [`Self::forward`] over a **packed** batch: each row holds several
+    /// sequences one after another, and each one starts from the incoming
+    /// cache (a fresh one for `cache = None`).
+    ///
+    /// `reset_bs` (`[batch, sequence]`, `true` at the first token of a
+    /// segment) marks each start. It must be at the first token of a chunk
+    /// (every [`Mamba3SsdPath::chunk_tokens`] tokens). A segment can end with
+    /// pad tokens (`pad_bs`) up to the next start. The result for each segment
+    /// is that of its own `forward` from the same cache. The returned cache is
+    /// that of the last segment of each row. See [`crate::packing`].
+    ///
+    /// At a start, every carried quantity restarts from the cache: the SSD
+    /// carry between chunks (plus the single-SSD boundary seed of that chunk),
+    /// the `β` taps (they read the tap slots), the cumulative rotation, and the
+    /// positive systems. Only [`Mamba3SsdPath::Serial`] and
+    /// [`Mamba3SsdPath::SerialRecalculated`] take resets.
+    #[allow(non_snake_case)]
+    pub fn forward_packed(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        ssd_path: Mamba3SsdPath,
+        pad_bs: Option<Tensor<2, Bool>>,
+        reset_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
@@ -1620,13 +1667,23 @@ impl Mamba3 {
         // ── SSD Pathway Selection ─────────────────────────────────────────────
         match cache {
             Mamba3Cache::DoubleSsd(cache) => {
-                let (out_bsm, cache) =
-                    self.forward_double_ssd(input_bsm, Some(cache), &ssd_path, pad_bs);
+                let (out_bsm, cache) = self.forward_double_ssd_packed(
+                    input_bsm,
+                    Some(cache),
+                    &ssd_path,
+                    pad_bs,
+                    reset_bs,
+                );
                 (out_bsm, cache.into())
             }
             Mamba3Cache::SingleSsd(cache) => {
-                let (out_bsm, cache) =
-                    self.forward_single_ssd(input_bsm, Some(cache), &ssd_path, pad_bs);
+                let (out_bsm, cache) = self.forward_single_ssd_packed(
+                    input_bsm,
+                    Some(cache),
+                    &ssd_path,
+                    pad_bs,
+                    reset_bs,
+                );
                 (out_bsm, cache.into())
             }
         }
@@ -1703,6 +1760,12 @@ impl Mamba3 {
     /// each slot, read from the incoming FIFO followed by this call. For a slot
     /// with no real position, that is the incoming FIFO itself.
     ///
+    /// `segments` marks the resets of a packed call ([`crate::packing`]). The
+    /// last segment of a slot starts from the incoming FIFO, so a position
+    /// from before its start is read from that FIFO. Without padding, the last
+    /// `lag` positions are always in the last segment: a segment is at least
+    /// one token, `u ≥ lag` positions.
+    ///
     /// # Shapes
     /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
     /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
@@ -1715,6 +1778,7 @@ impl Mamba3 {
         da_bsh: &Tensor<3>,
         lag: usize,
         end: Option<(Tensor<1, Int>, Option<Tensor<5>>, Option<Tensor<4>>)>,
+        segments: Option<&crate::packing::Segments>,
     ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
         if lag == 0 {
             return (None, None);
@@ -1739,11 +1803,27 @@ impl Mamba3 {
                 let b_all = Tensor::cat(vec![prev_bumhr, b_bsmhr.clone()], 1);
                 let x_all = Tensor::cat(vec![prev_buhp, x_bshp.clone()], 1);
                 let da_all = Tensor::cat(vec![prev_buh, da_bsh.clone()], 1);
-                (
-                    window(b_all, 1, end_b.clone(), lag),
-                    window(x_all, 1, end_b.clone(), lag),
-                    window(da_all, 1, end_b, lag),
-                )
+                let (b_last, x_last) = match segments {
+                    None => (
+                        window(b_all, 1, end_b.clone(), lag),
+                        window(x_all, 1, end_b.clone(), lag),
+                    ),
+                    Some(segments) => {
+                        use crate::packing::restart_window;
+                        let start_b = segments.last_start_b();
+                        (
+                            restart_window(b_all, 1, end_b.clone(), lag, start_b.clone()),
+                            restart_window(x_all, 1, end_b.clone(), lag, start_b.clone()),
+                        )
+                    }
+                };
+                let da_last = match segments {
+                    None => window(da_all, 1, end_b, lag),
+                    Some(segments) => {
+                        crate::packing::restart_window(da_all, 1, end_b, lag, segments.last_start_b())
+                    }
+                };
+                (b_last, x_last, da_last)
             }
         };
         let x_last_buhp = match crate::mamba3::helpers::tail_decay(da_bsh, lag) {

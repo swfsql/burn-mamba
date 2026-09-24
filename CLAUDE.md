@@ -103,7 +103,8 @@ src/
 │  ├─ helpers.rs     shared by both pathways and both modes: trapezoid masses,
 │  │                 QK-norm+GQA+bias, MIMO-V, mimo_outer_sum, split_trailing,
 │  │                 the tap-lag helpers, prefix_sum (the blocked scan for every
-│  │                 sequence-length cumsum), and the read axis (read_rows /
+│  │                 sequence-length cumsum; `period` = on the circle, for the
+│  │                 angle), and the read axis (read_rows /
 │  │                 read_causal_mask, + `prim` twins with scatter_read_rows)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS: DoubleSsd | SingleSsd, + From moves
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths);
@@ -125,7 +126,11 @@ src/
 │  │                 tropical.rs (the max-plus register)
 │  └─ quat_scan/     memory-efficient quaternion cumprod scan (recompute backward)
 ├─ padding.rs        right padding in a block: per-slot `window` gather,
-│                    `fill_padded`, `repeat_rows` (token mask → folded axis)
+│                    `real_end_b`, `fill_padded`, `repeat_rows` (token mask →
+│                    folded axis)
+├─ packing.rs        packed segments (`forward_packed`): resets at chunk
+│                    starts, each segment from the incoming cache;
+│                    chunk_resets, restart_heads, Segments, restart_window
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; header = why the MIMO 3-D tensors are not
    │                 stacked matrices for Muon
@@ -225,6 +230,15 @@ the step where its discretisation forms them:
 
 A family reads every "last samples" cache field (conv window, tap FIFO,
 `positive/` carries) at the end of each slot (`padding::window`).
+
+`Mamba{2,3}::forward_packed` also takes `reset` (`[batch, tokens]`, `true` at
+the first token of a segment). Each segment restarts from the incoming cache
+of the call: it gives what its own row of a batch from that cache gives
+(outputs, last cache, gradients, also those of the cache). A reset must be at
+a chunk start, so the SSD changes only in K4 (and its backward; single-SSD
+adds a boundary seed per chunk). The reads across a reset (Mamba-2 conv taps,
+Mamba-3 tap FIFO) take the cache values. The rotation and the `positive/`
+scans restart from the cache. Serial paths only. See `src/packing.rs`.
 
 ### Caches
 
@@ -363,8 +377,9 @@ transition, and per-rank angles have no state-space preimage
 
 - **`Complex2D`** (default, abelian `SO(2)`): angles projected, squashed to
   `range·π·tanh(·)`, Δ-scaled per head, then **`helpers::prefix_sum`** along
-  the sequence (not `cumsum`, which costs `O(len²)` on cubecl), absorbed into
-  B/C. `wrap_angle` reduces mod `2π` for fp16 stability. `rope_fraction`
+  the sequence (not `cumsum`, which costs `O(len²)` on cubecl) on the circle
+  (the block carries stay in `[−π, π]`), absorbed into B/C. `wrap_angle`
+  reduces mod `2π` for fp16 stability. `rope_fraction`
   (0.5 | 1, default 1) rotates a prefix. SISO uses interleaved pairs, MIMO
   half-and-half.
 - **`Real1D`** is the trivial group (a real transition). To switch the

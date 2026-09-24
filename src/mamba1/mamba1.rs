@@ -442,7 +442,7 @@ impl Mamba1 {
                     crate::padding::window(
                         Tensor::cat(vec![cache.conv_bik.clone(), input_bis], 2),
                         2,
-                        crate::padding::real_len_b(pad_bs),
+                        crate::padding::real_end_b(pad_bs),
                         conv_kernel,
                     )
                 }

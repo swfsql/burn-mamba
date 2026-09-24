@@ -940,6 +940,13 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// share one state, so they share its transition, and per-rank angles have no
 /// state-space preimage (`info/mamba-3/mimo-as-batch.md` §7).
 ///
+/// `start_bs` (`[batch, sequence]`) is the first position of the segment of
+/// each position in a packed row (`-1` before the first reset of the row), or
+/// `None`. Each segment then turns from the incoming rotation `prev`: its
+/// cumulative rotation is the one of the whole row, relative to the one
+/// before its first position, on top of `prev` (`θₜ − θₛ₋₁ + θ₀`, or
+/// `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`). The returned accumulator is that of the last segment.
+///
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]`: the in-projection
 ///   rotation channels (angles for Complex2D, quaternion generators for the
@@ -947,6 +954,7 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// - `dt_bsh`  : `[batch, sequence, nheads]` (`Δ`).
 /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`.
 /// - `c_btmhr` : `[batch, sequence / read_stride, mimo_rank, nheads, state_rank]`.
+#[allow(clippy::too_many_arguments)]
 pub fn rotate_bc_forward(
     rot_bsa: Option<Tensor<3>>,
     dt_bsh: Tensor<3>,
@@ -955,6 +963,7 @@ pub fn rotate_bc_forward(
     c_btmhr: Tensor<5>,
     read_stride: usize,
     spec: RotationSpec,
+    start_bs: Option<&Tensor<2, Int>>,
 ) -> (Tensor<5>, Tensor<5>, RotationState) {
     let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
     let tokens = c_btmhr.dims()[1];
@@ -976,12 +985,31 @@ pub fn rotate_bc_forward(
             // log-depth). It is *not* `Tensor::cumsum`, whose cost is
             // quadratic in the sequence length here. The angle of the cache
             // is the carry-in of the scan, so it joins the block offset and
-            // needs no add of its own. See [`prefix_sum`].
+            // needs no add of its own. The scan is on the circle: its carry
+            // stays in `[−π, π]` for any length, so the f32 rounding does not
+            // grow with the call. See [`prefix_sum`].
+            let prev_angle_b1ha = prev_angle_bha.unsqueeze_dim::<4>(1);
             let cum_angles_bsha = prefix_sum::<4, 5>(
                 raw_angles_bsha,
                 1,
-                Some(prev_angle_bha.unsqueeze_dim::<4>(1)),
+                Some(prev_angle_b1ha.clone()),
+                Some(std::f32::consts::TAU),
             );
+            // A packed row: each segment turns from the incoming angle, so its
+            // angle moves by the difference between that angle and the one
+            // before its first position. All of them are bounded (the scan is
+            // on the circle), so the difference loses no precision.
+            let cum_angles_bsha = match start_bs {
+                None => cum_angles_bsha,
+                Some(start_bs) => {
+                    let dims = cum_angles_bsha.dims();
+                    let before_bsha =
+                        Tensor::cat(vec![prev_angle_b1ha.clone(), cum_angles_bsha.clone()], 1);
+                    let shift_bsha = (at_segment_start(before_bsha, start_bs) - prev_angle_b1ha)
+                        .mask_fill(before_first_reset(start_bs, dims), 0.0);
+                    cum_angles_bsha - shift_bsha
+                }
+            };
             let cum_angles_bsmha = cum_angles_bsha.clone().unsqueeze_dim::<5>(2).expand([
                 batch,
                 sequence,
@@ -1032,8 +1060,32 @@ pub fn rotate_bc_forward(
             // [`quat_cumprod`] on values and gradients (asserted in tests).
             let (cum_bshk4, final_bhk4) = crate::mamba3::quat_scan::quat_cumprod_recalculated(
                 q_step_bshk4,
-                Some(prev_q_bhk4),
+                Some(prev_q_bhk4.clone()),
             );
+            // A packed row: each segment turns from the incoming rotation `P`.
+            // Its cumulative rotation is `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`: the carry comes in on
+            // the right (the oldest factor), so `T̄ₛ₋₁` cancels the rotation
+            // before the segment there. Both factors of a rotor fold the same
+            // way, so this holds for the whole stack.
+            let (cum_bshk4, final_bhk4) = match start_bs {
+                None => (cum_bshk4, final_bhk4),
+                Some(start_bs) => {
+                    let dims = cum_bshk4.dims();
+                    let prev_b1hk4 = prev_q_bhk4.unsqueeze_dim::<5>(1);
+                    let before_bshk4 = Tensor::cat(vec![prev_b1hk4.clone(), cum_bshk4.clone()], 1);
+                    let base_bshk4 = at_segment_start(before_bshk4, start_bs);
+                    let local_bshk4 = quat_mul(
+                        quat_mul(cum_bshk4.clone(), quat_conj(base_bshk4)),
+                        prev_b1hk4.expand(dims),
+                    )
+                    .mask_where(before_first_reset(start_bs, dims), cum_bshk4);
+                    let final_bhk4 = local_bshk4
+                        .clone()
+                        .narrow(1, sequence - 1, 1)
+                        .squeeze_dim::<4>(1);
+                    (local_bshk4, final_bhk4)
+                }
+            };
             // Renormalise the prefixes. In exact arithmetic, a product of unit
             // quaternions is a unit quaternion. But the scan composes each
             // prefix from `⌈log₂ L⌉` multiplies, so the norm drifts: very
@@ -1088,6 +1140,39 @@ pub fn rotate_bc_forward(
             (b, c, state)
         }
     }
+}
+
+/// The entry of `before` at the start of the segment of each position.
+/// `before` is `[batch, 1 + sequence, …]`: the carried value, then the value
+/// at each position. So index `s` holds the value just before position `s`.
+///
+/// `start_bs` is `-1` before the first reset of the row. Those positions read
+/// index 0 (the carried value), and the caller replaces them (see
+/// [`before_first_reset`]).
+fn at_segment_start<const D: usize>(before: Tensor<D>, start_bs: &Tensor<2, Int>) -> Tensor<D> {
+    let mut dims = before.dims();
+    dims[1] -= 1;
+    let idx = start_bs.clone().clamp_min(0);
+    before.gather(1, broadcast_rows(idx, dims))
+}
+
+/// `true` at the positions before the first reset of their row, broadcast to
+/// `dims` (`[batch, sequence, …]`).
+fn before_first_reset<const D: usize>(start_bs: &Tensor<2, Int>, dims: [usize; D]) -> Tensor<D, Bool> {
+    let [batch, sequence] = start_bs.dims();
+    let mut shape = [1usize; D];
+    shape[0] = batch;
+    shape[1] = sequence;
+    start_bs.clone().lower_elem(0).reshape(shape).expand(dims)
+}
+
+/// A `[batch, sequence]` tensor broadcast to `dims` (`[batch, sequence, …]`).
+fn broadcast_rows<const D: usize>(t_bs: Tensor<2, Int>, dims: [usize; D]) -> Tensor<D, Int> {
+    let [batch, sequence] = t_bs.dims();
+    let mut shape = [1usize; D];
+    shape[0] = batch;
+    shape[1] = sequence;
+    t_bs.reshape(shape).expand(dims)
 }
 
 #[cfg(all(test, feature = "_dev-test"))]

@@ -79,6 +79,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn,
         initial_state_bhpr.clone(),
+        None,
     );
     let y_bnlhp = serial::k5_ssd_chunk_scan(
         da_cumsum_bhnl,
@@ -123,6 +124,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         F::new(d_h.into_dispatch()),
         F::new(initial_state_bhpr.into_dispatch()),
         F::new(a_decay_h.into_dispatch()),
+        None,
     );
     let d_da_local_bhnl = Tensor::<4>::from_dispatch(grads.d_da_local_bhnl.inner());
     let d_dt_orange_bhnl = Tensor::<4>::from_dispatch(grads.d_dt_orange_bhnl.inner());

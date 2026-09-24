@@ -48,6 +48,10 @@ pub struct GainInput {
     /// `ℓ` before the first position, `[batch, nheads]`: [`LOG_ZERO`] for a
     /// fresh sequence (`Λ₀ = 0`: no evidence yet).
     pub carry_bh: Tensor<2>,
+    /// The first position of the segment of each position in a packed row,
+    /// `[batch, len]` (`-1` before the first reset of the row), or `None`.
+    /// Each segment starts from `carry_bh`.
+    pub start_bs: Option<Tensor<2, Int>>,
 }
 
 /// The per-position quantities of the gate.
@@ -195,13 +199,34 @@ pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
     };
     let ln_q = ln_q.clamp_min(LOG_ZERO);
     let elements = elements(&da_bsh, &ln_q, &masses);
-    let log_precision_bsh = scan::prefix(elements).apply(input.carry_bh.clone());
+    let log_precision_bsh = match &input.start_bs {
+        None => scan::prefix(elements).apply(input.carry_bh.clone()),
+        // A packed row: each segment scans alone, from the incoming carry.
+        Some(start_bs) => {
+            scan::prefix_in_segments(elements, start_bs).apply(input.carry_bh.clone())
+        }
+    };
     // ℓₜ₋₁: the carry, then every position but the last.
     let carry_b1h = input.carry_bh.reshape([batch, 1, nheads]);
     let prev_bsh = if len == 1 {
-        carry_b1h
+        carry_b1h.clone()
     } else {
-        Tensor::cat(vec![carry_b1h, log_precision_bsh.clone().narrow(1, 0, len - 1)], 1)
+        Tensor::cat(vec![carry_b1h.clone(), log_precision_bsh.clone().narrow(1, 0, len - 1)], 1)
+    };
+    // …and at the first position of a segment, the incoming carry again.
+    let prev_bsh = match &input.start_bs {
+        None => prev_bsh,
+        Some(start_bs) => {
+            let first_bsh = Tensor::<1, Int>::arange(0..len as i64, &start_bs.device())
+                .reshape([1, len])
+                .expand([batch, len])
+                .equal(start_bs.clone())
+                .unsqueeze_dim::<3>(2)
+                .expand([batch, len, nheads]);
+            prev_bsh
+                .expand([batch, len, nheads])
+                .mask_where(first_bsh, carry_b1h.expand([batch, len, nheads]))
+        }
     };
     // `ln Lₜ`: the predict acts on all that is known about the samples before
     // this position, including the installment of a sample that is paid only

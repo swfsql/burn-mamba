@@ -51,13 +51,26 @@ impl Mamba3 {
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - `pad_bt`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
-    #[allow(non_snake_case)]
     pub fn forward_double_ssd(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3DoubleSsdCache>,
         ssd_path: &Mamba3SsdPath,
         pad_bt: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
+        self.forward_double_ssd_packed(input_bsm, cache, ssd_path, pad_bt, None)
+    }
+
+    /// [`Self::forward_double_ssd`] over a packed batch: `reset_bt` marks the
+    /// first token of each segment, as in [`Self::forward_packed`].
+    #[allow(non_snake_case)]
+    pub fn forward_double_ssd_packed(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3DoubleSsdCache>,
+        ssd_path: &Mamba3SsdPath,
+        pad_bt: Option<Tensor<2, Bool>>,
+        reset_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
         let [batch, tokens, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -79,11 +92,20 @@ impl Mamba3 {
         assert_eq!(nheads % ngroups, 0);
         san(&input_bsm);
 
-        // A padded token pads all of its micro-steps. `end_b` is the real
-        // length of each slot on the folded axis, where its cache fields are
-        // read.
+        // A padded token pads all of its micro-steps. `end_b` is one past the
+        // last real position of each slot on the folded axis, where its cache
+        // fields are read.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
-        let end_b = pad_bs.as_ref().map(crate::padding::real_len_b);
+        let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
+
+        // A reset is at the first token of a chunk, which is its first
+        // micro-step on the folded axis. See [`crate::packing`].
+        let chunk_len = ssd_path.chunk_len_or_optimal(self);
+        let segments = reset_bt.map(|reset_bt| {
+            let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, micro_steps);
+            let reset_bn = crate::packing::chunk_resets(reset_bt, chunk_tokens);
+            crate::packing::Segments::new(reset_bn, chunk_len, sequence)
+        });
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -172,7 +194,7 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
-            self.gain_input(noise_bsh, cache.log_precision_bh.clone()),
+            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), segments.as_ref()),
         )
         .padded(pad_bs.as_ref());
         // The inputs of the tropical register, on the same folded axis.
@@ -231,6 +253,7 @@ impl Mamba3 {
             c_btmhr,
             u,
             self.rotation_spec(),
+            segments.as_ref().map(|s| &s.start_bs),
         );
         san(&b_bsmhr);
         san(&c_btmhr);
@@ -277,12 +300,20 @@ impl Mamba3 {
             // all of it for the own tap of the pattern, only the last slot for
             // an interior tap.
             let newest = slots_buhp.dims()[1] - lag;
-            let x_prev_bshp =
-                helpers::shift_stream(x_bshp.clone(), slots_buhp.narrow(1, newest, lag), lag);
-            let b_prev_bsmhr =
-                helpers::shift_stream(b_bsmhr.clone(), slots_bumhr.narrow(1, newest, lag), lag);
+            let (x_head_buhp, b_head_bumhr) =
+                (slots_buhp.narrow(1, newest, lag), slots_bumhr.narrow(1, newest, lag));
+            let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), x_head_buhp.clone(), lag);
+            let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), b_head_bumhr.clone(), lag);
+            // A packed row: each segment starts on the same prefix, as a call.
+            let (x_prev_bshp, b_prev_bsmhr) = match &segments {
+                Some(segments) => (
+                    segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
+                    segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
+                ),
+                None => (x_prev_bshp, b_prev_bsmhr),
+            };
             let beta_bsh = nu_bsh * alpha_bsh.clone();
-            let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag) {
+            let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag, segments.as_ref()) {
                 Some(gap_bsh) => beta_bsh * gap_bsh,
                 None => beta_bsh,
             };
@@ -314,10 +345,10 @@ impl Mamba3 {
             end_b.clone().map(|end_b| {
                 (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
             }),
+            segments.as_ref(),
         );
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
-        let chunk_len = ssd_path.chunk_len_or_optimal(self);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
@@ -387,6 +418,9 @@ impl Mamba3 {
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
             helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
+        // Every pass restarts its carry at the same chunks: the passes are
+        // the terms of one state.
+        let reset_bn = segments.as_ref().map(|s| s.reset_bn.clone());
 
         let input_gamma = Mamba3DoubleSsdInput {
             v_bnlmhp: v_gamma_bnlmhp,
@@ -396,6 +430,7 @@ impl Mamba3 {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
             read_stride: u,
+            reset_bn: reset_bn.clone(),
         };
         let (y_bntmhp, final_state_bhpr) = input_gamma.run(ssd_path);
 
@@ -419,6 +454,7 @@ impl Mamba3 {
                     ),
                     init_state_hpr: None,
                     read_stride: u,
+                    reset_bn: reset_bn.clone(),
                 };
                 let (y_beta_bntmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
                 (
@@ -449,6 +485,7 @@ impl Mamba3 {
             tropical_ab_bsh,
             cache.tropical_bh.clone(),
             end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
+            segments.as_ref(),
         );
         cache.log_precision_bh = log_precision_bh;
         cache.tropical_bh = tropical_bh;
@@ -675,7 +712,7 @@ mod step {
                 mu_raw_bH.map(|t| unfold_micro_b(t, u)),
                 self.dt_bias_h.val(),
                 self.trapezoid_spec(),
-                self.gain_input(noise_bH.map(|t| unfold_micro_b(t, u)), log_precision_bh),
+                self.gain_input(noise_bH.map(|t| unfold_micro_b(t, u)), log_precision_bh, None),
             );
             let tropical_ab_buh =
                 tropical_bH.map(|(a_bH, b_bH)| (unfold_micro_b(a_bH, u), unfold_micro_b(b_bH, u)));
@@ -936,6 +973,7 @@ mod step {
                 proj.c_b1mhr,
                 u,
                 self.rotation_spec(),
+                None,
             );
             san(&b_bumhr);
             san(&c_b1mhr);
@@ -1002,7 +1040,7 @@ mod step {
                 let b_prev_bumhr =
                     helpers::shift_stream(b_bumhr.clone(), slots_bumhr.narrow(1, newest, lag), lag);
                 let beta_buh = nu_buh * proj.alpha_buh.clone();
-                let beta_buh = match helpers::interior_gap_decay(proj.da_buh.clone(), lag) {
+                let beta_buh = match helpers::interior_gap_decay(proj.da_buh.clone(), lag, None) {
                     Some(gap_buh) => beta_buh * gap_buh,
                     None => beta_buh,
                 };
@@ -1044,6 +1082,7 @@ mod step {
                 proj.tropical_ab_buh,
                 cache.tropical_bh.clone(),
                 None,
+                None,
             );
             let out_m_bmhp = out_b1mhp.squeeze_dim::<4>(1);
             cache.log_precision_bh = log_precision_bh;
@@ -1057,7 +1096,7 @@ mod step {
             // decay since its own position. This is the helper of `forward`, so
             // both write the same slot layout with the same convention.
             let (k_state_bumhr, v_state_buhp) =
-                self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag, None);
+                self.save_tap_slots(&b_bumhr, &proj.x_buhp, &proj.da_buh, lag, None, None);
             cache.ssm_bhpr = state_bhpr;
             cache.k_state_bumhr = k_state_bumhr;
             cache.v_state_buhp = v_state_buhp;

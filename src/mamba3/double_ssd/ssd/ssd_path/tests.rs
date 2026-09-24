@@ -108,6 +108,7 @@ impl Inputs {
             // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
             init_state_hpr: None,
             read_stride: self.read_stride,
+            reset_bn: None,
         }
     }
 }

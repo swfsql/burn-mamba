@@ -44,6 +44,8 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
+        keep_bn: FloatTensor<Self>,
+        resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward node definition ─────────────────────────────────────────
         #[derive(Debug)]
@@ -57,6 +59,8 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
             b_bnlmhr: <B as BackendTypes>::FloatTensorPrimitive,
             c_bntmhr: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
+            // The constant reset factor (no gradient), if the call has resets
+            keep_bn: Option<<B as BackendTypes>::FloatTensorPrimitive>,
             // Flat lengths for splitting the combined upstream gradient
             read_stride: usize,
             flat_len_y_BNTMHP: usize,
@@ -98,6 +102,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     b_bnlmhr,
                     c_bntmhr,
                     initial_state_bhpr,
+                    keep_bn,
                     read_stride,
                     flat_len_y_BNTMHP,
                     flat_len_final_state_BHPR,
@@ -145,6 +150,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     c_bntmhr,
                     initial_state_bhpr,
                     read_stride,
+                    keep_bn.map(F::<B, 2>::new),
                 );
 
                 // ── Register gradients with autodiff ────────────────────
@@ -211,6 +217,8 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     c_bntmhr.primitive().clone(),
                     initial_state_bhpr.primitive().clone(),
                     read_stride,
+                    keep_bn.primitive().clone(),
+                    resets,
                 );
 
                 // prep.finish takes a single tensor, so pack both outputs into a
@@ -226,6 +234,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     b_bnlmhr: b_bnlmhr.primitive().clone(),
                     c_bntmhr: c_bntmhr.primitive().clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive().clone(),
+                    keep_bn: resets.then(|| keep_bn.primitive().clone()),
                     read_stride,
                     flat_len_y_BNTMHP,
                     flat_len_final_state_BHPR,
@@ -265,6 +274,8 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     c_bntmhr.into_primitive(),
                     initial_state_bhpr.into_primitive(),
                     read_stride,
+                    keep_bn.into_primitive(),
+                    resets,
                 );
 
                 let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(

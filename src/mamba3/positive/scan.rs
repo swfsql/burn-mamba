@@ -59,6 +59,9 @@ pub trait Element: Sized + Clone {
     fn narrow(self, start: usize, len: usize) -> Self;
     /// Concatenate along axis 1.
     fn cat(parts: Vec<Self>) -> Self;
+    /// The entries of `other` where `mask_bsh` is `true`, and those of `self`
+    /// elsewhere.
+    fn select(self, mask_bsh: Tensor<3, Bool>, other: Self) -> Self;
 }
 
 /// A projective 2×2 element: `σ ↦ M ⊗ σ` read as `σ₀ − σ₁`.
@@ -146,6 +149,15 @@ impl Element for Mobius {
         let [m00, m01, m10, m11] = m.map(|v| Tensor::cat(v, 1));
         Mobius { m00, m01, m10, m11 }
     }
+
+    fn select(self, mask_bsh: Tensor<3, Bool>, other: Self) -> Self {
+        Mobius {
+            m00: self.m00.mask_where(mask_bsh.clone(), other.m00),
+            m01: self.m01.mask_where(mask_bsh.clone(), other.m01),
+            m10: self.m10.mask_where(mask_bsh.clone(), other.m10),
+            m11: self.m11.mask_where(mask_bsh, other.m11),
+        }
+    }
 }
 
 /// An affine element `c ↦ lse(c + a, b)` — the matrix `[[a, b], [−∞, 0]]`.
@@ -201,6 +213,13 @@ impl Element for Affine {
             b: Tensor::cat(b, 1),
         }
     }
+
+    fn select(self, mask_bsh: Tensor<3, Bool>, other: Self) -> Self {
+        Affine {
+            a: self.a.mask_where(mask_bsh.clone(), other.a),
+            b: self.b.mask_where(mask_bsh, other.b),
+        }
+    }
 }
 
 /// Inclusive prefix products `Pₜ = eₜ ∘ ⋯ ∘ e₀` along axis 1, by Hillis–Steele
@@ -237,6 +256,38 @@ pub fn prefix<E: Element>(elements: E) -> E {
             acc.identity_like(offset),
             acc.clone().narrow(0, len - offset),
         ]);
+        acc = E::compose(acc, shifted);
+        offset *= 2;
+    }
+    acc
+}
+
+/// [`prefix`] over the segments of a packed row: each product starts at the
+/// first position of its own segment (`start_bs`, `[batch, len]`; `-1`
+/// before the first reset of the row).
+///
+/// A combine whose older window would reach back past the start takes the
+/// identity instead, as a position does before the first one. So the
+/// invariant of [`prefix`] holds with `max(·, 0)` replaced by
+/// `max(·, start)`.
+pub fn prefix_in_segments<E: Element>(elements: E, start_bs: &Tensor<2, Int>) -> E {
+    let [batch, len, nheads] = elements.dims();
+    let device = start_bs.device();
+    let position_bs = Tensor::<1, Int>::arange(0..len as i64, &device)
+        .reshape([1, len])
+        .expand([batch, len]);
+    let mut acc = elements;
+    let mut offset = 1usize;
+    while offset < len {
+        let shifted = E::cat(vec![
+            acc.identity_like(offset),
+            acc.clone().narrow(0, len - offset),
+        ]);
+        let crosses_bsh = (position_bs.clone() - offset as i64)
+            .lower(start_bs.clone())
+            .unsqueeze_dim::<3>(2)
+            .expand([batch, len, nheads]);
+        let shifted = shifted.select(crosses_bsh, acc.identity_like(len));
         acc = E::compose(acc, shifted);
         offset *= 2;
     }

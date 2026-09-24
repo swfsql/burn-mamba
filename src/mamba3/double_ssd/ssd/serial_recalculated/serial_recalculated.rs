@@ -41,6 +41,7 @@ impl Mamba3DoubleSsdInput {
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
+        let (keep_bn, resets) = keep_factor(input.reset_bn, &input.v_bnlmhp);
         let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
@@ -49,10 +50,35 @@ impl Mamba3DoubleSsdInput {
                 input.c_bntmhr.into_dispatch(),
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
+                keep_bn.into_dispatch(),
+                resets,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
         (y_bntmhp, final_state_bhpr)
+    }
+}
+
+/// The resets of a packed row as the recompute ops take them: a keep factor
+/// (`0` at a chunk that starts a new segment, `1` elsewhere, `[batch,
+/// nchunks]`), and whether there are resets at all. It is a constant (no
+/// gradient), with the dtype of `like`. Without resets, it is a 1×1
+/// placeholder that the ops do not read (the extension macro does not take
+/// `Option` tensors). Both pathways use it.
+///
+/// `like` is `[batch, nchunks, …]`.
+pub(crate) fn keep_factor<const D: usize>(
+    reset_bn: Option<Tensor<2, burn::tensor::Bool>>,
+    like: &Tensor<D>,
+) -> (Tensor<2>, bool) {
+    let dims = like.dims();
+    let options = (&like.device(), like.dtype());
+    match reset_bn {
+        Some(reset_bn) => (
+            Tensor::ones([dims[0], dims[1]], options).mask_fill(reset_bn, 0.0),
+            true,
+        ),
+        None => (Tensor::ones([1, 1], options), false),
     }
 }
 
@@ -90,10 +116,13 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     /// - `read_stride`:        `micro_steps` — folded positions per read row, so
     ///   `chunk_tokens = chunk_len / read_stride`
+    /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
+    ///   a new segment of a packed row. Read only when `resets` is `true`.
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+    #[allow(clippy::too_many_arguments)]
     fn double_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
@@ -101,6 +130,8 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
+        keep_bn: FloatTensor<Self>,
+        resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate Mamba3::double_ssd_serial (K1-K5) on primitives.
         let v_bnlmhp = F::<Self, 6>::new(v_bnlmhp);
@@ -108,6 +139,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
         let b_bnlmhr = F::<Self, 6>::new(b_bnlmhr);
         let c_bntmhr = F::<Self, 6>::new(c_bntmhr);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
+        let keep_bn = resets.then(|| F::<Self, 2>::new(keep_bn));
 
         let nchunks = v_bnlmhp.dims()[1];
         assert!(nchunks > 0, "sequence length must be at least 1");
@@ -126,6 +158,8 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
             intra_chunk_state_bnhpr,
             da_chunk_end_bhn,
             initial_state_bhpr,
+            keep_bn,
+            None,
         );
         san(&chunk_input_state_bnhpr);
         san(&final_state_bhpr);
@@ -229,18 +263,44 @@ pub(crate) fn k3_ssd_chunk_state<B: Backend>(
 ///
 /// Returns the per-chunk input-state stream `chunk_input_state_bnhpr` and the
 /// `final_state_bhpr`.
+///
+/// `keep_bn` is the reset of the high-level K4 as a factor: the state that
+/// goes into a chunk with `keep = 0` is its restart state, `initial + seedᶜ`
+/// (`initial` without seeds). The call starts from that of chunk 0.
 pub(crate) fn k4_ssd_state_passing<B: Backend>(
     intra_chunk_state_bnhpr: F<B, 5>,
     da_chunk_end_bhn: F<B, 3>,
     initial_state_bhpr: F<B, 4>,
+    keep_bn: Option<F<B, 2>>,
+    seed_bnhpr: Option<F<B, 5>>,
 ) -> (F<B, 5>, F<B, 4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
+    let state = [nheads, per_head_dim, state_rank];
+    let restart = |i_chunk: usize| match &seed_bnhpr {
+        Some(seed_bnhpr) => {
+            initial_state_bhpr.clone()
+                + seed_bnhpr
+                    .clone()
+                    .slice(s![.., i_chunk, .., .., ..])
+                    .squeeze_dim::<4>(1)
+        }
+        None => initial_state_bhpr.clone(),
+    };
+    let restart_bn = keep_bn.as_ref().map(restart_factor);
 
-    let mut running_state_bhpr = initial_state_bhpr;
+    let mut running_state_bhpr = restart(0);
     let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
     chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 
     for i_chunk in 0..nchunks {
+        // A chunk that starts a segment starts from its restart state. (A
+        // learnable `init_state_hpr` would join it, but only `Minimal` takes
+        // one.)
+        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+            running_state_bhpr = running_state_bhpr * keep_at(keep_bn, i_chunk, state)
+                + restart(i_chunk) * keep_at(restart_bn, i_chunk, state);
+            *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
+        }
         let intra_state_bhpr = intra_chunk_state_bnhpr
             .clone()
             .slice(s![.., i_chunk, .., .., ..])
@@ -260,6 +320,22 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     (chunk_input_state_bnhpr, final_state_bhpr)
 }
 
+/// `1 − keep`: `1` at a chunk that restarts.
+fn restart_factor<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
+    F::<B, 2>::full(keep_bn.dims(), 1.0, &keep_bn.device(), keep_bn.dtype()) - keep_bn.clone()
+}
+
+/// The factor of chunk `i_chunk`, broadcast over one state
+/// (`[batch, nheads, per_head_dim, state_rank]`).
+fn keep_at<B: Backend>(keep_bn: &F<B, 2>, i_chunk: usize, [nheads, per_head_dim, state_rank]: [usize; 3]) -> F<B, 4> {
+    let batch = keep_bn.dims()[0];
+    keep_bn
+        .clone()
+        .slice(s![.., i_chunk])
+        .reshape([batch, 1, 1, 1])
+        .expand([batch, nheads, per_head_dim, state_rank])
+}
+
 /// Backward of [`k4_ssd_state_passing`]: the reverse of its scalar-decay scan.
 /// It is the only part of the recompute backward that is still a walk (as the
 /// forward is, where it was measured).
@@ -271,20 +347,35 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
 /// so it comes out of the `(p, r)` sum, and the whole stream is one batched
 /// product.
 ///
+/// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
+/// (1 − keepᵢ) · restartᵢ`. So the gradient that goes on to chunk `i − 1` is
+/// `keepᵢ · d_sᵢ`, and `restartᵢ` gets `(1 − keepᵢ) · d_sᵢ`. The call starts
+/// from `restart₀`, so it also gets what the walk leaves at the end. `sᵢ` in
+/// `d_decay` is already the restarted one (the caller recomputed it).
+///
 /// # Returns
 /// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
 /// - `d_da_chunk_end_bhn` — gradient of the per-chunk log-decay
-/// - `d_initial_state_bhpr`
+/// - `d_initial_state_bhpr` — the sum over the restarts
+/// - `d_seed_bnhpr` — the gradient of each chunk's restart state, when
+///   `seeded` (the caller passes seeds, which come only with resets), else
+///   `None`
 pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
     d_chunk_input_state_bnhpr: F<B, 5>,
     chunk_input_state_bnhpr: F<B, 5>,
     da_chunk_end_bhn: F<B, 3>,
     d_final_state_bhpr: F<B, 4>,
-) -> (F<B, 5>, F<B, 3>, F<B, 4>) {
+    keep_bn: Option<F<B, 2>>,
+    seeded: bool,
+) -> (F<B, 5>, F<B, 3>, F<B, 4>, Option<F<B, 5>>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = chunk_input_state_bnhpr.dims();
+    let state = [nheads, per_head_dim, state_rank];
+    let restart_bn = keep_bn.as_ref().map(restart_factor);
 
     let mut d_running_state_bhpr = d_final_state_bhpr;
     let mut d_intra_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    // `d_restartᵢ`, in reverse chunk order.
+    let mut d_restart_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
     for i_chunk in (0..nchunks).rev() {
         d_intra_vec_bhpr.push(d_running_state_bhpr.clone());
 
@@ -300,10 +391,27 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
             .squeeze_dim::<4>(1);
 
         d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+            d_restart_vec_bhpr.push(d_running_state_bhpr.clone() * keep_at(restart_bn, i_chunk, state));
+            d_running_state_bhpr = d_running_state_bhpr * keep_at(keep_bn, i_chunk, state);
+        }
         san(&d_running_state_bhpr);
     }
     d_intra_vec_bhpr.reverse();
     let d_intra_chunk_state_bnhpr: F<B, 5> = F::stack(d_intra_vec_bhpr, 1);
+
+    // The walk ends on the state before chunk 0: `restart₀`. Seeds come only
+    // with resets.
+    assert!(!seeded || keep_bn.is_some(), "a seeded K4 has resets");
+    let (d_initial_state_bhpr, d_seed_bnhpr) = if d_restart_vec_bhpr.is_empty() {
+        (d_running_state_bhpr, None)
+    } else {
+        d_restart_vec_bhpr.reverse();
+        d_restart_vec_bhpr[0] = d_restart_vec_bhpr[0].clone() + d_running_state_bhpr;
+        let d_restart_bnhpr: F<B, 5> = F::stack(d_restart_vec_bhpr, 1);
+        let d_initial_state_bhpr = d_restart_bnhpr.clone().sum_dim(1).squeeze_dim::<4>(1);
+        (d_initial_state_bhpr, seeded.then_some(d_restart_bnhpr))
+    };
 
     let d_decay_bhn: F<B, 3> = (d_intra_chunk_state_bnhpr.clone() * chunk_input_state_bnhpr)
         .reshape([batch, nchunks, nheads, per_head_dim * state_rank])
@@ -317,7 +425,8 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
     (
         d_intra_chunk_state_bnhpr,
         d_da_chunk_end_bhn,
-        d_running_state_bhpr,
+        d_initial_state_bhpr,
+        d_seed_bnhpr,
     )
 }
 

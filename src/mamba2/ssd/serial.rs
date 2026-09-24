@@ -109,6 +109,7 @@ impl Mamba2SsdInput {
                 intra_chunk_state_bnhpr.clone(),
                 da_chunk_end_bhn.clone(),
                 input.initial_state_bhpr,
+                input.reset_bn,
             );
         assert_eq!(
             [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -280,6 +281,12 @@ pub fn k3_ssd_chunk_state(
 
 /// Based on the Kernel 4 Triton reference `_state_passing_fwd_kernel` (`ssd_state_passing.py`).
 ///
+/// `reset_bn` (`[batch, nchunks]`, `None` ⇒ no reset) marks the chunks that
+/// start a new segment of a packed row ([`crate::packing`]). The state that
+/// goes into such a chunk is `initial_state_bhpr` again, as at the start of
+/// the call. The select also stops the gradient to the state before it, and
+/// sends it to the initial state instead.
+///
 /// Returns:
 /// - chunk_input_state_bnhpr `[used in K5][!]`.
 /// - final_state_bhpr `[final output]`.
@@ -287,12 +294,13 @@ pub fn k4_ssd_state_passing(
     intra_chunk_state_bnhpr: Tensor<5>,
     da_chunk_end_bhn: Tensor<3>,
     initial_state_bhpr: Tensor<4>,
+    reset_bn: Option<Tensor<2, Bool>>,
 ) -> (Tensor<5>, Tensor<4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
     let flat_state_dim = per_head_dim * state_rank;
 
     // - 1/5: init-mut: (initial_state_bhpr [in][*]) -> (running_state_bhpr)
-    let mut running_state_bhpr = initial_state_bhpr;
+    let mut running_state_bhpr = initial_state_bhpr.clone();
     assert_eq!(
         [batch, nheads, per_head_dim, state_rank],
         running_state_bhpr.dims()
@@ -304,6 +312,19 @@ pub fn k4_ssd_state_passing(
 
     // - 3: serial-loop: (0..nchunks)
     for i_chunk in 0..nchunks {
+        // A chunk that starts a segment starts from the incoming state. (A
+        // learnable `init_state_hpr` would join it, but only `Minimal` takes
+        // one.)
+        if let Some(reset_bn) = &reset_bn {
+            let reset_bhpr = reset_bn
+                .clone()
+                .slice(s![.., i_chunk])
+                .reshape([batch, 1, 1, 1])
+                .expand([batch, nheads, per_head_dim, state_rank]);
+            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, initial_state_bhpr.clone());
+            *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
+        }
+
         let intra_state_bhpr = intra_chunk_state_bnhpr
             .clone()
             //   - 3.1/3.9: slice: (intra_chunk_state_bnhpr [in][!]) -> (intra_chunk_state_b1hpr)

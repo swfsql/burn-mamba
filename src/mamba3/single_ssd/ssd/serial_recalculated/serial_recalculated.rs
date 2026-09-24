@@ -18,7 +18,7 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::ssd::serial_recalculated::{
-    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
+    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing, keep_factor,
 };
 use crate::mamba3::helpers::prim::{read_causal_mask, read_rows};
 use crate::mamba3::single_ssd::prelude::*;
@@ -47,6 +47,13 @@ impl Mamba3SingleSsdInput {
             "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
+        let (keep_bn, resets) = keep_factor(input.reset_bn, &input.v_bnlmhp);
+        // The seeds, or a placeholder that the op does not read (as `keep`).
+        let seeded = input.seed_bnhpr.is_some();
+        let seed_bnhpr = input.seed_bnhpr.unwrap_or_else(|| {
+            let options = (&input.v_bnlmhp.device(), input.v_bnlmhp.dtype());
+            Tensor::zeros([1, 1, 1, 1, 1], options)
+        });
         let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
@@ -58,6 +65,10 @@ impl Mamba3SingleSsdInput {
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
                 input.siso_specialization,
+                keep_bn.into_dispatch(),
+                resets,
+                seed_bnhpr.into_dispatch(),
+                seeded,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -107,6 +118,12 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
     ///   γ-correction (performance-only; see
     ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
+    /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
+    ///   a new segment of a packed row. Read only when `resets` is `true`.
+    /// - `seed_bnhpr`:         `[batch, nchunks, nheads, per_head_dim,
+    ///   state_rank]`, the boundary seed of each chunk (see
+    ///   [`Mamba3SingleSsdInput::seed_bnhpr`]). Read only when `seeded` is
+    ///   `true`.
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -122,6 +139,10 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
         siso_specialization: bool,
+        keep_bn: FloatTensor<Self>,
+        resets: bool,
+        seed_bnhpr: FloatTensor<Self>,
+        seeded: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate the single-ssd form K1–K5 on primitives.
         let v_bnlmhp = F::<Self, 6>::new(v_bnlmhp);
@@ -131,6 +152,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         let gamma_bnth = F::<Self, 4>::new(gamma_bnth);
         let scale_bnlh = F::<Self, 4>::new(scale_bnlh);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
+        let keep_bn = resets.then(|| F::<Self, 2>::new(keep_bn));
+        let seed_bnhpr = seeded.then(|| F::<Self, 5>::new(seed_bnhpr));
 
         // K1 — chunk cumulative decay.
         let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum::<Self>(da_bnlh);
@@ -152,6 +175,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
             intra_chunk_state_bnhpr,
             da_chunk_end_bhn,
             initial_state_bhpr,
+            keep_bn,
+            seed_bnhpr,
         );
         san(&chunk_input_state_bnhpr);
         san(&final_state_bhpr);

@@ -89,6 +89,8 @@ impl Mamba3DoubleSsdInput {
                 intra_chunk_state_bnhpr,
                 da_chunk_end_bhn,
                 input.initial_state_bhpr,
+                input.reset_bn,
+                None,
             );
         assert_eq!(
             [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -253,6 +255,14 @@ pub fn k3_ssd_chunk_state(
 /// - `intra_chunk_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — total log-decay per chunk
 /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+/// - `reset_bn`: `[batch, nchunks]`, the chunks that start a new segment of a
+///   packed row ([`crate::packing`]), or `None`. The state that goes into
+///   such a chunk is the **restart state**, as at the start of the call. The
+///   select also stops the gradient to the state before it.
+/// - `seed_bnhpr`: the single-SSD boundary seed of each chunk (see
+///   `Mamba3SingleSsdInput::seed_bnhpr`), or `None`. The restart state of
+///   chunk `c` is `initial + seedᶜ`, and the call starts from that of chunk 0.
+///   Without it, the restart state is `initial`.
 ///
 /// # Returns
 /// - `chunk_input_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
@@ -261,19 +271,40 @@ pub fn k4_ssd_state_passing(
     intra_chunk_state_bnhpr: Tensor<5>,
     da_chunk_end_bhn: Tensor<3>,
     initial_state_bhpr: Tensor<4>,
+    reset_bn: Option<Tensor<2, Bool>>,
+    seed_bnhpr: Option<Tensor<5>>,
 ) -> (Tensor<5>, Tensor<4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
-
-    let mut running_state_bhpr = initial_state_bhpr;
     assert_eq!(
         [batch, nheads, per_head_dim, state_rank],
-        running_state_bhpr.dims()
+        initial_state_bhpr.dims()
     );
+    let restart = |i_chunk: usize| match &seed_bnhpr {
+        Some(seed_bnhpr) => {
+            initial_state_bhpr.clone() + seed_bnhpr.clone().narrow(1, i_chunk, 1).squeeze_dim::<4>(1)
+        }
+        None => initial_state_bhpr.clone(),
+    };
+
+    let mut running_state_bhpr = restart(0);
 
     let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
     chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 
     for i_chunk in 0..nchunks {
+        // A chunk that starts a segment starts from the restart state. (A
+        // learnable `init_state_hpr` would join it, but only `Minimal` takes
+        // one.)
+        if let Some(reset_bn) = &reset_bn {
+            let reset_bhpr = reset_bn
+                .clone()
+                .slice(s![.., i_chunk])
+                .reshape([batch, 1, 1, 1])
+                .expand([batch, nheads, per_head_dim, state_rank]);
+            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, restart(i_chunk));
+            *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
+        }
+
         let intra_state_bhpr: Tensor<4> = intra_chunk_state_bnhpr
             .clone()
             .slice(s![.., i_chunk, .., .., ..]) // intra_chunk_state_b1hpr

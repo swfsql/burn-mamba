@@ -53,6 +53,8 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
     pub d_scale_bnlh: F<B, 4>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
+    /// Gradient of the per-chunk boundary seeds (packed rows only).
+    pub d_seed_bnhpr: Option<F<B, 5>>,
 }
 
 /// Memory-efficient backward for the Mamba-3 MIMO-first chunkwise Single-SSD.
@@ -77,9 +79,13 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 ///   [`Mamba3SingleSsdInput::read_stride`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput))
 /// - `siso_specialization` — the forward's γ-correction branch choice, replayed
 ///   here so the backward matches it (performance-only; both agree)
+/// - `keep_bn` — the constant reset factor of the forward (`0` at a chunk
+///   that starts a new segment), or `None`
+/// - `seed_bnhpr` — the per-chunk boundary seeds of a packed row, or `None`
 ///
 /// # Returns
-/// One [`CombinedSingleSsdGrads`] with gradients for all 7 inputs.
+/// One [`CombinedSingleSsdGrads`] with gradients for all 7 inputs (and the
+/// seeds).
 #[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bntmhp: F<B, 6>,
@@ -94,7 +100,10 @@ pub fn combined_backward<B: Backend>(
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
     siso_specialization: bool,
+    keep_bn: Option<F<B, 2>>,
+    seed_bnhpr: Option<F<B, 5>>,
 ) -> CombinedSingleSsdGrads<B> {
+    let seeded = seed_bnhpr.is_some();
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
     let device = v_bnlmhp.device();
@@ -142,6 +151,8 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
+        keep_bn.clone(),
+        seed_bnhpr,
     );
 
     // Fused-position cumulative decay, on the write axis and on the read one.
@@ -380,12 +391,14 @@ pub fn combined_backward<B: Backend>(
     let d_chunk_input_state_bnhpr: F<B, 5> = cat_chunk_groups(vec_d_chunk_input_state_bnhpr, 1);
 
     // ── K4 backward — the reverse of the state-passing scan ───────────────
-    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr) =
+    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_seed_bnhpr) =
         k4_ssd_state_passing_backward(
             d_chunk_input_state_bnhpr,
             chunk_input_state_bnhpr,
             da_chunk_end_bhn,
             d_final_bhpr,
+            keep_bn,
+            seeded,
         );
     let d_da_cumsum_k4_bhnl: F<B, 4> = {
         let zeros = F::<B, 4>::zeros([batch, nheads, nchunks, chunk_len - 1], &device, dtype);
@@ -538,5 +551,6 @@ pub fn combined_backward<B: Backend>(
         d_gamma_bnth,
         d_scale_bnlh,
         d_initial_state_bhpr,
+        d_seed_bnhpr,
     }
 }

@@ -121,6 +121,29 @@ pub struct Mamba3SingleSsdInput {
     /// [`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)
     /// compute the same values and gradients. No effect at `mimo_rank > 1`.
     pub siso_specialization: bool,
+
+    /// The chunks that start a new segment of a packed row: the carry into
+    /// each of them restarts from zero (see [`crate::packing`]). `None` ⇒ no
+    /// reset. Only the two serial paths take it. `Minimal` panics when it is
+    /// `Some`.
+    ///
+    /// At a reset, no `ν` is paid forward across it. The chunk restarts from
+    /// `initial_state_bhpr` plus its own boundary seed (`seed_bnhpr`), as the
+    /// call does.
+    ///
+    /// # Shape
+    /// - `[batch, nchunks]`
+    pub reset_bn: Option<Tensor<2, Bool>>,
+
+    /// The boundary β seed of each chunk, with resets: the installments that
+    /// the first `lag` positions of a chunk pay to the cache slots, in case
+    /// the chunk restarts. `initial_state_bhpr` then holds no seed, and the
+    /// call starts from `initial + seed⁰`. `None` without resets (the seed of
+    /// the call is then in `initial_state_bhpr`).
+    ///
+    /// # Shape
+    /// - `[batch, nchunks, nheads, per_head_dim, state_rank]`
+    pub seed_bnhpr: Option<Tensor<5>>,
 }
 
 impl Mamba3SingleSsdInput {
@@ -154,7 +177,13 @@ impl Mamba3SingleSsdInput {
     ///   cache for streaming).
     pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {
-            Mamba3SsdPath::Minimal(_) => self.single_ssd_minimal(),
+            Mamba3SsdPath::Minimal(_) => {
+                assert!(
+                    self.reset_bn.is_none(),
+                    "Minimal does not take resets: use Serial or SerialRecalculated"
+                );
+                self.single_ssd_minimal()
+            }
             Mamba3SsdPath::Serial(_) => self.single_ssd_serial(),
             Mamba3SsdPath::SerialRecalculated(_) => self.single_ssd_serial_recalculated(),
         }

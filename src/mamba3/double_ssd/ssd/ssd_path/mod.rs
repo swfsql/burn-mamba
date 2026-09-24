@@ -66,6 +66,15 @@ pub struct Mamba3DoubleSsdInput {
     /// # Shape
     /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<3>>,
+
+    /// The chunks that start a new segment of a packed row: the carry into
+    /// each of them restarts from zero (see [`crate::packing`]). `None` ⇒ no
+    /// reset. Only the two serial paths take it. `Minimal` panics when it is
+    /// `Some`.
+    ///
+    /// # Shape
+    /// - `[batch, nchunks]`
+    pub reset_bn: Option<Tensor<2, Bool>>,
 }
 
 impl Mamba3DoubleSsdInput {
@@ -94,7 +103,13 @@ impl Mamba3DoubleSsdInput {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {
-            Mamba3SsdPath::Minimal(_) => self.double_ssd_minimal(),
+            Mamba3SsdPath::Minimal(_) => {
+                assert!(
+                    self.reset_bn.is_none(),
+                    "Minimal does not take resets: use Serial or SerialRecalculated"
+                );
+                self.double_ssd_minimal()
+            }
             Mamba3SsdPath::Serial(_) => self.double_ssd_serial(),
             Mamba3SsdPath::SerialRecalculated(_) => self.double_ssd_serial_recalculated(),
         }

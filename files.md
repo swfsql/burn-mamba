@@ -31,7 +31,8 @@ Feature-gated module declarations (`mamba{1,2,3}`, `unified`), the `prelude`
 
 The family half of right padding (the `pad` of `forward`):
 
-- `real_len_b`,
+- `real_end_b`: one past the last real row (the real length under right
+  padding; a packed row can also have pad rows inside),
 - `window`: the per-slot `narrow`, as a fixed-shape gather. Every "last
   samples" cache field is read with it, at the end of its slot.
 - `fill_padded`,
@@ -40,6 +41,28 @@ The family half of right padding (the `pad` of `forward`):
 `tests.rs` checks every family, both Mamba-3 pathways across the dials, and a
 network that ends with an `End` latent, against each slot run alone (outputs,
 caches, gradients). A fully padded slot returns its cache.
+
+## `src/packing.rs`
+
+Packed segments (`forward_packed` of Mamba-2/3): `reset` marks the first token
+of each segment, and the block restarts it from the incoming cache. The module
+header is the contract. A reset must be at a chunk start, so only K4 of the SSD
+changes, and the other sites need only per-chunk flags:
+
+- `chunk_resets` (debug-checks the chunk starts), `chunk_heads` (the positions
+  whose reads cross a reset), `restart_heads` (those reads take the cache
+  values; a `gather`, because the backward of `repeat_dim` is wrong in this
+  Burn),
+- `Segments` (`segment_start` by a `cummax` over chunks, for the scans over the
+  row), `restart_window` (the returned cache, as the last segment sees it).
+
+`tests.rs`: a packed call against the batch of its segments (one row each),
+both from one leaf cache, broadcast: outputs, returned cache, and the
+gradients of the parameters, the inputs and the cache. Both families, both
+serial paths, both Mamba-3 pathways; short, pad-only and one-token segments.
+Not bit-exact yet: the conv taps (not `Conv1d`), the length-dependent blocking
+of `prefix_sum`, the extra scan rounds, and the quaternion segment start
+(divided out).
 
 ---
 
@@ -67,6 +90,8 @@ caches, gradients). A fully padded slot returns its cache.
     does not read it.
   - Padding: `Δ = 0` (the same identity step as the chunk padding), the conv
     window read at the end of each slot.
+  - `forward_packed` (`forward` delegates): a reset replaces `Conv1d` with a
+    tap-by-tap conv whose taps read zero across the reset (`conv_packed`).
   - `muon_projections()`: `in_proj [z|x|B|C|dt*]` (`xbc` split further: the
     conv is shared, the linear map is not), `out_proj`.
   - `InProjTail` moves `dt` into `in_proj_tail` (`project_in` joins the two).
@@ -87,7 +112,8 @@ caches, gradients). A fully padded slot returns its cache.
   math (7 inputs). The `#[backend_extension]` list is the same at all four
   extension sites: one `Cube` arm for every cubecl `backend-*` feature
   (mirrors burn's `cube_backend` cfg), plus `Flex`/`NdArray`/`LibTorch`/
-  `Autodiff`.
+  `Autodiff`. The macro takes no `Option` tensor, so the resets arrive as
+  `keep_bn` (a constant, a 1×1 placeholder without resets) + `resets: bool`.
 
 ## Mamba-3 (`src/mamba3/`)
 
@@ -111,8 +137,9 @@ caches, gradients). A fully padded slot returns its cache.
   - `InProjTail` moves the `d_in_proj_tail()` segments into `in_proj_tail` for
     any application count, so one tiled Muon spec fits every real layer.
   - `forward`/`step` **dispatch by cache variant** (missing ⇒ SingleSsd).
+    `forward_packed` (and the `_packed` pathway twins) take the resets.
     `save_tap_slots` and `positive_tail` read the FIFO and the carries at the
-    end of each slot. `positive_read` applies the positive ports **before** the
+    end of each slot (fresh before its last reset). `positive_read` applies the positive ports **before** the
     `D` skip, so `has_outproj_norm` keeps them.
   - `init_state_hpr`: as in Mamba-2 (`Minimal` only, `step` does not read it).
   - Two performance-only `mimo_rank == 1` flags (`#[module(skip)]`, identical
@@ -127,6 +154,8 @@ caches, gradients). A fully padded slot returns its cache.
     axis). It returns **untransported** masses. A Kalman gain computes its
     decay **between `da` and `α`**, so every consumer reads the computed decay.
     `TrapezoidCoeffs::padded` makes padded positions the identity step.
+    `interior_gap_decay` restarts its window at a segment start of a packed
+    row, as at the start of a call.
   - A closed tap gives its mass **back** (`λ ← 1`, `μ ← 0`, by
     `token_start_gate`), so the gated patterns are bit-exact degeneracies.
   - The `A` floor is `-softplus(x).clamp(a_floor, ∞)`: the clamp must bind the
@@ -136,7 +165,9 @@ caches, gradients). A fully padded slot returns its cache.
     optional segment cannot be one more entry in the main split.
   - `prefix_sum` is **blocked** (runs of `∛(2·len)`, clamped `16..=256`).
     Burn's `cumsum` is `O(len²)` on cubecl. Blocking beats Hillis–Steele
-    doubling at every length measured (numbers in the doc).
+    doubling at every length measured (numbers in the doc). `period =
+    Some(2π)` (the angle) reduces the block carries by the same scan one level
+    up, so the f32 error does not grow with the length.
   - The read axis: `read_rows` / `read_causal_mask` (the identity at
     `stride = 1`), and `mod prim` twins on `F<B,_>` + `scatter_read_rows` for
     the recompute backwards.
@@ -174,15 +205,20 @@ caches, gradients). A fully padded slot returns its cache.
   `C` + `read_stride` on the read axis). The same three algorithms as Mamba-2,
   with `mimo_rank` fused into the chunk. `serial_recalculated/` owns the K1–K4
   primitives that **both** pathways' backwards use, including
-  `k4_ssd_state_passing_backward` (the only walk in either backward).
+  `k4_ssd_state_passing_backward` (the only walk in either backward), and
+  `keep_factor` (the resets as the recompute ops take them). K4 restarts a
+  reset chunk from `initial + seedᶜ` (the seed only in single-SSD), and its
+  backward returns the gradient of each restart.
 
 ### `mamba3/single_ssd/`
 
 - **`single_ssd/mod.rs`**: `forward_single_ssd`: one SSD call with key scale
   `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`, a strict mask + same-step γ correction,
-  and a **boundary-β seed** folded into the initial state. Under
-  `Trapezoid::None` it delegates to `forward_double_ssd`. `step_single_ssd`
-  converts to a double-ssd cache, runs `step_double_ssd`, and converts back.
+  and a **boundary-β seed** folded into the initial state. A packed row gets
+  one seed per chunk (`seed_bnhpr`, a tracked input of the recompute op), and
+  pays no `ν` forward across a reset. Under `Trapezoid::None` it delegates to
+  `forward_double_ssd`. `step_single_ssd` converts to a double-ssd cache, runs
+  `step_double_ssd`, and converts back.
 - **`token_band.rs`**: the lag-`u` correction band, as one intra-token
   contraction outside the kernel. It takes the **lag-`u` mass alone**. The
   pathways agree on everything a caller can observe, but not on the `u−1`
@@ -217,7 +253,9 @@ reference for MambaProduct: the dial versus DeltaProduct's mechanism, what
   - `safe_norm` is scale-free: `‖r‖²` of raw channels overflows f16 at
     `|r| ≈ 250`, and `∞` gives a *zero* rotation.
   - The quaternion generators are **per head**.
-  - `rotate_bc_forward` renormalises the scan's prefixes.
+  - `rotate_bc_forward` renormalises the scan's prefixes. With `start_bs`
+    (packed), each segment turns from the incoming rotation
+    (`θₜ − θₛ₋₁ + θ₀`, `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`).
   - `Real` holds a tensor-less `NoRotation`: the `Module` derive wants one
     field per variant.
 - **`rope.rs`**: `wrap_angle` (mod `2π`, offset `detach`ed) and
@@ -235,10 +273,12 @@ Per-head scalar systems beside the plant. Math and audit:
 - **`scan.rs`**: `lse` (exact next to `LOG_ZERO`, splits a tie's gradient),
   the `Mobius` (projective, shifted per combine) and `Affine` elements,
   `prefix` (Hillis–Steele: its doc says why it is not blocked), `fold` (the
-  reference).
+  reference). `prefix_in_segments` (the partner across a segment start is the
+  identity) serves packed rows: each segment applies the incoming carry.
 - **`kalman.rs`**: `LogMasses` (from the **pre-activations**: `ln` of an
   underflowed mass is a NaN gradient), `gate` (the decay, exact `ln α` at
   `κ = 0`). `Λ` is exact for a lag-1 tap, an upper bound at lag `u`.
+  `GainInput.start_bs` restarts the scan per segment, from the carry.
 - **`tropical.rs`**: `register`, the affine scan.
 
 ### `mamba3/quat_scan/`

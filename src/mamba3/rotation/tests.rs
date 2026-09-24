@@ -977,6 +977,7 @@ fn rotor_generator_channels_are_left_then_right() {
         c.clone(),
         1,
         spec(RotationKind::Quaternion4D),
+        None,
     );
     let (b_r, c_r, st_r) = rotate_bc_forward(
         Some(rot_rotor),
@@ -986,6 +987,7 @@ fn rotor_generator_channels_are_left_then_right() {
         c,
         1,
         spec(RotationKind::Rotor4D),
+        None,
     );
 
     let (left_r, right_r) = split_rotor(st_r.rotor());

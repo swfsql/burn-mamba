@@ -41,6 +41,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
+        keep_bn: FloatTensor<Self>,
+        resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward struct ──────────────────────────────────────────────────
         #[derive(Debug)]
@@ -48,8 +50,9 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
 
         /// State carried across the forward→backward boundary.
         ///
-        /// Only the 7 original inputs are saved. The backward recomputes all
-        /// intermediates (cb, intra state, chunk_input_state).
+        /// Only the 7 original inputs (and the constant reset factor) are
+        /// saved. The backward recomputes all intermediates (cb, intra state,
+        /// chunk_input_state).
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
             x_bnlhp: <B as BackendTypes>::FloatTensorPrimitive,
@@ -59,6 +62,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
             d_h: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
             a_decay_h: <B as BackendTypes>::FloatTensorPrimitive,
+            keep_bn: Option<<B as BackendTypes>::FloatTensorPrimitive>,
             // flat element counts, to split the combined gradient vector
             flat_len_y_BNLHP: usize,
             flat_len_final_state_BHPR: usize,
@@ -105,6 +109,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_h,
                     initial_state_bhpr,
                     a_decay_h,
+                    keep_bn,
                     //
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
@@ -165,6 +170,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_h,
                     initial_state_bhpr,
                     a_decay_h,
+                    keep_bn.map(F::<B, 2>::new),
                 );
 
                 // ── Register gradients ─────────────────────────────────────
@@ -236,6 +242,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_h.primitive().clone(),
                     initial_state_bhpr.primitive().clone(),
                     a_decay_h.primitive().clone(),
+                    keep_bn.primitive().clone(),
+                    resets,
                 );
 
                 // prep.finish takes one tensor, so pack both outputs into one
@@ -253,6 +261,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_h: d_h.primitive().clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive().clone(),
                     a_decay_h: a_decay_h.primitive().clone(),
+                    keep_bn: resets.then(|| keep_bn.primitive().clone()),
                     //
                     flat_len_y_BNLHP,
                     flat_len_final_state_BHPR,
@@ -292,6 +301,8 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                     d_h.into_primitive(),
                     initial_state_bhpr.into_primitive(),
                     a_decay_h.into_primitive(),
+                    keep_bn.into_primitive(),
+                    resets,
                 );
 
                 let (combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(

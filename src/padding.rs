@@ -17,10 +17,19 @@
 
 use burn::prelude::*;
 
-/// Real rows per slot, `[batch]`.
-pub(crate) fn real_len_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
-    let [batch, _] = pad_bs.dims();
-    pad_bs.clone().bool_not().int().sum_dim(1).reshape([batch])
+/// One past the last real row of each slot, `[batch]`: where the slot reads
+/// its cache fields. Under right padding, this is the number of real rows. In
+/// a packed row ([`crate::packing`]), pad rows can also end each segment, and
+/// only the last real row counts. A slot with no real row gives `0`.
+pub(crate) fn real_end_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
+    let [batch, sequence] = pad_bs.dims();
+    let device = pad_bs.device();
+    Tensor::<1, Int>::arange(1..sequence as i64 + 1, &device)
+        .reshape([1, sequence])
+        .expand([batch, sequence])
+        .mask_fill(pad_bs.clone(), 0)
+        .max_dim(1)
+        .reshape([batch])
 }
 
 /// `width` consecutive positions of `x` along `axis`, from `start_b` in each

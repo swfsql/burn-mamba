@@ -106,9 +106,12 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
 /// - `read_stride` — folded positions per read row (`micro_steps`)
+/// - `keep_bn` — the constant reset factor of the forward (`0` at a chunk
+///   that starts a new segment), or `None`
 ///
 /// # Returns
 /// One [`CombinedGrads`] struct with the gradients of all 5 inputs.
+#[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bntmhp: F<B, 6>,
     d_final_bhpr: F<B, 4>,
@@ -119,6 +122,7 @@ pub fn combined_backward<B: Backend>(
     c_bntmhr: F<B, 6>,
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
+    keep_bn: Option<F<B, 2>>,
 ) -> CombinedGrads<B> {
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
@@ -158,6 +162,8 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
+        keep_bn.clone(),
+        None,
     );
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -381,12 +387,14 @@ pub fn combined_backward<B: Backend>(
     let d_chunk_input_state_bnhpr: F<B, 5> = cat_chunk_groups(vec_d_chunk_input_state_bnhpr, 1);
 
     // ── K4 backward — the reverse of the state-passing scan ───────────────
-    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr) =
+    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, _) =
         k4_ssd_state_passing_backward(
             d_chunk_input_state_bnhpr,
             chunk_input_state_bnhpr,
             da_chunk_end_bhn,
             d_final_bhpr,
+            keep_bn,
+            false,
         );
     // d_da_end: [batch,nheads,nchunks] scattered into the last `l` of d_da_cumsum_k4.
     let d_da_cumsum_k4_bhnl: F<B, 4> = {

@@ -687,13 +687,39 @@ impl Mamba2 {
     /// - `pad_bs`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
     /// - cache (out) : updated convolution window and SSM state
-    #[allow(non_snake_case)]
     pub fn forward(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba2Cache>,
         ssd_path: Mamba2SsdPath,
         pad_bs: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba2Cache) {
+        self.forward_packed(input_bsm, cache, ssd_path, pad_bs, None)
+    }
+
+    /// [`Self::forward`] over a **packed** batch: each row holds several
+    /// sequences one after another, and each one starts from the incoming
+    /// cache (a fresh one for `cache = None`).
+    ///
+    /// `reset_bs` (`[batch, sequence]`, `true` at the first row of a segment)
+    /// marks each start. It must be at the first row of a chunk (every
+    /// `chunk_len` rows). A segment can end with pad rows (`pad_bs`) up to the
+    /// next start. The result for each segment is that of its own `forward`
+    /// from the same cache. The returned cache is that of the last segment of
+    /// each row. See [`crate::packing`].
+    ///
+    /// At a start, the conv reads the window of the cache in place of the
+    /// rows before it, and the SSD carry between chunks restarts from the
+    /// state of the cache. Only [`Mamba2SsdPath::Serial`] and
+    /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
+    #[allow(non_snake_case)]
+    pub fn forward_packed(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba2Cache>,
+        ssd_path: Mamba2SsdPath,
+        pad_bs: Option<Tensor<2, Bool>>,
+        reset_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba2Cache) {
         let [batch, sequence, _d_model] = input_bsm.dims();
         let d_inner = self.d_inner();
@@ -711,6 +737,12 @@ impl Mamba2 {
         assert_eq!(nheads % ngroups, 0);
         assert!(sequence > 0, "sequence length must be at least 1");
         san(&input_bsm);
+
+        // The chunk length is known before the conv, because a reset (at a
+        // chunk start) also changes the conv.
+        let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+        assert!(chunk_len > 0);
+        let reset_bn = reset_bs.map(|reset_bs| crate::packing::chunk_resets(reset_bs, chunk_len));
 
         // ── Initialise cache if not provided ──────────────────────────────────
         let mut cache = cache.unwrap_or_else(|| {
@@ -783,23 +815,37 @@ impl Mamba2 {
         // Update the cache: keep the last `conv_kernel` columns of the padded
         // input (from position `sequence - 1`). Under right padding, keep the
         // last real columns of each slot, read from the full previous window
-        // followed by the input.
-        cache.conv_bvk = match &pad_bs {
-            None => xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]),
-            Some(pad_bs) => {
+        // followed by the input. After a reset, the columns before the start
+        // of the last segment come from the incoming window, where that
+        // segment started.
+        cache.conv_bvk = match (&pad_bs, &reset_bn) {
+            (None, None) => xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]),
+            _ => {
                 let input_bvs = xbc_padded_bvS.clone().narrow(2, conv_kernel - 1, sequence);
-                crate::padding::window(
-                    Tensor::cat(vec![cache.conv_bvk.clone(), input_bvs], 2),
-                    2,
-                    crate::padding::real_len_b(pad_bs),
-                    conv_kernel,
-                )
+                let all_bvK = Tensor::cat(vec![cache.conv_bvk.clone(), input_bvs], 2);
+                let end_b = match &pad_bs {
+                    Some(pad_bs) => crate::padding::real_end_b(pad_bs),
+                    None => Tensor::full([batch], sequence as i64, &device),
+                };
+                match &reset_bn {
+                    None => crate::padding::window(all_bvK, 2, end_b, conv_kernel),
+                    Some(reset_bn) => crate::packing::restart_window(
+                        all_bvK,
+                        2,
+                        end_b,
+                        conv_kernel,
+                        crate::packing::last_start_b(reset_bn, chunk_len),
+                    ),
+                }
             }
         };
         assert_eq!([batch, conv_dim, conv_kernel], cache.conv_bvk.dims());
 
         // Apply the depthwise convolution and transpose back to [batch, sequence, conv_dim].
-        let xbc_bvs = self.conv1d.forward(xbc_padded_bvS);
+        let xbc_bvs = match &reset_bn {
+            None => self.conv1d.forward(xbc_padded_bvS),
+            Some(reset_bn) => self.conv_packed(xbc_padded_bvS, reset_bn, chunk_len),
+        };
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
         san(&xbc_bvs);
 
@@ -866,8 +912,6 @@ impl Mamba2 {
         // Zeros are the correct pad: Δ=0  ⇒  Ā=exp(0·A)=1, B̄=0·B=0.
         // The state goes through the pad unchanged, so the final state of the
         // padded last chunk equals the state after the last real token.
-        let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
-        assert!(chunk_len > 0);
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
         let (x_bShp, dt_bSh, b_bSgr, c_bSgr) = if pad == 0 {
@@ -905,6 +949,7 @@ impl Mamba2 {
             d_h: self.d_h.val(),
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
+            reset_bn,
         };
         ssd_input.sanity();
         let (y_bnlhp, final_state_bhpr) = ssd_input.run(&ssd_path);
@@ -945,6 +990,60 @@ impl Mamba2 {
         san(&out_bsm);
 
         (out_bsm, cache)
+    }
+
+    /// The depthwise causal conv of [`Self::forward_packed`], tap by tap. A
+    /// tap that reaches back past the start of its segment reads the cached
+    /// window instead, as at the start of a call.
+    ///
+    /// `Conv1d` computes `yₜ = bias + Σᵢ wᵢ · x̃ₜ₊ᵢ` over the causally padded
+    /// input `x̃` (`conv_kernel − 1` cached columns, then the input). So tap
+    /// `i` reads `back = conv_kernel − 1 − i` rows back. At row `q < back` of
+    /// a segment, it reads cached column `i + q`: the last `back` columns of
+    /// the cached ones, in order.
+    ///
+    /// # Shapes
+    /// - `xbc_padded_bvS` : `[batch, conv_dim, (conv_kernel − 1) + sequence]`
+    /// - `reset_bn`       : `[batch, nchunks]`
+    /// - out              : `[batch, conv_dim, sequence]`
+    #[allow(non_snake_case)]
+    fn conv_packed(
+        &self,
+        xbc_padded_bvS: Tensor<3>,
+        reset_bn: &Tensor<2, Bool>,
+        chunk_len: usize,
+    ) -> Tensor<3> {
+        let [batch, conv_dim, padded] = xbc_padded_bvS.dims();
+        let [_, _, conv_kernel] = self.conv1d.weight.dims();
+        let sequence = padded - (conv_kernel - 1);
+        let device = xbc_padded_bvS.device();
+        let weight_vk = self.conv1d.weight.val().reshape([conv_dim, conv_kernel]);
+        let mut out_bvs = match &self.conv1d.bias {
+            Some(bias) => bias
+                .val()
+                .reshape([1, conv_dim, 1])
+                .expand([batch, conv_dim, sequence]),
+            None => Tensor::zeros([batch, conv_dim, sequence], &device),
+        };
+        for i in 0..conv_kernel {
+            let back = conv_kernel - 1 - i;
+            let tap_bvs = xbc_padded_bvS.clone().narrow(2, i, sequence);
+            // A read `back` rows back crosses a segment start in the first
+            // `back` rows of a chunk that starts with a reset.
+            let tap_bvs = if back == 0 {
+                tap_bvs
+            } else {
+                let cached_bvk = xbc_padded_bvS.clone().narrow(2, i, back);
+                crate::packing::restart_heads(tap_bvs, 2, cached_bvk, reset_bn, chunk_len)
+            };
+            let w_bvs = weight_vk
+                .clone()
+                .narrow(1, i, 1)
+                .reshape([1, conv_dim, 1])
+                .expand([batch, conv_dim, sequence]);
+            out_bvs = out_bvs + tap_bvs * w_bvs;
+        }
+        out_bvs
     }
 }
 

@@ -135,7 +135,7 @@ fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usi
     let inner: usize = dims[dim + 1..].iter().product();
 
     for carried in [false, true] {
-        let got = prefix_sum::<D, DP1>(t.clone(), dim, carried.then(|| init.clone()));
+        let got = prefix_sum::<D, DP1>(t.clone(), dim, carried.then(|| init.clone()), None);
         assert_eq!(dims, got.dims(), "prefix_sum must preserve the shape");
         let got: Vec<f32> = got.to_data().try_to_vec().unwrap();
 
@@ -187,7 +187,7 @@ fn prefix_sum_matches_cumsum() {
     for len in [1, 5, 64, 257] {
         let t = Tensor::<4>::random([2, len, 3, 5], Distribution::Normal(0.0, 1.0), &device);
         let want = t.clone().cumsum(1);
-        let got = prefix_sum::<4, 5>(t, 1, None);
+        let got = prefix_sum::<4, 5>(t, 1, None, None);
         let scale = want.clone().abs().max().into_scalar::<f32>();
         let d = burn_stack::utils::test_helpers::max_abs_diff(got, want);
         assert!(
@@ -203,7 +203,8 @@ fn prefix_sum_matches_cumsum() {
 /// is as load-bearing as its value — and the blocked form's backward runs
 /// through a *different* graph from a single scan's (a reshape, two short
 /// scans and a broadcast), not merely a re-association. `len = 100` is a
-/// partial last block.
+/// partial last block. The scan on the circle has the same gradient, because
+/// its reductions subtract detached multiples of the period.
 #[test]
 fn prefix_sum_gradient_matches_the_definition() {
     let device = Device::default();
@@ -221,30 +222,115 @@ fn prefix_sum_gradient_matches_the_definition() {
     );
     let w_host: Vec<f32> = w.to_data().try_to_vec().unwrap();
 
-    let p = Param::from_tensor(Tensor::from_inner(raw));
-    let loss = (prefix_sum::<3, 4>(p.val(), 1, None) * Tensor::from_inner(w)).sum();
-    let grads = loss.backward();
-    let got: Vec<f32> = p
-        .val()
-        .grad(&grads)
-        .expect("grad through prefix_sum")
-        .to_data()
-        .try_to_vec()
-        .unwrap();
+    for period in [None, Some(std::f32::consts::TAU)] {
+        let p = Param::from_tensor(Tensor::from_inner(raw.clone()));
+        let loss =
+            (prefix_sum::<3, 4>(p.val(), 1, None, period) * Tensor::from_inner(w.clone())).sum();
+        let grads = loss.backward();
+        let got: Vec<f32> = p
+            .val()
+            .grad(&grads)
+            .expect("grad through prefix_sum")
+            .to_data()
+            .try_to_vec()
+            .unwrap();
 
-    // Reverse-inclusive sum of `w` along the scanned axis.
-    for b in 0..batch {
-        for c in 0..channels {
-            let mut acc = 0.0f32;
-            for j in (0..len).rev() {
-                let idx = (b * len + j) * channels + c;
-                acc += w_host[idx];
-                assert!(
-                    (got[idx] - acc).abs() < prefix_tol(acc),
-                    "grad at (b={b}, j={j}, c={c}): {} vs {acc}",
-                    got[idx]
-                );
+        // Reverse-inclusive sum of `w` along the scanned axis.
+        for b in 0..batch {
+            for c in 0..channels {
+                let mut acc = 0.0f32;
+                for j in (0..len).rev() {
+                    let idx = (b * len + j) * channels + c;
+                    acc += w_host[idx];
+                    assert!(
+                        (got[idx] - acc).abs() < prefix_tol(acc),
+                        "period={period:?}: grad at (b={b}, j={j}, c={c}): {} vs {acc}",
+                        got[idx]
+                    );
+                }
             }
         }
+    }
+}
+
+/// `x − k·p` with `k` the nearest integer to `x/p`: the representative in
+/// `[−p/2, p/2]`.
+fn reduce_f64(x: f64, p: f64) -> f64 {
+    x - (x / p).round() * p
+}
+
+/// On the circle, [`prefix_sum`] is the prefix sum **modulo the period**, and
+/// its rounding does not grow with the length.
+///
+/// The steps drift (mean 2), so the plain prefix grows linearly and passes
+/// `2.6·10⁵` at `len = 131072`, where one f32 step is `0.03`. The reference
+/// sums in f64 on the host. The period is the f32 `2π` that the scan
+/// subtracts, so the only difference left is rounding. The lengths use 0, 1, 2
+/// and 3 levels of the recursive carry.
+///
+/// The SSD reads the angle **between** two positions: the rotation of the
+/// state from one to the other. So the test compares differences over fixed
+/// lags. The absolute angle also collects the rounding of every earlier block,
+/// but both positions of a difference share that part, and it cancels. At a
+/// fixed lag, one tolerance holds at every length: the worst is about `2·10⁻⁵`
+/// at lag 1 and `3·10⁻⁴` at lag 1024. The plain scan (`period = None`) fails
+/// the same check at `len = 5000` already (`10⁻³` at lag 1), because it rounds
+/// each output at the size of the whole prefix.
+///
+/// Each output is also at most `π` plus one in-block prefix, whatever `len` is.
+/// That bound is why the rounding stays small.
+#[test]
+fn prefix_sum_on_the_circle_matches_the_definition() {
+    let device = Device::default();
+    let tau = std::f32::consts::TAU;
+    let (batch, channels) = (2, 3);
+    for len in [5, 100, 5000, 131072] {
+        let t = Tensor::<3>::random(
+            [batch, len, channels],
+            Distribution::Normal(2.0, 3.0),
+            &device,
+        );
+        let init = Tensor::<3>::random(
+            [batch, 1, channels],
+            Distribution::Uniform(-3.1, 3.1),
+            &device,
+        );
+        let t_host: Vec<f32> = t.to_data().try_to_vec().unwrap();
+        let init_host: Vec<f32> = init.to_data().try_to_vec().unwrap();
+        let got: Vec<f32> = prefix_sum::<3, 4>(t, 1, Some(init), Some(tau))
+            .to_data()
+            .try_to_vec()
+            .unwrap();
+
+        let step_max = t_host.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let bound = std::f32::consts::PI + scan_block(len) as f32 * step_max + 1e-3;
+        let mut worst = [0.0f64; 3];
+        for b in 0..batch {
+            for c in 0..channels {
+                let idx = |i: usize| (b * len + i) * channels + c;
+                let mut want = vec![0.0f64; len];
+                let mut acc = init_host[b * channels + c] as f64;
+                for i in 0..len {
+                    acc += t_host[idx(i)] as f64;
+                    want[i] = acc;
+                    assert!(
+                        got[idx(i)].abs() <= bound,
+                        "len={len}: |out| = {} passes the bound {bound}",
+                        got[idx(i)].abs()
+                    );
+                }
+                for (worst, lag) in worst.iter_mut().zip([1, 64, 1024]) {
+                    for i in lag..len {
+                        let got_d = got[idx(i)] as f64 - got[idx(i - lag)] as f64;
+                        let want_d = want[i] - want[i - lag];
+                        *worst = worst.max(reduce_f64(got_d - want_d, tau as f64).abs());
+                    }
+                }
+            }
+        }
+        assert!(
+            worst.iter().all(|w| *w < 5e-4),
+            "len={len}: the angle over lags 1, 64, 1024 is off by {worst:?}"
+        );
     }
 }

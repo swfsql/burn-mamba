@@ -78,6 +78,7 @@ pub mod prelude {
 
 pub mod unified;
 
+pub mod packing;
 mod padding;
 
 /// Re-export of the block-generic composition crate this one builds on, so a

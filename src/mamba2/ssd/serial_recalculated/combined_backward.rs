@@ -21,7 +21,9 @@
 
 #![allow(non_snake_case)]
 
-use super::serial_recalculated::{k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing};
+use super::serial_recalculated::{
+    k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing, restart_factor,
+};
 use burn_stack::utils::fprim::{F, Mask, san};
 use burn::backend::Backend;
 use burn::tensor::s;
@@ -122,6 +124,8 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `d_final_bhpr` — upstream gradient of the final SSM state
 /// - `x_bnlhp`, `dt_discretized_bhnl`, `b_bnlhr`, `c_bnlhr`, `d_h`,
 ///   `initial_state_bhpr`, `a_decay_h` — the seven saved forward inputs
+/// - `keep_bn` — the constant reset factor of the forward (`0` at a chunk
+///   that starts a new segment), or `None`
 ///
 /// # Returns
 /// One [`CombinedGrads`] struct containing gradients for all 7 inputs.
@@ -137,6 +141,7 @@ pub fn combined_backward<B: Backend>(
     d_h: F<B, 1>,
     initial_state_bhpr: F<B, 4>,
     a_decay_h: F<B, 1>,
+    keep_bn: Option<F<B, 2>>,
 ) -> CombinedGrads<B> {
     let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
     let [.., per_head_dim] = x_bnlhp.dims();
@@ -185,6 +190,7 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr.clone(),
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
+        keep_bn.clone(),
     );
     san(&chunk_input_state_bnhpr);
 
@@ -224,6 +230,16 @@ pub fn combined_backward<B: Backend>(
     let mut vec_d_da_end_bh: Vec<F<B, 2>> = Vec::with_capacity(nchunks);
 
     let mut d_running_state_bhpr: F<B, 4> = d_final_bhpr;
+    // The resets: what goes on to the previous chunk (`keep`), and what goes
+    // to the initial state (`1 − keep`), per chunk.
+    let restart_bn = keep_bn.as_ref().map(restart_factor);
+    let at = |t_bn: &F<B, 2>, i_chunk: usize| {
+        t_bn.clone()
+            .slice(s![.., i_chunk])
+            .reshape([batch, 1, 1, 1])
+            .expand([batch, nheads, per_head_dim, state_rank])
+    };
+    let mut d_initial_restarts_bhpr: Option<F<B, 4>> = None;
 
     for i_chunk in (0..nchunks).rev() {
         // ── Per-chunk slices ───────────────────────────────────────────────
@@ -370,6 +386,11 @@ pub fn combined_backward<B: Backend>(
         //   - d_intra_stateᵢ      = d_sᵢ₊₁  (current d_running_state)
         //   - d_decayᵢ            = d_sᵢ₊₁ · sᵢ
         //   - d_sᵢ (propagated)   = decayᵢ · d_sᵢ₊₁ + d_chunk_input_state
+        //   Under a reset, sᵢ = keepᵢ · (the state before chunk i) +
+        //   (1 − keepᵢ) · initial. So the gradient that goes on to chunk
+        //   i − 1 is keepᵢ · d_sᵢ, and the initial state gets (1 − keepᵢ) ·
+        //   d_sᵢ. `sᵢ` in d_decayᵢ is already the restarted one (K4 above
+        //   recomputed it with the reset).
         vec_d_intra_bhpr.push(d_running_state_bhpr.clone());
 
         let decay_chunk_bhpr: F<B, 4> = da_chunk_end_bhn
@@ -390,10 +411,22 @@ pub fn combined_backward<B: Backend>(
         vec_d_da_end_bh.push(d_da_chunk_end_bh);
 
         d_running_state_bhpr = decay_chunk_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+            let d_restart_bhpr = d_running_state_bhpr.clone() * at(restart_bn, i_chunk);
+            d_initial_restarts_bhpr = Some(match d_initial_restarts_bhpr {
+                Some(acc_bhpr) => acc_bhpr + d_restart_bhpr,
+                None => d_restart_bhpr,
+            });
+            d_running_state_bhpr = d_running_state_bhpr * at(keep_bn, i_chunk);
+        }
         san(&d_running_state_bhpr);
     }
-    // d_initial_state = the trailing d_running_state after the reverse loop.
-    let d_initial_state_bhpr = d_running_state_bhpr;
+    // d_initial_state = the trailing d_running_state after the reverse loop,
+    // plus what each restart sent to it.
+    let d_initial_state_bhpr = match d_initial_restarts_bhpr {
+        Some(acc_bhpr) => d_running_state_bhpr + acc_bhpr,
+        None => d_running_state_bhpr,
+    };
 
     // ── Restore natural (forward) chunk order ─────────────────────────────
     vec_orange_d_x_bhlp.reverse();

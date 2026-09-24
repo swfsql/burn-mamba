@@ -102,6 +102,8 @@ impl Mamba3SingleSsdInput {
                 intra_chunk_state_bnhpr,
                 da_chunk_end_bhn,
                 input.initial_state_bhpr,
+                input.reset_bn,
+                input.seed_bnhpr,
             );
         assert_eq!(
             [batch, nchunks, nheads, per_head_dim, state_rank],
