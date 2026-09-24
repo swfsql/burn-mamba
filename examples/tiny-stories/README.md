@@ -95,8 +95,9 @@ per character. A story is walked in windows (see
 - The batch carries the number of real positions of each slot. The loss and the
   accuracy mask the padding out, at the fixed shape of the window. A shape that
   changes per window slows every later CUDA allocation (tracel-ai/burn#5751).
-- `-- --profile <N>` prints the mean ms of each phase per `N` windows, and the
-  live device allocations. These stay flat while no launch shape changes.
+- `-- --profile <N>` prints the mean ms of each phase per `N` windows, the
+  live device allocations, and the bytes that the memory pools reserve. These
+  stay flat while no launch shape changes.
 
 ## Runs and the frontier
 
@@ -176,6 +177,7 @@ shared CLI, before the `--`, sets:
 | `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal` (not persisted) |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
+| `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward (not persisted) |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.

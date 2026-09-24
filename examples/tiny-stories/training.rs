@@ -131,6 +131,11 @@ pub struct Run {
     /// Whether decode steps and prefill chunks replay captured graphs
     /// (`--no-graph` runs them eagerly).
     pub graphs: bool,
+    /// `--max-vram`, in MiB. After each backward (the peak of a step), the
+    /// training reads the bytes that the memory pools reserve. Above this
+    /// cap, the process stops with an error. The pools keep their pages, so
+    /// the reserved bytes are the high-water mark of the run.
+    pub max_vram_mib: Option<u64>,
 }
 
 /// Wrapper over [`MambaVocabNet`] for custom implementations, with its [`Run`]
@@ -157,6 +162,17 @@ impl LmModel for Wrap {
         let t1 = prof::mark(&device);
         let grads = pre_metrics.loss.backward();
         let t2 = prof::mark(&device);
+        if let Some(max_mib) = self.1.max_vram_mib
+            && let Some(usage) = device.memory_pool_usage()
+        {
+            let reserved_mib = usage.bytes_reserved >> 20;
+            if reserved_mib > max_mib {
+                eprintln!(
+                    "VRAM LIMIT: the memory pools reserve {reserved_mib} MiB > --max-vram {max_mib} MiB; stopping"
+                );
+                std::process::exit(3);
+            }
+        }
         let output = TrainOutput::new(&self.0, grads, pre_metrics);
         prof::window_end(&device, t0, t1, t2);
         (output, caches)
@@ -307,12 +323,14 @@ pub mod prof {
             let [f, b, g, o, u] = s.sums.map(|sum| sum / s.every as f64);
             // Live allocations: flat unless some launch shape varies. Each new
             // shape pins a cached metadata buffer (burn#5751), but the bytes
-            // barely move.
+            // barely move. `reserved` is every page that the pools hold (the
+            // high-water mark of the step, the CUDA context excluded).
             let allocs = match s.device.as_ref().and_then(Device::memory_pool_usage) {
                 Some(usage) => format!(
-                    " allocs {} ({:.1} MB)",
+                    " allocs {} ({:.1} MB) reserved {:.1} MB",
                     usage.number_allocs,
-                    usage.bytes_in_use as f64 / 1e6
+                    usage.bytes_in_use as f64 / 1e6,
+                    usage.bytes_reserved as f64 / 1e6
                 ),
                 None => String::new(),
             };

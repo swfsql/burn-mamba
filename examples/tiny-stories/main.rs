@@ -21,8 +21,8 @@
 //!   distribution of the first character). It prefills an optional prompt with
 //!   chunkwise `forward`s, then samples one character per `step`.
 //!
-//! The corpus knobs, the SSD path and the step profiler ([`cli`]) go after the
-//! trailing `--`. The corpus knobs are written into the `training_config.json`
+//! The corpus knobs, the SSD path, the step profiler and the VRAM cap ([`cli`])
+//! go after the trailing `--`. The corpus knobs are written into the `training_config.json`
 //! of the artifacts, so a resumed run keeps them:
 //!
 //! ```bash
@@ -43,7 +43,7 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, OptimizerConfig, OptimizerKind, TrainingConfig},
 };
 
-/// The example's own flags (corpus knobs, SSD path, profiler).
+/// The example's own flags (corpus knobs, SSD path, profiler, VRAM cap).
 pub mod cli;
 /// Sampling from the trained LM.
 pub mod inference;
@@ -125,6 +125,7 @@ pub fn launch(app_args: &AppArgs) {
     let run = training::Run {
         ssd_path: cli.ssd_path,
         graphs: app_args.graphs(),
+        max_vram_mib: cli.max_vram_mib,
     };
     if let Some((every, sync)) = cli.profile {
         training::prof::init(every, sync);

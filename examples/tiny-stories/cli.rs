@@ -1,6 +1,6 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
-//! (`Overrides`, shared with `burn-deltanet`), the SSD path and the step
-//! profiler.
+//! (`Overrides`, shared with `burn-deltanet`), the SSD path, the step profiler
+//! and the VRAM cap.
 
 use crate::common::cli::{AppArgs, finish_extra};
 use crate::common::tiny_stories::lm::Overrides;
@@ -10,7 +10,8 @@ use burn_mamba::prelude::*;
 const HELP: &str = concat!(
     "    --ssd-path <PATH>      The SSD path of every chunkwise forward: recalc (default), serial or minimal\n",
     "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
-    "    --profile-sync         Also sync the device after each phase (with --profile)",
+    "    --profile-sync         Also sync the device after each phase (with --profile)\n",
+    "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward",
 );
 
 /// The parsed flags.
@@ -22,6 +23,9 @@ pub struct Cli {
     pub ssd_path: MambaSsdPath,
     /// `--profile` (and `--profile-sync`): see `training::prof`.
     pub profile: Option<(usize, bool)>,
+    /// `--max-vram`, in MiB: the cap on the bytes that the memory pools
+    /// reserve (the CUDA context is not included). See `training::Run`.
+    pub max_vram_mib: Option<u64>,
 }
 
 impl Cli {
@@ -37,11 +41,13 @@ impl Cli {
         let every: Option<usize> = pargs.opt_value_from_str("--profile").unwrap();
         let sync = pargs.contains("--profile-sync");
         assert!(every.is_some() || !sync, "--profile-sync needs --profile");
+        let max_vram_mib = pargs.opt_value_from_str("--max-vram").unwrap();
         finish_extra(pargs);
         Self {
             overrides,
             ssd_path: MambaSsdPath::Mamba3(ssd_path),
             profile: every.map(|every| (every, sync)),
+            max_vram_mib,
         }
     }
 }
