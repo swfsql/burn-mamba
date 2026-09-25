@@ -940,12 +940,14 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// share one state, so they share its transition, and per-rank angles have no
 /// state-space preimage (`info/mamba-3/mimo-as-batch.md` §7).
 ///
-/// `start_bs` (`[batch, sequence]`) is the first position of the segment of
-/// each position in a packed row (`-1` before the first reset of the row), or
-/// `None`. Each segment then turns from the incoming rotation `prev`: its
-/// cumulative rotation is the one of the whole row, relative to the one
-/// before its first position, on top of `prev` (`θₜ − θₛ₋₁ + θ₀`, or
-/// `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`). The returned accumulator is that of the last segment.
+/// `segments` is `(start_bs, origin)` for a packed row, or `None`. `start_bs`
+/// (`[batch, sequence]`) is the first position of the segment of each
+/// position (`-1` before the first reset of the row). Each segment turns from
+/// the `origin` rotation. Its cumulative rotation is that of the whole row,
+/// relative to the one before its first position, on top of `origin`
+/// (`θₜ − θₛ₋₁ + θ₀`, or `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`). The positions before the first
+/// reset continue from `prev`. The returned accumulator is that of the last
+/// segment.
 ///
 /// # Shapes
 /// - `rot_bsa` : `[batch, sequence, num_rotation_channels]`: the in-projection
@@ -963,7 +965,7 @@ pub fn rotate_bc_forward(
     c_btmhr: Tensor<5>,
     read_stride: usize,
     spec: RotationSpec,
-    start_bs: Option<&Tensor<2, Int>>,
+    segments: Option<(&Tensor<2, Int>, RotationState)>,
 ) -> (Tensor<5>, Tensor<5>, RotationState) {
     let [batch, sequence, mimo_rank, nheads, _state_rank] = b_bsmhr.dims();
     let tokens = c_btmhr.dims()[1];
@@ -995,17 +997,18 @@ pub fn rotate_bc_forward(
                 Some(prev_angle_b1ha.clone()),
                 Some(std::f32::consts::TAU),
             );
-            // A packed row: each segment turns from the incoming angle, so its
+            // A packed row: each segment turns from the origin angle. So its
             // angle moves by the difference between that angle and the one
             // before its first position. All of them are bounded (the scan is
             // on the circle), so the difference loses no precision.
-            let cum_angles_bsha = match start_bs {
+            let cum_angles_bsha = match segments {
                 None => cum_angles_bsha,
-                Some(start_bs) => {
+                Some((start_bs, origin)) => {
                     let dims = cum_angles_bsha.dims();
+                    let origin_angle_b1ha = origin.angle().unsqueeze_dim::<4>(1);
                     let before_bsha =
-                        Tensor::cat(vec![prev_angle_b1ha.clone(), cum_angles_bsha.clone()], 1);
-                    let shift_bsha = (at_segment_start(before_bsha, start_bs) - prev_angle_b1ha)
+                        Tensor::cat(vec![prev_angle_b1ha, cum_angles_bsha.clone()], 1);
+                    let shift_bsha = (at_segment_start(before_bsha, start_bs) - origin_angle_b1ha)
                         .mask_fill(before_first_reset(start_bs, dims), 0.0);
                     cum_angles_bsha - shift_bsha
                 }
@@ -1062,21 +1065,23 @@ pub fn rotate_bc_forward(
                 q_step_bshk4,
                 Some(prev_q_bhk4.clone()),
             );
-            // A packed row: each segment turns from the incoming rotation `P`.
+            // A packed row: each segment turns from the origin rotation `P`.
             // Its cumulative rotation is `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`: the carry comes in on
             // the right (the oldest factor), so `T̄ₛ₋₁` cancels the rotation
             // before the segment there. Both factors of a rotor fold the same
             // way, so this holds for the whole stack.
-            let (cum_bshk4, final_bhk4) = match start_bs {
+            let (cum_bshk4, final_bhk4) = match segments {
                 None => (cum_bshk4, final_bhk4),
-                Some(start_bs) => {
+                Some((start_bs, origin)) => {
                     let dims = cum_bshk4.dims();
                     let prev_b1hk4 = prev_q_bhk4.unsqueeze_dim::<5>(1);
-                    let before_bshk4 = Tensor::cat(vec![prev_b1hk4.clone(), cum_bshk4.clone()], 1);
+                    let (origin_q_bhk4, _) = origin.quat_stack(kind);
+                    let origin_b1hk4 = origin_q_bhk4.unsqueeze_dim::<5>(1);
+                    let before_bshk4 = Tensor::cat(vec![prev_b1hk4, cum_bshk4.clone()], 1);
                     let base_bshk4 = at_segment_start(before_bshk4, start_bs);
                     let local_bshk4 = quat_mul(
                         quat_mul(cum_bshk4.clone(), quat_conj(base_bshk4)),
-                        prev_b1hk4.expand(dims),
+                        origin_b1hk4.expand(dims),
                     )
                     .mask_where(before_first_reset(start_bs, dims), cum_bshk4);
                     let final_bhk4 = local_bshk4

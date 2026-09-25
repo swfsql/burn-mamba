@@ -85,8 +85,13 @@ impl Mobius {
     /// - `carry_bh` : `[batch, nheads]`
     /// - out        : `[batch, len, nheads]`
     pub fn apply(self, carry_bh: Tensor<2>) -> Tensor<3> {
-        let carry_b1h = carry_bh.unsqueeze_dim::<3>(1);
-        lse(self.m00 + carry_b1h.clone(), self.m01) - lse(self.m10 + carry_b1h, self.m11)
+        self.apply_each(carry_bh.unsqueeze_dim::<3>(1))
+    }
+
+    /// [`Self::apply`] with a carry per position, `[batch, len, nheads]` (or
+    /// `[batch, 1, nheads]`, broadcast).
+    pub fn apply_each(self, carry_bsh: Tensor<3>) -> Tensor<3> {
+        lse(self.m00 + carry_bsh.clone(), self.m01) - lse(self.m10 + carry_bsh, self.m11)
     }
 }
 
@@ -177,7 +182,13 @@ impl Affine {
     /// - `carry_bh` : `[batch, nheads]`
     /// - out        : `[batch, len, nheads]`
     pub fn apply(self, carry_bh: Tensor<2>) -> Tensor<3> {
-        lse(self.a + carry_bh.unsqueeze_dim::<3>(1), self.b)
+        self.apply_each(carry_bh.unsqueeze_dim::<3>(1))
+    }
+
+    /// [`Self::apply`] with a carry per position, `[batch, len, nheads]` (or
+    /// `[batch, 1, nheads]`, broadcast).
+    pub fn apply_each(self, carry_bsh: Tensor<3>) -> Tensor<3> {
+        lse(self.a + carry_bsh, self.b)
     }
 }
 
@@ -260,6 +271,36 @@ pub fn prefix<E: Element>(elements: E) -> E {
         offset *= 2;
     }
     acc
+}
+
+/// The segments of a packed row, as a scan over the row reads them.
+#[derive(Clone, Debug)]
+pub struct Restart {
+    /// `[batch, len]`: the first position of the segment of each position
+    /// (`-1` before the first reset of the row).
+    pub start_bs: Tensor<2, Int>,
+    /// `[batch, nheads]`: the carry that each segment starts from (that of
+    /// the origin cache).
+    pub origin_bh: Tensor<2>,
+}
+
+impl Restart {
+    /// The carry of each position, `[batch, len, nheads]`: `carry_bh` before
+    /// the first reset of the row, and the origin carry from there on.
+    pub fn carries(&self, carry_bh: Tensor<2>) -> Tensor<3> {
+        let [batch, len] = self.start_bs.dims();
+        let [_, nheads] = carry_bh.dims();
+        let restarted_bsh = self
+            .start_bs
+            .clone()
+            .greater_equal_elem(0)
+            .unsqueeze_dim::<3>(2)
+            .expand([batch, len, nheads]);
+        carry_bh
+            .unsqueeze_dim::<3>(1)
+            .expand([batch, len, nheads])
+            .mask_where(restarted_bsh, self.origin_bh.clone().unsqueeze_dim::<3>(1).expand([batch, len, nheads]))
+    }
 }
 
 /// [`prefix`] over the segments of a packed row: each product starts at the

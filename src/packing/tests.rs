@@ -1,14 +1,19 @@
-//! A packed call is its segments run as one batch, one segment per row, from
-//! the same incoming cache. Both calls start from one cache (made by an
-//! earlier call, then made a leaf), broadcast to their rows. The test
-//! compares:
+//! A packed stream is its sequences run as one batch, one sequence per row.
+//! Both start from one origin cache (made by an earlier call, then made a
+//! leaf), broadcast to their rows.
 //!
-//! - the outputs of the real rows of each segment,
-//! - every field of the cache that the packed call returns (that of the last
-//!   segment of each packed row) against the row of that segment,
+//! The packed stream is cut into calls. A sequence continues across a call
+//! boundary, and a reset can be at the first token of a call. The reference
+//! cuts its rows into calls of another length, with another chunk length. So
+//! the check also shows that the results do not depend on where the calls and
+//! the chunks end. The test compares:
+//!
+//! - the outputs of each sequence,
+//! - every field of the last cache of each packed row against the row of its
+//!   last sequence,
 //! - the gradients of a loss over both: of every parameter, of the inputs,
-//!   and of the fields of the incoming cache. Every segment sends its
-//!   gradient to that cache, and none to the segment before it.
+//!   and of the fields of the origin. Every segment sends its gradient to the
+//!   origin, and none to the segment before it.
 
 use crate::mamba2::prelude::*;
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
@@ -22,89 +27,143 @@ use burn_stack::utils::test_helpers::max_abs_diff;
 const D_MODEL: usize = 16;
 const VAL_TOL: f32 = 1e-4;
 const GRAD_TOL: f32 = 1e-3;
-/// Tokens of the call that makes the incoming cache.
+/// Tokens of the call that makes the origin cache.
 const PREFIX: usize = 4;
+/// Tokens per call of the reference batch.
+const REF_CALL: usize = 4;
 
-/// The packed rows of each layout: the lengths of their segments, in tokens.
-/// A length of `0` is a segment of pad rows only (one chunk).
+/// The packed rows of each stream: the lengths of their sequences, in tokens.
+/// A length of `0` is a sequence of pad tokens only (one chunk).
 ///
-/// - One packed row of three segments: the reference is a batch of 3.
-/// - Two packed rows: a long segment, a short one (shorter than the conv
-///   window), a pad-only one, and a one-token one.
-const LAYOUTS: [&[&[usize]]; 2] = [&[&[5, 8, 3]], &[&[9, 2, 0], &[1, 6]]];
+/// - One row `a, b, c`: the reference is a batch of 3.
+/// - Three rows: long sequences, a short one (shorter than the conv window),
+///   a pad-only one, and a one-token one.
+const STREAMS: [&[&[usize]]; 2] = [&[&[8, 7, 2]], &[&[5, 8, 3], &[9, 2, 0], &[1, 6]]];
 
-/// One segment: its packed row, its first token there, and its real tokens.
-/// Its index in [`Layout::segments`] is its row in the reference batch.
-struct Segment {
+/// A cut of a stream into calls: `(chunk, call)`, in tokens. `call = None` is
+/// one call that holds the whole stream. A call length that is not a multiple
+/// of the chunk length ends each call inside a chunk.
+type Schedule = (usize, Option<usize>);
+
+/// A Mamba-2 conv tap reads `conv_kernel − 1 = 3` rows back, so its chunks
+/// hold at least 3 tokens.
+const MAMBA2_SCHEDULES: [Schedule; 4] = [(3, Some(6)), (4, Some(6)), (3, Some(5)), (4, None)];
+const MAMBA3_SCHEDULES: [Schedule; 4] = [(2, Some(6)), (3, Some(6)), (3, Some(5)), (2, None)];
+
+// ---------------------------------------------------------------------------
+// The calls of a stream
+// ---------------------------------------------------------------------------
+
+/// A piece of a sequence in one call: `len` tokens of sequence `seq`, from
+/// its token `from`, at token `start` of row `row`.
+struct Piece {
+    call: usize,
     row: usize,
     start: usize,
+    seq: usize,
+    from: usize,
     len: usize,
 }
 
-/// A packed batch: each segment starts at a chunk start, and pad rows fill it
-/// up to the next one. A row that is shorter than the longest one ends with
-/// more pad rows.
-struct Layout {
-    segments: Vec<Segment>,
-    rows: usize,
-    tokens: usize,
+/// One call: its tokens, and its pad and reset flags (`[rows, tokens]`,
+/// flattened).
+struct Call {
+    len: usize,
     pad: Vec<bool>,
     reset: Vec<bool>,
-    /// The index of the last segment of each packed row.
+}
+
+/// A stream cut into calls. In each row, a sequence starts at a chunk start,
+/// with a reset. When a call ends, the sequence continues in the next call.
+/// Pad tokens fill the rest of each row.
+struct Plan {
+    rows: usize,
+    /// The number of sequences. Sequence `i` is the `i`-th in the order of
+    /// the rows.
+    seqs: usize,
+    calls: Vec<Call>,
+    pieces: Vec<Piece>,
+    /// The last sequence of each row.
     last: Vec<usize>,
 }
 
-impl Layout {
-    fn new(rows: &[&[usize]], chunk_tokens: usize) -> Self {
-        let span = |len: usize| len.max(1).next_multiple_of(chunk_tokens);
-        let tokens = rows
+impl Plan {
+    fn new(rows: &[Vec<usize>], chunk: usize, call_len: Option<usize>) -> Self {
+        let span = |len: usize| len.max(1).next_multiple_of(chunk);
+        let call_len = call_len.unwrap_or_else(|| {
+            rows.iter()
+                .map(|lens| lens.iter().map(|&len| span(len)).sum::<usize>())
+                .max()
+                .unwrap()
+        });
+        let first: Vec<usize> = rows
             .iter()
-            .map(|lens| lens.iter().map(|&l| span(l)).sum::<usize>())
-            .max()
-            .unwrap();
-        let (mut segments, mut pad, mut reset, mut last) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        for (row, lens) in rows.iter().enumerate() {
-            let (mut row_pad, mut row_reset) = (vec![true; tokens], vec![false; tokens]);
-            let mut start = 0;
-            for &len in lens.iter() {
-                segments.push(Segment { row, start, len });
-                row_pad[start..start + len].fill(false);
-                row_reset[start] = true;
-                start += span(len);
+            .scan(0, |next, lens| {
+                let first = *next;
+                *next += lens.len();
+                Some(first)
+            })
+            .collect();
+        let last = rows.iter().zip(&first).map(|(lens, first)| first + lens.len() - 1).collect();
+        // Per row: the next sequence, and its tokens in the calls before.
+        let mut state = vec![(0usize, 0usize); rows.len()];
+        let (mut calls, mut pieces) = (Vec::new(), Vec::new());
+        while state.iter().zip(rows).any(|(&(k, _), lens)| k < lens.len()) {
+            let call = calls.len();
+            let mut pad = vec![true; rows.len() * call_len];
+            let mut reset = vec![false; rows.len() * call_len];
+            for (row, lens) in rows.iter().enumerate() {
+                let (k, done) = &mut state[row];
+                let mut p = 0usize;
+                while *k < lens.len() {
+                    if *done == 0 {
+                        // A new sequence starts at a chunk start.
+                        p = p.next_multiple_of(chunk);
+                        if p >= call_len {
+                            break;
+                        }
+                        reset[row * call_len + p] = true;
+                    }
+                    let len = (lens[*k] - *done).min(call_len - p);
+                    if len > 0 {
+                        pad[row * call_len + p..row * call_len + p + len].fill(false);
+                        pieces.push(Piece {
+                            call,
+                            row,
+                            start: p,
+                            seq: first[row] + *k,
+                            from: *done,
+                            len,
+                        });
+                    }
+                    p += len;
+                    *done += len;
+                    if *done == lens[*k] {
+                        // A pad-only sequence holds one pad token.
+                        if lens[*k] == 0 {
+                            p += 1;
+                        }
+                        *k += 1;
+                        *done = 0;
+                    }
+                    if p >= call_len {
+                        break;
+                    }
+                }
             }
-            last.push(segments.len() - 1);
-            pad.extend(row_pad);
-            reset.extend(row_reset);
+            calls.push(Call {
+                len: call_len,
+                pad,
+                reset,
+            });
         }
         Self {
-            segments,
             rows: rows.len(),
-            tokens,
-            pad,
-            reset,
+            seqs: first.last().unwrap() + rows.last().unwrap().len(),
+            calls,
+            pieces,
             last,
         }
-    }
-
-    fn mask(&self, flags: &[bool], device: &Device) -> Tensor<2, Bool> {
-        let data = TensorData::new(flags.to_vec(), [self.rows, self.tokens]);
-        Tensor::from_data(data, device)
-    }
-
-    /// The longest segment (at least one token).
-    fn max_len(&self) -> usize {
-        self.segments.iter().map(|s| s.len).max().unwrap().max(1)
-    }
-
-    /// `[segments, max_len]`: the right padding of the reference batch.
-    fn reference_pad(&self, device: &Device) -> Tensor<2, Bool> {
-        let max_len = self.max_len();
-        let flags: Vec<bool> = self
-            .segments
-            .iter()
-            .flat_map(|s| (0..max_len).map(move |t| t >= s.len))
-            .collect();
-        Tensor::from_data(TensorData::new(flags, [self.segments.len(), max_len]), device)
     }
 }
 
@@ -179,7 +238,7 @@ macro_rules! impl_mamba3_cache {
 impl_mamba3_cache!(Mamba3DoubleSsdCache);
 impl_mamba3_cache!(Mamba3SingleSsdCache);
 
-/// A leaf that takes gradients: the incoming cache of the test.
+/// A leaf that takes gradients: the origin cache of the test.
 struct Leaf;
 impl FieldMap for Leaf {
     fn map<const D: usize>(&self, t: Tensor<D>) -> Tensor<D> {
@@ -224,7 +283,7 @@ impl FieldVisit for Grads<'_> {
     }
 }
 
-fn rows<C: TestCache>(cache: &C) -> Vec<Tensor<2>> {
+fn fields<C: TestCache>(cache: &C) -> Vec<Tensor<2>> {
     let mut rows = Rows(Vec::new());
     cache.visit(&mut rows);
     rows.0
@@ -277,132 +336,186 @@ fn assert_grads_close(packed: Vec<Option<Tensor<1>>>, batched: Vec<Option<Tensor
     }
 }
 
-/// Run a packed call and the batch of its segments from the same incoming
-/// cache, and compare them (see the module header). `forward` takes `(input,
-/// cache, pad, reset)`.
-fn check_packed_is_batched<C: TestCache, M: Module>(
-    module: &M,
-    chunk_tokens: usize,
-    forward: impl Fn(Tensor<3>, Option<C>, Option<Tensor<2, Bool>>, Option<Tensor<2, Bool>>) -> (Tensor<3>, C),
-) {
-    let device = Device::default().autodiff();
-    let normal = Distribution::Normal(0.0, 1.0);
-    for rows_spec in LAYOUTS {
-        let layout = Layout::new(rows_spec, chunk_tokens);
-        let nsegments = layout.segments.len();
-        let max_len = layout.max_len();
+/// `(input, cache, origin, pad, reset)` → `(output, cache)`.
+type Forward<'a, C> = dyn Fn(
+        Tensor<3>,
+        Option<C>,
+        Option<C>,
+        Option<Tensor<2, Bool>>,
+        Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, C)
+    + 'a;
 
-        // The incoming cache: a real one, then a leaf.
-        let x0 = Tensor::<3>::random([1, PREFIX, D_MODEL], normal, &device);
-        let cache0 = forward(x0, None, None, None).1.map(&Leaf);
-
-        // The reference batch holds the inputs. The packed rows are made of
-        // them, so both calls send their input gradients to the same leaf.
-        let x_ref = Tensor::<3>::random([nsegments, max_len, D_MODEL], normal, &device).require_grad();
-        let filler = |len: usize| Tensor::<3>::random([1, len, D_MODEL], normal, &device);
-        let x_packed = Tensor::cat(
-            (0..layout.rows)
+/// Run the calls of `plan` in order. The first call starts from `origin`
+/// (`[1, …]`, broadcast to the rows), and each next call from the cache of
+/// the call before. With `packed`, each call also takes its resets, and the
+/// origin for them. Returns the outputs of each sequence (`None` for a
+/// pad-only one) and the last cache.
+fn run<C: TestCache>(
+    plan: &Plan,
+    x_ref: &Tensor<3>,
+    origin: &C,
+    packed: bool,
+    forward: &Forward<'_, C>,
+) -> (Vec<Option<Tensor<3>>>, C) {
+    let device = x_ref.device();
+    let filler = |len: usize| Tensor::<3>::random([1, len, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
+    let origin = origin.clone().map(&Broadcast(plan.rows));
+    let mut cache = origin.clone();
+    let mut parts_y: Vec<Vec<Tensor<3>>> = vec![Vec::new(); plan.seqs];
+    for (index, call) in plan.calls.iter().enumerate() {
+        // Each row: its pieces, and filler at the pad tokens.
+        let x = Tensor::cat(
+            (0..plan.rows)
                 .map(|row| {
-                    let mut parts = Vec::new();
-                    let mut end = 0;
-                    for (i, s) in layout.segments.iter().enumerate().filter(|(_, s)| s.row == row) {
-                        if s.start > end {
-                            parts.push(filler(s.start - end));
+                    let (mut parts, mut end) = (Vec::new(), 0);
+                    for piece in plan.pieces.iter().filter(|p| p.call == index && p.row == row) {
+                        if piece.start > end {
+                            parts.push(filler(piece.start - end));
                         }
-                        if s.len > 0 {
-                            parts.push(x_ref.clone().narrow(0, i, 1).narrow(1, 0, s.len));
-                        }
-                        end = s.start + s.len;
+                        parts.push(x_ref.clone().narrow(0, piece.seq, 1).narrow(1, piece.from, piece.len));
+                        end = piece.start + piece.len;
                     }
-                    if layout.tokens > end {
-                        parts.push(filler(layout.tokens - end));
+                    if call.len > end {
+                        parts.push(filler(call.len - end));
                     }
                     Tensor::cat(parts, 1)
                 })
                 .collect(),
             0,
         );
-
-        let (y_packed, cache_packed) = forward(
-            x_packed,
-            Some(cache0.clone().map(&Broadcast(layout.rows))),
-            Some(layout.mask(&layout.pad, &device)),
-            Some(layout.mask(&layout.reset, &device)),
-        );
-        let (y_ref, cache_ref) = forward(
-            x_ref.clone(),
-            Some(cache0.clone().map(&Broadcast(nsegments))),
-            Some(layout.reference_pad(&device)),
-            None,
-        );
-
-        let weight_y = Tensor::<3>::random([1, max_len, D_MODEL], normal, &device);
-        let mut loss_packed = Tensor::<1>::zeros([1], &device);
-        let mut loss_ref = Tensor::<1>::zeros([1], &device);
-        for (i, s) in layout.segments.iter().enumerate().filter(|(_, s)| s.len > 0) {
-            let what = format!("layout {rows_spec:?}, segment {i}'s outputs");
-            let y_p = y_packed.clone().narrow(0, s.row, 1).narrow(1, s.start, s.len);
-            let y_r = y_ref.clone().narrow(0, i, 1).narrow(1, 0, s.len);
-            assert_close(y_p.clone(), y_r.clone(), VAL_TOL, &what);
-            let weight = weight_y.clone().narrow(1, 0, s.len);
-            loss_packed = loss_packed + (y_p * weight.clone()).sum();
-            loss_ref = loss_ref + (y_r * weight).sum();
+        let mask = |flags: &[bool]| {
+            Tensor::<2, Bool>::from_data(TensorData::new(flags.to_vec(), [plan.rows, call.len]), &device)
+        };
+        let (y, next) = if packed {
+            forward(x, Some(cache), Some(origin.clone()), Some(mask(&call.pad)), Some(mask(&call.reset)))
+        } else {
+            forward(x, Some(cache), None, Some(mask(&call.pad)), None)
+        };
+        cache = next;
+        for piece in plan.pieces.iter().filter(|p| p.call == index) {
+            parts_y[piece.seq].push(y.clone().narrow(0, piece.row, 1).narrow(1, piece.start, piece.len));
         }
-        for (row, &i) in layout.last.iter().enumerate() {
-            let fields_p = rows(&cache_packed.clone().map(&Row(row)));
-            let fields_r = rows(&cache_ref.clone().map(&Row(i)));
-            assert_eq!(fields_p.len(), fields_r.len());
-            for (k, (f_p, f_r)) in fields_p.into_iter().zip(fields_r).enumerate() {
-                let what = format!("layout {rows_spec:?}, packed row {row}'s cache field {k}");
-                assert_close(f_p.clone(), f_r.clone(), VAL_TOL, &what);
-                let weight = Tensor::<2>::random(f_r.dims(), normal, &device);
-                loss_packed = loss_packed + (f_p * weight.clone()).sum();
-                loss_ref = loss_ref + (f_r * weight).sum();
+    }
+    let ys = parts_y
+        .into_iter()
+        .map(|parts| (!parts.is_empty()).then(|| Tensor::cat(parts, 1)))
+        .collect();
+    (ys, cache)
+}
+
+/// Run each stream, cut by each schedule, and the batch of its sequences from
+/// the same origin, and compare them (see the module header). `forward` takes
+/// `(input, cache, origin, chunk, pad, reset)`, with `chunk` in tokens. The
+/// reference runs at `ref_chunk`.
+fn check_streams<C: TestCache, M: Module>(
+    module: &M,
+    schedules: &[Schedule],
+    ref_chunk: usize,
+    forward: impl Fn(
+        Tensor<3>,
+        Option<C>,
+        Option<C>,
+        usize,
+        Option<Tensor<2, Bool>>,
+        Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, C),
+) {
+    let device = Device::default().autodiff();
+    let normal = Distribution::Normal(0.0, 1.0);
+    for stream in STREAMS {
+        let rows: Vec<Vec<usize>> = stream.iter().map(|lens| lens.to_vec()).collect();
+        let lens = rows.concat();
+        let max_len = lens.iter().copied().max().unwrap().max(1);
+        // The reference batch: one sequence per row.
+        let singles: Vec<Vec<usize>> = lens.iter().map(|&len| vec![len]).collect();
+        let reference = Plan::new(&singles, ref_chunk, Some(REF_CALL));
+        for &(chunk, call) in schedules {
+            let what = format!("stream {stream:?}, chunk {chunk}, call {call:?}");
+            let plan = Plan::new(&rows, chunk, call);
+
+            // The origin: a real cache, then a leaf.
+            let x0 = Tensor::<3>::random([1, PREFIX, D_MODEL], normal, &device);
+            let origin = forward(x0, None, None, ref_chunk, None, None).1.map(&Leaf);
+            // Both runs read their inputs from this leaf.
+            let x_ref = Tensor::<3>::random([lens.len(), max_len, D_MODEL], normal, &device).require_grad();
+
+            let (y_packed, cache_packed) =
+                run(&plan, &x_ref, &origin, true, &|x, c, o, p, r| forward(x, c, o, chunk, p, r));
+            let (y_ref, cache_ref) =
+                run(&reference, &x_ref, &origin, false, &|x, c, o, p, r| forward(x, c, o, ref_chunk, p, r));
+
+            let mut loss_packed = Tensor::<1>::zeros([1], &device);
+            let mut loss_ref = Tensor::<1>::zeros([1], &device);
+            for (seq, (y_p, y_r)) in y_packed.into_iter().zip(y_ref).enumerate() {
+                let (y_p, y_r) = match (y_p, y_r) {
+                    (Some(y_p), Some(y_r)) => (y_p, y_r),
+                    (None, None) => continue,
+                    _ => panic!("{what}: sequence {seq} has outputs in one run only"),
+                };
+                assert_close(y_p.clone(), y_r.clone(), VAL_TOL, &format!("{what}: sequence {seq}'s outputs"));
+                let weight = Tensor::<3>::random(y_r.dims(), normal, &device);
+                loss_packed = loss_packed + (y_p * weight.clone()).sum();
+                loss_ref = loss_ref + (y_r * weight).sum();
             }
-        }
+            for (row, &seq) in plan.last.iter().enumerate() {
+                let fields_p = fields(&cache_packed.clone().map(&Row(row)));
+                let fields_r = fields(&cache_ref.clone().map(&Row(seq)));
+                assert_eq!(fields_p.len(), fields_r.len());
+                for (k, (f_p, f_r)) in fields_p.into_iter().zip(fields_r).enumerate() {
+                    let field = format!("{what}: packed row {row}'s cache field {k}");
+                    assert_close(f_p.clone(), f_r.clone(), VAL_TOL, &field);
+                    let weight = Tensor::<2>::random(f_r.dims(), normal, &device);
+                    loss_packed = loss_packed + (f_p * weight.clone()).sum();
+                    loss_ref = loss_ref + (f_r * weight).sum();
+                }
+            }
 
-        let grads_packed = loss_packed.backward();
-        let grads_ref = loss_ref.backward();
-        let input_grad = |grads: &Gradients| {
-            x_ref
-                .grad(grads)
-                .map(Tensor::from_inner)
-                .unwrap_or_else(|| Tensor::zeros(x_ref.dims(), &device))
-        };
-        assert_close(
-            input_grad(&grads_packed),
-            input_grad(&grads_ref),
-            GRAD_TOL,
-            &format!("layout {rows_spec:?}: the gradient of the inputs"),
-        );
-        let cache_grads = |grads: &Gradients| {
-            let mut visit = Grads(grads, Vec::new());
-            cache0.visit(&mut visit);
-            visit.1
-        };
-        assert_grads_close(
-            cache_grads(&grads_packed),
-            cache_grads(&grads_ref),
-            &format!("layout {rows_spec:?}: incoming cache field"),
-        );
-        assert_grads_close(
-            param_grads(module, &grads_packed),
-            param_grads(module, &grads_ref),
-            &format!("layout {rows_spec:?}: parameter"),
-        );
+            let grads_packed = loss_packed.backward();
+            let grads_ref = loss_ref.backward();
+            let input_grad = |grads: &Gradients| {
+                x_ref
+                    .grad(grads)
+                    .map(Tensor::from_inner)
+                    .unwrap_or_else(|| Tensor::zeros(x_ref.dims(), &device))
+            };
+            assert_close(
+                input_grad(&grads_packed),
+                input_grad(&grads_ref),
+                GRAD_TOL,
+                &format!("{what}: the gradient of the inputs"),
+            );
+            let origin_grads = |grads: &Gradients| {
+                let mut visit = Grads(grads, Vec::new());
+                origin.visit(&mut visit);
+                visit.1
+            };
+            assert_grads_close(
+                origin_grads(&grads_packed),
+                origin_grads(&grads_ref),
+                &format!("{what}: origin cache field"),
+            );
+            assert_grads_close(
+                param_grads(module, &grads_packed),
+                param_grads(module, &grads_ref),
+                &format!("{what}: parameter"),
+            );
+        }
     }
 }
 
 #[test]
-fn packed_mamba2_is_the_batch_of_its_segments() {
+fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
     let device = Device::default().autodiff();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
         .init(&device);
-    for path in [Mamba2SsdPath::Serial(Some(4)), Mamba2SsdPath::SerialRecalculated(Some(4))] {
-        check_packed_is_batched(&block, 4, |x, cache, pad, reset| {
-            block.forward_packed(x, cache, path.clone(), pad, reset)
+    let paths: [fn(Option<usize>) -> Mamba2SsdPath; 2] =
+        [Mamba2SsdPath::Serial, Mamba2SsdPath::SerialRecalculated];
+    for path in paths {
+        check_streams(&block, &MAMBA2_SCHEDULES, 4, |x, cache, origin, chunk, pad, reset| {
+            block.forward_packed(x, cache, origin, path(Some(chunk)), pad, reset)
         });
     }
 }
@@ -432,7 +545,7 @@ fn mamba3(
 ///   one),
 /// - every rotation kind, `u > 1`, MIMO, and both positive systems.
 #[test]
-fn packed_mamba3_is_the_batch_of_its_segments() {
+fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
     use {Gain as G, RotationKind as R, Trapezoid as T, Tropical as Tr};
     let device = Device::default().autodiff();
     let configs = [
@@ -442,17 +555,19 @@ fn packed_mamba3_is_the_batch_of_its_segments() {
         mamba3(R::Real1D, T::None, 2, 2, G::Projected, Tr::MaxPlus),
         mamba3(R::Complex2D, T::HorizontalReset, 3, 1, G::Kalman, Tr::None),
     ];
-    let paths = [Mamba3SsdPath::Serial(Some(4)), Mamba3SsdPath::SerialRecalculated(Some(4))];
+    let paths: [fn(Option<usize>) -> Mamba3SsdPath; 2] =
+        [Mamba3SsdPath::Serial, Mamba3SsdPath::SerialRecalculated];
     for config in &configs {
         let block = config.init(&device);
-        for path in &paths {
-            let chunk_tokens =
-                Mamba3SsdPath::chunk_tokens(path.chunk_len_or_optimal(&block), block.micro_steps);
-            check_packed_is_batched(&block, chunk_tokens, |x, cache, pad, reset| {
-                block.forward_double_ssd_packed(x, cache, path, pad, reset)
+        let u = block.micro_steps;
+        for path in paths {
+            // A chunk of `chunk` tokens is `chunk · u` positions.
+            let path = |chunk: usize| path(Some(chunk * u));
+            check_streams(&block, &MAMBA3_SCHEDULES, 2, |x, cache, origin, chunk, pad, reset| {
+                block.forward_double_ssd_packed(x, cache, origin, &path(chunk), pad, reset)
             });
-            check_packed_is_batched(&block, chunk_tokens, |x, cache, pad, reset| {
-                block.forward_single_ssd_packed(x, cache, path, pad, reset)
+            check_streams(&block, &MAMBA3_SCHEDULES, 2, |x, cache, origin, chunk, pad, reset| {
+                block.forward_single_ssd_packed(x, cache, origin, &path(chunk), pad, reset)
             });
         }
     }
@@ -496,7 +611,7 @@ fn packed_minimal_panics() {
         .init(&device);
     let x = Tensor::<3>::zeros([1, 8, D_MODEL], &device);
     let reset = Tensor::<2, Int>::zeros([1, 8], &device).bool();
-    let _ = block.forward_packed(x, None, Mamba2SsdPath::Minimal(Some(4)), None, Some(reset));
+    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Minimal(Some(4)), None, Some(reset));
 }
 
 /// A reset inside a chunk would need the masks of the official kernels inside
@@ -514,5 +629,23 @@ fn reset_inside_a_chunk_panics() {
     let reset = Tensor::<1, Int>::arange(0..8, &device)
         .equal_elem(2)
         .reshape([1, 8]);
-    let _ = block.forward_packed(x, None, Mamba2SsdPath::Serial(Some(4)), None, Some(reset));
+    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Serial(Some(4)), None, Some(reset));
+}
+
+/// A Mamba-2 conv tap reads `conv_kernel − 1` rows back, and only the first
+/// chunk of a segment checks for a restart. So a packed call refuses a chunk
+/// that holds fewer rows.
+#[test]
+#[should_panic(expected = "a packed call needs chunk_len")]
+fn packed_mamba2_chunk_shorter_than_the_conv_panics() {
+    let device = Device::default();
+    let block = Mamba2Config::new(D_MODEL)
+        .with_state_rank(8)
+        .with_per_head_dim(8)
+        .init(&device);
+    let x = Tensor::<3>::zeros([1, 8, D_MODEL], &device);
+    let reset = Tensor::<1, Int>::arange(0..8, &device)
+        .equal_elem(0)
+        .reshape([1, 8]);
+    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Serial(Some(2)), None, Some(reset));
 }

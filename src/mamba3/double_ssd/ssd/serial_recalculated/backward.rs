@@ -33,7 +33,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
     /// Memory-efficient combined forward+backward for the Mamba-3 MIMO SSD.
     ///
     /// The two output tensors (`y_bntmhp`, `final_state_bhpr`) go into one
-    /// tracked 1-D tensor, so one `Backward<B, 5>` node covers both. The caller
+    /// tracked 1-D tensor, so one `Backward<B, 6>` node covers both. The caller
     /// gets split and reshaped slices of that tensor. Burn's autodiff adds
     /// their upstream gradients into one gradient vector before it calls
     /// `backward`.
@@ -45,6 +45,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
         keep_bn: FloatTensor<Self>,
+        origin_bhpr: FloatTensor<Self>,
         resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // ── Backward node definition ─────────────────────────────────────────
@@ -59,8 +60,12 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
             b_bnlmhr: <B as BackendTypes>::FloatTensorPrimitive,
             c_bntmhr: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
-            // The constant reset factor (no gradient), if the call has resets
-            keep_bn: Option<<B as BackendTypes>::FloatTensorPrimitive>,
+            // The constant reset factor (no gradient) and the origin state, if
+            // the call has resets
+            restarts: Option<(
+                <B as BackendTypes>::FloatTensorPrimitive,
+                <B as BackendTypes>::FloatTensorPrimitive,
+            )>,
             // Flat lengths for splitting the combined upstream gradient
             read_stride: usize,
             flat_len_y_BNTMHP: usize,
@@ -75,12 +80,12 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
             shape_final_state_bhpr: [usize; 4],
         }
 
-        impl<B: Backend + Mamba3DoubleSsdBackendExt> Backward<B, 5> for CombinedKernelsBackward {
+        impl<B: Backend + Mamba3DoubleSsdBackendExt> Backward<B, 6> for CombinedKernelsBackward {
             type State = State<B>;
 
             fn backward(
                 self,
-                ops: Ops<Self::State, 5>,
+                ops: Ops<Self::State, 6>,
                 grads: &mut Gradients,
                 _checkpointer: &mut Checkpointer,
             ) {
@@ -90,6 +95,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     node_b_bnlmhr,
                     node_c_bntmhr,
                     node_initial_state_bhpr,
+                    node_origin_bhpr,
                 ] = ops.parents;
 
                 // Upstream gradient of the combined 1-dimensional output.
@@ -102,7 +108,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     b_bnlmhr,
                     c_bntmhr,
                     initial_state_bhpr,
-                    keep_bn,
+                    restarts,
                     read_stride,
                     flat_len_y_BNTMHP,
                     flat_len_final_state_BHPR,
@@ -140,6 +146,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     d_b_bnlmhr,
                     d_c_bntmhr,
                     d_initial_state_bhpr,
+                    d_origin_bhpr,
                     ..
                 } = combined_backward::combined_backward(
                     F::<B, 6>::new(d_y_bntmhp),
@@ -150,7 +157,12 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     c_bntmhr,
                     initial_state_bhpr,
                     read_stride,
-                    keep_bn.map(F::<B, 2>::new),
+                    restarts.map(|(keep_bn, origin_bhpr)| {
+                        (
+                            F::<B, 2>::new(keep_bn),
+                            F::<B, 4>::new(origin_bhpr).reshape(shape_initial_state_bhpr),
+                        )
+                    }),
                 );
 
                 // ── Register gradients with autodiff ────────────────────
@@ -168,6 +180,9 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                 }
                 if let Some(n) = node_initial_state_bhpr {
                     grads.register::<B>(n.id, d_initial_state_bhpr.inner());
+                }
+                if let (Some(n), Some(d_origin_bhpr)) = (node_origin_bhpr, d_origin_bhpr) {
+                    grads.register::<B>(n.id, d_origin_bhpr.inner());
                 }
             }
         }
@@ -205,6 +220,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                 b_bnlmhr.node(),
                 c_bntmhr.node(),
                 initial_state_bhpr.node(),
+                origin_bhpr.node(),
             ])
             .compute_bound()
             .stateful()
@@ -218,6 +234,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     initial_state_bhpr.primitive().clone(),
                     read_stride,
                     keep_bn.primitive().clone(),
+                    origin_bhpr.primitive().clone(),
                     resets,
                 );
 
@@ -234,7 +251,9 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     b_bnlmhr: b_bnlmhr.primitive().clone(),
                     c_bntmhr: c_bntmhr.primitive().clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive().clone(),
-                    keep_bn: resets.then(|| keep_bn.primitive().clone()),
+                    restarts: resets.then(|| {
+                        (keep_bn.primitive().clone(), origin_bhpr.primitive().clone())
+                    }),
                     read_stride,
                     flat_len_y_BNTMHP,
                     flat_len_final_state_BHPR,
@@ -275,6 +294,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
                     initial_state_bhpr.into_primitive(),
                     read_stride,
                     keep_bn.into_primitive(),
+                    origin_bhpr.into_primitive(),
                     resets,
                 );
 

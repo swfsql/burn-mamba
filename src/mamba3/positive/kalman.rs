@@ -48,10 +48,10 @@ pub struct GainInput {
     /// `ℓ` before the first position, `[batch, nheads]`: [`LOG_ZERO`] for a
     /// fresh sequence (`Λ₀ = 0`: no evidence yet).
     pub carry_bh: Tensor<2>,
-    /// The first position of the segment of each position in a packed row,
-    /// `[batch, len]` (`-1` before the first reset of the row), or `None`.
-    /// Each segment starts from `carry_bh`.
-    pub start_bs: Option<Tensor<2, Int>>,
+    /// The segments of a packed row, or `None`. Each segment starts from the
+    /// origin carry, and the positions before the first reset of the row
+    /// continue from `carry_bh`.
+    pub restart: Option<scan::Restart>,
 }
 
 /// The per-position quantities of the gate.
@@ -199,12 +199,11 @@ pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
     };
     let ln_q = ln_q.clamp_min(LOG_ZERO);
     let elements = elements(&da_bsh, &ln_q, &masses);
-    let log_precision_bsh = match &input.start_bs {
+    let log_precision_bsh = match &input.restart {
         None => scan::prefix(elements).apply(input.carry_bh.clone()),
-        // A packed row: each segment scans alone, from the incoming carry.
-        Some(start_bs) => {
-            scan::prefix_in_segments(elements, start_bs).apply(input.carry_bh.clone())
-        }
+        // A packed row: each segment scans alone, from the origin carry.
+        Some(restart) => scan::prefix_in_segments(elements, &restart.start_bs)
+            .apply_each(restart.carries(input.carry_bh.clone())),
     };
     // ℓₜ₋₁: the carry, then every position but the last.
     let carry_b1h = input.carry_bh.reshape([batch, 1, nheads]);
@@ -213,19 +212,22 @@ pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
     } else {
         Tensor::cat(vec![carry_b1h.clone(), log_precision_bsh.clone().narrow(1, 0, len - 1)], 1)
     };
-    // …and at the first position of a segment, the incoming carry again.
-    let prev_bsh = match &input.start_bs {
+    // …and at the first position of a segment, the origin carry.
+    let prev_bsh = match &input.restart {
         None => prev_bsh,
-        Some(start_bs) => {
-            let first_bsh = Tensor::<1, Int>::arange(0..len as i64, &start_bs.device())
+        Some(restart) => {
+            let first_bsh = Tensor::<1, Int>::arange(0..len as i64, &restart.start_bs.device())
                 .reshape([1, len])
                 .expand([batch, len])
-                .equal(start_bs.clone())
+                .equal(restart.start_bs.clone())
                 .unsqueeze_dim::<3>(2)
                 .expand([batch, len, nheads]);
-            prev_bsh
-                .expand([batch, len, nheads])
-                .mask_where(first_bsh, carry_b1h.expand([batch, len, nheads]))
+            let origin_bsh = restart
+                .origin_bh
+                .clone()
+                .reshape([batch, 1, nheads])
+                .expand([batch, len, nheads]);
+            prev_bsh.expand([batch, len, nheads]).mask_where(first_bsh, origin_bsh)
         }
     };
     // `ln Lₜ`: the predict acts on all that is known about the samples before

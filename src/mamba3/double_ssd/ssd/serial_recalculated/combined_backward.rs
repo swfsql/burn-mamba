@@ -47,6 +47,8 @@ pub struct CombinedGrads<B: Backend> {
     pub d_c_bntmhr: F<B, 6>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
+    /// Gradient of the origin state of the resets (`None` without resets).
+    pub d_origin_bhpr: Option<F<B, 4>>,
 }
 
 // ─── Recomputed forward kernels ──────────────────────────────────────────────
@@ -106,11 +108,13 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
 /// - `read_stride` — folded positions per read row (`micro_steps`)
-/// - `keep_bn` — the constant reset factor of the forward (`0` at a chunk
-///   that starts a new segment), or `None`
+/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+///   constant reset factor of the forward (`0` at a chunk that starts a new
+///   segment). `origin_bhpr` is the state that those chunks start from.
 ///
 /// # Returns
-/// One [`CombinedGrads`] struct with the gradients of all 5 inputs.
+/// One [`CombinedGrads`] struct with the gradients of all 5 inputs, and of
+/// the origin state.
 #[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bntmhp: F<B, 6>,
@@ -122,8 +126,9 @@ pub fn combined_backward<B: Backend>(
     c_bntmhr: F<B, 6>,
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
-    keep_bn: Option<F<B, 2>>,
+    restarts: Option<(F<B, 2>, F<B, 4>)>,
 ) -> CombinedGrads<B> {
+    let keep_bn = restarts.as_ref().map(|(keep_bn, _)| keep_bn.clone());
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
     let device = v_bnlmhp.device();
@@ -162,7 +167,7 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
-        keep_bn.clone(),
+        restarts,
         None,
     );
 
@@ -387,15 +392,16 @@ pub fn combined_backward<B: Backend>(
     let d_chunk_input_state_bnhpr: F<B, 5> = cat_chunk_groups(vec_d_chunk_input_state_bnhpr, 1);
 
     // ── K4 backward — the reverse of the state-passing scan ───────────────
-    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, _) =
+    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_restart_bnhpr) =
         k4_ssd_state_passing_backward(
             d_chunk_input_state_bnhpr,
             chunk_input_state_bnhpr,
             da_chunk_end_bhn,
             d_final_bhpr,
             keep_bn,
-            false,
         );
+    // Every chunk restarts from the same origin state.
+    let d_origin_bhpr = d_restart_bnhpr.map(|d_restart_bnhpr| d_restart_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
     // d_da_end: [batch,nheads,nchunks] scattered into the last `l` of d_da_cumsum_k4.
     let d_da_cumsum_k4_bhnl: F<B, 4> = {
         let zeros = F::<B, 4>::zeros([batch, nheads, nchunks, chunk_len - 1], &device, dtype);
@@ -553,5 +559,6 @@ pub fn combined_backward<B: Backend>(
         d_b_bnlmhr,
         d_c_bntmhr,
         d_initial_state_bhpr,
+        d_origin_bhpr,
     }
 }

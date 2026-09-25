@@ -28,6 +28,7 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
+use crate::mamba3::mamba3::Packed;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use burn_stack::modules::Silu;
@@ -58,16 +59,18 @@ impl Mamba3 {
         ssd_path: &Mamba3SsdPath,
         pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
-        self.forward_double_ssd_packed(input_bsm, cache, ssd_path, pad_bt, None)
+        self.forward_double_ssd_packed(input_bsm, cache, None, ssd_path, pad_bt, None)
     }
 
     /// [`Self::forward_double_ssd`] over a packed batch: `reset_bt` marks the
-    /// first token of each segment, as in [`Self::forward_packed`].
+    /// first token of each segment, which starts from `origin`, as in
+    /// [`Self::forward_packed`].
     #[allow(non_snake_case)]
     pub fn forward_double_ssd_packed(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3DoubleSsdCache>,
+        origin: Option<Mamba3DoubleSsdCache>,
         ssd_path: &Mamba3SsdPath,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
@@ -108,7 +111,7 @@ impl Mamba3 {
         });
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        let mut cache = cache.unwrap_or_else(|| {
+        let fresh = || {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
             let rotation = self.zero_rotation_state(batch, &device);
@@ -121,6 +124,12 @@ impl Mamba3 {
                 log_precision_bh,
                 tropical_bh,
             }
+        };
+        let mut cache = cache.unwrap_or_else(fresh);
+        // A packed row: the cache that each segment starts from.
+        let packed = segments.map(|segments| Packed {
+            segments,
+            origin: origin.unwrap_or_else(fresh),
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
@@ -194,7 +203,7 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
-            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), segments.as_ref()),
+            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
         // The inputs of the tropical register, on the same folded axis.
@@ -253,7 +262,7 @@ impl Mamba3 {
             c_btmhr,
             u,
             self.rotation_spec(),
-            segments.as_ref().map(|s| &s.start_bs),
+            packed.as_ref().map(|p| (&p.segments.start_bs, p.origin.rotation.clone())),
         );
         san(&b_bsmhr);
         san(&c_btmhr);
@@ -287,33 +296,35 @@ impl Mamba3 {
         // β-scaled copy of `x`, and (below) no second SSD call. `forward` is
         // then one standard SSD pass, with keys scaled by `γ = Δ`.
         let lag = self.tap_lag();
-        let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
-            let slots_buhp = cache
-                .v_state_buhp
-                .clone()
-                .expect("a β tap keeps its (B, x) cache slots");
-            let slots_bumhr = cache
-                .k_state_bumhr
-                .clone()
-                .expect("a β tap keeps its (B, x) cache slots");
-            // The prefix of a lag-`L` tap is the newest `L` slots of the FIFO:
-            // all of it for the own tap of the pattern, only the last slot for
-            // an interior tap.
+        // The prefix of a lag-`L` tap is the newest `L` slots of a FIFO: all
+        // of it for the own tap of the pattern, only the last slot for an
+        // interior tap.
+        let heads = |fifo: &Mamba3DoubleSsdCache, lag: usize| -> (Tensor<4>, Tensor<5>) {
+            let slots = "a β tap keeps its (B, x) cache slots";
+            let slots_buhp = fifo.v_state_buhp.clone().expect(slots);
+            let slots_bumhr = fifo.k_state_bumhr.clone().expect(slots);
             let newest = slots_buhp.dims()[1] - lag;
-            let (x_head_buhp, b_head_bumhr) =
-                (slots_buhp.narrow(1, newest, lag), slots_bumhr.narrow(1, newest, lag));
-            let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), x_head_buhp.clone(), lag);
-            let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), b_head_bumhr.clone(), lag);
-            // A packed row: each segment starts on the same prefix, as a call.
-            let (x_prev_bshp, b_prev_bsmhr) = match &segments {
-                Some(segments) => (
-                    segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
-                    segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
-                ),
+            (slots_buhp.narrow(1, newest, lag), slots_bumhr.narrow(1, newest, lag))
+        };
+        let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
+            let (x_head_buhp, b_head_bumhr) = heads(&cache, lag);
+            let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), x_head_buhp, lag);
+            let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), b_head_bumhr, lag);
+            // A packed row: each segment starts on the prefix of the origin,
+            // as a call from it.
+            let (x_prev_bshp, b_prev_bsmhr) = match &packed {
+                Some(p) => {
+                    let (x_head_buhp, b_head_bumhr) = heads(&p.origin, lag);
+                    (
+                        p.segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
+                        p.segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
+                    )
+                }
                 None => (x_prev_bshp, b_prev_bsmhr),
             };
             let beta_bsh = nu_bsh * alpha_bsh.clone();
-            let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag, segments.as_ref()) {
+            let segments = packed.as_ref().map(|p| &p.segments);
+            let beta_bsh = match helpers::interior_gap_decay(da_bsh.clone(), lag, segments) {
                 Some(gap_bsh) => beta_bsh * gap_bsh,
                 None => beta_bsh,
             };
@@ -345,7 +356,7 @@ impl Mamba3 {
             end_b.clone().map(|end_b| {
                 (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
             }),
-            segments.as_ref(),
+            packed.as_ref(),
         );
 
         // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
@@ -419,8 +430,9 @@ impl Mamba3 {
         let v_gamma_bnlmhp =
             helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
         // Every pass restarts its carry at the same chunks: the passes are
-        // the terms of one state.
-        let reset_bn = segments.as_ref().map(|s| s.reset_bn.clone());
+        // the terms of one state. The γ pass holds the state of the origin,
+        // and a β pass restarts from zero, as it starts a call.
+        let reset_bn = packed.as_ref().map(|p| p.segments.reset_bn.clone());
 
         let input_gamma = Mamba3DoubleSsdInput {
             v_bnlmhp: v_gamma_bnlmhp,
@@ -430,7 +442,10 @@ impl Mamba3 {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
             read_stride: u,
-            reset_bn: reset_bn.clone(),
+            restarts: packed.as_ref().map(|p| crate::packing::Restarts {
+                reset_bn: p.segments.reset_bn.clone(),
+                origin_bhpr: p.origin.ssm_bhpr.clone(),
+            }),
         };
         let (y_bntmhp, final_state_bhpr) = input_gamma.run(ssd_path);
 
@@ -443,18 +458,19 @@ impl Mamba3 {
                     b_prev_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
                 let v_beta_bnlmhp =
                     helpers::build_v_with_mimo::<5, 6>(x_beta_bnlhp, mimo_x_hmp.as_ref(), 3);
+                let zero_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
                 let input_beta = Mamba3DoubleSsdInput {
                     v_bnlmhp: v_beta_bnlmhp,
                     da_bnlh: da_bnlh.clone(),
                     b_bnlmhr: b_prev_bnlmhr,
                     c_bntmhr: c_bntmhr.clone(),
-                    initial_state_bhpr: Tensor::zeros(
-                        [batch, nheads, per_head_dim, state_rank],
-                        &device,
-                    ),
+                    initial_state_bhpr: zero_bhpr.clone(),
                     init_state_hpr: None,
                     read_stride: u,
-                    reset_bn: reset_bn.clone(),
+                    restarts: reset_bn.clone().map(|reset_bn| crate::packing::Restarts {
+                        reset_bn,
+                        origin_bhpr: zero_bhpr,
+                    }),
                 };
                 let (y_beta_bntmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
                 (
@@ -485,7 +501,7 @@ impl Mamba3 {
             tropical_ab_bsh,
             cache.tropical_bh.clone(),
             end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
-            segments.as_ref(),
+            packed.as_ref(),
         );
         cache.log_precision_bh = log_precision_bh;
         cache.tropical_bh = tropical_bh;

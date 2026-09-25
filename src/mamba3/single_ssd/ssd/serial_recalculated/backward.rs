@@ -34,10 +34,10 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
     /// Single-SSD.
     ///
     /// The two outputs (`y_bntmhp`, `final_state_bhpr`) are flattened and
-    /// concatenated into a single 1-D tracked tensor so one `Backward<B, 8>`
-    /// node covers both. The eight differentiable inputs are `v, da, b, c,
-    /// gamma, scale, initial_state, seed` (the seed is a placeholder without
-    /// resets).
+    /// concatenated into a single 1-D tracked tensor so one `Backward<B, 9>`
+    /// node covers both. The nine differentiable inputs are `v, da, b, c,
+    /// gamma, scale, initial_state, seed, origin` (the seed and the origin
+    /// are placeholders without resets).
     fn single_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
@@ -49,6 +49,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
         read_stride: usize,
         siso_specialization: bool,
         keep_bn: FloatTensor<Self>,
+        origin_bhpr: FloatTensor<Self>,
         resets: bool,
         seed_bnhpr: FloatTensor<Self>,
         seeded: bool,
@@ -65,8 +66,12 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
             gamma_bnth: <B as BackendTypes>::FloatTensorPrimitive,
             scale_bnlh: <B as BackendTypes>::FloatTensorPrimitive,
             initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
-            // The constant reset factor (no gradient), if the call has resets
-            keep_bn: Option<<B as BackendTypes>::FloatTensorPrimitive>,
+            // The constant reset factor (no gradient) and the origin state, if
+            // the call has resets
+            restarts: Option<(
+                <B as BackendTypes>::FloatTensorPrimitive,
+                <B as BackendTypes>::FloatTensorPrimitive,
+            )>,
             // The per-chunk boundary seeds, if the call passes them
             seed_bnhpr: Option<<B as BackendTypes>::FloatTensorPrimitive>,
             read_stride: usize,
@@ -84,12 +89,12 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
             shape_final_state_bhpr: [usize; 4],
         }
 
-        impl<B: Backend + Mamba3SingleSsdBackendExt> Backward<B, 8> for CombinedKernelsBackward {
+        impl<B: Backend + Mamba3SingleSsdBackendExt> Backward<B, 9> for CombinedKernelsBackward {
             type State = State<B>;
 
             fn backward(
                 self,
-                ops: Ops<Self::State, 8>,
+                ops: Ops<Self::State, 9>,
                 grads: &mut Gradients,
                 _checkpointer: &mut Checkpointer,
             ) {
@@ -102,6 +107,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     node_scale_bnlh,
                     node_initial_state_bhpr,
                     node_seed_bnhpr,
+                    node_origin_bhpr,
                 ] = ops.parents;
 
                 let d_combined: <B as BackendTypes>::FloatTensorPrimitive =
@@ -115,7 +121,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnth,
                     scale_bnlh,
                     initial_state_bhpr,
-                    keep_bn,
+                    restarts,
                     seed_bnhpr,
                     read_stride,
                     siso_specialization,
@@ -165,6 +171,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     d_gamma_bnth,
                     d_scale_bnlh,
                     d_initial_state_bhpr,
+                    d_origin_bhpr,
                     d_seed_bnhpr,
                 } = combined_backward::combined_backward(
                     F::<B, 6>::new(d_y_bntmhp),
@@ -178,7 +185,12 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     initial_state_bhpr,
                     read_stride,
                     siso_specialization,
-                    keep_bn.map(F::<B, 2>::new),
+                    restarts.map(|(keep_bn, origin_bhpr)| {
+                        (
+                            F::<B, 2>::new(keep_bn),
+                            F::<B, 4>::new(origin_bhpr).reshape(shape_initial_state_bhpr),
+                        )
+                    }),
                     seed_bnhpr,
                 );
 
@@ -205,6 +217,9 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                 }
                 if let (Some(n), Some(d_seed_bnhpr)) = (node_seed_bnhpr, d_seed_bnhpr) {
                     grads.register::<B>(n.id, d_seed_bnhpr.inner());
+                }
+                if let (Some(n), Some(d_origin_bhpr)) = (node_origin_bhpr, d_origin_bhpr) {
+                    grads.register::<B>(n.id, d_origin_bhpr.inner());
                 }
             }
         }
@@ -245,6 +260,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                 scale_bnlh.node(),
                 initial_state_bhpr.node(),
                 seed_bnhpr.node(),
+                origin_bhpr.node(),
             ])
             .compute_bound()
             .stateful()
@@ -261,6 +277,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     read_stride,
                     siso_specialization,
                     keep_bn.primitive().clone(),
+                    origin_bhpr.primitive().clone(),
                     resets,
                     seed_bnhpr.primitive().clone(),
                     seeded,
@@ -279,7 +296,9 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     gamma_bnth: gamma_bnth.primitive().clone(),
                     scale_bnlh: scale_bnlh.primitive().clone(),
                     initial_state_bhpr: initial_state_bhpr.primitive().clone(),
-                    keep_bn: resets.then(|| keep_bn.primitive().clone()),
+                    restarts: resets.then(|| {
+                        (keep_bn.primitive().clone(), origin_bhpr.primitive().clone())
+                    }),
                     seed_bnhpr: seeded.then(|| seed_bnhpr.primitive().clone()),
                     read_stride,
                     siso_specialization,
@@ -322,6 +341,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                     read_stride,
                     siso_specialization,
                     keep_bn.into_primitive(),
+                    origin_bhpr.into_primitive(),
                     resets,
                     seed_bnhpr.into_primitive(),
                     seeded,

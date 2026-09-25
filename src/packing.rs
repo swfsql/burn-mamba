@@ -1,14 +1,20 @@
 //! Packed segments inside a block: several sequences one after another in one
-//! row, each from the cache that the call got.
+//! row, each from one origin cache.
 //!
 //! `reset_bt` (`[batch, tokens]`, `true` at the first token of a segment)
 //! marks where a row starts a new sequence. At that token, the block restarts
-//! from the incoming cache of the call (a fresh one for `cache = None`). So
-//! each segment gives the outputs, the cache and the gradients of the same
-//! segment in its own call from that cache. The previous segment gets no
-//! gradient through the restart. The incoming cache gets the gradients of
-//! every segment of its row. A batch that holds each segment in its own row,
-//! from the same cache, gives the same gradients.
+//! from the **origin** cache (`origin`, a fresh one for `origin = None`). The
+//! tokens before the first reset of a row continue from the incoming cache
+//! (`cache`), as in a plain call. So a stream of packed calls can continue a
+//! sequence across a call boundary. A reset at the first token of a call
+//! starts a new sequence.
+//!
+//! Each sequence gives what its own row gives in a batch of plain calls from
+//! the origin: the outputs, the last cache and the gradients. This is true for
+//! any split of the stream into calls. The previous segment gets no gradient
+//! through a restart. The origin gets the gradients of every segment that
+//! restarts from it. `origin = cache` restarts every segment from the incoming
+//! cache (for example, a shared prefix).
 //!
 //! # Only at a chunk start
 //!
@@ -21,15 +27,25 @@
 //! - its chunk starts with a reset,
 //! - it reads further back than its own index in the chunk.
 //!
-//! Such a read takes the value of the cache instead (`restart_heads`). So a
+//! Such a read takes the value of the origin instead (`restart_heads`). So a
 //! per-chunk flag is all that those sites need, and no scan runs over the row
-//! for them. A segment can end with pad rows (`pad`), up to the next chunk
-//! start. The official Mamba-3 varlen kernels also start each sequence at a
-//! chunk start, with a padded last chunk.
+//! for them. This needs a read that reaches back one chunk at most:
+//!
+//! - A Mamba-2 conv tap reads `conv_kernel − 1` rows back. So
+//!   `Mamba2::forward_packed` asserts `chunk_len ≥ conv_kernel − 1`.
+//! - A Mamba-3 tap reads `u` positions (one token) back at most.
+//!
+//! A segment can end with pad rows (`pad`), up to the next chunk start. The official Mamba-3 varlen kernels also start each
+//! sequence at a chunk start, with a padded last chunk.
 //!
 //! Some scans run over the whole row: the cumulative rotation of Mamba-3 and
 //! its positive systems. They restart at the first position of each segment,
-//! from the carry of the cache.
+//! from the carry of the origin.
+//!
+//! The cache that a call returns is that of the last segment of each row. Its
+//! "last samples" fields (conv window, tap FIFO, carries) read the origin for
+//! the entries before the start of that segment (`last_origin`,
+//! `restart_window`).
 //!
 //! Only the serial SSD paths take resets. The inter-chunk decay of `Minimal`
 //! is a `nchunks × nchunks` matrix, which a long packed row makes large.
@@ -38,6 +54,64 @@
 //! `Mamba3::forward_packed`.
 
 use burn::prelude::*;
+
+/// The resets of a packed row as an SSD pass takes them: the chunks that
+/// restart, and the state that they restart from.
+#[derive(Clone, Debug)]
+pub struct Restarts {
+    /// `[batch, nchunks]`: `true` at a chunk that starts a new segment.
+    pub reset_bn: Tensor<2, Bool>,
+    /// `[batch, nheads, per_head_dim, state_rank]`: the state of the origin
+    /// cache. Each chunk of `reset_bn` starts from it.
+    pub origin_bhpr: Tensor<4>,
+}
+
+impl Restarts {
+    /// The restarts as a recompute op takes them. The extension macro takes
+    /// no `Option` tensor, so the op gets `(keep_bn, origin_bhpr, resets)`:
+    ///
+    /// - `keep_bn`: `0` at a chunk that starts a new segment, `1` elsewhere.
+    ///   It is a constant (no gradient), with the dtype of `like`.
+    /// - `origin_bhpr`: the state that those chunks start from.
+    /// - `resets`: `false` for `None`. Then the two tensors are placeholders
+    ///   (each dimension 1) that the op does not read.
+    ///
+    /// `like` is `[batch, nchunks, …]`.
+    pub(crate) fn op_inputs<const D: usize>(
+        restarts: Option<Self>,
+        like: &Tensor<D>,
+    ) -> (Tensor<2>, Tensor<4>, bool) {
+        let dims = like.dims();
+        let options = (&like.device(), like.dtype());
+        match restarts {
+            Some(Restarts { reset_bn, origin_bhpr }) => (
+                Tensor::ones([dims[0], dims[1]], options).mask_fill(reset_bn, 0.0),
+                origin_bhpr,
+                true,
+            ),
+            None => (
+                Tensor::ones([1, 1], options),
+                Tensor::zeros([1, 1, 1, 1], options),
+                false,
+            ),
+        }
+    }
+}
+
+/// `cache`, where each row with a reset takes the row of `origin` instead:
+/// the field that the last segment of each row starts from. Axis 0 is the
+/// batch.
+pub(crate) fn last_origin<const D: usize>(
+    cache: Tensor<D>,
+    origin: Tensor<D>,
+    reset_bn: &Tensor<2, Bool>,
+) -> Tensor<D> {
+    let dims = cache.dims();
+    let mut shape = [1usize; D];
+    shape[0] = dims[0];
+    let restarted = reset_bn.clone().any_dim(1).reshape(shape).expand(dims);
+    cache.mask_where(restarted, origin)
+}
 
 /// The reset flag of each chunk, `[batch, nchunks]`: the flag of its first
 /// token. `nchunks = ⌈tokens / chunk_tokens⌉`, so a partial last chunk also
@@ -94,9 +168,9 @@ pub(crate) fn chunk_heads(
 }
 
 /// `x`, where `head` replaces the first `width` positions (along `axis`) of
-/// every chunk that starts with a reset. `head` holds the cache values that
-/// those positions read at the start of a call: `x` with `width` entries along
-/// `axis`, one set per row. Axis 0 is the batch.
+/// every chunk that starts with a reset. `head` holds the values of the origin
+/// cache that those positions read at a restart: `x` with `width` entries
+/// along `axis`, one set per row. Axis 0 is the batch.
 pub(crate) fn restart_heads<const D: usize>(
     x: Tensor<D>,
     axis: usize,
@@ -197,13 +271,20 @@ impl Segments {
     pub fn last_start_b(&self) -> Tensor<1, Int> {
         last_start_b(&self.reset_bn, self.chunk_len)
     }
+
+    /// See [`last_origin`].
+    pub fn last_origin<const D: usize>(&self, cache: Tensor<D>, origin: Tensor<D>) -> Tensor<D> {
+        last_origin(cache, origin, &self.reset_bn)
+    }
 }
 
-/// [`crate::padding::window`] of `x_all` (`[cache | row]` along `axis`, where
-/// the cache field is `width` entries) at `end_b`, as the last segment of each
-/// row sees it. That segment starts from the cache field, so an entry from
-/// before its start is read from the cache instead. `last_start_b` is `0` for
-/// a row with no reset, which gives the plain window.
+/// [`crate::padding::window`] of `x_all` (`[start | row]` along `axis`, where
+/// the `start` field is `width` entries) at `end_b`, as the last segment of
+/// each row sees it. That segment starts from the `start` field, so an entry
+/// from before its start is read from that field instead. `start` is the
+/// field of [`last_origin`]: the origin for a row with a reset, else the
+/// incoming cache. `last_start_b` is `0` for a row with no reset, which gives
+/// the plain window.
 pub(crate) fn restart_window<const D: usize>(
     x_all: Tensor<D>,
     axis: usize,
@@ -214,15 +295,15 @@ pub(crate) fn restart_window<const D: usize>(
     let [batch] = end_b.dims();
     let device = x_all.device();
     let start_bw = last_start_b.reshape([batch, 1]).expand([batch, width]);
-    // In `[cache | last segment]`, the window starts at the real length of
+    // In `[start | last segment]`, the window starts at the real length of
     // the segment (zero for a segment with no real row).
     let local_end_bw = (end_b.reshape([batch, 1]).expand([batch, width]) - start_bw.clone()).clamp_min(0);
     let local_bw = Tensor::<1, Int>::arange(0..width as i64, &device)
         .reshape([1, width])
         .expand([batch, width])
         + local_end_bw;
-    // Back to `[cache | row]`: a cache entry stays, a segment entry moves by
-    // the start of the segment.
+    // Back to `[start | row]`: a `start` entry stays, a segment entry moves
+    // by the start of the segment.
     let in_cache_bw = local_bw.clone().lower_elem(width as i64);
     let idx_bw = local_bw + start_bw.mask_fill(in_cache_bw, 0);
     let mut shape = [1usize; D];

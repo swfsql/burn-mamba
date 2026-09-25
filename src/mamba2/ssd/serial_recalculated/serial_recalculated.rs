@@ -50,17 +50,10 @@ impl Mamba2SsdInput {
             dt_discretized_bhnl.dims()
         );
 
-        // The resets go into the op as a keep factor: `0` where a chunk starts
-        // a new segment, `1` elsewhere. It is a constant (no gradient), with
-        // the dtype of the data. Without resets, it is a 1×1 placeholder that
-        // the op does not read (the extension macro does not take `Option`
-        // tensors).
-        let resets = input.reset_bn.is_some();
-        let options = (&input.x_bnlhp.device(), input.x_bnlhp.dtype());
-        let keep_bn = match input.reset_bn {
-            Some(reset_bn) => Tensor::<2>::ones([batch, nchunks], options).mask_fill(reset_bn, 0.0),
-            None => Tensor::<2>::ones([1, 1], options),
-        };
+        // The resets go into the op as a keep factor and the origin state (see
+        // `Restarts::op_inputs`).
+        let (keep_bn, origin_bhpr, resets) =
+            crate::packing::Restarts::op_inputs(input.restarts, &input.x_bnlhp);
 
         // The custom op computes K1 itself (in forward and backward). It gets
         // `a_decay_h` directly, so `da_cumsum` is not an autodiff-tracked
@@ -74,6 +67,7 @@ impl Mamba2SsdInput {
             input.initial_state_bhpr.into_dispatch(),
             input.a_decay_h.into_dispatch(),
             keep_bn.into_dispatch(),
+            origin_bhpr.into_dispatch(),
             resets,
         );
         let y_bnlhp = Tensor::from_dispatch(y_bnlhp);
@@ -106,9 +100,10 @@ impl Mamba2SsdInput {
 )]
 pub trait Mamba2BackendExt: Backend {
     /// `keep_bn` (`[batch, nchunks]`) is `0` at a chunk that starts a new
-    /// segment of a packed row, and `1` elsewhere. The op reads it only when
-    /// `resets` is `true`. It is a constant: the op registers no gradient for
-    /// it.
+    /// segment of a packed row, and `1` elsewhere. It is a constant: the op
+    /// registers no gradient for it. Such a chunk starts from `origin_bhpr`
+    /// (`[batch, nheads, per_head_dim, state_rank]`). The op reads both only
+    /// when `resets` is `true`.
     ///
     /// Returns:
     /// - `y_bnlhp`.
@@ -123,6 +118,7 @@ pub trait Mamba2BackendExt: Backend {
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
         keep_bn: FloatTensor<Self>,
+        origin_bhpr: FloatTensor<Self>,
         resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // The default impl replicates Mamba2SsdInput::ssd_serial on backend
@@ -137,7 +133,7 @@ pub trait Mamba2BackendExt: Backend {
         let d_h = F::<Self, 1>::new(d_h);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
         let a_decay_h = F::<Self, 1>::new(a_decay_h);
-        let keep_bn = resets.then(|| F::<Self, 2>::new(keep_bn));
+        let restarts = resets.then(|| (F::<Self, 2>::new(keep_bn), F::<Self, 4>::new(origin_bhpr)));
 
         let nchunks = x_bnlhp.dims()[1];
         assert!(nchunks > 0, "sequence length must be at least 1");
@@ -165,7 +161,7 @@ pub trait Mamba2BackendExt: Backend {
             intra_chunk_state_bnhpr,
             da_chunk_end_bhn,
             initial_state_bhpr,
-            keep_bn,
+            restarts,
         );
         san(&chunk_input_state_bnhpr);
         san(&final_state_bhpr);
@@ -266,13 +262,14 @@ pub(crate) fn k3_ssd_chunk_state<B: Backend>(
 /// Returns the per-chunk input-state stream `chunk_input_state_bnhpr` and the
 /// `final_state_bhpr`.
 ///
-/// `keep_bn` is the reset of the high-level K4 as a factor: the state that
-/// goes into a chunk with `keep = 0` is the initial state.
+/// `restarts` is `(keep_bn, origin_bhpr)`: the reset of the high-level K4 as
+/// a factor, and the origin state. The state that goes into a chunk with
+/// `keep = 0` is the origin state.
 pub(crate) fn k4_ssd_state_passing<B: Backend>(
     intra_chunk_state_bnhpr: F<B, 5>,
     da_chunk_end_bhn: F<B, 3>,
     initial_state_bhpr: F<B, 4>,
-    keep_bn: Option<F<B, 2>>,
+    restarts: Option<(F<B, 2>, F<B, 4>)>,
 ) -> (F<B, 5>, F<B, 4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
 
@@ -285,15 +282,18 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
             .reshape([batch, 1, 1, 1])
             .expand([batch, nheads, per_head_dim, state_rank])
     };
-    let restart_bn = keep_bn.as_ref().map(restart_factor);
+    let restarts = restarts.map(|(keep_bn, origin_bhpr)| {
+        let restart_bn = restart_factor(&keep_bn);
+        (keep_bn, restart_bn, origin_bhpr)
+    });
 
     for i_chunk in 0..nchunks {
-        // A chunk that starts a segment starts from the incoming state. (A
+        // A chunk that starts a segment starts from the origin state. (A
         // learnable `init_state_hpr` would join it, but only `Minimal` takes
         // one.)
-        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+        if let Some((keep_bn, restart_bn, origin_bhpr)) = &restarts {
             running_state_bhpr = running_state_bhpr * at(keep_bn, i_chunk)
-                + initial_state_bhpr.clone() * at(restart_bn, i_chunk);
+                + origin_bhpr.clone() * at(restart_bn, i_chunk);
             *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
         }
 

@@ -123,7 +123,7 @@ impl Inputs {
             init_state_hpr: None,
             read_stride: self.read_stride,
             siso_specialization,
-            reset_bn: None,
+            restarts: None,
             seed_bnhpr: None,
         }
     }

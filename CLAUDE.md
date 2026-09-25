@@ -129,8 +129,10 @@ src/
 │                    `real_end_b`, `fill_padded`, `repeat_rows` (token mask →
 │                    folded axis)
 ├─ packing.rs        packed segments (`forward_packed`): resets at chunk
-│                    starts, each segment from the incoming cache;
-│                    chunk_resets, restart_heads, Segments, restart_window
+│                    starts; a row continues from `cache` up to its first
+│                    reset, each segment starts from `origin`; Restarts,
+│                    last_origin, chunk_resets, restart_heads, Segments,
+│                    restart_window
 └─ unified/          the runtime-selectable API + where the families plug in
    ├─ mod.rs         MambaSsdPath; header = why the MIMO 3-D tensors are not
    │                 stacked matrices for Muon
@@ -231,14 +233,19 @@ the step where its discretisation forms them:
 A family reads every "last samples" cache field (conv window, tap FIFO,
 `positive/` carries) at the end of each slot (`padding::window`).
 
-`Mamba{2,3}::forward_packed` also takes `reset` (`[batch, tokens]`, `true` at
-the first token of a segment). Each segment restarts from the incoming cache
-of the call: it gives what its own row of a batch from that cache gives
-(outputs, last cache, gradients, also those of the cache). A reset must be at
-a chunk start, so the SSD changes only in K4 (and its backward; single-SSD
-adds a boundary seed per chunk). The reads across a reset (Mamba-2 conv taps,
-Mamba-3 tap FIFO) take the cache values. The rotation and the `positive/`
-scans restart from the cache. Serial paths only. See `src/packing.rs`.
+`Mamba{2,3}::forward_packed(x, cache, origin, path, pad, reset)`: `reset`
+(`[batch, tokens]`) is `true` at the first token of a segment. A row continues
+from `cache` up to its first reset, and each segment restarts from `origin`
+(fresh for `None`). So a stream of packed calls continues a sequence across
+calls. Each sequence gives what its own row of a batch from `origin` gives
+(outputs, last cache, gradients, also those of `origin`), for any split into
+calls. `origin = cache` restarts every segment from the incoming cache. A
+reset must be at a chunk start, so the SSD changes only in K4 (and its
+backward; single-SSD adds a boundary seed per chunk). The reads across a reset
+(Mamba-2 conv taps, Mamba-3 tap FIFO) and the "last samples" fields take the
+origin values. The rotation and the `positive/` scans restart from the
+origin. Mamba-2 asserts `chunk_len ≥ conv_kernel − 1`. Serial paths only. See
+`src/packing.rs`.
 
 ### Caches
 

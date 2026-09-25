@@ -31,6 +31,7 @@
 
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
+use crate::mamba3::mamba3::Packed;
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use crate::mamba3::single_ssd::prelude::*;
@@ -80,21 +81,23 @@ impl Mamba3 {
         ssd_path: &Mamba3SsdPath,
         pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
-        self.forward_single_ssd_packed(input_bsm, cache, ssd_path, pad_bt, None)
+        self.forward_single_ssd_packed(input_bsm, cache, None, ssd_path, pad_bt, None)
     }
 
     /// [`Self::forward_single_ssd`] over a packed batch: `reset_bt` marks the
-    /// first token of each segment, as in [`Self::forward_packed`].
+    /// first token of each segment, which starts from `origin`, as in
+    /// [`Self::forward_packed`].
     ///
     /// A reset is a call boundary inside the row: the positions before it pay
-    /// no `ν` forward (the taps of the segment start read the cache slots),
-    /// and the chunk restarts from the incoming `h'` plus its own boundary
-    /// seed, as the call does.
+    /// no `ν` forward (the taps of the segment start read the slots of the
+    /// origin), and the chunk restarts from the `h'` of the origin plus its
+    /// own boundary seed, as a call from the origin does.
     #[allow(non_snake_case)]
     pub fn forward_single_ssd_packed(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3SingleSsdCache>,
+        origin: Option<Mamba3SingleSsdCache>,
         ssd_path: &Mamba3SsdPath,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
@@ -103,6 +106,7 @@ impl Mamba3 {
             let (out_bsm, cache) = self.forward_double_ssd_packed(
                 input_bsm,
                 cache.map(Into::into),
+                origin.map(Into::into),
                 ssd_path,
                 pad_bt,
                 reset_bt,
@@ -145,7 +149,7 @@ impl Mamba3 {
         });
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        let mut cache = cache.unwrap_or_else(|| {
+        let fresh = || {
             let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
             // Reached only with a β tap (`Trapezoid::None` delegated above).
             let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
@@ -159,6 +163,14 @@ impl Mamba3 {
                 log_precision_bh,
                 tropical_bh,
             }
+        };
+        let mut cache = cache.unwrap_or_else(fresh);
+        // A packed row: the cache that each segment starts from. At a call
+        // boundary, `h'` is the double-SSD state, so the fields convert as
+        // they are.
+        let packed = segments.map(|segments| Packed {
+            segments,
+            origin: origin.unwrap_or_else(fresh).into(),
         });
 
         // ── Step 1: In-projection ─────────────────────────────────────────────
@@ -234,7 +246,7 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.trapezoid_spec(),
-            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), segments.as_ref()),
+            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
         // The tropical register's inputs, on the same folded axis.
@@ -269,8 +281,8 @@ impl Mamba3 {
         // band correction takes it out of the reads of its token. The zero
         // keeps `h'` at a reset equal to that at a call boundary.)
         let pay_forward = |nu_bsh: Tensor<3>, l: usize| {
-            let nu_bsh = match &segments {
-                Some(segments) => crate::padding::fill_padded(nu_bsh, &segments.heads(l), 0.0),
+            let nu_bsh = match &packed {
+                Some(p) => crate::padding::fill_padded(nu_bsh, &p.segments.heads(l), 0.0),
                 None => nu_bsh,
             };
             let zero_bLh = Tensor::zeros([batch, l, nheads], &device);
@@ -327,7 +339,7 @@ impl Mamba3 {
             c_btmhr,
             u,
             self.rotation_spec(),
-            segments.as_ref().map(|s| &s.start_bs),
+            packed.as_ref().map(|p| (&p.segments.start_bs, p.origin.rotation.clone())),
         );
         san(&b_bsmhr);
         san(&c_btmhr);
@@ -343,7 +355,7 @@ impl Mamba3 {
             end_b.clone().map(|end_b| {
                 (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
             }),
-            segments.as_ref(),
+            packed.as_ref(),
         );
 
         // ── Boundary β seed for initial state ─────────────────────────────────
@@ -362,7 +374,8 @@ impl Mamba3 {
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         // The masses that the first `width` positions of each chunk pay,
         // `[batch, nchunks, width, nheads]`. Only chunk 0 is the start of the
-        // call. In a packed row, every chunk that starts a segment is one.
+        // call. In a packed row, every chunk that starts a segment is the
+        // start of one from the origin.
         let nchunks = sequence.div_ceil(chunk_len);
         let heads_of = |t_bsh: Tensor<3>, width: usize| {
             let pad = nchunks * chunk_len - sequence;
@@ -390,53 +403,49 @@ impl Mamba3 {
             ),
             None => nu_heads_bnuh,
         };
-        let v_prev_mimo_bumhp = helpers::build_v_with_mimo::<4, 5>(
-            cache
-                .v_state_buhp
-                .clone()
-                .expect("a β tap keeps its (B, x) cache slots"),
-            mimo_x_hmp.as_ref(),
-            2,
-        ); // [batch, lag, mimo_rank, nheads, per_head_dim]
-        let k_prev_bumhr = cache
-            .k_state_bumhr
-            .clone()
-            .expect("a β tap keeps its (B, x) cache slots");
-        let (initial_state_bhpr, seed_bnhpr) = match &segments {
-            None => {
-                let nu_head_buh = nu_heads_bnuh.narrow(1, 0, 1).squeeze_dim::<3>(1);
-                let v_prev_mimo_bumhp =
-                    v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
-                // The seed contracts over the slots *and* the ranks (both are
-                // outer products into one state). So, fused, it is the same
-                // one `mimo_outer_sum` that the per-token write uses.
-                let boundary_seed_bhpr = helpers::mimo_outer_sum(
-                    v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
-                    k_prev_bumhr.reshape([batch, lag * mimo_rank, nheads, state_rank]),
-                    self.use_siso_decode_kernels(),
-                );
-                (cache.ssm_bhpr.clone() + boundary_seed_bhpr, None)
-            }
-            // A packed row: a seed for every chunk, in case it restarts. Each
-            // slot writes one outer product (over the ranks), and each chunk
-            // weighs the slots by its own head masses.
-            Some(_) => {
-                let slot_writes_bhuP = helpers::mimo_outer_sum(
-                    v_prev_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
-                    k_prev_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),
-                    self.use_siso_decode_kernels(),
-                )
-                .reshape([batch, lag, nheads, per_head_dim * state_rank])
-                .swap_dims(1, 2);
-                let seed_bnhpr = nu_heads_bnuh
-                    .permute([0, 3, 1, 2]) // _bhnu
-                    .matmul(slot_writes_bhuP) // _bhnP
-                    .reshape([batch, nheads, nchunks, per_head_dim, state_rank])
-                    .swap_dims(1, 2);
-                (cache.ssm_bhpr.clone(), Some(seed_bnhpr))
-            }
+        // The slots of a FIFO, `v` with MIMO_V applied:
+        // `([batch, lag, mimo_rank, nheads, per_head_dim], [batch, lag, mimo_rank, nheads, state_rank])`.
+        let slots = "a β tap keeps its (B, x) cache slots";
+        let prev_slots = |v_state_buhp: Option<Tensor<4>>, k_state_bumhr: Option<Tensor<5>>| {
+            let v_prev_mimo_bumhp =
+                helpers::build_v_with_mimo::<4, 5>(v_state_buhp.expect(slots), mimo_x_hmp.as_ref(), 2);
+            (v_prev_mimo_bumhp, k_state_bumhr.expect(slots))
         };
+        // The seed of the call, from the slots of the cache and the masses of
+        // chunk 0.
+        let (v_prev_mimo_bumhp, k_prev_bumhr) =
+            prev_slots(cache.v_state_buhp.clone(), cache.k_state_bumhr.clone());
+        let nu_head_buh = nu_heads_bnuh.clone().narrow(1, 0, 1).squeeze_dim::<3>(1);
+        let v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
+        // The seed contracts over the slots *and* the ranks (both are outer
+        // products into one state). So, fused, it is the same one
+        // `mimo_outer_sum` that the per-token write uses.
+        let boundary_seed_bhpr = helpers::mimo_outer_sum(
+            v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
+            k_prev_bumhr.reshape([batch, lag * mimo_rank, nheads, state_rank]),
+            self.use_siso_decode_kernels(),
+        );
+        let initial_state_bhpr = cache.ssm_bhpr.clone() + boundary_seed_bhpr;
         san(&initial_state_bhpr);
+        // A packed row: each chunk gets a seed from the slots of the origin,
+        // in case it restarts. Each slot writes one outer product (over the
+        // ranks). Each chunk weighs the slots by its own head masses.
+        let seed_bnhpr = packed.as_ref().map(|p| {
+            let (v_origin_mimo_bumhp, k_origin_bumhr) =
+                prev_slots(p.origin.v_state_buhp.clone(), p.origin.k_state_bumhr.clone());
+            let slot_writes_bhuP = helpers::mimo_outer_sum(
+                v_origin_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
+                k_origin_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),
+                self.use_siso_decode_kernels(),
+            )
+            .reshape([batch, lag, nheads, per_head_dim * state_rank])
+            .swap_dims(1, 2);
+            nu_heads_bnuh
+                .permute([0, 3, 1, 2]) // _bhnu
+                .matmul(slot_writes_bhuP) // _bhnP
+                .reshape([batch, nheads, nchunks, per_head_dim, state_rank])
+                .swap_dims(1, 2)
+        });
 
         // ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
         let sequence_padded = sequence.next_multiple_of(chunk_len);
@@ -521,7 +530,10 @@ impl Mamba3 {
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
             read_stride: u,
             siso_specialization: self.siso_specialization,
-            reset_bn: segments.as_ref().map(|s| s.reset_bn.clone()),
+            restarts: packed.as_ref().map(|p| crate::packing::Restarts {
+                reset_bn: p.segments.reset_bn.clone(),
+                origin_bhpr: p.origin.ssm_bhpr.clone(),
+            }),
             seed_bnhpr,
         };
         let (y_bntmhp, final_state_bhpr) = ssd_input.run(ssd_path);
@@ -550,7 +562,7 @@ impl Mamba3 {
             tropical_ab_bsh,
             cache.tropical_bh.clone(),
             end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
-            segments.as_ref(),
+            packed.as_ref(),
         );
         cache.log_precision_bh = log_precision_bh;
         cache.tropical_bh = tropical_bh;

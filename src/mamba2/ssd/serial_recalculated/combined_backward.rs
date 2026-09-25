@@ -44,6 +44,8 @@ pub struct CombinedGrads<B: Backend> {
     pub d_d_h: F<B, 1>,
     /// Gradient of the initial SSM state.
     pub d_initial_state_bhpr: F<B, 4>,
+    /// Gradient of the origin state of the resets (`None` without resets).
+    pub d_origin_bhpr: Option<F<B, 4>>,
     /// Gradient of the per-head decay rate `A` (as `a_decay_h`).
     pub d_a_decay_h: F<B, 1>,
     /// Local same-chunk contribution to `d_da_cumsum` from BLUE+ORANGE only
@@ -124,11 +126,13 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `d_final_bhpr` — upstream gradient of the final SSM state
 /// - `x_bnlhp`, `dt_discretized_bhnl`, `b_bnlhr`, `c_bnlhr`, `d_h`,
 ///   `initial_state_bhpr`, `a_decay_h` — the seven saved forward inputs
-/// - `keep_bn` — the constant reset factor of the forward (`0` at a chunk
-///   that starts a new segment), or `None`
+/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+///   constant reset factor of the forward (`0` at a chunk that starts a new
+///   segment). `origin_bhpr` is the state that those chunks start from.
 ///
 /// # Returns
-/// One [`CombinedGrads`] struct containing gradients for all 7 inputs.
+/// One [`CombinedGrads`] struct containing gradients for all 7 inputs, and
+/// for the origin state.
 #[allow(clippy::too_many_arguments)]
 pub fn combined_backward<B: Backend>(
     d_y_bnlhp: F<B, 5>,
@@ -141,7 +145,7 @@ pub fn combined_backward<B: Backend>(
     d_h: F<B, 1>,
     initial_state_bhpr: F<B, 4>,
     a_decay_h: F<B, 1>,
-    keep_bn: Option<F<B, 2>>,
+    restarts: Option<(F<B, 2>, F<B, 4>)>,
 ) -> CombinedGrads<B> {
     let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
     let [.., per_head_dim] = x_bnlhp.dims();
@@ -190,7 +194,7 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr.clone(),
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
-        keep_bn.clone(),
+        restarts.clone(),
     );
     san(&chunk_input_state_bnhpr);
 
@@ -231,15 +235,18 @@ pub fn combined_backward<B: Backend>(
 
     let mut d_running_state_bhpr: F<B, 4> = d_final_bhpr;
     // The resets: what goes on to the previous chunk (`keep`), and what goes
-    // to the initial state (`1 − keep`), per chunk.
-    let restart_bn = keep_bn.as_ref().map(restart_factor);
+    // to the origin state (`1 − keep`), per chunk.
+    let keep_restart_bn = restarts.map(|(keep_bn, _origin_bhpr)| {
+        let restart_bn = restart_factor(&keep_bn);
+        (keep_bn, restart_bn)
+    });
     let at = |t_bn: &F<B, 2>, i_chunk: usize| {
         t_bn.clone()
             .slice(s![.., i_chunk])
             .reshape([batch, 1, 1, 1])
             .expand([batch, nheads, per_head_dim, state_rank])
     };
-    let mut d_initial_restarts_bhpr: Option<F<B, 4>> = None;
+    let mut d_origin_bhpr: Option<F<B, 4>> = None;
 
     for i_chunk in (0..nchunks).rev() {
         // ── Per-chunk slices ───────────────────────────────────────────────
@@ -387,8 +394,8 @@ pub fn combined_backward<B: Backend>(
         //   - d_decayᵢ            = d_sᵢ₊₁ · sᵢ
         //   - d_sᵢ (propagated)   = decayᵢ · d_sᵢ₊₁ + d_chunk_input_state
         //   Under a reset, sᵢ = keepᵢ · (the state before chunk i) +
-        //   (1 − keepᵢ) · initial. So the gradient that goes on to chunk
-        //   i − 1 is keepᵢ · d_sᵢ, and the initial state gets (1 − keepᵢ) ·
+        //   (1 − keepᵢ) · origin. So the gradient that goes on to chunk
+        //   i − 1 is keepᵢ · d_sᵢ, and the origin state gets (1 − keepᵢ) ·
         //   d_sᵢ. `sᵢ` in d_decayᵢ is already the restarted one (K4 above
         //   recomputed it with the reset).
         vec_d_intra_bhpr.push(d_running_state_bhpr.clone());
@@ -411,9 +418,9 @@ pub fn combined_backward<B: Backend>(
         vec_d_da_end_bh.push(d_da_chunk_end_bh);
 
         d_running_state_bhpr = decay_chunk_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
-        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+        if let Some((keep_bn, restart_bn)) = &keep_restart_bn {
             let d_restart_bhpr = d_running_state_bhpr.clone() * at(restart_bn, i_chunk);
-            d_initial_restarts_bhpr = Some(match d_initial_restarts_bhpr {
+            d_origin_bhpr = Some(match d_origin_bhpr {
                 Some(acc_bhpr) => acc_bhpr + d_restart_bhpr,
                 None => d_restart_bhpr,
             });
@@ -421,12 +428,9 @@ pub fn combined_backward<B: Backend>(
         }
         san(&d_running_state_bhpr);
     }
-    // d_initial_state = the trailing d_running_state after the reverse loop,
-    // plus what each restart sent to it.
-    let d_initial_state_bhpr = match d_initial_restarts_bhpr {
-        Some(acc_bhpr) => d_running_state_bhpr + acc_bhpr,
-        None => d_running_state_bhpr,
-    };
+    // d_initial_state = the trailing d_running_state after the reverse loop.
+    // The restarts sent their share to the origin state instead.
+    let d_initial_state_bhpr = d_running_state_bhpr;
 
     // ── Restore natural (forward) chunk order ─────────────────────────────
     vec_orange_d_x_bhlp.reverse();
@@ -618,6 +622,7 @@ pub fn combined_backward<B: Backend>(
         d_c_bnlhr,
         d_d_h,
         d_initial_state_bhpr,
+        d_origin_bhpr,
         #[cfg(test)]
         d_da_local_bhnl,
         #[cfg(test)]

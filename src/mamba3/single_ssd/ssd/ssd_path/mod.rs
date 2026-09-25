@@ -122,24 +122,21 @@ pub struct Mamba3SingleSsdInput {
     /// compute the same values and gradients. No effect at `mimo_rank > 1`.
     pub siso_specialization: bool,
 
-    /// The chunks that start a new segment of a packed row: the carry into
-    /// each of them restarts from zero (see [`crate::packing`]). `None` ⇒ no
-    /// reset. Only the two serial paths take it. `Minimal` panics when it is
-    /// `Some`.
+    /// The chunks that start a new segment of a packed row, and the origin
+    /// state. The carry into each of these chunks restarts from the origin
+    /// (see [`crate::packing`]). `None` ⇒ no reset. Only the two serial paths
+    /// take it. `Minimal` panics when it is `Some`.
     ///
     /// At a reset, no `ν` is paid forward across it. The chunk restarts from
-    /// `initial_state_bhpr` plus its own boundary seed (`seed_bnhpr`), as the
-    /// call does.
-    ///
-    /// # Shape
-    /// - `[batch, nchunks]`
-    pub reset_bn: Option<Tensor<2, Bool>>,
+    /// the origin state plus its own boundary seed (`seed_bnhpr`), as a call
+    /// from the origin does. The call itself starts from
+    /// `initial_state_bhpr`. As without resets, that state holds the seed of
+    /// the call.
+    pub restarts: Option<crate::packing::Restarts>,
 
     /// The boundary β seed of each chunk, with resets: the installments that
-    /// the first `lag` positions of a chunk pay to the cache slots, in case
-    /// the chunk restarts. `initial_state_bhpr` then holds no seed, and the
-    /// call starts from `initial + seed⁰`. `None` without resets (the seed of
-    /// the call is then in `initial_state_bhpr`).
+    /// the first `lag` positions of a chunk pay to the tap slots of the
+    /// origin, in case the chunk restarts. `None` without resets.
     ///
     /// # Shape
     /// - `[batch, nchunks, nheads, per_head_dim, state_rank]`
@@ -179,7 +176,7 @@ impl Mamba3SingleSsdInput {
         match path {
             Mamba3SsdPath::Minimal(_) => {
                 assert!(
-                    self.reset_bn.is_none(),
+                    self.restarts.is_none(),
                     "Minimal does not take resets: use Serial or SerialRecalculated"
                 );
                 self.single_ssd_minimal()

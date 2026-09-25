@@ -27,9 +27,9 @@ use burn::prelude::*;
 ///
 /// # In a packed row
 ///
-/// `start_bs` (`[batch, len]`) is the first position of the segment of each
-/// position in a packed row (`-1` before the first reset), or `None`. Each
-/// segment then scans alone, from `carry_bh`.
+/// `restart` marks the segments of a packed row, or is `None`. Each segment
+/// then scans alone, from the origin carry. The positions before the first
+/// reset of the row continue from `carry_bh`.
 ///
 /// # Shapes
 /// - `a_bsh`, `b_bsh` : `[batch, len, nheads]`
@@ -39,14 +39,16 @@ pub fn register(
     a_bsh: Tensor<3>,
     b_bsh: Tensor<3>,
     carry_bh: Tensor<2>,
-    start_bs: Option<&Tensor<2, Int>>,
+    restart: Option<&scan::Restart>,
 ) -> Tensor<3> {
     let elements = Affine {
         a: a_bsh.clamp_min(LOG_ZERO),
         b: b_bsh.clamp_min(LOG_ZERO),
     };
-    match start_bs {
+    match restart {
         None => scan::prefix(elements).apply(carry_bh),
-        Some(start_bs) => scan::prefix_in_segments(elements, start_bs).apply(carry_bh),
+        Some(restart) => {
+            scan::prefix_in_segments(elements, &restart.start_bs).apply_each(restart.carries(carry_bh))
+        }
     }
 }
