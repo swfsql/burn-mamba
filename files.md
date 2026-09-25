@@ -316,21 +316,25 @@ unit-quaternion VJP, parallel ops only).
 - **`cache.rs`**: `MambaCaches` (plain runtime state, **not** a `Module`) +
   `detach()`, and the `Block` / `BlockConfig` / `CacheStack` impls of each
   family. `cache_to_inner`/`cache_from_inner` are written by hand:
-  `Module::map` does **nothing** on plain `Tensor` fields.
+  `Module::map` does **nothing** on plain `Tensor` fields. Mamba-2/3 implement
+  `block_forward_packed` (`forward_packed` from a fresh origin).
 - **`capture.rs`**: `impl CacheTensors` (burn-stack's) for every family's
   caches and `MambaCaches`. The single-ssd cache uses the double-ssd traversal
   through the `From` move. Optional fields, pathway, family and rotation kind
   must match (else panic).
 - **`network.rs`**: `MambaLatentNet` / `MambaVocabNet` + their `*Config`
   (wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`), and the
-  `ModelConfigExt` impls.
+  `ModelConfigExt` impls. `MambaVocabNet::forward_packed` takes packed rows
+  (burn-stack's `Packed`). `pack_align` (the chunk in tokens) and
+  `n_class_latents` (the opening slots) give a packer its layout.
 - **`bidi.rs`**: `MambaBidiLayers` + `MambaBidiLayersConfig` (wrapping
   `burn_stack::modules::BidiLayers`).
 - **`tests/`**: the burn-stack containers tested against **real** blocks:
   `layer`, `layers` (`grad_horizon`), `multi_gate`, `bidi`, `class` (marker
   placement, forward/step/prime parity), `optim` (each plan fits its model and
   never selects a boundary weight, by `burn_stack::optim::BLOCK_CONTAINERS`),
-  `untied`, `capture`.
+  `untied`, `capture`, `packed` (a packed vocab net against each sequence
+  alone: logits, every parameter gradient).
 
 ## Benchmarks (`benches/layer.rs`, `bench.sh`, `kernels.sh`)
 

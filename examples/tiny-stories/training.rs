@@ -18,7 +18,7 @@ pub use crate::common::{
     tiny_stories::lm::TinyStoriesConfig,
     training::{TrainingConfig, metric_current},
 };
-use crate::dataset::TinyStoriesBatch;
+use crate::dataset::{PackLayout, TinyStoriesBatch};
 use burn::prelude::*;
 use burn::{
     optim::{GradientsParams, ModuleOptimizer},
@@ -26,7 +26,7 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::lm::{
-    self, Frontier, LmModel, dataloaders, epoch_train, epoch_valid,
+    self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid,
 };
 use burn_stack::utils::ClassCursors;
 use std::sync::{Mutex, OnceLock};
@@ -57,9 +57,18 @@ pub fn train(
 
     let mut model = Wrap(model, run);
 
-    // Create the dataloaders (downloading the corpus on the first run).
+    // Create the dataloaders (downloading the corpus on the first run). A
+    // packed row starts each story at a chunk start of the blocks, and opens
+    // it with a slot per class latent.
+    let layout = match config.pack {
+        None => PackLayout::default(),
+        Some(_) => PackLayout {
+            align: model.0.pack_align(&model.1.ssd_path).expect("this family takes no packed rows"),
+            lead: model.0.n_class_latents(),
+        },
+    };
     let (dataloader_train, dataloader_valid) =
-        dataloaders(&config, &training_device, &progress);
+        dataloaders_for(&config, &training_device, &progress, layout);
 
     // The session: resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
@@ -372,6 +381,10 @@ impl Wrap {
     ///
     /// `class` is the cursor of the run: it splices the latents into the first
     /// window of a story, and into no other window.
+    ///
+    /// A batch of packed rows (`--pack`) runs through the packed forward
+    /// instead. Each story restarts at its reset, and its latents are in its
+    /// opening slots, so `class` does not apply.
     pub fn forward_lm(
         &self,
         batch: TinyStoriesBatch,
@@ -382,8 +395,15 @@ impl Wrap {
             inputs,
             targets,
             scored,
+            packed,
             ..
         } = batch;
+        if let Some(packed) = packed {
+            let (logits, caches) =
+                self.0
+                    .forward_packed(inputs, caches, self.1.ssd_path.clone(), &packed.layout);
+            return (lm::lm_output_packed(logits, targets, packed.score_bs), caches);
+        }
         let (logits, caches) = self
             .0
             .forward(inputs.clone(), caches, self.1.ssd_path.clone(), Some(class), None);

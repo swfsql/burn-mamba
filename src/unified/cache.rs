@@ -199,6 +199,16 @@ mod impl_mamba2 {
         ) -> (Tensor<3>, Mamba2Cache) {
             self.forward(x, cache, options, pad)
         }
+        /// A reset only at a chunk start (see [`crate::packing`]).
+        fn block_forward_packed(
+            &self,
+            x: Tensor<3>,
+            cache: Option<Mamba2Cache>,
+            options: Mamba2SsdPath,
+            reset: Tensor<2, Bool>,
+        ) -> (Tensor<3>, Mamba2Cache) {
+            self.forward_packed(x, cache, None, options, None, Some(reset))
+        }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
         }
@@ -373,6 +383,17 @@ mod impl_mamba3 {
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba3Cache) {
             self.forward(x, cache, options, pad)
+        }
+        /// A reset only at a chunk start: every `chunk_len / micro_steps`
+        /// tokens (see [`crate::packing`]).
+        fn block_forward_packed(
+            &self,
+            x: Tensor<3>,
+            cache: Option<Mamba3Cache>,
+            options: Mamba3SsdPath,
+            reset: Tensor<2, Bool>,
+        ) -> (Tensor<3>, Mamba3Cache) {
+            self.forward_packed(x, cache, None, options, None, Some(reset))
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)

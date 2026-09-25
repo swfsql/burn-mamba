@@ -140,11 +140,12 @@ src/
    │                 CacheStack for each family
    ├─ capture.rs     CacheTensors traversal of each family (burn-stack's trait),
    │                 through which a CapturedStep writes its new cache back
-   ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs, ModelConfigExt)
+   ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs, ModelConfigExt);
+   │                 MambaVocabNet::forward_packed, pack_align, n_class_latents
    ├─ bidi.rs        MambaBidiLayers (+ Config)
    └─ tests/         the burn-stack containers with real blocks: layer, layers
                      (grad_horizon), multi_gate, bidi, class, optim, untied,
-                     capture
+                     capture, packed
 ```
 
 The generic containers (`Layer`/`Layers`/networks/bidi/multi_gate/class
@@ -246,6 +247,11 @@ backward; single-SSD adds a boundary seed per chunk). The reads across a reset
 origin values. The rotation and the `positive/` scans restart from the
 origin. Mamba-2 asserts `chunk_len ≥ conv_kernel − 1`. Serial paths only. See
 `src/packing.rs`.
+
+At the network level, `MambaVocabNet::forward_packed` takes burn-stack's
+`Packed` rows (fresh origin). Each sequence starts at a multiple of
+`pack_align`, with one reserved slot per `Start` class latent. tiny-stories
+trains on them with `-- --pack <W> --pack-rows <N>`.
 
 ### Caches
 
@@ -606,3 +612,5 @@ Under `../` (not analyzed here):
     `Edit`s.
   - Bash stays the tool for *reading* and *inspecting* (`cat`, `sed -n`, `rg`,
     `grep`) and for throwaway files outside the crate (for example, in `/tmp`).
+- **Memory**: ask the user before you write to the auto-memory. Show the
+  change that you propose, and write it only after the user approves it.

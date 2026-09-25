@@ -15,4 +15,5 @@ mod layers;
 mod multi_gate;
 #[cfg(feature = "optim")]
 mod optim;
+mod packed;
 mod untied;

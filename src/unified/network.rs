@@ -9,7 +9,7 @@ use burn_stack::modules::{
     LatentNetwork, LatentNetworkBuilder, LayersBuilder, ResidualsConfig, VocabNetwork,
     VocabNetworkBuilder,
 };
-use burn_stack::utils::{ClassCursors, ClassToken, GradHorizon, Schedule};
+use burn_stack::utils::{ClassCursors, ClassToken, GradHorizon, Packed, Schedule};
 
 // ===========================================================================
 // Unifying enums: one runtime + one serializable Config across all families
@@ -526,6 +526,90 @@ impl MambaVocabNet {
                 let (y, c) = net.forward(x, caches, path, class, pad);
                 (y, MambaCaches::Mamba3(c))
             }
+        }
+    }
+
+    /// [`Self::forward`] over packed rows ([`VocabNetwork::forward_packed`]).
+    /// At each reset of `packed`, every block restarts from a zero cache. A
+    /// reset must be at a multiple of [`Self::pack_align`], and each sequence
+    /// opens with [`Self::n_class_latents`] slots. Mamba-1 takes no packed
+    /// rows (it panics).
+    pub fn forward_packed(
+        &self,
+        x: Tensor<2, Int>,
+        caches: Option<MambaCaches>,
+        ssd_path: MambaSsdPath,
+        packed: &Packed,
+    ) -> (Tensor<3>, MambaCaches) {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(_) => panic!("Mamba-1 takes no packed rows"),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba2(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-2 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba2(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-2 network"),
+                };
+                let (y, c) = net.forward_packed(x, caches, path, packed);
+                (y, MambaCaches::Mamba2(c))
+            }
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => {
+                let caches = caches.map(|c| match c {
+                    MambaCaches::Mamba3(c) => c,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("cache family does not match Mamba-3 network"),
+                });
+                let path = match ssd_path {
+                    MambaSsdPath::Mamba3(p) => p,
+                    #[allow(unreachable_patterns)]
+                    _ => panic!("ssd_path family does not match Mamba-3 network"),
+                };
+                let (y, c) = net.forward_packed(x, caches, path, packed);
+                (y, MambaCaches::Mamba3(c))
+            }
+        }
+    }
+
+    /// Where [`Self::forward_packed`] accepts a reset on `ssd_path`: at the
+    /// multiples of the returned token count. It is the chunk of the blocks,
+    /// in tokens (`chunk_len / micro_steps` for Mamba-3). `None` for Mamba-1,
+    /// which takes no packed rows.
+    pub fn pack_align(&self, ssd_path: &MambaSsdPath) -> Option<usize> {
+        match (self, ssd_path) {
+            #[cfg(feature = "mamba1")]
+            (Self::Mamba1(_), _) => None,
+            #[cfg(feature = "mamba2")]
+            (Self::Mamba2(net), MambaSsdPath::Mamba2(path)) => {
+                let block = &net.layers.real_layers[0].block;
+                Some(path.chunk_len_or_optimal(block.state_rank, block.per_head_dim()))
+            }
+            #[cfg(feature = "mamba3")]
+            (Self::Mamba3(net), MambaSsdPath::Mamba3(path)) => {
+                let block = &net.layers.real_layers[0].block;
+                Some(path.chunk_len_or_optimal(block) / block.micro_steps.max(1))
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("ssd_path family does not match the network"),
+        }
+    }
+
+    /// The class latents of the stack: the opening slots of each sequence of
+    /// a packed row.
+    pub fn n_class_latents(&self) -> usize {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(net) => net.layers.class_latents.len(),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(net) => net.layers.class_latents.len(),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(net) => net.layers.class_latents.len(),
         }
     }
 
