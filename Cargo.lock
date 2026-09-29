@@ -959,8 +959,8 @@ dependencies = [
 
 [[package]]
 name = "burn-stack"
-version = "0.21.0"
-source = "git+https://github.com/swfsql/burn-stack.git?rev=6e57270ebc067845bfc5900be820c1c0693adb96#6e57270ebc067845bfc5900be820c1c0693adb96"
+version = "0.22.0"
+source = "git+https://github.com/swfsql/burn-stack.git?rev=5f2d0608af6560fce74338b10dca3221e73ce967#5f2d0608af6560fce74338b10dca3221e73ce967"
 dependencies = [
  "burn",
  "burn-cubecl",

@@ -31,7 +31,7 @@ use burn::module::Param;
 use burn::nn::Linear;
 use burn::prelude::*;
 use burn::tensor::{DType, Distribution};
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
@@ -41,7 +41,7 @@ fn uniform<const D: usize>(dims: [usize; D], lo: f64, hi: f64, device: &Device) 
 }
 
 fn floats<const D: usize>(t: Tensor<D>) -> Vec<f32> {
-    t.into_data().try_to_vec::<f32>().unwrap()
+    t.into_data().try_into_vec_as::<f32>().unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ fn lse_is_exact_beside_log_zero_and_splits_a_tie() {
     assert_eq!(max_abs_diff(scan::lse(x.clone(), zero.clone()), x.clone()), 0.0);
     assert_eq!(max_abs_diff(scan::lse(zero, x.clone()), x.clone()), 0.0);
     let tie = scan::lse(x.clone(), x.clone());
-    assert!(max_abs_diff(tie, x.clone() + std::f32::consts::LN_2) < 1e-5);
+    assert!(max_abs_diff(tie, x.clone() + std::f32::consts::LN_2) < dtype_tol(1e-5));
 
     // At a tie each side takes half the gradient, not one side all of it.
     let ad = device.autodiff();
@@ -64,7 +64,7 @@ fn lse_is_exact_beside_log_zero_and_splits_a_tie() {
     let b = Param::from_tensor(Tensor::<3>::from_inner(x).to_device(&ad));
     let grads = scan::lse(a.val(), b.val()).sum().backward();
     for g in [a.val().grad(&grads).unwrap(), b.val().grad(&grads).unwrap()] {
-        assert!(max_abs_diff(g.clone(), g.full_like(0.5)) < 1e-6);
+        assert!(max_abs_diff(g.clone(), g.full_like(0.5)) < dtype_tol(1e-6));
     }
 }
 
@@ -96,14 +96,14 @@ fn prefix_matches_fold_in_values() {
             scan::prefix(m.clone()).apply(carry.clone()),
             scan::fold(m).apply(carry.clone()),
         );
-        assert!(d < 1e-4, "Möbius, len {len}: prefix vs fold {d}");
+        assert!(d < dtype_tol(1e-4), "Möbius, len {len}: prefix vs fold {d}");
 
         let a = random_affine(dims, &device);
         let d = max_abs_diff(
             scan::prefix(a.clone()).apply(carry.clone()),
             scan::fold(a).apply(carry),
         );
-        assert!(d < 1e-4, "affine, len {len}: prefix vs fold {d}");
+        assert!(d < dtype_tol(1e-4), "affine, len {len}: prefix vs fold {d}");
     }
 }
 
@@ -132,7 +132,7 @@ fn prefix_matches_fold_in_gradients() {
     let by_fold = run(|m| scan::fold(m));
     for (i, (a, b)) in by_prefix.into_iter().zip(by_fold).enumerate() {
         let d = max_abs_diff(a, b);
-        assert!(d < 1e-4, "entry {i}: prefix vs fold gradient {d}");
+        assert!(d < dtype_tol(1e-4), "entry {i}: prefix vs fold gradient {d}");
     }
 }
 
@@ -148,7 +148,7 @@ fn projective_read_ignores_a_common_shift() {
         m10: m.m10.clone() + shift.clone(),
         m11: m.m11.clone() + shift,
     };
-    assert!(max_abs_diff(m.apply(carry.clone()), shifted.apply(carry)) < 1e-4);
+    assert!(max_abs_diff(m.apply(carry.clone()), shifted.apply(carry)) < dtype_tol(1e-4));
 }
 
 // ---------------------------------------------------------------------------
@@ -239,12 +239,12 @@ fn gate_matches_the_covariance_form_filter() {
 
                 let lambda = 1.0 / p;
                 assert!(
-                    ((lp[i] as f64).exp() / lambda - 1.0).abs() < 2e-3,
+                    ((lp[i] as f64).exp() / lambda - 1.0).abs() < f64::from(dtype_tol(2e-3)),
                     "Λ at b{b} h{h} t{t}: {} vs {lambda}",
                     (lp[i] as f64).exp()
                 );
                 assert!(
-                    (da_out[i] as f64 - d.ln()).abs() < 2e-3,
+                    (da_out[i] as f64 - d.ln()).abs() < f64::from(dtype_tol(2e-3)),
                     "ln d at b{b} h{h} t{t}: {} vs {}",
                     da_out[i],
                     d.ln()
@@ -262,7 +262,7 @@ fn gate_matches_the_covariance_form_filter() {
     let fresh = run_gate(&case, case.carry.full_like(LOG_ZERO));
     let first = |t: Tensor<3>| t.narrow(1, 0, 1);
     assert_eq!(max_abs_diff(first(fresh.da_bsh), first(case.da.clone())), 0.0);
-    assert!(max_abs_diff(first(fresh.log_precision_bsh), first(case.dt.clone().log())) < 1e-5);
+    assert!(max_abs_diff(first(fresh.log_precision_bsh), first(case.dt.clone().log())) < dtype_tol(1e-5));
 }
 
 /// Under a trapezoid the evidence is the plant's own two installments, and `Λ`
@@ -277,6 +277,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
     use crate::mamba3::trapezoid::TrapezoidSpec;
     use Trapezoid as T;
     let device = test_device();
+    let tol = f64::from(dtype_tol(1e-3));
     let (batch, nheads) = (2, 3);
     for (pattern, u, exact) in [
         (T::HorizontalCarryOver, 1, true),
@@ -332,9 +333,9 @@ fn the_precision_is_the_plants_weight_on_ones() {
                     let lambda = (lp[at(t)] as f64).exp();
                     let label = format!("{pattern:?} u{u} b{b} h{h} t{t}");
                     if exact {
-                        assert!((lambda / w - 1.0).abs() < 1e-3, "{label}: Λ {lambda} vs plant {w}");
+                        assert!((lambda / w - 1.0).abs() < tol, "{label}: Λ {lambda} vs plant {w}");
                     } else {
-                        assert!(lambda >= w * (1.0 - 1e-3), "{label}: Λ {lambda} under plant {w}");
+                        assert!(lambda >= w * (1.0 - tol), "{label}: Λ {lambda} under plant {w}");
                     }
                     let q = kappa[h] as f64 * dt[at(t)] as f64;
                     let ceiling = 1.0 / q + gamma[at(t)] as f64;
@@ -423,7 +424,7 @@ fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
                 let qm = kappa[h] as f64 * (dt[i] as f64).powi(2) * (noise[i] as f64).exp();
                 bound *= (0.25 * (1.0 + 1.0 / qm).ln()).tanh();
                 let dist = (a[i] - b[i]).abs() as f64;
-                assert!(dist <= bound + 2e-3, "b{bi} h{h} t{t}: {dist} > {bound}");
+                assert!(dist <= bound + f64::from(dtype_tol(2e-3)), "b{bi} h{h} t{t}: {dist} > {bound}");
             }
         }
     }
@@ -546,15 +547,15 @@ fn assert_slot(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tensor
     assert_eq!(a.is_some(), b.is_some(), "{label}: {name} present in one cache only");
     if let (Some(a), Some(b)) = (a, b) {
         let d = max_abs_diff(a.clone(), b.clone());
-        assert!(d <= tol, "{label}: {name} differs by {d}");
+        assert!(d <= dtype_tol(tol), "{label}: {name} differs by {d}");
     }
 }
 
 fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSsdCache) {
     let d = max_abs_diff(a.ssm_bhpr.clone(), b.ssm_bhpr.clone());
-    assert!(d < 1e-4, "{label}: ssm state differs by {d}");
+    assert!(d < dtype_tol(1e-4), "{label}: ssm state differs by {d}");
     if let (Some(a), Some(b)) = (&a.v_state_buhp, &b.v_state_buhp) {
-        assert!(max_abs_diff(a.clone(), b.clone()) < 1e-4, "{label}: tap slots");
+        assert!(max_abs_diff(a.clone(), b.clone()) < dtype_tol(1e-4), "{label}: tap slots");
     }
     assert_slot(label, "ln Λ", &a.log_precision_bh, &b.log_precision_bh, 1e-4);
     assert_slot(label, "tropical c", &a.tropical_bh, &b.tropical_bh, 1e-3);
@@ -584,26 +585,26 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
             outs.push(o.unsqueeze_dim::<3>(1));
             step_cache = Some(c);
         }
-        let d = max_abs_diff(out.clone(), Tensor::cat(outs, 1));
-        assert!(d < 1e-4, "{label}: forward vs step outputs {d}");
+        let d = max_rel_diff(Tensor::cat(outs, 1), out.clone());
+        assert!(d < dtype_tol(1e-4), "{label}: forward vs step outputs {d}");
         assert_caches_match(&format!("{label} forward/step"), &cache, &step_cache.unwrap());
 
         let (out_single, cache_single) = model.forward_single_ssd(input.clone(), None, &path, None);
-        let d = max_abs_diff(out.clone(), out_single);
-        assert!(d < 1e-4, "{label}: double vs single outputs {d}");
+        let d = max_rel_diff(out_single, out.clone());
+        assert!(d < dtype_tol(1e-4), "{label}: double vs single outputs {d}");
         assert_caches_match(&format!("{label} double/single"), &cache, &cache_single.into());
 
         let (head, mid) = model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &path, None);
         let (tail, last) =
             model.forward_single_ssd(input.clone().narrow(1, split, tokens - split), Some(mid), &path, None);
-        let d = max_abs_diff(out.clone(), Tensor::cat(vec![head, tail], 1));
-        assert!(d < 1e-4, "{label}: split prefill outputs {d}");
+        let d = max_rel_diff(Tensor::cat(vec![head, tail], 1), out.clone());
+        assert!(d < dtype_tol(1e-4), "{label}: split prefill outputs {d}");
         assert_caches_match(&format!("{label} split prefill"), &cache, &last.into());
 
         let (out_minimal, _) =
             model.forward_double_ssd(input, None, &Mamba3SsdPath::Minimal(Some(2 * case.u)), None);
-        let d = max_abs_diff(out, out_minimal);
-        assert!(d < 1e-4, "{label}: SerialRecalculated vs Minimal outputs {d}");
+        let d = max_rel_diff(out_minimal, out);
+        assert!(d < dtype_tol(1e-4), "{label}: SerialRecalculated vs Minimal outputs {d}");
     }
 }
 
@@ -639,8 +640,8 @@ fn forward_and_step_gradients_agree() {
         let g_step = (Tensor::cat(outs, 1) * head).sum().backward();
 
         let check = |name: &str, a: Option<Tensor<3>>, b: Option<Tensor<3>>| {
-            let d = max_abs_diff(a.expect(name), b.expect(name));
-            assert!(d < 1e-2, "{label}: {name} gradient differs by {d}");
+            let d = max_rel_diff(b.expect(name), a.expect(name));
+            assert!(d < dtype_tol(1e-2), "{label}: {name} gradient differs by {d}");
         };
         check(
             "input",
@@ -725,7 +726,7 @@ fn zero_kappa_and_zero_readout_are_the_stock_block() {
         };
         let label = format!("{case:?}");
         let exact = !gain.projects_noise() && !tropical.is_on();
-        let tol = if exact { 0.0 } else { 1e-6 };
+        let tol = if exact { 0.0 } else { dtype_tol(1e-6) };
         let mut model = case.config().init(&device);
         model.kalman_log_kappa_h = model
             .kalman_log_kappa_h

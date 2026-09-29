@@ -1,6 +1,6 @@
 use super::*;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 fn small_config() -> Mamba2Config {
     Mamba2Config::new(32)
@@ -68,21 +68,22 @@ fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cac
 
 /// Compare the output and final cache (conv window + SSM state) of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
-    use burn_stack::utils::test_helpers::max_abs_diff;
-    let d_out = max_abs_diff(a.out.clone(), b.out.clone());
-    let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
-    let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
+    use burn_stack::utils::test_helpers::max_rel_diff;
+    let tol = dtype_tol(tol);
+    let d_out = max_rel_diff(b.out.clone(), a.out.clone());
+    let d_conv = max_rel_diff(b.final_conv.clone(), a.final_conv.clone());
+    let d_ssm = max_rel_diff(b.final_ssm.clone(), a.final_ssm.clone());
     assert!(
         d_out < tol,
-        "{label}: output max abs diff = {d_out:.6} (tol {tol})"
+        "{label}: output max rel diff = {d_out:.6} (tol {tol})"
     );
     assert!(
         d_conv < tol,
-        "{label}: final conv window max abs diff = {d_conv:.6} (tol {tol})"
+        "{label}: final conv window max rel diff = {d_conv:.6} (tol {tol})"
     );
     assert!(
         d_ssm < tol,
-        "{label}: final SSM state max abs diff = {d_ssm:.6} (tol {tol})"
+        "{label}: final SSM state max rel diff = {d_ssm:.6} (tol {tol})"
     );
 }
 
@@ -150,17 +151,15 @@ fn run_with_grads(
 /// printing every comparison so a failure dump shows the full picture
 /// (instead of stopping at the first mismatch).
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+    let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check {
         ($field:ident, $name:expr) => {{
-            let d = (a.$field.clone() - b.$field.clone())
-                .abs()
-                .max()
-                .into_scalar::<f32>();
-            eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
+            let d = burn_stack::utils::test_helpers::max_rel_diff(b.$field.clone(), a.$field.clone());
+            eprintln!("{:>40} {:>16} | max rel diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
-                    "{}: grad of {} max abs diff = {:.6} (tol {})",
+                    "{}: grad of {} max rel diff = {:.6} (tol {})",
                     label, $name, d, grad_tol
                 ));
             }
@@ -264,7 +263,7 @@ fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath, random_i
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
         assert!(
-            d > 1e-3,
+            d > dtype_tol(1e-3),
             "random initial state appears ignored: random-init vs zero-init \
              output max abs diff = {d:.6} (expected a clear difference)"
         );

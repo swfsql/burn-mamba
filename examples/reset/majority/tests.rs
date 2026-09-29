@@ -228,7 +228,7 @@ fn accuracy(model: &MambaLatentNet, family: Family, count: usize, device: &Devic
         .argmax(1)
         .reshape([n])
         .into_data()
-        .try_to_vec::<i32>()
+        .try_into_vec_as::<i32>()
         .unwrap();
     let want: Vec<i64> = items.iter().flat_map(|i| i.targets.clone()).collect();
     // zero-vote positions have no sign to report and are not scored

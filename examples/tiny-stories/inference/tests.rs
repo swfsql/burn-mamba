@@ -26,7 +26,7 @@ use burn::prelude::*;
 use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::sample::Prefill;
 use burn_stack::utils::ClassCursors;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 /// Characters decoded after each opening of the tiny network.
 const CONTINUATION: usize = 64;
@@ -39,7 +39,7 @@ fn max_abs_diff<const D: usize>(a: Tensor<D>, b: Tensor<D>) -> f32 {
 fn assert_close(got: Tensor<2>, want: Tensor<2>, tol: f32, what: &str) {
     let scale = 1.0 + want.clone().abs().max().into_scalar::<f32>();
     let d = max_abs_diff(got, want);
-    assert!(d <= tol * scale, "{what}: differs by {d} (scale {scale})");
+    assert!(d <= dtype_tol(tol) * scale, "{what}: differs by {d} (scale {scale})");
 }
 
 /// `net` with other values in its class latents.
@@ -119,7 +119,7 @@ fn check_decode(
     // Other latent values, other logits: the opening reads the latents.
     let (moved, _, _) = open(shifted, run, device, Some(tokens), None);
     let d = max_abs_diff(moved, want);
-    assert!(d > 1e-2, "length {len}: shifted latents change the logits by {d} only");
+    assert!(d > dtype_tol(1e-2), "length {len}: shifted latents change the logits by {d} only");
 
     // The decode: teacher-forced steps after each opening, against one
     // `forward` over the prompt and the continuation.

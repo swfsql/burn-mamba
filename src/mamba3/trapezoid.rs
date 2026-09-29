@@ -359,7 +359,7 @@ mod tests {
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     use burn::prelude::*;
     use burn::tensor::Distribution;
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
     use burn_stack::utils::test_helpers::test_device;
 
     fn cfg() -> Mamba3Config {
@@ -537,14 +537,14 @@ mod tests {
                 );
 
                 assert!(
-                    max_abs_diff(out_single, out_step) < 1e-4,
+                    max_abs_diff(out_single, out_step) < dtype_tol(1e-4),
                     "{label}: forward vs unrolled step"
                 );
                 let cache_step = cache_step
                     .single_ssd()
                     .expect("a missing cache defaults to the single-ssd pathway");
                 assert!(
-                    max_abs_diff(cache_single.ssm_bhpr, cache_step.ssm_bhpr.clone()) < 1e-4,
+                    max_abs_diff(cache_single.ssm_bhpr, cache_step.ssm_bhpr.clone()) < dtype_tol(1e-4),
                     "{label}: final ssm state"
                 );
                 // Nothing to carry: the slots are absent, not zeroed.
@@ -583,11 +583,11 @@ mod tests {
                 grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
-                max_abs_diff(fwd_w, step_w) < 1e-4,
+                max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
                 "{kind:?}: d in_proj.weight"
             );
             assert!(
-                max_abs_diff(fwd_dt, step_dt) < 1e-4,
+                max_rel_diff(step_dt, fwd_dt) < dtype_tol(1e-4),
                 "{kind:?}: d dt_bias_h"
             );
         }
@@ -641,11 +641,11 @@ mod tests {
             ("double", carry.forward_double_ssd(x.clone(), None, &path, None).0),
         ] {
             let d = max_abs_diff(out_none.clone(), out);
-            assert!(d < 1e-6, "λ≡1 carry-over ({label}) vs None: {d:.3e}");
+            assert!(d < dtype_tol(1e-6), "λ≡1 carry-over ({label}) vs None: {d:.3e}");
         }
         // …and the same through the decode path.
         let d = max_abs_diff(unrolled(&none, &x).0, unrolled(&carry, &x).0);
-        assert!(d < 1e-6, "λ≡1 carry-over vs None, stepped: {d:.3e}");
+        assert!(d < dtype_tol(1e-6), "λ≡1 carry-over vs None, stepped: {d:.3e}");
     }
 
     // ── Trapezoid::Vertical ───────────────────────────────────────────────
@@ -711,9 +711,9 @@ mod tests {
                     ("double", out_double, cache_double.ssm_bhpr),
                 ] {
                     let d = max_abs_diff(out, out_step.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: forward vs step: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                     let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: final ssm state: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
                 }
 
                 // The tap FIFO is the previous token, `u` slots deep.
@@ -745,9 +745,9 @@ mod tests {
             let split = Tensor::cat(vec![head, tail], 1);
 
             let d = max_abs_diff(whole, split);
-            assert!(d < 1e-4, "{label}: split prefill output: {d:.3e}");
+            assert!(d < dtype_tol(1e-4), "{label}: split prefill output: {d:.3e}");
             let d = max_abs_diff(whole_cache.ssm_bhpr, split_cache.ssm_bhpr);
-            assert!(d < 1e-4, "{label}: split prefill final state: {d:.3e}");
+            assert!(d < dtype_tol(1e-4), "{label}: split prefill final state: {d:.3e}");
         }
     }
 
@@ -777,9 +777,9 @@ mod tests {
                 }),
             ] {
                 let d = max_abs_diff(out, out_step.clone());
-                assert!(d < 1e-4, "{label} {pathway}: forward vs step: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                 let d = max_abs_diff(cache_ssm, cache_step.ssm_bhpr.clone());
-                assert!(d < 1e-4, "{label} {pathway}: final state: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label} {pathway}: final state: {d:.3e}");
             }
         }
     }
@@ -815,19 +815,19 @@ mod tests {
                 let (out_all, cache_all) = unrolled(&model, &x);
                 let cache_all = cache_all.single_ssd().expect("single-ssd");
                 let d = max_abs_diff(out_tail, out_all.narrow(1, 2, 3));
-                assert!(d < 1e-4, "{label}: forward after step: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: forward after step: {d:.3e}");
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
-                assert!(d < 1e-4, "{label}: final state: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
                 let d = max_abs_diff(
                     cache_fwd.k_state_bumhr.expect("slots"),
                     cache_all.k_state_bumhr.expect("slots"),
                 );
-                assert!(d < 1e-4, "{label}: tap FIFO B: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: tap FIFO B: {d:.3e}");
                 let d = max_abs_diff(
                     cache_fwd.v_state_buhp.expect("slots"),
                     cache_all.v_state_buhp.expect("slots"),
                 );
-                assert!(d < 1e-4, "{label}: tap FIFO x (decay convention): {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: tap FIFO x (decay convention): {d:.3e}");
             }
         }
     }
@@ -861,11 +861,11 @@ mod tests {
                 grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
-                max_abs_diff(fwd_w, step_w) < 1e-4,
+                max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
                 "{kind:?}: d in_proj.weight"
             );
             assert!(
-                max_abs_diff(fwd_dt, step_dt) < 1e-4,
+                max_rel_diff(step_dt, fwd_dt) < dtype_tol(1e-4),
                 "{kind:?}: d dt_bias_h"
             );
         }
@@ -962,9 +962,9 @@ mod tests {
                         ("double", out_double, cache_double.ssm_bhpr),
                     ] {
                         let d = max_abs_diff(out, out_step.clone());
-                        assert!(d < 1e-4, "{label} {pathway}: forward vs step: {d:.3e}");
+                        assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                         let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                        assert!(d < 1e-4, "{label} {pathway}: final ssm state: {d:.3e}");
+                        assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
                     }
 
                     let slots = pattern.tap_slots(micro_steps);
@@ -1002,9 +1002,9 @@ mod tests {
                     }),
                 ] {
                     let d = max_abs_diff(out, out_step.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: forward vs step: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                     let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: final state: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final state: {d:.3e}");
                 }
             }
         }
@@ -1031,9 +1031,9 @@ mod tests {
                 let split = Tensor::cat(vec![head, tail], 1);
 
                 let d = max_abs_diff(whole, split);
-                assert!(d < 1e-4, "{label}: split prefill output: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: split prefill output: {d:.3e}");
                 let d = max_abs_diff(whole_cache.ssm_bhpr, split_cache.ssm_bhpr);
-                assert!(d < 1e-4, "{label}: split prefill final state: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: split prefill final state: {d:.3e}");
             }
         }
     }
@@ -1067,14 +1067,14 @@ mod tests {
                 let (out_all, cache_all) = unrolled(&model, &x);
                 let cache_all = cache_all.single_ssd().expect("single-ssd");
                 let d = max_abs_diff(out_tail, out_all.narrow(1, 2, 3));
-                assert!(d < 1e-4, "{label}: forward after step: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: forward after step: {d:.3e}");
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
-                assert!(d < 1e-4, "{label}: final state: {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
                 let d = max_abs_diff(
                     cache_fwd.v_state_buhp.expect("slots"),
                     cache_all.v_state_buhp.expect("slots"),
                 );
-                assert!(d < 1e-4, "{label}: tap FIFO x (decay convention): {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: tap FIFO x (decay convention): {d:.3e}");
             }
         }
     }
@@ -1107,11 +1107,11 @@ mod tests {
             let (fwd_w, fwd_dt) = grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
             let (step_w, step_dt) = grads(unrolled(&model, &x).0);
             assert!(
-                max_abs_diff(fwd_w, step_w) < 1e-4,
+                max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
                 "{pattern:?}: d in_proj.weight"
             );
             assert!(
-                max_abs_diff(fwd_dt, step_dt) < 1e-4,
+                max_rel_diff(step_dt, fwd_dt) < dtype_tol(1e-4),
                 "{pattern:?}: d dt_bias_h"
             );
         }
@@ -1195,7 +1195,7 @@ mod tests {
             none.forward_single_ssd(x.clone(), None, &path, None).0,
             reset.forward_single_ssd(x, None, &path, None).0,
         );
-        assert!(d < 1e-6, "single: HorizontalReset is None at u = 1: {d:.3e}");
+        assert!(d < dtype_tol(1e-6), "single: HorizontalReset is None at u = 1: {d:.3e}");
     }
 
     /// The semantic claim for the gate: closing a tap returns its mass to `γ`,
@@ -1225,7 +1225,7 @@ mod tests {
             reset.forward_single_ssd(x.clone(), None, &path, None).0,
             carry.forward_single_ssd(x.clone(), None, &path, None).0,
         );
-        assert!(d > 1e-4, "the gate has to do something: {d:.3e}");
+        assert!(d > dtype_tol(1e-4), "the gate has to do something: {d:.3e}");
 
         // `Real1D` and one tap ⇒ `λ` is the trailing segment, and its first
         // `nheads` columns are micro-step 0's. Saturate exactly those.
@@ -1311,9 +1311,9 @@ mod tests {
                     ("double", out_double, cache_double.ssm_bhpr),
                 ] {
                     let d = max_abs_diff(out, out_step.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: forward vs step: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                     let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                    assert!(d < 1e-4, "{label} {pathway}: final ssm state: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
                 }
             }
         }
@@ -1346,12 +1346,12 @@ mod tests {
             append_dead_segment(&vertical, &mut block, u * config.nheads(), 0.0, &device);
             let out = block.forward_single_ssd(x.clone(), None, &path, None).0;
             let d = max_abs_diff(out.clone(), out_vertical.clone());
-            assert!(d > 1e-4, "{pattern:?} vs Vertical: {d:.3e}");
+            assert!(d > dtype_tol(1e-4), "{pattern:?} vs Vertical: {d:.3e}");
             out
         })
         .collect();
         let d = max_abs_diff(two_tap[0].clone(), two_tap[1].clone());
-        assert!(d > 1e-4, "the reset and the carry-over of one lag: {d:.3e}");
+        assert!(d > dtype_tol(1e-4), "the reset and the carry-over of one lag: {d:.3e}");
     }
 
     /// The join: `VerticalPlusHorizontalCarryOver` **contains** both implemented
@@ -1402,7 +1402,7 @@ mod tests {
                 ("step", unrolled(target, &x).0, unrolled(&join, &x).0),
             ] {
                 let d = max_abs_diff(a, b);
-                assert!(d <= tol, "{pathway}: {label}: {d:.3e}");
+                assert!(d <= dtype_tol(tol), "{pathway}: {label}: {d:.3e}");
             }
         }
     }

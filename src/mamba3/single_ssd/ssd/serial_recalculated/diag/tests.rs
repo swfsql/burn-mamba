@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::mamba3::single_ssd::ssd::diag;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn::backend::Dispatch;
 use burn::module::Param;
 use burn::prelude::*;
@@ -89,7 +89,7 @@ fn siso_matches_mimo_forward() {
     ));
 
     let d = max_abs_diff(y_mimo, y_siso);
-    assert!(d < 1e-5, "forward: mimo↔siso max abs diff {d}");
+    assert!(d < dtype_tol(1e-5), "forward: mimo↔siso max abs diff {d}");
 }
 
 /// At `mimo_rank == 1` the two analytic backward branches agree on all four
@@ -129,7 +129,7 @@ fn siso_matches_mimo_backward() {
         to_prim(gamma),
     );
 
-    let tol = 1e-5;
+    let tol = dtype_tol(1e-5);
     for (name, d) in [
         (
             "d_v",
@@ -207,32 +207,32 @@ fn analytic_backward_matches_autodiff() {
                 siso,
             );
 
-            let tol = 1e-4;
+            let tol = dtype_tol(1e-4);
             for (name, d) in [
                 (
                     "d_v",
-                    max_abs_diff(
+                    max_rel_diff(
                         pv.val().grad(&grads).unwrap(),
                         to_tensor(analytic.d_v_bnlmhp),
                     ),
                 ),
                 (
                     "d_b",
-                    max_abs_diff(
+                    max_rel_diff(
                         pb.val().grad(&grads).unwrap(),
                         to_tensor(analytic.d_b_bnlmhr),
                     ),
                 ),
                 (
                     "d_c",
-                    max_abs_diff(
+                    max_rel_diff(
                         pc.val().grad(&grads).unwrap(),
                         to_tensor(analytic.d_c_bnlmhr),
                     ),
                 ),
                 (
                     "d_gamma",
-                    max_abs_diff(
+                    max_rel_diff(
                         pgamma.val().grad(&grads).unwrap(),
                         to_tensor(analytic.d_gamma_bnlh),
                     ),
@@ -241,7 +241,7 @@ fn analytic_backward_matches_autodiff() {
                 assert!(
                     d < tol,
                     "mimo_rank={mimo_rank} siso_specialization={siso} {name}: \
-                 analytic↔autodiff max abs diff {d} >= {tol}"
+                 analytic↔autodiff max rel diff {d} >= {tol}"
                 );
             }
         }

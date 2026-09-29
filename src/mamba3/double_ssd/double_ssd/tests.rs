@@ -1,7 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32) // d_model = 32
@@ -117,12 +117,13 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
 
 /// Compare the output and every final cache field of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
+    let tol = dtype_tol(tol);
     let checks = [
-        ("output", max_abs_diff(a.out.clone(), b.out.clone())),
+        ("output", max_rel_diff(b.out.clone(), a.out.clone())),
         (
             "final ssm",
-            max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone()),
+            max_rel_diff(b.final_ssm.clone(), a.final_ssm.clone()),
         ),
     ];
     let checks: Vec<(&str, f32)> = checks
@@ -132,24 +133,24 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
             a.final_k
                 .clone()
                 .zip(b.final_k.clone())
-                .map(|(x, y)| ("final k_state", max_abs_diff(x, y))),
+                .map(|(x, y)| ("final k_state", max_rel_diff(y, x))),
         )
         .chain(
             a.final_v
                 .clone()
                 .zip(b.final_v.clone())
-                .map(|(x, y)| ("final v_state", max_abs_diff(x, y))),
+                .map(|(x, y)| ("final v_state", max_rel_diff(y, x))),
         )
         .chain(
             // `Real1D` has no accumulator to compare.
             a.final_angle
                 .clone()
                 .zip(b.final_angle.clone())
-                .map(|(x, y)| ("final cum_angle", max_abs_diff(x, y))),
+                .map(|(x, y)| ("final cum_angle", max_rel_diff(y, x))),
         )
         .collect();
     for (name, d) in checks {
-        assert!(d < tol, "{label}: {name} max abs diff = {d:.6} (tol {tol})");
+        assert!(d < tol, "{label}: {name} max rel diff = {d:.6} (tol {tol})");
     }
 }
 
@@ -255,17 +256,15 @@ fn run_with_grads(
 /// printing every comparison so a failure dump shows the full picture
 /// (instead of stopping at the first mismatch).
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+    let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check {
         ($field:ident, $name:expr) => {{
-            let d = (a.$field.clone() - b.$field.clone())
-                .abs()
-                .max()
-                .into_scalar::<f32>();
-            eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
+            let d = burn_stack::utils::test_helpers::max_rel_diff(b.$field.clone(), a.$field.clone());
+            eprintln!("{:>40} {:>16} | max rel diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
-                    "{}: grad of {} max abs diff = {:.6} (tol {})",
+                    "{}: grad of {} max rel diff = {:.6} (tol {})",
                     label, $name, d, grad_tol
                 ));
             }
@@ -387,7 +386,7 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
         assert!(
-            d > 1e-3,
+            d > dtype_tol(1e-3),
             "random initial state appears ignored: random-init vs zero-init \
              output max abs diff = {d:.6} (expected a clear difference)"
         );

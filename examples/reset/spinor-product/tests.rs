@@ -525,7 +525,7 @@ fn run(
     let flat = out
         .reshape([n, NUM_CLASSES])
         .into_data()
-        .try_to_vec::<f32>()
+        .try_into_vec_as::<f32>()
         .unwrap();
     let channels = flat
         .chunks_exact(NUM_CLASSES)

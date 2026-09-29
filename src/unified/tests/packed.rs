@@ -18,7 +18,7 @@ use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
 use burn_stack::modules::ResidualsConfig;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn_stack::utils::{ClassLatent, Packed};
 use burn_stack::utils::test_helpers::test_device;
 
@@ -121,8 +121,8 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
             let (alone, _) = net.forward(ids, None, path.clone(), None, None);
             assert_eq!([1, n, VOCAB], alone.dims());
             let packed = logits.clone().narrow(0, b, 1).narrow(1, start, n);
-            let diff = max_abs_diff(packed.clone(), alone.clone());
-            assert!(diff < VAL_TOL, "row {b}, sequence at {start}: logits differ by {diff}");
+            let diff = max_rel_diff(packed.clone(), alone.clone());
+            assert!(diff < dtype_tol(VAL_TOL), "row {b}, sequence at {start}: logits differ by {diff}");
             let w = weight.clone().narrow(0, b, 1).narrow(1, start, n);
             loss_packed = loss_packed + (packed * w.clone()).sum();
             loss_alone = loss_alone + (alone * w).sum();
@@ -140,7 +140,7 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
                 let scale = a.clone().abs().max().into_scalar::<f32>().max(1.0);
                 let diff = max_abs_diff(p, a);
                 assert!(
-                    diff < GRAD_TOL * scale,
+                    diff < dtype_tol(GRAD_TOL) * scale,
                     "the gradient of parameter {i} differs by {diff} (max |grad| {scale})"
                 );
             }

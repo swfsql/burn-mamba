@@ -15,7 +15,7 @@
 use crate::prelude::*;
 use burn::prelude::*;
 use burn_stack::modules::{GatedMlpConfig, LayersBuilder, RmsNormConfig};
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::test_device;
 
@@ -72,7 +72,7 @@ fn layer_with_mlp_matches_the_two_residual_reference() {
             .unwrap()
             .forward(layer.norm2.as_ref().unwrap().forward(residual));
 
-    assert!(max_abs_diff(got, expected) < 1e-4);
+    assert!(max_abs_diff(got, expected) < dtype_tol(1e-4));
 }
 
 /// `forward` and `step` must still agree once the feed-forward is in the loop —
@@ -101,7 +101,7 @@ fn mlp_layer_forward_step_parity() {
         let (yt, c) = layers.step(xt, caches, None);
         caches = Some(c);
         let expected = full.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        assert!(max_abs_diff(yt, expected) < 1e-4, "mismatch at t={t}");
+        assert!(max_abs_diff(yt, expected) < dtype_tol(1e-4), "mismatch at t={t}");
     }
 }
 
@@ -132,7 +132,7 @@ fn mixer_only_layer_is_unchanged() {
         Mamba3SsdPath::default(),
         None,
     );
-    assert!(max_abs_diff(got, x + h1) < 1e-5);
+    assert!(max_abs_diff(got, x + h1) < dtype_tol(1e-5));
 }
 
 /// `norm2` is allocated together with `mlp`, so a hand-built `Layer` that sets
@@ -176,7 +176,7 @@ fn norm_and_norm2_are_independent() {
     });
 
     let layer = &layers.real_layers[0];
-    let norm_gamma = layer.norm.gamma.val().into_data().try_to_vec::<f32>().unwrap();
+    let norm_gamma = layer.norm.gamma.val().into_data().try_into_vec_as::<f32>().unwrap();
     let norm2_gamma = layer
         .norm2
         .as_ref()
@@ -184,7 +184,7 @@ fn norm_and_norm2_are_independent() {
         .gamma
         .val()
         .into_data()
-        .try_to_vec::<f32>()
+        .try_into_vec_as::<f32>()
         .unwrap();
     assert!(norm_gamma.iter().zip(&norm2_gamma).any(|(a, b)| a != b));
 }

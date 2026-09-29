@@ -6,9 +6,9 @@ use crate::prelude::*;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_stack::modules::multi_gate::MultiGateResidual;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{max_abs_diff, max_rel_diff};
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
@@ -44,8 +44,8 @@ fn forward_step_parity() {
 
         let h_ref = h_f.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let s_ref = s_f.clone().narrow(1, t, 1).squeeze_dim::<3>(1);
-        assert!(max_abs_diff(h_t, h_ref) < 1e-5, "h mismatch at t={t}");
-        assert!(max_abs_diff(s_t, s_ref) < 1e-5, "stream mismatch at t={t}");
+        assert!(max_abs_diff(h_t, h_ref) < dtype_tol(1e-5), "h mismatch at t={t}");
+        assert!(max_abs_diff(s_t, s_ref) < dtype_tol(1e-5), "stream mismatch at t={t}");
     }
 }
 
@@ -62,10 +62,10 @@ fn init_is_convex_mean() {
     let (h, new_streams) = m.step(layer_output.clone(), streams.clone());
 
     let expected_streams = (streams + layer_output.unsqueeze_dim::<3>(1)) * 0.5;
-    assert!(max_abs_diff(new_streams.clone(), expected_streams) < 1e-5);
+    assert!(max_abs_diff(new_streams.clone(), expected_streams) < dtype_tol(1e-5));
 
     let expected_h = new_streams.mean_dim(1).squeeze_dim::<2>(1);
-    assert!(max_abs_diff(h, expected_h) < 1e-5);
+    assert!(max_abs_diff(h, expected_h) < dtype_tol(1e-5));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn layers_standard_ignore_residuals_parity() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "Standard (ignored residuals) step disagrees with forward at t={t}"
         );
     }
@@ -186,7 +186,7 @@ fn layers_multi_gate_forward_step_parity() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "MGR step disagrees with forward at t={t}"
         );
     }
@@ -238,7 +238,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-3,
+            max_abs_diff(yt, expected) < dtype_tol(1e-3),
             "MGR (virtual) step disagrees with forward at t={t}"
         );
     }
@@ -304,7 +304,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "MGR (per-virtual, ignored residuals) step disagrees with forward at t={t}"
         );
     }
@@ -403,7 +403,7 @@ fn accumulate_appends_a_stream() {
     assert!(max_abs_diff(new_streams.clone(), expected) < 1e-6);
     // Zero queries ⇒ uniform α ⇒ the pool is the mean over the wider set.
     let mean = new_streams.mean_dim(2).squeeze_dim::<3>(2);
-    assert!(max_abs_diff(h, mean) < 1e-5);
+    assert!(max_abs_diff(h, mean) < dtype_tol(1e-5));
 
     // The single-token path agrees with the sequence one.
     let (h_t, s_t) = m.accumulate_step(
@@ -478,7 +478,7 @@ fn layers_multi_gate_streams_are_distinct() {
     }
     assert_eq!(streams.dims(), [batch, seq, n_stream, d_model]);
     assert!(
-        max_abs_diff(y.clone(), h) < 1e-5,
+        max_abs_diff(y.clone(), h) < dtype_tol(1e-5),
         "the stack must run the accumulate-then-mix schedule"
     );
 
@@ -498,7 +498,7 @@ fn layers_multi_gate_streams_are_distinct() {
         h = new_h;
     }
     assert!(
-        max_abs_diff(y, h) > 1e-3,
+        max_abs_diff(y, h) > dtype_tol(1e-3),
         "the stack must not collapse to a single lerped stream"
     );
 }
@@ -515,7 +515,7 @@ fn init_bias_step_ramps_the_gates() {
         .init(&device);
 
     let expected = Tensor::<1>::from_floats([-2.7, -1.8, -0.9, 0.0], &device);
-    assert!(max_abs_diff(m.b_beta.val(), expected) < 1e-5);
+    assert!(max_abs_diff(m.b_beta.val(), expected) < dtype_tol(1e-5));
 
     // Each stream therefore lerps by its own β — the first carries (β ≈ 0.06),
     // the last updates (β = 0.5) — even before any training.
@@ -527,7 +527,7 @@ fn init_bias_step_ramps_the_gates() {
         .narrow(3, 0, 1)
         .reshape([n])
         .into_data()
-        .try_to_vec()
+        .try_into_vec_as()
         .unwrap();
     for (i, w) in betas.windows(2).enumerate() {
         assert!(
@@ -537,7 +537,7 @@ fn init_bias_step_ramps_the_gates() {
         );
     }
     assert!(
-        (betas[n - 1] - 0.5).abs() < 1e-4,
+        (betas[n - 1] - 0.5).abs() < dtype_tol(1e-4),
         "last stream is σ(0) = 0.5"
     );
 }
@@ -559,7 +559,7 @@ fn attn_pool_reproduces_a_row_present_in_every_stream() {
     let streams = row.clone().unsqueeze_dim::<3>(1).expand([b, k, d]);
     // `attn_pool` keeps the stream axis at size 1 (it broadcasts back).
     let pooled = m.attn_pool(streams).squeeze_dim::<2>(1);
-    assert!(max_abs_diff(pooled, row) < 1e-5);
+    assert!(max_abs_diff(pooled, row) < dtype_tol(1e-5));
 }
 
 /// MGR + **stack-level** class latents: they are spliced below the first layer,
@@ -609,7 +609,7 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "MGR stack-latent step disagrees with forward at t={t}"
         );
     }
@@ -734,13 +734,13 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
 
     let f = run(false);
     let s = run(true);
-    assert!(max_abs_diff(f.0, s.0) < 1e-4, "user outputs disagree");
-    assert!(max_abs_diff(f.1, s.1) < 1e-3, "input grads disagree");
-    assert!(max_abs_diff(f.2, s.2) < 1e-3, "in_proj grads disagree");
-    assert!(max_abs_diff(f.3, s.3) < 1e-3, "Custom class-emb grads disagree");
-    assert!(max_abs_diff(f.4, s.4) < 1e-3, "Start class-emb grads disagree");
-    assert!(max_abs_diff(f.5, s.5) < 1e-3, "w_beta grads disagree");
-    assert!(max_abs_diff(f.6, s.6) < 1e-3, "w_alpha grads disagree");
+    assert!(max_rel_diff(s.0, f.0) < dtype_tol(1e-4), "user outputs disagree");
+    assert!(max_rel_diff(s.1, f.1) < dtype_tol(1e-3), "input grads disagree");
+    assert!(max_rel_diff(s.2, f.2) < dtype_tol(1e-3), "in_proj grads disagree");
+    assert!(max_rel_diff(s.3, f.3) < dtype_tol(1e-3), "Custom class-emb grads disagree");
+    assert!(max_rel_diff(s.4, f.4) < dtype_tol(1e-3), "Start class-emb grads disagree");
+    assert!(max_rel_diff(s.5, f.5) < dtype_tol(1e-3), "w_beta grads disagree");
+    assert!(max_rel_diff(s.6, f.6) < dtype_tol(1e-3), "w_alpha grads disagree");
 }
 
 /// MGR + class latents under a **chunked** `forward`: the same cursors carried
@@ -792,7 +792,7 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
         caches = Some(c);
         outs.push(y);
     }
-    assert!(max_abs_diff(Tensor::cat(outs, 1), y_one) < 1e-4);
+    assert!(max_rel_diff(Tensor::cat(outs, 1), y_one) < dtype_tol(1e-4));
 }
 
 /// MGR + class latents through `prime`: priming the latents waiting for the
@@ -856,7 +856,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
         let (y, c) = layers.step(token(t), caches2, Some(&mut class2));
         caches2 = Some(c);
         assert!(
-            max_abs_diff(y, want.clone()) < 1e-4,
+            max_abs_diff(y, want.clone()) < dtype_tol(1e-4),
             "prime+step disagrees with step at t={t}"
         );
     }
@@ -965,7 +965,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
     let mut class = ClassCursors::new(seq);
     let (y_prime, mut caches) = net.prime(batch, None, Some(&mut class));
     assert!(
-        max_abs_diff(y_prime.expect("three markers were waiting"), row(2)) < 1e-4,
+        max_rel_diff(y_prime.expect("three markers were waiting"), row(2)) < dtype_tol(1e-4),
         "prime did not return the network's class token"
     );
     assert_eq!(class.network, 1);
@@ -977,17 +977,17 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
         let (yt, c) = net.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_abs_diff(yt, row(t + 3)) < 1e-4,
+            max_rel_diff(yt, row(t + 3)) < dtype_tol(1e-4),
             "MGR step {t} disagrees with forward after the prime"
         );
     }
     for (i, (f, s)) in c_fwd.caches.iter().zip(&caches.unwrap().caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(s.conv_bvk.clone(), f.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(s.ssm_bhpr.clone(), f.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -1058,7 +1058,7 @@ fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
             let want = if t + 1 == seq { seq + 1 } else { pos };
             let expected = y_fwd.clone().narrow(1, want, 1).squeeze_dim::<2>(1);
             assert!(
-                max_abs_diff(yt, expected) < 1e-4,
+                max_rel_diff(yt, expected) < dtype_tol(1e-4),
                 "multi_gate={multi_gate}: step disagrees with forward at t={t}"
             );
         }

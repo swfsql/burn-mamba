@@ -10,7 +10,7 @@ use crate::training::Run;
 use burn::prelude::*;
 use burn::tensor::activation::log_softmax;
 use burn_mamba::prelude::*;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 #[test]
 fn score_reads_the_rows_of_the_continuation() {
@@ -57,6 +57,7 @@ fn score_reads_the_rows_of_the_continuation() {
     let ln2 = std::f64::consts::LN_2;
     let want_join = near / (n * join) as f64 / ln2;
     let want_far = far / (n * (c - join)) as f64 / ln2;
-    assert!((got.join - want_join).abs() < 1e-4, "join: {} vs {want_join}", got.join);
-    assert!((got.far - want_far).abs() < 1e-4, "far: {} vs {want_far}", got.far);
+    let tol = f64::from(dtype_tol(1e-4));
+    assert!((got.join - want_join).abs() < tol, "join: {} vs {want_join}", got.join);
+    assert!((got.far - want_far).abs() < tol, "far: {} vs {want_far}", got.far);
 }

@@ -13,7 +13,7 @@ use burn::prelude::*;
 use burn::tensor::Distribution;
 use burn_stack::modules::{Block, BlockConfig, LayerUntied, Layers, LayersBuilder};
 use burn_stack::utils::Schedule;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
@@ -80,7 +80,7 @@ where
     let (y, _) = layers.forward(x.clone(), None, options.clone(), None, None);
     let (want, _) = unshared.forward(x.clone(), None, options.clone(), None, None);
     let diff = max_abs_diff(y.clone(), want);
-    assert!(diff < TOL, "forward reads the wrong copies: {diff}");
+    assert!(diff < dtype_tol(TOL), "forward reads the wrong copies: {diff}");
 
     let mut caches = None;
     let mut ys = Vec::new();
@@ -90,8 +90,8 @@ where
         caches = Some(c);
         ys.push(y_t.unsqueeze_dim::<3>(1));
     }
-    let diff = max_abs_diff(y.clone(), Tensor::cat(ys, 1));
-    assert!(diff < TOL, "step reads other copies than forward: {diff}");
+    let diff = max_rel_diff(Tensor::cat(ys, 1), y.clone());
+    assert!(diff < dtype_tol(TOL), "step reads other copies than forward: {diff}");
 
     // Neither comparison proves anything unless the copies really differ.
     let tied = Layers {
@@ -99,7 +99,7 @@ where
         ..layers.clone()
     };
     let (y_tied, _) = tied.forward(x, None, options, None, None);
-    assert!(max_abs_diff(y, y_tied) > TOL, "the jitter left the copies equal");
+    assert!(max_abs_diff(y, y_tied) > dtype_tol(TOL), "the jitter left the copies equal");
 }
 
 /// Every Mamba-3 tensor that can be untied, untied — MIMO and the output norm on

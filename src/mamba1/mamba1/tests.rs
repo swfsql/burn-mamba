@@ -1,6 +1,6 @@
 use super::*;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 fn small_config() -> Mamba1Config {
     Mamba1Config::new(32) // d_model = 32
@@ -114,6 +114,7 @@ fn run_with_grads(
 /// Compare the output and final cache (conv window + SSM state) of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     use burn_stack::utils::test_helpers::max_abs_diff;
+    let tol = dtype_tol(tol);
     let d_out = max_abs_diff(a.out.clone(), b.out.clone());
     let d_conv = max_abs_diff(a.final_conv.clone(), b.final_conv.clone());
     let d_ssm = max_abs_diff(a.final_ssm.clone(), b.final_ssm.clone());
@@ -135,6 +136,7 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
 /// printing every comparison so a failure dump shows the full picture
 /// (instead of stopping at the first mismatch).
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+    let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check {
         ($field:ident, $name:expr) => {{
@@ -276,7 +278,7 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
         assert!(
-            d > 1e-3,
+            d > dtype_tol(1e-3),
             "random initial state appears ignored: random-init vs zero-init \
              output max abs diff = {d:.6} (expected a clear difference)"
         );

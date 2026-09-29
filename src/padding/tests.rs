@@ -14,7 +14,7 @@ use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
 use burn_stack::modules::{LatentNetworkBuilder, LayersBuilder};
 use burn_stack::utils::ClassLatent;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
@@ -50,7 +50,7 @@ fn rows<const D: usize>(t: &Tensor<D>) -> Tensor<2> {
 fn assert_close<const D: usize>(got: Tensor<D>, want: Tensor<D>, tol: f32, what: &str) {
     let scale = 1.0 + want.clone().abs().max().into_scalar::<f32>();
     let diff = max_abs_diff(got, want);
-    assert!(diff <= tol * scale, "{what}: differs by {diff} (scale {scale})");
+    assert!(diff <= dtype_tol(tol) * scale, "{what}: differs by {diff} (scale {scale})");
 }
 
 /// Every float parameter's gradient, in visiting order.

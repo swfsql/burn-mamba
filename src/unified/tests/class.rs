@@ -11,7 +11,7 @@ use burn_stack::utils::class::{
     class_chunk_plan, class_marker_output_indices, class_prime_plan, init_class_emb,
 };
 use burn_stack::utils::{ClassCursor, ClassCursors};
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 #[cfg(feature = "mamba2")]
 #[test]
@@ -506,7 +506,7 @@ fn class_latents_step_panics() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_step_matches_forward() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -540,7 +540,7 @@ fn class_latents_step_matches_forward() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "stepped user token {t} disagrees with forward"
         );
     }
@@ -557,7 +557,7 @@ fn class_latents_step_matches_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn per_layer_class_latents_step_matches_forward() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -665,26 +665,26 @@ fn per_layer_class_latents_step_matches_forward() {
     let s = run(true);
 
     // Results + final state.
-    assert!(max_abs_diff(f.0, s.0) < 1e-4, "user outputs disagree");
+    assert!(max_rel_diff(f.0, s.0) < dtype_tol(1e-4), "user outputs disagree");
     for (i, ((cf, sf), (cs, ss))) in f.1.iter().zip(&s.1).enumerate() {
         assert!(
-            max_abs_diff(cf.clone(), cs.clone()) < 1e-4,
+            max_rel_diff(cf.clone(), cs.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(sf.clone(), ss.clone()) < 1e-4,
+            max_rel_diff(sf.clone(), ss.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
     // Gradients (input, a block weight, and both class-latent embeddings).
-    assert!(max_abs_diff(f.2, s.2) < 1e-3, "input grads disagree");
-    assert!(max_abs_diff(f.3, s.3) < 1e-3, "in_proj grads disagree");
+    assert!(max_rel_diff(f.2, s.2) < dtype_tol(1e-3), "input grads disagree");
+    assert!(max_rel_diff(f.3, s.3) < dtype_tol(1e-3), "in_proj grads disagree");
     assert!(
-        max_abs_diff(f.4, s.4) < 1e-3,
+        max_rel_diff(f.4, s.4) < dtype_tol(1e-3),
         "Custom class-emb grads disagree"
     );
     assert!(
-        max_abs_diff(f.5, s.5) < 1e-3,
+        max_rel_diff(f.5, s.5) < dtype_tol(1e-3),
         "Start class-emb grads disagree"
     );
 }
@@ -781,7 +781,7 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_emits_the_class_markers_a_step_would_drop() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -849,14 +849,14 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
         let row = |p: usize| y_ref.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
         match (yp, primed[t]) {
             (Some(yp), Some(p)) => assert!(
-                max_abs_diff(yp, row(p)) < 1e-4,
+                max_rel_diff(yp, row(p)) < dtype_tol(1e-4),
                 "prime {t} did not return its class marker"
             ),
             (None, None) => {}
             _ => panic!("prime {t} emitted the wrong number of markers"),
         }
         assert!(
-            max_abs_diff(yt, row(stepped[t])) < 1e-4,
+            max_rel_diff(yt, row(stepped[t])) < dtype_tol(1e-4),
             "step {t} disagrees with the reference once primed"
         );
     }
@@ -865,11 +865,11 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
     // the reference's, exactly as it is without them.
     for (i, (f, s)) in c_ref.caches.iter().zip(&caches.unwrap().caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -883,7 +883,7 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -915,10 +915,10 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
     let (y_prime, mut caches) = layers.prime(batch, None, Some(&mut class));
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
     assert!(
-        max_abs_diff(
+        max_rel_diff(
             y_prime.expect("the upper layer's latent was waiting"),
             row(0)
-        ) < 1e-4,
+        ) < dtype_tol(1e-4),
         "prime did not return the per-layer latent"
     );
     // The bottom layer ran nothing, the top one one token.
@@ -930,17 +930,17 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
         let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_abs_diff(yt, row(t + 1)) < 1e-4,
+            max_rel_diff(yt, row(t + 1)) < dtype_tol(1e-4),
             "step {t} disagrees with forward after the prime"
         );
     }
     for (i, (f, s)) in c_fwd.caches.iter().zip(&caches.unwrap().caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -952,7 +952,7 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn prime_runs_a_per_layer_latent_mamba3() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -981,10 +981,10 @@ fn prime_runs_a_per_layer_latent_mamba3() {
     let mut class = ClassCursors::new(seq);
     let (y_prime, mut caches) = layers.prime(batch, None, Some(&mut class));
     assert!(
-        max_abs_diff(
+        max_rel_diff(
             y_prime.expect("the upper layer's latent was waiting"),
             row(0)
-        ) < 1e-4,
+        ) < dtype_tol(1e-4),
         "prime did not return the per-layer latent"
     );
     for t in 0..seq {
@@ -992,7 +992,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
         let (yt, c) = layers.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_abs_diff(yt, row(t + 1)) < 1e-4,
+            max_rel_diff(yt, row(t + 1)) < dtype_tol(1e-4),
             "step {t} disagrees with forward after the prime"
         );
     }
@@ -1005,7 +1005,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_on_a_network_covers_every_class_level() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1041,7 +1041,7 @@ fn prime_on_a_network_covers_every_class_level() {
     let mut class = ClassCursors::new(seq);
     let (y_prime, mut caches) = net.prime(batch, None, Some(&mut class));
     assert!(
-        max_abs_diff(y_prime.expect("three markers were waiting"), row(2)) < 1e-4,
+        max_rel_diff(y_prime.expect("three markers were waiting"), row(2)) < dtype_tol(1e-4),
         "prime did not return the network's class token"
     );
     assert_eq!(class.network, 1);
@@ -1053,17 +1053,17 @@ fn prime_on_a_network_covers_every_class_level() {
         let (yt, c) = net.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_abs_diff(yt, row(t + 3)) < 1e-4,
+            max_rel_diff(yt, row(t + 3)) < dtype_tol(1e-4),
             "step {t} disagrees with forward after the prime"
         );
     }
     for (i, (f, s)) in c_fwd.caches.iter().zip(&caches.unwrap().caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -1075,7 +1075,7 @@ fn prime_on_a_network_covers_every_class_level() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn layer_prime_returns_the_latent_and_its_delta() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1111,11 +1111,11 @@ fn layer_prime_returns_the_latent_and_its_delta() {
     let (y_prime, cache_prime) = layer.step(x0, cache, Some(&mut c_prime));
     assert_eq!(c_prime, c_step);
     assert!(
-        max_abs_diff(y_step, y_prime.clone()) < 1e-4,
+        max_rel_diff(y_step, y_prime.clone()) < dtype_tol(1e-4),
         "priming the latent changed the step that followed"
     );
     assert!(
-        max_abs_diff(cache_step.ssm_bhpr, cache_prime.ssm_bhpr.clone()) < 1e-4,
+        max_rel_diff(cache_step.ssm_bhpr, cache_prime.ssm_bhpr.clone()) < dtype_tol(1e-4),
         "priming the latent changed the state"
     );
 
@@ -1127,14 +1127,14 @@ fn layer_prime_returns_the_latent_and_its_delta() {
     );
     let (y_ref, c_ref) = layer.forward(reference, None, Mamba2SsdPath::default(), None);
     assert!(
-        max_abs_diff(delta, y_ref.clone().narrow(1, 0, 1).squeeze_dim::<2>(1)) < 1e-4,
+        max_rel_diff(delta, y_ref.clone().narrow(1, 0, 1).squeeze_dim::<2>(1)) < dtype_tol(1e-4),
         "the primed delta is not the latent's"
     );
     assert!(
-        max_abs_diff(y_prime, y_ref.narrow(1, 1, 1).squeeze_dim::<2>(1)) < 1e-4,
+        max_rel_diff(y_prime, y_ref.narrow(1, 1, 1).squeeze_dim::<2>(1)) < dtype_tol(1e-4),
         "the stepped delta is not the token's"
     );
-    assert!(max_abs_diff(c_ref.ssm_bhpr, cache_prime.ssm_bhpr) < 1e-4);
+    assert!(max_rel_diff(c_ref.ssm_bhpr, cache_prime.ssm_bhpr) < dtype_tol(1e-4));
 }
 
 // The runtime enums prime as well, threading the tagged caches straight into
@@ -1291,7 +1291,7 @@ fn class_chunk_plan_splits_a_sequence() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_split_forward_matches_single_forward() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1349,16 +1349,16 @@ fn class_markers_split_forward_matches_single_forward() {
     let y_split = Tensor::cat(vec![y_a, y_b], 1);
     assert_eq!(y_split.dims(), y_full.dims());
     assert!(
-        max_abs_diff(y_full, y_split) < 1e-4,
+        max_rel_diff(y_full, y_split) < dtype_tol(1e-4),
         "chunked class placement disagrees with the single forward"
     );
     for (i, (f, s)) in c_full.caches.iter().zip(&c_split.caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -1375,7 +1375,7 @@ fn class_markers_split_forward_matches_single_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_step_matches_forward_with_full_len() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1411,7 +1411,7 @@ fn class_markers_step_matches_forward_with_full_len() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "step {t} disagrees with forward at its last emitted token"
         );
     }
@@ -1422,11 +1422,11 @@ fn class_markers_step_matches_forward_with_full_len() {
     let c_step = caches.unwrap();
     for (i, (f, s)) in c_fwd.caches.iter().zip(&c_step.caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -1437,7 +1437,7 @@ fn class_markers_step_matches_forward_with_full_len() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_split_forward_matches_single_forward() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1482,7 +1482,7 @@ fn class_tokens_split_forward_matches_single_forward() {
     let y_split = Tensor::cat(vec![y_a, y_b], 1);
     assert_eq!(y_split.dims(), y_full.dims());
     assert!(
-        max_abs_diff(y_full, y_split) < 1e-4,
+        max_rel_diff(y_full, y_split) < dtype_tol(1e-4),
         "chunked class-token placement disagrees with the single forward"
     );
     // 2 class tokens at the network level, and the stack's End latent above them.
@@ -1522,7 +1522,7 @@ fn class_markers_without_full_len_panic_in_forward() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_forward_then_step() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1572,7 +1572,7 @@ fn class_markers_forward_then_step() {
         caches = c;
         let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "step {t} disagrees with forward at its last emitted token"
         );
     }
@@ -1587,7 +1587,7 @@ fn class_markers_forward_then_step() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_step_matches_forward_with_full_len() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1623,7 +1623,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
         caches = Some(c);
         let expected = y_fwd.clone().narrow(1, pos, 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt, expected) < 1e-4,
+            max_rel_diff(yt, expected) < dtype_tol(1e-4),
             "step {t} disagrees with forward at its last emitted token"
         );
     }
@@ -1646,7 +1646,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn end_closes_the_sequence_custom_never_does() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1712,7 +1712,7 @@ fn end_closes_the_sequence_custom_never_does() {
     layers.class_latents = Vec::new();
     let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None, None);
     assert!(
-        max_abs_diff(y_marked, y_ref.clone().narrow(1, 0, seq + 2)) < 1e-4,
+        max_rel_diff(y_marked, y_ref.clone().narrow(1, 0, seq + 2)) < dtype_tol(1e-4),
         "the markers did not land where the reference splices them"
     );
 
@@ -1721,13 +1721,13 @@ fn end_closes_the_sequence_custom_never_does() {
     for (t, (yt, cursor)) in got.into_iter().enumerate() {
         let want = y_ref.clone().narrow(1, last[t], 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt.clone(), want) < 1e-4,
+            max_rel_diff(yt.clone(), want) < dtype_tol(1e-4),
             "step {t} did not return its last emitted token"
         );
         if dropped[t] != last[t] {
             let other = y_ref.clone().narrow(1, dropped[t], 1).squeeze_dim::<2>(1);
             assert!(
-                max_abs_diff(yt, other) > 1e-3,
+                burn_stack::utils::test_helpers::max_abs_diff(yt, other) > dtype_tol(1e-3),
                 "step {t} returned a token it should have dropped"
             );
         }
@@ -1738,11 +1738,11 @@ fn end_closes_the_sequence_custom_never_does() {
     let c_step = caches.unwrap();
     for (i, (f, s)) in c_ref.caches.iter().zip(&c_step.caches).enumerate() {
         assert!(
-            max_abs_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < 1e-4,
+            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
             "layer {i} conv state disagrees"
         );
         assert!(
-            max_abs_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < 1e-4,
+            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} ssm state disagrees"
         );
     }
@@ -1769,7 +1769,7 @@ fn end_closes_the_sequence_custom_never_does() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn step_output_and_state_follow_the_last_emitted_token() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
     use burn::tensor::Distribution;
 
     let device = test_device();
@@ -1829,11 +1829,11 @@ fn step_output_and_state_follow_the_last_emitted_token() {
     let assert_state = |a: &[(Tensor<3>, Tensor<4>)], b: &[(Tensor<3>, Tensor<4>)], who: &str| {
         for (i, ((ca, sa), (cb, sb))) in a.iter().zip(b).enumerate() {
             assert!(
-                max_abs_diff(ca.clone(), cb.clone()) < 1e-4,
+                max_rel_diff(ca.clone(), cb.clone()) < dtype_tol(1e-4),
                 "{who}: layer {i} conv state disagrees"
             );
             assert!(
-                max_abs_diff(sa.clone(), sb.clone()) < 1e-4,
+                max_rel_diff(sa.clone(), sb.clone()) < dtype_tol(1e-4),
                 "{who}: layer {i} ssm state disagrees"
             );
         }
@@ -1856,7 +1856,7 @@ fn step_output_and_state_follow_the_last_emitted_token() {
     layers.class_latents = Vec::new();
     let (y_ref, c_ref) = layers.forward(reference.clone(), None, path.clone(), None, None);
     assert!(
-        max_abs_diff(y_marked, y_ref.clone()) < 1e-4,
+        max_rel_diff(y_marked, y_ref.clone()) < dtype_tol(1e-4),
         "the markers did not land where the reference splices them"
     );
     assert_state(&state(&c_marked), &state(&c_ref), "forward");
@@ -1870,11 +1870,11 @@ fn step_output_and_state_follow_the_last_emitted_token() {
         let want = y_ref.clone().narrow(1, last[t], 1).squeeze_dim::<2>(1);
         let other = y_ref.clone().narrow(1, dropped[t], 1).squeeze_dim::<2>(1);
         assert!(
-            max_abs_diff(yt.clone(), want) < 1e-4,
+            max_rel_diff(yt.clone(), want) < dtype_tol(1e-4),
             "step {t} did not return its last emitted token"
         );
         assert!(
-            max_abs_diff(yt, other) > 1e-3,
+            burn_stack::utils::test_helpers::max_abs_diff(yt, other) > dtype_tol(1e-3),
             "step {t} returned the token it should have dropped"
         );
         // The state must be the reference's after exactly those tokens — so the

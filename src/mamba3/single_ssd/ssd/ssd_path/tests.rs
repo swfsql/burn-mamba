@@ -1,7 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
@@ -216,15 +216,16 @@ fn run_path(
 }
 
 fn assert_path_runs_agree(label: &str, a: &PathRun, b: &PathRun, val_tol: f32, grad_tol: f32) {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::max_rel_diff;
+    let (val_tol, grad_tol) = (dtype_tol(val_tol), dtype_tol(grad_tol));
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check_inner {
         ($field:ident, $name:expr, $tol:expr) => {{
-            let d = max_abs_diff(a.$field.clone(), b.$field.clone());
-            eprintln!("{:>22} {:>14} | max abs diff = {:>10.6}", label, $name, d);
+            let d = max_rel_diff(b.$field.clone(), a.$field.clone());
+            eprintln!("{:>22} {:>14} | max rel diff = {:>10.6}", label, $name, d);
             if d >= $tol {
                 failures.push(format!(
-                    "{}: {} max abs diff = {:.6} (tol {})",
+                    "{}: {} max rel diff = {:.6} (tol {})",
                     label, $name, d, $tol
                 ));
             }
@@ -526,7 +527,7 @@ fn read_axis_matches_the_undecimated_kernel() {
                     ),
                 ];
                 for (what, d) in checks {
-                    assert!(d < 1e-4, "{label}: {what} max abs diff = {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label}: {what} max abs diff = {d:.3e}");
                 }
                 let d_c_full = full.d_c;
                 let d_gamma_full = full.d_gamma;
@@ -540,7 +541,7 @@ fn read_axis_matches_the_undecimated_kernel() {
                         max_abs_diff(kept_rows(d_gamma_full.clone(), 2, stride), read.d_gamma),
                     ),
                 ] {
-                    assert!(d < 1e-4, "{label}: {what} max abs diff = {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label}: {what} max abs diff = {d:.3e}");
                 }
 
                 // … and, off the read rows, nothing to compute: the full

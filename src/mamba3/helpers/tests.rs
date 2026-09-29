@@ -11,7 +11,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 /// `Σₘ v[m] ⊗ k[m]` computed elementwise from host data — the definition the
 /// tensor form has to reproduce.
@@ -54,8 +54,8 @@ fn mimo_outer_sum_matches_einsum() {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-        let v_host: Vec<f32> = v.to_data().try_to_vec().unwrap();
-        let k_host: Vec<f32> = k.to_data().try_to_vec().unwrap();
+        let v_host: Vec<f32> = v.to_data().try_into_vec_as().unwrap();
+        let k_host: Vec<f32> = k.to_data().try_into_vec_as().unwrap();
 
         let want = reference(&v_host, &k_host, [batch, mimo_rank, nheads, per_head_dim]);
 
@@ -65,10 +65,10 @@ fn mimo_outer_sum_matches_einsum() {
             let got = mimo_outer_sum(v.clone(), k.clone(), siso);
             assert_eq!([batch, nheads, per_head_dim, state_rank], got.dims());
 
-            let got_host: Vec<f32> = got.to_data().try_to_vec().unwrap();
+            let got_host: Vec<f32> = got.to_data().try_into_vec_as().unwrap();
             for (i, (g, w)) in got_host.iter().zip(want.iter()).enumerate() {
                 assert!(
-                    (g - w).abs() < 1e-5,
+                    (g - w).abs() < dtype_tol(1e-5),
                     "mimo_rank={mimo_rank} siso_specialization={siso} idx={i}: {g} vs {w}"
                 );
             }
@@ -114,7 +114,7 @@ fn reference_prefix_sum(data: &[f32], dims: &[usize], dim: usize) -> Vec<f32> {
 /// drift is ~1e-4). A real scan defect is off by whole summands — `O(1)`, orders
 /// above either term here — so nothing is given up by scaling.
 fn prefix_tol(expected: f32) -> f32 {
-    1e-4 + 1e-5 * expected.abs()
+    dtype_tol(1e-4) + dtype_tol(1e-5) * expected.abs()
 }
 
 /// One `(shape, dim)` case, run both without a carry-in and with one — the
@@ -123,20 +123,20 @@ fn prefix_tol(expected: f32) -> f32 {
 fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usize) {
     let device = test_device();
     let t = Tensor::<D>::random(dims, Distribution::Normal(0.0, 1.0), &device);
-    let host: Vec<f32> = t.to_data().try_to_vec().unwrap();
+    let host: Vec<f32> = t.to_data().try_into_vec_as().unwrap();
     let want = reference_prefix_sum(&host, &dims, dim);
 
     // `init` is `t`'s shape with a single position on the scanned axis.
     let mut init_dims = dims;
     init_dims[dim] = 1;
     let init = Tensor::<D>::random(init_dims, Distribution::Normal(0.0, 1.0), &device);
-    let init_host: Vec<f32> = init.to_data().try_to_vec().unwrap();
+    let init_host: Vec<f32> = init.to_data().try_into_vec_as().unwrap();
     let inner: usize = dims[dim + 1..].iter().product();
 
     for carried in [false, true] {
         let got = prefix_sum::<D, DP1>(t.clone(), dim, carried.then(|| init.clone()), None);
         assert_eq!(dims, got.dims(), "prefix_sum must preserve the shape");
-        let got: Vec<f32> = got.to_data().try_to_vec().unwrap();
+        let got: Vec<f32> = got.to_data().try_into_vec_as().unwrap();
 
         for (i, (g, w)) in got.iter().zip(want.iter()).enumerate() {
             // `init` repeats over the scanned axis: drop that axis from `i`.
@@ -219,7 +219,7 @@ fn prefix_sum_gradient_matches_the_definition() {
         Distribution::Normal(0.0, 1.0),
         &device,
     );
-    let w_host: Vec<f32> = w.to_data().try_to_vec().unwrap();
+    let w_host: Vec<f32> = w.to_data().try_into_vec_as().unwrap();
 
     for period in [None, Some(std::f32::consts::TAU)] {
         let p = Param::from_tensor(Tensor::from_inner(raw.clone()));
@@ -231,7 +231,7 @@ fn prefix_sum_gradient_matches_the_definition() {
             .grad(&grads)
             .expect("grad through prefix_sum")
             .to_data()
-            .try_to_vec()
+            .try_into_vec_as()
             .unwrap();
 
         // Reverse-inclusive sum of `w` along the scanned axis.
@@ -294,11 +294,11 @@ fn prefix_sum_on_the_circle_matches_the_definition() {
             Distribution::Uniform(-3.1, 3.1),
             &device,
         );
-        let t_host: Vec<f32> = t.to_data().try_to_vec().unwrap();
-        let init_host: Vec<f32> = init.to_data().try_to_vec().unwrap();
+        let t_host: Vec<f32> = t.to_data().try_into_vec_as().unwrap();
+        let init_host: Vec<f32> = init.to_data().try_into_vec_as().unwrap();
         let got: Vec<f32> = prefix_sum::<3, 4>(t, 1, Some(init), Some(tau))
             .to_data()
-            .try_to_vec()
+            .try_into_vec_as()
             .unwrap();
 
         let step_max = t_host.iter().fold(0.0f32, |m, x| m.max(x.abs()));
@@ -328,7 +328,7 @@ fn prefix_sum_on_the_circle_matches_the_definition() {
             }
         }
         assert!(
-            worst.iter().all(|w| *w < 5e-4),
+            worst.iter().all(|w| *w < f64::from(dtype_tol(5e-4))),
             "len={len}: the angle over lags 1, 64, 1024 is off by {worst:?}"
         );
     }

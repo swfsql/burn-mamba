@@ -47,7 +47,10 @@ cargo run --example reset-majority -- --training --inference
   guards. `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
 - A test takes its device from burn-stack's `test_device()` (fp16 under
   `dev-f16`), never from `Device::default()`: the dtype defaults are global,
-  and the first tensor fixes them for the process.
+  and the first tensor fixes them for the process. A tolerance goes through
+  `dtype_tol` (the fp32 value is unchanged), a check on values that can be
+  large compares with `max_rel_diff`, and a host read-back converts
+  (`try_into_vec_as`, not `try_to_vec`).
 - Every feature above **forwards to `burn-stack`** (see `Cargo.toml`), and it
   must. The `backend-*` cfgs are evaluated where
   `burn_stack::impl_backend_ext_for_burn_backends!` expands, which is in *this*

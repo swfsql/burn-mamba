@@ -6,7 +6,7 @@
 //! compare them (values *and* gradients).
 
 use super::*;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn::module::Param;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::test_device;
@@ -123,15 +123,15 @@ fn siso_matches_mimo_forward_and_grads() {
     );
     let r_siso = run(y_diag_correction_siso, v, b, c, gamma, head);
 
-    let tol = 1e-5;
+    let tol = dtype_tol(1e-5);
     for (name, d) in [
-        ("y", max_abs_diff(r_mimo.y, r_siso.y)),
-        ("d_v", max_abs_diff(r_mimo.d_v, r_siso.d_v)),
-        ("d_b", max_abs_diff(r_mimo.d_b, r_siso.d_b)),
-        ("d_c", max_abs_diff(r_mimo.d_c, r_siso.d_c)),
-        ("d_gamma", max_abs_diff(r_mimo.d_gamma, r_siso.d_gamma)),
+        ("y", max_rel_diff(r_siso.y, r_mimo.y)),
+        ("d_v", max_rel_diff(r_siso.d_v, r_mimo.d_v)),
+        ("d_b", max_rel_diff(r_siso.d_b, r_mimo.d_b)),
+        ("d_c", max_rel_diff(r_siso.d_c, r_mimo.d_c)),
+        ("d_gamma", max_rel_diff(r_siso.d_gamma, r_mimo.d_gamma)),
     ] {
-        assert!(d < tol, "{name}: mimo↔siso max abs diff {d} >= {tol}");
+        assert!(d < tol, "{name}: mimo↔siso max rel diff {d} >= {tol}");
     }
 }
 
@@ -165,7 +165,7 @@ fn dispatch_agrees_with_both_branches() {
             let direct = y_diag_correction_mimo(v.clone(), b.clone(), c.clone(), gamma.clone());
             let d = max_abs_diff(dispatched, direct);
             assert!(
-                d < 1e-5,
+                d < dtype_tol(1e-5),
                 "mimo_rank={mimo_rank} siso_specialization={siso_specialization}: \
                  dispatch mismatch {d}"
             );

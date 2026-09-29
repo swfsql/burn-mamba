@@ -22,7 +22,7 @@ use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients, TensorData};
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
@@ -297,7 +297,7 @@ fn fields<C: TestCache>(cache: &C) -> Vec<Tensor<2>> {
 fn assert_close<const D: usize>(got: Tensor<D>, want: Tensor<D>, tol: f32, what: &str) {
     let scale = 1.0 + want.clone().abs().max().into_scalar::<f32>();
     let diff = max_abs_diff(got, want);
-    assert!(diff <= tol * scale, "{what}: differs by {diff} (scale {scale})");
+    assert!(diff <= dtype_tol(tol) * scale, "{what}: differs by {diff} (scale {scale})");
 }
 
 /// Every float parameter's gradient, in visiting order.
@@ -591,7 +591,7 @@ fn restart_heads_gradient_sums_over_the_chunks() {
     let w = Tensor::<3>::random([1, 2, len], Distribution::Normal(0.0, 1.0), &device);
     let grads = (y * w.clone()).sum().backward();
     let got = Tensor::<3>::from_inner(head.grad(&grads).unwrap());
-    let w_host: Vec<f32> = w.to_data().try_to_vec().unwrap();
+    let w_host: Vec<f32> = w.to_data().try_into_vec_as().unwrap();
     let want: Vec<f32> = (0..2)
         .flat_map(|v| (0..width).map(move |j| (v, j)))
         .map(|(v, j)| [0, 2].iter().map(|c| w_host[v * len + c * chunk_len + j]).sum())

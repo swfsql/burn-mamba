@@ -4,7 +4,7 @@ use burn_stack::utils::fprim::F;
 use burn::backend::Dispatch;
 use burn::prelude::*;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 /// The primitive backend the high-level `Tensor` is pinned to; `combined_backward`
 /// runs generically over it here (dispatching to the feature-selected backend).
@@ -143,7 +143,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         .max()
         .into_scalar::<f32>();
     assert!(
-        diff < 1e-3,
+        diff < dtype_tol(1e-3),
         "d_da_local oracle identity violated; max abs diff = {diff}",
     );
 }

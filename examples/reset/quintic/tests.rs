@@ -499,7 +499,7 @@ fn run(
     let flat = out
         .reshape([count * len, classes])
         .into_data()
-        .try_to_vec::<f32>()
+        .try_into_vec_as::<f32>()
         .unwrap();
     let channels = flat
         .chunks_exact(classes)
@@ -899,7 +899,7 @@ fn learned_rotations() {
         unreachable!("reset-quintic configures the Mamba-3 variant")
     };
     let to_vec = |t: Tensor<1>| -> Vec<f64> {
-        t.into_data().try_to_vec::<f32>().unwrap().iter().map(|&v| f64::from(v)).collect()
+        t.into_data().try_into_vec_as::<f32>().unwrap().iter().map(|&v| f64::from(v)).collect()
     };
     let layer = &net.layers.real_layers[0];
     let block = &layer.block;

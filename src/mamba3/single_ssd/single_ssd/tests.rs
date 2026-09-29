@@ -4,7 +4,7 @@ use crate::mamba3::mamba3::Mamba3Config;
 use crate::mamba3::rotation::{RotationKind, RotationState};
 use burn::module::Param;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -216,17 +216,15 @@ fn run_with_grads(
 }
 
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
+    let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
     macro_rules! check {
         ($field:ident, $name:expr) => {{
-            let d = (a.$field.clone() - b.$field.clone())
-                .abs()
-                .max()
-                .into_scalar::<f32>();
-            eprintln!("{:>40} {:>16} | max abs diff = {:>10.6}", label, $name, d);
+            let d = burn_stack::utils::test_helpers::max_rel_diff(b.$field.clone(), a.$field.clone());
+            eprintln!("{:>40} {:>16} | max rel diff = {:>10.6}", label, $name, d);
             if d >= grad_tol {
                 failures.push(format!(
-                    "{}: grad of {} max abs diff = {:.6} (tol {})",
+                    "{}: grad of {} max rel diff = {:.6} (tol {})",
                     label, $name, d, grad_tol
                 ));
             }
@@ -364,6 +362,7 @@ fn check_single_ssd_match(
     grad_tol: f32,
 ) {
     use burn_stack::utils::test_helpers::max_abs_diff;
+    let val_tol = dtype_tol(val_tol);
     let vals = [
         ("output", max_abs_diff(a.rg.out.clone(), b.rg.out.clone())),
         (
@@ -422,7 +421,7 @@ fn guard_random_init_consumed(
     );
     let d = max_abs_diff(random_out.clone(), out_zero.inner());
     assert!(
-        d > 1e-3,
+        d > dtype_tol(1e-3),
         "random initial state appears ignored: random-init vs zero-init \
          output max abs diff = {d:.6} (expected a clear difference)"
     );
@@ -484,9 +483,10 @@ fn forward_match_tol(
         .abs()
         .max()
         .into_scalar::<f32>();
+    let tol = dtype_tol(1e-4);
     assert!(
-        diff < 1e-4,
-        "forward_double_ssd vs forward_single_ssd max absolute difference = {diff:.6} (expected < 1e-4)"
+        diff < tol,
+        "forward_double_ssd vs forward_single_ssd max absolute difference = {diff:.6} (expected < {tol})"
     );
     check_grads_match(
         "forward_single_ssd vs forward_double_ssd",
@@ -620,9 +620,10 @@ fn run_forward_single_ssd_matches_step(
         .abs()
         .max()
         .into_scalar::<f32>();
+    let tol = dtype_tol(1e-4);
     assert!(
-        diff < 1e-4,
-        "forward_single_ssd vs step max absolute difference = {diff:.6} (expected < 1e-4)"
+        diff < tol,
+        "forward_single_ssd vs step max absolute difference = {diff:.6} (expected < {tol})"
     );
     check_grads_match(
         "forward_single_ssd vs step",
@@ -761,7 +762,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
         );
         let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
         assert!(
-            d > 1e-3,
+            d > dtype_tol(1e-3),
             "random initial state appears ignored: random-init vs zero-init \
              output max abs diff = {d:.6} (expected a clear difference)"
         );
@@ -1069,7 +1070,7 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) 
         .max()
         .into_scalar::<f32>();
     assert!(
-        diff < 1e-4,
+        diff < dtype_tol(1e-4),
         "quaternion forward_single_ssd vs forward_double_ssd max abs diff = {diff:.6}"
     );
     check_grads_match("quaternion single vs double", &r_double, &r_single, 1e-3);
@@ -1108,7 +1109,7 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         .max()
         .into_scalar::<f32>();
     assert!(
-        diff < 1e-4,
+        diff < dtype_tol(1e-4),
         "quaternion forward_single_ssd vs step max abs diff = {diff:.6}"
     );
     check_grads_match("quaternion single vs step", &r_single, &r_step, 1e-3);

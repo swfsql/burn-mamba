@@ -1,7 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
@@ -260,7 +260,7 @@ fn run_minimal_matches_serial(
 
     // ── Forward agreement ────────────────────────────────────────────
     use burn_stack::utils::test_helpers::max_abs_diff;
-    let tol = 1e-4f32;
+    let tol = dtype_tol(1e-4);
     let dy_ser = max_abs_diff(r_min.y.clone(), r_ser.y.clone());
     let ds_ser = max_abs_diff(r_min.state.clone(), r_ser.state.clone());
     let dy_rec = max_abs_diff(r_min.y.clone(), r_rec.y.clone());

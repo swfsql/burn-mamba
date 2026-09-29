@@ -28,9 +28,9 @@ use burn::prelude::*;
 use crate::mamba3::prelude::{Mamba3Caches, Mamba3Config, Mamba3SsdPath};
 use burn_stack::modules::LayersBuilder;
 use burn_stack::utils::{GradHorizon, Schedule};
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{max_abs_diff, max_rel_diff};
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::test_device;
+use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
@@ -334,7 +334,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     let (h, _) = prefix.forward(x.inner(), None, path(), None, None);
     let (y_ref, _) = suffix.forward(Tensor::from_inner(h), None, path(), None, None);
     assert!(
-        max_abs_diff(y.clone(), y_ref.clone()) < 1e-5,
+        max_abs_diff(y.clone(), y_ref.clone()) < dtype_tol(1e-5),
         "the cut stack and the hand-split reference disagree on values",
     );
 
@@ -347,7 +347,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
             .grad(&grads_ref)
             .expect("shared weight grad (reference)");
         assert!(
-            max_abs_diff(got, want) < 1e-5,
+            max_abs_diff(got, want) < dtype_tol(1e-5),
             "real layer {r} did not collect exactly its tracked applications",
         );
     }
@@ -450,12 +450,12 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     let flat_split = all_slots_flat(&caches_split, n_virtual);
 
     assert!(
-        max_abs_diff(y_full, y_split.clone()) < 1e-5,
+        max_rel_diff(y_split.clone(), y_full) < dtype_tol(1e-5),
         "chunked output differs from the single call (horizon {horizon:?})",
     );
     for (i, (a, b)) in flat_full.iter().zip(&flat_split).enumerate() {
         assert!(
-            max_abs_diff(a.clone(), b.clone()) < 1e-5,
+            max_rel_diff(b.clone(), a.clone()) < dtype_tol(1e-5),
             "chunked final cache tensor {i} differs (horizon {horizon:?})",
         );
     }
@@ -469,7 +469,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
             let a = p.val().grad(&grads_full).expect("single-call grad");
             let b = p.val().grad(&grads_split).expect("chunked grad");
             assert!(
-                max_abs_diff(a, b) < 1e-4,
+                max_rel_diff(b, a) < dtype_tol(1e-4),
                 "real layer {r}: {name} gradient differs between the chunked and \
                  the single call (horizon {horizon:?}) — the cache handed between \
                  calls is not carrying gradient the way one continuous call does",
@@ -483,7 +483,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
             let a = p.val().grad(&grads_full).expect("single-call grad");
             let b = p.val().grad(&grads_split).expect("chunked grad");
             assert!(
-                max_abs_diff(a, b) < 1e-4,
+                max_rel_diff(b, a) < dtype_tol(1e-4),
                 "real layer {r}: {name} gradient differs between the chunked and \
                  the single call (horizon {horizon:?})",
             );
@@ -568,12 +568,12 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
     let flat_step = all_slots_flat(&caches_step, n_virtual);
 
     assert!(
-        max_abs_diff(y_fwd, y_step.clone()) < 1e-5,
+        max_rel_diff(y_step.clone(), y_fwd) < dtype_tol(1e-5),
         "stepped output differs from forward (horizon {horizon:?})",
     );
     for (i, (a, b)) in flat_fwd.iter().zip(&flat_step).enumerate() {
         assert!(
-            max_abs_diff(a.clone(), b.clone()) < 1e-5,
+            max_rel_diff(b.clone(), a.clone()) < dtype_tol(1e-5),
             "stepped final cache tensor {i} differs (horizon {horizon:?})",
         );
     }
@@ -596,7 +596,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
             .grad(&grads_step)
             .expect("step grad");
         assert!(
-            max_abs_diff(a, b) < 1e-4,
+            max_rel_diff(b, a) < dtype_tol(1e-4),
             "real layer {r}: in_proj gradient differs between step and forward \
              (horizon {horizon:?}) — the two do not cut at the same layers",
         );
@@ -608,7 +608,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
             let a = p.val().grad(&grads_fwd).expect("forward grad");
             let b = p.val().grad(&grads_step).expect("step grad");
             assert!(
-                max_abs_diff(a, b) < 1e-4,
+                max_abs_diff(a, b) < dtype_tol(1e-4),
                 "real layer {r}: {name} gradient differs between step and forward \
                  (horizon {horizon:?})",
             );
@@ -982,7 +982,7 @@ fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig
          nothing (max |grad| = {scale})",
     );
     assert!(
-        diff < 1e-5 * scale.max(1.0),
+        diff < dtype_tol(1e-5) * scale.max(1.0),
         "with an identity prefix the cut must reproduce full backprop on the \
          input's gradient — a carrier is missing its identity path \
          (max abs diff {diff}, grad scale {scale})",

@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::mamba3::rotation::rope::apply_rope;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn::module::Param;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::test_device;
@@ -200,10 +200,10 @@ fn check_factored_matches_explicit(
     );
     let y_fac = factored_recurrence(inp.q, inp.alpha, inp.x, inp.b, inp.c, inp.init);
 
-    let d = max_abs_diff(y_exp, y_fac);
+    let d = max_rel_diff(y_fac, y_exp);
     assert!(
-        d < VAL_TOL,
-        "factored vs explicit: y max abs diff = {d:.6} (tol {VAL_TOL})"
+        d < dtype_tol(VAL_TOL),
+        "factored vs explicit: y max rel diff = {d:.6} (tol {})", dtype_tol(VAL_TOL)
     );
 }
 
@@ -262,7 +262,7 @@ fn rot4_right_multiplication_matrix() {
     let by_product = quat_mul(v, p);
     let d = max_abs_diff(by_matrix, by_product);
     assert!(
-        d < VAL_TOL,
+        d < dtype_tol(VAL_TOL),
         "right-multiplication matrix vs quat_mul: {d:.6}"
     );
 }
@@ -373,10 +373,10 @@ fn rotor_factored_matches_explicit() {
             inp.init.clone(),
         );
         let y_fac = factored_recurrence_rotor(inp.q, p, inp.alpha, inp.x, inp.b, inp.c, inp.init);
-        let d = max_abs_diff(y_exp, y_fac);
+        let d = max_rel_diff(y_fac, y_exp);
         assert!(
-            d < VAL_TOL,
-            "rotor factored vs explicit: {d:.6} (tol {VAL_TOL})"
+            d < dtype_tol(VAL_TOL),
+            "rotor factored vs explicit: {d:.6} (tol {})", dtype_tol(VAL_TOL)
         );
     }
 }
@@ -406,7 +406,7 @@ fn rotor_with_identity_right_factor_is_quaternion4d() {
     );
     let y_quat = factored_recurrence(inp.q, inp.alpha, inp.x, inp.b, inp.c, inp.init);
     let d = max_abs_diff(y_rotor, y_quat);
-    assert!(d < VAL_TOL, "rotor with p = 1 vs quaternion: {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "rotor with p = 1 vs quaternion: {d:.6}");
 }
 
 /// What the right factor buys, in one line of algebra: with a shared axis the
@@ -429,13 +429,13 @@ fn rotor_turns_the_two_planes_independently() {
     let got = apply(Tensor::<2>::from_floats([[1.0, 0.0, 0.0, 0.0]], &device));
     let want = Tensor::<2>::from_floats([[(a - b).cos(), (a - b).sin(), 0.0, 0.0]], &device);
     let d = max_abs_diff(got, want);
-    assert!(d < VAL_TOL, "(1,i) plane angle is not a−b: {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "(1,i) plane angle is not a−b: {d:.6}");
 
     // … and the (j, k) plane by a + b, in the same step.
     let got = apply(Tensor::<2>::from_floats([[0.0, 0.0, 1.0, 0.0]], &device));
     let want = Tensor::<2>::from_floats([[0.0, 0.0, (a + b).cos(), (a + b).sin()]], &device);
     let d = max_abs_diff(got, want);
-    assert!(d < VAL_TOL, "(j,k) plane angle is not a+b: {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "(j,k) plane angle is not a+b: {d:.6}");
 }
 
 /// Two-sided multiplication is still orthogonal (it must be, or the
@@ -450,8 +450,8 @@ fn rotor_two_sided_is_orthogonal() {
     let rotated = quat_mul(quat_mul(q, v.clone()), quat_conj(p));
     let n_before = (v.clone() * v).sum_dim(1);
     let n_after = (rotated.clone() * rotated).sum_dim(1);
-    let d = max_abs_diff(n_before, n_after);
-    assert!(d < VAL_TOL, "two-sided rotation changed the norm: {d:.6}");
+    let d = max_rel_diff(n_after, n_before);
+    assert!(d < dtype_tol(VAL_TOL), "two-sided rotation changed the norm: {d:.6}");
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +473,7 @@ fn rot4_is_orthogonal() {
         .unsqueeze_dim::<3>(0)
         .expand([16, 4, 4]);
     let d = max_abs_diff(prod, eye);
-    assert!(d < VAL_TOL, "L_q Lqᵀ ≠ I: max abs diff = {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "L_q Lqᵀ ≠ I: max abs diff = {d:.6}");
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn rot4_homomorphism() {
     let lhs = quat_to_rot4::<2, 3>(quat_mul(a.clone(), b.clone()));
     let rhs = quat_to_rot4::<2, 3>(a).matmul(quat_to_rot4::<2, 3>(b));
     let d = max_abs_diff(lhs, rhs);
-    assert!(d < VAL_TOL, "L_(a⊗b) ≠ L_a·L_b: max abs diff = {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "L_(a⊗b) ≠ L_a·L_b: max abs diff = {d:.6}");
 }
 
 // ---------------------------------------------------------------------------
@@ -524,8 +524,8 @@ fn cumprod_split_equals_full() {
 
     let dc = max_abs_diff(cum_full, cum_split);
     let df = max_abs_diff(final_full, final_split);
-    assert!(dc < VAL_TOL, "split cum ≠ full cum: {dc:.6}");
-    assert!(df < VAL_TOL, "split final carry ≠ full: {df:.6}");
+    assert!(dc < dtype_tol(VAL_TOL), "split cum ≠ full cum: {dc:.6}");
+    assert!(df < dtype_tol(VAL_TOL), "split final carry ≠ full: {df:.6}");
 }
 
 // ---------------------------------------------------------------------------
@@ -588,8 +588,8 @@ fn cumprod_parallel_matches_sequential_values() {
         let (cum_seq, fin_seq) = quat_cumprod_sequential(q.clone(), init);
         let dc = max_abs_diff(cum_par, cum_seq);
         let df = max_abs_diff(fin_par, fin_seq);
-        assert!(dc < VAL_TOL, "parallel vs sequential cum: {dc:.6}");
-        assert!(df < VAL_TOL, "parallel vs sequential final carry: {df:.6}");
+        assert!(dc < dtype_tol(VAL_TOL), "parallel vs sequential cum: {dc:.6}");
+        assert!(df < dtype_tol(VAL_TOL), "parallel vs sequential final carry: {df:.6}");
     }
 }
 
@@ -625,8 +625,8 @@ fn cumprod_parallel_matches_sequential_grads() {
 
     let d = max_abs_diff(grad_for(true), grad_for(false));
     assert!(
-        d < GRAD_TOL,
-        "parallel vs sequential cum grad: {d:.6} (tol {GRAD_TOL})"
+        d < dtype_tol(GRAD_TOL),
+        "parallel vs sequential cum grad: {d:.6} (tol {})", dtype_tol(GRAD_TOL)
     );
 }
 
@@ -671,7 +671,7 @@ fn single_axis_collapses_to_cumsum() {
 
     let d = max_abs_diff(cum, expected);
     assert!(
-        d < VAL_TOL,
+        d < dtype_tol(VAL_TOL),
         "single-axis cumprod ≠ half-angle cumsum: {d:.6}"
     );
 }
@@ -733,8 +733,8 @@ fn k2_quaternion_matches_production_rope() {
 
     let d = max_abs_diff(b_quat, b_rope);
     assert!(
-        d < VAL_TOL,
-        "k=2 quaternion vs production apply_rope: max abs diff = {d:.6} (tol {VAL_TOL})"
+        d < dtype_tol(VAL_TOL),
+        "k=2 quaternion vs production apply_rope: max abs diff = {d:.6} (tol {})", dtype_tol(VAL_TOL)
     );
 }
 
@@ -782,7 +782,7 @@ fn scaled_axis_is_unit_and_identity_at_zero() {
     let norm = (q.clone() * q).sum_dim(1).sqrt();
     let d_unit = max_abs_diff(norm, Tensor::<2>::ones([32, 1], &device));
     assert!(
-        d_unit < VAL_TOL,
+        d_unit < dtype_tol(VAL_TOL),
         "quat_from_scaled_axis not unit norm: {d_unit:.6}"
     );
 
@@ -798,7 +798,7 @@ fn scaled_axis_is_unit_and_identity_at_zero() {
     );
     let d_id = max_abs_diff(q0, ident);
     assert!(
-        d_id < VAL_TOL,
+        d_id < dtype_tol(VAL_TOL),
         "zero generator ≠ identity quaternion: {d_id:.6}"
     );
 }
@@ -870,7 +870,7 @@ fn scaled_axis_single_axis_matches_half_angle() {
     let q = quat_from_scaled_axis(g);
     let expected = Tensor::cat(vec![phi.clone().cos(), phi.sin(), zeros.clone(), zeros], 1);
     let d = max_abs_diff(q, expected);
-    assert!(d < VAL_TOL, "scaled-axis single-axis mismatch: {d:.6}");
+    assert!(d < dtype_tol(VAL_TOL), "scaled-axis single-axis mismatch: {d:.6}");
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,7 +1004,7 @@ fn rotor_generator_channels_are_left_then_right() {
         ("right accumulator", max_abs_diff(ident, right_r)),
     ] {
         assert!(
-            d < VAL_TOL,
+            d < dtype_tol(VAL_TOL),
             "{what}: a zero right generator is not the identity rotor ({d:.6})"
         );
     }
@@ -1077,7 +1077,7 @@ fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, m
 
     let d = max_abs_diff(out_fwd, out_step);
     assert!(
-        d < 1e-3,
+        d < dtype_tol(1e-3),
         "{kind:?} forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}"
     );
 }
@@ -1145,7 +1145,7 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
 
     let d_out = max_abs_diff(out_full, out_cat);
     assert!(
-        d_out < 1e-3,
+        d_out < dtype_tol(1e-3),
         "{kind:?} split-prefill output mismatch: {d_out:.6}"
     );
 
@@ -1155,7 +1155,7 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     let s_split = cache_split.single_ssd().unwrap().ssm_bhpr;
     let d_state = max_abs_diff(s_full, s_split);
     assert!(
-        d_state < 1e-3,
+        d_state < dtype_tol(1e-3),
         "{kind:?} split-prefill final-state mismatch: {d_state:.6}"
     );
 }
@@ -1231,11 +1231,11 @@ fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     let d_in = max_abs_diff(d_in_fwd, d_in_step);
     let d_w = max_abs_diff(d_w_fwd, d_w_step);
     assert!(
-        d_in < 1e-2,
+        d_in < dtype_tol(1e-2),
         "{kind:?} forward/step input-grad mismatch: {d_in:.6}"
     );
     assert!(
-        d_w < 1e-2,
+        d_w < dtype_tol(1e-2),
         "{kind:?} forward/step in_proj-grad mismatch: {d_w:.6}"
     );
 }
@@ -1266,17 +1266,17 @@ fn assert_cache_parity(
     let (a, b) = (a.single_ssd().expect(missing), b.single_ssd().expect(missing));
 
     let d = max_abs_diff(a.ssm_bhpr, b.ssm_bhpr);
-    assert!(d < VAL_TOL, "{label}: ssm state: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "{label}: ssm state: {d:.3e}");
 
     let slots = "the default carry-over tap keeps its slots";
     let d = max_abs_diff(a.k_state_bumhr.expect(slots), b.k_state_bumhr.expect(slots));
-    assert!(d < VAL_TOL, "{label}: tap key slots: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "{label}: tap key slots: {d:.3e}");
     let d = max_abs_diff(a.v_state_buhp.expect(slots), b.v_state_buhp.expect(slots));
-    assert!(d < VAL_TOL, "{label}: tap value slots: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "{label}: tap value slots: {d:.3e}");
 
     let (a, b) = (a.rotation.angle(), b.rotation.angle());
     let d = max_abs_diff(a.clone().sin(), b.clone().sin()).max(max_abs_diff(a.cos(), b.cos()));
-    assert!(d < VAL_TOL, "{label}: cumulative rotation: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "{label}: cumulative rotation: {d:.3e}");
 }
 
 /// Full parity — **output, cache and gradients** — for the abelian angle scan,
@@ -1348,7 +1348,7 @@ fn complex_angle_scan_forward_step_parity() {
 
         // ── Output ───────────────────────────────────────────────────────────
         let d = max_abs_diff(out_fwd.clone(), out_step.clone());
-        assert!(d < VAL_TOL, "{label}: forward vs step output: {d:.3e}");
+        assert!(d < dtype_tol(VAL_TOL), "{label}: forward vs step output: {d:.3e}");
 
         // ── State ────────────────────────────────────────────────────────────
         assert_cache_parity(&label, cache_fwd, cache_step);
@@ -1365,11 +1365,11 @@ fn complex_angle_scan_forward_step_parity() {
         let (in_f, w_f, dt_f) = grads_of(out_fwd, &p_fwd);
         let (in_s, w_s, dt_s) = grads_of(out_step, &p_step);
         for (name, d) in [
-            ("input", max_abs_diff(in_f, in_s)),
-            ("in_proj.weight", max_abs_diff(w_f, w_s)),
-            ("dt_bias_h", max_abs_diff(dt_f, dt_s)),
+            ("input", max_rel_diff(in_s, in_f)),
+            ("in_proj.weight", max_rel_diff(w_s, w_f)),
+            ("dt_bias_h", max_rel_diff(dt_s, dt_f)),
         ] {
-            assert!(d < GRAD_TOL, "{label}: {name} gradient: {d:.3e}");
+            assert!(d < dtype_tol(GRAD_TOL), "{label}: {name} gradient: {d:.3e}");
         }
     }
 }
@@ -1426,7 +1426,7 @@ fn complex_angle_scan_split_prefill_parity() {
     let out_split = Tensor::cat(vec![out_a, out_b], 1);
 
     let d = max_abs_diff(out_whole.clone(), out_split.clone());
-    assert!(d < VAL_TOL, "split prefill output: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "split prefill output: {d:.3e}");
     assert_cache_parity("split prefill", cache_whole, cache_split);
 
     let grads_of = |out: Tensor<3>, p: &Param<Tensor<3>>| {
@@ -1444,7 +1444,7 @@ fn complex_angle_scan_split_prefill_parity() {
         ("in_proj.weight", max_abs_diff(w_w, w_s)),
         ("dt_bias_h", max_abs_diff(dt_w, dt_s)),
     ] {
-        assert!(d < GRAD_TOL, "split prefill: {name} gradient: {d:.3e}");
+        assert!(d < dtype_tol(GRAD_TOL), "split prefill: {name} gradient: {d:.3e}");
     }
 }
 
@@ -1536,8 +1536,8 @@ fn rotation_state_constructors_and_accessors() {
     // Identity quaternion: real part 1, vector part 0.
     let w = qt.clone().narrow(3, 0, 1);
     let xyz = qt.narrow(3, 1, 3);
-    assert!(max_abs_diff(w, Tensor::<4>::ones([2, 3, 5, 1], &device)) < VAL_TOL);
-    assert!(max_abs_diff(xyz, Tensor::<4>::zeros([2, 3, 5, 3], &device)) < VAL_TOL);
+    assert!(max_abs_diff(w, Tensor::<4>::ones([2, 3, 5, 1], &device)) < dtype_tol(VAL_TOL));
+    assert!(max_abs_diff(xyz, Tensor::<4>::zeros([2, 3, 5, 3], &device)) < dtype_tol(VAL_TOL));
 }
 
 #[test]
@@ -1683,17 +1683,17 @@ fn factored_matches_explicit_grads() {
     let g_fac = run_grads(&p_fac, head, true);
 
     let pairs = [
-        ("q", max_abs_diff(g_exp.d_q, g_fac.d_q)),
-        ("alpha", max_abs_diff(g_exp.d_alpha, g_fac.d_alpha)),
-        ("x", max_abs_diff(g_exp.d_x, g_fac.d_x)),
-        ("b", max_abs_diff(g_exp.d_b, g_fac.d_b)),
-        ("c", max_abs_diff(g_exp.d_c, g_fac.d_c)),
-        ("init", max_abs_diff(g_exp.d_init, g_fac.d_init)),
+        ("q", max_rel_diff(g_fac.d_q, g_exp.d_q)),
+        ("alpha", max_rel_diff(g_fac.d_alpha, g_exp.d_alpha)),
+        ("x", max_rel_diff(g_fac.d_x, g_exp.d_x)),
+        ("b", max_rel_diff(g_fac.d_b, g_exp.d_b)),
+        ("c", max_rel_diff(g_fac.d_c, g_exp.d_c)),
+        ("init", max_rel_diff(g_fac.d_init, g_exp.d_init)),
     ];
     for (name, d) in pairs {
         assert!(
-            d < GRAD_TOL,
-            "grad {name}: factored vs explicit max abs diff = {d:.6} (tol {GRAD_TOL})"
+            d < dtype_tol(GRAD_TOL),
+            "grad {name}: factored vs explicit max rel diff = {d:.6} (tol {})", dtype_tol(GRAD_TOL)
         );
     }
 }
@@ -1780,7 +1780,7 @@ fn real1d_matches_zeroed_rotation(kind: RotationKind) {
     let (real, _) = as_real1d(block).forward(x, None, Mamba3SsdPath::Minimal(None), None);
     let diff = max_abs_diff(zeroed, real);
     assert!(
-        diff < 1e-5,
+        diff < dtype_tol(1e-5),
         "{kind:?} with a zeroed generator differs from Real1D (max diff {diff})"
     );
 }
@@ -1832,7 +1832,7 @@ fn real1d_projects_no_rotation_channels() {
 
 /// Read a `[1, n]` tensor back as a `Vec<f32>`.
 fn row(t: Tensor<2>) -> Vec<f32> {
-    t.into_data().try_to_vec::<f32>().unwrap()
+    t.into_data().try_into_vec_as::<f32>().unwrap()
 }
 
 /// The rotation the block applies is a turn about the axis the projection
@@ -1862,7 +1862,7 @@ fn bounded_generator_keeps_its_axis() {
         for (k, gk) in g.iter().enumerate() {
             let expected = dir[k] / dir_norm * len;
             assert!(
-                (gk - expected).abs() < 1e-5,
+                (gk - expected).abs() < dtype_tol(1e-5),
                 "axis warped at scale {scale}: {g:?} is not parallel to {dir:?}"
             );
         }
@@ -1903,7 +1903,7 @@ fn half_turn_is_reachable_with_a_live_gradient() {
     ));
     let q = quat_from_scaled_axis(bound_rotation_vector::<2>(r.val(), 2.0 * pi));
     let w = row(q.clone().narrow(1, 0, 1))[0];
-    assert!(w.abs() < 1e-5, "not a half turn: w = {w}");
+    assert!(w.abs() < dtype_tol(1e-5), "not a half turn: w = {w}");
     let grads = q.narrow(1, 0, 1).sum().backward();
     let dw = row(r.val().grad(&grads).expect("grad r"))[0];
     assert!(
@@ -1919,7 +1919,7 @@ fn half_turn_is_reachable_with_a_live_gradient() {
     let q = quat_from_scaled_axis(bound_rotation_vector::<2>(saturated.val(), pi));
     let w = row(q.clone().narrow(1, 0, 1))[0];
     assert!(
-        w.abs() < 1e-5,
+        w.abs() < dtype_tol(1e-5),
         "saturated tanh should give a half turn: {w}"
     );
     let grads = q.narrow(1, 0, 1).sum().backward();
@@ -1975,7 +1975,7 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
             .clone()
             .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
     assert!(
-        max_abs_diff(y_default, y_widened.clone()) > 1e-4,
+        max_abs_diff(y_default, y_widened.clone()) > dtype_tol(1e-4),
         "{kind:?}: rotation_range is ignored"
     );
 
@@ -1989,7 +1989,7 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
     }
     let d = max_abs_diff(y_widened, Tensor::cat(steps, 1));
     assert!(
-        d < 1e-4,
+        d < dtype_tol(1e-4),
         "{kind:?}: forward/step disagree at range 1.37: {d}"
     );
     let _ = cache_widened;
@@ -2032,7 +2032,7 @@ fn cumulative_quaternion_stays_unit() {
     ] {
         let drift = max_abs_diff(norms.clone(), norms.ones_like());
         assert!(
-            drift < 1e-4,
+            drift < dtype_tol(1e-4),
             "{name}: cumulative rotation drifted off the unit sphere by {drift}"
         );
     }
@@ -2071,7 +2071,7 @@ fn saturated_generator_keeps_a_live_axis_gradient() {
     // the angle is pinned at the bound …
     let len = row((g.clone() * g.clone()).sum_dim(1).sqrt())[0];
     assert!(
-        (len - std::f32::consts::PI).abs() < 1e-5,
+        (len - std::f32::consts::PI).abs() < dtype_tol(1e-5),
         "expected a saturated angle, got {len}"
     );
     // … yet the direction still backprops
@@ -2098,7 +2098,7 @@ fn bounded_generator_survives_a_huge_projection() {
         let g = row(bound_rotation_vector::<2>(raw, max_angle));
         let len = g.iter().map(|v| v * v).sum::<f32>().sqrt();
         assert!(
-            (len - max_angle as f32).abs() < 1e-4,
+            (len - max_angle as f32).abs() < dtype_tol(1e-4),
             "at scale {scale} the generator is {len}, not the bound {max_angle}"
         );
     }
@@ -2123,13 +2123,13 @@ fn quaternion_generators_are_per_head() {
     let v = g
         .reshape([nheads * 3])
         .into_data()
-        .try_to_vec::<f32>()
+        .try_into_vec_as::<f32>()
         .unwrap();
     let angle = std::f32::consts::PI * 1.0f32.tanh();
     // head 0: (angle, 0, 0)   head 1: (0, angle, 0)
     for (k, expected) in [angle, 0.0, 0.0, 0.0, angle, 0.0].into_iter().enumerate() {
         assert!(
-            (v[k] - expected).abs() < 1e-5,
+            (v[k] - expected).abs() < dtype_tol(1e-5),
             "channel {k} is {} , expected {expected} (heads are sharing an axis?)",
             v[k]
         );

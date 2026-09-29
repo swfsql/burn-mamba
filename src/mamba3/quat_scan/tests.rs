@@ -6,7 +6,7 @@
 
 use super::quat_cumprod_recalculated;
 use crate::mamba3::rotation::{quat_cumprod, quat_normalize};
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn::module::Param;
 use burn::prelude::*;
 use burn::tensor::Distribution;
@@ -37,9 +37,9 @@ fn recalculated_matches_quat_cumprod_values() {
         let (cum_s, fin_s) = quat_cumprod(q.clone(), init);
         let dc = max_abs_diff(cum_r, cum_s);
         let df = max_abs_diff(fin_r, fin_s);
-        assert!(dc < VAL_TOL, "recalculated vs reference cum: {dc:.6}");
+        assert!(dc < dtype_tol(VAL_TOL), "recalculated vs reference cum: {dc:.6}");
         assert!(
-            df < VAL_TOL,
+            df < dtype_tol(VAL_TOL),
             "recalculated vs reference final carry: {df:.6}"
         );
     }
@@ -90,12 +90,13 @@ fn recalculated_matches_quat_cumprod_grads() {
     let (dq_s, di_s) = grad_for(false);
     let dq = max_abs_diff(dq_r, dq_s);
     let di = max_abs_diff(di_r, di_s);
+    let tol = dtype_tol(GRAD_TOL);
     assert!(
-        dq < GRAD_TOL,
-        "recalculated vs reference q-grad: {dq:.6} (tol {GRAD_TOL})"
+        dq < tol,
+        "recalculated vs reference q-grad: {dq:.6} (tol {tol})"
     );
     assert!(
-        di < GRAD_TOL,
-        "recalculated vs reference init-grad: {di:.6} (tol {GRAD_TOL})"
+        di < tol,
+        "recalculated vs reference init-grad: {di:.6} (tol {tol})"
     );
 }

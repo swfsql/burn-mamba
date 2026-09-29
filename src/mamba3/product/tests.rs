@@ -4,7 +4,7 @@ use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::ssd_path::Mamba3SsdPath;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 const MICRO: usize = 3;
@@ -31,7 +31,7 @@ fn unfold_reads_micro_steps_in_order() {
     let t = Tensor::<1, burn::tensor::Int>::arange(0..12, &device).float().reshape([1, 2, 6]);
     let out = unfold_micro_bs(t, 3);
     assert_eq!([1, 6, 2], out.dims());
-    let flat: Vec<f32> = out.into_data().try_to_vec::<f32>().unwrap();
+    let flat: Vec<f32> = out.into_data().try_into_vec_as::<f32>().unwrap();
     // Token 0's micro-steps are (0,1), (2,3), (4,5); token 1's follow.
     assert_eq!(
         vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11.],
@@ -41,7 +41,7 @@ fn unfold_reads_micro_steps_in_order() {
     let s = Tensor::<1, burn::tensor::Int>::arange(0..6, &device).float().reshape([1, 6]);
     let out = unfold_micro_b(s, 3);
     assert_eq!([1, 3, 2], out.dims());
-    let flat: Vec<f32> = out.into_data().try_to_vec::<f32>().unwrap();
+    let flat: Vec<f32> = out.into_data().try_into_vec_as::<f32>().unwrap();
     assert_eq!(vec![0., 1., 2., 3., 4., 5.], flat);
 }
 
@@ -140,11 +140,11 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
 
     let label = format!("{kind:?} u={micro_steps}");
     assert!(
-        max_abs_diff(out_fwd, out_step) < 1e-4,
+        max_abs_diff(out_fwd, out_step) < dtype_tol(1e-4),
         "{label}: forward vs unrolled step outputs"
     );
     assert!(
-        max_abs_diff(cache_fwd.ssm_bhpr, cache_step.ssm_bhpr) < 1e-4,
+        max_abs_diff(cache_fwd.ssm_bhpr, cache_step.ssm_bhpr) < dtype_tol(1e-4),
         "{label}: final ssm state"
     );
     // The tap slots are absent under `Trapezoid::None`, in both caches.
@@ -155,13 +155,13 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     );
     if let (Some(fwd), Some(step)) = (cache_fwd.k_state_bumhr, cache_step.k_state_bumhr) {
         assert!(
-            max_abs_diff(fwd, step) < 1e-4,
+            max_abs_diff(fwd, step) < dtype_tol(1e-4),
             "{label}: final k_state (the tap FIFO's B)"
         );
     }
     if let (Some(fwd), Some(step)) = (cache_fwd.v_state_buhp, cache_step.v_state_buhp) {
         assert!(
-            max_abs_diff(fwd, step) < 1e-4,
+            max_abs_diff(fwd, step) < dtype_tol(1e-4),
             "{label}: final v_state (the tap FIFO's x)"
         );
     }
@@ -215,7 +215,7 @@ fn forward_single_matches_step(kind: RotationKind, micro_steps: usize) {
         cache = Some(c);
     }
     assert!(
-        max_abs_diff(out_fwd, Tensor::cat(outs, 1)) < 1e-4,
+        max_abs_diff(out_fwd, Tensor::cat(outs, 1)) < dtype_tol(1e-4),
         "{kind:?} u={micro_steps}: forward_single_ssd vs unrolled step"
     );
 }
@@ -260,7 +260,7 @@ fn split_prefill_matches_full() {
             None,
         );
         assert!(
-            max_abs_diff(full, Tensor::cat(vec![head, tail], 1)) < 1e-4,
+            max_abs_diff(full, Tensor::cat(vec![head, tail], 1)) < dtype_tol(1e-4),
             "{kind:?}: split prefill vs full"
         );
     }
@@ -321,8 +321,8 @@ fn forward_step_grad_parity(kind: RotationKind, micro_steps: usize) {
         weight.clone().grad(&g_fwd).expect("grad in_proj (forward)"),
         weight.grad(&g_step).expect("grad in_proj (step)"),
     );
-    assert!(d_in < 1e-2, "{label}: forward/step input-grad diff {d_in:.6}");
-    assert!(d_w < 1e-2, "{label}: forward/step in_proj-grad diff {d_w:.6}");
+    assert!(d_in < dtype_tol(1e-2), "{label}: forward/step input-grad diff {d_in:.6}");
+    assert!(d_w < dtype_tol(1e-2), "{label}: forward/step in_proj-grad diff {d_w:.6}");
 }
 
 #[test]

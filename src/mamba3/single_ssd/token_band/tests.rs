@@ -3,7 +3,7 @@
 
 use super::*;
 use burn::tensor::Distribution;
-use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::{dtype_tol, max_rel_diff};
 use burn_stack::utils::test_helpers::test_device;
 
 /// `Σ_{j<u−1} νᵗᵃᵖ·dcy · (C[u−1]·B[j]) · V[j]`, written out one `(token, tap)`
@@ -87,8 +87,8 @@ fn matches_the_direct_sum() {
         .expect("u > 1");
         let want = reference(v, b, c, excess, da, u);
         assert_eq!(got.dims(), [batch, tokens, mimo_rank, nheads, per_head_dim]);
-        let d = max_abs_diff(got, want);
-        assert!(d < 1e-4, "u={u} m={mimo_rank}: {d:.3e}");
+        let d = max_rel_diff(got, want);
+        assert!(d < dtype_tol(1e-4), "u={u} m={mimo_rank}: {d:.3e}");
     }
 }
 
