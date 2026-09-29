@@ -5,9 +5,11 @@
 //! Each family implements `CacheStack::cache_to_inner`/`cache_from_inner` by
 //! hand. `Module::map` does nothing on plain `Tensor` fields, which is all a
 //! cache holds, so a `Module`-based conversion would silently skip every field.
+//! `cache_from_inner` lifts each tensor with `burn_stack::modules::lift`, not a
+//! bare `Tensor::from_inner` (see `lift`).
 
 use burn::prelude::*;
-use burn_stack::modules::{Block, BlockConfig, CacheStack};
+use burn_stack::modules::{Block, BlockConfig, CacheStack, lift};
 use burn_stack::utils::UntiedParam;
 
 /// Runtime-tagged caches: one variant per family, matching
@@ -39,8 +41,8 @@ impl MambaCaches {
     /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
     /// not the family type.
     ///
-    /// It has no effect off the autodiff backend (see
-    /// [`CacheStack::cache_to_inner`]).
+    /// Each slot keeps its device and checkpointing strategy. On a device
+    /// without autodiff, this does nothing (see [`CacheStack::detach`]).
     pub fn detach(self) -> Self {
         match self {
             #[cfg(feature = "mamba1")]
@@ -83,11 +85,14 @@ mod impl_mamba1 {
                 ssm_bir: c.ssm_bir.inner(),
             }
         }
-        fn cache_from_inner(c: Mamba1Cache) -> Mamba1Cache {
+        fn cache_from_inner(c: Mamba1Cache, device: &Device) -> Mamba1Cache {
             Mamba1Cache {
-                conv_bik: Tensor::from_inner(c.conv_bik),
-                ssm_bir: Tensor::from_inner(c.ssm_bir),
+                conv_bik: lift(c.conv_bik, device),
+                ssm_bir: lift(c.ssm_bir, device),
             }
+        }
+        fn cache_device(c: &Mamba1Cache) -> Device {
+            c.ssm_bir.device()
         }
     }
 
@@ -177,11 +182,14 @@ mod impl_mamba2 {
                 ssm_bhpr: c.ssm_bhpr.inner(),
             }
         }
-        fn cache_from_inner(c: Mamba2Cache) -> Mamba2Cache {
+        fn cache_from_inner(c: Mamba2Cache, device: &Device) -> Mamba2Cache {
             Mamba2Cache {
-                conv_bvk: Tensor::from_inner(c.conv_bvk),
-                ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
+                conv_bvk: lift(c.conv_bvk, device),
+                ssm_bhpr: lift(c.ssm_bhpr, device),
             }
+        }
+        fn cache_device(c: &Mamba2Cache) -> Device {
+            c.ssm_bhpr.device()
         }
     }
 
@@ -337,35 +345,39 @@ mod impl_mamba3 {
                 }),
             }
         }
-        fn cache_from_inner(c: Mamba3Cache) -> Mamba3Cache {
+        fn cache_from_inner(c: Mamba3Cache, device: &Device) -> Mamba3Cache {
             use crate::mamba3::prelude::RotationState;
-            fn rot(r: RotationState) -> RotationState {
+            fn rot(r: RotationState, device: &Device) -> RotationState {
                 match r {
                     RotationState::Real(u) => RotationState::Real(u),
-                    RotationState::Angle(t) => RotationState::Angle(Tensor::from_inner(t)),
-                    RotationState::Quaternion(t) => {
-                        RotationState::Quaternion(Tensor::from_inner(t))
-                    }
-                    RotationState::Rotor(t) => RotationState::Rotor(Tensor::from_inner(t)),
+                    RotationState::Angle(t) => RotationState::Angle(lift(t, device)),
+                    RotationState::Quaternion(t) => RotationState::Quaternion(lift(t, device)),
+                    RotationState::Rotor(t) => RotationState::Rotor(lift(t, device)),
                 }
             }
             match c {
                 Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
-                    ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
-                    k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
-                    v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
-                    rotation: rot(c.rotation),
-                    log_precision_bh: c.log_precision_bh.map(Tensor::from_inner),
-                    tropical_bh: c.tropical_bh.map(Tensor::from_inner),
+                    ssm_bhpr: lift(c.ssm_bhpr, device),
+                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
+                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+                    rotation: rot(c.rotation, device),
+                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
+                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
-                    ssm_bhpr: Tensor::from_inner(c.ssm_bhpr),
-                    k_state_bumhr: c.k_state_bumhr.map(Tensor::from_inner),
-                    v_state_buhp: c.v_state_buhp.map(Tensor::from_inner),
-                    rotation: rot(c.rotation),
-                    log_precision_bh: c.log_precision_bh.map(Tensor::from_inner),
-                    tropical_bh: c.tropical_bh.map(Tensor::from_inner),
+                    ssm_bhpr: lift(c.ssm_bhpr, device),
+                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
+                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+                    rotation: rot(c.rotation, device),
+                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
+                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
                 }),
+            }
+        }
+        fn cache_device(c: &Mamba3Cache) -> Device {
+            match c {
+                Mamba3Cache::DoubleSsd(c) => c.ssm_bhpr.device(),
+                Mamba3Cache::SingleSsd(c) => c.ssm_bhpr.device(),
             }
         }
     }

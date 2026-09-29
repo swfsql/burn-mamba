@@ -315,7 +315,8 @@ unit-quaternion VJP, parallel ops only).
   for Muon.
 - **`cache.rs`**: `MambaCaches` (plain runtime state, **not** a `Module`) +
   `detach()`, and the `Block` / `BlockConfig` / `CacheStack` impls of each
-  family. `cache_to_inner`/`cache_from_inner` are written by hand:
+  family. `cache_to_inner`/`cache_from_inner` (through burn-stack's
+  `lift`)/`cache_device` are written by hand:
   `Module::map` does **nothing** on plain `Tensor` fields. Mamba-2/3 implement
   `block_forward_packed` (`forward_packed` from a fresh origin).
 - **`capture.rs`**: `impl CacheTensors` (burn-stack's) for every family's

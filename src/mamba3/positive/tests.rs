@@ -830,6 +830,7 @@ fn the_slots_survive_a_no_grad_round_trip() {
     let (_, cache) = model.forward(input, None, Mamba3SsdPath::default(), None);
     let back = <Mamba3Caches as CacheStack>::cache_from_inner(
         <Mamba3Caches as CacheStack>::cache_to_inner(cache.clone()),
+        &ad,
     );
     let (Mamba3Cache::SingleSsd(before), Mamba3Cache::SingleSsd(after)) = (cache, back) else {
         panic!("a missing cache is a single-SSD one");

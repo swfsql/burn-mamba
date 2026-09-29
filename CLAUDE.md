@@ -496,7 +496,10 @@ generic containers (they do not reimplement them).
   `Backward<B,_>` nodes, the `Autodiff<B>` ext impls).
 - **A no-grad region means the inner backend, not `detach`** (`burn-stack`,
   see its `utils/detach.rs`). So each family's `Caches` must implement
-  `CacheStack::cache_to_inner`/`cache_from_inner` **by hand**. `Module::map`
+  `CacheStack::cache_to_inner`/`cache_from_inner`/`cache_device` **by hand**
+  (lift with `burn_stack::modules::lift`, never a bare `Tensor::from_inner`,
+  which enables autodiff on a plain tensor and resets the checkpointing
+  strategy). `Module::map`
   does nothing on plain `Tensor` fields, which is all a cache holds, so a
   `Module`-based conversion would silently skip every field.
 - **Two Mamba-3 SSD pathways**: the cache type selects double-ssd (simple) or
