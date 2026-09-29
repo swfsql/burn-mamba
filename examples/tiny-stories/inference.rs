@@ -22,7 +22,7 @@
 //! chunk of every prompt across which the prefill is held. `--no-graph`
 //! disables both captures, and the text is the same either way. [`infer`]
 //! loads the checkpoint and prints a few stories at different temperatures,
-//! and a few continuations of fixed prompts.
+//! and a few continuations of fixed prompts (or of the `--prompt` texts).
 //!
 //! One call is one story. A second call starts from a **zero** cache and
 //! primes again. This is the only place where these examples really reset a
@@ -46,20 +46,36 @@ const TEMPERATURES: &[f64] = &[0.5, 0.8, 1.0];
 /// Characters generated per sample by [`infer`].
 const SAMPLE_CHARS: usize = 800;
 
-/// Prompts [`infer`] continues, at temperature 0.8.
+/// Prompts [`infer`] continues when no `--prompt` is given.
 const PROMPTS: &[&str] = &[
     "once upon a time, there was a little girl named lily. she",
     "tom and his dog went to the park. they",
     "the sun was hot, so the kids",
 ];
 
-/// Load the trained LM and print one story per temperature, plus one
-/// continuation of each of [`PROMPTS`].
+/// The temperature of the prompted continuations when no `--temperature` is
+/// given.
+pub const PROMPT_TEMPERATURE: f64 = 0.8;
+
+/// The prompted continuations of [`infer`] (`--prompt`, `--continuations`,
+/// `--temperature`).
+pub struct Prompting {
+    /// The prompts. Empty selects [`PROMPTS`].
+    pub prompts: Vec<String>,
+    /// The continuations of each prompt, each with its own seed.
+    pub continuations: usize,
+    /// The sampling temperature of the continuations.
+    pub temperature: f64,
+}
+
+/// Load the trained LM and print one story per temperature, plus the
+/// continuations of each prompt that `prompting` selects.
 pub fn infer(
     model_config: MambaVocabNetConfig,
     infer_device: Device,
     app_args: &AppArgs,
     run: &Run,
+    prompting: &Prompting,
 ) {
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &infer_device)
@@ -91,27 +107,46 @@ pub fn infer(
         std::fs::write(&path, &text).expect("failed to write the sample");
     }
 
+    let Prompting { prompts, continuations, temperature } = prompting;
+    let prompts: Vec<&str> = match prompts.as_slice() {
+        [] => PROMPTS.to_vec(),
+        _ => prompts.iter().map(String::as_str).collect(),
+    };
     // One prefill for every prompt: they share the opening of the latents and
     // (without `--no-graph`) one captured chunk.
     let mut prefill = prefill(&model, run, &infer_device);
-    for (i, prompt) in PROMPTS.iter().enumerate() {
-        let t = Instant::now();
-        let text = generate(
-            &model,
-            run,
-            &infer_device,
-            Some(prompt),
-            SAMPLE_CHARS,
-            0.8,
-            (TEMPERATURES.len() + i) as u64,
-            Some(&mut prefill),
-        );
-        let ms = per_char(t);
-        println!("\n--- prompted, temperature 0.8 ({ms:.2} ms/char) ---\n{prompt}{text}");
-        let path = out_dir.join(format!("sample-prompted-{i}.txt"));
-        std::fs::write(&path, format!("{prompt}{text}")).expect("failed to write the sample");
+    // Each continuation has its own seed, after the seeds of the unprompted
+    // stories.
+    let mut seed = TEMPERATURES.len() as u64;
+    for (i, prompt) in prompts.iter().enumerate() {
+        for j in 0..*continuations {
+            let t = Instant::now();
+            let text = generate(
+                &model,
+                run,
+                &infer_device,
+                Some(prompt),
+                SAMPLE_CHARS,
+                *temperature,
+                seed,
+                Some(&mut prefill),
+            );
+            seed += 1;
+            let ms = per_char(t);
+            println!(
+                "\n--- prompted, temperature {temperature} ({ms:.2} ms/char) ---\n{prompt}{text}"
+            );
+            // The index of the continuation is in the name only when there are several.
+            let name = match continuations {
+                1 => format!("sample-prompted-{i}.txt"),
+                _ => format!("sample-prompted-{i}-{j}.txt"),
+            };
+            std::fs::write(out_dir.join(name), format!("{prompt}{text}"))
+                .expect("failed to write the sample");
+        }
     }
-    println!("\nsaved {} samples to {out_dir:?}", TEMPERATURES.len() + PROMPTS.len());
+    let n_samples = TEMPERATURES.len() + prompts.len() * continuations;
+    println!("\nsaved {n_samples} samples to {out_dir:?}");
 }
 
 /// Sample `n_chars` characters of one story, and continue `prompt` if there is
@@ -141,6 +176,55 @@ pub fn generate(
     prefill: Option<&mut Prefill<'_, MambaCaches>>,
 ) -> String {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let tokens = prompt.map(|prompt| {
+        let tokens = VOCAB.encode(prompt);
+        assert!(
+            !tokens.is_empty(),
+            "the prompt has no character inside the alphabet: {prompt:?}"
+        );
+        tokens
+    });
+    let (logits, caches, class) = open(model, run, device, tokens.as_deref(), prefill);
+
+    // Decode: one `step` per character, against that same cache. After the
+    // first few steps, it replays one captured graph, unless `--no-graph` is
+    // set (or a class latent is still to come).
+    let capture = model.only_start_latents() && run.graphs;
+    // Safety: the step reads only its arguments and `model`, which it borrows
+    // for the whole call.
+    unsafe {
+        decode(
+            device,
+            logits,
+            caches,
+            class,
+            n_chars,
+            temperature,
+            &mut rng,
+            capture,
+            |x, caches, class| model.step(x, Some(caches), class),
+        )
+    }
+}
+
+/// The opening of one story: the class latents, then the `prompt` tokens if
+/// there are some. Returns the logits of the next character, the cache, and
+/// the class cursors that the decode continues from.
+///
+/// The latents always come first:
+/// - With a `prefill` and only `Start` latents, `prime` runs the latents, and
+///   the prompt follows from that cache in fixed-shape chunks.
+/// - Otherwise, one `forward` takes the prompt, and the cursors splice the
+///   latents in front of it, exactly as in training.
+/// - Without a prompt, `prime` runs the latents alone. They already predict
+///   the first character.
+fn open(
+    model: &MambaVocabNet,
+    run: &Run,
+    device: &Device,
+    prompt: Option<&[u8]>,
+    prefill: Option<&mut Prefill<'_, MambaCaches>>,
+) -> (Tensor<2>, MambaCaches, ClassCursors) {
     // One story: the cursors open the sequence here and are threaded through
     // every call below, so the latents are emitted once.
     let mut class = ClassCursors::stream();
@@ -148,15 +232,10 @@ pub fn generate(
     let (logits, caches) = match prompt {
         // Prefill. Keep the cache, and the logits of the last character of the
         // prompt (the next character is drawn from them).
-        Some(prompt) => {
-            let tokens = VOCAB.encode(prompt);
-            assert!(
-                !tokens.is_empty(),
-                "the prompt has no character inside the alphabet: {prompt:?}"
-            );
+        Some(tokens) => {
             // In chunks after the latents, when they are all `Start`s.
             let prefilled = match prefill {
-                Some(prefill) if model.only_start_latents() => prefill.run(&tokens, || {
+                Some(prefill) if model.only_start_latents() => prefill.run(tokens, || {
                     let mut class = ClassCursors::stream();
                     let (_, caches) = model.prime(1, None, Some(&mut class));
                     caches.map(|caches| (caches, class))
@@ -190,27 +269,7 @@ pub fn generate(
             )
         }
     };
-
-    // Decode: one `step` per character, against that same cache. After the
-    // first few steps, it replays one captured graph, unless `--no-graph` is
-    // set (or a class latent is still to come).
-    let caches = caches.expect("the opening leaves a cache");
-    let capture = model.only_start_latents() && run.graphs;
-    // Safety: the step reads only its arguments and `model`, which it borrows
-    // for the whole call.
-    unsafe {
-        decode(
-            device,
-            logits,
-            caches,
-            class,
-            n_chars,
-            temperature,
-            &mut rng,
-            capture,
-            |x, caches, class| model.step(x, Some(caches), class),
-        )
-    }
+    (logits, caches.expect("the opening leaves a cache"), class)
 }
 
 /// Prompt characters per [`prefill`] chunk: one training window. A replayed
@@ -230,3 +289,6 @@ pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Pref
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -53,8 +53,10 @@
   corpus, with a tied 48-character embedding at both ends. Its README covers
   the case-folded alphabet, the download, the class latents that mark the
   start of a story (and that `prime()` replays for seedless sampling), the
-  prefill-`forward()` / decode-`step()` sampler, and the runs of windows that
-  carry the state across a story.
+  prefill-`forward()` / decode-`step()` sampler, the runs of windows that
+  carry the state across a story, the packed rows of whole stories
+  (`-- --pack`), and a measure of how much a trained model uses the earlier
+  part of a story (`-- --context-use`).
 
 #### Examples Structure
 
@@ -73,7 +75,8 @@ An example usually has:
 - `training.rs`: the training procedure,
 - `inference.rs`: the inference procedure (if applicable),
 - `cli.rs`: its own command-line flags (empty when it has none),
-- `main.rs`: the launch procedure.
+- `main.rs`: the launch procedure,
+- `tests.rs` or `<module>/tests.rs`: its tests (if it has some).
 
 `main.rs` parses the command line: first the shared flags (training and/or
 inference, and more), then the flags of the example, after `--`. The examples

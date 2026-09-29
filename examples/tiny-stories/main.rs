@@ -45,8 +45,13 @@ pub use common::{
 
 /// The example's own flags (corpus knobs, SSD path, profiler, VRAM cap).
 pub mod cli;
+/// How much the trained LM uses the earlier part of a story (`--context-use`).
+pub mod context;
 /// Sampling from the trained LM.
 pub mod inference;
+/// A tiny network for the tests.
+#[cfg(test)]
+pub mod test_net;
 /// The example's `model_config()`.
 pub mod model;
 /// Training entry point for the LM.
@@ -142,10 +147,15 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if app_args.inference {
-        inference::infer(model_config, device, app_args, &run);
+        inference::infer(model_config.clone(), device.clone(), app_args, &run, &cli.prompting);
     }
 
-    if !app_args.inference && !app_args.training {
+    if cli.context_use {
+        let n_stories = config.valid_stories;
+        context::context_use(model_config, device, app_args, &run, n_stories, cli.context_batch);
+    }
+
+    if !app_args.inference && !app_args.training && !cli.context_use {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }

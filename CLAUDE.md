@@ -612,5 +612,10 @@ Under `../` (not analyzed here):
     `Edit`s.
   - Bash stays the tool for *reading* and *inspecting* (`cat`, `sed -n`, `rg`,
     `grep`) and for throwaway files outside the crate (for example, in `/tmp`).
+- **Waiting**: for a wait of more than ~1 min (a build, a run, a chain of
+  runs), do not keep the turn alive with a foreground loop or `sleep`. Watch
+  the job in the background (a `Monitor` is preferred, a background waiter
+  script is also correct), then return the turn. The watch also reports each
+  failure state (for example, a crash).
 - **Memory**: ask the user before you write to the auto-memory. Show the
   change that you propose, and write it only after the user approves it.

@@ -174,7 +174,12 @@ shared CLI, before the `--`, sets:
 | `--no-frontier` | off | carry the state through the whole story, ungated |
 | `--train-stories <n>` | 4096 | stories taken from the train split |
 | `--valid-stories <n>` | 256 | stories taken from the validation split |
-| `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal` (not persisted) |
+| `--ssd-path <p>[:<l>]` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal`. `l` sets the chunk length, in folded positions (default: from the block shape). Not persisted |
+| `--prompt <text>` | the built-in prompts | at inference, continue `text` instead of the built-in prompts. Give the flag again for each prompt |
+| `--continuations <n>` | 1 | at inference, the number of continuations of each prompt, each with its own seed |
+| `--temperature <t>` | 0.8 | at inference, the sampling temperature of the prompted continuations |
+| `--context-use` | off | measure how much the trained model uses the earlier part of the validation stories (see `context.rs`) |
+| `--context-batch <n>` | 4 | with `--context-use`, the sequences per forward |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 | `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward (not persisted) |
