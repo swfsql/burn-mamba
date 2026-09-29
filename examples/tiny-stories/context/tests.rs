@@ -10,10 +10,11 @@ use crate::training::Run;
 use burn::prelude::*;
 use burn::tensor::activation::log_softmax;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 #[test]
 fn score_reads_the_rows_of_the_continuation() {
-    let device = Device::default();
+    let device = test_device();
     device.seed(0);
     let net = tiny_net(&device);
     let run = Run {

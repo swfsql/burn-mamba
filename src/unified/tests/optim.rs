@@ -8,6 +8,7 @@ use burn::optim::{AdamWConfig, MuonConfig, Optimizer, RecordState, StateSink, St
 use burn::prelude::*;
 use burn_stack::optim::segmented::{BlockState, Segmented, SegmentedState};
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,7 +141,7 @@ fn mamba3_real1d_plan_fits_the_model() {
 #[cfg(feature = "mamba3")]
 fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
     use crate::prelude::*;
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -176,7 +177,7 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
 #[test]
 fn mamba2_plan_fits_the_model() {
     use crate::prelude::*;
-    let device = Device::default();
+    let device = test_device();
     let config = MambaVocabNetConfig::Mamba2 {
         vocab_size: 20,
         pad_vocab_size_multiple: 1,
@@ -207,7 +208,7 @@ fn mamba2_plan_fits_the_model() {
 #[test]
 fn mamba1_plan_fits_the_model() {
     use crate::prelude::*;
-    let device = Device::default();
+    let device = test_device();
     let config = MambaLatentNetConfig::Mamba1 {
         input_size: 3,
         output_size: 5,
@@ -241,7 +242,7 @@ fn bidi_plan_fits_the_model() {
     use crate::unified::MambaBidiLayersConfig;
     use burn_stack::modules::bidi::OutputMergeConfig;
     use crate::prelude::*;
-    let device = Device::default();
+    let device = test_device();
     let config = MambaBidiLayersConfig::Mamba3 {
         n_real_layers: 2,
         n_virtual_layers: None,
@@ -304,7 +305,7 @@ fn rand_2d(shape: [usize; 2], device: &Device) -> Tensor<2> {
 /// the non-Muon channels of a fused projection keep exactly the update they had.
 #[test]
 fn all_adamw_blocks_equal_plain_adamw() {
-    let device = Device::default();
+    let device = test_device();
     let spec = ProjSpec::path(
         "w",
         vec![
@@ -335,7 +336,7 @@ fn all_adamw_blocks_equal_plain_adamw() {
 /// A single all-Muon block is just Muon.
 #[test]
 fn one_muon_block_equals_plain_muon() {
-    let device = Device::default();
+    let device = test_device();
     let spec = ProjSpec::path_whole("w", 12);
     let segmented = Segmented::new(&spec, muon().build(), adamw().build(), 1);
     let plain = muon().build();
@@ -360,7 +361,7 @@ fn one_muon_block_equals_plain_muon() {
 /// matrix — the whole reason the plan carries the column seams.
 #[test]
 fn per_block_muon_differs_from_fused_muon() {
-    let device = Device::default();
+    let device = test_device();
     let spec = ProjSpec::path(
         "w",
         vec![ProjSegment::muon("a", 6), ProjSegment::muon("b", 6)],
@@ -379,7 +380,7 @@ fn per_block_muon_differs_from_fused_muon() {
 /// The hand-written record round-trips, keeping each block on its own optimizer.
 #[test]
 fn segmented_state_round_trips() {
-    let device = Device::default();
+    let device = test_device();
     let spec = ProjSpec::path(
         "w",
         vec![
@@ -418,7 +419,7 @@ fn segmented_state_round_trips() {
 /// state: the state is the Muon blocks' alone, and pairs back with them.
 #[test]
 fn sgd_fallback_blocks_are_stateless_sgd() {
-    let device = Device::default();
+    let device = test_device();
     let widths = vec![6, 4, 2];
     let spec = ProjSpec::path(
         "w",
@@ -461,7 +462,7 @@ fn sgd_fallback_blocks_are_stateless_sgd() {
 #[test]
 fn build_assembles_groups_without_panicking() {
     use crate::prelude::*;
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 2,
         output_size: 2,
@@ -500,7 +501,7 @@ fn build_assembles_groups_without_panicking() {
 #[test]
 fn module_optimizer_state_round_trips_through_a_record() {
     use crate::prelude::*;
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 2,
         output_size: 2,
@@ -560,7 +561,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
 #[test]
 fn describe_reports_every_parameter() {
     use crate::prelude::*;
-    let device = Device::default();
+    let device = test_device();
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 1,
         output_size: 10,

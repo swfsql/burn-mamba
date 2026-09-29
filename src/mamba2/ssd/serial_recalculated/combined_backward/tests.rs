@@ -4,6 +4,7 @@ use burn_stack::utils::fprim::F;
 use burn::backend::Dispatch;
 use burn::prelude::*;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 /// The primitive backend the high-level `Tensor` is pinned to; `combined_backward`
 /// runs generically over it here (dispatching to the feature-selected backend).
@@ -27,7 +28,7 @@ type B = Dispatch;
 /// and ddt·dt).
 #[test]
 fn oracle_da_local_matches_einsum_minus_ddt_dt() {
-    let device = Default::default();
+    let device = test_device();
     let batch = 2;
     let nchunks = 3;
     let chunk_len = 4;

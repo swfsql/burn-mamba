@@ -45,6 +45,9 @@ cargo run --example reset-majority -- --training --inference
   `burn/optim` + `burn/std`. `cubecl`/`fusion` enable the memory-saving custom
   backward on those backend families. `check-nan`/`check-inf` enable the NaN/Inf
   guards. `dev-f16`/`dev-simd`/`dev-autotune` are example/test conveniences.
+- A test takes its device from burn-stack's `test_device()` (fp16 under
+  `dev-f16`), never from `Device::default()`: the dtype defaults are global,
+  and the first tensor fixes them for the process.
 - Every feature above **forwards to `burn-stack`** (see `Cargo.toml`), and it
   must. The `backend-*` cfgs are evaluated where
   `burn_stack::impl_backend_ext_for_burn_backends!` expands, which is in *this*

@@ -35,6 +35,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the construction's constants
@@ -641,7 +642,7 @@ const NUM_COUNT_CODES: usize = SEQ_LENGTH * SEQ_LENGTH;
 /// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_rotor_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, RotationKind::Rotor4D, Head::Decoder);
     println!("hand-built SO(4) block ({} params):", model.num_params());
     let mut worst = 1.0f64;
@@ -670,7 +671,7 @@ fn handmade_rotor_solves_every_family() {
 /// leaves it at 1, and the left-isoclinic block drives it to ~0.
 #[test]
 fn left_isoclinic_carries_a_double_cover() {
-    let device = Device::default();
+    let device = test_device();
     let decoder = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
     println!(
         "the same construction, left-isoclinic ({} params):",
@@ -756,7 +757,7 @@ fn mean_over_rms(channels: &[[f64; RANK]], targets: &[i64]) -> f64 {
 /// of angles is a function of the symbol counts, and `lr ≠ rl`.
 #[test]
 fn abelian_rotation_loses_the_order() {
-    let device = Device::default();
+    let device = test_device();
     println!("the same construction, abelian rotation:");
     let mut best = 0.0f64;
     for (name, family) in FAMILIES {
@@ -937,7 +938,7 @@ fn left_isoclinic_with_final_norm() {
     const ODD_SCALE: f64 = 0.55;
     const E: f64 = 0.35;
     const SLOPE: f64 = 10.0;
-    let device = Device::default();
+    let device = test_device();
 
     // both lifts of every class, by walking the group from the identity
     let mut lifts: Vec<Vec<[f64; RANK]>> = vec![Vec::new(); NUM_CLASSES];

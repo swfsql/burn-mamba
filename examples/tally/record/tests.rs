@@ -25,6 +25,7 @@ use crate::shared::handmade::{accuracy, affine_channels, memoryless_ceiling, par
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -291,7 +292,7 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 /// head, so the SSM state stays at zero: the register gives the answer.
 #[test]
 fn handmade_register_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, Arm::Register);
     println!("hand-built register block ({} params):", model.num_params());
     let (worst, accs) = worst_family(&model, 256, &device);
@@ -313,7 +314,7 @@ fn handmade_register_solves_every_family() {
 /// the number bounds the ablated *architecture*, not one fitting of it.
 #[test]
 fn no_decaying_comparison_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     let alphas = [1.0, 0.95, 0.9, 0.8, 0.7, 0.5, 0.3, 0.0];
     let offsets = [-2.0, -1.0, 0.0, 1.0];
     let gains = [0.5, 1.0, 2.0, 4.0];
@@ -384,7 +385,7 @@ fn no_decaying_comparison_solves_the_task() {
 /// decay above one, which the `α = exp(Δ·A) ≤ 1` of the plant cannot express.
 #[test]
 fn the_exponential_domain_arm_costs_range() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, Arm::ExpWrite);
     println!("hand-built exponential-write block (no register), in f32:");
     let (worst, accs) = worst_family(&model, 256, &device);

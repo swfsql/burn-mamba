@@ -20,6 +20,7 @@ use crate::shared::handmade::{accuracy, affine_channels, memoryless_ceiling, par
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -201,7 +202,7 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 /// the answer.
 #[test]
 fn handmade_register_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, Arm::Register);
     println!("hand-built register block ({} params):", model.num_params());
     let (worst, accs) = worst_family(&model, 256, &device);
@@ -226,7 +227,7 @@ fn handmade_register_solves_every_family() {
 /// the same as an empty stack.)
 #[test]
 fn no_stock_gate_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     let alphas = [1.0, 0.95, 0.9, 0.8, 0.7, 0.6, 0.5, 0.3];
     let writes = [-1.0, -0.5, 0.0];
     let thetas = [-2.0, -1.0, -0.5, -0.25, -0.1, 0.0, 0.1, 0.25, 0.5];

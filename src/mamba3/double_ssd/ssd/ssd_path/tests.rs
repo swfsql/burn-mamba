@@ -1,6 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -215,7 +216,7 @@ fn run_minimal_matches_serial(
     state_rank: usize,
     random_init: bool,
 ) {
-    let device: Device = Default::default();
+    let device = test_device();
     let (v, da, b, c, init) = random_input(
         batch,
         nchunks,
@@ -384,7 +385,7 @@ fn paths_agree_with_a_read_stride_mimo() {
 #[test]
 fn read_axis_matches_the_undecimated_kernel() {
     use burn_stack::utils::test_helpers::max_abs_diff;
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, nchunks, nheads, per_head_dim, state_rank) = (2, 3, 2, 8, 8);
 
     for (chunk_len, stride, mimo_rank) in [(4, 2, 1), (6, 3, 1), (6, 3, 2), (4, 4, 2)] {

@@ -23,6 +23,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the construction's constants
@@ -254,7 +255,7 @@ const FAMILIES: [(&str, Family); 3] = [
 /// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, true, HOLD_ALPHA, 1.0);
     println!("hand-built selective block ({} params):", model.num_params());
     let mut worst = 1.0f64;
@@ -280,7 +281,7 @@ fn handmade_block_solves_every_family() {
 /// `long-suffix`.
 #[test]
 fn no_fixed_decay_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     let alphas = [
         HOLD_ALPHA, // the flattest hold the block's `a_floor` allows
         0.99,

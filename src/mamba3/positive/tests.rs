@@ -32,6 +32,7 @@ use burn::nn::Linear;
 use burn::prelude::*;
 use burn::tensor::{DType, Distribution};
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -49,7 +50,7 @@ fn floats<const D: usize>(t: Tensor<D>) -> Vec<f32> {
 
 #[test]
 fn lse_is_exact_beside_log_zero_and_splits_a_tie() {
-    let device: Device = Default::default();
+    let device = test_device();
     let x = uniform([2, 5, 3], -4.0, 4.0, &device);
     let zero = x.full_like(LOG_ZERO);
     assert_eq!(max_abs_diff(scan::lse(x.clone(), zero.clone()), x.clone()), 0.0);
@@ -85,7 +86,7 @@ fn random_affine(dims: [usize; 3], device: &Device) -> Affine {
 
 #[test]
 fn prefix_matches_fold_in_values() {
-    let device: Device = Default::default();
+    let device = test_device();
     for len in [1, 2, 3, 5, 8, 13, 33] {
         let dims = [2, len, 3];
         let carry = uniform([2, 3], -2.0, 2.0, &device);
@@ -108,7 +109,7 @@ fn prefix_matches_fold_in_values() {
 
 #[test]
 fn prefix_matches_fold_in_gradients() {
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.clone().autodiff();
     let dims = [2, 11, 3];
     let lift = |t: Tensor<3>| Param::from_tensor(Tensor::<3>::from_inner(t).to_device(&ad));
@@ -137,7 +138,7 @@ fn prefix_matches_fold_in_gradients() {
 
 #[test]
 fn projective_read_ignores_a_common_shift() {
-    let device: Device = Default::default();
+    let device = test_device();
     let m = random_mobius([2, 4, 3], &device);
     let carry = uniform([2, 3], -2.0, 2.0, &device);
     let shift = uniform([2, 4, 3], -5.0, 5.0, &device);
@@ -202,7 +203,7 @@ fn run_gate(case: &GateCase, carry: Tensor<2>) -> kalman::GainOutput {
 /// state `η` updated by `dₜ` divided by `Λ` is the filter's mean.
 #[test]
 fn gate_matches_the_covariance_form_filter() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, len, nheads) = (2, 24, 3);
     let case = gate_case(batch, len, &device);
     let out = run_gate(&case, case.carry.clone());
@@ -275,7 +276,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
     use crate::mamba3::helpers::trapezoidal_coefficients;
     use crate::mamba3::trapezoid::TrapezoidSpec;
     use Trapezoid as T;
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, nheads) = (2, 3);
     for (pattern, u, exact) in [
         (T::HorizontalCarryOver, 1, true),
@@ -349,7 +350,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
 /// `t + 1` ways the maximum can have been reached.
 #[test]
 fn register_tracks_max_plus_within_its_log_bound() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, len, nheads) = (2, 40, 3);
     // Integer-valued projections at a large scale: a counter, a floor and
     // resets, with ties.
@@ -387,7 +388,7 @@ fn register_tracks_max_plus_within_its_log_bound() {
 /// forgetting, never remove it.
 #[test]
 fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
-    let device: Device = Default::default();
+    let device = test_device();
     let case = gate_case(3, 40, &device);
     let out = run_gate(&case, case.carry.clone() + 5.0);
     let q = case.log_kappa.clone().unsqueeze::<3>().exp() * case.dt.clone() * case.noise.clone().exp();
@@ -404,7 +405,7 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
 /// about the evidence held forget the disagreement.
 #[test]
 fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, len, nheads) = (2, 30, 3);
     let case = gate_case(batch, len, &device);
     let a = floats(run_gate(&case, case.carry.clone()).log_precision_bsh);
@@ -438,7 +439,7 @@ fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
 /// pre-activations, never `ln` of a zero.
 #[test]
 fn an_underflowing_mass_keeps_the_gradient_finite() {
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.autodiff();
     let dt_raw = [-1e4f32, -200.0, -40.0, -17.5, -8.0, 0.0, 30.0];
     let lambda_raw = [0.0f32, 200.0, -200.0, 40.0, -40.0, 1.0, -1.0];
@@ -563,7 +564,7 @@ fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSs
 /// the minimal SSD algorithm — outputs and every cache field, across the lattice.
 #[test]
 fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
-    let device: Device = Default::default();
+    let device = test_device();
     for case in lattice() {
         let label = format!("{case:?}");
         let config = case.config();
@@ -612,7 +613,7 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
 /// systems' own parameters.
 #[test]
 fn forward_and_step_gradients_agree() {
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.clone().autodiff();
     for case in [lattice()[1], lattice()[2], lattice()[3]] {
         let label = format!("{case:?}");
@@ -704,7 +705,7 @@ fn as_stock(model: &Mamba3) -> Mamba3 {
 /// register) round their shared rows through a wider matmul, so to 1e-6.
 #[test]
 fn zero_kappa_and_zero_readout_are_the_stock_block() {
-    let device: Device = Default::default();
+    let device = test_device();
     use Trapezoid as T;
     for (gain, tropical, trapezoid, u, norm) in [
         (Gain::Kalman, Tropical::None, T::HorizontalCarryOver, 1, false),
@@ -753,7 +754,7 @@ fn zero_kappa_and_zero_readout_are_the_stock_block() {
 /// `e = 0`) every positive-system parameter receives gradient.
 #[test]
 fn the_join_has_live_gradients_at_init() {
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.clone().autodiff();
     // With the out-norm too: `ω` scales the SSD's share against the `D` skip,
     // which the norm keeps.
@@ -799,7 +800,7 @@ fn the_join_has_live_gradients_at_init() {
 /// range) still backpropagate finite gradients into every parameter.
 #[test]
 fn a_vanished_step_keeps_the_block_gradient_finite() {
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.clone().autodiff();
     let config = lattice()[1].config();
     let mut model = exercised(config.init(&ad), &ad);
@@ -822,7 +823,7 @@ fn a_vanished_step_keeps_the_block_gradient_finite() {
 fn the_slots_survive_a_no_grad_round_trip() {
     use crate::mamba3::cache::Mamba3Caches;
     use burn_stack::modules::CacheStack;
-    let device: Device = Default::default();
+    let device = test_device();
     let ad = device.clone().autodiff();
     let config = lattice()[1].config();
     let model = exercised(config.init(&ad), &ad);

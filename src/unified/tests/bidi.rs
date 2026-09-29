@@ -8,6 +8,7 @@ use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfi
 use burn_stack::utils::BidiSchedule;
 use burn::prelude::*;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 /// Regression test for the virtual-layer / output-merge indexing.
 ///
@@ -23,7 +24,7 @@ use burn::tensor::Distribution;
 fn virtual_layers_share_per_real_pair_merge() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let d_model = 16;
     let n_real = 4; // 2 real pairs
     let n_virtual = 10; // 5 virtual pairs → must wrap onto the 2 real pairs
@@ -86,7 +87,7 @@ fn virtual_forward_is_deterministic() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
     use burn_stack::utils::test_helpers::max_abs_diff;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)

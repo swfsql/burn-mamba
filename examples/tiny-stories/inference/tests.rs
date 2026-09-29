@@ -26,6 +26,7 @@ use burn::prelude::*;
 use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::sample::Prefill;
 use burn_stack::utils::ClassCursors;
+use burn_stack::utils::test_helpers::test_device;
 
 /// Characters decoded after each opening of the tiny network.
 const CONTINUATION: usize = 64;
@@ -149,7 +150,7 @@ fn check_decode(
 
 #[test]
 fn the_latents_run_before_the_prompt() {
-    let device = Device::default();
+    let device = test_device();
     device.seed(0);
     let net = tiny_net(&device);
     let shifted = shifted_latents(&net);
@@ -188,7 +189,7 @@ fn a_checkpoint_decodes_as_it_scores() {
     let dir = std::path::PathBuf::from(
         std::env::var("TS_CHECKPOINT").expect("TS_CHECKPOINT names a run directory"),
     );
-    let device = Device::default();
+    let device = test_device();
     let config: MambaVocabNetConfig =
         load_model_config(&dir.join("model_config.json")).expect("a model config in the run");
     let net = load_model(&dir, &config, &device).expect("a model in the run");

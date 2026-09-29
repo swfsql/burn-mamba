@@ -9,6 +9,7 @@ use burn::backend::Dispatch;
 use burn::module::Param;
 use burn::prelude::*;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Dev = burn::prelude::Device;
 type P<const D: usize> = F<Dispatch, D>;
@@ -61,7 +62,7 @@ const SHAPE: (usize, usize, usize, usize, usize, usize) = (2, 3, 5, 4, 6, 8);
 /// At `mimo_rank == 1` the two forward branches agree.
 #[test]
 fn siso_matches_mimo_forward() {
-    let device = Dev::default();
+    let device = test_device();
     let (batch, nchunks, chunk_len, nheads, per_head_dim, state_rank) = SHAPE;
     let (v, b, c, gamma) = random_input(
         batch,
@@ -95,7 +96,7 @@ fn siso_matches_mimo_forward() {
 /// gradients.
 #[test]
 fn siso_matches_mimo_backward() {
-    let device = Dev::default();
+    let device = test_device();
     let (batch, nchunks, chunk_len, nheads, per_head_dim, state_rank) = SHAPE;
     let (v, b, c, gamma) = random_input(
         batch,
@@ -164,7 +165,7 @@ fn analytic_backward_matches_autodiff() {
         // Inputs live on the plain device; `Tensor::from_inner` lifts them onto
         // the autodiff graph for the reference run, so `grad()` comes back
         // plain and is directly comparable with the analytic result.
-        let device = Dev::default();
+        let device = test_device();
         let (v, b, c, gamma) = random_input(
             batch,
             nchunks,

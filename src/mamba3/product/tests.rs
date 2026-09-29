@@ -5,8 +5,7 @@ use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::ssd_path::Mamba3SsdPath;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::max_abs_diff;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 const MICRO: usize = 3;
 
@@ -27,7 +26,7 @@ fn cfg(kind: RotationKind, micro_steps: usize) -> Mamba3Config {
 /// channel `j·width + c` becomes position `j`, channel `c`.
 #[test]
 fn unfold_reads_micro_steps_in_order() {
-    let device: Device = Default::default();
+    let device = test_device();
     // [1, 2, 6] = 2 tokens × (3 micro-steps × width 2), values 0..12.
     let t = Tensor::<1, burn::tensor::Int>::arange(0..12, &device).float().reshape([1, 2, 6]);
     let out = unfold_micro_bs(t, 3);
@@ -51,7 +50,7 @@ fn unfold_reads_micro_steps_in_order() {
 /// applies inside the SSD.
 #[test]
 fn last_micro_takes_the_read_position() {
-    let device: Device = Default::default();
+    let device = test_device();
     let folded = Tensor::<1, burn::tensor::Int>::arange(0..12, &device)
         .float()
         .reshape([1, 12, 1, 1]);
@@ -114,7 +113,7 @@ fn in_proj_widens_only_the_per_micro_step_segments() {
 /// the folded sequence, `step` runs `u` explicit micro-steps, and they must
 /// agree on outputs *and* on every cache field.
 fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
-    let device: Device = Default::default();
+    let device = test_device();
     let config = cfg(kind, micro_steps);
     let model: Mamba3 = config.init(&device);
 
@@ -194,7 +193,7 @@ fn forward_matches_step_double_rotor() {
 /// through the double-ssd cache — so this also pins that the two accumulators
 /// still coincide at token boundaries when a token is `u` micro-steps long.
 fn forward_single_matches_step(kind: RotationKind, micro_steps: usize) {
-    let device: Device = Default::default();
+    let device = test_device();
     let config = cfg(kind, micro_steps);
     let model: Mamba3 = config.init(&device);
 
@@ -239,7 +238,7 @@ fn forward_single_matches_step_all_kinds() {
 /// micro-step follows.
 #[test]
 fn split_prefill_matches_full() {
-    let device: Device = Default::default();
+    let device = test_device();
     for kind in [RotationKind::Complex2D, RotationKind::Quaternion4D] {
         let config = cfg(kind, 2);
         let model: Mamba3 = config.init(&device);
@@ -278,7 +277,7 @@ fn split_prefill_matches_full() {
 /// position, or a `C` broadcast whose gradient was not summed back over the
 /// group — would show up here and in no value test.
 fn forward_step_grad_parity(kind: RotationKind, micro_steps: usize) {
-    let device: Device = Default::default();
+    let device = test_device();
     let config = cfg(kind, micro_steps);
     let model: Mamba3 = config.init(&device.clone().autodiff());
 
@@ -346,7 +345,7 @@ fn forward_step_grad_parity_non_abelian() {
 /// would still pass.
 #[test]
 fn every_micro_step_receives_gradient() {
-    let device: Device = Default::default();
+    let device = test_device();
     let config = cfg(RotationKind::Complex2D, MICRO);
     let model: Mamba3 = config.init(&device.clone().autodiff());
 

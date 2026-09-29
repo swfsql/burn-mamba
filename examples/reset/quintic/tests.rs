@@ -35,6 +35,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the constructions' constants
@@ -610,7 +611,7 @@ fn exact_everywhere(model: &MambaLatentNet, group: Group, device: &Device) -> f6
 /// `A₅` in one `Rotor4D` block: every weight in closed form, no training.
 #[test]
 fn handmade_a5_rotor_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade_a5(&device, RotationKind::Rotor4D, Head::Decoder);
     println!("hand-built one-layer SO(4) block on A₅ ({} params):", model.num_params());
     let worst = exact_everywhere(&model, Group::Alternating, &device);
@@ -620,7 +621,7 @@ fn handmade_a5_rotor_solves_every_family() {
 /// `S₅` in two `Rotor4D` layers: every weight in closed form, no training.
 #[test]
 fn handmade_s5_two_layers_solve_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade_s5(&device, Head::Decoder);
     println!("hand-built two-layer SO(4) stack on S₅ ({} params):", model.num_params());
     let worst = exact_everywhere(&model, Group::Symmetric, &device);
@@ -641,7 +642,7 @@ fn handmade_s5_two_layers_solve_every_family() {
 /// head that is exact for the conjugating block is near chance here.
 #[test]
 fn left_isoclinic_carries_the_binary_icosahedral_group() {
-    let device = Device::default();
+    let device = test_device();
     let group = Group::Alternating;
     let classes = group.num_classes();
     let twin = handmade_a5(&device, RotationKind::Quaternion4D, Head::Decoder);
@@ -890,7 +891,7 @@ fn normal_subgroup_orders(group: &[Perm]) -> Vec<usize> {
 fn learned_rotations() {
     let dir = std::env::var("QUINTIC_ARTIFACTS").expect("set QUINTIC_ARTIFACTS");
     let dir = std::path::PathBuf::from(dir);
-    let device = Device::default();
+    let device = test_device();
     let cfg: MambaLatentNetConfig =
         crate::common::cli::load_model_config(&dir.join("model_config.json")).unwrap();
     let model: MambaLatentNet = crate::common::cli::load_model(&dir, &cfg, &device).unwrap();

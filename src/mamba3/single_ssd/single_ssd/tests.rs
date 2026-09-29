@@ -4,8 +4,7 @@ use crate::mamba3::mamba3::Mamba3Config;
 use crate::mamba3::rotation::{RotationKind, RotationState};
 use burn::module::Param;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -64,7 +63,7 @@ fn build_cross_caches(
     batch: usize,
     random: bool,
 ) -> (Mamba3DoubleSsdCache, Mamba3SingleSsdCache) {
-    let device: Device = Default::default();
+    let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
@@ -117,7 +116,7 @@ fn build_cross_caches(
 /// history) is random, exercising forward_single_ssd continuation from an arbitrary
 /// single-ssd form state.
 fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3SingleSsdCache {
-    let device: Device = Default::default();
+    let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
@@ -452,7 +451,7 @@ fn forward_match_tol(
     random_init: bool,
     grad_tol: f32,
 ) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -582,7 +581,7 @@ fn run_forward_single_ssd_matches_step(
     single_ssd_path: Mamba3SsdPath,
     random_init: bool,
 ) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -680,7 +679,7 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
 /// is a special case). The guard at the end confirms that the block uses the
 /// initial cache (and does not silently ignore it).
 fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path: Mamba3SsdPath) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -867,7 +866,7 @@ fn run_cache_fields_with_grads(
 /// also be gradient-transparent), and the mid-point cache always carries a
 /// non-trivial previous-token K/V history.
 fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -1046,7 +1045,7 @@ fn cfg_quat_partial() -> Mamba3Config {
 /// Quaternion4D: `forward_single_ssd ≡ forward_double_ssd` on values and
 /// gradients, both from a fresh cache.
 fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -1078,7 +1077,7 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) 
 
 /// Quaternion4D: `forward_single_ssd ≡ step_single_ssd` unrolling, both fresh.
 fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -1154,7 +1153,7 @@ fn quaternion_single_matches_step_mimo() {
 /// construction; only the flags differ.
 fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
-    let device: Device = Default::default();
+    let device = test_device();
     let specialized = cfg
         .clone()
         .with_siso_specialization(true)

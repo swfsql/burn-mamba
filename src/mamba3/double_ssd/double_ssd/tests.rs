@@ -1,8 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 fn small_config() -> Mamba3Config {
     Mamba3Config::new(32) // d_model = 32
@@ -66,7 +65,7 @@ struct Heads {
 /// cumulative RoPE angle) holds random values, exercising parity from an
 /// arbitrary initial state.
 fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache {
-    let device: Device = Default::default();
+    let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
@@ -316,7 +315,7 @@ fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
 /// channel near zero amplifies fp32 noise by that factor. The *values* are
 /// untouched (`|B| = 1` either way), so only this bound moves.
 fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: f32) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -593,7 +592,7 @@ fn step_matches_forward_rope_half_outproj_norm_mimo_random_init() {
 /// single `Minimal` config suffices: the three ssd-paths are proven equivalent
 /// among themselves in `double_ssd::ssd::ssd_path::tests`.
 fn run_split_matches_full(cfg: Mamba3Config) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -671,7 +670,7 @@ fn split_matches_full() {
 /// The two models share their weights by construction — only the flags differ.
 fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
-    let device: Device = Default::default();
+    let device = test_device();
     let specialized = cfg
         .clone()
         .with_siso_specialization(true)

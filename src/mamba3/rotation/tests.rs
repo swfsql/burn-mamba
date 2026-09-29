@@ -17,6 +17,7 @@ use crate::mamba3::rotation::rope::apply_rope;
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -186,7 +187,7 @@ fn check_factored_matches_explicit(
     blocks: usize,
     random_init: bool,
 ) {
-    let device: Device = Default::default();
+    let device = test_device();
     let inp = random_inputs(batch, sequence, nheads, blocks, random_init, &device);
 
     let y_exp = explicit_recurrence(
@@ -250,7 +251,7 @@ fn quat_to_rot4_right<const D: usize, const DR: usize>(p: Tensor<D>) -> Tensor<D
 /// The oracle itself: `R_p · v == v ⊗ p`.
 #[test]
 fn rot4_right_multiplication_matrix() {
-    let device: Device = Default::default();
+    let device = test_device();
     let normal = Distribution::Normal(0.0, 1.0);
     let p = quat_normalize(Tensor::<2>::random([16, 4], normal, &device));
     let v = Tensor::<2>::random([16, 4], normal, &device);
@@ -353,7 +354,7 @@ fn rotor_factored_matches_explicit() {
     for (batch, sequence, nheads, blocks, random_init) in
         [(2, 7, 3, 1, false), (2, 7, 3, 1, true), (2, 6, 2, 3, true)]
     {
-        let device: Device = Default::default();
+        let device = test_device();
         let inp = random_inputs(batch, sequence, nheads, blocks, random_init, &device);
         // A second, independent stream of unit quaternions for the right factor.
         let p = quat_normalize(Tensor::<5>::random(
@@ -385,7 +386,7 @@ fn rotor_factored_matches_explicit() {
 /// reinterpreting the left factor.
 #[test]
 fn rotor_with_identity_right_factor_is_quaternion4d() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 5, 3, 2);
     let inp = random_inputs(batch, sequence, nheads, blocks, false, &device);
     let ident = {
@@ -415,7 +416,7 @@ fn rotor_with_identity_right_factor_is_quaternion4d() {
 /// and the reason the ladder needs `Rotor4D` to contain `Complex2D`.
 #[test]
 fn rotor_turns_the_two_planes_independently() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (a, b) = (0.7f32, 0.3f32);
     let quat = |angle: f32| {
         Tensor::<2>::from_floats([[angle.cos(), angle.sin(), 0.0, 0.0]], &device) // axis = i
@@ -441,7 +442,7 @@ fn rotor_turns_the_two_planes_independently() {
 /// `⟨C̄, B̄⟩ = ⟨C, PP⁻¹B⟩` step of the factoring fails).
 #[test]
 fn rotor_two_sided_is_orthogonal() {
-    let device: Device = Default::default();
+    let device = test_device();
     let normal = Distribution::Normal(0.0, 1.0);
     let q = quat_normalize(Tensor::<2>::random([64, 4], normal, &device));
     let p = quat_normalize(Tensor::<2>::random([64, 4], normal, &device));
@@ -459,7 +460,7 @@ fn rotor_two_sided_is_orthogonal() {
 
 #[test]
 fn rot4_is_orthogonal() {
-    let device: Device = Default::default();
+    let device = test_device();
     let q = quat_normalize(Tensor::<2>::random(
         [16, 4],
         Distribution::Normal(0.0, 1.0),
@@ -479,7 +480,7 @@ fn rot4_is_orthogonal() {
 fn rot4_homomorphism() {
     // L_{a⊗b} == L_a · L_b, the property that makes the cumulative-product
     // scan equivalent to materialising and multiplying the 4×4 matrices.
-    let device: Device = Default::default();
+    let device = test_device();
     let a = quat_normalize(Tensor::<2>::random(
         [16, 4],
         Distribution::Normal(0.0, 1.0),
@@ -503,7 +504,7 @@ fn rot4_homomorphism() {
 
 #[test]
 fn cumprod_split_equals_full() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 9, 2, 2);
     let q = quat_normalize(Tensor::<5>::random(
         [batch, sequence, nheads, blocks, 4],
@@ -565,7 +566,7 @@ fn quat_cumprod_sequential(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tens
 
 #[test]
 fn cumprod_parallel_matches_sequential_values() {
-    let device: Device = Default::default();
+    let device = test_device();
     // A non-power-of-two sequence exercises the identity-padded shift edges.
     let (batch, sequence, nheads, blocks) = (2, 13, 3, 2);
     let q = quat_normalize(Tensor::<5>::random(
@@ -594,7 +595,7 @@ fn cumprod_parallel_matches_sequential_values() {
 
 #[test]
 fn cumprod_parallel_matches_sequential_grads() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 11, 2, 2);
     let q_raw = Tensor::<5>::random(
         [batch, sequence, nheads, blocks, 4],
@@ -637,7 +638,7 @@ fn cumprod_parallel_matches_sequential_grads() {
 fn single_axis_collapses_to_cumsum() {
     // Quaternions about a fixed axis (here î) commute; their cumulative product
     // is the half-angle-cumsum quaternion — exactly RoPE's closed form.
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 8, 2, 2);
 
     // Random per-step angles θₜ; per-step quaternion = (cos(θ/2), sin(θ/2), 0, 0).
@@ -692,7 +693,7 @@ fn single_axis_collapses_to_cumsum() {
 /// to the abelian RoPE implementation at `k = 2`.
 #[test]
 fn k2_quaternion_matches_production_rope() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 6, 2, 2); // state_rank = 4·blocks = 8
     let state_rank = blocks * 4;
 
@@ -747,7 +748,7 @@ fn k2_quaternion_matches_production_rope() {
 /// source of the extra state-tracking power.
 #[test]
 fn rotation_order_matters_for_generic_quaternions() {
-    let device: Device = Default::default();
+    let device = test_device();
     let a = quat_normalize(Tensor::<2>::random(
         [8, 4],
         Distribution::Normal(0.0, 1.0),
@@ -774,7 +775,7 @@ fn rotation_order_matters_for_generic_quaternions() {
 
 #[test]
 fn scaled_axis_is_unit_and_identity_at_zero() {
-    let device: Device = Default::default();
+    let device = test_device();
     // Random generators → unit quaternions.
     let g = Tensor::<2>::random([32, 3], Distribution::Normal(0.0, 1.0), &device);
     let q = quat_from_scaled_axis(g);
@@ -821,7 +822,7 @@ fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
 /// would underflow to a no-op in f16 and re-open the NaN.
 #[test]
 fn scaled_axis_zero_generator_grad_finite() {
-    let device: Device = Default::default();
+    let device = test_device();
     // Row 0 is the exact zero generator; the rest are generic. Mixing the two
     // checks both that the degenerate row is guarded and that the clamp does not
     // disturb the ordinary rows (which still backprop normally).
@@ -844,7 +845,7 @@ fn scaled_axis_zero_generator_grad_finite() {
 /// `clamp_min` fix; a unit quaternion (sum-of-squares 1) is left untouched.
 #[test]
 fn normalize_zero_quaternion_grad_finite() {
-    let device: Device = Default::default();
+    let device = test_device();
     let random = Tensor::<2>::random([7, 4], Distribution::Normal(0.0, 1.0), &device);
     let raw = Tensor::cat(vec![Tensor::<2>::zeros([1, 4], &device), random], 0); // [8, 4]
     let p = Param::from_tensor(Tensor::from_inner(raw));
@@ -862,7 +863,7 @@ fn normalize_zero_quaternion_grad_finite() {
 fn scaled_axis_single_axis_matches_half_angle() {
     // g = (2φ, 0, 0) ⇒ angle = 2φ, q = (cos φ, sin φ, 0, 0): the single-axis
     // parameterisation used by the RoPE collapse / cross-check above.
-    let device: Device = Default::default();
+    let device = test_device();
     let phi = Tensor::<2>::random([16, 1], Distribution::Normal(0.0, 0.7), &device);
     let zeros = Tensor::<2>::zeros([16, 1], &device);
     let g = Tensor::cat(vec![phi.clone() * 2.0, zeros.clone(), zeros.clone()], 1); // (2φ,0,0)
@@ -940,7 +941,7 @@ fn config_rotation_channels_and_d_in_proj() {
 /// kinds share one generator projection, one scan and one normalisation.
 #[test]
 fn rotor_generator_channels_are_left_then_right() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 4, 3, 2);
     let state_rank = blocks * 4;
     let normal = Distribution::Normal(0.0, 1.0);
@@ -1018,7 +1019,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     use burn::module::Module;
-    let device: Device = Default::default();
+    let device = test_device();
     let cfg = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1047,7 +1048,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1122,7 +1123,7 @@ fn rotor_block_forward_step_parity_mimo() {
 fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1178,7 +1179,7 @@ fn rotor_split_prefill_matches_full() {
 fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1304,7 +1305,7 @@ fn complex_angle_scan_forward_step_parity() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
 
-    let device: Device = Default::default();
+    let device = test_device();
     // (tokens, micro_steps, expected to take the blocked branch)
     for (tokens, micro_steps, blocked) in [(8, 1, false), (16, 2, true), (24, 1, true)] {
         let folded = tokens * micro_steps;
@@ -1389,7 +1390,7 @@ fn complex_angle_scan_split_prefill_parity() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
 
-    let device: Device = Default::default();
+    let device = test_device();
     let (head_tokens, tail_tokens) = (6, 24);
     let tokens = head_tokens + tail_tokens;
     assert!(
@@ -1455,7 +1456,7 @@ fn complex_angle_scan_split_prefill_parity() {
 fn rotor_right_factor_channels_receive_gradient() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let cfg = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1503,7 +1504,7 @@ fn rotor_right_factor_channels_receive_gradient() {
 
 #[test]
 fn rotation_state_constructors_and_accessors() {
-    let device: Device = Default::default();
+    let device = test_device();
 
     let a = RotationState::zeros_angle(2, 3, 4, &device);
     a.sanity();
@@ -1542,7 +1543,7 @@ fn rotation_state_constructors_and_accessors() {
 #[test]
 #[should_panic(expected = "expected Quaternion")]
 fn rotation_state_wrong_unwrap_panics() {
-    let device: Device = Default::default();
+    let device = test_device();
     let a = RotationState::zeros_angle(1, 1, 1, &device);
     let _ = a.quaternion();
 }
@@ -1557,7 +1558,7 @@ fn quaternion_bidi_forward_runs() {
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     use burn_stack::modules::bidi::OutputMergeConfig;
     use crate::unified::{MambaBidiLayersConfig, MambaSsdPath};
-    let device: Device = Default::default();
+    let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1661,7 +1662,7 @@ fn run_grads(p: &Params, head: Tensor<3>, factored: bool) -> Grads {
 
 #[test]
 fn factored_matches_explicit_grads() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 5, 2, 2);
     let inp = random_inputs(batch, sequence, nheads, blocks, true, &device);
     // Re-draw a raw (un-normalised) quaternion so the unit map carries gradient.
@@ -1765,7 +1766,7 @@ fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mam
 fn real1d_matches_zeroed_rotation(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -1817,7 +1818,7 @@ fn real1d_projects_no_rotation_channels() {
         real.d_in_proj()
     );
 
-    let device: Device = Default::default();
+    let device = test_device();
     let block = real.init(&device);
     assert!(matches!(
         block.zero_rotation_state(2, &device),
@@ -1845,7 +1846,7 @@ fn row(t: Tensor<2>) -> Vec<f32> {
 /// diagonal, `max` about a coordinate axis) rather than a ball.
 #[test]
 fn bounded_generator_keeps_its_axis() {
-    let device: Device = Default::default();
+    let device = test_device();
     let max_angle = 2.0 * std::f64::consts::PI;
     let dir = [2.0f32, -1.0, 0.5];
     let dir_norm = (dir.iter().map(|v| v * v).sum::<f32>()).sqrt();
@@ -1892,7 +1893,7 @@ fn bounded_generator_keeps_its_axis() {
 /// healthy gradient.
 #[test]
 fn half_turn_is_reachable_with_a_live_gradient() {
-    let device: Device = Default::default();
+    let device = test_device();
     let pi = std::f64::consts::PI;
 
     // range = 2: a half-turn at ‖r‖ = atanh(0.5), differentiable.
@@ -1933,7 +1934,7 @@ fn half_turn_is_reachable_with_a_live_gradient() {
 /// differentiable.)
 #[test]
 fn complex_range_one_matches_the_reference_angle() {
-    let device: Device = Default::default();
+    let device = test_device();
     let rot = Tensor::<3>::random([2, 5, 3], Distribution::Normal(0.0, 1.0), &device);
     let dt = Tensor::<3>::random([2, 5, 4], Distribution::Uniform(0.01, 1.0), &device);
 
@@ -1953,7 +1954,7 @@ fn complex_range_one_matches_the_reference_angle() {
 fn rotation_range_is_wired_through(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
-    let device: Device = Default::default();
+    let device = test_device();
     let base = Mamba3Config::new(32)
         .with_state_rank(16)
         .with_expand(2)
@@ -2015,7 +2016,7 @@ fn rotation_range_is_wired_through_quaternion() {
 /// prefix out of many factors.
 #[test]
 fn cumulative_quaternion_stays_unit() {
-    let device: Device = Default::default();
+    let device = test_device();
     let g = Tensor::<5>::random([1, 512, 2, 1, 3], Distribution::Normal(0.0, 1.0), &device);
     let q = quat_from_scaled_axis::<5>(g);
     let (cum, carry) = quat_cumprod(q, None);
@@ -2044,7 +2045,7 @@ fn cumulative_quaternion_stays_unit() {
 #[should_panic(expected = "multiple of 4")]
 fn quaternion_partial_rope_must_be_whole_blocks() {
     use crate::mamba3::mamba3::Mamba3Config;
-    let device: Device = Default::default();
+    let device = test_device();
     let _ = Mamba3Config::new(8)
         .with_state_rank(4)
         .with_expand(1)
@@ -2061,7 +2062,7 @@ fn quaternion_partial_rope_must_be_whole_blocks() {
 /// the three saturated components.
 #[test]
 fn saturated_generator_keeps_a_live_axis_gradient() {
-    let device: Device = Default::default();
+    let device = test_device();
     // long enough that tanh(‖r‖) is exactly 1.0 in f32
     let raw = Tensor::<1>::from_floats([12.0f32, 6.0, -3.0].as_slice(), &device).reshape([1, 3]);
     let r = Param::from_tensor(Tensor::from_inner(raw));
@@ -2089,7 +2090,7 @@ fn saturated_generator_keeps_a_live_axis_gradient() {
 /// the intended "as far as the bound allows".
 #[test]
 fn bounded_generator_survives_a_huge_projection() {
-    let device: Device = Default::default();
+    let device = test_device();
     let max_angle = 2.0 * std::f64::consts::PI;
     for scale in [1e3f32, 1e10, 1e20] {
         let raw = Tensor::<1>::from_floats([scale, -scale * 0.5, 0.0].as_slice(), &device)
@@ -2109,7 +2110,7 @@ fn bounded_generator_survives_a_huge_projection() {
 /// separates the rotations of two heads.
 #[test]
 fn quaternion_generators_are_per_head() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (nheads, blocks) = (2, 1);
     // head 0 turns about x, head 1 about y — impossible to express when the
     // three channels are shared and only Δ differs.

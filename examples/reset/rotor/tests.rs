@@ -30,6 +30,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the construction's constants
@@ -489,7 +490,7 @@ fn best_sector_accuracy(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64
 /// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade_rotor(&device, Turn::Selective, Head::Decoder);
     println!(
         "hand-built rotating block ({} params):",
@@ -521,7 +522,7 @@ fn handmade_block_solves_every_family() {
 /// from the position by more than a detent.
 #[test]
 fn no_fixed_rotation_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     let omegas: Vec<f64> = (1..=12).map(|k| k as f64 * std::f64::consts::PI / 12.0).collect();
 
     println!("fixed-rotation sweep (best readout per ω), accuracy per family:");
@@ -573,7 +574,7 @@ fn no_fixed_rotation_solves_the_task() {
 /// ~38% for every decay.
 #[test]
 fn no_real_state_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     let alphas = [1.0 - 1e-4, 0.99, 0.95, 0.9, 0.8, 0.5, 0.2];
 
     println!("rotation-free sweep (best readout per ᾱ), accuracy per family:");

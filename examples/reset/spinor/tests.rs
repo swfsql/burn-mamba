@@ -36,6 +36,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the construction's constants
@@ -599,7 +600,7 @@ const NUM_COUNT_CODES: usize = SEQ_LENGTH * SEQ_LENGTH;
 /// Every weight is written in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
     println!(
         "hand-built quaternion block ({} params):",
@@ -636,7 +637,7 @@ fn handmade_block_solves_every_family() {
 /// curve has the order.
 #[test]
 fn abelian_rotation_loses_the_order() {
-    let device = Device::default();
+    let device = test_device();
     let decoder = handmade(&device, RotationKind::Complex2D, Head::Decoder);
     println!(
         "the same construction, abelian rotation ({} params):",

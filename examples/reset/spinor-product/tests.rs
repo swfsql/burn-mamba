@@ -41,6 +41,7 @@ use burn::data::dataset::Dataset;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 // ---------------------------------------------------------------------------
 // the construction's constants
@@ -677,7 +678,7 @@ const NUM_COUNT_CODES: usize = COUNT_BASE * COUNT_BASE * COUNT_BASE;
 /// group tracker, and the long column measures that for everything else.
 #[test]
 fn handmade_product_block_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, PAIR, Head::Decoder, 1.0);
     println!(
         "hand-built micro_steps = {PAIR} block ({} params):",
@@ -711,7 +712,7 @@ fn handmade_product_block_solves_every_family() {
 /// the head can express, not only the decoder that this head carries.
 #[test]
 fn one_step_cannot_compose_a_token() {
-    let device = Device::default();
+    let device = test_device();
     println!("the same construction at micro_steps = 1, swept over the generator scale:");
     println!("      scale    random    shuffle       runs");
     let scales = [0.25, 0.4, 0.5, 0.6, 0.75, 1.0, 1.25, 1.5];
@@ -1148,7 +1149,7 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
 /// exact at every length.
 #[test]
 fn a_second_layer_only_helps_by_composing_the_pair() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade_composed(&device, Head::Decoder);
     println!(
         "one-step block handed the pair's product ({} params):",

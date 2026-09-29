@@ -15,6 +15,7 @@ use burn::tensor::{Distribution, Gradients};
 use burn_stack::modules::{LatentNetworkBuilder, LayersBuilder};
 use burn_stack::utils::ClassLatent;
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
 const VAL_TOL: f32 = 1e-4;
@@ -97,7 +98,7 @@ fn check_each_slot_alone<C, M: Module>(
     forward: impl Fn(Tensor<3>, Option<C>, Option<Tensor<2, Bool>>) -> (Tensor<3>, C),
     fields: impl Fn(&C) -> Vec<Tensor<2>>,
 ) {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let batch = LENS.len();
     let padded = *LENS.iter().max().unwrap();
     let normal = Distribution::Normal(0.0, 1.0);
@@ -147,7 +148,7 @@ fn check_each_slot_alone<C, M: Module>(
 
 #[test]
 fn padded_mamba1_is_each_slot_alone() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let block = Mamba1Config::new(D_MODEL)
         .with_state_rank(8)
         .with_conv_kernel(4)
@@ -161,7 +162,7 @@ fn padded_mamba1_is_each_slot_alone() {
 
 #[test]
 fn padded_mamba2_is_each_slot_alone() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
@@ -220,7 +221,7 @@ fn mamba3(
 #[test]
 fn padded_mamba3_is_each_slot_alone() {
     use {Gain as G, RotationKind as R, Trapezoid as T, Tropical as Tr};
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let configs = [
         mamba3(R::Complex2D, T::HorizontalCarryOver, 1, 1, G::Projected, Tr::None),
         mamba3(R::Quaternion4D, T::Vertical, 3, 2, G::Kalman, Tr::MaxPlus),
@@ -255,7 +256,7 @@ fn padded_mamba3_is_each_slot_alone() {
 /// token, not the padding the batch-wide `End` follows.
 #[test]
 fn padded_mamba3_network_closes_each_slot_at_its_own_end() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let block = mamba3(
         RotationKind::Quaternion4D,
         Trapezoid::Vertical,

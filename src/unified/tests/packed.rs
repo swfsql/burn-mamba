@@ -20,6 +20,7 @@ use burn::tensor::{Distribution, Gradients};
 use burn_stack::modules::ResidualsConfig;
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn_stack::utils::{ClassLatent, Packed};
+use burn_stack::utils::test_helpers::test_device;
 
 const VOCAB: usize = 11;
 const VAL_TOL: f32 = 1e-4;
@@ -73,7 +74,7 @@ fn param_grads<M: Module>(module: &M, grads: &Gradients) -> Vec<Option<Tensor<1>
 }
 
 fn check(net: MambaVocabNet, path: MambaSsdPath) {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let align = net.pack_align(&path).expect("a family with packed rows");
     let lead = net.n_class_latents();
     let (starts, width) = starts(align, lead);
@@ -172,7 +173,7 @@ fn mamba3_net(micro_steps: usize, trapezoid: Trapezoid, residuals: ResidualsConf
         mlp: None,
         untied: Vec::new(),
     }
-    .init(&Device::default().autodiff())
+    .init(&test_device().autodiff())
 }
 
 #[cfg(feature = "mamba3")]
@@ -226,6 +227,6 @@ fn packed_mamba2_matches_alone() {
         mlp: None,
         untied: Vec::new(),
     }
-    .init(&Device::default().autodiff());
+    .init(&test_device().autodiff());
     check(net, MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(Some(4))));
 }

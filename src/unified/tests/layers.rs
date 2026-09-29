@@ -30,6 +30,7 @@ use burn_stack::modules::LayersBuilder;
 use burn_stack::utils::{GradHorizon, Schedule};
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -124,7 +125,7 @@ fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
 /// path, and `cut == 0` really does take the untouched branch.
 #[test]
 fn full_horizon_matches_no_horizon() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let n = 4;
 
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
@@ -168,7 +169,7 @@ fn full_horizon_matches_no_horizon() {
 /// those caches, which is what reaches back in if `cache_to_inner` is skipped.
 #[test]
 fn nothing_tracked_reaches_the_prefix() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
@@ -242,7 +243,7 @@ fn nothing_tracked_reaches_the_prefix() {
 
 #[test]
 fn prefix_parameters_get_no_gradient() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
@@ -307,7 +308,7 @@ fn prefix_parameters_get_no_gradient() {
 /// identity, so gradients on the clones are the gradients on the original.
 #[test]
 fn shared_weight_grad_counts_tracked_applications_only() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n_real, n_virtual, k) = (2, 6, 2);
 
     let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
@@ -365,7 +366,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
 /// at all.
 #[test]
 fn horizon_is_inert_without_autodiff() {
-    let device = Device::default();
+    let device = test_device();
     assert!(!device.is_autodiff(), "this test needs a plain device");
     let n = 4;
 
@@ -402,7 +403,7 @@ fn horizon_is_inert_without_autodiff() {
 /// head, so a sign or ordering error cannot cancel out the way a plain `sum`
 /// would let it.
 fn run_chunked_parity(horizon: Option<GradHorizon>) {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n_real, n_virtual) = (2, 6);
     // Split on a chunk boundary (`path()` uses chunk_len 4) so the two runs do
     // the same arithmetic in the same order and any mismatch is structural.
@@ -521,7 +522,7 @@ fn chunked_forward_matches_single_forward_under_horizon() {
 /// index) still matches on values — every path computes the same numbers — and
 /// diverges only on the gradients.
 fn run_step_parity(horizon: Option<GradHorizon>) {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n_real, n_virtual, seq) = (2, 6, 4);
 
     let mut layers = LayersBuilder::new(n_real, block_config(D_MODEL))
@@ -633,7 +634,7 @@ fn step_matches_forward_under_horizon() {
 /// per token rather than sequence per layer.
 #[test]
 fn stepped_prefix_parameters_get_no_gradient() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
@@ -681,7 +682,7 @@ fn run_prime_cut(latent_layer: usize) {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
@@ -768,7 +769,7 @@ fn prime_under_a_cut_with_a_latent_below_it() {
 fn boundary_weights_keep_their_gradient_under_a_cut() {
     use burn_stack::modules::network::LatentNetworkBuilder;
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let n = 4;
     for k in [None, Some(4), Some(2), Some(0)] {
         let horizon = k.map(|k| GradHorizon::last(k, n));
@@ -807,7 +808,7 @@ fn boundary_weights_keep_their_gradient_under_a_cut() {
 /// stepping keeps its boundary weights alive.
 #[test]
 fn stepped_input_keeps_its_gradient_under_a_cut() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
@@ -829,7 +830,7 @@ fn stepped_input_keeps_its_gradient_under_a_cut() {
 /// all), which is the case that skips the in-loop boundary entirely.
 #[test]
 fn a_cut_changes_gradients_only() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let n = 4;
 
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
@@ -869,7 +870,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
@@ -927,7 +928,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
 fn run_identity_prefix_exactness(residuals: burn_stack::modules::ResidualsConfig) {
     use burn_stack::modules::Residuals;
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
@@ -1017,7 +1018,7 @@ fn identity_prefix_is_exact_under_multi_gate_residuals() {
 fn multi_gate_input_keeps_its_gradient_under_a_cut() {
     use burn_stack::modules::ResidualsConfig;
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let n = 4;
     for horizon in [None, Some(GradHorizon::last(2, n))] {
         let mut layers = LayersBuilder::new(n, block_config(D_MODEL))
@@ -1082,9 +1083,9 @@ fn grad_horizon_memory_probe() {
     // than anything the graph retains.
     let plain = std::env::var("BURN_MAMBA_PLAIN").is_ok();
     let device = if plain {
-        Device::default()
+        test_device()
     } else {
-        Device::default().autodiff()
+        test_device().autodiff()
     };
     let mut layers = LayersBuilder::new(n_real, block_config(d_model))
         .with_n_virtual_layers(Some((n_virtual, Schedule::Cyclic)))

@@ -360,6 +360,7 @@ mod tests {
     use burn::prelude::*;
     use burn::tensor::Distribution;
     use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::test_device;
 
     fn cfg() -> Mamba3Config {
         Mamba3Config::new(32)
@@ -379,7 +380,7 @@ mod tests {
         Tensor::random(
             [2, tokens, config.d_model],
             Distribution::Normal(0.0, 1.0),
-            &Default::default(),
+            &test_device(),
         )
     }
 
@@ -419,7 +420,7 @@ mod tests {
     fn default_is_the_carry_over() {
         assert_eq!(Trapezoid::default(), Trapezoid::HorizontalCarryOver);
         assert_eq!(cfg().trapezoid, Trapezoid::HorizontalCarryOver);
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let _ = cfg().init(&device);
     }
 
@@ -428,7 +429,7 @@ mod tests {
     /// two-tap members, and neither at a `u` where they would be inert.
     #[test]
     fn every_pattern_builds_and_pays_for_its_own_masses() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in PATTERNS {
             for micro_steps in [1, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, micro_steps);
@@ -481,7 +482,7 @@ mod tests {
             with.micro_steps * with.nheads(),
             "one λ channel per (head, micro-step)"
         );
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let block = without.init(&device);
         assert_eq!(block.lambda_channels_total(), 0);
         assert_eq!(block.in_proj.weight.dims()[1], without.d_in_proj());
@@ -504,7 +505,7 @@ mod tests {
     /// would have straddled micro-steps).
     #[test]
     fn none_forward_matches_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [
             RotationKind::Real1D,
             RotationKind::Complex2D,
@@ -557,7 +558,7 @@ mod tests {
     /// recurrence's, through the default recompute backward.
     #[test]
     fn none_grads_match_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
             let config = cfg_none(kind, 2);
             let model: Mamba3 = config.init(&device.clone().autodiff());
@@ -601,7 +602,7 @@ mod tests {
     #[test]
     fn none_equals_lambda_saturated_at_one() {
         use burn::module::Param;
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let config = cfg()
             .with_rotation(RotationKind::Real1D)
             .with_has_proj_bias(true);
@@ -683,7 +684,7 @@ mod tests {
     /// and both `u`s.
     #[test]
     fn vertical_forward_matches_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [
             RotationKind::Real1D,
             RotationKind::Complex2D,
@@ -729,7 +730,7 @@ mod tests {
     /// then straddles the boundary.
     #[test]
     fn vertical_split_prefill_matches() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
             let config = cfg_vertical(kind, 3);
             let model: Mamba3 = config.init(&device);
@@ -755,7 +756,7 @@ mod tests {
     /// them the same way — both need `m > 1` to be more than a reshape.
     #[test]
     fn vertical_matches_step_with_mimo() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for mimo_rank in [2, 3] {
             let config = cfg_vertical(RotationKind::Complex2D, 2).with_mimo_rank(mimo_rank);
             let model: Mamba3 = config.init(&device);
@@ -789,7 +790,7 @@ mod tests {
     /// merely to two self-consistent ones.
     #[test]
     fn vertical_forward_continues_a_stepped_cache() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
             for micro_steps in [2, 3] {
                 let config = cfg_vertical(kind, micro_steps);
@@ -835,7 +836,7 @@ mod tests {
     /// correction and the seed are on the autodiff path like everything else.
     #[test]
     fn vertical_grads_match_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
             let config = cfg_vertical(kind, 2);
             let model: Mamba3 = config.init(&device.clone().autodiff());
@@ -878,7 +879,7 @@ mod tests {
     /// ([`Trapezoid::has_interior_tap`]).
     #[test]
     fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let base = cfg().with_rotation(RotationKind::Complex2D);
         let carry = base.clone().init(&device);
         let x = input(&base, 6);
@@ -935,7 +936,7 @@ mod tests {
     /// pattern says.
     #[test]
     fn lattice_forward_matches_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in GATED_AND_TWO_TAP {
             for kind in [
                 RotationKind::Real1D,
@@ -979,7 +980,7 @@ mod tests {
     /// a reshape of the SISO case.
     #[test]
     fn lattice_matches_step_with_mimo() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in GATED_AND_TWO_TAP {
             for mimo_rank in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, 2).with_mimo_rank(mimo_rank);
@@ -1014,7 +1015,7 @@ mod tests {
     /// that would notice an installment paid twice or not at all.
     #[test]
     fn lattice_split_prefill_matches() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in GATED_AND_TWO_TAP {
             for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
                 let config = cfg_for(pattern, kind, 3);
@@ -1042,7 +1043,7 @@ mod tests {
     /// slot carries) rather than to two self-consistent ones.
     #[test]
     fn lattice_forward_continues_a_stepped_cache() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in GATED_AND_TWO_TAP {
             for micro_steps in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, micro_steps);
@@ -1082,7 +1083,7 @@ mod tests {
     /// second mass and the extra pass are all on the autodiff path.
     #[test]
     fn lattice_grads_match_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in GATED_AND_TWO_TAP {
             let config = cfg_for(pattern, RotationKind::Complex2D, 2);
             let model: Mamba3 = config.init(&device.clone().autodiff());
@@ -1159,7 +1160,7 @@ mod tests {
     /// and not about the projection.
     #[test]
     fn horizontal_reset_is_none_at_one_micro_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let config = cfg()
             .with_rotation(RotationKind::Real1D)
             .with_has_proj_bias(true);
@@ -1205,7 +1206,7 @@ mod tests {
     #[test]
     fn horizontal_reset_is_the_carry_over_with_lambda_saturated() {
         use burn::module::Param;
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let u = 3;
         let config = cfg_for(Trapezoid::HorizontalReset, RotationKind::Real1D, u)
             .with_has_proj_bias(true);
@@ -1283,7 +1284,7 @@ mod tests {
     /// first straddles one.
     #[test]
     fn lattice_multi_chunk_matches_step() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         for pattern in [
             Trapezoid::Vertical,
             Trapezoid::HorizontalReset,
@@ -1326,7 +1327,7 @@ mod tests {
     /// gates part company at each token's first micro-step.
     #[test]
     fn two_tap_patterns_actually_spend_their_second_tap() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let u = 3;
         let config = cfg_for(Trapezoid::Vertical, RotationKind::Real1D, u).with_has_proj_bias(true);
         let vertical = config.clone().init(&device);
@@ -1360,7 +1361,7 @@ mod tests {
     /// shared in-projection.
     #[test]
     fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
-        let device: burn::prelude::Device = Default::default();
+        let device = test_device();
         let u = 3;
         let config = cfg_for(Trapezoid::HorizontalCarryOver, RotationKind::Real1D, u)
             .with_has_proj_bias(true);

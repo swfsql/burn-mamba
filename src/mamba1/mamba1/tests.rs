@@ -1,7 +1,6 @@
 use super::*;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 fn small_config() -> Mamba1Config {
     Mamba1Config::new(32) // d_model = 32
@@ -180,7 +179,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// zero (the standard fresh start); with `random = true` it holds random
 /// values, exercising forward/step parity from an arbitrary initial state.
 fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache {
-    let device: Device = Default::default();
+    let device = test_device();
     let d_inner = cfg.d_inner();
     let conv_kernel = cfg.conv_kernel;
     let state_rank = cfg.state_rank;
@@ -214,7 +213,7 @@ fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cac
 /// recurrent unrolling from that same state — outputs *and* final cache —
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -383,7 +382,7 @@ fn step_matches_forward_custom_dt_rank_random_init() {
 /// arbitrary initial state implies a `forward`-produced cache continues
 /// correctly); this is a direct, explicit check.
 fn run_split_matches_full(cfg: Mamba1Config) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;

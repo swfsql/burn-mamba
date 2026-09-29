@@ -1,6 +1,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -191,7 +192,7 @@ fn run_minimal_matches_serial(
     state_rank: usize,
     random_init: bool,
 ) {
-    let device: Device = Default::default();
+    let device = test_device();
     let (x, dt, a_decay, b, c, d, init) = random_input(
         batch,
         nchunks,

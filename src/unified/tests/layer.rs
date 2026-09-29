@@ -17,8 +17,7 @@ use burn::prelude::*;
 use burn_stack::modules::{GatedMlpConfig, LayersBuilder, RmsNormConfig};
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 #[cfg(feature = "mamba3")]
 fn block_config(d_model: usize) -> crate::mamba3::prelude::Mamba3Config {
@@ -41,7 +40,7 @@ fn block_config(d_model: usize) -> crate::mamba3::prelude::Mamba3Config {
 fn layer_with_mlp_matches_the_two_residual_reference() {
     use crate::mamba3::prelude::Mamba3SsdPath;
 
-    let device = Device::default();
+    let device = test_device();
     let (batch, seq, d_model) = (2, 6, 16);
     let layers = LayersBuilder::new(1, block_config(d_model))
         .with_mlp(Some(GatedMlpConfig::new(d_model, 32)))
@@ -83,7 +82,7 @@ fn layer_with_mlp_matches_the_two_residual_reference() {
 fn mlp_layer_forward_step_parity() {
     use crate::mamba3::prelude::Mamba3SsdPath;
 
-    let device = Device::default();
+    let device = test_device();
     let (batch, seq, d_model) = (2, 5, 16);
     let layers = LayersBuilder::new(2, block_config(d_model))
         .with_mlp(Some(GatedMlpConfig::new(d_model, 32)))
@@ -114,7 +113,7 @@ fn mlp_layer_forward_step_parity() {
 fn mixer_only_layer_is_unchanged() {
     use crate::mamba3::prelude::Mamba3SsdPath;
 
-    let device = Device::default();
+    let device = test_device();
     let (batch, seq, d_model) = (2, 4, 16);
     let layers = LayersBuilder::new(1, block_config(d_model)).init(&device);
     let layer = &layers.real_layers[0];
@@ -143,7 +142,7 @@ fn mixer_only_layer_is_unchanged() {
 #[test]
 #[should_panic(expected = "`norm2` is allocated alongside `mlp`")]
 fn mlp_without_norm2_panics() {
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let mut layers = LayersBuilder::new(1, block_config(d_model))
         .with_mlp(Some(GatedMlpConfig::new(d_model, 32)))
@@ -165,7 +164,7 @@ fn mlp_without_norm2_panics() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn norm_and_norm2_are_independent() {
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let mut layers = LayersBuilder::new(1, block_config(d_model))
         .with_mlp(Some(GatedMlpConfig::new(d_model, 32)))

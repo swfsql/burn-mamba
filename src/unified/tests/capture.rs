@@ -10,6 +10,7 @@ use crate::prelude::*;
 use burn::prelude::*;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -89,7 +90,7 @@ mod mamba3 {
 
     #[test]
     fn owned_buffers_keep_values_and_assign_moves_them() {
-        let device = Device::default();
+        let device = test_device();
         for double in [false, true] {
             let label = if double { "double" } else { "single" };
             let (first, second) = two_caches(double, &device);
@@ -111,7 +112,7 @@ mod mamba3 {
     #[test]
     #[should_panic(expected = "SSD pathway")]
     fn pathway_mismatch_panics() {
-        let device = Device::default();
+        let device = test_device();
         let (single, _) = two_caches(false, &device);
         let (double, _) = two_caches(true, &device);
         let _ = single.assign_in_place(double);
@@ -121,7 +122,7 @@ mod mamba3 {
 #[cfg(feature = "mamba2")]
 #[test]
 fn mamba2_assign_moves_every_field() {
-    let device = Device::default();
+    let device = test_device();
     let model = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -137,7 +138,7 @@ fn mamba2_assign_moves_every_field() {
 #[cfg(feature = "mamba1")]
 #[test]
 fn mamba1_assign_moves_every_field() {
-    let device = Device::default();
+    let device = test_device();
     let model = Mamba1Config::new(16).with_state_rank(8).init(&device);
     let (_, first) = model.step(input(2, 16, &device), None);
     let (_, second) = model.step(input(2, 16, &device), Some(first.clone()));

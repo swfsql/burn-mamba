@@ -14,8 +14,7 @@ use burn::tensor::Distribution;
 use burn_stack::modules::{Block, BlockConfig, LayerUntied, Layers, LayersBuilder};
 use burn_stack::utils::Schedule;
 use burn_stack::utils::test_helpers::max_abs_diff;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
 const BATCH: usize = 2;
@@ -57,7 +56,7 @@ where
     C: BlockConfig,
     <C::Block as Block>::Options: Clone,
 {
-    let device: Device = Default::default();
+    let device = test_device();
     let schedule = Schedule::Cyclic;
     let layers = LayersBuilder::new(N_REAL, block)
         .with_n_virtual_layers(Some((N_VIRTUAL, schedule.clone())))
@@ -156,7 +155,7 @@ fn mamba1_untied_stack_is_its_unshared_views() {
 fn mamba3_layout_follows_the_untie_list() {
     use crate::mamba3::prelude::Mamba3Untied::{DtBias, InProjTail};
 
-    let device: Device = Default::default();
+    let device = test_device();
     let stock = mamba3_config().init(&device).num_params();
     assert_eq!(mamba3_config().init_applications(3, &device).num_params(), stock);
 
@@ -181,7 +180,7 @@ fn mamba3_untied_tail_trains_one_copy_per_application() {
     use burn::optim::{AdamWConfig, GradientsParams};
     use burn_stack::optim::{MuonPlan, muon_config};
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let block = mamba3_config().with_untied(vec![Mamba3Untied::InProjTail]);
     let layers = LayersBuilder::new(1, block.clone())
         .with_n_virtual_layers(Some((3, Schedule::Cyclic)))

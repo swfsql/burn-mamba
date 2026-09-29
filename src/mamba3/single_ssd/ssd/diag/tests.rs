@@ -9,6 +9,7 @@ use super::*;
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -92,7 +93,7 @@ fn run(
 /// the forward output and on every input gradient.
 #[test]
 fn siso_matches_mimo_forward_and_grads() {
-    let device = Device::default();
+    let device = test_device();
     let (batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim, state_rank) =
         (2, 3, 5, 1, 4, 6, 8);
 
@@ -139,7 +140,7 @@ fn siso_matches_mimo_forward_and_grads() {
 /// on, the MIMO branch otherwise.
 #[test]
 fn dispatch_agrees_with_both_branches() {
-    let device = Device::default();
+    let device = test_device();
     let (batch, nchunks, chunk_len, nheads, per_head_dim, state_rank) = (2, 2, 4, 3, 6, 8);
 
     for mimo_rank in [1, 3] {

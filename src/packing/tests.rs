@@ -23,6 +23,7 @@ use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients, TensorData};
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 const D_MODEL: usize = 16;
 const VAL_TOL: f32 = 1e-4;
@@ -421,7 +422,7 @@ fn check_streams<C: TestCache, M: Module>(
         Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, C),
 ) {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let normal = Distribution::Normal(0.0, 1.0);
     for stream in STREAMS {
         let rows: Vec<Vec<usize>> = stream.iter().map(|lens| lens.to_vec()).collect();
@@ -506,7 +507,7 @@ fn check_streams<C: TestCache, M: Module>(
 
 #[test]
 fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
@@ -547,7 +548,7 @@ fn mamba3(
 #[test]
 fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
     use {Gain as G, RotationKind as R, Trapezoid as T, Tropical as Tr};
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let configs = [
         mamba3(R::Complex2D, T::HorizontalCarryOver, 1, 1, G::Projected, Tr::None),
         mamba3(R::Quaternion4D, T::Vertical, 3, 2, G::Kalman, Tr::MaxPlus),
@@ -579,7 +580,7 @@ fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
 /// has the right forward but a wrong backward in this Burn.
 #[test]
 fn restart_heads_gradient_sums_over_the_chunks() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (width, chunk_len, nchunks) = (3, 4, 3);
     let len = chunk_len * nchunks;
     let head = Tensor::<3>::random([1, 2, width], Distribution::Normal(0.0, 1.0), &device).require_grad();
@@ -604,7 +605,7 @@ fn restart_heads_gradient_sums_over_the_chunks() {
 #[test]
 #[should_panic(expected = "Minimal does not take resets")]
 fn packed_minimal_panics() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
@@ -620,7 +621,7 @@ fn packed_minimal_panics() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "a reset must be at the first token of a chunk")]
 fn reset_inside_a_chunk_panics() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
@@ -638,7 +639,7 @@ fn reset_inside_a_chunk_panics() {
 #[test]
 #[should_panic(expected = "a packed call needs chunk_len")]
 fn packed_mamba2_chunk_shorter_than_the_conv_panics() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)

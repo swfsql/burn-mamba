@@ -11,8 +11,7 @@
 use super::*;
 use burn::module::Param;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 /// `Σₘ v[m] ⊗ k[m]` computed elementwise from host data — the definition the
 /// tensor form has to reproduce.
@@ -40,7 +39,7 @@ fn reference(v: &[f32], k: &[f32], dims: [usize; 4]) -> Vec<f32> {
 
 #[test]
 fn mimo_outer_sum_matches_einsum() {
-    let device = Device::default();
+    let device = test_device();
     let (batch, nheads, per_head_dim, state_rank) = (2, 3, 4, 5);
 
     // `1` is the SISO shape the block actually runs at; `3` exercises the sum.
@@ -122,7 +121,7 @@ fn prefix_tol(expected: f32) -> f32 {
 /// carry only shifts every output by a constant, so the same host reference
 /// serves for both once it is added back.
 fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usize) {
-    let device = Device::default();
+    let device = test_device();
     let t = Tensor::<D>::random(dims, Distribution::Normal(0.0, 1.0), &device);
     let host: Vec<f32> = t.to_data().try_to_vec().unwrap();
     let want = reference_prefix_sum(&host, &dims, dim);
@@ -183,7 +182,7 @@ fn prefix_sum_matches_the_definition() {
 /// the one to delete if that op goes away.**
 #[test]
 fn prefix_sum_matches_cumsum() {
-    let device = Device::default();
+    let device = test_device();
     for len in [1, 5, 64, 257] {
         let t = Tensor::<4>::random([2, len, 3, 5], Distribution::Normal(0.0, 1.0), &device);
         let want = t.clone().cumsum(1);
@@ -207,7 +206,7 @@ fn prefix_sum_matches_cumsum() {
 /// its reductions subtract detached multiples of the period.
 #[test]
 fn prefix_sum_gradient_matches_the_definition() {
-    let device = Device::default();
+    let device = test_device();
     let (batch, len, channels) = (2, 100, 3);
 
     let raw = Tensor::<3>::random(
@@ -281,7 +280,7 @@ fn reduce_f64(x: f64, p: f64) -> f64 {
 /// That bound is why the rounding stays small.
 #[test]
 fn prefix_sum_on_the_circle_matches_the_definition() {
-    let device = Device::default();
+    let device = test_device();
     let tau = std::f32::consts::TAU;
     let (batch, channels) = (2, 3);
     for len in [5, 100, 5000, 131072] {

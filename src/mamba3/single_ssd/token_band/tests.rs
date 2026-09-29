@@ -4,6 +4,7 @@
 use super::*;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::max_abs_diff;
+use burn_stack::utils::test_helpers::test_device;
 
 /// `Σ_{j<u−1} νᵗᵃᵖ·dcy · (C[u−1]·B[j]) · V[j]`, written out one `(token, tap)`
 /// pair at a time.
@@ -62,7 +63,7 @@ fn reference(
 
 #[test]
 fn matches_the_direct_sum() {
-    let device: Device = Default::default();
+    let device = test_device();
     let dist = Distribution::Normal(0.0, 1.0);
     let (batch, tokens, nheads, per_head_dim, state_rank) = (2, 3, 2, 4, 6);
     for (u, mimo_rank) in [(2, 1), (3, 1), (3, 2), (4, 3)] {
@@ -94,7 +95,7 @@ fn matches_the_direct_sum() {
 /// At `u = 1` the band *is* the diagonal, which the kernel already owns.
 #[test]
 fn no_band_at_one_micro_step() {
-    let device: Device = Default::default();
+    let device = test_device();
     let dist = Distribution::Normal(0.0, 1.0);
     let (batch, sequence, nheads, per_head_dim, state_rank) = (1, 4, 2, 4, 6);
     assert!(

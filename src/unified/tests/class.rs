@@ -11,11 +11,12 @@ use burn_stack::utils::class::{
     class_chunk_plan, class_marker_output_indices, class_prime_plan, init_class_emb,
 };
 use burn_stack::utils::{ClassCursor, ClassCursors};
+use burn_stack::utils::test_helpers::test_device;
 
 #[cfg(feature = "mamba2")]
 #[test]
 fn latent_network_builder_mamba2() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -46,7 +47,7 @@ fn latent_network_builder_mamba2() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn unified_net_config_mamba2() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -98,7 +99,7 @@ fn unified_net_config_mamba2() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn unified_net_config_mamba3() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba3Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -139,7 +140,7 @@ fn unified_net_config_mamba3() {
 #[cfg(feature = "mamba1")]
 #[test]
 fn unified_net_config_mamba1() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let net = MambaLatentNetConfig::Mamba1 {
         input_size: 3,
@@ -176,7 +177,7 @@ fn unified_net_config_mamba1() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn bidi_layers_mamba2() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -209,7 +210,7 @@ fn bidi_layers_mamba2() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_layers_mamba3() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba3Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -244,7 +245,7 @@ fn bidi_layers_mamba3() {
 #[cfg(feature = "mamba1")]
 #[test]
 fn bidi_layers_mamba1() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
@@ -267,7 +268,7 @@ fn bidi_layers_mamba1() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn unified_bidi_config_mamba2() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -302,7 +303,7 @@ fn unified_bidi_config_mamba2() {
 fn bidi_forward_is_deterministic_mamba2() {
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -335,7 +336,7 @@ fn bidi_forward_is_deterministic_mamba2() {
 fn bidi_forward_is_deterministic_mamba1() {
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let layers = BidiLayersBuilder {
         n_real_layers: 2,
@@ -363,7 +364,7 @@ fn bidi_forward_is_deterministic_mamba1() {
 fn bidi_forward_is_deterministic_mamba3() {
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba3Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -412,7 +413,7 @@ fn assert_bidi_deterministic(y1: Tensor<3>, y2: Tensor<3>) {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_latents_lengthen_and_index() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -454,7 +455,7 @@ fn class_latents_custom_index() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_on_latent_network() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -484,7 +485,7 @@ fn class_tokens_on_latent_network() {
 #[test]
 #[should_panic(expected = "need a full-length hint")]
 fn class_latents_step_panics() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -506,7 +507,7 @@ fn class_latents_step_panics() {
 #[test]
 fn class_latents_step_matches_forward() {
     use burn_stack::utils::test_helpers::max_abs_diff;
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -559,7 +560,7 @@ fn per_layer_class_latents_step_matches_forward() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let adev = device.clone().autodiff();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
@@ -783,7 +784,7 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -885,7 +886,7 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -954,7 +955,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba3Config::new(d_model)
         .with_expand(2)
@@ -1007,7 +1008,7 @@ fn prime_on_a_network_covers_every_class_level() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1077,7 +1078,7 @@ fn layer_prime_returns_the_latent_and_its_delta() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1143,7 +1144,7 @@ fn layer_prime_returns_the_latent_and_its_delta() {
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_through_the_runtime_enums() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -1293,7 +1294,7 @@ fn class_markers_split_forward_matches_single_forward() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1377,7 +1378,7 @@ fn class_markers_step_matches_forward_with_full_len() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1439,7 +1440,7 @@ fn class_tokens_split_forward_matches_single_forward() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -1495,7 +1496,7 @@ fn class_tokens_split_forward_matches_single_forward() {
 #[test]
 #[should_panic(expected = "need a full-length hint")]
 fn class_markers_without_full_len_panic_in_forward() {
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -1524,7 +1525,7 @@ fn class_markers_forward_then_step() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1589,7 +1590,7 @@ fn class_tokens_step_matches_forward_with_full_len() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
         .with_per_head_dim(4)
@@ -1648,7 +1649,7 @@ fn end_closes_the_sequence_custom_never_does() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1771,7 +1772,7 @@ fn step_output_and_state_follow_the_last_emitted_token() {
     use burn_stack::utils::test_helpers::max_abs_diff;
     use burn::tensor::Distribution;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)

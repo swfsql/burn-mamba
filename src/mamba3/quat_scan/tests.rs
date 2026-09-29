@@ -10,15 +10,14 @@ use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::module::Param;
 use burn::prelude::*;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 const VAL_TOL: f32 = 1e-4;
 const GRAD_TOL: f32 = 1e-3;
 
 #[test]
 fn recalculated_matches_quat_cumprod_values() {
-    let device: Device = Default::default();
+    let device = test_device();
     // Non-power-of-two sequence exercises the identity-padded shift edges.
     let (batch, sequence, nheads, blocks) = (2, 13, 3, 2);
     let q = quat_normalize(Tensor::<5>::random(
@@ -48,7 +47,7 @@ fn recalculated_matches_quat_cumprod_values() {
 
 #[test]
 fn recalculated_matches_quat_cumprod_grads() {
-    let device: Device = Default::default();
+    let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 11, 2, 2);
     let q_raw = Tensor::<5>::random(
         [batch, sequence, nheads, blocks, 4],

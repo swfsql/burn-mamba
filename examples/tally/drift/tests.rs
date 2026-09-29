@@ -24,6 +24,7 @@ use crate::shared::handmade::{accuracy, affine_channels, memoryless_ceiling, par
 use burn::module::Param;
 use burn::prelude::*;
 use burn_mamba::prelude::*;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -196,7 +197,7 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 /// fitting.
 #[test]
 fn handmade_gate_solves_every_family() {
-    let device = Device::default();
+    let device = test_device();
     let model = handmade(&device, Arm::Kalman);
     println!("hand-built Kalman block ({} params):", model.num_params());
     let (worst, accs) = worst_family(&model, 256, &device);
@@ -216,7 +217,7 @@ fn handmade_gate_solves_every_family() {
 /// else.
 #[test]
 fn no_projected_decay_solves_the_task() {
-    let device = Device::default();
+    let device = test_device();
     println!("scaled member (κ = 0), by gap decay:");
     let header: String = FAMILIES.iter().map(|(n, _)| format!("  {n:>7}")).collect();
     println!("     α_gap {header}     worst");

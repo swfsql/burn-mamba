@@ -1,7 +1,6 @@
 use super::*;
 use burn::tensor::Distribution;
-
-type Device = burn::prelude::Device;
+use burn_stack::utils::test_helpers::test_device;
 
 fn small_config() -> Mamba2Config {
     Mamba2Config::new(32)
@@ -43,7 +42,7 @@ struct Heads {
 /// with `random = true` it holds random values, exercising parity from an
 /// arbitrary initial state (conv window + SSM hidden state).
 fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cache {
-    let device: Device = Default::default();
+    let device = test_device();
     let conv_dim = cfg.conv_dim();
     let conv_kernel = cfg.conv_kernel;
     let nheads = cfg.nheads();
@@ -200,7 +199,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// recurrent unrolling from that same state — outputs *and* final cache —
 /// then feeding a `forward`-produced cache back in continues correctly.
 fn run_step_matches_forward(cfg: Mamba2Config, ssd_path: Mamba2SsdPath, random_init: bool) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
@@ -342,7 +341,7 @@ fn step_matches_forward_norm_before_gate_random_init() {
 /// suffices: the three ssd-paths are proven equivalent among themselves in
 /// `mamba2::ssd::ssd_path::tests`.
 fn run_split_matches_full(cfg: Mamba2Config) {
-    let device: Device = Default::default();
+    let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;

@@ -8,6 +8,7 @@ use burn::prelude::*;
 use burn_stack::modules::multi_gate::MultiGateResidual;
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn::tensor::Distribution;
+use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
 
@@ -24,7 +25,7 @@ fn random_mgr(d_model: usize, n_stream: usize, device: &Device) -> MultiGateResi
 
 #[test]
 fn forward_step_parity() {
-    let device = Device::default();
+    let device = test_device();
     let (b, s, n, d) = (2, 5, 4, 8);
     let m = random_mgr(d, n, &device);
 
@@ -52,7 +53,7 @@ fn forward_step_parity() {
 fn init_is_convex_mean() {
     // Zero queries + zero bias ⇒ β = σ(0) = 0.5 and α uniform = 1/n, so the
     // mixer is the midpoint of (stream, layer_output) and the pool is the mean.
-    let device = Device::default();
+    let device = test_device();
     let (b, n, d) = (2, 3, 6);
     let m = MultiGateResidualConfig::new(d, n).init(&device);
 
@@ -69,7 +70,7 @@ fn init_is_convex_mean() {
 
 #[test]
 fn gradients_flow() {
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let (b, s, n, d) = (2, 4, 3, 8);
     let m = MultiGateResidualConfig::new(d, n)
         .with_init_bias(0.5)
@@ -104,7 +105,7 @@ fn layers_standard_ignore_residuals_parity() {
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
     use burn_stack::utils::Schedule;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -151,7 +152,7 @@ fn layers_multi_gate_forward_step_parity() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -201,7 +202,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
     use burn_stack::utils::Schedule;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba3Config::new(d_model)
         .with_expand(2)
@@ -254,7 +255,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
     use burn_stack::utils::Schedule;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -321,7 +322,7 @@ fn bidi_multi_gate_forward_and_grads() {
     use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
     use burn_stack::modules::{Layer, Residuals};
 
-    let device = Device::default().autodiff();
+    let device = test_device().autodiff();
     let d_model = 16;
     let n_real = 4; // 2 pairs
     let block = Mamba2Config::new(d_model)
@@ -387,7 +388,7 @@ fn bidi_multi_gate_forward_and_grads() {
 /// there — `k+1` streams out of `k`, and (at zero-init) their plain mean.
 #[test]
 fn accumulate_appends_a_stream() {
-    let device = Device::default();
+    let device = test_device();
     let (b, s, n, d) = (2, 3, 4, 8);
     let m = MultiGateResidualConfig::new(d, n).init(&device);
 
@@ -431,7 +432,7 @@ fn layers_multi_gate_streams_are_distinct() {
     use burn_stack::modules::{LayersBuilder, Residuals, ResidualsConfig};
     use burn_stack::utils::Schedule;
 
-    let device = Device::default();
+    let device = test_device();
     let (d_model, n_stream, n_virtual) = (16, 3, 5);
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -506,7 +507,7 @@ fn layers_multi_gate_streams_are_distinct() {
 /// depth-timescales from step zero (`0` keeps the paper's uniform init).
 #[test]
 fn init_bias_step_ramps_the_gates() {
-    let device = Device::default();
+    let device = test_device();
     let (n, d) = (4, 8);
     let m = MultiGateResidualConfig::new(d, n)
         .with_init_bias(-2.7)
@@ -550,7 +551,7 @@ fn init_bias_step_ramps_the_gates() {
 /// embedding a plain additive skip would have handed it.
 #[test]
 fn attn_pool_reproduces_a_row_present_in_every_stream() {
-    let device = Device::default();
+    let device = test_device();
     let (b, k, d) = (2, 4, 8);
     let m = random_mgr(d, k, &device);
 
@@ -571,7 +572,7 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -629,7 +630,7 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
     use burn_stack::utils::{ClassCursors, ClassLatent};
     use burn::module::Param;
 
-    let device = Device::default();
+    let device = test_device();
     let adev = device.clone().autodiff();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
@@ -753,7 +754,7 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -805,7 +806,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -872,7 +873,7 @@ fn bidi_multi_gate_class_latents_forward() {
     use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMergeConfig};
     use burn_stack::utils::ClassLatent;
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -925,7 +926,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent, ClassToken};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
@@ -1009,7 +1010,7 @@ fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
     use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
-    let device = Device::default();
+    let device = test_device();
     let d_model = 16;
     let block = Mamba2Config::new(d_model)
         .with_expand(2)
