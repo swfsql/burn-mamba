@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["chunk_heads","chunk_resets","last_origin","last_start_b","restart_heads","restart_window","segment_start"],"struct":["Restarts","Segments"]};

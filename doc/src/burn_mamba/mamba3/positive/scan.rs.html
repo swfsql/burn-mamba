@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/positive/scan.rs`."><title>scan.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (6bb1652a0 2026-09-22)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/positive/</div>scan.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! The log-semiring prefix product that every positive member runs on.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/positive/scan.rs`."><title>scan.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (c1070d693 2026-09-28)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/positive/</div>scan.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! The log-semiring prefix product that every positive member runs on.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! An element is a 2×2 nonnegative matrix in log coordinates, one per
 <a href=#4 id=4 data-nosnippet>4</a>//! `[batch, position, head]`. It has two shapes:
@@ -59,200 +59,292 @@
 <a href=#59 id=59 data-nosnippet>59</a>    </span><span class="kw">fn </span>narrow(<span class="self">self</span>, start: usize, len: usize) -&gt; <span class="self">Self</span>;
 <a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// Concatenate along axis 1.
 <a href=#61 id=61 data-nosnippet>61</a>    </span><span class="kw">fn </span>cat(parts: Vec&lt;<span class="self">Self</span>&gt;) -&gt; <span class="self">Self</span>;
-<a href=#62 id=62 data-nosnippet>62</a>}
-<a href=#63 id=63 data-nosnippet>63</a>
-<a href=#64 id=64 data-nosnippet>64</a><span class="doccomment">/// A projective 2×2 element: `σ ↦ M ⊗ σ` read as `σ₀ − σ₁`.
-<a href=#65 id=65 data-nosnippet>65</a></span><span class="attr">#[derive(Clone, Debug)]
-<a href=#66 id=66 data-nosnippet>66</a></span><span class="kw">pub struct </span>Mobius {
-<a href=#67 id=67 data-nosnippet>67</a>    <span class="doccomment">/// `ln M₀₀`, `[batch, len, nheads]`.
-<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">pub </span>m00: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// `ln M₀₁`.
-<a href=#70 id=70 data-nosnippet>70</a>    </span><span class="kw">pub </span>m01: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#71 id=71 data-nosnippet>71</a>    <span class="doccomment">/// `ln M₁₀`.
-<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="kw">pub </span>m10: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// `ln M₁₁`.
-<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">pub </span>m11: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#75 id=75 data-nosnippet>75</a>}
-<a href=#76 id=76 data-nosnippet>76</a>
-<a href=#77 id=77 data-nosnippet>77</a><span class="kw">impl </span>Mobius {
-<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// The log-ratio after this (prefix) product, from `ℓ₀` per head:
-<a href=#79 id=79 data-nosnippet>79</a>    /// `lse(M₀₀ + ℓ₀, M₀₁) − lse(M₁₀ + ℓ₀, M₁₁)`.
-<a href=#80 id=80 data-nosnippet>80</a>    ///
-<a href=#81 id=81 data-nosnippet>81</a>    /// # Shapes
-<a href=#82 id=82 data-nosnippet>82</a>    /// - `carry_bh` : `[batch, nheads]`
-<a href=#83 id=83 data-nosnippet>83</a>    /// - out        : `[batch, len, nheads]`
-<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub fn </span>apply(<span class="self">self</span>, carry_bh: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
-<a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">let </span>carry_b1h = carry_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
-<a href=#86 id=86 data-nosnippet>86</a>        lse(<span class="self">self</span>.m00 + carry_b1h.clone(), <span class="self">self</span>.m01) - lse(<span class="self">self</span>.m10 + carry_b1h, <span class="self">self</span>.m11)
-<a href=#87 id=87 data-nosnippet>87</a>    }
-<a href=#88 id=88 data-nosnippet>88</a>}
-<a href=#89 id=89 data-nosnippet>89</a>
-<a href=#90 id=90 data-nosnippet>90</a><span class="kw">impl </span>Element <span class="kw">for </span>Mobius {
-<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">fn </span>compose(later: <span class="self">Self</span>, earlier: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
-<a href=#92 id=92 data-nosnippet>92</a>        <span class="kw">let </span>(x, y) = (later, earlier);
-<a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>m00 = lse(x.m00.clone() + y.m00.clone(), x.m01.clone() + y.m10.clone());
-<a href=#94 id=94 data-nosnippet>94</a>        <span class="kw">let </span>m01 = lse(x.m00.clone() + y.m01.clone(), x.m01 + y.m11.clone());
-<a href=#95 id=95 data-nosnippet>95</a>        <span class="kw">let </span>m10 = lse(x.m10.clone() + y.m00, x.m11.clone() + y.m10);
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>m11 = lse(x.m10 + y.m01, x.m11 + y.m11);
-<a href=#97 id=97 data-nosnippet>97</a>        <span class="comment">// Projective: the read cancels any common shift, in value and in
-<a href=#98 id=98 data-nosnippet>98</a>        // gradient. So subtract the largest entry (detached, because its
-<a href=#99 id=99 data-nosnippet>99</a>        // gradient would cancel anyway), and floor the structural zeros again.
-<a href=#100 id=100 data-nosnippet>100</a>        </span><span class="kw">let </span>shift = m00
-<a href=#101 id=101 data-nosnippet>101</a>            .clone()
-<a href=#102 id=102 data-nosnippet>102</a>            .max_pair(m01.clone())
-<a href=#103 id=103 data-nosnippet>103</a>            .max_pair(m10.clone())
-<a href=#104 id=104 data-nosnippet>104</a>            .max_pair(m11.clone())
-<a href=#105 id=105 data-nosnippet>105</a>            .detach();
-<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">let </span>floor = |t: Tensor&lt;<span class="number">3</span>&gt;| (t - shift.clone()).clamp_min(LOG_ZERO);
-<a href=#107 id=107 data-nosnippet>107</a>        Mobius {
-<a href=#108 id=108 data-nosnippet>108</a>            m00: floor(m00),
-<a href=#109 id=109 data-nosnippet>109</a>            m01: floor(m01),
-<a href=#110 id=110 data-nosnippet>110</a>            m10: floor(m10),
-<a href=#111 id=111 data-nosnippet>111</a>            m11: floor(m11),
-<a href=#112 id=112 data-nosnippet>112</a>        }
-<a href=#113 id=113 data-nosnippet>113</a>    }
-<a href=#114 id=114 data-nosnippet>114</a>
-<a href=#115 id=115 data-nosnippet>115</a>    <span class="kw">fn </span>identity_like(<span class="kw-2">&amp;</span><span class="self">self</span>, len: usize) -&gt; <span class="self">Self </span>{
-<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>(one, zero) = one_and_zero(<span class="kw-2">&amp;</span><span class="self">self</span>.m00, len);
-<a href=#117 id=117 data-nosnippet>117</a>        Mobius {
-<a href=#118 id=118 data-nosnippet>118</a>            m00: one.clone(),
-<a href=#119 id=119 data-nosnippet>119</a>            m01: zero.clone(),
-<a href=#120 id=120 data-nosnippet>120</a>            m10: zero,
-<a href=#121 id=121 data-nosnippet>121</a>            m11: one,
-<a href=#122 id=122 data-nosnippet>122</a>        }
-<a href=#123 id=123 data-nosnippet>123</a>    }
-<a href=#124 id=124 data-nosnippet>124</a>
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">fn </span>dims(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [usize; <span class="number">3</span>] {
-<a href=#126 id=126 data-nosnippet>126</a>        <span class="self">self</span>.m00.dims()
-<a href=#127 id=127 data-nosnippet>127</a>    }
-<a href=#128 id=128 data-nosnippet>128</a>
-<a href=#129 id=129 data-nosnippet>129</a>    <span class="kw">fn </span>narrow(<span class="self">self</span>, start: usize, len: usize) -&gt; <span class="self">Self </span>{
-<a href=#130 id=130 data-nosnippet>130</a>        Mobius {
-<a href=#131 id=131 data-nosnippet>131</a>            m00: <span class="self">self</span>.m00.narrow(<span class="number">1</span>, start, len),
-<a href=#132 id=132 data-nosnippet>132</a>            m01: <span class="self">self</span>.m01.narrow(<span class="number">1</span>, start, len),
-<a href=#133 id=133 data-nosnippet>133</a>            m10: <span class="self">self</span>.m10.narrow(<span class="number">1</span>, start, len),
-<a href=#134 id=134 data-nosnippet>134</a>            m11: <span class="self">self</span>.m11.narrow(<span class="number">1</span>, start, len),
-<a href=#135 id=135 data-nosnippet>135</a>        }
-<a href=#136 id=136 data-nosnippet>136</a>    }
-<a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">fn </span>cat(parts: Vec&lt;<span class="self">Self</span>&gt;) -&gt; <span class="self">Self </span>{
-<a href=#139 id=139 data-nosnippet>139</a>        <span class="kw">let </span><span class="kw-2">mut </span>m = [<span class="macro">vec!</span>[], <span class="macro">vec!</span>[], <span class="macro">vec!</span>[], <span class="macro">vec!</span>[]];
-<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">for </span>p <span class="kw">in </span>parts {
-<a href=#141 id=141 data-nosnippet>141</a>            m[<span class="number">0</span>].push(p.m00);
-<a href=#142 id=142 data-nosnippet>142</a>            m[<span class="number">1</span>].push(p.m01);
-<a href=#143 id=143 data-nosnippet>143</a>            m[<span class="number">2</span>].push(p.m10);
-<a href=#144 id=144 data-nosnippet>144</a>            m[<span class="number">3</span>].push(p.m11);
-<a href=#145 id=145 data-nosnippet>145</a>        }
-<a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">let </span>[m00, m01, m10, m11] = m.map(|v| Tensor::cat(v, <span class="number">1</span>));
-<a href=#147 id=147 data-nosnippet>147</a>        Mobius { m00, m01, m10, m11 }
-<a href=#148 id=148 data-nosnippet>148</a>    }
-<a href=#149 id=149 data-nosnippet>149</a>}
-<a href=#150 id=150 data-nosnippet>150</a>
-<a href=#151 id=151 data-nosnippet>151</a><span class="doccomment">/// An affine element `c ↦ lse(c + a, b)` — the matrix `[[a, b], [−∞, 0]]`.
-<a href=#152 id=152 data-nosnippet>152</a></span><span class="attr">#[derive(Clone, Debug)]
-<a href=#153 id=153 data-nosnippet>153</a></span><span class="kw">pub struct </span>Affine {
-<a href=#154 id=154 data-nosnippet>154</a>    <span class="doccomment">/// The log-gain, `[batch, len, nheads]` (any sign).
-<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="kw">pub </span>a: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#156 id=156 data-nosnippet>156</a>    <span class="doccomment">/// The log-offset.
-<a href=#157 id=157 data-nosnippet>157</a>    </span><span class="kw">pub </span>b: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#158 id=158 data-nosnippet>158</a>}
-<a href=#159 id=159 data-nosnippet>159</a>
-<a href=#160 id=160 data-nosnippet>160</a><span class="kw">impl </span>Affine {
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="doccomment">/// The register after this (prefix) map, from `c₀` per head:
-<a href=#162 id=162 data-nosnippet>162</a>    /// `lse(a + c₀, b)`.
-<a href=#163 id=163 data-nosnippet>163</a>    ///
-<a href=#164 id=164 data-nosnippet>164</a>    /// # Shapes
-<a href=#165 id=165 data-nosnippet>165</a>    /// - `carry_bh` : `[batch, nheads]`
-<a href=#166 id=166 data-nosnippet>166</a>    /// - out        : `[batch, len, nheads]`
-<a href=#167 id=167 data-nosnippet>167</a>    </span><span class="kw">pub fn </span>apply(<span class="self">self</span>, carry_bh: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
-<a href=#168 id=168 data-nosnippet>168</a>        lse(<span class="self">self</span>.a + carry_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>), <span class="self">self</span>.b)
-<a href=#169 id=169 data-nosnippet>169</a>    }
-<a href=#170 id=170 data-nosnippet>170</a>}
-<a href=#171 id=171 data-nosnippet>171</a>
-<a href=#172 id=172 data-nosnippet>172</a><span class="kw">impl </span>Element <span class="kw">for </span>Affine {
-<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">fn </span>compose(later: <span class="self">Self</span>, earlier: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="comment">// lse(lse(c + a₁, b₁) + a₂, b₂) = lse(c + (a₁ + a₂), lse(b₁ + a₂, b₂)).
-<a href=#175 id=175 data-nosnippet>175</a>        </span>Affine {
-<a href=#176 id=176 data-nosnippet>176</a>            b: lse(earlier.b + later.a.clone(), later.b).clamp_min(LOG_ZERO),
-<a href=#177 id=177 data-nosnippet>177</a>            a: (earlier.a + later.a).clamp_min(LOG_ZERO),
-<a href=#178 id=178 data-nosnippet>178</a>        }
-<a href=#179 id=179 data-nosnippet>179</a>    }
-<a href=#180 id=180 data-nosnippet>180</a>
-<a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">fn </span>identity_like(<span class="kw-2">&amp;</span><span class="self">self</span>, len: usize) -&gt; <span class="self">Self </span>{
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">let </span>(one, zero) = one_and_zero(<span class="kw-2">&amp;</span><span class="self">self</span>.a, len);
-<a href=#183 id=183 data-nosnippet>183</a>        Affine { a: one, b: zero }
-<a href=#184 id=184 data-nosnippet>184</a>    }
-<a href=#185 id=185 data-nosnippet>185</a>
-<a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">fn </span>dims(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [usize; <span class="number">3</span>] {
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="self">self</span>.a.dims()
-<a href=#188 id=188 data-nosnippet>188</a>    }
-<a href=#189 id=189 data-nosnippet>189</a>
-<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">fn </span>narrow(<span class="self">self</span>, start: usize, len: usize) -&gt; <span class="self">Self </span>{
-<a href=#191 id=191 data-nosnippet>191</a>        Affine {
-<a href=#192 id=192 data-nosnippet>192</a>            a: <span class="self">self</span>.a.narrow(<span class="number">1</span>, start, len),
-<a href=#193 id=193 data-nosnippet>193</a>            b: <span class="self">self</span>.b.narrow(<span class="number">1</span>, start, len),
-<a href=#194 id=194 data-nosnippet>194</a>        }
-<a href=#195 id=195 data-nosnippet>195</a>    }
-<a href=#196 id=196 data-nosnippet>196</a>
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="kw">fn </span>cat(parts: Vec&lt;<span class="self">Self</span>&gt;) -&gt; <span class="self">Self </span>{
-<a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">let </span>(a, b) = parts.into_iter().map(|p| (p.a, p.b)).unzip();
-<a href=#199 id=199 data-nosnippet>199</a>        Affine {
-<a href=#200 id=200 data-nosnippet>200</a>            a: Tensor::cat(a, <span class="number">1</span>),
-<a href=#201 id=201 data-nosnippet>201</a>            b: Tensor::cat(b, <span class="number">1</span>),
-<a href=#202 id=202 data-nosnippet>202</a>        }
-<a href=#203 id=203 data-nosnippet>203</a>    }
-<a href=#204 id=204 data-nosnippet>204</a>}
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a><span class="doccomment">/// Inclusive prefix products `Pₜ = eₜ ∘ ⋯ ∘ e₀` along axis 1, by Hillis–Steele
-<a href=#207 id=207 data-nosnippet>207</a>/// doubling.
-<a href=#208 id=208 data-nosnippet>208</a>///
-<a href=#209 id=209 data-nosnippet>209</a>/// Invariant after the round at `offset`: position `t` holds the product of
-<a href=#210 id=210 data-nosnippet>210</a>/// the window `[max(t − 2·offset + 1, 0), t]`, where the positions before the
-<a href=#211 id=211 data-nosnippet>211</a>/// axis are the identity. `⌈log₂ len⌉` rounds cover every window.
-<a href=#212 id=212 data-nosnippet>212</a>///
-<a href=#213 id=213 data-nosnippet>213</a>/// # Why doubling, and what it costs
-<a href=#214 id=214 data-nosnippet>214</a>///
-<a href=#215 id=215 data-nosnippet>215</a>/// `helpers::prefix_sum` blocks its scan, and its measurements show blocking
-<a href=#216 id=216 data-nosnippet>216</a>/// faster than doubling at every length. But its blocks run on `cumsum`, a
-<a href=#217 id=217 data-nosnippet>217</a>/// one-launch in-block scan that this element does not have: the log-semiring
-<a href=#218 id=218 data-nosnippet>218</a>/// product is not `+`, and the [`Mobius`] one is not even commutative. So an
-<a href=#219 id=219 data-nosnippet>219</a>/// in-block pass would itself be a doubling or a loop. The schedule is thus
-<a href=#220 id=220 data-nosnippet>220</a>/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole folded
-<a href=#221 id=221 data-nosnippet>221</a>/// sequence. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
-<a href=#222 id=222 data-nosnippet>222</a>/// the renormalising shift, the new floors) and a dozen for [`Affine`]. The
-<a href=#223 id=223 data-nosnippet>223</a>/// tensors are `[batch, len, nheads]`, with no `per_head_dim·state_rank`
-<a href=#224 id=224 data-nosnippet>224</a>/// factor, so the cost that grows with `len` is mostly launches, not bytes.
-<a href=#225 id=225 data-nosnippet>225</a>///
-<a href=#226 id=226 data-nosnippet>226</a>/// The backward is plain autodiff, which keeps the intermediates of every
-<a href=#227 id=227 data-nosnippet>227</a>/// round alive until it runs. A recompute backward like that of `quat_scan` is
-<a href=#228 id=228 data-nosnippet>228</a>/// still an open item, and its divide-out trick does not port: a log-semiring
-<a href=#229 id=229 data-nosnippet>229</a>/// element has no inverse. The `a` of [`Affine`] is a plain running sum on the
-<a href=#230 id=230 data-nosnippet>230</a>/// same rounds, which `prefix_sum` could compute alone.
-<a href=#231 id=231 data-nosnippet>231</a></span><span class="kw">pub fn </span>prefix&lt;E: Element&gt;(elements: E) -&gt; E {
-<a href=#232 id=232 data-nosnippet>232</a>    <span class="kw">let </span>[_batch, len, _nheads] = elements.dims();
-<a href=#233 id=233 data-nosnippet>233</a>    <span class="kw">let </span><span class="kw-2">mut </span>acc = elements;
-<a href=#234 id=234 data-nosnippet>234</a>    <span class="kw">let </span><span class="kw-2">mut </span>offset = <span class="number">1usize</span>;
-<a href=#235 id=235 data-nosnippet>235</a>    <span class="kw">while </span>offset &lt; len {
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span>shifted = E::cat(<span class="macro">vec!</span>[
-<a href=#237 id=237 data-nosnippet>237</a>            acc.identity_like(offset),
-<a href=#238 id=238 data-nosnippet>238</a>            acc.clone().narrow(<span class="number">0</span>, len - offset),
-<a href=#239 id=239 data-nosnippet>239</a>        ]);
-<a href=#240 id=240 data-nosnippet>240</a>        acc = E::compose(acc, shifted);
-<a href=#241 id=241 data-nosnippet>241</a>        offset <span class="kw-2">*</span>= <span class="number">2</span>;
-<a href=#242 id=242 data-nosnippet>242</a>    }
-<a href=#243 id=243 data-nosnippet>243</a>    acc
-<a href=#244 id=244 data-nosnippet>244</a>}
-<a href=#245 id=245 data-nosnippet>245</a>
-<a href=#246 id=246 data-nosnippet>246</a><span class="doccomment">/// The same prefix products by a sequential left fold: one combine per
-<a href=#247 id=247 data-nosnippet>247</a>/// position. The tests compare [`prefix`] against it.
-<a href=#248 id=248 data-nosnippet>248</a></span><span class="kw">pub fn </span>fold&lt;E: Element&gt;(elements: E) -&gt; E {
-<a href=#249 id=249 data-nosnippet>249</a>    <span class="kw">let </span>[_batch, len, _nheads] = elements.dims();
-<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="macro">vec!</span>[elements.clone().narrow(<span class="number">0</span>, <span class="number">1</span>)];
-<a href=#251 id=251 data-nosnippet>251</a>    <span class="kw">for </span>t <span class="kw">in </span><span class="number">1</span>..len {
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="kw">let </span>prev = out[t - <span class="number">1</span>].clone();
-<a href=#253 id=253 data-nosnippet>253</a>        out.push(E::compose(elements.clone().narrow(t, <span class="number">1</span>), prev));
-<a href=#254 id=254 data-nosnippet>254</a>    }
-<a href=#255 id=255 data-nosnippet>255</a>    E::cat(out)
-<a href=#256 id=256 data-nosnippet>256</a>}
-<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="doccomment">/// The entries of `other` where `mask_bsh` is `true`, and those of `self`
+<a href=#63 id=63 data-nosnippet>63</a>    /// elsewhere.
+<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="kw">fn </span>select(<span class="self">self</span>, mask_bsh: Tensor&lt;<span class="number">3</span>, Bool&gt;, other: <span class="self">Self</span>) -&gt; <span class="self">Self</span>;
+<a href=#65 id=65 data-nosnippet>65</a>}
+<a href=#66 id=66 data-nosnippet>66</a>
+<a href=#67 id=67 data-nosnippet>67</a><span class="doccomment">/// A projective 2×2 element: `σ ↦ M ⊗ σ` read as `σ₀ − σ₁`.
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#69 id=69 data-nosnippet>69</a></span><span class="kw">pub struct </span>Mobius {
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// `ln M₀₀`, `[batch, len, nheads]`.
+<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub </span>m00: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// `ln M₀₁`.
+<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>m01: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="doccomment">/// `ln M₁₀`.
+<a href=#75 id=75 data-nosnippet>75</a>    </span><span class="kw">pub </span>m10: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="doccomment">/// `ln M₁₁`.
+<a href=#77 id=77 data-nosnippet>77</a>    </span><span class="kw">pub </span>m11: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#78 id=78 data-nosnippet>78</a>}
+<a href=#79 id=79 data-nosnippet>79</a>
+<a href=#80 id=80 data-nosnippet>80</a><span class="kw">impl </span>Mobius {
+<a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// The log-ratio after this (prefix) product, from `ℓ₀` per head:
+<a href=#82 id=82 data-nosnippet>82</a>    /// `lse(M₀₀ + ℓ₀, M₀₁) − lse(M₁₀ + ℓ₀, M₁₁)`.
+<a href=#83 id=83 data-nosnippet>83</a>    ///
+<a href=#84 id=84 data-nosnippet>84</a>    /// # Shapes
+<a href=#85 id=85 data-nosnippet>85</a>    /// - `carry_bh` : `[batch, nheads]`
+<a href=#86 id=86 data-nosnippet>86</a>    /// - out        : `[batch, len, nheads]`
+<a href=#87 id=87 data-nosnippet>87</a>    </span><span class="kw">pub fn </span>apply(<span class="self">self</span>, carry_bh: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#88 id=88 data-nosnippet>88</a>        <span class="self">self</span>.apply_each(carry_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>))
+<a href=#89 id=89 data-nosnippet>89</a>    }
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// [`Self::apply`] with a carry per position, `[batch, len, nheads]` (or
+<a href=#92 id=92 data-nosnippet>92</a>    /// `[batch, 1, nheads]`, broadcast).
+<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub fn </span>apply_each(<span class="self">self</span>, carry_bsh: Tensor&lt;<span class="number">3</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#94 id=94 data-nosnippet>94</a>        lse(<span class="self">self</span>.m00 + carry_bsh.clone(), <span class="self">self</span>.m01) - lse(<span class="self">self</span>.m10 + carry_bsh, <span class="self">self</span>.m11)
+<a href=#95 id=95 data-nosnippet>95</a>    }
+<a href=#96 id=96 data-nosnippet>96</a>}
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="kw">impl </span>Element <span class="kw">for </span>Mobius {
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">fn </span>compose(later: <span class="self">Self</span>, earlier: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
+<a href=#100 id=100 data-nosnippet>100</a>        <span class="kw">let </span>(x, y) = (later, earlier);
+<a href=#101 id=101 data-nosnippet>101</a>        <span class="kw">let </span>m00 = lse(x.m00.clone() + y.m00.clone(), x.m01.clone() + y.m10.clone());
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>m01 = lse(x.m00.clone() + y.m01.clone(), x.m01 + y.m11.clone());
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>m10 = lse(x.m10.clone() + y.m00, x.m11.clone() + y.m10);
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">let </span>m11 = lse(x.m10 + y.m01, x.m11 + y.m11);
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="comment">// Projective: the read cancels any common shift, in value and in
+<a href=#106 id=106 data-nosnippet>106</a>        // gradient. So subtract the largest entry (detached, because its
+<a href=#107 id=107 data-nosnippet>107</a>        // gradient would cancel anyway), and floor the structural zeros again.
+<a href=#108 id=108 data-nosnippet>108</a>        </span><span class="kw">let </span>shift = m00
+<a href=#109 id=109 data-nosnippet>109</a>            .clone()
+<a href=#110 id=110 data-nosnippet>110</a>            .max_pair(m01.clone())
+<a href=#111 id=111 data-nosnippet>111</a>            .max_pair(m10.clone())
+<a href=#112 id=112 data-nosnippet>112</a>            .max_pair(m11.clone())
+<a href=#113 id=113 data-nosnippet>113</a>            .detach();
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>floor = |t: Tensor&lt;<span class="number">3</span>&gt;| (t - shift.clone()).clamp_min(LOG_ZERO);
+<a href=#115 id=115 data-nosnippet>115</a>        Mobius {
+<a href=#116 id=116 data-nosnippet>116</a>            m00: floor(m00),
+<a href=#117 id=117 data-nosnippet>117</a>            m01: floor(m01),
+<a href=#118 id=118 data-nosnippet>118</a>            m10: floor(m10),
+<a href=#119 id=119 data-nosnippet>119</a>            m11: floor(m11),
+<a href=#120 id=120 data-nosnippet>120</a>        }
+<a href=#121 id=121 data-nosnippet>121</a>    }
+<a href=#122 id=122 data-nosnippet>122</a>
+<a href=#123 id=123 data-nosnippet>123</a>    <span class="kw">fn </span>identity_like(<span class="kw-2">&amp;</span><span class="self">self</span>, len: usize) -&gt; <span class="self">Self </span>{
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">let </span>(one, zero) = one_and_zero(<span class="kw-2">&amp;</span><span class="self">self</span>.m00, len);
+<a href=#125 id=125 data-nosnippet>125</a>        Mobius {
+<a href=#126 id=126 data-nosnippet>126</a>            m00: one.clone(),
+<a href=#127 id=127 data-nosnippet>127</a>            m01: zero.clone(),
+<a href=#128 id=128 data-nosnippet>128</a>            m10: zero,
+<a href=#129 id=129 data-nosnippet>129</a>            m11: one,
+<a href=#130 id=130 data-nosnippet>130</a>        }
+<a href=#131 id=131 data-nosnippet>131</a>    }
+<a href=#132 id=132 data-nosnippet>132</a>
+<a href=#133 id=133 data-nosnippet>133</a>    <span class="kw">fn </span>dims(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [usize; <span class="number">3</span>] {
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="self">self</span>.m00.dims()
+<a href=#135 id=135 data-nosnippet>135</a>    }
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">fn </span>narrow(<span class="self">self</span>, start: usize, len: usize) -&gt; <span class="self">Self </span>{
+<a href=#138 id=138 data-nosnippet>138</a>        Mobius {
+<a href=#139 id=139 data-nosnippet>139</a>            m00: <span class="self">self</span>.m00.narrow(<span class="number">1</span>, start, len),
+<a href=#140 id=140 data-nosnippet>140</a>            m01: <span class="self">self</span>.m01.narrow(<span class="number">1</span>, start, len),
+<a href=#141 id=141 data-nosnippet>141</a>            m10: <span class="self">self</span>.m10.narrow(<span class="number">1</span>, start, len),
+<a href=#142 id=142 data-nosnippet>142</a>            m11: <span class="self">self</span>.m11.narrow(<span class="number">1</span>, start, len),
+<a href=#143 id=143 data-nosnippet>143</a>        }
+<a href=#144 id=144 data-nosnippet>144</a>    }
+<a href=#145 id=145 data-nosnippet>145</a>
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="kw">fn </span>cat(parts: Vec&lt;<span class="self">Self</span>&gt;) -&gt; <span class="self">Self </span>{
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="kw">let </span><span class="kw-2">mut </span>m = [<span class="macro">vec!</span>[], <span class="macro">vec!</span>[], <span class="macro">vec!</span>[], <span class="macro">vec!</span>[]];
+<a href=#148 id=148 data-nosnippet>148</a>        <span class="kw">for </span>p <span class="kw">in </span>parts {
+<a href=#149 id=149 data-nosnippet>149</a>            m[<span class="number">0</span>].push(p.m00);
+<a href=#150 id=150 data-nosnippet>150</a>            m[<span class="number">1</span>].push(p.m01);
+<a href=#151 id=151 data-nosnippet>151</a>            m[<span class="number">2</span>].push(p.m10);
+<a href=#152 id=152 data-nosnippet>152</a>            m[<span class="number">3</span>].push(p.m11);
+<a href=#153 id=153 data-nosnippet>153</a>        }
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>[m00, m01, m10, m11] = m.map(|v| Tensor::cat(v, <span class="number">1</span>));
+<a href=#155 id=155 data-nosnippet>155</a>        Mobius { m00, m01, m10, m11 }
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">fn </span>select(<span class="self">self</span>, mask_bsh: Tensor&lt;<span class="number">3</span>, Bool&gt;, other: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
+<a href=#159 id=159 data-nosnippet>159</a>        Mobius {
+<a href=#160 id=160 data-nosnippet>160</a>            m00: <span class="self">self</span>.m00.mask_where(mask_bsh.clone(), other.m00),
+<a href=#161 id=161 data-nosnippet>161</a>            m01: <span class="self">self</span>.m01.mask_where(mask_bsh.clone(), other.m01),
+<a href=#162 id=162 data-nosnippet>162</a>            m10: <span class="self">self</span>.m10.mask_where(mask_bsh.clone(), other.m10),
+<a href=#163 id=163 data-nosnippet>163</a>            m11: <span class="self">self</span>.m11.mask_where(mask_bsh, other.m11),
+<a href=#164 id=164 data-nosnippet>164</a>        }
+<a href=#165 id=165 data-nosnippet>165</a>    }
+<a href=#166 id=166 data-nosnippet>166</a>}
+<a href=#167 id=167 data-nosnippet>167</a>
+<a href=#168 id=168 data-nosnippet>168</a><span class="doccomment">/// An affine element `c ↦ lse(c + a, b)` — the matrix `[[a, b], [−∞, 0]]`.
+<a href=#169 id=169 data-nosnippet>169</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#170 id=170 data-nosnippet>170</a></span><span class="kw">pub struct </span>Affine {
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="doccomment">/// The log-gain, `[batch, len, nheads]` (any sign).
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">pub </span>a: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="doccomment">/// The log-offset.
+<a href=#174 id=174 data-nosnippet>174</a>    </span><span class="kw">pub </span>b: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#175 id=175 data-nosnippet>175</a>}
+<a href=#176 id=176 data-nosnippet>176</a>
+<a href=#177 id=177 data-nosnippet>177</a><span class="kw">impl </span>Affine {
+<a href=#178 id=178 data-nosnippet>178</a>    <span class="doccomment">/// The register after this (prefix) map, from `c₀` per head:
+<a href=#179 id=179 data-nosnippet>179</a>    /// `lse(a + c₀, b)`.
+<a href=#180 id=180 data-nosnippet>180</a>    ///
+<a href=#181 id=181 data-nosnippet>181</a>    /// # Shapes
+<a href=#182 id=182 data-nosnippet>182</a>    /// - `carry_bh` : `[batch, nheads]`
+<a href=#183 id=183 data-nosnippet>183</a>    /// - out        : `[batch, len, nheads]`
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="kw">pub fn </span>apply(<span class="self">self</span>, carry_bh: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#185 id=185 data-nosnippet>185</a>        <span class="self">self</span>.apply_each(carry_bh.unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>))
+<a href=#186 id=186 data-nosnippet>186</a>    }
+<a href=#187 id=187 data-nosnippet>187</a>
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="doccomment">/// [`Self::apply`] with a carry per position, `[batch, len, nheads]` (or
+<a href=#189 id=189 data-nosnippet>189</a>    /// `[batch, 1, nheads]`, broadcast).
+<a href=#190 id=190 data-nosnippet>190</a>    </span><span class="kw">pub fn </span>apply_each(<span class="self">self</span>, carry_bsh: Tensor&lt;<span class="number">3</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#191 id=191 data-nosnippet>191</a>        lse(<span class="self">self</span>.a + carry_bsh, <span class="self">self</span>.b)
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>}
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a><span class="kw">impl </span>Element <span class="kw">for </span>Affine {
+<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">fn </span>compose(later: <span class="self">Self</span>, earlier: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="comment">// lse(lse(c + a₁, b₁) + a₂, b₂) = lse(c + (a₁ + a₂), lse(b₁ + a₂, b₂)).
+<a href=#198 id=198 data-nosnippet>198</a>        </span>Affine {
+<a href=#199 id=199 data-nosnippet>199</a>            b: lse(earlier.b + later.a.clone(), later.b).clamp_min(LOG_ZERO),
+<a href=#200 id=200 data-nosnippet>200</a>            a: (earlier.a + later.a).clamp_min(LOG_ZERO),
+<a href=#201 id=201 data-nosnippet>201</a>        }
+<a href=#202 id=202 data-nosnippet>202</a>    }
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="kw">fn </span>identity_like(<span class="kw-2">&amp;</span><span class="self">self</span>, len: usize) -&gt; <span class="self">Self </span>{
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">let </span>(one, zero) = one_and_zero(<span class="kw-2">&amp;</span><span class="self">self</span>.a, len);
+<a href=#206 id=206 data-nosnippet>206</a>        Affine { a: one, b: zero }
+<a href=#207 id=207 data-nosnippet>207</a>    }
+<a href=#208 id=208 data-nosnippet>208</a>
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">fn </span>dims(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [usize; <span class="number">3</span>] {
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="self">self</span>.a.dims()
+<a href=#211 id=211 data-nosnippet>211</a>    }
+<a href=#212 id=212 data-nosnippet>212</a>
+<a href=#213 id=213 data-nosnippet>213</a>    <span class="kw">fn </span>narrow(<span class="self">self</span>, start: usize, len: usize) -&gt; <span class="self">Self </span>{
+<a href=#214 id=214 data-nosnippet>214</a>        Affine {
+<a href=#215 id=215 data-nosnippet>215</a>            a: <span class="self">self</span>.a.narrow(<span class="number">1</span>, start, len),
+<a href=#216 id=216 data-nosnippet>216</a>            b: <span class="self">self</span>.b.narrow(<span class="number">1</span>, start, len),
+<a href=#217 id=217 data-nosnippet>217</a>        }
+<a href=#218 id=218 data-nosnippet>218</a>    }
+<a href=#219 id=219 data-nosnippet>219</a>
+<a href=#220 id=220 data-nosnippet>220</a>    <span class="kw">fn </span>cat(parts: Vec&lt;<span class="self">Self</span>&gt;) -&gt; <span class="self">Self </span>{
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="kw">let </span>(a, b) = parts.into_iter().map(|p| (p.a, p.b)).unzip();
+<a href=#222 id=222 data-nosnippet>222</a>        Affine {
+<a href=#223 id=223 data-nosnippet>223</a>            a: Tensor::cat(a, <span class="number">1</span>),
+<a href=#224 id=224 data-nosnippet>224</a>            b: Tensor::cat(b, <span class="number">1</span>),
+<a href=#225 id=225 data-nosnippet>225</a>        }
+<a href=#226 id=226 data-nosnippet>226</a>    }
+<a href=#227 id=227 data-nosnippet>227</a>
+<a href=#228 id=228 data-nosnippet>228</a>    <span class="kw">fn </span>select(<span class="self">self</span>, mask_bsh: Tensor&lt;<span class="number">3</span>, Bool&gt;, other: <span class="self">Self</span>) -&gt; <span class="self">Self </span>{
+<a href=#229 id=229 data-nosnippet>229</a>        Affine {
+<a href=#230 id=230 data-nosnippet>230</a>            a: <span class="self">self</span>.a.mask_where(mask_bsh.clone(), other.a),
+<a href=#231 id=231 data-nosnippet>231</a>            b: <span class="self">self</span>.b.mask_where(mask_bsh, other.b),
+<a href=#232 id=232 data-nosnippet>232</a>        }
+<a href=#233 id=233 data-nosnippet>233</a>    }
+<a href=#234 id=234 data-nosnippet>234</a>}
+<a href=#235 id=235 data-nosnippet>235</a>
+<a href=#236 id=236 data-nosnippet>236</a><span class="doccomment">/// Inclusive prefix products `Pₜ = eₜ ∘ ⋯ ∘ e₀` along axis 1, by Hillis–Steele
+<a href=#237 id=237 data-nosnippet>237</a>/// doubling.
+<a href=#238 id=238 data-nosnippet>238</a>///
+<a href=#239 id=239 data-nosnippet>239</a>/// Invariant after the round at `offset`: position `t` holds the product of
+<a href=#240 id=240 data-nosnippet>240</a>/// the window `[max(t − 2·offset + 1, 0), t]`, where the positions before the
+<a href=#241 id=241 data-nosnippet>241</a>/// axis are the identity. `⌈log₂ len⌉` rounds cover every window.
+<a href=#242 id=242 data-nosnippet>242</a>///
+<a href=#243 id=243 data-nosnippet>243</a>/// # Why doubling, and what it costs
+<a href=#244 id=244 data-nosnippet>244</a>///
+<a href=#245 id=245 data-nosnippet>245</a>/// `helpers::prefix_sum` blocks its scan, and its measurements show blocking
+<a href=#246 id=246 data-nosnippet>246</a>/// faster than doubling at every length. But its blocks run on `cumsum`, a
+<a href=#247 id=247 data-nosnippet>247</a>/// one-launch in-block scan that this element does not have: the log-semiring
+<a href=#248 id=248 data-nosnippet>248</a>/// product is not `+`, and the [`Mobius`] one is not even commutative. So an
+<a href=#249 id=249 data-nosnippet>249</a>/// in-block pass would itself be a doubling or a loop. The schedule is thus
+<a href=#250 id=250 data-nosnippet>250</a>/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole folded
+<a href=#251 id=251 data-nosnippet>251</a>/// sequence. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
+<a href=#252 id=252 data-nosnippet>252</a>/// the renormalising shift, the new floors) and a dozen for [`Affine`]. The
+<a href=#253 id=253 data-nosnippet>253</a>/// tensors are `[batch, len, nheads]`, with no `per_head_dim·state_rank`
+<a href=#254 id=254 data-nosnippet>254</a>/// factor, so the cost that grows with `len` is mostly launches, not bytes.
+<a href=#255 id=255 data-nosnippet>255</a>///
+<a href=#256 id=256 data-nosnippet>256</a>/// The backward is plain autodiff, which keeps the intermediates of every
+<a href=#257 id=257 data-nosnippet>257</a>/// round alive until it runs. A recompute backward like that of `quat_scan` is
+<a href=#258 id=258 data-nosnippet>258</a>/// still an open item, and its divide-out trick does not port: a log-semiring
+<a href=#259 id=259 data-nosnippet>259</a>/// element has no inverse. The `a` of [`Affine`] is a plain running sum on the
+<a href=#260 id=260 data-nosnippet>260</a>/// same rounds, which `prefix_sum` could compute alone.
+<a href=#261 id=261 data-nosnippet>261</a></span><span class="kw">pub fn </span>prefix&lt;E: Element&gt;(elements: E) -&gt; E {
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">let </span>[_batch, len, _nheads] = elements.dims();
+<a href=#263 id=263 data-nosnippet>263</a>    <span class="kw">let </span><span class="kw-2">mut </span>acc = elements;
+<a href=#264 id=264 data-nosnippet>264</a>    <span class="kw">let </span><span class="kw-2">mut </span>offset = <span class="number">1usize</span>;
+<a href=#265 id=265 data-nosnippet>265</a>    <span class="kw">while </span>offset &lt; len {
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="kw">let </span>shifted = E::cat(<span class="macro">vec!</span>[
+<a href=#267 id=267 data-nosnippet>267</a>            acc.identity_like(offset),
+<a href=#268 id=268 data-nosnippet>268</a>            acc.clone().narrow(<span class="number">0</span>, len - offset),
+<a href=#269 id=269 data-nosnippet>269</a>        ]);
+<a href=#270 id=270 data-nosnippet>270</a>        acc = E::compose(acc, shifted);
+<a href=#271 id=271 data-nosnippet>271</a>        offset <span class="kw-2">*</span>= <span class="number">2</span>;
+<a href=#272 id=272 data-nosnippet>272</a>    }
+<a href=#273 id=273 data-nosnippet>273</a>    acc
+<a href=#274 id=274 data-nosnippet>274</a>}
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a><span class="doccomment">/// The segments of a packed row, as a scan over the row reads them.
+<a href=#277 id=277 data-nosnippet>277</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#278 id=278 data-nosnippet>278</a></span><span class="kw">pub struct </span>Restart {
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="doccomment">/// `[batch, len]`: the first position of the segment of each position
+<a href=#280 id=280 data-nosnippet>280</a>    /// (`-1` before the first reset of the row).
+<a href=#281 id=281 data-nosnippet>281</a>    </span><span class="kw">pub </span>start_bs: Tensor&lt;<span class="number">2</span>, Int&gt;,
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// `[batch, nheads]`: the carry that each segment starts from (that of
+<a href=#283 id=283 data-nosnippet>283</a>    /// the origin cache).
+<a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">pub </span>origin_bh: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#285 id=285 data-nosnippet>285</a>}
+<a href=#286 id=286 data-nosnippet>286</a>
+<a href=#287 id=287 data-nosnippet>287</a><span class="kw">impl </span>Restart {
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="doccomment">/// The carry of each position, `[batch, len, nheads]`: `carry_bh` before
+<a href=#289 id=289 data-nosnippet>289</a>    /// the first reset of the row, and the origin carry from there on.
+<a href=#290 id=290 data-nosnippet>290</a>    </span><span class="kw">pub fn </span>carries(<span class="kw-2">&amp;</span><span class="self">self</span>, carry_bh: Tensor&lt;<span class="number">2</span>&gt;) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span>[batch, len] = <span class="self">self</span>.start_bs.dims();
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>[<span class="kw">_</span>, nheads] = carry_bh.dims();
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">let </span>restarted_bsh = <span class="self">self
+<a href=#294 id=294 data-nosnippet>294</a>            </span>.start_bs
+<a href=#295 id=295 data-nosnippet>295</a>            .clone()
+<a href=#296 id=296 data-nosnippet>296</a>            .greater_equal_elem(<span class="number">0</span>)
+<a href=#297 id=297 data-nosnippet>297</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>)
+<a href=#298 id=298 data-nosnippet>298</a>            .expand([batch, len, nheads]);
+<a href=#299 id=299 data-nosnippet>299</a>        carry_bh
+<a href=#300 id=300 data-nosnippet>300</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>)
+<a href=#301 id=301 data-nosnippet>301</a>            .expand([batch, len, nheads])
+<a href=#302 id=302 data-nosnippet>302</a>            .mask_where(restarted_bsh, <span class="self">self</span>.origin_bh.clone().unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>).expand([batch, len, nheads]))
+<a href=#303 id=303 data-nosnippet>303</a>    }
+<a href=#304 id=304 data-nosnippet>304</a>}
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a><span class="doccomment">/// [`prefix`] over the segments of a packed row: each product starts at the
+<a href=#307 id=307 data-nosnippet>307</a>/// first position of its own segment (`start_bs`, `[batch, len]`; `-1`
+<a href=#308 id=308 data-nosnippet>308</a>/// before the first reset of the row).
+<a href=#309 id=309 data-nosnippet>309</a>///
+<a href=#310 id=310 data-nosnippet>310</a>/// A combine whose older window would reach back past the start takes the
+<a href=#311 id=311 data-nosnippet>311</a>/// identity instead, as a position does before the first one. So the
+<a href=#312 id=312 data-nosnippet>312</a>/// invariant of [`prefix`] holds with `max(·, 0)` replaced by
+<a href=#313 id=313 data-nosnippet>313</a>/// `max(·, start)`.
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="kw">pub fn </span>prefix_in_segments&lt;E: Element&gt;(elements: E, start_bs: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>, Int&gt;) -&gt; E {
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">let </span>[batch, len, nheads] = elements.dims();
+<a href=#316 id=316 data-nosnippet>316</a>    <span class="kw">let </span>device = start_bs.device();
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw">let </span>position_bs = Tensor::&lt;<span class="number">1</span>, Int&gt;::arange(<span class="number">0</span>..len <span class="kw">as </span>i64, <span class="kw-2">&amp;</span>device)
+<a href=#318 id=318 data-nosnippet>318</a>        .reshape([<span class="number">1</span>, len])
+<a href=#319 id=319 data-nosnippet>319</a>        .expand([batch, len]);
+<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">let </span><span class="kw-2">mut </span>acc = elements;
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span><span class="kw-2">mut </span>offset = <span class="number">1usize</span>;
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">while </span>offset &lt; len {
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">let </span>shifted = E::cat(<span class="macro">vec!</span>[
+<a href=#324 id=324 data-nosnippet>324</a>            acc.identity_like(offset),
+<a href=#325 id=325 data-nosnippet>325</a>            acc.clone().narrow(<span class="number">0</span>, len - offset),
+<a href=#326 id=326 data-nosnippet>326</a>        ]);
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span>crosses_bsh = (position_bs.clone() - offset <span class="kw">as </span>i64)
+<a href=#328 id=328 data-nosnippet>328</a>            .lower(start_bs.clone())
+<a href=#329 id=329 data-nosnippet>329</a>            .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>)
+<a href=#330 id=330 data-nosnippet>330</a>            .expand([batch, len, nheads]);
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span>shifted = shifted.select(crosses_bsh, acc.identity_like(len));
+<a href=#332 id=332 data-nosnippet>332</a>        acc = E::compose(acc, shifted);
+<a href=#333 id=333 data-nosnippet>333</a>        offset <span class="kw-2">*</span>= <span class="number">2</span>;
+<a href=#334 id=334 data-nosnippet>334</a>    }
+<a href=#335 id=335 data-nosnippet>335</a>    acc
+<a href=#336 id=336 data-nosnippet>336</a>}
+<a href=#337 id=337 data-nosnippet>337</a>
+<a href=#338 id=338 data-nosnippet>338</a><span class="doccomment">/// The same prefix products by a sequential left fold: one combine per
+<a href=#339 id=339 data-nosnippet>339</a>/// position. The tests compare [`prefix`] against it.
+<a href=#340 id=340 data-nosnippet>340</a></span><span class="kw">pub fn </span>fold&lt;E: Element&gt;(elements: E) -&gt; E {
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>[_batch, len, _nheads] = elements.dims();
+<a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="macro">vec!</span>[elements.clone().narrow(<span class="number">0</span>, <span class="number">1</span>)];
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="kw">for </span>t <span class="kw">in </span><span class="number">1</span>..len {
+<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">let </span>prev = out[t - <span class="number">1</span>].clone();
+<a href=#345 id=345 data-nosnippet>345</a>        out.push(E::compose(elements.clone().narrow(t, <span class="number">1</span>), prev));
+<a href=#346 id=346 data-nosnippet>346</a>    }
+<a href=#347 id=347 data-nosnippet>347</a>    E::cat(out)
+<a href=#348 id=348 data-nosnippet>348</a>}
+<a href=#349 id=349 data-nosnippet>349</a>
 </code></pre></div></section></main></body></html>

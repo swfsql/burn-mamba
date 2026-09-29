@@ -1,0 +1,66 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Packed segments inside a block: several sequences one after another in one row, each from one origin cache."><title>burn_mamba::packing - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (c1070d693 2026-09-28)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module packing</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.60.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module packing</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#only-at-a-chunk-start" title="Only at a chunk start">Only at a chunk start</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate burn_<wbr>mamba</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">burn_mamba</a></div><h1>Module <span>packing</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/burn_mamba/packing.rs.html#1-318">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Packed segments inside a block: several sequences one after another in one
+row, each from one origin cache.</p>
+<p><code>reset_bt</code> (<code>[batch, tokens]</code>, <code>true</code> at the first token of a segment)
+marks where a row starts a new sequence. At that token, the block restarts
+from the <strong>origin</strong> cache (<code>origin</code>, a fresh one for <code>origin = None</code>). The
+tokens before the first reset of a row continue from the incoming cache
+(<code>cache</code>), as in a plain call. So a stream of packed calls can continue a
+sequence across a call boundary. A reset at the first token of a call
+starts a new sequence.</p>
+<p>Each sequence gives what its own row gives in a batch of plain calls from
+the origin: the outputs, the last cache and the gradients. This is true for
+any split of the stream into calls. The previous segment gets no gradient
+through a restart. The origin gets the gradients of every segment that
+restarts from it. <code>origin = cache</code> restarts every segment from the incoming
+cache (for example, a shared prefix).</p>
+<h2 id="only-at-a-chunk-start"><a class="doc-anchor" href="#only-at-a-chunk-start">§</a>Only at a chunk start</h2>
+<p>A reset must be at the first token of a chunk (<code>chunk_len</code> tokens, or
+<code>chunk_len / micro_steps</code> for Mamba-3). Then the chunkwise scan changes at
+one place only, the carry between chunks (K4). Every other site that reads
+an earlier sample (a conv tap, a trapezoid tap) crosses a reset exactly when
+two conditions are true:</p>
+<ul>
+<li>its chunk starts with a reset,</li>
+<li>it reads further back than its own index in the chunk.</li>
+</ul>
+<p>Such a read takes the value of the origin instead (<code>restart_heads</code>). So a
+per-chunk flag is all that those sites need, and no scan runs over the row
+for them. This needs a read that reaches back one chunk at most:</p>
+<ul>
+<li>A Mamba-2 conv tap reads <code>conv_kernel − 1</code> rows back. So
+<code>Mamba2::forward_packed</code> asserts <code>chunk_len ≥ conv_kernel − 1</code>.</li>
+<li>A Mamba-3 tap reads <code>u</code> positions (one token) back at most.</li>
+</ul>
+<p>A segment can end with pad rows (<code>pad</code>), up to the next chunk start. The official Mamba-3 varlen kernels also start each
+sequence at a chunk start, with a padded last chunk.</p>
+<p>Some scans run over the whole row: the cumulative rotation of Mamba-3 and
+its positive systems. They restart at the first position of each segment,
+from the carry of the origin.</p>
+<p>The cache that a call returns is that of the last segment of each row. Its
+“last samples” fields (conv window, tap FIFO, carries) read the origin for
+the entries before the start of that segment (<code>last_origin</code>,
+<code>restart_window</code>).</p>
+<p>Only the serial SSD paths take resets. The inter-chunk decay of <code>Minimal</code>
+is a <code>nchunks × nchunks</code> matrix, which a long packed row makes large.</p>
+<p>The entry points are <code>Mamba2::forward_packed</code> and
+<code>Mamba3::forward_packed</code>.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Restarts.html" title="struct burn_mamba::packing::Restarts">Restarts</a></dt><dd>The resets of a packed row as an SSD pass takes them: the chunks that
+restart, and the state that they restart from.</dd><dt><a class="struct" href="struct.Segments.html" title="struct burn_mamba::packing::Segments">Segments</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The resets of a packed call on its folded axis (Mamba-3: <code>micro_steps</code>
+positions per token), with what the sites that read the past need.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.chunk_heads.html" title="fn burn_mamba::packing::chunk_heads">chunk_<wbr>heads</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>[batch, len]</code>: <code>true</code> at the first <code>width</code> positions of every chunk that
+starts with a reset. <code>len ≤ nchunks · chunk_len</code>.</dd><dt><a class="fn" href="fn.chunk_resets.html" title="fn burn_mamba::packing::chunk_resets">chunk_<wbr>resets</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The reset flag of each chunk, <code>[batch, nchunks]</code>: the flag of its first
+token. <code>nchunks = ⌈tokens / chunk_tokens⌉</code>, so a partial last chunk also
+has a flag.</dd><dt><a class="fn" href="fn.last_origin.html" title="fn burn_mamba::packing::last_origin">last_<wbr>origin</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>cache</code>, where each row with a reset takes the row of <code>origin</code> instead:
+the field that the last segment of each row starts from. Axis 0 is the
+batch.</dd><dt><a class="fn" href="fn.last_start_b.html" title="fn burn_mamba::packing::last_start_b">last_<wbr>start_<wbr>b</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>[batch]</code>: the first position of the last segment of each row, or <code>0</code> for
+a row with no reset.</dd><dt><a class="fn" href="fn.restart_heads.html" title="fn burn_mamba::packing::restart_heads">restart_<wbr>heads</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>x</code>, where <code>head</code> replaces the first <code>width</code> positions (along <code>axis</code>) of
+every chunk that starts with a reset. <code>head</code> holds the values of the origin
+cache that those positions read at a restart: <code>x</code> with <code>width</code> entries
+along <code>axis</code>, one set per row. Axis 0 is the batch.</dd><dt><a class="fn" href="fn.restart_window.html" title="fn burn_mamba::packing::restart_window">restart_<wbr>window</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><a href="../padding/fn.window.html" title="fn burn_mamba::padding::window"><code>crate::padding::window</code></a> of <code>x_all</code> (<code>[start | row]</code> along <code>axis</code>, where
+the <code>start</code> field is <code>width</code> entries) at <code>end_b</code>, as the last segment of
+each row sees it. That segment starts from the <code>start</code> field, so an entry
+from before its start is read from that field instead. <code>start</code> is the
+field of <a href="fn.last_origin.html" title="fn burn_mamba::packing::last_origin"><code>last_origin</code></a>: the origin for a row with a reset, else the
+incoming cache. <code>last_start_b</code> is <code>0</code> for a row with no reset, which gives
+the plain window.</dd><dt><a class="fn" href="fn.segment_start.html" title="fn burn_mamba::packing::segment_start">segment_<wbr>start</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>[batch, len]</code>: the first position of the segment that holds each
+position. It is <code>-1</code> where no reset comes before the position in its row:
+the incoming cache continues there.</dd></dl></section></div></main></body></html>
