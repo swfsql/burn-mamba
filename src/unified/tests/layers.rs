@@ -608,7 +608,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
             let a = p.val().grad(&grads_fwd).expect("forward grad");
             let b = p.val().grad(&grads_step).expect("step grad");
             assert!(
-                max_abs_diff(a, b) < dtype_tol(1e-4),
+                max_rel_diff(b, a) < dtype_tol(1e-4),
                 "real layer {r}: {name} gradient differs between step and forward \
                  (horizon {horizon:?})",
             );

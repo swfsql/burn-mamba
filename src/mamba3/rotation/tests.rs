@@ -16,7 +16,7 @@ use super::*;
 use crate::mamba3::rotation::rope::apply_rope;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn::module::Param;
-use burn::tensor::Distribution;
+use burn::tensor::{DType, Distribution};
 use burn_stack::utils::test_helpers::test_device;
 
 type Device = burn::prelude::Device;
@@ -1974,10 +1974,11 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         widened
             .clone()
             .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
-    assert!(
-        max_abs_diff(y_default, y_widened.clone()) > dtype_tol(1e-4),
-        "{kind:?}: rotation_range is ignored"
-    );
+    // A lower bound, so it does not grow with `dtype_tol`: with the range
+    // ignored, the two runs are the same computation and `d` is exactly 0 in
+    // every dtype. The effect itself is ~1e-2, below the f16 `dtype_tol(1e-4)`.
+    let d = max_abs_diff(y_default, y_widened.clone());
+    assert!(d > 1e-4, "{kind:?}: rotation_range is ignored: {d}");
 
     // forward vs unrolled step under the same non-default range
     let mut cache = None;
@@ -2101,6 +2102,48 @@ fn bounded_generator_survives_a_huge_projection() {
             (len - max_angle as f32).abs() < dtype_tol(1e-4),
             "at scale {scale} the generator is {len}, not the bound {max_angle}"
         );
+    }
+}
+
+/// A generator near `0` keeps a finite gradient, in f32 and in f16, and the
+/// value of the quaternion stays `(cos(‖g‖/2), sin(‖g‖/2)·ĝ)`.
+///
+/// A small `Δ` scales the generator towards `0`. There, the angle stops at the
+/// floor of `safe_norm` (`≈ 2e-5` in f16), and `angle²` underflows to `0` in
+/// f16. The backward of `sin(angle/2)/angle` (and of `tanh(n)/n`) reads
+/// `1/angle²`, so without a floor on the divisor the gradient is `0·∞ = NaN`.
+#[test]
+fn a_tiny_generator_keeps_the_gradient_finite() {
+    let ad = test_device().autodiff();
+    let scales = [0.0f32, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2];
+    let dir = [1.0f32, -0.5, 0.25];
+    let raw: Vec<f32> = scales.iter().flat_map(|s| dir.map(|d| d * s)).collect();
+    for dtype in [DType::F32, DType::F16] {
+        let g = Param::from_tensor(
+            Tensor::<1>::from_floats(raw.as_slice(), &ad)
+                .reshape([scales.len(), 3])
+                .cast(dtype),
+        );
+        let q = quat_from_scaled_axis::<2>(bound_rotation_vector::<2>(g.val(), 1.0));
+        let got = row(q.clone().cast(DType::F32));
+        let grads = (q * Tensor::<1>::from_floats([0.3f32, -0.7, 0.5, 1.1], &ad).cast(dtype).unsqueeze())
+            .sum()
+            .backward();
+        let d_g = row(g.val().grad(&grads).expect("grad g").cast(DType::F32));
+        assert!(d_g.iter().all(|v| v.is_finite()), "{dtype:?}: the generator gradient: {d_g:?}");
+        // `bound_rotation_vector` is `tanh(n)·r/n ≈ r` here, so `‖g‖ ≈ s·‖dir‖`.
+        // The tolerance is that of `dtype`, not that of the test device.
+        let tol = if dtype == DType::F16 { 1e-3 } else { 1e-6 };
+        for (i, s) in scales.iter().enumerate() {
+            let angle = f64::from(*s) * 1.3125f64.sqrt();
+            let (sin, cos) = (angle / 2.0).sin_cos();
+            let axis = dir.map(|d| f64::from(d) / 1.3125f64.sqrt());
+            let want = [cos, sin * axis[0], sin * axis[1], sin * axis[2]];
+            for (k, w) in want.iter().enumerate() {
+                let d = (f64::from(got[4 * i + k]) - w).abs();
+                assert!(d < tol, "{dtype:?}: scale {s}, component {k}: {d:.3e}");
+            }
+        }
     }
 }
 

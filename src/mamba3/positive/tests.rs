@@ -394,7 +394,8 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
     let out = run_gate(&case, case.carry.clone() + 5.0);
     let q = case.log_kappa.clone().unsqueeze::<3>().exp() * case.dt.clone() * case.noise.clone().exp();
     let ceiling = q.recip() + case.dt.clone();
-    let excess = out.log_precision_bsh.exp() - ceiling.clone() * 1.0001;
+    // `Λ = exp(ℓ)`: the relative error of `Λ` is the absolute error of `ℓ`.
+    let excess = out.log_precision_bsh.exp() - ceiling.clone() * (1.0 + dtype_tol(1e-4));
     assert!(excess.max().into_scalar::<f32>() < 0.0, "a precision above its ceiling");
     let raise = out.da_bsh - case.da.clone();
     assert!(raise.max().into_scalar::<f32>() <= 0.0, "a decay above stock's");

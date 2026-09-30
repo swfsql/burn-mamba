@@ -266,7 +266,9 @@ reference for MambaProduct: the dial versus DeltaProduct's mechanism, what
   - The generator bounds its **magnitude** (`bound_rotation_vector`), so the
     axis does not depend on the size of the projection.
   - `safe_norm` is scale-free: `‖r‖²` of raw channels overflows f16 at
-    `|r| ≈ 250`, and `∞` gives a *zero* rotation.
+    `|r| ≈ 250`, and `∞` gives a *zero* rotation. The divisions by the angle
+    (`sin(a/2)/a`, `tanh(n)/n`) floor it at `√div_eps`: their backward reads
+    `1/a²`, which underflows to `0` in f16 near the floor of `safe_norm`.
   - The quaternion generators are **per head**.
   - `rotate_bc_forward` renormalises the scan's prefixes. With
     `(start_bs, origin)` (packed), each segment turns from the origin rotation

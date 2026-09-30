@@ -87,34 +87,44 @@ fn mimo_outer_sum_matches_einsum() {
 ///
 /// A row-major buffer collapses to `[outer, len, inner]` around the scanned
 /// axis, which is all the indexing needs.
-fn reference_prefix_sum(data: &[f32], dims: &[usize], dim: usize) -> Vec<f32> {
+///
+/// Also returns the **peak** of each prefix: the largest `|out|` along the
+/// axis up to it (see [`prefix_tol`]).
+fn reference_prefix_sum(data: &[f32], dims: &[usize], dim: usize) -> (Vec<f32>, Vec<f32>) {
     let outer: usize = dims[..dim].iter().product();
     let len = dims[dim];
     let inner: usize = dims[dim + 1..].iter().product();
     let mut out = data.to_vec();
+    let mut peak = data.to_vec();
     for o in 0..outer {
         for i in 0..inner {
             let mut acc = 0.0f32;
+            let mut top = 0.0f32;
             for k in 0..len {
                 let idx = (o * len + k) * inner + i;
                 acc += data[idx];
+                top = top.max(acc.abs());
                 out[idx] = acc;
+                peak[idx] = top;
             }
         }
     }
-    out
+    (out, peak)
 }
 
-/// How far a prefix of magnitude `expected` may drift between two summation
-/// orders.
+/// How far a prefix may drift between two summation orders, given its `peak`:
+/// the largest `|partial sum|` along the axis up to it.
 ///
-/// It has to **scale with the value**: partial sums of standard normals
+/// It has to **scale with the magnitude**: partial sums of standard normals
 /// random-walk to `~√len`, and f32 carries ~1e-7 relative, so any constant bound
 /// is a length away from flaking (`len = 2048` reaches ±60, where the observed
-/// drift is ~1e-4). A real scan defect is off by whole summands — `O(1)`, orders
-/// above either term here — so nothing is given up by scaling.
-fn prefix_tol(expected: f32) -> f32 {
-    dtype_tol(1e-4) + dtype_tol(1e-5) * expected.abs()
+/// drift is ~1e-4). The scale is the peak, not the prefix itself. A walk can
+/// come back near `0` after ±45, and the partial sums on its way (the block
+/// carries of the scan) are rounded at ±45: one f16 step there is `0.03`. A
+/// real scan defect is off by whole summands — `O(1)`, orders above either
+/// term here — so nothing is given up by scaling.
+fn prefix_tol(peak: f32) -> f32 {
+    dtype_tol(1e-4) + dtype_tol(1e-5) * peak.abs()
 }
 
 /// One `(shape, dim)` case, run both without a carry-in and with one — the
@@ -124,7 +134,7 @@ fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usi
     let device = test_device();
     let t = Tensor::<D>::random(dims, Distribution::Normal(0.0, 1.0), &device);
     let host: Vec<f32> = t.to_data().try_into_vec_as().unwrap();
-    let want = reference_prefix_sum(&host, &dims, dim);
+    let (want, peak) = reference_prefix_sum(&host, &dims, dim);
 
     // `init` is `t`'s shape with a single position on the scanned axis.
     let mut init_dims = dims;
@@ -147,8 +157,9 @@ fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usi
                 0.0
             };
             let want = w + carry;
+            // The carry adds the same constant to every partial sum.
             assert!(
-                (g - want).abs() < prefix_tol(want),
+                (g - want).abs() < prefix_tol(peak[i] + carry.abs()),
                 "dims={dims:?} dim={dim} carried={carried} idx={i}: {g} vs {want}"
             );
         }
@@ -237,12 +248,13 @@ fn prefix_sum_gradient_matches_the_definition() {
         // Reverse-inclusive sum of `w` along the scanned axis.
         for b in 0..batch {
             for c in 0..channels {
-                let mut acc = 0.0f32;
+                let (mut acc, mut peak) = (0.0f32, 0.0f32);
                 for j in (0..len).rev() {
                     let idx = (b * len + j) * channels + c;
                     acc += w_host[idx];
+                    peak = peak.max(acc.abs());
                     assert!(
-                        (got[idx] - acc).abs() < prefix_tol(acc),
+                        (got[idx] - acc).abs() < prefix_tol(peak),
                         "period={period:?}: grad at (b={b}, j={j}, c={c}): {} vs {acc}",
                         got[idx]
                     );

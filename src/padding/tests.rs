@@ -186,7 +186,9 @@ macro_rules! mamba3_fields {
         out.extend(c.v_state_buhp.as_ref().map(rows));
         match &c.rotation {
             RotationState::Real(_) => {}
-            RotationState::Angle(t) => out.push(rows(t)),
+            // On the circle: `θ` and `θ ± 2π` are the same rotation, and two
+            // runs can put an angle near `±π` on the two sides of the wrap.
+            RotationState::Angle(t) => out.push(rows(&Tensor::cat(vec![t.clone().cos(), t.clone().sin()], 2))),
             RotationState::Quaternion(t) | RotationState::Rotor(t) => out.push(rows(t)),
         }
         out.extend(c.log_precision_bh.as_ref().map(rows));

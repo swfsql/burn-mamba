@@ -180,6 +180,12 @@ trait FieldMap {
 /// A reader of every tensor field of a cache.
 trait FieldVisit {
     fn visit<const D: usize>(&mut self, t: &Tensor<D>);
+
+    /// A field on the circle `ℝ/2πℤ` (the cumulative RoPE angle). Two runs
+    /// can put an angle near `±π` on the two sides of the wrap.
+    fn visit_angle<const D: usize>(&mut self, t: &Tensor<D>) {
+        self.visit(t);
+    }
 }
 
 trait TestCache: Clone {
@@ -227,7 +233,7 @@ macro_rules! impl_mamba3_cache {
                 self.v_state_buhp.iter().for_each(|t| v.visit(t));
                 match &self.rotation {
                     RotationState::Real(_) => {}
-                    RotationState::Angle(t) => v.visit(t),
+                    RotationState::Angle(t) => v.visit_angle(t),
                     RotationState::Quaternion(t) | RotationState::Rotor(t) => v.visit(t),
                 }
                 self.log_precision_bh.iter().for_each(|t| v.visit(t));
@@ -272,6 +278,11 @@ impl FieldVisit for Rows {
         let batch = t.dims()[0];
         let n = t.shape().num_elements() / batch;
         self.0.push(t.clone().reshape([batch, n]));
+    }
+
+    /// `(cos θ, sin θ)`: the same point for `θ` and `θ ± 2π`.
+    fn visit_angle<const D: usize>(&mut self, t: &Tensor<D>) {
+        self.visit(&Tensor::cat(vec![t.clone().cos(), t.clone().sin()], D - 1));
     }
 }
 

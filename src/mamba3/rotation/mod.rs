@@ -534,11 +534,16 @@ pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
     // singular `sqrt` backward and give NaN). It also keeps the sum of squares
     // from an overflow at large `g`.
     let angle = safe_norm(g.clone()); // [..., 1]
-    let half = angle.clone() * 0.5;
-    let w = half.clone().cos(); // [..., 1]
-    // sin(angle/2) / angle  → 1/2 as angle → 0 (no rotation). `angle ≥ √div_eps`
-    // after the pre-`sqrt` clamp, so the division is already guarded.
-    let scale = half.sin() / angle; // [..., 1]
+    let w = (angle.clone() * 0.5).cos(); // [..., 1]
+    // sin(angle/2) / angle = ½·(1 − angle²/24 + …) → 1/2 as angle → 0 (no
+    // rotation). The backward of the division reads `1/angle²`. Near the
+    // floor of `safe_norm`, `angle²` underflows to 0 in f16 (`angle ≈ 2e-5`),
+    // and the gradient becomes `0·∞ = NaN`. So the division reads the angle
+    // floored at `√div_eps`, where `angle² = div_eps` is a normal number. The
+    // change of the value is at most `div_eps/24` (relative), which is below
+    // the epsilon of the dtype.
+    let floored = angle.clamp_min(burn_stack::utils::div_eps(g.dtype()).sqrt());
+    let scale = (floored.clone() * 0.5).sin() / floored; // [..., 1]
     let v = g * scale; // [..., 3]
     quat_normalize(Tensor::cat(vec![w, v], n))
 }
@@ -565,7 +570,10 @@ pub fn quat_from_scaled_axis<const D: usize>(g: Tensor<D>) -> Tensor<D> {
 /// - `r`  : `[..., 3]`
 /// - out  : `[..., 3]`, with `‖out‖ ≤ max_angle` (attained once `tanh` saturates).
 pub fn bound_rotation_vector<const D: usize>(r: Tensor<D>, max_angle: f64) -> Tensor<D> {
-    let norm = safe_norm(r.clone()); // [..., 1]
+    // `tanh(n)/n = 1 − n²/3 + …`: the same floor as the division in
+    // `quat_from_scaled_axis` keeps `n²` a normal number in the backward. The
+    // change of the value is at most `div_eps/3` (relative).
+    let norm = safe_norm(r.clone()).clamp_min(burn_stack::utils::div_eps(r.dtype()).sqrt()); // [..., 1]
     let scale = norm.clone().tanh() * max_angle / norm;
     r * scale
 }
