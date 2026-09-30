@@ -691,7 +691,8 @@ impl Mamba3 {
     /// The two readout ports of the positive systems, on the SSD readout,
     /// before the `D` skip, the gate and the rank merge:
     ///
-    /// - `C`: `y ← y·(Λ + ε)^(−ω)` when the block has [`Self::kalman_read_h`],
+    /// - `C`: `y ← y·(Λ + ε)^(−ω)` when the block has [`Self::kalman_read_h`]
+    ///   (the gain capped at `√max` of the dtype),
     /// - `D`: `y ← y + c·e` when it has [`Self::tropical_readout_hp`].
     ///
     /// Both broadcast over the mimo ranks, which share the state.
@@ -713,7 +714,16 @@ impl Mamba3 {
                     log_precision_bth.clone(),
                     log_precision_bth.full_like(LN_EPS),
                 );
-                let scale_bth = (-(ln_lambda_bth * omega_h.val().unsqueeze::<3>())).exp();
+                // The gain is at most `√max` of the dtype (256 in f16,
+                // 1.8e19 in f32). At `Λ ≈ 0` and `ω > 0.8`, `ε^(−ω)` is above
+                // the f16 range, and a head that wrote nothing reads `y = 0`
+                // there: `0·∞ = NaN`. With the cap, the gain and the `y` that
+                // it scales share the range. Their product and its backward
+                // overflow only if `|y|` is also above `√max`.
+                let max = log_precision_bth.dtype().finfo().expect("a float dtype").max;
+                let scale_bth = (-(ln_lambda_bth * omega_h.val().unsqueeze::<3>()))
+                    .clamp_max(0.5 * max.ln())
+                    .exp();
                 y_btmhp * scale_bth.unsqueeze_dims::<5>(&[2, 4])
             }
             _ => y_btmhp,

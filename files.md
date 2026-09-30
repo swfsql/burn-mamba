@@ -154,6 +154,8 @@ quaternion segment start (divided out).
     `positive_tail` read the FIFO and the carries at the end of each slot
     (from the origin before its last reset). `positive_read` applies the
     positive ports **before** the `D` skip, so `has_outproj_norm` keeps them.
+    Its read gain `(Λ + ε)^(−ω)` is capped at `√max` of the dtype: at
+    `Λ ≈ 0`, `ε^(−ω)` is above the f16 range on a readout of `0` (a NaN).
   - `init_state_hpr`: as in Mamba-2 (`Minimal` only, `step` does not read it).
   - Two performance-only `mimo_rank == 1` flags (`#[module(skip)]`, identical
     values/grads): `siso_specialization` (chunkwise γ-correction, wins

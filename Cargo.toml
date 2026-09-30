@@ -189,5 +189,5 @@ cubecl-std = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d51685
 cubecl-wgpu = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
 cubecl-zspace = { git = "https://github.com/swfsql/cubecl.git", rev = "afe4c5d5168546f1f1598a2b8879bc940068e278" }
 
-# [patch."https://github.com/swfsql/burn-stack.git"]
-# burn-stack = { path = "../burn-stack" }
+[patch."https://github.com/swfsql/burn-stack.git"]
+burn-stack = { path = "../burn-stack" }

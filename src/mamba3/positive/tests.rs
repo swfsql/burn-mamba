@@ -800,6 +800,10 @@ fn the_join_has_live_gradients_at_init() {
 /// The block-level regression for [`an_underflowing_mass_keeps_the_gradient_finite`]:
 /// heads whose `Δ` underflows at every position (`dt_bias` far past softplus's
 /// range) still backpropagate finite gradients into every parameter.
+///
+/// Those heads read with `ω = 1`. They hold no evidence (`Λ ≈ 0`), so the
+/// read gain `(Λ + ε)^(−ω)` would be `1e6`, above the f16 range, on a readout
+/// of `0`. The cap of the gain keeps `0·∞ = NaN` out of the forward.
 #[test]
 fn a_vanished_step_keeps_the_block_gradient_finite() {
     let device = test_device();
@@ -808,6 +812,9 @@ fn a_vanished_step_keeps_the_block_gradient_finite() {
     let mut model = exercised(config.init(&ad), &ad);
     let bias: Vec<f32> = (0..model.nheads()).map(|h| if h % 2 == 0 { -200.0 } else { 0.0 }).collect();
     model.dt_bias_h = Param::from_tensor(Tensor::from_floats(bias.as_slice(), &ad));
+    let omega = floats(model.kalman_read_h.as_ref().unwrap().val());
+    let omega: Vec<f32> = omega.iter().enumerate().map(|(h, w)| if h % 2 == 0 { 1.0 } else { *w }).collect();
+    model.kalman_read_h = Some(Param::from_tensor(Tensor::from_floats(omega.as_slice(), &ad)));
     let input = Tensor::<3>::from_inner(uniform([2, 5, config.d_model], -1.5, 1.5, &device)).to_device(&ad);
     let (out, _) = model.forward(input, None, Mamba3SsdPath::default(), None);
     let grads = out.sum().backward();
