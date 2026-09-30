@@ -29,6 +29,7 @@ use burn_stack::examples::tiny_stories::lm::{
     self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid,
 };
 use burn_stack::utils::ClassCursors;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -142,10 +143,19 @@ pub struct Run {
     pub graphs: bool,
     /// `--max-vram`, in MiB. After each backward (the peak of a step), the
     /// training reads the bytes that the memory pools reserve. Above this
-    /// cap, the process stops with an error. The pools keep their pages, so
-    /// the reserved bytes are the high-water mark of the run.
+    /// cap, the process stops with an error.
+    ///
+    /// A pool only queues a page that it frees, and the device keeps a queued
+    /// page until an explicit cleanup. The report does not count the queue,
+    /// so the process can hold much more than the pools reserve (~0.5 GiB on
+    /// a model near 1M params). So with the cap, the training also cleans up
+    /// before windows 0, 1, 2, 4, 8, … and before each 256th window. Then the
+    /// reserved bytes and the CUDA context hold the process.
     pub max_vram_mib: Option<u64>,
 }
+
+/// The training windows so far: the schedule of the `--max-vram` cleanups.
+static TRAIN_WINDOWS: AtomicU64 = AtomicU64::new(0);
 
 /// Wrapper over [`MambaVocabNet`] for custom implementations, with its [`Run`]
 /// settings.
@@ -166,6 +176,12 @@ impl LmModel for Wrap {
         class: &mut ClassCursors,
     ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
         let device = batch.inputs.device();
+        if self.1.max_vram_mib.is_some() {
+            let window = TRAIN_WINDOWS.fetch_add(1, Ordering::Relaxed);
+            if window.is_power_of_two() || window % 256 == 0 {
+                device.memory_cleanup();
+            }
+        }
         let t0 = prof::window_start();
         let (pre_metrics, caches) = self.forward_lm(batch, caches, class);
         let t1 = prof::mark(&device);

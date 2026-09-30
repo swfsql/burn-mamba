@@ -18,7 +18,7 @@ const HELP: &str = concat!(
     "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
     "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
     "    --profile-sync         Also sync the device after each phase (with --profile)\n",
-    "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward",
+    "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward. Also clean up the memory before windows 0, 1, 2, 4, 8, ... and before each 256th window",
 );
 
 /// The parsed flags.

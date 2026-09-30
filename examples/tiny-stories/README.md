@@ -182,7 +182,7 @@ shared CLI, before the `--`, sets:
 | `--context-batch <n>` | 4 | with `--context-use`, the sequences per forward |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
-| `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward (not persisted) |
+| `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward. Also cleans up the memory before windows 0, 1, 2, 4, 8, … and before each 256th window, so that the pools hold the process (not persisted) |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
