@@ -315,10 +315,10 @@ fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) 
 /// batch) runs eagerly. `--no-graph` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
-/// between passes. Each capture costs the 4 forwards that
+/// between passes. Each capture costs the 3 forwards that
 /// `CapturedStep::capture` runs before it records. Without hardware graphs
 /// (flex), the capture falls back to eager, and the recording runs too: that
-/// costs only 5 forwards per pass.
+/// costs only 4 forwards per pass.
 pub struct Valid {
     model: AeModel,
     captured: RefCell<Option<CapturedLogits>>,

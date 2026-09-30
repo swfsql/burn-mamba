@@ -56,10 +56,6 @@ cargo run --example reset-majority -- --training --inference
   `burn_stack::impl_backend_ext_for_burn_backends!` expands, which is in *this*
   crate. If a backend is added on one side only, it silently loses its
   `BackendExt` impls.
-- `Cargo.toml` `[patch]`es every burn and cubecl crate to the swfsql forks with
-  the tracel-ai/burn#5772 memory fix (a captured graph holds the memory of one
-  pass, not ~3), as burn-stack does. A crate that is missing from the list
-  links a second copy.
 
 ## Writing Style
 
