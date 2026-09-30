@@ -16,7 +16,8 @@
 //!    the decay that a cached slot carries across a call boundary, and the
 //!    per-position gate of a tap pattern.
 //! 7. [`prefix_sum`]: the blocked inclusive scan that replaces
-//!    `Tensor::cumsum` for every sequence-length cumulative sum.
+//!    `Tensor::cumsum` for every sequence-length cumulative sum, and
+//!    [`sub_periods`], its reduction on the circle.
 //! 8. The **read axis** ([`read_rows`], [`read_causal_mask`], and their
 //!    primitive twins in [`prim`]).
 //!
@@ -30,6 +31,7 @@ use burn_stack::modules::RmsNorm;
 use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
 use burn::prelude::*;
+use burn::tensor::DType;
 
 /// Remove a **trailing** in-projection segment of `width` channels from
 /// `proj`. The segment is `None` when the block projects none.
@@ -111,6 +113,32 @@ pub(crate) fn scan_block(len: usize) -> usize {
     block
 }
 
+/// `x − k·period`, for the whole numbers `k` of the caller (detached, so the
+/// gradient is 1).
+///
+/// In f16 and bf16, `k·period` would round `period` to the dtype. `2π`
+/// becomes `6.28125`, `1.9·10⁻³` short, so each reduction by `k` turns would
+/// leave `k·1.9·10⁻³`. A carry or a cache that is reduced again and again adds
+/// that up (a whole turn of error over a long scan, `1.9·10⁻³` per turn in a
+/// decode). So a half dtype subtracts `period` in two parts: a head with 8
+/// significant bits, which every float dtype holds exactly, and the small
+/// rest. f32 and f64 subtract `k·period` in one part.
+///
+/// The fix removes only the error of the period. The half dtype still rounds
+/// the angle itself at each add, and with a constant step that rounding also
+/// drifts.
+pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f32) -> Tensor<D> {
+    match x.dtype() {
+        DType::F16 | DType::BF16 => {
+            let period = f64::from(period);
+            let unit = 2f64.powi(period.abs().log2().floor() as i32 - 7);
+            let head = (period / unit).round() * unit;
+            x - k.clone() * head - k * (period - head)
+        }
+        _ => x - k * period,
+    }
+}
+
 /// Inclusive prefix sum along `dim`, continued from `init`:
 /// `out[i] = init + Σ_{j ≤ i} t[j]`.
 ///
@@ -167,7 +195,12 @@ pub(crate) fn scan_block(len: usize) -> usize {
 /// So each output is one in-block prefix plus a carry of at most `p/2`, for any
 /// `len`. With `None`, the carry grows with `len`, and so does its f32
 /// rounding: at `|θ| = 10⁵`, one f32 step is `0.008`. The reduction subtracts a
-/// detached multiple of `p`, so the gradient is that of the plain sum.
+/// detached multiple of `p` ([`sub_periods`]), so the gradient is that of the
+/// plain sum.
+///
+/// In f16, the rounding is at the size of the partial sums: an in-block prefix
+/// (`block` steps) and a carry-level prefix (up to 16 reduced totals, so up to
+/// `17π`). At the in-block size, one f16 step is already `0.03` for `|θ| ≥ 32`.
 ///
 /// # Shapes
 /// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
@@ -229,7 +262,7 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
             // periods, and the gradient is 1.
             let reduce = |x: Tensor<D>| {
                 let k = (x.clone().detach() / period).round();
-                x - k * period
+                sub_periods(x, k, period)
             };
             // The run totals are one more sequence on the circle. So their
             // exclusive prefix is the inclusive one of this same scan, minus

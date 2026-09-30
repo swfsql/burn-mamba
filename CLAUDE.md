@@ -110,8 +110,9 @@ src/
 │  │                 QK-norm+GQA+bias, MIMO-V, mimo_outer_sum, split_trailing,
 │  │                 the tap-lag helpers, prefix_sum (the blocked scan for every
 │  │                 sequence-length cumsum; `period` = on the circle, for the
-│  │                 angle), and the read axis (read_rows /
-│  │                 read_causal_mask, + `prim` twins with scatter_read_rows)
+│  │                 angle; sub_periods: two-part 2π in f16/bf16), and the
+│  │                 read axis (read_rows / read_causal_mask, + `prim` twins
+│  │                 with scatter_read_rows)
 │  ├─ cache.rs       Mamba3Cache(s) ENUMS: DoubleSsd | SingleSsd, + From moves
 │  ├─ ssd_path.rs    pathway-agnostic Mamba3SsdPath (From<> both sub-paths);
 │  │                 optimal_chunk_len, chunk_tokens, backward_chunk_group

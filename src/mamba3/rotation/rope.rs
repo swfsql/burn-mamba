@@ -13,7 +13,10 @@ use burn::prelude::*;
 /// Reduce angles modulo `2π` into `[−π, π]`, leaving the autodiff graph intact.
 ///
 /// `sin`/`cos` are `2π`-periodic, so a subtraction of an integer multiple of
-/// `2π` is value-exact. `|angle| ≤ π` keeps precision in low-bit floats: about
+/// `2π` does not change the rotation. In f16 and bf16, the dtype cannot hold
+/// `2π`, so the subtraction is in two parts (`helpers::sub_periods`).
+/// Otherwise, each wrap of the decode cache would lose `1.9·10⁻³` per turn.
+/// `|angle| ≤ π` keeps precision in low-bit floats: about
 /// half of the representable `f16` values are in `|x| ≤ 1`, and the periodic
 /// `sin`/`cos` lose accuracy only when the argument drifts to large
 /// magnitudes. The same applies to the cumulative angle accumulator. Without
@@ -27,7 +30,7 @@ use burn::prelude::*;
 pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     let two_pi = 2.0 * std::f32::consts::PI;
     let k = (angles.clone().detach() * (1.0f32 / two_pi)).round();
-    angles - k * two_pi
+    crate::mamba3::helpers::sub_periods(angles, k, two_pi)
 }
 
 /// Apply a rotary embedding (RoPE) to `x` along its last dimension.

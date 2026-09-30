@@ -10,7 +10,7 @@
 
 use super::*;
 use burn::module::Param;
-use burn::tensor::Distribution;
+use burn::tensor::{Distribution, FloatDType};
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 /// `Σₘ v[m] ⊗ k[m]` computed elementwise from host data — the definition the
@@ -290,7 +290,18 @@ fn reduce_f64(x: f64, p: f64) -> f64 {
 ///
 /// Each output is also at most `π` plus one in-block prefix, whatever `len` is.
 /// That bound is why the rounding stays small.
+///
+/// In f16, "small" is not small enough for the tolerance. With a mean step of
+/// 2, the in-block prefix reaches 50–220, and the carry-level prefix reaches
+/// `17π`. There, one f16 step is 0.03–0.125, and the tolerance
+/// (`dtype_tol(5e-4) ≈ 0.037`) is about one step. The f16 checks are
+/// [`prefix_sum_on_the_circle_keeps_whole_turns_in_f16`] and
+/// [`a_decode_wrap_keeps_whole_turns_in_f16`].
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "f32 only: in f16, the outputs round at the size of the partial sums (up to 220), where one step is 0.03-0.125"
+)]
 fn prefix_sum_on_the_circle_matches_the_definition() {
     let device = test_device();
     let tau = std::f32::consts::TAU;
@@ -344,4 +355,56 @@ fn prefix_sum_on_the_circle_matches_the_definition() {
             "len={len}: the angle over lags 1, 64, 1024 is off by {worst:?}"
         );
     }
+}
+
+/// In f16, the scan on the circle loses no part of a turn per block
+/// ([`sub_periods`]): `4096` steps of `0.5` land within `0.1` of the
+/// definition, at every position.
+///
+/// The steps and their in-block sums are exact in f16. So the error comes
+/// only from the reductions of the block totals (`16 = 3·2π − 2.85`) and from
+/// the carry-level prefix. With `2π` rounded to `6.28125`, each block total
+/// would keep `3·1.9·10⁻³`, and the angle would be off by `0.63`. The input is
+/// cast to f16, so the check is the same in each build.
+#[test]
+fn prefix_sum_on_the_circle_keeps_whole_turns_in_f16() {
+    let device = test_device();
+    let tau = std::f32::consts::TAU;
+    let len = 4096;
+    assert!(scan_block(len) < len, "the length takes the blocked branch");
+    let t = Tensor::<3>::full([1, len, 1], 0.5, &device).cast(FloatDType::F16);
+    let got: Vec<f32> = prefix_sum::<3, 4>(t, 1, None, Some(tau))
+        .to_data()
+        .try_into_vec_as()
+        .unwrap();
+    let worst = got
+        .iter()
+        .enumerate()
+        .map(|(i, &g)| reduce_f64(f64::from(g) - 0.5 * (i + 1) as f64, f64::from(tau)).abs())
+        .fold(0.0, f64::max);
+    assert!(worst < 0.1, "the angle is off by {worst} after {len} steps");
+}
+
+/// In f16, the wrap of the decode cache loses no part of a turn
+/// ([`sub_periods`]): `4096` decode steps of `0.5`, each one
+/// `wrap_angle(θ + 0.5)`, land within `0.02` of `4096·0.5 mod 2π`.
+///
+/// Each add is exact on the grid that the angle reaches, so the error comes
+/// only from the 326 wraps. With `2π` rounded to `6.28125`, each wrap would
+/// keep `1.9·10⁻³`, `0.63` in total. The two-part subtraction leaves about
+/// `2·10⁻⁵` per wrap (its small part rounds to the f16 grid of the angle).
+#[test]
+fn a_decode_wrap_keeps_whole_turns_in_f16() {
+    use crate::mamba3::rotation::rope::wrap_angle;
+    let device = test_device();
+    let steps = 4096;
+    let mut angle = Tensor::<1>::zeros([1], &device).cast(FloatDType::F16);
+    let mut worst = 0.0f64;
+    for i in 1..=steps {
+        angle = wrap_angle(angle + 0.5);
+        let got: Vec<f32> = angle.to_data().try_into_vec_as().unwrap();
+        let off = reduce_f64(f64::from(got[0]) - 0.5 * i as f64, std::f64::consts::TAU);
+        worst = worst.max(off.abs());
+    }
+    assert!(worst < 0.02, "the angle is off by {worst} after {steps} steps");
 }

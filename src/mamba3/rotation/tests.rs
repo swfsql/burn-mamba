@@ -1844,7 +1844,16 @@ fn row(t: Tensor<2>) -> Vec<f32> {
 /// small ones, so the axis would drift toward the diagonal as the projection
 /// grows, and the reachable set would be a cube (angle `√3·max` about the
 /// diagonal, `max` about a coordinate axis) rather than a ball.
+///
+/// f16 cannot show the monotony. At scale 2, `‖r‖ ≈ 4.58` and
+/// `1 − tanh(4.58) ≈ 2·10⁻⁴`, but the f16 step below 1 is `4.9·10⁻⁴`. So the
+/// f16 `tanh` is already 1, the angle is already the bound, and the angle at
+/// scale 20 cannot be larger.
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "f32 only: in f16, tanh(4.58) rounds to 1, so the angle stops growing before scale 20"
+)]
 fn bounded_generator_keeps_its_axis() {
     let device = test_device();
     let max_angle = 2.0 * std::f64::consts::PI;
@@ -1891,7 +1900,17 @@ fn bounded_generator_keeps_its_axis() {
 /// state-tracking, is reachable only by a step the optimiser can never take. At
 /// `range = 2` the same half-turn sits at `tanh = 0.5`, in the interior, with a
 /// healthy gradient.
+///
+/// The dead gradient is an exact 0 in f32 only. At the asymptote, the
+/// derivative of `tanh` is 0 in f16 too, but the derivative of the direction
+/// `r/‖r‖` along `r` is a difference of two terms that are equal in exact
+/// arithmetic. In f32 they round to the same value. In f16 the division
+/// backward rounds `1/‖r‖²`, and one step at 0.1 stays: `dw = −2⁻¹³`.
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "f32 only: in f16, the direction derivative leaves one rounding step (dw = -2^-13), not an exact 0"
+)]
 fn half_turn_is_reachable_with_a_live_gradient() {
     let device = test_device();
     let pi = std::f64::consts::PI;

@@ -183,6 +183,9 @@ quaternion segment start (divided out).
     doubling at every length measured (numbers in the doc). `period =
     Some(2π)` (the angle) reduces the block carries by the same scan one level
     up, so the f32 error does not grow with the length.
+  - `sub_periods`: the reduction by whole periods. f16/bf16 round 2π to
+    6.28125, so they subtract a head of 8 significant bits and the rest
+    (f32/f64: one part).
   - The read axis: `read_rows` / `read_causal_mask` (the identity at
     `stride = 1`), and `mod prim` twins on `F<B,_>` + `scatter_read_rows` for
     the recompute backwards.
@@ -282,7 +285,7 @@ reference for MambaProduct: the dial versus DeltaProduct's mechanism, what
     (`θₜ − θₛ₋₁ + θ₀`, `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`).
   - `Real` holds a tensor-less `NoRotation`: the `Module` derive wants one
     field per variant.
-- **`rope.rs`**: `wrap_angle` (mod `2π`, offset `detach`ed) and
+- **`rope.rs`**: `wrap_angle` (mod `2π` by `sub_periods`, offset `detach`ed) and
   `apply_rope`/`apply_rope_partial` (interleaved pairs for SISO,
   half-and-half for MIMO).
 
