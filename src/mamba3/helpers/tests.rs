@@ -166,6 +166,43 @@ fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usi
     }
 }
 
+/// Asserts that `len` takes the blocked branch of [`prefix_sum`] with a
+/// partial last block, so that the zero padding runs.
+fn assert_padded(len: usize) {
+    let block = scan_block(len);
+    assert!(
+        block < len && len % block != 0,
+        "len = {len} (block {block}) takes no padding"
+    );
+}
+
+/// The zero padding of [`prefix_sum`] takes the dtype of the input, not the
+/// default dtype of the device. The input is bf16, the default dtype of no
+/// build, at a length that pads. The steps are whole numbers, and each prefix
+/// is at most 99, so every prefix is exact in bf16.
+#[test]
+#[cfg_attr(
+    not(feature = "dev-f16"),
+    ignore = "f16 build only: a half-precision check (a bf16 input)"
+)]
+fn the_padding_takes_the_dtype_of_the_input() {
+    let device = test_device();
+    let len = 100;
+    assert_padded(len);
+    let steps: Vec<f32> = (0..len).map(|i| (i % 3) as f32).collect();
+    let t = Tensor::<1>::from_floats(steps.as_slice(), &device)
+        .reshape([1, len, 1])
+        .cast(FloatDType::BF16);
+    let got = prefix_sum::<3, 4>(t, 1, None, None);
+    assert_eq!(got.dtype(), burn::tensor::DType::BF16, "the dtype of the output");
+    let got: Vec<f32> = got.into_data().try_into_vec_as().unwrap();
+    let mut want = 0.0;
+    for (i, (g, s)) in got.iter().zip(&steps).enumerate() {
+        want += s;
+        assert_eq!(*g, want, "position {i}");
+    }
+}
+
 /// [`prefix_sum`] **is** the inclusive prefix sum, at every axis position, with
 /// and without a carry-in.
 ///
@@ -176,6 +213,9 @@ fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usi
 /// sequence reaches at `micro_steps = 8`, the length this function exists for.
 #[test]
 fn prefix_sum_matches_the_definition() {
+    for len in [17, 100, 999] {
+        assert_padded(len);
+    }
     for len in [1, 2, 3, 5, 16, 17, 32, 100, 999] {
         // Scanned axis in the middle, as in the cumulative rotation angle.
         check_prefix_sum::<4, 5>([2, len, 3, 5], 1);
@@ -219,6 +259,7 @@ fn prefix_sum_matches_cumsum() {
 fn prefix_sum_gradient_matches_the_definition() {
     let device = test_device();
     let (batch, len, channels) = (2, 100, 3);
+    assert_padded(len);
 
     let raw = Tensor::<3>::random(
         [batch, len, channels],
@@ -364,9 +405,12 @@ fn prefix_sum_on_the_circle_matches_the_definition() {
 /// The steps and their in-block sums are exact in f16. So the error comes
 /// only from the reductions of the block totals (`16 = 3·2π − 2.85`) and from
 /// the carry-level prefix. With `2π` rounded to `6.28125`, each block total
-/// would keep `3·1.9·10⁻³`, and the angle would be off by `0.63`. The input is
-/// cast to f16, so the check is the same in each build.
+/// would keep `3·1.9·10⁻³`, and the angle would be off by `0.63`.
 #[test]
+#[cfg_attr(
+    not(feature = "dev-f16"),
+    ignore = "f16 build only: a half-precision check (an f16 input)"
+)]
 fn prefix_sum_on_the_circle_keeps_whole_turns_in_f16() {
     let device = test_device();
     let tau = std::f32::consts::TAU;
@@ -394,6 +438,10 @@ fn prefix_sum_on_the_circle_keeps_whole_turns_in_f16() {
 /// keep `1.9·10⁻³`, `0.63` in total. The two-part subtraction leaves about
 /// `2·10⁻⁵` per wrap (its small part rounds to the f16 grid of the angle).
 #[test]
+#[cfg_attr(
+    not(feature = "dev-f16"),
+    ignore = "f16 build only: a half-precision check (an f16 input)"
+)]
 fn a_decode_wrap_keeps_whole_turns_in_f16() {
     use crate::mamba3::rotation::rope::wrap_angle;
     let device = test_device();

@@ -384,7 +384,7 @@ fn paths_agree_with_a_read_stride_mimo() {
 /// them. The single-SSD twin of this test also carries `γ`.
 #[test]
 fn read_axis_matches_the_undecimated_kernel() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::{max_abs_diff, max_rel_diff};
     let device = test_device();
     let (batch, nchunks, nheads, per_head_dim, state_rank) = (2, 3, 2, 8, 8);
 
@@ -460,24 +460,25 @@ fn read_axis_matches_the_undecimated_kernel() {
                 s_head.clone(),
             );
 
-            // Same values at the read rows …
+            // Same values at the read rows … (relative to the full kernel:
+            // some gradients reach 32).
             let d_c_full = full.d_c;
             for (what, d) in [
-                ("y", max_abs_diff(kept_rows(full.y, 2, stride), read.y)),
-                ("final_state", max_abs_diff(full.state, read.state)),
-                ("grad v", max_abs_diff(full.d_v, read.d_v)),
-                ("grad b", max_abs_diff(full.d_b, read.d_b)),
-                ("grad da", max_abs_diff(full.d_da, read.d_da)),
+                ("y", max_rel_diff(read.y, kept_rows(full.y, 2, stride))),
+                ("final_state", max_rel_diff(read.state, full.state)),
+                ("grad v", max_rel_diff(read.d_v, full.d_v)),
+                ("grad b", max_rel_diff(read.d_b, full.d_b)),
+                ("grad da", max_rel_diff(read.d_da, full.d_da)),
                 (
                     "grad init_state",
-                    max_abs_diff(full.d_init_state, read.d_init_state),
+                    max_rel_diff(read.d_init_state, full.d_init_state),
                 ),
                 (
                     "grad c",
-                    max_abs_diff(kept_rows(d_c_full.clone(), 2, stride), read.d_c),
+                    max_rel_diff(read.d_c, kept_rows(d_c_full.clone(), 2, stride)),
                 ),
             ] {
-                assert!(d < dtype_tol(1e-4), "{label}: {what} max abs diff = {d:.3e}");
+                assert!(d < dtype_tol(1e-4), "{label}: {what} max rel diff = {d:.3e}");
             }
 
             // … and, off the read rows, nothing to compute.

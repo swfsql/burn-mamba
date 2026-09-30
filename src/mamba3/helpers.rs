@@ -232,7 +232,9 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     } else {
         let mut pad_dims = t.dims();
         pad_dims[dim] = pad;
-        Tensor::cat(vec![t, Tensor::zeros(pad_dims, &device)], dim)
+        // In the dtype of `t`, which can differ from the default of the device.
+        let zeros = Tensor::zeros(pad_dims, (&device, t.dtype()));
+        Tensor::cat(vec![t, zeros], dim)
     };
 
     // Split the scanned axis into (which block, where in it). Row-major, so the

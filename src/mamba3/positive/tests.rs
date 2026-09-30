@@ -349,9 +349,13 @@ fn the_precision_is_the_plants_weight_on_ones() {
 /// The soft register is the max-plus recursion `c = max(c + a, b)` from above,
 /// and by at most `ln(t + 1)` in projection units — the log-sum-exp over the
 /// `t + 1` ways the maximum can have been reached.
+///
+/// The margin is `dtype_tol(1e-3)`. A tie reaches the bound itself: at `t = 1`,
+/// `8 + ln 2 = 8.6931`, which f16 rounds to `8.6953` (one step is `0.0078` at 8).
 #[test]
 fn register_tracks_max_plus_within_its_log_bound() {
     let device = test_device();
+    let tol = f64::from(dtype_tol(1e-3));
     let (batch, len, nheads) = (2, 40, 3);
     // Integer-valued projections at a large scale: a counter, a floor and
     // resets, with ties.
@@ -372,7 +376,7 @@ fn register_tracks_max_plus_within_its_log_bound() {
                 hard = (hard + a[i] as f64).max(b[i] as f64);
                 let gap = soft[i] as f64 - hard;
                 assert!(
-                    gap > -1e-3 && gap <= ((t + 1) as f64).ln() + 1e-3,
+                    gap > -tol && gap <= ((t + 1) as f64).ln() + tol,
                     "b{bi} h{h} t{t}: soft {} vs hard {hard}",
                     soft[i]
                 );

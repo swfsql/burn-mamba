@@ -23,10 +23,15 @@ use burn::prelude::*;
 /// this, it would grow without bound over a long sequence or many decode
 /// steps.
 ///
+/// The wrap does not remove the rounding of the angle itself. In f16, one
+/// step at `|angle| ≈ π` is `2⁻⁹ ≈ 2·10⁻³`, and each decode step rounds the
+/// sum again. So a long f16 decode drifts: in a numpy simulation, 4096 steps
+/// of 1–2.5 rad drift by 0.18–0.82 rad. Only an f32 angle scan and an f32
+/// angle cache remove this drift.
+///
 /// The integer multiple `k` is `detach`ed, so autodiff sees it as a constant:
 /// `d/dx (x − k·2π) = 1`, and the backward pass is the same as for the
-/// unwrapped angle. This mirrors the detached `max` rescaling in
-/// [`RmsNormGated`](burn_stack::modules::norm::rms_norm_gated::RmsNormGated).
+/// unwrapped angle.
 pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     let two_pi = 2.0 * std::f32::consts::PI;
     let k = (angles.clone().detach() * (1.0f32 / two_pi)).round();

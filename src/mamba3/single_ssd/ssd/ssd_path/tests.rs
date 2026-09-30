@@ -425,7 +425,7 @@ fn single_ssd_paths_agree_with_a_read_stride_mimo() {
 /// them.
 #[test]
 fn read_axis_matches_the_undecimated_kernel() {
-    use burn_stack::utils::test_helpers::max_abs_diff;
+    use burn_stack::utils::test_helpers::{max_abs_diff, max_rel_diff};
     let device = test_device();
     let (batch, nchunks, nheads, per_head_dim, state_rank) = (2, 3, 2, 8, 8);
 
@@ -513,35 +513,36 @@ fn read_axis_matches_the_undecimated_kernel() {
                     siso,
                 );
 
-                // Same values at the read rows …
+                // Same values at the read rows … (relative to the full
+                // kernel: some gradients reach 32).
                 let checks: [(&str, f32); 7] = [
-                    ("y", max_abs_diff(kept_rows(full.y, 2, stride), read.y)),
-                    ("final_state", max_abs_diff(full.state, read.state)),
-                    ("grad v", max_abs_diff(full.d_v, read.d_v)),
-                    ("grad b", max_abs_diff(full.d_b, read.d_b)),
-                    ("grad da", max_abs_diff(full.d_da, read.d_da)),
-                    ("grad scale", max_abs_diff(full.d_scale, read.d_scale)),
+                    ("y", max_rel_diff(read.y, kept_rows(full.y, 2, stride))),
+                    ("final_state", max_rel_diff(read.state, full.state)),
+                    ("grad v", max_rel_diff(read.d_v, full.d_v)),
+                    ("grad b", max_rel_diff(read.d_b, full.d_b)),
+                    ("grad da", max_rel_diff(read.d_da, full.d_da)),
+                    ("grad scale", max_rel_diff(read.d_scale, full.d_scale)),
                     (
                         "grad init_state",
-                        max_abs_diff(full.d_init_state, read.d_init_state),
+                        max_rel_diff(read.d_init_state, full.d_init_state),
                     ),
                 ];
                 for (what, d) in checks {
-                    assert!(d < dtype_tol(1e-4), "{label}: {what} max abs diff = {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label}: {what} max rel diff = {d:.3e}");
                 }
                 let d_c_full = full.d_c;
                 let d_gamma_full = full.d_gamma;
                 for (what, d) in [
                     (
                         "grad c",
-                        max_abs_diff(kept_rows(d_c_full.clone(), 2, stride), read.d_c),
+                        max_rel_diff(read.d_c, kept_rows(d_c_full.clone(), 2, stride)),
                     ),
                     (
                         "grad gamma",
-                        max_abs_diff(kept_rows(d_gamma_full.clone(), 2, stride), read.d_gamma),
+                        max_rel_diff(read.d_gamma, kept_rows(d_gamma_full.clone(), 2, stride)),
                     ),
                 ] {
-                    assert!(d < dtype_tol(1e-4), "{label}: {what} max abs diff = {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label}: {what} max rel diff = {d:.3e}");
                 }
 
                 // … and, off the read rows, nothing to compute: the full
