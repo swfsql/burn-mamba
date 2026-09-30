@@ -2086,14 +2086,18 @@ fn saturated_generator_keeps_a_live_axis_gradient() {
 
 /// A projection large enough to overflow the sum-of-squares must still saturate
 /// at the bound, not collapse: `‖r‖²` is formed at the raw scale, so a channel
-/// of `1e20` overflows f32 (and one of a few hundred overflows f16) — after
-/// which `max/∞ = 0` would silently mean *no rotation at all*, the opposite of
-/// the intended "as far as the bound allows".
+/// above `√max` of the dtype overflows it (`1.8e19` in f32, `256` in f16) —
+/// after which `max/∞ = 0` would silently mean *no rotation at all*, the
+/// opposite of the intended "as far as the bound allows".
+///
+/// The scales follow the dtype: two below `√max`, and two above it, up to
+/// `max/2`.
 #[test]
 fn bounded_generator_survives_a_huge_projection() {
     let device = test_device();
     let max_angle = 2.0 * std::f64::consts::PI;
-    for scale in [1e3f32, 1e10, 1e20] {
+    let max = device.settings().float_dtype.finfo().max;
+    for scale in [max.powf(0.25), max.powf(0.45), max.powf(0.75), max / 2.0].map(|s| s as f32) {
         let raw = Tensor::<1>::from_floats([scale, -scale * 0.5, 0.0].as_slice(), &device)
             .reshape([1, 3]);
         let g = row(bound_rotation_vector::<2>(raw, max_angle));
@@ -2176,5 +2180,37 @@ fn quaternion_generators_are_per_head() {
             "channel {k} is {} , expected {expected} (heads are sharing an axis?)",
             v[k]
         );
+    }
+}
+
+/// A normalised quaternion has an **unbiased** norm, in f32 and in f16: the
+/// mean of `|q| − 1` is far below the epsilon of the dtype. A product of `L`
+/// factors has the norm `∏|qᵢ|`, so a bias `b` drifts it by `e^(b·L)`, and an
+/// unbiased error only by a random walk.
+///
+/// The inputs of `quat_normalize` are near-unit here (the exp map, and a
+/// second normalisation). That is the hard case: at a norm ≈ 1, the f16 grid
+/// step above 1 is twice the step below, and a division by `√Σq²` gave a mean
+/// of `+2e-4` (10% of drift over 512 factors).
+#[test]
+fn a_normalised_quaternion_has_an_unbiased_norm() {
+    let device = test_device();
+    let n = 20000;
+    let g = Tensor::<2>::random([n, 3], Distribution::Normal(0.0, 1.0), &device);
+    let raw = Tensor::<2>::random([n, 4], Distribution::Normal(0.0, 1.0), &device);
+    for dtype in [DType::F32, DType::F16] {
+        let eps = if dtype == DType::F16 { 9.77e-4 } else { 1.19e-7 };
+        for (name, q) in [
+            ("exp map", quat_from_scaled_axis::<2>(g.clone().cast(dtype))),
+            ("normalised twice", quat_normalize(quat_normalize(raw.clone().cast(dtype)))),
+        ] {
+            let v = row(q.cast(DType::F32));
+            let mean = v
+                .chunks(4)
+                .map(|c| c.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt() - 1.0)
+                .sum::<f64>()
+                / n as f64;
+            assert!(mean.abs() < eps / 20.0, "{dtype:?}, {name}: mean(|q| − 1) = {mean:+.2e}");
+        }
     }
 }

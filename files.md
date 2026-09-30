@@ -272,6 +272,11 @@ reference for MambaProduct: the dial versus DeltaProduct's mechanism, what
     (`sin(a/2)/a`, `tanh(n)/n`) floor it at `√div_eps`: their backward reads
     `1/a²`, which underflows to `0` in f16 near the floor of `safe_norm`.
   - The quaternion generators are **per head**.
+  - `quat_normalize` divides `1.5·q`: at a norm ≈ 1, the f16 grid step above
+    1 is twice the step below, and the norm of the result is biased
+    (`+2e-4`, 10% of drift over 512 factors). At 1.5 it is unbiased.
+  - `quat_cumprod` (and the `quat_scan` primitive) renormalises the prefix
+    product once, after the doubling, with a detached norm.
   - `rotate_bc_forward` renormalises the scan's prefixes. With
     `(start_bs, origin)` (packed), each segment turns from the origin rotation
     (`θₜ − θₛ₋₁ + θ₀`, `Tₜ ⊗ T̄ₛ₋₁ ⊗ P`).
@@ -308,7 +313,8 @@ The memory-efficient cumulative-product scan (a recompute backward, like SSD
 `SerialRecalculated`). `quat_scan.rs`: `Mamba3QuatScanBackendExt` + the SoA
 `Quat` helper (no per-step `narrow`/`cat`) + `quat_cumprod_recalculated`.
 `backward.rs`: a `Backward<B,2>` that saves only `q` + `init` (the exact
-unit-quaternion VJP, parallel ops only).
+unit-quaternion VJP, parallel ops only). The VJP reads `Pₜ ⊗ P̄ₛ` as the steps
+between `s` and `t`, so the prefix product is renormalised.
 
 ---
 

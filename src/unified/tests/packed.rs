@@ -87,8 +87,12 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
         .map(|lens| {
             lens.iter()
                 .map(|&len| {
-                    Tensor::<1>::random([len], Distribution::Uniform(0.0, VOCAB as f64), &device)
-                        .int()
+                    // Drawn as integers. An f16 float draw goes through the
+                    // `rand_distr` sampler of `half`, which rounds an f32 draw
+                    // to nearest: `Uniform(0, 11)` returns 11 (an id past the
+                    // vocabulary) for each f32 draw in `[10.996, 11)`
+                    // (https://github.com/VoidStarKat/half-rs/issues/152).
+                    Tensor::<1, Int>::random([len], Distribution::Uniform(0.0, VOCAB as f64), &device)
                         .into_data()
                         .convert::<i64>()
                         .try_to_vec::<i64>()

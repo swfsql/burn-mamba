@@ -291,6 +291,10 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 /// Every weight is in closed form. There is no training. `Δ = 1e-12` in every
 /// head, so the SSM state stays at zero: the register gives the answer.
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "exact in f32 only: in f16, the hand-built register misses 3–8% of the probes of each family"
+)]
 fn handmade_register_solves_every_family() {
     let device = test_device();
     let model = handmade(&device, Arm::Register);

@@ -127,6 +127,24 @@ impl<B: Backend> Quat<B> {
         }
     }
 
+    /// `self / |self|`, divided on `1.5·self`: for a near-unit quaternion, the
+    /// norm (≈ 1.5) is then in the middle of a binade, and the rounding is
+    /// unbiased (see [`quat_normalize`](crate::mamba3::rotation::quat_normalize)).
+    /// There is no floor for a zero quaternion: the only input is a product of
+    /// unit quaternions.
+    pub fn normalize(self) -> Quat<B> {
+        let [w, x, y, z] = [self.w, self.x, self.y, self.z].map(|c| c.mul_scalar(1.5));
+        let square = w.clone() * w.clone() + x.clone() * x.clone() + y.clone() * y.clone() + z.clone() * z.clone();
+        let norm = B::float_sqrt(square.inner());
+        let div = |c: F<B, 4>| F::new(B::float_div(c.inner(), norm.clone()));
+        Quat {
+            w: div(w),
+            x: div(x),
+            y: div(y),
+            z: div(z),
+        }
+    }
+
     /// Quaternion conjugate `(w, −x, −y, −z)`. For a unit quaternion `q* = q⁻¹`.
     pub fn conj(self) -> Quat<B> {
         Quat {
@@ -170,6 +188,13 @@ impl<B: Backend> Quat<B> {
 ///
 /// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
 /// backward needs `P` alone (`G[t] = P[t] ⊗ S[t]`).
+///
+/// `P` is renormalised once, after the doubling. `|a ⊗ b| = |a|·|b|`, so the
+/// norm errors of the multiplies do not move the directions, and one
+/// correction at the end is as good as one per level. Without it, the norm is
+/// a random walk (≈ 2% at 512 steps in f16). The backward reads `Pₜ ⊗ P̄ₛ` as
+/// the product of the steps between `s` and `t`, which is true only for a
+/// unit `P`.
 pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
     let [batch, sequence, nheads, blocks] = q.w.dims();
     let device = q.w.device();
@@ -183,7 +208,7 @@ pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
         a = a.mul(shifted); // recent (a) ⊗ older (shifted)
         offset *= 2;
     }
-    a
+    a.normalize()
 }
 
 // ---------------------------------------------------------------------------

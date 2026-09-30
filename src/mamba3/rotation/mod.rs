@@ -479,8 +479,18 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     // min-normal (~6.1e-5) and silently do nothing. So the floor on the
     // squared quantity is `div_eps` itself, which is above the denormal floor
     // of each format by construction.
+    //
+    // The division runs on `1.5·q`. For a near-unit `q` (every use here), the
+    // norm is then ≈ 1.5, in the middle of a binade. At a norm ≈ 1, the grid
+    // step above 1 is twice the step below. So in f16, `√Σq²` rounds to
+    // exactly 1 for each true norm in `[1 − 1.2e-4, 1 + 4.9e-4)`, the
+    // division does nothing there, and the output norm has a mean of
+    // `1 + 2e-4`. A product of `L` such factors drifts by `e^(2e-4·L)`: 10% at
+    // `L = 512`. At 1.5 the rounding is unbiased, and the norm of a product
+    // is a random walk (≈ 0.7% at 512).
     let eps = burn_stack::utils::div_eps(q.dtype());
-    let norm = (q.clone() * q.clone()).sum_dim(n).clamp_min(eps).sqrt();
+    let q = q * 1.5;
+    let norm = (q.clone() * q.clone()).sum_dim(n).clamp_min(2.25 * eps).sqrt();
     q / norm
 }
 
@@ -778,6 +788,12 @@ pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, 
         a = quat_mul(a, shifted);
         offset *= 2;
     }
+    // One renormalisation, as in `quat_scan`'s primitive scan. The norm is
+    // detached, so the gradient stays that of the plain product, as the
+    // recompute backward computes it. On `1.5·a`, as in `quat_normalize`.
+    let a = a * 1.5;
+    let norm = (a.clone() * a.clone()).sum_dim(4).sqrt().detach();
+    let a = a / norm;
 
     // Fold the cross-chunk carry once: cumₜ = Pₜ ⊗ init. `init` (the previous
     // chunk's final cumulative rotation) is the oldest factor, hence on the
@@ -1100,11 +1116,11 @@ pub fn rotate_bc_forward(
                 }
             };
             // Renormalise the prefixes. In exact arithmetic, a product of unit
-            // quaternions is a unit quaternion. But the scan composes each
-            // prefix from `⌈log₂ L⌉` multiplies, so the norm drifts: very
-            // little in f32, ~1% over a long f16 sequence. A non-unit rotation
-            // rescales B/C instead of only turning them. `forward` and `step`
-            // both come here, so they stay numerically alike and orthogonal.
+            // quaternions is a unit quaternion. The scan renormalises its
+            // prefix product, but the carry and the segments of a packed row
+            // add multiplies after it. A non-unit rotation rescales B/C
+            // instead of only turning them. `forward` and `step` both come
+            // here, so they stay numerically alike and orthogonal.
             let cum_bshk4 = quat_normalize(cum_bshk4);
             let over_mimo = |q_bshj4: Tensor<5>| {
                 q_bshj4

@@ -610,6 +610,10 @@ fn exact_everywhere(model: &MambaLatentNet, group: Group, device: &Device) -> f6
 
 /// `A₅` in one `Rotor4D` block: every weight in closed form, no training.
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "exact in f32 only: f16 rounds each rotation, and the error adds up over a run of one symbol"
+)]
 fn handmade_a5_rotor_solves_every_family() {
     let device = test_device();
     let model = handmade_a5(&device, RotationKind::Rotor4D, Head::Decoder);
@@ -620,6 +624,10 @@ fn handmade_a5_rotor_solves_every_family() {
 
 /// `S₅` in two `Rotor4D` layers: every weight in closed form, no training.
 #[test]
+#[cfg_attr(
+    feature = "dev-f16",
+    ignore = "exact in f32 only: f16 rounds each rotation, and the error adds up over a run of one symbol"
+)]
 fn handmade_s5_two_layers_solve_every_family() {
     let device = test_device();
     let model = handmade_s5(&device, Head::Decoder);
