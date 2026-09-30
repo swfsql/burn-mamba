@@ -26,6 +26,13 @@ const VOCAB: usize = 11;
 const VAL_TOL: f32 = 1e-4;
 /// Relative to the largest gradient of a parameter (at least 1).
 const GRAD_TOL: f32 = 1e-5;
+/// [`GRAD_TOL`] for f16 and bf16 gradients. The packed run and the sequences
+/// alone add in different orders, and each rounds on its own. In f16, the
+/// gradients differ by up to `1.1·10⁻²` (20 runs of each test), above
+/// `dtype_tol(GRAD_TOL)` (`6.7·10⁻³`). In f64, they agree to `1.6·10⁻¹⁵`. A
+/// packing error gives a difference of order 1, so this tolerance still finds
+/// it.
+const HALF_GRAD_TOL: f32 = 5e-2;
 /// The tokens of each sequence of each row (the chunk is 4 or 8 tokens).
 const ROWS: [&[usize]; 2] = [&[5, 9, 1], &[12, 3]];
 
@@ -142,9 +149,13 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
                 // The loss sums every logit, so a gradient can be in the
                 // thousands (the tied embedding). Compare against its scale.
                 let scale = a.clone().abs().max().into_scalar::<f32>().max(1.0);
+                let tol = match p.dtype() {
+                    burn::tensor::DType::F16 | burn::tensor::DType::BF16 => HALF_GRAD_TOL,
+                    _ => dtype_tol(GRAD_TOL),
+                };
                 let diff = max_abs_diff(p, a);
                 assert!(
-                    diff < dtype_tol(GRAD_TOL) * scale,
+                    diff < tol * scale,
                     "the gradient of parameter {i} differs by {diff} (max |grad| {scale})"
                 );
             }
