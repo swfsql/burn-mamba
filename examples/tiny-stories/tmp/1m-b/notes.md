@@ -1,7 +1,8 @@
 # notes: tiny-stories ≤1M search, part b (results and findings)
 
-`archive/notes.md` is the full chronological log (search it for a detail, do
-not read it whole). `../1m/` is the older history.
+`archive/notes.md` is the full chronological log (in git only, see
+`ORIENTATION.md`, Files). Search it for a detail, do not read it whole.
+`../1m/` is the older history.
 
 Notation: sv → **dv** = the stable valid → the decayed valid, in bits/char.
 ms = ms/step. MB = cubecl `reserved`. The noise of dv is ±0.005–0.008 (one

@@ -1,8 +1,21 @@
 # ORIENTATION: tiny-stories ≤1M-param search, part b
 
 Workspace: `examples/tiny-stories/tmp/1m-b/` (the paths below are relative
-to it). Read `handoff.md` first (state, pool, next steps). `notes.md` has the
-results and the findings.
+to it). Read `handoff.md` first.
+
+## Files
+
+- `handoff.md`: the state, the pool, the running jobs, the next steps.
+- `ORIENTATION.md` (this file): the goal, the rules, the protocol, the
+  metric, the tools.
+- `notes.md`: the results and the findings.
+- `far-use.md`: the plan for auxiliary objectives that target the far use.
+- Git tracks the `*.md`, `*.sh` and `*.py` files of this directory
+  (`examples/tiny-stories/.gitignore`). It does not track the other files:
+  `runs/`, `cfg/`, `bin/`, the `ctx*/` copies, the `.txt` logs and tables.
+- The old chronological logs (`archive/`) are in git only. Read one with
+  `git show 8a67461:examples/tiny-stories/tmp/1m-b/archive/notes.md` (also
+  `handoff.md`, `ORIENTATION.md`).
 
 ## Goal and ceilings (user)
 

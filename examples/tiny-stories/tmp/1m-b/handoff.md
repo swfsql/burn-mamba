@@ -1,8 +1,10 @@
 # Handoff: tiny-stories ≤1M-param search
 
-Read this file, then `ORIENTATION.md` (goal, rules, protocol, tools).
-`notes.md` has the results and the findings (§3 = the `v0.64.0` build). The
-paths are relative to `examples/tiny-stories/tmp/1m-b/`.
+Read this file, then `ORIENTATION.md` (goal, rules, protocol, tools, and
+the map of the files). `notes.md` has the results and the findings (§3 = the
+`v0.64.0` build). `far-use.md` is the plan for auxiliary objectives that
+target the far use. The paths are relative to
+`examples/tiny-stories/tmp/1m-b/`.
 
 ## Goal (user)
 
@@ -24,7 +26,7 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
 |---|---|---|---|---|---|---|---|---|---|
 | **h16** | `s1k-u1-wd1-h16` | 969,160 | ~720 | 3134 MiB | 0.8579 / 0.224 | 0.8014 / 0.253 | 0.7493 / 0.269 | **0.7281** / 0.284 | `p12k-h16-lr1` (12000) |
 | h16 × g2 | `s1k-u1-wd1-h16g2` | 982,747 | ~680 | 3284 MiB | 0.8649 / 0.241 | 0.8083 / 0.261 | 0.7552 / 0.285 | 0.7327 / **0.289** | `p12k-h16g2-lr1` (12000) |
-| h16 × V6 | `n-h16-V6` | 982,380 | 871 | ~3580 MiB | **0.8533** / 0.225 | running | – | – | `n03-h16-V6` (2630) |
+| h16 × V6 | `n-h16-V6` | 982,380 | 871 | ~3580 MiB | **0.8533** / 0.225 | – | – | – | `n03-h16-V6` (2630) |
 | h16 × g2 × V6 | `n-h16g2-V6` | 995,318 | 880 | ~3844 MiB | 0.8589 / 0.222 | – | – | – | `n06-h16g2V6` (2630) |
 
 - h16 × g2 × V6 is over the preferred limit (3686 MiB), and 17 MiB under
@@ -37,27 +39,21 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
   h16 g16 r16 L3 × V9 (0.9372 / 0.167), n02 h20 (0.8722 / 0.218), n05 h16 ×
   g4 d136 (0.8966 / 0.201).
 
-## Running at the stop
+## Queue
 
-- `queue.sh` started `extend.sh n03-h16-V6 p5k-h16V6 2000 1000` at
-  05:32 UTC (2026-10-01). It ends at ~06:35 with `runs/p5k-h16V6` (4630) and
-  `runs/p5k-h16V6-d` (5630). Then the queue runner exits (`queue.txt` is
-  empty).
-- `queue.pending.txt` holds the parked lines: the context use of
-  `p5k-h16V6-d`, n06 → 4630 + its context use, the probe + screen + context
-  use of n07 (h16 + `trop=MaxPlus`). To resume them:
+- Nothing runs, and `queue.txt` is empty.
+- `queue.pending.txt` holds the parked pool work: n03 and n06 → 4630, each
+  with its context use, then the probe + screen + context use of n07 (h16 +
+  `trop=MaxPlus`). To resume it:
   `cp queue.pending.txt queue.txt && nohup ./queue.sh > /dev/null 2>&1 &`,
   then `qwait.sh` in the background (it prints once per finished line).
-- If somebody stopped the n03 extension, `runs/p5k-h16V6` is partial. Give
-  the next attempt a new name.
 
 ## Binary
 
-- `bin/ts-cuda` = `v0.64.0-8dd4158-dirty-631e80dd`: burn-mamba `main` at
-  `8dd4158` + the new example flag `--pack-align N` (uncommitted in the
-  checkout: `cli.rs`, `main.rs`, `training.rs` and two test constructors of
-  `examples/tiny-stories`). Without the flag, it runs as `v0.64.0-8dd4158`.
-  n01 used `v0.64.0-8dd4158`. The runs from n02 on use the dirty build.
+- `bin/ts-cuda` = `v0.64.0-8dd4158-dirty-631e80dd`: burn-mamba `8dd4158` +
+  the example flag `--pack-align N`. Its diff is the code change of
+  `b56ff38`. Without the flag, it runs as `v0.64.0-8dd4158`. n01 used
+  `v0.64.0-8dd4158`. The runs from n02 on use the dirty build.
 - Keep `--max-vram` on every training run (the scripts add 3750).
 
 ## Findings of this session (detail: `notes.md` §3)
@@ -73,14 +69,22 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
 
 ## Next steps
 
-1. Run the context use of `p5k-h16V6-d`, then resume the parked queue (n06
-   → 4630).
-2. Bring n03 and n06 to the milestones of the other two, in matched steps:
-   8000 (`extend.sh … 3370 1600 --max-lr 1e-3`), then 12000 (`… 4000 2400
-   --max-lr 1e-3`), with the context use after each. Then compare the 2 × 2
-   at 9600 and 14400 on loss and far use. Each run is ~1–1.5 h.
-3. n07: h16 + `trop=MaxPlus` (`n-h16-trop`, 996,520 params, probe first), a
-   breadth test of a long-memory register.
+The focus is the far use (`far-use.md`), before the pool.
+
+1. `far-use.md` step 1: the diagnostics. They need no training (flex jobs).
+   Coherence boosting comes first: it shows whether auxiliary losses have
+   room.
+2. `far-use.md` step 2: the shared-suffix contrast in the example, then its
+   test on h16 to 3230 with two seeds.
+3. The parked pool work (`queue.pending.txt`, see Queue). A flex job slows
+   a GPU training, so run the flex jobs of steps 1 and 2 between its runs.
+   - n07 (h16 + `trop=MaxPlus`, `n-h16-trop`, 996,520 params) is a breadth
+     test of a long-memory register.
+   - After 4630: bring n03 and n06 to the milestones of the other two, in
+     matched steps. First 8000 (`extend.sh … 3370 1600 --max-lr 1e-3`), then
+     12000 (`… 4000 2400 --max-lr 1e-3`), each with its context use. Then
+     compare the 2 × 2 at 9600 and 14400 on loss and far use. Each run is
+     ~1–1.5 h.
 4. More ideas: the next LR point (5e-4 from 12000 tied at 14400 on h16);
    M = 16000/20000 for the pool; a clean quaternion test at B's shape (h4 +
    Q4D rf 0.5, ~984k); h32 r32 (it fits, but it halves the state); a longer
