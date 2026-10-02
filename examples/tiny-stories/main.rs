@@ -47,6 +47,8 @@ pub use common::{
 pub mod cli;
 /// How much the trained LM uses the earlier part of a story (`--context-use`).
 pub mod context;
+/// The shared-suffix contrast, an auxiliary training loss (`--contrast`).
+pub mod contrast;
 /// Sampling from the trained LM.
 pub mod inference;
 /// A tiny network for the tests.
@@ -138,12 +140,15 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if app_args.training {
+        // The saved settings of the run, with the flags of this invocation.
+        let contrast = contrast::ContrastConfig::resolve(&app_args.artifacts_path, &cli.contrast);
         training::train(
             config.clone(),
             model_config.clone(),
             autodiff_device,
             app_args,
             run.clone(),
+            contrast,
         );
     }
 
@@ -152,7 +157,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if cli.context_use {
-        let n_stories = config.valid_stories;
+        let n_stories = cli.context_stories.unwrap_or(config.valid_stories);
         context::context_use(model_config, device, app_args, &run, n_stories, cli.context_batch);
     }
 

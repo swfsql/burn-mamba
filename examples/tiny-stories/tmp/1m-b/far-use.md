@@ -35,10 +35,11 @@ reasons. The results go to `notes.md`.
 - **The bar.** The far use grows ~+0.03 per doubling of the steps, and its
   seed spread is ~0.017 @3230. An auxiliary loss pays if it gives more than
   +0.03 of far use at the same valid loss.
-- **Judge by `bits(C | own)`** of the far part, by the valid loss and by the
-  samples. Do not judge by the far-use difference alone. The contrast (step
-  2) trains that difference, so the difference can grow because
-  `bits(C | other)` grows.
+- **Judge by `bits(C | own)`** of the far part, by the **gain**
+  `bits(C | none) − bits(C | own)`, by the valid loss and by the samples. Do
+  not judge by the far-use difference alone. The contrast (step 2) trains
+  that difference, so the difference can grow because `bits(C | other)`
+  grows (the penalty).
 
 ## Step 1: diagnostics (no training)
 
@@ -47,13 +48,13 @@ addition to `examples/tiny-stories/context.rs`.
 
 1. **Coherence boosting** (Malkin et al. 2022). Score `C` with
    `log_softmax((1 + α)·z_full − α·z_noP)`. `z_noP` are the logits of `C`
-   with no prompt (the class latents only). Use α ∈ {0, 0.1, 0.2, 0.5}.
-   - If some α > 0 lowers `bits(C | own)`, the state holds the information
-     but the readout gives it too little weight. Auxiliary losses have room.
-   - If no α helps, the limit is capacity. Spend the effort on the
-     architecture (heads, `r`).
-   - Also sample the hard prompt with α ≈ 0.3. Look whether it keeps its
-     names.
+   with no prompt (the class latents only). **Done** (`notes.md` §4):
+   - No α > 0 lowers `bits(C | own)`. The readout is calibrated. Training
+     makes α = 0 nearly stationary, so this does not decide capacity, and it
+     does not test the writes (step 2).
+   - The no-prompt pass splits the use into a **gain** (`none − own`) and a
+     **penalty** (`other − none`). The far-use lead of g2 is all penalty.
+   - Parked: the boosted samples of the hard prompt (α ≈ 0.3).
 2. **The shuffle probe.**
    `Δ_shuffle = bits(C | own P, sentences shuffled) − bits(C | own P)`.
    Split `P` at ". " and keep the last sentence in place (the join). The bag
@@ -106,8 +107,10 @@ L    = L_LM + λ · mean_t[ −log σ(Δ_≤t) ]
   - Sentence cuts give prompts of different lengths. The `pad` mask (right
     padding) keeps the cache of each slot exact.
 - **λ** is the knob. Start small (0.1).
-- **The test.** h16 to 3230 (`screen.sh … 2630 600`) with two seeds. Compare
-  with k16 and n04: dv 0.8579 / 0.8596, far use 0.224 / 0.241.
+- **The test.** h16 to 3230 (`screen.sh … 2630 600`), one seed first
+  (models before seeds). Compare with k16 (the same seed) and n04: dv
+  0.8579 / 0.8596, far use 0.224 / 0.241, gain 0.139 / 0.146, own far
+  0.9052 / 0.9057.
 
 A model that learns only the topic is already a win. The current samples
 change topic: a meeting, then "mummy", then "dirty words".

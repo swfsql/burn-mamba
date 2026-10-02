@@ -18,10 +18,11 @@ pub use crate::common::{
     tiny_stories::lm::TinyStoriesConfig,
     training::{TrainingConfig, metric_current},
 };
+use crate::contrast::{self, ContrastConfig, Feed};
 use crate::dataset::{PackLayout, TinyStoriesBatch};
 use burn::prelude::*;
 use burn::{
-    optim::{GradientsParams, ModuleOptimizer},
+    optim::{GradientsAccumulator, GradientsParams, ModuleOptimizer},
     train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep},
 };
 use burn_mamba::prelude::*;
@@ -35,13 +36,15 @@ use std::time::Instant;
 
 /// Run the full training routine. Load or initialize the model and the
 /// optimizer, then train for the configured number of epochs, with validations,
-/// samples and checkpoints on the way.
+/// samples and checkpoints on the way. With `contrast` enabled, each step also
+/// trains the shared-suffix contrast (see [`crate::contrast`]).
 pub fn train(
     config: TinyStoriesConfig,
     model_config: MambaVocabNetConfig,
     training_device: Device,
     app_args: &AppArgs,
     run: Run,
+    contrast: ContrastConfig,
 ) {
     training_device.seed(config.training.seed);
 
@@ -76,6 +79,18 @@ pub fn train(
     };
     let (dataloader_train, dataloader_valid) =
         dataloaders_for(&config, &training_device, &progress, layout);
+    if contrast.enabled() {
+        // A shuffle of its own, from the resume point of the LM order.
+        let seed = progress.shuffle_seed(config.training.seed) ^ CONTRAST_SEED;
+        let feed = Feed::new(
+            contrast,
+            config.train_stories,
+            seed,
+            progress.step + 1,
+            &app_args.artifacts_path,
+        );
+        contrast::init(feed);
+    }
 
     // The session: resume position, budget, cadence and metrics log.
     let mut session = app_args.session(
@@ -169,6 +184,10 @@ pub struct Run {
 /// The training windows so far: the schedule of the `--max-vram` cleanups.
 static TRAIN_WINDOWS: AtomicU64 = AtomicU64::new(0);
 
+/// Mixed into the seed of the contrast, so that its order differs from the
+/// order of the LM batches.
+const CONTRAST_SEED: u64 = 0xC047_7A57;
+
 /// Wrapper over [`MambaVocabNet`] for custom implementations, with its [`Run`]
 /// settings.
 pub struct Wrap(pub MambaVocabNet, pub Run);
@@ -194,11 +213,35 @@ impl LmModel for Wrap {
                 device.memory_cleanup();
             }
         }
+        // The positions of the batch: a constant of the run for packed rows.
+        let lm_positions = batch.inputs.dims().iter().product::<usize>();
         let t0 = prof::window_start();
         let (pre_metrics, caches) = self.forward_lm(batch, caches, class);
         let t1 = prof::mark(&device);
-        let grads = pre_metrics.loss.backward();
+        let mut grads = GradientsParams::from_grads(pre_metrics.loss.backward(), &self.0);
         let t2 = prof::mark(&device);
+        // The contrast runs after the backward of the LM loss, which frees the
+        // activations of the LM pass. So the peak is that of the larger pass.
+        // Before the start of its ramp, the contrast does not run.
+        let mut readouts = None;
+        if let Some(feed) = contrast::FEED.get() {
+            let mut feed = feed.lock().unwrap();
+            if feed.runs() {
+                let batch = feed.batch(&device);
+                let weight = feed.weight();
+                let (loss, read) =
+                    contrast::loss(&self.0, &self.1.ssd_path, batch, feed.config(), weight, lm_positions);
+                let t3 = prof::mark(&device);
+                let contrast_grads = GradientsParams::from_grads(loss.backward(), &self.0);
+                let t4 = prof::mark(&device);
+                let mut sum = GradientsAccumulator::<MambaVocabNet>::new();
+                sum.accumulate(&self.0, grads);
+                sum.accumulate(&self.0, contrast_grads);
+                grads = sum.grads();
+                prof::contrast(t2, t3, t4);
+                readouts = Some(read);
+            }
+        }
         if let Some(max_mib) = self.1.max_vram_mib
             && let Some(usage) = device.memory_pool_usage()
         {
@@ -210,8 +253,16 @@ impl LmModel for Wrap {
                 std::process::exit(3);
             }
         }
-        let output = TrainOutput::new(&self.0, grads, pre_metrics);
+        let output = TrainOutput {
+            grads,
+            item: pre_metrics,
+        };
         prof::window_end(&device, t0, t1, t2);
+        // After the end of the window: the read of the readouts waits for the
+        // device, as the metric reads of the loop do.
+        if let Some(feed) = contrast::FEED.get() {
+            feed.lock().unwrap().end_step(readouts);
+        }
         (output, caches)
     }
 
@@ -261,8 +312,8 @@ impl LmModel for Wrap {
 ///
 /// Phases:
 ///
-/// - `fwd`: forward + loss.
-/// - `bwd`: backward.
+/// - `fwd`: forward + loss (with `--contrast`, also those of the contrast).
+/// - `bwd`: backward (with `--contrast`, also that of the contrast).
 /// - `gap`: window end → the optimizer. These are the metric reads of the loop,
 ///   that is its implicit sync.
 /// - `opt`: the optimizer step.
@@ -328,6 +379,15 @@ pub mod prof {
             s.sums[1] += ms(t1, t2);
             s.window_end = Some(Instant::now());
             s.device = Some(device.clone());
+        }
+    }
+
+    /// Add the contrast to `fwd` (`t2..t3`) and to `bwd` (`t3..t4`).
+    pub fn contrast(t2: Instant, t3: Instant, t4: Instant) {
+        if let Some(state) = STATE.get() {
+            let mut s = state.lock().unwrap();
+            s.sums[0] += ms(t2, t3);
+            s.sums[1] += ms(t3, t4);
         }
     }
 

@@ -5,6 +5,7 @@
 use crate::common::cli::{AppArgs, finish_extra};
 use crate::common::tiny_stories::lm::Overrides;
 use crate::context::BATCH;
+use crate::contrast::ContrastOverrides;
 use crate::inference::{PROMPT_TEMPERATURE, Prompting};
 use burn_mamba::prelude::*;
 
@@ -17,6 +18,7 @@ const HELP: &str = concat!(
     "    --temperature <T>      At inference, the sampling temperature of the prompted continuations (default 0.8)\n",
     "    --context-use          Measure how much the trained model uses the earlier part of the validation stories\n",
     "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
+    "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)\n",
     "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
     "    --profile-sync         Also sync the device after each phase (with --profile)\n",
     "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward. Also clean up the memory before windows 0, 1, 2, 4, 8, ... and before each 256th window",
@@ -43,12 +45,21 @@ pub struct Cli {
     pub context_use: bool,
     /// `--context-batch`: the sequences per `forward` of `--context-use`.
     pub context_batch: usize,
+    /// `--context-stories`: the validation stories that `--context-use` reads
+    /// (`None`: the stories of the validation loss).
+    pub context_stories: Option<usize>,
+    /// The `--contrast*` flags: see [`crate::contrast`].
+    pub contrast: ContrastOverrides,
 }
 
 impl Cli {
     /// Parse the arguments forwarded after `--`.
     pub fn parse(app_args: &AppArgs) -> Self {
-        let help = format!("tiny-stories' own flags (after --):\n{}\n{HELP}", Overrides::HELP);
+        let help = format!(
+            "tiny-stories' own flags (after --):\n{}\n{HELP}\n{}",
+            Overrides::HELP,
+            ContrastOverrides::HELP
+        );
         let mut pargs = app_args.extra(&help);
         let overrides = Overrides::parse(&mut pargs);
         let ssd_path = pargs
@@ -73,6 +84,9 @@ impl Cli {
         let context_use = pargs.contains("--context-use");
         let context_batch = pargs.opt_value_from_str("--context-batch").unwrap().unwrap_or(BATCH);
         assert!(context_batch >= 1, "--context-batch must be at least 1");
+        let context_stories: Option<usize> = pargs.opt_value_from_str("--context-stories").unwrap();
+        assert!(context_stories != Some(0), "--context-stories must be at least 1");
+        let contrast = ContrastOverrides::parse(&mut pargs);
         finish_extra(pargs);
         Self {
             overrides,
@@ -83,6 +97,8 @@ impl Cli {
             prompting,
             context_use,
             context_batch,
+            context_stories,
+            contrast,
         }
     }
 }

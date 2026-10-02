@@ -281,3 +281,52 @@ page sizes. So a probe is the only reliable size check.
   the far use of every screen and milestone (`ctx.sh` → `ctx.txt`). Groups
   raised it most so far (h16 × g2), so **n05-h16g4** (`n-h16g4-d136`: d136
   p17, 16 heads, 4 groups, 990,721 params) tests whether the trend goes on.
+
+## 4. Far use: diagnostics (`far-use.md` step 1)
+
+### Coherence boosting (step 1.1, 2026-10-02)
+
+`--context-use` also scores `C` with no prompt (the class latents, then
+`C`), and after each prompt with coherence boosting at α ∈ {0, 0.05, 0.1,
+0.2, 0.3, 0.5, 1} (`context.rs`). Build `v0.64.0-6ca4e79-dirty-87616530`.
+α = 0 gives the `ctx.txt` rows exactly. The logs are in
+`ctx7/<run>/context-use.log`, and the summary lines in `ctx7.txt`.
+
+The far part (64..256), in bits/char. gain = none − own, penalty = other −
+none (pairing i+1), use = gain + penalty.
+
+| run | step | none | own | other | gain | penalty | use |
+|---|---|---|---|---|---|---|---|
+| k16 h16 (seed 0) | 3230 | 1.0444 | 0.9052 | 1.1287 | 0.139 | 0.084 | 0.224 |
+| n04 h16 (seed 1) | 3230 | 1.0513 | 0.9057 | 1.1462 | 0.146 | 0.095 | 0.241 |
+| k17 h16 × g2 | 3230 | 1.0568 | 0.9147 | 1.1554 | 0.142 | 0.099 | 0.241 |
+| h16 (`p12k-h16-lr1-d`) | 14400 | 0.9408 | 0.7626 | 1.0463 | 0.178 | 0.106 | 0.284 |
+| h16 × g2 (`p12k-h16g2-lr1-d2`) | 14400 | 0.9461 | 0.7681 | 1.0571 | 0.178 | 0.111 | 0.289 |
+
+- **No α > 0 lowers bits(C | own)**, on any checkpoint, in the join or in
+  the far part. At α = 0.05 the far part costs +0.0002 to +0.0006. So the
+  slope at α = 0 is about 0. The far use grows with α (h16 @14400: 0.284 →
+  0.403 at α = 0.3) only because bits(C | other) grows faster.
+- The test is weak by construction. Cross-entropy training on the same
+  distribution makes α = 0 a stationary point, if the readout can scale the
+  part of its logits that the prompt sets. So the result shows a calibrated
+  readout. It does not show that the limit is capacity, and it does not
+  test what the model writes into the state (the target of step 2).
+- **The use has two parts.** A wrong prompt costs more than no prompt
+  (penalty 0.08–0.11): the model commits to the names and events of the
+  prompt that it reads. From 3230 to 14400, the gain grows from 0.139 to
+  0.178, and the penalty from 0.084 to 0.106.
+- **The far-use lead of g2 is in the penalty, not in the gain.** The gain of
+  g2 ties h16: 0.142 @3230 (the two h16 seeds: 0.139, 0.146), and 0.178
+  against 0.178 @14400. Its own bits are higher (0.7681 against 0.7626
+  @14400). So g2 commits harder to any prompt. It does not use its own
+  prompt better.
+- The seed spread on 244 stories (gain 0.006, penalty 0.011) was story
+  noise. On 1968 stories, the gain is the noisy part (`tmp.md`, 2048
+  stories).
+- From now on, report the gain and the own bits beside the use (`ctx.sh`
+  prints the no-prompt row). A contrast (step 2) can raise the use through
+  the penalty alone.
+- The boosted samples of the hard prompt (α ≈ 0.3) are parked. In
+  distribution, α = 0.3 costs +0.010 bits/char on the far part, and the
+  sampler needs a second cache per step.

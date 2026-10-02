@@ -181,6 +181,7 @@ shared CLI, before the `--`, sets:
 | `--temperature <t>` | 0.8 | at inference, the sampling temperature of the prompted continuations |
 | `--context-use` | off | measure how much the trained model uses the earlier part of the validation stories (see `context.rs`) |
 | `--context-batch <n>` | 4 | with `--context-use`, the sequences per forward |
+| `--context-stories <n>` | the validation stories | with `--context-use`, read the first `n` validation stories |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 | `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward. Also cleans up the memory before windows 0, 1, 2, 4, 8, … and before each 256th window, so that the pools hold the process (not persisted) |

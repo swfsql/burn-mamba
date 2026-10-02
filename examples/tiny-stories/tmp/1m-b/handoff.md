@@ -17,7 +17,8 @@ untied tensors of mnist-class (`gen.py untie=1`).
 ## State
 
 Best loss: **0.7281**, h16 @14400 (`runs/p12k-h16-lr1-d`). Best far use:
-**0.289**, h16 × g2 @14400 (`runs/p12k-h16g2-lr1-d2`).
+**0.289**, h16 × g2 @14400 (`runs/p12k-h16g2-lr1-d2`). But its gain ties h16
+(0.178): the lead is in the penalty (`notes.md` §4).
 
 The pool is a 2 × 2 on h16: {base, g2} × {L5, L5 × V6 untied}. Each cell:
 decayed valid / far use (pairing i+1). Process memory on the current build.
@@ -50,10 +51,10 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
 
 ## Binary
 
-- `bin/ts-cuda` = `v0.64.0-8dd4158-dirty-631e80dd`: burn-mamba `8dd4158` +
-  the example flag `--pack-align N`. Its diff is the code change of
-  `b56ff38`. Without the flag, it runs as `v0.64.0-8dd4158`. n01 used
-  `v0.64.0-8dd4158`. The runs from n02 on use the dirty build.
+- `bin/ts-cuda` = `v0.64.0-6ca4e79-dirty-87616530`: `6ca4e79` + the no-prompt
+  pass and coherence boosting in `--context-use` (`context.rs`). Training
+  and inference run as `v0.64.0-8dd4158-dirty-631e80dd` (`--pack-align N`),
+  which n02–n06 used. n01 used `v0.64.0-8dd4158`.
 - Keep `--max-vram` on every training run (the scripts add 3750).
 
 ## Findings of this session (detail: `notes.md` §3)
@@ -72,8 +73,8 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
 The focus is the far use (`far-use.md`), before the pool.
 
 1. `far-use.md` step 1: the diagnostics. They need no training (flex jobs).
-   Coherence boosting comes first: it shows whether auxiliary losses have
-   room.
+   Coherence boosting is done (no α > 0 helps, `notes.md` §4). Next: the
+   shuffle probe (1.2), then the distance curve (1.3).
 2. `far-use.md` step 2: the shared-suffix contrast in the example, then its
    test on h16 to 3230 with two seeds.
 3. The parked pool work (`queue.pending.txt`, see Queue). A flex job slows

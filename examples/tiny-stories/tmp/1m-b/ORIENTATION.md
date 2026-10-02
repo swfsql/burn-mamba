@@ -52,6 +52,9 @@ to it). Read `handoff.md` first.
 - New ideas: breadth-first, one run at a time, no blind sweeps. After each
   run, pick the single most useful next run. Some features pay only late
   (`agg.py` shows the rank per bucket).
+- **Models before seeds**: test a new variant on one seed first. Two
+  different models are worth more than two seeds of one model. Add a seed
+  only when a decision needs it.
 - Read the results with `summ.py`, `agg.py`, `tail`, `grep ^prof`. Never dump
   big files.
 - **Waiting**: no foreground loop or `sleep`. Wait in the background
@@ -101,8 +104,13 @@ to it). Read `handoff.md` first.
   pairings: their spread (≤ 0.003) is the noise. **Far use** (chars 64..256
   of the continuation) is the plot-level signal. It takes ~2 min per
   checkpoint on flex (`BURN_DEVICE=flex`), on a copy of the run dir in
-  `ctx5/` (the app rewrites its configs at startup). `ctx.sh <run>` does it
-  and prints the join/far rows (append them to `ctx.txt`).
+  `ctx5/` (the app rewrites its configs at startup). `ctx.sh <run> [batch]
+  [root]` does it and prints the join/far rows and the no-prompt row
+  (append them to `ctx.txt`).
+- **Gain** = `bits(C | no prompt) − bits(C | own)` of the far part, and the
+  penalty = other − none (use = gain + penalty). Report the gain and the own
+  bits beside the far use: a model can raise the use by the penalty alone
+  (`notes.md` §4). The log also has the coherence boosting table.
 - Samples: `--inference` on a copy of the run dir, with the example flags
   `--prompt <TEXT>` (once per prompt), `--continuations 3`, `--temperature
   T`. Run the user's two prompts (`infer-*` dirs, see their `README.txt`)
