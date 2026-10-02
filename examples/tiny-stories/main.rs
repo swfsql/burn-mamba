@@ -129,6 +129,7 @@ pub fn launch(app_args: &AppArgs) {
 
     let run = training::Run {
         ssd_path: cli.ssd_path,
+        pack_align: cli.pack_align,
         graphs: app_args.graphs(),
         max_vram_mib: cli.max_vram_mib,
     };

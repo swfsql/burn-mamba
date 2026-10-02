@@ -63,10 +63,16 @@ pub fn train(
     // it with a slot per class latent.
     let layout = match config.pack {
         None => PackLayout::default(),
-        Some(_) => PackLayout {
-            align: model.0.pack_align(&model.1.ssd_path).expect("this family takes no packed rows"),
-            lead: model.0.n_class_latents(),
-        },
+        Some(_) => {
+            let chunk =
+                model.0.pack_align(&model.1.ssd_path).expect("this family takes no packed rows");
+            let align = model.1.pack_align.unwrap_or(chunk);
+            assert!(
+                align.is_multiple_of(chunk),
+                "--pack-align {align} is not a multiple of the chunk length ({chunk} tokens)"
+            );
+            PackLayout { align, lead: model.0.n_class_latents() }
+        }
     };
     let (dataloader_train, dataloader_valid) =
         dataloaders_for(&config, &training_device, &progress, layout);
@@ -138,6 +144,12 @@ pub fn train(
 pub struct Run {
     /// The SSD path of every chunkwise `forward` (`--ssd-path`).
     pub ssd_path: MambaSsdPath,
+    /// `--pack-align`, in tokens: each story of a packed row starts at a
+    /// multiple of it. It must be a multiple of the chunk length, because a
+    /// reset must be at a chunk start. `None` aligns to the chunk. A value
+    /// larger than the chunk keeps the packing of a longer chunk, so a
+    /// shorter chunk (less memory) trains on the same rows.
+    pub pack_align: Option<usize>,
     /// Whether decode steps and prefill chunks replay captured graphs
     /// (`--no-graph` runs them eagerly).
     pub graphs: bool,

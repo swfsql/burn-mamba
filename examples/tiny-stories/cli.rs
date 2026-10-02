@@ -11,6 +11,7 @@ use burn_mamba::prelude::*;
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
     "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward: recalc (default), serial or minimal. L sets the chunk length, in folded positions (default: from the block shape)\n",
+    "    --pack-align <N>       With --pack, start each story at a multiple of N tokens. N must be a multiple of the chunk length (default: the chunk length)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",
     "    --temperature <T>      At inference, the sampling temperature of the prompted continuations (default 0.8)\n",
@@ -28,6 +29,8 @@ pub struct Cli {
     /// `--ssd-path`: the recalculated serial scan (the default) uses about 1/3
     /// less vram than `Minimal`.
     pub ssd_path: MambaSsdPath,
+    /// `--pack-align`: see `training::Run::pack_align`.
+    pub pack_align: Option<usize>,
     /// `--profile` (and `--profile-sync`): see `training::prof`.
     pub profile: Option<(usize, bool)>,
     /// `--max-vram`, in MiB: the cap on the bytes that the memory pools
@@ -52,6 +55,8 @@ impl Cli {
             .opt_value_from_fn("--ssd-path", parse_ssd_path)
             .unwrap()
             .unwrap_or(Mamba3SsdPath::SerialRecalculated(None));
+        let pack_align: Option<usize> = pargs.opt_value_from_str("--pack-align").unwrap();
+        assert!(pack_align != Some(0), "--pack-align must be at least 1");
         let every: Option<usize> = pargs.opt_value_from_str("--profile").unwrap();
         let sync = pargs.contains("--profile-sync");
         assert!(every.is_some() || !sync, "--profile-sync needs --profile");
@@ -72,6 +77,7 @@ impl Cli {
         Self {
             overrides,
             ssd_path: MambaSsdPath::Mamba3(ssd_path),
+            pack_align,
             profile: every.map(|every| (every, sync)),
             max_vram_mib,
             prompting,
