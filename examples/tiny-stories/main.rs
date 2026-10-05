@@ -156,12 +156,24 @@ pub fn launch(app_args: &AppArgs) {
         inference::infer(model_config.clone(), device.clone(), app_args, &run, &cli.prompting);
     }
 
+    if let Some(batches) = cli.contrast_eval {
+        contrast::contrast_eval(
+            model_config.clone(),
+            device.clone(),
+            app_args,
+            &run.ssd_path,
+            &cli.contrast,
+            config.train_stories,
+            batches,
+        );
+    }
+
     if cli.context_use {
         let n_stories = cli.context_stories.unwrap_or(config.valid_stories);
         context::context_use(model_config, device, app_args, &run, n_stories, cli.context_batch);
     }
 
-    if !app_args.inference && !app_args.training && !cli.context_use {
+    if !app_args.inference && !app_args.training && !cli.context_use && cli.contrast_eval.is_none() {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }

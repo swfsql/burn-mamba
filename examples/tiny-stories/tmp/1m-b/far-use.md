@@ -33,13 +33,14 @@ reasons. The results go to `notes.md`.
 - An auxiliary loss must have the optimum of the LM loss (it is
   **consistent**). If it does not, it gets a small weight.
 - **The bar.** The far use grows ~+0.03 per doubling of the steps, and its
-  seed spread is ~0.017 @3230. An auxiliary loss pays if it gives more than
-  +0.03 of far use at the same valid loss.
-- **Judge by `bits(C | own)`** of the far part, by the **gain**
-  `bits(C | none) − bits(C | own)`, by the valid loss and by the samples. Do
-  not judge by the far-use difference alone. The contrast (step 2) trains
-  that difference, so the difference can grow because `bits(C | other)`
-  grows (the penalty).
+  seed spread is ~0.01–0.017 @3230. An auxiliary loss pays if it gives more
+  than +0.03 of far use at the same valid loss.
+- **Judge by `bits(C | own)`** of the far part (2048 stories, paired with
+  the control: the stable metric), by the valid loss and by the samples.
+  Read the **gain** `bits(C | none) − bits(C | own)` and the far use against
+  their noise (~0.01). The contrast trains `Δ`, so `Δ` can grow because
+  `bits(C | other)` grows (the penalty), or because odd contexts score
+  worse.
 
 ## Step 1: diagnostics (no training)
 
@@ -60,7 +61,9 @@ addition to `examples/tiny-stories/context.rs`.
    Split `P` at ". " and keep the last sentence in place (the join). The bag
    of words stays the same. Only the order of the events changes. A
    `Δ_shuffle` near 0 means that the far use is a bag of sentences. This
-   probe is the gate of step 3.
+   probe is the gate of step 3. **Answered** by `--contrast-eval` (the
+   shuffled negative, `notes.md` §5): Δ_shuffle is 0.01–0.03 bits/char,
+   ~6–8% of the far use.
 3. **The distance curve** (Khandelwal et al. 2018). Replace the text farther
    back than `d` chars with the text of another story, for `d` ∈ {16, 32,
    64, 128, 256, 512}. The curve shows which timescales the model uses. It
@@ -106,11 +109,17 @@ L    = L_LM + λ · mean_t[ −log σ(Δ_≤t) ]
   - The cost is one more forward and backward of `C`.
   - Sentence cuts give prompts of different lengths. The `pad` mask (right
     padding) keeps the cache of each slot exact.
-- **λ** is the knob. Start small (0.1).
-- **The test.** h16 to 3230 (`screen.sh … 2630 600`), one seed first
-  (models before seeds). Compare with k16 (the same seed) and n04: dv
-  0.8579 / 0.8596, far use 0.224 / 0.241, gain 0.139 / 0.146, own far
-  0.9052 / 0.9057.
+- **λ** is the knob, normalized so that λ = 1 pushes as hard as the LM loss
+  at chance. It is 0 until `--contrast-start`, then ramps.
+- **Built** in the example (`contrast.rs`, `notes.md` §5). The other term
+  comes from the C rows rolled by one row, so the shared suffix needs no
+  cache permutation. The LM backward runs first, then the contrast
+  backward, and the gradients add up: the peak memory does not change.
+- **Result: random negatives do not push.** At J 0 the join separates the
+  pair at once (c01: a null run). On the far part (J 64) h16 tells a random
+  other story apart within ~20–30 characters at every checkpoint from 250
+  on (push 0.41 @250, 0.08 @1000, 0.02 @14400). A later start does not
+  help. The limit is the easy negative, so step 3.
 
 A model that learns only the topic is already a win. The current samples
 change topic: a meeting, then "mummy", then "dirty words".
@@ -128,6 +137,19 @@ The gate: step 2 raises the far use, but `Δ_shuffle` stays near 0.
   it with no loss. ALBERT's sentence-order prediction swapped the two
   segments (the same topic), and it helped.
 - Use a curriculum: random negatives first, then bag-matched ones.
+- **Built** (`--contrast-negative`): `shuffled` (the middle sentences move,
+  the first and the last stay: a moved opening is a cheap sign),
+  `shuffled-all`, and `nearest:M` (the most similar prompt of M, the
+  prompts compared up to their own cuts).
+- **Result.** Shuffled negatives push 0.4–0.8 of chance at every
+  checkpoint. nearest:64 only ~2× random. c03 (shuffled, λ 1, against b01
+  on 1 worker): the order Δ grows ×5 (0.009 → 0.044 bits/char), at an LM
+  cost of ~0.008 (own far and dv). The use against random prompts does not
+  move, and the no-prompt score gets worse (+0.018). That fits a shortcut:
+  "unnatural context ⇒ predict worse".
+- **Risk of every synthetic negative:** a shuffled prompt never occurs as
+  an own prompt. So nothing stops the model from scoring all odd contexts
+  lower. Judge by the own bits paired against the control, never by `Δ`.
 
 ## Step 4: unknown gaps (the Kalman reading)
 

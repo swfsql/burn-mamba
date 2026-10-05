@@ -12,7 +12,10 @@ to it). Read `handoff.md` first.
 - `far-use.md`: the plan for auxiliary objectives that target the far use.
 - Git tracks the `*.md`, `*.sh` and `*.py` files of this directory
   (`examples/tiny-stories/.gitignore`). It does not track the other files:
-  `runs/`, `cfg/`, `bin/`, the `ctx*/` copies, the `.txt` logs and tables.
+  `runs/`, `cfg/`, `bin/`, `snap/` (snapshots), the `ctx*/` and `ceval*/`
+  copies, the `.txt` logs and tables.
+- `tmp.md`: the notes of the running session. At the end of a session they
+  go to the files above, and `tmp.md` is empty again.
 - The old chronological logs (`archive/`) are in git only. Read one with
   `git show 8a67461:examples/tiny-stories/tmp/1m-b/archive/notes.md` (also
   `handoff.md`, `ORIENTATION.md`).
@@ -22,7 +25,7 @@ to it). Read `handoff.md` first.
 - The lowest held-out **valid bits/char** of the `tiny-stories` example,
   **and long-context coherence** (the **far use** of `--context-use`, see
   Metric). Measure the far use of every screen and every milestone
-  (`ctx.sh`, between GPU runs), and rank the candidates by both.
+  (`ctx.sh -g -n 2048`, between GPU runs), and rank the candidates by both.
 - Use the most of both ceilings (params and VRAM). Where a shape has VRAM
   left, add cheap capacity (expand, virtual layers, …). Virtual layers
   (V > L) always take the untied tensors of mnist-class (`gen.py untie=1`).
@@ -99,18 +102,24 @@ to it). Read `handoff.md` first.
   of a story. **Keep `seq × runlen = 1024`**, or the metric changes. The
   validation stays unpacked.
 - **Context use** (`--context-use`, `examples/tiny-stories/context.rs`): on
-  the 244 valid stories of ≥ 512 chars, the cost of chars 256..512 after
-  their own first 256 chars against after the chars of another story. Two
-  pairings: their spread (≤ 0.003) is the noise. **Far use** (chars 64..256
-  of the continuation) is the plot-level signal. It takes ~2 min per
-  checkpoint on flex (`BURN_DEVICE=flex`), on a copy of the run dir in
-  `ctx5/` (the app rewrites its configs at startup). `ctx.sh <run> [batch]
-  [root]` does it and prints the join/far rows and the no-prompt row
-  (append them to `ctx.txt`).
+  the valid stories of ≥ 512 chars, the cost of chars 256..512 after their
+  own first 256 chars against after the chars of another story. **Far use**
+  (chars 64..256 of the continuation) is the plot-level signal.
+  - Use 2048 stories on the GPU: `ctx.sh -g -n 2048 -r ctxg <run>` (~78 s,
+    1968 stories; append the line to `ctxg.txt`). The default (244 stories,
+    flex, `ctx5/`) is too noisy to compare models (s.e. of the gain 0.006
+    against 0.002). A GPU job: run it between GPU runs or in the queue.
+  - `ctx.sh` works on a copy of the run dir (the app rewrites its configs
+    at startup). It also takes a snapshot dir (`snap/<run>/<step>`).
+  - `context-stories.jsonl` has the scores of each story.
+    `ctxstat.py <dir>…` gives the mean ± s.e. and the paired difference to
+    the first dir (a paired s.e. is ~0.001).
 - **Gain** = `bits(C | no prompt) − bits(C | own)` of the far part, and the
-  penalty = other − none (use = gain + penalty). Report the gain and the own
-  bits beside the far use: a model can raise the use by the penalty alone
-  (`notes.md` §4). The log also has the coherence boosting table.
+  penalty = other − none (use = gain + penalty). **The stable metric is the
+  own far bits, paired with the control.** The gain and the use carry the
+  noise of their baselines (~0.01 between seeds), and a model can raise the
+  use by the penalty alone (`notes.md` §4). The log also has the coherence
+  boosting table.
 - Samples: `--inference` on a copy of the run dir, with the example flags
   `--prompt <TEXT>` (once per prompt), `--continuations 3`, `--temperature
   T`. Run the user's two prompts (`infer-*` dirs, see their `README.txt`)
@@ -128,14 +137,21 @@ to it). Read `handoff.md` first.
 - The builds before `v0.64.0` (`ts-cuda-v0…v11`, `ts-flex`) leak host memory
   when they evaluate a model with untied tensors. The builds from `main` do
   not.
-- Runs are not bit-reproducible: the 2 dataloader workers can deliver two
-  batches in either order.
+- **Run noise.** With 2 dataloader workers, two same-seed runs train on
+  different batch orders from step 2, and dv moves by ~0.01. With 1 worker
+  (the `*-w1` cfgs: `num_workers` 1, the same speed) the order is fixed:
+  the per-step losses agree to ~1e-7 for ~50 steps, then float noise grows
+  to a mean gap of ~6e-3 per step by step 250. The noise of a final dv on
+  1 worker is not measured yet. Compare a treatment only with a control on
+  the same harness and launcher.
 - CLI: burn-stack's `AppArgs` flags first (`-a -c -m -b -i --resume --seed
   --max-lr --valid-batches …`), then after `--` the example flags (corpus,
   packing, `--pack-align N` (a multiple of the chunk: chunk 64 can train on
   the rows of chunk 128), `--ssd-path recalc|serial|minimal[:L]`,
   `--profile N`,
-  `--max-vram`, prompts, `--context-use [--context-batch N]`).
+  `--max-vram`, prompts, `--context-use [--context-batch N]
+  [--context-stories N]`, the contrast `--contrast* …` and
+  `--contrast-eval N`, see `far-use.md` and `notes.md` §5).
   `bin/ts-cuda --help` and `bin/ts-cuda -- --help` list them.
 - `gen.py <cfg> k=v …` → `cfg/<cfg>/` (the keys are `DEFAULTS` in the file).
   A key with a string default keeps `None` as a string.
@@ -146,6 +162,12 @@ to it). Read `handoff.md` first.
 - `screen.sh <run> <cfg> <T1> <T2> [args]`: `runs/<run>` at constant LR for
   T1 steps, then `runs/<run>-d`, a cosine decay to max/100 over 0.9·T2.
   Launch with `nohup ./screen.sh … > /dev/null 2>&1 &`.
+- `snapscreen.sh <run> <cfg> <T1> <T2> <E> [args]`: `screen.sh` with a
+  checkpoint every E steps, each copied whole to `snap/<run>/<step>/` (the
+  decay branch too). b01 and c03 used it with the `*-w1` cfg and E = 250.
+- `ceval.sh [-g] [-n N] [-r root] <run | snap/<run>/<step>> [-- flags]`:
+  `--contrast-eval` on a copy (`ceval*/`): the push and the `Δ` of each cut
+  × negative × J, with no backward. A GPU job (~1 min).
 - `extend.sh <src> <new> <N1> <N2> [args]`: from a stable checkpoint (never a
   `-d`), +N1 steps (`--resume`, and `--max-lr` sets the new constant LR),
   then a decay branch `runs/<new>-d` of N2.

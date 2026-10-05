@@ -2,26 +2,37 @@
 
 Read this file, then `ORIENTATION.md` (goal, rules, protocol, tools, and
 the map of the files). `notes.md` has the results and the findings (§3 = the
-`v0.64.0` build). `far-use.md` is the plan for auxiliary objectives that
-target the far use. The paths are relative to
+`v0.64.0` pool build, §4 = the far-use diagnostics and the 2048-story
+context use, §5 = the contrast). `far-use.md` is the plan for auxiliary
+objectives that target the far use. The paths are relative to
 `examples/tiny-stories/tmp/1m-b/`.
 
 ## Goal (user)
 
 The lowest valid bits/char **and** long-context coherence: the **far use**
-of `--context-use`. Measure the far use of every screen and every milestone
-(`ctx.sh`, a flex job between GPU runs), and rank by both. Use the most of
-both ceilings (1M params, VRAM). Virtual layers (V > L) always take the
-untied tensors of mnist-class (`gen.py untie=1`).
+of `--context-use`. Measure the context use of every screen and every
+milestone (`ctx.sh -g -n 2048`), and rank by both. Judge the far use by the
+own far bits paired with a control. Use the most of both ceilings (1M
+params, VRAM). Virtual layers (V > L) always take the untied tensors of
+mnist-class (`gen.py untie=1`).
+
+## Guidelines (user)
+
+- **Plan before long runs.** First run the checks of a few minutes that
+  show whether a run of 40 minutes or more can be informative: evals on
+  the existing checkpoints and snapshots, short probes, tiny smoke runs.
+  Do not spend a long run that can be a null.
+- **Models before seeds** (`ORIENTATION.md`, Working rules).
 
 ## State
 
 Best loss: **0.7281**, h16 @14400 (`runs/p12k-h16-lr1-d`). Best far use:
-**0.289**, h16 × g2 @14400 (`runs/p12k-h16g2-lr1-d2`). But its gain ties h16
-(0.178): the lead is in the penalty (`notes.md` §4).
+**0.289**, h16 × g2 @14400 (`runs/p12k-h16g2-lr1-d2`). But its gain ties h16,
+and its own bits are worse: the lead is in the penalty (`notes.md` §4).
 
 The pool is a 2 × 2 on h16: {base, g2} × {L5, L5 × V6 untied}. Each cell:
-decayed valid / far use (pairing i+1). Process memory on the current build.
+decayed valid / far use (pairing i+1, 244 stories). Process memory on the
+current build.
 
 | id | cfg | params | ms/step | process | @3230 | @5630 | @9600 | @14400 | latest stable run |
 |---|---|---|---|---|---|---|---|---|---|
@@ -30,63 +41,58 @@ decayed valid / far use (pairing i+1). Process memory on the current build.
 | h16 × V6 | `n-h16-V6` | 982,380 | 871 | ~3580 MiB | **0.8533** / 0.225 | – | – | – | `n03-h16-V6` (2630) |
 | h16 × g2 × V6 | `n-h16g2-V6` | 995,318 | 880 | ~3844 MiB | 0.8589 / 0.222 | – | – | – | `n06-h16g2V6` (2630) |
 
-- h16 × g2 × V6 is over the preferred limit (3686 MiB), and 17 MiB under
-  the `--max-vram 3750` cap. It is inside the search limit.
-- h16 with seed 1 (`n04-h16-s1`): 0.8596 / 0.241 @3230. So the h16 loss
-  replicates. The **far use has a seed spread of ~0.017 @3230**, so a
-  far-use gap @3230 decides nothing. The g2 far-use lead was +0.016 @9600 and
-  only +0.005 @14400 (one seed each).
-- Parked: r128 (0.7590 / 0.267 @9600). Evicted this session: n01 quaternion
-  h16 g16 r16 L3 × V9 (0.9372 / 0.167), n02 h20 (0.8722 / 0.218), n05 h16 ×
-  g4 d136 (0.8966 / 0.201).
+- The pool runs used 2 workers: their dv has a data-order noise of ~0.01
+  (`ORIENTATION.md`, Run noise). Parked: r128 (0.7590 / 0.267 @9600).
+
+**The contrast** (`far-use.md` steps 2–3, `notes.md` §5): built, and tested
+on h16 @3230 against the 1-worker control **b01-h16-w1** (dv 0.8680,
+snapshots every 250 in `snap/b01-h16-w1/`).
+
+- Random negatives do not push (the pair separates within a few words).
+- Shuffled negatives push (0.4–0.8 of chance).
+- **c03-h16-shuf**: shuffled (first and last sentence in place), sentence
+  cut, J 0, λ 1, start 500, ramp 500. Order Δ ×5 (0.009 → 0.044
+  bits/char). dv 0.8758 (+0.0078), own far +0.0080 ± 0.0010, none +0.018,
+  use unchanged. The cost is real only if the 1-worker noise is small. The
+  no-prompt loss suggests a shortcut ("odd context ⇒ predict worse").
 
 ## Queue
 
 - Nothing runs, and `queue.txt` is empty.
 - `queue.pending.txt` holds the parked pool work: n03 and n06 → 4630, each
   with its context use, then the probe + screen + context use of n07 (h16 +
-  `trop=MaxPlus`). To resume it:
-  `cp queue.pending.txt queue.txt && nohup ./queue.sh > /dev/null 2>&1 &`,
-  then `qwait.sh` in the background (it prints once per finished line).
+  `trop=MaxPlus`). Its `ctx.sh` lines use the old 244-story flex form:
+  change them to `ctx.sh -g -n 2048 -r ctxg … >> ctxg.txt` before a resume.
+  To resume: `cp queue.pending.txt queue.txt && nohup ./queue.sh >
+  /dev/null 2>&1 &`, then `qwait.sh` in the background.
 
 ## Binary
 
-- `bin/ts-cuda` = `v0.64.0-6ca4e79-dirty-87616530`: `6ca4e79` + the no-prompt
-  pass and coherence boosting in `--context-use` (`context.rs`). Training
-  and inference run as `v0.64.0-8dd4158-dirty-631e80dd` (`--pack-align N`),
-  which n02–n06 used. n01 used `v0.64.0-8dd4158`.
+- `bin/ts-cuda` = `v0.64.0-4d90008-dirty-14058a87`: `4d90008` + the push
+  readout, `--contrast-eval`, `--contrast-negative`. c03 used this build,
+  and b01 used `…-dirty-8b4ea840`. Without the contrast, their training
+  path is the same. After the commit of this session, `./build.sh` gives a
+  clean tag of the same code.
+- The pool runs used `v0.64.0-8dd4158-dirty-631e80dd` (`--pack-align N`).
 - Keep `--max-vram` on every training run (the scripts add 3750).
-
-## Findings of this session (detail: `notes.md` §3)
-
-- The memory grows with heads × `r` (B/C per head), in steps at the pool
-  page sizes. Chunk 64 does not help. h32 fits only at r32 (3507 MB, 943,190
-  params). h32 at r48/r64 and h16 × r128 do not fit. Probe every new shape.
-- Virtual layers V6 (untied, full params) pay −0.005/−0.006 of loss, on h16
-  and on h16 × g2. They do not raise the far use. Cost: +17% step, +440 MiB.
-- Width is expensive to give up: g4 at d136 loses +0.039. A quaternion with
-  many heads costs `nheads · 3 · blocks` in-proj channels per application.
-  So n01 had to take r16, and it lost +0.08.
 
 ## Next steps
 
-The focus is the far use (`far-use.md`), before the pool.
-
-1. `far-use.md` step 1: the diagnostics. They need no training (flex jobs).
-   Coherence boosting is done (no α > 0 helps, `notes.md` §4). Next: the
-   shuffle probe (1.2), then the distance curve (1.3).
-2. `far-use.md` step 2: the shared-suffix contrast in the example, then its
-   test on h16 to 3230 with two seeds.
-3. The parked pool work (`queue.pending.txt`, see Queue). A flex job slows
-   a GPU training, so run the flex jobs of steps 1 and 2 between its runs.
-   - n07 (h16 + `trop=MaxPlus`, `n-h16-trop`, 996,520 params) is a breadth
-     test of a long-memory register.
-   - After 4630: bring n03 and n06 to the milestones of the other two, in
-     matched steps. First 8000 (`extend.sh … 3370 1600 --max-lr 1e-3`), then
-     12000 (`… 4000 2400 --max-lr 1e-3`), each with its context use. Then
-     compare the 2 × 2 at 9600 and 14400 on loss and far use. Each run is
-     ~1–1.5 h.
-4. More ideas: the next LR point (5e-4 from 12000 tied at 14400 on h16);
-   M = 16000/20000 for the pool; a clean quaternion test at B's shape (h4 +
-   Q4D rf 0.5, ~984k); h32 r32 (it fits, but it halves the state); a longer
-   `dt` init range for longer timescales; more seeds for a far-use decision.
+1. **The 1-worker noise** (~3 min): `ctx.sh -g -n 2048 -r ctxg` on
+   `snap/b01-h16-w1/500` and `snap/c03-h16-shuf/500`. They differ only by
+   the float noise (the contrast starts at 500). About 0.001 apart: c03's
+   cost is real. Much more: a b01 rerun (`b02`, ~40 min) for the noise of
+   a final dv.
+2. **Order or shortcut?** Compare the per-position `Δ` of c03 and b01 (a
+   small change to `--contrast-eval`). Real order use sits on the chars
+   that depend on the events. A "predict worse after odd prompts" penalty
+   is flat over `C`.
+3. Then decide on the shuffled contrast. The options: a lower λ (0.3), a
+   later start (~2000: there the gain stalls and the penalty rises), J 64,
+   or a natural-text negative. Every synthetic negative carries the
+   shortcut risk (`far-use.md` step 3).
+4. The parked pool work (Queue). More ideas:
+   - the next LR point (5e-4 from 12000 at 14400 on h16),
+   - M = 16000/20000, a clean quaternion test at B's shape (h4 + Q4D rf
+     0.5), h32 r32,
+   - a longer `dt` init range, the distance curve (`far-use.md` step 1.3).

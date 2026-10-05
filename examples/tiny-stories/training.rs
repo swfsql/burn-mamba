@@ -87,7 +87,7 @@ pub fn train(
             config.train_stories,
             seed,
             progress.step + 1,
-            &app_args.artifacts_path,
+            Some(&app_args.artifacts_path),
         );
         contrast::init(feed);
     }

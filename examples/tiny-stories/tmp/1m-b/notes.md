@@ -322,11 +322,165 @@ none (pairing i+1), use = gain + penalty.
   @14400). So g2 commits harder to any prompt. It does not use its own
   prompt better.
 - The seed spread on 244 stories (gain 0.006, penalty 0.011) was story
-  noise. On 1968 stories, the gain is the noisy part (`tmp.md`, 2048
-  stories).
+  noise. On 1968 stories, the gain is the noisy part (see below).
 - From now on, report the gain and the own bits beside the use (`ctx.sh`
   prints the no-prompt row). A contrast (step 2) can raise the use through
   the penalty alone.
 - The boosted samples of the hard prompt (α ≈ 0.3) are parked. In
   distribution, α = 0.3 costs +0.010 bits/char on the far part, and the
   sampler needs a second cache per step.
+
+### Data sizes
+
+- Train: the first 262,144 stories of the train rows (rows 20,000.., of
+  2,712,634), 210M chars in 56,032 packed rows of 4224. One epoch is
+  28,016 steps. A `--resume` trains the rest of the epoch from a new
+  shuffle of all rows, so the segments overlap. h16 @14400: 28,800 row
+  draws (0.51 epoch), ~110k unique stories. A screen @3230: ~30k stories.
+- Valid loss: the first 256 valid stories (190,070 chars). The context use
+  reads the first N valid stories with ≥ 512 chars: 244 of 256, or 1968 of
+  2048. The other valid stories and the 10,000 test stories are not used.
+
+### Context use on 2048 stories (GPU)
+
+`ctx.sh -g -n 2048 -r ctxg <run>` (~78 s; the GPU gives the flex numbers to
+4 decimals). `ctxstat.py` gives the mean ± s.e. and the paired differences
+from `context-stories.jsonl`. The s.e. of a mean: gain 0.006 (244 stories)
+→ 0.002 (1968). A paired difference of two models: ~0.001.
+
+| run | step | own | none | gain | penalty | use |
+|---|---|---|---|---|---|---|
+| k16 h16 (seed 0) | 3230 | 0.8765 | 1.0174 | 0.1409 | 0.0848 | 0.2257 |
+| n04 h16 (seed 1) | 3230 | 0.8757 | 1.0267 | 0.1509 | 0.0879 | 0.2388 |
+| k17 h16 × g2 | 3230 | 0.8832 | 1.0264 | 0.1432 | 0.0963 | 0.2395 |
+| b01 h16, 1 worker | 3230 | 0.8879 | 1.0218 | 0.1339 | 0.0845 | 0.2185 |
+| h16 | 5630 | 0.8155 | 0.9744 | 0.1589 | 0.0967 | 0.2556 |
+| h16 | 9600 | 0.7628 | 0.9327 | 0.1699 | 0.1008 | 0.2707 |
+| h16 | 14400 | 0.7401 | 0.9165 | 0.1764 | 0.1072 | 0.2835 |
+| h16 × g2 | 14400 | 0.7478 | 0.9262 | 0.1784 | 0.1102 | 0.2887 |
+
+- **Seeds differ in the no-prompt score, not in the own score.** Seed 1 −
+  seed 0: own −0.0007 ± 0.0012, none +0.0093, gain +0.0100 ± 0.0011, use
+  +0.0131. So `bits(C | own)` of the far part is the stable metric. The
+  gain and the use take the noise of their baselines (`C` read as a story
+  start, and after a wrong prompt): ~0.01.
+- **g2 against h16:** own +0.0067 @3230 and +0.0077 @14400 (worse), gain
+  +0.002 (a tie), penalty +0.0115 @3230. g2 commits harder to any prompt.
+- **Readiness proxy** (b01 snapshots, then the 2-worker milestones): own
+  join (the local part) 1.539 @250, 1.340 @500, 1.190 @1000, 1.059 @2000,
+  0.879 @3230, 0.738 @14400. Gain 0.029 @250, 0.049 @500, 0.084 @1000,
+  0.086 @1500, 0.092 @2000, 0.104 @2500, 0.141 @3230, 0.176 @14400.
+  Penalty −0.006 @250, 0.024 @1000, 0.044 @1500, 0.073 @2000. The gain
+  climbs fast to ~1000, stalls from 1000 to 2000 while the penalty triples,
+  then climbs again. The local part improves all the time, and the own far
+  bits fall about as much as the join: most of the far gain is local
+  quality. No point shows "the grammar is done".
+
+## 5. Far use: the shared-suffix contrast (`far-use.md` steps 2 and 3)
+
+The code is `examples/tiny-stories/contrast.rs` (its header has the math).
+The flags are `--contrast*` (saved as `contrast.json`), the readouts are in
+`contrast.jsonl` and in the `contrast step=` lines, and `--contrast-eval N`
+(`ceval.sh`) measures the push of a checkpoint with no backward.
+
+### The scale and the schedule of λ
+
+- The push on `Δ_s` sums `σ(−Δ_≤t)` over the prefixes that contain it. At
+  chance, the push on all own log-probs sums to `(m + 1)/4` (64 at m = 256)
+  against 1 for the LM loss. So the loss is normalized by `4/(m + 1)`: at
+  λ = 1 the contrast pushes as hard as the LM loss at chance.
+- **push** (a readout) = this mass relative to chance: 1 at chance, 0 when
+  the pairs are separated. The push of the training is λ times it.
+- λ is 0 before `--contrast-start`, then ramps over `--contrast-ramp`
+  (user: no topics before grammar). The pass does not run while λ = 0.
+
+### Mechanics and smoke tests
+
+- t-tiny (18,304 params, 300 + 100 steps): no panic, no NaN. A bare
+  `--resume` keeps the saved settings. A same-seed rerun of the t-tiny
+  control moves dv by 0.022 (2.5102 → 2.5319), so every small cost on
+  t-tiny (λ_old 0.001: +0.010, 0.01: +0.027) is noise. Only λ_old 0.1
+  (+0.227, ~6.4 on the normalized scale) is a clear cost.
+- h16 probe: reserved 3149 → 3157 MB (the second backward keeps the peak),
+  697 → 948 ms/step (+36%). With an explicit negative (one more prompt
+  pass): ~1.0 s/step.
+- Direction: 10 SGD steps on the contrast alone raise `Δ` (measured by
+  plain forwards) from 0.21 to 0.48 nats/char. With `Δ` flipped inside the
+  loss, it falls to −0.52, and the test fails.
+
+### Run noise and the 1-worker harness
+
+- **2 workers**: two same-seed runs train on different batch orders from
+  step 2. That moves dv by ~0.01 (k16 0.8579, b01 0.8680, c01 0.8689).
+- **1 worker** (cfg `s1k-u1-wd1-h16-w1`): the same order, the same speed.
+  The per-step losses agree to ~1e-7 for ~50 steps. Then float noise grows:
+  ≤ 2e-5 by 100, ≤ 4e-3 by 150, a mean gap of ~6e-3 per step from 250 on
+  (b01 against c03, before the contrast starts). The 403-step buckets
+  still agree to 3 decimals. The noise of a final dv on 1 worker is not
+  measured.
+- At λ = 1e-9 the whole contrast path (the second backward, the sum of the
+  gradients) gives the control losses to 2.4e-7 over 50 steps: the path is
+  clean.
+- **b01-h16-w1** (1 worker, 2630 + 600, `snapscreen.sh`, snapshots every
+  250 in `snap/b01-h16-w1/`): dv **0.8680**. The control of the 1-worker
+  contrast runs.
+
+### Random negatives (c01, and the push on the h16 timeline)
+
+- **c01-h16-ctr** (2 workers, char cut, J 0, λ 1, start 500, ramp 500): dv
+  0.8689. Its contrast loss had a median of 1e-4 per step: the join
+  separates the pair within a few characters, so the far part got no
+  gradient. A null run. Its gap to k16 is the data-order noise.
+- Push of random negatives on h16 (64 batches × 4 stories): J 0 ~2e-5 at
+  every step from 1000 on. J 64: 0.41 @250, 0.14 @500, 0.078 @1000, 0.050
+  @2630, 0.025 @5630, 0.023 @14400. J 128: 0.10–0.19. A random other story
+  is told apart within ~20–30 characters at every checkpoint. So a later
+  start does not help. The limit is the easy negative.
+
+### Harder negatives
+
+Push, J 0 / J 64 (char cut), and Δ at J 0 (bits/char):
+
+| step | random | shuffled-all | nearest:64 (J 64) | Δ random | Δ shuffled-all |
+|---|---|---|---|---|---|
+| 250 | 0.010 / 0.41 | 0.65 / 0.81 | – | 0.114 | 0.007 |
+| 1000 | 9e-5 / 0.078 | 0.55 / 0.71 | 0.18 | 0.239 | 0.013 |
+| 3230 | 4e-5 / 0.026 | 0.41 / 0.58 | 0.081 | 0.395 | 0.022 |
+| 14400 | 3e-5 / 0.023 | 0.28 / 0.48 | 0.060 | 0.512 | 0.031 |
+
+- **Only ~6–8% of h16's far use is order**: the own prompt against the
+  same sentences in another order differs by 0.01–0.03 bits/char. The rest
+  is a bag of words. This is the shuffle probe of step 1.2 (Δ_shuffle near
+  0).
+- **nearest:64** (the most similar prompt of 64, idf-weighted words, the
+  prompts compared up to their own cuts) pushes only ~2–2.6× as much as
+  random.
+- **Guard 1** (`shuffled`: the first sentence stays too). Sentence cut, J 0,
+  push / Δ: 0.74 / 0.005 @500, 0.76 / 0.004 @1000, 0.65 / 0.009 @3230,
+  0.58 / 0.012 @14400. shuffled-all: 0.74, 0.68, 0.51, 0.42 (Δ 0.005,
+  0.007, 0.015, 0.022). A moved opening was a third to a half of Δ.
+
+### c03: shuffled negatives (guarded) against b01
+
+`c03-h16-shuf`: 1 worker, sentence cut, J 0, λ 1, start 500, ramp 500,
+2630 + 600 (~55 min).
+
+- dv **0.8758** (b01 0.8680). Train buckets against b01: 0 @403 and @806,
+  then +0.003, +0.006, +0.008, +0.010, +0.006, +0.007: the gap opens after
+  the start.
+- The training push stays 0.39–0.72. Train Δ 0.007 → 0.044 bits/char.
+- 2048 stories, paired with b01: own far **+0.0080 ± 0.0010**, none
+  **+0.0182 ± 0.0013**, gain +0.0103 ± 0.0011, penalty −0.0125 ± 0.0013,
+  use −0.0023 ± 0.0012.
+- Shuffled Δ (sentence, J 0) on matched snapshots: b01 0.004, 0.006, 0.007,
+  0.009 @1000/2000/2630/3230; c03 0.010, 0.012, **0.042**, **0.044**. The
+  char cut (not trained) moves too: 0.012 → 0.054 @2630. Random Δ does not
+  change.
+- Reading: the contrast teaches what it targets (order Δ ×5), at an LM
+  cost of ~0.008 (if the 1-worker noise is small). The use against random
+  prompts does not move. The gain rises only because the no-prompt score
+  gets worse by more than the own score. That fits "unnatural context ⇒
+  predict worse" (a shortcut), not a better use of the own prompt.
+- Open: the size of the 1-worker noise (the 2048-story context use of b01
+  and c03 @500, where only the float noise differs), and where in `C` the
+  order Δ of c03 sits (per position: events, or a flat penalty).

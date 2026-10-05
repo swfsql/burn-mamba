@@ -53,11 +53,12 @@
 //! backward of its own. The two gradients add up into one optimizer step. So
 //! the peak memory is that of the larger pass, not of their sum.
 
+use crate::AppArgs;
 use crate::dataset::{Split, VOCAB, stories};
 use burn::config::Config;
 use burn::prelude::*;
-use burn::tensor::activation::{log_sigmoid, log_softmax};
-use burn_mamba::prelude::{MambaSsdPath, MambaVocabNet};
+use burn::tensor::activation::{log_sigmoid, log_softmax, sigmoid};
+use burn_mamba::prelude::{MambaSsdPath, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::utils::ClassCursors;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -107,6 +108,158 @@ impl Cut {
     }
 }
 
+/// The negative prompt of a row: the prompt that does not belong to its
+/// continuation. All of them come from the data alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Negative {
+    /// The prompt of another row: a random other story.
+    Random,
+    /// The own prompt with its middle sentences in a random new order. The
+    /// first sentence (the opening, "once upon a time …") and the last one
+    /// (it ends at the cut) stay in place. The words are the same, so only
+    /// the order of the events tells the two apart. A moved opening would be
+    /// a cheap sign of a negative.
+    Shuffled,
+    /// As [`Shuffled`](Self::Shuffled), but the first sentence moves too.
+    ShuffledAll,
+    /// The prompt of the story of a pool of `pool` random stories whose words
+    /// overlap most with the own prompt ([`WordIndex`]). Only the prompts
+    /// compare, each up to its own cut.
+    Nearest {
+        /// The stories drawn per row.
+        pool: usize,
+    },
+}
+
+impl Negative {
+    /// `random`, `shuffled`, `shuffled-all`, or `nearest[:POOL]` (the pool
+    /// defaults to 64).
+    pub fn parse(arg: &str) -> Result<Negative, String> {
+        match arg.split_once(':') {
+            None if arg == "random" => Ok(Negative::Random),
+            None if arg == "shuffled" => Ok(Negative::Shuffled),
+            None if arg == "shuffled-all" => Ok(Negative::ShuffledAll),
+            None if arg == "nearest" => Ok(Negative::Nearest { pool: 64 }),
+            Some(("nearest", pool)) => match pool.parse::<usize>() {
+                Ok(pool) if pool >= 1 => Ok(Negative::Nearest { pool }),
+                _ => Err(format!("pool {pool:?} is not a positive integer")),
+            },
+            _ => Err(format!(
+                "unknown negative {arg:?} (random | shuffled | shuffled-all | nearest[:POOL])"
+            )),
+        }
+    }
+
+    /// The name of the flag value.
+    pub fn name(self) -> String {
+        match self {
+            Negative::Random => "random".into(),
+            Negative::Shuffled => "shuffled".into(),
+            Negative::ShuffledAll => "shuffled-all".into(),
+            Negative::Nearest { pool } => format!("nearest:{pool}"),
+        }
+    }
+}
+
+/// `tokens` with its sentences in a random new order. The last sentence stays
+/// in place, and the first one too with `keep_first`. A sentence ends where
+/// [`Cut::Sentence`] allows a cut. `None` with fewer than two sentences to
+/// move.
+pub fn shuffle_sentences(tokens: &[u8], keep_first: bool, rng: &mut impl Rng) -> Option<Vec<u8>> {
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain((1..tokens.len()).filter(|&at| Cut::Sentence.allows(tokens, at)))
+        .collect();
+    // The sentences that move: from the first (or the second) to the one
+    // before the last.
+    let (first, last) = (usize::from(keep_first), starts.len() - 1);
+    if last < first + 2 {
+        return None;
+    }
+    let mut order: Vec<usize> = (first..last).collect();
+    while order.iter().zip(first..).all(|(&s, i)| i == s) {
+        rand::seq::SliceRandom::shuffle(order.as_mut_slice(), rng);
+    }
+    let mut shuffled = Vec::with_capacity(tokens.len());
+    shuffled.extend_from_slice(&tokens[..starts[first]]);
+    for s in order {
+        shuffled.extend_from_slice(&tokens[starts[s]..starts[s + 1]]);
+    }
+    shuffled.extend_from_slice(&tokens[starts[last]..]);
+    Some(shuffled)
+}
+
+/// The word weights of [`Negative::Nearest`]. A word is a run of letters.
+/// Two prompts compare by the cosine of their word sets, each word weighted
+/// by its `idf = ln(N / df)` over the starts of the stories. So a word that
+/// every story has ("once", "upon") counts for almost nothing. Only the
+/// prompts compare, never their continuations: a negative that shares the
+/// words of the continuation would predict it for the wrong reason.
+pub struct WordIndex {
+    /// The id of each word.
+    ids: std::collections::HashMap<Vec<u8>, u32>,
+    /// The `idf²` of each word id.
+    weight: Vec<f32>,
+}
+
+impl WordIndex {
+    /// The weights of the words of the first `region` characters of each
+    /// story. A prompt is never longer than `region`, so the index knows
+    /// each of its whole words.
+    pub fn new(stories: &[Vec<u8>], region: usize) -> Self {
+        let mut ids: std::collections::HashMap<Vec<u8>, u32> = Default::default();
+        let mut df: Vec<u32> = Vec::new();
+        for tokens in stories {
+            let mut set: Vec<u32> = split_words(&tokens[..region.min(tokens.len())])
+                .map(|word| {
+                    let next = ids.len() as u32;
+                    *ids.entry(word.to_vec()).or_insert(next)
+                })
+                .collect();
+            set.sort_unstable();
+            set.dedup();
+            df.resize(ids.len(), 0);
+            set.iter().for_each(|&w| df[w as usize] += 1);
+        }
+        let n = stories.len() as f32;
+        let weight = df.iter().map(|&d| (n / d as f32).ln().powi(2)).collect();
+        Self { ids, weight }
+    }
+
+    /// The sorted, unique ids of the known words of `tokens` (a prompt).
+    pub fn words(&self, tokens: &[u8]) -> Vec<u32> {
+        let mut set: Vec<u32> = split_words(tokens).filter_map(|word| self.ids.get(word).copied()).collect();
+        set.sort_unstable();
+        set.dedup();
+        set
+    }
+
+    /// The weighted cosine of two word sets of [`words`](Self::words).
+    pub fn similarity(&self, a: &[u32], b: &[u32]) -> f32 {
+        let (mut i, mut j, mut dot) = (0, 0, 0.0);
+        while i < a.len() && j < b.len() {
+            match a[i].cmp(&b[j]) {
+                std::cmp::Ordering::Less => i += 1,
+                std::cmp::Ordering::Greater => j += 1,
+                std::cmp::Ordering::Equal => {
+                    dot += self.weight[a[i] as usize];
+                    i += 1;
+                    j += 1;
+                }
+            }
+        }
+        let norm = |set: &[u32]| set.iter().map(|&w| self.weight[w as usize]).sum::<f32>().sqrt();
+        let norm = norm(a) * norm(b);
+        if norm > 0.0 { dot / norm } else { 0.0 }
+    }
+}
+
+/// The words of `tokens`: the runs of letters.
+fn split_words(tokens: &[u8]) -> impl Iterator<Item = &[u8]> {
+    tokens
+        .split(|&t| !VOCAB.character(t).is_ascii_lowercase())
+        .filter(|word| !word.is_empty())
+}
+
 /// The settings of the contrast. The training saves them as `contrast.json`
 /// in the artifacts directory, so a resumed run keeps them.
 #[derive(Config, Debug)]
@@ -124,6 +277,9 @@ pub struct ContrastConfig {
     /// Where a cut can fall (`--contrast-cut`).
     #[config(default = "Cut::Char")]
     pub cut: Cut,
+    /// The negative prompt of each row (`--contrast-negative`).
+    #[config(default = "Negative::Random")]
+    pub negative: Negative,
     /// Continuation characters (`--contrast-continuation`).
     #[config(default = 256)]
     pub continuation: usize,
@@ -203,6 +359,8 @@ pub struct ContrastOverrides {
     pub prompt: Option<(usize, usize)>,
     /// `--contrast-cut char|word|sentence`.
     pub cut: Option<Cut>,
+    /// `--contrast-negative random|shuffled|nearest[:POOL]`.
+    pub negative: Option<Negative>,
     /// `--contrast-continuation N`.
     pub continuation: Option<usize>,
     /// `--contrast-skip J`.
@@ -223,6 +381,7 @@ impl ContrastOverrides {
         "    --contrast <K>         Train the shared-suffix contrast on K stories per step (0: none; saved with the run)\n",
         "    --contrast-prompt <MIN:MAX>  The contrast prompt length, in characters (default 192:320)\n",
         "    --contrast-cut <CUT>   Where a contrast cut can fall: char (default), word or sentence\n",
+        "    --contrast-negative <NEG>  The negative prompt: random (another story, default), shuffled (the own middle sentences in a new order), shuffled-all (the first sentence moves too) or nearest[:POOL] (the most similar of POOL stories, default 64)\n",
         "    --contrast-continuation <N>  The contrast continuation length, in characters (default 256)\n",
         "    --contrast-skip <J>    The first J characters of each continuation get no contrast loss (default 0)\n",
         "    --contrast-weight <λ>  The weight of the contrast loss after the ramp; 1 pushes as hard as the LM loss at chance (default 0.1)\n",
@@ -244,6 +403,7 @@ impl ContrastOverrides {
             stories: pargs.opt_value_from_str("--contrast").unwrap(),
             prompt,
             cut: pargs.opt_value_from_fn("--contrast-cut", Cut::parse).unwrap(),
+            negative: pargs.opt_value_from_fn("--contrast-negative", Negative::parse).unwrap(),
             continuation: pargs.opt_value_from_str("--contrast-continuation").unwrap(),
             skip: pargs.opt_value_from_str("--contrast-skip").unwrap(),
             weight: pargs.opt_value_from_str("--contrast-weight").unwrap(),
@@ -264,6 +424,9 @@ impl ContrastOverrides {
         }
         if let Some(cut) = self.cut {
             config.cut = cut;
+        }
+        if let Some(negative) = self.negative {
+            config.negative = negative;
         }
         if let Some(continuation) = self.continuation {
             config.continuation = continuation;
@@ -291,62 +454,104 @@ impl ContrastOverrides {
 #[derive(Clone, Debug)]
 pub struct ContrastBatch {
     /// Each prompt but its last character, right-padded:
-    /// `[K, prompt_max − 1]`.
-    pub prompt: Tensor<2, Int>,
-    /// `true` at the padding of `prompt`.
-    pub pad: Tensor<2, Bool>,
+    /// `[K, prompt_max − 1]`, and `true` at the padding.
+    pub prompt: (Tensor<2, Int>, Tensor<2, Bool>),
     /// The inputs of the own pass: the last character of `P_i`, then `C_i`
     /// but its last character: `[K, n]`.
     pub own: Tensor<2, Int>,
-    /// The inputs of the other pass: the last character of `P_i`, then
-    /// `C_{i+1}` but its last character: `[K, n]`.
-    pub other: Tensor<2, Int>,
     /// The targets of the own pass: `C_i`, `[K, n]`.
     pub own_targets: Tensor<2, Int>,
-    /// The targets of the other pass: `C_{i+1}`, `[K, n]`.
+    /// The negative prompts `N_i`, as `prompt`. `None`: the negative of row
+    /// `i` is the prompt of row `i − 1` (a random other story).
+    pub negative: Option<(Tensor<2, Int>, Tensor<2, Bool>)>,
+    /// The inputs of the other pass, `[K, n]`. With no `negative`: the last
+    /// character of `P_i`, then `C_{i+1}` (row `i − 1` of the roll reads
+    /// `C_i` after `P_{i−1}`). With a `negative`: the last character of
+    /// `N_i`, then `C_i`.
+    pub other: Tensor<2, Int>,
+    /// The targets of the other pass: `C_{i+1}` with no `negative`, else
+    /// `C_i`.
     pub other_targets: Tensor<2, Int>,
 }
 
 impl ContrastBatch {
-    /// The batch of the prompts and the continuations (at least 2 rows). The
-    /// prompts are 2 to `prompt_max` characters long, and the continuations
-    /// all have one length.
+    /// The batch of the prompts and the continuations (at least 2 rows), with
+    /// the prompt of the previous row as the negative. The prompts are 2 to
+    /// `prompt_max` characters long, and the continuations all have one
+    /// length.
     pub fn new(prompts: &[&[u8]], continuations: &[&[u8]], prompt_max: usize, device: &Device) -> Self {
+        Self::build(prompts, None, continuations, prompt_max, device)
+    }
+
+    /// As [`new`](Self::new), with the negative prompt of each row given:
+    /// row `i` reads `C_i` after `P_i` and after `negatives[i]`.
+    pub fn with_negatives(
+        prompts: &[&[u8]],
+        negatives: &[&[u8]],
+        continuations: &[&[u8]],
+        prompt_max: usize,
+        device: &Device,
+    ) -> Self {
+        Self::build(prompts, Some(negatives), continuations, prompt_max, device)
+    }
+
+    fn build(
+        prompts: &[&[u8]],
+        negatives: Option<&[&[u8]]>,
+        continuations: &[&[u8]],
+        prompt_max: usize,
+        device: &Device,
+    ) -> Self {
         let k = prompts.len();
         let n = continuations[0].len();
         assert!(k >= 2 && continuations.len() == k, "one continuation per prompt, 2 rows or more");
         assert!(continuations.iter().all(|c| c.len() == n), "the continuations have one length");
+        let fits = |p: &&[u8]| (2..=prompt_max).contains(&p.len());
+        assert!(prompts.iter().all(fits), "a prompt has 2 to {prompt_max} characters");
         assert!(
-            prompts.iter().all(|p| (2..=prompt_max).contains(&p.len())),
-            "a prompt has 2 to {prompt_max} characters"
+            negatives.is_none_or(|neg| neg.len() == k && neg.iter().all(fits)),
+            "one negative of 2 to {prompt_max} characters per prompt"
         );
-        let width = prompt_max - 1;
-        let mut prompt = vec![0i32; k * width];
-        let mut pad = vec![true; k * width];
-        let (mut own, mut other) = (Vec::with_capacity(k * n), Vec::with_capacity(k * n));
-        let (mut own_targets, mut other_targets) = (Vec::with_capacity(k * n), Vec::with_capacity(k * n));
-        for (i, p) in prompts.iter().enumerate() {
-            let (head, last) = (&p[..p.len() - 1], p[p.len() - 1]);
-            for (j, &t) in head.iter().enumerate() {
-                prompt[i * width + j] = t as i32;
-                pad[i * width + j] = false;
+        let ints = |v: &[i32], cols: usize| Tensor::<1, Int>::from_ints(v, device).reshape([k, cols]);
+        // Each prompt but its last character, right-padded.
+        let padded = |prompts: &[&[u8]]| {
+            let width = prompt_max - 1;
+            let mut ids = vec![0i32; k * width];
+            let mut pad = vec![true; k * width];
+            for (i, p) in prompts.iter().enumerate() {
+                for (j, &t) in p[..p.len() - 1].iter().enumerate() {
+                    ids[i * width + j] = t as i32;
+                    pad[i * width + j] = false;
+                }
             }
-            let next = continuations[(i + 1) % k];
-            for (inputs, targets, c) in [(&mut own, &mut own_targets, continuations[i]), (&mut other, &mut other_targets, next)] {
-                inputs.push(last as i32);
+            let pad = Tensor::<1, Bool>::from_bool(burn::tensor::TensorData::new(pad, [k * width]), device);
+            (ints(&ids, width), pad.reshape([k, width]))
+        };
+        // The inputs: the last character of `prefix`, then `continuation` but
+        // its last character. The targets: `continuation`.
+        let pass = |rows: &[(&[u8], &[u8])]| {
+            let (mut inputs, mut targets) = (Vec::with_capacity(k * n), Vec::with_capacity(k * n));
+            for (prefix, c) in rows {
+                inputs.push(prefix[prefix.len() - 1] as i32);
                 inputs.extend(c[..n - 1].iter().map(|&t| t as i32));
                 targets.extend(c.iter().map(|&t| t as i32));
             }
-        }
-        let ints = |v: &[i32], cols: usize| Tensor::<1, Int>::from_ints(v, device).reshape([k, cols]);
+            (ints(&inputs, n), ints(&targets, n))
+        };
+        let own_rows: Vec<(&[u8], &[u8])> = prompts.iter().copied().zip(continuations.iter().copied()).collect();
+        let other_rows: Vec<(&[u8], &[u8])> = match negatives {
+            None => (0..k).map(|i| (prompts[i], continuations[(i + 1) % k])).collect(),
+            Some(neg) => neg.iter().copied().zip(continuations.iter().copied()).collect(),
+        };
+        let (own, own_targets) = pass(&own_rows);
+        let (other, other_targets) = pass(&other_rows);
         Self {
-            prompt: ints(&prompt, width),
-            pad: Tensor::<1, Bool>::from_bool(burn::tensor::TensorData::new(pad, [k * width]), device)
-                .reshape([k, width]),
-            own: ints(&own, n),
-            other: ints(&other, n),
-            own_targets: ints(&own_targets, n),
-            other_targets: ints(&other_targets, n),
+            prompt: padded(prompts),
+            own,
+            own_targets,
+            negative: negatives.map(padded),
+            other,
+            other_targets,
         }
     }
 }
@@ -354,9 +559,7 @@ impl ContrastBatch {
 /// The contrast loss of `batch` (see the module header) at the weight
 /// `weight` (`λ` at this step). Under `--contrast-lm`, plus the LM loss of
 /// the own continuations. The LM term divides by `lm_positions`, the
-/// positions of the packed batch. Also returns the readouts `[2]`: the mean
-/// of `−log σ(Δ_≤t)` (before the weight and the scale), and the mean of `Δ`
-/// per scored character (nats).
+/// positions of the packed batch. Also returns the readouts of [`scored`].
 pub fn loss(
     model: &MambaVocabNet,
     ssd_path: &MambaSsdPath,
@@ -365,40 +568,83 @@ pub fn loss(
     weight: f64,
     lm_positions: usize,
 ) -> (Tensor<1>, Tensor<1>) {
-    let [k, n] = batch.own.dims();
     let device = batch.own.device();
-    // The pass over the prompts opens each row with the class latents, and
-    // leaves the cursor after them. So the passes over `C` emit none.
-    let mut class = ClassCursors::stream();
-    let (_, caches) = model.forward(batch.prompt, None, ssd_path.clone(), Some(&mut class), Some(batch.pad));
-    let mut class_other = class.clone();
-    let (own_logits, _) = model.forward(batch.own, Some(caches.clone()), ssd_path.clone(), Some(&mut class), None);
-    let (other_logits, _) = model.forward(batch.other, Some(caches), ssd_path.clone(), Some(&mut class_other), None);
+    let (own_kn, other_kn) = pair_log_probs(model, ssd_path, batch);
+    let (contrast, readouts) = scored(own_kn.clone(), other_kn, config.skip);
+    let m = own_kn.dims()[1] - config.skip;
+    // At chance, the mean pushes the own log-probs by `(m + 1)/4` together.
+    // The weight changes during the ramp, so it is data, not a kernel scalar.
+    // A new scalar is a new key of the cubecl cache (burn#5751).
+    let weight_1 = Tensor::<1>::from_floats([(weight * 4.0 / (m + 1) as f64) as f32], &device);
+    let mut total = contrast * weight_1;
+    if config.lm {
+        total = total + own_kn.neg().sum().div_scalar(lm_positions as f64);
+    }
+    (total, readouts)
+}
+
+/// The log-probabilities `[K, n]` of the continuations of `batch`: row `i`
+/// of both scores `C_i`, after `P_i` (own) and after its negative (other:
+/// `P_{i−1}`, or `N_i`).
+pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: ContrastBatch) -> (Tensor<2>, Tensor<2>) {
+    let [k, n] = batch.own.dims();
+    // A pass over prompts opens each row with the class latents, and leaves
+    // the cursor after them. So the passes over `C` emit none.
+    let prompt_pass = |(ids, pad): (Tensor<2, Int>, Tensor<2, Bool>)| {
+        let mut class = ClassCursors::stream();
+        let (_, caches) = model.forward(ids, None, ssd_path.clone(), Some(&mut class), Some(pad));
+        (caches, class)
+    };
+    let (caches, mut class) = prompt_pass(batch.prompt);
+    let (other_caches, mut class_other) = match batch.negative.clone() {
+        None => (caches.clone(), class.clone()),
+        Some(negative) => prompt_pass(negative),
+    };
+    let (own_logits, _) = model.forward(batch.own, Some(caches), ssd_path.clone(), Some(&mut class), None);
+    let (other_logits, _) =
+        model.forward(batch.other, Some(other_caches), ssd_path.clone(), Some(&mut class_other), None);
     assert_eq!(own_logits.dims()[1], n, "the passes over the continuations emit no latents");
     let log_p = |logits: Tensor<3>, targets: Tensor<2, Int>| {
         log_softmax(logits, 2).gather(2, targets.reshape([k, n, 1])).reshape([k, n])
     };
     let own_kn = log_p(own_logits, batch.own_targets);
-    // Row `i` of the other pass scores `C_{i+1}`. Roll it back by one row, so
-    // that row `i` of both terms scores `C_i`.
     let other_kn = log_p(other_logits, batch.other_targets);
-    let other_kn = Tensor::cat(vec![other_kn.clone().narrow(0, k - 1, 1), other_kn.narrow(0, 0, k - 1)], 0);
-    let m = n - config.skip;
-    let delta_km = (own_kn.clone() - other_kn).narrow(1, config.skip, m);
+    match batch.negative {
+        Some(_) => (own_kn, other_kn),
+        // Row `i` of the other pass scores `C_{i+1}`. Roll it back by one
+        // row, so that row `i` of both terms scores `C_i`.
+        None => {
+            let other_kn = Tensor::cat(vec![other_kn.clone().narrow(0, k - 1, 1), other_kn.narrow(0, 0, k - 1)], 0);
+            (own_kn, other_kn)
+        }
+    }
+}
+
+/// The contrast loss of the log-probabilities of [`pair_log_probs`], scored
+/// from the character `skip` (`J`) on: `mean −log σ(Δ_≤t)` (`[1]`, before
+/// the weight and the scale). Also returns the readouts `[3]`, detached:
+///
+/// - that loss,
+/// - the mean of `Δ` per scored character (nats),
+/// - the **push**: the gradient mass of that loss on the own log-probs. It
+///   is relative to its value at chance: 1 at chance, 0 when every pair is
+///   separated. The push of the training is the weight times this.
+pub fn scored(own_kn: Tensor<2>, other_kn: Tensor<2>, skip: usize) -> (Tensor<1>, Tensor<1>) {
+    let [_, n] = own_kn.dims();
+    let device = own_kn.device();
+    let m = n - skip;
+    let delta_km = (own_kn - other_kn).narrow(1, skip, m);
     // `Δ_≤t = Σ_{s ≤ t} Δ_s`: a product with the upper triangle of ones.
     let upper_mm = Tensor::<2>::ones([m, m], &device).triu(0);
     let prefix_km = delta_km.clone().matmul(upper_mm);
-    let contrast = log_sigmoid(prefix_km).neg().mean();
-    // At chance, the mean pushes the own log-probs by `(m + 1)/4` together.
-    // The weight changes during the ramp, so it is data, not a kernel scalar.
-    // A new scalar is a new key of the cubecl cache (burn#5751).
-    let weight_1 = Tensor::<1>::from_floats([(weight * 4.0 / (m + 1) as f64) as f32], &device);
-    let mut total = contrast.clone() * weight_1;
-    if config.lm {
-        total = total + own_kn.neg().sum().div_scalar(lm_positions as f64);
-    }
-    let readouts = Tensor::cat(vec![contrast, delta_km.mean()], 0).detach();
-    (total, readouts)
+    let contrast = log_sigmoid(prefix_km.clone()).neg().mean();
+    // The push on `Δ_s` sums `σ(−Δ_≤t)` over the `t ≥ s`. So the prefix of
+    // index `t` (from 0) counts `t + 1` times. At chance, this mean is
+    // `(m + 1)/4`.
+    let counts_1m = Tensor::<1, Int>::arange(1..m as i64 + 1, &device).float().reshape([1, m]);
+    let push = (sigmoid(prefix_km.neg()) * counts_1m).mean().mul_scalar(4.0 / (m + 1) as f64);
+    let readouts = Tensor::cat(vec![contrast.clone(), delta_km.mean(), push], 0).detach();
+    (contrast, readouts)
 }
 
 /// The cut of `tokens`, which hold at least `prompt_min + continuation`
@@ -423,12 +669,14 @@ pub struct Feed {
     /// The next position in `order`.
     next: usize,
     rng: ChaCha8Rng,
+    /// The word index of [`Negative::Nearest`], built at its first use.
+    index: Option<WordIndex>,
     /// The schedule step of the next batch.
     step: usize,
     /// `contrast.jsonl` in the artifacts directory: one line per step.
-    log: std::fs::File,
+    log: Option<std::fs::File>,
     /// The sums of the readouts since the last printed line, and their count.
-    sums: [f64; 2],
+    sums: [f64; 3],
     count: usize,
 }
 
@@ -438,9 +686,9 @@ const PRINT_EVERY: usize = 100;
 impl Feed {
     /// The stories of the first `train_stories` of the train split (those of
     /// the LM batches), in the order of a shuffle with `seed`. `step` is the
-    /// schedule step of the first batch (that of a resumed run). Appends the
-    /// readouts to `contrast.jsonl` in `dir`.
-    pub fn new(config: ContrastConfig, train_stories: usize, seed: u64, step: usize, dir: &Path) -> Self {
+    /// schedule step of the first batch (that of a resumed run). With a
+    /// `dir`, appends the readouts to `contrast.jsonl` in it.
+    pub fn new(config: ContrastConfig, train_stories: usize, seed: u64, step: usize, dir: Option<&Path>) -> Self {
         assert!(config.enabled(), "the contrast is disabled");
         let keep = config.prompt_max + config.continuation;
         let need = config.prompt_min + config.continuation;
@@ -460,12 +708,14 @@ impl Feed {
         );
         println!(
             "contrast: {} of {train_stories} train stories, {} per step, prompt {}..={}, {:?} cut, \
-             continuation {}, skip {}, weight {} (0 before step {}, then a ramp of {} steps), lm {}",
+             {:?} negative, continuation {}, skip {}, weight {} (0 before step {}, then a ramp of {} \
+             steps), lm {}",
             stories.len(),
             config.stories,
             config.prompt_min,
             config.prompt_max,
             config.cut,
+            config.negative,
             config.continuation,
             config.skip,
             config.weight,
@@ -473,22 +723,35 @@ impl Feed {
             config.ramp,
             config.lm
         );
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("contrast.jsonl"))
-            .expect("failed to open contrast.jsonl");
+        let log = dir.map(|dir| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("contrast.jsonl"))
+                .expect("failed to open contrast.jsonl")
+        });
         Self {
             config,
             stories,
             order: Vec::new(),
             next: 0,
             rng: ChaCha8Rng::seed_from_u64(seed),
+            index: None,
             step,
             log,
-            sums: [0.0; 2],
+            sums: [0.0; 3],
             count: 0,
         }
+    }
+
+    /// Draw again from the start of a shuffle with `seed`, with these cut and
+    /// negative kinds.
+    pub fn restart(&mut self, cut: Cut, negative: Negative, seed: u64) {
+        self.config.cut = cut;
+        self.config.negative = negative;
+        self.rng = ChaCha8Rng::seed_from_u64(seed);
+        self.order.clear();
+        self.next = 0;
     }
 
     /// The settings.
@@ -507,12 +770,10 @@ impl Feed {
         self.weight() > 0.0 || self.config.lm
     }
 
-    /// The next `K` stories, cut.
-    pub fn batch(&mut self, device: &Device) -> ContrastBatch {
-        let (k, n) = (self.config.stories, self.config.continuation);
-        let mut rows: Vec<(usize, usize)> = Vec::with_capacity(k);
+    /// The next story of the shuffle that has a cut, and its cut.
+    fn draw(&mut self) -> (usize, usize) {
         let mut misses = 0;
-        while rows.len() < k {
+        loop {
             if self.next == self.order.len() {
                 self.order = (0..self.stories.len()).collect();
                 rand::seq::SliceRandom::shuffle(self.order.as_mut_slice(), &mut self.rng);
@@ -521,16 +782,72 @@ impl Feed {
             let story = self.order[self.next];
             self.next += 1;
             match cut(&self.config, &mut self.rng, &self.stories[story]) {
-                Some(at) => rows.push((story, at)),
+                Some(at) => return (story, at),
                 None => {
                     misses += 1;
-                    assert!(misses < 100 * k, "the contrast finds no {:?} cut in the stories", self.config.cut);
+                    assert!(misses < 1000, "the contrast finds no {:?} cut in the stories", self.config.cut);
+                }
+            }
+        }
+    }
+
+    /// The next `K` stories, cut, with their negatives.
+    pub fn batch(&mut self, device: &Device) -> ContrastBatch {
+        let (k, n, max) = (self.config.stories, self.config.continuation, self.config.prompt_max);
+        let mut rows: Vec<(usize, usize)> = Vec::with_capacity(k);
+        // The negative prompts, when they are not those of the other rows.
+        let mut negatives: Vec<Vec<u8>> = Vec::new();
+        match self.config.negative {
+            Negative::Random => rows.extend((0..k).map(|_| self.draw())),
+            Negative::Shuffled | Negative::ShuffledAll => {
+                let keep_first = self.config.negative == Negative::Shuffled;
+                let mut misses = 0;
+                while rows.len() < k {
+                    let (story, at) = self.draw();
+                    match shuffle_sentences(&self.stories[story][..at], keep_first, &mut self.rng) {
+                        Some(negative) => {
+                            rows.push((story, at));
+                            negatives.push(negative);
+                        }
+                        None => {
+                            misses += 1;
+                            assert!(misses < 1000, "no contrast prompt has two sentences to move");
+                        }
+                    }
+                }
+            }
+            Negative::Nearest { pool } => {
+                rows.extend((0..k).map(|_| self.draw()));
+                let candidates: Vec<(usize, usize)> = (0..pool).map(|_| self.draw()).collect();
+                let index = self
+                    .index
+                    .get_or_insert_with(|| WordIndex::new(&self.stories, self.config.prompt_max));
+                // The prompts compare, each up to its own cut.
+                let candidate_words: Vec<Vec<u32>> =
+                    candidates.iter().map(|&(c, at)| index.words(&self.stories[c][..at])).collect();
+                for (i, &(story, at)) in rows.iter().enumerate() {
+                    let own = index.words(&self.stories[story][..at]);
+                    let best = candidates
+                        .iter()
+                        .zip(&candidate_words)
+                        .filter(|((c, _), _)| *c != story)
+                        .max_by(|(_, a), (_, b)| index.similarity(&own, a).total_cmp(&index.similarity(&own, b)))
+                        .map(|(candidate, _)| candidate);
+                    // Only when the pool holds no other story: the next row.
+                    let (c, at) = *best.unwrap_or(&rows[(i + 1) % k]);
+                    negatives.push(self.stories[c][..at].to_vec());
                 }
             }
         }
         let prompts: Vec<&[u8]> = rows.iter().map(|&(s, at)| &self.stories[s][..at]).collect();
         let continuations: Vec<&[u8]> = rows.iter().map(|&(s, at)| &self.stories[s][at..at + n]).collect();
-        ContrastBatch::new(&prompts, &continuations, self.config.prompt_max, device)
+        match self.config.negative {
+            Negative::Random => ContrastBatch::new(&prompts, &continuations, max, device),
+            _ => {
+                let negatives: Vec<&[u8]> = negatives.iter().map(Vec::as_slice).collect();
+                ContrastBatch::with_negatives(&prompts, &negatives, &continuations, max, device)
+            }
+        }
     }
 
     /// End the current step: log the readouts of [`loss`] if the pass ran
@@ -543,25 +860,31 @@ impl Feed {
             return;
         };
         let values: Vec<f64> = readouts.into_data().try_into_vec_as().unwrap();
-        let [contrast, delta] = [values[0], values[1]];
+        let [contrast, delta, push] = [values[0], values[1], values[2]];
         let bits = delta / std::f64::consts::LN_2;
-        writeln!(
-            self.log,
-            "{{\"step\":{step},\"weight\":{weight},\"contrast\":{contrast},\"delta_bits\":{bits}}}"
-        )
-        .expect("failed to write contrast.jsonl");
+        if let Some(log) = &mut self.log {
+            writeln!(
+                log,
+                "{{\"step\":{step},\"weight\":{weight},\"contrast\":{contrast},\"delta_bits\":{bits},\
+                 \"push\":{push}}}"
+            )
+            .expect("failed to write contrast.jsonl");
+        }
         self.sums[0] += contrast;
         self.sums[1] += bits;
+        self.sums[2] += push;
         self.count += 1;
         if self.count == PRINT_EVERY {
             let n = self.count as f64;
             println!(
-                "contrast step={step} weight {weight:.4} loss {:.4} delta {:+.4} bits/char (mean of {} steps)",
+                "contrast step={step} weight {weight:.4} loss {:.4} delta {:+.4} bits/char push {:.2e} \
+                 (mean of {} steps)",
                 self.sums[0] / n,
                 self.sums[1] / n,
+                self.sums[2] / n,
                 self.count
             );
-            self.sums = [0.0; 2];
+            self.sums = [0.0; 3];
             self.count = 0;
         }
     }
@@ -573,6 +896,90 @@ pub static FEED: OnceLock<Mutex<Feed>> = OnceLock::new();
 /// Start the contrast of this process.
 pub fn init(feed: Feed) {
     assert!(FEED.set(Mutex::new(feed)).is_ok(), "the contrast starts once");
+}
+
+/// The skips `J` of `--contrast-eval` (those below the continuation).
+pub const EVAL_SKIPS: [usize; 5] = [0, 16, 32, 64, 128];
+
+/// The seed of the stories of `--contrast-eval`. It is fixed, so every
+/// checkpoint gets the same stories.
+const EVAL_SEED: u64 = 0;
+
+/// The pool of [`Negative::Nearest`] in `--contrast-eval`.
+const EVAL_POOL: usize = 64;
+
+/// `--contrast-eval N`: how strongly the contrast pushes the trained model,
+/// with no backward and no change to the checkpoint. For each cut kind and
+/// each kind of negative, it scores `batches` batches of train stories (the
+/// same ones for every checkpoint). From one pair of forwards per batch, it gives the readouts
+/// of [`scored`] at each `J` of [`EVAL_SKIPS`]. The other settings come from
+/// the `--contrast*` flags (`K` defaults to 4). Prints a table, and saves it
+/// as `contrast-eval.json` in the artifacts directory.
+#[allow(clippy::too_many_arguments)]
+pub fn contrast_eval(
+    model_config: MambaVocabNetConfig,
+    device: Device,
+    app_args: &AppArgs,
+    ssd_path: &MambaSsdPath,
+    overrides: &ContrastOverrides,
+    train_stories: usize,
+    batches: usize,
+) {
+    let model: MambaVocabNet = app_args
+        .load_model(&model_config, &device)
+        .expect("no trained model in the artifacts directory");
+    let config = overrides.apply(ContrastConfig::new().with_stories(4));
+    config.validate();
+    assert!(config.enabled(), "--contrast-eval needs 2 stories or more per batch");
+    let n = config.continuation;
+    let skips: Vec<usize> = EVAL_SKIPS.into_iter().filter(|&j| j < n).collect();
+    let mut feed = Feed::new(config, train_stories, EVAL_SEED, 0, None);
+    println!(
+        "contrast eval: {batches} batches of {} stories per cut. push = the gradient mass relative to chance",
+        feed.config().stories
+    );
+    println!("  cut        negative        J   loss       delta bits/char   push");
+    let mut json = Vec::new();
+    let negatives = [
+        Negative::Random,
+        Negative::Shuffled,
+        Negative::ShuffledAll,
+        Negative::Nearest { pool: EVAL_POOL },
+    ];
+    for cut in [Cut::Char, Cut::Word, Cut::Sentence] {
+        for negative in negatives {
+            feed.restart(cut, negative, EVAL_SEED);
+            let mut sums = vec![[0.0f64; 3]; skips.len()];
+            for _ in 0..batches {
+                let (own_kn, other_kn) = pair_log_probs(&model, ssd_path, feed.batch(&device));
+                let readouts: Vec<Tensor<1>> = skips
+                    .iter()
+                    .map(|&j| scored(own_kn.clone(), other_kn.clone(), j).1)
+                    .collect();
+                // One read-back per batch.
+                let values: Vec<f64> = Tensor::cat(readouts, 0).into_data().try_into_vec_as().unwrap();
+                for (sum, v) in sums.iter_mut().zip(values.chunks(3)) {
+                    sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
+                }
+            }
+            let name = negative.name();
+            for (&j, sum) in skips.iter().zip(&sums) {
+                let [contrast, delta, push] = sum.map(|s| s / batches as f64);
+                let bits = delta / std::f64::consts::LN_2;
+                println!(
+                    "  {:<10} {name:<12} {j:>4}   {contrast:.4}     {bits:+.4}           {push:.3e}",
+                    format!("{cut:?}")
+                );
+                json.push(format!(
+                    "{{\"cut\":\"{cut:?}\",\"negative\":\"{name}\",\"skip\":{j},\"contrast\":{contrast},\
+                     \"delta_bits\":{bits},\"push\":{push}}}"
+                ));
+            }
+        }
+    }
+    let path = app_args.artifacts_path.join("contrast-eval.json");
+    std::fs::write(&path, format!("[{}]\n", json.join(","))).expect("failed to write contrast-eval.json");
+    println!("saved to {path:?}");
 }
 
 #[cfg(test)]

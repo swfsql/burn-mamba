@@ -19,6 +19,7 @@ const HELP: &str = concat!(
     "    --context-use          Measure how much the trained model uses the earlier part of the validation stories\n",
     "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
     "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)\n",
+    "    --contrast-eval <N>    Measure how strongly the contrast pushes the trained model: N batches per cut kind, no backward\n",
     "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
     "    --profile-sync         Also sync the device after each phase (with --profile)\n",
     "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward. Also clean up the memory before windows 0, 1, 2, 4, 8, ... and before each 256th window",
@@ -50,6 +51,9 @@ pub struct Cli {
     pub context_stories: Option<usize>,
     /// The `--contrast*` flags: see [`crate::contrast`].
     pub contrast: ContrastOverrides,
+    /// `--contrast-eval`: the batches per cut kind of
+    /// [`contrast_eval`](crate::contrast::contrast_eval).
+    pub contrast_eval: Option<usize>,
 }
 
 impl Cli {
@@ -87,6 +91,8 @@ impl Cli {
         let context_stories: Option<usize> = pargs.opt_value_from_str("--context-stories").unwrap();
         assert!(context_stories != Some(0), "--context-stories must be at least 1");
         let contrast = ContrastOverrides::parse(&mut pargs);
+        let contrast_eval: Option<usize> = pargs.opt_value_from_str("--contrast-eval").unwrap();
+        assert!(contrast_eval != Some(0), "--contrast-eval must be at least 1");
         finish_extra(pargs);
         Self {
             overrides,
@@ -99,6 +105,7 @@ impl Cli {
             context_batch,
             context_stories,
             contrast,
+            contrast_eval,
         }
     }
 }

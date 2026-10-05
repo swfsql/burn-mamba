@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: ctx.sh [-g] [-n stories] [-b batch] [-r root] <run>
+# usage: ctx.sh [-g] [-n stories] [-b batch] [-r root] <run | snap/<run>/<step>>
 #   -g  run on the GPU (the default device of bin/ts-cuda): a GPU job. Without
 #       -g, run on flex: a host job. Run a flex job between GPU runs (it
 #       slows a GPU training).
@@ -27,10 +27,13 @@ done
 shift $((OPTIND - 1))
 run=$1
 [ -z "$cb" ] && { [ "$gpu" = 1 ] && cb=32 || cb=4; }
-dir=$root/$run
+# A run name (runs/<run>) or a checkpoint directory (snap/<run>/<step>).
+src=runs/$run
+[ -d "$src" ] || src=$run
+dir=$root/$(tr / _ <<< "${run#snap/}")
 [ -e "$dir" ] && { echo "exists: $dir"; exit 1; }
 mkdir -p "$dir"
-cp "runs/$run"/{model.bpk,model_config.json,training_config.json} "$dir/"
+cp "$src"/{model.bpk,model_config.json,training_config.json} "$dir/"
 source ./args.sh
 stamp "$dir"
 ex=(--context-use --context-batch "$cb")
