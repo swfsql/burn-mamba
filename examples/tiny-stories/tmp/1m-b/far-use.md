@@ -75,7 +75,13 @@ addition to `examples/tiny-stories/context.rs`.
    ties in with the heads hypothesis and with a longer `dt` init range.
 4. Optional: **re-mention bits.** The bits of the words of `C` (3 letters or
    more) that also occur in `P`. This probe catches "jick". It needs no word
-   list.
+   list. **Done** (`--context-use`, `notes.md` §6): the words that fewer
+   than 20% of the stories hold (names, objects). The use concentrates on
+   them (h16 @24000: 0.92 bits per letter, far part 0.18), but the first
+   letter still costs 1.8 bits: the entity choice fails, as in the samples.
+   A larger state (r128) recalls better. A quaternion and a second group
+   (g2) do not. So the binding is a capacity problem: the next lever is
+   the state size, not an auxiliary loss.
 
 ## Step 2: the shared-suffix contrast (stage 1: topic)
 

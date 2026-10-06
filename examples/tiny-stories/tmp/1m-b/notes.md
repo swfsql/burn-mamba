@@ -613,8 +613,101 @@ But the gap to its decay grows:
 - The excess grows as the run goes on, so 1e-3 gets relatively too high.
   From the stable 16000: 5e-4 (`p20k-h16-lr05`, `p20k-h16g2-lr05`) and a
   1e-3 control for h16 (`p20k-h16-lr1`), each with a decay of 4000 →
-  @24000. Stable 20000 at 5e-4: 0.7392 (its excess is smaller, so this
-  does not compare with the 1e-3 trunk).
+  @24000 (below).
+- **The step-down wins** (the matched pair, both from the stable 16000):
+  stable 20000 at 1e-3 0.7778 (above its 0.7740 @16000: the readout no
+  longer falls), at 5e-4 0.7392. @24000: 1e-3 dv 0.7070, 5e-4 dv 0.7010.
+  Paired, 1e-3 − 5e-4: own far +0.0057 ± 0.0004, use −0.0048 ± 0.0005.
+  The 1e-3 run still gains over @19200 (0.7163 → 0.7070), but less.
+- The LR points so far: from 4630, 1e-3 beats 2e-3 and 4e-3. From 8000,
+  5e-4 ties 1e-3 @14400 (0.7283 / 0.7281). From 16000, 5e-4 wins @24000.
+  So the best constant LR falls as the run goes on. A practical rule:
+  step down when the stable readout stops falling (1e-3 flattened at
+  16000 → 20000). **Not tested: how low the trunk LR should go** (2.5e-4
+  from 20000, user: not a priority).
+
+### @24000 (stable 16000, +4000 at 5e-4, then a decay of 4000)
+
+| run | stable 20000 | dv @24000 | own far | use | ms/step |
+|---|---|---|---|---|---|
+| **h16** (`p20k-h16-lr05-d`) | 0.7392 | **0.7010** | **0.7112** | 0.2954 | 664 |
+| h16, 1e-3 control (`p20k-h16-lr1-d`) | 0.7778 | 0.7070 | 0.7168 | 0.2906 | 664 |
+| h16 × g2 (`p20k-h16g2-lr05-d`) | 0.7440 | 0.7065 | 0.7200 | **0.2987** | 760 |
+
+- h16 against @19200: dv −0.0153 (−0.048 per doubling, against −0.028 for
+  the last milestone at 1e-3). The 1e-3 trend guess was 0.709. Own far
+  −0.0153 ± 0.0005 (as much as the dv), none −0.0135, use +0.0040 ±
+  0.0006.
+- h16 × g2 against @19200: dv −0.0157, own far −0.0149 ± 0.0005. Against
+  h16 @24000: dv +0.0055, own far +0.0088 ± 0.0010, use +0.0033 ± 0.0017.
+  The ranking holds: h16 has the better loss and own bits, g2 the higher
+  use (partly from worse no-prompt bits).
+- The cooldown tails (`cool.py`) of all three: +0.002 to +0.005 ± 0.004
+  (settled).
+
+### Samples of h16 @24000
+
+`infer.sh` (flex, beside a GPU run, ~2 ms/char): `p20k-h16-lr05-d` at T
+0.8 and 0.5 → `infer-h16-lr05-24000-prompts{,-t0.5}/`, the user's two
+prompts (those of `a62d59c`, by `--prompt`: the built-in prompts differ
+now). Against r128 @9600 (`far-use.md`, The problem):
+
+- The hard prompt: the names collapse into "jack" (6 continuations: jack
+  68, alice 2, jane 1, "jack and jack" 10). The name leaks into words
+  ("jacket", "such a jack!": the "jick" failure in a new form). Jane
+  becomes "the girl", and at T 0.5 that referent holds. Local phrases
+  still take the topic ("sit on the reverse", "balance on the road" ×6).
+- Lily: on topic (mom, dog, cat), clean grammar, but no story logic ("it
+  was a good day to eat a cat").
+- Unprompted T 0.5: a repetition loop ("shiny shiny shiny …").
+- The fluency improved (user: also on the hard prompts). The binding of
+  names did not: the far-use gain (0.256 → 0.295) is topic retention.
+
+### The re-mention probe (`--context-use`, `ctxrg/`)
+
+A re-mention is a far-part word (3+ letters) that also occurs in the own
+prompt and that fewer than 20% of the scored stories hold: names and
+objects (lily 0.15, tom 0.11, ball 0.09, dog 0.16), not the function words
+(the 0.99, she 0.48, mom 0.28). ~10k words in 1949 of the 1968 stories.
+Two mark sets: every letter, and the first letter of each word (the
+choice of the entity). Run on the GPU (flex: 36 min per checkpoint, too
+slow). Beside the training of h16 × g2 at batch 8: 85–200 s per
+checkpoint, card total ≤ 4.7 GiB, the training ~1.8× slower.
+
+Own bits/char (letters / first letters), and the gain of the first
+letters (none − own):
+
+| checkpoint | far own | letters own | first own | first gain |
+|---|---|---|---|---|
+| B-wd @3230 / q4d @3230 | 0.8913 / 0.9105 | 0.888 / 0.945 | 2.350 / 2.380 | 1.255 / 1.340 |
+| B-wd @5630 / q4d @5630 | 0.8307 / 0.8495 | 0.755 / 0.780 | 2.173 / 2.157 | 1.412 / 1.455 |
+| r128 @3230 | 0.8837 | 0.838 | 2.312 | 1.362 |
+| h16 @3230 / 5630 / 9600 | 0.8765 / 0.8155 / 0.7628 | 0.843 / 0.710 / 0.646 | 2.284 / 2.086 / 1.960 | 1.282 / 1.424 / 1.551 |
+| h16 @14400 / 19200 | 0.7401 / 0.7264 | 0.614 / 0.596 | 1.899 / 1.855 | 1.586 / 1.610 |
+| h16 × g2 @19200 | 0.7349 | 0.613 | 1.892 | 1.647 |
+| h16 @24000, 1e-3 / 5e-4 | 0.7168 / 0.7112 | 0.583 / 0.580 | 1.832 / 1.828 | 1.579 / 1.603 |
+
+- **The use concentrates on the re-mentions**: h16 @24000 gains 0.92
+  bits per letter there (far part: 0.18). But the first letter still
+  costs 1.8 bits after the own prompt: ~3–4 candidates for the entity
+  that the story names again (the binding failure of the samples).
+- Paired (run − control), own letters / first letters:
+  - **r128 − B @3230: −0.050 ± 0.004 / −0.037 ± 0.010**, for a far own of
+    only −0.008. A larger state improves the recall (the associative
+    recall view: the state size limits the binding, not the transition
+    group).
+  - q4d − B @3230: +0.057 ± 0.005 / +0.031 ± 0.011. @5630: +0.025 ± 0.004
+    / −0.017 ± 0.011. The quaternion does not recall better. Its larger
+    gains come from worse no-prompt bits. At 5630 its first letters tie B
+    while it trails by 0.019 overall (1.5 s.e.: a faint hint, the
+    opposite at 3230).
+  - h16 × g2 − h16 @19200: +0.017 ± 0.003 / +0.037 ± 0.010. The far-use
+    lead of g2 does not come from the re-mentions.
+- h16 recalls better with training (first letters 2.28 → 1.83), slowing as
+  the loss does. The step-down to 5e-4 hardly changes the recall (1.828
+  against 1.832).
+- So the next lever for the binding is the state size at h16's width
+  (user: the priority of the next session, from scratch, a long run, g1).
 
 ### The cooldown length (`cool.py`)
 

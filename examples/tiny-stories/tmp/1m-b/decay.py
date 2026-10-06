@@ -3,22 +3,29 @@
 
 usage: decay.py <src-run> <cfg> <D-schedule-steps> [min_lr]
 
-S = the step saved in runs/<src>/progress.json. The cosine becomes
-warmup_steps = S, total_steps = S + D, so it decays max_lr → min_lr over [S, S+D]
-(and stays at min_lr past it). Default min_lr = max_lr / 100.
+S = the step saved in runs/<src>/progress.json. The LR sequence of the run
+(lrseq.py) keeps its segments before S. From S, a cosine runs from the rate
+at S to min_lr over D steps, and holds min_lr after them. The segments of
+the run from S on (planned step-downs) go. Default min_lr = the rate at S /
+100.
 """
-import json, os, sys
+import os
+import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+from lrseq import HERE, cut, load, rate, run_path, save, saved_step, segments
+
 src, cfg, d = sys.argv[1], sys.argv[2], int(sys.argv[3])
-run = os.path.join(HERE, "runs", src)
-s = json.load(open(os.path.join(run, "progress.json")))["step"]
-tc = json.load(open(os.path.join(run, "training_config.json")))
-lr = tc["training"]["lr"]["CosineAnnealing"]
-lr["warmup_steps"], lr["total_steps"] = s, s + d
-lr["min_lr"] = float(sys.argv[4]) if len(sys.argv) > 4 else lr["max_lr"] / 100
+s = saved_step(src)
+tc = load(run_path(src, "training_config.json"))
+# The rate of step S, as the run trained it: a segment that starts at S
+# (a planned step-down) sets only the steps after S.
+top = rate({"Sequence": [x for x in segments(tc) if x["from"] < s]}, s)
+min_lr = float(sys.argv[4]) if len(sys.argv) > 4 else top / 100
+cosine = {"max_lr": top, "min_lr": min_lr, "warmup_steps": 0, "total_steps": d}
+cut(tc, s, {"CosineAnnealing": cosine})
 out = os.path.join(HERE, "cfg", cfg)
 os.makedirs(out, exist_ok=True)
-json.dump(tc, open(os.path.join(out, "training_config.json"), "w"), indent=2)
-open(os.path.join(out, "args.txt"), "w").write(f"decay of {src}: S={s} D={d} {lr}\n")
-print(out, lr)
+save(os.path.join(out, "training_config.json"), tc)
+with open(os.path.join(out, "args.txt"), "w") as f:
+    f.write(f"decay of {src}: S={s} D={d} {cosine}\n")
+print(out, cosine)

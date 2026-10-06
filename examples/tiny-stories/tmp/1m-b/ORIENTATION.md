@@ -63,7 +63,9 @@ to it). Read `handoff.md` first.
 - **Waiting**: no foreground loop or `sleep`. Wait in the background
   (`wait.sh`, a chain script that prints a summary, or a `Monitor`), then
   return the turn. Match processes with `pgrep -x ts-cuda`. Kill by exact PID
-  or `pkill -x` only (`-f` also matches the waiters and the shell).
+  or `pkill -x` only (`-f` also matches the waiters and the shell). `-x`
+  sees only the first 15 characters of a process name, so a longer binary
+  name never matches: use `pgrep -fx '<full command>'`.
 - Never `rm` artifacts. Every run gets a fresh `runs/<name>`.
 - **Every new directory gets a `build.txt`** (the burn-mamba version, commit
   and diff of its binary). The scripts do it. For a directory made by hand,
@@ -82,8 +84,10 @@ to it). Read `handoff.md` first.
   (`recalc:256` at u2: the chunk is 128 tokens). Whole stories per row,
   ~7.5k scored chars per step.
 - **wd 0.1** for Muon and AdamW (`gen.py … wd=0.1`).
-- **LR**: 4e-3 constant to step 4630, then 1e-3 (`--max-lr 1e-3` on the
-  extension). From 16000 on, 5e-4 (tested against a 1e-3 control).
+- **LR**: 4e-3 constant to step 4630, then 1e-3 (`extend.sh --lr 1e-3`).
+  From 16000 on, 5e-4 (it beat a 1e-3 control @24000). The best constant LR
+  falls as the run goes on (`notes.md` §6): step down when the stable
+  readout stops falling.
 - **Milestones** in fresh steps: stable 2630 / 4630 / 8000 / 12000 / 16000
   / 20000, each with a decay branch of M/5 (600 / 1000 / 1600 / 2400 /
   3200 / 4000). `screen.sh` runs the first, `extend.sh` the others. Each
@@ -101,14 +105,15 @@ to it). Read `handoff.md` first.
 - No from-scratch run of the final schedule (user): the trunk with its
   step-downs and a last leaf is that run. A from-scratch run serves a new
   config.
-- **The LR in the config.** burn-stack has `Lr::Sequence` (segments from a
-  global step, each counting from its start) and `Lr::Linear`. The scripts
-  still write the old form: a constant LR is `CosineAnnealing` over 10M
-  steps (its leftover `min_lr` 4e-3 makes it drift by +7e-8 by 28021), and
-  a leaf is the warmup trick of `decay.py`. The plan: `decay.py` appends a
-  cooldown segment, a `stage.py` appends a step-down, and `gen.py` writes
-  sequences. On a sequence, `--max-lr` scales the whole schedule: never
-  use it for a step-down.
+- **The LR in the config** (`lrseq.py`): an `Lr::Sequence` of burn-stack.
+  Each segment starts at a global step and counts its own steps from
+  there. A trunk is `[0: Linear 0 → 4e-3 over 128]` (the ramp holds its
+  end), then a `Constant` segment per step-down. A leaf appends a cosine
+  from its branch step. A segment that starts at the saved step S sets
+  the steps after S (S itself was trained before the resume). On a
+  sequence, `--max-lr` scales the whole schedule: `extend.sh` refuses it.
+  The runs before 2026-10-06 have the old form (a `CosineAnnealing` over
+  10M steps): `seq.py` rewrites a run before it extends again.
 
 ## Metric
 
@@ -123,12 +128,21 @@ to it). Read `handoff.md` first.
   - Use 2048 stories on the GPU: `ctx.sh -g -n 2048 -r ctxg <run>` (~78 s,
     1968 stories; append the line to `ctxg.txt`). The default (244 stories,
     flex, `ctx5/`) is too noisy to compare models (s.e. of the gain 0.006
-    against 0.002). A GPU job: run it between GPU runs or in the queue.
+    against 0.002). Run it on the GPU: between GPU runs, in the queue, or
+    beside a training with `-b 8` (beside h16 × g2 the card total stayed at
+    4.7 GiB or less, at 85–200 s per checkpoint, and the training ran ~1.8×
+    slower). On flex, 2048 stories take ~36 min: too slow to be useful.
   - `ctx.sh` works on a copy of the run dir (the app rewrites its configs
     at startup). It also takes a snapshot dir (`snap/<run>/<step>`).
   - `context-stories.jsonl` has the scores of each story.
     `ctxstat.py <dir>…` gives the mean ± s.e. and the paired difference to
     the first dir (a paired s.e. is ~0.001).
+  - **Re-mentions** (`context.rs`): the far-part words of 3+ letters that
+    also occur in the own prompt and that fewer than 20% of the stories
+    hold (names and objects, ~5 per story). Their bits per letter and per
+    first letter (the choice of the entity), own / none / other, measure
+    the recall of the entities of the prompt. `ctx.sh` prints the two
+    rows, and `ctxstat.py` pools and pairs them (`notes.md` §6).
 - **Gain** = `bits(C | no prompt) − bits(C | own)` of the far part, and the
   penalty = other − none (use = gain + penalty). **The stable metric is the
   own far bits, paired with the control.** The gain and the use carry the
@@ -137,8 +151,8 @@ to it). Read `handoff.md` first.
   boosting table.
 - Samples: `--inference` on a copy of the run dir, with the example flags
   `--prompt <TEXT>` (once per prompt), `--continuations 3`, `--temperature
-  T`. Run the user's two prompts (`infer-*` dirs, see their `README.txt`)
-  again on each new best.
+  T`. Run the user's two prompts again on each new best: `infer.sh <run>
+  <dir> [T]` (flex, beside a GPU run, ~2 ms/char, into `infer-*` dirs).
 
 ## Tools
 
@@ -171,7 +185,14 @@ to it). Read `handoff.md` first.
   `--contrast-eval N`, see `far-use.md` and `notes.md` §5).
   `bin/ts-cuda --help` and `bin/ts-cuda -- --help` list them.
 - `gen.py <cfg> k=v …` → `cfg/<cfg>/` (the keys are `DEFAULTS` in the file).
-  A key with a string default keeps `None` as a string.
+  A key with a string default keeps `None` as a string. `lr`, `warm` and
+  `stages=S:LR,…` write the LR sequence (planned step-downs, e.g.
+  `stages=4630:1e-3,16000:5e-4`).
+- `stage.py <run> <lr> [from]`: from `from` (default: the saved step), the
+  schedule of the run is the constant `lr`, and its later segments go.
+  `seq.py <run | cfg/name>…`: rewrites the old LR form as a sequence, from
+  the logged rates (it keeps `training_config.old.json` and refuses a
+  leaf).
 - `params.sh <cfg>` → the param count (a 2 s flex dry run). `probe.sh <cfg> [args [-- ex args]]` →
   reserved, total and ms/step of 10 steps (`probes.txt`). Probe before a run
   that grows the activations. `speed.sh` → a packed throughput line
@@ -189,14 +210,15 @@ to it). Read `handoff.md` first.
   that pair runs, and `contrast-profile.jsonl` gets the scores of each
   character. `cprof.py <dir>…` reads them: delta, the entropy shift and the
   own cost per character class and position, paired with the first dir.
-- `extend.sh <src> <new> <N1> <N2> [args]`: from a stable checkpoint (never a
-  `-d`), +N1 steps (`--resume`, and `--max-lr` sets the new constant LR),
-  then a decay branch `runs/<new>-d` of N2.
+- `extend.sh <src> <new> <N1> <N2> [--lr LR] [args]`: from a stable
+  checkpoint (never a `-d`), +N1 steps (`--resume`, and `--lr` runs
+  `stage.py` for a step-down), then a decay branch `runs/<new>-d` of N2.
 - `branch.sh <src> <new> <cfg|-> <nb> [args]` continues a run.
   `branch.sh <src> <new> - 0 --valid-batches 32` validates a checkpoint
   again (the full valid set).
-  `decay.py <src> <cfg> <D> [min_lr]` writes a decay config (WSD by config:
-  `CosineAnnealing` with `min_lr = max_lr` is warmup + constant).
+  `decay.py <src> <cfg> <D> [min_lr]` writes a decay config: the sequence of
+  the run up to its saved step S, then a cosine from the rate of step S to
+  min_lr (default: that rate / 100) over D steps.
 - `wait.sh <run> [runs…]`: the silent waiter (one summary, an OOM guard at
   5400 MiB total).
 - `queue.sh` (launch with `setsid nohup ./queue.sh > /dev/null 2>&1 <
@@ -204,7 +226,8 @@ to it). Read `handoff.md` first.
   lines of `queue.txt` in order, one at a time, and logs
   `start`/`done`/`fail` into `queue.log`. To add, drop or reorder the
   pending runs, edit `queue.txt` (not the script). It runs as `bash
-  ./queue.sh`: match it with `pgrep -f queue.sh` (not `-x`). An
+  ./queue.sh`: match it with `pgrep -fx 'bash ./queue.sh'` (a plain `-f`
+  also matches a waiter whose command line holds the text). An
   interruption of a Claude turn does not stop it: `pkill -x ts-cuda;
   pkill -f queue.sh` does. `queue.pending.txt` holds the parked runs.
   `qwait.sh` (in the background) prints once when the next line ends: its

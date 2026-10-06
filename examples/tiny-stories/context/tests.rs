@@ -5,8 +5,8 @@
 //! character from `prime`. The reference boosts each character by itself. The
 //! check is per story.
 
-use super::{BATCH, Bits, score};
-use crate::dataset::VOCAB_SIZE;
+use super::{BATCH, Bits, remention_marks, score};
+use crate::dataset::{VOCAB, VOCAB_SIZE};
 use crate::test_net::tiny_net;
 use crate::training::Run;
 use burn::prelude::*;
@@ -37,7 +37,11 @@ fn score_reads_the_rows_of_the_continuation() {
     let other = |i: usize| (i + 1) % n;
     let pairings: [&dyn Fn(usize) -> usize; 2] = [&own, &other];
     let alphas = [0.0, 0.5];
-    let got = score(&net, &run, &device, &prompts, &continuations, join, BATCH, &pairings, &alphas);
+    // Two mark sets with no pattern of the join or the far part.
+    let marks: Vec<Vec<Vec<bool>>> = (0..2)
+        .map(|s| (0..n).map(|i| (0..c).map(|k| (i + k + s) % 3 == 0).collect()).collect())
+        .collect();
+    let got = score(&net, &run, &device, &prompts, &continuations, join, BATCH, &pairings, &alphas, &marks);
 
     // The reference: the log-probabilities of the next character after
     // `tokens`, with the class latents in front.
@@ -59,6 +63,15 @@ fn score_reads_the_rows_of_the_continuation() {
     // each story: no prompt, then each pairing at each α.
     let mut none = vec![(0.0, 0.0); n];
     let mut paired = vec![vec![vec![(0.0, 0.0); n]; alphas.len()]; pairings.len()];
+    // `marked[k][s][i]`: no prompt (k 0), then each pairing at `alphas[0]`.
+    let mut marked = vec![vec![vec![0.0; n]; marks.len()]; 1 + pairings.len()];
+    let mut mark = |k: usize, i: usize, ch: usize, x: f64| {
+        for (s, set) in marks.iter().enumerate() {
+            if set[i][ch] {
+                marked[k][s][i] += x;
+            }
+        }
+    };
     let add = |sums: &mut (f64, f64), k: usize, x: f64| {
         if k < join {
             sums.0 += x;
@@ -70,7 +83,9 @@ fn score_reads_the_rows_of_the_continuation() {
         for k in 0..c {
             let target = continuations[i][k];
             let log_p_none = next_log_p(&continuations[i][..k]);
-            add(&mut none[i], k, nll(log_p_none.clone(), target));
+            let x_none = nll(log_p_none.clone(), target);
+            add(&mut none[i], k, x_none);
+            mark(0, i, k, x_none);
             for (j, pair) in pairings.iter().enumerate() {
                 let tokens: Vec<u8> = prompts[pair(i)].iter().chain(&continuations[i][..k]).copied().collect();
                 let log_p = next_log_p(&tokens);
@@ -79,7 +94,11 @@ fn score_reads_the_rows_of_the_continuation() {
                         log_p.clone().mul_scalar(1.0 + alpha) - log_p_none.clone().mul_scalar(alpha),
                         0,
                     );
-                    add(&mut paired[j][a][i], k, nll(boosted, target));
+                    let x = nll(boosted, target);
+                    add(&mut paired[j][a][i], k, x);
+                    if a == 0 {
+                        mark(1 + j, i, k, x);
+                    }
                 }
             }
         }
@@ -106,4 +125,41 @@ fn score_reads_the_rows_of_the_continuation() {
     // The boost changes the score, so the check above can tell α apart.
     let far = |a: usize| Bits::mean(&got.pairings[0][a]).far;
     assert!((far(0) - far(1)).abs() > 10.0 * tol);
+    // The marked sums, in bits (a sum over up to `c` characters).
+    assert_eq!(got.marked.len(), 1 + pairings.len(), "no prompt, then one score per pairing");
+    for (k, want) in marked.iter().enumerate() {
+        for (s, want) in want.iter().enumerate() {
+            for (i, want) in want.iter().enumerate() {
+                let (got, want) = (got.marked[k][s][i], want / ln2);
+                assert!((got - want).abs() < c as f64 * tol, "marked, score {k}, set {s}, story {i}: {got} vs {want}");
+            }
+        }
+    }
+}
+
+#[test]
+fn remention_marks_keep_the_rare_words_of_the_own_prompt() {
+    let enc = |t: &str| VOCAB.encode(t);
+    // "the" is in every story, "ball" and "tom" in one story each. The 10
+    // stories put the share of a word in one story at 0.1 (below
+    // `REMENTION_DF`), and of "the" at 1.
+    let mut prompts = vec![enc("tom has the ball. ")];
+    let mut continuations = vec![enc("so the ball and tom and the cat. tomato")];
+    for i in 1..10 {
+        prompts.push(enc(&format!("the story {i}. ")));
+        continuations.push(enc(&format!("the end of it {i}. the end.")));
+    }
+    let join = 2;
+    let [letters, first] = remention_marks(&prompts, &continuations, join);
+    let on = |set: &[bool]| -> Vec<usize> { (0..set.len()).filter(|&k| set[k]).collect() };
+    // "ball" (at 7) and "tom" (at 16) are rare and in the own prompt. "the"
+    // is common, "cat" is not in the prompt, "tomato" (at 33) is another
+    // word, and "so" is short.
+    assert_eq!(VOCAB.decode(&continuations[0][7..11]), "ball");
+    assert_eq!(on(&letters[0]), vec![7, 8, 9, 10, 16, 17, 18]);
+    assert_eq!(on(&first[0]), vec![7, 16]);
+    assert!(letters[1..].iter().all(|row| !row.contains(&true)), "the other stories re-mention nothing rare");
+    // A word that starts before `join` does not count.
+    let [late, _] = remention_marks(&prompts, &continuations, 10);
+    assert_eq!(on(&late[0]), vec![16, 17, 18]);
 }
