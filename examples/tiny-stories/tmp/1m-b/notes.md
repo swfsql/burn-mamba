@@ -477,10 +477,161 @@ Push, J 0 / J 64 (char cut), and Δ at J 0 (bits/char):
   char cut (not trained) moves too: 0.012 → 0.054 @2630. Random Δ does not
   change.
 - Reading: the contrast teaches what it targets (order Δ ×5), at an LM
-  cost of ~0.008 (if the 1-worker noise is small). The use against random
-  prompts does not move. The gain rises only because the no-prompt score
-  gets worse by more than the own score. That fits "unnatural context ⇒
-  predict worse" (a shortcut), not a better use of the own prompt.
-- Open: the size of the 1-worker noise (the 2048-story context use of b01
-  and c03 @500, where only the float noise differs), and where in `C` the
-  order Δ of c03 sits (per position: events, or a flat penalty).
+  cost of ~0.008. The use against random prompts does not move. The gain
+  rises only because the no-prompt score gets worse by more than the own
+  score.
+
+### The 1-worker noise at step 500
+
+The weight of c03 is 0 up to step 500, so only the float noise separates
+`snap/b01-h16-w1/500` and `snap/c03-h16-shuf/500`. Paired, c03 − b01
+(2048 stories):
+
+| | own far | none | gain | penalty | use |
+|---|---|---|---|---|---|
+| @500, float noise only | +0.0014 ± 0.0012 | −0.0030 ± 0.0012 | −0.0045 ± 0.0006 | −0.0034 ± 0.0007 | −0.0078 ± 0.0007 |
+| -d, with the contrast | +0.0080 ± 0.0010 | +0.0182 ± 0.0013 | +0.0103 ± 0.0011 | −0.0125 ± 0.0013 | −0.0023 ± 0.0012 |
+
+- The own far bits of the twins are ~0.001 apart: the cost of c03 is real.
+- The use of the twins moves by 0.008 (11 paired s.e.) with the same data
+  order. The paired s.e. covers only the stories, not the model. So on 1
+  worker too, only the own far bits rank two runs.
+- Step 500 is early: the float noise can grow to the noise of a seed by
+  the end of a run. Before a decision on a dv gap below ~0.01, rerun b01
+  (b02).
+
+### Where the Δ sits (`--contrast-profile`, `cprof.py`)
+
+Sentence cut, 128 batches × 4 = 512 rows (131k chars), on the `-d`
+checkpoints (`cprof-shuf/`, `cprof-rand/`, `cprof-near/`, tables in
+`cprof.txt`). `delta` = own − other, `dH` = the entropy after the negative
+− after the own prompt, `own` = the own cost, all in bits/char. Classes:
+`start` (the first letter of a word), `second`, `inner` (the third letter
+or later: the word prefix mostly fixes it), `space`, `other`.
+
+Shuffled negative, c03 − b01, paired. The s.e. is ≤ 0.008 on start and
+other, 0.011 on @0..16, and ≤ 0.002 on the rest.
+
+| | start | second | inner | space | other | @0..16 | @64..128 | @128..256 | all |
+|---|---|---|---|---|---|---|---|---|---|
+| delta | **+0.133** | +0.009 | +0.003 | +0.015 | +0.021 | **+0.201** | +0.034 | +0.003 | +0.034 |
+| dH | −0.007 | +0.010 | +0.002 | +0.002 | −0.004 | −0.013 | +0.002 | +0.002 | +0.002 |
+| own | +0.020 | +0.012 | +0.006 | +0.005 | +0.029 | +0.015 | +0.010 | +0.011 | +0.011 |
+
+The @500 twins: delta −0.0015 ± 0.0002, every cell ≤ 0.004.
+
+- **Not a flat penalty.** After the shuffled prompt, c03 is not less sure
+  (dH +0.002), and the inner letters carry almost no delta. 65% of its
+  delta is on word starts (b01: 15%), mostly in the first 16 characters
+  after the cut.
+- **Not the shape of natural order use.** p12k-h16-lr1-d (no contrast)
+  against b01: delta +0.004, spread as b01's own (space 47%, start 23%,
+  other 19%), with dH +0.003. c03 instead predicts other opening words of
+  the next sentence after a shuffled prompt, and is sure of them. At J 0,
+  the prefix sums put the most push on the first characters (character
+  `s` is in `m − s` prefixes).
+- **It does not transfer.** c03 − b01, delta: random −0.004 ± 0.002,
+  nearest:64 −0.005 ± 0.002. The own cost is flat (+0.011 ± 0.002) over
+  every class and position: a general LM cost.
+- **Nearest:64 follows the natural progress.** p12k − b01: delta +0.074 ±
+  0.003, +0.045 to +0.065 in the far part, with dH +0.014, in b01's shape.
+  It also follows the general LM progress (own −0.148). Its push at J 64:
+  0.076 (b01-d), 0.054 (p12k-d).
+
+### c04: one-sided, nearest:64, J 64
+
+`c04-h16-near1s`: the flags of c03, but `--contrast-negative nearest:64
+--contrast-skip 64 --contrast-weight 3 --contrast-one-sided` (the other
+pass detached: no penalty route). Probe: reserved 3165 MB, 947 ms/step.
+
+- **Broken: dv 1.0764** (b01 0.8680, +0.21). 2048 stories, paired with
+  b01: own far **+0.214 ± 0.002**, none +0.150, gain −0.064, use −0.124
+  (0.094: b01 @750).
+- The train loss leaves b01 within 50 steps of the start of the ramp
+  (+0.028 at λ ≈ 0.6), grows with λ to +0.18 (λ ≈ 2), then stays. The
+  decay recovers 0.11 (b01: 0.08): a higher noise floor. The per-step push
+  swings from 0.05 to 0.66. The train Δ stays at 0.02–0.11 bits/char.
+- **Why.** In the two-sided form, own and other score the same characters,
+  so their fluency gradients cancel. The one-sided form keeps the full LM
+  gradient of 768 characters per step, at ~10× the weight of a packed
+  character: ~10× the variance of the LM gradient, as a much smaller batch
+  at the same LR (`far-use.md`, Rejected).
+
+### Closed (user, 2026-10-06)
+
+No contrast raised the far use. c01 (random) is a null, c03 (shuffled)
+learns a feature that does not transfer and costs ~0.01, and c04
+(one-sided) breaks the training. The plain cross-entropy does better in
+the long run. Not tested: the two-sided nearest:64 at J 64.
+
+## 6. Past 14400: the limit of h16 and h16 × g2 (from 2026-10-06)
+
+User: h16 and h16 × g2 are not saturated, so find their limit. Each
+milestone branches from the stable trunk (`extend.sh`). Build
+`v0.64.0-eef06da-dirty-0779d0ea`.
+
+### @19200 (stable 16000 at 1e-3, then a decay of 3200)
+
+| run | stable 16000 | dv @19200 | own far | use | ms/step | reserved |
+|---|---|---|---|---|---|---|
+| **h16** (`p16k-h16-lr1-d`) | 0.7740 | **0.7163** | **0.7264** | 0.2914 | 675–690 | 3147 MB |
+| h16 × g2 (`p16k-h16g2-lr1-d`) | 0.7804 | 0.7222 | 0.7349 | **0.2954** | 708–723 | 3300 MB |
+
+- Against @14400 (2048 stories, paired): h16 dv −0.0118, own far −0.0137 ±
+  0.0006, none −0.0098, gain +0.0039, use +0.0079. h16 × g2 dv −0.0105, own
+  far −0.0129 ± 0.0006, use +0.0067. The own far bits gain a little more
+  than the dv and than the no-prompt bits: more training also makes the
+  prompt worth more.
+- h16 × g2 against h16 @19200: own far +0.0085 ± 0.0010, none +0.0118,
+  use +0.0040 ± 0.0016. h16 wins the dv and the own bits (dv gap +0.0046
+  @14400, +0.0059 @19200). g2 has the higher use, partly from worse
+  no-prompt bits.
+- The decayed dv of h16 per doubling of the steps: −0.070, −0.068 (3230 →
+  9600, with the LR step at 4630), −0.036, −0.028. The gain falls, but it
+  is ~5× the noise. A power law through the last three points gives `L∞ ≈
+  0.663` (c 0.70): an exact fit of 3 points, so a guess. It predicts
+  0.709 @24000 and 0.700 @32000.
+- The data: ~7.5k scored chars per step, so 19200 steps are ~0.69 epoch of
+  the 210M train chars. One epoch is 28021 steps.
+
+### The LR step-down at 16000
+
+The stable valid of h16 at 1e-3 still falls, so 1e-3 does not unlearn.
+But the gap to its decay grows:
+
+| trunk at 1e-3 | stable | its decay | gap |
+|---|---|---|---|
+| @8000 | 0.7875 | 0.7493 @9600 | 0.038 |
+| @12000 | 0.7804 | 0.7281 @14400 | 0.052 |
+| @16000 | 0.7740 | 0.7163 @19200 | 0.058 |
+
+- From 8000 to 12000, the stable valid falls 0.007, and the decayed one
+  0.021. The trunk learns ~3× faster than its own loss shows. At a
+  constant LR, the gradient noise holds the weights above the floor of the
+  valley, and only the decay takes that excess out (the "river valley" of
+  warmup-stable-decay schedules, Wen et al. 2024).
+- The excess grows as the run goes on, so 1e-3 gets relatively too high.
+  From the stable 16000: 5e-4 (`p20k-h16-lr05`, `p20k-h16g2-lr05`) and a
+  1e-3 control for h16 (`p20k-h16-lr1`), each with a decay of 4000 →
+  @24000. Stable 20000 at 5e-4: 0.7392 (its excess is smaller, so this
+  does not compare with the 1e-3 trunk).
+
+### The cooldown length (`cool.py`)
+
+The train bits of each decay branch, in 10 bins of its length. The cosine
+of `decay.py` spans bins 0–8, and bin 9 is the tail at min_lr. The tail
+(bin 9 − bin 8), h16 / h16 × g2, by the length N2:
+
+| N2 | 600 | 1000 | 1600 | 2400 | 3200 |
+|---|---|---|---|---|---|
+| tail | −0.012 / −0.005 | −0.005 / −0.002 | −0.008 / −0.001 | −0.003 / +0.002 | 0.000 / −0.001 |
+
+- The s.e. is 0.004–0.012 (b01 @600: +0.006, the lr05 leaf @2400: 0.000).
+  The leaves of 1600 and more settle before the LR bottoms out. The
+  short leaves (600, 1000) hint at an unfinished settle (mean −0.004, not
+  significant).
+- The tail cannot show whether a longer cooldown at the same total steps
+  ends lower. A matched pair at one epoch waits in `queue.pending.txt`:
+  from the stable 20000 at 5e-4, (a) +2421, then a cooldown of 5600 (20%)
+  → `p28k-h16-lr05-d`, and (b) a cooldown of 8021 (29%) at once →
+  `p20k-h16-lr05-dlong`. Both end at 28021.

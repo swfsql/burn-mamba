@@ -165,6 +165,7 @@ pub fn launch(app_args: &AppArgs) {
             &cli.contrast,
             config.train_stories,
             batches,
+            cli.contrast_profile,
         );
     }
 

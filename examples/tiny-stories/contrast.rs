@@ -24,6 +24,11 @@
 //!   this 1, as the LM loss pushes all its log-probs together. So at λ = 1,
 //!   the contrast pushes as hard as the LM loss until the pairs separate. The
 //!   other log-probs get the same push, with the other sign.
+//! - **One-sided** (`--contrast-one-sided`): the other pass is detached. The
+//!   push on the own log-probs does not change, and the other log-probs get
+//!   none. So the contrast cannot win by a worse prediction after the
+//!   negative (the penalty). It is then a weighted LM loss on `C | P`, with
+//!   the weight `σ(−Δ_≤t)` on each prefix.
 //! - **The schedule of λ** ([`ContrastConfig::weight_at`]): 0 up to the step
 //!   `start`, then a linear ramp to λ over `ramp` steps. An untrained model
 //!   has no grammar yet, so it has nothing to gain from the prompt. While the
@@ -305,6 +310,11 @@ pub struct ContrastConfig {
     /// as one character of the packed batch.
     #[config(default = false)]
     pub lm: bool,
+    /// Detach the other pass (`--contrast-one-sided`). Then the contrast only
+    /// raises the own log-probs. It cannot win by a worse prediction after
+    /// the negative (the penalty).
+    #[config(default = false)]
+    pub one_sided: bool,
 }
 
 impl ContrastConfig {
@@ -373,6 +383,8 @@ pub struct ContrastOverrides {
     pub ramp: Option<usize>,
     /// `--contrast-lm`.
     pub lm: bool,
+    /// `--contrast-one-sided`.
+    pub one_sided: bool,
 }
 
 impl ContrastOverrides {
@@ -388,6 +400,7 @@ impl ContrastOverrides {
         "    --contrast-start <S>   The step where the ramp of the contrast weight starts; 0 before it (default 1000)\n",
         "    --contrast-ramp <R>    The steps of the linear ramp of the contrast weight (default 1000)\n",
         "    --contrast-lm          Also train the next-character loss on the own continuations of the contrast\n",
+        "    --contrast-one-sided   Detach the pass after the negative: the contrast only raises the own log-probabilities\n",
     );
 
     /// Parse the flags.
@@ -410,6 +423,7 @@ impl ContrastOverrides {
             start: pargs.opt_value_from_str("--contrast-start").unwrap(),
             ramp: pargs.opt_value_from_str("--contrast-ramp").unwrap(),
             lm: pargs.contains("--contrast-lm"),
+            one_sided: pargs.contains("--contrast-one-sided"),
         }
     }
 
@@ -445,6 +459,9 @@ impl ContrastOverrides {
         }
         if self.lm {
             config.lm = true;
+        }
+        if self.one_sided {
+            config.one_sided = true;
         }
         config
     }
@@ -570,6 +587,7 @@ pub fn loss(
 ) -> (Tensor<1>, Tensor<1>) {
     let device = batch.own.device();
     let (own_kn, other_kn) = pair_log_probs(model, ssd_path, batch);
+    let other_kn = if config.one_sided { other_kn.detach() } else { other_kn };
     let (contrast, readouts) = scored(own_kn.clone(), other_kn, config.skip);
     let m = own_kn.dims()[1] - config.skip;
     // At chance, the mean pushes the own log-probs by `(m + 1)/4` together.
@@ -587,7 +605,22 @@ pub fn loss(
 /// of both scores `C_i`, after `P_i` (own) and after its negative (other:
 /// `P_{i−1}`, or `N_i`).
 pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: ContrastBatch) -> (Tensor<2>, Tensor<2>) {
-    let [k, n] = batch.own.dims();
+    let rolled = batch.negative.is_none();
+    let [own, other] =
+        pair_passes(model, ssd_path, batch).map(|(log_p_knv, targets_kn)| target_log_p(log_p_knv, targets_kn));
+    (own, if rolled { roll_back(other) } else { other })
+}
+
+/// The log-softmax `[K, n, vocab]` of the two passes over the continuations
+/// of `batch` (own, then other), each with its targets `[K, n]`. With no
+/// `negative`, row `i` of the other pass scores `C_{i+1}` (see
+/// [`roll_back`]).
+fn pair_passes(
+    model: &MambaVocabNet,
+    ssd_path: &MambaSsdPath,
+    batch: ContrastBatch,
+) -> [(Tensor<3>, Tensor<2, Int>); 2] {
+    let n = batch.own.dims()[1];
     // A pass over prompts opens each row with the class latents, and leaves
     // the cursor after them. So the passes over `C` emit none.
     let prompt_pass = |(ids, pad): (Tensor<2, Int>, Tensor<2, Bool>)| {
@@ -604,20 +637,32 @@ pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: Con
     let (other_logits, _) =
         model.forward(batch.other, Some(other_caches), ssd_path.clone(), Some(&mut class_other), None);
     assert_eq!(own_logits.dims()[1], n, "the passes over the continuations emit no latents");
-    let log_p = |logits: Tensor<3>, targets: Tensor<2, Int>| {
-        log_softmax(logits, 2).gather(2, targets.reshape([k, n, 1])).reshape([k, n])
-    };
-    let own_kn = log_p(own_logits, batch.own_targets);
-    let other_kn = log_p(other_logits, batch.other_targets);
-    match batch.negative {
-        Some(_) => (own_kn, other_kn),
-        // Row `i` of the other pass scores `C_{i+1}`. Roll it back by one
-        // row, so that row `i` of both terms scores `C_i`.
-        None => {
-            let other_kn = Tensor::cat(vec![other_kn.clone().narrow(0, k - 1, 1), other_kn.narrow(0, 0, k - 1)], 0);
-            (own_kn, other_kn)
-        }
-    }
+    [
+        (log_softmax(own_logits, 2), batch.own_targets),
+        (log_softmax(other_logits, 2), batch.other_targets),
+    ]
+}
+
+/// The log-probability `[K, n]` of each target under a log-softmax
+/// `[K, n, vocab]`.
+fn target_log_p(log_p_knv: Tensor<3>, targets_kn: Tensor<2, Int>) -> Tensor<2> {
+    let [k, n, _] = log_p_knv.dims();
+    log_p_knv.gather(2, targets_kn.reshape([k, n, 1])).reshape([k, n])
+}
+
+/// Row `i` of a score of the other pass moved to row `i + 1` (cyclic). With
+/// no `negative`, row `i` of the other pass scores `C_{i+1}`. After the roll,
+/// row `i` of both terms scores `C_i`.
+fn roll_back(other_kn: Tensor<2>) -> Tensor<2> {
+    let k = other_kn.dims()[0];
+    Tensor::cat(vec![other_kn.clone().narrow(0, k - 1, 1), other_kn.narrow(0, 0, k - 1)], 0)
+}
+
+/// The entropy `[K, n]` (nats) of each prediction of a log-softmax
+/// `[K, n, vocab]`.
+fn entropy(log_p_knv: Tensor<3>) -> Tensor<2> {
+    let [k, n, _] = log_p_knv.dims();
+    (log_p_knv.clone().exp() * log_p_knv).sum_dim(2).neg().reshape([k, n])
 }
 
 /// The contrast loss of the log-probabilities of [`pair_log_probs`], scored
@@ -709,7 +754,7 @@ impl Feed {
         println!(
             "contrast: {} of {train_stories} train stories, {} per step, prompt {}..={}, {:?} cut, \
              {:?} negative, continuation {}, skip {}, weight {} (0 before step {}, then a ramp of {} \
-             steps), lm {}",
+             steps), lm {}, one-sided {}",
             stories.len(),
             config.stories,
             config.prompt_min,
@@ -721,7 +766,8 @@ impl Feed {
             config.weight,
             config.start,
             config.ramp,
-            config.lm
+            config.lm,
+            config.one_sided
         );
         let log = dir.map(|dir| {
             std::fs::OpenOptions::new()
@@ -915,6 +961,10 @@ const EVAL_POOL: usize = 64;
 /// of [`scored`] at each `J` of [`EVAL_SKIPS`]. The other settings come from
 /// the `--contrast*` flags (`K` defaults to 4). Prints a table, and saves it
 /// as `contrast-eval.json` in the artifacts directory.
+///
+/// With `profile` (`--contrast-profile`), only the cut and the negative of
+/// the flags run, and [`profiled_pair_log_probs`] also writes the scores of
+/// each character into `contrast-profile.jsonl`.
 #[allow(clippy::too_many_arguments)]
 pub fn contrast_eval(
     model_config: MambaVocabNetConfig,
@@ -924,6 +974,7 @@ pub fn contrast_eval(
     overrides: &ContrastOverrides,
     train_stories: usize,
     batches: usize,
+    profile: bool,
 ) {
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &device)
@@ -933,6 +984,22 @@ pub fn contrast_eval(
     assert!(config.enabled(), "--contrast-eval needs 2 stories or more per batch");
     let n = config.continuation;
     let skips: Vec<usize> = EVAL_SKIPS.into_iter().filter(|&j| j < n).collect();
+    let negatives = [
+        Negative::Random,
+        Negative::Shuffled,
+        Negative::ShuffledAll,
+        Negative::Nearest { pool: EVAL_POOL },
+    ];
+    let kinds: Vec<(Cut, Negative)> = match profile {
+        true => vec![(config.cut, config.negative)],
+        false => [Cut::Char, Cut::Word, Cut::Sentence]
+            .into_iter()
+            .flat_map(|cut| negatives.map(|negative| (cut, negative)))
+            .collect(),
+    };
+    let profile_path = app_args.artifacts_path.join("contrast-profile.jsonl");
+    let mut profile_log =
+        profile.then(|| std::fs::File::create(&profile_path).expect("failed to create contrast-profile.jsonl"));
     let mut feed = Feed::new(config, train_stories, EVAL_SEED, 0, None);
     println!(
         "contrast eval: {batches} batches of {} stories per cut. push = the gradient mass relative to chance",
@@ -940,46 +1007,92 @@ pub fn contrast_eval(
     );
     println!("  cut        negative        J   loss       delta bits/char   push");
     let mut json = Vec::new();
-    let negatives = [
-        Negative::Random,
-        Negative::Shuffled,
-        Negative::ShuffledAll,
-        Negative::Nearest { pool: EVAL_POOL },
-    ];
-    for cut in [Cut::Char, Cut::Word, Cut::Sentence] {
-        for negative in negatives {
-            feed.restart(cut, negative, EVAL_SEED);
-            let mut sums = vec![[0.0f64; 3]; skips.len()];
-            for _ in 0..batches {
-                let (own_kn, other_kn) = pair_log_probs(&model, ssd_path, feed.batch(&device));
-                let readouts: Vec<Tensor<1>> = skips
-                    .iter()
-                    .map(|&j| scored(own_kn.clone(), other_kn.clone(), j).1)
-                    .collect();
-                // One read-back per batch.
-                let values: Vec<f64> = Tensor::cat(readouts, 0).into_data().try_into_vec_as().unwrap();
-                for (sum, v) in sums.iter_mut().zip(values.chunks(3)) {
-                    sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
-                }
+    for (cut, negative) in kinds {
+        feed.restart(cut, negative, EVAL_SEED);
+        let mut sums = vec![[0.0f64; 3]; skips.len()];
+        for _ in 0..batches {
+            let batch = feed.batch(&device);
+            let (own_kn, other_kn) = match profile_log.as_mut() {
+                Some(log) => profiled_pair_log_probs(&model, ssd_path, batch, log),
+                None => pair_log_probs(&model, ssd_path, batch),
+            };
+            let readouts: Vec<Tensor<1>> = skips
+                .iter()
+                .map(|&j| scored(own_kn.clone(), other_kn.clone(), j).1)
+                .collect();
+            // One read-back per batch.
+            let values: Vec<f64> = Tensor::cat(readouts, 0).into_data().try_into_vec_as().unwrap();
+            for (sum, v) in sums.iter_mut().zip(values.chunks(3)) {
+                sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
             }
-            let name = negative.name();
-            for (&j, sum) in skips.iter().zip(&sums) {
-                let [contrast, delta, push] = sum.map(|s| s / batches as f64);
-                let bits = delta / std::f64::consts::LN_2;
-                println!(
-                    "  {:<10} {name:<12} {j:>4}   {contrast:.4}     {bits:+.4}           {push:.3e}",
-                    format!("{cut:?}")
-                );
-                json.push(format!(
-                    "{{\"cut\":\"{cut:?}\",\"negative\":\"{name}\",\"skip\":{j},\"contrast\":{contrast},\
-                     \"delta_bits\":{bits},\"push\":{push}}}"
-                ));
-            }
+        }
+        let name = negative.name();
+        for (&j, sum) in skips.iter().zip(&sums) {
+            let [contrast, delta, push] = sum.map(|s| s / batches as f64);
+            let bits = delta / std::f64::consts::LN_2;
+            println!(
+                "  {:<10} {name:<12} {j:>4}   {contrast:.4}     {bits:+.4}           {push:.3e}",
+                format!("{cut:?}")
+            );
+            json.push(format!(
+                "{{\"cut\":\"{cut:?}\",\"negative\":\"{name}\",\"skip\":{j},\"contrast\":{contrast},\
+                 \"delta_bits\":{bits},\"push\":{push}}}"
+            ));
         }
     }
     let path = app_args.artifacts_path.join("contrast-eval.json");
     std::fs::write(&path, format!("[{}]\n", json.join(","))).expect("failed to write contrast-eval.json");
     println!("saved to {path:?}");
+    if profile {
+        println!("saved to {profile_path:?}");
+    }
+}
+
+/// [`pair_log_probs`] of `batch`. Also writes one line per row of `batch`
+/// into `log` (`contrast-profile.jsonl`):
+///
+/// - `text`: the last character of the prompt, then the `n` characters of
+///   the continuation,
+/// - `own`, `other`: the log-probability (nats) of each character of the
+///   continuation, after the own prompt and after the negative,
+/// - `h_own`, `h_other`: the entropy (nats) of each of these predictions.
+pub fn profiled_pair_log_probs(
+    model: &MambaVocabNet,
+    ssd_path: &MambaSsdPath,
+    batch: ContrastBatch,
+    log: &mut impl Write,
+) -> (Tensor<2>, Tensor<2>) {
+    let [k, n] = batch.own.dims();
+    let rolled = batch.negative.is_none();
+    // The first input of the own pass is the last character of the prompt.
+    let text_ids = Tensor::cat(vec![batch.own.clone().narrow(1, 0, 1), batch.own_targets.clone()], 1);
+    let [(own_knv, own_targets), (other_knv, other_targets)] = pair_passes(model, ssd_path, batch);
+    let align = |other_kn: Tensor<2>| if rolled { roll_back(other_kn) } else { other_kn };
+    let own_kn = target_log_p(own_knv.clone(), own_targets);
+    let other_kn = align(target_log_p(other_knv.clone(), other_targets));
+    let columns = vec![own_kn.clone(), other_kn.clone(), entropy(own_knv), align(entropy(other_knv))];
+    let ids: Vec<i64> = text_ids.into_data().try_into_vec_as().unwrap();
+    let values: Vec<f32> = Tensor::cat(columns, 0).into_data().try_into_vec_as().unwrap();
+    for (i, row_ids) in ids.chunks(n + 1).enumerate() {
+        let text: String = row_ids.iter().map(|&t| VOCAB.character(t as u8)).collect();
+        // Column `c` of row `i` is row `c·K + i` of the concatenation.
+        let column = |c: usize| {
+            let row = &values[(c * k + i) * n..(c * k + i + 1) * n];
+            row.iter().map(|v| format!("{v:.5}")).collect::<Vec<_>>().join(",")
+        };
+        // The alphabet is printable ASCII and `\n`, so the debug form of
+        // `text` is a JSON string.
+        writeln!(
+            log,
+            "{{\"text\":{text:?},\"own\":[{}],\"other\":[{}],\"h_own\":[{}],\"h_other\":[{}]}}",
+            column(0),
+            column(1),
+            column(2),
+            column(3)
+        )
+        .expect("failed to write contrast-profile.jsonl");
+    }
+    (own_kn, other_kn)
 }
 
 #[cfg(test)]

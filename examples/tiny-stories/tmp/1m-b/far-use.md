@@ -5,6 +5,11 @@ the **far use** of `--context-use` (`ORIENTATION.md`, Metric). This file
 holds the ideas, the order of the work, and the rejected ideas with their
 reasons. The results go to `notes.md`.
 
+**Status: the contrast (steps 2–3) is closed** (user, 2026-10-06). No
+contrast run raised the far use, and each one cost LM loss (`notes.md` §5).
+The plain cross-entropy does better in the long run. Step 4 and the Parked
+ideas stay open.
+
 ## The problem
 
 - The best far use is 0.289 bits/char (h16 × g2 @14400). The far part costs
@@ -145,11 +150,20 @@ The gate: step 2 raises the far use, but `Δ_shuffle` stays near 0.
   checkpoint. nearest:64 only ~2× random. c03 (shuffled, λ 1, against b01
   on 1 worker): the order Δ grows ×5 (0.009 → 0.044 bits/char), at an LM
   cost of ~0.008 (own far and dv). The use against random prompts does not
-  move, and the no-prompt score gets worse (+0.018). That fits a shortcut:
-  "unnatural context ⇒ predict worse".
+  move.
+- **What c03 learned** (`--contrast-profile`, `notes.md` §5). Not a flat
+  "odd context ⇒ predict worse": the entropy does not change, and the
+  inner letters of words carry no Δ. Not the natural order use either:
+  65% of the new Δ is on word starts in the first 16 characters after the
+  cut, and the model is sure of its other choice. It is a narrow
+  discriminating feature. It does not transfer to random or nearest
+  negatives, and its LM cost is flat over every position.
 - **Risk of every synthetic negative:** a shuffled prompt never occurs as
-  an own prompt. So nothing stops the model from scoring all odd contexts
-  lower. Judge by the own bits paired against the control, never by `Δ`.
+  an own prompt. So the model can learn a feature that only separates the
+  synthetic pairs. Judge by the own bits paired against the control, never
+  by `Δ`.
+- **Not tested:** the two-sided contrast with nearest:64 at J 64 (a natural
+  negative, the PMI gradient). Its push is ~0.07 of chance.
 
 ## Step 4: unknown gaps (the Kalman reading)
 
@@ -183,6 +197,29 @@ The gate: step 2 raises the far use, but `Δ_shuffle` stays near 0.
   hijack).
 - Later, a 2 × 2: {Projected, Kalman} × {no gaps, gaps}. Kalman costs 1.35×
   the step (`notes.md` §2).
+- **Why use 2 is the best founded idea here.** It is a plain cross-entropy
+  on real targets: no negative and no second pass, so no cancellation to
+  lose (c04). The chars after a gap have no local context, so their
+  gradient is mostly far use. A position weight cannot isolate that.
+- **Its risks.**
+  - With the state held over a gap of `k`, the model predicts the text `k`
+    chars ahead. That is multi-token prediction with the own head (no
+    extra params). Gloeckle et al. 2024: it helps large and byte-level
+    models, and it hurts small ones. At 1M it competes for the state.
+  - Blank noising (Xie et al. 2017) and word dropout help mostly in the
+    overfit regime. h16 sees ~½ epoch at 14400 (underfit). Keep the rate
+    low.
+  - The model sees the unknowns, so it can learn a gap-only behavior
+    (`Δ ≈ 0` on them: hold the state). That changes nothing on clean text.
+    Only the writes before a gap carry over.
+- **The test of the tally-drift reading.** With `Gain::Projected`, "hold"
+  is the likely answer. A doubt that rises needs a variable for it
+  (`KalmanProjectedNoise`, or a learned counter channel). After a gap, the
+  entropy must grow with `k` (calibrated), and the loss smoothly.
+- **A cheap prototype** without the burn-stack seam: a rare char of the
+  alphabet (`$`, 26 of the 210M train characters) as the blank. The tied
+  head distorts its output row. Only a prototype: the unknown stays out of
+  the vocab.
 
 ## Parked
 
@@ -200,6 +237,17 @@ The gate: step 2 raises the far use, but `Δ_shuffle` stays near 0.
 - **Loss weights.** LongCE (Fang et al. 2024) weights each char by its gain
   from the long context. The weight depends on the target, so it biases the
   model to copy. Use mild weights only.
+- **A position weight** `w(t)` on the LM loss (user): first more weight on
+  the story starts, then on the ends. It does not depend on the target, so
+  it keeps the optimum of each position. It only moves the capacity of a
+  small model between positions, and the dv is the unweighted mean. It is
+  blunt: ~2/3 of the characters are at positions ≥ 256 already (a story is
+  ~800 characters), and most of the loss at a late position is local. The
+  noise cost is small at mild weights: the effective batch is
+  `(E w)²/E w²`, 92% for a linear ramp 0.5 → 1.5. The start-first phase is
+  the short-to-long curriculum of Shortformer (Press et al. 2021) and of
+  the sequence length warmup (Li et al. 2022): it speeds up early
+  training. The grammar is in every position.
 
 ## Rejected
 
@@ -210,6 +258,14 @@ The gate: step 2 raises the far use, but `Δ_shuffle` stays near 0.
   remove that term.
 - **A detached cache at the cut.** It blocks the gradient that trains what
   the model writes. Mask the loss of the prompt instead.
+- **A one-sided contrast** (the other pass detached, c04). It removes the
+  penalty route, but also the cancellation of the fluency gradient. The
+  loss is then the full LM gradient of a few hundred characters per step
+  at ~10× the weight of a packed character: a small-batch LM loss, with
+  ~10× the gradient variance. c04 (λ 3): dv +0.21, and the far use falls.
+  The push (in log-prob space) does not show the size of the parameter
+  gradient. The other pass is the baseline that a variance-reduced form
+  needs.
 - **Distractors** (a sentence of another story in the gap). That is false
   evidence, an outlier. A Kalman filter cannot reject outliers, so the model
   learns read-but-ignore. That generalizes as "distrust recent text", which

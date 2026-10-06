@@ -211,7 +211,7 @@ BEHAVIOR OVERVIEW
 - The program reads and writes the model weights, the optimizer state and the configurations in the artifacts directory (--artifacts-path). Without --artifacts-path, the program creates a new temporary directory and prints its path.
 - With --remove-artifacts and --training, the program deletes the model and optimizer files (and the saved progress) in the artifacts directory before training.
 - The program loads the model and optimizer weights from the artifacts directory if they are present. Otherwise it creates new ones and saves them.
-- --seed, --epochs, --batch-size and --max-lr replace the value in the training config (loaded or created) before the program saves the config. So later runs from the same artifacts directory inherit the value. --epochs also rescales the length of a cosine LR schedule by the same factor, so the schedule still spans the run. --batch-size rescales its length and warmup by the inverse factor (an epoch has that many fewer steps).
+- --seed, --epochs, --batch-size and --max-lr replace the value in the training config (loaded or created) before the program saves the config. So later runs from the same artifacts directory inherit the value. --epochs also rescales the step counts of the LR schedule by the same factor, so the schedule still spans the run (a cosine keeps its warmup). --batch-size rescales them and the warmup by the inverse factor (an epoch has that many fewer steps). --max-lr gives a cosine its max rate and a constant schedule its rate. It scales all rates of a ramp or a sequence, so that their peak becomes LR.
 - --adamw, --sgd and --muon choose the optimizer. --muon puts the hidden weight matrices of the model on Muon, and the other flag (default --adamw) optimizes every other parameter. --adamw and --sgd are exclusive. Without these flags, a new training config gets the default optimizer of the example.
 - In a loaded config, these flags replace the optimizer and keep the LR schedule (see --max-lr). If the new optimizer would ignore the optimizer state that the old optimizer saved, the program panics. (--remove-artifacts with --training removes that state.)
 - Only plain SGD (--sgd alone) has a training step that replays from a captured graph.
@@ -238,9 +238,9 @@ OPTIONS:
                                 number of epochs. Unlimited when absent.
         --max-seconds <S>       Stop training when S seconds have passed since its first step. Unlimited when absent.
     -s, --seed <N>              Replace the RNG seed of the training config (model init, data shuffle, sampling)
-        --epochs <N>            Replace the number of epochs of the training config (rescales a cosine LR schedule)
-        --batch-size <N>        Replace the mini-batch size of the training config (rescales a cosine LR schedule)
-        --max-lr <LR>           Replace the peak rate of the LR schedule (the only rate of a constant schedule)
+        --epochs <N>            Replace the number of epochs of the training config (rescales the LR schedule)
+        --batch-size <N>        Replace the mini-batch size of the training config (rescales the LR schedule)
+        --max-lr <LR>           Replace the peak rate of the LR schedule (a sequence scales all its rates)
         --adamw                 Optimize with AdamW (with --muon: every parameter that Muon does not own)
         --sgd                   Optimize with plain SGD (with --muon: every parameter that Muon does not own)
         --muon                  Put the hidden weight matrices on Muon

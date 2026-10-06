@@ -6,7 +6,8 @@
 //! (the check fails with detached caches).
 
 use super::{
-    ContrastBatch, ContrastConfig, Cut, WordIndex, cut, loss, pair_log_probs, scored, shuffle_sentences,
+    ContrastBatch, ContrastConfig, Cut, WordIndex, cut, loss, pair_log_probs, profiled_pair_log_probs, scored,
+    shuffle_sentences,
 };
 use crate::dataset::VOCAB;
 use crate::test_net::tiny_net;
@@ -54,18 +55,26 @@ fn cut_stays_in_its_bounds() {
     }
 }
 
-/// The log-probabilities `[n]` of `continuation` after `prompt`, from one
-/// `forward` over both (the class latents in front).
-fn reference_log_p(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<1> {
+/// The log-softmax `[1, n, vocab]` of the predictions of `continuation` after
+/// `prompt`, from one `forward` over both (the class latents in front).
+fn reference_log_softmax(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<3> {
     let n = continuation.len();
     let device = net.devices()[0].clone();
     let tokens: Vec<i32> = prompt.iter().chain(&continuation[..n - 1]).map(|&t| t as i32).collect();
     let x = Tensor::<1, Int>::from_ints(tokens.as_slice(), &device).reshape([1, tokens.len()]);
     let (logits, _) = net.forward(x, None, path.clone(), None, None);
     let lead = logits.dims()[1] - tokens.len();
+    log_softmax(logits.narrow(1, lead + prompt.len() - 1, n), 2)
+}
+
+/// The log-probabilities `[n]` of `continuation` after `prompt`, from one
+/// `forward` over both (the class latents in front).
+fn reference_log_p(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<1> {
+    let n = continuation.len();
+    let device = net.devices()[0].clone();
     let targets: Vec<i32> = continuation.iter().map(|&t| t as i32).collect();
     let targets = Tensor::<1, Int>::from_ints(targets.as_slice(), &device).reshape([1, n, 1]);
-    log_softmax(logits.narrow(1, lead + prompt.len() - 1, n), 2)
+    reference_log_softmax(net, path, prompt, continuation)
         .gather(2, targets)
         .reshape([n])
 }
@@ -221,6 +230,73 @@ fn explicit_negatives_match_a_forward_over_each_pair() {
     }
 }
 
+/// The numbers of the array `name` in a line of `contrast-profile.jsonl`.
+fn profile_field(line: &str, name: &str) -> Vec<f32> {
+    let key = format!("\"{name}\":[");
+    let start = line.find(&key).unwrap_or_else(|| panic!("no {name} in {line}")) + key.len();
+    let end = start + line[start..].find(']').unwrap();
+    line[start..end].split(',').map(|v| v.parse().unwrap()).collect()
+}
+
+/// Each line of the profile holds the text of its row, the log-probabilities
+/// of [`pair_log_probs`] (with and without the roll), and the entropies of a
+/// forward over each pair.
+#[test]
+fn profile_lines_hold_the_scores_of_each_character() {
+    let device = test_device();
+    device.seed(0);
+    let net = tiny_net(&device);
+    let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
+    let ids = |len: usize, salt: usize| -> Vec<u8> {
+        (0..len).map(|j| ((j * 5 + salt * 11 + 1) % crate::dataset::VOCAB_SIZE) as u8).collect()
+    };
+    let prompts = [ids(6, 1), ids(4, 2), ids(7, 3)];
+    let negatives = [ids(3, 7), ids(7, 8), ids(5, 9)];
+    let continuations = [ids(5, 4), ids(5, 5), ids(5, 6)];
+    let p: Vec<&[u8]> = prompts.iter().map(Vec::as_slice).collect();
+    let neg: Vec<&[u8]> = negatives.iter().map(Vec::as_slice).collect();
+    let c: Vec<&[u8]> = continuations.iter().map(Vec::as_slice).collect();
+    let tol = dtype_tol(1e-4);
+    for explicit in [false, true] {
+        let batch = match explicit {
+            true => ContrastBatch::with_negatives(&p, &neg, &c, 8, &device),
+            false => ContrastBatch::new(&p, &c, 8, &device),
+        };
+        let (own_ref, other_ref) = pair_log_probs(&net, &path, batch.clone());
+        let mut log = Vec::new();
+        let (own_kn, other_kn) = profiled_pair_log_probs(&net, &path, batch, &mut log);
+        assert!(max_rel_diff(own_kn.clone(), own_ref) < tol, "own, explicit {explicit}");
+        assert!(max_rel_diff(other_kn.clone(), other_ref) < tol, "other, explicit {explicit}");
+        let log = String::from_utf8(log).unwrap();
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.len(), 3, "one line per row");
+        for (i, line) in lines.iter().enumerate() {
+            let text = VOCAB.decode(&[&prompts[i][prompts[i].len() - 1..], &continuations[i][..]].concat());
+            assert!(line.starts_with(&format!("{{\"text\":{text:?},")), "text of row {i}: {line}");
+            // With no explicit negative, row `i` reads its continuation after
+            // the prompt of row `i − 1`.
+            let negative = if explicit { &negatives[i] } else { &prompts[(i + 2) % 3] };
+            let row = |t: &Tensor<2>| -> Vec<f32> { t.clone().narrow(0, i, 1).into_data().try_into_vec_as().unwrap() };
+            let entropy = |prompt: &[u8]| -> Vec<f32> {
+                let log_p = reference_log_softmax(&net, &path, prompt, &continuations[i]);
+                (log_p.clone().exp() * log_p).sum_dim(2).neg().into_data().try_into_vec_as().unwrap()
+            };
+            let fields = [
+                ("own", row(&own_kn)),
+                ("other", row(&other_kn)),
+                ("h_own", entropy(&prompts[i])),
+                ("h_other", entropy(negative)),
+            ];
+            for (name, want) in fields {
+                let got = profile_field(line, name);
+                assert_eq!(got.len(), 5, "{name} of row {i}");
+                let diff = got.iter().zip(&want).map(|(g, w)| (g - w).abs()).fold(0.0, f32::max);
+                assert!(diff < tol, "{name} of row {i} (explicit {explicit}): {got:?} against {want:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn weight_is_zero_then_ramps() {
     let config = ContrastConfig::new().with_weight(0.8).with_start(100).with_ramp(40);
@@ -245,6 +321,16 @@ impl ModuleMapper for Leaf {
 
 #[test]
 fn loss_matches_a_forward_over_each_pair() {
+    loss_matches_reference(false);
+}
+
+/// The reference of the one-sided loss detaches its other log-probs.
+#[test]
+fn one_sided_loss_matches_a_forward_over_each_pair() {
+    loss_matches_reference(true);
+}
+
+fn loss_matches_reference(one_sided: bool) {
     let device = test_device().autodiff();
     device.seed(0);
     let net = tiny_net(&device).map(&mut Leaf);
@@ -263,7 +349,8 @@ fn loss_matches_a_forward_over_each_pair() {
         .with_prompt_max(prompt_max)
         .with_continuation(n)
         .with_skip(2)
-        .with_lm(true);
+        .with_lm(true)
+        .with_one_sided(one_sided);
     let p: Vec<&[u8]> = prompts.iter().map(Vec::as_slice).collect();
     let c: Vec<&[u8]> = continuations.iter().map(Vec::as_slice).collect();
     let batch = ContrastBatch::new(&p, &c, prompt_max, &device);
@@ -274,6 +361,7 @@ fn loss_matches_a_forward_over_each_pair() {
     let other: Vec<Tensor<1>> = (0..k).map(|i| log_p(&prompts[(i + k - 1) % k], &continuations[i])).collect();
     let own_kn = Tensor::stack::<2>(own, 0);
     let other_kn = Tensor::stack::<2>(other, 0);
+    let other_kn = if one_sided { other_kn.detach() } else { other_kn };
     let prefix = (own_kn.clone() - other_kn.clone()).narrow(1, 2, n - 2).cumsum(1);
     // The push on the host: `4/(m + 1) · mean_{i,t} (t + 1)·σ(−Δ_≤t)`.
     let m = n - 2;

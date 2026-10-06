@@ -83,17 +83,32 @@ to it). Read `handoff.md` first.
   ~7.5k scored chars per step.
 - **wd 0.1** for Muon and AdamW (`gen.py … wd=0.1`).
 - **LR**: 4e-3 constant to step 4630, then 1e-3 (`--max-lr 1e-3` on the
-  extension).
-- **Milestones** in fresh steps: stable 2630 / 4630 / 8000 / 12000, each with
-  a decay branch of M/5 (600 / 1000 / 1600 / 2400). `screen.sh` runs the
-  first, `extend.sh` the others. Each member has a fresh packed history, so
-  `agg.py` compares the members bucket by bucket.
-- **Rank by the decayed (`-d`) valid.** A constant-LR reading misleads (the
-  decay recovers 0.04–0.12). The noise is ±0.005–0.008.
+  extension). From 16000 on, 5e-4 (tested against a 1e-3 control).
+- **Milestones** in fresh steps: stable 2630 / 4630 / 8000 / 12000 / 16000
+  / 20000, each with a decay branch of M/5 (600 / 1000 / 1600 / 2400 /
+  3200 / 4000). `screen.sh` runs the first, `extend.sh` the others. Each
+  member has a fresh packed history, so `agg.py` compares the members
+  bucket by bucket. One epoch is **28021 steps** (the batches of the
+  packed epoch).
+- **The trunk and its leaves.** The stable runs form a trunk at constant
+  LR. Each decay branch is a leaf: nothing continues from it. Re-warming
+  a decayed model loses the gain of its decay.
+- **Rank by the decayed (`-d`) valid.** A constant-LR reading misleads: the
+  decay recovers 0.04–0.12, and more as the run goes on (`notes.md` §6).
+  The noise is ±0.005–0.008.
 - The *train* loss in the logs is a per-window average (for curves only).
   Compare train buckets only between runs with the same wd and LR schedule.
-- The single-run LR schedule (a cosine fit to the step-down points) runs from
-  zero only when the search ends (user).
+- No from-scratch run of the final schedule (user): the trunk with its
+  step-downs and a last leaf is that run. A from-scratch run serves a new
+  config.
+- **The LR in the config.** burn-stack has `Lr::Sequence` (segments from a
+  global step, each counting from its start) and `Lr::Linear`. The scripts
+  still write the old form: a constant LR is `CosineAnnealing` over 10M
+  steps (its leftover `min_lr` 4e-3 makes it drift by +7e-8 by 28021), and
+  a leaf is the warmup trick of `decay.py`. The plan: `decay.py` appends a
+  cooldown segment, a `stage.py` appends a step-down, and `gen.py` writes
+  sequences. On a sequence, `--max-lr` scales the whole schedule: never
+  use it for a step-down.
 
 ## Metric
 
@@ -141,9 +156,11 @@ to it). Read `handoff.md` first.
   different batch orders from step 2, and dv moves by ~0.01. With 1 worker
   (the `*-w1` cfgs: `num_workers` 1, the same speed) the order is fixed:
   the per-step losses agree to ~1e-7 for ~50 steps, then float noise grows
-  to a mean gap of ~6e-3 per step by step 250. The noise of a final dv on
-  1 worker is not measured yet. Compare a treatment only with a control on
-  the same harness and launcher.
+  to a mean gap of ~6e-3 per step by step 250. At step 500 the own far
+  bits of two such twins are ~0.001 apart, but their use is 0.008 apart
+  (`notes.md` §5). The noise of a final dv on 1 worker is not measured
+  yet. Compare a treatment only with a control on the same harness and
+  launcher.
 - CLI: burn-stack's `AppArgs` flags first (`-a -c -m -b -i --resume --seed
   --max-lr --valid-batches …`), then after `--` the example flags (corpus,
   packing, `--pack-align N` (a multiple of the chunk: chunk 64 can train on
@@ -167,7 +184,11 @@ to it). Read `handoff.md` first.
   decay branch too). b01 and c03 used it with the `*-w1` cfg and E = 250.
 - `ceval.sh [-g] [-n N] [-r root] <run | snap/<run>/<step>> [-- flags]`:
   `--contrast-eval` on a copy (`ceval*/`): the push and the `Δ` of each cut
-  × negative × J, with no backward. A GPU job (~1 min).
+  × negative × J, with no backward. A GPU job (~1 min). With `--
+  --contrast-profile` (and `--contrast-cut`, `--contrast-negative`), only
+  that pair runs, and `contrast-profile.jsonl` gets the scores of each
+  character. `cprof.py <dir>…` reads them: delta, the entropy shift and the
+  own cost per character class and position, paired with the first dir.
 - `extend.sh <src> <new> <N1> <N2> [args]`: from a stable checkpoint (never a
   `-d`), +N1 steps (`--resume`, and `--max-lr` sets the new constant LR),
   then a decay branch `runs/<new>-d` of N2.
@@ -178,13 +199,22 @@ to it). Read `handoff.md` first.
   `CosineAnnealing` with `min_lr = max_lr` is warmup + constant).
 - `wait.sh <run> [runs…]`: the silent waiter (one summary, an OOM guard at
   5400 MiB total).
-- `queue.sh` (launch with `nohup … &`) runs the lines of `queue.txt` in
-  order, one at a time, and logs `start`/`done`/`fail` into `queue.log`. To
-  add, drop or reorder the pending runs, edit `queue.txt` (not the script).
+- `queue.sh` (launch with `setsid nohup ./queue.sh > /dev/null 2>&1 <
+  /dev/null &`, so that the end of a tool shell cannot kill it) runs the
+  lines of `queue.txt` in order, one at a time, and logs
+  `start`/`done`/`fail` into `queue.log`. To add, drop or reorder the
+  pending runs, edit `queue.txt` (not the script). It runs as `bash
+  ./queue.sh`: match it with `pgrep -f queue.sh` (not `-x`). An
+  interruption of a Claude turn does not stop it: `pkill -x ts-cuda;
+  pkill -f queue.sh` does. `queue.pending.txt` holds the parked runs.
   `qwait.sh` (in the background) prints once when the next line ends: its
   summary and the errors, with the OOM guard of `wait.sh`.
 - `agg.py [-b N] [runs]`: one row per run, ranked by dv (buckets, slope,
   ranks). `summ.py [-c N] <run>…`: steps/s, buckets, every validation.
+- `cool.py <run-d>…`: the train bits of each decay branch in 10 bins of
+  its length, and the tail (the last bin, at min_lr) with its s.e. A tail
+  that still falls means that the cooldown ended before the weights
+  settled.
 - `args.sh` (sourced by the scripts) adds `--max-vram 3750` unless given.
 - Data: `stories=262144` (210M chars, cached). A `--resume` shuffles the rest
   of the epoch again. `step` in `metrics.jsonl` counts schedule steps, and
