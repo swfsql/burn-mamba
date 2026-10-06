@@ -618,6 +618,9 @@ Under `../` (not analyzed here):
     `Edit`s.
   - Bash stays the tool for *reading* and *inspecting* (`cat`, `sed -n`, `rg`,
     `grep`) and for throwaway files outside the crate (for example, in `/tmp`).
+- A dangerous-command-guard hook (`dcg`) checks each Bash command. It also
+  blocks a `>` redirect to a path that holds a variable: use a literal
+  path, or a script file.
 - **Waiting**: if a command or a wait can take more than ~1 min (a build, a
   run, a chain of runs, one step of a chain such as a probe or an
   evaluation), do not hold the turn: no foreground loop (`until`, `while`),

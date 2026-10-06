@@ -27,7 +27,10 @@ mnist-class (`gen.py untie=1`).
 - The plain cross-entropy does better in the long run than the auxiliary
   losses tried so far.
 - **Next priority: larger state sizes**, probably from scratch, for a long
-  run, at h16 g1 (user, 2026-10-06).
+  run, at h16 g1 (user, 2026-10-06). A long run is one config extended in
+  many steps, with a measurement at each milestone, not one uninterrupted
+  run.
+- Prefer cosine anneals between LR rates to jumps (user).
 
 ## State
 
@@ -78,25 +81,50 @@ The pool. Each cell: decayed valid / far use (pairing i+1). Up to @14400:
   3149 MB, 671 ms/step (as before). `extend.sh p20k-h16-lr05 smoke-ext 2 2
   --lr 2.5e-4`: 2.5e-4 at 20001–20002 (the stage from 20000), then the
   decay segment from 20002, as `lrseq.rate` gives it. `ctx.sh -g -n 256 -r
-  ctxsmoke`: the six rows (with `letters` and `first`). The runs
-  `smoke-ext{,-d}` and `probe-s1k-u1-wd1-h16-1791327549` are tests only.
+  ctxsmoke`: the six rows (with `letters` and `first`). The test artifacts
+  are deleted, but for `probe-s1k-u1-wd1-h16-1791327549` (a test only).
 - The trunks and the pool cfgs hold LR sequences (`seq.py`). The older
   runs keep the old form: `seq.py` rewrites a run before it extends again.
 - Keep `--max-vram` on every training run (the scripts add 3750).
 
 ## Next steps
 
-1. After the commit: a clean `./build.sh` (the same code, a clean tag).
-2. **Larger state sizes at h16 g1** (user: the priority). The re-mention
-   probe says that the state size limits the binding of entities. Plan:
-   `params.sh` and `probe.sh` (10 steps) for h16 × r96 / r128 at `d_model`
-   ~150 (B/C cost ~+100k params at r128), then one from-scratch long run
-   with the protocol's step-downs in its config (`gen.py …
-   stages=4630:1e-3,16000:5e-4`). Judge it by the dv, the own far bits and
-   the re-mention rows of `ctx.sh` against h16 at the same milestones.
-3. The full-epoch leaves and the cooldown pair (Queue, pending), when the
+1. A clean `./build.sh` (the committed code is the installed dirty build).
+2. **The seed noise of the re-mention rows** (~80 s, before any run on the
+   state size): `ctx.sh -g -n 2048 -r ctxrg n04-h16-s1-d`, then `ctxstat.py
+   ctxrg/k16-Bwd-h16-d ctxrg/n04-h16-s1-d` (h16 @3230, seeds 0 and 1). The
+   r128 result (first letters −0.037 ± 0.010 against B) carries only the
+   error of the stories, and float noise alone moved the far use by 0.008
+   (`notes.md` §5). If the seed spread of the first-letter own bits is well
+   below 0.037, the direction of the state size is solid. If it is close,
+   r128 needs a second seed first.
+3. **Larger state sizes at h16 g1** (user: the priority). The re-mention
+   probe says that the state size limits the binding of entities.
+   - `params.sh` and `probe.sh` (10 steps) for h16 × r96 / r128 at
+     `d_model` ~150 (B/C cost ~+100k params at r128).
+   - A screen (2630 + 600) against h16 @3230 (first letters 2.284): a
+     go/no-go in under an hour. The r128 effect showed at @3230 already.
+   - Then the long run of one config, from scratch, but as the trunk and
+     its leaves of the protocol: many extensions, each with a measurement
+     (a decayed leaf and `ctx.sh`) at its milestone. Never one
+     uninterrupted run of many hours (user).
+4. **Rank also by the first-letter re-mention cost** (the `first` row of
+   `ctx.sh`), beside the dv and the own far bits. For r128 it moved 4–5×
+   more than the far loss, and it tracks the binding failure of the
+   samples.
+5. **The LR of the new config: step down earlier and smoothly** (user:
+   agreed). At least `stages=4630:1e-3,12000:5e-4` (5e-4 tied 1e-3 from
+   8000, the 1e-3 readout flattened by 16000, the excess was 0.052 at
+   12000). Better: cosine anneals between the rates, not jumps (user), e.g.
+   1e-3 → 5e-4 over 8000–12000. A segment `{from: 8000, CosineAnnealing {
+   max_lr 1e-3, min_lr 5e-4, warmup_steps 0, total_steps 4000 }}` holds 5e-4
+   after its end, so the config can hold it now, and `decay.py` reads the
+   rate of a leaf in the middle of an anneal. But `gen.py stages=` and
+   `stage.py` write only jumps: give them an anneal form first (e.g.
+   `A-B:LR`, a cosine from the rate at A to LR at B).
+6. The full-epoch leaves and the cooldown pair (Queue, pending), when the
    user says so.
-4. The parked pool work (Queue). More ideas: a longer `dt` init range, the
+7. The parked pool work (Queue). More ideas: a longer `dt` init range, the
    distance curve (`far-use.md` step 1.3).
-5. Far use, if it comes back: gapped rows (`far-use.md` step 4), with a
+8. Far use, if it comes back: gapped rows (`far-use.md` step 4), with a
    cheap prototype (`$` as the blank).
