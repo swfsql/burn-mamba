@@ -59,11 +59,11 @@
   (`-- --pack`), and a measure of how much a trained model uses the earlier
   part of a story (`-- --context-use`).
 - **`hnet-stories`** ([`hnet-stories/README.md`](hnet-stories/README.md), work
-  in progress): a character-level H-Net on the same corpus. The model learns
-  where its chunks start: Mamba-2 stacks run on the characters, and a Mamba-3
-  main network runs on the chunks. Its README covers the stages, the start
-  rows that open a story, the ratio loss and the learning rate of each stage,
-  and the chunk view of a sample (`-- --show-chunks`).
+  in progress): a character-level H-Net of Mamba-3 stacks on the same corpus.
+  The model learns where its chunks start: the stages run on the characters,
+  and the main network runs on the chunks. Its README covers the stages, the
+  start rows that open a story, the ratio loss and the learning rate of each
+  stage, and the chunk view of a sample (`-- --show-chunks`).
 
 #### Examples Structure
 

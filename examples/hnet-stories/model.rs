@@ -1,5 +1,6 @@
 //! The model config of the `hnet-stories` example: a small character-level
-//! H-Net, and the recipe that trains it. See [`model_config`].
+//! H-Net of Mamba-3 stacks, and the recipe that trains it. See
+//! [`model_config`].
 //!
 //! This example is a work in progress. The sizes and hyperparameters here are
 //! placeholders until a parameter search.
@@ -8,8 +9,7 @@ use crate::cli::ModelFlags;
 use crate::dataset::VOCAB_SIZE;
 use burn::prelude::*;
 use burn_mamba::prelude::{
-    Mamba2Config, Mamba3Config, MambaBlockConfig, MambaHNetVocabNet, MambaHNetVocabNetConfig,
-    RotationKind,
+    Mamba3Config, MambaBlockConfig, MambaHNetVocabNet, MambaHNetVocabNetConfig, RotationKind,
 };
 use burn_stack::modules::hnet::{HNetShape, HNetStageShape, HNetVocabShape};
 use burn_stack::modules::{GatedMlpConfig, ModelConfigExt, NetworkShape};
@@ -20,6 +20,12 @@ const STAGE_WIDTHS: [usize; 2] = [32, 48];
 
 /// The width of the main network.
 const MAIN_WIDTH: usize = 64;
+
+/// The state rank of the blocks of every stage.
+const STAGE_STATE_RANK: usize = 32;
+
+/// The state rank of the blocks of the main network.
+const MAIN_STATE_RANK: usize = 64;
 
 /// The target mean chunk length of each stage, in rows of its own input. At
 /// stage 0 that is characters: about a short word.
@@ -78,38 +84,30 @@ pub fn lr_multipliers(widths: &[usize], main_width: usize, targets: &[f64]) -> V
     multipliers
 }
 
-/// A block config of `family` at width `d`.
-fn block(family: &str, d: usize) -> MambaBlockConfig {
-    match family {
-        "mamba2" => MambaBlockConfig::Mamba2(
-            Mamba2Config::new(d)
-                .with_expand(2)
-                .with_per_head_dim(16)
-                .with_state_rank(32)
-                .with_ngroups(1),
-        ),
-        "mamba3" => MambaBlockConfig::Mamba3(
-            Mamba3Config::new(d)
-                .with_expand(2)
-                .with_per_head_dim(16)
-                .with_state_rank(if d == MAIN_WIDTH { 64 } else { 32 })
-                .with_ngroups(1)
-                .with_mimo_rank(1)
-                .with_rope_fraction(1.0)
-                .with_has_proj_bias(true)
-                .with_has_outproj_norm(true)
-                .with_rotation(RotationKind::Complex2D),
-        ),
-        other => panic!("unknown block family {other:?}"),
-    }
+/// A Mamba-3 block config at width `d` with a state of rank `state_rank`.
+fn mamba3(d: usize, state_rank: usize) -> MambaBlockConfig {
+    MambaBlockConfig::Mamba3(
+        Mamba3Config::new(d)
+            .with_expand(2)
+            .with_per_head_dim(16)
+            .with_state_rank(state_rank)
+            .with_ngroups(1)
+            .with_mimo_rank(1)
+            .with_rope_fraction(1.0)
+            .with_has_proj_bias(true)
+            .with_has_outproj_norm(true)
+            .with_rotation(RotationKind::Complex2D),
+    )
 }
 
 /// The character-level H-Net, with `flags.stages` stages.
 ///
-/// The layout follows the reference at a tiny size. The stacks at character
-/// resolution are short and mixer-only. The main network is deeper and has a
-/// SwiGLU MLP. Every stack takes the reference init (`N(0, 0.02)`, with the
-/// residual rescale over the stacks down to it).
+/// The layout follows the reference at a tiny size, with Mamba-3 in every
+/// stack. The reference has Mamba-2 in the stages and attention in the main
+/// network. The stacks at character resolution are short and mixer-only. The
+/// main network is deeper and has a SwiGLU MLP. Every stack takes the
+/// reference init (`N(0, 0.02)`, with the residual rescale over the stacks
+/// down to it).
 pub fn model_config(flags: &ModelFlags) -> HNetStoriesConfig {
     let init = || InitPolicy::new().with_residual_paths(InitPolicy::default_residual_paths());
     let outer = || NetworkShape::new(2).with_init(Some(init()));
@@ -129,8 +127,8 @@ pub fn model_config(flags: &ModelFlags) -> HNetStoriesConfig {
     HNetStoriesConfig::new(
         MambaHNetVocabNetConfig::new(
             shape,
-            widths.iter().map(|&d| block(&flags.stage_family, d)).collect(),
-            block(&flags.main_family, MAIN_WIDTH),
+            widths.iter().map(|&d| mamba3(d, STAGE_STATE_RANK)).collect(),
+            mamba3(MAIN_WIDTH, MAIN_STATE_RANK),
         ),
         targets.clone(),
         lr_multipliers(widths, MAIN_WIDTH, &targets),

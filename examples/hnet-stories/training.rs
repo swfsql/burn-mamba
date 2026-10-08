@@ -106,7 +106,7 @@ pub fn train(
 #[derive(Clone, Debug)]
 pub struct Run {
     /// The SSD paths of every chunkwise `forward`: (the stages, the main
-    /// network). Each is the default of its family.
+    /// network). Both are the Mamba-3 default.
     pub paths: (MambaSsdPath, MambaSsdPath),
     /// `--step-mode`: how a decode step runs the inner network of a stage.
     pub step_mode: StepMode,
@@ -132,14 +132,13 @@ impl Run {
         let n_stages = config.model.stage_blocks.len();
         assert_eq!(config.ratio_targets.len(), n_stages, "one ratio target per stage");
         assert_eq!(config.lr_multipliers.len(), n_stages + 1, "one LR multiplier per stage, then the main network");
-        let path = |block: &MambaBlockConfig| match block {
-            MambaBlockConfig::Mamba1(_) => MambaSsdPath::Mamba1,
-            MambaBlockConfig::Mamba2(_) => MambaSsdPath::mamba2_default(),
-            MambaBlockConfig::Mamba3(_) => MambaSsdPath::mamba3_default(),
-        };
-        let stage = config.model.stage_blocks.first().unwrap_or(&config.model.main_block);
+        assert_eq!(
+            config.model.families(),
+            ("mamba3", "mamba3"),
+            "this example runs Mamba-3 in every stack"
+        );
         Self {
-            paths: (path(stage), path(&config.model.main_block)),
+            paths: (MambaSsdPath::mamba3_default(), MambaSsdPath::mamba3_default()),
             step_mode: cli.step_mode,
             graphs,
             show_chunks: cli.show_chunks,

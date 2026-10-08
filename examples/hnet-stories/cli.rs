@@ -10,8 +10,6 @@ use burn_stack::modules::hnet::StepMode;
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
     "    --stages <N>           A new model: the number of stages, 1 or 2 (default 1)\n",
-    "    --stage-family <F>     A new model: the block family of the encoders and decoders, mamba2 (default) or mamba3\n",
-    "    --main-family <F>      A new model: the block family of the main network, mamba3 (default) or mamba2\n",
     "    --step-mode <M>        How a decode step runs the inner network of a stage: masked (default, capturable) or gathered (only the rows that start a chunk, read on the host)\n",
     "    --show-chunks          Mark the chunk starts in each sample: | where stage 0 starts a chunk, ‖ where stage 1 also does\n",
     "    --chunk-log <N>        Print the chunk ratios of each stage once per N training windows (default 100, 0 never)\n",
@@ -24,10 +22,6 @@ const HELP: &str = concat!(
 pub struct ModelFlags {
     /// `--stages`.
     pub stages: usize,
-    /// `--stage-family`.
-    pub stage_family: String,
-    /// `--main-family`.
-    pub main_family: String,
 }
 
 /// The parsed flags.
@@ -52,21 +46,7 @@ impl Cli {
         let help = format!("hnet-stories' own flags (after --):\n{}\n{HELP}", Overrides::HELP);
         let mut pargs = app_args.extra(&help);
         let overrides = Overrides::parse(&mut pargs);
-        let family = |value: &str| match value {
-            "mamba2" | "mamba3" => Ok(value.to_string()),
-            other => Err(format!("a family must be 'mamba2' or 'mamba3', got {other:?}")),
-        };
-        let model = ModelFlags {
-            stages: pargs.opt_value_from_str("--stages").unwrap().unwrap_or(1),
-            stage_family: pargs
-                .opt_value_from_fn("--stage-family", family)
-                .unwrap()
-                .unwrap_or_else(|| "mamba2".to_string()),
-            main_family: pargs
-                .opt_value_from_fn("--main-family", family)
-                .unwrap()
-                .unwrap_or_else(|| "mamba3".to_string()),
-        };
+        let model = ModelFlags { stages: pargs.opt_value_from_str("--stages").unwrap().unwrap_or(1) };
         assert!(matches!(model.stages, 1 | 2), "--stages must be 1 or 2");
         let step_mode = pargs
             .opt_value_from_fn("--step-mode", |value: &str| match value {

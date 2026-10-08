@@ -4,9 +4,8 @@
 //! **characters** of the [TinyStories-GPT4-clean] corpus, the corpus of the
 //! `tiny-stories` example. The model learns where its chunks start. Each
 //! stage keeps the characters where its router starts a chunk, runs the next
-//! level on that shorter sequence, and expands the result back. By default,
-//! Mamba-2 stacks run at character resolution and a Mamba-3 stack runs on the
-//! chunks. This example is a work in progress: its sizes and hyperparameters
+//! level on that shorter sequence, and expands the result back. Every stack is
+//! Mamba-3. This example is a work in progress: its sizes and hyperparameters
 //! are placeholders until a parameter search.
 //!
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
@@ -72,6 +71,9 @@ pub fn launch(app_args: &AppArgs) {
     // setup training and model configs (placeholder values, see the header)
     let batch_size = 8;
     let num_epochs = 16;
+    // Characters per training window. Most stories (~820 characters on
+    // average) fit in one window, so most runs are one window long.
+    let seq_len = 1024;
     let loaded = app_args.load_training_config::<TinyStoriesConfig>();
     let is_fresh = loaded.is_none();
     let mut config = loaded.unwrap_or_else(|| {
@@ -85,6 +87,7 @@ pub fn launch(app_args: &AppArgs) {
                 .with_batch_size(app_args.batch_size.unwrap_or(batch_size))
                 .with_num_workers(2),
         )
+        .with_seq_len(seq_len)
     });
     cli.overrides.apply(&mut config);
     assert!(

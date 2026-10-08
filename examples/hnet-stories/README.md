@@ -25,15 +25,15 @@ cargo run --release --example hnet-stories --features backend-flex -- --inferenc
 
 `model.rs` holds the config. One stage is the default:
 
-| Part | Family | Width | Stack |
+| Part | Width | State rank | Stack |
 |---|---|---|---|
-| stage 0 (characters) | Mamba-2 | 32 | 2 encoder layers, 2 decoder layers, no MLP |
-| stage 1 (`--stages 2`) | Mamba-2 | 48 | 2 encoder layers, 2 decoder layers, no MLP |
-| main network | Mamba-3 | 64 | 4 layers with a SwiGLU MLP |
+| stage 0 (characters) | 32 | 32 | 2 encoder layers, 2 decoder layers, no MLP |
+| stage 1 (`--stages 2`) | 48 | 32 | 2 encoder layers, 2 decoder layers, no MLP |
+| main network | 64 | 64 | 4 layers with a SwiGLU MLP |
 
-- Mamba-2 at character resolution and a different mixer inside follow the
-  reference (which uses attention inside). `--stage-family mamba3` and
-  `--main-family mamba2` change the families of a new model.
+- Every stack is Mamba-3, with the complex (`Complex2D`) rotation, as in
+  `tiny-stories`. The reference has Mamba-2 in the stages and attention in the
+  main network.
 - The embedding is tied to the LM head, and a token is the pair (character,
   case flag), as in `tiny-stories`.
 - Four learnable **start rows** open every story (`n_start_tokens`). They go
@@ -58,8 +58,9 @@ run keeps it:
   step and is narrower, so it takes a larger rate.
 - **Runs of windows.** A story trains window by window, and the state carries
   from one window to the next (see "Runs and the frontier" in the
-  `tiny-stories` README). The first window of a story opens with the start
-  rows. An H-Net takes no packed rows (`--pack`): its chunks would move the
+  `tiny-stories` README). A window holds 1024 characters (`-- --seq-len`), so
+  most stories fit in one window. The first window of a story opens with the
+  start rows. An H-Net takes no packed rows (`--pack`): its chunks would move the
   resets.
 
 ## Sampling
