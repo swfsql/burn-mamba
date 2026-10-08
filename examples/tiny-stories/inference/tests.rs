@@ -19,7 +19,7 @@
 
 use super::{PREFILL_CHUNK, open, prefill};
 use crate::common::cli::{load_model, load_model_config};
-use crate::dataset::{VOCAB, VOCAB_SIZE};
+use crate::dataset::{FIRST_LETTER, UPPER, VOCAB, VOCAB_SIZE, pair};
 use crate::test_net::{N_LATENTS, tiny_net};
 use crate::training::Run;
 use burn::prelude::*;
@@ -62,9 +62,10 @@ fn eager_run(chunk_len: Option<usize>) -> Run {
     }
 }
 
-fn ids(tokens: &[u8], device: &Device) -> Tensor<2, Int> {
-    let ids: Vec<i32> = tokens.iter().map(|&t| t as i32).collect();
-    Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([1, tokens.len()])
+/// The pairs `[1, len, 2]` of cased `tokens`.
+fn pairs(tokens: &[u8], device: &Device) -> Tensor<3, Int> {
+    let pairs: Vec<i32> = tokens.iter().flat_map(|&t| pair(t)).collect();
+    Tensor::<1, Int>::from_ints(pairs.as_slice(), device).reshape([1, tokens.len(), 2])
 }
 
 /// The logits of the last position.
@@ -73,14 +74,25 @@ fn last(logits: Tensor<3>) -> Tensor<2> {
     logits.narrow(1, rows - 1, 1).squeeze_dim::<2>(1)
 }
 
-/// The mean bits per character of `targets` under `logits` (one row each).
+/// The mean bits per character of the cased `targets` under `logits` (one
+/// row `[1, VOCAB_SIZE + 1]` each): the id, plus the case of a letter.
 fn bits(logits: &[Tensor<2>], targets: &[u8]) -> f64 {
     let total: f64 = logits
         .iter()
         .zip(targets)
         .map(|(l, &t)| {
-            let log_p = burn::tensor::activation::log_softmax(l.clone(), 1);
-            -log_p.narrow(1, t as usize, 1).into_scalar::<f32>() as f64
+            let [id, flag] = pair(t);
+            let vocab = l.clone().narrow(1, 0, VOCAB_SIZE);
+            let log_p = burn::tensor::activation::log_softmax(vocab, 1);
+            let primary = -log_p.narrow(1, id as usize, 1).into_scalar::<f32>() as f64;
+            let z = l.clone().narrow(1, VOCAB_SIZE, 1).into_scalar::<f32>() as f64;
+            let p_upper = 1.0 / (1.0 + (-z).exp());
+            let case = match (id as usize >= FIRST_LETTER, flag) {
+                (false, _) => 0.0,
+                (true, 1) => -p_upper.ln(),
+                (true, _) => -(1.0 - p_upper).ln(),
+            };
+            primary + case
         })
         .sum();
     total / targets.len() as f64 / std::f64::consts::LN_2
@@ -109,7 +121,7 @@ fn check_decode(
     let (_, primed) = net.prime(1, None, Some(&mut primed_class));
     assert!(primed.is_some(), "the Start latents leave a cache");
     let (want, _) =
-        net.forward(ids(tokens, device), primed, run.ssd_path.clone(), Some(&mut primed_class), None);
+        net.forward(pairs(tokens, device), primed, run.ssd_path.clone(), Some(&mut primed_class), None);
     let want = last(want);
     assert_close(logits.clone(), want.clone(), tol, &format!("length {len}: prefill vs prime + forward"));
 
@@ -125,7 +137,7 @@ fn check_decode(
     // The decode: teacher-forced steps after each opening, against one
     // `forward` over the prompt and the continuation.
     let whole = [tokens, continuation].concat();
-    let (all, _) = net.forward(ids(&whole, device), None, run.ssd_path.clone(), None, None);
+    let (all, _) = net.forward(pairs(&whole, device), None, run.ssd_path.clone(), None, None);
     // The rows of the latents come first, then one row per token.
     let lead = all.dims()[1] - whole.len();
     assert_eq!(lead, N_LATENTS, "one row per latent, then one per token");
@@ -134,7 +146,7 @@ fn check_decode(
     let mut scored = vec![row(len - 1)];
     let mut openings = [(caches, class), (one_pass_caches, one_pass_class)];
     for (k, &token) in continuation.iter().enumerate().take(continuation.len() - 1) {
-        let x = Tensor::<1, Int>::from_ints([token as i32], device);
+        let x = Tensor::<1, Int>::from_ints(pair(token), device).reshape([1, 2]);
         let want = row(len + k);
         for (path, (caches, class)) in ["prefill", "one pass"].iter().zip(&mut openings) {
             let (got, next) = net.step(x.clone(), Some(caches.clone()), Some(class));
@@ -163,11 +175,16 @@ fn the_latents_run_before_the_prompt() {
     assert!(net.only_start_latents(), "the prefill path needs Start latents only");
     // One prefill across the prompts, as `infer` holds it.
     let mut chunked = prefill(&net, &run, &device);
+    // A cased token: every fourth letter is upper case.
+    let cased = |i: usize, id: usize| {
+        let id = id as u8;
+        if i % 4 == 0 && id as usize >= FIRST_LETTER { id | UPPER } else { id }
+    };
     for len in [1, PREFILL_CHUNK - 1, PREFILL_CHUNK, PREFILL_CHUNK + 1] {
-        // Different ids for every length.
-        let tokens: Vec<u8> = (0..len).map(|i| ((i * 5 + len * 3) % VOCAB_SIZE) as u8).collect();
+        // Different tokens for every length.
+        let tokens: Vec<u8> = (0..len).map(|i| cased(i, (i * 5 + len * 3) % VOCAB_SIZE)).collect();
         let continuation: Vec<u8> =
-            (0..CONTINUATION).map(|i| ((i * 7 + len) % VOCAB_SIZE) as u8).collect();
+            (0..CONTINUATION).map(|i| cased(i + 1, (i * 7 + len) % VOCAB_SIZE)).collect();
         check_decode(&net, &shifted, &run, &device, &mut chunked, &tokens, &continuation, 1e-4);
     }
 }
@@ -175,12 +192,12 @@ fn the_latents_run_before_the_prompt() {
 /// The two prompts of the user, each with a continuation that stays on topic.
 const CHECKPOINT_PROMPTS: [(&str, &str); 2] = [
     (
-        "lily likes cats and dogs. she asked her mom for a dog and her mom said no, so instead she asked",
-        " her mom for a cat. her mom said yes, and lily was very happy. she named the cat tom.",
+        "Lily likes cats and dogs. She asked her mom for a dog and her mom said no, so instead she asked",
+        " her mom for a cat. Her mom said yes, and Lily was very happy. She named the cat Tom.",
     ),
     (
-        "alice and jack walked up the street and met a girl in a red dress. the girl said to them, \"hi, i'm jane. what are your names?\"",
-        "\n\"i'm alice, and this is jack,\" said alice. jane smiled and said, \"do you want to play with me?\"",
+        "Alice and Jack walked up the street and met a girl in a red dress. The girl said to them, \"Hi, I'm Jane. What are your names?\"",
+        "\n\"I'm Alice, and this is Jack,\" said Alice. Jane smiled and said, \"Do you want to play with me?\"",
     ),
 ];
 
@@ -202,7 +219,7 @@ fn a_checkpoint_decodes_as_it_scores() {
     let run = eager_run(Some(128));
     let mut chunked = prefill(&net, &run, &device);
     for (prompt, continuation) in CHECKPOINT_PROMPTS {
-        let (tokens, continuation) = (VOCAB.encode(prompt), VOCAB.encode(continuation));
+        let (tokens, continuation) = (VOCAB.encode_cased(prompt), VOCAB.encode_cased(continuation));
         let (decoded, scored) =
             check_decode(&net, &shifted, &run, &device, &mut chunked, &tokens, &continuation, 1e-3);
         println!("continuation bits/char: decode {decoded:.4}, forward {scored:.4} | {prompt}");

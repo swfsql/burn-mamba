@@ -50,8 +50,9 @@
 - **`tiny-stories`** (work in progress): a tiny character-level Mamba-3
   language model on the cleaned
   [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean)
-  corpus, with a tied 48-character embedding at both ends. Its README covers
-  the case-folded alphabet, the download, the class latents that mark the
+  corpus, with a tied 48-character embedding at both ends and a binary case
+  channel. Its README covers the case-folded alphabet and the case flag, the
+  download, the class latents that mark the
   start of a story (and that `prime()` replays for seedless sampling), the
   prefill-`forward()` / decode-`step()` sampler, the runs of windows that
   carry the state across a story, the packed rows of whole stories

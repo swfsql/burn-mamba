@@ -728,3 +728,90 @@ of `decay.py` spans bins 0–8, and bin 9 is the tail at min_lr. The tail
   from the stable 20000 at 5e-4, (a) +2421, then a cooldown of 5600 (20%)
   → `p28k-h16-lr05-d`, and (b) a cooldown of 8021 (29%) at once →
   `p20k-h16-lr05-dlong`. Both end at 28021.
+
+## 7. A larger state at h16 g1 (2026-10-07)
+
+User: the long run is **h16 + a larger state** (h16 is the winner). The
+handoff predicted that the state size limits the binding of the entities
+(r128 − B @3230). This section tests it at h16. It fails.
+
+### The seed noise of the re-mention rows
+
+h16 @3230, seed 1 − seed 0 (n04 − k16, paired, `ctxrg/`): far own −0.0007 ±
+0.0012, letters own −0.018 ± 0.004, first own −0.026 ± 0.010. The r128 − B
+effect was −0.050 ± 0.004 / −0.037 ± 0.010. So the first letters of r128
+were inside the seed noise, and all the evidence came from 4 heads. For
+h16, the user dismissed it ("that r128 was without h16, that is completely
+dismissed"). The far own is
+seed-stable (±0.001). The two h16 seeds are the control band @3230: dv
+0.8579 / 0.8596, far own 0.8765 / 0.8757, letters 0.843 / 0.824, first
+2.284 / 2.258.
+
+### The cost of `r` at h16
+
+- Params: the B/C projections cost `2·r·d` per layer, and Complex2D's
+  angles `r/2·d` per layer (r128 d152 L5: 48,640). Under 1M: h16 × r128
+  (d144) 931,214; h16 × r128 × rf 0.5 (d152) 993,627; h16 × r128 × Real1D
+  (d152) 969,147 (h16: 969,160); h16 × r128 L4 (d168) 966,124; h16 × r96
+  (d152) 951,467; h16 × r256 × Real1D (d128) 914,548.
+- VRAM: the full rotation makes B/C per head, so they grow with heads × `r`.
+  No larger state at h16 fit the cap until `--grad-checkpointing`.
+  Reserved MB with gc (recalc:128): h16 2460 (plain 3149); h16 × r128 L4
+  (d168) 3218 (plain 3915); h16 × r128 (d144) 3776 (plain 4612); h16 ×
+  r128 × rf 0.5 (d152) 3149; h16 × r128 × Real1D (d152) 2536; h16 × r96
+  (d152) 3995; h16 × r192 × Real1D (d144) 4267; h16 × r256 × Real1D (d128)
+  3506. Every `r` that is not a power of 2 jumps (the pages). Chunk 64
+  (`--pack-align 128`) does not help.
+- `--grad-checkpointing` (Burn's `Balanced`): −22% at h16 for 2–5% more
+  time. The 1-worker twins agree bit for bit at 8 of 10 steps, and to
+  2.4e-7 at 2. The probe's `ctx` column is 350–680 MiB for the r128 shapes
+  (h16: ~130): a transient between the first cleanups.
+
+### The screens @3230 (2630 + 600, gc)
+
+| variant | params | ms | dv | far own | letters | first |
+|---|---|---|---|---|---|---|
+| h16, seed 0 / 1 | 969k | 670 | 0.8579 / 0.8596 | 0.8765 / 0.8757 | 0.843 / 0.824 | 2.284 / 2.258 |
+| r01 h16 × r128 × rf 0.5 (d152) | 994k | 868 | 0.8584 | 0.8769 | 0.825 | 2.242 |
+| r03 h16 × r128 (d144) | 931k | 979 | 0.8747 | 0.8933 | 0.886 | 2.355 |
+| r02 h16 × r128 × Real1D (d152) | 969k | 688 | 0.8670 | 0.8843 | 0.827 | 2.257 |
+
+- r03 changes only `r` (and the width). It is worse at every row, the
+  recall included. The width of h16 costs more than r128 gives (as n05,
+  h16 × g4 at d136).
+- r02: the rotation is worth ~0.01 here. The 256-regime "the rotation ties
+  at u1" does not hold. Its recall equals the better h16 seed at a worse
+  loss.
+- r01 ties the loss. Its first letters are 0.029 below the seed mean (one
+  seed spread). Its first gain is +0.084, but its no-prompt bits rose too.
+
+### The long run of r01 (the protocol of h16, matched steps and LR)
+
+| milestone | sv (h16 → r01) | dv (h16 → r01) | far own | letters | first |
+|---|---|---|---|---|---|
+| @5630 | 0.9162 → 0.9168 | 0.8014 → 0.8046 | +0.0047 ± 0.0010 | +0.001 ± 0.004 | −0.011 ± 0.009 |
+| @9600 | 0.7875 → 0.7925 | 0.7493 → 0.7544 | +0.0035 ± 0.0010 | −0.002 ± 0.003 | −0.007 ± 0.009 |
+
+The paired rows are r01 − h16 (own bits). The loss falls behind, and the
+recall lead goes to nothing. The trunk `p8k-h16r128rf05` is saved at 8000,
+with the anneal 1e-3 → 5e-4 over 8000–12000 in its config (`stage.py`).
+Paused at @9600 (the search moved to the cased world, `../1m-cased/`).
+
+### Findings
+
+- **At 1M params, a larger state at h16 costs width or rotation, and no
+  variant recalls better past @3230.** The recall followed the model
+  quality in every run.
+- **The rotation may give most of its value in the low-noise phase of the
+  leaves** (user). The decay recovery (sv − dv) @3230: the full-rotation
+  models 0.110 / 0.112 (h16 seeds) and 0.112 (r03); rf 0.5 0.105; Real1D
+  0.109. @5630: h16 0.115, r01 0.112. @9600: both 0.038. So rf 0.5 had the
+  best trunk and lost its lead in each leaf. Rank by the leaves (as the
+  protocol does).
+- **The first-letter row mixes two things**: the binding failure and the
+  real uncertainty of which entity the story names next. After the first
+  letter, a re-mention costs ~0.26 bits/char (h16 @9600), so the model
+  completes a name once it has chosen it. But the samples show a real
+  binding failure at the choice ("alice said, "i'm just jack"", "jack and
+  jack"). A templated binding probe (proposed, not built) can separate
+  the two.

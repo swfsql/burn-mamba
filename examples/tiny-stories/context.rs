@@ -38,13 +38,19 @@
 //!
 //! **Re-mentions** ([`remention_marks`]) isolate the recall of names and
 //! objects. They are the words of the far part that also occur in the own
-//! prompt, and that only few stories hold (so not the function words). Their
-//! bits after the own prompt, with no prompt, and after the other prompts show
-//! how well the model recalls an entity of the prompt when the story names it
-//! again. The overall far use hides this part.
+//! prompt (the case does not matter), and that only few stories hold (so not
+//! the function words). Their bits after the own prompt, with no prompt, and
+//! after the other prompts show how well the model recalls an entity of the
+//! prompt when the story names it again. The overall far use hides this part.
+//!
+//! **The case.** The bits of a character are those of the cased text, as the
+//! validation scores it: the bits of its id, plus the bits of its case flag
+//! when it is a letter. A position gives two softmaxes: the ids, and the case
+//! (lower, upper) over `[0, z]`, with `z` the case logit
+//! ([`cased_log_probs`]). The boost acts on each of them.
 
 use crate::AppArgs;
-use crate::dataset::{Split, VOCAB, stories};
+use crate::dataset::{FIRST_LETTER, Split, VOCAB, VOCAB_SIZE, pair, stories};
 use crate::training::Run;
 use burn::prelude::*;
 use burn::tensor::activation::log_softmax;
@@ -128,10 +134,30 @@ pub struct Scores {
     pub marked: Vec<Vec<Vec<f64>>>,
 }
 
-/// The log-probabilities `[rows, c, vocab]` of the continuations of `rows`.
-/// Each continuation follows the first `p` characters of the prompt that
-/// `pair` gives it, with the class latents in front (as the validation scores
-/// it). With `p = 0`, the readout of the last latent predicts the first
+/// The log-probabilities of a cased character, from `logits`
+/// `[b, c, VOCAB_SIZE + 1]`: `[b, c, VOCAB_SIZE + 2]`. First the ids (a
+/// softmax over the vocab logits), then the case, lower and upper (a softmax
+/// over `[0, z]`, with `z` the case logit).
+pub fn cased_log_probs(logits: Tensor<3>) -> Tensor<3> {
+    let vocab = logits.clone().narrow(2, 0, VOCAB_SIZE);
+    let z = logits.narrow(2, VOCAB_SIZE, 1);
+    let case = Tensor::cat(vec![z.zeros_like(), z], 2);
+    Tensor::cat(vec![log_softmax(vocab, 2), log_softmax(case, 2)], 2)
+}
+
+/// Coherence boosting of [`cased_log_probs`]: `(1 + α)·full − α·none`, then a
+/// log-softmax over the ids and another over the case.
+fn boost(full: Tensor<3>, none: Tensor<3>, alpha: f64) -> Tensor<3> {
+    let mix = full.mul_scalar(1.0 + alpha) - none.mul_scalar(alpha);
+    let ids = mix.clone().narrow(2, 0, VOCAB_SIZE);
+    let case = mix.narrow(2, VOCAB_SIZE, 2);
+    Tensor::cat(vec![log_softmax(ids, 2), log_softmax(case, 2)], 2)
+}
+
+/// The log-probabilities (see [`cased_log_probs`]) of the continuations of
+/// `rows`. Each continuation follows the first `p` characters of the prompt
+/// that `pair_of` gives it, with the class latents in front (as the validation
+/// scores it). With `p = 0`, the readout of the last latent predicts the first
 /// character.
 #[allow(clippy::too_many_arguments)]
 fn log_probs(
@@ -142,21 +168,21 @@ fn log_probs(
     continuations: &[Vec<u8>],
     rows: &[usize],
     p: usize,
-    pair: &dyn Fn(usize) -> usize,
+    pair_of: &dyn Fn(usize) -> usize,
 ) -> Tensor<3> {
     let (b, c) = (rows.len(), continuations[0].len());
-    let ids: Vec<i32> = rows
+    let pairs: Vec<i32> = rows
         .iter()
-        .flat_map(|&i| prompts[pair(i)][..p].iter().chain(&continuations[i]))
-        .map(|&t| t as i32)
+        .flat_map(|&i| prompts[pair_of(i)][..p].iter().chain(&continuations[i]))
+        .flat_map(|&t| pair(t))
         .collect();
-    let x = Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([b, p + c]);
+    let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), device).reshape([b, p + c, 2]);
     let (logits, _) = model.forward(x, None, run.ssd_path.clone(), None, None);
     // The rows of the latents come first, then one row per token. The row of
     // token `p + k − 1` predicts `continuations[i][k]`.
     let lead = logits.dims()[1] - (p + c);
     assert!(lead + p >= 1, "no row predicts the first character: no prompt and no class latents");
-    log_softmax(logits.narrow(1, lead + p - 1, c), 2)
+    cased_log_probs(logits.narrow(1, lead + p - 1, c))
 }
 
 /// Score each continuation with no prompt, and after the prompt that each
@@ -202,11 +228,20 @@ pub fn score(
     let order: Vec<usize> = (0..n).collect();
     for rows in order.chunks(batch) {
         let b = rows.len();
-        let targets: Vec<i32> = rows
-            .iter()
-            .flat_map(|&i| continuations[i].iter().map(|&t| t as i32))
-            .collect();
-        let targets = Tensor::<1, Int>::from_ints(targets.as_slice(), device).reshape([b, c, 1]);
+        // Per character: the column of its id, the column of its case, and
+        // whether the case counts (a letter).
+        let (mut id_cols, mut case_cols, mut letters) = (Vec::new(), Vec::new(), Vec::new());
+        for &i in rows {
+            for &t in &continuations[i] {
+                let [id, flag] = pair(t);
+                id_cols.push(id);
+                case_cols.push(VOCAB_SIZE as i32 + flag);
+                letters.push(f32::from(u8::from(id as usize >= FIRST_LETTER)));
+            }
+        }
+        let column = |cols: Vec<i32>| Tensor::<1, Int>::from_ints(cols.as_slice(), device).reshape([b, c, 1]);
+        let (id_bc1, case_bc1) = (column(id_cols), column(case_cols));
+        let letter_bc = Tensor::<1>::from_floats(letters.as_slice(), device).reshape([b, c]);
         // The marks of the rows as 0/1: `[b, m, c]`.
         let mask_bmc = (m > 0).then(|| {
             let mask: Vec<f32> = rows
@@ -218,7 +253,9 @@ pub fn score(
         // The summed negative log-likelihood of the join, of the far part and
         // of each mark set, per row: `[b, 2 + m]`.
         let nll_bs = |log_p: Tensor<3>| {
-            let nll_bc = log_p.gather(2, targets.clone()).reshape([b, c]).neg();
+            let id_bc = log_p.clone().gather(2, id_bc1.clone()).reshape([b, c]);
+            let case_bc = log_p.gather(2, case_bc1.clone()).reshape([b, c]);
+            let nll_bc = (id_bc + case_bc * letter_bc.clone()).neg();
             let near_b1 = nll_bc.clone().narrow(1, 0, join).sum_dim(1);
             let far_b1 = nll_bc.clone().narrow(1, join, c - join).sum_dim(1);
             let mut sums = vec![near_b1, far_b1];
@@ -238,7 +275,7 @@ pub fn score(
                 let boosted = if alpha == 0.0 {
                     full.clone()
                 } else {
-                    log_softmax(full.clone().mul_scalar(1.0 + alpha) - none.clone().mul_scalar(alpha), 2)
+                    boost(full.clone(), none.clone(), alpha)
                 };
                 nll.push(nll_bs(boosted));
             }
@@ -286,18 +323,18 @@ pub fn ratio_se(xs: &[f64], ns: &[usize]) -> (f64, f64) {
 }
 
 /// The words of `tokens`: `(start, word)` for each run of at least
-/// [`REMENTION_LEN`] letters.
+/// [`REMENTION_LEN`] letters, in lower case.
 fn words(tokens: &[u8]) -> Vec<(usize, String)> {
     let text: Vec<char> = tokens.iter().map(|&t| VOCAB.character(t)).collect();
     let mut out = Vec::new();
     let mut k = 0;
     while k < text.len() {
         let start = k;
-        while k < text.len() && text[k].is_ascii_lowercase() {
+        while k < text.len() && text[k].is_ascii_alphabetic() {
             k += 1;
         }
         if k - start >= REMENTION_LEN {
-            out.push((start, text[start..k].iter().collect()));
+            out.push((start, text[start..k].iter().map(char::to_ascii_lowercase).collect()));
         }
         k = k.max(start + 1);
     }
@@ -360,7 +397,7 @@ pub fn context_use(
     let (indices, (prompts, continuations)): (Vec<usize>, (Vec<Vec<u8>>, Vec<Vec<u8>>)) =
         stories(Split::Valid, n_stories)
             .iter()
-            .map(|story| VOCAB.encode(story))
+            .map(|story| VOCAB.encode_cased(story))
             .enumerate()
             .filter(|(_, tokens)| tokens.len() >= PROMPT + CONTINUATION)
             .map(|(index, tokens)| {

@@ -6,3 +6,9 @@ tmp/1m-b/*
 !tmp/1m-b/*.sh
 !tmp/1m-b/*.py
 !tmp/1m-b/*.md
+
+!tmp/1m-cased/
+tmp/1m-cased/*
+!tmp/1m-cased/*.sh
+!tmp/1m-cased/*.py
+!tmp/1m-cased/*.md

@@ -4,11 +4,15 @@
 usage: gen.py <name> [key=value ...]   (see SHORT for keys; unknown keys abort)
 
 The LR schedule is an LR sequence (lrseq.py): a `Linear` warmup from 0 to
-`lr` over `warm` steps (the ramp then holds `lr`), and a `Constant` segment
-for each step-down of `stages` ("S:LR,S:LR", the protocol: 4630:1e-3,16000:5e-4).
+`lr` over `warm` steps (the ramp then holds `lr`), and a segment for each
+step-down of `stages`. "S:LR" is a jump to LR at S. "A-B:LR" is an anneal: a
+cosine from the rate at A to LR at B, which then holds LR. For example
+"4630:1e-3,8000-12000:5e-4".
 `decay.py` writes a decay branch from a step, and `stage.py` a step-down.
 """
 import json, os, sys
+
+from lrseq import stage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,9 +73,13 @@ def training(a):
         "momentum": {"momentum": 0.95, "dampening": 0.0, "nesterov": True},
         "ns_coefficients": [3.4445, -4.775, 2.0315], "epsilon": 1e-7,
         "ns_steps": 5, "adjust_lr_fn": "MatchRmsAdamW"}
-    warmup = {"from": 0, "lr": {"Linear": {"start": 0.0, "end": a["lr"], "steps": a["warm"]}}}
-    stages = [{"from": int(s), "lr": {"Constant": {"lr": float(lr)}}}
-              for s, lr in (st.split(":") for st in a["stages"].split(",") if st)]
+    seq = [{"from": 0, "lr": {"Linear": {"start": 0.0, "end": a["lr"], "steps": a["warm"]}}}]
+    for st in (st for st in a["stages"].split(",") if st):
+        span, lr = st.split(":")
+        start, segment = stage(seq, span, float(lr))
+        if start <= seq[-1]["from"]:
+            sys.exit(f"the stages must start in order: {a['stages']}")
+        seq.append(segment)
     frontier = "Always" if a["frontier"] in ("always", 0) else {
         "Bits": {"max_bits": float(a["frontier"])}}
     return {
@@ -85,7 +93,7 @@ def training(a):
                 "muon": muon},
             "num_epochs": a["epochs"], "batch_size": a["bs"],
             "num_workers": a["workers"],
-            "lr": {"Sequence": [warmup] + stages},
+            "lr": {"Sequence": seq},
             "seed": a["seed"]},
         "seq_len": a["seq"], "run_len": a["runlen"],
         "frontier": frontier, "train_stories": a["stories"],

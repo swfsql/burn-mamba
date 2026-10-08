@@ -29,6 +29,12 @@ There is no `<unk>`, no `<bos>` and no padding class
 the decoder knows. The embedding is **tied** (`missing_lm_head = true`): one table
 answers both "which character is this" and "which character comes next".
 
+The case is a second, binary channel, not a part of the vocabulary. Each
+character is the pair (id, case flag), and the flag is 1 for `A-Z` only. The
+model adds a learned vector to the embedding where the flag is 1, and it
+predicts the flag of the next character with one more logit. The flag of a
+symbol is always 0 at the input and is not scored at the output.
+
 Four learnable **class latents** mark the start of a story, not a character (see
 [Story boundaries](#story-boundaries)).
 
@@ -184,6 +190,7 @@ shared CLI, before the `--`, sets:
 | `--context-stories <n>` | the validation stories | with `--context-use`, read the first `n` validation stories |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
+| `--grad-checkpointing` | off | train with the balanced gradient checkpointing of Burn: the backward computes the memory-bound ops again and keeps the outputs of the compute-bound ops. Less vram, more time (not persisted) |
 | `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward. Also cleans up the memory before windows 0, 1, 2, 4, 8, … and before each 256th window, so that the pools hold the process (not persisted) |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
@@ -202,7 +209,8 @@ other:
 3. Every generated character then costs one `step()` against that same cache:
    O(state) per token, with no growing KV cache.
 
-Sampling is temperature-scaled multinomial over the full 48-way softmax
+Sampling is temperature-scaled multinomial over the full 48-way softmax, and a
+letter then draws its case from the temperature-scaled case logit
 (`temperature <= 0` is greedy). `ChaCha8Rng` seeds it, so a run is reproducible.
 
 `--inference` writes into `<artifacts>/inference/`:
@@ -217,8 +225,10 @@ noise to words to sentences. The checks are spaced in optimizer steps (every
 
 ## Notes
 
-- The loss is reported in nats (the cross-entropy of Burn) and as **bits per
-  character**. The uniform baseline is `log2(48) = 5.58` bits.
+- The loss is reported in nats and as **bits per character** of the cased text:
+  the cross-entropy of the id, plus the binary cross-entropy of the case flag
+  of a letter. The validation also reports the two parts (`primary` and
+  `case`). The uniform baseline of the ids is `log2(48) = 5.58` bits.
 - The tied head starts *badly*. Burn initialises an `Embedding` from `N(0, 1)`. So
   at a `d_model` of 32, the initial logits have a variance of ~32, and the first
   batches score 25–40 bits/char instead of 5.58. This is a transient: the first

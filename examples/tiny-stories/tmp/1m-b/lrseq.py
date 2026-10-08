@@ -54,6 +54,24 @@ def cut(training, step, lr):
     training["training"]["lr"] = {"Sequence": kept + [{"from": step, "lr": lr}]}
 
 
+def stage(seq, span, lr):
+    """The segment of a step-down to `lr` after the segments `seq`.
+
+    `span` is "S" or "A-B". "S" is a jump: the constant `lr` from S. "A-B"
+    is an anneal: a cosine from the rate at A (of `seq`) to `lr` at B. After
+    B, the cosine holds `lr`. Returns (the start step, the segment).
+    """
+    if "-" not in span:
+        s = int(span)
+        return s, {"from": s, "lr": {"Constant": {"lr": lr}}}
+    a, b = map(int, span.split("-"))
+    if b <= a:
+        sys.exit(f"an anneal must end after its start: {span}")
+    top = rate({"Sequence": seq}, a)
+    cosine = {"max_lr": top, "min_lr": lr, "warmup_steps": 0, "total_steps": b - a}
+    return a, {"from": a, "lr": {"CosineAnnealing": cosine}}
+
+
 def run_path(run, name):
     return os.path.join(HERE, "runs", run, name)
 

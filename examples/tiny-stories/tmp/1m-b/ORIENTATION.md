@@ -58,6 +58,10 @@ to it). Read `handoff.md` first.
 - **Models before seeds**: test a new variant on one seed first. Two
   different models are worth more than two seeds of one model. Add a seed
   only when a decision needs it.
+- **Name a variant by its full change from the pool base**, in chat and in
+  the notes: "h16 × r128 × rf 0.5 (d152)", never a bare shape ("r128
+  d152"). The width that the param budget forces goes in parentheses. A
+  reader of only one message must see which base the variant keeps.
 - Read the results with `summ.py`, `agg.py`, `tail`, `grep ^prof`. Never dump
   big files.
 - **Waiting**: no foreground loop or `sleep`. Wait in the background
@@ -186,10 +190,15 @@ to it). Read `handoff.md` first.
   `bin/ts-cuda --help` and `bin/ts-cuda -- --help` list them.
 - `gen.py <cfg> k=v …` → `cfg/<cfg>/` (the keys are `DEFAULTS` in the file).
   A key with a string default keeps `None` as a string. `lr`, `warm` and
-  `stages=S:LR,…` write the LR sequence (planned step-downs, e.g.
-  `stages=4630:1e-3,16000:5e-4`).
-- `stage.py <run> <lr> [from]`: from `from` (default: the saved step), the
-  schedule of the run is the constant `lr`, and its later segments go.
+  `stages=…` write the LR sequence (planned step-downs). `S:LR` is a jump
+  at S. `A-B:LR` is an anneal: a cosine from the rate at A to LR at B,
+  which then holds LR (e.g. `stages=4630:1e-3,8000-12000:5e-4`).
+- `stage.py <run> <lr> [from | A-B]`: from `from` (default: the saved
+  step), the schedule of the run is the constant `lr` (or, with `A-B`, the
+  anneal to `lr`), and its later segments go.
+- `--grad-checkpointing` (an example flag): Burn's `Balanced` gradient
+  checkpointing. About −700 MB at h16 for 2–5% more time, with the same
+  losses (`notes.md` §7).
   `seq.py <run | cfg/name>…`: rewrites the old LR form as a sequence, from
   the logged rates (it keeps `training_config.old.json` and refuses a
   leaf).

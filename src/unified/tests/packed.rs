@@ -108,19 +108,22 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
                 .collect()
         })
         .collect();
-    let mut packed_ids = vec![0i64; batch * width];
+    // A token is the pair (id, flag). The flag of token `j` of a sequence is
+    // `j mod 2`.
+    let pairs = |seq: &[i64]| -> Vec<i64> { seq.iter().enumerate().flat_map(|(j, &t)| [t, (j % 2) as i64]).collect() };
+    let mut packed_ids = vec![0i64; batch * width * 2];
     for (b, row) in tokens.iter().enumerate() {
         for (seq, &start) in row.iter().zip(&starts[b]) {
-            for (j, &t) in seq.iter().enumerate() {
-                packed_ids[b * width + start + lead + j] = t;
-            }
+            let at = (b * width + start + lead) * 2;
+            packed_ids[at..at + seq.len() * 2].copy_from_slice(&pairs(seq));
         }
     }
-    let packed_ids = Tensor::<1, Int>::from_ints(packed_ids.as_slice(), &device).reshape([batch, width]);
+    let packed_ids = Tensor::<1, Int>::from_ints(packed_ids.as_slice(), &device).reshape([batch, width, 2]);
     let layout = Packed::from_starts(&starts, lead, width, &device);
 
-    // A fixed weight per logit, so the loss reaches every one of them.
-    let weight = Tensor::<3>::random([batch, width, VOCAB], Distribution::Normal(0.0, 1.0), &device);
+    // A fixed weight per logit (the vocab and the flag), so the loss reaches
+    // every one of them.
+    let weight = Tensor::<3>::random([batch, width, VOCAB + 1], Distribution::Normal(0.0, 1.0), &device);
 
     let (logits, _) = net.forward_packed(packed_ids, None, path.clone(), &layout);
     let mut loss_packed = Tensor::<1>::zeros([1], &device);
@@ -128,9 +131,9 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
     for (b, row) in tokens.iter().enumerate() {
         for (seq, &start) in row.iter().zip(&starts[b]) {
             let n = lead + seq.len();
-            let ids = Tensor::<1, Int>::from_ints(seq.as_slice(), &device).reshape([1, seq.len()]);
+            let ids = Tensor::<1, Int>::from_ints(pairs(seq).as_slice(), &device).reshape([1, seq.len(), 2]);
             let (alone, _) = net.forward(ids, None, path.clone(), None, None);
-            assert_eq!([1, n, VOCAB], alone.dims());
+            assert_eq!([1, n, VOCAB + 1], alone.dims());
             let packed = logits.clone().narrow(0, b, 1).narrow(1, start, n);
             let diff = max_rel_diff(packed.clone(), alone.clone());
             assert!(diff < dtype_tol(VAL_TOL), "row {b}, sequence at {start}: logits differ by {diff}");

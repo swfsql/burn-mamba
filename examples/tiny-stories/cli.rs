@@ -23,6 +23,7 @@ const HELP: &str = concat!(
     "    --contrast-profile     With --contrast-eval, run only the cut and the negative of the flags, and write the scores of each character to contrast-profile.jsonl\n",
     "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
     "    --profile-sync         Also sync the device after each phase (with --profile)\n",
+    "    --grad-checkpointing   Train with the balanced gradient checkpointing of Burn. The backward computes the memory-bound ops again and keeps the outputs of the compute-bound ops. This uses less vram and more time\n",
     "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward. Also clean up the memory before windows 0, 1, 2, 4, 8, ... and before each 256th window",
 );
 
@@ -40,6 +41,9 @@ pub struct Cli {
     /// `--max-vram`, in MiB: the cap on the bytes that the memory pools
     /// reserve (the CUDA context is not included). See `training::Run`.
     pub max_vram_mib: Option<u64>,
+    /// `--grad-checkpointing`: the training device gets the `Balanced`
+    /// gradient checkpointing of Burn.
+    pub grad_checkpointing: bool,
     /// `--prompt` (repeatable), `--continuations` and `--temperature`: the
     /// prompted continuations of inference.
     pub prompting: Prompting,
@@ -80,6 +84,7 @@ impl Cli {
         let sync = pargs.contains("--profile-sync");
         assert!(every.is_some() || !sync, "--profile-sync needs --profile");
         let max_vram_mib = pargs.opt_value_from_str("--max-vram").unwrap();
+        let grad_checkpointing = pargs.contains("--grad-checkpointing");
         let prompting = Prompting {
             prompts: pargs.values_from_str("--prompt").unwrap(),
             continuations: pargs.opt_value_from_str("--continuations").unwrap().unwrap_or(1),
@@ -106,6 +111,7 @@ impl Cli {
             pack_align,
             profile: every.map(|every| (every, sync)),
             max_vram_mib,
+            grad_checkpointing,
             prompting,
             context_use,
             context_batch,

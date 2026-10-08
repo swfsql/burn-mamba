@@ -178,7 +178,7 @@ in `burn-stack`, parameterised by the SSM core block `M`
 (`Mamba1`/`Mamba2`/`Mamba3`):
 
 ```text
-VocabNetwork<M>   embedding → Layers<M> → final RMSNorm → LM head → logits
+VocabNetwork<M>   embedding (+ flag) → Layers<M> → final RMSNorm → LM head (+ flag logit)
 LatentNetwork<M>  in_proj → Layers<M> → [norm_f] → out_proj (continuous I/O)
 Layers<M>         a stack of N (virtual) layers over R real weight sets
 Layer<M>          Pre-LN residual:  y = x·residual_scale + Block(RMSNorm(x))
@@ -190,7 +190,9 @@ BlockConfig}` and `CacheStack` on its `Caches` (all in `src/unified/cache.rs`).
 `Block::Options` is the per-call SSD-path selector.
 
 The LM head of `VocabNetwork` is tied to the embeddingᵀ (`missing_lm_head`) or
-is a separate `Linear`. The runtime enums `MambaVocabNet` / `MambaLatentNet` /
+is a separate `Linear`. A token is a pair `(id, flag)` (`[…, 2]`), and the
+logits are `[…, vocab + 1]`: the last column is the flag logit (tiny-stories:
+the letter case). The runtime enums `MambaVocabNet` / `MambaLatentNet` /
 `MambaBidiLayers` (each with a `#[derive(Config)]` `*Config`) select the family
 at construction. They panic on a cache or SSD path of the wrong family.
 

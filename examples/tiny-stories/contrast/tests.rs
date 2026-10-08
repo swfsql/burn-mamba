@@ -9,7 +9,7 @@ use super::{
     ContrastBatch, ContrastConfig, Cut, WordIndex, cut, loss, pair_log_probs, profiled_pair_log_probs, scored,
     shuffle_sentences,
 };
-use crate::dataset::VOCAB;
+use crate::dataset::{FIRST_LETTER, UPPER, VOCAB, VOCAB_SIZE, pair};
 use crate::test_net::tiny_net;
 use burn::module::{ModuleMapper, Param};
 use burn::optim::GradientsParams;
@@ -55,28 +55,52 @@ fn cut_stays_in_its_bounds() {
     }
 }
 
-/// The log-softmax `[1, n, vocab]` of the predictions of `continuation` after
-/// `prompt`, from one `forward` over both (the class latents in front).
-fn reference_log_softmax(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<3> {
+/// The cased token of `id`: upper case when it is a letter and `j` is a
+/// multiple of 3.
+fn cased(j: usize, id: usize) -> u8 {
+    let id = (id % VOCAB_SIZE) as u8;
+    if j % 3 == 0 && id as usize >= FIRST_LETTER { id | UPPER } else { id }
+}
+
+/// The log-softmaxes of the predictions of `continuation` after `prompt`,
+/// from one `forward` over both (the class latents in front): the ids
+/// `[1, n, VOCAB_SIZE]`, and the case `[1, n, 2]` (lower, upper: a softmax
+/// over `[0, z]`).
+fn reference_log_softmax(
+    net: &MambaVocabNet,
+    path: &MambaSsdPath,
+    prompt: &[u8],
+    continuation: &[u8],
+) -> (Tensor<3>, Tensor<3>) {
     let n = continuation.len();
     let device = net.devices()[0].clone();
-    let tokens: Vec<i32> = prompt.iter().chain(&continuation[..n - 1]).map(|&t| t as i32).collect();
-    let x = Tensor::<1, Int>::from_ints(tokens.as_slice(), &device).reshape([1, tokens.len()]);
+    let tokens: Vec<u8> = prompt.iter().chain(&continuation[..n - 1]).copied().collect();
+    let pairs: Vec<i32> = tokens.iter().flat_map(|&t| pair(t)).collect();
+    let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), &device).reshape([1, tokens.len(), 2]);
     let (logits, _) = net.forward(x, None, path.clone(), None, None);
     let lead = logits.dims()[1] - tokens.len();
-    log_softmax(logits.narrow(1, lead + prompt.len() - 1, n), 2)
+    let logits = logits.narrow(1, lead + prompt.len() - 1, n);
+    let z = logits.clone().narrow(2, VOCAB_SIZE, 1);
+    let case = Tensor::cat(vec![z.zeros_like(), z], 2);
+    (log_softmax(logits.narrow(2, 0, VOCAB_SIZE), 2), log_softmax(case, 2))
 }
 
 /// The log-probabilities `[n]` of `continuation` after `prompt`, from one
-/// `forward` over both (the class latents in front).
+/// `forward` over both (the class latents in front): that of each id, plus
+/// that of its case on a letter.
 fn reference_log_p(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<1> {
     let n = continuation.len();
     let device = net.devices()[0].clone();
-    let targets: Vec<i32> = continuation.iter().map(|&t| t as i32).collect();
-    let targets = Tensor::<1, Int>::from_ints(targets.as_slice(), &device).reshape([1, n, 1]);
-    reference_log_softmax(net, path, prompt, continuation)
-        .gather(2, targets)
-        .reshape([n])
+    let column = |f: &dyn Fn([i32; 2]) -> i32| {
+        let v: Vec<i32> = continuation.iter().map(|&t| f(pair(t))).collect();
+        Tensor::<1, Int>::from_ints(v.as_slice(), &device).reshape([1, n, 1])
+    };
+    let letter: Vec<f32> = continuation.iter().map(|&t| f32::from(u8::from(pair(t)[0] as usize >= FIRST_LETTER))).collect();
+    let letter = Tensor::<1>::from_floats(letter.as_slice(), &device);
+    let (ids, case) = reference_log_softmax(net, path, prompt, continuation);
+    let id = ids.gather(2, column(&|[id, _]| id)).reshape([n]);
+    let case = case.gather(2, column(&|[_, flag]| flag)).reshape([n]);
+    id + case * letter
 }
 
 /// The direction of the loss, apart from its formula and from its readouts:
@@ -90,7 +114,7 @@ fn descent_on_the_contrast_raises_delta() {
     let mut net = tiny_net(&device).map(&mut Leaf);
     let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
-        (0..len).map(|j| ((j * (salt + 2) + salt * 5) % crate::dataset::VOCAB_SIZE) as u8).collect()
+        (0..len).map(|j| cased(j, j * (salt + 2) + salt * 5)).collect()
     };
     let (k, n) = (4, 16);
     let prompts: Vec<Vec<u8>> = (0..k).map(|i| ids(12, i)).collect();
@@ -210,7 +234,7 @@ fn explicit_negatives_match_a_forward_over_each_pair() {
     let net = tiny_net(&device);
     let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
-        (0..len).map(|j| ((j * 5 + salt * 11 + 1) % crate::dataset::VOCAB_SIZE) as u8).collect()
+        (0..len).map(|j| cased(j, j * 5 + salt * 11 + 1)).collect()
     };
     let prompts = [ids(6, 1), ids(4, 2), ids(7, 3)];
     let negatives = [ids(3, 7), ids(7, 8), ids(5, 9)];
@@ -248,7 +272,7 @@ fn profile_lines_hold_the_scores_of_each_character() {
     let net = tiny_net(&device);
     let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
-        (0..len).map(|j| ((j * 5 + salt * 11 + 1) % crate::dataset::VOCAB_SIZE) as u8).collect()
+        (0..len).map(|j| cased(j, j * 5 + salt * 11 + 1)).collect()
     };
     let prompts = [ids(6, 1), ids(4, 2), ids(7, 3)];
     let negatives = [ids(3, 7), ids(7, 8), ids(5, 9)];
@@ -277,9 +301,12 @@ fn profile_lines_hold_the_scores_of_each_character() {
             // the prompt of row `i − 1`.
             let negative = if explicit { &negatives[i] } else { &prompts[(i + 2) % 3] };
             let row = |t: &Tensor<2>| -> Vec<f32> { t.clone().narrow(0, i, 1).into_data().try_into_vec_as().unwrap() };
+            // The entropy of the cased character: `H(id) + P(letter)·H(case)`.
             let entropy = |prompt: &[u8]| -> Vec<f32> {
-                let log_p = reference_log_softmax(&net, &path, prompt, &continuations[i]);
-                (log_p.clone().exp() * log_p).sum_dim(2).neg().into_data().try_into_vec_as().unwrap()
+                let (ids, case) = reference_log_softmax(&net, &path, prompt, &continuations[i]);
+                let h = |log_p: Tensor<3>| (log_p.clone().exp() * log_p).sum_dim(2).neg();
+                let p_letter = ids.clone().narrow(2, FIRST_LETTER, VOCAB_SIZE - FIRST_LETTER).exp().sum_dim(2);
+                (h(ids) + p_letter * h(case)).into_data().try_into_vec_as().unwrap()
             };
             let fields = [
                 ("own", row(&own_kn)),
@@ -338,7 +365,7 @@ fn loss_matches_reference(one_sided: bool) {
     // Three rows. The prompts have three lengths, so the pass over them is
     // padded.
     let ids = |len: usize, salt: usize| -> Vec<u8> {
-        (0..len).map(|k| ((k * 7 + salt * 13 + 3) % crate::dataset::VOCAB_SIZE) as u8).collect()
+        (0..len).map(|k| cased(k, k * 7 + salt * 13 + 3)).collect()
     };
     let prompts = [ids(5, 1), ids(8, 2), ids(3, 3)];
     let continuations = [ids(6, 4), ids(6, 5), ids(6, 6)];

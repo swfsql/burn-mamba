@@ -340,9 +340,11 @@ between `s` and `t`, so the prefix product is renormalised.
   must match (else panic).
 - **`network.rs`**: `MambaLatentNet` / `MambaVocabNet` + their `*Config`
   (wrapping `burn_stack::modules::{LatentNetwork, VocabNetwork}`), and the
-  `ModelConfigExt` impls. `MambaVocabNet::forward_packed` takes packed rows
-  (burn-stack's `Packed`). `pack_align` (the chunk in tokens) and
-  `n_class_latents` (the opening slots) give a packer its layout.
+  `ModelConfigExt` impls. `MambaVocabNet` takes token pairs `(id, flag)` and
+  returns `vocab + 1` logits (the flag channel of `VocabNetwork`).
+  `MambaVocabNet::forward_packed` takes packed rows (burn-stack's `Packed`).
+  `pack_align` (the chunk in tokens) and `n_class_latents` (the opening
+  slots) give a packer its layout.
 - **`bidi.rs`**: `MambaBidiLayers` + `MambaBidiLayersConfig` (wrapping
   `burn_stack::modules::BidiLayers`).
 - **`tests/`**: the burn-stack containers tested against **real** blocks:

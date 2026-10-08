@@ -30,7 +30,7 @@
 //! into a second story is out-of-distribution.
 
 use crate::AppArgs;
-use crate::dataset::VOCAB;
+use crate::dataset::{VOCAB, pair};
 use crate::training::Run;
 use burn::prelude::*;
 use burn_mamba::prelude::{MambaCaches, MambaVocabNet, MambaVocabNetConfig};
@@ -156,8 +156,8 @@ pub fn infer(
 /// the class latents that start a story, and it returns the distribution of
 /// the first character, so no input is necessary.
 ///
-/// A prompt is case-folded and filtered through the alphabet (see
-/// [`VOCAB`](crate::dataset::VOCAB)), and it must not be empty after that. The
+/// A prompt keeps its case, is filtered through the alphabet (see
+/// [`VOCAB`](crate::dataset::VOCAB)), and must not be empty after that. The
 /// same cursors splice the latents in front of it, exactly as in training.
 /// `temperature` scales the logits before the softmax, and `<= 0` samples
 /// greedily (argmax). With a `prefill` (see [`prefill`]), the prompt follows
@@ -177,7 +177,7 @@ pub fn generate(
 ) -> String {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let tokens = prompt.map(|prompt| {
-        let tokens = VOCAB.encode(prompt);
+        let tokens = VOCAB.encode_cased(prompt);
         assert!(
             !tokens.is_empty(),
             "the prompt has no character inside the alphabet: {prompt:?}"
@@ -207,8 +207,8 @@ pub fn generate(
     }
 }
 
-/// The opening of one story: the class latents, then the `prompt` tokens if
-/// there are some. Returns the logits of the next character, the cache, and
+/// The opening of one story: the class latents, then the `prompt` tokens
+/// (cased) if there are some. Returns the logits of the next character, the cache, and
 /// the class cursors that the decode continues from.
 ///
 /// The latents always come first:
@@ -249,9 +249,9 @@ fn open(
                 }
                 // One chunkwise pass over the latents and the whole prompt.
                 None => {
-                    let ids: Vec<i32> = tokens.iter().map(|&t| t as i32).collect();
-                    let input =
-                        Tensor::<1, Int>::from_ints(ids.as_slice(), device).reshape([1, ids.len()]);
+                    let pairs: Vec<i32> = tokens.iter().flat_map(|&t| pair(t)).collect();
+                    let input = Tensor::<1, Int>::from_ints(pairs.as_slice(), device)
+                        .reshape([1, tokens.len(), 2]);
                     let (logits, caches) =
                         model.forward(input, None, run.ssd_path.clone(), Some(&mut class), None);
                     let last = logits.dims()[1] - 1;

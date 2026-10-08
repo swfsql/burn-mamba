@@ -1193,20 +1193,21 @@ fn prime_through_the_runtime_enums() {
         .init(&device),
     );
     let mut class = ClassCursors::new(seq);
+    // The logits: the vocab, then the flag of the token pair.
     let (logits, caches) = lm.prime(batch, None, Some(&mut class));
     assert_eq!(
         logits.expect("the class latent was waiting").dims(),
-        [batch, vocab]
+        [batch, vocab + 1]
     );
     // `Start` fires once: the next prime has nothing left to emit.
     let (again, caches) = lm.prime(batch, caches, Some(&mut class));
     assert!(again.is_none(), "the Start latent was primed twice");
     let (logits, _c) = lm.step(
-        Tensor::<1, Int>::zeros([batch], &device),
+        Tensor::<2, Int>::zeros([batch, 2], &device),
         caches,
         Some(&mut class),
     );
-    assert_eq!(logits.dims(), [batch, vocab]);
+    assert_eq!(logits.dims(), [batch, vocab + 1]);
 }
 
 // --- streamed placement (chunked forward / cursored step) ------------------

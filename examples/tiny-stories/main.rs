@@ -73,7 +73,10 @@ pub fn launch(app_args: &AppArgs) {
     // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
-    let autodiff_device = device.clone().autodiff();
+    let mut autodiff_device = device.clone().autodiff();
+    if cli.grad_checkpointing {
+        autodiff_device = autodiff_device.gradient_checkpointing();
+    }
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     // setup training and model configs (placeholder values, see the header)

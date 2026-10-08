@@ -59,10 +59,11 @@
 //! the peak memory is that of the larger pass, not of their sum.
 
 use crate::AppArgs;
-use crate::dataset::{Split, VOCAB, stories};
+use crate::context::cased_log_probs;
+use crate::dataset::{FIRST_LETTER, Split, VOCAB, VOCAB_SIZE, pair, stories};
 use burn::config::Config;
 use burn::prelude::*;
-use burn::tensor::activation::{log_sigmoid, log_softmax, sigmoid};
+use burn::tensor::activation::{log_sigmoid, sigmoid};
 use burn_mamba::prelude::{MambaSsdPath, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::utils::ClassCursors;
 use rand::{Rng, SeedableRng};
@@ -217,7 +218,7 @@ impl WordIndex {
             let mut set: Vec<u32> = split_words(&tokens[..region.min(tokens.len())])
                 .map(|word| {
                     let next = ids.len() as u32;
-                    *ids.entry(word.to_vec()).or_insert(next)
+                    *ids.entry(word).or_insert(next)
                 })
                 .collect();
             set.sort_unstable();
@@ -232,7 +233,7 @@ impl WordIndex {
 
     /// The sorted, unique ids of the known words of `tokens` (a prompt).
     pub fn words(&self, tokens: &[u8]) -> Vec<u32> {
-        let mut set: Vec<u32> = split_words(tokens).filter_map(|word| self.ids.get(word).copied()).collect();
+        let mut set: Vec<u32> = split_words(tokens).filter_map(|word| self.ids.get(&word).copied()).collect();
         set.sort_unstable();
         set.dedup();
         set
@@ -258,11 +259,13 @@ impl WordIndex {
     }
 }
 
-/// The words of `tokens`: the runs of letters.
-fn split_words(tokens: &[u8]) -> impl Iterator<Item = &[u8]> {
+/// The words of the cased `tokens`: the runs of letters, as token ids (so the
+/// case does not matter).
+fn split_words(tokens: &[u8]) -> impl Iterator<Item = Vec<u8>> {
     tokens
-        .split(|&t| !VOCAB.character(t).is_ascii_lowercase())
+        .split(|&t| !VOCAB.character(t).is_ascii_alphabetic())
         .filter(|word| !word.is_empty())
+        .map(|word| word.iter().map(|&t| pair(t)[0] as u8).collect())
 }
 
 /// The settings of the contrast. The training saves them as `contrast.json`
@@ -467,28 +470,30 @@ impl ContrastOverrides {
     }
 }
 
-/// One step of the contrast: `K` rows, row `i` cut from story `i`.
+/// One step of the contrast: `K` rows, row `i` cut from story `i`. Every
+/// character is a pair (id, case flag), on a trailing axis of 2.
 #[derive(Clone, Debug)]
 pub struct ContrastBatch {
     /// Each prompt but its last character, right-padded:
-    /// `[K, prompt_max − 1]`, and `true` at the padding.
-    pub prompt: (Tensor<2, Int>, Tensor<2, Bool>),
+    /// `[K, prompt_max − 1, 2]`, and `true` at the padding (`[K,
+    /// prompt_max − 1]`).
+    pub prompt: (Tensor<3, Int>, Tensor<2, Bool>),
     /// The inputs of the own pass: the last character of `P_i`, then `C_i`
-    /// but its last character: `[K, n]`.
-    pub own: Tensor<2, Int>,
-    /// The targets of the own pass: `C_i`, `[K, n]`.
-    pub own_targets: Tensor<2, Int>,
+    /// but its last character: `[K, n, 2]`.
+    pub own: Tensor<3, Int>,
+    /// The targets of the own pass: `C_i`, `[K, n, 2]`.
+    pub own_targets: Tensor<3, Int>,
     /// The negative prompts `N_i`, as `prompt`. `None`: the negative of row
     /// `i` is the prompt of row `i − 1` (a random other story).
-    pub negative: Option<(Tensor<2, Int>, Tensor<2, Bool>)>,
-    /// The inputs of the other pass, `[K, n]`. With no `negative`: the last
-    /// character of `P_i`, then `C_{i+1}` (row `i − 1` of the roll reads
+    pub negative: Option<(Tensor<3, Int>, Tensor<2, Bool>)>,
+    /// The inputs of the other pass, `[K, n, 2]`. With no `negative`: the
+    /// last character of `P_i`, then `C_{i+1}` (row `i − 1` of the roll reads
     /// `C_i` after `P_{i−1}`). With a `negative`: the last character of
     /// `N_i`, then `C_i`.
-    pub other: Tensor<2, Int>,
+    pub other: Tensor<3, Int>,
     /// The targets of the other pass: `C_{i+1}` with no `negative`, else
     /// `C_i`.
-    pub other_targets: Tensor<2, Int>,
+    pub other_targets: Tensor<3, Int>,
 }
 
 impl ContrastBatch {
@@ -529,31 +534,33 @@ impl ContrastBatch {
             negatives.is_none_or(|neg| neg.len() == k && neg.iter().all(fits)),
             "one negative of 2 to {prompt_max} characters per prompt"
         );
-        let ints = |v: &[i32], cols: usize| Tensor::<1, Int>::from_ints(v, device).reshape([k, cols]);
+        let pairs = |v: Vec<[i32; 2]>, cols: usize| {
+            Tensor::<1, Int>::from_ints(v.concat().as_slice(), device).reshape([k, cols, 2])
+        };
         // Each prompt but its last character, right-padded.
         let padded = |prompts: &[&[u8]]| {
             let width = prompt_max - 1;
-            let mut ids = vec![0i32; k * width];
+            let mut ids = vec![[0i32; 2]; k * width];
             let mut pad = vec![true; k * width];
             for (i, p) in prompts.iter().enumerate() {
                 for (j, &t) in p[..p.len() - 1].iter().enumerate() {
-                    ids[i * width + j] = t as i32;
+                    ids[i * width + j] = pair(t);
                     pad[i * width + j] = false;
                 }
             }
             let pad = Tensor::<1, Bool>::from_bool(burn::tensor::TensorData::new(pad, [k * width]), device);
-            (ints(&ids, width), pad.reshape([k, width]))
+            (pairs(ids, width), pad.reshape([k, width]))
         };
         // The inputs: the last character of `prefix`, then `continuation` but
         // its last character. The targets: `continuation`.
         let pass = |rows: &[(&[u8], &[u8])]| {
             let (mut inputs, mut targets) = (Vec::with_capacity(k * n), Vec::with_capacity(k * n));
             for (prefix, c) in rows {
-                inputs.push(prefix[prefix.len() - 1] as i32);
-                inputs.extend(c[..n - 1].iter().map(|&t| t as i32));
-                targets.extend(c.iter().map(|&t| t as i32));
+                inputs.push(pair(prefix[prefix.len() - 1]));
+                inputs.extend(c[..n - 1].iter().map(|&t| pair(t)));
+                targets.extend(c.iter().map(|&t| pair(t)));
             }
-            (ints(&inputs, n), ints(&targets, n))
+            (pairs(inputs, n), pairs(targets, n))
         };
         let own_rows: Vec<(&[u8], &[u8])> = prompts.iter().copied().zip(continuations.iter().copied()).collect();
         let other_rows: Vec<(&[u8], &[u8])> = match negatives {
@@ -611,19 +618,20 @@ pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: Con
     (own, if rolled { roll_back(other) } else { other })
 }
 
-/// The log-softmax `[K, n, vocab]` of the two passes over the continuations
-/// of `batch` (own, then other), each with its targets `[K, n]`. With no
-/// `negative`, row `i` of the other pass scores `C_{i+1}` (see
-/// [`roll_back`]).
+/// The log-probabilities `[K, n, VOCAB_SIZE + 2]` of the two passes over the
+/// continuations of `batch` (own, then other, see
+/// [`cased_log_probs`](crate::context::cased_log_probs)), each with its target
+/// pairs `[K, n, 2]`. With no `negative`, row `i` of the other pass scores
+/// `C_{i+1}` (see [`roll_back`]).
 fn pair_passes(
     model: &MambaVocabNet,
     ssd_path: &MambaSsdPath,
     batch: ContrastBatch,
-) -> [(Tensor<3>, Tensor<2, Int>); 2] {
+) -> [(Tensor<3>, Tensor<3, Int>); 2] {
     let n = batch.own.dims()[1];
     // A pass over prompts opens each row with the class latents, and leaves
     // the cursor after them. So the passes over `C` emit none.
-    let prompt_pass = |(ids, pad): (Tensor<2, Int>, Tensor<2, Bool>)| {
+    let prompt_pass = |(ids, pad): (Tensor<3, Int>, Tensor<2, Bool>)| {
         let mut class = ClassCursors::stream();
         let (_, caches) = model.forward(ids, None, ssd_path.clone(), Some(&mut class), Some(pad));
         (caches, class)
@@ -638,16 +646,23 @@ fn pair_passes(
         model.forward(batch.other, Some(other_caches), ssd_path.clone(), Some(&mut class_other), None);
     assert_eq!(own_logits.dims()[1], n, "the passes over the continuations emit no latents");
     [
-        (log_softmax(own_logits, 2), batch.own_targets),
-        (log_softmax(other_logits, 2), batch.other_targets),
+        (cased_log_probs(own_logits), batch.own_targets),
+        (cased_log_probs(other_logits), batch.other_targets),
     ]
 }
 
-/// The log-probability `[K, n]` of each target under a log-softmax
-/// `[K, n, vocab]`.
-fn target_log_p(log_p_knv: Tensor<3>, targets_kn: Tensor<2, Int>) -> Tensor<2> {
+/// The log-probability `[K, n]` of each target pair `[K, n, 2]` under the
+/// log-probabilities `[K, n, VOCAB_SIZE + 2]` of
+/// [`cased_log_probs`](crate::context::cased_log_probs): that of its id, plus
+/// that of its case when it is a letter.
+fn target_log_p(log_p_knv: Tensor<3>, targets_kn2: Tensor<3, Int>) -> Tensor<2> {
     let [k, n, _] = log_p_knv.dims();
-    log_p_knv.gather(2, targets_kn.reshape([k, n, 1])).reshape([k, n])
+    let id_kn1 = targets_kn2.clone().narrow(2, 0, 1);
+    let case_kn1 = targets_kn2.narrow(2, 1, 1).add_scalar(VOCAB_SIZE as i64);
+    let letter_kn = id_kn1.clone().greater_equal_elem(FIRST_LETTER as i64).float().reshape([k, n]);
+    let id_kn = log_p_knv.clone().gather(2, id_kn1).reshape([k, n]);
+    let case_kn = log_p_knv.gather(2, case_kn1).reshape([k, n]);
+    id_kn + case_kn * letter_kn
 }
 
 /// Row `i` of a score of the other pass moved to row `i + 1` (cyclic). With
@@ -658,11 +673,17 @@ fn roll_back(other_kn: Tensor<2>) -> Tensor<2> {
     Tensor::cat(vec![other_kn.clone().narrow(0, k - 1, 1), other_kn.narrow(0, 0, k - 1)], 0)
 }
 
-/// The entropy `[K, n]` (nats) of each prediction of a log-softmax
-/// `[K, n, vocab]`.
+/// The entropy `[K, n]` (nats) of each prediction of the log-probabilities
+/// `[K, n, VOCAB_SIZE + 2]` of
+/// [`cased_log_probs`](crate::context::cased_log_probs): `H(id) + P(letter) ·
+/// H(case)`, because a symbol has no case.
 fn entropy(log_p_knv: Tensor<3>) -> Tensor<2> {
     let [k, n, _] = log_p_knv.dims();
-    (log_p_knv.clone().exp() * log_p_knv).sum_dim(2).neg().reshape([k, n])
+    let h = |log_p: Tensor<3>| (log_p.clone().exp() * log_p).sum_dim(2).neg().reshape([k, n]);
+    let ids = log_p_knv.clone().narrow(2, 0, VOCAB_SIZE);
+    let letters = ids.clone().narrow(2, FIRST_LETTER, VOCAB_SIZE - FIRST_LETTER);
+    let p_letter = letters.exp().sum_dim(2).reshape([k, n]);
+    h(ids) + p_letter * h(log_p_knv.narrow(2, VOCAB_SIZE, 2))
 }
 
 /// The contrast loss of the log-probabilities of [`pair_log_probs`], scored
@@ -740,7 +761,7 @@ impl Feed {
         let stories: Vec<Vec<u8>> = stories(Split::Train, train_stories)
             .iter()
             .map(|story| {
-                let mut tokens = VOCAB.encode(story);
+                let mut tokens = VOCAB.encode_cased(story);
                 tokens.truncate(keep);
                 tokens
             })
@@ -1062,7 +1083,7 @@ pub fn profiled_pair_log_probs(
     batch: ContrastBatch,
     log: &mut impl Write,
 ) -> (Tensor<2>, Tensor<2>) {
-    let [k, n] = batch.own.dims();
+    let [k, n, _] = batch.own.dims();
     let rolled = batch.negative.is_none();
     // The first input of the own pass is the last character of the prompt.
     let text_ids = Tensor::cat(vec![batch.own.clone().narrow(1, 0, 1), batch.own_targets.clone()], 1);
@@ -1073,8 +1094,11 @@ pub fn profiled_pair_log_probs(
     let columns = vec![own_kn.clone(), other_kn.clone(), entropy(own_knv), align(entropy(other_knv))];
     let ids: Vec<i64> = text_ids.into_data().try_into_vec_as().unwrap();
     let values: Vec<f32> = Tensor::cat(columns, 0).into_data().try_into_vec_as().unwrap();
-    for (i, row_ids) in ids.chunks(n + 1).enumerate() {
-        let text: String = row_ids.iter().map(|&t| VOCAB.character(t as u8)).collect();
+    for (i, row_ids) in ids.chunks(2 * (n + 1)).enumerate() {
+        let text: String = row_ids
+            .chunks(2)
+            .map(|p| VOCAB.character(crate::dataset::unpair(p[0] as u8, p[1] == 1)))
+            .collect();
         // Column `c` of row `i` is row `c·K + i` of the concatenation.
         let column = |c: usize| {
             let row = &values[(c * k + i) * n..(c * k + i + 1) * n];

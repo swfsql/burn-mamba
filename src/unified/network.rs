@@ -468,13 +468,14 @@ pub enum MambaVocabNet {
 }
 
 impl MambaVocabNet {
-    /// Full-sequence pass: token IDs `[batch, sequence]` → logits
-    /// `[batch, sequence, padded_vocab]`. The `ssd_path`/`caches` family must
+    /// Full-sequence pass: token pairs `[batch, sequence, 2]` (id, flag) →
+    /// logits `[batch, sequence, padded_vocab + 1]` (the vocab logits, then the
+    /// flag logit, see [`VocabNetwork`]). The `ssd_path`/`caches` family must
     /// match the network. A mismatch is a caller error and panics. `pad` marks
     /// a right-padded batch ([`VocabNetwork::forward`]).
     pub fn forward(
         &self,
-        x: Tensor<2, Int>,
+        x: Tensor<3, Int>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
         class: Option<&mut ClassCursors>,
@@ -536,7 +537,7 @@ impl MambaVocabNet {
     /// rows (it panics).
     pub fn forward_packed(
         &self,
-        x: Tensor<2, Int>,
+        x: Tensor<3, Int>,
         caches: Option<MambaCaches>,
         ssd_path: MambaSsdPath,
         packed: &Packed,
@@ -613,12 +614,13 @@ impl MambaVocabNet {
         }
     }
 
-    /// Single-token step: token IDs `[batch]` → logits `[batch, padded_vocab]`.
-    /// The cache family must match the network. `class` (the cursors of the
-    /// inner [`Layers`]) goes to the inner network (see [`VocabNetwork::step`]).
+    /// Single-token step: token pairs `[batch, 2]` → logits
+    /// `[batch, padded_vocab + 1]`. The cache family must match the network.
+    /// `class` (the cursors of the inner [`Layers`]) goes to the inner network
+    /// (see [`VocabNetwork::step`]).
     pub fn step(
         &self,
-        x: Tensor<1, Int>,
+        x: Tensor<2, Int>,
         caches: Option<MambaCaches>,
         class: Option<&mut ClassCursors>,
     ) -> (Tensor<2>, MambaCaches) {
