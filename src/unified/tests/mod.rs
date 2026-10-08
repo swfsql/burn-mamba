@@ -9,6 +9,7 @@
 mod bidi;
 mod capture;
 mod class;
+mod hnet;
 mod layer;
 #[cfg(feature = "mamba3")]
 mod layers;

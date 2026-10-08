@@ -15,8 +15,8 @@ LibTorch, …).
 
 **[`burn-stack`](../burn-stack)** (`../burn-stack/CLAUDE.md`) holds everything
 *around* the block: layers, (virtual-)layer stacks, bidirectional pairs,
-latent/vocab networks, multi-gate residuals, class tokens, schedules, the Muon
-plan. It is block-agnostic by construction. This crate supplies the three
+latent/vocab networks, H-Nets, multi-gate residuals, class tokens, schedules,
+the Muon plan. It is block-agnostic by construction. This crate supplies the three
 `Block` implementations and the runtime-selectable `Mamba*` enums in
 `src/unified/`. **Never put anything mamba-specific into `burn-stack`**: no
 name, no shape assumption, no doc reference. If it needs one, it belongs here.
@@ -146,9 +146,12 @@ src/
    ├─ network.rs     MambaLatentNet / MambaVocabNet (+ Configs, ModelConfigExt);
    │                 MambaVocabNet::forward_packed, pack_align, n_class_latents
    ├─ bidi.rs        MambaBidiLayers (+ Config)
+   ├─ hnet.rs        MambaHNetVocabNet / MambaHNetCaches: one variant per
+   │                 (stage family, main family) pair (macro); Config =
+   │                 HNetVocabShape + MambaBlockConfig per stage + main
    └─ tests/         the burn-stack containers with real blocks: layer, layers
                      (grad_horizon), multi_gate, bidi, class, optim, untied,
-                     capture, packed
+                     capture, packed, hnet
 ```
 
 The generic containers (`Layer`/`Layers`/networks/bidi/multi_gate/class
@@ -195,6 +198,8 @@ logits are `[…, vocab + 1]`: the last column is the flag logit (tiny-stories:
 the letter case). The runtime enums `MambaVocabNet` / `MambaLatentNet` /
 `MambaBidiLayers` (each with a `#[derive(Config)]` `*Config`) select the family
 at construction. They panic on a cache or SSD path of the wrong family.
+`MambaHNetVocabNet` (burn-stack's H-Net) selects two: one family for its
+stages, one for its main network.
 
 ### Dual execution modes
 
@@ -480,12 +485,13 @@ gradient). Both are structural, stock exactly at `κ = 0` / `e = 0`, with one
 cache slot each. What each buys: `info/kalman/gate-as-positive-system.md`
 (cite it, do not restate it).
 
-### Virtual layers, bidirectional, class tokens, multi-gate
+### Virtual layers, bidirectional, class tokens, multi-gate, H-Net
 
 These are `burn-stack` features, documented in `../burn-stack/CLAUDE.md`. Here:
 they are family-agnostic, `src/unified/tests/` tests each one against real
-blocks, and the runtime enums (`MambaLatentNet` / `MambaBidiLayers`) wrap the
-generic containers (they do not reimplement them).
+blocks, and the runtime enums (`MambaLatentNet` / `MambaBidiLayers` /
+`MambaHNetVocabNet`) wrap the generic containers (they do not reimplement
+them).
 
 ---
 

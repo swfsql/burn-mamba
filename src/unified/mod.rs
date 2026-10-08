@@ -58,10 +58,16 @@ pub mod network;
 /// Runtime-selectable bidirectional stacks ([`MambaBidiLayers`]).
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod bidi;
+/// Runtime-selectable H-Net language models ([`MambaHNetVocabNet`]): one
+/// family for the stages, one for the main network.
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+pub mod hnet;
 
 pub use cache::MambaCaches;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+pub use hnet::{MambaBlockConfig, MambaHNetCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig};
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
 

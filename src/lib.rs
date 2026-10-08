@@ -67,7 +67,8 @@ pub mod prelude {
     // The runtime-selectable unified API (this crate).
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
     pub use crate::unified::{
-        MambaBidiLayers, MambaBidiLayersConfig, MambaLatentNet, MambaLatentNetConfig,
+        MambaBidiLayers, MambaBidiLayersConfig, MambaBlockConfig, MambaHNetCaches,
+        MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet, MambaLatentNetConfig,
         MambaVocabNet, MambaVocabNetConfig,
     };
     pub use crate::unified::{MambaCaches, MambaSsdPath};
