@@ -584,3 +584,24 @@
   started in the second of the kill, beside a probe). Now: **L-R-N15-B5**
   here (20:46), Kaggle batch 14 (after batch 13): L-R-N15-B (7 slots: the
   protocol contrast) and L-R-B5 (N 2).
+- **L-R-N15-B5** at the 5 slots: reserved 3386 MB from step 100 to 600
+  (flat), 1.28 s/step here (the old protocol ~1.0).
+- **User hunch (20:55)**: explore a lot the main-strong settings (a 4th
+  layer, a larger main d and state rank, at the cost of the stage d and
+  rank); with whole stories, a higher N and a stronger main should matter
+  more. Kaggle batch 14 is now L-R-B5 + L-Nm4-s96r128-B5 (the 7-slot
+  contrast deferred). The `M-*` family (N 2, stage 2+2 Real1D, main Real1D
+  r 128 unless noted; md fitted with mmlp 8, then mmlp filled):
+
+  | cfg | stage d / r | main | params |
+  |---|---|---|---|
+  | M-s96r64-L4 | 96 / 64 | d136 × 4 | 992,533 |
+  | M-s80r64-L4 | 80 / 64 | d144 × 4 | 996,753 |
+  | M-s64r64-L4 | 64 / 64 | d152 × 4 | 992,717 |
+  | M-s96r64-L5 | 96 / 64 | d120 × 5 | 999,624 |
+  | M-s96r64-L4r256 | 96 / 64 | d120 × 4, r 256 | 994,829 |
+  | M-s96r64-L4c | 96 / 64 | d128 × 4, Complex2D | 997,553 |
+  | M-s96r32-L4 | 96 / 32 | d136 × 4 | 990,485 |
+  | M-s112r64-L4 | 112 / 64 | d120 × 4 | 995,253 |
+
+  Their VRAM probes (`probes-B.txt`) follow L-R-N15-B5 here.

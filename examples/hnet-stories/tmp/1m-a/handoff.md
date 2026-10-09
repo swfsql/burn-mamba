@@ -38,20 +38,25 @@ at its end).
   baseline; started 20:46; + ctx + long).
 - Kaggle batch 13 (v16, pushed 20:05; old protocol, its results are void):
   the N 2 extension and L-W-s112-m. Batch 14 (the waiter pushes it after
-  batch 13): **L-R-N15-B** (7 slots: the protocol contrast) and **L-R-B5**
-  (N 2). Probe the pulled runs here: `long.sh -g <run>-d >> long.txt`.
+  batch 13): **L-R-B5** (N 2) and **L-Nm4-s96r128-B5**. Probe the pulled
+  runs here: `long.sh -g <run>-d >> long.txt`. Deferred: L-R-N15-B (7
+  slots, the protocol contrast; cfg/R-N15-B).
 - The heartbeat (a session cron, every 30 min) checks both runners.
 
 ## Next steps
 
-1. **The baseline**: L-R-N15-B5 `wv`, against the flat 0.8868 at 3230.
-   L-R-N15-B (7 slots) checks the slot choice; L-R-B5 the N.
-2. **The main network** (user: it should matter most; a larger main d and
-   state rank; or thin stages, a big main, a 4th main layer), now in the
-   whole stories, where the main can matter: cfg/W-m64r-B5 (stage d112 2+2
-   Real1D r 128, main d144 × 3 r 64, N 2) and cfg/Nm4-s96r128-B5 (stage
-   d96 r 128, main d128 × 4 r 128, N 2), against L-R-B5. Measure their
-   VRAM at the buckets (the 1024 slot holds 11 × 1024 tokens).
+1. **The baseline**: L-R-N15-B5 `wv` (3386 MB reserved, ~1.3 s/step),
+   against the flat 0.8868 at 3230. L-R-B5 gives the N 2 reference.
+2. **The main network: explore a lot** (user hunch, 20:55: with whole
+   stories, a higher N and a stronger main should matter more; a 4th
+   layer, a larger main d and state rank, even at the cost of the stage d
+   and rank; keep at it even if the first configs lose). The `M-*` family
+   (stage 2+2 Real1D, thinner: d 64..96, r 32/64; main 4..5 layers, r 128
+   or 256, Real1D or Complex2D; md fitted to 1M with `fit.py`; N 2, then
+   N 3): VRAM probes here first (a 10-step probe sees the 11 × 1024 batch;
+   the steady reserved ≈ the step-100 value), then long runs. Kaggle batch
+   14: L-R-B5 (the N 2 reference) and L-Nm4-s96r128-B5 (stage d96 r 128,
+   main d128 × 4 r 128).
 3. Then the milestones of the best shape (`extend.sh`, pieces < 1 h:
    `… N1 0`, `--lr LR --span A-B`), against the flat `wv`.
 4. Rank by long runs (two seeds where it matters), by `wv`, with dv and
