@@ -73,10 +73,7 @@ pub fn launch(app_args: &AppArgs) {
     // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
-    let mut autodiff_device = device.clone().autodiff();
-    if cli.grad_checkpointing {
-        autodiff_device = autodiff_device.gradient_checkpointing();
-    }
+    let autodiff_device = cli.step.training_device(&device);
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     // setup training and model configs (placeholder values, see the header)
@@ -136,11 +133,9 @@ pub fn launch(app_args: &AppArgs) {
         ssd_path: cli.ssd_path,
         pack_align: cli.pack_align,
         graphs: app_args.graphs(),
-        max_vram_mib: cli.max_vram_mib,
+        max_vram_mib: cli.step.max_vram_mib,
     };
-    if let Some((every, sync)) = cli.profile {
-        training::prof::init(every, sync);
-    }
+    cli.step.start_profile();
 
     if app_args.training {
         // The saved settings of the run, with the flags of this invocation.

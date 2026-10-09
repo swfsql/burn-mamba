@@ -1,0 +1,8 @@
+!tmp/
+tmp/*
+
+!tmp/1m-a/
+tmp/1m-a/*
+!tmp/1m-a/*.sh
+!tmp/1m-a/*.py
+!tmp/1m-a/*.md

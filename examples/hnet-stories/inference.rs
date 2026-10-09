@@ -48,10 +48,13 @@ const PROMPTS: &[&str] = &[
 /// given.
 pub const PROMPT_TEMPERATURE: f64 = 0.8;
 
-/// The prompted continuations of [`infer`] (`--prompt`, `--temperature`).
+/// The prompted continuations of [`infer`] (`--prompt`, `--continuations`,
+/// `--temperature`).
 pub struct Prompting {
     /// The prompts. Empty selects [`PROMPTS`].
     pub prompts: Vec<String>,
+    /// The continuations of each prompt, each with its own seed.
+    pub continuations: usize,
     /// The sampling temperature of the continuations.
     pub temperature: f64,
 }
@@ -71,8 +74,11 @@ pub fn infer(model_config: HNetStoriesConfig, device: Device, app_args: &AppArgs
         false => prompting.prompts.clone(),
     };
     for (i, prompt) in prompts.iter().enumerate() {
-        let text = generate(&model, run, &device, Some(prompt), SAMPLE_CHARS, prompting.temperature, 100 + i as u64);
-        println!("--- continuation (temperature {}) ---\n{prompt}{text}\n", prompting.temperature);
+        for c in 0..prompting.continuations {
+            let seed = 100 + (i * prompting.continuations + c) as u64;
+            let text = generate(&model, run, &device, Some(prompt), SAMPLE_CHARS, prompting.temperature, seed);
+            println!("--- continuation {c} of prompt {i} (temperature {}) ---\n{prompt}{text}\n", prompting.temperature);
+        }
     }
 }
 

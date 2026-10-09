@@ -65,7 +65,7 @@ pub fn launch(app_args: &AppArgs) {
     // fp16/i32 when `dev-f16` is on.
     let mut device = burn::prelude::Device::default();
     common::device::configure_dtype(&mut device);
-    let autodiff_device = device.clone().autodiff();
+    let autodiff_device = cli.step.training_device(&device);
     let dtype = burn::tensor::Tensor::<1>::zeros([1], &device).dtype();
 
     // setup training and model configs (placeholder values, see the header)
@@ -118,6 +118,7 @@ pub fn launch(app_args: &AppArgs) {
     app_args.save_model_config(&model_config);
 
     let run = training::Run::new(&model_config, &cli, app_args.graphs());
+    cli.step.start_profile();
 
     if app_args.training {
         training::train(config.clone(), model_config.clone(), autodiff_device, app_args, run.clone());

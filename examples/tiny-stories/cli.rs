@@ -2,7 +2,8 @@
 //! (`Overrides`, shared with `burn-deltanet`), the SSD path, the step profiler
 //! and the VRAM cap.
 
-use crate::common::cli::{AppArgs, finish_extra};
+use crate::common::cli::{AppArgs, StepFlags, finish_extra};
+use crate::common::parse_ssd_path;
 use crate::common::tiny_stories::lm::Overrides;
 use crate::context::BATCH;
 use crate::contrast::ContrastOverrides;
@@ -20,11 +21,7 @@ const HELP: &str = concat!(
     "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
     "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)\n",
     "    --contrast-eval <N>    Measure how strongly the contrast pushes the trained model: N batches per cut kind, no backward\n",
-    "    --contrast-profile     With --contrast-eval, run only the cut and the negative of the flags, and write the scores of each character to contrast-profile.jsonl\n",
-    "    --profile <N>          Print the mean milliseconds of each training-step phase once per N windows\n",
-    "    --profile-sync         Also sync the device after each phase (with --profile)\n",
-    "    --grad-checkpointing   Train with the balanced gradient checkpointing of Burn. The backward computes the memory-bound ops again and keeps the outputs of the compute-bound ops. This uses less vram and more time\n",
-    "    --max-vram <MiB>       Stop the process with an error when the memory pools hold more than this, after a backward. Also clean up the memory before windows 0, 1, 2, 4, 8, ... and before each 256th window",
+    "    --contrast-profile     With --contrast-eval, run only the cut and the negative of the flags, and write the scores of each character to contrast-profile.jsonl",
 );
 
 /// The parsed flags.
@@ -36,14 +33,8 @@ pub struct Cli {
     pub ssd_path: MambaSsdPath,
     /// `--pack-align`: see `training::Run::pack_align`.
     pub pack_align: Option<usize>,
-    /// `--profile` (and `--profile-sync`): see `training::prof`.
-    pub profile: Option<(usize, bool)>,
-    /// `--max-vram`, in MiB: the cap on the bytes that the memory pools
-    /// reserve (the CUDA context is not included). See `training::Run`.
-    pub max_vram_mib: Option<u64>,
-    /// `--grad-checkpointing`: the training device gets the `Balanced`
-    /// gradient checkpointing of Burn.
-    pub grad_checkpointing: bool,
+    /// `--profile`, `--max-vram`, `--grad-checkpointing`.
+    pub step: StepFlags,
     /// `--prompt` (repeatable), `--continuations` and `--temperature`: the
     /// prompted continuations of inference.
     pub prompting: Prompting,
@@ -68,8 +59,9 @@ impl Cli {
     /// Parse the arguments forwarded after `--`.
     pub fn parse(app_args: &AppArgs) -> Self {
         let help = format!(
-            "tiny-stories' own flags (after --):\n{}\n{HELP}\n{}",
+            "tiny-stories' own flags (after --):\n{}\n{HELP}\n{}\n{}",
             Overrides::HELP,
+            StepFlags::HELP,
             ContrastOverrides::HELP
         );
         let mut pargs = app_args.extra(&help);
@@ -80,11 +72,7 @@ impl Cli {
             .unwrap_or(Mamba3SsdPath::SerialRecalculated(None));
         let pack_align: Option<usize> = pargs.opt_value_from_str("--pack-align").unwrap();
         assert!(pack_align != Some(0), "--pack-align must be at least 1");
-        let every: Option<usize> = pargs.opt_value_from_str("--profile").unwrap();
-        let sync = pargs.contains("--profile-sync");
-        assert!(every.is_some() || !sync, "--profile-sync needs --profile");
-        let max_vram_mib = pargs.opt_value_from_str("--max-vram").unwrap();
-        let grad_checkpointing = pargs.contains("--grad-checkpointing");
+        let step = StepFlags::parse(&mut pargs);
         let prompting = Prompting {
             prompts: pargs.values_from_str("--prompt").unwrap(),
             continuations: pargs.opt_value_from_str("--continuations").unwrap().unwrap_or(1),
@@ -109,9 +97,7 @@ impl Cli {
             overrides,
             ssd_path: MambaSsdPath::Mamba3(ssd_path),
             pack_align,
-            profile: every.map(|every| (every, sync)),
-            max_vram_mib,
-            grad_checkpointing,
+            step,
             prompting,
             context_use,
             context_batch,
@@ -120,23 +106,5 @@ impl Cli {
             contrast_eval,
             contrast_profile,
         }
-    }
-}
-
-/// `<path>[:<chunk_len>]`. The chunk length counts folded positions, as
-/// `Mamba3SsdPath` does.
-fn parse_ssd_path(arg: &str) -> Result<Mamba3SsdPath, String> {
-    let (path, chunk_len) = match arg.split_once(':') {
-        None => (arg, None),
-        Some((path, len)) => match len.parse::<usize>() {
-            Ok(len) if len >= 1 => (path, Some(len)),
-            _ => return Err(format!("chunk length {len:?} is not a positive integer")),
-        },
-    };
-    match path {
-        "recalc" => Ok(Mamba3SsdPath::SerialRecalculated(chunk_len)),
-        "serial" => Ok(Mamba3SsdPath::Serial(chunk_len)),
-        "minimal" => Ok(Mamba3SsdPath::Minimal(chunk_len)),
-        other => Err(format!("unknown SSD path {other:?} (recalc | serial | minimal)")),
     }
 }

@@ -25,6 +25,7 @@ use burn::{
 };
 use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::lm::{self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid};
+use burn_stack::examples::{prof, vram};
 use burn_stack::modules::ModelConfigExt;
 use burn_stack::modules::hnet::{Routing, StepMode};
 use burn_stack::utils::ClassCursors;
@@ -106,8 +107,10 @@ pub fn train(
 #[derive(Clone, Debug)]
 pub struct Run {
     /// The SSD paths of every chunkwise `forward`: (the stages, the main
-    /// network). Both are the Mamba-3 default.
+    /// network), from `--ssd-path` and `--main-ssd-path`.
     pub paths: (MambaSsdPath, MambaSsdPath),
+    /// `--max-vram`, in MiB: the cap of [`vram`], with its cleanups.
+    pub max_vram_mib: Option<u64>,
     /// `--step-mode`: how a decode step runs the inner network of a stage.
     pub step_mode: StepMode,
     /// Whether decode steps replay a captured graph (`--no-graph` runs them
@@ -138,7 +141,8 @@ impl Run {
             "this example runs Mamba-3 in every stack"
         );
         Self {
-            paths: (MambaSsdPath::mamba3_default(), MambaSsdPath::mamba3_default()),
+            paths: cli.paths.clone(),
+            max_vram_mib: cli.step.max_vram_mib,
             step_mode: cli.step_mode,
             graphs,
             show_chunks: cli.show_chunks,
@@ -150,7 +154,8 @@ impl Run {
     }
 }
 
-/// The training windows so far: the cadence of `--chunk-log`.
+/// The training windows so far: the cadence of `--chunk-log` and of the
+/// `--max-vram` cleanups.
 static TRAIN_WINDOWS: AtomicU64 = AtomicU64::new(0);
 
 /// The H-Net with its [`Run`] settings.
@@ -237,13 +242,24 @@ impl LmModel for Wrap {
         caches: Option<Self::Caches>,
         _class: &mut ClassCursors,
     ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
-        let (output, caches, routing) = self.forward_lm(batch, caches);
+        let device = batch.inputs.device();
         let window = TRAIN_WINDOWS.fetch_add(1, Ordering::Relaxed);
+        if self.1.max_vram_mib.is_some() {
+            vram::cleanup(&device, window);
+        }
+        let t0 = prof::window_start();
+        let (output, caches, routing) = self.forward_lm(batch, caches);
         if self.1.chunk_log > 0 && window % self.1.chunk_log as u64 == 0 {
             log_chunks(&routing, &self.1.ratio_targets);
         }
         let loss = output.loss.clone() + self.ratio_loss(&routing);
+        let t1 = prof::mark(&device);
         let grads = GradientsParams::from_grads(loss.backward(), &self.0);
+        let t2 = prof::mark(&device);
+        if let Some(max_mib) = self.1.max_vram_mib {
+            vram::check(&device, max_mib);
+        }
+        prof::window_end(&device, t0, t1, t2);
         (TrainOutput { grads, item: output }, caches)
     }
 
@@ -275,7 +291,10 @@ impl LmModel for Wrap {
             };
             rates = rates.with_group(ParamGroup::from_predicate(scope), lr * multiplier);
         }
-        Wrap(optim.step(rates.step(), self.0, grads), self.1)
+        let t3 = prof::opt_start();
+        let model = Wrap(optim.step(rates.step(), self.0, grads), self.1);
+        prof::opt_end(t3);
+        model
     }
 
     fn save(&self, app_args: &AppArgs) {

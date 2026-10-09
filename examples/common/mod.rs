@@ -12,11 +12,12 @@
 //! The `config → module` interface is `burn_stack::modules::ModelConfigExt`,
 //! which the network configs of this crate implement. This module only
 //! re-exports those items under the `common::*` paths that the examples use.
-//! It adds two things that must be *here*, in the example crate:
+//! It adds the things that must be *here*, in the example crate:
 //!
 //! - [`ARTIFACT_PREFIX`], the one constant that must expand in this crate.
-//! - [`parse_rotation`], the parser of a flag that names a type of this crate.
-//!   `burn-stack` is family-agnostic, so it cannot have this parser.
+//! - [`parse_rotation`] and [`parse_ssd_path`], the parsers of flags that name
+//!   a type of this crate. `burn-stack` is family-agnostic, so it cannot have
+//!   these parsers.
 //!
 //! With the Dispatch-based architecture, no module here has a generic backend
 //! type. `Tensor`/`Device`/`Module` are pinned to the global `Dispatch`
@@ -52,5 +53,25 @@ pub fn parse_rotation(value: &str) -> Result<burn_mamba::prelude::RotationKind, 
         other => Err(format!(
             "--rotation must be 'complex', 'quaternion' or 'rotor', got {other:?}"
         )),
+    }
+}
+
+/// A `--ssd-path <path>[:<chunk_len>]` value (`recalc | serial | minimal`),
+/// for `pico_args::Arguments::opt_value_from_fn`. The chunk length counts
+/// folded positions, as `Mamba3SsdPath` does.
+pub fn parse_ssd_path(arg: &str) -> Result<burn_mamba::prelude::Mamba3SsdPath, String> {
+    use burn_mamba::prelude::Mamba3SsdPath;
+    let (path, chunk_len) = match arg.split_once(':') {
+        None => (arg, None),
+        Some((path, len)) => match len.parse::<usize>() {
+            Ok(len) if len >= 1 => (path, Some(len)),
+            _ => return Err(format!("chunk length {len:?} is not a positive integer")),
+        },
+    };
+    match path {
+        "recalc" => Ok(Mamba3SsdPath::SerialRecalculated(chunk_len)),
+        "serial" => Ok(Mamba3SsdPath::Serial(chunk_len)),
+        "minimal" => Ok(Mamba3SsdPath::Minimal(chunk_len)),
+        other => Err(format!("unknown SSD path {other:?} (recalc | serial | minimal)")),
     }
 }

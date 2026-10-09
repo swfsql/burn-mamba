@@ -128,5 +128,5 @@ path = "examples/tally/record/main.rs"
 name = "tally-drift"
 path = "examples/tally/drift/main.rs"
 
-# [patch."https://github.com/swfsql/burn-stack.git"]
-# burn-stack = { path = "../burn-stack" }
+[patch."https://github.com/swfsql/burn-stack.git"]
+burn-stack = { path = "../burn-stack" }
