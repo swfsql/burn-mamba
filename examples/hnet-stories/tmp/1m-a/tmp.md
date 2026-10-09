@@ -206,3 +206,77 @@
   probe). A session rewind
   restored the pre-edit `burn-stack/CLAUDE.md` (the File Map entries of
   the commit, put back) and `queue.txt` (b-r1d twice, removed).
+- **L-N2** (b, 2630 + 600, gc): sv@2630 1.0934, **dv@3230 0.9248**, 881
+  ms, 2086 MB. The flat h16-s2 (packed, lr 4e-3, 3149 MB): sv 0.9931, dv
+  **0.8798**. At 600 + 200 they tied (1.1286 / 1.1314). At 3230 the H-Net
+  is +0.045 behind. Its decay gains 0.169 (the flat 0.113): the trunk at
+  lr 8e-3 (picked on the short screens, 5e-3 tied) is likely too hot for
+  a long trunk. Next: L-N2 × lr 4e-3. The recall of L-N2-d (`ctxg.txt`):
+  far own 0.9544; the re-mention first letter own 2.925, gain **1.229**
+  (0.697 at 800 steps). The flat h16-s2-d probe is queued.
+- **The full-budget shapes** (user, again: every shape uses both
+  ceilings). `fit.py` fills the params (`mmlp` at `mlpmul=8`). The probes
+  (`fills.txt`): F-base 1809 MB, F-mv6m-mr96 3121, F-r1d-sr104 2715.
+  F-sr80, F-sr88, F-sm2r48 stopped at the VRAM limit (F-sr80: 4499 MiB):
+  at a stage r ≥ 80 the default chunk goes from 32 to 64 (√(r·p) rounded
+  up to a multiple of 32), so the intra-chunk memory doubles. The chunk
+  length changes no value: `--ssd-path recalc:32` pins it (re-probed).
+  The F-base probe reads 1809 (k-base 1962): the probes have a ±150 MB
+  noise from the inner length. Re-probes with the chunk pinned at 32:
+  F-sr80 4295 MiB (still over), F-sr88 and F-sr72 over, F-sm2r48 over;
+  F-sr64 2589, F-r1d-sr104 2740, F-mv6m-mr96 3129. **A Complex2D stage
+  above r 64 costs far more than linear** (r 64 2589, r 72 > 3750), while
+  Real1D r 104 fits. To investigate (the rotation path?).
+- **The recall of the flat model at 3230** (h16-s2-d, paired, 1968
+  stories): re-mention first letter own **2.685** (L-N2-d 2.925), gain
+  **1.622** (L-N2-d 1.229, −0.39 ± 0.02); far own 0.899 (0.954), far use
+  0.217 (0.187). At 800 the H-Net led the gain by +0.07; at 3230 the flat
+  leads by 0.39. Without a prompt the H-Net is better (4.154 / 4.307). The
+  user's hypothesis (the compression pays later) has no support here. The
+  confounds: the LR (8e-3 / 4e-3), the VRAM (2086 / 3149 MB), and the
+  window: the flat trains on packed rows of 4224 (whole stories), the
+  H-Net on the first 1024 chars of each story.
+- **Length buckets** (user: a window of 4096; a few batch-length slots, by
+  the longest story; batch similar lengths together). burn-stack
+  `dataset.rs` `bucket_batches` / `BucketedStoriesDataset` /
+  `BucketedStoriesBatcher`, `lm.rs` `Bucket {slots, chars}` (+
+  `--buckets`, `--bucket-chars`, `--no-bucket`), a unit test. Each story
+  goes to the shortest slot that holds it; a slot takes `round(chars / its
+  mean)` stories, so one shape per slot; the leftovers move up. The
+  validation is unchanged (bs 10, the first 1024 chars). `gen.py
+  buckets=512,768,1024,1536,2048,3072,4160 bchars=7450`: 512 16 × 844,
+  768 11 × 13308, 1024 9 × 7851, 1536 6 × 3352, 2048 4 × 1879, 3072 3 ×
+  1198, 4160 2 × 176; fill 0.838 (unbucketed 0.73), 8.2–9.2k positions
+  per batch (now 10,240), every story whole (max 4148). The user's three
+  slots 1024/2048/4160 would fill 0.679 with up to 12.5k positions. The
+  train chars per epoch grow 7.7% (the tails of the 12% long stories).
+  The story train-length stats: median 720, p88 1026, p99 2231, max 4148.
+- **The long N comparison** (2630 + 600, lr 8e-3; L-N15 and L-N3 on
+  Kaggle T4s, 1.14 / 1.37 steps/s): dv@3230 L-N15 **0.9070**, L-N2 0.9248,
+  L-N3 0.9482 (flat h16-s2 0.8798). The order of the short screens holds,
+  and the gaps grow (N 1.5 − N 2: −0.011 at 800, −0.018 at 3230; N 3 − N 2:
+  +0.012, +0.023). The recall at 3230 (paired, 1968 stories): far own N
+  1.5 0.934, N 2 0.954, N 3 0.982 (flat 0.899); re-mention letters own
+  1.182 / 1.278 / 1.358 (flat 0.950); re-mention first letter own 2.907 /
+  2.925 / **2.847** (flat 2.685), gain 1.319 / 1.229 / 1.246 (flat 1.622).
+  Less compression wins the bits and most recall rows. Compression still
+  helps the entity choice (N 3 has the best own first letter of the
+  H-Nets), but not enough to pay. The flat model leads every row.
+- **B-base** (b at the buckets): the corpus line matches the simulation
+  (28,612 batches, fill 0.838); prof n=100: 1585 ms (JIT included), 1822
+  MB. Kaggle (batch 2): L-B-N15 and L-B-N15-lr4 (2630 + 600 + ctx): the
+  buckets at the long horizon (against L-N15) and the trunk LR.
+- **The flat reference is not matched** (user: packed data, the hot
+  trunk LR, the H-Net also learns its tokenizer). The volume per step
+  is matched: h16-s2 scores 7505 chars/step (2 × 4224 × 0.888), L-N* 7452
+  (10 × 1024 × 0.73). The composition is not: the flat rows hold whole
+  stories (the positions past 1024 train), the old H-Net protocol only
+  the first 1024 chars. The LR: the flat trunk at 4e-3 (its peak in 1m-b),
+  the H-Net at 8e-3. The tokenizer: the gap to the flat grows with the
+  steps (−0.003 at 800, +0.045 at 3230), not the sign of a slow start
+  alone, but 3230 steps is ~11% of an epoch. The matched reference:
+  **h16-B** (the flat h16 at the same buckets, lr 4e-3, 2630 + 600 +
+  ctx; queued here, `bin/ts-cuda` rebuilt with the buckets).
+- **F-base** (b + main MLP 32 at `mlpmul=8`, 998,352): dv 1.1294 (b
+  1.1286), 942 ms, 2086 MB. The param filler is neutral: it fills the
+  budget without moving the screen.

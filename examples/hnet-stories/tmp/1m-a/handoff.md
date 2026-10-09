@@ -21,12 +21,15 @@ at its end).
 
 ## Running
 
-- Local (`queue.txt`, `queue.sh`): L-N2 (b, 2630 + 600), then its ctx
-  probe, then the VRAM fills f-sr48, f-sr64, f-mr96, f-mm2, f-mv6m
-  (600 + 200).
-- Kaggle (batch 20261009-051418, kernel v4, T4 × 2): L-N15 and L-N3
-  (2630 + 600) + their ctx probes, one per GPU. `kaggle/kpull.sh` merges
-  them when the kernel ends.
+- Local (`queue.txt`, `queue.sh`): B-base (b at the length buckets, 600 +
+  200; burn-stack `Bucket`, `gen.py buckets=…`).
+- Kaggle (batch 2, T4 × 2): L-B-N15 and L-B-N15-lr4 (2630 + 600 + ctx).
+  A background waiter runs `kaggle/kpull.sh` when the kernel ends.
+- Done: L-N2 / L-N15 / L-N3 (dv 0.9248 / 0.9070 / 0.9482; the flat
+  0.8798), their recall (`ctxg.txt`, tmp.md). The full-budget probes
+  (`fills.txt`): a Complex2D stage above r 64 does not fit (to
+  investigate); F-sr64, F-r1d-sr104, F-mv6m-mr96 fit. Their screens wait
+  for the bucket result (the protocol can change).
 - The heartbeat (a session cron, every 30 min) checks both runners.
 
 ## Next steps

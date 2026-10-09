@@ -50,6 +50,10 @@ DEFAULTS = dict(
     bs=10, seq=1024, lr=4e-3, warm=128, stages="", wd=0.1, muon=1,
     stories=262144, vstories=256, epochs=1000, frontier="always", seed=0,
     workers=2, runlen=1,
+    # buckets: the slots of length-bucketed training (`512,768,…`; empty:
+    # none), each batch ~bchars scored chars. `seq`/`runlen` then set only
+    # the validation (keep seq × runlen = 1024).
+    buckets="", bchars=7450,
 )
 
 
@@ -184,6 +188,9 @@ def training(a):
         "frontier": frontier, "train_stories": a["stories"],
         "valid_stories": a["vstories"], "sample_chars": 400,
         "sample_temperature": 0.8, "pack": None,
+        "bucket": None if not a["buckets"] else {
+            "slots": [int(s) for s in a["buckets"].split(",")],
+            "chars": a["bchars"]},
     }
 
 

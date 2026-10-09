@@ -47,7 +47,15 @@ to it). Read `handoff.md` first. This search replaces the flat search of
   compression), or the reverse. Log the params and the reserved MB of each
   variant against its base. A variant that frees budget (Real1D stages:
   −8k params, −566 MB) has not had its fair test until it spends that
-  budget. Every shape should use the most of both ceilings.
+  budget. **Every shape should use the most of both ceilings** (user,
+  again 2026-10-09). The recipe of a full-budget shape (`F-*`):
+  1. Dose the VRAM knob so the steady reserved is ≤ ~3500 MB (the process
+     < 3.6 GiB with the ~100 MiB CUDA context). With gc, the steady
+     reserved ≈ 1.06 × the step-10 probe (L-N2: 2086 against 1962).
+  2. Then fill the params with `fit.py` (the main MLP width `mmlp` at
+     `mlpmul=8`, VRAM-free, ~10k per step) to ≥ ~990k. The main width
+     `md` steps by ~48k and must stay ≥ the stage width.
+  The reference is `F-base` (b + `mmlp` 32, 998k).
 - **Rank by the recall too**: `ctx.sh -g -n 2048` (`ctxg.txt`). The valid
   bits hide it. The re-mention first letter (the choice of the entity)
   moves against the bits with the compression (`notes.md`).
