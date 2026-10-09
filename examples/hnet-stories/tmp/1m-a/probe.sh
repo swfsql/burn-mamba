@@ -17,7 +17,9 @@ cd "$(dirname "$0")"
 cfg=$1; shift
 dir=runs/probe-$cfg-$(date +%s)
 mkdir -p "$dir"
-idle=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
+# The GPU of this process (Kaggle's runner sets CUDA_VISIBLE_DEVICES per lane).
+gpu=${CUDA_VISIBLE_DEVICES:-0}
+idle=$(nvidia-smi -i "$gpu" --query-gpu=memory.used --format=csv,noheader,nounits)
 source ./args.sh; split_args "$@"  # adds --max-vram (see args.sh)
 stamp "$dir"
 bin/hn-cuda --training -a "$dir" -c "cfg/$cfg/training_config.json" \
@@ -25,7 +27,7 @@ bin/hn-cuda --training -a "$dir" -c "cfg/$cfg/training_config.json" \
   --valid-batches 1 "${app[@]}" -- --profile 5 "${ex[@]}" >> "$dir/stdout.log" 2>&1 &
 pid=$! peak=0 note=
 while kill -0 "$pid" 2>/dev/null; do
-  m=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
+  m=$(nvidia-smi -i "$gpu" --query-gpu=memory.used --format=csv,noheader,nounits)
   [ "$m" -gt "$peak" ] && peak=$m
   if [ "$m" -gt 5400 ]; then note=KILLED; kill "$pid"; fi
   # Stop at the final validation: the training peak is already known.

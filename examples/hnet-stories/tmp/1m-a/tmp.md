@@ -137,6 +137,41 @@
   msched=0,1,1,1,1,2` (burn-stack `Schedule::Custom`). The fill screen
   f-mv6m (main mL 3 → 6 applications, middle-heavy, untied, 994k) replaces
   the Cyclic f-mv6. b-N3-v6 (running) keeps Cyclic: the contrast.
+- **b × N 3 × main virtual 6** (Cyclic `0,1,2,0,1,2`, untied, 994k, gc):
+  dv 1.1601 (b × N 3 1.1404, +0.020), 977 ms, 2547 MB. The savings of N 3
+  spent on a Cyclic second pass of the main network lose. The
+  middle-heavy f-mv6m (on b, N 2) is still queued.
+- **The budget table** (`knobs.py`, 10-step probes with gc; the base b
+  1962 MB, 958,776 params). ΔMB / Δparams from b: stage Real1D −614 /
+  −8k; stage head dim 32 −603 / −14k; rope fraction 0.5 −480 / −11k; main
+  head dim 34 −455 / −15k; N 3 −206; Trapezoid None −191 / −15k; main MLP
+  ~0 / +314k; main expand 3 ~0 / +167k; main Quaternion4D +74 / +322k;
+  Multi-Gate 4 +103 / +2k; main micro-steps 2 +184 / +172k; stage expand 3
+  +323 / +212k; no gc +360; stage Quaternion4D +463 / +190k; main r 128
+  +489 / +73k; main virtual 6 +585 / +35k; stage MIMO 2 +690 / +43k; stage
+  r 64 +799 / +46k; main Rotor4D +874 / +658k; main MIMO 4 +1096 / +187k;
+  stage Rotor4D +1395 / +388k. **VRAM-heavy, param-cheap** (~16–18 MB per
+  kparam): the stage state rank, the stage MIMO, the main virtual layers.
+  **Param-heavy, VRAM-free**: the main MLP, the main expand. The head count
+  is a large hidden VRAM cost (stage p 32: −603 MB). gc saves 360 MB
+  (−15%). Caveats: the step-10 probe reads ~12% low against the steady
+  state (b without gc: probe 2322, screen 2652); |ΔMB| < ~150 is noise
+  (2 workers: each probe sees other batches, and the inner length follows
+  the batch; main MIMO 2 reads −122); the N 3 probe has not reached its
+  chunk ratio by step 10.
+- **Kaggle as a second runner** (user: Kaggle first, Colab later).
+  `kaggle/`: kg.sh (the CLI 1.7.4.5 with the repo's `KGAT_` token: kagglesdk
+  sends KAGGLE_API_TOKEN as a Bearer token before it looks at the
+  username/key, which only pass the CLI check), kcorpus.sh (the private
+  dataset swfsql/hnet-corpus: the cased caches), runner.py (the kernel),
+  kpush.sh / kpull.sh, kqueue.txt (the Kaggle queue), kbatches.txt (the
+  pushed batches), out/<ts>/ (the fetched outputs). The smoke: Kaggle
+  unpacks the payload archive (runner.py takes either form). **T4 × 2**
+  (sm_75, driver 580); the k-base probe reserves **1962.3 MB, the same as
+  here**; the 100 + 50 smoke screen ran at 756 ms/step. So runner.py runs
+  one lane per GPU (dependent steps on one line with `&&`), and probe.sh
+  queries its own GPU (`CUDA_VISIBLE_DEVICES`). The first batch (05:00):
+  L-N15 and L-N3 (+ their ctx probes) on the two T4s; L-N2 runs here.
 - **gc by default** (user): `args.sh` adds `--grad-checkpointing` unless
   `--no-gc`. From b-N3-v6 on, every run has it (b-S2b and earlier: none).
 - **The budget table** (user: which knobs target the VRAM): `knobs.sh` /

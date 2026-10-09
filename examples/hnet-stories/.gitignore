@@ -6,3 +6,9 @@ tmp/1m-a/*
 !tmp/1m-a/*.sh
 !tmp/1m-a/*.py
 !tmp/1m-a/*.md
+
+!tmp/1m-a/kaggle/
+tmp/1m-a/kaggle/*
+!tmp/1m-a/kaggle/*.sh
+!tmp/1m-a/kaggle/*.py
+!tmp/1m-a/kaggle/*.md

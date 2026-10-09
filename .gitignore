@@ -3,3 +3,4 @@
 tmp/
 bacon.toml
 __pycache__/
+.kaggle/
