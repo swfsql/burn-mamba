@@ -356,7 +356,128 @@
   power of two costs about as much as the next power of two, or more** (48
   > 64, 96 > 128, Real1D 72 > 128): allocation or kernel padding, not the
   model. Complex2D adds ~1 GB per 64 ranks on top (the rotated B/C).
-  So: Real1D r 128 (cheaper than r 104), power-of-two ranks only.
+  So: Real1D r 128 (cheaper than r 104), power-of-two ranks only. The
+  chunk pin (recalc:32) does not remove it, and it moved F-r1d-sr104 by
+  only 25 MB. The user: likely the cubecl JIT (the line sizes and the
+  tiling follow the dimensions, also without fusion and autotune). A
+  multiple of 32 is not enough (r 96 is the worst point).
+- **F-r1d-sr64** (Real1D r 64 + mmlp 48, 998,785): dv 1.1231 (Complex2D
+  r 64 F-sr64 1.1282, Real1D r 104 1.1076), 806 ms, 1881 MB. The gain is
+  the rank (r 64 → 104: −0.016), not the kind (a tie at r 64).
+- **R-trapN** (Trapezoid None, r 124): dv **1.1501** (+0.042), 911 ms,
+  2916 MB. The trapezoid pays much more than its params (R128a has it
+  off, R128b keeps it).
+- **The split of the winner** (user: are the stage and main blocks the
+  same? bigger main blocks?): one stage layer ~136k (d128 e2 p16 Real1D
+  r 104), one main layer ~131k (d128 e2 p16 Complex2D r 64 + MLP 8): the
+  4 stage layers hold 543k (54%), the 3 main layers 394k (39%), the rest
+  62k. The H-Net paper does the reverse (thin encoders, a big main). The
+  main runs at 1/N of the positions, so its VRAM per param is half. The
+  old allocation tests (a2 d96 + md176) lost at Complex2D r 32, before the
+  stage rank paid. Kaggle batch 6 moves params from the stages to the
+  main, with the stage block kept: M-s11-L5 (stage 1+1, main × 5, 991k),
+  M-s12-L4 (1+2, × 4, 995k), M-s11-w (1+1, main d168 × 3, 992k),
+  M-s11-e3r128 (1+1, main × 3 at expand 3 and r 128, 997k).
+- **L-R-N15-lr4** (the winner × N 1.5, lr 4e-3, Kaggle v8): sv 0.9685, **dv
+  0.8534** (L-R-lr4 0.8617: −0.008; the flat 0.8798: −0.026), 3092 MB.
+  The new best long run.
+- **The r 128 screens** (Kaggle v8): R128b (Real1D everywhere, stage r
+  128, main r 48, 991k) **1.1078** (ties F-r1d-sr104 1.1076), 2476 MB;
+  R128a (Trapezoid None) 1.1718, R128a-N15 1.1140: the trapezoid again.
+- **The flat at the milestone 4630** (h16-x4630-d, 4630 + 1000): **dv@5630
+  0.8137**.
+- **L-R-x4630-d** (L-R-lr4 → 4630 + 1000, lr 4e-3 constant): **dv@5630
+  0.8096** (the flat h16-x4630-d 0.8137: −0.004). The lead shrinks: −0.018
+  at 3230, −0.004 at 5630. The recall still leads (paired, 1968 stories):
+  far own 0.823 / 0.831, use 0.263 / 0.248; re-mention letters own 0.743
+  / 0.778; first letter own 2.291 / 2.406, use 2.416 / 2.266. Next here:
+  L-R-N15-x4630 (the best long run, −0.026 at 3230).
+- **Kaggle batch 6** (600 + 200, lr 8e-3): R128c (Real1D everywhere,
+  stage r 128, main r 32, mmlp 16, 996,257) **1.1001**, 914 ms, 2212 MB;
+  R128c-N15 **1.0964** (the best screen), 978 ms, 2300 MB; R-N15-s1
+  1.1081 (R-N15 seed 0 1.0973: **a seed gap of 0.011**, so the noise of
+  the R family is ±0.005–0.008, more than b's ±0.004; gaps < ~0.01 need
+  long runs). **The main-heavy shapes lose** (the user's question): stage
+  1+1 / main × 5 1.1609; 1+2 / × 4 1.1341; 1+1 / main d168 1.1477; 1+1 /
+  main expand 3 + r 128 1.1570 (3810 MB). At this scale the char-level
+  stages carry the modeling and need their 2+2 depth. Kaggle batch 7:
+  L-R128c-N15-lr4 and L-R128c-lr4 (2630 + 600 + ctx).
+- **L-R-N15-x4630-d** (L-R-N15-lr4 → 4630 + 1000): **dv@5630 0.8038** (the
+  flat 0.8137: −0.010; L-R-x4630-d 0.8096). The lead over the flat
+  shrinks: −0.026 at 3230, −0.010 at 5630. Next: the milestone 8000 +
+  1600 (the flat h16-x8000 here, on its sequence: 1e-3 from 4630; the
+  H-Net on Kaggle with `extend.sh --lr 1e-3`).
+- **The R128c long runs** (lr 4e-3, Kaggle v10): L-R128c-N15-lr4 **dv
+  0.8581** (L-R-N15-lr4 0.8534: +0.005), 981 ms, 2300 MB; L-R128c-lr4 dv
+  0.8606 (L-R-lr4 0.8617: −0.001), 911 ms, 2212 MB. R128c ties R at the
+  long horizon, with ~0.8 GB less VRAM. Kaggle batch 8: L-R-N15-x8000
+  (4630 → 8000 + 1600 at 1e-3, as the flat) and the long seed repeat
+  L-R-N15-lr4-s1.
+- **The flat at the milestone 8000** (h16-x8000-d, 8000 + 1600, 1e-3 from
+  4630): **dv@9600 0.7597**.
+- **The block control** (is the gain the H-Net or the Real1D large-rank
+  block?): fr-d152, the flat h16 with the stage block of the winner
+  (Real1D, r 128, head dim 16, d152 × 5, Multi-Gate 4, 980,192), packed
+  as h16-s2, lr 4e-3, 2630 + 600 + ctx (here): sv 0.9807, **dv 0.8715**
+  (h16-s2 0.8798: −0.008), 802 ms, 3021 MB. **The H-Net still leads the
+  block-matched flat** (L-R-N15-lr4 0.8534: −0.018): of its −0.026 against
+  h16, −0.008 is the block and −0.018 the H-Net. The recall (paired):
+  far own 0.870 / 0.891 (fr-d152), re-mention letters own 0.812 / 0.849,
+  first letter own 2.423 / 2.475, gain 1.717 / 1.597: the H-Net leads
+  every row. Next here: fr-x4630 (4630 + 1000), the trend against the
+  block-matched flat.
+- **L-R-N15-x8000-d** (4630 → 8000 at 1e-3 + 1600, Kaggle v11): sv@8000
+  0.7902, **dv@9600 0.7461** (the flat h16-x8000-d 0.7597: **−0.014**). The
+  lead over the flat: −0.026 at 3230, −0.010 at 5630, −0.014 at 9600.
+- **The long seed noise**: L-R-N15-lr4-s1 dv 0.8485 (seed 0 0.8534): ~±0.005
+  at 3230. The R128c / R gaps (≤ 0.005) are noise.
+- **fr-x4630-d** (the block-matched flat → 4630 + 1000): **dv@5630
+  0.8164** (h16-x4630-d 0.8137: +0.003). The large-rank Real1D block helps
+  a flat model only early; the H-Net (L-R-N15-x4630-d 0.8038) leads both.
+  So the gain is the H-Net, not the block.
+- **The stage-heavy allocation** (the block of R128c; queued here):
+  A-s33-d112 (stage 3+3 d112, main d112 × 3, 997k), A-s22-d136-L2 (stage
+  2+2 d136, main d136 × 2, mmlp 40, 994k), and R128c-s1 (the seed noise of
+  the base). Stage 3+2 at d128 does not fit (> 1M even at main × 2).
+- **Kaggle batch 9** (lr 4e-3, 2630 + 600): L-R-N125-lr4 **0.8515**, 1122
+  ms, 3180 MB (chunk ratio 0.797, target 0.8); L-R-N15-a01-lr4 (α 0.1)
+  **0.8517** (ratio 0.667 = target). Both tie R-N15 (seeds 0.8534 /
+  0.8485, mean 0.851): the compression and the ratio weight are flat
+  around N 1.25–1.5, α 0.1–0.3. Kaggle batch 10: the deeper stages
+  A-s44-d96 (stage 4+4 d96, main d96 × 3, mmlp 64, 993k), A-s33-d112-N15,
+  A-s44-d96-N15, A-s33-d112-L2 (main × 2 + mmlp 136, 1M).
+- **The stage-heavy screens** (here): A-s33-d112 1.1091, 1094 ms, 2493 MB;
+  A-s22-d136-L2 1.1073, 918 ms, 2623 MB; **R128c-s1 1.1177** (seed 0
+  1.1001: **a seed gap of 0.018**). The R family's short screens have
+  ~±0.009 of seed noise: they cannot rank it. Both allocations tie the
+  R128c mean (~1.109). From here, long runs decide (±0.005).
+- **Kaggle batch 10** (600 + 200): A-s44-d96 1.1105 (1318 ms, 2545 MB),
+  A-s44-d96-N15 1.1061, **A-s33-d112-N15 1.0898** (1194 ms, 2493 MB; the
+  best screen value, R128c-N15 1.0964: −0.007, inside the noise),
+  A-s33-d112-L2 1.1103. N 1.5 helps every shape here (−0.004 … −0.019).
+  The long test of A-s33-d112-N15 goes to batch 12.
+- **The flat at the milestone 12000** (h16-x12000-d, 8000-12000 cosine
+  1e-3 → 5e-4, + 2400): **dv@14400 0.7353**.
+- **L-R-N15-x12000-d** (8000 → 12000 at the flat's cosine, in two trunk
+  pieces, + 2400; Kaggle v14): sv@12000 0.7500, **dv@14400 0.7207** (the
+  flat 0.7353: **−0.015**). The lead over the flat by milestone: −0.026 at
+  3230, −0.010 at 5630, −0.014 at 9600, −0.015 at 14400. It holds at
+  ~0.015 after the first milestone; the flat does not catch up.
+- **L-R128c-N15-lr4-s1**: dv 0.8517 (seed 0 0.8581). Two-seed means at
+  3230: R128c-N15 0.8549, R-N15 (r 104) 0.8510: r 104 stays the reference
+  (Δ 0.004, ~1 s.e.).
+- The long allocation tests: L-A-s33-N15-lr4 (here, 18:14), Kaggle batch
+  12: L-A-s33-N15-lr4-s1 and L-A-s22-L2-N15-lr4.
+- **The milestone 12000 + 2400** (the flat plan: 8000-12000 cosine 1e-3 →
+  5e-4): the flat h16-x12000 here (one trunk phase of ~50 min); the H-Net
+  on Kaggle batch 11 in two trunk pieces (`extend.sh … 2000 0 --lr 5e-4
+  --span 8000-12000`, then `… 2000 2400`). extend.sh: `N2 = 0` (a trunk
+  piece) and `--span A-B` (stage.py's anneal; dry test: the same sequence
+  as the flat). Lane 2: L-R128c-N15-lr4-s1 (two seeds of R128c-N15 long).
+- Kaggle batch 9: L-R-N125-lr4 (N 1.25: the trend of the long runs) and
+  L-R-N15-a01-lr4 (the ratio-loss weight α 0.1, not 0.3).
+- **The extensions to the milestone 4630 + 1000** (the 1m-b plan): the
+  flat h16-s2 → h16-x4630 and L-R-lr4 → L-R-x4630 (+ ctx), here.
 - **The flat reference is not matched** (user: packed data, the hot
   trunk LR, the H-Net also learns its tokenizer). The volume per step
   is matched: h16-s2 scores 7505 chars/step (2 × 4224 × 0.888), L-N* 7452

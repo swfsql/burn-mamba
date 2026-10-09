@@ -56,6 +56,12 @@ to it). Read `handoff.md` first. This search replaces the flat search of
      `mlpmul=8`, VRAM-free, ~10k per step) to ≥ ~990k. The main width
      `md` steps by ~48k and must stay ≥ the stage width.
   The reference is `F-base` (b + `mmlp` 32, 998k).
+- **Keep the trapezoid and the B/C bias on** (user): this Mamba-3 has no
+  short conv, and they take its place (`info/mamba-3/architecture-deltas.md`).
+  Trapezoid None lost 0.042 (R-trapN). Free params elsewhere.
+- **Power-of-two state ranks**: another rank costs about as much VRAM as
+  the next power of two, or more (the cubecl kernels follow the
+  dimensions; the curve in `notes.md`).
 - **Rank by the recall too**: `ctx.sh -g -n 2048` (`ctxg.txt`). The valid
   bits hide it. The re-mention first letter (the choice of the entity)
   moves against the bits with the compression (`notes.md`).

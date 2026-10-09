@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# usage: extend.sh <src-run> <new-run> <N1> <N2> [--lr LR] [hn-cuda args for all phases]
+# usage: extend.sh <src-run> <new-run> <N1> <N2> [--lr LR [--span A-B]] [hn-cuda args for all phases]
 # Extends a screen: copies the stable checkpoint runs/<src-run> (a screen's
 # phase 1) to runs/<new-run>, continues it for N1 more steps (--resume, on its
 # LR sequence), then decays a branch runs/<new-run>-d for N2 steps, as
-# screen.sh does (cosine over 0.9·N2·ratio schedule steps).
+# screen.sh does (cosine over 0.9·N2·ratio schedule steps). N2 = 0: no decay
+# branch (a trunk piece: a long trunk goes in pieces of < 1 h).
 # --lr LR: a step-down. stage.py sets the constant LR from the saved step on
-# in runs/<new-run> (a planned later step-down of the schedule goes). A
-# --max-lr is refused: on an LR sequence it scales the whole schedule.
+# in runs/<new-run> (a planned later step-down of the schedule goes). With
+# --span A-B: a cosine from the rate at A to LR at B, then LR (stage.py).
+# A --max-lr is refused: on an LR sequence it scales the whole schedule.
 # The same N1/N2 for every candidate keeps them step-matched.
 # Foreground script: launch it with nohup … & (wait.sh waits on screen.pid).
 set -euo pipefail
 cd "$(dirname "$0")"
 src=$1 run=$2 n1=$3 n2=$4; shift 4
-lr=
+lr= span=
 if [ "${1:-}" = "--lr" ]; then lr=$2; shift 2; fi
+if [ "${1:-}" = "--span" ]; then span=$2; shift 2; fi
 for a in "$@"; do
   [ "$a" = "--max-lr" ] && { echo "extend.sh: use --lr (a step-down), not --max-lr"; exit 1; }
 done
@@ -24,9 +27,10 @@ dir=runs/$run
 cp -r "runs/$src" "$dir"
 stamp "$dir"
 echo $$ > "$dir/screen.pid"
-[ -n "$lr" ] && python3 stage.py "$run" "$lr" >> "$dir/stdout.log"
+if [ -n "$lr" ]; then python3 stage.py "$run" "$lr" ${span:+"$span"} >> "$dir/stdout.log"; fi
 echo "== $(date -Is) extend.sh phase1 $src -> $run -b $n1 ${common[*]} [$(bin_tag)]" >> "$dir/stdout.log"
 bin/hn-cuda --training --resume -a "$dir" -b "$n1" "${common[@]}" >> "$dir/stdout.log" 2>&1
+if [ "$n2" = 0 ]; then echo "== $(date -Is) extend.sh done (no decay)" >> "$dir/stdout.log"; exit 0; fi
 d=$(python3 - "$dir" "$n2" <<'EOF'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1] + "/metrics.jsonl")]
