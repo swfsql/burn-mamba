@@ -605,3 +605,28 @@
   | M-s112r64-L4 | 112 / 64 | d120 × 4 | 995,253 |
 
   Their VRAM probes (`probes-B.txt`) follow L-R-N15-B5 here.
+- **Kaggle batch 13** (old protocol, knowledge only): L-R-x8000-d (N 2)
+  dv@9600 0.7515 (N 1.5: 0.7461; N 1.5 still leads by 0.005 at 9600);
+  L-W-s112-m-d (stage d112 r 128, main d152 × 3 r 32, N 2) dv@3230 0.8887
+  (R at N 2: 0.8617, +0.027: a main at rank 32 loses).
+- **probe.sh** visits every slot (burn-stack `--bucket-probe 2`, user: the
+  VRAM of a slot depends on the model, not in proportion to its
+  positions): `slots a/b/…` = the reserved MB after each slot.
+- **Incident (21:42–21:48)**: the first `Bucket.probe` was a `usize` with a
+  Burn config default, and a Burn default does not apply when a config
+  loads: every saved bucketed config failed ("missing field `probe`").
+  Lost: Kaggle batch 14 (both lines at start; re-pushed 21:50), the
+  decay phase of L-R-N15-B5 (re-run from its phase-1 checkpoint, 21:48),
+  the 10 probes. A first fix made it an `Option` (burn-stack 21b859b);
+  **the user: update the configs instead** (reverted, 7ba5ee7). `gen.py`
+  writes `"probe": 0`; the bucketed `cfg/` were regenerated from `args.txt`
+  (only that field changed); dec-L-R-N15-B5, runs/L-R-N15-B5 and its -d by
+  hand. Everything stopped at 22:00 (user), Kaggle v18 too.
+- **L-R-N15-B5** phase 1: sv@2630 0.9809 (58.4 min, 0.75 steps/s).
+- **The per-slot probe** (smoke test, R-N15-B5): reserved after each slot
+  2903 / 2614 / 2421 / 2710 / 2421 MB (1024 / 1536 / 2048 / 3072 / 4160):
+  the 1024 slot (11 × 1024) is the peak. Not cumulative (`--max-vram`
+  cleans the pool), so `reserved` = their maximum. The run held 3386
+  steady (× 1.17 the probe); the probe's total peak 4168 MiB (idle 692).
+  The bucket summary of a probe run was wrong (it counted runs of
+  consecutive slots; burn-stack ee201dd counts per slot).

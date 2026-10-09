@@ -90,7 +90,12 @@ The scripts of `../../../tiny-stories/tmp/1m-cased/` (see
 `../../../tiny-stories/tmp/1m-b/ORIENTATION.md`), with these changes:
 
 - The binary is `bin/hn-cuda` (`./build.sh`). Match it with
-  `pgrep -x hn-cuda`.
+  `pgrep -x hn-cuda`. **A new config field** (user): add it to every saved
+  config that will load again (`gen.py`, then regenerate `cfg/` from
+  `args.txt`; the `dec-*` configs and the run dirs by hand), not an
+  `Option`. A Burn config default does not apply when a config loads.
+  Stop the runners first: the next phase of a running run loads its
+  config with the new binary.
 - `gen.py <cfg> k=v …`: an H-Net config (the header lists the keys).
   Per-stage keys take `/` lists: `S=2 d=64/128 enc=1 dec=1`.
 - The example flags: `--ssd-path`, `--main-ssd-path`, `--profile N`,

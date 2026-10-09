@@ -4,7 +4,7 @@ Read this file, then `ORIENTATION.md` (the goal, the protocol, the tools).
 `tmp.md` holds the results of the running session (they go to `notes.md`
 at its end).
 
-## State (2026-10-09 20:50): the search restarts
+## State (2026-10-09 22:05): the search restarts
 
 - **The protocol changed** (user, 20:40): whole stories, full backprop, the
   length buckets 1024,1536,2048,3072,4160 (`gen.py` default). **Every
@@ -32,16 +32,37 @@ at its end).
     the 512/768/1024 grouping cost the b family 0.008. Hence one slot up
     to 1024.
 
-## Running
+## Stopped (2026-10-09 22:05, user): restart in the new session
 
-- Local (`queue.txt`): **L-R-N15-B5** (R-N15 at the 5 slots, the new
-  baseline; started 20:46; + ctx + long).
-- Kaggle batch 13 (v16, pushed 20:05; old protocol, its results are void):
-  the N 2 extension and L-W-s112-m. Batch 14 (the waiter pushes it after
-  batch 13): **L-R-B5** (N 2) and **L-Nm4-s96r128-B5**. Probe the pulled
-  runs here: `long.sh -g <run>-d >> long.txt`. Deferred: L-R-N15-B (7
-  slots, the protocol contrast; cfg/R-N15-B).
-- The heartbeat (a session cron, every 30 min) checks both runners.
+Everything is stopped: `queue.sh`, the GPU, the Kaggle kernel (v18
+cancelled by the user), the waiters. `queue.txt` and `kaggle/kqueue.txt`
+are empty. The config incident (tmp.md): every bucketed `cfg/` now has
+`"probe": 0`; the binaries (`eb28b0bb`) and both smoke tests pass (a
+regenerated config probes; the decay config of R-N15-B5 loads and trains).
+To restart:
+
+1. **L-R-N15-B5's decay leaf** (phase 1 is done: sv@2630 0.9809).
+   `runs/L-R-N15-B5-d` holds a killed partial phase 2: `mv` it to
+   `runs/fail2-L-R-N15-B5-d`, then as screen.sh phase 2: `cp -r
+   runs/L-R-N15-B5 runs/L-R-N15-B5-d`, `cp bin/hn-cuda.txt
+   runs/L-R-N15-B5-d/build.txt`, `bin/hn-cuda --training --resume -a
+   runs/L-R-N15-B5-d -c cfg/dec-L-R-N15-B5/training_config.json -b 600
+   --valid-every 0 --checkpoint-every 0 --valid-batches 1 -- --profile 100
+   --ssd-path recalc:32 --grad-checkpointing --max-vram 3750 >>
+   runs/L-R-N15-B5-d/stdout.log`, then `ctx.sh -g -n 2048 -r ctxg` and
+   `long.sh -g` on it (a queue line).
+2. **The VRAM probes** of the M family (`probes-B.txt`; R-N15-B5 is done:
+   2903 MB at the 1024 slot, its run 3386): `./probe.sh <cfg> --
+   --ssd-path recalc:32 --chunk-log 0 >> probes-B.txt` for Nm4-s96r128-B5
+   and the 8 `M-*` (the list in tmp.md).
+3. **Kaggle batch 14** again: `kaggle/kqueue.txt` = the screen.sh lines
+   of L-R-B5 and L-Nm4-s96r128-B5 (+ ctx), then in the background
+   `kaggle/kwait.sh 2 /tmp/kpush-19.log` (push, poll the status,
+   `kpull.sh`, `long.sh` on each pulled `-d` run). The failed runs of v17
+   are `runs/fail-*`.
+- Old bucketed run dirs (L-B-*, B-*, probe-B-*, h16-B, the `ctxg/` and
+  `long*/` copies) still lack `"probe"`: they do not load. They are
+  invalid runs; add the field by hand if one must load again.
 
 ## Next steps
 
@@ -53,14 +74,18 @@ at its end).
    and rank; keep at it even if the first configs lose). The `M-*` family
    (stage 2+2 Real1D, thinner: d 64..96, r 32/64; main 4..5 layers, r 128
    or 256, Real1D or Complex2D; md fitted to 1M with `fit.py`; N 2, then
-   N 3): VRAM probes here first (a 10-step probe sees the 11 × 1024 batch;
-   the steady reserved ≈ the step-100 value), then long runs. Kaggle batch
-   14: L-R-B5 (the N 2 reference) and L-Nm4-s96r128-B5 (stage d96 r 128,
-   main d128 × 4 r 128).
+   N 3): VRAM probes here first (`probe.sh` visits every slot, user;
+   `reserved` = the max over the slots; a run holds ~1.17 × that: dose a
+   shape to a probe ≤ ~2990 MB for a run ≤ 3500), then long runs. Kaggle
+   batch 14: L-R-B5 (the N 2 reference) and L-Nm4-s96r128-B5 (stage d96 r
+   128, main d128 × 4 r 128).
 3. Then the milestones of the best shape (`extend.sh`, pieces < 1 h:
    `… N1 0`, `--lr LR --span A-B`), against the flat `wv`.
 4. Rank by long runs (two seeds where it matters), by `wv`, with dv and
    the recall (`ctx.sh`) beside it.
-5. The VRAM confound (user): the flat h16-s2 3149 MB without gc, the H-Net
+5. At the session end: the File Map line of burn-stack `dataset.rs`
+   (`probe_order`, `BucketedStoriesDataset::new(…, probe)`) and of
+   burn-mamba `examples/common/long_stories.rs` (examples/README.md has it).
+6. The VRAM confound (user): the flat h16-s2 3149 MB without gc, the H-Net
    ~3.1 GB with gc; a flat with gc could hold a larger block (fr-d152: wv
    0.8792 at 3230, h16-s2 0.8868). No gc-filled flat search was done.

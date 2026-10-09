@@ -194,7 +194,7 @@ def training(a):
         "sample_temperature": 0.8, "pack": None,
         "bucket": None if not a["buckets"] else {
             "slots": [int(s) for s in a["buckets"].split(",")],
-            "chars": a["bchars"]},
+            "chars": a["bchars"], "probe": 0},
     }
 
 

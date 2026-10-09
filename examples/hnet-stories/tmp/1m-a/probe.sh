@@ -12,8 +12,9 @@
 #   are not the host's.)
 # - ms/step: the mean of steps 6..10 (`--profile 5`, the first block is JIT).
 #   A bucketed config: 2 steps per slot (`--bucket-probe 2`, `--profile 2`),
-#   `slots a/b/…` the reserved MB after each slot, ms/step that of the last
-#   slot (its first step is JIT).
+#   `slots a/b/…` the reserved MB after each slot, `reserved` their maximum,
+#   ms/step that of the last slot (its first step is JIT). A run holds more:
+#   R-N15-B5 probed 2903 (the 1024 slot), its run 3386 steady (× 1.17).
 # A probe over 5400 MiB total (PROBE_KILL_MIB: the 6 GiB card here) is killed
 # before the card runs out ("KILLED").
 # Foreground: several probes run one after another from one caller.
@@ -60,8 +61,13 @@ line=$(grep "^prof n=$steps " "$dir/stdout.log")
 ms=$(sed -n 's/.*total \([0-9.]*\) ms.*/\1/p' <<< "$line")
 res=$(sed -n 's/.*reserved \([0-9.]*\) MB.*/\1/p' <<< "$line")
 ctx=$(python3 -c "print(round($peak - $idle - ${res:-0} * 1e6 / 2**20))")
-# The reserved MB after each slot (cumulative: the pool keeps the pages).
+# The reserved MB after each slot. Not cumulative (`--max-vram` cleans the
+# pool), so `reserved` is their maximum.
 per=
-[ "$nslots" -gt 0 ] && per="slots $(grep "^prof n=" "$dir/stdout.log" | sed -n 's/.*reserved \([0-9]*\)\.[0-9]* MB.*/\1/p' | paste -sd/)"
+if [ "$nslots" -gt 0 ]; then
+  slotres=$(grep "^prof n=" "$dir/stdout.log" | sed -n 's/.*reserved \([0-9]*\)\.[0-9]* MB.*/\1/p')
+  per="slots $(paste -sd/ <<< "$slotres")"
+  res=$(sort -n <<< "$slotres" | tail -n 1)
+fi
 printf "%-20s reserved %6s MB  total %5s MiB (idle %4s, ctx %4s)  ms/step %6s  %s %s [%s -- %s]\n" \
   "$cfg" "${res:--}" "$peak" "$idle" "$ctx" "${ms:--}" "$per" "$note" "${app[*]}" "${ex[*]}"
