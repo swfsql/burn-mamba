@@ -550,3 +550,37 @@
 - **F-base** (b + main MLP 32 at `mlpmul=8`, 998,352): dv 1.1294 (b
   1.1286), 942 ms, 2086 MB. The param filler is neutral: it fills the
   budget without moving the screen.
+
+## The protocol switch (2026-10-09 20:40): whole stories
+
+- **User**: train on full stories with full backprop (length slots); every
+  earlier H-Net run is invalid, the flat reference stays, the insights
+  stay. L-W-m128r-L2 killed at step 1371. Old-protocol probes:
+  `long-v1/`, `long-v1.txt`.
+- **The whole valid `wv`** (`long.sh`, `--long-stories`): the 256 valid
+  stories in full (207,187 chars; 32 longer than 1024). Its chars 0..1024
+  reproduce `dv` exactly (R-N15 0.8534 = dv@3230).
+- **The flat reference** (packed whole stories), `wv` / dv:
+
+  | step | flat h16 wv | dv | old H-Net R-N15 wv (invalid) |
+  |---|---|---|---|
+  | 3230 | **0.8868** | 0.8798 | 0.8659 |
+  | 5630 | **0.8204** | 0.8137 | 0.8164 |
+  | 9600 | **0.7660** | 0.7597 | 0.7580 |
+  | 14400 | **0.7412** | 0.7353 | 0.7322 |
+
+  At 3230 also: fr-d152-d 0.8792, h16-B-d (the flat at the 7 buckets)
+  0.8924 (+0.006 against packed, on both parts: 0..1024 +0.005, past
+  1024 +0.013).
+- **The length grouping costs** (old-protocol b family, `wv`): L-B-N15-lr4
+  (7 slots, whole stories) 0.9130 against L-N15-lr4 (first 1024) 0.9033:
+  chars 0..1024 0.9061 / 0.8915 (+0.015), past 1024 0.9896 / 1.0340
+  (−0.044). B-c1024 (the 1024 data grouped 512/768/1024) cost +0.008.
+  So the protocol takes **5 slots: 1024,1536,2048,3072,4160** (`gen.py`
+  default): the 88% of stories up to 1024 chars mix in one slot (11 ×
+  1024 tokens, fill 0.69; the old protocol 10 × 1024), the long slots stay
+  fine (≤ 9.2k tokens). 27,568 batches (7 slots: 28,612).
+- L-R-N15-B (7 slots) crashed at start (a cubecl memory failure: it
+  started in the second of the kill, beside a probe). Now: **L-R-N15-B5**
+  here (20:46), Kaggle batch 14 (after batch 13): L-R-N15-B (7 slots: the
+  protocol contrast) and L-R-B5 (N 2).

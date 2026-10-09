@@ -19,17 +19,26 @@ to it). Read `handoff.md` first. This search replaces the flat search of
 
 ## Protocol
 
-- **Unpacked** (an H-Net takes no packed rows): seq 1024, `runlen=1`,
-  frontier Always, **bs 10**: ~7450 scored chars/step, as the packed
-  2×4224 rows of tiny-stories (~7.5k). The fill is 0.73. 12% of the stories
-  are longer than 1024 and lose their tail.
-- The metric: the valid split of tiny-stories (256 stories, their first
-  1024 chars, 190,070 chars). Keep `seq × runlen = 1024`.
+- **Whole stories, full backprop** (user, 2026-10-09 20:40): the length
+  buckets 512,768,1024,1536,2048,3072,4160 (`gen.py` default; each story
+  is one row of the shortest slot that holds it), ~7450 scored chars per
+  batch (`bchars`), as the packed 2×4224 rows of the flat model (~7.5k).
+  **Every H-Net run before this protocol is invalid** (it trained the first
+  1024 chars only: past char 1024 it got worse, `long-v1.txt`). Their
+  insights stay (the rules below, `notes.md`), not their numbers.
+- **The metric: the whole valid `wv`** (`long.sh`: the 256 valid stories
+  in full, 207,187 chars, 32 of them longer than 1024). The training valid
+  `dv` scores their first 1024 chars only (190,070 chars; keep `seq ×
+  runlen = 1024`); log it beside `wv`. `long.sh` also gives the long
+  stories (157, longer than 2048) and their tail.
 - The LR and the milestones are those of `../../../tiny-stories/tmp/1m-b/
   ORIENTATION.md` (the trunk at constant LR, a decay leaf per milestone,
-  rank by the decayed valid `dv`). Each stage trains at `lr · λˢ`
-  (`lrm`). Short screens (600 + 200) predicted the extended order in 1m-b.
-- The flat reference: `tiny-stories/tmp/1m-cased/runs/h16-s2` (h16, packed).
+  rank by the decayed valid). Each stage trains at `lr · λˢ` (`lrm`).
+  Short screens (600 + 200) cannot rank the strong shapes (±0.009): rank
+  by long runs (2630 + 600, lr 4e-3), two seeds where it matters.
+- The flat reference: `tiny-stories/tmp/1m-cased/runs/h16-s2` (h16, packed:
+  whole stories) and its milestones h16-x4630 / x8000 / x12000 (`long.txt`
+  has their `wv`); h16-B-d is the flat at the buckets.
 - **`--grad-checkpointing` everywhere** (user): `args.sh` adds it to every
   training script unless `--no-gc` (the same losses in tiny-stories, −22%
   VRAM, +2–5% time). The screens before 2026-10-09 04:10 ran without it.

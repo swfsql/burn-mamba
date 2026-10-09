@@ -10,8 +10,9 @@
 # (`--long-stories`) with the weights of the run: copies its weights and
 # configs to <root>/<name> (the app rewrites the configs at startup), runs
 # there, and prints the segment rows (0..1024, 1024..2048, the tail 2048..,
-# all). long-stories.jsonl there holds the bits of each bin of each story
-# (longstat.py reads it).
+# all) and the whole valid (the 256 stories of the validation loss in full:
+# all, chars 0..1024, past 1024). long-stories.jsonl and whole-valid.jsonl
+# there hold the bits of each bin of each story (longstat.py reads them).
 set -euo pipefail
 cd "$(dirname "$0")"
 gpu=0 bin=bin/hn-cuda batch=4 root=long
@@ -44,4 +45,4 @@ if [ "$gpu" = 1 ]; then
 else
   BURN_DEVICE=flex "$bin" -a "$dir" -- "${ex[@]}" > "$dir/long-stories.log" 2>&1
 fi
-echo "$name: $(grep -E '^  (bits/char|per char|per story|later)' "$dir/long-stories.log" | tr -s ' ' | paste -sd'|')"
+echo "$name: $(grep -E '^  (bits/char|per char|per story|later)|^whole valid' "$dir/long-stories.log" | tr -s ' ' | paste -sd'|')"

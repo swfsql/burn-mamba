@@ -18,6 +18,12 @@
 //! each [`BIN`] characters (the position profile). The bits are those of the
 //! cased text, as the validation scores it ([`cased_log_probs`]).
 //!
+//! **The whole valid.** The validation loss cuts each story at its window
+//! (the first 1024 characters in the 1M searches). The measure also scores
+//! the stories of the validation loss in full, each in one `forward`. That
+//! gives the bits per character of their whole text, for any model and any
+//! training protocol (windows, packed rows, length buckets).
+//!
 //! **Padding.** A batch holds stories of similar length. Each story is
 //! right-padded (with its last character) to a multiple of [`BIN`]. The models
 //! are causal, so the padding does not change the logits of the real
@@ -91,17 +97,31 @@ pub fn score(logits_of: &LogitsFn, device: &Device, tokens: &[Vec<u8>], batch: u
     bits
 }
 
+/// One line per story: `story` is its index in the validation split (so two
+/// models pair up on it), `bins` the summed bits of each [`BIN`].
+fn story_lines(indices: &[usize], lens: &[usize], bits: &[Vec<f64>]) -> String {
+    (0..indices.len())
+        .map(|i| {
+            let bins: Vec<String> = bits[i].iter().map(f64::to_string).collect();
+            format!("{{\"story\":{},\"len\":{},\"bins\":[{}]}}\n", indices[i], lens[i], bins.join(","))
+        })
+        .collect()
+}
+
 /// Score the long stories of the validation split (see the module header),
 /// `batch` stories per `forward`. Print the bits per character of each
-/// segment and of each bin. Save the summary as `long-stories.json` in
-/// `artifacts` (the artifacts directory), and the bits of each bin of each
-/// story in `long-stories.jsonl`.
-pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, batch: usize) {
+/// segment and of each bin. Then score the stories of the validation loss
+/// (the first `valid_stories`) in full: the bits per character of the whole
+/// text, of its chars `0..1024` and of the rest. Save the summary as
+/// `long-stories.json` in `artifacts` (the artifacts directory), and the bits
+/// of each bin of each story in `long-stories.jsonl` and `whole-valid.jsonl`.
+pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, valid_stories: usize, batch: usize) {
     let split = Split::Valid.capacity();
+    let all: Vec<Vec<u8>> = stories(Split::Valid, split).iter().map(|story| VOCAB.encode_cased(story)).collect();
     // `indices`: the index of each scored story in the validation split.
-    let (indices, tokens): (Vec<usize>, Vec<Vec<u8>>) = stories(Split::Valid, split)
+    let (indices, tokens): (Vec<usize>, Vec<Vec<u8>>) = all
         .iter()
-        .map(|story| VOCAB.encode_cased(story))
+        .cloned()
         .enumerate()
         .filter(|(_, tokens)| tokens.len() > MIN_CHARS)
         .unzip();
@@ -192,6 +212,28 @@ pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, bat
             .join(", ")
     );
 
+    // The whole valid: the stories of the validation loss, each in full.
+    let m = valid_stories.min(split);
+    let whole = &all[..m];
+    let whole_bits = score(logits_of, device, whole, batch);
+    let whole_lens: Vec<usize> = whole.iter().map(Vec::len).collect();
+    let (mut first, mut past, mut first_chars, mut past_chars) = (0.0, 0.0, 0, 0);
+    for (bins, &len) in whole_bits.iter().zip(&whole_lens) {
+        first += bins.iter().take(BOUNDS[0] / BIN).sum::<f64>();
+        past += bins.iter().skip(BOUNDS[0] / BIN).sum::<f64>();
+        first_chars += len.min(BOUNDS[0]);
+        past_chars += len.saturating_sub(BOUNDS[0]);
+    }
+    let longer = whole_lens.iter().filter(|&&len| len > BOUNDS[0]).count();
+    let whole_chars = first_chars + past_chars;
+    let whole_all = (first + past) / whole_chars as f64;
+    let (whole_first, whole_past) = (first / first_chars as f64, past / past_chars as f64);
+    println!(
+        "whole valid: the first {m} validation stories in full ({whole_chars} characters, {longer} stories \
+         longer than {cut}): bits/char {whole_all:.4}; chars 0..{cut} {whole_first:.4}, past {cut} {whole_past:.4}",
+        cut = BOUNDS[0]
+    );
+
     let segments_json: Vec<String> = (0..segments.len())
         .map(|s| {
             let (per_char, (mean, se), chars) = results[s];
@@ -208,7 +250,9 @@ pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, bat
         .collect();
     let json = format!(
         "{{\"stories\":{n},\"valid_stories\":{split},\"min_chars\":{MIN_CHARS},\"bin\":{BIN},\
-         \"segments\":[{}],\"later_minus_first\":[[{},{}],[{},{}]],\"profile\":[{}]}}\n",
+         \"segments\":[{}],\"later_minus_first\":[[{},{}],[{},{}]],\"profile\":[{}],\
+         \"whole_valid\":{{\"stories\":{m},\"chars\":{whole_chars},\"longer\":{longer},\"bits\":{whole_all},\
+         \"first\":{whole_first},\"past\":{whole_past}}}}}\n",
         segments_json.join(","),
         d1.0,
         d1.1,
@@ -219,21 +263,12 @@ pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, bat
     let path = artifacts.join("long-stories.json");
     std::fs::write(&path, json).expect("failed to write long-stories.json");
     println!("saved to {path:?}");
-
-    // One line per story. `story` is its index in the validation split, so two
-    // models pair up on it. `bins`: the summed bits of each bin.
-    let lines: String = (0..n)
-        .map(|i| {
-            let bins: Vec<String> = bits[i].iter().map(f64::to_string).collect();
-            format!(
-                "{{\"story\":{},\"len\":{},\"bins\":[{}]}}\n",
-                indices[i],
-                lens[i],
-                bins.join(",")
-            )
-        })
-        .collect();
-    let path = artifacts.join("long-stories.jsonl");
-    std::fs::write(&path, lines).expect("failed to write long-stories.jsonl");
-    println!("saved to {path:?}");
+    for (name, lines) in [
+        ("long-stories.jsonl", story_lines(&indices, &lens, &bits)),
+        ("whole-valid.jsonl", story_lines(&(0..m).collect::<Vec<_>>(), &whole_lens, &whole_bits)),
+    ] {
+        let path = artifacts.join(name);
+        std::fs::write(&path, lines).unwrap_or_else(|e| panic!("failed to write {name}: {e}"));
+        println!("saved to {path:?}");
+    }
 }

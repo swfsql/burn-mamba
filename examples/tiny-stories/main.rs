@@ -173,7 +173,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if cli.long_stories {
-        context::long_stories(model_config, device, app_args, &run, cli.context_batch);
+        context::long_stories(model_config, device, app_args, &run, config.valid_stories, cli.context_batch);
     }
 
     if !app_args.inference

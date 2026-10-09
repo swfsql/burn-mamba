@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Compare the long-story bits of runs, story by story.
 
-usage: longstat.py <dir> [<dir> …]   (each dir holds a long-stories.jsonl,
-e.g. long/<run>; a bare name means long/<name>)
+usage: longstat.py [-w] <dir> [<dir> …]   (each dir holds a
+long-stories.jsonl, e.g. long/<run>; a bare name means long/<name>)
+  -w  the whole valid (whole-valid.jsonl: the 256 stories of the validation
+      loss in full; the segments 0..1024, 1024.., all)
 
 Per segment (0..1024, 1024..2048, the tail 2048.., all): the bits per
 character of each run (all characters pooled), then the paired difference of
@@ -13,12 +15,20 @@ run (bits/char per 256 characters, pooled).
 import json, math, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SEGMENTS = [("0..1024", 0, 1024), ("1024..2048", 1024, 2048), ("2048..", 2048, None), ("all", 0, None)]
+WHOLE = sys.argv[1:2] == ["-w"]
+if WHOLE:
+    sys.argv.pop(1)
+SEGMENTS = (
+    [("0..1024", 0, 1024), ("1024..", 1024, None), ("all", 0, None)]
+    if WHOLE
+    else [("0..1024", 0, 1024), ("1024..2048", 1024, 2048), ("2048..", 2048, None), ("all", 0, None)]
+)
 
 
 def load(arg):
     path = arg if os.path.isdir(arg) else os.path.join(HERE, "long", arg)
-    rows = [json.loads(l) for l in open(os.path.join(path, "long-stories.jsonl"))]
+    file = "whole-valid.jsonl" if WHOLE else "long-stories.jsonl"
+    rows = [json.loads(l) for l in open(os.path.join(path, file))]
     bin_ = json.load(open(os.path.join(path, "long-stories.json")))["bin"]
     return {r["story"]: r for r in rows}, bin_
 
@@ -54,7 +64,8 @@ def main():
                 for i in stories:
                     x, n = seg(rows[i], bin_, a, b)
                     y, n0 = seg(rows0[i], bin0, a, b)
-                    d.append(x / n - y / n0)
+                    if n > 0:  # a short story has no chars past 1024
+                        d.append(x / n - y / n0)
                 m, se = mean_se(d)
                 cell += f" {m:+.4f}±{se:.4f}"
             cells.append(f"{cell:>20}" if k == 0 else f"{cell:>28}")

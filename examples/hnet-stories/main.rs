@@ -134,7 +134,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if cli.long_stories {
-        inference::long_stories(model_config, device, app_args, &run, cli.context_batch);
+        inference::long_stories(model_config, device, app_args, &run, config.valid_stories, cli.context_batch);
     }
 
     if !app_args.inference && !app_args.training && !cli.context_use && !cli.long_stories {
