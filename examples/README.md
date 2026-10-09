@@ -56,15 +56,16 @@
   start of a story (and that `prime()` replays for seedless sampling), the
   prefill-`forward()` / decode-`step()` sampler, the runs of windows that
   carry the state across a story, the packed rows of whole stories
-  (`-- --pack`), and a measure of how much a trained model uses the earlier
-  part of a story (`-- --context-use`).
+  (`-- --pack`), a measure of how much a trained model uses the earlier
+  part of a story (`-- --context-use`), and the bits of whole long stories
+  (`-- --long-stories`).
 - **`hnet-stories`** ([`hnet-stories/README.md`](hnet-stories/README.md), work
   in progress): a character-level H-Net of Mamba-3 stacks on the same corpus.
   The model learns where its chunks start: the stages run on the characters,
   and the main network runs on the chunks. Its README covers the stages, the
   start rows that open a story, the ratio loss and the learning rate of each
   stage, and the chunk view of a sample (`-- --show-chunks`). It also takes
-  `-- --context-use`, the measure of `tiny-stories`.
+  `-- --context-use` and `-- --long-stories`, the measures of `tiny-stories`.
 
 #### Examples Structure
 
@@ -106,8 +107,9 @@ adds:
 - `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs,
   and `parse_ssd_path`, the `--ssd-path` value of the TinyStories examples
   (flags that name a `burn-mamba` type, which `burn-stack` cannot do),
-- `common/context.rs`, the `--context-use` measure of `tiny-stories` and
-  `hnet-stories`. It reads a model only through a logits closure.
+- `common/context.rs` and `common/long_stories.rs`, the `--context-use` and
+  `--long-stories` measures of `tiny-stories` and `hnet-stories`. They read
+  a model only through a logits closure.
 
 ##### Model Definition
 

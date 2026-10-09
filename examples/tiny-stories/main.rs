@@ -169,10 +169,19 @@ pub fn launch(app_args: &AppArgs) {
 
     if cli.context_use {
         let n_stories = cli.context_stories.unwrap_or(config.valid_stories);
-        context::context_use(model_config, device, app_args, &run, n_stories, cli.context_batch);
+        context::context_use(model_config.clone(), device.clone(), app_args, &run, n_stories, cli.context_batch);
     }
 
-    if !app_args.inference && !app_args.training && !cli.context_use && cli.contrast_eval.is_none() {
+    if cli.long_stories {
+        context::long_stories(model_config, device, app_args, &run, cli.context_batch);
+    }
+
+    if !app_args.inference
+        && !app_args.training
+        && !cli.context_use
+        && !cli.long_stories
+        && cli.contrast_eval.is_none()
+    {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }

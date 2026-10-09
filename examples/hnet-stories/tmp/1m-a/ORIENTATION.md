@@ -89,6 +89,12 @@ The scripts of `../../../tiny-stories/tmp/1m-cased/` (see
   each stage, against its target), `--continuations`, `--show-chunks`.
 - `ctx.sh` / `ctxstat.py`: the context probe (`--context-use`), as in
   tiny-stories.
+- `long.sh [-g] [-t] <run>` / `longstat.py`: the whole-story probe
+  (`--long-stories`): the 157 valid stories longer than 2048 chars, each in
+  one `forward`; bits/char of 0..1024, 1024..2048, the tail 2048.., all
+  (`>> long.txt`). `-t` takes a tiny-stories run directory (its `ts-cuda`).
+  `longstat.py long/A long/B …`: the paired differences against A, and the
+  profile per 256 chars. ~40 s on the GPU beside a training.
 - **Kaggle** (a second runner, T4 × 2, the same VRAM accounting):
   `kaggle/kqueue.txt` holds the lines of a batch (each line a job, the
   steps of one job joined with `&&`; the two GPUs take the lines in

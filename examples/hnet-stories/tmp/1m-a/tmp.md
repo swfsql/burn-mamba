@@ -486,6 +486,44 @@
   main d168 × 2 Real1D r 128, mmlp 32, 996k) and L-W-m64r (main d144 × 3
   r 64, mmlp 24, 998k), long. Batch 13 has L-W-s112-m (main d152 × 3, r
   32: the low-rank contrast) and the N 2 extension.
+- **L-R-N15-wd05** (R-N15 at weight decay 0.05, not 0.1): sv 0.9549 (R-N15
+  0.9685 / 0.9675: −0.013), **dv 0.8492** (0.8534 / 0.8485, mean 0.851:
+  −0.002, a tie). The lower decay helps the stable phase only. ctx: use
+  far 0.252, re-mention letters gain 0.868.
+- **The whole-story metric** (`--long-stories`, `examples/common/
+  long_stories.rs`; `long.sh` / `longstat.py` here): the valid stories
+  longer than 2048 chars of the whole split, each in one `forward`, the
+  bits per char of 0..1024, 1024..2048, the tail 2048.., all, and a
+  profile per 256 chars. On the train cache: 1.5% of the stories are
+  longer than 2048, 0.13% longer than 3072 (max 4149). The valid split:
+  157 stories (2056..4064, mean 2463); 12% of the stories are longer than
+  1024, **7.2% of the valid text is past char 1024** (0.8% past 2048).
+  Batch 1 = batch 4 exactly (the right padding is exact). ~40 s per run.
+- **The long stories (`long.txt`), bits/char pooled, H-Net R-N15 / flat
+  h16:**
+
+  | step | 0..1024 | 1024..2048 | 2048.. | all |
+  |---|---|---|---|---|
+  | 3230 | **1.0010** / 1.0100 | 1.0551 / **1.0216** | 1.0482 / **0.9946** | 1.0315 / **1.0122** |
+  | 5630 | **0.9427** / 0.9412 | 0.9950 / **0.9517** | 0.9945 / **0.9227** | 0.9732 / **0.9425** |
+  | 9600 | **0.8768** / 0.8808 | 0.9308 / **0.8942** | 0.9349 / **0.8648** | 0.9090 / **0.8837** |
+  | 14400 | **0.8458** / 0.8495 | 0.9023 / **0.8636** | 0.9061 / **0.8387** | 0.8794 / **0.8535** |
+
+  (5630: the flat leads 0..1024 by 0.0015.) Paired at 14400 (flat − H-Net,
+  per story): +0.0037 ± 0.0020, −0.0387 ± 0.0032, −0.0769 ± 0.0063, all
+  −0.0259 ± 0.0019. **Past char 1024 the H-Net gets worse and the flat
+  better**: the profile per 256 (14400) H-Net 0.866 0.875 0.894 0.905
+  0.911 0.902 0.891 … 1.02, flat 0.872 0.881 0.882 0.887 0.874 0.864 0.830
+  … 0.93. The H-Net protocol trains the first 1024 chars only; the flat's
+  packed rows hold whole stories. **The buckets fix it**: L-B-N15-lr4 (b at
+  the buckets, whole stories) against L-N15-lr4 (b, first 1024): 0..1024
+  −0.0012 ± 0.0024, 1024..2048 −0.0427 ± 0.0032, tail −0.0620 ± 0.0071, all
+  −0.0292 ± 0.0022; its profile falls past 1024 as the flat's does. The
+  rest at 3230: h16-B-d 1.0172 / 1.0261 / 1.0008 / 1.0181, fr-d152-d
+  1.0078 / 1.0188 / 0.9829 / 1.0082. On the whole valid text the past-1024
+  loss weighs ~0.072 × 0.04 ≈ 0.003, against the H-Net's first-1024 lead
+  (0.015 at 14400). Next here: **L-R-N15-B** (R-N15 at the buckets
+  512…4160, bchars 7450, 2630 + 600 + ctx + long), ahead of L-W-m64r.
 - The long allocation tests: L-A-s33-N15-lr4 (here, 18:14), Kaggle batch
   12: L-A-s33-N15-lr4-s1 and L-A-s22-L2-N15-lr4.
 - **The milestone 12000 + 2400** (the flat plan: 8000-12000 cosine 1e-3 →

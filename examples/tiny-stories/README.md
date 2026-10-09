@@ -186,8 +186,9 @@ shared CLI, before the `--`, sets:
 | `--continuations <n>` | 1 | at inference, the number of continuations of each prompt, each with its own seed |
 | `--temperature <t>` | 0.8 | at inference, the sampling temperature of the prompted continuations |
 | `--context-use` | off | measure how much the trained model uses the earlier part of the validation stories (see `context.rs`) |
-| `--context-batch <n>` | 4 | with `--context-use`, the sequences per forward |
+| `--context-batch <n>` | 4 | with `--context-use` or `--long-stories`, the sequences per forward |
 | `--context-stories <n>` | the validation stories | with `--context-use`, read the first `n` validation stories |
+| `--long-stories` | off | score the whole validation stories longer than 2048 characters: the bits per character of 0..1024, 1024..2048, the tail and a profile per 256 characters (see `common/long_stories.rs`) |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 | `--grad-checkpointing` | off | train with the balanced gradient checkpointing of Burn: the backward computes the memory-bound ops again and keeps the outputs of the compute-bound ops. Less vram, more time (not persisted) |

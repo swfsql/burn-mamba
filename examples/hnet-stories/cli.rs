@@ -24,8 +24,9 @@ const HELP: &str = concat!(
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",
     "    --temperature <T>      At inference, the sampling temperature of the prompted continuations (default 0.8)\n",
     "    --context-use          Measure how much the trained model uses the earlier part of the validation stories\n",
-    "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
-    "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)",
+    "    --context-batch <N>    With --context-use or --long-stories, the sequences per forward (default 4)\n",
+    "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)\n",
+    "    --long-stories         Score the whole validation stories longer than 2048 characters, per segment of 1024 characters",
 );
 
 /// The shape of a new model (a saved model config ignores these).
@@ -57,11 +58,15 @@ pub struct Cli {
     /// `--context-use`: run
     /// [`context_use`](crate::common::context::context_use).
     pub context_use: bool,
-    /// `--context-batch`: the sequences per `forward` of `--context-use`.
+    /// `--context-batch`: the sequences per `forward` of `--context-use` and
+    /// of `--long-stories`.
     pub context_batch: usize,
     /// `--context-stories`: the validation stories that `--context-use` reads
     /// (`None`: the stories of the validation loss).
     pub context_stories: Option<usize>,
+    /// `--long-stories`: run
+    /// [`long_stories`](crate::common::long_stories::long_stories).
+    pub long_stories: bool,
 }
 
 impl Cli {
@@ -108,6 +113,7 @@ impl Cli {
         assert!(context_batch >= 1, "--context-batch must be at least 1");
         let context_stories: Option<usize> = pargs.opt_value_from_str("--context-stories").unwrap();
         assert!(context_stories != Some(0), "--context-stories must be at least 1");
+        let long_stories = pargs.contains("--long-stories");
         finish_extra(pargs);
         Self {
             overrides,
@@ -121,6 +127,7 @@ impl Cli {
             context_use,
             context_batch,
             context_stories,
+            long_stories,
         }
     }
 }
