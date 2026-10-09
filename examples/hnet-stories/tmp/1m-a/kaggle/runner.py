@@ -2,7 +2,8 @@
 private GPU kernel, `kpull.sh` fetches its outputs).
 
 The kernel reads two private datasets: <owner>/hnet-corpus (the cased text
-caches) and <owner>/hnet-payload (`payload.tar.gz`: the binary, the scripts,
+caches) and the payload of its batch, <owner>/hnet-pay-<ts>
+(`payload.tgz.bin`, a gzipped tar: the binary, the scripts,
 `cfg/`, the source runs of the batch, `kqueue.txt` and `kaggle-budget.txt`;
 Kaggle can serve it unpacked).
 It runs the lines of `kqueue.txt` in the workspace, as `queue.sh` does, on
@@ -65,7 +66,7 @@ def unpack_payload():
     """The payload into WS. Kaggle can keep the archive of the dataset, or
     unpack it (then the tree holds `kqueue.txt`). An unpacked tree can lose
     the exec bits, so they are set again."""
-    archive = find("payload.tar.gz", required=False)
+    archive = find("payload.tgz.bin", required=False) or find("payload.tar.gz", required=False)
     if archive:
         with tarfile.open(archive) as tar:
             tar.extractall(WS)

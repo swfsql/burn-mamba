@@ -7,7 +7,7 @@
 #   *.py scripts, cfg/, the runs that the batch reads (the source of an
 #   extend.sh / branch.sh line, the run of a ctx.sh / infer.sh line), the
 #   batch as kqueue.txt, and the budget (seconds) as kaggle-budget.txt. It
-#   goes up as a new version of the private dataset <owner>/hnet-payload.
+#   goes up as a new private dataset, <owner>/hnet-pay-<ts>.
 # - Then the kernel is pushed (a new version runs at once). The lines move
 #   from kqueue.txt to kbatches.txt, under a `== <ts>` header.
 # The lines are those of queue.txt (screen.sh, extend.sh, probe.sh, …), and
@@ -70,26 +70,28 @@ for s in $srcs; do
 done
 printf '%s\n' "$lines" > "$pay/ws/kqueue.txt"
 echo "$budget" > "$pay/ws/kaggle-budget.txt"
-tar czf "$pay/data/payload.tar.gz" -C "$pay/ws" .
+# Not `.tar.gz`: Kaggle unpacks an archive that it recognizes, and on
+# 2026-10-09 that step stalled for > 1 h, while the same file as `.bin` was
+# live in 20 s. runner.py unpacks it.
+tar czf "$pay/data/payload.tgz.bin" -C "$pay/ws" .
 # The marker of this batch, beside the archive: the version is live when
 # the dataset lists it, and runner.py refuses a payload without it.
 echo "$ts" > "$pay/data/batch-$ts.txt"
+# A new private dataset per batch (a new version of one dataset is also
+# possible, but a new dataset needs no state). The CLI cannot delete the old
+# ones.
+payset=$owner/hnet-pay-$ts
 cat > "$pay/data/dataset-metadata.json" <<EOF
-{"title": "hnet-payload", "id": "$owner/hnet-payload", "licenses": [{"name": "CC0-1.0"}]}
+{"title": "hnet-pay-$ts", "id": "$payset", "licenses": [{"name": "CC0-1.0"}]}
 EOF
-echo "payload: $(du -h "$pay/data/payload.tar.gz" | cut -f1), sources: ${srcs:-none}"
-if "$here/kg.sh" datasets status "$owner/hnet-payload" > /dev/null 2>&1; then
-  "$here/kg.sh" datasets version -p "$pay/data" -m "batch $ts"
-else
-  "$here/kg.sh" datasets create -p "$pay/data"
-fi
-# The kernel must read the new version. `datasets status` can still report
-# the previous version as ready, so wait until the files of the dataset
+echo "payload: $(du -h "$pay/data/payload.tgz.bin" | cut -f1), sources: ${srcs:-none}"
+"$here/kg.sh" datasets create -p "$pay/data"
+# The kernel must read this payload: wait until the files of the dataset
 # list the marker of this batch (and the status is ready).
 live=
 for _ in $(seq 120); do
-  s=$("$here/kg.sh" datasets status "$owner/hnet-payload" 2>&1 || true)
-  if [ "$s" = ready ] && "$here/kg.sh" datasets files "$owner/hnet-payload" 2>/dev/null | grep -q "batch-$ts.txt"; then
+  s=$("$here/kg.sh" datasets status "$payset" 2>&1 || true)
+  if [ "$s" = ready ] && "$here/kg.sh" datasets files "$payset" 2>/dev/null | grep -q "batch-$ts.txt"; then
     live=1
     break
   fi
@@ -103,7 +105,7 @@ cat > "$pay/kernel/kernel-metadata.json" <<EOF
 {"id": "$kernel", "title": "hnet-1m-a-runner", "code_file": "runner.py",
  "language": "python", "kernel_type": "script", "is_private": true,
  "enable_gpu": true, "enable_tpu": false, "enable_internet": false,
- "dataset_sources": ["$owner/hnet-corpus", "$owner/hnet-payload"],
+ "dataset_sources": ["$owner/hnet-corpus", "$payset"],
  "competition_sources": [], "kernel_sources": [], "model_sources": []}
 EOF
 "$here/kg.sh" kernels push -p "$pay/kernel" -t 43200

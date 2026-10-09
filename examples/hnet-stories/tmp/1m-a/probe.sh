@@ -10,7 +10,8 @@
 #   (A per-process nvidia-smi query cannot work here: the container's PIDs
 #   are not the host's.)
 # - ms/step: the mean of steps 6..10 (`--profile 5`, the first block is JIT).
-# A probe over 5400 MiB total is killed before the card runs out ("KILLED").
+# A probe over 5400 MiB total (PROBE_KILL_MIB: the 6 GiB card here) is killed
+# before the card runs out ("KILLED").
 # Foreground: several probes run one after another from one caller.
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -29,7 +30,7 @@ pid=$! peak=0 note=
 while kill -0 "$pid" 2>/dev/null; do
   m=$(nvidia-smi -i "$gpu" --query-gpu=memory.used --format=csv,noheader,nounits)
   [ "$m" -gt "$peak" ] && peak=$m
-  if [ "$m" -gt 5400 ]; then note=KILLED; kill "$pid"; fi
+  if [ "$m" -gt "${PROBE_KILL_MIB:-5400}" ]; then note=KILLED; kill "$pid"; fi
   # Stop at the final validation: the training peak is already known.
   grep -q "running full validation" "$dir/stdout.log" && { kill "$pid"; break; }
   sleep 1

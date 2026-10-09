@@ -78,7 +78,9 @@ The scripts of `../../../tiny-stories/tmp/1m-cased/` (see
   `kaggle/kqueue.txt` holds the lines of a batch (each line a job, the
   steps of one job joined with `&&`; the two GPUs take the lines in
   parallel). `kaggle/kpush.sh [hours]` pushes it (the binary, the scripts,
-  `cfg/`, the source runs) and starts the kernel; `kaggle/kpull.sh` gives
+  `cfg/`, the source runs, as `payload.tgz.bin` in a new private dataset
+  `hnet-pay-<ts>`: Kaggle's unpacking of a `.tar.gz` can stall for hours)
+  and starts the kernel; `kaggle/kpull.sh` gives
   the status and, when the kernel ends, merges its runs into `runs/` (each
   with a `host.txt`). One kernel at a time. The token stays in the
   gitignored `.kaggle/access_token` of the repo (`kaggle/kg.sh`).

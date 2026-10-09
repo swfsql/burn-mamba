@@ -266,6 +266,97 @@
   (28,612 batches, fill 0.838); prof n=100: 1585 ms (JIT included), 1822
   MB. Kaggle (batch 2): L-B-N15 and L-B-N15-lr4 (2630 + 600 + ctx): the
   buckets at the long horizon (against L-N15) and the trunk LR.
+- **B-base** (b at the buckets 512…4160, 600 + 200): **dv 1.1504** (b
+  1.1286, +0.022), 984 ms, 1822 MB. The buckets lose at the short
+  horizon. A likely cause: the metric scores the first 1024 chars, and
+  whole stories give fewer openings per step (9.2 stories per batch, not
+  10) and spend steps on positions that the metric never scores. The
+  window gains of 1m-b (256 → 1024) were inside the scored span. The
+  diagnostic B-c1024 (slots 512/768/1024: the old data, only grouped by
+  length; 16 × 844, 11 × 13308, 8 × 12780, fill 0.871) separates the tails
+  from the grouping. The bucketed probes (10 steps): B-Fbase 1706,
+  B-sr64 2245, B-r1d-sr104 2476, B-mv6m-mr96 2767 MB.
+- The Kaggle push of L-B-N15 / L-B-N15-lr4 failed: the new version of
+  the payload dataset never went live (`lastUpdated` stayed at 05:14,
+  `datasets files` listed the old marker). kpush.sh stopped before the
+  kernel (the marker check worked). Retried with the full log
+  (`/tmp/kpush-retry.log`): the same (the CLI reports no error, Kaggle
+  accepts the version and does not process it: 41 min for the first).
+  A test dataset `hnet-ping`: a new dataset and a version of it are live
+  at once (tiny files). A new dataset with the payload (`hnet-pay-<ts>`)
+  stalled too (403 for 10 min). The same 46 MB archive as
+  `payload.tgz.bin` (`hnet-ping2`) was live in 20 s: **Kaggle's unpacking
+  of a `.tar.gz` stalls** (it ran at 05:14). kpush.sh uploads
+  `payload.tgz.bin` into a new dataset per batch; runner.py unpacks it.
+- **h16-B** (the flat h16 at the buckets, lr 4e-3, no gc): 816 ms/step,
+  **3707 MB** reserved, flat from step 100 (packed h16-s2: 3149 MB). Under
+  the 3.8 GiB search ceiling, over the 3.6 GiB preference.
+- **h16-B-d** (the flat at the buckets, 2630 + 600): sv 0.9978, **dv
+  0.8847** (packed h16-s2: 0.9931 / 0.8798, +0.005). The recall: far own
+  0.909 (0.899), re-mention first letter own 2.719 (2.685), gain 1.457
+  (1.622). For the flat model the buckets ≈ the packed rows.
+- **B-c1024** (b at the buckets 512/768/1024, the first 1024 chars,
+  fill 0.871): dv 1.1370 (b 1.1286, +0.008), 804 ms, 1671 MB. So at 800
+  steps the grouping by length costs ~0.008 and the tails past 1024 a
+  further ~0.013 (B-base 1.1504). The seed noise is not known: the
+  repeat s128-N2-s1 (b, seed 1) is queued.
+- **The seed noise**: s128-N2-s1 (b, seed 1) dv 1.1326 (seed 0 1.1286):
+  ~±0.004 on a 600 + 200 screen. B-c1024 (+0.008) is ~2σ; B-base
+  (+0.022) is real.
+- **F-sr64** (stage r 64, md 128, mmlp 32, 996,865): dv 1.1282 (F-base
+  1.1294, b 1.1286), 1082 ms, 2761 MB. The stage state rank 64 ties.
+- **The bucketed long runs** (Kaggle v5, payload 20261009-070847):
+  L-B-N15 (lr 8e-3) sv 1.0965, **dv 0.9272**; L-B-N15-lr4 sv **1.0301**,
+  **dv 0.9061**. Against L-N15 (the first 1024 chars, lr 8e-3, 0.9070):
+  the buckets lose 0.020 at the same LR also at 3230. The trunk LR: 4e-3
+  beats 8e-3 by 0.066 at 2630 and 0.021 after the decay (the decay gain
+  0.124 against 0.169). Matched with the flat (h16-B, the same buckets,
+  lr 4e-3, 0.8847): the H-Net is +0.021 behind. The recall: far own
+  L-B-N15-lr4 0.934 (h16-B 0.909); re-mention letters own 1.223 (0.991).
+  **Decision**: the protocol stays the first 1024 chars (the metric's
+  span); the trunk LR goes down. Kaggle batch 3: L-N15-lr4 and
+  L-N15-lr25 (2630 + 600 + ctx).
+- **F-r1d-sr104** (Real1D stages at r 104, recalc:32, md 128, mmlp 8,
+  999,425): **dv 1.1076**, the best screen (F-base 1.1294: −0.022, ~5σ;
+  b × N 1.5 1.1175), 1058 ms, 2916 MB. The budget-matched Real1D test
+  reverses b-r1d (Real1D r 32, unspent: 1.1649). The stage state rank
+  pays once it is large: Complex2D r 64 ties (F-sr64 1.1282), and
+  Complex2D above r 64 does not fit (the anomaly), while Real1D r 104
+  fits at 2916 MB. So the anomaly now matters.
+- **F-mv6m-mr96** (main virtual 6 middle-heavy + main r 96): dv 1.1395
+  (+0.010), 1272 ms, 3763 MB. The main virtual layers lose again.
+- **The long LR** (N 1.5, the first 1024 chars, Kaggle v6): L-N15-lr4 sv
+  1.0203, **dv 0.8915**; L-N15-lr25 sv 1.0052, dv 0.8960 (lr 8e-3: sv
+  1.0676, dv 0.9070). **lr 4e-3 is the LR of the long runs** (2.5e-3 has
+  the better trunk, a smaller decay gain). The gap to the flat h16-s2
+  (0.8798): +0.012 (at lr 8e-3: +0.027).
+- **L-N2-lr4** (b, lr 4e-3, 2630 + 600): sv 1.029, **dv 0.8927** (L-N15-lr4
+  0.8915: a tie; at lr 8e-3 N 1.5 led by 0.018). The recall (paired, 1968
+  stories): far use N 2 **0.217** / N 1.5 0.203 (flat h16-s2 0.217);
+  re-mention letters own **1.070** / 1.135 (flat 0.950). At the right LR
+  N 2 ties the bits and recalls better: the hot LR hurt the compression
+  more. The user's hypothesis gets part of its support back.
+- **R-p32** (Real1D stages, head dim 32, r 128, md 128, 997,281): dv
+  1.1136 (F-r1d-sr104 1.1076: +0.006, ~1.5σ), 819 ms, 1774 MB.
+- Queued here: F-r1d-sr64 (Real1D r 64 + mmlp 48: the rank or the kind?)
+  and R-trapN (Trapezoid None, r 124).
+- **L-R-lr4** (F-r1d-sr104 at lr 4e-3, 2630 + 600, Kaggle v7): **dv@3230
+  0.8617**. **The H-Net beats the flat model** (h16-s2 0.8798: −0.018;
+  the best Complex2D H-Net L-N15-lr4 0.8915: −0.030). 998 ms, 2916 MB.
+  It also beats the flat model on every recall row (paired, 1968
+  stories): far own 0.878 / 0.899, far use 0.249 / 0.217; re-mention
+  letters own 0.847 / 0.950, use 1.322 / 1.127; first letter own 2.479
+  / 2.685, use 2.246 / 1.964.
+- **Around the winner** (600 + 200, lr 8e-3, Kaggle v7): R-N15 (× N 1.5)
+  **1.0973** (−0.010); R-all (Real1D main too, stage r 120) 1.1101 (tie);
+  R-all-N15 1.0981.
+- **The stage-rank VRAM curve** (10-step probes on a T4, recalc:32, b's
+  shape, MB): Complex2D r 48 3130, 64 2675, 68 4206, 72 4351, 80 4609, 96
+  5127, 128 4426; Real1D r 64 1671, 72 2829, 128 2300. **A rank that is no
+  power of two costs about as much as the next power of two, or more** (48
+  > 64, 96 > 128, Real1D 72 > 128): allocation or kernel padding, not the
+  model. Complex2D adds ~1 GB per 64 ranks on top (the rotated B/C).
+  So: Real1D r 128 (cheaper than r 104), power-of-two ranks only.
 - **The flat reference is not matched** (user: packed data, the hot
   trunk LR, the H-Net also learns its tokenizer). The volume per step
   is matched: h16-s2 scores 7505 chars/step (2 × 4224 × 0.888), L-N* 7452
