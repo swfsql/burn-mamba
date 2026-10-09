@@ -26,7 +26,7 @@ const HELP: &str = concat!(
     "    --context-use          Measure how much the trained model uses the earlier part of the validation stories\n",
     "    --context-batch <N>    With --context-use or --long-stories, the sequences per forward (default 4)\n",
     "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)\n",
-    "    --long-stories         Score the whole validation stories longer than 2048 characters, per segment of 1024 characters",
+    "    --long-stories         Score whole validation stories: those longer than 2048 characters (per segment of 1024 characters), and those of the validation loss",
 );
 
 /// The shape of a new model (a saved model config ignores these).

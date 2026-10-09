@@ -15,8 +15,9 @@ the tools), then `notes.md` (the findings).
   s/step). Its decay leaf is not done.
 - **Everything is stopped** (user): no `queue.sh`, an idle GPU, no Kaggle
   kernel, no waiters. `queue.txt` and `kaggle/kqueue.txt` are empty. The
-  binaries (`eb28b0bb`) passed two smoke tests: a per-slot probe and the
-  decay config of L-R-N15-B5.
+  binaries (`eb419b1f`) passed two smoke tests (on `eb28b0bb`, which
+  differs only in a help line): a per-slot probe and the decay config of
+  L-R-N15-B5.
 - Old bucketed run dirs (L-B-*, B-*, probe-B-*, h16-B, their `ctxg/` and
   `long*/` copies) lack the `"probe"` config field, so they do not load.
   They are invalid runs. Add the field by hand if one must load again.
@@ -60,7 +61,4 @@ the tools), then `notes.md` (the findings).
    - The VRAM confound (user). The flat h16-s2 ran at 3149 MB without gc.
      With gc, a flat model could hold a larger block (fr-d152: wv 0.8792
      at 3230). Nobody ran a gc-filled flat search yet.
-5. At the session end: drain `tmp.md` into `notes.md`. Prepare the File
-   Map lines of burn-stack `dataset.rs` (`probe_order`,
-   `BucketedStoriesDataset::new(…, probe)`) and of burn-mamba
-   `examples/common/long_stories.rs` (`examples/README.md` has it).
+5. At the session end: drain `tmp.md` into `notes.md`.
