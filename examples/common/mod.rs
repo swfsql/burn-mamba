@@ -19,6 +19,10 @@
 //!   a type of this crate. `burn-stack` is family-agnostic, so it cannot have
 //!   these parsers.
 //!
+//! It also holds [`context`], the context-use measure that the two
+//! TinyStories examples of this crate (`tiny-stories`, `hnet-stories`) share.
+//! It reads a model only through a logits closure.
+//!
 //! With the Dispatch-based architecture, no module here has a generic backend
 //! type. `Tensor`/`Device`/`Module` are pinned to the global `Dispatch`
 //! backend, and the device selects the concrete runtime backend.
@@ -26,6 +30,10 @@
 #![allow(dead_code)]
 
 pub use burn_stack::examples::{cli, device, mnist, session, tiny_stories, training};
+
+/// How much a trained LM uses the earlier part of a story (`--context-use`),
+/// for any model of the TinyStories examples.
+pub mod context;
 
 /// The `ModelConfigExt` interface, under its usual `common::model` path.
 pub mod model {

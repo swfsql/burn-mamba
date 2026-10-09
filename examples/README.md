@@ -63,7 +63,8 @@
   The model learns where its chunks start: the stages run on the characters,
   and the main network runs on the chunks. Its README covers the stages, the
   start rows that open a story, the ratio loss and the learning rate of each
-  stage, and the chunk view of a sample (`-- --show-chunks`).
+  stage, and the chunk view of a sample (`-- --show-chunks`). It also takes
+  `-- --context-use`, the measure of `tiny-stories`.
 
 #### Examples Structure
 
@@ -102,8 +103,11 @@ implement. `common/mod.rs` re-exports those under the `common::*` paths, and
 adds:
 
 - `ARTIFACT_PREFIX`, which must expand in the example crate,
-- `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs (a
-  flag that names a `burn-mamba` type, which `burn-stack` cannot do).
+- `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs,
+  and `parse_ssd_path`, the `--ssd-path` value of the TinyStories examples
+  (flags that name a `burn-mamba` type, which `burn-stack` cannot do),
+- `common/context.rs`, the `--context-use` measure of `tiny-stories` and
+  `hnet-stories`. It reads a model only through a logits closure.
 
 ##### Model Definition
 

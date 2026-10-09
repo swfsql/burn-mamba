@@ -1,9 +1,11 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
 //! (`Overrides`, shared with `tiny-stories`), the flags of a training step
 //! (`StepFlags`: the profiler, the VRAM cap, the gradient checkpointing), the
-//! SSD paths, the shape of a new model, and the sampling.
+//! SSD paths, the shape of a new model, the sampling, and the context-use
+//! measure.
 
 use crate::common::cli::{AppArgs, StepFlags, finish_extra};
+use crate::common::context::BATCH;
 use crate::common::parse_ssd_path;
 use crate::common::tiny_stories::lm::Overrides;
 use crate::inference::{PROMPT_TEMPERATURE, Prompting};
@@ -20,7 +22,10 @@ const HELP: &str = concat!(
     "    --chunk-log <N>        Print the chunk ratios of each stage once per N training windows (default 100, 0 never)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",
-    "    --temperature <T>      At inference, the sampling temperature of the prompted continuations (default 0.8)",
+    "    --temperature <T>      At inference, the sampling temperature of the prompted continuations (default 0.8)\n",
+    "    --context-use          Measure how much the trained model uses the earlier part of the validation stories\n",
+    "    --context-batch <N>    With --context-use, the sequences per forward (default 4)\n",
+    "    --context-stories <N>  With --context-use, read the first N validation stories (default: the stories of the validation loss)",
 );
 
 /// The shape of a new model (a saved model config ignores these).
@@ -49,6 +54,14 @@ pub struct Cli {
     pub chunk_log: usize,
     /// `--prompt` (repeatable), `--continuations` and `--temperature`.
     pub prompting: Prompting,
+    /// `--context-use`: run
+    /// [`context_use`](crate::common::context::context_use).
+    pub context_use: bool,
+    /// `--context-batch`: the sequences per `forward` of `--context-use`.
+    pub context_batch: usize,
+    /// `--context-stories`: the validation stories that `--context-use` reads
+    /// (`None`: the stories of the validation loss).
+    pub context_stories: Option<usize>,
 }
 
 impl Cli {
@@ -90,7 +103,24 @@ impl Cli {
                 .unwrap_or(PROMPT_TEMPERATURE),
         };
         assert!(prompting.continuations >= 1, "--continuations must be at least 1");
+        let context_use = pargs.contains("--context-use");
+        let context_batch = pargs.opt_value_from_str("--context-batch").unwrap().unwrap_or(BATCH);
+        assert!(context_batch >= 1, "--context-batch must be at least 1");
+        let context_stories: Option<usize> = pargs.opt_value_from_str("--context-stories").unwrap();
+        assert!(context_stories != Some(0), "--context-stories must be at least 1");
         finish_extra(pargs);
-        Self { overrides, step, paths, model, step_mode, show_chunks, chunk_log, prompting }
+        Self {
+            overrides,
+            step,
+            paths,
+            model,
+            step_mode,
+            show_chunks,
+            chunk_log,
+            prompting,
+            context_use,
+            context_batch,
+            context_stories,
+        }
     }
 }

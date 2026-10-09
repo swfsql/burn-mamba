@@ -125,10 +125,15 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if app_args.inference {
-        inference::infer(model_config, device, app_args, &run, &cli.prompting);
+        inference::infer(model_config.clone(), device.clone(), app_args, &run, &cli.prompting);
     }
 
-    if !app_args.inference && !app_args.training {
+    if cli.context_use {
+        let n_stories = cli.context_stories.unwrap_or(config.valid_stories);
+        inference::context_use(model_config, device, app_args, &run, n_stories, cli.context_batch);
+    }
+
+    if !app_args.inference && !app_args.training && !cli.context_use {
         println!("neither training nor inference were enabled");
         println!("{}", common::cli::HELP);
     }

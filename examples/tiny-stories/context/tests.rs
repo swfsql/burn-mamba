@@ -47,7 +47,8 @@ fn score_reads_the_rows_of_the_continuation() {
     let marks: Vec<Vec<Vec<bool>>> = (0..2)
         .map(|s| (0..n).map(|i| (0..c).map(|k| (i + k + s) % 3 == 0).collect()).collect())
         .collect();
-    let got = score(&net, &run, &device, &prompts, &continuations, join, BATCH, &pairings, &alphas, &marks);
+    let logits_of = |x: Tensor<3, Int>| net.forward(x, None, run.ssd_path.clone(), None, None).0;
+    let got = score(&logits_of, &device, &prompts, &continuations, join, BATCH, &pairings, &alphas, &marks);
 
     // The reference: the log-probabilities of the next character after
     // `tokens`, with the class latents in front: the ids `[VOCAB_SIZE]`, and

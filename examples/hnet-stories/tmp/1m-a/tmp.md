@@ -110,3 +110,19 @@
   probe) to hnet-stories, the direct measure of the recall of names.
 - The tiny-stories example tests pass after the move of prof/vram (14
   passed, 1 ignored).
+- **The LR on b**: lr 5e-3 dv 1.1282, lr 8e-3 1.1286 (tie), lr 1.2e-2
+  1.1457 (+0.017, leads only @100–200). The optimum is flat over 5e-3 –
+  8e-3. Use 5e-3 for the long runs (the 1m-b lesson: the best constant LR
+  falls as the run goes on)? L-N15 / L-N3 keep the 8e-3 of their cfg.
+- **`--context-use` in hnet-stories** (the re-mention probe): the measure
+  moved to `examples/common/context.rs`, generic over a logits closure (the
+  lead rows: the class latents of tiny-stories, the start rows of the
+  H-Net). tiny-stories keeps a thin `context.rs` (the load, the closure,
+  the tests: both pass). `ctx.sh` / `ctxstat.py` here run `bin/hn-cuda`
+  (`v0.67.0-7bc782e-dirty-37fe66fe`). Smoke (flex, 32 stories, b-N15-d,
+  38 s): far use 0.102, re-mention letters own 1.96 / none 2.16 / other
+  2.26. Queued: `ctx.sh -g -n 2048` of b-N15-d, s128-N2-d, b-N3-d, the
+  flat h16-q-d (→ `ctxg.txt`), and of L-N15-d, L-N3-d after their screens.
+- Committed: burn-stack `c94299e`, burn-mamba `7bc782e`. A session rewind
+  restored the pre-edit `burn-stack/CLAUDE.md` (the File Map entries of
+  the commit, put back) and `queue.txt` (b-r1d twice, removed).

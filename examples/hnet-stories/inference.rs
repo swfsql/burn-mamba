@@ -1,4 +1,5 @@
-//! Sampling from the trained H-Net, and the chunk view.
+//! Sampling from the trained H-Net, the chunk view, and the context-use
+//! measure ([`context_use`]).
 //!
 //! [`generate`] opens a story in one of two ways:
 //!
@@ -31,6 +32,26 @@ use burn_stack::modules::hnet::StepMode;
 use burn_stack::utils::ClassCursors;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+
+/// Load the trained H-Net and measure its context use over the first
+/// `n_stories` validation stories, `batch` sequences per `forward` (see
+/// [`crate::common::context`]). Each sequence opens with the start rows (one
+/// `forward_opened`), as the validation scores the first window of a story.
+/// The start rows are the lead rows of the measure.
+pub fn context_use(
+    model_config: HNetStoriesConfig,
+    device: Device,
+    app_args: &AppArgs,
+    run: &Run,
+    n_stories: usize,
+    batch: usize,
+) {
+    let model: MambaHNetVocabNet = app_args
+        .load_model(&model_config, &device)
+        .expect("no trained model in the artifacts directory: train first (--training)");
+    let logits_of = |x: Tensor<3, Int>| model.forward_opened(x, run.paths.clone(), None).0;
+    crate::common::context::context_use(&logits_of, &device, &app_args.artifacts_path, n_stories, batch);
+}
 
 /// Temperatures sampled by [`infer`], from near-greedy to loose.
 const TEMPERATURES: &[f64] = &[0.5, 0.8, 1.0];
