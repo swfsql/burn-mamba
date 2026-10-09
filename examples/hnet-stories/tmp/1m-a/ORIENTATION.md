@@ -30,6 +30,27 @@ to it). Read `handoff.md` first. This search replaces the flat search of
   rank by the decayed valid `dv`). Each stage trains at `lr · λˢ`
   (`lrm`). Short screens (600 + 200) predicted the extended order in 1m-b.
 - The flat reference: `tiny-stories/tmp/1m-cased/runs/h16-s2` (h16, packed).
+- **`--grad-checkpointing` everywhere** (user): `args.sh` adds it to every
+  training script unless `--no-gc` (the same losses in tiny-stories, −22%
+  VRAM, +2–5% time). The screens before 2026-10-09 04:10 ran without it.
+- **The budget table of the knobs**: `knobs.sh` (one change at a time from
+  the base, the params and the probe lines) and `knobs.py` (Δparams,
+  Δreserved MB, MB per kparam). The VRAM-heavy, param-cheap knobs fill the
+  VRAM that a shape leaves.
+- **Virtual layers** (user): repeat the middle real layers more than the
+  edge layers (`msched=0,1,1,1,1,2`), mostly when not every real layer
+  repeats. They always take the untied tensors of mnist-class, in the
+  block config and in the layer (`gen.py muntie=auto`, the default, does
+  it).
+- **Compare at matched budgets** (user). A change can be cheap in params
+  and heavy in VRAM (the state rank, MIMO, virtual layers, less
+  compression), or the reverse. Log the params and the reserved MB of each
+  variant against its base. A variant that frees budget (Real1D stages:
+  −8k params, −566 MB) has not had its fair test until it spends that
+  budget. Every shape should use the most of both ceilings.
+- **Rank by the recall too**: `ctx.sh -g -n 2048` (`ctxg.txt`). The valid
+  bits hide it. The re-mention first letter (the choice of the entity)
+  moves against the bits with the compression (`notes.md`).
 
 ## Tools
 

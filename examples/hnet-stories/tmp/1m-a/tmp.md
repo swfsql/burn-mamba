@@ -114,6 +114,39 @@
   1.1457 (+0.017, leads only @100–200). The optimum is flat over 5e-3 –
   8e-3. Use 5e-3 for the long runs (the 1m-b lesson: the best constant LR
   falls as the run goes on)? L-N15 / L-N3 keep the 8e-3 of their cfg.
+- **b × Real1D stages** (the Mamba-2-like stage, 951k): dv 1.1649 (b
+  1.1286, +0.036), 764 ms, 2086 MB. The rotation at char level pays: the
+  stages keep Complex2D. **Not budget-matched** (user): Real1D frees 8k
+  params and 566 MB, unspent (e.g. a larger stage state rank). Not rerun
+  for now. The general point: every screen so far leaves ~0.9–1.1 GB of
+  pools unused (the base b: 2652 MB, the search cap 3750 MB, the preferred
+  3545 MB). After the long runs: a "fill the VRAM" series on the base
+  (state rank, main MIMO, main virtual layers).
+- The fill knobs are not free in params here: b has 41k left, the stage r
+  64 alone costs +46k, main MIMO 2 +64k. Queued after the long runs (all
+  < 1M): f-sr48 (stage r 48, 982k), f-sr64 (stage r 64, main d128, 960k),
+  f-mr96 (main r 96, 995k), f-mm2 (main MIMO 2, main d128, 974k), f-mv6
+  (main virtual 6, untied, 994k).
+- **b × 2 stages** (b-S2b: stage d112 2+2, stage d128 1+1, main d136 × 2,
+  N 2/2, 982k): dv 1.1782 (b 1.1286, +0.050), 824 ms, 2144 MB (−508 MB).
+  Both routers hold their 0.5. Not budget-matched (the main sees 1/4 of the
+  chars, as at N 4); its recall is not probed yet.
+- **Virtual layers** (user): they lost in every earlier test. If tested,
+  use a schedule that repeats the middle real layers more than the edge
+  layers (the first and last layers as the entry and exit). `gen.py
+  msched=0,1,1,1,1,2` (burn-stack `Schedule::Custom`). The fill screen
+  f-mv6m (main mL 3 → 6 applications, middle-heavy, untied, 994k) replaces
+  the Cyclic f-mv6. b-N3-v6 (running) keeps Cyclic: the contrast.
+- **gc by default** (user): `args.sh` adds `--grad-checkpointing` unless
+  `--no-gc`. From b-N3-v6 on, every run has it (b-S2b and earlier: none).
+- **The budget table** (user: which knobs target the VRAM): `knobs.sh` /
+  `knobs.py`, 24 one-knob variants of b (stage/main state rank, rotation
+  kind per stack, rope fraction 0.5, expand 3, main virtual 6, MIMO 2/4,
+  head dim, main MLP, Multi-Gate, micro-steps 2, Trapezoid None, N 1.5 /
+  3), with gc, + the base without gc. Params (`knobs-params.txt`): base
+  958,776. Queued as 10-step probes before the long runs. `gen.py su/mu`:
+  micro-steps per stack. k-me3 takes mp 24 and the head-dim variant is mp 34
+  (main d136: 408 / 16 and 272 / 32 do not split into heads).
 - **`--context-use` in hnet-stories** (the re-mention probe): the measure
   moved to `examples/common/context.rs`, generic over a logits closure (the
   lead rows: the class latents of tiny-stories, the start rows of the
@@ -123,6 +156,18 @@
   38 s): far use 0.102, re-mention letters own 1.96 / none 2.16 / other
   2.26. Queued: `ctx.sh -g -n 2048` of b-N15-d, s128-N2-d, b-N3-d, the
   flat h16-q-d (→ `ctxg.txt`), and of L-N15-d, L-N3-d after their screens.
-- Committed: burn-stack `c94299e`, burn-mamba `7bc782e`. A session rewind
+- **The context probe at 800 steps** (`ctxg.txt`, 1968 stories, paired;
+  s.e. of a difference ~0.001 far, ~0.01 first letter). Own far bits: N 1.5
+  1.1746, flat h16 1.1770, N 2 1.1804, N 3 1.1996. **The re-mention first
+  letter** (the choice of the entity), own: N 1.5 3.890, N 2 **3.763**,
+  N 3 3.782, flat 3.774. Its gain over no prompt: N 1.5 0.467, N 2
+  **0.697**, N 3 0.625, flat 0.631. **Compression trades local modeling for
+  entity recall**: N 1.5 wins the bits and is the worst at the recall
+  (+0.11–0.13 against all others). N 2 recalls best, ahead of the flat
+  model, at +0.006 far bits. The user's hypothesis has support already at
+  800 steps. The long comparison: L-N2 (first), L-N15, L-N3, each with its
+  probe. b × N 1.25 dropped (the direction that hurts the recall).
+- Committed: burn-stack `c94299e`, burn-mamba `7bc782e`, `03731e8` (the
+  probe). A session rewind
   restored the pre-edit `burn-stack/CLAUDE.md` (the File Map entries of
   the commit, put back) and `queue.txt` (b-r1d twice, removed).

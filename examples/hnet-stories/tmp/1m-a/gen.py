@@ -28,12 +28,17 @@ from lrseq import HERE, stage
 DEFAULTS = dict(
     # stages (per-stage lists with `/`)
     S=1, d="64", enc="2", dec="2", r="32", p="16", e="2", sm="1", smlp="0",
-    mgr="0", N="4/2", srot="Complex2D",
+    mgr="0", N="4/2", srot="Complex2D", su="1",
     # main network
-    # muntie=1: the untied list of mnist-class (the block tail and the small
-    # per-head tensors, the layer pre-norms), once per virtual application.
-    md=128, mL=3, mV=0, mr=64, mp=16, me=2, mm=1, mmlp=0, mmgr=0,
-    mrot="Complex2D", muntie=0,
+    # muntie: the untied lists of mnist-class (Mamba3Config: the block tail and
+    # the small per-head tensors; the layer: its pre-norms), held once per
+    # virtual application. `auto` (user): on whenever the main network has
+    # virtual layers. `0` / `1` force it.
+    # su/mu: micro_steps (MambaProduct) of the stages / the main network.
+    md=128, mL=3, mV=0, mr=64, mp=16, me=2, mm=1, mu=1, mmlp=0, mmgr=0,
+    # msched: the virtual schedule of the main network: Cyclic, Stretched, or
+    # the real layer of each application, `0,1,1,1,1,2` (Custom; mV values).
+    mrot="Complex2D", muntie="auto", msched="Cyclic",
     # every block (`rot` is per stack: `srot`, `mrot`. Real1D: the
     # Mamba-2-like block, with no rotation)
     rf=1.0, rr=2.0, trap="HorizontalCarryOver", bias=1, onorm=1, mlpmul=32,
@@ -58,10 +63,10 @@ def per_stage(a, key, kind):
     return vals[: a["S"]]
 
 
-def block(a, d, r, p, e, m, rot, untie=0):
+def block(a, d, r, p, e, m, rot, untie=0, u=1):
     return {"Mamba3": {
         "d_model": d, "state_rank": r, "expand": e, "per_head_dim": p,
-        "ngroups": 1, "mimo_rank": m, "micro_steps": 1, "trapezoid": a["trap"],
+        "ngroups": 1, "mimo_rank": m, "micro_steps": u, "trapezoid": a["trap"],
         "gain": "Projected", "kalman_kappa_init": 0.01, "tropical": "None",
         "a_floor": 0.0001, "dt_min": 0.001, "dt_max": 0.1,
         "dt_init_floor": 0.0001, "dt_limit": [0.0, 65504.0],
@@ -82,10 +87,20 @@ def init(a):
             "residual_depth": None}
 
 
-def stack(a, d, layers, mlp, mgr, virtual=0, untie=0):
+def schedule(sched, virtual, layers):
+    """The JSON of a virtual schedule (see `msched`)."""
+    if sched in ("Cyclic", "Stretched"):
+        return sched
+    idx = [int(i) for i in sched.split(",")]
+    if len(idx) != virtual or not all(0 <= i < layers for i in idx):
+        sys.exit(f"msched={sched}: needs {virtual} real layers in 0..{layers}")
+    return {"Custom": idx}
+
+
+def stack(a, d, layers, mlp, mgr, virtual=0, untie=0, sched="Cyclic"):
     return {
         "n_real_layers": layers,
-        "n_virtual_layers": None if virtual in (0, layers) else [virtual, "Cyclic"],
+        "n_virtual_layers": None if virtual in (0, layers) else [virtual, schedule(sched, virtual, layers)],
         "grad_horizon": None, "class_latents": [],
         "ignore_first_residual": False, "ignore_last_residual": False,
         "residuals": "Standard" if mgr == 0 else {"MultiGate": {
@@ -105,11 +120,12 @@ def model(a):
     rs, ps, es = per_stage(a, "r", int), per_stage(a, "p", int), per_stage(a, "e", int)
     ms, mlps = per_stage(a, "sm", int), per_stage(a, "smlp", int)
     mgrs, targets = per_stage(a, "mgr", int), per_stage(a, "N", float)
-    rots = per_stage(a, "srot", str)
+    rots, us = per_stage(a, "srot", str), per_stage(a, "su", int)
     stages = [{"encoder": stack(a, ds[s], enc[s], mlps[s], mgrs[s]),
                "decoder": stack(a, ds[s], dec[s], mlps[s], mgrs[s])}
               for s in range(a["S"])]
-    main = stack(a, a["md"], a["mL"], a["mmlp"], a["mmgr"], a["mV"], a["muntie"])
+    muntie = a["mV"] not in (0, a["mL"]) if a["muntie"] == "auto" else bool(int(a["muntie"]))
+    main = stack(a, a["md"], a["mL"], a["mmlp"], a["mmgr"], a["mV"], muntie, a["msched"])
     if a["lrm"] == "auto":
         lrm = [math.sqrt(a["md"] / ds[s] * math.prod(targets[s:])) for s in range(a["S"])] + [1.0]
     else:
@@ -127,8 +143,8 @@ def model(a):
                 "missing_lm_head": bool(a["tie"]), "head_init": head_init,
                 "n_start_tokens": a["start"],
             },
-            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s]) for s in range(a["S"])],
-            "main_block": block(a, a["md"], a["mr"], a["mp"], a["me"], a["mm"], a["mrot"], a["muntie"]),
+            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s], 0, us[s]) for s in range(a["S"])],
+            "main_block": block(a, a["md"], a["mr"], a["mp"], a["me"], a["mm"], a["mrot"], muntie, a["mu"]),
         },
         "ratio_targets": targets,
         "ratio_weight": a["alpha"],

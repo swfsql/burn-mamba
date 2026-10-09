@@ -1,22 +1,29 @@
 # Sourced by the scripts that run bin/hn-cuda.
 # split_args "$@": sets app=(the AppArgs flags) and ex=(the example flags after
-# `--`), and adds `--max-vram $VRAM_MAX_MIB` (default 3750) to ex unless the
-# caller gave one. 3750 MiB of pools + ~140 MiB of CUDA context keeps the
-# process under 3.8 GiB (the search limit). Call as:
-# bin/hn-cuda … "${app[@]}" -- "${ex[@]}".
+# `--`), and:
+# - adds `--max-vram $VRAM_MAX_MIB` (default 3750) to ex unless the caller
+#   gave one. 3750 MiB of pools + ~140 MiB of CUDA context keeps the process
+#   under 3.8 GiB (the search limit).
+# - adds `--grad-checkpointing` (the default of the search: less VRAM, a
+#   little more time, the same losses) unless the caller gave it, or gave
+#   `--no-gc`. `--no-gc` is not a flag of the example: it is removed here.
+# Call as: bin/hn-cuda … "${app[@]}" -- "${ex[@]}".
 # stamp <dir>: writes <dir>/build.txt, the build info of bin/hn-cuda (see
 # build.sh). bin_tag: the tag of bin/hn-cuda, for the `==` lines of the logs.
 stamp() { cp bin/hn-cuda.txt "$1/build.txt"; }
 bin_tag() { sed -n 's/^tag: //p' bin/hn-cuda.txt; }
 split_args() {
   app=() ex=()
-  local seen=0 a
+  local seen=0 gc=1 a
   for a in "$@"; do
     if [ "$seen" = 0 ] && [ "$a" = "--" ]; then seen=1
     elif [ "$seen" = 0 ]; then app+=("$a")
+    elif [ "$a" = "--no-gc" ]; then gc=0
+    elif [ "$a" = "--grad-checkpointing" ]; then :
     else ex+=("$a")
     fi
   done
+  [ "$gc" = 1 ] && ex+=(--grad-checkpointing)
   case " ${ex[*]} " in
     *" --max-vram "*) ;;
     *) ex+=(--max-vram "${VRAM_MAX_MIB:-3750}") ;;
