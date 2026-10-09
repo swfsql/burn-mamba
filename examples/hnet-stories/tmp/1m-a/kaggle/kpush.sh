@@ -71,6 +71,9 @@ done
 printf '%s\n' "$lines" > "$pay/ws/kqueue.txt"
 echo "$budget" > "$pay/ws/kaggle-budget.txt"
 tar czf "$pay/data/payload.tar.gz" -C "$pay/ws" .
+# The marker of this batch, beside the archive: the version is live when
+# the dataset lists it, and runner.py refuses a payload without it.
+echo "$ts" > "$pay/data/batch-$ts.txt"
 cat > "$pay/data/dataset-metadata.json" <<EOF
 {"title": "hnet-payload", "id": "$owner/hnet-payload", "licenses": [{"name": "CC0-1.0"}]}
 EOF
@@ -80,14 +83,22 @@ if "$here/kg.sh" datasets status "$owner/hnet-payload" > /dev/null 2>&1; then
 else
   "$here/kg.sh" datasets create -p "$pay/data"
 fi
-# The kernel must read the new version: wait until the dataset is ready.
-for _ in $(seq 60); do
+# The kernel must read the new version. `datasets status` can still report
+# the previous version as ready, so wait until the files of the dataset
+# list the marker of this batch (and the status is ready).
+live=
+for _ in $(seq 120); do
   s=$("$here/kg.sh" datasets status "$owner/hnet-payload" 2>&1 || true)
-  [ "$s" = ready ] && break
+  if [ "$s" = ready ] && "$here/kg.sh" datasets files "$owner/hnet-payload" 2>/dev/null | grep -q "batch-$ts.txt"; then
+    live=1
+    break
+  fi
   sleep 5
 done
-[ "$s" = ready ] || { echo "the payload is not ready: $s"; exit 1; }
-cp "$here/runner.py" "$pay/kernel/"
+[ -n "$live" ] || { echo "the payload of batch $ts is not live: $s"; exit 1; }
+# The pushed runner expects this batch.
+sed "s/^EXPECTED_BATCH = None$/EXPECTED_BATCH = \"$ts\"/" "$here/runner.py" > "$pay/kernel/runner.py"
+grep -q "^EXPECTED_BATCH = \"$ts\"$" "$pay/kernel/runner.py" || { echo "runner.py has no EXPECTED_BATCH line"; exit 1; }
 cat > "$pay/kernel/kernel-metadata.json" <<EOF
 {"id": "$kernel", "title": "hnet-1m-a-runner", "code_file": "runner.py",
  "language": "python", "kernel_type": "script", "is_private": true,

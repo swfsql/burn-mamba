@@ -33,6 +33,10 @@ OUT = "/kaggle/working"
 WS = "/tmp/ws"
 CORPUS = ("train-262144-cased.txt", "valid-256-cased.txt", "valid-2048-cased.txt")
 TEXT_OUTPUTS = ("probes.txt", "knobs.txt", "ctxg.txt", "speeds.txt")
+# The batch that this kernel must run: kpush.sh writes it into the pushed
+# copy. The payload must carry its marker `batch-<id>.txt` (Kaggle can attach
+# an older version of the dataset).
+EXPECTED_BATCH = None
 
 
 def log(msg):
@@ -95,6 +99,10 @@ def sync(before, host_txt):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    if EXPECTED_BATCH is not None and find(f"batch-{EXPECTED_BATCH}.txt", required=False) is None:
+        markers = sorted(os.path.basename(p) for p in glob.glob(f"{INPUT}/**/batch-*.txt", recursive=True))
+        log(f"stale payload: expected batch-{EXPECTED_BATCH}.txt, found {markers or 'no marker'}")
+        sys.exit(2)
     cache = os.path.expanduser("~/.cache/burn-dataset/tinystories-gpt4-clean")
     os.makedirs(cache, exist_ok=True)
     for name in CORPUS:
