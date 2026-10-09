@@ -35,15 +35,31 @@ at its end).
 
 ## Running
 
-- Local (`queue.txt`): L-A-s33-N15-lr4 (stage 3+3 at d112, main d112 × 3,
-  the best screen 1.0898).
+- Local (`queue.txt`): L-R-N15-wd05 (weight decay 0.05).
 - Kaggle (batch 12): L-A-s33-N15-lr4-s1, L-A-s22-L2-N15-lr4 (stage 2+2
-  at d136, main × 2).
+  at d136, main × 2). Batch 13 (a waiter pushes it after batch 12): the
+  N 2 extension to 8000 (two pieces) and L-W-s112-m.
 - The heartbeat (a session cron, every 30 min) checks both runners.
 
 ## Next steps
 
-1. Read the long allocation tests against R-N15 (0.851 at 3230).
-2. Rank candidates with long runs (two seeds), not screens.
-3. A trunk longer than 1 h goes in pieces: `extend.sh … N1 0` (no decay),
-   `--lr LR --span A-B` for an anneal.
+1. **The whole-story metric** (user; implement first, after the
+   compaction): a probe after the training, as `ctx.sh`. The valid stories
+   longer than 1024 chars (~30 of the 256; option: of the 2048), each scored
+   over its whole length (≤ 4148); report the bits of chars 0..1024 and of
+   the tail past 1024. Generic over a logits closure in `examples/common`
+   (as `context.rs`), so the H-Net and the flat get the same measure; a
+   flag in both examples + a script. Run it on the milestone runs of both.
+2. **N 2 to the milestones** (user: a higher N should use the main stage
+   more and remember entities better): L-R-x4630 → L-R-t6315 → L-R-x8000
+   (Kaggle batch 13), then 12000 in two pieces as L-R-N15-x12000.
+3. **The main network** (user: it should matter most). The main-heavy
+   screens took depth from the stages (2+2 → 1+1): the loss can be the thin
+   stages. Batch 13 runs L-W-s112-m (stage d112 2+2, main d152 × 3, 982k)
+   long. Also: a higher N, and the tail of the whole-story metric (where
+   the main can matter and the first-1024 metric is blind).
+4. Rank candidates with long runs (two seeds), not screens. A trunk longer
+   than 1 h goes in pieces: `extend.sh … N1 0`, `--lr LR --span A-B`.
+5. The VRAM confound (user): the flat h16-s2 3149 MB without gc, the H-Net
+   ~3.1 GB with gc; a flat with gc could hold a larger block (fr-d152 is
+   one: it held its edge only early). No gc-filled flat search was done.

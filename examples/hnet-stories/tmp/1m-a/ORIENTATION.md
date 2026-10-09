@@ -68,6 +68,15 @@ to it). Read `handoff.md` first. This search replaces the flat search of
 
 ## Tools
 
+- Every run appends (`>>`) its stdout to a log file: `screen.sh`,
+  `extend.sh` and `probe.sh` do it, and a queue line appends its probe
+  output (`>> ctxg.txt`, `>> fills.txt`).
+- **Context efficiency**: read the results with `summ.py` (`| grep
+  valid@`), `ctxstat.py` (`| grep` the rows), `tail`, `grep ^prof`; compare
+  configs with `diff cfg/a/args.txt cfg/b/args.txt`. Never dump big files
+  (logs, `metrics.jsonl`, a whole script, the output of `kpull.sh`: filter
+  it with `grep -E "^(done|fail)|^==|valid@"`).
+
 The scripts of `../../../tiny-stories/tmp/1m-cased/` (see
 `../../../tiny-stories/tmp/1m-b/ORIENTATION.md`), with these changes:
 

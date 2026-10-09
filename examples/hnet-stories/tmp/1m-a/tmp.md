@@ -466,6 +466,17 @@
 - **L-R128c-N15-lr4-s1**: dv 0.8517 (seed 0 0.8581). Two-seed means at
   3230: R128c-N15 0.8549, R-N15 (r 104) 0.8510: r 104 stays the reference
   (Δ 0.004, ~1 s.e.).
+- **L-A-s33-N15-lr4** (stage 3+3 at d112, main d112 × 3, N 1.5, lr 4e-3):
+  sv 0.9821, **dv 0.8597** (R-N15 mean 0.851: +0.009). The best screen
+  value (1.0898) did not hold at the long horizon. Next here: L-R-N15-wd05
+  (weight decay 0.05).
+- **User notes (19:50)**: extend N 2 too (the main stage, the entities);
+  add a whole-story metric (the long valid stories); the main network
+  should matter most; the VRAM of the flat reference (3149 MB, no gc;
+  matched within ~2% of the H-Net's ~3.1 GB, but without gc). Plan in
+  handoff.md. Kaggle batch 13: L-R-x8000 (N 2, two pieces) and
+  L-W-s112-m (stage d112 2+2 Real1D r 128, main d152 × 3 Real1D r 32,
+  N 2, lr 4e-3, 981,710: the stages keep their depth, the main grows).
 - The long allocation tests: L-A-s33-N15-lr4 (here, 18:14), Kaggle batch
   12: L-A-s33-N15-lr4-s1 and L-A-s22-L2-N15-lr4.
 - **The milestone 12000 + 2400** (the flat plan: 8000-12000 cosine 1e-3 →
