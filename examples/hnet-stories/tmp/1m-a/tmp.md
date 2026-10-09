@@ -477,6 +477,15 @@
   handoff.md. Kaggle batch 13: L-R-x8000 (N 2, two pieces) and
   L-W-s112-m (stage d112 2+2 Real1D r 128, main d152 × 3 Real1D r 32,
   N 2, lr 4e-3, 981,710: the stages keep their depth, the main grows).
+- **Kaggle batch 12** (long, N 1.5, lr 4e-3): L-A-s33-N15-lr4-s1 0.8562
+  (seed 0 0.8597, mean 0.858: +0.007 against R-N15); **L-A-s22-L2-N15-lr4
+  0.8780** (stage 2+2 at d136, main × 2: +0.027). **Taking a main layer
+  away costs much** (with the stages kept deep): the main depth matters
+  (the user's intuition). The user: the main wants both a larger d and a
+  larger state rank. Here: L-W-m128r-L2 (stage d112 2+2 Real1D r 128,
+  main d168 × 2 Real1D r 128, mmlp 32, 996k) and L-W-m64r (main d144 × 3
+  r 64, mmlp 24, 998k), long. Batch 13 has L-W-s112-m (main d152 × 3, r
+  32: the low-rank contrast) and the N 2 extension.
 - The long allocation tests: L-A-s33-N15-lr4 (here, 18:14), Kaggle batch
   12: L-A-s33-N15-lr4-s1 and L-A-s22-L2-N15-lr4.
 - **The milestone 12000 + 2400** (the flat plan: 8000-12000 cosine 1e-3 →

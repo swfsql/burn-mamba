@@ -35,7 +35,8 @@ at its end).
 
 ## Running
 
-- Local (`queue.txt`): L-R-N15-wd05 (weight decay 0.05).
+- Local (`queue.txt`): L-R-N15-wd05 (weight decay 0.05), then
+  L-W-m128r-L2 and L-W-m64r (long).
 - Kaggle (batch 12): L-A-s33-N15-lr4-s1, L-A-s22-L2-N15-lr4 (stage 2+2
   at d136, main × 2). Batch 13 (a waiter pushes it after batch 12): the
   N 2 extension to 8000 (two pieces) and L-W-s112-m.
@@ -44,10 +45,12 @@ at its end).
 ## Next steps
 
 1. **The whole-story metric** (user; implement first, after the
-   compaction): a probe after the training, as `ctx.sh`. The valid stories
-   longer than 1024 chars (~30 of the 256; option: of the 2048), each scored
-   over its whole length (≤ 4148); report the bits of chars 0..1024 and of
-   the tail past 1024. Generic over a logits closure in `examples/common`
+   compaction): a probe after the training, as `ctx.sh`. **Real long
+   stories** (user): the valid stories longer than 2048 chars, looked for
+   past the 256 of the metric (the whole valid split, rows 10k..20k: ~1.5%
+   of the stories, ~150), each scored over its whole length (≤ 4148);
+   report the bits of chars 0..1024, of 1024..2048 and of the tail past
+   2048. Generic over a logits closure in `examples/common`
    (as `context.rs`), so the H-Net and the flat get the same measure; a
    flag in both examples + a script. Run it on the milestone runs of both.
 2. **N 2 to the milestones** (user: a higher N should use the main stage
@@ -55,9 +58,12 @@ at its end).
    (Kaggle batch 13), then 12000 in two pieces as L-R-N15-x12000.
 3. **The main network** (user: it should matter most). The main-heavy
    screens took depth from the stages (2+2 → 1+1): the loss can be the thin
-   stages. Batch 13 runs L-W-s112-m (stage d112 2+2, main d152 × 3, 982k)
-   long. Also: a higher N, and the tail of the whole-story metric (where
-   the main can matter and the first-1024 metric is blind).
+   stages; L-A-s22-L2-N15 (main × 2) lost 0.027, so the main depth
+   matters. The user: a larger main d and a larger main state rank. Long
+   runs: L-W-m128r-L2 (main d168 × 2 r 128) and L-W-m64r (main d144 × 3 r
+   64) here, L-W-s112-m (main d152 × 3 r 32) in batch 13; all with stage
+   d112 2+2 Real1D r 128, N 2. Also: a higher N, and the tail of the
+   whole-story metric (where the main can matter).
 4. Rank candidates with long runs (two seeds), not screens. A trunk longer
    than 1 h goes in pieces: `extend.sh … N1 0`, `--lr LR --span A-B`.
 5. The VRAM confound (user): the flat h16-s2 3149 MB without gc, the H-Net
