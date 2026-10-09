@@ -1,10 +1,10 @@
 //! The bits of whole long stories (`--long-stories`).
 //!
-//! The validation loss scores the first characters of each story (the
-//! training window). Most stories end inside that window, so the loss tells
-//! little about the end of a long story. There, the model must keep the names,
-//! the objects and the events of the start in its state, and it reads
-//! positions past the training window.
+//! The validation loss of a windowed or packed run scores the first characters
+//! of each story (the window). Most stories end inside that window, so the
+//! loss tells little about the end of a long story. There, the model must keep
+//! the names, the objects and the events of the start in its state, and it
+//! reads positions past the training window.
 //!
 //! The measure does not depend on the model. As [`super::context`], it reads
 //! the model through a [`LogitsFn`], with the lead rows in front of the tokens.
@@ -18,11 +18,13 @@
 //! each [`BIN`] characters (the position profile). The bits are those of the
 //! cased text, as the validation scores it ([`cased_log_probs`]).
 //!
-//! **The whole valid.** The validation loss cuts each story at its window
-//! (the first 1024 characters in the 1M searches). The measure also scores
-//! the stories of the validation loss in full, each in one `forward`. That
-//! gives the bits per character of their whole text, for any model and any
-//! training protocol (windows, packed rows, length buckets).
+//! **The whole valid.** The validation loss of a windowed or packed run cuts
+//! each story at its window (the first 1024 characters in the 1M searches).
+//! The measure also scores the stories of the validation loss in full, each in
+//! one `forward`. That gives the bits per character of their whole text, for
+//! any model and any training protocol (windows, packed rows, length buckets).
+//! A length-bucketed run validates whole stories, so its validation loss is
+//! this number.
 //!
 //! **Padding.** A batch holds stories of similar length. Each story is
 //! right-padded (with its last character) to a multiple of [`BIN`]. The models

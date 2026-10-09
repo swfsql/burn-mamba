@@ -72,8 +72,9 @@ session. At the session end they go into `notes.md`, compressed, by topic.
   leaf of 600 / 1000 / 1600 / 2400. `screen.sh` runs the first,
   `extend.sh` the others. The stable runs form a trunk. Nothing continues
   from a decay leaf (`-d`).
-- **Rank by the `wv` of the decayed run** (`long.sh -g <run>-d`), with dv
-  and the recall (`ctx.sh`) beside it. A long run has ±0.005 of seed noise.
+- **Rank by the `wv` of the decayed run**, with the recall (`ctx.sh`)
+  beside it. From binary `4e42bba3` on, the dv of a bucketed run is `wv`
+  (every valid story whole). An older run needs `long.sh -g <run>-d`. A long run has ±0.005 of seed noise.
   A short screen has ±0.009, so it cannot rank strong shapes: use it only
   to drop clear losers.
 - Every run: `--grad-checkpointing` and `--max-vram 3750` (`args.sh` adds

@@ -51,8 +51,9 @@ DEFAULTS = dict(
     stories=262144, vstories=256, epochs=1000, frontier="always", seed=0,
     workers=2, runlen=1,
     # buckets: the slots of length-bucketed training (`512,768,…`; empty:
-    # none), each batch ~bchars scored chars. `seq`/`runlen` then set only
-    # the validation (keep seq × runlen = 1024). The default is the protocol:
+    # none), each batch ~bchars scored chars. `seq`/`runlen` then do
+    # nothing: the validation takes the slots too (each story whole). The
+    # default is the protocol:
     # whole stories, full backprop (the longest story has 4149 chars). One
     # slot for every story up to 1024 chars (88% of them, 11 × 1024 tokens):
     # finer short slots group the stories by length, which cost +0.008
