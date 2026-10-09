@@ -1,121 +1,153 @@
-# ORIENTATION: hnet-stories ≤1M-param search
+# ORIENTATION: hnet-stories ≤1M-param search (1m-a)
 
 Workspace: `examples/hnet-stories/tmp/1m-a/` (the paths below are relative
-to it). Read `handoff.md` first. This search replaces the flat search of
-`../../../tiny-stories/tmp/1m-cased/` (the cased world, the same metric).
+to it). Read `handoff.md` (the state, the next steps), then this file, then
+`notes.md` (the findings). `tmp.md` collects the results of the running
+session. At the session end they go into `notes.md`, compressed, by topic.
 
 ## Goal and ceilings (user)
 
-- The lowest valid bits/char of the cased text (`bits` = `primary` +
-  `case`) with an H-Net whose stacks are all Mamba-3. The number of stages,
-  and the layer and block settings of each stage, are hyperparameters.
-- The ceilings: training steps, params (< 1M), VRAM (the process under
-  3.6 GiB preferred, under 3.8 GiB for the search). Wall clock is not a
-  ceiling. Log ms/step anyway.
+- The lowest bits/char of the cased text (`bits` = `primary` + `case`) on
+  the whole valid (`wv`), with an H-Net whose stacks are all Mamba-3. The
+  stages, the layers and the blocks of each stack are hyperparameters.
+- The ceilings:
+  - the training steps (matched with the flat reference),
+  - the params (< 1M),
+  - the VRAM (the process under 3.6 GiB preferred, under 3.8 GiB for the
+    search).
+
+  Wall clock is not a ceiling. Log ms/step anyway.
+- **Every shape uses the most of both ceilings** (user).
 - **A long run is a sequence of extensions of < ~1 h each** (user), so that
   a partial result can stop it.
-- Library changes (burn-stack, burn-mamba) are allowed. Claude can commit
-  both (the `[patch]` of burn-stack stays in the commits of burn-mamba).
+- Library changes (burn-stack, burn-mamba) are allowed.
+
+## Working rules (user)
+
+- Claude decides: no forms, no questions that block progress. Questions
+  and suggestions are welcome. Log each decision and its reason in
+  `tmp.md`.
+- Models before seeds. Rank by long runs. Add a seed only where a decision
+  needs it.
+- Name a variant by its change from its base (`R-N15 × main d152 × 4`).
+- **Context efficiency**: every run appends (`>>`) its stdout to a log.
+  Read results with `summ.py` (`| grep valid@`), `ctxstat.py`,
+  `longstat.py`, `tail`, `grep ^prof`. Compare configs with `diff
+  cfg/a/args.txt cfg/b/args.txt`. Never dump big files (logs,
+  `metrics.jsonl`, the output of `kpull.sh`).
+- **Waiting**: no foreground loop or `sleep`. Wait in the background (a
+  waiter script or a `Monitor`), then return the turn. Match the binary
+  with `pgrep -x hn-cuda`. Kill by exact PID.
+- One GPU job at a time here. A ~3 GB VRAM probe does not fit beside a
+  training on the 6 GB card, but a `long.sh` or `ctx.sh` probe does. One
+  host job at a time (builds).
+- Never `rm`. `cp` and `mv` are allowed. Every run gets a fresh
+  `runs/<name>`, and every new directory a `build.txt` (`stamp.sh`).
+- Edit the hand-written files (notes, crate sources) only with Edit/Write.
+- **A new config field** (user): add it to every saved config that loads
+  again. Change `gen.py`, then regenerate `cfg/` from each `args.txt`. Edit
+  the `dec-*` configs and the run dirs by hand. Never make the field an
+  `Option` for compatibility: a Burn config default does not apply when a
+  config loads. Stop the runners first: the next phase of a running run
+  loads its config with the new binary.
+- Commits (both repos, at good points): `git -c user.name="Thiago Machado"
+  -c user.email=swfsql@gmail.com commit -F /tmp/<msg>`, the message ends
+  with the `Co-Authored-By` trailer. The dcg hook blocks three things in a
+  command line: text like `<owner>/x`, `sleep N; …` chains, and a `>`
+  redirect to a variable path. Use a literal path or a script file.
+- No auto-memory writes (user): durable notes go into these files.
 
 ## Protocol
 
-- **Whole stories, full backprop** (user, 2026-10-09 20:40): the length
-  buckets 512,768,1024,1536,2048,3072,4160 (`gen.py` default; each story
-  is one row of the shortest slot that holds it), ~7450 scored chars per
-  batch (`bchars`), as the packed 2×4224 rows of the flat model (~7.5k).
-  **Every H-Net run before this protocol is invalid** (it trained the first
-  1024 chars only: past char 1024 it got worse, `long-v1.txt`). Their
-  insights stay (the rules below, `notes.md`), not their numbers.
-- **The metric: the whole valid `wv`** (`long.sh`: the 256 valid stories
-  in full, 207,187 chars, 32 of them longer than 1024). The training valid
-  `dv` scores their first 1024 chars only (190,070 chars; keep `seq ×
-  runlen = 1024`); log it beside `wv`. `long.sh` also gives the long
-  stories (157, longer than 2048) and their tail.
-- The LR and the milestones are those of `../../../tiny-stories/tmp/1m-b/
-  ORIENTATION.md` (the trunk at constant LR, a decay leaf per milestone,
-  rank by the decayed valid). Each stage trains at `lr · λˢ` (`lrm`).
-  Short screens (600 + 200) cannot rank the strong shapes (±0.009): rank
-  by long runs (2630 + 600, lr 4e-3), two seeds where it matters.
-- The flat reference: `tiny-stories/tmp/1m-cased/runs/h16-s2` (h16, packed:
-  whole stories) and its milestones h16-x4630 / x8000 / x12000 (`long.txt`
-  has their `wv`); h16-B-d is the flat at the buckets.
-- **`--grad-checkpointing` everywhere** (user): `args.sh` adds it to every
-  training script unless `--no-gc` (the same losses in tiny-stories, −22%
-  VRAM, +2–5% time). The screens before 2026-10-09 04:10 ran without it.
-- **The budget table of the knobs**: `knobs.sh` (one change at a time from
-  the base, the params and the probe lines) and `knobs.py` (Δparams,
-  Δreserved MB, MB per kparam). The VRAM-heavy, param-cheap knobs fill the
-  VRAM that a shape leaves.
-- **Virtual layers** (user): repeat the middle real layers more than the
-  edge layers (`msched=0,1,1,1,1,2`), mostly when not every real layer
-  repeats. They always take the untied tensors of mnist-class, in the
-  block config and in the layer (`gen.py muntie=auto`, the default, does
-  it).
-- **Compare at matched budgets** (user). A change can be cheap in params
-  and heavy in VRAM (the state rank, MIMO, virtual layers, less
-  compression), or the reverse. Log the params and the reserved MB of each
-  variant against its base. A variant that frees budget (Real1D stages:
-  −8k params, −566 MB) has not had its fair test until it spends that
-  budget. **Every shape should use the most of both ceilings** (user,
-  again 2026-10-09). The recipe of a full-budget shape (`F-*`):
-  1. Dose the VRAM knob so the steady reserved is ≤ ~3500 MB (the process
-     < 3.6 GiB with the ~100 MiB CUDA context). With gc, the steady
-     reserved ≈ 1.06 × the step-10 probe (L-N2: 2086 against 1962).
-  2. Then fill the params with `fit.py` (the main MLP width `mmlp` at
-     `mlpmul=8`, VRAM-free, ~10k per step) to ≥ ~990k. The main width
-     `md` steps by ~48k and must stay ≥ the stage width.
-  The reference is `F-base` (b + `mmlp` 32, 998k).
+- **Whole stories, full backprop** (user, 2026-10-09): the length buckets
+  1024,1536,2048,3072,4160 (`gen.py` default). Each story is one row of the
+  shortest slot that holds it. A batch scores ~7450 chars (`bchars`), as
+  the packed 2 × 4224 rows of the flat model do. **The H-Net runs before
+  2026-10-09 20:40 are invalid** (the first 1024 chars only, `notes.md`
+  §2).
+- **The LR** (the flat's plan): a ramp to 4e-3 over 128 steps, 4e-3 to step
+  4630, then 1e-3, then a cosine 1e-3 → 5e-4 over 8000–12000. Each stage
+  trains at `lr · λˢ` (`lrm=auto`).
+- **The milestones**: stable 2630 / 4630 / 8000 / 12000, each with a decay
+  leaf of 600 / 1000 / 1600 / 2400. `screen.sh` runs the first,
+  `extend.sh` the others. The stable runs form a trunk. Nothing continues
+  from a decay leaf (`-d`).
+- **Rank by the `wv` of the decayed run** (`long.sh -g <run>-d`), with dv
+  and the recall (`ctx.sh`) beside it. A long run has ±0.005 of seed noise.
+  A short screen has ±0.009, so it cannot rank strong shapes: use it only
+  to drop clear losers.
+- Every run: `--grad-checkpointing` and `--max-vram 3750` (`args.sh` adds
+  them), `--ssd-path recalc:32` (pins the SSD chunk, which doubles at a
+  state rank ≥ 80).
+- The flat reference: h16 of `../../../tiny-stories/tmp/1m-cased/runs/`
+  (`h16-s2`, `h16-x4630`, `h16-x8000`, `h16-x12000`). Its `wv` is in
+  `notes.md` §1.
+
+## Shapes and budgets
+
+- **A full-budget shape**:
+  1. The VRAM: `probe.sh <cfg>` runs 2 batches of each slot and reports the
+     reserved MB after each slot and their maximum. A run holds ~1.17 ×
+     that maximum. So dose a shape to a probe ≤ ~2990 MB: its run then
+     holds ≤ ~3500 MB, and the process stays < 3.6 GiB.
+  2. The params: `fit.py` fills the budget to ≥ ~990k (the main MLP `mmlp`
+     at `mlpmul=8` costs no VRAM, ~10k per step). The main width `md` must
+     stay ≥ the stage width.
 - **Keep the trapezoid and the B/C bias on** (user): this Mamba-3 has no
-  short conv, and they take its place (`info/mamba-3/architecture-deltas.md`).
-  Trapezoid None lost 0.042 (R-trapN). Free params elsewhere.
-- **Power-of-two state ranks**: another rank costs about as much VRAM as
-  the next power of two, or more (the cubecl kernels follow the
-  dimensions; the curve in `notes.md`).
-- **Rank by the recall too**: `ctx.sh -g -n 2048` (`ctxg.txt`). The valid
-  bits hide it. The re-mention first letter (the choice of the entity)
-  moves against the bits with the compression (`notes.md`).
+  short conv, and they take its place.
+- **Power-of-two state ranks**: another rank costs the VRAM of the next
+  power of two, or more. A Complex2D stage above r 64 does not fit.
+- **Virtual layers** (user): repeat the middle real layers more than the
+  edge layers (`msched=0,1,1,1,1,2`), with the untied tensors (`gen.py
+  muntie=auto`). They lost so far.
+- The budget table of the knobs: `knobs.sh` / `knobs.py` (`notes.md` §7).
 
 ## Tools
 
-- Every run appends (`>>`) its stdout to a log file: `screen.sh`,
-  `extend.sh` and `probe.sh` do it, and a queue line appends its probe
-  output (`>> ctxg.txt`, `>> fills.txt`).
-- **Context efficiency**: read the results with `summ.py` (`| grep
-  valid@`), `ctxstat.py` (`| grep` the rows), `tail`, `grep ^prof`; compare
-  configs with `diff cfg/a/args.txt cfg/b/args.txt`. Never dump big files
-  (logs, `metrics.jsonl`, a whole script, the output of `kpull.sh`: filter
-  it with `grep -E "^(done|fail)|^==|valid@"`).
-
-The scripts of `../../../tiny-stories/tmp/1m-cased/` (see
-`../../../tiny-stories/tmp/1m-b/ORIENTATION.md`), with these changes:
-
-- The binary is `bin/hn-cuda` (`./build.sh`). Match it with
-  `pgrep -x hn-cuda`. **A new config field** (user): add it to every saved
-  config that will load again (`gen.py`, then regenerate `cfg/` from
-  `args.txt`; the `dec-*` configs and the run dirs by hand), not an
-  `Option`. A Burn config default does not apply when a config loads.
-  Stop the runners first: the next phase of a running run loads its
-  config with the new binary.
-- `gen.py <cfg> k=v …`: an H-Net config (the header lists the keys).
-  Per-stage keys take `/` lists: `S=2 d=64/128 enc=1 dec=1`.
-- The example flags: `--ssd-path`, `--main-ssd-path`, `--profile N`,
-  `--max-vram`, `--grad-checkpointing`, `--chunk-log N` (the chunk ratio of
-  each stage, against its target), `--continuations`, `--show-chunks`.
-- `ctx.sh` / `ctxstat.py`: the context probe (`--context-use`), as in
-  tiny-stories.
-- `long.sh [-g] [-t] <run>` / `longstat.py`: the whole-story probe
-  (`--long-stories`): the 157 valid stories longer than 2048 chars, each in
-  one `forward`; bits/char of 0..1024, 1024..2048, the tail 2048.., all
-  (`>> long.txt`). `-t` takes a tiny-stories run directory (its `ts-cuda`).
-  `longstat.py long/A long/B …`: the paired differences against A, and the
-  profile per 256 chars. ~40 s on the GPU beside a training.
-- **Kaggle** (a second runner, T4 × 2, the same VRAM accounting):
-  `kaggle/kqueue.txt` holds the lines of a batch (each line a job, the
-  steps of one job joined with `&&`; the two GPUs take the lines in
-  parallel). `kaggle/kpush.sh [hours]` pushes it (the binary, the scripts,
-  `cfg/`, the source runs, as `payload.tgz.bin` in a new private dataset
-  `hnet-pay-<ts>`: Kaggle's unpacking of a `.tar.gz` can stall for hours)
-  and starts the kernel; `kaggle/kpull.sh` gives
-  the status and, when the kernel ends, merges its runs into `runs/` (each
-  with a `host.txt`). One kernel at a time. The token stays in the
-  gitignored `.kaggle/access_token` of the repo (`kaggle/kg.sh`).
+- **Binaries**: `bin/hn-cuda` (`./build.sh`, a host job: it keeps each
+  build as `bin/hn-cuda-<tag>` + `.txt`). The flat model's `ts-cuda` is in
+  `../../../tiny-stories/tmp/1m-cased/bin/` (its own `build.sh`).
+  `bin/hn-cuda -- --help` lists the example flags.
+- **Configs**: `gen.py <cfg> k=v …` → `cfg/<cfg>/`. The keys and their
+  defaults are at the top of the file. Per-stage keys take `/` lists.
+  `fit.py <cfg> <key> [from=V] [step=S] k=v …` fits one key to the param
+  cap (`python3 fit.py`). `params.sh <cfg>` counts the params (~2 s, flex).
+- **Runs**:
+  - `screen.sh <run> <cfg> <T1> <T2> [args]`: a stable run of T1 steps,
+    then a cosine decay leaf `<run>-d` of T2 steps.
+  - `extend.sh <src> <new> <N1> <N2> [--lr LR [--span A-B]] [args]`: from
+    a stable checkpoint, +N1 steps (with a step-down or an anneal), then a
+    leaf of N2. With `N2 = 0` it is a trunk piece.
+  - `branch.sh`, `decay.py`, `stage.py`, `lrseq.py`: the LR sequence
+    tools.
+- **The queue**: `queue.sh` runs the lines of `queue.txt` one at a time
+  (`bash -c`) and logs `start` / `done` / `fail` into `queue.log`. It
+  exits when the queue is empty. Check it with `ps -p $(cat queue.pid) -o
+  args=`. Start it with `setsid nohup ./queue.sh > /dev/null 2>&1 <
+  /dev/null &`. Waiters: `qwait.sh`, `qall.sh`, `after.sh`, `wait.sh`.
+- **Reading**: `summ.py <run>…` (speed, train buckets, every validation),
+  `agg.py`, `cool.py`.
+- **Probes** (after a run, on the GPU beside a training):
+  - `long.sh -g [-t] <run>` → `long.txt` (~50 s): the whole valid (`wv`:
+    all, chars 0..1024, past 1024) and the long stories (0..1024,
+    1024..2048, past 2048). `-t` takes a tiny-stories run directory.
+    `longstat.py [-w] long/A long/B …`: the paired differences against A,
+    and the profile per 256 chars (`-w`: the whole valid).
+  - `ctx.sh -g -n 2048 -r ctxg <run>` → `ctxg.txt`: the recall (far use,
+    re-mentions). `ctxstat.py` pairs the runs.
+  - `probe.sh <cfg> -- --ssd-path recalc:32 --chunk-log 0` →
+    `probes-B.txt` (the bucket protocol). `probes.txt`, `fills.txt` and
+    `knobs.txt` are from the old protocol.
+  - `infer.sh <run> <dir>`: samples on flex.
+- **Kaggle** (a second runner, two T4s, the same VRAM accounting):
+  - `kaggle/kqueue.txt` holds the lines of a batch: one job per line, its
+    steps joined with `&&`. The two GPUs take the lines in parallel.
+  - `kaggle/kwait.sh <hours> <log>` (in the background) pushes the batch
+    (`kpush.sh`: the binary, the scripts, `cfg/`, the source runs). Then it
+    waits for the kernel, merges its runs (`kpull.sh`), and runs `long.sh`
+    on each pulled `-d` run.
+  - One kernel at a time. `kpush.sh` empties `kqueue.txt`, so stage the
+    next batch after a push ends.
+  - The token stays in the gitignored `.kaggle/access_token`
+    (`kaggle/kg.sh` reads it). Never print it. `owner.txt`, `kqueue.txt`
+    and `out/` stay out of git.
