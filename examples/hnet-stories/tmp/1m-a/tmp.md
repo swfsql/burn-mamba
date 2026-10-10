@@ -183,6 +183,120 @@ file starts empty again.
     ms/step), so phase 1 should stay < 1 h.
   - Kaggle batch 3 (after batch 2): L-S2x-s112-L4 first, then the d64
     pair L-S2x-s64e-L4 / L-S4x-s64-L4, if their probes fit.
+- Probes: **S2x-s112-L4 2132**, **S2x-s64e-L4 1553** MB.
+- **L-S2a-B5** (here, 01:30): 0.93 steps/s (phase 1 ≈ 47 min). Reserved
+  2388 at step 100, **2473 from step 200 on: × 1.32 its probe** (1878).
+  So the probe-to-run factor depends on the shape: R-N15-B5 × 1.17,
+  M-s64r256-L4 × 1.04, S2a-B5 × 1.32. A two-stage shape has two routers,
+  so more distinct inner lengths (pool shapes) than a probe of 10 steps
+  meets. Dose an S = 2 shape to a probe ≤ ~2650 MB (× 1.32 → 3500).
+- Train bits per window (seed 0, the same batches), S2a-B5 / R-B5 /
+  R-N15-B5: 1–328 2.408 / 2.323 / 2.319, 657–984 1.234 / 1.196 / 1.183,
+  1313–1424 1.136 / 1.091 / 1.074. S2a trails R-B5 by 0.03–0.045, and
+  the gap does not close yet.
+
+## Kaggle batch 2 (new binary: dv = wv)
+
+| run | wv | 0..1024 | past 1024 | long stories all | run MB |
+|---|---|---|---|---|---|
+| L-R-B5-d (ref, N 2) | 0.8723 | 0.8650 | 0.9525 | 1.0051 | ~3390 |
+| L-M-s96r128-L5-d | 0.9022 | 0.8949 | 0.9838 | 1.0308 | 2440 |
+| L-Nm4-s96r128-B5-d | 0.9094 | 0.9025 | 0.9854 | 1.0397 | 2505 |
+| L-M-s96r128-L4r256-d | 0.9240 | 0.9167 | 1.0057 | | 2887 |
+| L-R-N15-B-d (7 slots) | 0.8697 | 0.8614 | 0.9621 | | 2799 |
+
+- **The M family loses** at 3230: +0.030 (L5), +0.038 (Nm4), +0.052
+  (L4r256) against R-B5, on every row. The long stories too (L5 +0.024
+  past 2048, ± 0.007): no long-horizon gain. With M-s64r256-L4 (+0.10),
+  the order follows the stage width: d64 +0.10, d96 +0.03 to +0.05.
+  Caveat: the M runs were 500–950 MB under the VRAM ceiling.
+- **The 7-slot contrast ties**: L-R-N15-B 0.8697 against R-N15-B5 0.8605
+  / 0.8688. The 5 slots stay.
+
+## Both ceilings (user, 02:10)
+
+- The user: a candidate is near both ceilings (params and VRAM), not
+  only under them. A result far from the VRAM ceiling is useless.
+- So **L-S2a-B5 stopped** at step ~1600 (run 2473 MB, ~1 GB under):
+  `runs/fail-L-S2a-B5`. Batch 3 (S2x-s112-L4 ~2800 run, the d64 pair
+  ~2050 / ~1750) is withdrawn for a refill. The M runs of batch 2 run at
+  ~2650–2980 MB (500–850 under): weak evidence only.
+- **`dose.sh <cfg> [steps]`** (new): 200 steps of the real run (the
+  shuffled order) and the reserved MB at each prof line. The run holds
+  steady from step ~200, so it doses a shape better than a probe (whose
+  factor is × 1.04–1.32). Target: max ~3450 MB.
+- The fill knobs (param counts, mmlp 0): the outer stage rank is the cheap
+  VRAM lever. Outer r 256 with main r 64 costs the same params as outer r
+  128 with main r 128 (2·128·112·2 = 2·64·112·4). A second outer layer
+  pair (2+2) costs ~160k at d112, ~50k at d64.
+- The refilled candidates (probes queued here, 02:18):
+  - **S2x-s112r256-L4**: d112/112 1+1 / 1+1, r 256/128, N 4/4, main d112
+    × 4 Real1D r 64, mmlp 0, 995,425.
+  - **S2a2-B5**: d112/120 1+1 / 1+1, r 256/128, N 1.41/1.41, main d120 ×
+    3 Complex2D r 64, mmlp 8, 992,028.
+  - **S2x-s64e2-L4**: d64/64 2+2 / 1+1, r 256/128, N 4/4, main d128 × 4
+    Real1D r 128, mmlp 24, 988,561.
+  - **S4x-s64e2-L4**: d64 ×4, outer 2+2, the others 1+1, r 256 then 128,
+    N 2 each, main d104 × 4 Real1D r 128, mmlp 8, 998,213.
+- Their probes: S2a2-B5 2861, S2x-s112r256-L4 2861, S4x-s64e2-L4 2622,
+  S2x-s64e2-L4 2517 MB (this one beside a `long.sh`). The first try of
+  two of them was killed: `kwait.sh`'s `long.sh` ran beside them.
+
+## How the process spends its VRAM (user, 02:30; cubecl 48301b5)
+
+- **`bytes_reserved`** (the `prof` lines, `--max-vram`, the probes) is
+  the sum of the pages that the pools hold
+  (`Device::memory_pool_usage` → cubecl `memory_report(Device).usage()`).
+- **A freed page waits.** A pool that drops a page calls
+  `storage.dealloc(id)`, which only pushes the id onto
+  `GpuStorage.deallocations`. `cuMemFree` runs at `storage.flush()`, and
+  only an **explicit** cleanup (`Device::memory_cleanup`) flushes. The
+  periodic cleanup of each `reserve` drops idle pages but never flushes.
+  So between two explicit cleanups, the dropped pages leave
+  `bytes_reserved` but stay on the device.
+- `GpuStorage.allocated` (`bytes_allocated()`) counts every page up to its
+  `cuMemFree`, so it is exact for the storage. But the public
+  `MemoryReport` does not carry it, so burn cannot read it.
+- `--max-vram` cleans up explicitly at windows 0, 1, 2, 4, …, 256, then
+  every 256. So the queue can grow for 256 windows.
+- The process also holds the CUDA context and the loaded kernels (the
+  JIT builds a module per kernel shape).
+- **The exact measure**: the driver's count per process
+  (`nvidia-smi --query-compute-apps=pid,used_memory`). The PIDs are host
+  PIDs, so a new PID against a baseline taken before the launch is ours
+  (a 136 MiB process of the host is always there). `args.sh`: `gpu_pids`,
+  `proc_mib`. `probe.sh` prints `proc` (its peak), and `dose.sh` prints it
+  and logs a sample per second (`<dir>/vram.log`). **The ceiling applies
+  to `proc`**: < 3686 MiB (3.6 GiB) preferred, < 3891 MiB for the search.
+- **Superseded (user, 02:40): never depend on `nvidia-smi`**, also not
+  on its per-process query: it counts the host, and the host usage
+  moves. The `proc` column and `vramwatch.sh` are gone (moved to /tmp).
+  The measure comes from inside the process:
+  - burn-stack `vram.rs`: `--vram-cleanup-every <N>` (StepFlags), the
+    period of the explicit cleanups (default: 0, 1, 2, 4, …, 256, then
+    every 256). With 1, the dropped pages never wait past a window.
+  - `vram::check` (after every backward) records the high-water mark of
+    `bytes_reserved`. The `prof` line prints it as `peak X MB` (over its
+    block). `probe.sh` and `dose.sh` read `peak`.
+  - `dose.sh <cfg> [steps]` (default 520): the `peak` of each `prof`
+    line and their maximum, and the ms/step.
+- The first R-N15-B5 dose (default cleanups, before the `peak` field):
+  reserved at the `prof` lines 3289 / 3385 / 3385 / 3385 / **3482** (n =
+  100…500). So the pools still grow after step 400.
+- 02:41: the disk was full (627 GB, the user frees it). Two doses died.
+  At 02:48 they run again: R-N15-B5 with `--vram-cleanup-every 1`, then
+  with the default cleanups. Their comparison gives the cost of the
+  exact measure and the true high-water mark.
+
+## No auto-fill (user, 02:45; strict rule 14)
+
+- The params: `mmlp` fills only a small rest near the cap. The VRAM: never
+  auto-filled; each candidate spends it by a design choice.
+- Checked the refills: S2x-s112r256-L4 (mmlp 0), S2a2-B5 (mmlp 8) and
+  S4x-s64e2-L4 (mmlp 8) pass. S2x-s64e2-L4 had mmlp 24 (~37k): replaced by
+  an inner stage r 256 (a design choice: the stage rank is the lever, and
+  the inner stage runs at 1/4 of the positions), mmlp 0, **989,073**. The
+  old config: `cfg/tmp-S2x-s64e2-L4-mmlp24`.
 
 ## Two stages (user, 23:30)
 

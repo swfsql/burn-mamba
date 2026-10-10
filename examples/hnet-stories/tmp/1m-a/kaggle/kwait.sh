@@ -2,7 +2,8 @@
 # usage: kaggle/kwait.sh <budget-hours> <log>   (run it in the background)
 # Pushes kaggle/kqueue.txt (kpush.sh), polls the kernel status until it
 # ends, pulls and merges the batch (kpull.sh; its filtered output in
-# <log>.pull), then runs long.sh on each pulled `-d` run (`>> long.txt`).
+# <log>.pull), then queues long.sh for each pulled `-d` run (`>> long.txt`)
+# in the local queue.
 # Prints KWAIT-DONE at the end, PUSH FAILED if the push did not go out.
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/.."
@@ -18,7 +19,13 @@ while :; do
   sleep 120
 done
 kaggle/kpull.sh 2>&1 | grep -E "^(done|fail)|^==|valid@|merged" | tee "$log.pull"
+# The long.sh runs go through the local queue (queue.txt), and the queue
+# starts when it does not run. A GPU job beside a probe or a dose spoils its
+# VRAM count.
 for r in $(grep -o "^== [^:]*-d:" "$log.pull" | sed 's/^== //; s/:$//'); do
-  [ -e "long/$r" ] || ./long.sh -g "$r" >> long.txt
+  [ -e "long/$r" ] || echo "./long.sh -g $r >> long.txt" >> queue.txt
 done
+if ! kill -0 "$(cat queue.pid 2>/dev/null)" 2>/dev/null; then
+  setsid nohup ./queue.sh > /dev/null 2>&1 < /dev/null &
+fi
 echo KWAIT-DONE

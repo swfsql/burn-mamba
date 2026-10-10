@@ -59,6 +59,13 @@ them, so:
 13. **Commits** (both repos, at good points): `git -c user.name="Thiago
     Machado" -c user.email=swfsql@gmail.com commit -F /tmp/<msg>`, the
     message ends with the `Co-Authored-By` trailer.
+14. **No auto-fill of a free budget** (2026-10-10):
+    - The params: fill the rest with the main MLP (`mmlp`, `fit.py`) only
+      when the shape is already close to the param ceiling. A larger gap
+      gets a deliberate design change.
+    - The VRAM: **never** fill the free VRAM automatically. There are too
+      many ways to spend it. Each candidate spends it by an explicit
+      design choice, logged with its reason.
 
 ## Goal
 
@@ -144,10 +151,10 @@ has the detail):
      use the probe for the coarse search only. `dose.sh <cfg> [steps]`
      runs the first steps of the real run and reports the reserved MB at
      each `prof` line.
-  2. The params: `fit.py` fills the budget to ≥ ~990k. The main MLP
-     `mmlp` at `mlpmul=8` costs no VRAM (~10k per step). The main width
-     `md` must stay ≥ the stage width, and the stage widths must not
-     shrink inward.
+  2. The params: design the shape near the cap, then `fit.py` fills only
+     a small rest with the main MLP (strict rule 14). `mmlp` at
+     `mlpmul=8` costs no VRAM (~10k per step). The main width `md` must
+     stay ≥ the stage width, and the stage widths must not shrink inward.
 - **The VRAM knobs** (`knobs.py`, `notes.md` §7): the stage state rank is
   the most VRAM per param. The stages set the peak (the 1024 slot), so N
   and the main knobs move it little.

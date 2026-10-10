@@ -3,9 +3,13 @@
 # not a screen.
 # 10 training steps (a bucketed config: 2 per slot) in a fresh
 # runs/probe-<cfg>-<n>, then prints one line:
-# - reserved: cubecl's `bytes_reserved` after step 10 (from the `prof` line):
+# - reserved: the `peak` of the `prof` line: the largest `bytes_reserved` of
+#   cubecl after a backward (`vram::check`) over the steps of the line:
 #   every page the pools hold, the CUDA context excluded. It does not drift
-#   with the host: rank configs by it.
+#   with the host. It misses the freed pages that wait for a cleanup, the
+#   CUDA context and the loaded kernels (see burn-stack's vram.rs).
+# - total, idle, ctx: from nvidia-smi, which counts the host too. The host
+#   usage moves, so never decide by these columns.
 # - total: the peak total VRAM (host included), and the host's idle usage.
 # - ctx: total − idle − reserved, in MiB (the CUDA context, ~90–120 MiB).
 #   (A per-process nvidia-smi query cannot work here: the container's PIDs
@@ -59,13 +63,13 @@ done
 wait "$pid" 2>/dev/null
 line=$(grep "^prof n=$steps " "$dir/stdout.log")
 ms=$(sed -n 's/.*total \([0-9.]*\) ms.*/\1/p' <<< "$line")
-res=$(sed -n 's/.*reserved \([0-9.]*\) MB.*/\1/p' <<< "$line")
+res=$(sed -n 's/.*peak \([0-9.]*\) MB.*/\1/p' <<< "$line")
 ctx=$(python3 -c "print(round($peak - $idle - ${res:-0} * 1e6 / 2**20))")
 # The reserved MB after each slot. Not cumulative (`--max-vram` cleans the
 # pool), so `reserved` is their maximum.
 per=
 if [ "$nslots" -gt 0 ]; then
-  slotres=$(grep "^prof n=" "$dir/stdout.log" | sed -n 's/.*reserved \([0-9]*\)\.[0-9]* MB.*/\1/p')
+  slotres=$(grep "^prof n=" "$dir/stdout.log" | sed -n 's/.*peak \([0-9]*\)\.[0-9]* MB.*/\1/p')
   per="slots $(paste -sd/ <<< "$slotres")"
   res=$(sort -n <<< "$slotres" | tail -n 1)
 fi
