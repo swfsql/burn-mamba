@@ -138,6 +138,52 @@ file starts empty again.
   go to Kaggle. Step 300: still 2711 MB, 1314 ms/step (phase 1 ≈ 58
   min).
 
+## L-M-s64r256-L4 (here, new binary)
+
+- sv@2630 **1.1235** (whole valid, n = 28), 61.5 min, 0.71 steps/s,
+  2711 MB steady (× 1.04 the probe). Its train bits trail L-R-B5 by ~0.13
+  at every point (328: 2.515 / 2.323, 1312: 1.254 / 1.119, 2624: 1.117 /
+  0.989). Far past the seed noise: **the thinnest-stage extreme loses**.
+- Two suspects: the stage width d64, or the stage LR (`lrm=auto`: λ
+  2.12, 8.5e-3; R-B5 1.41). It matters for S2x / S4x (λ 5.5–5.8).
+  Diagnostic queued here: **D-M-s64r256-L4-lrm** (`lrm=1.414/1`, the
+  stage LR of R-B5), 656 steps. Seed 0 gives the same batches as
+  L-M-s64r256-L4, so the train bits pair step for step.
+- **L-M-s64r256-L4-d: wv 0.9723** (R-B5 0.8723, R-N15-B5 0.8605–0.8688):
+  +0.10. Not extended.
+- The S2 / S4 probes: **S2a-B5 1878**, **S2x-s64-L4 2132**, **S2x-s96-L4
+  1991**, **S4x-s64-L4 1320** MB. All far under 2990: a 1+1 outer stage
+  holds about half the VRAM of a 2+2 one. They need a fill before a
+  long run (decided after the diagnostic).
+- **The diagnostic: the stage LR is not the cause.** Train bits per step
+  window (seed 0, the same batches), auto (λ 2.12) / λ 1.41 / R-B5:
+  1–82 4.178 / 4.340 / 3.947, 165–328 1.749 / 1.779 / 1.589, 493–656
+  1.428 / 1.418 / 1.291. The capped LR starts slower and ties by 656;
+  both stay 0.13 behind R-B5. So **a full-resolution stage at d64 costs
+  ~0.13**: the width of the char-level stage is the lever, not its LR.
+  `lrm=auto` stays.
+- So the S2x / S4x shapes with a d64 outer stage carry that handicap.
+  Param counts (mmlp 0): the widths must not shrink inward (a narrower
+  inner stage does not build). S2 N 4/4 at d128/128 with a main d128 × 4
+  r 128: 1,253,761 (r 64: 1,179,009; mL 3: 1,055,009). S4 at d96 ×4:
+  1,172,401; at d80 with a main d112: 1,059,225. **S4 fits 1M only with
+  d64 stages** (the four boundaries).
+- Decisions:
+  - **S2x-s112-L4** replaces S2x-s96-L4: d112/112 1+1 / 1+1 Real1D r
+    128, N 4/4, main d112 × 4 Real1D r 128, mmlp 0, 995,425. The widest
+    outer stage that fits with a 4-layer main at r 128.
+  - **The S2/S4 contrast at equal stage widths (d64)**: S2x-s64e-L4
+    (d64/64 r 128, main d152 × 4 r 128, mmlp 8, 999,309) against
+    S4x-s64-L4. Both carry the d64 handicap, so the pair ranks S against
+    N, not against R-B5. Lower priority than S2x-s112-L4 and S2a-B5.
+  - Their probes run here (01:29). The local GPU was idle 00:58–01:29
+    (the queue ran out during the diagnostic).
+  - **L-S2a-B5 runs here** after the probes: the local GPU would idle
+    until batch 2 ends, and a 1+1 outer stage is fast (probe 973
+    ms/step), so phase 1 should stay < 1 h.
+  - Kaggle batch 3 (after batch 2): L-S2x-s112-L4 first, then the d64
+    pair L-S2x-s64e-L4 / L-S4x-s64-L4, if their probes fit.
+
 ## Two stages (user, 23:30)
 
 - Every shape so far has S = 1. `Nˢ` is per stage (the router of stage s
