@@ -288,6 +288,20 @@ file starts empty again.
   with the default cleanups. Their comparison gives the cost of the
   exact measure and the true high-water mark.
 
+- **A wrong install** (02:41): the build of the `peak` binary
+  (`6cf3c2b-dirty-cc8a67e3`) could not copy into `bin/hn-cuda` (the disk
+  was full), but `build.sh` went on: `cp … && mv …` does not stop `set
+  -e`. So `bin/hn-cuda.txt` named cc8a67e3, while `bin/hn-cuda` stayed
+  the 02:33 binary (`88211b1-dirty-244dcd02`: the cleanup flag, no
+  `peak`). The dose `runs/dose-R-N15-B5-1791600515` (cleanup every 1) ran
+  on that binary; its `build.txt` is wrong. Fixed at 02:58: cc8a67e3
+  installed; `build.sh` copies on separate lines and checks with `cmp`.
+- That dose (`--vram-cleanup-every 1`, reserved at the `prof` lines):
+  n=400 **3193 MB**, 1064 ms/step (100: 1275, 200: 1125, 300: 1086). The
+  default dose had 3385 MB at n=400, 1300–1600 ms/step. So the cleanup
+  before every window costs no time here (it is faster), and the pools
+  hold ~190 MB less.
+
 ## No auto-fill (user, 02:45; strict rule 14)
 
 - The params: `mmlp` fills only a small rest near the cap. The VRAM: never

@@ -111,6 +111,9 @@ pub struct Run {
     pub paths: (MambaSsdPath, MambaSsdPath),
     /// `--max-vram`, in MiB: the cap of [`vram`], with its cleanups.
     pub max_vram_mib: Option<u64>,
+    /// `--vram-cleanup-every`: the period of those cleanups (`None`: the
+    /// default schedule of [`vram::cleanup`]).
+    pub vram_cleanup_every: Option<u64>,
     /// `--step-mode`: how a decode step runs the inner network of a stage.
     pub step_mode: StepMode,
     /// Whether decode steps replay a captured graph (`--no-graph` runs them
@@ -143,6 +146,7 @@ impl Run {
         Self {
             paths: cli.paths.clone(),
             max_vram_mib: cli.step.max_vram_mib,
+            vram_cleanup_every: cli.step.vram_cleanup_every,
             step_mode: cli.step_mode,
             graphs,
             show_chunks: cli.show_chunks,
@@ -245,7 +249,7 @@ impl LmModel for Wrap {
         let device = batch.inputs.device();
         let window = TRAIN_WINDOWS.fetch_add(1, Ordering::Relaxed);
         if self.1.max_vram_mib.is_some() {
-            vram::cleanup(&device, window);
+            vram::cleanup(&device, window, self.1.vram_cleanup_every);
         }
         let t0 = prof::window_start();
         let (output, caches, routing) = self.forward_lm(batch, caches);

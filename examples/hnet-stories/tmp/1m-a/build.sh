@@ -66,6 +66,10 @@ if [ ! -e "bin/hn-cuda-$tag.txt" ]; then
     fi
   } > "bin/hn-cuda-$tag.txt"
 fi
-cp "bin/hn-cuda-$tag" bin/hn-cuda.new && mv bin/hn-cuda.new bin/hn-cuda
+# One command per line: `set -e` stops at a failed copy (a full disk), so
+# bin/hn-cuda.txt never names a binary that did not install.
+cp "bin/hn-cuda-$tag" bin/hn-cuda.new
+mv bin/hn-cuda.new bin/hn-cuda
+cmp "bin/hn-cuda-$tag" bin/hn-cuda
 cp "bin/hn-cuda-$tag.txt" bin/hn-cuda.txt
 echo "installed bin/hn-cuda = $tag"

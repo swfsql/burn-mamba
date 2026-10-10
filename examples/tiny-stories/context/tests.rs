@@ -25,6 +25,7 @@ fn score_reads_the_rows_of_the_continuation() {
         pack_align: None,
         graphs: false,
         max_vram_mib: None,
+        vram_cleanup_every: None,
     };
     // Two batches, the second one partial.
     let (n, p, c, join) = (BATCH + 1, 5, 6, 2);

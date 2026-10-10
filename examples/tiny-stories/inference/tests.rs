@@ -59,6 +59,7 @@ fn eager_run(chunk_len: Option<usize>) -> Run {
         pack_align: None,
         graphs: false,
         max_vram_mib: None,
+        vram_cleanup_every: None,
     }
 }
 

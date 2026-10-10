@@ -170,6 +170,9 @@ pub struct Run {
     /// `--max-vram`, in MiB: the cap of
     /// [`vram`](burn_stack::examples::vram), with its cleanups.
     pub max_vram_mib: Option<u64>,
+    /// `--vram-cleanup-every`: the period of those cleanups (`None`: the
+    /// default schedule).
+    pub vram_cleanup_every: Option<u64>,
 }
 
 /// The training windows so far: the schedule of the `--max-vram` cleanups.
@@ -199,7 +202,7 @@ impl LmModel for Wrap {
     ) -> (TrainOutput<ClassificationOutput>, Self::Caches) {
         let device = batch.inputs.device();
         if self.1.max_vram_mib.is_some() {
-            vram::cleanup(&device, TRAIN_WINDOWS.fetch_add(1, Ordering::Relaxed));
+            vram::cleanup(&device, TRAIN_WINDOWS.fetch_add(1, Ordering::Relaxed), self.1.vram_cleanup_every);
         }
         // The positions of the batch: a constant of the run for packed rows.
         let lm_positions = batch.inputs.dims().iter().product::<usize>();

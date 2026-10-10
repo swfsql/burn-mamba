@@ -134,6 +134,7 @@ pub fn launch(app_args: &AppArgs) {
         pack_align: cli.pack_align,
         graphs: app_args.graphs(),
         max_vram_mib: cli.step.max_vram_mib,
+        vram_cleanup_every: cli.step.vram_cleanup_every,
     };
     cli.step.start_profile();
 
