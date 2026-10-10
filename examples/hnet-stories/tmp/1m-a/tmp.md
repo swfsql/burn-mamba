@@ -302,6 +302,21 @@ file starts empty again.
   before every window costs no time here (it is faster), and the pools
   hold ~190 MB less.
 
+- **The two schedules on R-N15-B5** (520 steps, binary cc8a67e3, `peak`
+  per `prof` line):
+  - the default cleanups: peak 3386 MB in every block, 1284 / 1134 /
+    1162 / 1164 / 1188 ms/step;
+  - `--vram-cleanup-every 1`: peak 3386 MB in every block (the reserved
+    at the `prof` point moves 3193–3386), 1297 / 1083 / 1063 / 1040 /
+    1018 ms/step.
+
+  The same pool peak, and ~10% faster. With the cleanup before every
+  window, the dropped pages never outlive a window, so the process ≈
+  peak + ~140 MiB. **Decision: `args.sh` adds `--vram-cleanup-every 1`**
+  to every run (03:20). The dose target: peak ~3400–3550 MB.
+- The first default dose (02:25, binary 4e42bba3) read 3482 at n=500:
+  an older binary, read at the `prof` point. Not used.
+
 ## No auto-fill (user, 02:45; strict rule 14)
 
 - The params: `mmlp` fills only a small rest near the cap. The VRAM: never

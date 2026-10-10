@@ -7,6 +7,10 @@
 # - adds `--grad-checkpointing` (the default of the search: less VRAM, a
 #   little more time, the same losses) unless the caller gave it, or gave
 #   `--no-gc`. `--no-gc` is not a flag of the example: it is removed here.
+# - adds `--vram-cleanup-every 1` unless the caller gave a period: the pages
+#   that the pools drop never wait past a window, so the `peak` of the
+#   `prof` lines plus the CUDA context (~140 MiB) is the VRAM of the
+#   process. R-N15-B5: the same peak as the old schedule, ~10% faster.
 # Call as: bin/hn-cuda … "${app[@]}" -- "${ex[@]}".
 # stamp <dir>: writes <dir>/build.txt, the build info of bin/hn-cuda (see
 # build.sh). bin_tag: the tag of bin/hn-cuda, for the `==` lines of the logs.
@@ -27,5 +31,9 @@ split_args() {
   case " ${ex[*]} " in
     *" --max-vram "*) ;;
     *) ex+=(--max-vram "${VRAM_MAX_MIB:-3750}") ;;
+  esac
+  case " ${ex[*]} " in
+    *" --vram-cleanup-every "*) ;;
+    *) ex+=(--vram-cleanup-every 1) ;;
   esac
 }

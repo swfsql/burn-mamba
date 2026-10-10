@@ -112,9 +112,9 @@ them, so:
   (every valid story whole). An older run needs `long.sh -g <run>-d`.
 - **The seed noise** of a long run: 0.008 between two seeds (R-N15-B5).
   One run per shape ranks only a gap ≳ 0.01. Below that, add a seed.
-- Every run: `--grad-checkpointing` and `--max-vram 3750` (`args.sh` adds
-  them), `--ssd-path recalc:32` (pins the SSD chunk, which doubles at a
-  state rank ≥ 80).
+- Every run: `--grad-checkpointing`, `--max-vram 3750` and
+  `--vram-cleanup-every 1` (`args.sh` adds them), `--ssd-path recalc:32`
+  (pins the SSD chunk, which doubles at a state rank ≥ 80).
 - The flat reference: h16 of `../../../tiny-stories/tmp/1m-cased/runs/`
   (`h16-s2`, `h16-x4630`, `h16-x8000`, `h16-x12000`). Its `wv` is in
   `notes.md` §1.
@@ -132,14 +132,17 @@ has the detail):
   queues it. The driver frees it at the next explicit cleanup
   (`Device::memory_cleanup`), and nothing else frees it. The report does
   not count the queue.
-- `--max-vram` cleans up before windows 0, 1, 2, 4, …, 256, then before
-  every 256th window. So the queue can grow for 256 windows.
-  `--vram-cleanup-every 1` cleans up before every window: then the queue
-  never outlives a window, and the reserved bytes after a backward hold
-  the pool memory of the process at the peak of the step.
+- `--max-vram` alone cleans up before windows 0, 1, 2, 4, …, 256, then
+  before every 256th window. So the queue can grow for 256 windows.
+  **`--vram-cleanup-every 1`** (the default of `args.sh` since
+  2026-10-10 03:20) cleans up before every window: the queue never
+  outlives a window. R-N15-B5: the same pool peak (3386 MB), ~10% faster.
+- `vram::check` reads the pools after every backward. The `prof` line
+  prints their high-water mark as `peak X MB`.
 - The CUDA context and the loaded kernels are outside the pools (~140 MiB).
-- Under investigation (`tmp.md`): the cost of `--vram-cleanup-every 1`,
-  and the dose target that keeps the process under the ceiling.
+- So with `--vram-cleanup-every 1`, **the process ≈ `peak` + ~140 MiB**.
+  The dose target: a `peak` of **~3400–3550 MB** (the process then stays
+  < 3.6 GiB = 3865 MB). R-N15-B5 is at 3386.
 
 ## Shapes and budgets
 
@@ -149,8 +152,8 @@ has the detail):
      holds more, by a factor that depends on the shape: × 1.04
      (M-s64r256-L4), × 1.17 (R-N15-B5), × 1.32 (S2a-B5, two routers). So
      use the probe for the coarse search only. `dose.sh <cfg> [steps]`
-     runs the first steps of the real run and reports the reserved MB at
-     each `prof` line.
+     runs the first 520 steps of the real run (~10 min) and reports the
+     `peak` of each `prof` line: dose to the target of [VRAM](#vram).
   2. The params: design the shape near the cap, then `fit.py` fills only
      a small rest with the main MLP (strict rule 14). `mmlp` at
      `mlpmul=8` costs no VRAM (~10k per step). The main width `md` must
