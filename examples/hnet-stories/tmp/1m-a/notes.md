@@ -1,18 +1,21 @@
 # Notes: hnet-stories ≤1M-param search (1m-a)
 
-The findings of the search, by topic. §3–§7 come from the **old protocol**
+The findings of the search, by topic. §4–§7 come from the **old protocol**
 (the first 1024 chars of each story, before 2026-10-09 20:40). Those runs
 are invalid as results: they never trained past char 1024. Their findings
 are the starting points of the new protocol, not its numbers.
 
 Terms:
 
-- **dv**: the decayed valid (the 256 valid stories, their first 1024
-  chars).
-- **wv**: the whole valid (the same stories in full).
+- **wv**: the whole valid (the 256 valid stories, each in full). The
+  ranking metric.
+- **dv**: the decayed valid of the training loop. From binary `4e42bba3`
+  (2026-10-09 22:44) on, the dv of a bucketed run **is** wv (checked to
+  1e-8). Before, dv cut each story at 1024 chars, and wv came from
+  `long.sh`.
 - **sv**: the stable valid, before the decay.
-- A **screen**: 600 + 200 steps at lr 8e-3. A **long run**: 2630 + 600
-  steps at lr 4e-3.
+- A **long run**: 2630 + 600 steps at lr 4e-3 (`screen.sh`). A **screen**
+  (old protocol): 600 + 200 steps at lr 8e-3.
 - A variant has the name of its change from its base (`b × N 1.5`).
 
 ## 1. The reference and the metrics
@@ -20,7 +23,7 @@ Terms:
 - **The flat reference**: h16 of `tiny-stories/tmp/1m-cased` (packed 2 ×
   4224 rows: whole stories with full backprop, 3149 MB without gc).
 
-  | step | wv | dv |
+  | step | wv | dv (first 1024) |
   |---|---|---|
   | 3230 | 0.8868 | 0.8798 |
   | 5630 | 0.8204 | 0.8137 |
@@ -29,164 +32,208 @@ Terms:
 
   At 3230 also: fr-d152 (the flat with the Real1D r 128 block of the
   H-Net) wv 0.8792, h16-B (the flat at the 7 buckets) 0.8924.
-- **wv** (`long.sh`): 207,187 chars, 32 stories longer than 1024. Its
-  chars 0..1024 reproduce dv exactly. 12% of the stories are longer than
-  1024, and 7.2% of the valid text is past char 1024 (0.8% past 2048).
+- **wv**: 207,187 chars, 32 stories longer than 1024. 12% of the stories
+  are longer than 1024, and 7.2% of the valid text is past char 1024
+  (0.8% past 2048). `long.sh` also splits it (0..1024, past 1024).
 - **The long stories** (`long.sh`): the 157 valid stories longer than 2048
-  chars (2056..4064, mean 2463), from the whole valid split. Each one runs
-  in one `forward`. Batch 1 and batch 4 give the same bits: the right
-  padding is exact.
+  chars (2056..4064, mean 2463), from the whole valid split, each in one
+  `forward`. The right padding is exact (batch 1 = batch 4).
 - **The recall** (`ctx.sh -g -n 2048`, 1968 stories, paired): the s.e. of
   a difference is ~0.001 on the far bits, ~0.01 on the re-mention first
   letter. The valid bits hide the recall.
+- **The seed noise** (new protocol): R-N15-B5 at seeds 0 and 1 differ by
+  **0.0083** in wv (paired −0.0084 ± 0.0019; the ± is the valid-set noise
+  only). The shift is the same in every row (0..1024, past 1024, the long
+  stories), and in the recall (re-mention letters own −0.037). So one run
+  per shape ranks only a gap ≳ 0.01. Below that, add a seed.
 
-## 2. Why the protocol changed (2026-10-09)
+## 2. The protocol (2026-10-09)
 
-- **The old H-Net got worse past char 1024, and the flat model got
-  better.**
-  At 14400 (bits/char pooled, R-N15 / flat): chars 0..1024 0.8458 /
-  0.8495, 1024..2048 0.9023 / 0.8636, past 2048 0.9061 / 0.8387, the long
-  stories all 0.8794 / 0.8535. The bits per 256 chars of the H-Net rose
-  from 0.866 to ~1.0 along a story. Those of the flat fell to ~0.83.
-  The cause is the old protocol: it trained the first 1024 chars only.
-- **Whole stories fix the tail**: L-B-N15-lr4 (b at the 7 buckets) against
-  L-N15-lr4 (b, first 1024), on the long stories: 1024..2048 −0.043, past
+- **Why it changed**: the old H-Net (first 1024 chars only) got worse past
+  char 1024, and the flat model got better. At 14400, the bits per 256
+  chars of the H-Net rose from 0.866 to ~1.0 along a story, those of the
+  flat fell to ~0.83.
+- **Whole stories fix the tail**: L-B-N15-lr4 (the 7 buckets) against
+  L-N15-lr4 (first 1024), on the long stories: 1024..2048 −0.043, past
   2048 −0.062, chars 0..1024 −0.001.
-- **The length grouping costs**: on wv, L-B-N15-lr4 lost 0.010 overall
-  (chars 0..1024 +0.015, past 1024 −0.044). B-c1024 (the old data, only
-  grouped 512/768/1024) cost +0.008. The flat model at the 7 buckets lost
-  0.006 of wv against its packed rows.
-- So the protocol has **5 slots** (1024,1536,2048,3072,4160): every story
-  up to 1024 chars (88%) mixes in one slot. Batches × stories per slot:
-  20960 × 11, 3353 × 6, 1879 × 4, 1199 × 3, 177 × 2 (27,568 batches). The
-  1024 slot holds 11 × 1024 tokens (fill 0.69). The old protocol held 10 ×
-  1024.
-- **The first run** (R-N15-B5, R-N15 at the 5 slots): sv@2630 0.9809,
-  3386 MB steady, 1.28 s/step (the old protocol ~1.0 s/step).
+- **The length grouping costs the story heads**: the new baseline against
+  the old R-N15 at 3230: chars 0..1024 +0.008, past 1024 about −0.07, all
+  +0.003. (B-c1024, the old data only grouped: +0.008. The flat at 7
+  buckets: +0.006.)
+- **5 slots** (1024,1536,2048,3072,4160): every story up to 1024 chars
+  (88%) mixes in one slot. Batches × stories per slot: 20960 × 11, 3353 ×
+  6, 1879 × 4, 1199 × 3, 177 × 2. **7 slots tie**: L-R-N15-B 0.8697
+  against R-N15-B5 0.8605 / 0.8688.
+- **The validation** of a bucketed config takes the same slots and `chars`
+  (burn-stack `dataloaders_for`): each valid story whole, in one window.
 
-## 3. The recipe (old protocol)
+## 3. The results of the new protocol (wv at 3230)
 
-- **The head**: the tied head starts at 117 bits/char (it predicts the
-  current char). The untied head (`tie=0`) won by 0.036.
-- **The init**: the Burn init beat the reference init (N(0, 0.02) + the
-  residual rescale) by 0.032.
+| run | shape | wv | 0..1024 | past 1024 | long all | run MB |
+|---|---|---|---|---|---|---|
+| L-R-N15-B5-d | R-N15 (N 1.5), seed 0 | 0.8688 | 0.8612 | 0.9529 | 0.9981 | 3386 |
+| L-R-N15-B5-s1-d | seed 1 | **0.8605** | 0.8536 | 0.9377 | 0.9889 | 3386 |
+| L-R-B5-d | R-B5 (N 2) | 0.8723 | 0.8650 | 0.9525 | 1.0051 | ~3390 |
+| L-R-N15-B-d | R-N15, 7 slots | 0.8697 | 0.8614 | 0.9621 | | 2799 |
+| L-M-s96r128-L5-d | stage d96, main d112 × 5 | 0.9022 | 0.8949 | 0.9838 | 1.0308 | 2440 |
+| L-Nm4-s96r128-B5-d | stage d96, main d128 × 4 | 0.9094 | 0.9025 | 0.9854 | 1.0397 | 2505 |
+| L-M-s96r128-L4r256-d | stage d96, main d112 × 4 r 256 | 0.9240 | 0.9167 | 1.0057 | | 2887 |
+| L-M-s64r256-L4-d | stage d64 r 256, main d144 × 4 | 0.9723 | | | | 2711 |
+
+- **The H-Net leads the flat** (0.8868) by 0.015–0.026.
+- **N 1.5 and N 2 tie**: R-B5 +0.0035 against the seed mean of R-N15-B5
+  (0.8647). The recall of N 2 is also within the seed spread.
+- The run MB are the pool reserved MB, under the old cleanup schedule (see
+  §7): the M runs were 500–950 MB under the VRAM ceiling, so they are
+  weak evidence (strict rule 1).
+
+## 4. The stage width is the lever (new protocol)
+
+- **The M family** (the user's hunch: with whole stories, a stronger main
+  should matter more) **loses** at 3230: +0.030 (L5), +0.038 (Nm4),
+  +0.052 (L4r256), +0.10 (stage d64), on every row. The long stories too
+  (L5 +0.024 past 2048, ± 0.007): no long-horizon gain at 3230.
+- The loss follows the width of the char-level stage: d64 +0.10, d96
+  +0.03 to +0.05.
+- **The stage LR is not the cause** (D-M-s64r256-L4-lrm, 656 steps, the
+  same batches): λ 2.12 (auto) and λ 1.41 (R-B5's stage LR) tie by step
+  656 (train bits 1.428 / 1.418), both 0.13 behind R-B5 (1.291). So
+  `lrm=auto` stays.
+- Not tested yet: the M shapes at the VRAM ceiling, the M shapes at the
+  longer milestones.
+
+## 5. Two and four stages (new protocol, not run yet)
+
+- `Nˢ` is per stage (the router of stage s keeps ~1/Nˢ of its positions),
+  so the main sees ~1/ΠNˢ of the chars. The one old S = 2 test (b-S2b, a
+  screen) lost 0.050, but at a total compression of 4 and with one main
+  layer fewer.
+- **The params**: a stage boundary costs ~50k at d128 (d128/128 1+1 / 1+1
+  r 104: 1,039,361 against R-B5's 989,825). The widths must not shrink
+  inward (a narrower inner stage does not build). S2 N 4/4 at d128/128
+  with a main d128 × 4 r 128: 1.25M. **S4 fits 1M only with d64 stages**
+  (at d96 ×4: 1.17M). A second outer layer pair (2+2) costs ~160k at d112,
+  ~50k at d64. Outer r 256 + main r 64 costs the same params as outer r
+  128 + main r 128.
+- **The VRAM**: a 1+1 outer stage holds about half the VRAM of a 2+2 one.
+- **S2a-B5** (R-B5's 4 stage layers over two levels: outer d112 1+1,
+  inner d128 1+1, r 128, N 1.41/1.41, main d128 × 3): it trailed R-B5 by
+  0.03–0.045 in train bits up to step 1424 (the same batches), then it
+  stopped: its run held 2473 MB, ~1 GB under the ceiling.
+- **The user's hunches**: S = 2 at N 4/4 (the main sees 1/16), against S =
+  4 at N 2 (the same total), with a main of ≥ 4 layers. The gain should
+  show at medium-long runs, mainly on the long horizon. So judge them at
+  3230 **and** at 4630 (the trunk and its reference L-R-B5 go on to
+  4630), by wv, the long-stories rows and the recall.
+- λ auto puts an outer stage of these shapes at lr × 4.3–5.8. Watch the
+  early train bits. Cap λ (`lrm=3/2/1`) if a run diverges.
+- **The refilled candidates** (2026-10-10, near both ceilings):
+
+  | cfg | shape | params | probe MB |
+  |---|---|---|---|
+  | S2x-s112r256-L4 | d112/112 1+1/1+1, r 256/128, N 4/4, main d112 × 4 r 64 | 995,425 | 2861 |
+  | S2a2-B5 | d112/120 1+1/1+1, r 256/128, N 1.41/1.41, main d120 × 3 C2D r 64 | 992,028 | 2861 |
+  | S2x-s64e2-L4 | d64/64 2+2/1+1, r 256/256, N 4/4, main d128 × 4 r 128 | 989,073 | |
+  | S4x-s64e2-L4 | d64 ×4, outer 2+2, r 256 then 128, N 2, main d104 × 4 r 128 | 998,213 | 2622 |
+
+  Real1D everywhere unless noted. The S2x-s64e2 / S4x-s64e2 pair has equal
+  stage widths (d64): it ranks S against N, and carries the d64 handicap
+  (§4).
+
+## 6. The recipe (old protocol)
+
+- **The head**: the untied head (`tie=0`) won by 0.036.
+- **The init**: the Burn init beat the reference init by 0.032.
 - **λ** (the stage LR multiplier) auto beat 1/1 by 0.019.
-- **The LR**: screens 8e-3 (4e-3 +0.016, 1.2e-2 +0.017, 1.6e-2 diverges,
-  5e-3 ties). Long runs **4e-3**: at N 1.5, 8e-3 dv 0.9070, 4e-3 0.8915,
-  2.5e-3 0.8960. A hot trunk gains more in the decay but loses overall.
-- **The base b**: stage d128 2+2 (Complex2D r 32), main d136 × 3 r 64,
-  untied head, Burn init, N 2, λ auto. Stage d144 tied d128. Stage 4+4 at
-  d96 lost 0.08 (unstable at the stage LR). One main layer lost.
+- **The LR**: long runs at **4e-3** (8e-3 0.9070, 4e-3 0.8915, 2.5e-3
+  0.8960).
+- **The base b**: stage d128 2+2, main d136 × 3 r 64, untied head, Burn
+  init, N 2, λ auto. Stage 4+4 at d96 lost 0.08 (unstable). One main layer
+  lost.
 - **The param filler**: the main MLP at `mlpmul=8` (`mmlp`) costs no VRAM
-  and is neutral on the screen (F-base 1.1294, b 1.1286).
+  and is neutral on a screen. Use it only for a small rest (strict rule
+  14).
 
-## 4. The block (old protocol)
+## 7. The block, N and the main (old protocol)
 
-- **The lever: Real1D stages at a large state rank**, budget-matched.
-  F-r1d-sr104 (Real1D r 104, recalc:32) screen 1.1076 (F-base 1.1294).
-  Real1D r 64 1.1231 and Complex2D r 64 1.1282: the rank pays, not the
-  kind. Real1D r 32 with the freed budget unspent lost 0.036. Long:
-  L-R-lr4 (N 2) 0.8617, **R-N15** (N 1.5) 0.8534 / 0.8485 (two seeds).
-  R128c (Real1D everywhere, stage r 128, main r 32) tied at ~0.8 GB less.
+- **Real1D stages at a large state rank**: the rank pays, not the kind.
+  F-r1d-sr104 screen 1.1076 (F-base 1.1294). Long: R-N15 0.8534 / 0.8485.
 - **The trapezoid** (and the B/C bias) replace the deleted short conv:
-  Trapezoid None lost 0.042 (R-trapN) and 0.064 (R128a).
+  Trapezoid None lost 0.042 and 0.064.
 - **Lost**: main virtual layers (Cyclic +0.020, middle-heavy +0.010), two
-  stages (+0.050, not budget-matched).
-- **Tied**: Multi-Gate 4, a Real1D main (R-all), weight decay 0.05 (against
-  0.1), the ratio weight α 0.1 (against 0.3), N 1.25 (against 1.5).
+  stages (+0.050, not budget-matched), main × 2 (+0.027), stage 1+1 with a
+  heavier main (+0.025–0.06), a main at rank 32 (+0.027), stage 3+3 at
+  d112 (+0.007).
+- **Tied**: Multi-Gate 4, a Real1D main, weight decay 0.05, α 0.1, N 1.25.
+- **Compression trades local bits for entity recall**: N 2 had the better
+  re-mention letters and far use at 3230.
 
-## 5. The compression N and the main network (old protocol)
+## 8. VRAM
 
-- **Less compression won the bits**: screens N 1.5 / 2 / 3 1.1175 /
-  1.1286 / 1.1404. Long at 8e-3 0.9070 / 0.9248 / 0.9482. At 4e-3 N 1.5
-  and N 2 tied in b (0.8915 / 0.8927). In the R family N 1.5 led by 0.008
-  at 3230 and by 0.005 at 9600 (0.7461 / 0.7515).
-- **Compression trades local bits for entity recall**: at 800 steps N 2
-  had the best re-mention first-letter gain (0.697, N 1.5 0.467, flat
-  0.631). At 3230 (lr 4e-3) N 2 had the better far use (0.217 / 0.203)
-  and re-mention letters (own 1.070 / 1.135).
-- **The allocation**: R-N15 holds 54% of its params in the 4 stage layers,
-  39% in the 3 main layers (the H-Net paper does the reverse). The main
-  runs at 1/N of the positions, so its VRAM per param is about half.
-  - The main depth matters: main × 2 with the stages kept lost 0.027
-    (L-A-s22-L2-N15).
-  - Main-heavy shapes that thin the stages to 1+1 lost 0.025–0.06
-    (screens, against R128c).
-  - A main at rank 32 lost 0.027 (L-W-s112-m, N 2).
-  - Stage 3+3 at d112 lost 0.007 (long, two seeds).
-- **The user's hunch** (2026-10-09): with whole stories, a stronger main
-  and a higher N should matter more. A stronger main has a 4th layer, a
-  larger d and a larger state rank, at the cost of the stage d and rank.
-  The `M-*` family (§8) tests it. It has not run yet.
-
-## 6. The H-Net against the flat model (old protocol)
-
-- **dv**: R-N15 led by 0.026 at 3230, 0.010 at 5630, 0.014 at 9600, 0.015
-  at 14400. It also led every recall row at 3230 and 5630.
-- **The block control**: fr-d152 (the flat with the Real1D r 128 block)
-  gained 0.008 at 3230 and nothing at 5630 (+0.003). So the gain was the
-  H-Net, not its block.
-- **wv** (computed after the switch): R-N15 0.8659 / 0.8164 / 0.7580 /
-  0.7322 at the four milestones. It still led the flat, by less.
-
-## 7. VRAM
-
-- **The budget table** (`knobs.txt`, 10-step probes of b with gc, ΔMB /
-  Δparams). VRAM-heavy, param-cheap (~16–18 MB per kparam): the stage state
-  rank (r 64: +799 / +46k), the stage MIMO 2 (+690 / +43k), the main
-  virtual layers (+585 / +35k). Param-heavy, VRAM-free: the main MLP, the
-  main expand. The head count is a hidden cost: stage head dim 32 frees
-  603 MB. Real1D stages free ~600 MB. gc saves 360 MB (−15%).
-- **Power-of-two state ranks**: another rank costs as much as the next
-  power of two, or more. Complex2D stage r 48 3130 MB, 64 2675, 72 4351,
-  96 5127, 128 4426. Real1D r 64 1671, 72 2829, 128 2300. The user: the
-  cubecl JIT (its tiling follows the dimensions). A Complex2D stage above r
-  64 does not fit. Real1D r 128 costs less than r 104.
-- **The chunk**: the default chunk is √(r·p) rounded up to a multiple of
-  32, so it doubles at r ≥ 80. `--ssd-path recalc:32` pins it (no value
-  changes).
-- **The probe against a run**: unbucketed, a run held ~1.06–1.12 × its
-  step-10 probe. At the buckets, `probe.sh` runs 2 batches of each slot
-  (`--bucket-probe 2`). R-N15-B5 per slot: 2903 / 2614 / 2421 / 2710 /
-  2421 MB, so the 1024 slot is the peak. Its run held 3386 steady (1.17 ×
-  the maximum). The pool is not cumulative across the slots (`--max-vram`
-  cleans it). Probe noise: ±150 MB.
-
-## 8. The M family (new protocol, not run yet)
-
-N 2, stage 2+2 Real1D, main Real1D r 128 unless noted. `md` fitted to 1M
-with `mmlp 8` (`fit.py`), then `mmlp` filled.
-
-| cfg | stage d / r | main | params |
-|---|---|---|---|
-| M-s96r64-L4 | 96 / 64 | d136 × 4 | 992,533 |
-| M-s80r64-L4 | 80 / 64 | d144 × 4 | 996,753 |
-| M-s64r64-L4 | 64 / 64 | d152 × 4 | 992,717 |
-| M-s96r64-L5 | 96 / 64 | d120 × 5 | 999,624 |
-| M-s96r64-L4r256 | 96 / 64 | d120 × 4, r 256 | 994,829 |
-| M-s96r64-L4c | 96 / 64 | d128 × 4, Complex2D | 997,553 |
-| M-s96r32-L4 | 96 / 32 | d136 × 4 | 990,485 |
-| M-s112r64-L4 | 112 / 64 | d120 × 4 | 995,253 |
-
-Also: Nm4-s96r128-B5 (stage d96 r 128, main d128 × 4 r 128, 996,273) and
-W-m64r-B5 (stage d112 r 128, main d144 × 3 r 64, 997,543).
+- **The ceiling** is on the VRAM of the process (strict rule 1). Never
+  decide by `nvidia-smi` (strict rule 2).
+- **How cubecl spends it** (48301b5, the `Adaptive` layout, the `Sync`
+  allocator):
+  - `bytes_reserved` (`Device::memory_pool_usage`) is the sum of the pages
+    that the pools hold.
+  - A pool drops a page on its own (idle past its period, or left behind
+    by a growth of the arena pages). The storage only queues it
+    (`GpuStorage.deallocations`). `cuMemFree` runs at `storage.flush()`,
+    and only an explicit cleanup (`Device::memory_cleanup`) flushes. The
+    periodic cleanup of each `reserve` never flushes. The storage counter
+    (`GpuStorage.allocated`) is exact, but the public `MemoryReport` does
+    not carry it.
+  - The CUDA context and the loaded kernels are outside the pools (~140
+    MiB).
+- **The measure** (burn-stack, 2026-10-10): `--vram-cleanup-every 1`
+  cleans up before every window, so the queue never outlives a window.
+  `vram::check` records the high-water mark of the pools after every
+  backward, and the `prof` line prints it (`peak X MB`). So **the process
+  ≈ peak + ~140 MiB**. `args.sh` adds the flag to every run.
+- **R-N15-B5, 520 steps**: the old schedule and `--vram-cleanup-every 1`
+  have the same peak (3386 MB). The cleanup before every window is ~10%
+  faster (1018–1063 against 1134–1188 ms/step).
+- **The dose target**: a peak of ~3400–3550 MB. `probe.sh` (10 steps)
+  only for the coarse search: a run holds more, by a shape-dependent
+  factor (× 1.04 M-s64r256-L4, × 1.17 R-N15-B5, × 1.32 S2a-B5).
+  `dose.sh` (520 steps, ~10 min) gives the peak of the run.
+- **What moves the peak**: the stages set it (the 1024 slot). The stage
+  state rank is the most VRAM per param (r 64 → 128: +360 MB at d64,
+  +470 at d96; r 128 → 256 at d64 +720). N does not move it (the N 3
+  probes of four M shapes: the N 2 peaks). The main knobs are cheap.
+- **Power-of-two state ranks**: another rank costs the VRAM of the next
+  power of two, or more. A Complex2D stage above r 64 does not fit.
+- The budget table of the knobs (old protocol, Complex2D base, ±150 MB):
+  `knobs.py`. VRAM-heavy and param-cheap (~16–18 MB per kparam): the
+  stage state rank, the stage MIMO 2 (but 3.3× the ms/step), the main
+  virtual layers. Param-heavy and VRAM-free: the main MLP, the main
+  expand.
 
 ## 9. Kaggle
 
-- Two T4s, the same reserved MB as here (the b probe: 1962 MB on both).
-  The bucketed b family ran at 1.14 steps/s there.
+- Two T4s, the same pool accounting as here. A T4 trains ~1.4× this card
+  (R shapes: phase 1 51–54 min, the leaf ~12.5 min).
 - Kaggle's unpacking of a `.tar.gz` stalls for hours. The payload goes up
-  as `payload.tgz.bin` in a new private dataset per batch (live in ~20 s).
+  as `payload.tgz.bin` in a new private dataset per batch.
 - The CLI sends the `KGAT_` token as a Bearer token (`kg.sh`). The CLI
   cannot cancel a kernel: the user does it on the web.
+- `kwait.sh` queues `long.sh` for the pulled runs in the local queue (a
+  GPU job beside a probe spoils it, and killed two probes).
 
 ## 10. Lessons
 
-- **A new config field** (user): add it to every saved config that loads
-  again, never make it an `Option` for compatibility. A Burn config default
-  does not apply when a config loads. Stop the runners first: the next
-  phase of a running run loads its config with the new binary.
-- A run that starts in the second of a kill can fail in cubecl (the GPU
-  memory is not free yet): wait ~20 s.
-- The bucket summary must count per slot (a probe order breaks the runs of
-  equal slots).
+- **A new config field** (strict rule 9): never an `Option`. A Burn config
+  default does not apply when a config loads.
+- A run that starts in the second of a kill can fail in cubecl: wait ~20 s.
+- The bucket summary counts per slot.
+- **A waiter on `pgrep -f`** matches itself and never ends (strict rule 4).
+- **`build.sh`**: `cp … && mv …` does not stop `set -e`. On a full disk,
+  `bin/hn-cuda.txt` then named a binary that did not install. Fixed: one
+  command per line and a `cmp`.
+- **The disk** (627 GB, shared with every project) filled up on
+  2026-10-10. `cargo`'s `target/debug` was 115 GB.
+- **The Edit tool** drops the trailing space of an edit string: two queue
+  lines lost their `-- ` that way.
+- **Never edit a script while a queue line runs it**: bash reads a script
+  as it runs.
+- `nvidia-smi` counts the host, and the host usage moves (strict rule 2).
