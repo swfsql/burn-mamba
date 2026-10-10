@@ -38,11 +38,12 @@ session. At the session end they go into `notes.md`, compressed, by topic.
 - **Waiting**: no foreground loop or `sleep`. Wait in the background (a
   waiter script or a `Monitor`), then return the turn. Match the binary
   with `pgrep -x hn-cuda`. Kill by exact PID.
-  - **Never wait on `pgrep -f <pattern>`**: the command line of the
-    waiter holds the pattern, so `pgrep -f` always finds the waiter
-    itself, and the wait never ends. Wait on a line in a file
-    (`queue.log`, a log, `probes-B.txt`), on `pgrep -x hn-cuda`, or on
-    a PID (`kill -0 <pid>`).
+  - Prefer not to wait on `pgrep -f <pattern>`: the command line of the
+    waiter holds the pattern, so `pgrep -f` finds the waiter itself, and
+    the waiter does not end. The heartbeat limits the idle time, but a
+    stuck waiter delays the next step. Wait on a line in a file
+    (`queue.log`, a log, `probes-B.txt`), on `pgrep -x hn-cuda`, or on a
+    PID (`kill -0 <pid>`).
 - One GPU job at a time here. A ~3 GB VRAM probe does not fit beside a
   training on the 6 GB card, but a `long.sh` or `ctx.sh` probe does. One
   host job at a time (builds).
