@@ -38,12 +38,11 @@ session. At the session end they go into `notes.md`, compressed, by topic.
 - **Waiting**: no foreground loop or `sleep`. Wait in the background (a
   waiter script or a `Monitor`), then return the turn. Match the binary
   with `pgrep -x hn-cuda`. Kill by exact PID.
-  - Prefer not to wait on `pgrep -f <pattern>`: the command line of the
-    waiter holds the pattern, so `pgrep -f` finds the waiter itself, and
-    the waiter does not end. The heartbeat limits the idle time, but a
-    stuck waiter delays the next step. Wait on a line in a file
-    (`queue.log`, a log, `probes-B.txt`), on `pgrep -x hn-cuda`, or on a
-    PID (`kill -0 <pid>`).
+  - **Never wait on `pgrep -f <pattern>`**: the command line of the
+    waiter holds the pattern, so `pgrep -f` always finds the waiter
+    itself, and the wait never ends. Wait on a line in a file
+    (`queue.log`, a log, `probes-B.txt`), on `pgrep -x hn-cuda`, or on
+    a PID (`kill -0 <pid>`).
 - One GPU job at a time here. A ~3 GB VRAM probe does not fit beside a
   training on the 6 GB card, but a `long.sh` or `ctx.sh` probe does. One
   host job at a time (builds).
@@ -92,11 +91,16 @@ session. At the session end they go into `notes.md`, compressed, by topic.
 
 ## Shapes and budgets
 
-- **A full-budget shape**:
+- **A full-budget shape** (user): a candidate is near **both** ceilings,
+  not only under them. A result far from the VRAM ceiling is useless.
+  Many probes are fine.
   1. The VRAM: `probe.sh <cfg>` runs 2 batches of each slot and reports the
-     reserved MB after each slot and their maximum. A run holds ~1.17 ×
-     that maximum. So dose a shape to a probe ≤ ~2990 MB: its run then
-     holds ≤ ~3500 MB, and the process stays < 3.6 GiB.
+     reserved MB after each slot and their maximum (~1.5 min). A run holds
+     more, by a factor that depends on the shape: × 1.04 (M-s64r256-L4),
+     × 1.17 (R-N15-B5), × 1.32 (S2a-B5, two routers). Use the probe for
+     the coarse search. Then `dose.sh <cfg>` (200 steps of the real run,
+     ~4 min) gives the steady reserved MB of the run: dose it to
+     **~3450 MB**, so that the process stays < 3.6 GiB.
   2. The params: `fit.py` fills the budget to ≥ ~990k (the main MLP `mmlp`
      at `mlpmul=8` costs no VRAM, ~10k per step). The main width `md` must
      stay ≥ the stage width.
@@ -143,7 +147,10 @@ session. At the session end they go into `notes.md`, compressed, by topic.
   - `ctx.sh -g -n 2048 -r ctxg <run>` → `ctxg.txt`: the recall (far use,
     re-mentions). `ctxstat.py` pairs the runs.
   - `probe.sh <cfg> -- --ssd-path recalc:32 --chunk-log 0` →
-    `probes-B.txt` (the bucket protocol). `probes.txt`, `fills.txt` and
+    `probes-B.txt` (the bucket protocol).
+  - `dose.sh <cfg> [steps] -- --ssd-path recalc:32 --chunk-log 0` →
+    `doses.txt`: the steady reserved MB of the run (a GPU job, not beside
+    a training). `probes.txt`, `fills.txt` and
     `knobs.txt` are from the old protocol.
   - `infer.sh <run> <dir>`: samples on flex.
 - **Kaggle** (a second runner, two T4s, the same VRAM accounting):
