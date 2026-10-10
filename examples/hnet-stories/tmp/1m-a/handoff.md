@@ -4,7 +4,7 @@ Read this file, then `ORIENTATION.md` (**its strict rules first**: they
 come from the user and must survive every rewrite), then `notes.md` (the
 findings).
 
-## State (2026-10-10 04:00)
+## State (2026-10-10 04:30)
 
 - **Nothing runs**: no `queue.sh`, an idle GPU, no Kaggle kernel, no
   waiters. `queue.txt` and `kaggle/kqueue.txt` are empty.
@@ -21,15 +21,20 @@ findings).
   seed noise is 0.008. The M family (a stronger main, a thinner stage)
   loses by 0.03–0.10: the width of the char-level stage is the lever
   (`notes.md` §4).
-- **The candidates of `notes.md` §5** (two and four stages, near both
-  ceilings) have their doses: DOSES-PLACEHOLDER.
+- **The candidates of `notes.md` §5** (two and four stages, near the
+  param ceiling) have their doses (`doses.txt`, peak max): **S2a2-B5 3532
+  MB (on target)**, S2x-s112r256-L4 3029, S2x-s64e2-L4 2710, S4x-s64e2-L4
+  2617. The last three are 400–900 MB under the VRAM target.
 
 ## Restart, in order
 
-1. **Dose the candidates to the target.** A candidate whose peak is far
-   from ~3400–3550 MB gets a deliberate design change (strict rule 14:
-   never an auto-fill of the VRAM), then a new `dose.sh`. Log each choice
-   and its reason in `tmp.md`.
+1. **Dose the candidates to the target.** S2a2-B5 is ready. The other
+   three get a deliberate design change for +400 to +900 MB (strict rule
+   14: never an auto-fill of the VRAM), keeping the params near the cap,
+   then a new `dose.sh <cfg> -- --ssd-path recalc:32 --chunk-log 0`
+   (~10 min). The width of the char-level stage is the lever with the
+   evidence (`notes.md` §4), so prefer a change that keeps or widens the
+   outer stage. Log each choice and its reason in `tmp.md`.
 2. **Kaggle**: the long runs of the dosed candidates (`screen.sh <run>
    <cfg> 2630 600 -- --profile 100 --ssd-path recalc:32 && ./ctx.sh -g
    -n 2048 -r ctxg <run>-d >> ctxg.txt`), then `kaggle/kwait.sh <hours>

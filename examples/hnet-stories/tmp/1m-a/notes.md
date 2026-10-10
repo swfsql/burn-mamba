@@ -129,16 +129,19 @@ Terms:
   early train bits. Cap λ (`lrm=3/2/1`) if a run diverges.
 - **The refilled candidates** (2026-10-10, near both ceilings):
 
-  | cfg | shape | params | probe MB |
-  |---|---|---|---|
-  | S2x-s112r256-L4 | d112/112 1+1/1+1, r 256/128, N 4/4, main d112 × 4 r 64 | 995,425 | 2861 |
-  | S2a2-B5 | d112/120 1+1/1+1, r 256/128, N 1.41/1.41, main d120 × 3 C2D r 64 | 992,028 | 2861 |
-  | S2x-s64e2-L4 | d64/64 2+2/1+1, r 256/256, N 4/4, main d128 × 4 r 128 | 989,073 | |
-  | S4x-s64e2-L4 | d64 ×4, outer 2+2, r 256 then 128, N 2, main d104 × 4 r 128 | 998,213 | 2622 |
+  | cfg | shape | params | dose peak max (steady) MB | ms/step |
+  |---|---|---|---|---|
+  | S2x-s112r256-L4 | d112/112 1+1/1+1, r 256/128, N 4/4, main d112 × 4 r 64 | 995,425 | 3029 (2861) | 805 |
+  | S2a2-B5 | d112/120 1+1/1+1, r 256/128, N 1.41/1.41, main d120 × 3 C2D r 64 | 992,028 | **3532 (3364)** | 1118 |
+  | S2x-s64e2-L4 | d64/64 2+2/1+1, r 256/256, N 4/4, main d128 × 4 r 128 | 989,073 | 2710 (2324–2421) | 927 |
+  | S4x-s64e2-L4 | d64 ×4, outer 2+2, r 256 then 128, N 2, main d104 × 4 r 128 | 998,213 | 2617 (2429–2526) | 1246 |
 
-  Real1D everywhere unless noted. The S2x-s64e2 / S4x-s64e2 pair has equal
-  stage widths (d64): it ranks S against N, and carries the d64 handicap
-  (§4).
+  The doses: 520 steps, `--vram-cleanup-every 1` (§8); R-N15-B5 has 3386.
+  **Only S2a2-B5 is at the target** (~3400–3550). The others need a
+  deliberate design change for +400 to +900 MB (strict rule 14). The
+  first `prof` block holds the largest peak of a run. Real1D everywhere
+  unless noted. The S2x-s64e2 / S4x-s64e2 pair has equal stage widths
+  (d64): it ranks S against N, and carries the d64 handicap (§4).
 
 ## 6. The recipe (old protocol)
 
