@@ -75,6 +75,8 @@ them, so:
 - The ceilings: the training steps (matched with the flat reference), the
   params, the VRAM (strict rule 1). Wall clock is not a ceiling. Log
   ms/step anyway.
+- **The reference is the flat h16-V7u** (at both ceilings, `notes.md` §1).
+  The older flat h16 is under both ceilings: do not rank against it.
 - Library changes (burn-stack, burn-mamba) are allowed.
 
 ## Working notes
@@ -82,15 +84,21 @@ them, so:
 - Models before seeds. Rank by long runs. Add a seed only where a decision
   needs it.
 - Name a variant by its change from its base (`R-N15 × main d152 × 4`).
+  `catalog.py` prints the shape, the params and the dose of each model
+  (`python3 catalog.py > catalog.txt`). Its role notes are in the script.
 - One GPU job at a time here. A probe or a dose runs alone. One host job at
   a time (builds).
-- The long runs go to Kaggle (a T4 is ~1.4× this card). Here: the probes,
-  the doses, the short diagnostics, `long.sh`, `ctx.sh`, and a long run
+- The long runs go to Kaggle (a T4: ~1.17 s/step for the R shapes, this
+  card: ~1.05). Here: the probes, the doses, the short diagnostics,
+  `long.sh` and `ctx.sh`. The flat runs go here too. A long run goes here
   when Kaggle is busy and this GPU would idle.
 - The dcg hook blocks three things in a command line: text like
   `<owner>/x`, `sleep N; …` chains, and a `>` redirect to a variable path.
   Use a literal path or a script file.
 - An edit string must not end with a space: the Edit tool drops it.
+- `queue.sh` changes `queue.txt` (`sed -i`): read the file again before a
+  Write. `pgrep -x queue.sh` does not match (the process is `bash`): use
+  `ps -p $(cat queue.pid) -o args=`.
 
 ## Protocol
 
@@ -98,100 +106,100 @@ them, so:
   1024,1536,2048,3072,4160 (`gen.py` default). Each story is one row of the
   shortest slot that holds it. A batch scores ~7450 chars (`bchars`), as
   the packed 2 × 4224 rows of the flat model do. **The H-Net runs before
-  2026-10-09 20:40 are invalid** (the first 1024 chars only, `notes.md`
-  §2).
+  2026-10-09 20:40 are invalid** (the first 1024 chars only).
 - **The LR** (the flat's plan): a ramp to 4e-3 over 128 steps, 4e-3 to step
   4630, then 1e-3, then a cosine 1e-3 → 5e-4 over 8000–12000. Each stage
-  trains at `lr · λˢ` (`lrm=auto`).
+  trains at `lr · λˢ` (`lrm=auto`). The best step-down depends on the
+  budget (`notes.md` §2): compare two models on the same schedule.
 - **The milestones**: stable 2630 / 4630 / 8000 / 12000, each with a decay
   leaf of 600 / 1000 / 1600 / 2400. `screen.sh` runs the first,
-  `extend.sh` the others. The stable runs form a trunk. Nothing continues
-  from a decay leaf (`-d`).
-- **Rank by the `wv` of the decayed run**, with the recall (`ctx.sh`)
-  beside it. From binary `4e42bba3` on, the dv of a bucketed run is `wv`
-  (every valid story whole). An older run needs `long.sh -g <run>-d`.
+  `extend.sh` the others (`--lr` for a step-down). The stable runs form a
+  trunk. Nothing continues from a decay leaf (`-d`).
+- **Rank by the `wv` of the decayed run**, with the long stories
+  (`long.sh`) and the recall (`ctx.sh`) beside it. From binary `4e42bba3`
+  on, the dv of a bucketed run is `wv`. The in-loop valid of the flat
+  scores the first 1024 chars only: its `wv` comes from `long.sh -t`.
 - **The seed noise** of a long run: 0.008 between two seeds (R-N15-B5).
   One run per shape ranks only a gap ≳ 0.01. Below that, add a seed.
-- Every run: `--grad-checkpointing`, `--max-vram 3750` and
+- Every H-Net run: `--grad-checkpointing`, `--max-vram 3750` and
   `--vram-cleanup-every 1` (`args.sh` adds them), `--ssd-path recalc:32`
   (pins the SSD chunk, which doubles at a state rank ≥ 80).
-- The flat reference: h16 of `../../../tiny-stories/tmp/1m-cased/runs/`
-  (`h16-s2`, `h16-x4630`, `h16-x8000`, `h16-x12000`). Its `wv` is in
-  `notes.md` §1.
+- **The flat reference h16-V7u** lives in `../../../tiny-stories/tmp/1m-cased`
+  (its own `gen.py`, `screen.sh`, `extend.sh`, `probe.sh`, `bin/ts-cuda`):
+  runs `h16-V7u-s2` (3230), `-x4630`, `-sd2630`, `-x8000`. Its flags:
+  `--pack 4224 --pack-rows 2 --ssd-path recalc:128 --profile 100
+  --grad-checkpointing --vram-cleanup-every 1`. A run saves its pack
+  settings, so `extend.sh` needs only the other flags. Run it from this
+  queue: `cd ../../../tiny-stories/tmp/1m-cased && ./extend.sh …`. The
+  old reference h16 has the runs `h16-s2`, `-x4630`, `-x8000`, `-x12000`,
+  `-sd2630`.
 
 ## VRAM
 
 How cubecl (48301b5, the `Adaptive` layout, the `Sync` allocator) spends
-the device memory, and what the pool report shows (burn-stack `vram.rs`
-has the detail):
+the device memory (burn-stack `vram.rs` has the detail):
 
 - `bytes_reserved` (the `prof` lines, `--max-vram`, `probe.sh`,
-  `dose.sh`) is the sum of the pages that the pools hold.
-- **A dropped page waits.** A pool drops a page on its own (idle past its
-  period, or left behind by a growth of the arena pages). The storage only
-  queues it. The driver frees it at the next explicit cleanup
-  (`Device::memory_cleanup`), and nothing else frees it. The report does
-  not count the queue.
-- `--max-vram` alone cleans up before windows 0, 1, 2, 4, …, 256, then
-  before every 256th window. So the queue can grow for 256 windows.
-  **`--vram-cleanup-every 1`** (the default of `args.sh` since
-  2026-10-10 03:20) cleans up before every window: the queue never
-  outlives a window. R-N15-B5: the same pool peak (3386 MB), ~10% faster.
+  `dose.sh`) is the sum of the pages that the pools hold. A page is ~168
+  MB, so a peak moves in steps of that size.
+- **A dropped page waits** in the storage queue until an explicit cleanup
+  (`Device::memory_cleanup`). The report does not count the queue.
+  **`--vram-cleanup-every 1`** (`args.sh`) cleans up before every window,
+  so the queue never outlives a window.
 - `vram::check` reads the pools after every backward. The `prof` line
   prints their high-water mark as `peak X MB`.
-- The CUDA context and the loaded kernels are outside the pools (~140 MiB).
-- So with `--vram-cleanup-every 1`, **the process ≈ `peak` + ~140 MiB**.
-  The dose target: a `peak` of **~3400–3550 MB** (the process then stays
-  < 3.6 GiB = 3865 MB). R-N15-B5 is at 3386.
+- The CUDA context and the loaded kernels are outside the pools (~140
+  MiB). So **the process ≈ `peak` + ~140 MiB**.
+- **The dose target**: a `peak` of **~3400–3550 MB** (the process then
+  stays < 3.6 GiB = 3865 MB). R-N15-B5 is at 3386, h16-V7u at 3455. One
+  page over (3592, 3663) still keeps the process < 3.6 GiB.
 
 ## Shapes and budgets
 
 - **The dose** (strict rule 1):
-  1. The VRAM: `probe.sh <cfg>` runs 2 batches of each slot (~1.5 min)
-     and reports the reserved MB after each slot and their maximum. A run
-     holds more, by a factor that depends on the shape: × 1.04
-     (M-s64r256-L4), × 1.17 (R-N15-B5), × 1.32 (S2a-B5, two routers). So
-     use the probe for the coarse search only. `dose.sh <cfg> [steps]`
-     runs the first 520 steps of the real run (~10 min) and reports the
-     `peak` of each `prof` line: dose to the target of [VRAM](#vram).
+  1. The VRAM: `probe.sh <cfg>` (2 batches of each slot, ~1 min) is for
+     the coarse search only: a run holds × 1.0 to × 1.34 of the probe, by
+     shape (`notes.md` §7). `dose.sh <cfg> [steps]` runs the first 520
+     steps of the real run (~10 min): dose every shape before it trains.
   2. The params: design the shape near the cap, then `fit.py` fills only
-     a small rest with the main MLP (strict rule 14). `mmlp` at
-     `mlpmul=8` costs no VRAM (~10k per step). The main width `md` must
-     stay ≥ the stage width, and the stage widths must not shrink inward.
-- **The VRAM knobs** (`knobs.py`, `notes.md` §7): the stage state rank is
-  the most VRAM per param. The stages set the peak (the 1024 slot), so N
-  and the main knobs move it little.
-- **Power-of-two state ranks**: another rank costs the VRAM of the next
-  power of two, or more. A Complex2D stage above r 64 does not fit.
+     a small rest with the main MLP (strict rule 14). `mmlp` costs no
+     VRAM. The widths must not shrink inward (stage ≤ inner stage ≤ main).
+- **The VRAM knobs** (`notes.md` §7): the stages set the peak (the 1024
+  slot). The heads × the state rank of a stage drive it. A state rank
+  costs the VRAM of the next power of two (r 104 = r 128). A head dim
+  below 16 doubles the heads (over the band at d64 and d112). N moves the
+  peak little. A main at expand 1 and the main MLP are cheap.
 - **Virtual layers** (user): repeat the middle real layers more than the
   edge layers (`msched=0,1,1,1,1,2`), with the untied tensors (`gen.py
-  muntie=auto`). They lost so far.
+  muntie=auto`). In the H-Net main they tie (R-N15-r64V7). In the flat
+  they are the fill of h16-V7u (Cyclic, untied).
 
 ## Tools
 
 - **Binaries**: `bin/hn-cuda` (`./build.sh`, a host job: it keeps each
-  build as `bin/hn-cuda-<tag>` + `.txt`). The flat model's `ts-cuda` is in
-  `../../../tiny-stories/tmp/1m-cased/bin/` (its own `build.sh`).
+  build as `bin/hn-cuda-<tag>` + `.txt`). The flat's `ts-cuda` is in
+  `../../../tiny-stories/tmp/1m-cased/bin/` (its own `build.sh`, ~3 min).
   `bin/hn-cuda -- --help` lists the example flags.
 - **Configs**: `gen.py <cfg> k=v …` → `cfg/<cfg>/`. The keys and their
   defaults are at the top of the file. Per-stage keys take `/` lists.
   `fit.py <cfg> <key> [from=V] [step=S] k=v …` fits one key to the param
   cap (`python3 fit.py`). `params.sh <cfg>` counts the params (~2 s, flex).
+  `catalog.py` prints the models.
 - **Runs**:
   - `screen.sh <run> <cfg> <T1> <T2> [args]`: a stable run of T1 steps,
     then a cosine decay leaf `<run>-d` of T2 steps.
   - `extend.sh <src> <new> <N1> <N2> [--lr LR [--span A-B]] [args]`: from
     a stable checkpoint, +N1 steps (with a step-down or an anneal), then a
-    leaf of N2. With `N2 = 0` it is a trunk piece.
+    leaf of N2. With `N2 = 0` it is a trunk piece. `--lr` removes the
+    later segments of the schedule: add them again with a later `--lr`.
   - `branch.sh`, `decay.py`, `stage.py`, `lrseq.py`: the LR sequence
     tools.
 - **The queue**: `queue.sh` runs the lines of `queue.txt` one at a time
   (`bash -c`) and logs `start` / `done` / `fail` into `queue.log`. It
-  exits when the queue is empty. Check it with `ps -p $(cat queue.pid) -o
-  args=`. Start it with `setsid nohup ./queue.sh > /dev/null 2>&1 <
-  /dev/null &`. Waiters: `qwait.sh`, `qall.sh`, `after.sh`, `wait.sh`.
-  Never edit a script while a queue line runs it (bash reads a script as
-  it runs).
+  exits when the queue is empty. Start it with `setsid nohup ./queue.sh >
+  /dev/null 2>&1 < /dev/null &`. Waiters: `qwait.sh`, `qall.sh` (silent
+  until the next `empty`), `after.sh`, `wait.sh`. Never edit a script
+  while a queue line runs it (bash reads a script as it runs).
 - **Reading**: `summ.py <run>…` (speed, train buckets, every validation),
   `agg.py`, `cool.py`.
 - **Probes**:
@@ -203,8 +211,7 @@ has the detail):
   - `ctx.sh -g -n 2048 -r ctxg <run>` → `ctxg.txt`: the recall (far use,
     re-mentions). `ctxstat.py ctxg/A ctxg/B …` pairs the runs.
   - `probe.sh <cfg> -- --ssd-path recalc:32 --chunk-log 0` →
-    `probes-B.txt` (the bucket protocol). `probes.txt`, `fills.txt` and
-    `knobs.txt` are from the old protocol.
+    `probes-B.txt` (the bucket protocol).
   - `dose.sh <cfg> [steps] -- --ssd-path recalc:32 --chunk-log 0` →
     `doses.txt`.
   - `infer.sh <run> <dir>`: samples on flex.
@@ -214,9 +221,14 @@ has the detail):
   - `kaggle/kwait.sh <hours> <log>` (in the background) pushes the batch
     (`kpush.sh`: the binary, the scripts, `cfg/`, the source runs). Then it
     waits for the kernel, merges its runs (`kpull.sh`), and queues
-    `long.sh` for each pulled `-d` run in the local queue.
+    `long.sh` for each pulled `-d` run in the local queue. It can miss a
+    `-d` run (`notes.md` §8): check each one.
+  - Only `probes.txt`, `knobs.txt`, `ctxg.txt` and `speeds.txt` come back
+    as text. A dose on Kaggle: read the peaks in the pulled `runs/dose-*`.
   - One kernel at a time. `kpush.sh` empties `kqueue.txt`, so stage the
-    next batch after a push ends.
-  - The token stays in the gitignored `.kaggle/access_token`
-    (`kaggle/kg.sh` reads it). Never print it. `owner.txt`, `kqueue.txt`
-    and `out/` stay out of git.
+    next batch after a push ends. The flat cannot run on Kaggle (the
+    payload holds this workspace only).
+  - The CLI (`/usr/local/bin/kaggle`) can be gone after an environment
+    reset: the user installs it. The token stays in the gitignored
+    `.kaggle/access_token` (`kaggle/kg.sh` reads it). Never print it.
+    `owner.txt`, `kqueue.txt` and `out/` stay out of git.
