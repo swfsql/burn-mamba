@@ -24,7 +24,8 @@ DEFAULTS = dict(
     # untie=1: mnist-class's untied list (block tail + small per-head tensors,
     # the layer pre-norms), held once per virtual application.
     # mgrpv=1: one MultiGate module per virtual layer. sched: the virtual
-    # schedule (Cyclic | Stretched).
+    # schedule (Cyclic | Stretched), or the real layer of each application,
+    # `0,1,2,2,2,3,4` (Custom; V values).
     untie=0, mgrpv=0, sched="Cyclic",
     # training
     bs=8, seq=256, lr=12e-3, warm=128, stages="", wd=1e-4,
@@ -33,6 +34,16 @@ DEFAULTS = dict(
     muon=1, stories=4096, vstories=256, epochs=1000, frontier=1.6, seed=0,
     workers=2, runlen=18446744073709551615,
 )
+
+
+def schedule(a):
+    """The JSON of the virtual schedule (see `sched`)."""
+    if a["sched"] in ("Cyclic", "Stretched"):
+        return a["sched"]
+    idx = [int(i) for i in str(a["sched"]).split(",")]
+    if len(idx) != a["V"] or not all(0 <= i < a["L"] for i in idx):
+        sys.exit(f"sched={a['sched']}: needs {a['V']} real layers in 0..{a['L']}")
+    return {"Custom": idx}
 
 
 def model(a):
@@ -58,7 +69,7 @@ def model(a):
         "multiple_of": a["mlpmul"], "has_proj_bias": False}
     return {"Mamba3": {
         "n_real_layers": a["L"],
-        "n_virtual_layers": None if a["V"] in (0, a["L"]) else [a["V"], a["sched"]],
+        "n_virtual_layers": None if a["V"] in (0, a["L"]) else [a["V"], schedule(a)],
         "grad_horizon": None, "vocab_size": 48, "pad_vocab_size_multiple": 1,
         "mamba_block": block, "missing_lm_head": bool(a["tie"]),
         "class_latents": ["Start"] * a["cls"], "ignore_first_residual": False,

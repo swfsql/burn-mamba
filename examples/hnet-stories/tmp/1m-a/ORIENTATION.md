@@ -165,14 +165,24 @@ the device memory (burn-stack `vram.rs` has the detail):
      a small rest with the main MLP (strict rule 14). `mmlp` costs no
      VRAM. The widths must not shrink inward (stage ≤ inner stage ≤ main).
 - **The VRAM knobs** (`notes.md` §7): the stages set the peak (the 1024
-  slot). The heads × the state rank of a stage drive it. A state rank
-  costs the VRAM of the next power of two (r 104 = r 128). A head dim
+  slot). The heads × the state rank of a stage drive it. **Use a power
+  of 2 for a state rank** (user): a rank that is not a power of 2 jumps
+  in the pages, and it can cost more VRAM than the next power of 2 (the
+  flat, `../../../tiny-stories/tmp/1m-b/notes.md`: h16 × r 96 3995 MB,
+  h16 × r 128 3776 MB). It can also help the score. A head dim
   below 16 doubles the heads (over the band at d64 and d112). N moves the
   peak little. A main at expand 1 and the main MLP are cheap.
 - **Virtual layers** (user): repeat the middle real layers more than the
-  edge layers (`msched=0,1,1,1,1,2`), with the untied tensors (`gen.py
-  muntie=auto`). In the H-Net main they tie (R-N15-r64V7). In the flat
-  they are the fill of h16-V7u (Cyclic, untied).
+  edge layers (`msched=0,1,1,1,1,2`).
+  - A real layer is fully untied. A virtual application is partly untied:
+    it holds its own copy of the `untied` tensors only (the block tail, the
+    small per-head tensors, the pre-norms).
+  - Untie every virtual application, in every stack (user, 2026-10-11).
+    The copies are cheap in params and usually give a better score.
+    `gen.py` does this by default: `muntie=auto` in the main, `suntie=auto`
+    in a stage with `eV`/`dV`.
+  - The results: in the H-Net main, the score is a draw (R-N15-r64V7 =
+    R-N15-B5 at 3230). In the flat, they are the fill of h16-V7u (Cyclic).
 
 ## Tools
 
@@ -214,6 +224,9 @@ the device memory (burn-stack `vram.rs` has the detail):
     `probes-B.txt` (the bucket protocol).
   - `dose.sh <cfg> [steps] -- --ssd-path recalc:32 --chunk-log 0` →
     `doses.txt`.
+  - `gate.sh <cfg> [lo] [hi]`: exit 0 when the last dose of `<cfg>` is in
+    the band (default 3380–3670 MB). A queue line starts a screen only
+    after a good dose: `if ./gate.sh A; then ./screen.sh …; fi`.
   - `infer.sh <run> <dir>`: samples on flex.
 - **Kaggle** (a second runner, two T4s, the same pool accounting):
   - `kaggle/kqueue.txt` holds the lines of a batch: one job per line, its

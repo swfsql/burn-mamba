@@ -17,7 +17,7 @@ findings).
   H-Nets at 3230 (0.8644) and at 5630 (each at its best schedule). It
   **leads by 0.0085 at 9600** (0.7487 against R-N15-B5's 0.7572).
 - **The best H-Nets**: R-N15-B5 and R-N125-B5 (N 1.25 = N 1.5), and
-  R-N15-r64V7 (stage r 64 + main V 7: a tie). Closed: deep compression
+  R-N15-r64V7 (stage r 64 + main V 7: a draw). Closed: deep compression
   (N 4/4), two stages at total N 2, a d144 stage paid by the main.
   Parked: S4 / d64 (no design near both ceilings).
 - **The LR** (`notes.md` §2): the H-Net wants its step-down at about half

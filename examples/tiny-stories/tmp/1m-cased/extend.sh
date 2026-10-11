@@ -3,7 +3,8 @@
 # Extends a screen: copies the stable checkpoint runs/<src-run> (a screen's
 # phase 1) to runs/<new-run>, continues it for N1 more steps (--resume, on its
 # LR sequence), then decays a branch runs/<new-run>-d for N2 steps, as
-# screen.sh does (cosine over 0.9·N2·ratio schedule steps).
+# screen.sh does (cosine over 0.9·N2·ratio schedule steps). N2 = 0: no decay
+# branch (a trunk piece: a long trunk goes in pieces of < 1 h).
 # --lr LR: a step-down. stage.py sets the constant LR from the saved step on
 # in runs/<new-run> (a planned later step-down of the schedule goes). A
 # --max-lr is refused: on an LR sequence it scales the whole schedule.
@@ -27,6 +28,7 @@ echo $$ > "$dir/screen.pid"
 [ -n "$lr" ] && python3 stage.py "$run" "$lr" >> "$dir/stdout.log"
 echo "== $(date -Is) extend.sh phase1 $src -> $run -b $n1 ${common[*]} [$(bin_tag)]" >> "$dir/stdout.log"
 bin/ts-cuda --training --resume -a "$dir" -b "$n1" "${common[@]}" >> "$dir/stdout.log" 2>&1
+if [ "$n2" = 0 ]; then echo "== $(date -Is) extend.sh done (no decay)" >> "$dir/stdout.log"; exit 0; fi
 d=$(python3 - "$dir" "$n2" <<'EOF'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1] + "/metrics.jsonl")]

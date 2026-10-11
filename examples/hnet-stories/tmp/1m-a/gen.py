@@ -11,7 +11,8 @@ stages. The main network keys start with `m`.
   the main network. `lrm=1/1` (S + 1 values) sets them.
 - `smlp`/`mmlp`: the hidden width of a SwiGLU MLP (0: none).
 - `mgr`/`mmgr`: Multi-Gate residual streams (0: the standard residual).
-- `mV`: the virtual layers of the main network (0: none).
+- `mV`: the virtual layers of the main network (0: none). `eV`/`dV`: those
+  of the stage encoders / decoders.
 - `init=ref`: N(0, 0.02) with the residual rescale (the reference). `burn`:
   the defaults of Burn.
 - The training keys are those of `../../../tiny-stories/tmp/1m-cased/gen.py`.
@@ -29,6 +30,11 @@ DEFAULTS = dict(
     # stages (per-stage lists with `/`)
     S=1, d="64", enc="2", dec="2", r="32", p="16", e="2", sm="1", smlp="0",
     mgr="0", N="4/2", srot="Complex2D", su="1",
+    # eV/dV: the virtual layers of the encoder / decoder of each stage (0:
+    # none). esched/dsched: their schedules (as msched). suntie: as muntie,
+    # `auto` = on when a stack of the stage has virtual layers (the stage
+    # block is shared by its encoder and decoder, so both untie).
+    eV="0", dV="0", esched="Cyclic", dsched="Cyclic", suntie="auto",
     # main network
     # muntie: the untied lists of mnist-class (Mamba3Config: the block tail and
     # the small per-head tensors; the layer: its pre-norms), held once per
@@ -130,8 +136,13 @@ def model(a):
     ms, mlps = per_stage(a, "sm", int), per_stage(a, "smlp", int)
     mgrs, targets = per_stage(a, "mgr", int), per_stage(a, "N", float)
     rots, us = per_stage(a, "srot", str), per_stage(a, "su", int)
-    stages = [{"encoder": stack(a, ds[s], enc[s], mlps[s], mgrs[s]),
-               "decoder": stack(a, ds[s], dec[s], mlps[s], mgrs[s])}
+    evs, dvs = per_stage(a, "eV", int), per_stage(a, "dV", int)
+    escheds, dscheds = per_stage(a, "esched", str), per_stage(a, "dsched", str)
+    sunties = [(evs[s] not in (0, enc[s]) or dvs[s] not in (0, dec[s]))
+               if a["suntie"] == "auto" else bool(int(a["suntie"]))
+               for s in range(a["S"])]
+    stages = [{"encoder": stack(a, ds[s], enc[s], mlps[s], mgrs[s], evs[s], sunties[s], escheds[s]),
+               "decoder": stack(a, ds[s], dec[s], mlps[s], mgrs[s], dvs[s], sunties[s], dscheds[s])}
               for s in range(a["S"])]
     muntie = a["mV"] not in (0, a["mL"]) if a["muntie"] == "auto" else bool(int(a["muntie"]))
     main = stack(a, a["md"], a["mL"], a["mmlp"], a["mmgr"], a["mV"], muntie, a["msched"])
@@ -152,7 +163,7 @@ def model(a):
                 "missing_lm_head": bool(a["tie"]), "head_init": head_init,
                 "n_start_tokens": a["start"],
             },
-            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s], 0, us[s]) for s in range(a["S"])],
+            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s], sunties[s], us[s]) for s in range(a["S"])],
             "main_block": block(a, a["md"], a["mr"], a["mp"], a["me"], a["mm"], a["mrot"], muntie, a["mu"]),
         },
         "ratio_targets": targets,
