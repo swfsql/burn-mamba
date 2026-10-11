@@ -291,3 +291,111 @@ file starts empty again.
   step down at 2630.
 - 12:21 Here: **L-R-N15-B5-s1-sd2630** (seed 1, the same step-down):
   a seed replicate (R-B5-sd2630 on Kaggle is the shape replicate).
+- **Kaggle batch 6** (pulled 13:07):
+  - **L-R-B5-sd2630-d wv 0.8046** at 5630: **−0.016 against L-R-B5-x4630-d**
+    (0.8204). The early step-down replicates on a second trunk.
+  - **L-R-N15-B5-sd-x8000-d wv 0.7668** at 9600: **+0.0096 against the
+    step-down at 4630** (L-R-N15-B5-x8000-d 0.7572), and level with the
+    flat (0.7660). The trunk at 1e-3 stalls: 0.8425 (4630), 0.8284
+    (6315), 0.8216 (8000); the 4630 step-down trunk: 0.8151, 0.8005.
+  - So **the best step-down depends on the budget**: for 5630, at 2630
+    (47% of it at 4e-3); for 9600, at 4630 (48%), not at 2630 (27%). The
+    protocol's 5630 milestone keeps 82% at 4e-3: too long for the H-Net
+    (the flat does not care). A reading: the H-Net wants about half of the
+    budget at 4e-3.
+  - kwait missed the `== …-d:` header of L-R-B5-sd2630-d again (the first
+    job to end, both times?). Its `long.sh` was queued by hand.
+- 13:12 **Kaggle batch 7** (`/tmp/kpush-7.log`): the 9600 budget with
+  4e-3 held to 6315 (66%), then 1e-3 to 8000, a leaf of 1600:
+  L-R-N15-B5-h6315 → L-R-N15-B5-h-x8000, and L-R-B5-h6315 → L-R-B5-h-x8000
+  (two trunks: the effects are ~0.01, the noise 0.008). Against the 4630
+  step-down (0.7572 / 0.7608). Why: is 48% the H-Net's optimum at 9600, or
+  does a longer high-LR phase still pay?
+- **The fairness of the flat reference** (deferred in the handoff, now
+  decision-relevant: the H-Net leads by ~0.01): h16 ran without gc at 3149
+  MB reserved (an older measure), and with **969,481 params** (under the
+  ≥ ~990k of strict rule 1). The flat workspace's own handoff proposes
+  h16 × V6 (virtual layers) under gc. Plan: rebuild ts-cuda (the current
+  code: `--vram-cleanup-every`, the `peak` measure), dose h16 × V (gc) to
+  the band, fill the params, then a 3230 screen against h16-s2-d (0.8868).
+- **L-R-N15-B5-s1-sd2630-d wv 0.7962** at 5630 (trunk 4630 0.8384). The
+  early step-down at 5630, three H-Net runs: 0.7962 / 0.8020 / 0.8046,
+  against the flat's 0.8197 on the same schedule: **the H-Net leads by
+  0.015–0.024**.
+- 13:19 ts-cuda rebuilt (`v0.67.0-4dd4cb8-dirty-99dc0dcf`, 3 min). The flat
+  variants (tiny-stories `gen.py`, h16's args + V/untie): h16-V6u (V 6,
+  untied, 982,701), **h16-V7u (V 7, untied, 995,921)**, h16-V8u
+  (1,009,141: over). Untying costs 13.2k per application. Probes (gc,
+  `--vram-cleanup-every 1`): h16 without gc (the reference as it ran),
+  h16 with gc, V6u, V7u.
+- **The flat probes** (peak MB, `--vram-cleanup-every 1`, 10 steps; the
+  packed batches have one shape): h16 no gc **3149** (the reference as it
+  ran: ~250–400 under the band, 969k params), h16 gc 2460, V6u gc 2996,
+  **V7u gc 3455** (on the band, 995,921 params). ms/step 669 / 698 / 841 /
+  970.
+- 13:21 Here: **h16-V7u-s2** (screen 2630 + 600, the flat's flags + gc +
+  cleanup every window), then `long.sh -t`. Against h16-s2-d 0.8868 and
+  the H-Net's 0.8605–0.8723. Why: the flat at both ceilings, as the H-Net
+  candidates are (strict rule 1 for the reference too).
+- **h16-V7u-s2-d (the flat at both ceilings): wv 0.8644** at 3230 (chars
+  0..1024 0.8565, past 1024 0.9515); sv@2630 0.9775 (first 1024; h16
+  0.9931). Peak 3455–3458 MB in the run, 1.03 steps/s. **−0.022 against
+  the reference flat h16** (0.8868), and **level with the best H-Nets**:
+  R-N15-B5 0.8688 / 0.8605, R-N125-B5 0.8638 / 0.8624, R-B5 0.8723. The
+  long stories (paired against h16-V7u): R-N15-B5 +0.005 / −0.004,
+  R-N125-B5 −0.002 / −0.007, R-B5 +0.012, h16 +0.019.
+- **So the H-Net's lead at 3230 (0.015–0.026) was the reference flat
+  under both ceilings** (969k params, no gc, 3149 MB). A flat at both
+  ceilings ties the best H-Net. Every later H-Net lead (5630 −0.018 on
+  the early step-down, 9600 −0.009, 14400 −0.010) was against h16 too:
+  those comparisons need h16-V7u at the same milestones.
+- 14:16 Here: h16-V7u-x4630 (the 4630 trunk + a leaf to 5630, the
+  standard schedule), then h16-V7u-sd2630 (the early step-down, the
+  H-Net's best at 5630). Then the 9600 chain.
+- The flat stays here, not on Kaggle: the runner and the payload know only
+  this workspace, and the flat's milestones are one sequential trunk chain
+  (two GPUs would not shorten it).
+- **An H-Net design from the flat's lesson**: the flat gained 0.022 from
+  depth by reuse (virtual layers, untied) at the VRAM band. R-N15-B5 spends
+  its VRAM on the stage rank (r 104, the 128 tier). Stage r 64 frees ~1 GB
+  (the d144 probes: r 64 1985 against r 104 3176) and 41k params, which
+  pay for main virtual layers. tmp-v-VE: R-N15-B5 × stage r 64 × main V 7
+  (0,1,1,1,1,1,2, the user's middle-heavy rule; untied), 995,713 params.
+  tmp-v-VB: × V 6 (0,1,1,1,1,2), 984,961. Probes queued after the current
+  flat leg.
+- **h16-V7u-x4630-d wv 0.8037** at 5630 (the standard schedule; trunk
+  4630 0.9151 on the first 1024). **The filled flat leads the H-Net on
+  the same schedule**: R-N15-B5 0.8143 (+0.011), R-B5 0.8204 (+0.017). The
+  long stories against it: R-N15-B5 +0.0107 ± 0.0015, R-B5 +0.0212. The
+  H-Net's early step-down (0.7962–0.8046) only reaches this flat; the
+  flat's own early step-down runs now (h16-V7u-sd2630).
+- **Probes of the reuse design**: VE 2683 MB, VB 2632 (R-N15-B5 2903, its
+  run 3386): VE ≈ 3140 in a run (× 1.17), 1–2 pages under the band. Two
+  fills: N 1.25 (= N 1.5 in quality; the main then sees 80% of the
+  chars), and an 8th main application paid by the main MLP (mmlp 8 → 0).
+  tmp-v-VE-N125 995,713, tmp-v-VE8 996,225, tmp-v-VE8-N125 996,225. Their
+  doses go to Kaggle when batch 7 ends.
+- **Kaggle batch 7** (pulled 15:38): 4e-3 held to 6315 (66%), then 1e-3
+  to 8000, a leaf to 9600: **L-R-N15-B5-h-x8000-d 0.7581** (step at 4630:
+  0.7572), **L-R-B5-h-x8000-d 0.7626** (0.7608). A tie (+0.001 / +0.002).
+  So at 9600 the H-Net's step-down is flat between 48% and 66% of the
+  budget, and 27% costs +0.010. With 5630 (47% best, 82% −0.012 worse):
+  **the H-Net wants its step-down at about half of the budget.**
+- 15:42 **Kaggle batch 8** (`/tmp/kpush-8.log`): the doses of VE, VE-N125,
+  VE8, VE8-N125. (`>> probes.txt` did not come back; the peaks are in the
+  pulled `runs/dose-*` logs.)
+  - **VE: peaks 3121 / 3452 / 3452 / 3592 / 3452** (× 1.34 of its probe).
+    Max one page over the band, the process ≈ 3739 MB (< 3.6 GiB), as
+    S2x-e21h16-L4. VE-N125, VE8, VE8-N125: over 3750 MiB (stopped).
+  - **Decision: R-N15-r64V7** (= VE: R-N15-B5 × stage r 64 × main V 7,
+    0,1,1,1,1,1,2, untied), 995,713 params, ~1.42 s/step on a T4.
+- **h16-V7u-sd2630-d wv 0.7968** at 5630: the filled flat gains −0.007
+  from the early step-down too (h16 did not). **At 5630, each at its best
+  schedule: the flat 0.7968, the H-Net 0.7962 / 0.8020 / 0.8046 (mean
+  0.8009). A tie.**
+- 15:59 **Kaggle batch 9** (`/tmp/kpush-9.log`): L-R-N15-r64V7 and
+  L-R-N15-r64V7-s1 (screens, two seeds: the rivals at 3230, the flat
+  0.8644 and R-N15-B5 0.8647, are inside the noise).
+- 15:59 Here: h16-V7u-x8000 (3370 at 1e-3 + a leaf of 1600 to 9600, one
+  piece of ~55 min): the filled flat at 9600, against the H-Net 0.7572 /
+  0.7608.
