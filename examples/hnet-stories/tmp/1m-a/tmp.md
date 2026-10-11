@@ -207,3 +207,87 @@ file starts empty again.
     4630 judgment of a deep-compression trunk, even at +0.13.
   - L-R-B5-t10000 + L-R-B5-x12000 (the cosine 1e-3 → 5e-4 over 8000–12000,
     a leaf of 2400 to 14400; flat 0.7412): the reference curve.
+- **L-R-N15-B5-x8000-d** (here): trunk 0.8151 (6315), 0.8005 (8000);
+  **wv@9600 0.7572: −0.009 against the flat** (0.7660). R-B5 −0.005.
+  The gain is in chars 0..1024 (−0.0095); past 1024 the three tie
+  (0.8343–0.8348). The long stories (paired against the flat): R-N15-B5
+  **−0.0139 ± 0.0014** (every row better), R-B5 −0.0066 ± 0.0014.
+- **The H-Net against the flat, all milestones** (wv): 3230 −0.015 to
+  −0.026, 5630 −0.006 to 0.000, 9600 −0.005 to −0.009. The 5630 tie was a
+  dip, not a trend. The H-Net trunks gain more after the step-down to
+  1e-3 (R-N15-B5 4630 → 8000: −0.133, the flat −0.128 on the first 1024).
+  N 1.5 leads N 2 at every milestone (0.004–0.006 on the leaves, 0.022 /
+  0.009 on the 4630 / 8000 trunks).
+- 08:49 Here: L-R-N15-B5-t10000 + L-R-N15-B5-x12000 (the 12000 milestone,
+  a leaf to 14400): the full curve of the best shape, beside R-B5's on
+  Kaggle.
+- **Kaggle batch 4** (pulled 10:12):
+  - **L-R-B5-x12000-d wv 0.7320** at 14400: **−0.009 against the flat**
+    (0.7412). Trunk 0.7881 (10000), 0.7641 (12000).
+  - **L-S2x-e21h16-L4-lrm-x4630-d wv 0.9286** at 5630: **+0.108 against
+    R-B5** (+0.132 at 3230). Trunk 4630 1.0797. The recall deficit closes
+    faster than the bits (against R-B5: far use −0.064 → −0.042,
+    re-mention letters own +0.405 → +0.239), but it is still a deficit.
+  - **Decision: the deep-compression line stops** (N 4/4 at d112, judged
+    at 3230 and 4630 as the user asked). At −0.024 per 2400 steps, it
+    would need > 10k more steps to meet R-B5. Open for the user: a run to
+    9600 if the trend is worth a measure.
+- 10:16 **Kaggle batch 5** (`/tmp/kpush-5.log`):
+  - **L-R-N15-B5-sd2630**: the R-N15-B5 trunk at 2630, stepped down to
+    1e-3, to 4630 + a leaf of 1000. Against L-R-N15-B5-x4630-d (0.8143,
+    the step-down at 4630). Why: the H-Net trunks gain more at 1e-3 than
+    the flat's, so an earlier step-down could pay at 5630 (the user's LR
+    option).
+  - **R-N125-B5** (screen): R-N15-B5 at N 1.25 (λ 1.12), 999,425 params.
+    Why: N 1.5 beats N 2 at every milestone. N does not move the peak (the
+    stage sets it), so no dose: the `prof` peak of the run checks it.
+- **L-R-N15-B5-x12000-d wv 0.7308** at 14400: **−0.010 against the flat**
+  (0.7412); R-B5 0.7320. Trunk 0.7805 (10000), 0.7616 (12000). The long
+  stories (paired against the flat): **−0.0148 ± 0.0014** (0..1024
+  −0.013, 1024..2048 −0.018, past 2048 −0.007 ± 0.005). Chars 0..1024
+  −0.011, past 1024 −0.0035.
+- **The H-Net against the flat, the full curve** (wv, best H-Net):
+  3230 −0.026 (R-N15-B5-s1), 5630 −0.006, 9600 −0.009, 14400 −0.010. N 1.5
+  and N 2 tie at 14400 (0.0012).
+- `kwait.sh` did not queue `long.sh` for L-R-B5-x12000-d: its `== …-d:`
+  header was not in the pull log. Queued by hand. Check the `long.sh` of
+  each pulled `-d` run.
+- 10:44 Here: **R-N125-B5-s1** (N 1.25, seed 1), beside seed 0 on Kaggle.
+  Why: the N differences are below the seed noise (0.008), so N 1.25
+  against N 1.5 needs 2 seeds against 2. Its peak: 3386 MB (= N 1.5).
+- **Kaggle batch 5** (pulled 11:23):
+  - **L-R-N15-B5-sd2630-d wv 0.8020** at 5630: **−0.0123 against the
+    step-down at 4630** (L-R-N15-B5-x4630-d 0.8143), −0.018 against the
+    flat. Trunk 4630 at 1e-3: 0.8425 (at 4e-3: 0.9331).
+  - **L-R-N125-B5-d wv 0.8638** at 3230 (sv 0.9794): N 1.5's seeds 0.8688
+    / 0.8605 (mean 0.8647). A tie so far.
+- The flat's 4630 extension (h16-x4630) had no `--pack` on its command
+  line, but its log shows the packed rows: the flat references are sound.
+- 11:30 **Kaggle batch 6** (`/tmp/kpush-6.log`):
+  - L-R-N15-B5-sd-t6315 + L-R-N15-B5-sd-x8000 (1e-3 held from 2630, a
+    leaf of 1600 to 9600). Against L-R-N15-B5-x8000-d (0.7572). Why: does
+    the early step-down still pay at 9600?
+  - **L-R-B5-sd2630** (R-B5's trunk at 2630 → 1e-3, to 4630 + a leaf):
+    against L-R-B5-x4630-d (0.8204), the same trunk. Why: a replicate of
+    the effect on a second trunk.
+- Here, after N 1.25 seed 1: **h16-sd2630**, the flat with the same
+  step-down at 2630 (its `extend.sh --lr 1e-3`, `recalc:128` as its
+  extensions). Why: the flat may gain from it too. A gain counts for the
+  H-Net only against the flat on the same schedule.
+- **L-R-N125-B5-s1-d wv 0.8624** at 3230 (sv 0.9855). **N 1.25, two seeds:
+  0.8638 / 0.8624 (mean 0.8631)**; N 1.5: 0.8688 / 0.8605 (mean 0.8647);
+  N 2: 0.8723 (one seed). N 1.25 = N 1.5 (−0.0016, inside the noise), so N
+  between 1.25 and 1.5 is flat; N 2 is ≈ +0.008.
+- **h16-sd2630-d** (the flat, the step-down at 2630; here, 33 min): **wv
+  0.8197** at 5630, against 0.8204 (the step-down at 4630): **−0.0007, no
+  gain**. The H-Net gains −0.0123 from the same change.
+- **So on the same schedule (1e-3 from 2630), the H-Net leads the flat by
+  0.018 at 5630** (0.8020 / 0.8197; chars 0..1024 −0.018, past 1024
+  −0.014). The long stories: **−0.0187 ± 0.0015** (0..1024 −0.018,
+  1024..2048 −0.020, past 2048 −0.011 ± 0.009). The lead at 5630 on the
+  flat's schedule was 0.006.
+- Reading: the stable LR 4e-3 holds the H-Net trunk back (its stage trains
+  at lr × λ, and it has a router), not the flat's. The H-Net's recipe should
+  step down at 2630.
+- 12:21 Here: **L-R-N15-B5-s1-sd2630** (seed 1, the same step-down):
+  a seed replicate (R-B5-sd2630 on Kaggle is the shape replicate).
