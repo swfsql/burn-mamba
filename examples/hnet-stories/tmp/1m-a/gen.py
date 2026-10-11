@@ -16,8 +16,8 @@ stages. The main network keys start with `m`.
 - `init=ref`: N(0, 0.02) with the residual rescale (the reference). `burn`:
   the defaults of Burn.
 - The training keys are those of `../../../tiny-stories/tmp/1m-cased/gen.py`.
-  `lr`, `warm` and `stages=…` write the LR sequence (`S:LR` a jump,
-  `A-B:LR` a cosine anneal).
+  `lr`, `warm` and `stages=…` (default: the protocol; `stages=` for none)
+  write the LR sequence (`S:LR` a jump, `A-B:LR` a cosine anneal).
 """
 import json
 import math
@@ -53,7 +53,10 @@ DEFAULTS = dict(
     # few JIT compilations). Keep it a multiple of the main SSD chunk.
     tie=1, start=4, init="ref", alpha=0.3, lrm="auto", cmult=64, smooth=64,
     # training
-    bs=10, seq=1024, lr=4e-3, warm=128, stages="", wd=0.1, muon=1,
+    # stages: the trunk schedule of the protocol (as the flat's configs):
+    # 1e-3 from 4630, a cosine to 5e-4 over 8000–12000.
+    bs=10, seq=1024, lr=4e-3, warm=128, stages="4630:1e-3,8000-12000:5e-4",
+    wd=0.1, muon=1,
     stories=262144, vstories=256, epochs=1000, frontier="always", seed=0,
     workers=2, runlen=1,
     # buckets: the slots of length-bucketed training (`512,768,…`; empty:

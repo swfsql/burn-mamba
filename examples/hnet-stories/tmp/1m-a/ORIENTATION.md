@@ -111,10 +111,17 @@ them, so:
   4630, then 1e-3, then a cosine 1e-3 → 5e-4 over 8000–12000. Each stage
   trains at `lr · λˢ` (`lrm=auto`). The best step-down depends on the
   budget (`notes.md` §2): compare two models on the same schedule.
+- **The trunk schedule is in the config**, as in the flat: `gen.py`
+  writes the protocol (`stages` default), and every trunk holds it. So
+  `extend.sh` follows the protocol with **no** `--lr`. `--lr` is only for
+  a deliberate step-down off the protocol (`sd2630`, `h6315`), logged.
+  Two guards (`lrprof.py`): `extend.sh` refuses an extension that leaves
+  the protocol with no `--lr`, and `kpush.sh` checks a batch before the
+  push. `lrprof.py <run>…` prints where a run leaves the protocol.
 - **The milestones**: stable 2630 / 4630 / 8000 / 12000, each with a decay
   leaf of 600 / 1000 / 1600 / 2400. `screen.sh` runs the first,
-  `extend.sh` the others (`--lr` for a step-down). The stable runs form a
-  trunk. Nothing continues from a decay leaf (`-d`).
+  `extend.sh` the others. The stable runs form a trunk. Nothing continues
+  from a decay leaf (`-d`).
 - **Rank by the `wv` of the decayed run**, with the long stories
   (`long.sh`) and the recall (`ctx.sh`) beside it. From binary `4e42bba3`
   on, the dv of a bucketed run is `wv`. The in-loop valid of the flat
@@ -203,7 +210,8 @@ the device memory (burn-stack `vram.rs` has the detail):
     leaf of N2. With `N2 = 0` it is a trunk piece. `--lr` removes the
     later segments of the schedule: add them again with a later `--lr`.
   - `branch.sh`, `decay.py`, `stage.py`, `lrseq.py`: the LR sequence
-    tools.
+    tools. `lrprof.py`: the protocol check of a run (`--guard`, `--batch`),
+    and `--fill` (gives a trunk the rest of the protocol).
 - **The queue**: `queue.sh` runs the lines of `queue.txt` one at a time
   (`bash -c`) and logs `start` / `done` / `fail` into `queue.log`. It
   exits when the queue is empty. Start it with `setsid nohup ./queue.sh >

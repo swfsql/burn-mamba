@@ -128,3 +128,57 @@ file starts empty again.
   `long.sh -t` and `ctx.sh`. Reason: it measures the flat's seed noise,
   so it tells if the 0.005 of the middle schedules is real. It also
   firms the 0.8644 that ranks every H-Net at 3230.
+- 23:00 **h16-V7u seed 1** at 3230: wv **0.8559**, −0.0078 ± 0.0022
+  against seed 0 (0.8644). The long stories −0.0079. The recall: far own
+  −0.0115, re-mention letters own −0.062. So **the flat's seed noise is
+  ~0.008 too**, as the H-Net's. The two-seed mean of h16-V7u at 3230 is
+  **0.8602**. The H-Net two-seed means: R-N125-B5 0.8631, R-N15-B5 0.8647,
+  R-N15-r64V7 0.8660: the flat leads all of them at 3230 too (0.003 to
+  0.006). The middle schedules (0.8688, 0.8694) are worse than both flat
+  seeds (~0.009 against the mean), but one seed each is inside the noise,
+  and so is their re-mention gain.
+- 23:00 **Decision**: a second seed of `h16-V7u-m2` (`h16-V7u-m2-s1`)
+  here, then `long.sh -t` and `ctx.sh`. Reason: a two-seed mean of the
+  middle schedule against the two-seed mean of Cyclic decides the user's
+  question.
+- 23:20 **Error (Claude): the 9600 runs of R-N15-r64V7 are not on the
+  protocol.** The H-Net config holds no step-down: the protocol adds it
+  with `extend.sh … --lr 1e-3` on the x4630 → t6315 piece (R-N15-B5 did
+  so). The r64V7 lines (17:58) omitted `--lr 1e-3`, so their trunk stayed
+  at 4e-3 to 8000 and the 9600 leaf decayed from 4e-3 (the saved
+  `training_config.json`). A step-down at 82% costs the H-Net ~0.01
+  (`notes.md` §2), about the whole +0.0115 against R-N15-B5. So the 21:40
+  "Closed" is **withdrawn**: `L-R-N15-r64V7(-s1)-t6315/-x8000` are the
+  "no step-down" schedule, not the protocol. The 5630 result stands (the
+  x4630 trunks and leaves have the same schedule as R-N15-B5's): r64V7
+  leads R-N15-B5 by 0.0055 there (two seeds).
+- 23:20 **Decision**: the protocol rerun of both seeds from the x4630
+  trunks (`-pt6315`, then `-px8000` + the leaf of 1600, `ctx.sh`), staged
+  as the next Kaggle batch.
+- 23:30 **The audit** (`lrprof.py`, every run of both workspaces against
+  the protocol, step by step): the only error is the 6 r64V7 runs
+  (`-t6315`, `-x8000`, `-x8000-d`, both seeds). The other new-protocol
+  deviations are the deliberate `sd2630` (9 H-Net, 4 flat) and `h6315` (6)
+  runs. 112 more are the old-protocol screens (another peak LR from step
+  1). Every ranked comparison in `notes.md` is on matched schedules.
+- 23:30 **The cause**: the flat's configs hold the trunk schedule
+  (`stages=4630:1e-3,8000-12000:5e-4`), so its extensions follow it with
+  no flag. The H-Net's configs held only the ramp (`stages=""`): its
+  protocol needed `--lr 1e-3` at the 4630 → 6315 piece, and nothing
+  checked it. The user expected the flat's behavior.
+- 23:30 **The fix** (user: a trunk scheduler as the flat's):
+  - `gen.py`: `stages` defaults to the protocol (byte-equal to the flat's
+    schedule). `cfg/` regenerated from `args.txt`: 149 configs now hold
+    the protocol. 156 old-protocol configs went back to their old files
+    (a regeneration added today's `bucket` default to them). Nothing else
+    changed (checked against a backup).
+  - `lrprof.py --fill`: 50 on-protocol trunks got the rest of the
+    protocol (their segments before the saved step stay; the audit is
+    unchanged after it). So every extension follows the protocol with no
+    `--lr`, and the staged r64V7 rerun has no `--lr`.
+  - Guards: `extend.sh` (both workspaces) runs `lrprof.py --guard` on the
+    source when it has no `--lr`. `kpush.sh` runs `lrprof.py --batch` and
+    does not push a failing batch. Tested on the 17:58 batch (fails at
+    step 4631) and on protocol, chained and deliberate lines (pass).
+  - The batch on Kaggle now (`r128s11V2-m5`, `r64sV5`) went up with the
+    old configs: `lrprof.py --fill` its two trunks after the pull.

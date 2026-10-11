@@ -5,9 +5,14 @@
 # LR sequence), then decays a branch runs/<new-run>-d for N2 steps, as
 # screen.sh does (cosine over 0.9·N2·ratio schedule steps). N2 = 0: no decay
 # branch (a trunk piece: a long trunk goes in pieces of < 1 h).
-# --lr LR: a step-down. stage.py sets the constant LR from the saved step on
-# in runs/<new-run> (a planned later step-down of the schedule goes). With
-# --span A-B: a cosine from the rate at A to LR at B, then LR (stage.py).
+# The schedule of runs/<src-run> holds the protocol (gen.py `stages`), so an
+# extension follows it with no --lr. Without --lr, `lrprof.py --guard`
+# refuses a source that trained on the protocol but leaves it in the N1
+# steps (a trunk without the protocol: `lrprof.py --fill`).
+# --lr LR: a deliberate step-down. stage.py sets the constant LR from the
+# saved step on in runs/<new-run> (a planned later step-down of the schedule
+# goes). With --span A-B: a cosine from the rate at A to LR at B, then LR
+# (stage.py).
 # A --max-lr is refused: on an LR sequence it scales the whole schedule.
 # The same N1/N2 for every candidate keeps them step-matched.
 # Foreground script: launch it with nohup … & (wait.sh waits on screen.pid).
@@ -24,6 +29,7 @@ source ./args.sh; split_args "$@"  # adds --max-vram (see args.sh)
 common=(--valid-every 0 --checkpoint-every 0 --valid-batches 1 "${app[@]}" -- "${ex[@]}")
 dir=runs/$run
 [ -e "$dir" ] && { echo "exists: $dir"; exit 1; }
+if [ -z "$lr" ]; then python3 lrprof.py --guard "$src" "$n1"; fi
 cp -r "runs/$src" "$dir"
 stamp "$dir"
 echo $$ > "$dir/screen.pid"

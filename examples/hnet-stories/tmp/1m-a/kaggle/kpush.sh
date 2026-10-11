@@ -24,6 +24,9 @@ case "$status" in
 esac
 lines=$(grep -v '^#' "$here/kqueue.txt" | grep -v '^[[:space:]]*$' || true)
 [ -n "$lines" ] || { echo "kqueue.txt has no lines"; exit 1; }
+# The LR check: an extension of a protocol run stays on the protocol, unless
+# its line has --lr (lrprof.py --batch).
+(cd "$ws" && python3 lrprof.py --batch "$here/kqueue.txt") || { echo "LR check failed: not pushed"; exit 1; }
 # The runs that the batch reads, less those that it creates itself (a ctx.sh
 # after a screen.sh on the same line reads a run of the batch).
 srcs=$(python3 -c '
