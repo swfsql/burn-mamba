@@ -182,3 +182,57 @@ file starts empty again.
     step 4631) and on protocol, chained and deliberate lines (pass).
   - The batch on Kaggle now (`r128s11V2-m5`, `r64sV5`) went up with the
     old configs: `lrprof.py --fill` its two trunks after the pull.
+- 23:31 **The Kaggle batch** (dose → gate → screen):
+  - `R-N15-r128s11V2-m5`: dose **3193 MB**, under the band: the gate
+    stopped it (no screen). It needs ~1 page more.
+  - `R-N15-r64sV5`: dose 3390–3522 MB; the screen at 3230: **wv 0.8670**
+    (R-N15-B5 two-seed mean 0.8647, h16-V7u 0.8602). The stage reuse at
+    r 64 does not pay. Its trunk got the protocol (`--fill`).
+- 23:33 **Decision**: push the r64V7 rerun (kernel version 32; the
+  `kpush.sh` LR check passed).
+- 23:35 **Decision**: spend the missing page of `r128s11V2-m5` by N 1.5 →
+  1.25 (`R-N125-r128s11V2-m5`, 991,665, λ 1.12/1): the main then runs on
+  80% of the tokens (67% at N 1.5). Reason: no params, and N 1.25 = N 1.5
+  on R-N15-B5 (two seeds each). A main V6 (one untied application, +8.6k)
+  was 225 params over the cap. Dose here after the flat, then a gated
+  screen.
+- 00:12 **`h16-V7u-m2` seed 1**: wv 0.8571 (Cyclic seed 1: 0.8559,
+  +0.0012). Two-seed means: Cyclic **0.8602**, `m2` **0.8630** (+0.0028,
+  inside the noise). The re-mention letters: `m2` gains ~0.017 within each
+  seed pair (seed 0 −0.044 + 0.000, seed 1 −0.075 against −0.062).
+  **Result**: the middle placement does not beat Cyclic in bits. Cyclic
+  stays the flat reference.
+- 00:12 `R-N125-r128s11V2-m5`: dose **3482 MB** (in the band, the gate
+  passed). Its screen runs here from 00:09 (~70 min).
+- 00:20 **User hypothesis**: two layers applied twice (`m13`,
+  0,1,1,2,3,3,4) fare better than one layer applied three times (`m2`).
+  Seed 0: `m13` − `m2` = +0.0006 wv (equal), the long stories +0.0062,
+  far own +0.0032, re-mention letters ≈ 0. One seed cannot decide it (the
+  paired schedule gaps move ~0.003 between seeds). **Decision**: `m13`
+  seed 1 here after the H-Net screen, for a two-seed mean of all three
+  schedules.
+- 00:35 **Re-mention letters against wv** (user: the letter gain of `m2`
+  looks larger than its wv loss). The letters are ~12% of the chars of
+  the far window (44,338 of 1968 × 192). Weighted, the gain is worth
+  −0.005 / −0.002 per char of the window (seeds 0 / 1), and the measured
+  far own of `m2` is +0.0005 / +0.0003: the other 88% of the window lose
+  what the names gain. So `m2` trades the local prediction for the entity
+  recall; the net is wv +0.0028. The letters metric moves ~0.06 between
+  seeds of one model.
+- 01:12 `R-N125-r128s11V2-m5` trunk at 2630: sv **0.9698**, the best H-Net
+  trunk (R-N15-B5 0.9809 / 0.9748, R-N125-B5 0.9794 / 0.9855, R-N15-r64V7
+  0.9864, R-N15-r64sV5 1.0027). The leaf (wv) ends ~01:25.
+- 01:25 **`R-N125-r128s11V2-m5` at 3230: wv 0.8533**, the first H-Net
+  ahead of the flat (h16-V7u 0.8644 / 0.8559, mean 0.8602: −0.0069; R-N15-B5
+  mean 0.8647: −0.0114). Paired against flat seed 0 (flat seed 1 in
+  brackets): wv −0.0102 ± 0.0019 (−0.0078), the long stories −0.0108 ±
+  0.0016 (−0.0079), far own −0.0171 ± 0.0013 (−0.0115), re-mention letters
+  own −0.126 ± 0.006 (−0.062). It beats both flat seeds on every row. One
+  seed. Shape: stage d128, 1+1 real R1D layers at r 128 × 2+2 untied
+  applications, N 1.25, main d128 × 5 C2D r 64 rf 0.5, 991,665 params, a
+  3482 MB dose, 1.37 s/step here.
+- 01:30 **Decision**: the next Kaggle batch (staged, the LR check
+  passes): seed 0 to 5630 and 9600 on the protocol, and seed 1 (a screen,
+  the dose carries over) to 3230, 5630 and 9600, `ctx.sh` after each leaf.
+  Reason: the flat used to pull ahead later (9600, 14400), and one seed
+  ranks only a gap ≳ 0.01.
