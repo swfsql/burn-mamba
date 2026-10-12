@@ -17,11 +17,10 @@ findings).
     (`ps -ef | grep '[k]wait.sh'`), wait for the kernel status
     `COMPLETE` (`kaggle/kg.sh kernels status <owner>/hnet-1m-a-runner`),
     then run `kaggle/kpull.sh`.
-- **Here**: the screen of `L-R-N15-r128s11V2-m5V6c-st2` (stage + main
-  reuse, dose 3482 MB) ends ~04:10. The same queue line then runs
-  `long.sh` and `ctx.sh`. Then two doses (~04:35): the Multi-Gate
-  variants of the leader (step 5). Then the queue is empty, and
-  `queue.sh` exits.
+- **Here**: nothing runs. The stage + main reuse screen is done (wv
+  0.8733, `tmp.md` 04:12). Four candidates are dosed in the band and
+  ready to screen (step 5): `R-N125-r128s11V2-m5-mg4` and `-mmg4` (3482
+  MB), `R-N125-r128s11V2-m5-st2` (3482), `R-N15-r64V7c` (3592).
 - **No new runs** (user, 2026-10-12): wait for these, then start the next
   session's plan.
 - **The binaries** are unchanged: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3`,
@@ -63,8 +62,8 @@ findings).
      but the flat h16-V7u is Multi-Gate 4, and in the flat the standard
      residual lost 0.046. Untested on the H-Net in the new protocol. The
      configs: `R-N125-r128s11V2-m5-mg4` (every stack, 993,485) and `-mmg4`
-     (the main only, 992,965). Their doses are in `doses.txt` (~04:35).
-     Screen the ones in the band.
+     (the main only, 992,965). Both dose 3482 MB (= the leader, in the
+     band): screen both.
    - Stage + main reuse at N 1.25 is over the band (3771 MB). A VRAM trim
      could give the page back (8 stage heads at p 32: the same state
      size, less VRAM, −8k params).

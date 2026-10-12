@@ -36,3 +36,10 @@ file starts empty again.
   (untested). **Decision**: the one-change test `R-N125-r128s11V2-m5-st2`
   (the leader with `start=2` only, 991,409); its dose runs here last.
   `start=2` waits for its screen.
+- 04:42 The Multi-Gate doses: `-mg4` and `-mmg4` both **3482 MB** (= the
+  leader: no extra page), so both are in the band. ms/step (the last
+  window): the leader 1283, `-mg4` 1346, `-mmg4` 1459.
+- 05:02 The last doses: `R-N15-r64V7c` **3592 MB** (= R-N15-r64V7's max),
+  `R-N125-r128s11V2-m5-st2` **3482 MB** (= the leader). All four
+  candidates are in the band and ready to screen. The local queue is
+  empty (user: no new runs).
