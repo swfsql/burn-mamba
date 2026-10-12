@@ -25,3 +25,14 @@ file starts empty again.
   after the Multi-Gate doses (~04:45). Rank it against R-N15-r64V7 on
   the same milestones (3230: 0.8644 / 0.8675; 5630, 9600 on the
   protocol), two seeds if the gap is < 0.01.
+- 04:12 **`R-N15-r128s11V2-m5V6c-st2`** (stage + main reuse; N 1.5, main
+  V 6 Cyclic, `start=2`) at 3230: wv **0.8733**; sv 1.0118 at 2630.
+  Paired against the leader R-N125-r128s11V2-m5: wv +0.0190 ± 0.0016, the
+  long stories +0.0224, far own +0.0212, far with no prompt +0.0216
+  (the recall gain is equal: +0.0004), re-mention letters +0.060. So it
+  models the text worse, with and without a prompt. Three changes from
+  the leader, not separable: N 1.5 (neutral on R-N15-B5), one more main
+  application (neutral on R-N15-r64V7 at 3230), and 2 start rows
+  (untested). **Decision**: the one-change test `R-N125-r128s11V2-m5-st2`
+  (the leader with `start=2` only, 991,409); its dose runs here last.
+  `start=2` waits for its screen.

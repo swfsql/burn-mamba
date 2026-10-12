@@ -68,7 +68,12 @@ findings).
    - Stage + main reuse at N 1.25 is over the band (3771 MB). A VRAM trim
      could give the page back (8 stage heads at p 32: the same state
      size, less VRAM, −8k params).
-   - The 225-param trim of a main application: `start=2` (user: keep it).
+   - The 225-param trim of a main application: `start=2` (user: keep
+     it). **But** the stage + main reuse screen
+     (`L-R-N15-r128s11V2-m5V6c-st2-d`) lost 0.019 against the leader, with
+     three changes in it (`tmp.md` 04:12). Screen `R-N125-r128s11V2-m5-st2`
+     (the leader with `start=2` only, dose in `doses.txt`) first: it
+     tells if the start rows cost it. Then choose the trim again.
    - **The H-Net main schedule** (user): `R-N15-r64V7c` (Cyclic main,
      0,1,2,0,1,2,0) against R-N15-r64V7 (0,1,1,1,1,1,2), all else equal.
      Its dose runs here last (~04:45). Rank it on the same milestones,
