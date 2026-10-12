@@ -17,16 +17,18 @@ Terms:
   paired): far own / none / gain, and the re-mention letters (s.e. ~0.001
   on the far bits, ~0.005 on the letters). The valid bits hide the recall.
 - **The seed noise**: 0.008 in wv between two seeds (R-N15-B5), 0.0085 for
-  the flat h16-V7u. One run ranks only a gap ≳ 0.01.
+  the flat h16-V7u, but 0.022 at 3230 for R-N125-r128s11V2-m5 (0.0085 at
+  9600). One run ranks only a gap ≳ 0.01, and a lead of one seed needs a
+  second seed before it counts.
 
-## 1. The result: stage reuse at r 128 leads the flat at 3230
+## 1. The result: two H-Nets tie the flat at 9600
 
-| milestone | best H-Nets (wv) | h16-V7u (flat) |
+| milestone | best H-Nets (wv, seeds 0 / 1) | h16-V7u (flat) |
 |---|---|---|
-| 3230 | **R-N125-r128s11V2-m5 0.8533** (one seed); R-N15-B5 0.8688 / 0.8605, R-N125-B5 0.8638 / 0.8624, R-N15-r64V7 0.8644 / 0.8675 | 0.8644 / 0.8559 (mean **0.8602**) |
-| 5630, the protocol | R-N15-r64V7 0.8088 / 0.8087, R-N15-B5 0.8143 | **0.8037** |
+| 3230 | R-N125-r128s11V2-m5 0.8533 / 0.8756 (mean 0.8645); R-N15-B5 0.8688 / 0.8605, R-N125-B5 0.8638 / 0.8624, R-N15-r64V7 0.8644 / 0.8675 | 0.8644 / 0.8559 (mean **0.8602**) |
+| 5630, the protocol | R-N125-r128s11V2-m5 0.7997 / 0.8126, R-N15-r64V7 0.8088 / 0.8087, R-N15-B5 0.8143 | **0.8037** |
 | 5630, step-down at 2630 | 0.7962 / 0.8020 / 0.8046 | **0.7968** |
-| 9600 | R-N15-r64V7 0.7501 / 0.7490, R-N15-B5 0.7572 | **0.7487** |
+| 9600 | **R-N125-r128s11V2-m5 0.7448 / 0.7533 (mean 0.7491)**, **R-N15-r64V7 0.7501 / 0.7490 (mean 0.7496)**, R-N15-B5 0.7572 | **0.7487** |
 | 14400 | R-N15-B5 0.7308, R-B5 0.7320 | **0.7220** |
 
 - **h16-V7u** (the reference): d160 × 5 C2D r 64, 16 heads, × 7 Cyclic
@@ -36,13 +38,17 @@ Terms:
 - **The R-B5 family trails the flat**: 0.003–0.006 at 3230 (two-seed
   means), 0.0085 at 9600, 0.0086 ± 0.0016 at 14400 (R-N15-B5). It ties at
   5630 only when each model has its best schedule (§2).
-- **R-N125-r128s11V2-m5** (§4) at 3230: −0.0069 against the flat mean.
-  Paired against flat seed 0 (flat seed 1 in brackets): wv −0.0102 ±
-  0.0019 (−0.0078), the long stories −0.0108 (−0.0079), far own −0.0171
-  (−0.0115), re-mention letters −0.126 (−0.062). It beats both flat seeds
-  on every row. One seed.
+- **R-N125-r128s11V2-m5** (stage reuse at r 128, §4): seed 0 beats the
+  flat at every milestone (3230 −0.0069 against the flat mean, on every
+  row of the long stories and the recall too), seed 1 loses at every one.
+  The seed spread is 0.022 / 0.013 / 0.0085 at 3230 / 5630 / 9600: far
+  over the 0.008 of R-N15-B5. Paired against the flat at 9600: wv
+  −0.0042 / +0.0042 ± 0.0016, the long stories −0.0074 / +0.0063 (5630:
+  wv −0.0043 / +0.0084). So its two-seed mean ties the flat at 9600.
 - **R-N15-r64V7** (main reuse) ties the flat at 9600: paired wv +0.0006 /
   +0.0002 ± 0.0016, the long stories +0.0014 / −0.0002.
+- So the reuse closed the gap at 9600 (R-N15-B5: +0.0085), but no H-Net
+  beats the flat yet.
 - **The flat's virtual schedule** (two seeds each, wv at 3230): Cyclic
   (0,1,2,3,4,0,1) **0.8602**, `m2` (0,1,2,2,2,3,4) 0.8630 (+0.0028),
   `m13` (0,1,1,2,3,3,4) 0.8699 (+0.0097, worse in both seeds). So the
@@ -77,7 +83,7 @@ Terms:
 
 | run | shape (change from its base) | wv | peak MB |
 |---|---|---|---|
-| L-R-N125-r128s11V2-m5-d | stage d128 1+1 R1D r 128 × 2+2 untied applications, N 1.25, main d128 × 5 C2D r 64 rf 0.5 | **0.8533** | 3482 |
+| L-R-N125-r128s11V2-m5-d / -s1-d | stage d128 1+1 R1D r 128 × 2+2 untied applications, N 1.25, main d128 × 5 C2D r 64 rf 0.5 | 0.8533 / 0.8756 | 3482 |
 | L-R-N125-B5-d / -s1-d | R-N15-B5 × N 1.25 | 0.8638 / 0.8624 | 3386 |
 | L-R-N15-r64V7-d / -s1-d | R-N15-B5 × stage r 64 × main V 7 (0,1,1,1,1,1,2, untied) | 0.8644 / 0.8675 | 3452 (max 3592) |
 | L-R-N15-r64sV5-d | R-N15-B5 × stage r 64 × 5+5 untied applications | 0.8670 | 3522 |
@@ -107,7 +113,8 @@ Terms:
   library change):
   - At r 64 it does not pay (5+5: 0.8670).
   - At r 128 it pays: 1+1 real × 2+2 applications free ~260k params for a
-    main × 5 (R-N125-r128s11V2-m5: 0.8533, §1).
+    main × 5 (R-N125-r128s11V2-m5: ties the flat at 9600, a large seed
+    spread, §1).
   - At r 104 / r 100 an extra stage application is over the band (§7).
 - **Main reuse**: R-N15-r64V7 (stage r 64, main × 7 untied, 0,1,1,1,1,1,2)
   ties R-N15-B5 at 3230, then leads it (−0.0055 at 5630, −0.0076 at 9600)
@@ -188,7 +195,7 @@ Terms:
   batch (a `.tar.gz` stalls Kaggle's unpacking for hours).
 - `kpush.sh` runs the LR check (`lrprof.py --batch`) before a push.
 - `kwait.sh` queues `long.sh` for the pulled `-d` runs here, but it misses
-  some `== <run>-d:` headers (5 so far): check each pulled `-d` run.
+  some `== <run>-d:` headers (8 so far): check each pulled `-d` run.
 - Only `probes.txt`, `knobs.txt`, `ctxg.txt` and `speeds.txt` come back as
   text. A Kaggle dose: read the peaks in the pulled `runs/dose-*`.
 - The CLI cannot cancel a kernel (the user does it on the web). The flat
