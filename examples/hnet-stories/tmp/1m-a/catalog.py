@@ -64,6 +64,7 @@ NOTES = {
     "R-N125-r128s11V2-m5V6c-st2": "the same at N 1.25 (over the band)",
     "R-N125-r128s11V2-m5-st2": "R-N125-r128s11V2-m5 with 2 start rows (the "
                                "trim test)",
+    "R-N125-r128s11V2-m5-st8": "R-N125-r128s11V2-m5 with 8 start rows",
     "R-N125-r128s11V2-m5-mg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in every "
                                "stack (as the flat)",
     "R-N125-r128s11V2-m5-mmg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in the "

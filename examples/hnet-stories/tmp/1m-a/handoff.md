@@ -15,8 +15,9 @@ findings).
     (`ps -ef | grep '[k]wait.sh'`): wait for `COMPLETE`
     (`kaggle/kg.sh kernels status <owner>/hnet-1m-a-runner`), then
     `kaggle/kpull.sh`.
-- **Here**: nothing runs (user, 2026-10-12: no new runs until the Kaggle
-  batch ends). Four candidates are dosed in the band (step 3).
+- **Here**: no training (user, 2026-10-12: no new runs until the Kaggle
+  batch ends). Four candidates are dosed in the band (step 3), and the
+  dose of `-st8` (step 4) ends ~05:30.
 - The binaries: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3`, the flat's
   `ts-cuda` = `v0.67.0-4dd4cb8-dirty-99dc0dcf`. No cron (session-only).
 
@@ -51,8 +52,15 @@ findings).
    | `R-N15-r64V7c` | a Cyclic main against R-N15-r64V7's 0,1,1,1,1,1,2 (user: the H-Net main schedule) | 3592 |
 
    Rank each against its base at 3230; two seeds if the gap is < 0.01.
-4. **Then stage + main reuse again**: the first try lost 0.019 with three
-   changes in it (`notes.md` §4). Use the results of step 3 (the trim, the
-   schedule). At N 1.25 one main application is over the band: 8 stage
-   heads (p 32, the same state size) could give the page back.
-5. At the session end: drain `tmp.md` into `notes.md`.
+4. **The start rows** (user): the stage + main reuse screen lost 0.019,
+   and two of its three changes were neutral alone (`notes.md` §4).
+   - If `-st2` loses: the start rows matter. Screen
+     `R-N125-r128s11V2-m5-st8` (8 rows, 992,177, its dose in
+     `doses.txt`), then consider start rows per stack (the main): a
+     burn-stack change, as an H-Net stack takes no class markers today.
+   - If `-st2` ties: the measured changes did not compose. Look at N 1.5 ×
+     main reuse on the r 128 shape.
+5. **Then stage + main reuse again**, with the results of steps 3–4 (the
+   trim, the schedule). At N 1.25 one main application is over the band:
+   8 stage heads (p 32, the same state size) could give the page back.
+6. At the session end: drain `tmp.md` into `notes.md`.

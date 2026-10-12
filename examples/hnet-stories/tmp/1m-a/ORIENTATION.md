@@ -80,7 +80,9 @@ them, so:
 ## Working notes
 
 - Models before seeds. Rank by long runs. Add a seed where a decision needs
-  it. **One change per screen** against its base.
+  it. A screen can combine changes that were measured alone, plus a cheap
+  untested one. When it surprises, either the untested change matters or
+  the measured ones do not compose: a one-change screen tells which.
 - Name a variant by its change from its base (`R-N15 × main d152 × 4`).
   `catalog.py` prints the shape, the params, the dose and the role of each
   model (`python3 catalog.py > catalog.txt`; the roles are in the script).

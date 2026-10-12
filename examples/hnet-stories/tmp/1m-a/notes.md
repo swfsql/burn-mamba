@@ -118,8 +118,13 @@ Terms:
   R-N15-r128s11V2-m5V6c-st2 (N 1.5, main V 6 Cyclic, `start=2` as the
   trim) loses 0.019 against the leader: wv +0.0190 ± 0.0016, the long
   stories +0.022, far own +0.021, and the same with no prompt (the recall
-  gain is equal). So it models the text worse. Three changes: not
-  separable yet (the start rows untested: R-N125-r128s11V2-m5-st2, dosed).
+  gain is equal). So it models the text worse. Two of its three changes
+  were neutral alone (N 1.5 on R-N15-B5, main reuse on R-N15-r64V7). The
+  start rows were never tested (4 came from mnist-class). So either the
+  start rows matter, or the measured changes do not compose:
+  R-N125-r128s11V2-m5-st2 (dosed) tells which. If they matter: more start
+  rows (`-st8`, dosed), and start rows per stack (a burn-stack change: an
+  H-Net stack takes no class markers today).
 - **The residuals**: every H-Net stack is `Standard` (`mgr=0`, `mmgr=0`),
   the flat is Multi-Gate 4. In the flat (`1m-b`) the standard residual
   lost 0.046 (Multi-Gate 3 / 6: +0.011 / +0.017). The H-Net's one test
@@ -199,8 +204,10 @@ Terms:
   +0.019 at 9600, a wrong "closed". The fix: the protocol in the config,
   `lrprof.py --fill` for 50 trunks, `--guard` (`extend.sh`) and `--batch`
   (`kpush.sh`).
-- **One change per screen**: the stage + main reuse screen changed three
-  things, so its loss cannot be placed.
+- **A combined screen tests the composition** (user): it can join changes
+  measured alone with a cheap untested one. A surprise then says that the
+  untested change matters or that the measured ones do not compose, and a
+  one-change screen tells which.
 - **A regeneration of `cfg/`** can change old configs through a newer
   default (156 got `bucket`): compare against a backup, keep the old files.
 - **The queue**: read `queue.txt` again before a Write (`queue.sh` changes
