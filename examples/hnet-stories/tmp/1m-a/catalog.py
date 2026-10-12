@@ -52,6 +52,7 @@ NOTES = {
     "tmp-v-C2": "S4 N 2 d64, outer 3+3, r 256 ×4, main d64 (under, 1.012M)",
     "R-N15-r64V7": "main reuse: stage r 64, the main × 7 applications",
     "R-N15-r64V7-s1": "R-N15-r64V7, seed 1",
+    "R-N15-r64V7c": "R-N15-r64V7 with a Cyclic main (the schedule test)",
     "R-N15-r64sV4": "stage reuse at r 64: 4+4 applications (under the band)",
     "R-N15-r64sV5": "stage reuse at r 64: 5+5 applications",
     "R-N15-r128s11V2-m5": "stage reuse at r 128: 1+1 real × 2+2, main × 5 "
