@@ -61,6 +61,10 @@ NOTES = {
     "R-N15-r128s11V2-m5V6c-st2": "stage + main reuse: R-N15-r128s11V2-m5 "
                                  "× main V 6 (Cyclic), 2 class tokens",
     "R-N125-r128s11V2-m5V6c-st2": "the same at N 1.25 (over the band)",
+    "R-N125-r128s11V2-m5-mg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in every "
+                               "stack (as the flat)",
+    "R-N125-r128s11V2-m5-mmg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in the "
+                                "main only",
 }
 # The flat reference: another workspace and another gen.py (by hand).
 FLAT = ("h16-V7u", 995921, 3455,
