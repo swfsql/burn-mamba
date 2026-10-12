@@ -4,7 +4,7 @@ Read this file, then `ORIENTATION.md` (**its strict rules first**: they
 come from the user and must survive every rewrite), then `notes.md` (the
 findings).
 
-## State (2026-10-12 03:00)
+## State (2026-10-12 05:00)
 
 - **Kaggle** (kernel version 33, batch `20261012-013449`): R-N125-r128s11V2-m5
   on the protocol, `ctx.sh` after each leaf.
