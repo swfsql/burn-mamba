@@ -193,7 +193,9 @@ Terms:
   (F-r1d-sr104 1.1076 against F-base 1.1294).
 - **The trapezoid** (and the B/C bias) replace the deleted short conv:
   Trapezoid None lost 0.042 and 0.064.
-- **Lost**: main virtual layers (Cyclic +0.020, middle-heavy +0.010), main
+- **Lost**: main virtual layers (Cyclic +0.020 on b × N 3, middle-heavy
+  +0.010 on F with a main r 96 too: two bases, so not a schedule
+  comparison; the new protocol: R-N15-r64V7c, `handoff.md`), main
   × 2 (+0.027), stage 1+1 with a heavier main (+0.025–0.06), a main at r 32
   (+0.027), stage 3+3 at d112 (+0.007), stage 4+4 at d96 (+0.08,
   unstable).
