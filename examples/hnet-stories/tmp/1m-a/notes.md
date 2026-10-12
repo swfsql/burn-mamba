@@ -25,18 +25,18 @@ Terms:
   stories, paired): the s.e. of a difference is ~0.001 on the far bits,
   ~0.01 on the re-mention first letter. The valid bits hide the recall.
 - **The seed noise**: R-N15-B5 at seeds 0 and 1 differ by 0.008 in wv (the
-  same shift in every row and in the recall). One run per shape ranks only
-  a gap ≳ 0.01.
+  same shift in every row and in the recall), the flat h16-V7u by 0.0085.
+  One run per shape ranks only a gap ≳ 0.01.
 
-## 1. The result: a flat at both ceilings ties the H-Net, then leads
+## 1. The result: stage reuse at r 128 leads the flat at 3230
 
 | milestone | best H-Net (wv) | h16-V7u (flat, both ceilings) | h16 (old flat) |
 |---|---|---|---|
-| 3230 | R-N15-B5 0.8688 / 0.8605, R-N125-B5 0.8638 / 0.8624, R-N15-r64V7 0.8644 / 0.8675 | **0.8644** | 0.8868 |
-| 5630, the protocol | R-N15-B5 0.8143, R-B5 0.8204 | **0.8037** | 0.8204 |
+| 3230 | **R-N125-r128s11V2-m5 0.8533** (one seed); R-N15-B5 0.8688 / 0.8605, R-N125-B5 0.8638 / 0.8624, R-N15-r64V7 0.8644 / 0.8675 | 0.8644 / 0.8559 (mean **0.8602**) | 0.8868 |
+| 5630, the protocol | R-N15-r64V7 0.8088 / 0.8087, R-N15-B5 0.8143, R-B5 0.8204 | **0.8037** | 0.8204 |
 | 5630, step-down at 2630 | 0.7962 / 0.8020 / 0.8046 | **0.7968** | 0.8197 |
-| 9600 | R-N15-B5 0.7572, R-B5 0.7608 | **0.7487** | 0.7660 |
-| 14400 | R-N15-B5 0.7308, R-B5 0.7320 | not run | 0.7412 |
+| 9600 | R-N15-r64V7 0.7501 / 0.7490, R-N15-B5 0.7572, R-B5 0.7608 | **0.7487** | 0.7660 |
+| 14400 | R-N15-B5 0.7308, R-B5 0.7320 | **0.7220** | 0.7412 |
 
 - **h16** (the flat reference until 2026-10-11) is under both ceilings:
   969,481 params, no gc, a 3149 MB peak. Every H-Net lead over it (3230:
@@ -46,13 +46,31 @@ Terms:
   application), under gc: 995,921 params, a 3455 MB peak, 1.03 steps/s
   here. It gains 0.022 on h16 at 3230. Other flats at 3230: fr-d152 (the
   H-Net's Real1D r 128 block) 0.8792, h16-B (7 slots) 0.8924.
-- Against h16-V7u, the H-Net ties at 3230 (6 runs at N 1.25–1.5, mean
-  0.8646). It ties at 5630 when each model has its best schedule (§2).
-  **At 9600 the flat leads by 0.0085.**
+- Against h16-V7u (two seeds at 3230: mean 0.8602), the R-B5 family
+  trails: by 0.003–0.006 at 3230 (two-seed means), by 0.0085 at 9600 and
+  by 0.0086 ± 0.0016 at 14400 (R-N15-B5). It ties at 5630 when each model
+  has its best schedule (§2).
+- **R-N125-r128s11V2-m5** (stage reuse at r 128, §4) at 3230: wv 0.8533,
+  −0.0069 against the flat mean. Paired against flat seed 0 (flat seed 1
+  in brackets): wv −0.0102 ± 0.0019 (−0.0078), the long stories −0.0108
+  ± 0.0016 (−0.0079), far own −0.0171 ± 0.0013 (−0.0115), re-mention
+  letters own −0.126 ± 0.006 (−0.062). It beats both flat seeds on every
+  row. One seed (its seed 1 and its 5630 / 9600 runs: `handoff.md`).
+- **R-N15-r64V7** (main reuse) ties the flat at 9600: paired wv +0.0006 /
+  +0.0002 ± 0.0016, the long stories +0.0014 / −0.0002.
 - The long stories, paired against h16-V7u: 3230 R-N15-B5 +0.005 /
   −0.004, R-N125-B5 −0.002 / −0.007, R-N15-r64V7 +0.002 / +0.003, R-B5
   +0.012. 5630 (the protocol): R-N15-B5 +0.011. 9600: R-N15-B5 +0.009 ±
   0.0015.
+- **The flat's virtual schedule** (user; two seeds each, wv at 3230):
+  Cyclic (0,1,2,3,4,0,1: the extras at the top, on the first layers)
+  **0.8602**, `m2` (0,1,2,2,2,3,4) 0.8630 (+0.0028), `m13`
+  (0,1,1,2,3,3,4) 0.8699 (+0.0097, worse in both seeds). The middle
+  placement does not help this flat, and two layers applied twice is the
+  worst. `m2` gains ~0.017 on the re-mention letters in each seed pair.
+  The letters are ~12% of the chars of the far window, and there the gain
+  and the loss on the other chars cancel: `m2` trades the local
+  prediction for the entity recall.
 
 ## 2. The LR schedule: the H-Net steps down at about half of its budget
 
@@ -67,10 +85,16 @@ Terms:
   | 2630 | −0.012 (R-N15-B5), −0.016 (R-B5), seed 1 at 0.7962 | h16 −0.0007, h16-V7u −0.007 | +0.010 |
   | 4630 (the protocol) | 0 | 0 | 0 |
   | 6315 | | | +0.001 / +0.002 |
+  | none (4e-3 to 8000) | | | +0.019 (R-N15-r64V7, two seeds) |
 
 - So the H-Net wants the step-down at 47–66% of the budget. At 27% or 82%
-  it loses ~0.01. The protocol's 5630 milestone (82% at 4e-3) is bad for
-  the H-Net. The h16-V7u flat gains from the early step-down too.
+  it loses ~0.01, with no step-down 0.019. The protocol's 5630 milestone
+  (82% at 4e-3) is bad for the H-Net. The h16-V7u flat gains from the
+  early step-down too.
+- **The trunk schedule is in the config** (as in the flat): `gen.py`
+  writes the protocol, so `extend.sh` follows it with no `--lr`. `--lr` is
+  only for a deliberate step-down. `lrprof.py` checks a run against the
+  protocol and guards `extend.sh` and `kpush.sh` (§9).
 - The trunks at 1e-3 from 2630 stall (0.8425 / 0.8284 / 0.8216 at 4630 /
   6315 / 8000). At 4e-3 the R-B5 trunk progresses slower than the flat's
   (2630 → 4630: −0.039 against −0.064). The R-N15-B5 trunk does not (4630:
@@ -82,6 +106,8 @@ Terms:
 
 | run | shape (change from its base) | wv | peak MB |
 |---|---|---|---|
+| L-R-N125-r128s11V2-m5-d | stage d128 1+1 R1D r 128 × 2+2 untied applications, N 1.25, main d128 × 5 C2D r 64 rf 0.5 | **0.8533** | 3482 |
+| L-R-N15-r64sV5-d | R-N15-B5 × stage r 64 × 5+5 untied applications (mmlp 8) | 0.8670 | 3522 |
 | L-R-N15-B5-d / -s1-d | stage d128 2+2 R1D r 104, main d128 × 3 C2D r 64, N 1.5 | 0.8688 / 0.8605 | 3386 |
 | L-R-N125-B5-d / -s1-d | R-N15-B5 × N 1.25 | 0.8638 / 0.8624 | 3386 |
 | L-R-N15-r64V7-d / -s1-d | R-N15-B5 × stage r 64 × main V 7 (0,1,1,1,1,1,2, untied) | 0.8644 / 0.8675 | 3452 (max 3592) |
@@ -111,7 +137,22 @@ Terms:
 - **The main carries the recall**: a weaker main (R-B5-s144b) and deep
   compression lose it.
 - **Stage rank against main reuse**: R-N15-r64V7 (stage r 64, the freed
-  VRAM and params on 7 main applications) ties R-N15-B5 at 3230.
+  VRAM and params on 7 untied main applications, 0,1,1,1,1,1,2) ties
+  R-N15-B5 at 3230, then leads it: −0.0055 at 5630, −0.0076 at 9600 (two
+  seeds each), where it ties the flat (§1).
+- **Stage reuse** (virtual layers in a stage: `gen.py` `eV`/`dV`, untied,
+  no library change):
+  - At r 64 it does not pay: 4+4 applications of 2+2 real are under the
+    band (3000 MB), 5+5 gives 0.8670 (R-N15-B5 mean 0.8647).
+  - At r 128 the real layers pay for it: 1+1 real × 2+2 applications free
+    ~260k params for a main × 5. At N 1.5 it is one page under the band
+    (3193 MB). N 1.25 spends that page with no params (3482 MB):
+    R-N125-r128s11V2-m5, 0.8533 (§1).
+  - At r 104 / r 100 an extra stage application is over the band (§7).
+- **Stage + main reuse** (the next design): one untied main application
+  of the r 128 shape costs 8.6k params (225 over the cap) and ~290 MB at
+  N 1.25 (3771 MB: over). `start=2` (2 class tokens, not 4) trims 256.
+  At N 1.5 it doses 3482 MB (R-N15-r128s11V2-m5V6c-st2).
 - **Two stages at total N 2** (S2a2-B5): +0.024 at 3230, +0.020 at 5630
   (the long stories +0.020). Its recall equals R-B5's at 5630.
 - **Deep compression** (S2 at N 4/4, d112): +0.13 at 3230, +0.108 at 5630
@@ -172,12 +213,22 @@ Terms:
 - **What moves the peak**: the stages set it (the 1024 slot). The
   [s, h, r] tensors dominate: the heads × the state rank. A head dim of 8
   doubles the heads and the stage VRAM (d64, d112: over the band). At d144,
-  18 heads and 16 heads differ by < 1 page. A state rank costs the VRAM of
-  the next power of two: at d144, r 64 → r 104 is +60%. N moves the peak
-  little. A main at expand 1 is cheap (R-B5-s144: −200 MB against R-B5).
+  18 heads and 16 heads differ by < 1 page. A main at expand 1 is cheap
+  (R-B5-s144: −200 MB against R-B5).
+- **Use a power-of-2 state rank** (user): another rank jumps in the
+  pages, and it can cost more than the next power of 2. Stage r 128
+  against r 104 / r 96 (probes, MB): R-N15-B5 2617 against 2906, `eV3`
+  3099 against 3678, `s11V2-m5` 2906 against 3485 (r 96). The flat
+  (`1m-b`): h16 × r 96 3995, h16 × r 128 3776. At d144, r 64 → r 104 is
+  +60%.
+- **The cost of one more application** (MB): a stage application at r 64
+  ~170 (probe), at r 128 ~480 (probe). A main application at N 1.25 ~290
+  (dose: 3482 → 3771). N 1.5 → 1.25 at the r 128 shape: +290 (dose:
+  3193 → 3482). Otherwise N moves the peak little.
 - **The probe → run factor** is × 1.0 (S4, the flat), × 1.06–1.08 (S2 at
-  N 4/4), × 1.06–1.34 (S = 1: R-B5-s144 × 1.06, R-N15-B5 × 1.17,
-  R-N15-r64V7 × 1.34). Dose every shape.
+  N 4/4), × 1.06–1.34 (S = 1: R-B5-s144 × 1.06, R-N15-r64sV4 × 1.15,
+  R-N15-B5 × 1.17, R-N15-r64V7 × 1.34). Dose every shape. `gate.sh` lets a
+  queue line screen a shape only after a dose in the band.
 - **The flat**: gc saves ~690 MB at h16 (3149 → 2460). Each untied virtual
   application adds ~460 MB under gc (V6u 2996, V7u 3455).
 - The knob table of the old protocol (Complex2D base, ±150 MB) is
@@ -195,9 +246,14 @@ Terms:
   cannot cancel a kernel: the user does it on the web. An environment
   reset can remove the CLI: the user installs it again.
 - `kwait.sh` queues `long.sh` for the pulled runs in the local queue (a
-  GPU job beside a probe spoils it). It missed the `== <run>-d:` header of
-  one pulled `-d` run twice (L-R-B5-x12000-d, L-R-B5-sd2630-d), so it
-  queued no `long.sh` for it. Check each pulled `-d` run.
+  GPU job beside a probe spoils it). It misses the `== <run>-d:` header of
+  a pulled `-d` run often (L-R-B5-x12000-d, L-R-B5-sd2630-d, three
+  r64V7 leaves), so it queues no `long.sh` for it. Check each pulled `-d`
+  run.
+- `kpush.sh` runs the LR check (`lrprof.py --batch`) and does not push a
+  batch that leaves the protocol with no `--lr`.
+- A T4 runs R-N15-r64V7 at ~1.46 s/step. The pieces of a chain cost no
+  time: each starts in the second the last one ends.
 - Only `probes.txt`, `knobs.txt`, `ctxg.txt` and `speeds.txt` come back
   as text. A dose on Kaggle: read the peaks in the pulled `runs/dose-*`.
 - The flat cannot run on Kaggle: the runner and the payload know only
@@ -210,6 +266,19 @@ Terms:
   0.015–0.026.
 - **Compare two models on the same schedule**: the step-down position
   moves a result by ~0.01, and differently for the H-Net and the flat.
+- **The trunk schedule belongs in the config** (2026-10-11): the H-Net
+  configs held only the ramp, so its protocol needed `--lr 1e-3` at the
+  4630 → 6315 piece. The R-N15-r64V7 batch omitted it, and nothing
+  checked: 4e-3 to 8000, +0.019 at 9600, a wrong "closed". The fix:
+  `gen.py` writes the protocol (`stages`), `lrprof.py --fill` gave it to
+  50 trunks, and `lrprof.py --guard` / `--batch` guard `extend.sh` and
+  `kpush.sh`. Check the schedule (`lrprof.py <run>`) before a verdict.
+- **A regeneration of `cfg/`** can change old configs through a newer
+  default (156 old-protocol configs got `bucket`): compare against a
+  backup, and keep the old files.
+- **Read, Write, then start the queue**: a Write of `queue.txt` fails
+  when `queue.sh` changed the file. In one parallel call with the start,
+  the queue starts empty and exits.
 - **A new config field** (strict rule 9): never an `Option`. A Burn config
   default does not apply when a config loads.
 - A run that starts in the second of a kill can fail in cubecl: wait ~20 s.

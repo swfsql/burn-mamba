@@ -4,40 +4,62 @@ Read this file, then `ORIENTATION.md` (**its strict rules first**: they
 come from the user and must survive every rewrite), then `notes.md` (the
 findings).
 
-## State (2026-10-11 17:40)
+## State (2026-10-12 03:00)
 
-- **Nothing runs**: an idle GPU, no Kaggle kernel, no waiters, no cron.
-  `queue.txt` and `kaggle/kqueue.txt` are empty.
-- **The binaries**: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3` (unchanged).
-  The flat's `../../../tiny-stories/tmp/1m-cased/bin/ts-cuda` =
-  `v0.67.0-4dd4cb8-dirty-99dc0dcf` (rebuilt 2026-10-11: it has
-  `--vram-cleanup-every` and the `peak` measure).
-- **The result** (`notes.md` §1): the flat reference h16 was under both
-  ceilings. The flat at both ceilings is **h16-V7u**. It ties the best
-  H-Nets at 3230 (0.8644) and at 5630 (each at its best schedule). It
-  **leads by 0.0085 at 9600** (0.7487 against R-N15-B5's 0.7572).
-- **The best H-Nets**: R-N15-B5 and R-N125-B5 (N 1.25 = N 1.5), and
-  R-N15-r64V7 (stage r 64 + main V 7: a draw). Closed: deep compression
-  (N 4/4), two stages at total N 2, a d144 stage paid by the main.
-  Parked: S4 / d64 (no design near both ceilings).
-- **The LR** (`notes.md` §2): the H-Net wants its step-down at about half
-  of the budget. Compare two models on the same schedule.
+- **Kaggle** (kernel version 33, batch `20261012-013449`): R-N125-r128s11V2-m5
+  on the protocol, `ctx.sh` after each leaf.
+  - gpu0, seed 0 (from the trunk `L-R-N125-r128s11V2-m5`): `-x4630(-d)`,
+    `-t6315`, `-x8000(-d)`. Ends ~05:00.
+  - gpu1, seed 1: the screen `L-R-N125-r128s11V2-m5-s1(-d)`, then
+    `-s1-x4630(-d)`, `-s1-t6315`, `-s1-x8000(-d)`. Ends ~06:20.
+  - A `kwait.sh` (started in the old session, log `/tmp/kpush-13.log`)
+    pulls it and queues `long.sh`. If no `kwait.sh` runs
+    (`ps -ef | grep '[k]wait.sh'`), wait for the kernel status
+    `COMPLETE` (`kaggle/kg.sh kernels status <owner>/hnet-1m-a-runner`),
+    then run `kaggle/kpull.sh`.
+- **Here**: the screen of `L-R-N15-r128s11V2-m5V6c-st2` (stage + main
+  reuse, dose 3482 MB) ends ~04:10. The same queue line then runs
+  `long.sh` and `ctx.sh`. Then the queue is empty, and `queue.sh` exits.
+- **No new runs** (user, 2026-10-12): wait for these, then start the next
+  session's plan.
+- **The binaries** are unchanged: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3`,
+  the flat's `ts-cuda` = `v0.67.0-4dd4cb8-dirty-99dc0dcf`.
+- No cron: a heartbeat is session-only. Start one again if you need it.
+- `tmp.md` is empty: its findings went into `notes.md`.
+
+## The result (`notes.md` §1)
+
+- **R-N125-r128s11V2-m5** (stage 1+1 real R1D r 128 × 2+2 untied
+  applications, N 1.25, main d128 × 5) beats both flat seeds at 3230: wv
+  0.8533 against the flat mean 0.8602, also on the long stories and the
+  recall. One seed.
+- **R-N15-r64V7** (main reuse) ties the flat at 9600 (0.7501 / 0.7490
+  against 0.7487).
+- **The flat h16-V7u**: 0.7220 at 14400. Cyclic is its best virtual
+  schedule (two seeds each against the middle placements).
+- The trunk schedule is in the config now (`notes.md` §2, §9):
+  `extend.sh` needs no `--lr` for the protocol.
 
 ## Next steps
 
-1. **Can an H-Net beat h16-V7u?** That is now the question of the search.
-   Rank every candidate against h16-V7u at the same milestone and
-   schedule.
-2. **Complete the flat reference** (here: the flat cannot run on Kaggle).
-   - h16-V7u to 14400: `extend.sh h16-V7u-x8000 …` with the 8000–12000
-     anneal, ~2 h in pieces < 1 h.
-   - A second seed at 3230, if a decision needs it.
-3. **H-Net ideas from the flat's lesson** (depth by reuse pays in the
-   flat):
-   - R-N15-r64V7 at 5630 and 9600: does main reuse keep up later?
-   - Virtual layers in the stages (`gen.py` has `mV` for the main only:
-     check if burn-stack takes them in a stage stack).
-4. **Tools**: `kwait.sh` / `kpull.sh` can miss a `-d` run (`notes.md` §8).
-   The flat could go to Kaggle with a payload and runner change, if its
-   curve needs parallel runs.
-5. At the session end: drain `tmp.md` into `notes.md`.
+1. **Collect the Kaggle batch.** Check each pulled `-d` run for its
+   `long.sh` (`kwait.sh` misses some headers). Check the schedules:
+   `python3 lrprof.py <runs>` (all should print nothing: on the protocol).
+2. **Rank R-N125-r128s11V2-m5 (two seeds) against h16-V7u**: 3230 (flat
+   mean 0.8602), 5630 (0.8037), 9600 (0.7487). Use `longstat.py -w` and
+   `ctxstat.py` against the flat runs (`-t` dirs in `long/`; the flat's
+   recall is in `../../../tiny-stories/tmp/1m-cased/ctxg/`).
+3. **Read the stage + main reuse screen** (`L-R-N15-r128s11V2-m5V6c-st2-d`)
+   against R-N125-r128s11V2-m5 at 3230. It has three changes from it:
+   main V 6 (Cyclic), N 1.5, 2 class tokens (`start=2`, the param trim).
+4. **If R-N125-r128s11V2-m5 holds at 9600**: take it to 14400 (the flat:
+   0.7220) in pieces < 1 h (`-x10000` +2000 with no leaf, then `-x12000`
+   +2000 and the leaf of 2400). The configs hold the whole protocol, so
+   no `--lr`.
+5. **Designs to try** (dose first, `gate.sh` in the queue line):
+   - Stage + main reuse at N 1.25 is over the band (3771 MB). A VRAM trim
+     could give the page back (8 stage heads at p 32: the same state
+     size, less VRAM, −8k params).
+   - The 225-param trim of a main application: `start=2` now. Ask the
+     user if another trim is preferred.
+6. At the session end: drain `tmp.md` into `notes.md`.

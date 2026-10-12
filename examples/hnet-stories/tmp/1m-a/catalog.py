@@ -50,10 +50,22 @@ NOTES = {
     "S4x-s64e2-L4": "four stages at N 2, d64 (under the band)",
     "tmp-v-B2": "S2 N 4/4 d64, outer 3+3 + inner 2+2 (one page under)",
     "tmp-v-C2": "S4 N 2 d64, outer 3+3, r 256 ×4, main d64 (under, 1.012M)",
+    "R-N15-r64V7": "main reuse: stage r 64, the main × 7 applications",
+    "R-N15-r64V7-s1": "R-N15-r64V7, seed 1",
+    "R-N15-r64sV4": "stage reuse at r 64: 4+4 applications (under the band)",
+    "R-N15-r64sV5": "stage reuse at r 64: 5+5 applications",
+    "R-N15-r128s11V2-m5": "stage reuse at r 128: 1+1 real × 2+2, main × 5 "
+                          "(one page under)",
+    "R-N125-r128s11V2-m5": "R-N15-r128s11V2-m5 at N 1.25 (the page)",
+    "R-N125-r128s11V2-m5-s1": "R-N125-r128s11V2-m5, seed 1",
+    "R-N15-r128s11V2-m5V6c-st2": "stage + main reuse: R-N15-r128s11V2-m5 "
+                                 "× main V 6 (Cyclic), 2 class tokens",
+    "R-N125-r128s11V2-m5V6c-st2": "the same at N 1.25 (over the band)",
 }
 # The flat reference: another workspace and another gen.py (by hand).
-FLAT = ("h16", 969481, "-",
-        "flat | d160×5 e2 C2D r64 h16 (p 20) | packed 2 × 4224, no gc",
+FLAT = ("h16-V7u", 995921, 3455,
+        "flat | d160×5 V7 (Cyclic, untied) e2 C2D r64 h16 (p 20) | packed "
+        "2 × 4224, gc",
         "the flat reference (../../../tiny-stories/tmp/1m-cased)")
 # A model dosed under another config of the same VRAM (mmlp is VRAM-free).
 DOSE_AS = {"S2x-e21h16-L4": "tmp-v-P4", "S2x-e21h16-L4-lrm": "tmp-v-P4"}
@@ -100,6 +112,9 @@ def shape(name):
         st += f" m{j(m)}"
     if set(stage_vals(a, "smlp")) != {"0"}:
         st += f" mlp{j(stage_vals(a, 'smlp'))}"
+    ev, dv = stage_vals(a, "eV"), stage_vals(a, "dV")
+    if set(ev) != {"0"} or set(dv) != {"0"}:
+        st += f" V{j(f'{ev[s]}+{dv[s]}' for s in range(S))}"
     mh = a["md"] * a["me"] // a["mp"]
     main = (f"main d{a['md']}×{a['mL']} e{a['me']} {ROT.get(a['mrot'], a['mrot'])} "
             f"r{a['mr']} h{mh}")
@@ -118,7 +133,7 @@ def shape(name):
     if a["buckets"] != DEFAULTS["buckets"]:
         extra.append("first 1024 chars (old)" if not a["buckets"]
                      else f"{len(str(a['buckets']).split(','))} slots")
-    for k in ("seed", "trap", "bias", "alpha", "wd", "rr", "rf", "mgr"):
+    for k in ("seed", "trap", "bias", "alpha", "wd", "rr", "rf", "mgr", "start"):
         if a[k] != DEFAULTS[k]:
             extra.append(f"{k}={a[k]}")
     if extra:
