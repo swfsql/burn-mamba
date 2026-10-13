@@ -111,7 +111,12 @@ cat > "$pay/kernel/kernel-metadata.json" <<EOF
  "dataset_sources": ["$owner/hnet-corpus", "$payset"],
  "competition_sources": [], "kernel_sources": [], "model_sources": []}
 EOF
-"$here/kg.sh" kernels push -p "$pay/kernel" -t 43200
+# The CLI exits 0 on a refused push (for example "Kernel push error: Maximum
+# weekly GPU quota of 30.00 hours reached."): accept only its success line.
+# A refused batch stays in kqueue.txt.
+out=$("$here/kg.sh" kernels push -p "$pay/kernel" -t 43200 2>&1 || true)
+echo "$out"
+grep -q "successfully pushed" <<< "$out" || { echo "kernel push refused: batch $ts not pushed"; exit 1; }
 { echo "== $ts $pay"; printf '%s\n' "$lines"; } >> "$here/kbatches.txt"
 : > "$here/kqueue.txt"
 echo "pushed batch $ts ($(wc -l <<< "$lines") lines)"

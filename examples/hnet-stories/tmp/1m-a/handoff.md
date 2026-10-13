@@ -4,49 +4,55 @@ Read this file, then `ORIENTATION.md` (**its strict rules first**: they
 come from the user and must survive every rewrite), then `notes.md` (the
 findings).
 
-## State (2026-10-12 06:30)
+## State (2026-10-13 08:30)
 
 - **Nothing runs**: an idle GPU here, no Kaggle kernel, no waiter, no
   cron. `queue.txt` and `kaggle/kqueue.txt` are empty.
-- Five candidates are dosed in the band and ready to screen (steps 1–2).
+- **Kaggle is at its weekly GPU quota** (refused 2026-10-13 05:40). The
+  reset time is unknown (likely 5–7 days). Plan the work for this card. A
+  push is the only test of the quota.
 - The binaries: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3`, the flat's
   `ts-cuda` = `v0.67.0-4dd4cb8-dirty-99dc0dcf`.
 
 ## The result (`notes.md` §1)
 
-- **Two H-Nets tie the flat h16-V7u at 9600** (two seeds each, wv 0.7487):
-  R-N125-r128s11V2-m5 (stage reuse at r 128) 0.7491, R-N15-r64V7 (main
-  reuse) 0.7496. R-N15-B5 trailed by 0.0085. No H-Net beats the flat yet.
-- R-N125-r128s11V2-m5 has a large seed spread (0.022 at 3230): its seed 0
-  beat the flat everywhere, its seed 1 lost everywhere.
-- The flat: 0.7220 at 14400; Cyclic is its best virtual schedule.
+- **R-N125-r128s11V2-m5-mg4 leads the flat h16-V7u** (wv, two-seed
+  means). The lead: −0.0013 at 3230 and at 5630 (two flat seeds), −0.0047
+  / −0.0051 at 9600 / 14400 (only the flat's seed 0). At 14400: 0.7174 / 0.7164
+  against 0.7220. On the long stories past char 1024: −0.022 / −0.021.
+- Multi-Gate 4 gains ~0.005 on its base at every milestone. It is the
+  default now (ORIENTATION, Shapes and budgets).
 
-## Next steps
+## Open questions
 
-1. **Screen the four dosed one-change candidates** (`doses.txt`), each
-   against its base at 3230, two seeds where the gap is < 0.01 (the seed
-   spread of the r 128 leader is large: compare seed pairs, or means):
+These are the questions as this session saw them, each with its
+evidence. They are not a plan: the plans of earlier handoffs steered the
+sessions after them (user). Re-decide the order from `notes.md`.
 
-   | config | the change | dose MB |
-   |---|---|---|
-   | `R-N125-r128s11V2-m5-mg4` | Multi-Gate 4 in every stack (the flat has it; the standard residual lost 0.046 in the flat) | 3482 |
-   | `R-N125-r128s11V2-m5-mmg4` | Multi-Gate 4 in the main only | 3482 |
-   | `R-N125-r128s11V2-m5-st2` | 2 start rows (the param trim of a main application) | 3482 |
-   | `R-N15-r64V7c` | a Cyclic main against 0,1,1,1,1,1,2 (user: the H-Net main schedule) | 3592 |
+1. **Does the lead hold against the flat's seed 1?** Seed 1 was better
+   than seed 0 by 0.0085 / 0.0031 at 3230 / 5630. So the lead of ~0.005
+   at 9600 / 14400 can shrink or go. Its trunk `h16-V7u-s1-x4630` is
+   ready (the chain: ORIENTATION, Protocol). Until then, "the H-Net beats
+   the flat" holds against one flat seed only.
+2. **Multi-Gate on main reuse**: `R-N15-r64V7-mg4` (+ `-s1`), 997,533
+   params, dosed 3592 MB, ready to screen. Its base R-N15-r64V7 ties the
+   flat at 9600. Its main routes over 7 applications, as the flat does,
+   where Multi-Gate gained 0.046.
+3. **The 8 stage heads** (`p=32`) free ~630 MB at the same state size,
+   but a stage application still costs ~480–590 MB.
+   - Screened: 8 heads × 3+3 × main V 6: +0.007 / +0.006 at 3230 / 5630
+     against the leader (one seed).
+   - Dosed: `R-N125-r128s11V4-m5-sp32-mg4` (4+4, no main reuse,
+     991,117) 3683 MB, 13 MB over the gate. Its N 1.5 twin is not made
+     (expected ~3440).
+   - The 8 heads alone were never measured: alone they sit under the
+     band.
+4. **Main reuse on the r 128 shape** lost ~0.006 twice (16 and 8 stage
+   heads). It paid on the r 64 shape (R-N15-r64V7). Why it does not
+   compose with stage reuse is open.
+5. **A deeper stage** comes from applications, not from real layers: a
+   real r 128 stage layer pair costs ~250k params (`notes.md` §4).
 
-2. **The start rows** (user): the stage + main reuse screen lost 0.019,
-   and two of its three changes were neutral alone (`notes.md` §4).
-   - If `-st2` loses: the start rows matter. Screen
-     `R-N125-r128s11V2-m5-st8` (8 rows, 992,177, 3482 MB), then consider
-     start rows per stack (the main): a burn-stack change, as an H-Net
-     stack takes no class markers today.
-   - If `-st2` ties: the measured changes did not compose. Look at N 1.5 ×
-     main reuse on the r 128 shape.
-3. **Then stage + main reuse again**, with the results of steps 1–2 (the
-   trim, the schedule, Multi-Gate). At N 1.25 one main application is over
-   the band: 8 stage heads (p 32, the same state size) could give the page
-   back.
-4. **14400**: take the best tie to 14400 (the flat 0.7220) when a design
-   is chosen: `-x10000` (+2000, no leaf), then `-x12000` (+2000, the leaf
-   of 2400). The configs hold the whole protocol: no `--lr`.
-5. At the session end: drain `tmp.md` into `notes.md`.
+The cost here (the leader's speed, ~1.34 s/step): a 3230 screen ~80 min,
++ ~80 min to 5630, + ~2 h to 9600, + ~2 h to 14400. The flat: ~1.1
+s/step, so its seed 1 needs ~3.5 h from 5630 to 14400.

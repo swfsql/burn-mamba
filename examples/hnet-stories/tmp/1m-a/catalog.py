@@ -65,10 +65,25 @@ NOTES = {
     "R-N125-r128s11V2-m5-st2": "R-N125-r128s11V2-m5 with 2 start rows (the "
                                "trim test)",
     "R-N125-r128s11V2-m5-st8": "R-N125-r128s11V2-m5 with 8 start rows",
-    "R-N125-r128s11V2-m5-mg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in every "
-                               "stack (as the flat)",
+    "R-N125-r128s11V2-m5-mg4": "the leader: R-N125-r128s11V2-m5 × Multi-Gate "
+                               "4 in every stack (as the flat)",
+    "R-N125-r128s11V2-m5-mg4-s1": "R-N125-r128s11V2-m5-mg4, seed 1",
     "R-N125-r128s11V2-m5-mmg4": "R-N125-r128s11V2-m5 × Multi-Gate 4 in the "
                                 "main only",
+    "R-N15-r128s11V2-m5V6c-st2-s1": "R-N15-r128s11V2-m5V6c-st2, seed 1",
+    "R-N125-r128s11V2-m5V6c-st2-sp32": "R-N125-r128s11V2-m5V6c-st2 × 8 stage "
+                                       "heads (p 32): the VRAM of the heads",
+    "R-N125-r128s11V3-m5-sp32": "the leader × 8 stage heads × 3+3 (+ mmlp 8; "
+                                "under the band)",
+    "R-N125-r128s11V3-m5V6c-st2-sp32-mg4": "8 stage heads × 3+3 × main V 6 "
+                                           "× st2 × mg4 (over by 13 MB)",
+    "R-N15-r128s11V3-m5V6c-st2-sp32-mg4": "the same at N 1.5 (the 8-head "
+                                          "reuse everywhere)",
+    "R-N15-r128s11V4-m5V6c-st2-sp32-mg4": "the same × 4+4 (over the band)",
+    "R-N125-r128s11V4-m5-sp32-mg4": "the leader × 8 stage heads × 4+4 (over "
+                                    "by 13 MB; N 1.5 not made)",
+    "R-N15-r64V7-mg4": "R-N15-r64V7 × Multi-Gate 4 (dosed, not run)",
+    "R-N15-r64V7-mg4-s1": "R-N15-r64V7-mg4, seed 1",
 }
 # The flat reference: another workspace and another gen.py (by hand).
 FLAT = ("h16-V7u", 995921, 3455,

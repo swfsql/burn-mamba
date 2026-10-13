@@ -79,17 +79,21 @@ them, so:
 
 ## Working notes
 
-- Models before seeds. Rank by long runs. Add a seed where a decision needs
-  it. A screen can combine changes that were measured alone, plus a cheap
+- **Kaggle is at its quota, or near it** (user, 2026-10-13). Plan the GPU
+  work for this card. A Kaggle batch is a bonus (see [Tools](#tools)).
+- Models before seeds. Rank by long runs. **Rank by two-seed means**: one
+  seed against one seed of the reference misreads a gap (`notes.md` §9).
+  A screen can combine changes that were measured alone, plus a cheap
   untested one. When it surprises, either the untested change matters or
   the measured ones do not compose: a one-change screen tells which.
+- A handoff gives open questions with their evidence. Its order is a
+  suggestion: re-decide it from `notes.md` (user, 2026-10-13: the plans
+  of earlier handoffs steered the sessions after them).
 - Name a variant by its change from its base (`R-N15 × main d152 × 4`).
   `catalog.py` prints the shape, the params, the dose and the role of each
   model (`python3 catalog.py > catalog.txt`; the roles are in the script).
 - One GPU job at a time here (a probe or a dose runs alone), one host job
   at a time (builds).
-- The long H-Net runs go to Kaggle. Here: the flat runs, the probes, the
-  doses, `long.sh`, `ctx.sh`, and a long run when this GPU would idle.
 - The dcg hook blocks in a command line: text like `<owner>/x`,
   `sleep N; …` chains, a `>` redirect to a variable path. Use a literal
   path or a script file.
@@ -115,20 +119,28 @@ them, so:
 - **The milestones**: stable 2630 / 4630 / 8000 / 12000, each with a decay
   leaf of 600 / 1000 / 1600 / 2400 (3230 / 5630 / 9600 / 14400).
   `screen.sh` runs the first, `extend.sh` the others. Nothing continues
-  from a leaf (`-d`).
+  from a leaf (`-d`). The chain: `extend.sh <run> <run>-x4630 2000 1000`,
+  `extend.sh …-x4630 …-t6315 1685 0`, `extend.sh …-t6315 …-x8000 1685
+  1600`, `extend.sh …-x8000 …-t10000 2000 0`, `extend.sh …-t10000
+  …-x12000 2000 2400`.
 - **Rank by the `wv` of the leaf**, with the long stories (`long.sh`) and
   the recall (`ctx.sh`) beside it. The flat's `wv` comes from `long.sh -t`.
-  The seed noise is ~0.008: one run ranks only a gap ≳ 0.01.
+  The seed noise is ~0.008 (more for some shapes, `notes.md` terms): one
+  run ranks only a gap ≳ 0.01.
 - Every H-Net run: `--grad-checkpointing`, `--max-vram 3750`,
   `--vram-cleanup-every 1` (`args.sh` adds them), `--ssd-path recalc:32`.
 - **The flat h16-V7u** lives in `../../../tiny-stories/tmp/1m-cased` (its
   own `gen.py`, `screen.sh`, `extend.sh`, `probe.sh`, `lrprof.py`,
-  `bin/ts-cuda`), runs `h16-V7u-s2` (3230; seed 1: `h16-V7u-s1-s2`),
-  `-x4630`, `-sd2630`, `-x8000`, `-x10000`, `-x12000` (14400). Its flags:
-  `--pack 4224 --pack-rows 2 --ssd-path recalc:128 --profile 100
-  --grad-checkpointing --vram-cleanup-every 1` (`extend.sh` needs no
-  `--pack`). Run it from this queue: `cd ../../../tiny-stories/tmp/1m-cased
-  && ./extend.sh …`. For the flat, a probe is a dose (× 1.0).
+  `bin/ts-cuda`). Seed 0: runs `h16-V7u-s2` (3230), `-x4630`, `-sd2630`,
+  `-x8000`, `-x10000`, `-x12000` (14400). Seed 1: `h16-V7u-s1-s2`
+  (3230), `h16-V7u-s1-x4630` (5630). Its flags: `--ssd-path recalc:128
+  --profile 100 --grad-checkpointing --vram-cleanup-every 1` (the screen
+  adds `--pack 4224 --pack-rows 2`; `extend.sh` needs no `--pack`). Its
+  chain differs: `-x4630` (2000 1000), `-x8000` (3370 1600), `-x10000`
+  (2000 0), `-x12000` (2000 2400). Run it from this queue: `cd
+  ../../../tiny-stories/tmp/1m-cased && ./extend.sh …`, then `./long.sh -g
+  -t ../../../tiny-stories/tmp/1m-cased/runs/<run>-d >> long.txt` here.
+  For the flat, a probe is a dose (× 1.0).
 
 ## VRAM
 
@@ -140,25 +152,33 @@ them, so:
   `peak` + ~140 MiB**.
 - **The dose target**: a `peak` of **~3400–3550 MB** (the process then
   stays < 3.6 GiB = 3865 MB). One page over (3592, 3663) is still < 3.6 GiB.
+  `gate.sh` stops at 3670 (3683 failed it twice).
 
 ## Shapes and budgets
 
 - **The dose** (strict rule 1): `probe.sh <cfg>` (~1 min) is for the coarse
   search only (a run holds × 1.0 to × 1.34 of it). `dose.sh <cfg>` runs the
-  first 520 steps of the real run (~10 min): dose every shape before it
+  first 520 steps of the real run (~10–15 min): dose every shape before it
   trains. The params: design near the cap; `fit.py` fills only a small rest
   with the main MLP (strict rule 14). The widths must not shrink inward.
-- **The VRAM knobs** (`notes.md` §7): the stages set the peak (the heads ×
-  the state rank). **Use a power of 2 for a state rank** (user): another
-  rank can cost more VRAM than the next power of 2.
+- **The VRAM knobs** (`notes.md` §7): the stages set the peak (the stage
+  heads × the state rank, the stage applications, N). **Use a power of 2
+  for a state rank** (user): another rank can cost more VRAM than the next
+  power of 2. 8 stage heads (`p=32`) cost ~630 MB less than 16 at the same
+  state size, but not less per stage application.
+- **Multi-Gate 4 is the default** (user, 2026-10-13): `mgr=4 mmgr=4` on
+  the `gen.py` line of every new candidate (`gen.py`'s own default stays 0
+  for the old configs). Not in a stack of **one application** (one real
+  layer, no virtual layers): it has nothing to route there. `mgr` sets the
+  encoder and the decoder of a stage together: a stage with one such stack
+  needs a `gen.py` split first.
 - **Virtual layers** (in a stage: `eV`/`dV`; in the main: `mV`):
   - Untie every virtual application, in every stack (user, 2026-10-11):
     cheap in params, usually a better score. A real layer is fully untied;
     a virtual application holds its own copy of the `untied` tensors only.
     `gen.py` does it by default (`suntie=auto`, `muntie=auto`).
-  - The schedule is a test variable: Cyclic beat the middle placements in
-    the flat (two seeds, `notes.md` §1). The H-Net main schedule is open
-    (R-N15-r64V7 against its Cyclic twin R-N15-r64V7c).
+  - The schedule: Cyclic is the default (the flat's best; in the H-Net
+    main it ties 0,1,1,1,1,1,2 at 3230).
 
 ## Tools
 
@@ -166,9 +186,10 @@ them, so:
   build as `bin/hn-cuda-<tag>` + `.txt`). The flat's `bin/ts-cuda` (its
   own `build.sh`, ~3 min). `bin/hn-cuda -- --help` lists the flags.
 - **Configs**: `gen.py <cfg> k=v …` → `cfg/<cfg>/` (the keys and defaults
-  are at the top; per-stage keys take `/` lists). `fit.py <cfg> <key>
-  [from=V] [step=S] k=v …` fits one key to the param cap. `params.sh <cfg>`
-  counts the params (~2 s, flex).
+  are at the top; per-stage keys take `/` lists). A seed twin: `gen.py
+  <cfg>-s1 $(cat cfg/<cfg>/args.txt) seed=1`. `fit.py <cfg> <key>
+  [from=V] [step=S] k=v …` fits one key to the param cap. `params.sh
+  <cfg>` counts the params (~2 s, flex).
 - **Runs**: `screen.sh <run> <cfg> <T1> <T2> [args]` (a trunk of T1, a
   leaf of T2). `extend.sh <src> <new> <N1> <N2> [--lr LR [--span A-B]]
   [args]` (+N1 from a trunk, then a leaf of N2; `N2 = 0`: a trunk piece).
@@ -186,13 +207,19 @@ them, so:
   `ctxg.txt` (`ctxstat.py ctxg/A ctxg/B …`). `probe.sh` → `probes-B.txt`,
   `dose.sh` → `doses.txt` (both with `-- --ssd-path recalc:32 --chunk-log
   0`). `infer.sh <run> <dir>`: samples on flex.
-- **Kaggle** (two T4s): `kaggle/kqueue.txt` holds a batch (one job per
-  line, its steps joined with `&&`; the GPUs take the lines in parallel).
+- **Kaggle** (two T4s): **at its weekly quota** (30 GPU hours) since
+  2026-10-13 05:40. The reset time is unknown (likely 5–7 days), and the
+  CLI shows no quota: a push is the only test. `kaggle/kqueue.txt` holds
+  a batch (one job per line, its steps joined with `&&`; the GPUs take
+  the lines in parallel). One gated candidate per line, and lines of
+  equal length: a line that stops early leaves its T4 idle.
   `kaggle/kwait.sh <hours> <log>` (in the background) pushes it
   (`kpush.sh`: the LR check, then the binary, the scripts, `cfg/`, the
-  source runs), waits, merges (`kpull.sh`) and queues `long.sh` for the
-  pulled `-d` runs (it misses some: check each). One kernel at a time;
-  `kpush.sh` empties `kqueue.txt`. The CLI can vanish after an environment
-  reset (the user installs it). The token is in the gitignored
-  `.kaggle/access_token` (`kaggle/kg.sh`): never print it. `owner.txt`,
-  `kqueue.txt` and `out/` stay out of git.
+  source runs; it stops on a refused kernel, and the batch stays in
+  `kqueue.txt`), waits, merges (`kpull.sh`) and queues `long.sh` for the
+  pulled `-d` runs (it misses some: check each). `doses.txt` does not go
+  up: a Kaggle line that gates doses first. One kernel at a time;
+  `kpush.sh` empties `kqueue.txt`. The CLI can vanish after an
+  environment reset (the user installs it). The token is in the
+  gitignored `.kaggle/access_token` (`kaggle/kg.sh`): never print it.
+  `owner.txt`, `kqueue.txt` and `out/` stay out of git.
