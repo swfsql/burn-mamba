@@ -76,6 +76,97 @@ file starts empty again.
   −0.0036. A small drift toward a gain, inside the noise. `-mg4-s1` at
   9600 (batch 2) tells more.
 
+### Multi-Gate parked (user, 03:35)
+
+- The user: Multi-Gate did not do what was expected (the flat's 0.046),
+  even with the long training; perhaps the few real layers of each stack
+  serve too many purposes. Park it; Claude decides the tests.
+- Decision: no more Multi-Gate exploration (no `-mmg4-s1`, no other gate
+  counts). But it stays in the base: it costs 0 MB and ~1.8k params, and
+  its gain is small but the same at every milestone and in both seeds
+  (−0.005 against the base mean at 3230 / 5630 / 9600, a smaller seed
+  spread). The 14400 pair (batch 3) runs on: the CLI cannot cancel it,
+  and it answers step 4.
+- Then (user, 03:45, after the two-seed means): keep `-mg4` in the base;
+  Multi-Gate 4 is the **default** for every new candidate (`mgr=4
+  mmgr=4` on the `gen.py` line), **except a stack of one application**
+  (one real layer, no virtual layers): it has nothing to route, so it
+  keeps the standard residual (user, 03:50). Today every stack of the
+  candidates has ≥ 2 applications. Note: `mgr` sets the encoder and the
+  decoder of a stage together, so a stage with one single-application
+  stack needs a `gen.py` split first. `gen.py`'s default stays 0, so a
+  regeneration of `cfg/` does not change old configs (`notes.md` §9).
+- A reading that fits the user's guess: the stage stacks hold one real
+  layer each over 2–3 applications, so a gate has little to route there;
+  the flat routes over 5 real × 7 applications.
+
+### The 8-head reuse-everywhere doses (03:37)
+
+- `R-N125-r128s11V3-m5V6c-st2-sp32-mg4`: **3683 MB**, 13 over the gate
+  (the process ≈ 3830 MB, under 3.6 GiB but at its edge). Not screened:
+  the gate stays as it is.
+- `R-N125-r128s11V4-…`: over `--max-vram 3750` (3927 MiB at step 47).
+- So the main V6 at N 1.25 costs ~590 MB here (3096 → 3683), not ~290.
+- Decision: both at **N 1.5** (N 1.25 = N 1.5 in score; N 1.5 saved
+  ~290 MB at this shape). Local queue: dose 4+4, dose 3+3, then a gated
+  screen of 4+4, else 3+3 (more reuse first).
+- N 1.5: 4+4 **3924 MB** (over), 3+3 **3442 MB** (in the band; ~1500
+  ms/step). The gate picked 3+3: `L-R-N15-r128s11V3-m5V6c-st2-sp32-mg4`
+  screens from 04:08 (~05:35 with `long.sh` + `ctx.sh`).
+- The VRAM ladder at 8 stage heads (r 128): the 4th stage application
+  costs ~480 MB, the 3rd ~540 (with the main V6 at N 1.25). So 8 heads
+  lower the floor, not the cost of an application. N 1.25 → 1.5 gave
+  back ~240 MB on 3+3.
+- Its references at 3230: the `-mg4` mean 0.8589 (the one-change
+  question: 8 heads × 3+3 × main V6 × st2), and the 16-head reuse-
+  everywhere pair 0.8705.
+
+### **`-mg4` beats the flat at 14400** (Kaggle batch 3, pulled 05:34)
+
+- wv at 14400: **0.7174 / 0.7164 (mean 0.7169)**; the flat 0.7220 (one
+  seed). Both seeds: −0.0046 / −0.0056. `lrprof.py` clean. The earlier
+  H-Nets: R-N15-B5 0.7308, R-B5 0.7320.
+- The lead over the flat grows: −0.0013 / −0.0028 / −0.0047 / −0.0051
+  (3230 / 5630 / 9600 / 14400, two-seed means), and the seed spread is
+  0.001 at 14400.
+- Paired against the flat on the long stories at 9600 (`longstat.py
+  -w`): −0.0032 / −0.0056 ± 0.0016 on all, −0.009 / −0.008 past 1024.
+- `kwait.sh` missed the `long.sh` of `-mg4-s1-x12000-d`: added by hand.
+- Batch 4 pushed: the `R-N15-r64V7-mg4` pair.
+
+### `R-N15-r128s11V3-m5V6c-st2-sp32-mg4` at 3230 (local, 05:32)
+
+- wv **0.8660** (seed 0). `lrprof.py` clean. Against the `-mg4` mean
+  0.8589: **+0.0071**; the 16-head reuse-everywhere mean 0.8705:
+  −0.0045; the base mean 0.8645: +0.0015.
+- The long stories: +0.0040 against `-mg4` s0, +0.022 past 1024. The
+  recall: own 0.8769 and none 1.0229 (both worse than `-mg4`), but the
+  **gain 0.1460**, the largest of the family (`-mg4` 0.1374 / 0.1432):
+  it uses the context more and models the text worse at 3230.
+- So 8 heads × 3+3 × main V6 is a mild loss at 3230, like the 16-head
+  form. Main reuse paid only after 3230 before (§4). Decision: extend
+  it to 5630 here (one seed; a closing gap gets a second seed and 9600).
+
+### Next Kaggle batch (prepared 04:45, pushed when batch 3 ends)
+
+- `R-N15-r64V7-mg4` + `-s1`: main reuse (3 real × 7 applications,
+  0,1,1,1,1,1,2) × Multi-Gate 4, 997,533 params. Reason: the second tie
+  of the flat at 9600 gets the new default; and the main of R-N15-r64V7
+  routes over 7 applications, the case where the user expects a gate to
+  pay (the flat). A one-change test against its base pair (3230: 0.8644
+  / 0.8675). Each line doses its own config on its GPU, then gates (one
+  gated candidate per line).
+
+### `R-N15-r128s11V2-m5V6c-st2-s1` (local, 03:19)
+
+- wv at 3230: **0.8676** (seed 0: 0.8733; mean 0.8705). `lrprof.py`
+  clean. The long stories: +0.0138 against base s0.
+- So the 16-head stage + main reuse at N 1.5 is +0.006 against the base
+  mean, +0.009 / +0.012 against the `-st2` / `-mg4` means: a mild loss
+  at 3230, not 0.019. Both of its seeds are worse than every seed of the
+  family but base s1. Main reuse tied at 3230 on R-N15-r64V7 and paid
+  only later (§4), so 3230 can understate it.
+
 ### Kaggle batch 2 (pulled 02:47)
 
 - Line B stopped at its first gate: `R-N125-r128s11V3-m5-sp32` dosed
