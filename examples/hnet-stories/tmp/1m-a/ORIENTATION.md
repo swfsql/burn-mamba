@@ -79,8 +79,9 @@ them, so:
 
 ## Working notes
 
-- **Kaggle is at its quota, or near it** (user, 2026-10-13). Plan the GPU
-  work for this card. A Kaggle batch is a bonus (see [Tools](#tools)).
+- **Kaggle's weekly quota resets on Saturday 00:00 UTC** (see
+  [Tools](#tools)). Plan the GPU work for this card; a Kaggle batch is a
+  bonus.
 - Models before seeds. Rank by long runs. **Rank by two-seed means**: one
   seed against one seed of the reference misreads a gap (`notes.md` §9).
   A screen can combine changes that were measured alone, plus a cheap
@@ -133,11 +134,12 @@ them, so:
   own `gen.py`, `screen.sh`, `extend.sh`, `probe.sh`, `lrprof.py`,
   `bin/ts-cuda`). Seed 0: runs `h16-V7u-s2` (3230), `-x4630`, `-sd2630`,
   `-x8000`, `-x10000`, `-x12000` (14400). Seed 1: `h16-V7u-s1-s2`
-  (3230), `h16-V7u-s1-x4630` (5630). Its flags: `--ssd-path recalc:128
-  --profile 100 --grad-checkpointing --vram-cleanup-every 1` (the screen
-  adds `--pack 4224 --pack-rows 2`; `extend.sh` needs no `--pack`). Its
-  chain differs: `-x4630` (2000 1000), `-x8000` (3370 1600), `-x10000`
-  (2000 0), `-x12000` (2000 2400). Run it from this queue: `cd
+  (3230), `h16-V7u-s1-x4630`, `-t6315`, `-x8000`, `-x10000`, `-x12000`
+  (14400). Its flags: `--ssd-path recalc:128 --profile 100
+  --grad-checkpointing --vram-cleanup-every 1` (the screen adds `--pack
+  4224 --pack-rows 2`; `extend.sh` needs no `--pack`). Its seed 1 ran the
+  H-Net chain (seed 0: `-x8000` as one piece of 3370 1600). Run it from
+  this queue: `cd
   ../../../tiny-stories/tmp/1m-cased && ./extend.sh …`, then `./long.sh -g
   -t ../../../tiny-stories/tmp/1m-cased/runs/<run>-d >> long.txt` here.
   For the flat, a probe is a dose (× 1.0).
@@ -170,8 +172,10 @@ them, so:
   the `gen.py` line of every new candidate (`gen.py`'s own default stays 0
   for the old configs). Not in a stack of **one application** (one real
   layer, no virtual layers): it has nothing to route there. `mgr` sets the
-  encoder and the decoder of a stage together: a stage with one such stack
-  needs a `gen.py` split first.
+  encoder and the decoder of a stage together; `emgr` / `dmgr` set one of
+  them (for example `eV=1 dV=3 emgr=0 dmgr=4`).
+- **The stage placement**: the leader's 2+2 stage applications beat 1+3
+  and 3+1 (`notes.md` §4).
 - **Virtual layers** (in a stage: `eV`/`dV`; in the main: `mV`):
   - Untie every virtual application, in every stack (user, 2026-10-11):
     cheap in params, usually a better score. A real layer is fully untied;
@@ -183,7 +187,8 @@ them, so:
 ## Tools
 
 - **Binaries**: `bin/hn-cuda` (`./build.sh`, a host job; it keeps each
-  build as `bin/hn-cuda-<tag>` + `.txt`). The flat's `bin/ts-cuda` (its
+  build as `bin/hn-cuda-<tag>` + `.txt`). The box has CUDA 13.0; the
+  binaries of CUDA 12.2 run unchanged. The flat's `bin/ts-cuda` (its
   own `build.sh`, ~3 min). `bin/hn-cuda -- --help` lists the flags.
 - **Configs**: `gen.py <cfg> k=v …` → `cfg/<cfg>/` (the keys and defaults
   are at the top; per-stage keys take `/` lists). A seed twin: `gen.py
@@ -207,9 +212,9 @@ them, so:
   `ctxg.txt` (`ctxstat.py ctxg/A ctxg/B …`). `probe.sh` → `probes-B.txt`,
   `dose.sh` → `doses.txt` (both with `-- --ssd-path recalc:32 --chunk-log
   0`). `infer.sh <run> <dir>`: samples on flex.
-- **Kaggle** (two T4s): **at its weekly quota** (30 GPU hours) since
-  2026-10-13 05:40. The reset time is unknown (likely 5–7 days), and the
-  CLI shows no quota: a push is the only test. `kaggle/kqueue.txt` holds
+- **Kaggle** (two T4s, CLI 2.2.4): a weekly quota of 30 GPU hours that
+  resets on Saturday 00:00 UTC. The CLI shows no quota: a push is the only
+  test. A push can stay QUEUED for hours. `kaggle/kqueue.txt` holds
   a batch (one job per line, its steps joined with `&&`; the GPUs take
   the lines in parallel). One gated candidate per line, and lines of
   equal length: a line that stops early leaves its T4 idle.

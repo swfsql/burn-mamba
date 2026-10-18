@@ -4,55 +4,54 @@ Read this file, then `ORIENTATION.md` (**its strict rules first**: they
 come from the user and must survive every rewrite), then `notes.md` (the
 findings).
 
-## State (2026-10-13 08:30)
+## State (2026-10-18 07:10 UTC)
 
 - **Nothing runs**: an idle GPU here, no Kaggle kernel, no waiter, no
   cron. `queue.txt` and `kaggle/kqueue.txt` are empty.
-- **Kaggle is at its weekly GPU quota** (refused 2026-10-13 05:40). The
-  reset time is unknown (likely 5–7 days). Plan the work for this card. A
-  push is the only test of the quota.
 - The binaries: `bin/hn-cuda` = `6cf3c2b-dirty-cc8a67e3`, the flat's
-  `ts-cuda` = `v0.67.0-4dd4cb8-dirty-99dc0dcf`.
+  `ts-cuda` = `v0.67.0-4dd4cb8-dirty-99dc0dcf`. Both run under the box's
+  CUDA 13.0 unchanged.
+- Kaggle: ~16 h of this week's 30 h used (the reset: Saturday 00:00 UTC).
+- `runs/killed-*`: partial runs of a stopped queue line; ignore them.
 
 ## The result (`notes.md` §1)
 
-- **R-N125-r128s11V2-m5-mg4 leads the flat h16-V7u** (wv, two-seed
-  means). The lead: −0.0013 at 3230 and at 5630 (two flat seeds), −0.0047
-  / −0.0051 at 9600 / 14400 (only the flat's seed 0). At 14400: 0.7174 / 0.7164
-  against 0.7220. On the long stories past char 1024: −0.022 / −0.021.
-- Multi-Gate 4 gains ~0.005 on its base at every milestone. It is the
-  default now (ORIENTATION, Shapes and budgets).
+- **R-N125-r128s11V2-m5-mg4 ties the flat h16-V7u, with a trend.** Two
+  seeds each, wv: −0.0013 / −0.0013 / −0.0018 / −0.0028 (3230 / 5630 /
+  9600 / 14400). At 14400: 0.7169 against 0.7197, ~1 s.e.
+- The gain is only past char 1024 (−0.014 on the wv tail, −0.006 on the
+  157 long stories past char 1024). On the first 1024 chars the H-Net ties
+  the flat.
+- Every variant of the leader that this session ran lost (`notes.md` §4):
+  the leader is a local optimum of its neighbours.
 
 ## Open questions
 
 These are the questions as this session saw them, each with its
-evidence. They are not a plan: the plans of earlier handoffs steered the
-sessions after them (user). Re-decide the order from `notes.md`.
+evidence. They are not a plan: re-decide the order from `notes.md`.
 
-1. **Does the lead hold against the flat's seed 1?** Seed 1 was better
-   than seed 0 by 0.0085 / 0.0031 at 3230 / 5630. So the lead of ~0.005
-   at 9600 / 14400 can shrink or go. Its trunk `h16-V7u-s1-x4630` is
-   ready (the chain: ORIENTATION, Protocol). Until then, "the H-Net beats
-   the flat" holds against one flat seed only.
-2. **Multi-Gate on main reuse**: `R-N15-r64V7-mg4` (+ `-s1`), 997,533
-   params, dosed 3592 MB, ready to screen. Its base R-N15-r64V7 ties the
-   flat at 9600. Its main routes over 7 applications, as the flat does,
-   where Multi-Gate gained 0.046.
-3. **The 8 stage heads** (`p=32`) free ~630 MB at the same state size,
-   but a stage application still costs ~480–590 MB.
-   - Screened: 8 heads × 3+3 × main V 6: +0.007 / +0.006 at 3230 / 5630
-     against the leader (one seed).
-   - Dosed: `R-N125-r128s11V4-m5-sp32-mg4` (4+4, no main reuse,
-     991,117) 3683 MB, 13 MB over the gate. Its N 1.5 twin is not made
-     (expected ~3440).
-   - The 8 heads alone were never measured: alone they sit under the
-     band.
-4. **Main reuse on the r 128 shape** lost ~0.006 twice (16 and 8 stage
-   heads). It paid on the r 64 shape (R-N15-r64V7). Why it does not
-   compose with stage reuse is open.
-5. **A deeper stage** comes from applications, not from real layers: a
-   real r 128 stage layer pair costs ~250k params (`notes.md` §4).
+1. **The N view (user, long-term)**: the leader's N 1.25 under-uses the
+   H-Net; at N ≈ 1 it is a heterogeneous flat.
+   - Rung a (the leader × N 2 × decoder 3 × st2), two-seed means
+     against the leader's: +0.0174 / +0.0118 / +0.0068 / +0.0051 (3230 /
+     5630 / 9600 / 14400); against the flat's +0.0023 at 14400.
+   - So N 2 closes ~70% of its gap by 14400, but it still loses there. A
+     longer budget could flip it; the step budget is a ceiling, though
+     (ORIENTATION, Goal).
+   - Rung b (N 2, the freed VRAM on main applications) needs a param
+     trade: the leader has ~6.5k of headroom, one untied main application
+     costs 8.6k.
+   - N = 1 (the heterogeneous-flat test) needs a burn-stack change: the
+     ratio loss divides by N − 1.
+2. **A new axis.** The neighbours of the leader are spent: stage heads,
+   stage placement, stage applications, main reuse, Multi-Gate on main
+   reuse, N 2, 2 start rows (a tie to 14400: s0 +0.0021, s1 −0.0022 at
+   5630; its s1 trunk `-t6315` waits, with no reason to go on).
+   - Untested, each with a param trade: `rf 1` in the main, a C2D stage,
+     a stage MLP.
+   - The H-Net ties on the first 1024 chars and gains on the tail, so a
+     gain on the first 1024 chars is the way to a clear lead.
 
-The cost here (the leader's speed, ~1.34 s/step): a 3230 screen ~80 min,
-+ ~80 min to 5630, + ~2 h to 9600, + ~2 h to 14400. The flat: ~1.1
-s/step, so its seed 1 needs ~3.5 h from 5630 to 14400.
+The cost here: a 3230 screen ~80 min (the leader ~1.4 s/step), + ~70 min
+to 5630, + ~2 h to 9600, + ~2.5 h to 14400. On Kaggle a chain to 14400
+takes ~6–7.5 h per line.

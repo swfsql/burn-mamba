@@ -81,9 +81,19 @@ NOTES = {
                                           "reuse everywhere)",
     "R-N15-r128s11V4-m5V6c-st2-sp32-mg4": "the same × 4+4 (over the band)",
     "R-N125-r128s11V4-m5-sp32-mg4": "the leader × 8 stage heads × 4+4 (over "
-                                    "by 13 MB; N 1.5 not made)",
-    "R-N15-r64V7-mg4": "R-N15-r64V7 × Multi-Gate 4 (dosed, not run)",
+                                    "by 13 MB)",
+    "R-N15-r128s11V4-m5-sp32-mg4": "the same at N 1.5 (closed: +0.011)",
+    "R-N15-r64V7-mg4": "R-N15-r64V7 × Multi-Gate 4 (closed: +0.006)",
     "R-N15-r64V7-mg4-s1": "R-N15-r64V7-mg4, seed 1",
+    "R-N125-r128s11V13-m5-mg4": "the leader × encoder 1 + decoder 3 "
+                                "applications (closed: +0.009)",
+    "R-N125-r128s11V31-m5-mg4": "the leader × encoder 3 + decoder 1 "
+                                "applications (closed: +0.013)",
+    "R-N2-r128s11V23-m5-mg4": "the leader × N 2 × decoder 3 (over the "
+                              "param cap: do not run)",
+    "R-N2-r128s11V23-m5-mg4-st2": "the N ladder, rung a: the leader × N 2 "
+                                  "× decoder 3 × st2",
+    "R-N125-r128s11V2-m5-mg4-st2": "the leader × 2 start rows",
 }
 # The flat reference: another workspace and another gen.py (by hand).
 FLAT = ("h16-V7u", 995921, 3455,
