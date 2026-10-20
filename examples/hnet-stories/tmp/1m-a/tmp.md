@@ -106,3 +106,39 @@ file starts empty again.
   0.0016, past 1024 +0.0215 ± 0.0118. The gap holds (+0.0090 at 3230).
   **Main d144 × 4: closed** (two-seed +0.0070 at 3230; no closing trend).
 - 00:27: `lrm141` (s0) screens here, then `lrm2`.
+- Kaggle batch 20261019-233156 pulled 01:02 (both `long.sh` queued). s1
+  at 3230 (sv at 2630), against the leader's s1 0.8552 (0.9775):
+  `lrm141-s1` **0.8680, +0.0128** (0.9958); `lrm2-s1` **0.8539, −0.0013**
+  (0.9936). Not monotone in λ, and both trunks trail by ~0.017: wait for
+  the s0 pair.
+- `L-R-N125-r128s11V2-m5-mg4-lrm141-d` (s0, here): **0.8642, +0.0017**
+  (sv 0.9891, +0.010). **λ 1.41: two-seed mean 0.8661, +0.0072: closed.**
+- **User (02:00): no third seed of any run.** Spend the resources on
+  candidates with other configurations, two seeds at most.
+- **The VRAM follows the stage heads × rank**: the per-(head, rank) bias
+  makes B/C per head (`[b, s, h, r]`), so 8 heads × r 128 freed ~630 MB
+  and lost ~0.02 at the same state size. **Next candidate: stage 32 heads
+  × r 64** (p 8): the leader's heads × rank (2048), half the state, twice
+  the decay timescales. `R-N125-r128s11V2-m5-mg4-sh32r64`, **993,005**.
+  - 32 heads × r 64 alone: 984,813. The fill (+8.2k) is deliberate:
+    `subc=1`, a new `gen.py` key that unties the B/C bias per stage
+    application too (`BBias`, `CBias`), in line with "untie every virtual
+    application". Default 0: the leader, `sp32c` and `R-N15-B5` regenerate
+    byte for byte.
+  - Rejected: stage e 1 (−99k: + main × 6 1,020,961, + r 256 969,901);
+    main h32 × r 32 (977,805; a main at r 32 lost before).
+  - Its dose follows the `lrm2` screen here.
+- **`L-R-N125-r128s11V2-m5-mg4-lrm2-d` (s0, here): 0.8576, −0.0049**
+  against the leader's s0 (sv 0.9853, +0.006). Paired: chars 0..1024
+  **−0.0047 ± 0.0016**, past 1024 +0.0092 ± 0.0096. **λ 2: two-seed mean
+  0.8558, −0.0031 against the leader (the flat −0.0045)**, the first gain
+  on chars 0..1024 of this session. The trunks trail (+0.006 / +0.016),
+  the leaves recover more. Not monotone in λ (1.41: +0.0072), so part of
+  it can be noise. **Decision**: λ 2 gets the long schedule on both seeds
+  (a cheap change: 0 params, 0 MB): s0 here, s1 on Kaggle.
+- Dose `sh32r64`: **3578 MB** max (3482 in 4 of 5 windows), ~1455
+  ms/step (+8%). In the gate band.
+- 03:25: Kaggle batch (two lines of ~7.9k steps each): `lrm2-s1` x4630 →
+  t6315 → x8000 (9600); `sh32r64-s1` screen → x4630 → t6315. Equal
+  lengths cost no extra quota (the kernel runs as long as its longest
+  line). Here: `sh32r64` s0 screen, then the `lrm2` s0 chain to 9600.

@@ -37,6 +37,9 @@ DEFAULTS = dict(
     # `auto` = on when a stack of the stage has virtual layers (the stage
     # block is shared by its encoder and decoder, so both untie).
     eV="0", dV="0", esched="Cyclic", dsched="Cyclic", suntie="auto",
+    # subc: with suntie, every stage application holds its own B/C bias too
+    # (`BBias`, `CBias`: h·r each). 0: the old untied list.
+    subc=0,
     # main network
     # muntie: the untied lists of mnist-class (Mamba3Config: the block tail and
     # the small per-head tensors; the layer: its pre-norms), held once per
@@ -83,7 +86,7 @@ def per_stage(a, key, kind):
     return vals[: a["S"]]
 
 
-def block(a, d, r, p, e, m, rot, untie=0, u=1):
+def block(a, d, r, p, e, m, rot, untie=0, u=1, bc=0):
     return {"Mamba3": {
         "d_model": d, "state_rank": r, "expand": e, "per_head_dim": p,
         "ngroups": 1, "mimo_rank": m, "micro_steps": u, "trapezoid": a["trap"],
@@ -95,7 +98,7 @@ def block(a, d, r, p, e, m, rot, untie=0, u=1):
         "rotation": rot, "rotation_range": a["rr"],
         "siso_specialization": True, "siso_specialization_decode": True,
         "untied": ["InProjTail", "DtBias", "D", "BNorm", "CNorm", "OutNorm"]
-        if untie else [],
+        + (["BBias", "CBias"] if bc else []) if untie else [],
     }}
 
 
@@ -170,7 +173,8 @@ def model(a):
                 "missing_lm_head": bool(a["tie"]), "head_init": head_init,
                 "n_start_tokens": a["start"],
             },
-            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s], sunties[s], us[s]) for s in range(a["S"])],
+            "stage_blocks": [block(a, ds[s], rs[s], ps[s], es[s], ms[s], rots[s], sunties[s], us[s],
+                                   int(a["subc"])) for s in range(a["S"])],
             "main_block": block(a, a["md"], a["mr"], a["mp"], a["me"], a["mm"], a["mrot"], muntie, a["mu"]),
         },
         "ratio_targets": targets,
