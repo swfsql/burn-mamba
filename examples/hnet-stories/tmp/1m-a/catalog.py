@@ -94,6 +94,29 @@ NOTES = {
     "R-N2-r128s11V23-m5-mg4-st2": "the N ladder, rung a: the leader × N 2 "
                                   "× decoder 3 × st2",
     "R-N125-r128s11V2-m5-mg4-st2": "the leader × 2 start rows",
+    "R-N125-r128s11V2-m5-mg4-lrm2": "the leader × stage λ 2 (the candidate: "
+                                    "−0.0031 at 3230)",
+    "R-N125-r128s11V2-m5-mg4-lrm2-s1": "R-N125-r128s11V2-m5-mg4-lrm2, seed 1",
+    "R-N125-r128s11V2-m5-mg4-lrm141": "the leader × stage λ 1.41 (closed: "
+                                      "+0.0072)",
+    "R-N125-r128s11V2-m5-mg4-lrm141-s1": "R-N125-r128s11V2-m5-mg4-lrm141, "
+                                         "seed 1",
+    "R-N125-r128s11V2-m5-mg4-sh32r64": "the leader × 32 stage heads × r 64 "
+                                       "(the leader's heads × rank) × subc",
+    "R-N125-r128s11V2-m5-mg4-sh32r64-s1": "R-N125-r128s11V2-m5-mg4-sh32r64, "
+                                          "seed 1",
+    "R-N125-r128s11V2-m5-mg4-sp32c": "the leader × 8 stage heads × a C2D "
+                                     "stage (closed: +0.026)",
+    "R-N125-r128s11V2-m5-mg4-sp32c-s1": "R-N125-r128s11V2-m5-mg4-sp32c, seed 1",
+    "R-N125-r128s11V2-m4d144-mg4": "the leader × main d144 × 4 (closed: "
+                                   "+0.0070)",
+    "R-N125-r128s11V2-m4d144-mg4-s1": "R-N125-r128s11V2-m4d144-mg4, seed 1",
+    "R-N125-r128s11V2-m4d144-mg4-rf1": "main d144 × 4 × rf 1 (3675 MB: over "
+                                       "the band)",
+    "R-N125-r128s11V2-m4d144p18-mg4-rf1": "the same at 16 main heads (3675 "
+                                          "MB: over the band)",
+    "R-N15-r128s11V2-m4d144-mg4-rf1": "the same at 18 main heads × N 1.5 "
+                                      "(3675 MB: over the band)",
 }
 # The flat reference: another workspace and another gen.py (by hand).
 FLAT = ("h16-V7u", 995921, 3455,

@@ -51,6 +51,10 @@ Terms:
   both ceilings, so every earlier H-Net lead of 0.005–0.026 was that
   gap). Its virtual schedule (two seeds each, 3230): Cyclic 0.8602, `m2`
   +0.0028, `m13` +0.0097.
+- **The candidate: the leader × stage λ 2** (`-lrm2`, §2). At 3230 its
+  two-seed wv is 0.8558: −0.0031 against the leader, −0.0045 against the
+  flat. It gains on chars 0..1024 and loses past 1024. Its chains to 9600
+  run (`handoff.md`).
 
 ## 2. The LR schedule: the H-Net steps down at about half of its budget
 
@@ -74,11 +78,26 @@ Terms:
   `lrprof.py` guards it (§9).
 - The leaf gain (leaf − trunk): the H-Net −0.122 / −0.135 (3230 / 5630),
   h16 −0.113 / −0.115. Trunks at 1e-3 from 2630 stall.
+- **The stage LR multiplier λ** (`lrm`: 0 params, 0 MB). `lrm=auto` gives
+  λ = √N: 1.12 at N 1.25, 1.41 at N 2. So the leader's stage got its λ
+  from the heuristic, not from a measurement. Two seeds each at 3230,
+  against the leader (auto):
+
+  | λ | wv s0 / s1 (mean) | Δ mean | chars 0..1024 s0 / s1 | past 1024 s0 / s1 |
+  |---|---|---|---|---|
+  | 1.41 | 0.8642 / 0.8680 (0.8661) | +0.0072 | +0.0008 / +0.0113 | +0.024 / +0.019 |
+  | 2 | 0.8576 / 0.8539 (0.8558) | **−0.0031** | **−0.0047 / −0.0021** | +0.009 / +0.016 |
+
+  The bands are paired against the leader's seed (± 0.0016 on 0..1024,
+  ± 0.006–0.014 past 1024). Not monotone in λ, so part of it can be
+  noise. At λ 2 the trunks trail (+0.006 / +0.016 at 2630), and the
+  leaves recover more.
 
 ## 3. The results of the new protocol (wv at 3230)
 
 | run | shape (change from its base) | wv | peak MB |
 |---|---|---|---|
+| L-R-N125-r128s11V2-m5-mg4-lrm2-d / -s1-d | the leader × stage λ 2 (§2) | 0.8576 / 0.8539 | 3482 |
 | L-R-N125-r128s11V2-m5-mg4-d / -s1-d | the leader (§1) | 0.8625 / 0.8552 | 3482 |
 | L-R-N125-r128s11V2-m5-mg4-st2-d / -s1-d | the leader × 2 start rows (T4 / here) | 0.8657 / 0.8572 | 3482 |
 | L-R-N125-r128s11V2-m5-mmg4-d | R-N125-r128s11V2-m5 × Multi-Gate 4 in the main only | 0.8586 | 3482 |
@@ -86,6 +105,8 @@ Terms:
 | L-R-N125-r128s11V2-m5-d / -s1-d | stage d128 1+1 R1D r 128 × 2+2 untied applications, N 1.25, main d128 × 5 C2D r 64 rf 0.5 | 0.8533 / 0.8756 | 3482 |
 | L-R-N125-r128s11V13-m5-mg4-d / -s1-d | the leader × encoder 1, decoder 3 applications | 0.8636 (T4 0.8681) / 0.8696 | 3482 |
 | L-R-N125-B5-d / -s1-d | R-N15-B5 × N 1.25 | 0.8638 / 0.8624 | 3386 |
+| L-R-N125-r128s11V2-m5-mg4-lrm141-d / -s1-d | the leader × stage λ 1.41 (§2) | 0.8642 / 0.8680 | 3482 |
+| L-R-N125-r128s11V2-m4d144-mg4-d / -s1-d | the leader × main d144 × 4 (18 heads) | 0.8715 / 0.8602 | 3482 |
 | L-R-N15-r64V7-d / -s1-d | R-N15-B5 × stage r 64 × main V 7 (0,1,1,1,1,1,2, untied) | 0.8644 / 0.8675 | 3452 (max 3592) |
 | L-R-N15-r64V7c-d | R-N15-r64V7 × a Cyclic main | 0.8636 | 3592 |
 | L-R-N15-r128s11V3-m5V6c-st2-sp32-mg4-d | 8 stage heads × 3+3 × main V 6 Cyclic × 2 start rows × Multi-Gate 4, N 1.5 | 0.8660 (5630: 0.8069) | 3442 |
@@ -99,6 +120,7 @@ Terms:
 | L-R-N125-r128s11V31-m5-mg4-d | the leader × encoder 3, decoder 1 applications | 0.8752 | 3482 |
 | L-R-N2-r128s11V23-m5-mg4-st2-d / -s1-d | the leader × N 2 × decoder 3 × 2 start rows | 0.8812 / 0.8714 | 3385 |
 | L-R-B5-s144b-d | R-B5 × stage d144 × main d144 × 3 expand 1 | 0.8838 | 3390 |
+| L-R-N125-r128s11V2-m5-mg4-sp32c-d / -s1-d | the leader × 8 stage heads × a C2D stage (rf 0.5) | 0.8843 / 0.8850 | 3385 |
 | L-S2a2-B5-d | two stages d112/120, N 1.41/1.41, main d120 × 3 | 0.8965 | 3532 |
 | L-M-s96r128-L5-d | stage d96, main d112 × 5 | 0.9022 | 2440 * |
 | L-M-s64r256-L4-d | stage d64 r 256, main d144 × 4 | 0.9723 | 2711 * |
@@ -114,7 +136,8 @@ Terms:
   +0.009 (3230 / 5630); encoder 3 + decoder 1 +0.013 (one seed);
   N 2 × decoder 3 +0.017 (3230; +0.005 at 14400); 2 start rows +0.0026 /
   −0.0013 (3230 / 5630), s0 +0.0001 / +0.0021 (9600 / 14400; the long
-  stories at 14400 +0.0007): a tie.
+  stories at 14400 +0.0007): a tie. Main d144 × 4 lost +0.0070, and 8
+  stage heads × a C2D stage +0.026 (3230). Only the stage λ 2 gains (§2).
 - **N**: N 1.25 = N 1.5 (0.8631 / 0.8647). N costs no params. It moves
   the peak little where the stage sets it (R-N15-B5), ~240–290 MB per
   0.25 at the r 128 shapes (N 1.25 → 2 frees about one decoder
@@ -142,6 +165,18 @@ Terms:
   +0.05. A d144 stage paid by the main loses 0.0115, mostly in the recall.
 - **The main carries the recall**: a weaker main and deep compression
   lose it.
+- **The main wants depth**: main d144 × 4 (988,961, 3482 MB) for d128 × 5
+  loses +0.0070 (two seeds, 3230). Seed 0: +0.0090 / +0.0097 (3230 /
+  5630), and +0.0096 / +0.0094 on chars 0..1024 (paired). The main cannot
+  go narrower than the stage (d128), so the main is at a local optimum
+  too. Closed. (`lrm=auto` scales with the main width: this arm ran at
+  stage λ 1.19.)
+- **`rf 1` in the main** (the flat's value) costs +10,320 params (16 more
+  angles per layer) and one page (3482 → 3675 MB). It fits the params
+  only at main d144 × 4 (998,241). There it doses 3675 at N 1.25 and at
+  N 1.5, at 16 or 18 main heads. Shelved: it is over the band. Its
+  evidence at u 1 is weak (the flat: the rotation ties at u 1, and rf 0.5
+  lost at u 2).
 - **Stage reuse** (virtual layers in a stage, `eV`/`dV`, untied): at r 64
   it does not pay (5+5: 0.8670). At r 128 it pays: 1+1 real × 2+2
   applications free ~260k params for a main × 5 (the leader's base). A
@@ -164,16 +199,30 @@ Terms:
   to route.
 - **8 stage heads (p 32)**: the same state size, ~630 MB less (§7), but
   the freed VRAM bought only stage applications that lose (+0.007 to
-  +0.011). Closed.
+  +0.011). A C2D stage at 8 heads (`sp32c`, 993,517) is param-neutral: 8
+  heads free 16.5k, and the C2D stage costs 16.5k. It loses +0.026 (two
+  seeds, 3230), on chars 0..1024 and past them. So the stage wants at
+  least 16 heads. Closed.
+- **32 stage heads × r 64** (`sh32r64`, p 8). It keeps the leader's heads
+  × rank (the VRAM, §7), with half the state and twice the decay
+  timescales. 984,813 params, + `subc` (8.2k) = 993,005. Its screens run
+  (`handoff.md`).
 - **Closed**: two stages at total N 2 (+0.024 / +0.020 at 3230 / 5630);
   deep compression N 4/4 (+0.13 / +0.108); the d64 / S4 line (no design
   near both ceilings).
 - **The param costs**: a stage boundary ~50k at d128; one outer layer at
   d112 r 256 146k; one untied main application (r 128 shape) 8.6k; one
   untied stage application at 16 heads ~6.6k, at 8 heads ~7k per pair.
-  The leader has ~6.5k of headroom, so a main application, `rf 1`, a C2D
-  stage or a stage r 256 all need a param trade. The widths must not
-  shrink inward. `lrm=auto` stays.
+  On the leader:
+  - `rf 1` +10.3k.
+  - A C2D stage +16.5k (its angles are in the untied tail of every
+    application).
+  - 8 stage heads −16.5k, 32 heads +33k (the per-(head, rank) B/C bias
+    and the per-head tails).
+  - Stage expand 1 −99k (+ main × 6: 1,020,961, + r 256: 969,901).
+  - `subc`: +2·h·r per extra stage application.
+
+  The leader has ~6.5k of headroom. The widths must not shrink inward.
 
 ## 5. The recipe (old protocol)
 
@@ -204,10 +253,15 @@ Terms:
 - **CUDA 13.0** (the box, 2026-10-16; was 12.2): the old binaries run
   unchanged, the leader doses 3482 MB again, the flat runs 1049 ms/step
   (1063 before). So the doses of CUDA 12.2 hold.
-- **What moves the peak**: the stages (the 1024 slot), the stage **heads**
-  × the state rank. A head dim of 8 doubles the heads (over the band). A
-  main at expand 1 and the main MLP are cheap. The stage placement does
-  not move it (1+3, 2+2, 3+1 all 3482).
+- **What moves the peak**: the stages (the 1024 slot), the stage **heads
+  × the state rank**. The per-(head, rank) bias makes B/C per head
+  (`[b, s, h, r]`), so their memory follows h × r. 8 heads × r 128: −630
+  MB. 32 heads × r 128: over the band. 32 heads × r 64 (the leader's h ×
+  r): 3578 max, 3482 in 4 of 5 windows. A main at expand 1 and the main
+  MLP are cheap. The stage placement does not move it (1+3, 2+2, 3+1 all
+  3482). The main heads do not move it either (16 or 18 at d144 × 4).
+- **`rf 1` in the main costs one page**: main d144 × 4 3482 → 3675. N 1.5
+  does not pay it back (3675 max, 3579 in 4 of 5 windows).
 - **The peak varies by seed and host**: R-N15-r64V7-mg4 dosed 3592 here,
   3733 (s0) and 3455 (s1) on the T4s. A shape one page under the gate can
   fail it on another seed.
@@ -255,7 +309,14 @@ Terms:
   between them.
 - A kernel line that stops early (a failed gate, a short chain) leaves its
   T4 idle while the other line runs: one gated candidate per line, and
-  lines of equal length.
+  lines of equal length. The kernel runs as long as its longest line, so
+  more steps on the shorter line cost no quota.
+- A seed twin of a shape dosed here screens on Kaggle with no dose (no
+  `doses.txt` there, and the shape is the same).
+- `kwait.sh` dies with the box. After a shutdown, pull with
+  `kaggle/kpull.sh`, then queue `long.sh` for each pulled `-d` run.
+- The week of 2026-10-17: ~16 h by 10-18. Then three batches: ~1.5 h,
+  ~1.5 h, and ~3.3 h (pushed 2026-10-20 03:21). In total ~22 h.
 - The payload goes up as `payload.tgz.bin` in a new private dataset per
   batch (a `.tar.gz` stalls Kaggle's unpacking for hours). A refused push
   leaves its dataset behind (the CLI cannot delete it).
@@ -293,6 +354,13 @@ Terms:
 - **A cheap change gets the long schedule before it is closed** (user):
   Multi-Gate tied at 3230 and led at 9600 / 14400; N 2 closed ~70% of its
   3230 gap by 14400.
+- **Host-matched seeds**: the leader's s0 ran here and its s1 on a T4. So
+  a candidate runs s0 here and s1 on Kaggle: each per-seed comparison then
+  stays on one host type (the host noise: 0.0045 at 3230).
+- **A heuristic default drifts with its inputs**. `lrm=auto` lowered the
+  stage λ from 1.41 to 1.12 when N moved from 2 to 1.25. No run measured
+  that. After every shape neighbour lost, λ 2 gained. Measure a derived
+  default again when its input moves.
 - **A regeneration of `cfg/`** can change old configs through a newer
   default (156 got `bucket`): compare against a backup, keep the old
   files. So `gen.py` keeps `mgr=0` as its default, and a new key

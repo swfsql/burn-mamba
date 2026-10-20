@@ -66,6 +66,8 @@ them, so:
     - The VRAM: **never** fill the free VRAM automatically. There are too
       many ways to spend it. Each candidate spends it by an explicit
       design choice, logged with its reason.
+15. **Two seeds at most** (2026-10-20): never run a third seed of a run.
+    Spend the resources on candidates with other configurations instead.
 
 ## Goal
 
@@ -84,6 +86,10 @@ them, so:
   bonus.
 - Models before seeds. Rank by long runs. **Rank by two-seed means**: one
   seed against one seed of the reference misreads a gap (`notes.md` §9).
+  Run s0 of a candidate here and s1 on Kaggle (as the leader's seeds), so
+  each per-seed comparison stays on one host type.
+- The local GPU also runs extensions when it is fully idle (user,
+  2026-10-19).
   A screen can combine changes that were measured alone, plus a cheap
   untested one. When it surprises, either the untested change matters or
   the measured ones do not compose: a one-change screen tells which.
@@ -166,8 +172,10 @@ them, so:
 - **The VRAM knobs** (`notes.md` §7): the stages set the peak (the stage
   heads × the state rank, the stage applications, N). **Use a power of 2
   for a state rank** (user): another rank can cost more VRAM than the next
-  power of 2. 8 stage heads (`p=32`) cost ~630 MB less than 16 at the same
-  state size, but not less per stage application.
+  power of 2. The per-(head, rank) bias makes B/C per head, so the stage
+  B/C memory follows heads × rank. 8 stage heads (`p=32`) at r 128 cost
+  ~630 MB less than 16. 32 heads at r 64 cost about the same as 16 at r
+  128. `rf 1` in the main costs one page.
 - **Multi-Gate 4 is the default** (user, 2026-10-13): `mgr=4 mmgr=4` on
   the `gen.py` line of every new candidate (`gen.py`'s own default stays 0
   for the old configs). Not in a stack of **one application** (one real
@@ -181,6 +189,8 @@ them, so:
     cheap in params, usually a better score. A real layer is fully untied;
     a virtual application holds its own copy of the `untied` tensors only.
     `gen.py` does it by default (`suntie=auto`, `muntie=auto`).
+    `subc=1` also unties the B/C bias per stage application (+2·h·r per
+    extra application; default 0, the old configs).
   - The schedule: Cyclic is the default (the flat's best; in the H-Net
     main it ties 0,1,1,1,1,1,2 at 3230).
 
@@ -217,12 +227,15 @@ them, so:
   test. A push can stay QUEUED for hours. `kaggle/kqueue.txt` holds
   a batch (one job per line, its steps joined with `&&`; the GPUs take
   the lines in parallel). One gated candidate per line, and lines of
-  equal length: a line that stops early leaves its T4 idle.
+  equal length: a line that stops early leaves its T4 idle. The kernel
+  runs as long as its longest line, so steps on the shorter line are free.
+  A seed twin of a shape dosed here screens with no dose there.
   `kaggle/kwait.sh <hours> <log>` (in the background) pushes it
   (`kpush.sh`: the LR check, then the binary, the scripts, `cfg/`, the
   source runs; it stops on a refused kernel, and the batch stays in
   `kqueue.txt`), waits, merges (`kpull.sh`) and queues `long.sh` for the
-  pulled `-d` runs (it misses some: check each). `doses.txt` does not go
+  pulled `-d` runs (it misses some: check each). It dies with the box:
+  after a shutdown, run `kpull.sh` by hand. `doses.txt` does not go
   up: a Kaggle line that gates doses first. One kernel at a time;
   `kpush.sh` empties `kqueue.txt`. The CLI can vanish after an
   environment reset (the user installs it). The token is in the
