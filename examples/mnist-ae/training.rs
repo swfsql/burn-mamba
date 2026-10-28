@@ -196,8 +196,8 @@ pub fn epoch_train(
         let (loss, logits_flat) = trainer.step(input.clone(), optim, lr);
         let pre_metrics = RegressionOutput::new(loss, logits_flat, input.reshape([batch_size, HEIGHT * WIDTH]));
 
-        loss_metric.update(&pre_metrics.adapt(), session.meta());
-        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
+        loss_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
+        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
 
         let loss = metric_current(loss_metric.value());
         session.log_train(&[("loss", loss)]);
@@ -289,7 +289,7 @@ pub fn epoch_valid(
         metric_meta.progress.items_processed += batch_size;
 
         let pre_metrics = InferenceStep::step(&valid_model, batch.to_device(&device));
-        loss_metric.update(&pre_metrics.adapt(), &metric_meta);
+        loss_metric.update(&pre_metrics.adapt(), &metric_meta).expect("metric update");
     }
 
     let loss = metric_current(loss_metric.running_value());

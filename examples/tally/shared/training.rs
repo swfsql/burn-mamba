@@ -162,8 +162,8 @@ fn epoch_train(
         let batch = (batch.inputs, batch.targets);
         let (loss, (logits, targets)) = trainer.step(batch, optim, lr);
         let output = ClassificationOutput::new(loss, logits, targets);
-        loss_metric.update(&output.adapt(), session.meta());
-        acc_metric.update(&output.adapt(), session.meta());
+        loss_metric.update(&output.adapt(), session.meta()).expect("metric update");
+        acc_metric.update(&output.adapt(), session.meta()).expect("metric update");
 
         let (loss, acc) = (
             metric_current(loss_metric.value()),
@@ -219,8 +219,8 @@ fn validate_all(
         let mut acc_metric = burn::train::metric::AccuracyMetric::new().with_pad_token(NUM_CLASSES);
         for batch in loader.iter().map(|b| b.expect("dataloader batch")).take(limit) {
             let out = InferenceStep::step(&valid_model, batch.to_device(&device));
-            loss_metric.update(&out.adapt(), &meta);
-            acc_metric.update(&out.adapt(), &meta);
+            loss_metric.update(&out.adapt(), &meta).expect("metric update");
+            acc_metric.update(&out.adapt(), &meta).expect("metric update");
         }
         let (loss, acc) = (
             metric_current(loss_metric.running_value()),

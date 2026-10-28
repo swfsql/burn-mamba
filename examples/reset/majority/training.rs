@@ -188,9 +188,9 @@ pub fn epoch_train(
         let (loss, (logits, targets)) = trainer.step(batch, optim, lr);
         let pre_metrics = ClassificationOutput::new(loss, logits, targets);
 
-        loss_metric.update(&pre_metrics.adapt(), session.meta());
-        acc_metric.update(&pre_metrics.adapt(), session.meta());
-        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta());
+        loss_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
+        acc_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
+        iteration_speed_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
 
         let (loss, acc) = (
             metric_current(loss_metric.value()),
@@ -260,8 +260,8 @@ pub fn evaluate(dataloader: Dataloader, model: &Wrap, limit: usize) -> (f64, f64
 
     for batch in dataloader.iter().map(|b| b.expect("dataloader batch")).take(limit) {
         let pre_metrics = InferenceStep::step(model, batch.to_device(&device));
-        loss_metric.update(&pre_metrics.adapt(), &metric_meta);
-        acc_metric.update(&pre_metrics.adapt(), &metric_meta);
+        loss_metric.update(&pre_metrics.adapt(), &metric_meta).expect("metric update");
+        acc_metric.update(&pre_metrics.adapt(), &metric_meta).expect("metric update");
     }
     (
         metric_current(loss_metric.running_value()),

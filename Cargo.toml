@@ -1,6 +1,6 @@
 [package]
 name = "burn-mamba"
-version = "0.67.0"
+version = "0.68.0"
 edition = "2024"
 
 [features]
@@ -47,18 +47,20 @@ dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "b3aaff635f0cf630a8825a7096fed9f7b7202f87", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "ea18deecb92a4ba243f9ada74e337decd7e9bd48", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
-# burn-flex = { version = "0.22.0-pre.3", default-features = false, optional = true }
-burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true }
+burn-flex = { version = "0.22.1", default-features = false, optional = true }
+# burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true }
 
 ### For the main branch. ###
-# burn = { version = "0.22.0-pre.3", default-features = false, features = ["extension"]}
-# burn-cubecl = { version = "0.22.0-pre.3", default-features = false, optional = true}
-# burn-fusion = { version = "0.22.0-pre.3", default-features = false, optional = true}
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, features = ["extension"] }
-burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true}
-burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true}
+burn = { version = "0.22.1", default-features = false, features = ["extension"]}
+burn-cubecl = { version = "0.22.1", default-features = false, optional = true}
+burn-fusion = { version = "0.22.1", default-features = false, optional = true}
+
+### For a burn git revision. ###
+# burn = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, features = ["extension"] }
+# burn-cubecl = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true}
+# burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true}
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["extension"] }
@@ -66,7 +68,7 @@ burn-fusion = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "b3aaff635f0cf630a8825a7096fed9f7b7202f87", default-features = false, features = ["test-helpers", "examples-common"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "ea18deecb92a4ba243f9ada74e337decd7e9bd48", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 num-traits = "0.2.19"
 rand = "0.9.2"
@@ -76,10 +78,12 @@ pico-args = { version = "0.5.0", features = ["eq-separator", "combined-flags"] }
 image = "0.25.10"
 
 ### For the main branch. ###
-# burn = { version = "0.22.0-pre.3", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
-# burn-dataset = { version = "0.22.0-pre.3", features = ["network"] }
-burn = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
-burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", features = ["network"] }
+burn = { version = "0.22.1", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
+burn-dataset = { version = "0.22.1", features = ["network"] }
+
+### For a burn git revision. ###
+# burn = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, features = ["autodiff", "train", "dataset", "std", "optim", "extension"]}
+# burn-dataset = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", features = ["network"] }
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false, features = ["autodiff", "train", "dataset", "std"] }
@@ -128,5 +132,5 @@ path = "examples/tally/record/main.rs"
 name = "tally-drift"
 path = "examples/tally/drift/main.rs"
 
-[patch."https://github.com/swfsql/burn-stack.git"]
-burn-stack = { path = "../burn-stack" }
+# [patch."https://github.com/swfsql/burn-stack.git"]
+# burn-stack = { path = "../burn-stack" }
