@@ -5,6 +5,7 @@ How the engineering skills read the domain documentation of this repo when they 
 ## Before exploring, read these
 
 - **`GLOSSARY.md`** at the repo root.
+- **`../burn-stack/GLOSSARY.md`**: it defines the terms of the containers (block, layer, cache, row, segment, …).
 - **`docs/adr/`**: read the ADRs that touch the area of your work.
 - The **Notation** table of `CLAUDE.md` and the module headers of `src/mamba2/mamba2.rs` and `src/mamba3/mamba3.rs`. They define the math and the shape suffixes.
 
@@ -32,4 +33,4 @@ If the glossary does not have the concept, that is a signal. Either you invent l
 
 If your output contradicts an ADR, say so explicitly. Do not silently override it:
 
-> _Contradicts ADR-0003 (no custom kernels), but worth reopening because…_
+> _Contradicts ADR-0001 (no custom kernels), but worth reopening because…_
