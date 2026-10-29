@@ -19,11 +19,10 @@
 //!   — adds the intra-chunk (attention-like) and inter-chunk (state-carried)
 //!   contributions into the output `y`.
 //!
-//! The values and gradients are identical to those of
-//! [`minimal`](crate::mamba2::ssd::minimal). The serial form keeps per-chunk
-//! tensors small (lower peak memory). It is also the base of the recompute
-//! backward in [`serial_recalculated`](crate::mamba2::ssd::serial_recalculated).
-//! Here, the gradients use plain autodiff.
+//! The values and gradients are identical to those of [`minimal`]. The serial
+//! form keeps per-chunk tensors small (lower peak memory). It is also the base
+//! of the recompute backward in [`serial_recalculated`]. Here, the gradients
+//! use plain autodiff.
 //!
 //! Each kernel lists its operations as numbered comments
 //! (`- i/n: op: (inputs) -> (outputs)`), to compare with the backward.

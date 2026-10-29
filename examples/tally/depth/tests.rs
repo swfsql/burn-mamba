@@ -11,11 +11,10 @@
 //!    linear state computes) is wrong where the floor has an effect.
 
 use crate::dataset::{
-    CLOSE, EMPTY, FAMILIES, INSIDE, NUM_SYMBOLS, OPEN, RESET, SEQ_LENGTH, gen_random, labels, task,
-    unclamped,
+    CLOSE, EMPTY, FAMILIES, INSIDE, NUM_SYMBOLS, OPEN, RESET, labels, task, unclamped,
 };
 use crate::model::{NUM_CLASSES, model_config};
-use crate::shared::data::{Generator, IGNORE, TallyDataset};
+use crate::shared::data::{IGNORE, TallyDataset};
 use crate::shared::handmade::{accuracy, affine_channels, memoryless_ceiling, param, softplus_inv};
 use burn::module::Param;
 use burn::prelude::*;

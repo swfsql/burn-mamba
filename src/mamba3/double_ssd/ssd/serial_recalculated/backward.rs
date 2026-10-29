@@ -1,7 +1,6 @@
 //! # Custom autodiff node for the Mamba-3 double-SSD recompute backward
 //!
-//! Implements [`Mamba3DoubleSsdBackendExt`](crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdBackendExt)
-//! for `Autodiff<B>` with one Burn
+//! Implements [`Mamba3DoubleSsdBackendExt`] for `Autodiff<B>` with one Burn
 //! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward keeps
 //! only its leaf inputs. The backprop replays the serial kernels and the
 //! gradient math in

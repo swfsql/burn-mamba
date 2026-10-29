@@ -1,10 +1,8 @@
 //! # SSD algorithm selection and input bundle (Mamba-2)
 //!
 //! [`Mamba2SsdPath`] selects which of the three exact SSD reformulations
-//! ([`minimal`](crate::mamba2::ssd::minimal) /
-//! [`serial`](crate::mamba2::ssd::serial) /
-//! [`serial_recalculated`](crate::mamba2::ssd::serial_recalculated)) runs, and
-//! at what chunk length. [`Mamba2SsdInput`] bundles the pre-processed tensors
+//! ([`minimal`] / [`serial`] / [`serial_recalculated`]) runs, and at what
+//! chunk length. [`Mamba2SsdInput`] bundles the pre-processed tensors
 //! that the scan uses (B/C already GQA-expanded to per-head).
 //! [`Mamba2SsdInput::run`] calls the algorithm that the path selects.
 

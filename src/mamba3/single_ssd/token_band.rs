@@ -6,9 +6,8 @@
 //! weight `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/mamba-3/trapezoid-as-integration.md` §5).
 //! That is right for every read `t` *after* the tap is paid (`t − s ≥ lag`). It
 //! is wrong for the `lag` reads before it, where the weight must still be
-//! `γₛ`. At lag 1 that exception is only the diagonal, and
-//! [`ssd::diag`](crate::mamba3::single_ssd::ssd::diag) corrects it inside the
-//! kernel. At lag `u` it is a `u`-wide **band** (§9).
+//! `γₛ`. At lag 1 that exception is only the diagonal, and [`ssd::diag`]
+//! corrects it inside the kernel. At lag `u` it is a `u`-wide **band** (§9).
 //!
 //! The caller passes the excess in. It is not recomputed from `scale − γ`,
 //! because the scale of a two-tap pattern also holds a **lag-1** installment.

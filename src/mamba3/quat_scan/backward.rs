@@ -1,7 +1,6 @@
 //! # Custom autodiff node for the quaternion cumulative-product scan
 //!
-//! Implements [`Mamba3QuatScanBackendExt`](super::quat_scan::Mamba3QuatScanBackendExt)
-//! for `Autodiff<B>` with one Burn
+//! Implements [`Mamba3QuatScanBackendExt`] for `Autodiff<B>` with one Burn
 //! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward keeps
 //! only its two leaf inputs (the per-step quaternions `q` and the carry
 //! `init`). The backprop recomputes the prefix product and computes the exact
@@ -33,7 +32,7 @@
 //! ```
 //!
 //! `final_carry = cum[:, −1]` is a high-level autodiff slice (in
-//! [`quat_cumprod_recalculated`](super::quat_scan::quat_cumprod_recalculated)).
+//! [`quat_cumprod_recalculated`]).
 //! So its gradient is already in `d_cum` at the last position when this node
 //! runs, and the node has one output.
 

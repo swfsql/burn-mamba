@@ -18,8 +18,7 @@
 //! - **K5** [`k5_ssd_chunk_scan`](crate::mamba3::double_ssd::ssd::serial::k5_ssd_chunk_scan)
 //!   — adds the intra- and inter-chunk parts into `y`.
 //!
-//! The values and gradients are identical to those of
-//! [`minimal`](crate::mamba3::double_ssd::ssd::minimal). SISO
+//! The values and gradients are identical to those of [`minimal`]. SISO
 //! (`mimo_rank = 1`) is the special case where the fused length equals the
 //! chunk length. The gradients use plain autodiff.
 

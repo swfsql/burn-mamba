@@ -14,10 +14,7 @@
 //!    but the *decision* gap that it gives on this task is small. This test
 //!    shows it.
 
-use crate::dataset::{
-    FAMILIES, GAP, MARGIN, NUM_SYMBOLS, NUM_VALUES, Q_GAP, SEQ_LENGTH, labels, posterior, task,
-    value,
-};
+use crate::dataset::{FAMILIES, GAP, NUM_SYMBOLS, NUM_VALUES, Q_GAP, labels, posterior, task, value};
 use crate::model::{NUM_CLASSES, model_config};
 use crate::shared::data::{IGNORE, TallyDataset};
 use crate::shared::handmade::{accuracy, affine_channels, memoryless_ceiling, param, softplus_inv};
