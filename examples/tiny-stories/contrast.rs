@@ -66,7 +66,7 @@ use burn::prelude::*;
 use burn::tensor::activation::{log_sigmoid, sigmoid};
 use burn_mamba::prelude::{MambaSsdPath, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::utils::ClassCursors;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::io::Write;
 use std::path::Path;
