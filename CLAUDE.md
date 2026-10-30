@@ -74,10 +74,11 @@ cargo run --example reset-majority -- --training --inference
   delete it.
 - Always be **extremely succinct** when you add content to either file.
 - `examples/README.md` documents `examples/`, not this file.
-- **Commit messages**: the user can ask for a commit message for the session.
-  **Write the message as text only** (a title line + a short body) for the user
-  to copy. Do NOT run `git commit` or any git command to create the commit.
-  End the message with the `Co-Authored-By:` trailer.
+- **Commits**: when a skill or the user tells you to commit (for example, at the
+  end of an implementation), commit your work to the current branch. Do not
+  push. When the user asks only for a commit message, write it as text for the
+  user to copy. A commit message has a title line and a short body, and it ends
+  with the `Co-Authored-By:` trailer.
 
 ## File Map
 
