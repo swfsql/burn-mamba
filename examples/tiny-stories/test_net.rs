@@ -39,7 +39,7 @@ pub fn tiny_net(device: &Device) -> MambaVocabNet {
         .with_per_head_dim(8)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_siso_specialization_decode(true)
         .with_rotation(RotationKind::Complex2D);
     MambaVocabNetConfig::Mamba3 {

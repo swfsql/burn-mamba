@@ -4,9 +4,10 @@
 //! alone or with the others:
 //!
 //! 1. **Trapezoidal discretisation** of the recurrence.
-//! 2. A **complex-valued state transition**, applied as **data-dependent RoPE**
-//!    on the B/C projections ([`rotation`](crate::mamba3::rotation)). This is a
-//!    re-factoring of the transition, *not* a positional encoding.
+//! 2. A **complex-valued state transition**, applied as a **data-dependent
+//!    rotation** of the B/C projections
+//!    ([`rotation`](crate::mamba3::rotation)). This is a re-factoring of the
+//!    transition, *not* a positional encoding.
 //! 3. **MIMO** (multiple-input multiple-output) rank expansion.
 //! 4. **MambaProduct** ([`product`](crate::mamba3::product)):
 //!    [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)

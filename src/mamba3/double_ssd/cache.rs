@@ -119,10 +119,10 @@ pub struct Mamba3DoubleSsdCache {
     pub v_state_buhp: Option<Tensor<4>>,
 
     /// **Cumulative data-dependent rotation** up to the current position
-    /// ([`RotationState`]): nothing for `Real1D`, the abelian RoPE angle for
-    /// [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D) (each
-    /// step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`), or the
-    /// cumulative unit quaternion(s) for the quaternion kinds.
+    /// ([`RotationState`]): nothing for `Real1D`, the abelian rotation angle
+    /// for [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D)
+    /// (each step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`), or
+    /// the cumulative unit quaternion(s) for the quaternion kinds.
     ///
     /// The identity for fresh sequences. It continues across calls for
     /// streaming.
@@ -191,16 +191,17 @@ pub struct Mamba3DoubleSsdCacheConfig {
     #[config(default = 1)]
     pub mimo_rank: usize,
 
-    /// Number of RoPE angle pairs = `rope_dim / 2` = `(state_rank * rope_fraction) / 2`
-    /// (rounded down to even by `Mamba3Config::rope_dim`).
-    pub num_rope_angles: usize,
+    /// Number of rotation angles = `rotation_dim / 2`
+    /// = `(state_rank * rotation_fraction) / 2` (rounded down to even by
+    /// `Mamba3Config::rotation_dim`).
+    pub num_rotation_angles: usize,
 
     /// Which transition rotation the block uses ([`RotationKind`]). It selects
     /// the accumulator variant (see [`RotationState::identity`]).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
-    /// Number of quaternion blocks (`rope_dim / 4`). Only
+    /// Number of quaternion blocks (`rotation_dim / 4`). Only
     /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`] use it.
     #[config(default = 1)]
     pub num_quat_blocks: usize,
@@ -234,7 +235,7 @@ impl Mamba3DoubleSsdCacheConfig {
             per_head_dim: block_config.per_head_dim,
             nheads: block_config.nheads(),
             mimo_rank: block_config.mimo_rank,
-            num_rope_angles: block_config.num_rope_angles(),
+            num_rotation_angles: block_config.num_rotation_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
             trapezoid: block_config.trapezoid,
@@ -274,7 +275,7 @@ impl Mamba3DoubleSsdCacheConfig {
             self.rotation,
             self.batch,
             self.nheads,
-            self.num_rope_angles,
+            self.num_rotation_angles,
             self.num_quat_blocks,
             device,
         );

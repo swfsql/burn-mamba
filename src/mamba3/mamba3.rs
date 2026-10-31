@@ -1,4 +1,4 @@
-//! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent RoPE
+//! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent Rotation
 //!
 //! This module implements the core **Mamba-3 layer** from the paper
 //! *"Mamba-3: Improved Sequence Modeling using State Space Principles"*.
@@ -7,13 +7,13 @@
 //!
 //! 1. trapezoidal discretisation,
 //! 2. a **complex-valued state transition**, implemented as data-dependent
-//!    rotary embeddings on B and C (the "RoPE trick"),
+//!    rotations of B and C (the "RoPE trick"),
 //! 3. MIMO (multiple-input multiple-output) projection.
 //!
 //! Sections 1–3 show each one alone, and section 4 combines them. Section 5
 //! adds this crate's fourth dial, MambaProduct.
 //!
-//! ## 1. Trapezoidal recurrence (SISO, no RoPE, no MIMO — Proposition 1)
+//! ## 1. Trapezoidal recurrence (SISO, no rotation, no MIMO — Proposition 1)
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ xₜ₋₁ᵀ + γₜ Bₜ xₜᵀ   (state update)
@@ -46,11 +46,12 @@
 //! the other tap, or to `γ`), so the mass of the step is `Δₜ` under every
 //! member. See the header of [`Trapezoid`].
 //!
-//! ## 2. Complex transition, a.k.a. "data-dependent RoPE" (no trapezoid, no MIMO
-//! — paper section *Complex-Valued SSMs*)
+//! ## 2. Complex transition, the rotation (no trapezoid, no MIMO — paper section
+//! *Complex-Valued SSMs*)
 //!
-//! Despite the name, this is **not a positional encoding**. It is the
-//! *imaginary part of the state transition*. The `A` of Mamba-3 is complex
+//! The paper calls it "data-dependent RoPE". Despite that name, the rotation is
+//! **not a positional encoding**. It is the *imaginary part of the state
+//! transition*. The `A` of Mamba-3 is complex
 //! (`A + iϑ`). After discretisation, a complex SSM of state `N/2` is exactly a
 //! real SSM of state `N` whose transition is the scalar decay `α` times a
 //! block-diagonal of `2×2` rotations (paper Prop. *Complex-to-Real SSM
@@ -100,15 +101,16 @@
 //! ```
 //!
 //! `θⱼ − θᵢ` is not a position. It is `Σ Δ·ϱ·π·tanh(ϑ)` over the steps between:
-//! how far the transition itself rotated, driven by the inputs. It is the
-//! relative position of vanilla RoPE only in the degenerate case of an
-//! input-independent, constant per-step angle (`θⱼ − θᵢ = (j−i)·θ`). The data
-//! dependence is the point: it gives the layer rotational state dynamics, and
+//! how far the transition itself rotated, driven by the inputs. It is a
+//! relative position (as in a rotary position embedding) only in the
+//! degenerate case of an input-independent, constant per-step angle
+//! (`θⱼ − θᵢ = (j−i)·θ`). The data dependence is the point: it gives the
+//! layer rotational state dynamics, and
 //! thus state-tracking (parity, mod-k), which a real SSM with non-negative
 //! eigenvalues provably cannot express. See [`crate::mamba3::rotation`]. Its
 //! `Quaternion4D` applies the same argument to a non-abelian rotation group.
 //!
-//! ## 3. MIMO Extension (no trapezoid coefficients, no RoPE — `mimo_rank = M > 1`)
+//! ## 3. MIMO Extension (no trapezoid coefficients, no rotation — `mimo_rank = M > 1`)
 //!
 //! With MIMO, B/C carry M parallel rank channels, and the state update is a
 //! sum of M outer products. The readout gives M outputs, which the gate
@@ -125,8 +127,8 @@
 //!
 //! ## 4. Combined formulation (everything together)
 //!
-//! Trapezoid + RoPE + MIMO in one expression. `B̃ₜ[m] = Rₜ Bₜ[m]` and
-//! `C̃ₜ[m] = Rₜ Cₜ[m]` are the RoPE-rotated MIMO projections. The `β` tap is at
+//! Trapezoid + rotation + MIMO in one expression. `B̃ₜ[m] = Rₜ Bₜ[m]` and
+//! `C̃ₜ[m] = Rₜ Cₜ[m]` are the rotated MIMO projections. The `β` tap is at
 //! the lag 1 of the default member (§1: a member with lag `l` reads `t−l`, and
 //! a two-tap member adds a second such term):
 //!
@@ -196,7 +198,7 @@
 //! | `n`    | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
 //! | `g`    | `ngroups` | `G` | `num_bc_heads` | 1, .., `nheads` |
 //! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
-//! | `a`    | `num_rope_angles` = `state_rank` / 2 (or `rope_dim` / 2) | — | `num_rope_angles` | varies |
+//! | `a`    | `num_rotation_angles` = `state_rank` / 2 (or `rotation_dim` / 2) | — | `num_rope_angles` | varies |
 //!
 //! An uppercase letter is a relation (offset, multiple, concat, stack) of
 //! lowercase letters. For example, `X` can be `x+1`, `x-1` or `x*2`, and `XY`
@@ -222,8 +224,8 @@ use burn_stack::utils::{UntiedParam, untied};
 /// The Mamba-3 SSM block.
 ///
 /// The full Mamba-3 layer with exponential-trapezoidal discretization and
-/// data-dependent RoPE, for SISO (mimo_rank=1) and MIMO (mimo_rank>1). It has
-/// two execution modes:
+/// data-dependent rotation, for SISO (mimo_rank=1) and MIMO (mimo_rank>1). It
+/// has two execution modes:
 ///
 /// - [`Self::forward`] — chunkwise SSD for training / prefill (the cache
 ///   variant selects the double- or single-SSD pathway)
@@ -364,16 +366,17 @@ pub struct Mamba3 {
     /// Paper: `G`. Python: `num_bc_heads`.
     pub ngroups: usize,
 
-    /// Number of RoPE angle pairs (`rope_dim / 2`).
+    /// Number of rotation angles, one for each pair of entries
+    /// (`rotation_dim / 2`).
     ///
     /// Python: `num_rope_angles`.
-    pub num_rope_angles: usize,
+    pub num_rotation_angles: usize,
 
-    /// Effective RoPE dimension (= `2 · num_rope_angles`). Always even and
-    /// `≤ state_rank`. The rotation turns only the first `rope_dim` entries of
-    /// B/C. `0` for [`RotationKind::Real1D`], which rotates nothing (like every
-    /// other rotation count here).
-    pub rope_dim: usize,
+    /// Effective rotation dimension (= `2 · num_rotation_angles`). Always even
+    /// and `≤ state_rank`. The rotation turns only the first `rotation_dim`
+    /// entries of B/C. `0` for [`RotationKind::Real1D`], which rotates nothing
+    /// (like every other rotation count here).
+    pub rotation_dim: usize,
 
     /// MIMO rank. 1 = SISO (standard Mamba-3).
     ///
@@ -411,12 +414,12 @@ pub struct Mamba3 {
     pub rotation_range: f64,
 
     /// Number of in-projection channels for the rotation parameters, per
-    /// micro-step: `num_rope_angles` for `Complex2D`,
+    /// micro-step: `num_rotation_angles` for `Complex2D`,
     /// `nheads·3·num_rotation_blocks` for the quaternion kinds, `0` for
     /// `Real1D`. At `0`, `in_proj` has no rotation segment.
     pub num_rotation_channels: usize,
 
-    /// Number of quaternion blocks (`rope_dim / 4`). Only
+    /// Number of quaternion blocks (`rotation_dim / 4`). Only
     /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`] use it.
     pub num_quat_blocks: usize,
 
@@ -755,7 +758,7 @@ impl Mamba3 {
     pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
         crate::mamba3::rotation::RotationSpec {
             kind: self.rotation,
-            rope_dim: self.rope_dim,
+            rotation_dim: self.rotation_dim,
             range: self.rotation_range,
         }
     }
@@ -881,7 +884,8 @@ pub struct Mamba3Config {
     pub d_model: usize,
 
     /// State rank — the latent dimension of the SSM hidden state.
-    /// **Must be even** for every rotating [`RotationKind`] (RoPE pairing).
+    /// **Must be even** for every rotating [`RotationKind`] (the rotation turns
+    /// pairs of entries).
     /// [`RotationKind::Real1D`] makes no pairs, so it also accepts an odd rank
     /// (down to the scalar state `1`).
     ///
@@ -1038,7 +1042,7 @@ pub struct Mamba3Config {
     /// legal `state_rank` (4, one quaternion block) usable, because a partial
     /// quaternion rotation must cover whole 4-blocks.
     #[config(default = 1.0)]
-    pub rope_fraction: f64,
+    pub rotation_fraction: f64,
 
     /// Whether to apply a gated RMSNorm before the output projection.
     ///
@@ -1053,15 +1057,16 @@ pub struct Mamba3Config {
     /// carried by the state transition and absorbed into `B`/`C` (see
     /// [`RotationKind`]).
     ///
-    /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D) — the
-    /// current Mamba-3 RoPE — for which the block is byte-for-byte unchanged.
+    /// Defaults to the abelian [`Complex2D`](RotationKind::Complex2D), the
+    /// rotation of the reference Mamba-3.
     /// [`Quaternion4D`](RotationKind::Quaternion4D) selects the non-abelian
     /// quaternion rotation; its in-projection devotes
     /// `nheads · 3 · num_quat_blocks` channels to per-head quaternion
-    /// generators in place of the shared `num_rope_angles` angle channels (see
-    /// [`Self::num_rotation_channels`]). [`Rotor4D`](RotationKind::Rotor4D)
-    /// selects the full `SO(4)` rotation of each 4-block and doubles that
-    /// channel count (a left and a right generator per head and block).
+    /// generators in place of the shared `num_rotation_angles` angle channels
+    /// (see [`Self::num_rotation_channels`]).
+    /// [`Rotor4D`](RotationKind::Rotor4D) selects the full `SO(4)` rotation of
+    /// each 4-block and doubles that channel count (a left and a right
+    /// generator per head and block).
     /// [`Real1D`](RotationKind::Real1D) removes the rotation altogether — no
     /// channels, no accumulator, a real transition.
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
@@ -1159,34 +1164,34 @@ impl Mamba3Config {
         self.d_inner() / self.per_head_dim
     }
 
-    /// Effective RoPE dimension: the number of B/C channels that turn.
-    /// `state_rank` for full RoPE (`rope_fraction = 1.0`), `state_rank / 2` for
-    /// `rope_fraction = 0.5`, and `0` for [`RotationKind::Real1D`], which
-    /// rotates nothing.
-    pub fn rope_dim(&self) -> usize {
+    /// Effective rotation dimension: the number of B/C channels that turn.
+    /// `state_rank` for a full rotation (`rotation_fraction = 1.0`),
+    /// `state_rank / 2` for `rotation_fraction = 0.5`, and `0` for
+    /// [`RotationKind::Real1D`], which rotates nothing.
+    pub fn rotation_dim(&self) -> usize {
         if self.rotation == RotationKind::Real1D {
             return 0;
         }
-        let mut d = (self.state_rank as f64 * self.rope_fraction) as usize;
+        let mut d = (self.state_rank as f64 * self.rotation_fraction) as usize;
         if !d.is_multiple_of(2) {
             d -= 1;
         }
         d
     }
 
-    /// Number of RoPE rotation angles projected per head: `rope_dim / 2` (`0`
+    /// Number of rotation angles projected per head: `rotation_dim / 2` (`0`
     /// for [`RotationKind::Real1D`]). `init` asserts that every rotating kind
     /// turns at least one pair, so this is `> 0` wherever the block reads it.
-    pub fn num_rope_angles(&self) -> usize {
-        self.rope_dim() / 2
+    pub fn num_rotation_angles(&self) -> usize {
+        self.rotation_dim() / 2
     }
 
     /// Number of **state** quaternion blocks for the quaternion kinds:
-    /// `rope_dim / 4`. For them, `init` asserts that it is a whole non-zero
+    /// `rotation_dim / 4`. For them, `init` asserts that it is a whole non-zero
     /// number. `0` for [`RotationKind::Real1D`]. Meaningless (and not read) for
     /// [`RotationKind::Complex2D`].
     pub fn num_quat_blocks(&self) -> usize {
-        self.rope_dim() / 4
+        self.rotation_dim() / 4
     }
 
     /// Number of in-projection channels for the rotation parameters, per
@@ -1194,7 +1199,7 @@ impl Mamba3Config {
     ///
     /// - [`Real1D`](RotationKind::Real1D): none. The trailing `in_proj`
     ///   segment is absent, not zero-width (Burn has no zero-width tensors).
-    /// - [`Complex2D`](RotationKind::Complex2D): `num_rope_angles` angle
+    /// - [`Complex2D`](RotationKind::Complex2D): `num_rotation_angles` angle
     ///   channels, shared across heads and scaled per head by `Δ`, as in the
     ///   reference.
     /// - [`Quaternion4D`](RotationKind::Quaternion4D) /
@@ -1212,7 +1217,7 @@ impl Mamba3Config {
         match self.rotation {
             // A real transition has no rotation to parameterise.
             RotationKind::Real1D => 0,
-            RotationKind::Complex2D => self.num_rope_angles(),
+            RotationKind::Complex2D => self.num_rotation_angles(),
             // Three generator channels per (head, block) and **per factor**:
             // one factor for Quaternion4D, two for Rotor4D.
             RotationKind::Quaternion4D | RotationKind::Rotor4D => {
@@ -1371,14 +1376,15 @@ impl Mamba3Config {
         let ngroups = self.ngroups;
         let state_rank = self.state_rank;
         let mimo_rank = self.mimo_rank;
-        let num_rope_angles = self.num_rope_angles();
+        let num_rotation_angles = self.num_rotation_angles();
 
         assert!(state_rank > 0, "state_rank must be positive");
-        // RoPE pairing needs an even rank. `Real1D` makes no pairs, so it is
-        // the one kind that accepts an odd (for example, scalar) state.
+        // The rotation turns pairs of entries, so it needs an even rank.
+        // `Real1D` makes no pairs, so it is the one kind that accepts an odd
+        // (for example, scalar) state.
         assert!(
             self.rotation == RotationKind::Real1D || state_rank.is_multiple_of(2),
-            "state_rank must be even for RoPE pairing"
+            "state_rank must be even for a rotating RotationKind (the rotation turns pairs)"
         );
         assert!(self.per_head_dim > 0, "per_head_dim must be positive");
         assert_eq!(
@@ -1392,18 +1398,18 @@ impl Mamba3Config {
         assert!(mimo_rank >= 1, "mimo_rank must be at least 1");
         assert!(self.micro_steps >= 1, "micro_steps must be at least 1");
         assert!(
-            [0.5, 1.0].contains(&self.rope_fraction),
-            "rope_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
+            [0.5, 1.0].contains(&self.rotation_fraction),
+            "rotation_fraction must be 0.5 or 1.0 (for no rotation use RotationKind::Real1D)"
         );
         if self.rotation != RotationKind::Real1D {
             // Every rotating kind must turn something. The no-rotation
             // ablation is its own kind (`Real1D`), not a fraction of zero.
             assert!(
-                num_rope_angles > 0,
-                "{:?} rotates nothing at state_rank = {} and rope_fraction = {} — use RotationKind::Real1D",
+                num_rotation_angles > 0,
+                "{:?} rotates nothing at state_rank = {} and rotation_fraction = {} — use RotationKind::Real1D",
                 self.rotation,
                 self.state_rank,
-                self.rope_fraction
+                self.rotation_fraction
             );
         }
         if matches!(
@@ -1420,10 +1426,10 @@ impl Mamba3Config {
             // the block would silently round `num_quat_blocks` up to its floor
             // of 1 and rotate *everything* when asked for half.
             assert!(
-                self.rope_dim().is_multiple_of(4),
-                "{:?} rotates whole 4-blocks: rope_fraction·state_rank = {} is not a multiple of 4",
+                self.rotation_dim().is_multiple_of(4),
+                "{:?} rotates whole 4-blocks: rotation_fraction·state_rank = {} is not a multiple of 4",
                 self.rotation,
-                self.rope_dim()
+                self.rotation_dim()
             );
         }
         assert!(self.rotation_range > 0.0, "rotation_range must be positive");
@@ -1594,8 +1600,8 @@ impl Mamba3Config {
             tropical_readout_hp,
             state_rank,
             ngroups,
-            rope_dim: self.rope_dim(),
-            num_rope_angles,
+            rotation_dim: self.rotation_dim(),
+            num_rotation_angles,
             mimo_rank,
             micro_steps: self.micro_steps,
             rotation: self.rotation,
@@ -1903,7 +1909,7 @@ impl Mamba3 {
             self.rotation,
             batch,
             self.nheads(),
-            self.num_rope_angles,
+            self.num_rotation_angles,
             self.num_quat_blocks,
             device,
         )

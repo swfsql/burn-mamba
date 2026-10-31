@@ -44,14 +44,15 @@ Each generation in this crate builds on the one before:
   **positive systems** beside the recurrence (a Kalman gate, a max-plus
   register).
 
-Despite the name, the *data-dependent RoPE* of Mamba-3 is not a positional
-encoding. It is the imaginary part of the state transition. A complex SSM is
-exactly a real SSM whose transition is a scalar decay times a block-diagonal of
-`2×2` rotations. Those rotations are orthogonal (and, in `SO(2)`, they
-commute), so the cumulative rotation factors out of the recurrence, and `B`/`C`
-absorb it. This is the "RoPE trick": the plain scalar-decay SSD kernel stays
-unchanged. So the transition uses the machinery of RoPE, on the query/key side
-(by SSD duality). But the angles are data-dependent, not a fixed frequency
+The paper calls the rotation of Mamba-3 *data-dependent RoPE*. Despite that
+name, the rotation is not a positional encoding. It is the imaginary part of
+the state transition. A complex SSM is exactly a real SSM whose transition is
+a scalar decay times a block-diagonal of `2×2` rotations. Those rotations are
+orthogonal (and, in `SO(2)`, they commute), so the cumulative rotation factors
+out of the recurrence, and `B`/`C` absorb it. This is the "RoPE trick": the
+plain scalar-decay SSD kernel stays unchanged. So the transition uses the
+machinery of a rotary position embedding, on the query/key side (by SSD
+duality). But the angles are data-dependent, not a fixed frequency
 schedule, and the purpose is rotational state dynamics. That lets Mamba-3 track
 state (parity, mod-k), which a real SSM with non-negative eigenvalues provably
 cannot do.

@@ -39,8 +39,9 @@ use burn_mamba::prelude::{
 ///
 /// Necessary config choices:
 ///
-/// - `state_rank = 2` ⇒ exactly one rotation pair. With `rope_fraction = 1`, the
-///   whole state rotates. The rotor *is* the state.
+/// - `state_rank = 2` ⇒ exactly one rotation pair. With
+///   `rotation_fraction = 1`, the whole state rotates. The rotor *is* the
+///   state.
 /// - `per_head_dim = 1`, `expand = 1` ⇒ `nheads = 2`: the cos axis and the sin
 ///   axis, and nothing else.
 /// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
@@ -59,7 +60,7 @@ use burn_mamba::prelude::{
 pub fn model_config() -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 2, per_head_dim = 1 ⇒ nheads = 2 (the cos head
     // and the sin head), each with its own Δ, A and D.
-    // state_rank = 2 ⇒ the state is a single plane, and rope_fraction = 1.0
+    // state_rank = 2 ⇒ the state is a single plane, and rotation_fraction = 1.0
     // rotates all of it.
     let mamba_block = Mamba3Config::new(2)
         .with_state_rank(2) // one rotation pair — the rotor itself
@@ -67,7 +68,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_per_head_dim(1)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Complex2D)
         .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);

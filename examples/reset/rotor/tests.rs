@@ -122,7 +122,8 @@ enum Turn {
     /// detent and `R` does not turn it at all.
     Selective,
     /// The ablation: `ϑ` is a constant, so **every** symbol turns the state by
-    /// the same angle. This is vanilla RoPE, a phase that counts positions.
+    /// the same angle. This is a rotary position embedding: a phase that
+    /// counts positions.
     Fixed(f64),
 }
 
@@ -513,13 +514,14 @@ fn handmade_block_solves_every_family() {
 /// one changed knob). Give each angle the best readout that its output plane
 /// admits.
 ///
-/// A fixed rotation is vanilla RoPE. The phase that it accumulates between the
-/// reset and the read is `ω · (positions since the reset)`, and that tells
-/// nothing about the number of turns in those positions. `balanced` shows this
-/// directly: its turn count is decorrelated from the position. In `drift`, a
-/// fixed rotation comes closest to right, because most steps turn the same
-/// way. But it is no better once the few opposite steps move the count away
-/// from the position by more than a detent.
+/// A fixed rotation is a rotary position embedding. The phase that it
+/// accumulates between the reset and the read is
+/// `ω · (positions since the reset)`, and that tells nothing about the number
+/// of turns in those positions. `balanced` shows this directly: its turn
+/// count is decorrelated from the position. In `drift`, a fixed rotation comes
+/// closest to right, because most steps turn the same way. But it is no better
+/// once the few opposite steps move the count away from the position by more
+/// than a detent.
 #[test]
 fn no_fixed_rotation_solves_the_task() {
     let device = test_device();

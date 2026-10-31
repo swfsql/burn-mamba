@@ -41,7 +41,7 @@ fn block_config(d_model: usize) -> Mamba3Config {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
 }
 
 const D_MODEL: usize = 16;

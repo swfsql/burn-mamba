@@ -53,7 +53,7 @@
 //! [`Mamba-1`](crate::mamba1) is the predecessor: a sequential selective scan
 //! with a diagonal (not scalar) state transition. [`Mamba-3`](crate::mamba3)
 //! extends this SSD layer with trapezoidal discretisation, a complex-valued
-//! state transition (data-dependent RoPE on B/C), MIMO rank expansion and
+//! state transition (a data-dependent rotation of B/C), MIMO rank expansion and
 //! MambaProduct.
 //!
 //! ## Notation / Dimension Keys

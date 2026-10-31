@@ -948,7 +948,7 @@ mod step {
             // length `u`, and one call is `forward` on a one-token sequence
             // (the parity tests assert this). The block is not walked one
             // position at a time, because that is not necessary. After the RoPE
-            // factoring, the transition inside the block is the *scalar* `α`,
+            // trick, the transition inside the block is the *scalar* `α`,
             // so the block has a closed form:
             //
             //     h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ · writeⱼ ,    wⱼ = ∏_{r>j} αᵣ

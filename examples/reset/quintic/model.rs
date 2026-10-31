@@ -82,7 +82,7 @@ pub fn floor_width(group: Group) -> (usize, usize) {
 ///
 /// These config choices are load-bearing:
 ///
-/// - `state_rank = 4`, `rope_fraction = 1.0`: one quaternion block, turned
+/// - `state_rank = 4`, `rotation_fraction = 1.0`: one quaternion block, turned
 ///   whole. It is the smallest non-abelian state. `A₅` is perfect, so an
 ///   abelian state carries none of it.
 /// - `layers`: the one knob that separates the two groups.
@@ -113,7 +113,7 @@ pub fn model_config_with(
         .with_per_head_dim(d_inner / nheads)
         .with_ngroups(1)
         .with_mimo_rank(mimo_rank)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(rotation)
         .with_trapezoid(Trapezoid::None)
         .with_has_proj_bias(true);

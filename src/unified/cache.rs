@@ -290,7 +290,7 @@ mod impl_mamba3 {
             Mamba3SingleSsdCacheConfig {
                 batch,
                 state_rank: mamba_block.state_rank,
-                num_rope_angles: mamba_block.num_rope_angles,
+                num_rotation_angles: mamba_block.num_rotation_angles,
                 per_head_dim: mamba_block.per_head_dim(),
                 nheads: mamba_block.nheads(),
                 mimo_rank: mamba_block.mimo_rank,

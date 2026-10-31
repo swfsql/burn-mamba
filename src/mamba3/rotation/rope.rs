@@ -1,4 +1,5 @@
-//! Rotary (RoPE) application helpers for the abelian rotation pathway.
+//! The RoPE trick for the abelian rotation kind
+//! ([`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D)).
 //!
 //! Purely mechanical: given per-pair cumulative angles, rotate the paired
 //! channels of B/C. See the [module header](crate::mamba3::rotation) for why
@@ -7,7 +8,7 @@
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
-// RoPE utility
+// RoPE trick
 // ---------------------------------------------------------------------------
 
 /// Reduce angles modulo `2π` into `[−π, π]`, leaving the autodiff graph intact.
@@ -38,7 +39,7 @@ pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
     crate::mamba3::helpers::sub_periods(angles, k, two_pi)
 }
 
-/// Apply a rotary embedding (RoPE) to `x` along its last dimension.
+/// Rotate the pairs of `x` along its last dimension (the RoPE trick).
 ///
 /// Purely the mechanical pairwise rotation. In Mamba-3 the `angles` are the
 /// cumulative rotation of the *state transition* (see [`crate::mamba3::mamba3`]),
@@ -104,10 +105,11 @@ pub fn apply_rope<const D: usize>(
     }
 }
 
-/// Apply RoPE to only the rotation-active entries of the last dimension. The
-/// rest is unchanged. When `rope_dim == state_rank` (full RoPE), this is
-/// [`apply_rope`]. `rope_dim` must be positive: a block that rotates nothing
-/// is [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
+/// Apply the RoPE trick to only the rotation-active entries of the last
+/// dimension. The rest is unchanged. When `rotation_dim == state_rank` (a full
+/// rotation), this is [`apply_rope`]. `rotation_dim` must be positive: a block
+/// that rotates nothing is
+/// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D),
 /// which never comes here.
 ///
 /// Pairing scheme (it must match the reference kernels: see Section
@@ -115,56 +117,58 @@ pub fn apply_rope<const D: usize>(
 /// `mamba3_mimo_fwd.py`):
 ///
 /// - `rotate_pairwise = true` (SISO, interleaved/NeoX): pairs `(0,1), (2,3), …`.
-///   Only pairs `0..num_rope_angles` turn, and the pairs after them are
-///   unchanged. This is the same as a rotation of the first `rope_dim`
+///   Only pairs `0..num_rotation_angles` turn, and the pairs after them are
+///   unchanged. This is the same as a rotation of the first `rotation_dim`
 ///   entries.
 /// - `rotate_pairwise = false` (MIMO, half-and-half/GPT-J): the pair distance
 ///   is always `state_rank/2`: element `n` pairs with element
-///   `state_rank/2 + n`. With partial RoPE, only the first `num_rope_angles`
-///   pairs turn. The other elements in both halves are unchanged.
+///   `state_rank/2 + n`. With a partial rotation, only the first
+///   `num_rotation_angles` pairs turn. The other elements in both halves are
+///   unchanged.
 pub fn apply_rope_partial<const D: usize>(
     x: Tensor<D>,
     angles: Tensor<D>,
-    rope_dim: usize,
+    rotation_dim: usize,
     rotate_pairwise: bool,
 ) -> Tensor<D> {
-    debug_assert!(rope_dim > 0, "partial RoPE requires rope_dim > 0");
+    debug_assert!(rotation_dim > 0, "a partial rotation requires rotation_dim > 0");
 
     let state_rank = x.dims()[D - 1];
-    if rope_dim == state_rank {
+    if rotation_dim == state_rank {
         return apply_rope::<D>(x, angles, rotate_pairwise);
     }
 
     if rotate_pairwise {
-        // Pairs are local. A slice of the first rope_dim entries gives the
+        // Pairs are local. A slice of the first rotation_dim entries gives the
         // same result as the reference (which rotates the whole headdim, with
         // identity cos/sin for the tail pairs).
-        let x_rope = x.clone().narrow(D - 1, 0, rope_dim);
-        let x_rest = x.narrow(D - 1, rope_dim, state_rank - rope_dim);
+        let x_rope = x.clone().narrow(D - 1, 0, rotation_dim);
+        let x_rest = x.narrow(D - 1, rotation_dim, state_rank - rotation_dim);
         let x_rope_rotated = apply_rope::<D>(x_rope, angles, true);
         return Tensor::cat(vec![x_rope_rotated, x_rest], D - 1);
     }
 
-    // Half-and-half partial RoPE: the pair distance must be `state_rank/2`,
-    // not `rope_dim/2`. `apply_rope` on a slice of the first `rope_dim`
+    // Half-and-half partial rotation: the pair distance must be `state_rank/2`,
+    // not `rotation_dim/2`. `apply_rope` on a slice of the first `rotation_dim`
     // entries would pair within the slice and give the wrong rotation.
     let half = state_rank / 2;
-    let num_rope_angles = rope_dim / 2;
+    let num_rotation_angles = rotation_dim / 2;
     debug_assert!(
-        num_rope_angles < half,
-        "partial RoPE requires rope_dim < state_rank here"
+        num_rotation_angles < half,
+        "a partial rotation requires rotation_dim < state_rank here"
     );
 
     // Split x into the two halves, then within each half separate the
     // rotation-active prefix from the pass-through suffix.
     let x_h1 = x.clone().narrow(D - 1, 0, half);
     let x_h2 = x.narrow(D - 1, half, half);
-    let x_h1_rope = x_h1.clone().narrow(D - 1, 0, num_rope_angles);
-    let x_h1_pass = x_h1.narrow(D - 1, num_rope_angles, half - num_rope_angles);
-    let x_h2_rope = x_h2.clone().narrow(D - 1, 0, num_rope_angles);
-    let x_h2_pass = x_h2.narrow(D - 1, num_rope_angles, half - num_rope_angles);
+    let x_h1_rope = x_h1.clone().narrow(D - 1, 0, num_rotation_angles);
+    let x_h1_pass = x_h1.narrow(D - 1, num_rotation_angles, half - num_rotation_angles);
+    let x_h2_rope = x_h2.clone().narrow(D - 1, 0, num_rotation_angles);
+    let x_h2_pass = x_h2.narrow(D - 1, num_rotation_angles, half - num_rotation_angles);
 
-    // angles: [..., num_rope_angles] — broadcasts element-wise against the rope-active slices.
+    // angles: [..., num_rotation_angles] — broadcasts element-wise against the
+    // rotation-active slices.
     let angles = wrap_angle(angles);
     let cos = angles.clone().cos();
     let sin = angles.sin();

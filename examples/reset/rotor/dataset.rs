@@ -27,9 +27,9 @@
 //!   (every Mamba-1/Mamba-2 state, and Mamba-3 without the rotation) can hold
 //!   only that count, not its residue. A linear readout cuts the count axis
 //!   into at most `NUM_CLASSES` intervals, but the answer alternates along it.
-//! - **The turn must be data-dependent.** A fixed per-step angle is vanilla
-//!   RoPE: the phase that it accumulates between the reset and the read
-//!   measures *positions*, not turns.
+//! - **The turn must be data-dependent.** A fixed per-step angle is a rotary
+//!   position embedding: the phase that it accumulates between the reset and
+//!   the read measures *positions*, not turns.
 //!
 //! The two adversarial families close the two shortcuts that remain.
 //! [`Family::Drift`] drives the count out of the reach of any three-interval

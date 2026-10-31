@@ -5,12 +5,12 @@
 //! SSM) reproduces the explicit recurrence that carries the `4×4` rotation
 //! inside the state — for **non-commuting** quaternions. The two paths use
 //! deliberately different primitives (quaternion product vs materialised `4×4`
-//! matmul), so agreement cross-validates both the homomorphism and the RoPE
-//! factoring at once.
+//! matmul), so agreement cross-validates both the homomorphism and the
+//! factoring of the RoPE trick at once.
 //!
 //! The other tests pin the supporting facts: the `q ↦ L_q` homomorphism and
 //! orthogonality, the cross-chunk carry of [`quat_cumprod`], the abelian
-//! collapse to a `cumsum` of angles (RoPE), and gradient parity.
+//! collapse to a `cumsum` of angles (`Complex2D`), and gradient parity.
 
 use super::*;
 use crate::mamba3::rotation::rope::apply_rope;
@@ -631,13 +631,15 @@ fn cumprod_parallel_matches_sequential_grads() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Abelian collapse: single-axis quaternions ⇒ cumsum of half-angles (RoPE)
+// 4. Abelian collapse: single-axis quaternions ⇒ cumsum of half-angles
+//    (`Complex2D`)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn single_axis_collapses_to_cumsum() {
     // Quaternions about a fixed axis (here î) commute; their cumulative product
-    // is the half-angle-cumsum quaternion — exactly RoPE's closed form.
+    // is the half-angle-cumsum quaternion — exactly the closed form of
+    // `Complex2D`.
     let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 8, 2, 2);
 
@@ -678,7 +680,7 @@ fn single_axis_collapses_to_cumsum() {
 
 // ---------------------------------------------------------------------------
 // 5. k=2 cross-check: the abelian restriction of the quaternion pathway
-//    reproduces the *production* RoPE (`apply_rope`, the current pathway).
+//    reproduces the *production* rotation (`apply_rope`, the `Complex2D` kind).
 // ---------------------------------------------------------------------------
 
 /// A single quaternion's left-multiplication `L_q` is **isoclinic**: with
@@ -687,12 +689,12 @@ fn single_axis_collapses_to_cumsum() {
 /// rotates each 2-pair `(0,1),(2,3),…` by its own angle.
 ///
 /// So restricting the quaternion machinery to a single fixed axis (the abelian
-/// case) and locking each block's two RoPE pairs to a shared angle, the two
+/// case) and locking each block's two rotation pairs to a shared angle, the two
 /// pathways must agree **exactly** — and the non-abelian `quat_cumprod`
-/// collapses to the cumulative angle of RoPE. This ties the quaternion code
-/// to the abelian RoPE implementation at `k = 2`.
+/// collapses to the cumulative angle of `Complex2D`. This ties the quaternion
+/// code to the abelian `Complex2D` implementation at `k = 2`.
 #[test]
-fn k2_quaternion_matches_production_rope() {
+fn k2_quaternion_matches_production_rotation() {
     let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 6, 2, 2); // state_rank = 4·blocks = 8
     let state_rank = blocks * 4;
@@ -720,7 +722,7 @@ fn k2_quaternion_matches_production_rope() {
     );
     let b_quat = rotate_state_rank_blocks::<4, 5>(bvec.clone(), qcum);
 
-    // ── Production RoPE pathway ──────────────────────────────────────────────
+    // ── Production Complex2D rotation ───────────────────────────────────────
     // Cumulative per-block angle Φⱼ = cumsum(aⱼ) (single-axis quaternions
     // commute, so the product's angle is the sum), duplicated across each
     // block's two interleaved pairs: angles = [Φ⁰, Φ⁰, Φ¹, Φ¹, …].
@@ -739,13 +741,14 @@ fn k2_quaternion_matches_production_rope() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Non-commutativity is real and load-bearing (the expressivity beyond RoPE)
+// 6. Non-commutativity is real and load-bearing (the expressivity beyond
+//    `Complex2D`)
 // ---------------------------------------------------------------------------
 
 /// Two generic (multi-axis) quaternions do **not** commute, so swapping the
 /// order of two rotation steps changes the cumulative rotation — something no
-/// `cumsum`-of-angles (abelian RoPE) can represent. This is the structural
-/// source of the extra state-tracking power.
+/// `cumsum`-of-angles (abelian `Complex2D`) can represent. This is the
+/// structural source of the extra state-tracking power.
 #[test]
 fn rotation_order_matters_for_generic_quaternions() {
     let device = test_device();
@@ -862,7 +865,7 @@ fn normalize_zero_quaternion_grad_finite() {
 #[test]
 fn scaled_axis_single_axis_matches_half_angle() {
     // g = (2φ, 0, 0) ⇒ angle = 2φ, q = (cos φ, sin φ, 0, 0): the single-axis
-    // parameterisation used by the RoPE collapse / cross-check above.
+    // parameterisation used by the `Complex2D` collapse / cross-check above.
     let device = test_device();
     let phi = Tensor::<2>::random([16, 1], Distribution::Normal(0.0, 0.7), &device);
     let zeros = Tensor::<2>::zeros([16, 1], &device);
@@ -880,22 +883,23 @@ fn scaled_axis_single_axis_matches_half_angle() {
 #[test]
 fn config_rotation_channels_and_d_in_proj() {
     use crate::mamba3::mamba3::Mamba3Config;
-    // state_rank=16, rope_fraction=0.5 ⇒ rope_dim=8, num_rope_angles=4,
-    // num_quat_blocks = (16·0.5 → 8, /4) = 2.
+    // state_rank=16, rotation_fraction=0.5 ⇒ rotation_dim=8,
+    // num_rotation_angles=4, num_quat_blocks = (16·0.5 → 8, /4) = 2.
     let base = Mamba3Config::new(64)
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8);
 
-    // Default is the abelian pathway, and d_in_proj is unchanged from the
-    // legacy formula (num_rotation_channels == num_rope_angles).
+    // The default is the abelian kind. Its rotation segment of `in_proj` has
+    // one channel for each angle
+    // (num_rotation_channels == num_rotation_angles).
     assert_eq!(base.rotation, RotationKind::Complex2D);
-    assert_eq!(base.num_rotation_channels(), base.num_rope_angles());
-    let legacy = 2 * base.d_inner()
+    assert_eq!(base.num_rotation_channels(), base.num_rotation_angles());
+    let complex2d_d_in_proj = 2 * base.d_inner()
         + 2 * base.ngroups * base.state_rank * base.mimo_rank
         + 3 * base.nheads()
-        + base.num_rope_angles();
-    assert_eq!(base.d_in_proj(), legacy);
+        + base.num_rotation_angles();
+    assert_eq!(base.d_in_proj(), complex2d_d_in_proj);
 
     // Quaternion4D: rotation channels = nheads · 3 · num_quat_blocks (an
     // axis·angle generator per head and block), reflected in d_in_proj.
@@ -903,14 +907,14 @@ fn config_rotation_channels_and_d_in_proj() {
     assert_eq!(q.num_quat_blocks(), 4); // 16 / 4, the default full rotation
     assert_eq!(q.num_rotation_channels(), q.nheads() * 3 * 4);
     // an explicit half is still honoured (and still whole 4-blocks)
-    let q_half = q.clone().with_rope_fraction(0.5);
+    let q_half = q.clone().with_rotation_fraction(0.5);
     assert_eq!(q_half.num_quat_blocks(), 2);
-    assert_eq!(q_half.rope_dim(), 8);
+    assert_eq!(q_half.rotation_dim(), 8);
     let q_expected = 2 * q.d_inner()
         + 2 * q.ngroups * q.state_rank * q.mimo_rank
         + 3 * q.nheads()
         + q.nheads() * 3 * q.num_quat_blocks();
-    assert_eq!(q.rope_dim(), q.state_rank);
+    assert_eq!(q.rotation_dim(), q.state_rank);
     assert_eq!(q.d_in_proj(), q_expected);
     // The two pathways differ only in the rotation-channel count.
     assert_eq!(
@@ -966,7 +970,7 @@ fn rotor_generator_channels_are_left_then_right() {
     let c = Tensor::<5>::random([batch, sequence, 1, nheads, state_rank], normal, &device);
     let spec = |kind| RotationSpec {
         kind,
-        rope_dim: state_rank,
+        rotation_dim: state_rank,
         range: 2.0,
     };
 
@@ -1045,7 +1049,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 /// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
 /// `quat_mul`, feeding the unchanged double-ssd SSD core). Both the
 /// left-isoclinic and the full-`SO(4)` kind run it.
-fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, mimo_rank: usize) {
+fn quaternion_forward_step_parity_kind(kind: RotationKind, rotation_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     let device = test_device();
@@ -1054,7 +1058,7 @@ fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, m
         .with_expand(2)
         .with_per_head_dim(8)
         .with_mimo_rank(mimo_rank)
-        .with_rope_fraction(rope_fraction)
+        .with_rotation_fraction(rotation_fraction)
         .with_rotation(kind)
         .init(&device);
 
@@ -1078,21 +1082,21 @@ fn quaternion_forward_step_parity_kind(kind: RotationKind, rope_fraction: f64, m
     let d = max_abs_diff(out_fwd, out_step);
     assert!(
         d < dtype_tol(1e-3),
-        "{kind:?} forward vs step parity (rope_fraction={rope_fraction}, mimo_rank={mimo_rank}): {d:.6}"
+        "{kind:?} forward vs step parity (rotation_fraction={rotation_fraction}, mimo_rank={mimo_rank}): {d:.6}"
     );
 }
 
-fn quaternion_forward_step_parity(rope_fraction: f64, mimo_rank: usize) {
-    quaternion_forward_step_parity_kind(RotationKind::Quaternion4D, rope_fraction, mimo_rank);
+fn quaternion_forward_step_parity(rotation_fraction: f64, mimo_rank: usize) {
+    quaternion_forward_step_parity_kind(RotationKind::Quaternion4D, rotation_fraction, mimo_rank);
 }
 
 #[test]
-fn quaternion_block_forward_step_parity_full_rope() {
+fn quaternion_block_forward_step_parity_full_rotation() {
     quaternion_forward_step_parity(1.0, 1);
 }
 
 #[test]
-fn quaternion_block_forward_step_parity_partial_rope() {
+fn quaternion_block_forward_step_parity_partial_rotation() {
     quaternion_forward_step_parity(0.5, 1);
 }
 
@@ -1102,12 +1106,12 @@ fn quaternion_block_forward_step_parity_mimo() {
 }
 
 #[test]
-fn rotor_block_forward_step_parity_full_rope() {
+fn rotor_block_forward_step_parity_full_rotation() {
     quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 1.0, 1);
 }
 
 #[test]
-fn rotor_block_forward_step_parity_partial_rope() {
+fn rotor_block_forward_step_parity_partial_rotation() {
     quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 0.5, 1);
 }
 
@@ -1128,7 +1132,7 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_rotation(kind)
         .init(&device);
 
@@ -1184,7 +1188,7 @@ fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(kind)
         .init(&device.clone().autodiff());
 
@@ -1563,7 +1567,7 @@ fn quaternion_bidi_forward_runs() {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D);
     let n_real = 2; // one bidirectional pair
     let layers = MambaBidiLayersConfig::Mamba3 {
@@ -1749,8 +1753,8 @@ fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mam
         .bias
         .map(|b| Param::from_tensor(b.val().narrow(0, 0, keep)));
     block.rotation = RotationKind::Real1D;
-    block.rope_dim = 0;
-    block.num_rope_angles = 0;
+    block.rotation_dim = 0;
+    block.num_rotation_angles = 0;
     block.num_quat_blocks = 0;
     block.num_rotation_channels = 0;
     block
@@ -1812,9 +1816,9 @@ fn real1d_projects_no_rotation_channels() {
     let complex = base.clone();
     let real = base.with_rotation(RotationKind::Real1D);
     assert_eq!(0, real.num_rotation_channels());
-    assert_eq!(0, real.rope_dim());
+    assert_eq!(0, real.rotation_dim());
     assert_eq!(
-        complex.d_in_proj() - complex.num_rope_angles(),
+        complex.d_in_proj() - complex.num_rotation_angles(),
         real.d_in_proj()
     );
 
@@ -1978,7 +1982,7 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(kind);
 
     let default = base.clone().init(&device);
@@ -2058,19 +2062,19 @@ fn cumulative_quaternion_stays_unit() {
     }
 }
 
-/// A partial quaternion rotation has to land on whole 4-blocks; asking for half
-/// of a `state_rank` that is not a multiple of 8 is a configuration error, not
-/// something to round silently (it used to rotate *everything*).
+/// A partial quaternion rotation must cover whole 4-blocks. Half of a
+/// `state_rank` that is not a multiple of 8 is a configuration error, and the
+/// block does not round it silently.
 #[test]
 #[should_panic(expected = "multiple of 4")]
-fn quaternion_partial_rope_must_be_whole_blocks() {
+fn quaternion_partial_rotation_must_be_whole_blocks() {
     use crate::mamba3::mamba3::Mamba3Config;
     let device = test_device();
     let _ = Mamba3Config::new(8)
         .with_state_rank(4)
         .with_expand(1)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_rotation(RotationKind::Quaternion4D)
         .init(&device);
 }

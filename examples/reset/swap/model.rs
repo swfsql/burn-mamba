@@ -42,7 +42,7 @@ use burn_mamba::prelude::{
 /// Necessary config choices:
 ///
 /// - `state_rank = 4` is one quaternion block: the smallest state that can hold
-///   a rotation of this kind. `rope_fraction = 1.0` turns all of it.
+///   a rotation of this kind. `rotation_fraction = 1.0` turns all of it.
 /// - `per_head_dim = 1`, `expand = 1`, `d_model = 2` ⇒ `d_inner = 2`,
 ///   `nheads = 2`. That gives two readouts of the one state, which the six-way
 ///   label needs. `d_inner = d_model`, so `out_proj` is the identity. Both heads
@@ -71,7 +71,7 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         .with_per_head_dim(1)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(rotation)
         .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);

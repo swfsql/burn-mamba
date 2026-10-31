@@ -1,6 +1,6 @@
 # 02: Rename rope to rotation
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 
@@ -45,3 +45,23 @@ runs. Old configs stop loading, and that is correct (no config compatibility).
 - [ ] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- The acceptance `rg -i rope` also finds these hits. Each one stays, for the
+  reason given:
+  - The paper's names, as citations: "The paper calls it "data-dependent
+    RoPE"" (`src/mamba3/mamba3.rs`, `README.md`), the proposition title
+    *Complex SSM, Data-Dependent RoPE Equivalence* (`mamba3.rs`,
+    `src/mamba3/rotation/mod.rs`) and `"Data-Dependent RoPE" in the paper`
+    (`src/mamba3/rotation/rope.rs`). A citation keeps the words of its source.
+  - `\mathrm{rope}(…)` in `info/mamba-3/architecture-deltas.md`, and `rope(…)`
+    and `rope_pairs` in `scripts/mamba-3/architecture_deltas.py`. They are the
+    math and numpy forms of `apply_rope` and `apply_rope_partial` (the RoPE
+    trick).
+  - The _Avoid_ lines of `GLOSSARY.md`.
+  - The words "property" and "proper" (`rg -i` matches "rope" inside them).
+- "Vanilla RoPE" and "standard RoPE" mean the transformer positional encoding,
+  not the rotation. The prose writes them out as "a rotary position
+  embedding".
+- The script `scripts/mamba-3/architecture_deltas.py` follows the rename
+  (`rotation_dim`, and the check labels "bias-before-rotation" and
+  "bias-after-rotation"). It still passes (35 checks).

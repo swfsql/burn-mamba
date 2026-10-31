@@ -146,7 +146,7 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(16)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(rotation);
     let config = MambaLatentNetConfig::Mamba3 {
         input_size: 3,

@@ -329,7 +329,7 @@ pub fn model_config(n_latent: usize) -> AeConfig {
         .with_ngroups(2)
         .with_mimo_rank(1)
         // one quaternion block per head turned, the other half unrotated
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_has_proj_bias(false)
         .with_has_outproj_norm(true)
         // Non-abelian quaternion rotation: more expressive per parameter.

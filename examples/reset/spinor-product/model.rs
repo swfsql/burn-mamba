@@ -41,8 +41,8 @@ pub const D_MODEL: usize = 8;
 ///
 /// These config choices are load-bearing:
 ///
-/// - `state_rank = 4` is the smallest quaternion block, and `rope_fraction =
-///   1.0` turns all of it: the group *is* the state.
+/// - `state_rank = 4` is the smallest quaternion block, and
+///   `rotation_fraction = 1.0` turns all of it: the group *is* the state.
 /// - `d_model = 8` gives each slot four dimensions, the smallest number that
 ///   carries five symbols affinely. `tests.rs` puts the symbols on a regular
 ///   4-simplex of norm 2. So every token has RMS 1 (the pre-`RmsNorm` of the
@@ -85,7 +85,7 @@ pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
         .with_per_head_dim(2)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D)
         .with_micro_steps(micro_steps)
         .with_has_proj_bias(true);

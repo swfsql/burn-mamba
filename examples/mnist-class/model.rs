@@ -47,9 +47,9 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_ngroups(2)
         .with_mimo_rank(1)
         // The rotation of the transition: Real1D | Complex2D | Quaternion4D |
-        // Rotor4D. `rope_fraction = 0.5` turns half of the state rank (one
+        // Rotor4D. `rotation_fraction = 0.5` turns half of the state rank (one
         // quaternion block per head), and the other half stays unrotated.
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_has_proj_bias(false)
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Quaternion4D)

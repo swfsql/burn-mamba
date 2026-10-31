@@ -78,14 +78,14 @@ def silu(x):
     return x / (1.0 + np.exp(-x))
 
 
-def rope_pairs(v, theta, rope_dim):
-    """Rotate the first `rope_dim` coordinates of `v` as interleaved 2-blocks.
+def rope_pairs(v, theta, rotation_dim):
+    """Rotate the first `rotation_dim` coordinates of `v` as interleaved 2-blocks.
 
-    `theta` has one angle per pair. The tail (`N - rope_dim` coordinates) passes
-    through untouched — this is `rope_fraction < 1`.
+    `theta` has one angle per pair. The tail (`N - rotation_dim` coordinates) passes
+    through untouched — this is `rotation_fraction < 1`.
     """
     v = np.asarray(v, float).copy()
-    for j in range(rope_dim // 2):
+    for j in range(rotation_dim // 2):
         a, b = v[2 * j], v[2 * j + 1]
         c, s = np.cos(theta[j]), np.sin(theta[j])
         v[2 * j], v[2 * j + 1] = c * a - s * b, s * a + c * b
@@ -206,28 +206,28 @@ print(f"        floors: {', '.join(f'{k}={v:.1f}' for k, v in floors.items())}")
 
 # 4.7 The bias is added *before* the rotation, so the floor is not flat.
 f = 0.5
-rope_dim = int(f * N) // 2 * 2
-n_pairs = rope_dim // 2
+rotation_dim = int(f * N) // 2 * 2
+n_pairs = rotation_dim // 2
 theta_t = RNG.uniform(-np.pi, np.pi, size=n_pairs)
 theta_s = RNG.uniform(-np.pi, np.pi, size=n_pairs)
-pre_t = rope_pairs(np.ones(N), theta_t, rope_dim)
-pre_s = rope_pairs(np.ones(N), theta_s, rope_dim)
-predicted = (N - rope_dim) + 2.0 * np.cos(theta_t - theta_s).sum()
-ok("4.7  bias-before-rope: floor = (N - rope_dim) + 2*sum cos(theta_t - theta_s)",
+pre_t = rope_pairs(np.ones(N), theta_t, rotation_dim)
+pre_s = rope_pairs(np.ones(N), theta_s, rotation_dim)
+predicted = (N - rotation_dim) + 2.0 * np.cos(theta_t - theta_s).sum()
+ok("4.7  bias-before-rotation: floor = (N - rotation_dim) + 2*sum cos(theta_t - theta_s)",
    abs(float(pre_t @ pre_s) - predicted) < 1e-9)
 
-post = float(rope_pairs(np.zeros(N), theta_t, rope_dim) @ np.ones(N) + np.ones(N) @ np.ones(N))
-ok("4.8  bias-after-rope would instead be the flat constant N",
+post = float(rope_pairs(np.zeros(N), theta_t, rotation_dim) @ np.ones(N) + np.ones(N) @ np.ones(N))
+ok("4.8  bias-after-rotation would instead be the flat constant N",
    abs(post - N) < 1e-9)
 
 many = []
 for _ in range(2000):
     tt = RNG.uniform(-np.pi, np.pi, size=n_pairs)
     ss = RNG.uniform(-np.pi, np.pi, size=n_pairs)
-    many.append(float(rope_pairs(np.ones(N), tt, rope_dim)
-                      @ rope_pairs(np.ones(N), ss, rope_dim)))
-ok("4.9  averaged over rotation lag the floor decays to the unrotated part (N - rope_dim)",
-   abs(np.mean(many) - (N - rope_dim)) < 0.05 * N)
+    many.append(float(rope_pairs(np.ones(N), tt, rotation_dim)
+                      @ rope_pairs(np.ones(N), ss, rotation_dim)))
+ok("4.9  averaged over rotation lag the floor decays to the unrotated part (N - rotation_dim)",
+   abs(np.mean(many) - (N - rotation_dim)) < 0.05 * N)
 
 # 4.10 At init the layer's read is, to O(1/sqrt(N)), the bias-only read.
 L, P = 24, 64

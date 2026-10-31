@@ -20,7 +20,7 @@
 //! - [`mamba2`] — Structured State Space Duality (SSD). It recasts the
 //!   recurrence as a chunkwise algorithm made of matrix multiplications.
 //! - [`mamba3`] — SSD with trapezoidal discretisation, a complex-valued state
-//!   transition (data-dependent RoPE on B/C), and MIMO rank expansion.
+//!   transition (a data-dependent rotation of B/C), and MIMO rank expansion.
 //!
 //! The block-agnostic [`burn_stack`] crate holds everything around the block:
 //! the Pre-LN [`Layer`](burn_stack::modules::Layer), the (virtual-)layer
@@ -58,7 +58,7 @@ pub mod mamba1;
 #[cfg(feature = "mamba2")]
 pub mod mamba2;
 /// Mamba-3: trapezoidal SSD with a complex-valued state transition
-/// (data-dependent RoPE) and MIMO.
+/// (a data-dependent rotation) and MIMO.
 #[cfg(feature = "mamba3")]
 pub mod mamba3;
 

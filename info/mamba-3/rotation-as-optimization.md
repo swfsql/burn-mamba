@@ -441,7 +441,7 @@ Two precisions, so that this is not overclaimed:
   the parameters above give a defective Jordan block, `rank(C − αI) = 1`,
   with transient growth to `2.84` before the decay. The Mamba-3 pair is
   diagonal and monotone. So momentum is a reading of the *rotating* channels
-  only. It does not extend along `rope_fraction` to the unrotated channels,
+  only. It does not extend along `rotation_fraction` to the unrotated channels,
   which never enter the correspondence.
 
 Views I, II and III are three readings of one recurrence. I and II are the

@@ -48,8 +48,8 @@ pub fn model_config() -> MambaVocabNetConfig {
         .with_per_head_dim(32)
         .with_ngroups(1)
         .with_mimo_rank(1)
-        // rope_fraction = 1.0 (rotate 100% of the B/C projections)
-        .with_rope_fraction(1.0)
+        // rotation_fraction = 1.0 (rotate 100% of the B/C projections)
+        .with_rotation_fraction(1.0)
         .with_has_proj_bias(true)
         .with_has_outproj_norm(true)
         // The abelian rotation: text needs no state-tracking group other than a

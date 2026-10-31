@@ -59,10 +59,10 @@ Four results:
    perplexities (§4.6).
 2. **The bias is added before the rotation, so the floor is a locality prior,
    not a constant.** The bias–bias term is
-   `(N − rope_dim) + 2Σⱼcos(θ_{t,j} − θ_{s,j})` (§4.7). It is maximal at zero
-   rotation-lag, and over large lags its average is the unrotated remainder
-   `N − rope_dim` (§4.9). A bias added *after* the rotation gives the flat
-   constant `N` (§4.8). So `rope_fraction` is also the fraction of the
+   `(N − rotation_dim) + 2Σⱼcos(θ_{t,j} − θ_{s,j})` (§4.7). It is maximal at
+   zero rotation-lag, and over large lags its average is the unrotated remainder
+   `N − rotation_dim` (§4.9). A bias added *after* the rotation gives the flat
+   constant `N` (§4.8). So `rotation_fraction` is also the fraction of the
    convolutional floor that the rotation localises. This couples two dials
    that look independent.
 3. **The two replacements for the short convolution are both low-pass.** The
@@ -178,8 +178,9 @@ The tables directly support three readings:
 
 The source also reports these results, which this note does not derive again:
 
-- Data-dependent RoPE takes parity from 0.90 → 100.0, and bracketed modular
-  arithmetic from 0.88 → 87.75, where standard RoPE and no RoPE both fail.
+- The data-dependent rotation takes parity from 0.90 → 100.0, and bracketed
+  modular arithmetic from 0.88 → 87.75. A rotary position embedding (a fixed
+  rotation) and no rotation both fail there.
 - MIMO at `R = 4` adds 1.2 points of downstream average over SISO at matched
   parameters.
 - Mamba-3 at half the state size matches the perplexity of Mamba-2.
@@ -256,17 +257,17 @@ a convention: without it, the four-term expansion has no floor.
 So each bias vector is rotated by its own cumulative angles, and the constant
 term becomes (§4.7):
 
-$$b_C^\top R_t^\top R_s b_B=(N-\texttt{rope\_dim})+2\sum_{j}\cos\big(\theta_{t,j}-\theta_{s,j}\big)$$
+$$b_C^\top R_t^\top R_s b_B=(N-\texttt{rotation\_dim})+2\sum_{j}\cos\big(\theta_{t,j}-\theta_{s,j}\big)$$
 
 It is maximal at zero rotation-lag, and its average decays to the unrotated
-remainder `N − rope_dim` as the lag grows (§4.9). A bias added after the
+remainder `N − rotation_dim` as the lag grows (§4.9). A bias added after the
 rotation gives the flat constant `N` at every lag (§4.8). This has two
 consequences:
 
 - The convolutional floor is a *locality* prior in the time of the
   accumulated rotation, not a uniform prior.
-- `rope_fraction` sets how much of the floor is localised. At
-  `rope_fraction = 1` no flat component survives. At `0.5` (the reference)
+- `rotation_fraction` sets how much of the floor is localised. At
+  `rotation_fraction = 1` no flat component survives. At `0.5` (the reference)
   half of it survives.
 
 That is a real coupling between the bias and the rotation, and only the order

@@ -54,8 +54,8 @@ fn cfg_real1d_scalar() -> Mamba3Config {
 /// Build a matched pair of initial caches for cross-algorithm parity
 /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
 /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
-/// With `random = true` the SSM state and cumulative RoPE angle are random while
-/// the previous-token K/V history is **zero** — so the single-ssd form's
+/// With `random = true` the SSM state and cumulative rotation angle are random
+/// while the previous-token K/V history is **zero** — so the single-ssd form's
 /// boundary-β seed is zero and both forms share the exact same logical initial state.
 /// With `random = false` everything is zero.
 fn build_cross_caches(
@@ -68,7 +68,7 @@ fn build_cross_caches(
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let dist = Distribution::Normal(0.0, 1.0);
     let ssm = if random {
         Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], dist, &device)
@@ -79,9 +79,9 @@ fn build_cross_caches(
     // abelian. Built once, so both cache forms start from the same rotation.
     let angle = (cfg.rotation != RotationKind::Real1D).then(|| {
         if random {
-            Tensor::<3>::random([batch, nheads, num_rope_angles], dist, &device)
+            Tensor::<3>::random([batch, nheads, num_rotation_angles], dist, &device)
         } else {
-            Tensor::<3>::zeros([batch, nheads, num_rope_angles], &device)
+            Tensor::<3>::zeros([batch, nheads, num_rotation_angles], &device)
         }
     });
     let rotation = || match angle.clone() {
@@ -121,7 +121,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let dist = Distribution::Normal(0.0, 1.0);
     let mk4 = |shape: [usize; 4]| {
         let t = if random {
@@ -151,7 +151,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
-        _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
+        _ => RotationState::Angle(mk3([batch, nheads, num_rotation_angles])),
     };
     let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let tap = slots > 0;
@@ -429,7 +429,7 @@ fn guard_random_init_consumed(
 
 /// forward_single_ssd ≡ forward_double_ssd on values and gradients, from the same
 /// initial state. With `random_init = true` the shared logical initial state
-/// is random (random SSM state + cumulative RoPE angle; zero previous-token
+/// is random (random SSM state + cumulative rotation angle; zero previous-token
 /// history so the single-ssd and double-ssd forms coincide). The output and all
 /// parameter gradients must agree. The single-ssd cache SSM accumulator itself is
 /// not compared here (different semantics from the double-form state); the
@@ -691,7 +691,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
@@ -719,8 +719,8 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
             normal,
             &device,
         ),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     let init_cache = build_single_ssd_cache(&cfg, batch, true);
@@ -878,7 +878,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
@@ -906,8 +906,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
             normal,
             &device,
         ),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     // Shared, fully-random initial cache fields (including the previous-token
@@ -917,7 +917,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let init_k =
         Tensor::<5>::random([batch, slots, mimo_rank, nheads, state_rank], normal, &device);
     let init_v = Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device);
-    let init_angle = Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device);
+    let init_angle = Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device);
 
     let path_double = ssd_path.clone();
     let path_single = ssd_path;
@@ -1026,7 +1026,7 @@ fn cfg_quat() -> Mamba3Config {
         .with_state_rank(8) // multiple of 4 (required by Quaternion4D)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(1.0)
+        .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D)
 }
 
@@ -1039,7 +1039,7 @@ fn cfg_quat_partial() -> Mamba3Config {
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_rotation(RotationKind::Quaternion4D)
 }
 
@@ -1116,12 +1116,12 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 }
 
 #[test]
-fn quaternion_single_matches_double_full_rope() {
+fn quaternion_single_matches_double_full_rotation() {
     quaternion_single_matches_double(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
 }
 
 #[test]
-fn quaternion_single_matches_double_partial_rope() {
+fn quaternion_single_matches_double_partial_rotation() {
     quaternion_single_matches_double(cfg_quat_partial(), Mamba3SsdPath::Minimal(Some(4)));
 }
 
@@ -1131,7 +1131,7 @@ fn quaternion_single_matches_double_mimo() {
 }
 
 #[test]
-fn quaternion_single_matches_step_full_rope() {
+fn quaternion_single_matches_step_full_rotation() {
     quaternion_single_matches_step(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
 }
 
@@ -1173,7 +1173,7 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
@@ -1201,8 +1201,8 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
             normal,
             &device,
         ),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     // A random initial cache so the boundary-β seed (the other specialized

@@ -11,8 +11,8 @@
 //!
 //! - The state must *turn*. The label is periodic in a count that a real state
 //!   can hold but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)).
-//! - The turn must be data-dependent. A fixed per-step angle is vanilla RoPE,
-//!   whose phase measures position, not turns
+//! - The turn must be data-dependent. A fixed per-step angle is a rotary
+//!   position embedding, whose phase measures position, not turns
 //!   ([`Family::Balanced`](crate::dataset::Family::Balanced)).
 //!
 //! `examples/reset/README.md` gives the task, the measurements and how to run

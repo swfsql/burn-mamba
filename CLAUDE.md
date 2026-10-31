@@ -159,7 +159,7 @@ upper-case letter is a relation of base dimensions (offset, multiple, concat):
 | `n` | `nchunks` = `s`/`chunk_len` | — | `nchunks` | varies |
 | `g` | `ngroups` | `G` | `ngroups` | 1 … `nheads` |
 | `l` | `chunk_len` | `Q` | `chunk_size` | 64 … 256 |
-| `a` | `num_rope_angles` = `rope_dim`/2 | — | `num_rope_angles` | varies |
+| `a` | `num_rotation_angles` = `rotation_dim`/2 | — | `num_rope_angles` | varies |
 | `v` | `conv_dim` = `d_inner`+2·`ngroups`·`state_rank` (Mamba-2) | — | `conv_dim` | — |
 | `k` | `conv_kernel` (Mamba-1/2) | — | `d_conv` | 4 |
 

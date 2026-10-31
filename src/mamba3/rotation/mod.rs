@@ -1,11 +1,11 @@
-//! # The transition rotation — from real, through RoPE, to `SO(4)`
+//! # The transition rotation — from real, through `SO(2)`, to `SO(4)`
 //!
 //! This module owns the data-dependent rotation of the Mamba-3 transition:
 //! the four [`RotationKind`]s, their cache accumulator ([`RotationState`]),
 //! their per-step definition ([`RotationSpec`]) and the one entry point that
 //! applies them to `B`/`C` ([`rotate_bc_forward`]).
 //!
-//! The data-dependent RoPE of Mamba-3 gives a **complex-valued** SSM. The
+//! The data-dependent rotation of Mamba-3 gives a **complex-valued** SSM. The
 //! state transition factors as a per-head scalar decay times a block-diagonal
 //! of `2×2` rotations (paper Prop. *Complex-to-Real SSM Equivalence*).
 //! `SO(2) ≅ U(1)` is **abelian**, so the cumulative rotation collapses to a
@@ -25,8 +25,8 @@
 //! ## What survives, what changes
 //!
 //! The key fact follows from telescoping and orthogonality only, **without**
-//! commutativity: the RoPE *factoring* survives intact. With the **ordered**
-//! cumulative rotation `Pₜ = Rₜ Rₜ₋₁ ⋯ R₁`,
+//! commutativity: the *factoring* of the RoPE trick survives intact. With the
+//! **ordered** cumulative rotation `Pₜ = Rₜ Rₜ₋₁ ⋯ R₁`,
 //!
 //! ```text
 //!   Cₜᵀ (Rₜ⋯Rᵢ₊₁) Bᵢ  =  (Pₜᵀ Cₜ)ᵀ (Pᵢᵀ Bᵢ)  =  C̄ₜᵀ B̄ᵢ ,
@@ -110,19 +110,19 @@
 //! zeroed knob: the in-projection has no rotation channels, the cache holds no
 //! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD core
 //! unchanged. So to switch the rotation off, select the *kind*.
-//! `rope_fraction` only narrows a rotation that exists. `Real1D` is also the
-//! one kind that makes no pairs, so it is the only one that accepts an **odd**
-//! `state_rank`, down to the scalar state `state_rank = 1`.
+//! `rotation_fraction` only narrows a rotation that exists. `Real1D` is also
+//! the one kind that makes no pairs, so it is the only one that accepts an
+//! **odd** `state_rank`, down to the scalar state `state_rank = 1`.
 //!
 //! Quaternion layout: the last axis has size 4 and holds `(w, x, y, z)`, with
 //! `w` the real part. A `state_rank` of `r = 4·J` is `J` independent quaternion
-//! blocks. The rotation acts within each block, exactly as RoPE acts within
-//! each `2`-pair. [`Mamba3`](crate::mamba3::mamba3::Mamba3) selects a kind with
-//! [`RotationKind`] and applies it through one [`RotationSpec`]. The SSD
-//! kernels do not depend on the kind.
+//! blocks. The rotation acts within each block, exactly as the `SO(2)` rotation
+//! acts within each `2`-pair. [`Mamba3`](crate::mamba3::mamba3::Mamba3)
+//! selects a kind with [`RotationKind`] and applies it through one
+//! [`RotationSpec`]. The SSD kernels do not depend on the kind.
 
-/// Rotary (RoPE) application: the mechanical pairwise rotation the abelian
-/// pathway factors into B/C.
+/// The RoPE trick of [`RotationKind::Complex2D`]: the pairwise rotation that
+/// `B`/`C` absorb.
 pub mod rope;
 
 use crate::mamba3::helpers;
@@ -143,9 +143,9 @@ use burn::prelude::*;
 ///   Mamba-2 under the trapezoid of Mamba-3). The in-projection has *no*
 ///   rotation channels, and the cache holds no accumulator
 ///   ([`RotationState::Real`]). This is the rotation ablation, which is why
-///   `rope_fraction` has no `0.0` setting.
-/// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex RoPE
-///   of Mamba-3: cumulative *angles* (a prefix sum), applied by
+///   `rotation_fraction` has no `0.0` setting.
+/// - [`Complex2D`](RotationKind::Complex2D) — the abelian `SO(2)`/complex
+///   rotation of Mamba-3: cumulative *angles* (a prefix sum), applied by
 ///   [`apply_rope`](crate::mamba3::rotation::rope::apply_rope). The default.
 /// - [`Quaternion4D`](RotationKind::Quaternion4D) — the non-abelian
 ///   `SU(2) ⊂ SO(4)` quaternion rotation: a cumulative *product* by
@@ -171,7 +171,7 @@ pub enum RotationKind {
     /// No rotation: a real transition (the trivial group). No rotation
     /// channels, no cumulative accumulator, `B`/`C` go through unchanged.
     Real1D,
-    /// Abelian complex (`SO(2)`) RoPE. The default.
+    /// Abelian complex (`SO(2)`) rotation. The default.
     #[default]
     Complex2D,
     /// Non-abelian quaternion (`SU(2)`, left-isoclinic) rotation.
@@ -213,10 +213,10 @@ pub struct RotationSpec {
     /// Which rotational-state algebra ([`RotationKind`]).
     pub kind: RotationKind,
     /// How many leading `state_rank` entries turn (see
-    /// [`Mamba3Config::rope_fraction`](crate::mamba3::mamba3::Mamba3Config::rope_fraction)).
+    /// [`Mamba3Config::rotation_fraction`](crate::mamba3::mamba3::Mamba3Config::rotation_fraction)).
     /// For the quaternion kinds this is a multiple of 4. For
     /// [`RotationKind::Real1D`] it is `0`, and nothing reads it.
-    pub rope_dim: usize,
+    pub rotation_dim: usize,
     /// The per-step rotation bound in half-turns per unit `Δ`
     /// ([`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)):
     /// one step turns by at most `range · π · Δ`.
@@ -234,8 +234,8 @@ pub struct NoRotation;
 ///
 /// - [`Real`](RotationState::Real) — nothing: a real transition has no
 ///   cumulative rotation to carry.
-/// - [`Angle`](RotationState::Angle) — abelian per-pair cumulative RoPE angle,
-///   shape `[batch, nheads, num_rope_angles]`.
+/// - [`Angle`](RotationState::Angle) — abelian per-pair cumulative rotation
+///   angle, shape `[batch, nheads, num_rotation_angles]`.
 /// - [`Quaternion`](RotationState::Quaternion) — per-block cumulative unit
 ///   quaternion, shape `[batch, nheads, blocks, 4]`, from [`quat_cumprod`].
 /// - [`Rotor`](RotationState::Rotor) — both `SO(4)` factors, shape
@@ -249,7 +249,8 @@ pub enum RotationState {
     /// composes nothing between calls. It holds a [`NoRotation`] only because
     /// the Burn `Module` derive takes exactly one field per enum variant.
     Real(NoRotation),
-    /// Abelian RoPE cumulative angle, shape `[batch, nheads, num_rope_angles]`.
+    /// Abelian cumulative rotation angle, shape
+    /// `[batch, nheads, num_rotation_angles]`.
     Angle(Tensor<3>),
     /// Quaternion cumulative rotation, shape `[batch, nheads, blocks, 4]`.
     Quaternion(Tensor<4>),
@@ -271,14 +272,15 @@ impl RotationState {
         RotationState::Real(NoRotation)
     }
 
-    /// Zero-initialised abelian angle accumulator `[batch, nheads, num_rope_angles]`.
+    /// Zero-initialised abelian angle accumulator
+    /// `[batch, nheads, num_rotation_angles]`.
     pub fn zeros_angle(
         batch: usize,
         nheads: usize,
-        num_rope_angles: usize,
+        num_rotation_angles: usize,
         device: &Device,
     ) -> Self {
-        RotationState::Angle(Tensor::zeros([batch, nheads, num_rope_angles], device))
+        RotationState::Angle(Tensor::zeros([batch, nheads, num_rotation_angles], device))
     }
 
     /// Identity-initialised quaternion accumulator `[batch, nheads, blocks, 4]`
@@ -336,14 +338,14 @@ impl RotationState {
         kind: RotationKind,
         batch: usize,
         nheads: usize,
-        num_rope_angles: usize,
+        num_rotation_angles: usize,
         num_quat_blocks: usize,
         device: &Device,
     ) -> Self {
         match kind {
             RotationKind::Real1D => RotationState::real(),
             RotationKind::Complex2D => {
-                RotationState::zeros_angle(batch, nheads, num_rope_angles, device)
+                RotationState::zeros_angle(batch, nheads, num_rotation_angles, device)
             }
             RotationKind::Quaternion4D => {
                 RotationState::identity_quaternion(batch, nheads, num_quat_blocks, device)
@@ -525,7 +527,7 @@ pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
 
 /// Materialise a unit quaternion from a **scaled rotation vector** `g ∈ ℝ³`
 /// (axis · angle) with the exponential map. This is the data-dependent
-/// "materialise `Rₜ`" step, the analogue of the RoPE angle
+/// "materialise `Rₜ`" step, the analogue of the `Complex2D` angle
 /// `Δₜ · range·π·tanh(ϑₜ)`.
 ///
 /// With `‖g‖ = angle` and the axis `ĝ = g / angle`, it returns the unit
@@ -643,7 +645,8 @@ pub fn quat_to_rot4<const D: usize, const DR: usize>(q: Tensor<D>) -> Tensor<DR>
 /// block (the rotation `L_q` within each `4`-block), reshaped back to
 /// `[..., state_rank]`.
 ///
-/// This generalises the per-pair `2×2` rotation of RoPE to per-block `4×4`.
+/// This generalises the per-pair `2×2` rotation of `Complex2D` to per-block
+/// `4×4`.
 /// To absorb the *inverse* cumulative rotation into `B`/`C` (`B̄ = Pᵀ B`), pass
 /// `q = conj(Qcum)`: `rotate_state_rank_blocks(b, conj(qcum))`.
 ///
@@ -736,8 +739,8 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 /// sequence axis, with a cross-chunk carry.
 ///
 /// This is the non-abelian analogue of the cumulative *sum of angles* of
-/// RoPE. Complex rotations compose by adding angles. Quaternions compose by
-/// multiplication, which depends on the order, so a real scan is necessary.
+/// `Complex2D`. Complex rotations compose by adding angles. Quaternions compose
+/// by multiplication, which depends on the order, so a real scan is necessary.
 ///
 /// # Shapes
 /// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-step **unit** quaternions
@@ -811,51 +814,51 @@ pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, 
 }
 
 // ---------------------------------------------------------------------------
-// Partial block rotation (rope_fraction support)
+// Partial block rotation (rotation_fraction support)
 // ---------------------------------------------------------------------------
 
-/// Apply a per-block quaternion rotation to the first `rope_width` entries of
-/// the `state_rank` axis (a multiple of 4). The rest is unchanged. The
+/// Apply a per-block quaternion rotation to the first `rotation_width` entries
+/// of the `state_rank` axis (a multiple of 4). The rest is unchanged. The
 /// quaternion analogue of [`apply_rope_partial`].
 ///
-/// `q` has one quaternion per rotated block (`rope_width / 4` of them). `DB`
-/// must equal `D + 1`.
+/// `q` has one quaternion per rotated block (`rotation_width / 4` of them).
+/// `DB` must equal `D + 1`.
 pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
     v: Tensor<D>,
     q: Tensor<DB>,
-    rope_width: usize,
+    rotation_width: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
     debug_assert!(
-        rope_width > 0,
+        rotation_width > 0,
         "a quaternion kind always turns at least one block; a real transition is RotationKind::Real1D"
     );
-    if rope_width == r {
+    if rotation_width == r {
         rotate_state_rank_blocks::<D, DB>(v, q)
     } else {
-        let head = v.clone().narrow(D - 1, 0, rope_width);
-        let tail = v.narrow(D - 1, rope_width, r - rope_width);
+        let head = v.clone().narrow(D - 1, 0, rotation_width);
+        let tail = v.narrow(D - 1, rotation_width, r - rotation_width);
         let head_rot = rotate_state_rank_blocks::<D, DB>(head, q);
         Tensor::cat(vec![head_rot, tail], D - 1)
     }
 }
 
 /// Two-sided counterpart of [`rotate_blocks_partial`]: rotates the first
-/// `rope_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`. The
+/// `rotation_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`. The
 /// rest is unchanged.
 pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
     v: Tensor<D>,
     ql: Tensor<DB>,
     qr: Tensor<DB>,
-    rope_width: usize,
+    rotation_width: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
-    debug_assert!(rope_width > 0, "see rotate_blocks_partial");
-    if rope_width == r {
+    debug_assert!(rotation_width > 0, "see rotate_blocks_partial");
+    if rotation_width == r {
         rotate_state_rank_blocks_two_sided::<D, DB>(v, ql, qr)
     } else {
-        let head = v.clone().narrow(D - 1, 0, rope_width);
-        let tail = v.narrow(D - 1, rope_width, r - rope_width);
+        let head = v.clone().narrow(D - 1, 0, rotation_width);
+        let tail = v.narrow(D - 1, rotation_width, r - rotation_width);
         let head_rot = rotate_state_rank_blocks_two_sided::<D, DB>(head, ql, qr);
         Tensor::cat(vec![head_rot, tail], D - 1)
     }
@@ -942,7 +945,7 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// - [`Real1D`](RotationKind::Real1D): nothing happens. `B`/`C` go through,
 ///   and the (empty) accumulator comes back. `rot` is `None` there, because
 ///   the block projects no rotation channels.
-/// - [`Complex2D`](RotationKind::Complex2D): the abelian RoPE of the
+/// - [`Complex2D`](RotationKind::Complex2D): the abelian rotation of the
 ///   reference. The cumulative angle (`helpers::prefix_sum`, continued from `prev`),
 ///   then [`apply_rope_partial`].
 /// - [`Quaternion4D`](RotationKind::Quaternion4D): the per-step unit quaternion
@@ -995,7 +998,7 @@ pub fn rotate_bc_forward(
     let tokens = c_btmhr.dims()[1];
     let RotationSpec {
         kind,
-        rope_dim,
+        rotation_dim,
         range,
     } = spec;
     // Only `Real1D` projects no rotation channels, and it never reads them.
@@ -1005,7 +1008,7 @@ pub fn rotate_bc_forward(
         RotationKind::Complex2D => {
             let rot_bsa = rot(rot_bsa);
             let prev_angle_bha = prev.angle();
-            let num_rope_angles = prev_angle_bha.dims()[2];
+            let num_rotation_angles = prev_angle_bha.dims()[2];
             let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
             // The abelian scan is blocked (the quaternion scan below is
             // log-depth). It is *not* `Tensor::cumsum`, whose cost is
@@ -1042,13 +1045,13 @@ pub fn rotate_bc_forward(
                 sequence,
                 mimo_rank,
                 nheads,
-                num_rope_angles,
+                num_rotation_angles,
             ]);
             let rotate_pairwise = mimo_rank == 1;
             let b = apply_rope_partial::<5>(
                 b_bsmhr,
                 cum_angles_bsmha.clone(),
-                rope_dim,
+                rotation_dim,
                 rotate_pairwise,
             );
             // `C` reads at one folded position per token, so it turns by the
@@ -1056,7 +1059,7 @@ pub fn rotate_bc_forward(
             // than a turn of a broadcast copy at every micro-step.
             let cum_angles_btmha =
                 helpers::read_rows::<5, 6>(cum_angles_bsmha, 1, read_stride);
-            let c = apply_rope_partial::<5>(c_btmhr, cum_angles_btmha, rope_dim, rotate_pairwise);
+            let c = apply_rope_partial::<5>(c_btmhr, cum_angles_btmha, rotation_dim, rotate_pairwise);
             let last = wrap_angle(
                 cum_angles_bsha
                     .narrow(1, sequence - 1, 1)
@@ -1073,8 +1076,8 @@ pub fn rotate_bc_forward(
             let stack = prev_q_bhk4.dims()[2];
             // The rotated width is a whole number of quaternion blocks, and
             // the cache was sized for exactly that many.
-            assert_eq!(rope_dim, blocks * 4, "cache/block rotation width mismatch");
-            let rope_width = rope_dim;
+            assert_eq!(rotation_dim, blocks * 4, "cache/block rotation width mismatch");
+            let rotation_width = rotation_dim;
             // Generators [b,s,h,stack,3]: the raw channels, bounded to an
             // angle of at most `range·π` (see `generator_increment`) and scaled
             // per head by Δ. The bound is necessary: an unbounded `g = rot·Δ`
@@ -1145,9 +1148,9 @@ pub fn rotate_bc_forward(
                         (over_mimo_read(left.clone()), over_mimo_read(right.clone()));
                     let (ql, qr) = (over_mimo(left), over_mimo(right));
                     (
-                        rotate_blocks_two_sided_partial::<5, 6>(b_bsmhr, ql, qr, rope_width),
+                        rotate_blocks_two_sided_partial::<5, 6>(b_bsmhr, ql, qr, rotation_width),
                         rotate_blocks_two_sided_partial::<5, 6>(
-                            c_btmhr, ql_read, qr_read, rope_width,
+                            c_btmhr, ql_read, qr_read, rotation_width,
                         ),
                     )
                 }
@@ -1156,8 +1159,8 @@ pub fn rotate_bc_forward(
                     let conj_btmhj4 = over_mimo_read(conj_bshk4.clone());
                     let conj_bsmhj4 = over_mimo(conj_bshk4);
                     (
-                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4, rope_width),
-                        rotate_blocks_partial::<5, 6>(c_btmhr, conj_btmhj4, rope_width),
+                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4, rotation_width),
+                        rotate_blocks_partial::<5, 6>(c_btmhr, conj_btmhj4, rotation_width),
                     )
                 }
             };

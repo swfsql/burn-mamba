@@ -32,7 +32,7 @@ fn mamba3_config() -> crate::mamba3::prelude::Mamba3Config {
         .with_expand(2)
         .with_per_head_dim(4)
         .with_state_rank(8)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
 }
 
 /// Adds noise to every parameter, so an untied stack's copies stop agreeing.

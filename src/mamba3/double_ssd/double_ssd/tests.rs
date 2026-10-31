@@ -30,7 +30,7 @@ struct RunGrads {
     final_k: Option<Tensor<5>>,
     /// Final tap-FIFO x from the returned cache; `None` with it.
     final_v: Option<Tensor<4>>,
-    /// Final cumulative RoPE angle from the returned cache; `None` for
+    /// Final cumulative rotation angle from the returned cache; `None` for
     /// [`RotationKind::Real1D`], which has no accumulator.
     final_angle: Option<Tensor<3>>,
     d_input: Tensor<3>,
@@ -62,7 +62,7 @@ struct Heads {
 /// Build the initial cache passed to both `forward` and the `step`
 /// unrolling. With `random = false` it is zero (the standard fresh start);
 /// with `random = true` every field (SSM state, previous-token B/x, and
-/// cumulative RoPE angle) holds random values, exercising parity from an
+/// cumulative rotation angle) holds random values, exercising parity from an
 /// arbitrary initial state.
 fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache {
     let device = test_device();
@@ -70,7 +70,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let dist = Distribution::Normal(0.0, 1.0);
     let mk4 = |shape: [usize; 4]| {
         let t = if random {
@@ -100,7 +100,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
-        _ => RotationState::Angle(mk3([batch, nheads, num_rope_angles])),
+        _ => RotationState::Angle(mk3([batch, nheads, num_rotation_angles])),
     };
     // The tap FIFO is as deep as the pattern's lag.
     let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
@@ -295,7 +295,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 
 /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
 /// token-by-token from the **same** initial cache. Outputs, every final
-/// cache field (SSM state, previous-token B/x, cumulative RoPE angle), and
+/// cache field (SSM state, previous-token B/x, cumulative rotation angle), and
 /// parameter gradients must all agree up to float-summation-order noise.
 ///
 /// With `random_init = true` the shared initial cache is random rather than
@@ -324,7 +324,7 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
@@ -341,8 +341,8 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
         }),
         v: (slots > 0)
             .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     let ssd_path = Mamba3SsdPath::Minimal(Some(4));
@@ -404,15 +404,15 @@ fn cfg_ngroups2() -> Mamba3Config {
 fn cfg_mimo_ngroups2() -> Mamba3Config {
     cfg_ngroups2().with_mimo_rank(2)
 }
-fn cfg_rope_half() -> Mamba3Config {
+fn cfg_rotation_half() -> Mamba3Config {
     Mamba3Config::new(32)
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
 }
-fn cfg_rope_half_mimo() -> Mamba3Config {
-    cfg_rope_half().with_mimo_rank(2)
+fn cfg_rotation_half_mimo() -> Mamba3Config {
+    cfg_rotation_half().with_mimo_rank(2)
 }
 fn cfg_real1d() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -439,13 +439,13 @@ fn cfg_outproj_norm() -> Mamba3Config {
 fn cfg_outproj_norm_mimo() -> Mamba3Config {
     cfg_outproj_norm().with_mimo_rank(2)
 }
-fn cfg_rope_half_outproj_norm_mimo() -> Mamba3Config {
+fn cfg_rotation_half_outproj_norm_mimo() -> Mamba3Config {
     Mamba3Config::new(32)
         .with_state_rank(8)
         .with_expand(2)
         .with_per_head_dim(8)
         .with_mimo_rank(2)
-        .with_rope_fraction(0.5)
+        .with_rotation_fraction(0.5)
         .with_has_outproj_norm(true)
 }
 
@@ -489,26 +489,26 @@ fn step_matches_forward_mimo_ngroups2_random_init() {
     run_step_matches_forward(cfg_mimo_ngroups2(), true);
 }
 
-// ── rope_fraction = 0.5 (partial RoPE) ──────────────────────────────────
+// ── rotation_fraction = 0.5 (partial rotation) ──────────────────────────────
 
 #[test]
-fn step_matches_forward_rope_half() {
-    run_step_matches_forward(cfg_rope_half(), false);
+fn step_matches_forward_rotation_half() {
+    run_step_matches_forward(cfg_rotation_half(), false);
 }
 
 #[test]
-fn step_matches_forward_rope_half_random_init() {
-    run_step_matches_forward(cfg_rope_half(), true);
+fn step_matches_forward_rotation_half_random_init() {
+    run_step_matches_forward(cfg_rotation_half(), true);
 }
 
 #[test]
-fn step_matches_forward_rope_half_mimo() {
-    run_step_matches_forward(cfg_rope_half_mimo(), false);
+fn step_matches_forward_rotation_half_mimo() {
+    run_step_matches_forward(cfg_rotation_half_mimo(), false);
 }
 
 #[test]
-fn step_matches_forward_rope_half_mimo_random_init() {
-    run_step_matches_forward(cfg_rope_half_mimo(), true);
+fn step_matches_forward_rotation_half_mimo_random_init() {
+    run_step_matches_forward(cfg_rotation_half_mimo(), true);
 }
 
 // ── RotationKind::Real1D (no rotation: a real transition) ───────────────
@@ -568,13 +568,13 @@ fn step_matches_forward_outproj_norm_mimo_random_init() {
 // ── Both features combined ──────────────────────────────────────────────
 
 #[test]
-fn step_matches_forward_rope_half_outproj_norm_mimo() {
-    run_step_matches_forward(cfg_rope_half_outproj_norm_mimo(), false);
+fn step_matches_forward_rotation_half_outproj_norm_mimo() {
+    run_step_matches_forward(cfg_rotation_half_outproj_norm_mimo(), false);
 }
 
 #[test]
-fn step_matches_forward_rope_half_outproj_norm_mimo_random_init() {
-    run_step_matches_forward(cfg_rope_half_outproj_norm_mimo(), true);
+fn step_matches_forward_rotation_half_outproj_norm_mimo_random_init() {
+    run_step_matches_forward(cfg_rotation_half_outproj_norm_mimo(), true);
 }
 
 // ── Chunked-prefill continuity (split vs full) ──────────────────────────
@@ -602,7 +602,7 @@ fn run_split_matches_full(cfg: Mamba3Config) {
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
@@ -619,8 +619,8 @@ fn run_split_matches_full(cfg: Mamba3Config) {
         }),
         v: (slots > 0)
             .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     let ssd_path = Mamba3SsdPath::Minimal(Some(4));
@@ -688,7 +688,7 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     let per_head_dim = cfg.per_head_dim;
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
-    let num_rope_angles = cfg.num_rope_angles();
+    let num_rotation_angles = cfg.num_rotation_angles();
     let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
@@ -705,8 +705,8 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
         }),
         v: (slots > 0)
             .then(|| Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device)),
-        angle: (num_rope_angles > 0)
-            .then(|| Tensor::<3>::random([batch, nheads, num_rope_angles], normal, &device)),
+        angle: (num_rotation_angles > 0)
+            .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
     let unroll = |m: &Mamba3, x: Tensor<3>, init: Mamba3DoubleSsdCache| {

@@ -189,7 +189,7 @@ trait FieldMap {
 trait FieldVisit {
     fn visit<const D: usize>(&mut self, t: &Tensor<D>);
 
-    /// A field on the circle `ℝ/2πℤ` (the cumulative RoPE angle). Two runs
+    /// A field on the circle `ℝ/2πℤ` (the cumulative rotation angle). Two runs
     /// can put an angle near `±π` on the two sides of the wrap.
     fn visit_angle<const D: usize>(&mut self, t: &Tensor<D>) {
         self.visit(t);

@@ -33,7 +33,7 @@ fn mamba3(d_model: usize) -> MambaBlockConfig {
             .with_state_rank(8)
             .with_ngroups(1)
             .with_mimo_rank(1)
-            .with_rope_fraction(0.5),
+            .with_rotation_fraction(0.5),
     )
 }
 

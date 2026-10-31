@@ -327,10 +327,10 @@ impl Mamba3 {
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Shared with the double-ssd pathway through [`rotate_bc_forward`]. The
         // single-pass SSD core below does not depend on the rotation: it only
-        // uses the rotated B̄/C̄ (the RoPE factoring `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`
-        // holds for every kind). `C` turns at token resolution: it needs the
-        // cumulative rotation of the micro-step where it is read, a stride slice
-        // of the rotation of `B`.
+        // uses the rotated B̄/C̄. The factoring of the RoPE trick,
+        // `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`, holds for every kind. `C` turns at token
+        // resolution: it needs the cumulative rotation of the micro-step where
+        // it is read, a stride slice of the rotation of `B`.
         let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh.clone(),

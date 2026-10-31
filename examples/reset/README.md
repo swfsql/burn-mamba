@@ -219,7 +219,7 @@ unrolls to two heads that share one rotating pair.
 | shortcut | why it is closed |
 |---|---|
 | hold the turn count in a **real** state | the label is *periodic* in the count, and a linear readout cuts the count axis into three intervals at most |
-| a **fixed** rotation (vanilla RoPE) | its phase measures *positions* since the reset, not turns |
+| a **fixed** rotation (a rotary position embedding) | its phase measures *positions* since the reset, not turns |
 
 The eval set tests these from both sides:
 

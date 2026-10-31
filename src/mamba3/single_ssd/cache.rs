@@ -92,8 +92,8 @@ pub struct Mamba3SingleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The K of the tap FIFO** (post-RoPE, post-bias `B`), one slot per
-    /// lagged position, **oldest first**.
+    /// **The K of the tap FIFO** (`B` after the bias and the rotation), one
+    /// slot per lagged position, **oldest first**.
     ///
     /// At the start of the next `forward_single_ssd` call, it seeds the
     /// deferred boundary β contributions
@@ -177,16 +177,16 @@ pub struct Mamba3SingleSsdCacheConfig {
     #[config(default = 1)]
     pub mimo_rank: usize,
 
-    /// Number of RoPE angle pairs
-    /// (see [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rope_angles`]).
-    pub num_rope_angles: usize,
+    /// Number of rotation angles
+    /// (see [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::num_rotation_angles`]).
+    pub num_rotation_angles: usize,
 
     /// Which transition rotation the block uses (see
     /// [`crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::rotation`]).
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
-    /// Number of quaternion blocks (`rope_dim / 4`). Only
+    /// Number of quaternion blocks (`rotation_dim / 4`). Only
     /// [`RotationKind::Quaternion4D`] / [`RotationKind::Rotor4D`] use it.
     #[config(default = 1)]
     pub num_quat_blocks: usize,
@@ -219,7 +219,7 @@ impl Mamba3SingleSsdCacheConfig {
             per_head_dim: block_config.per_head_dim,
             nheads: block_config.nheads(),
             mimo_rank: block_config.mimo_rank,
-            num_rope_angles: block_config.num_rope_angles(),
+            num_rotation_angles: block_config.num_rotation_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
             trapezoid: block_config.trapezoid,
@@ -259,7 +259,7 @@ impl Mamba3SingleSsdCacheConfig {
             self.rotation,
             self.batch,
             self.nheads,
-            self.num_rope_angles,
+            self.num_rotation_angles,
             self.num_quat_blocks,
             device,
         );

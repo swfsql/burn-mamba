@@ -94,7 +94,7 @@ fn mamba3(d: usize, state_rank: usize) -> MambaBlockConfig {
             .with_state_rank(state_rank)
             .with_ngroups(1)
             .with_mimo_rank(1)
-            .with_rope_fraction(1.0)
+            .with_rotation_fraction(1.0)
             .with_has_proj_bias(true)
             .with_has_outproj_norm(true)
             .with_rotation(RotationKind::Complex2D),
