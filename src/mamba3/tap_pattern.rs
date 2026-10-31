@@ -82,7 +82,7 @@
 /// - [`Vertical`](Self::Vertical) *is*
 ///   [`HorizontalCarryOver`](Self::HorizontalCarryOver),
 /// - the two-tap members are also `HorizontalCarryOver` (they fold and have no
-///   `μ` channels, see [`has_lag1_tap`](Self::has_lag1_tap)),
+///   `μ` channels, see [`has_two_taps`](Self::has_two_taps)),
 /// - [`HorizontalReset`](Self::HorizontalReset) *is* [`None`](Self::None).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TapPattern {
@@ -272,12 +272,9 @@ impl TapPattern {
         }
     }
 
-    /// Whether the pattern adds a **second**, lag-1 tap beside the one at
-    /// [`tap_lag`](Self::tap_lag). True for the two-tap members, and only when
-    /// the two lags are different. The one tap of
-    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) and of
-    /// [`HorizontalReset`](Self::HorizontalReset) is a lag-1 tap, but it is the
-    /// tap at `tap_lag`, so these members return `false`.
+    /// Whether the pattern has **two** taps at `micro_steps`: a lag-1 tap beside
+    /// the lag-`u` tap at [`tap_lag`](Self::tap_lag). True for the two-tap
+    /// members, and only when the two lags are different.
     ///
     /// At `u = 1` the lags are equal: both taps read the same sample, so the
     /// split is a decomposition of one coefficient, and the pair **folds** back
@@ -286,7 +283,7 @@ impl TapPattern {
     /// segment for Muon, one shift, one SSD pass. Thus a two-tap member at
     /// `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not an
     /// expensive form of it.
-    pub fn has_lag1_tap(self, micro_steps: usize) -> bool {
+    pub fn has_two_taps(self, micro_steps: usize) -> bool {
         micro_steps > 1
             && matches!(
                 self,
@@ -313,8 +310,8 @@ impl TapPattern {
     /// (`false`). Where it is closed, the share of `μ` returns to the lag-`u`
     /// tap.
     ///
-    /// Read only when [`has_lag1_tap`](Self::has_lag1_tap).
-    pub fn lag1_tap_crosses_tokens(self) -> bool {
+    /// Read only when [`has_two_taps`](Self::has_two_taps).
+    pub fn two_tap_lag1_crosses_tokens(self) -> bool {
         self == TapPattern::VerticalPlusHorizontalCarryOver
     }
 
@@ -349,7 +346,7 @@ pub struct TapPatternSpec {
     pub pattern: TapPattern,
     /// Recurrence micro-steps per token (`u`). The gates are periodic in it,
     /// and at `u = 1` a two-tap pattern folds
-    /// ([`TapPattern::has_lag1_tap`]).
+    /// ([`TapPattern::has_two_taps`]).
     pub micro_steps: usize,
     /// `Δ`'s clamp
     /// ([`Mamba3Config::dt_limit`](crate::mamba3::mamba3::Mamba3Config::dt_limit)).
@@ -445,7 +442,7 @@ mod tests {
                 let block = config.init(&device);
                 let scalars = 2
                     + usize::from(pattern.has_beta_tap())
-                    + usize::from(pattern.has_lag1_tap(micro_steps));
+                    + usize::from(pattern.has_two_taps(micro_steps));
                 let label = format!("{pattern:?} u={micro_steps}");
                 assert_eq!(
                     block.in_proj.weight.dims()[1],
@@ -471,7 +468,7 @@ mod tests {
                     );
                     assert_eq!(
                         names.iter().any(|n| n == "mu"),
-                        pattern.has_lag1_tap(micro_steps),
+                        pattern.has_two_taps(micro_steps),
                         "{label}: μ segment"
                     );
                 }
@@ -885,7 +882,7 @@ mod tests {
     /// — the same weights, and bit for bit. For the two-tap members that is the
     /// **fold**: with both taps on one sample there is no mix to make, so they
     /// spend no `μ` channels and the pair is one tap
-    /// ([`TapPattern::has_lag1_tap`]).
+    /// ([`TapPattern::has_two_taps`]).
     #[test]
     fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
         let device = test_device();

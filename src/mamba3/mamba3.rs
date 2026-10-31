@@ -497,14 +497,14 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the `μ` segment of the in-projection (the mix of the second
-    /// tap): one channel per (head, micro-step) for the two-tap patterns.
+    /// Width of the `μ` segment of the in-projection (the mix of the two
+    /// taps): one channel per (head, micro-step) for the two-tap patterns.
     /// **`0`** for every other pattern, and for a two-tap one at `u = 1`,
-    /// where the taps fold ([`TapPattern::has_lag1_tap`]).
+    /// where the taps fold ([`TapPattern::has_two_taps`]).
     /// `helpers::split_trailing` removes it from the tail, just inside the `λ`
     /// segment.
     pub fn mu_channels_total(&self) -> usize {
-        if self.tap_pattern.has_lag1_tap(self.micro_steps) {
+        if self.tap_pattern.has_two_taps(self.micro_steps) {
             self.micro_steps * self.nheads()
         } else {
             0
@@ -1265,7 +1265,7 @@ impl Mamba3Config {
         let u = self.micro_steps;
         let scalars = 2
             + usize::from(self.tap_pattern.has_beta_tap())
-            + usize::from(self.tap_pattern.has_lag1_tap(u))
+            + usize::from(self.tap_pattern.has_two_taps(u))
             + usize::from(self.gain.projects_noise())
             + 2 * usize::from(self.tropical.is_on());
         scalars * u * self.nheads() + u * self.num_rotation_channels()
@@ -1316,7 +1316,7 @@ impl Mamba3Config {
             )
             .chain(
                 self.tap_pattern
-                    .has_lag1_tap(self.micro_steps)
+                    .has_two_taps(self.micro_steps)
                     .then(|| per_micro(Seg::adamw("mu", nheads)))
                     .into_iter()
                     .flatten(),

@@ -635,7 +635,7 @@ mod step {
         pub nu_buh: Option<Tensor<3>>,
         /// The mass of the lag-1 tap of a two-tap pattern
         /// `[batch, u, nheads]`. `None` unless the pattern
-        /// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
+        /// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
         pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,

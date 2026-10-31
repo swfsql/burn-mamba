@@ -57,7 +57,7 @@ loading, and that is correct (no config compatibility).
   cache configs (`Mamba3DoubleSsdCacheConfig`, `Mamba3SingleSsdCacheConfig`),
   and the test locals `trapezoid`. All of them are `tap_pattern` now.
 - These identifiers used an old tap term, so they follow the term:
-  - `interior_tap_crosses_tokens` becomes `lag1_tap_crosses_tokens`.
+  - `interior_tap_crosses_tokens` becomes `two_tap_lag1_crosses_tokens`.
   - `far_tap_crosses_tokens` becomes `tap_crosses_tokens`. The local
     `far_open_1s1` (also the parameter of `kalman::LogMasses::new`) becomes
     `tap_open_1s1`. In this code, "far tap" meant the tap at `tap_lag`. Under
@@ -86,11 +86,11 @@ loading, and that is correct (no config compatibility).
 - The prose names the extra tap of a two-tap member "the lag-1 tap of a
   two-tap member" (or pattern). It does not write "the second tap", because
   "second tap" already means the `β` tap ("No second tap" under `None`).
-- The new name `has_lag1_tap` is `false` for `HorizontalCarryOver` and
-  `HorizontalReset`, and `lag1_tap_crosses_tokens` is `false` for
-  `HorizontalCarryOver`. Their one tap is a lag-1 tap, but it is the tap at
-  `tap_lag`. The docs say this. A name such as `has_two_taps` would not need
-  the note. This question is open for the user.
+- After the review, the user changed the map row `has_lag1_tap` to
+  `has_two_taps`. The name `has_lag1_tap` was `false` for
+  `HorizontalCarryOver` and `HorizontalReset`, but the one tap of each is a
+  lag-1 tap (the tap at `tap_lag`). The predicate on that lag-1 tap is
+  `two_tap_lag1_crosses_tokens`, for the same reason.
 - The script `scripts/mamba-3/trapezoid_as_integration.py` follows the prose.
   Its labels "(today)" and "today's formula" lose the changelog word. It still
   passes (74 checks).

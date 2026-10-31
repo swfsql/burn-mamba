@@ -546,7 +546,7 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
 /// decides *which* mass it applies to: `λ` for
 /// [`TapPattern::tap_crosses_tokens`](crate::mamba3::tap_pattern::TapPattern::tap_crosses_tokens),
 /// `μ` for
-/// [`lag1_tap_crosses_tokens`](crate::mamba3::tap_pattern::TapPattern::lag1_tap_crosses_tokens).
+/// [`two_tap_lag1_crosses_tokens`](crate::mamba3::tap_pattern::TapPattern::two_tap_lag1_crosses_tokens).
 pub fn token_start_gate(len: usize, micro_steps: usize, device: &Device) -> Tensor<3> {
     let open: Vec<f32> = (0..len)
         .map(|p| if p.is_multiple_of(micro_steps) { 0.0 } else { 1.0 })
@@ -574,8 +574,8 @@ pub struct TrapezoidCoeffs {
     /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), which
     /// has no left endpoint: the tensor is not formed (not formed as zeros).
     pub nu: Option<Tensor<3>>,
-    /// `νⁱⁿᵗₜ`: the mass of the extra lag-1 tap. `None` unless
-    /// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
+    /// `νⁱⁿᵗₜ`: the mass of the lag-1 tap of a two-tap pattern. `None` unless
+    /// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
     pub nu_interior: Option<Tensor<3>>,
     /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
     /// there is no `λ` (all of the step is paid at the right endpoint).
@@ -629,7 +629,7 @@ impl TrapezoidCoeffs {
 /// projects no `λ` channels. The coefficients then have their `λ ≡ 1` values
 /// *by construction*: no mass is formed, and `γ` **is** `Δ` (the same tensor,
 /// not a new `1 · Δ`). `mu_raw` is `None` unless the pattern
-/// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
+/// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
 /// The same holds one level down: no `μ`, no second mass.
 ///
 /// A gate closes by giving its mass back, not by dropping it. `λ` is `1` where
@@ -707,7 +707,7 @@ pub fn trapezoidal_coefficients(
             let (nu, nu_interior) = match mu_raw {
                 Some(mu_raw) => {
                     let mu = burn::tensor::activation::sigmoid(mu_raw);
-                    let mu = match gate(spec.pattern.lag1_tap_crosses_tokens()) {
+                    let mu = match gate(spec.pattern.two_tap_lag1_crosses_tokens()) {
                         Some(open_1s1) => mu * open_1s1,
                         None => mu,
                     };

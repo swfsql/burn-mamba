@@ -392,7 +392,7 @@ impl Mamba3 {
         };
         let nu_heads_bnuh = heads_of(nu_bsh.clone(), lag);
         let nu_heads_bnuh = match nu_interior_bsh
-            .filter(|_| self.tap_pattern.lag1_tap_crosses_tokens())
+            .filter(|_| self.tap_pattern.two_tap_lag1_crosses_tokens())
         {
             // `lag ≥ 2` here: a two-tap pattern folds at `u = 1`, so the lag-1
             // tap of a two-tap pattern and a one-slot FIFO never coexist.

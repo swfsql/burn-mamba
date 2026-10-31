@@ -302,7 +302,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
             uniform(dims, -2.0, 1.0, &device),
             uniform(dims, -3.0, 1.0, &device),
             Some(uniform(dims, -3.0, 3.0, &device)),
-            pattern.has_lag1_tap(u).then(|| uniform(dims, -3.0, 3.0, &device)),
+            pattern.has_two_taps(u).then(|| uniform(dims, -3.0, 3.0, &device)),
             Tensor::zeros([nheads], &device),
             spec,
             Some(GainInput {
