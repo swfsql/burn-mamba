@@ -407,7 +407,7 @@ cross = [s for s in range(1, TF) if tok[s] != tok[s - 1]]
 interior = [s for s in range(1, TF) if tok[s] == tok[s - 1]]
 ok("only 1 tap in u crosses a token boundary (u - 1 are inside one token)",
    len(cross) == TK - 1 and len(interior) == TF - TK)
-ok("every interior tap pairs two projections of the SAME token",
+ok("every lag-1 tap inside a token pairs two projections of the SAME token",
    all(tok[s] == tok[s - 1] for s in interior))
 # The boundary tap and the incoming state are moved by the SAME operator, a scalar
 # apart -- so the previous token is not made stale relative to the state it arrives
@@ -477,7 +477,7 @@ def collapse_taps(taps, t_idx, gam=gam_l):
 LATTICE = {
     "vertical (lag u)": [(U, nu_l, en_all)],
     "reset-horizontal (lag 1, no carry-over)": [(1, nu_l, en_reset)],
-    "carry-over-horizontal (today)": [(1, nu_l, en_all)],
+    "carry-over-horizontal (the default)": [(1, nu_l, en_all)],
     "vertical + reset-horizontal": [(U, nu_l, en_all), (1, nu_2, en_reset)],
     "vertical + carry-over-horizontal": [(U, nu_l, en_all), (1, nu_2, en_all)],
 }
@@ -494,7 +494,7 @@ scale = gam_l.copy()
 scale[:-U] = gam_l[:-U] + nu_l[U:]
 w_exact = np.array([[(gam_l[s] if t - s < U else scale[s]) if s <= t else 0.0
                      for s in range(TF)] for t in range(TF)])
-ok("vertical key scale = gamma_s + (1-lam_{s+u}) dt_{s+u} (today's formula, shifted)",
+ok("vertical key scale = gamma_s + (1-lam_{s+u}) dt_{s+u} (the lag-1 formula, shifted)",
    all(close(sum(w_exact[t, s] * (mprod(Mp, s + 1, t) @ Vp[s]) for s in range(t + 1)),
              Hv[t], 1e-9) for t in range(TF)))
 band = np.array([[(scale[s] - gam_l[s]) if (s <= t and t - s < U) else 0.0
@@ -502,10 +502,10 @@ band = np.array([[(scale[s] - gam_l[s]) if (s <= t and t - s < U) else 0.0
 glob = np.array([[scale[s] if s <= t else 0.0 for s in range(TF)] for t in range(TF)])
 ok("global scaling minus a u-wide band correction gives the exact weights",
    close(glob - band, w_exact))
-ok("at u = 1 that band is the diagonal, i.e. today's same-step correction",
+ok("at u = 1 that band is the diagonal, i.e. the same-step correction of lag 1",
    all(band[t, s] == 0.0 for t in range(TF) for s in range(TF) if s <= t and t - s >= U))
 
-Hh = run_taps(LATTICE["carry-over-horizontal (today)"])
+Hh = run_taps(LATTICE["carry-over-horizontal (the default)"])
 Hr2 = run_taps(LATTICE["reset-horizontal (lag 1, no carry-over)"])
 for a, Ha, b, Hb in [("vertical", Hv, "carry-over", Hh),
                      ("reset", Hr2, "carry-over", Hh),
@@ -521,7 +521,8 @@ ok("at u = 1 reset-horizontal degenerates to no trapezoid at all",
 # The document prices the members; `burn-mamba` has to *parameterise* them, and
 # there is one choice that keeps every property above. The step's mass dt is
 # split by two learned scalars, and a tap that is not admissible hands its mass
-# back one level (interior -> far, far -> gamma) rather than dropping it:
+# back one level rather than dropping it. The lag-1 tap of a two-tap member
+# gives it to the lag-u tap, and the tap at tap_lag gives it to gamma:
 #
 #   gamma = lam dt        nu = (1 - lam) dt        nu_int = nu mu,  nu_far = nu - nu_int
 #
@@ -532,7 +533,7 @@ nu_tot = (1 - lamp) * dtp
 # so the whole left-endpoint mass returns to gamma (i.e. lam = 1 there).
 gam_reset = np.where(micro == 0, dtp, gam_l)
 nu_reset = nu_tot * en_reset
-# the two-tap members: the interior (lag-1) tap takes mu of the mass, gated or not.
+# the two-tap members: the lag-1 tap takes mu of the mass, gated or not.
 nu_int_r, nu_far_r = nu_tot * mu * en_reset, nu_tot * (1 - mu * en_reset)
 nu_int_c, nu_far_c = nu_tot * mu, nu_tot * (1 - mu)
 
@@ -579,7 +580,7 @@ for name, taps_u1 in [
        close(run_taps(taps_u1), Hh))
 
 # The single-SSD form survives both members: one global scale per sample, and a
-# band correction that is the *far* installment alone -- the interior one is
+# band correction that is the *lag-u* installment alone -- the lag-1 one is
 # already paid at every read inside the band except the diagonal, which the
 # kernel replaces with gamma outright.
 for name in ("VerticalPlusHorizontalReset", "VerticalPlusHorizontalCarryOver"):
@@ -599,7 +600,7 @@ for name in ("VerticalPlusHorizontalReset", "VerticalPlusHorizontalCarryOver"):
                        for s in range(TF)] for t in range(TF)])
     diag2 = np.array([[gam[s] if s == t else 0.0 for s in range(TF)] for t in range(TF)])
     strict = np.array([[scale2[s] if s < t else 0.0 for s in range(TF)] for t in range(TF)])
-    ok(f"strict scale - far band + gamma diagonal = the exact weights: {name}",
+    ok(f"strict scale - lag-u band + gamma diagonal = the exact weights: {name}",
        close(strict - band2 + diag2, exact))
     reads = [t for t in range(TF) if micro[t] == U - 1]
     ok(f"the band is nonzero only inside the token a surviving read ends: {name}",

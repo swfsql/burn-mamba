@@ -29,7 +29,7 @@ The four ladder rungs share three settings:
   of the layer puts a 1-D token on `±1`, so one dimension carries only two
   symbols. Three points of `ℝ²` are affinely independent, so every
   in-projection channel can take any value on the three symbols.
-- **`Trapezoid::None`**. Every construction below pins `λ ≈ 1`, so the `β` tap
+- **`TapPattern::None`**. Every construction below pins `λ ≈ 1`, so the `β` tap
   does nothing useful. Switching it off is structural: no `λ` segment in the
   in-projection, no tap slot in the cache, one SSD call instead of two.
 - **`nheads = 2`**. A head is a *readout*, not a piece of state: every head
@@ -840,7 +840,7 @@ correctly. Only the composition does not.
   word problem. It is the same problem, at half the number of recurrence steps of
   a stock block.
 - **This is the rung that keeps the trapezoid, and the one that cannot shrink.**
-  - The five `reset-*` rungs run at `Trapezoid::None` (their constructions pin
+  - The five `reset-*` rungs run at `TapPattern::None` (their constructions pin
     `λ ≈ 1`, so the `β` tap is dead weight) and at two heads.
   - Here the construction also pins `λ ≈ 1`. Without the tap, it *still* gets
     100% at 32 tokens, but only 83% at 96. The 96-token column is what this rung

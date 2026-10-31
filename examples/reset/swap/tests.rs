@@ -43,7 +43,7 @@ use burn_stack::utils::test_helpers::test_device;
 
 /// `Δ` for every head and every symbol. It is fixed at 1, so the rotation
 /// generator is exactly `range·π·tanh(ϑ)`, and `γ = Δ = 1` writes `B`
-/// unscaled. (The block runs at `Trapezoid::None`, which gives the whole step
+/// unscaled. (The block runs at `TapPattern::None`, which gives the whole step
 /// to the current token.)
 const DELTA: f64 = 1.0;
 /// `‖ϑ‖` for a **half-turn**: the same constant as in `reset-spinor`, for the
@@ -207,7 +207,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
-    // The 2s are `nheads`, and the 4s are `state_rank`. `Trapezoid::None`
+    // The 2s are `nheads`, and the 4s are `state_rank`. `TapPattern::None`
     // projects no λ, so the whole mass of the step is `γ = Δ`. Each entry is
     // the value of the channel at (SWAP_L, SWAP_R, RESET), *before* its
     // activation.

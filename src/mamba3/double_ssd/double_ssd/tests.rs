@@ -26,7 +26,7 @@ struct RunGrads {
     /// Final SSM hidden state from the returned cache.
     final_ssm: Tensor<4>,
     /// Final tap-FIFO B from the returned cache; `None` for
-    /// [`Trapezoid::None`], which keeps no tap slots.
+    /// [`TapPattern::None`], which keeps no tap slots.
     final_k: Option<Tensor<5>>,
     /// Final tap-FIFO x from the returned cache; `None` with it.
     final_v: Option<Tensor<4>>,
@@ -50,7 +50,7 @@ struct RunGrads {
 struct Heads {
     out: Tensor<3>,
     ssm: Tensor<4>,
-    /// `None` when the block is [`Trapezoid::None`] and its cache has no tap
+    /// `None` when the block is [`TapPattern::None`] and its cache has no tap
     /// slots to attach a loss head to.
     k: Option<Tensor<5>>,
     v: Option<Tensor<4>>,
@@ -103,7 +103,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
         _ => RotationState::Angle(mk3([batch, nheads, num_rotation_angles])),
     };
     // The tap FIFO is as deep as the pattern's lag.
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let tap = slots > 0;
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
@@ -128,7 +128,7 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     ];
     let checks: Vec<(&str, f32)> = checks
         .into_iter()
-        // `Trapezoid::None` keeps no tap slots to compare.
+        // `TapPattern::None` keeps no tap slots to compare.
         .chain(
             a.final_k
                 .clone()
@@ -325,7 +325,7 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rotation_angles = cfg.num_rotation_angles();
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
@@ -603,7 +603,7 @@ fn run_split_matches_full(cfg: Mamba3Config) {
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rotation_angles = cfg.num_rotation_angles();
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
@@ -689,7 +689,7 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     let state_rank = cfg.state_rank;
     let mimo_rank = cfg.mimo_rank;
     let num_rotation_angles = cfg.num_rotation_angles();
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let normal = Distribution::Normal(0.0, 1.0);
 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);

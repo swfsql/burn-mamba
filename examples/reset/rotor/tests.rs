@@ -45,7 +45,7 @@ const DETENT: f64 = 2.0 * std::f64::consts::PI / MODULUS as f64;
 const MAX_ANGLE: f64 = 2.0 * std::f64::consts::PI;
 /// `Δ` for every head and every symbol. It is fixed at 1, so the per-step
 /// angle is exactly `MAX_ANGLE·tanh(ϑ)`, and `γ = Δ = 1` writes `B` unscaled
-/// (`Trapezoid::None` gives the whole step to the current token).
+/// (`TapPattern::None` gives the whole step to the current token).
 const DELTA: f64 = 1.0;
 /// `Â` on a `±` symbol. `A = −softplus(Â)`, and the block floors `|A|` at its
 /// `a_floor` (`1e-4`). So any value this negative leaves the decay at
@@ -255,7 +255,7 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
         Turn::Fixed(omega) => [(omega / MAX_ANGLE).atanh(); 3],
     };
     // Channel order: [z(2) | x(2) | B_raw(2) | C_raw(2) | dt(2) | A(2) | ϑ(1)].
-    // `Trapezoid::None` projects no λ, as `Real1D` projects no ϑ.
+    // `TapPattern::None` projects no λ, as `Real1D` projects no ϑ.
     let channels: Vec<[f64; 3]> = vec![
         [Z_PRE; 3],                                                    // z, head 0
         [Z_PRE; 3],                                                    // z, head 1
@@ -299,7 +299,7 @@ fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
         [softplus_inv(1e-6); 3],                                // Δ, head 1 — never writes
         [softplus_inv(a_hold), softplus_inv(a_hold), softplus_inv(A_WIPE)], // A, head 0
         [A_HOLD_RAW; 3],                                        // A, head 1
-        // No λ channel: `Trapezoid::None` projects none.
+        // No λ channel: `TapPattern::None` projects none.
         // No ϑ channel: `Real1D` projects none.
     ];
     // D₀ = 0 (head 0 reads the state alone), D₁ = 1 (head 1 *is* its skip).

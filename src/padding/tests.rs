@@ -199,7 +199,7 @@ macro_rules! mamba3_fields {
 
 fn mamba3(
     rotation: RotationKind,
-    trapezoid: Trapezoid,
+    tap_pattern: TapPattern,
     micro_steps: usize,
     mimo_rank: usize,
     gain: Gain,
@@ -209,7 +209,7 @@ fn mamba3(
         .with_state_rank(8)
         .with_per_head_dim(8)
         .with_rotation(rotation)
-        .with_trapezoid(trapezoid)
+        .with_tap_pattern(tap_pattern)
         .with_micro_steps(micro_steps)
         .with_mimo_rank(mimo_rank)
         .with_gain(gain)
@@ -222,7 +222,7 @@ fn mamba3(
 /// rows span several.
 #[test]
 fn padded_mamba3_is_each_slot_alone() {
-    use {Gain as G, RotationKind as R, Trapezoid as T, Tropical as Tr};
+    use {Gain as G, RotationKind as R, TapPattern as T, Tropical as Tr};
     let device = test_device().autodiff();
     let configs = [
         mamba3(R::Complex2D, T::HorizontalCarryOver, 1, 1, G::Projected, Tr::None),
@@ -261,7 +261,7 @@ fn padded_mamba3_network_closes_each_slot_at_its_own_end() {
     let device = test_device().autodiff();
     let block = mamba3(
         RotationKind::Quaternion4D,
-        Trapezoid::Vertical,
+        TapPattern::Vertical,
         2,
         1,
         Gain::Kalman,

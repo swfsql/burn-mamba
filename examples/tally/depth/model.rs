@@ -21,7 +21,7 @@
 //!
 //! - `Tropical::MaxPlus`: the register. It is structural: two in-projection
 //!   channels per (head, micro-step), one cache slot, and the readout `eₕ`.
-//! - `Gain::Projected`, `RotationKind::Real1D`, `Trapezoid::None`,
+//! - `Gain::Projected`, `RotationKind::Real1D`, `TapPattern::None`,
 //!   `state_rank = 1`: the plant at the floor of the `reset` ladder, so the
 //!   rung measures only the register.
 //! - `d_model = 2` is the floor for a three-symbol alphabet (the argument of
@@ -32,7 +32,7 @@
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{
-    Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid, Tropical,
+    Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern, Tropical,
 };
 
 /// Number of output classes (see [`crate::dataset`]).
@@ -49,7 +49,7 @@ pub fn model_config(tropical: bool) -> MambaLatentNetConfig {
         .with_ngroups(1)
         .with_mimo_rank(1)
         .with_rotation(RotationKind::Real1D) // a real transition: decay only
-        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
+        .with_tap_pattern(TapPattern::None) // no β tap: nothing here integrates
         .with_gain(Gain::Projected) // the decay is not the point of this rung
         .with_tropical(if tropical {
             Tropical::MaxPlus

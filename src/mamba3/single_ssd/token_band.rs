@@ -1,6 +1,6 @@
 //! # The lag-`u` correction band (single-SSD, [`Vertical`])
 //!
-//! [`Vertical`]: crate::mamba3::trapezoid::Trapezoid::Vertical
+//! [`Vertical`]: crate::mamba3::tap_pattern::TapPattern::Vertical
 //!
 //! The single-SSD pathway scales the key of sample `s` by the whole collapsed
 //! weight `Δ̃ₛ = γₛ + νₛ₊ₗₐ₉` (`info/mamba-3/trapezoid-as-integration.md` §5).
@@ -64,7 +64,7 @@ use burn::prelude::*;
 /// `None` at `micro_steps == 1` (the band is the diagonal, which the kernel
 /// already corrects). Callers use it only at `lag == micro_steps`, under one
 /// of the lag-`u` patterns
-/// ([`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical) and
+/// ([`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical) and
 /// the two that add a tap to it). `excess_bsh` is the **lag-`u`** mass,
 /// shifted back to the sample that owes it (`νₛ₊ᵤ`), never the whole
 /// `scaleₛ − γₛ`.

@@ -4,7 +4,7 @@
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
 };
 
 /// A single Mamba-3 block at `state_rank = 1` and [`RotationKind::Real1D`],
@@ -12,7 +12,7 @@ use burn_mamba::prelude::{
 ///
 /// ```ignore
 /// Δₕ(u) = softplus(⟨aₕ, u⟩ + bₕ)     Aₕ(u) = −softplus(⟨cₕ, u⟩)     ᾱₕ = exp(Δₕ Aₕ)
-/// γₕ(u) = Δₕ(u)                     (`Trapezoid::None`: β = 0, current token only)
+/// γₕ(u) = Δₕ(u)                     (`TapPattern::None`: β = 0, current token only)
 /// hₜ⁽ʰ⁾ = ᾱₕ(uₜ)·hₜ₋₁⁽ʰ⁾ + γₕ(uₜ)·B(uₜ)·xₕ(uₜ)
 /// yₜ⁽ʰ⁾ = C(uₜ)·hₜ⁽ʰ⁾ + Dₕ·xₕ(uₜ)
 /// ```
@@ -44,7 +44,7 @@ use burn_mamba::prelude::{
 ///   an odd `state_rank`: there is no pair to rotate.)
 /// - Mamba-3 has no short convolution, so the SSM state is the only memory of
 ///   the model. There is no local window to use as a shortcut.
-/// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
+/// - `TapPattern::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
 ///   weight. Switching it off is structural: no `λ` segment in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the residual of the single layer, so the
@@ -67,7 +67,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_ngroups(1)
         .with_mimo_rank(1)
         .with_rotation(RotationKind::Real1D) // a real transition: decay only
-        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
+        .with_tap_pattern(TapPattern::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

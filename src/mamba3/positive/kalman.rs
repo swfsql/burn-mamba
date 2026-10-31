@@ -8,7 +8,7 @@
 //! ```
 //!
 //! `γ`/`ν` are the two endpoint masses of the trapezoid (`γ = Δ` and no `ν`
-//! under [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None)). The
+//! under [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None)). The
 //! plant pays the left-endpoint installment of a sample one step late,
 //! transported by the decay of that step (`β = ν·α`, with `d` for `α`). So `Λ`
 //! **is** the recurrence of the plant on ones: the total weight of every
@@ -81,24 +81,24 @@ pub struct LogMasses {
     /// `ln νₜ`: the left endpoint, the installment of an earlier sample, paid
     /// at this position. All taps together (a two-tap `μ` split sums back to
     /// `(1 − λ)·Δ`). `None` under
-    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
+    /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None).
     pub nu_bsh: Option<Tensor<3>>,
 }
 
 impl LogMasses {
     /// The masses of `helpers::trapezoidal_coefficients`, in logs:
     /// `Δ = clamp(softplus(dt_raw), dt_limit)`, `γ = λ'·Δ`, `ν = (1 − λ')·Δ`,
-    /// where `λ' = σ(lambda_raw)`, set to `1` where `far_open_1s1` closes the
-    /// far tap.
+    /// where `λ' = σ(lambda_raw)`, set to `1` where `tap_open_1s1` closes the
+    /// tap at [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag).
     ///
     /// # Shapes
     /// - `dt_raw_bsh`, `lambda_raw_bsh` : `[batch, len, nheads]` (`dd_dt + dt_bias`; `λ`'s logit)
-    /// - `far_open_1s1`                 : `[1, len, 1]`, `0` where the far tap is closed
+    /// - `tap_open_1s1`                 : `[1, len, 1]`, `0` where the tap at `tap_lag` is closed
     pub fn new(
         dt_raw_bsh: Tensor<3>,
         dt_limit: (f64, f64),
         lambda_raw_bsh: Option<Tensor<3>>,
-        far_open_1s1: Option<Tensor<3>>,
+        tap_open_1s1: Option<Tensor<3>>,
     ) -> Self {
         // `ln` is monotone, so clamping `ln Δ` is clamping `Δ`.
         let ln_dt = log_softplus(dt_raw_bsh).clamp_max(dt_limit.1.ln());
@@ -118,8 +118,9 @@ impl LogMasses {
         // `ln σ(x) = −softplus(−x)` and `ln(1 − σ(x)) = −softplus(x)`.
         let ln_lambda = -softplus(-lambda_raw_bsh.clone());
         let ln_one_minus = -softplus(lambda_raw_bsh);
-        // A closed far tap is `λ' = 1`: `ln λ' = 0` and `ln(1 − λ') = ln 0`.
-        let (ln_lambda, ln_one_minus) = match far_open_1s1 {
+        // A closed tap at `tap_lag` is `λ' = 1`: `ln λ' = 0` and
+        // `ln(1 − λ') = ln 0`.
+        let (ln_lambda, ln_one_minus) = match tap_open_1s1 {
             Some(open_1s1) => (
                 ln_lambda * open_1s1.clone(),
                 ln_one_minus * open_1s1.clone() + (-open_1s1 + 1.0) * LOG_ZERO,

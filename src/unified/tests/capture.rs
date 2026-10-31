@@ -36,7 +36,7 @@ mod mamba3 {
     use super::*;
     use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 
-    /// Every optional field present: a two-tap trapezoid at `u = 2` (the tap
+    /// Every optional field present: a two-tap pattern at `u = 2` (the tap
     /// FIFO), a Kalman gain (`ln Λ`), the tropical register, and a tensor
     /// rotation state.
     fn block(device: &Device) -> Mamba3 {
@@ -46,7 +46,7 @@ mod mamba3 {
             .with_per_head_dim(4)
             .with_ngroups(2)
             .with_micro_steps(2)
-            .with_trapezoid(Trapezoid::VerticalPlusHorizontalCarryOver)
+            .with_tap_pattern(TapPattern::VerticalPlusHorizontalCarryOver)
             .with_gain(Gain::Kalman)
             .with_tropical(Tropical::MaxPlus)
             .with_rotation(RotationKind::Quaternion4D)

@@ -26,7 +26,7 @@ use crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache;
 use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::ssd_path::Mamba3SsdPath;
-use crate::mamba3::trapezoid::Trapezoid;
+use crate::mamba3::tap_pattern::TapPattern;
 use burn::module::Param;
 use burn::nn::Linear;
 use burn::prelude::*;
@@ -267,15 +267,16 @@ fn gate_matches_the_covariance_form_filter() {
 
 /// Under a trapezoid the evidence is the plant's own two installments, and `Λ`
 /// is the plant's recurrence on ones, run on the very coefficients the SSD
-/// consumes: `Wₜ = αₜ·Wₜ₋₁ + γₜ + αₜ·νⁱⁿᵗₜ + νₜ·Tₜ`, `Tₜ` the far tap's transport
-/// across its lag (front factors `1`, as `helpers::interior_gap_decay` pads).
+/// consumes: `Wₜ = αₜ·Wₜ₋₁ + γₜ + αₜ·νⁱⁿᵗₜ + νₜ·Tₜ`, `Tₜ` the transport of the
+/// tap at `tap_lag` across its lag (front factors `1`, as
+/// `helpers::interior_gap_decay` pads).
 /// Equal for a lag-1 tap, an upper bound for a lag-`u` one; the ceiling
 /// `Λₜ < 1/qₜ + γₜ` holds either way.
 #[test]
 fn the_precision_is_the_plants_weight_on_ones() {
     use crate::mamba3::helpers::trapezoidal_coefficients;
-    use crate::mamba3::trapezoid::TrapezoidSpec;
-    use Trapezoid as T;
+    use crate::mamba3::tap_pattern::TapPatternSpec;
+    use TapPattern as T;
     let device = test_device();
     let tol = f64::from(dtype_tol(1e-3));
     let (batch, nheads) = (2, 3);
@@ -289,7 +290,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
     ] {
         let len = 8 * u;
         let dims = [batch, len, nheads];
-        let spec = TrapezoidSpec {
+        let spec = TapPatternSpec {
             pattern,
             micro_steps: u,
             dt_limit: (0.0, 6.5504e4),
@@ -301,7 +302,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
             uniform(dims, -2.0, 1.0, &device),
             uniform(dims, -3.0, 1.0, &device),
             Some(uniform(dims, -3.0, 3.0, &device)),
-            pattern.has_interior_tap(u).then(|| uniform(dims, -3.0, 3.0, &device)),
+            pattern.has_lag1_tap(u).then(|| uniform(dims, -3.0, 3.0, &device)),
             Tensor::zeros([nheads], &device),
             spec,
             Some(GainInput {
@@ -480,7 +481,7 @@ fn an_underflowing_mass_keeps_the_gradient_finite() {
 struct Case {
     gain: Gain,
     tropical: Tropical,
-    trapezoid: Trapezoid,
+    tap_pattern: TapPattern,
     u: usize,
     rotation: RotationKind,
     mimo: usize,
@@ -496,7 +497,7 @@ impl Case {
             .with_ngroups(2)
             .with_gain(self.gain)
             .with_tropical(self.tropical)
-            .with_trapezoid(self.trapezoid)
+            .with_tap_pattern(self.tap_pattern)
             .with_micro_steps(self.u)
             .with_rotation(self.rotation)
             .with_mimo_rank(self.mimo)
@@ -511,11 +512,11 @@ impl Case {
 fn lattice() -> Vec<Case> {
     use Gain::*;
     use RotationKind::*;
-    use Trapezoid as T;
-    let case = |gain, tropical, trapezoid, u, rotation, mimo, norm| Case {
+    use TapPattern as T;
+    let case = |gain, tropical, tap_pattern, u, rotation, mimo, norm| Case {
         gain,
         tropical,
-        trapezoid,
+        tap_pattern,
         u,
         rotation,
         mimo,
@@ -712,8 +713,8 @@ fn as_stock(model: &Mamba3) -> Mamba3 {
 #[test]
 fn zero_kappa_and_zero_readout_are_the_stock_block() {
     let device = test_device();
-    use Trapezoid as T;
-    for (gain, tropical, trapezoid, u, norm) in [
+    use TapPattern as T;
+    for (gain, tropical, tap_pattern, u, norm) in [
         (Gain::Kalman, Tropical::None, T::HorizontalCarryOver, 1, false),
         (Gain::Kalman, Tropical::None, T::Vertical, 2, true),
         (Gain::Kalman, Tropical::None, T::None, 2, false),
@@ -723,7 +724,7 @@ fn zero_kappa_and_zero_readout_are_the_stock_block() {
         let case = Case {
             gain,
             tropical,
-            trapezoid,
+            tap_pattern,
             u,
             rotation: RotationKind::Complex2D,
             mimo: 1,
@@ -768,7 +769,7 @@ fn the_join_has_live_gradients_at_init() {
         let config = Case {
             gain: Gain::KalmanProjectedNoise,
             tropical: Tropical::MaxPlus,
-            trapezoid: Trapezoid::HorizontalCarryOver,
+            tap_pattern: TapPattern::HorizontalCarryOver,
             u: 1,
             rotation: RotationKind::Complex2D,
             mimo: 1,

@@ -11,9 +11,9 @@
 //!   forward:    h = SSD(γ-scaled V, B)   +   SSD(β-scaled V_shifted, B_shifted)
 //! ```
 //!
-//! The shift is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
+//! The shift is [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag)
 //! folded positions (`1` by default, `u` for
-//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)), and
+//! [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical)), and
 //! `β = ν·α` carries the transport across that whole gap.
 //!
 //! A two-tap pattern adds a second `β` side at lag 1. The two shifts are
@@ -145,7 +145,7 @@ impl Mamba3 {
         // (per-token read) do not widen.
         // b_raw_bsMGR / c_raw_btMGR have channel size `mimo_rank * ngroups * state_rank`.
         // The three optional segments come off the tail first (`Real1D`
-        // projects no rotation, a one-tap pattern no `μ`, `Trapezoid::None` no
+        // projects no rotation, a one-tap pattern no `μ`, `TapPattern::None` no
         // `λ`), because a zero-width segment would silently vanish from the
         // fixed-arity split below.
         let u = micro_steps;
@@ -202,7 +202,7 @@ impl Mamba3 {
             lambda_raw_bsh,
             mu_raw_bsh,
             self.dt_bias_h.val(),
-            self.trapezoid_spec(),
+            self.tap_pattern_spec(),
             self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
@@ -274,9 +274,9 @@ impl Mamba3 {
         // prior token of a continued cache. For a fresh (zero) cache this is
         // the same as zero-padding.
         //
-        // The shift is [`Trapezoid::tap_lag`] *folded* positions: 1 for the
-        // default [`Trapezoid::HorizontalCarryOver`], `u` for
-        // [`Trapezoid::Vertical`]. That is exactly the FIFO depth of `step`.
+        // The shift is [`TapPattern::tap_lag`] *folded* positions: 1 for the
+        // default [`TapPattern::HorizontalCarryOver`], `u` for
+        // [`TapPattern::Vertical`]. That is exactly the FIFO depth of `step`.
         //
         // A lag-`L` tap must be transported across *its own* gap (§9): by
         // `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`. `β = ν·α` holds the `d = 0` factor, and
@@ -287,18 +287,18 @@ impl Mamba3 {
         // A two-tap pattern adds a second, lag-1 side. The two shifts are
         // different, so they cannot share a pass, and this pathway runs three
         // SSD calls. The single-SSD pathway fuses them into its key scale and
-        // stays at one. The prefix of the interior tap is the newest slot of
-        // the FIFO, which *is* the lag-1 slot, undecayed. It has no effect under
-        // [`Trapezoid::VerticalPlusHorizontalReset`], whose `νⁱⁿᵗ` is zero at
-        // every position that would read it.
+        // stays at one. The prefix of the lag-1 tap of a two-tap pattern is the
+        // newest slot of the FIFO, which *is* the lag-1 slot, undecayed. It has no effect
+        // under [`TapPattern::VerticalPlusHorizontalReset`], whose `νⁱⁿᵗ` is
+        // zero at every position that would read it.
         //
-        // Under [`Trapezoid::None`] there is no left endpoint: no shift, no
+        // Under [`TapPattern::None`] there is no left endpoint: no shift, no
         // β-scaled copy of `x`, and (below) no second SSD call. `forward` is
         // then one standard SSD pass, with keys scaled by `γ = Δ`.
         let lag = self.tap_lag();
         // The prefix of a lag-`L` tap is the newest `L` slots of a FIFO: all
-        // of it for the own tap of the pattern, only the last slot for an
-        // interior tap.
+        // of it for the tap at `tap_lag`, only the newest slot for the lag-1
+        // tap of a two-tap pattern.
         let heads = |fifo: &Mamba3DoubleSsdCache, lag: usize| -> (Tensor<4>, Tensor<5>) {
             let slots = "a β tap keeps its (B, x) cache slots";
             let slots_buhp = fifo.v_state_buhp.clone().expect(slots);
@@ -424,7 +424,7 @@ impl Mamba3 {
         // Build the V tensors: insert the mimo_rank axis at position 3 of
         // `_bnlhp`. With a β tap, these are the two standard SSD passes that
         // give the pathway its name (γ-SSM + β-SSM, summed). Under
-        // [`Trapezoid::None`] the second pass does not exist, and a
+        // [`TapPattern::None`] the second pass does not exist, and a
         // "double"-SSD forward is one pass.
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
@@ -630,12 +630,12 @@ mod step {
         /// `α = exp(da)` `[batch, u, nheads]`.
         pub alpha_buh: Tensor<3>,
         /// The tap mass `ν` `[batch, u, nheads]`. `None` under
-        /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None).
+        /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None).
         /// `β = ν·α` is formed where it is used.
         pub nu_buh: Option<Tensor<3>>,
-        /// The mass of the interior (lag-1) tap `[batch, u, nheads]`. `None`
-        /// unless the pattern
-        /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+        /// The mass of the lag-1 tap of a two-tap pattern
+        /// `[batch, u, nheads]`. `None` unless the pattern
+        /// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
         pub nu_interior_buh: Option<Tensor<3>>,
         /// `γ = λ·Δ` `[batch, u, nheads]` (`= Δ` when there is no `λ`).
         pub gamma_buh: Tensor<3>,
@@ -684,7 +684,7 @@ mod step {
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
             // See the note in `forward`: the three trailing segments are the
             // optional ones (`Real1D` projects no rotation, a one-tap pattern
-            // no `μ`, `Trapezoid::None` no `λ`).
+            // no `μ`, `TapPattern::None` no `λ`).
             let (proj_bd, rot_bA) =
                 helpers::split_trailing(proj_bd, self.rotation_channels_total(), 1);
             let (proj_bd, mu_raw_bH) =
@@ -727,7 +727,7 @@ mod step {
                 lambda_raw_bH.map(|t| unfold_micro_b(t, u)),
                 mu_raw_bH.map(|t| unfold_micro_b(t, u)),
                 self.dt_bias_h.val(),
-                self.trapezoid_spec(),
+                self.tap_pattern_spec(),
                 self.gain_input(noise_bH.map(|t| unfold_micro_b(t, u)), log_precision_bh, None),
             );
             let tropical_ab_buh =
@@ -967,7 +967,7 @@ mod step {
             // unchanged op graph of stock Mamba-3.
             //
             // The trapezoid is unchanged by all of this. A tap at
-            // [`Trapezoid::tap_lag`] reads folded position `p − lag`: the
+            // [`TapPattern::tap_lag`] reads folded position `p − lag`: the
             // [`helpers::shift_stream`] of `forward` over this block, with the
             // FIFO of the cache as the prefix. `β = ν·α` times
             // [`helpers::interior_gap_decay`] is the same gap transport (§9). At
@@ -1033,9 +1033,9 @@ mod step {
 
             // A tapped side at its own lag: the `beta_side` of `forward`, over
             // this block. The prefix is the newest `lag` slots of the FIFO: all
-            // of it for the own tap of the pattern, only the newest slot for the
+            // of it for the tap at `tap_lag`, only the newest slot for the
             // lag-1 tap of a two-tap pattern (by the FIFO convention, that slot
-            // has the empty decay product). Under [`Trapezoid::None`] there is
+            // has the empty decay product). Under [`TapPattern::None`] there is
             // no tapped side: no shifted stream, no second outer product, one
             // term less in the state update.
             let tap_write = |nu_buh: Tensor<3>, lag: usize| {

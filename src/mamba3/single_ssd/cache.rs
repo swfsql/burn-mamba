@@ -17,7 +17,7 @@
 //!
 //! The two states are equal at call boundaries, where caches are produced and
 //! consumed (see [`crate::mamba3::cache`]). Under
-//! [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) the difference
+//! [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) the difference
 //! disappears everywhere: `scaleₜ = γₜ`, so `h' ≡ h` at every position, and
 //! neither cache has tap slots.
 //!
@@ -101,7 +101,7 @@ pub struct Mamba3SingleSsdCache {
     /// them, because it did not know the `λ, Δ` of the `lag` positions that pay
     /// them.
     ///
-    /// `None` under [`Trapezoid::None`], which has no boundary β term to defer.
+    /// `None` under [`TapPattern::None`], which has no boundary β term to defer.
     ///
     /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
     pub k_state_bumhr: Option<Tensor<5>>,
@@ -192,12 +192,12 @@ pub struct Mamba3SingleSsdCacheConfig {
     pub num_quat_blocks: usize,
 
     /// The tap pattern of the block (see
-    /// [`Mamba3DoubleSsdCacheConfig::trapezoid`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::trapezoid)).
-    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
-    pub trapezoid: Trapezoid,
+    /// [`Mamba3DoubleSsdCacheConfig::tap_pattern`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCacheConfig::tap_pattern)).
+    #[config(default = "crate::mamba3::tap_pattern::TapPattern::HorizontalCarryOver")]
+    pub tap_pattern: TapPattern,
 
-    /// Recurrence micro-steps per token (`u`). With [`Self::trapezoid`], it
-    /// sets the depth of the tap FIFO (see [`Trapezoid::tap_lag`]).
+    /// Recurrence micro-steps per token (`u`). With [`Self::tap_pattern`], it
+    /// sets the depth of the tap FIFO (see [`TapPattern::tap_lag`]).
     #[config(default = 1)]
     pub micro_steps: usize,
 
@@ -222,7 +222,7 @@ impl Mamba3SingleSsdCacheConfig {
             num_rotation_angles: block_config.num_rotation_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
-            trapezoid: block_config.trapezoid,
+            tap_pattern: block_config.tap_pattern,
             micro_steps: block_config.micro_steps,
             gain: block_config.gain,
             tropical: block_config.tropical,
@@ -235,7 +235,7 @@ impl Mamba3SingleSsdCacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let slots = self.trapezoid.tap_slots(self.micro_steps);
+        let slots = self.tap_pattern.tap_slots(self.micro_steps);
         let tap = slots > 0;
         let k_state_bumhr = tap.then(|| {
             Tensor::zeros(

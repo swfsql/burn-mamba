@@ -26,7 +26,7 @@
 //! code paths. The discretisation is the exception: MambaProduct gives `step`
 //! its own `u` axis, so both paths call it at rank 3.
 
-use crate::mamba3::trapezoid::TrapezoidSpec;
+use crate::mamba3::tap_pattern::TapPatternSpec;
 use burn_stack::modules::RmsNorm;
 use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
@@ -41,7 +41,7 @@ use burn::tensor::DType;
 /// then the rotation channels
 /// ([`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
 /// projects none), `μ` (a one-tap pattern projects none) and `λ`
-/// ([`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) projects
+/// ([`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) projects
 /// none). That is why the in-projection puts them last.
 ///
 /// An optional slice cannot be one more entry in the main `split_into`. Burn
@@ -70,7 +70,7 @@ pub fn split_trailing<const D: usize>(
 /// that index is before the call.
 ///
 /// This is the "shift-before-chunking" of the double-SSD pathway, generalised
-/// from lag 1 to [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag).
+/// from lag 1 to [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag).
 /// A folded sequence is `tokens · u` long and `lag ∈ {1, u}`, so
 /// `sequence ≥ lag` always. At equality, the whole call is prefix.
 ///
@@ -539,14 +539,14 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
 /// (`len` is the folded sequence, which starts at a token boundary) and in
 /// `step` (`len` is `u`, so the gate is its first entry). At `u = 1` every
 /// position is a token start, and the gate is all zeros. That alone is why
-/// [`Trapezoid::HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset)
-/// becomes [`None`](crate::mamba3::trapezoid::Trapezoid::None) there.
+/// [`TapPattern::HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset)
+/// becomes [`None`](crate::mamba3::tap_pattern::TapPattern::None) there.
 ///
 /// Here, the admissibility rule of a pattern becomes a tensor. The caller
 /// decides *which* mass it applies to: `λ` for
-/// [`Trapezoid::far_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::far_tap_crosses_tokens),
+/// [`TapPattern::tap_crosses_tokens`](crate::mamba3::tap_pattern::TapPattern::tap_crosses_tokens),
 /// `μ` for
-/// [`interior_tap_crosses_tokens`](crate::mamba3::trapezoid::Trapezoid::interior_tap_crosses_tokens).
+/// [`lag1_tap_crosses_tokens`](crate::mamba3::tap_pattern::TapPattern::lag1_tap_crosses_tokens).
 pub fn token_start_gate(len: usize, micro_steps: usize, device: &Device) -> Tensor<3> {
     let open: Vec<f32> = (0..len)
         .map(|p| if p.is_multiple_of(micro_steps) { 0.0 } else { 1.0 })
@@ -569,13 +569,13 @@ pub struct TrapezoidCoeffs {
     /// `αₜ = exp(da) ∈ (0, 1]`: the decay, projected or computed (as `da`).
     pub alpha: Tensor<3>,
     /// `νₜ`: the mass of the tap at
-    /// [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag), before its
+    /// [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag), before its
     /// transport. `None` under
-    /// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), which
+    /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), which
     /// has no left endpoint: the tensor is not formed (not formed as zeros).
     pub nu: Option<Tensor<3>>,
     /// `νⁱⁿᵗₜ`: the mass of the extra lag-1 tap. `None` unless
-    /// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+    /// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
     pub nu_interior: Option<Tensor<3>>,
     /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
     /// there is no `λ` (all of the step is paid at the right endpoint).
@@ -617,7 +617,7 @@ impl TrapezoidCoeffs {
 
 /// Compute the trapezoidal discretisation coefficients from the raw
 /// (data-dependent) projections. See the header of `mamba3.rs` for the
-/// formulas and the header of `trapezoid.rs` for how the masses divide.
+/// formulas and the header of `tap_pattern.rs` for how the masses divide.
 ///
 /// All data tensors are `[batch, len, nheads]`, where `len` is the folded
 /// sequence (`forward`) or the `u` micro-steps of one token (`step`).
@@ -625,16 +625,18 @@ impl TrapezoidCoeffs {
 /// are periodic along axis 1.
 ///
 /// `lambda_raw` is `None` under
-/// [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None), whose block
+/// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), whose block
 /// projects no `λ` channels. The coefficients then have their `λ ≡ 1` values
 /// *by construction*: no mass is formed, and `γ` **is** `Δ` (the same tensor,
 /// not a new `1 · Δ`). `mu_raw` is `None` unless the pattern
-/// [`has_interior_tap`](crate::mamba3::trapezoid::Trapezoid::has_interior_tap).
+/// [`has_lag1_tap`](crate::mamba3::tap_pattern::TapPattern::has_lag1_tap).
 /// The same holds one level down: no `μ`, no second mass.
 ///
 /// A gate closes by giving its mass back, not by dropping it. `λ` is `1` where
-/// the far tap is not admissible (so `γ` takes all of the step). `μ` is `0`
-/// where the interior tap is not admissible (so the far tap takes all of the
+/// the tap at
+/// [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) is not
+/// admissible (so `γ` takes all of the step). `μ` is `0` where the lag-1 tap
+/// of a two-tap member is not admissible (so the lag-`u` tap takes all of the
 /// left endpoint). Both are exact at the ends, so the degenerate members equal
 /// their targets bit for bit.
 ///
@@ -651,7 +653,7 @@ pub fn trapezoidal_coefficients(
     lambda_raw: Option<Tensor<3>>,
     mu_raw: Option<Tensor<3>>,
     dt_bias_h: Tensor<1>,
-    spec: TrapezoidSpec,
+    spec: TapPatternSpec,
     gain: Option<crate::mamba3::positive::kalman::GainInput>,
 ) -> TrapezoidCoeffs {
     let (dt_limit, a_floor) = (spec.dt_limit, spec.a_floor);
@@ -671,15 +673,16 @@ pub fn trapezoidal_coefficients(
     let gate = |crosses: bool| {
         (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
     };
-    // Where the far tap is closed — read by `λ` below and by the gate's masses.
-    let far_open_1s1 = lambda_raw
+    // Where the tap at `tap_lag` is closed — read by `λ` below and by the
+    // gate's masses.
+    let tap_open_1s1 = lambda_raw
         .as_ref()
-        .and_then(|_| gate(spec.pattern.far_tap_crosses_tokens()));
+        .and_then(|_| gate(spec.pattern.tap_crosses_tokens()));
     let (da, log_precision) = match gain {
         Some(gain) => {
             use crate::mamba3::positive::kalman;
             let masses =
-                kalman::LogMasses::new(dt_raw, dt_limit, lambda_raw.clone(), far_open_1s1.clone());
+                kalman::LogMasses::new(dt_raw, dt_limit, lambda_raw.clone(), tap_open_1s1.clone());
             let out = kalman::gate(da, masses, gain);
             (out.da_bsh, Some(out.log_precision_bsh))
         }
@@ -689,21 +692,22 @@ pub fn trapezoidal_coefficients(
     let (nu, nu_interior, gamma) = match lambda_raw {
         Some(lambda_raw) => {
             let lambda = burn::tensor::activation::sigmoid(lambda_raw);
-            // A closed far tap means λ = 1 there: all of the step is paid at
-            // the right endpoint. This makes the gated pattern a submodel of
-            // the ungated one, not a lossy version of it.
-            let lambda = match far_open_1s1 {
+            // A closed tap at `tap_lag` means λ = 1 there: all of the step is
+            // paid at the right endpoint. This makes the gated pattern a
+            // submodel of the ungated one, not a lossy version of it.
+            let lambda = match tap_open_1s1 {
                 Some(open_1s1) => lambda * open_1s1.clone() + (-open_1s1 + 1.0),
                 None => lambda,
             };
             let nu = (-lambda.clone() + 1.0) * dt.clone();
             let gamma = lambda * dt.clone();
-            // …and a closed interior tap means μ = 0 there: its share of the
-            // left endpoint returns to the far tap, one level up.
+            // …and where the lag-1 tap of a two-tap member is closed, μ = 0.
+            // Its share of the left endpoint returns to the lag-`u` tap, one
+            // level up.
             let (nu, nu_interior) = match mu_raw {
                 Some(mu_raw) => {
                     let mu = burn::tensor::activation::sigmoid(mu_raw);
-                    let mu = match gate(spec.pattern.interior_tap_crosses_tokens()) {
+                    let mu = match gate(spec.pattern.lag1_tap_crosses_tokens()) {
                         Some(open_1s1) => mu * open_1s1,
                         None => mu,
                     };

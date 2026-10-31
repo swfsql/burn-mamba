@@ -26,7 +26,7 @@ random/shuffle/runs).
 ### Results
 
 - **A₅, one layer.** Hand-built exact at `reset-swap`'s config (`d_model 2`, 2 heads,
-  `state_rank 4`, `Trapezoid::None`, no final norm, 60-way head) — 308 params:
+  `state_rank 4`, `TapPattern::None`, no final norm, 60-way head) — 308 params:
   conjugation `v ↦ q v q̄` in a `Rotor4D` 4-block is SO(3), the icosahedron.
   Trains exact at `d_model 4`, 2 heads, `per_head_dim 2`, `mimo_rank 2`, len 96
   (608 params): 96 → 100/100/100; 288 → 100/99.5/99.3 (seed 1: 100/91.4/91.3).

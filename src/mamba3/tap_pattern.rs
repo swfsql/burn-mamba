@@ -8,7 +8,7 @@
 //! `u > 1`, the folded sequence has `u` positions per token
 //! ([`crate::mamba3::product`]), and the choice is real.
 //!
-//! [`Trapezoid`] names the members of that lattice.
+//! [`TapPattern`] names the members of that lattice.
 //! `info/mamba-3/trapezoid-as-integration.md` §§8–9 derives it, prices each
 //! member, and proves the invariant that all members keep: each tap is
 //! transported across *its own* gap, which keeps the single-SSD `Δ̃` collapse.
@@ -19,7 +19,11 @@
 //! A pattern says which earlier samples are **admissible** at each folded
 //! position. Their *weight* is not a second decision. Two learned per-(head,
 //! micro-step) scalars split the mass `Δₚ` of the step. A tap that is not
-//! admissible gives its mass back one level (interior → far, far → `γ`):
+//! admissible gives its mass back one level. The lag-1 tap of a two-tap
+//! member gives it to the lag-`u` tap. The tap at
+//! [`tap_lag`](TapPattern::tap_lag) gives it to `γ`. Under
+//! [`HorizontalReset`](TapPattern::HorizontalReset), that tap is a lag-1 tap.
+//! The masses are:
 //!
 //! ```text
 //!   γ = λΔ            the right endpoint, what the read sees   (λ = σ(λ̂))
@@ -39,10 +43,10 @@
 //! Because of this fallback, the gated members are *submodels*, not different
 //! models:
 //!
-//! - [`HorizontalReset`](Trapezoid::HorizontalReset) is
-//!   [`HorizontalCarryOver`](Trapezoid::HorizontalCarryOver) with `λ = 1` at
+//! - [`HorizontalReset`](TapPattern::HorizontalReset) is
+//!   [`HorizontalCarryOver`](TapPattern::HorizontalCarryOver) with `λ = 1` at
 //!   the first micro-step of each token (the limit of §8).
-//! - [`VerticalPlusHorizontalCarryOver`](Trapezoid::VerticalPlusHorizontalCarryOver)
+//! - [`VerticalPlusHorizontalCarryOver`](TapPattern::VerticalPlusHorizontalCarryOver)
 //!   *contains* both implemented single-tap patterns, at `μ ≡ 1` and `μ ≡ 0`.
 //!
 //! If a closed tap dropped its mass instead of giving it back, both statements
@@ -59,13 +63,14 @@
 /// - whether the in-projection has `λ` and `μ` channels,
 /// - how many `(B, x)` tap slots the cache holds ([`tap_slots`](Self::tap_slots)).
 ///
-/// The lattice is the product of the settings of the two taps. The lag-1
-/// (*horizontal*) tap is absent, gated to within a token, or unrestricted. The
-/// lag-`u` (*vertical*) tap is absent or present. All six cells exist:
+/// The lattice is the product of the settings of the two taps. The lag-1 tap
+/// is absent, gated to within a token, or unrestricted (the `Horizontal…` part
+/// of a name). The lag-`u` tap is absent or present (the `Vertical` part). All
+/// six cells exist:
 ///
 /// ```text
-///                   no vertical                 + vertical (lag u)
-///   no horizontal   None                        Vertical
+///                   no lag-u tap                + lag-u tap
+///   no lag-1 tap    None                        Vertical
 ///   reset (j ≥ 1)   HorizontalReset             VerticalPlusHorizontalReset
 ///   carry (all j)   HorizontalCarryOver         VerticalPlusHorizontalCarryOver
 /// ```
@@ -77,10 +82,10 @@
 /// - [`Vertical`](Self::Vertical) *is*
 ///   [`HorizontalCarryOver`](Self::HorizontalCarryOver),
 /// - the two-tap members are also `HorizontalCarryOver` (they fold and have no
-///   `μ` channels, see [`has_interior_tap`](Self::has_interior_tap)),
+///   `μ` channels, see [`has_lag1_tap`](Self::has_lag1_tap)),
 /// - [`HorizontalReset`](Self::HorizontalReset) *is* [`None`](Self::None).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum Trapezoid {
+pub enum TapPattern {
     /// **No second tap.** `λ ≡ 1`, so `β = 0` and `γ = Δ`: the write is plain
     /// exponential-Euler, as in Mamba-2 (the §4 Lie–Trotter row of the note).
     ///
@@ -233,13 +238,13 @@ pub enum Trapezoid {
     VerticalPlusHorizontalCarryOver,
 }
 
-impl Trapezoid {
+impl TapPattern {
     /// Whether the pattern has a second (`β`) tap. `false` only for
     /// [`None`](Self::None). Every site branches on this predicate: no tap
     /// means no `λ` channels, no `β` coefficient, no tap slots in the cache,
     /// and no previous-sample term in the recurrence.
     pub fn has_beta_tap(self) -> bool {
-        self != Trapezoid::None
+        self != TapPattern::None
     }
 
     /// How far back the `β` tap reaches, in **folded** positions
@@ -259,17 +264,20 @@ impl Trapezoid {
     /// keeps the `Δ̃` collapse, and thus the single-SSD pathway.
     pub fn tap_lag(self, micro_steps: usize) -> usize {
         match self {
-            Trapezoid::None => 0,
-            Trapezoid::HorizontalCarryOver | Trapezoid::HorizontalReset => 1,
-            Trapezoid::Vertical
-            | Trapezoid::VerticalPlusHorizontalReset
-            | Trapezoid::VerticalPlusHorizontalCarryOver => micro_steps,
+            TapPattern::None => 0,
+            TapPattern::HorizontalCarryOver | TapPattern::HorizontalReset => 1,
+            TapPattern::Vertical
+            | TapPattern::VerticalPlusHorizontalReset
+            | TapPattern::VerticalPlusHorizontalCarryOver => micro_steps,
         }
     }
 
     /// Whether the pattern adds a **second**, lag-1 tap beside the one at
     /// [`tap_lag`](Self::tap_lag). True for the two-tap members, and only when
-    /// the two lags are different.
+    /// the two lags are different. The one tap of
+    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) and of
+    /// [`HorizontalReset`](Self::HorizontalReset) is a lag-1 tap, but it is the
+    /// tap at `tap_lag`, so these members return `false`.
     ///
     /// At `u = 1` the lags are equal: both taps read the same sample, so the
     /// split is a decomposition of one coefficient, and the pair **folds** back
@@ -278,35 +286,36 @@ impl Trapezoid {
     /// segment for Muon, one shift, one SSD pass. Thus a two-tap member at
     /// `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not an
     /// expensive form of it.
-    pub fn has_interior_tap(self, micro_steps: usize) -> bool {
+    pub fn has_lag1_tap(self, micro_steps: usize) -> bool {
         micro_steps > 1
             && matches!(
                 self,
-                Trapezoid::VerticalPlusHorizontalReset
-                    | Trapezoid::VerticalPlusHorizontalCarryOver
+                TapPattern::VerticalPlusHorizontalReset
+                    | TapPattern::VerticalPlusHorizontalCarryOver
             )
     }
 
     /// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at the
-    /// **first** micro-step of a token, where it is the only tap that would
-    /// cross a token boundary. `false` only for
+    /// **first** micro-step of a token, where it would cross a token boundary.
+    /// `false` only for
     /// [`HorizontalReset`](Self::HorizontalReset), whose left-endpoint mass
     /// then returns to `γ` (module header).
-    pub fn far_tap_crosses_tokens(self) -> bool {
-        self != Trapezoid::HorizontalReset
+    pub fn tap_crosses_tokens(self) -> bool {
+        self != TapPattern::HorizontalReset
     }
 
-    /// Whether the *interior* (lag-1) tap of a two-tap member is admissible at
-    /// the first micro-step of a token, where it would cross a token boundary.
-    /// This is the only difference between
+    /// Whether the lag-1 tap of a two-tap member is admissible at the first
+    /// micro-step of a token, where it would cross a token boundary. This is the
+    /// only difference between
     /// [`VerticalPlusHorizontalCarryOver`](Self::VerticalPlusHorizontalCarryOver)
     /// (`true`) and
     /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset)
-    /// (`false`). Where it is closed, the share of `μ` returns to the far tap.
+    /// (`false`). Where it is closed, the share of `μ` returns to the lag-`u`
+    /// tap.
     ///
-    /// Read only when [`has_interior_tap`](Self::has_interior_tap).
-    pub fn interior_tap_crosses_tokens(self) -> bool {
-        self == Trapezoid::VerticalPlusHorizontalCarryOver
+    /// Read only when [`has_lag1_tap`](Self::has_lag1_tap).
+    pub fn lag1_tap_crosses_tokens(self) -> bool {
+        self == TapPattern::VerticalPlusHorizontalCarryOver
     }
 
     /// How many `(B, x)` tap slots a cache holds for this pattern at
@@ -330,17 +339,17 @@ impl Trapezoid {
 /// micro-steps (the period of its gates), and the two clamps on the
 /// coefficients.
 ///
-/// [`Mamba3::trapezoid_spec`](crate::mamba3::mamba3::Mamba3::trapezoid_spec)
+/// [`Mamba3::tap_pattern_spec`](crate::mamba3::mamba3::Mamba3::tap_pattern_spec)
 /// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`
 /// and `step` compute the masses from **one** definition. The same reason
 /// makes [`RotationSpec`](crate::mamba3::rotation::RotationSpec) exist.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TrapezoidSpec {
-    /// Which earlier sample(s) the `β` tap reads ([`Trapezoid`]).
-    pub pattern: Trapezoid,
+pub struct TapPatternSpec {
+    /// Which earlier sample(s) the `β` tap reads ([`TapPattern`]).
+    pub pattern: TapPattern,
     /// Recurrence micro-steps per token (`u`). The gates are periodic in it,
     /// and at `u = 1` a two-tap pattern folds
-    /// ([`Trapezoid::has_interior_tap`]).
+    /// ([`TapPattern::has_lag1_tap`]).
     pub micro_steps: usize,
     /// `Δ`'s clamp
     /// ([`Mamba3Config::dt_limit`](crate::mamba3::mamba3::Mamba3Config::dt_limit)).
@@ -373,7 +382,7 @@ mod tests {
         cfg()
             .with_rotation(kind)
             .with_micro_steps(micro_steps)
-            .with_trapezoid(Trapezoid::None)
+            .with_tap_pattern(TapPattern::None)
     }
 
     fn input(config: &Mamba3Config, tokens: usize) -> Tensor<3> {
@@ -399,27 +408,27 @@ mod tests {
 
     /// Every member of the lattice, at the `u` its taps are distinct at, for the
     /// bodies below to iterate over.
-    const PATTERNS: [Trapezoid; 6] = [
-        Trapezoid::None,
-        Trapezoid::HorizontalReset,
-        Trapezoid::HorizontalCarryOver,
-        Trapezoid::Vertical,
-        Trapezoid::VerticalPlusHorizontalReset,
-        Trapezoid::VerticalPlusHorizontalCarryOver,
+    const PATTERNS: [TapPattern; 6] = [
+        TapPattern::None,
+        TapPattern::HorizontalReset,
+        TapPattern::HorizontalCarryOver,
+        TapPattern::Vertical,
+        TapPattern::VerticalPlusHorizontalReset,
+        TapPattern::VerticalPlusHorizontalCarryOver,
     ];
 
-    fn cfg_for(pattern: Trapezoid, kind: RotationKind, micro_steps: usize) -> Mamba3Config {
+    fn cfg_for(pattern: TapPattern, kind: RotationKind, micro_steps: usize) -> Mamba3Config {
         cfg()
             .with_rotation(kind)
             .with_micro_steps(micro_steps)
-            .with_trapezoid(pattern)
+            .with_tap_pattern(pattern)
     }
 
     /// The default is the lag-1 carry-over, and an untouched config builds.
     #[test]
     fn default_is_the_carry_over() {
-        assert_eq!(Trapezoid::default(), Trapezoid::HorizontalCarryOver);
-        assert_eq!(cfg().trapezoid, Trapezoid::HorizontalCarryOver);
+        assert_eq!(TapPattern::default(), TapPattern::HorizontalCarryOver);
+        assert_eq!(cfg().tap_pattern, TapPattern::HorizontalCarryOver);
         let device = test_device();
         let _ = cfg().init(&device);
     }
@@ -436,7 +445,7 @@ mod tests {
                 let block = config.init(&device);
                 let scalars = 2
                     + usize::from(pattern.has_beta_tap())
-                    + usize::from(pattern.has_interior_tap(micro_steps));
+                    + usize::from(pattern.has_lag1_tap(micro_steps));
                 let label = format!("{pattern:?} u={micro_steps}");
                 assert_eq!(
                     block.in_proj.weight.dims()[1],
@@ -462,7 +471,7 @@ mod tests {
                     );
                     assert_eq!(
                         names.iter().any(|n| n == "mu"),
-                        pattern.has_interior_tap(micro_steps),
+                        pattern.has_lag1_tap(micro_steps),
                         "{label}: μ segment"
                     );
                 }
@@ -475,8 +484,8 @@ mod tests {
     #[test]
     fn none_drops_the_lambda_channels() {
         let with = cfg();
-        let without = cfg().with_trapezoid(Trapezoid::None);
-        assert!(!Trapezoid::None.has_beta_tap());
+        let without = cfg().with_tap_pattern(TapPattern::None);
+        assert!(!TapPattern::None.has_beta_tap());
         assert_eq!(
             with.d_in_proj() - without.d_in_proj(),
             with.micro_steps * with.nheads(),
@@ -528,12 +537,12 @@ mod tests {
                 assert_eq!(
                     max_abs_diff(out_single.clone(), out_double),
                     0.0,
-                    "{label}: the pathways coincide under Trapezoid::None"
+                    "{label}: the pathways coincide under TapPattern::None"
                 );
                 assert_eq!(
                     max_abs_diff(cache_single.ssm_bhpr.clone(), cache_double.ssm_bhpr),
                     0.0,
-                    "{label}: h' ≡ h under Trapezoid::None"
+                    "{label}: h' ≡ h under TapPattern::None"
                 );
 
                 assert!(
@@ -593,7 +602,7 @@ mod tests {
         }
     }
 
-    /// The semantic claim: `Trapezoid::None` **is** `λ ≡ 1`.
+    /// The semantic claim: `TapPattern::None` **is** `λ ≡ 1`.
     ///
     /// `σ(30)` rounds to exactly `1.0` in f32, so a carry-over block whose `λ`
     /// columns are zeroed and whose `λ` bias is `30` has `β = 0` and `γ = Δ`
@@ -606,7 +615,7 @@ mod tests {
         let config = cfg()
             .with_rotation(RotationKind::Real1D)
             .with_has_proj_bias(true);
-        let none = config.clone().with_trapezoid(Trapezoid::None).init(&device);
+        let none = config.clone().with_tap_pattern(TapPattern::None).init(&device);
         let mut carry = config.clone().init(&device);
 
         // Everything but the in-projection is shared outright.
@@ -648,7 +657,7 @@ mod tests {
         assert!(d < dtype_tol(1e-6), "λ≡1 carry-over vs None, stepped: {d:.3e}");
     }
 
-    // ── Trapezoid::Vertical ───────────────────────────────────────────────
+    // ── TapPattern::Vertical ──────────────────────────────────────────────
     //
     // The lag-`u` pattern. `forward` (both pathways) must equal an unrolled
     // `step`, the two pathways must agree with each other, and at `u = 1` the
@@ -658,7 +667,7 @@ mod tests {
         cfg()
             .with_rotation(kind)
             .with_micro_steps(micro_steps)
-            .with_trapezoid(Trapezoid::Vertical)
+            .with_tap_pattern(TapPattern::Vertical)
     }
 
     /// The lag is what the pattern is, and both implemented patterns read it
@@ -666,11 +675,11 @@ mod tests {
     #[test]
     fn vertical_is_lag_u() {
         for u in [1, 2, 5] {
-            assert_eq!(Trapezoid::Vertical.tap_lag(u), u);
-            assert_eq!(Trapezoid::HorizontalCarryOver.tap_lag(u), 1);
-            assert_eq!(Trapezoid::None.tap_lag(u), 0);
+            assert_eq!(TapPattern::Vertical.tap_lag(u), u);
+            assert_eq!(TapPattern::HorizontalCarryOver.tap_lag(u), 1);
+            assert_eq!(TapPattern::None.tap_lag(u), 0);
         }
-        assert!(Trapezoid::Vertical.has_beta_tap());
+        assert!(TapPattern::Vertical.has_beta_tap());
         // Same λ channels as the carry-over: the pattern is an algorithm and a
         // cache layout, not a coefficient.
         assert_eq!(
@@ -876,7 +885,7 @@ mod tests {
     /// — the same weights, and bit for bit. For the two-tap members that is the
     /// **fold**: with both taps on one sample there is no mix to make, so they
     /// spend no `μ` channels and the pair is one tap
-    /// ([`Trapezoid::has_interior_tap`]).
+    /// ([`TapPattern::has_lag1_tap`]).
     #[test]
     fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
         let device = test_device();
@@ -885,11 +894,11 @@ mod tests {
         let x = input(&base, 6);
         let path = Mamba3SsdPath::default();
         for pattern in [
-            Trapezoid::Vertical,
-            Trapezoid::VerticalPlusHorizontalReset,
-            Trapezoid::VerticalPlusHorizontalCarryOver,
+            TapPattern::Vertical,
+            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::VerticalPlusHorizontalCarryOver,
         ] {
-            let mut folded: Mamba3 = base.clone().with_trapezoid(pattern).init(&device);
+            let mut folded: Mamba3 = base.clone().with_tap_pattern(pattern).init(&device);
             // A tap pattern is not a parameterisation: at `u = 1` the blocks have
             // the same weight shapes, so sharing every weight compares them.
             share_weights_except_in_proj(&carry, &mut folded);
@@ -925,10 +934,10 @@ mod tests {
     // unrolled `step`, from a fresh cache and from a continued one — and the
     // degeneracy tests below are what pin their *semantics*.
 
-    const GATED_AND_TWO_TAP: [Trapezoid; 3] = [
-        Trapezoid::HorizontalReset,
-        Trapezoid::VerticalPlusHorizontalReset,
-        Trapezoid::VerticalPlusHorizontalCarryOver,
+    const GATED_AND_TWO_TAP: [TapPattern; 3] = [
+        TapPattern::HorizontalReset,
+        TapPattern::VerticalPlusHorizontalReset,
+        TapPattern::VerticalPlusHorizontalCarryOver,
     ];
 
     /// `forward` from a cache equals `step` unrolled from that same cache — both
@@ -1164,10 +1173,10 @@ mod tests {
         let config = cfg()
             .with_rotation(RotationKind::Real1D)
             .with_has_proj_bias(true);
-        let none = config.clone().with_trapezoid(Trapezoid::None).init(&device);
+        let none = config.clone().with_tap_pattern(TapPattern::None).init(&device);
         let mut reset = config
             .clone()
-            .with_trapezoid(Trapezoid::HorizontalReset)
+            .with_tap_pattern(TapPattern::HorizontalReset)
             .init(&device);
         share_weights_except_in_proj(&none, &mut reset);
         append_dead_segment(&none, &mut reset, config.nheads(), 0.0, &device);
@@ -1208,12 +1217,12 @@ mod tests {
         use burn::module::Param;
         let device = test_device();
         let u = 3;
-        let config = cfg_for(Trapezoid::HorizontalReset, RotationKind::Real1D, u)
+        let config = cfg_for(TapPattern::HorizontalReset, RotationKind::Real1D, u)
             .with_has_proj_bias(true);
         let reset = config.clone().init(&device);
         let mut carry = config
             .clone()
-            .with_trapezoid(Trapezoid::HorizontalCarryOver)
+            .with_tap_pattern(TapPattern::HorizontalCarryOver)
             .init(&device);
         share_weights_except_in_proj(&reset, &mut carry);
         carry.in_proj = reset.in_proj.clone();
@@ -1286,10 +1295,10 @@ mod tests {
     fn lattice_multi_chunk_matches_step() {
         let device = test_device();
         for pattern in [
-            Trapezoid::Vertical,
-            Trapezoid::HorizontalReset,
-            Trapezoid::VerticalPlusHorizontalReset,
-            Trapezoid::VerticalPlusHorizontalCarryOver,
+            TapPattern::Vertical,
+            TapPattern::HorizontalReset,
+            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::VerticalPlusHorizontalCarryOver,
         ] {
             let config = cfg_for(pattern, RotationKind::Complex2D, 3);
             let model: Mamba3 = config.init(&device);
@@ -1323,25 +1332,25 @@ mod tests {
     /// were quietly dropped would leave both pathways agreeing with each other
     /// and with `step`, and only a comparison against the *one-tap* pattern they
     /// would then be notices. At `μ = σ(0) = ½` each two-tap member must differ
-    /// from [`Vertical`](Trapezoid::Vertical) — and from the other, since their
+    /// from [`Vertical`](TapPattern::Vertical) — and from the other, since their
     /// gates part company at each token's first micro-step.
     #[test]
     fn two_tap_patterns_actually_spend_their_second_tap() {
         let device = test_device();
         let u = 3;
-        let config = cfg_for(Trapezoid::Vertical, RotationKind::Real1D, u).with_has_proj_bias(true);
+        let config = cfg_for(TapPattern::Vertical, RotationKind::Real1D, u).with_has_proj_bias(true);
         let vertical = config.clone().init(&device);
         let x = input(&config, 5);
         let path = Mamba3SsdPath::default();
         let out_vertical = vertical.forward_single_ssd(x.clone(), None, &path, None).0;
 
         let two_tap: Vec<Tensor<3>> = [
-            Trapezoid::VerticalPlusHorizontalReset,
-            Trapezoid::VerticalPlusHorizontalCarryOver,
+            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::VerticalPlusHorizontalCarryOver,
         ]
         .into_iter()
         .map(|pattern| {
-            let mut block = config.clone().with_trapezoid(pattern).init(&device);
+            let mut block = config.clone().with_tap_pattern(pattern).init(&device);
             share_weights_except_in_proj(&vertical, &mut block);
             append_dead_segment(&vertical, &mut block, u * config.nheads(), 0.0, &device);
             let out = block.forward_single_ssd(x.clone(), None, &path, None).0;
@@ -1363,12 +1372,12 @@ mod tests {
     fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
         let device = test_device();
         let u = 3;
-        let config = cfg_for(Trapezoid::HorizontalCarryOver, RotationKind::Real1D, u)
+        let config = cfg_for(TapPattern::HorizontalCarryOver, RotationKind::Real1D, u)
             .with_has_proj_bias(true);
         let carry = config.clone().init(&device);
         let mut vertical = config
             .clone()
-            .with_trapezoid(Trapezoid::Vertical)
+            .with_tap_pattern(TapPattern::Vertical)
             .init(&device);
         share_weights_except_in_proj(&carry, &mut vertical);
         vertical.in_proj = carry.in_proj.clone();
@@ -1381,7 +1390,7 @@ mod tests {
         ] {
             let mut join = config
                 .clone()
-                .with_trapezoid(Trapezoid::VerticalPlusHorizontalCarryOver)
+                .with_tap_pattern(TapPattern::VerticalPlusHorizontalCarryOver)
                 .init(&device);
             share_weights_except_in_proj(&carry, &mut join);
             // `Real1D` ⇒ `μ` is the trailing segment: append it dead, at the
@@ -1411,14 +1420,14 @@ mod tests {
     /// tap, one slot for the lag-1 patterns, `u` for the lag-`u` ones.
     #[test]
     fn tap_slots_follow_the_lag() {
-        assert_eq!(Trapezoid::None.tap_slots(3), 0);
-        assert_eq!(Trapezoid::HorizontalReset.tap_slots(3), 1);
-        assert_eq!(Trapezoid::HorizontalCarryOver.tap_slots(3), 1);
-        assert_eq!(Trapezoid::Vertical.tap_slots(3), 3);
-        assert_eq!(Trapezoid::VerticalPlusHorizontalReset.tap_slots(3), 3);
+        assert_eq!(TapPattern::None.tap_slots(3), 0);
+        assert_eq!(TapPattern::HorizontalReset.tap_slots(3), 1);
+        assert_eq!(TapPattern::HorizontalCarryOver.tap_slots(3), 1);
+        assert_eq!(TapPattern::Vertical.tap_slots(3), 3);
+        assert_eq!(TapPattern::VerticalPlusHorizontalReset.tap_slots(3), 3);
         // At `u = 1` the lag-`u` patterns *are* the lag-1 one, and the two
         // patterns that degenerate to each other agree on the buffer too.
-        assert_eq!(Trapezoid::Vertical.tap_slots(1), 1);
-        assert_eq!(Trapezoid::VerticalPlusHorizontalReset.tap_slots(1), 1);
+        assert_eq!(TapPattern::Vertical.tap_slots(1), 1);
+        assert_eq!(TapPattern::VerticalPlusHorizontalReset.tap_slots(1), 1);
     }
 }

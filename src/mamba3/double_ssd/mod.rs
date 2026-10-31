@@ -5,12 +5,12 @@
 //!
 //! - γ-SSM: `hᵞₜ = αₜ hᵞₜ₋₁ + γₜ Bₜ xₜ`   (the current sample)
 //! - β-SSM: `hᵝₜ = αₜ hᵝₜ₋₁ + βₜ Bₜ₋ₗ xₜ₋ₗ`, one per `β` tap, at the own lag
-//!   `l` = [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)
+//!   `l` = [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag)
 //!   of that tap, transported across its own gap
 //! - `hₜ = hᵞₜ + Σ hᵝₜ`.
 //!
 //! So there are **two** calls at the default, one under
-//! [`Trapezoid::None`](crate::mamba3::trapezoid::Trapezoid::None) (no tap to
+//! [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) (no tap to
 //! shift), and three under a two-tap pattern (its lags are different, so they
 //! cannot share a pass). It is simple and easy to verify. The cost is ~2× the
 //! intra-chunk and chunk-state memory of the

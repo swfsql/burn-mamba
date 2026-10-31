@@ -33,7 +33,7 @@ tie, a symbol that fixes the answer by itself) is **not scored**.
 The three rungs share these settings:
 
 - **The plant is at the floor of the `reset` ladder**: `state_rank = 1`,
-  `RotationKind::Real1D`, `Trapezoid::None`. So a rung measures the positive
+  `RotationKind::Real1D`, `TapPattern::None`. So a rung measures the positive
   system, not the SSM. In the hand-built `tally-depth` and `tally-record`
   blocks, the state of the plant stays at zero.
 - **`ignore_last_residual`**: the head sees only the block.

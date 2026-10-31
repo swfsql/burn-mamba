@@ -336,9 +336,10 @@ the cross-token role is not degraded:
   state**, a scalar apart (verified by a perturbation of each in turn).
 - The same sample has both roles, as at `u = 1`.
 
-What really changes is the interior taps. They pair **two projections of the
-same token**. That is not a two-point quadrature of a data stream, but a second
-key/value pair from one input, which is the shape of MIMO. So at `u > 1`,
+What really changes is the lag-1 taps inside a token. They pair **two
+projections of the same token**. That is not a two-point quadrature of a data
+stream, but a second key/value pair from one input, which is the shape of
+MIMO. So at `u > 1`,
 `(u−1)/u` of the taps of the trapezoid stop being an integrator. They become
 more within-token write rank, in the slot that `mimo_rank` and `micro_steps`
 already fill.
@@ -388,9 +389,13 @@ trapezoid is a standing suggestion in this literature (the banded factor of
 the mask is the obvious thing to widen). The theorem says what it costs:
 nothing on the algorithm side, if the transport rule above is kept.
 
-**The six members.** The tap set is a choice about two taps, so the lattice is
-a product: a lag-1 (*horizontal*) tap that is absent, gated to within a token,
-or unrestricted, times a lag-`u` (*vertical*) tap that is absent or present.
+**The six members.** The tap pattern is a choice about two taps, so the
+lattice is the product of two settings:
+
+- The lag-1 tap is absent, gated to within a token, or unrestricted (the
+  `Horizontal…` part of a member name).
+- The lag-`u` tap is absent or present (the `Vertical` part).
+
 All six collapse, and all six are really different models at `u > 1`. The
 degenerate cases rank them:
 
@@ -447,7 +452,7 @@ collapse**. The single-SSD pathway is built on it, and it stays true for any
 tap set that transports each tap over its own gap.
 
 How to *parameterise* the members is a separate question, and this note does
-not settle it. The header of `src/mamba3/trapezoid.rs` does. The checks for
+not settle it. The header of `src/mamba3/tap_pattern.rs` does. The checks for
 that choice (mass conservation, the fallback of the gate, and the two-tap key
 scale) are under this section in the script.
 
@@ -478,7 +483,8 @@ condition that keeps it: transport each tap over its own gap.
 (§7). That is the structural reason why the fold needed no special case, and
 it is the precise sense in which the two compose. One nuance is worth a note
 where `micro_steps` is documented. Under the default member, only `1/u` of the
-taps still cross a token at `u > 1`, and the interior taps change kind (§8).
+taps still cross a token at `u > 1`, and the lag-1 taps inside a token change
+kind (§8).
 The lattice of §9 exists to make that choice.
 
 ### 10.4 What does not follow

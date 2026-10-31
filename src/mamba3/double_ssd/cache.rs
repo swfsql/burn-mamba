@@ -10,11 +10,11 @@
 //! 3. **Previous V state**: the matching `x`, `[batch, lag, nheads,
 //!    per_head_dim]`. With k_state, it rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`.
 //!    Items 2 and 3 are the **tap slots** of the trapezoid. They exist only
-//!    when the [`Trapezoid`](crate::mamba3::trapezoid::Trapezoid) of the block
+//!    when the [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block
 //!    has a β tap. The FIFO is as deep as its
-//!    [`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag) (`1` for the
+//!    [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) (`1` for the
 //!    default, `u` for
-//!    [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical)).
+//!    [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical)).
 //! 4. **Cumulative rotation**
 //!    ([`RotationState`](crate::mamba3::rotation::RotationState)): the rotation accumulated up
 //!    to position `t`, to continue the data-dependent rotation.
@@ -101,8 +101,8 @@ pub struct Mamba3DoubleSsdCache {
     /// no rotation again.
     ///
     /// The tap slots of the trapezoid are `None` (not allocated, not zeroed)
-    /// under [`Trapezoid::None`], which has no β term. Present exactly when
-    /// [`Self::v_state_buhp`] is (see [`Trapezoid::tap_slots`]).
+    /// under [`TapPattern::None`], which has no β term. Present exactly when
+    /// [`Self::v_state_buhp`] is (see [`TapPattern::tap_slots`]).
     ///
     /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
     pub k_state_bumhr: Option<Tensor<5>>,
@@ -206,14 +206,14 @@ pub struct Mamba3DoubleSsdCacheConfig {
     #[config(default = 1)]
     pub num_quat_blocks: usize,
 
-    /// The tap pattern of the block ([`Trapezoid`]). It decides whether the
+    /// The tap pattern of the block ([`TapPattern`]). It decides whether the
     /// tap slots exist, and, with [`Self::micro_steps`], how many there are
-    /// (see [`Trapezoid::tap_slots`]).
-    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
-    pub trapezoid: Trapezoid,
+    /// (see [`TapPattern::tap_slots`]).
+    #[config(default = "crate::mamba3::tap_pattern::TapPattern::HorizontalCarryOver")]
+    pub tap_pattern: TapPattern,
 
     /// Recurrence micro-steps per token (`u`). Only the lag-`u` tap patterns
-    /// read it (see [`Trapezoid::tap_lag`]).
+    /// read it (see [`TapPattern::tap_lag`]).
     #[config(default = 1)]
     pub micro_steps: usize,
 
@@ -238,7 +238,7 @@ impl Mamba3DoubleSsdCacheConfig {
             num_rotation_angles: block_config.num_rotation_angles(),
             rotation: block_config.rotation,
             num_quat_blocks: block_config.num_quat_blocks(),
-            trapezoid: block_config.trapezoid,
+            tap_pattern: block_config.tap_pattern,
             micro_steps: block_config.micro_steps,
             gain: block_config.gain,
             tropical: block_config.tropical,
@@ -251,7 +251,7 @@ impl Mamba3DoubleSsdCacheConfig {
             [self.batch, self.nheads, self.per_head_dim, self.state_rank],
             device,
         );
-        let slots = self.trapezoid.tap_slots(self.micro_steps);
+        let slots = self.tap_pattern.tap_slots(self.micro_steps);
         let tap = slots > 0;
         let k_state_bumhr = tap.then(|| {
             Tensor::zeros(

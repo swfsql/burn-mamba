@@ -178,7 +178,7 @@ src/
 ├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + the cache enum
 │  ├─ helpers.rs         shared by both pathways and by forward and step
 │  ├─ ssd_path.rs        `Mamba3SsdPath` (both pathways), the chunk length
-│  ├─ trapezoid.rs       the tap pattern (`Trapezoid`)
+│  ├─ tap_pattern.rs     the tap pattern (`TapPattern`)
 │  ├─ double_ssd/        double-SSD pathway + its cache
 │  │  ├─ double_ssd/     its forward, and the step of both pathways
 │  │  └─ ssd/            the standard SSD paths

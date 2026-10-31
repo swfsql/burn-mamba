@@ -146,7 +146,7 @@
 //!
 //! What `u > 1` does change is the taps of the trapezoid. They are now on the
 //! folded chain, so they become a *choice*
-//! ([`Trapezoid`](crate::mamba3::trapezoid::Trapezoid)). The default
+//! ([`TapPattern`](crate::mamba3::tap_pattern::TapPattern)). The default
 //! `HorizontalCarryOver` reads the previous **micro-step**: the 2-tap FIR
 //! filter runs at the finer rate, and only `1/u` of the taps still cross a
 //! token. `Vertical` reads the same micro-step of the previous **token**. The

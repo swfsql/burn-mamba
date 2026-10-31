@@ -130,7 +130,7 @@ pub const LOG_ZERO: f32 = -3.0e4;
 /// How the decay of a head is formed: projected from the token, or computed by
 /// a per-head Kalman filter on top of that projection. See the module header.
 ///
-/// Structural, like [`Trapezoid`](crate::mamba3::trapezoid::Trapezoid). A
+/// Structural, like [`TapPattern`](crate::mamba3::tap_pattern::TapPattern). A
 /// Kalman member allocates the per-head `κ` and `ω` and a cache slot for
 /// `ln Λ`. Under [`KalmanProjectedNoise`](Self::KalmanProjectedNoise) it also
 /// adds one in-projection channel per (head, micro-step).

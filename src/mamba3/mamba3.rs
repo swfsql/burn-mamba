@@ -31,12 +31,12 @@
 //! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)`, the left/right split of the trapezoid.
 //! `λ ≡ 1` gives the Mamba-2 (Euler / right-endpoint) form.
 //!
-//! [`Mamba3Config::trapezoid`] selects *which* earlier sample the `βₜ` tap
+//! [`Mamba3Config::tap_pattern`] selects *which* earlier sample the `βₜ` tap
 //! reads. At `micro_steps = 1` (below), `t−1` is the only choice. At `u > 1`:
 //!
-//! - the default [`Trapezoid::HorizontalCarryOver`] reads the recurrence step
+//! - the default [`TapPattern::HorizontalCarryOver`] reads the recurrence step
 //!   just before,
-//! - [`Trapezoid::Vertical`] reads the same micro-step of the previous
+//! - [`TapPattern::Vertical`] reads the same micro-step of the previous
 //!   **token**, with one lag at every tap site,
 //! - two members read **both**. A second projected scalar `μₜ = σ(μ̂ₜ)` splits
 //!   `(1 − λₜ)Δₜ` between them. One of the two gates its lag-1 tap to within a
@@ -44,7 +44,7 @@
 //!
 //! The tap and its mass are one choice. A closed tap gives its share back (to
 //! the other tap, or to `γ`), so the mass of the step is `Δₜ` under every
-//! member. See the header of [`Trapezoid`].
+//! member. See the header of [`TapPattern`].
 //!
 //! ## 2. Complex transition, the rotation (no trapezoid, no MIMO — paper section
 //! *Complex-Valued SSMs*)
@@ -207,7 +207,7 @@
 use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
-use crate::mamba3::trapezoid::Trapezoid;
+use crate::mamba3::tap_pattern::TapPattern;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
 use burn::prelude::*;
@@ -240,7 +240,7 @@ pub struct Mamba3 {
     ///
     /// The segments from `lambda_raw` on are optional, so they are at the end:
     ///
-    /// - [`Trapezoid::None`] projects no `lambda_raw`,
+    /// - [`TapPattern::None`] projects no `lambda_raw`,
     /// - a one-tap pattern projects no `mu_raw`,
     /// - [`RotationKind::Real1D`] projects no `rotation`,
     /// - every [`Gain`] except [`Gain::KalmanProjectedNoise`] projects no `noise`,
@@ -394,10 +394,10 @@ pub struct Mamba3 {
     #[module(skip)]
     pub rotation: RotationKind,
 
-    /// Which earlier sample(s) the trapezoid's `β` tap reads ([`Trapezoid`]).
+    /// Which earlier sample(s) the trapezoid's `β` tap reads ([`TapPattern`]).
     /// A non-parameter constant, like [`Self::rotation`].
     #[module(skip)]
-    pub trapezoid: Trapezoid,
+    pub tap_pattern: TapPattern,
 
     /// How the decay is formed ([`Gain`]). A non-parameter constant, like
     /// [`Self::rotation`].
@@ -486,11 +486,11 @@ impl Mamba3 {
     }
 
     /// Width of the `λ` segment of the in-projection: one channel per (head,
-    /// micro-step), or **`0`** under [`Trapezoid::None`], which has no `λ`.
+    /// micro-step), or **`0`** under [`TapPattern::None`], which has no `λ`.
     /// `helpers::split_trailing` removes it from the tail, just inside the
     /// rotation segment.
     pub fn lambda_channels_total(&self) -> usize {
-        if self.trapezoid.has_beta_tap() {
+        if self.tap_pattern.has_beta_tap() {
             self.micro_steps * self.nheads()
         } else {
             0
@@ -500,11 +500,11 @@ impl Mamba3 {
     /// Width of the `μ` segment of the in-projection (the mix of the second
     /// tap): one channel per (head, micro-step) for the two-tap patterns.
     /// **`0`** for every other pattern, and for a two-tap one at `u = 1`,
-    /// where the taps fold ([`Trapezoid::has_interior_tap`]).
+    /// where the taps fold ([`TapPattern::has_lag1_tap`]).
     /// `helpers::split_trailing` removes it from the tail, just inside the `λ`
     /// segment.
     pub fn mu_channels_total(&self) -> usize {
-        if self.trapezoid.has_interior_tap(self.micro_steps) {
+        if self.tap_pattern.has_lag1_tap(self.micro_steps) {
             self.micro_steps * self.nheads()
         } else {
             0
@@ -743,9 +743,9 @@ impl Mamba3 {
     /// micro-steps (the period of its gates), and the two clamps. Every site
     /// that computes the masses of the trapezoid ([`forward`](Self::forward),
     /// [`step`](Self::step)) uses this.
-    pub fn trapezoid_spec(&self) -> crate::mamba3::trapezoid::TrapezoidSpec {
-        crate::mamba3::trapezoid::TrapezoidSpec {
-            pattern: self.trapezoid,
+    pub fn tap_pattern_spec(&self) -> crate::mamba3::tap_pattern::TapPatternSpec {
+        crate::mamba3::tap_pattern::TapPatternSpec {
+            pattern: self.tap_pattern,
             micro_steps: self.micro_steps,
             dt_limit: self.dt_limit,
             a_floor: self.a_floor,
@@ -948,19 +948,19 @@ pub struct Mamba3Config {
     pub micro_steps: usize,
 
     /// Which earlier sample(s) the `β` tap of the trapezoid reads: the **tap
-    /// pattern** ([`Trapezoid`]).
+    /// pattern** ([`TapPattern`]).
     ///
     /// This choice exists only at [`Self::micro_steps`] `> 1`, where "the
     /// previous step" can mean the previous micro-step or the previous token.
     /// At `u = 1`, every pattern is equal to the default or switches the
     /// trapezoid off. It selects an *algorithm*, a *cache layout* and the
     /// number of per-head masses in the in-projection, not the value of a
-    /// coefficient. See [`Trapezoid`] and
+    /// coefficient. See [`TapPattern`] and
     /// `info/mamba-3/trapezoid-as-integration.md` §9.
     ///
-    /// Defaults to [`Trapezoid::HorizontalCarryOver`] (one lag-1 tap).
-    #[config(default = "crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver")]
-    pub trapezoid: Trapezoid,
+    /// Defaults to [`TapPattern::HorizontalCarryOver`] (one lag-1 tap).
+    #[config(default = "crate::mamba3::tap_pattern::TapPattern::HorizontalCarryOver")]
+    pub tap_pattern: TapPattern,
 
     /// How the decay of each head is formed ([`Gain`]):
     ///
@@ -1245,7 +1245,7 @@ impl Mamba3Config {
     /// `u` = [`Self::micro_steps`]. Only the **per-micro-step** segments widen.
     /// The gate `z` and the read `C` are per token (see
     /// [`crate::mamba3::product`]). At `u = 1`, the stock block (the default
-    /// trapezoid, no positive system) has
+    /// tap pattern, no positive system) has
     /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
     ///
     /// A block can omit every segment from `λ` on (see [`Mamba3::in_proj`] for
@@ -1264,8 +1264,8 @@ impl Mamba3Config {
     pub fn d_in_proj_tail(&self) -> usize {
         let u = self.micro_steps;
         let scalars = 2
-            + usize::from(self.trapezoid.has_beta_tap())
-            + usize::from(self.trapezoid.has_interior_tap(u))
+            + usize::from(self.tap_pattern.has_beta_tap())
+            + usize::from(self.tap_pattern.has_lag1_tap(u))
             + usize::from(self.gain.projects_noise())
             + 2 * usize::from(self.tropical.is_on());
         scalars * u * self.nheads() + u * self.num_rotation_channels()
@@ -1304,19 +1304,19 @@ impl Mamba3Config {
             .collect();
         let tail: Vec<Seg> = per_micro(Seg::adamw("dt", nheads))
             .chain(per_micro(Seg::adamw("a", nheads)))
-            // `Trapezoid::None` projects no `λ` (as `Real1D` projects no
+            // `TapPattern::None` projects no `λ` (as `Real1D` projects no
             // rotation). Only a two-tap pattern projects `μ`, the mix of the
             // second mass.
             .chain(
-                self.trapezoid
+                self.tap_pattern
                     .has_beta_tap()
                     .then(|| per_micro(Seg::adamw("lambda", nheads)))
                     .into_iter()
                     .flatten(),
             )
             .chain(
-                self.trapezoid
-                    .has_interior_tap(self.micro_steps)
+                self.tap_pattern
+                    .has_lag1_tap(self.micro_steps)
                     .then(|| per_micro(Seg::adamw("mu", nheads)))
                     .into_iter()
                     .flatten(),
@@ -1605,7 +1605,7 @@ impl Mamba3Config {
             mimo_rank,
             micro_steps: self.micro_steps,
             rotation: self.rotation,
-            trapezoid: self.trapezoid,
+            tap_pattern: self.tap_pattern,
             gain: self.gain,
             tropical: self.tropical,
             rotation_range: self.rotation_range,
@@ -1769,10 +1769,10 @@ impl Mamba3 {
     }
 
     /// How far back the `β` tap of this block reaches, in folded positions:
-    /// [`Trapezoid::tap_lag`] at the `micro_steps` of this block. `0` when the
+    /// [`TapPattern::tap_lag`] at the `micro_steps` of this block. `0` when the
     /// pattern has no tap.
     pub fn tap_lag(&self) -> usize {
-        self.trapezoid.tap_lag(self.micro_steps)
+        self.tap_pattern.tap_lag(self.micro_steps)
     }
 
     /// The tap FIFO of the trapezoid, filled with zeros: [`Self::tap_lag`]

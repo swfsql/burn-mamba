@@ -72,7 +72,7 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
         Mamba3Caches::DoubleSsd(_) => panic!("expected the default single-ssd caches"),
     };
-    // The trapezoid's tap slots are absent under `Trapezoid::None`.
+    // The trapezoid's tap slots are absent under `TapPattern::None`.
     vec![
         c.ssm_bhpr.clone().reshape([-1]),
         match &c.k_state_bumhr {

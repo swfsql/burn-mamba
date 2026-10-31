@@ -296,7 +296,7 @@ mod impl_mamba3 {
                 mimo_rank: mamba_block.mimo_rank,
                 rotation: mamba_block.rotation,
                 num_quat_blocks: mamba_block.num_quat_blocks,
-                trapezoid: mamba_block.trapezoid,
+                tap_pattern: mamba_block.tap_pattern,
                 micro_steps: mamba_block.micro_steps,
                 gain: mamba_block.gain,
                 tropical: mamba_block.tropical,

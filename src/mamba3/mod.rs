@@ -24,7 +24,7 @@
 //!
 //! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per
 //!   trapezoid term: one for the current sample, plus one per `β` tap
-//!   ([`trapezoid`](crate::mamba3::trapezoid)). That is **two** calls at the
+//!   ([`tap_pattern`](crate::mamba3::tap_pattern)). That is **two** calls at the
 //!   default and three under a two-tap pattern. It is simple and easy to
 //!   verify, but it uses ~2× the intra-chunk memory (~3× at two taps).
 //! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
@@ -38,19 +38,19 @@
 //!
 //! ## The tap pattern of the trapezoid
 //!
-//! [`trapezoid`](crate::mamba3::trapezoid) names the earlier sample(s) that the
+//! [`tap_pattern`](crate::mamba3::tap_pattern) names the earlier sample(s) that the
 //! second tap of the write reads. This choice exists only at `u > 1`, and it
 //! changes the algorithm *and* the cache. Four of the six members have one lag
-//! each ([`tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag)):
+//! each ([`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag)):
 //!
 //! - the default
-//!   [`HorizontalCarryOver`](crate::mamba3::trapezoid::Trapezoid::HorizontalCarryOver)
+//!   [`HorizontalCarryOver`](crate::mamba3::tap_pattern::TapPattern::HorizontalCarryOver)
 //!   (lag 1),
-//! - [`Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical) (lag `u`),
+//! - [`Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical) (lag `u`),
 //!   which is equal to the default at `u = 1`,
 //! - the gated
-//!   [`HorizontalReset`](crate::mamba3::trapezoid::Trapezoid::HorizontalReset),
-//! - the tapless [`None`](crate::mamba3::trapezoid::Trapezoid::None).
+//!   [`HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset),
+//! - the tapless [`None`](crate::mamba3::tap_pattern::TapPattern::None).
 //!
 //! The two other members have both lags. A second per-head mass mixes them.
 //!
@@ -78,7 +78,7 @@ pub mod product;
 pub mod quat_scan;
 pub mod rotation;
 pub mod ssd_path;
-pub mod trapezoid;
+pub mod tap_pattern;
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;
@@ -128,5 +128,5 @@ pub mod prelude {
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
     pub use ssd_path::Mamba3SsdPath;
-    pub use trapezoid::Trapezoid;
+    pub use tap_pattern::TapPattern;
 }

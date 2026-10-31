@@ -4,7 +4,7 @@
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
 };
 
 /// A single Mamba-3 block at `state_rank = 2`, unrolled, is one data-dependent
@@ -44,7 +44,7 @@ use burn_mamba::prelude::{
 ///   state.
 /// - `per_head_dim = 1`, `expand = 1` ⇒ `nheads = 2`: the cos axis and the sin
 ///   axis, and nothing else.
-/// - `Trapezoid::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
+/// - `TapPattern::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
 ///   weight. Switching it off is structural: no `λ` segment in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the residual of the single layer, so
@@ -70,7 +70,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_mimo_rank(1)
         .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Complex2D)
-        .with_trapezoid(Trapezoid::None) // no β tap: nothing here integrates
+        .with_tap_pattern(TapPattern::None) // no β tap: nothing here integrates
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

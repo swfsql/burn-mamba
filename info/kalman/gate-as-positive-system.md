@@ -148,7 +148,7 @@ computed decay:
 ```
 
 Here `mₜ = Δₜ` is the mass of the step when it has no left endpoint
-(`Trapezoid::None`, §3.9 gives the split). `qₜ = κₕ·Δₜ·exp(rₜ)` is the doubt
+(`TapPattern::None`, §3.9 gives the split). `qₜ = κₕ·Δₜ·exp(rₜ)` is the doubt
 that the step injects. Its matrix is:
 
 ```text
@@ -315,7 +315,7 @@ more heads do not buy more digits.
 
 ### 6.1 What is structural
 
-`Gain` and `Tropical` are structural, like `Trapezoid` and `RotationKind`:
+`Gain` and `Tropical` are structural, like `TapPattern` and `RotationKind`:
 
 - A Kalman member allocates `κ` and `ω` per head, one cache slot, and (on the
   projected-noise arm) one in-projection channel per (head, micro-step). The

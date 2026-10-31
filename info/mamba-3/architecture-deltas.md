@@ -130,7 +130,7 @@ groups (multi-value attention: in both families, the heads of a group share
 | skip | `D ⊙ x` per head | unchanged |
 
 `*` `μ` is a segment of this crate, not of the source. It is the mass that
-splits the left endpoint between two taps. Only a two-tap `Trapezoid` has it
+splits the left endpoint between two taps. Only a two-tap `TapPattern` has it
 ([`trapezoid-as-integration.md`](trapezoid-as-integration.md) §9), and it
 folds away at `micro_steps = 1`. Every per-micro-step segment widens by `u`.
 `z` and `C` do not.

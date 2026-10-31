@@ -24,7 +24,7 @@
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{
-    Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid, Tropical,
+    Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern, Tropical,
 };
 
 /// Number of output classes (see [`crate::dataset`]).
@@ -40,7 +40,7 @@ pub fn model_config(tropical: bool) -> MambaLatentNetConfig {
         .with_ngroups(1)
         .with_mimo_rank(1)
         .with_rotation(RotationKind::Real1D)
-        .with_trapezoid(Trapezoid::None)
+        .with_tap_pattern(TapPattern::None)
         .with_gain(Gain::Projected)
         .with_tropical(if tropical {
             Tropical::MaxPlus

@@ -4,7 +4,7 @@
 
 use crate::dataset::{Group, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, Trapezoid,
+    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
 };
 
 /// The default depth for a group: the fewest layers that can hold it.
@@ -86,7 +86,7 @@ pub fn floor_width(group: Group) -> (usize, usize) {
 ///   whole. It is the smallest non-abelian state. `A₅` is perfect, so an
 ///   abelian state carries none of it.
 /// - `layers`: the one knob that separates the two groups.
-/// - `Trapezoid::None`: every construction pins `λ ≈ 1`.
+/// - `TapPattern::None`: every construction pins `λ ≈ 1`.
 /// - `final_norm: false`, `ignore_last_residual`: the head sees only the output
 ///   of the last block, through nothing but an affine map.
 pub fn model_config(group: Group, rotation: RotationKind, layers: usize) -> MambaLatentNetConfig {
@@ -115,7 +115,7 @@ pub fn model_config_with(
         .with_mimo_rank(mimo_rank)
         .with_rotation_fraction(1.0)
         .with_rotation(rotation)
-        .with_trapezoid(Trapezoid::None)
+        .with_tap_pattern(TapPattern::None)
         .with_has_proj_bias(true);
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)

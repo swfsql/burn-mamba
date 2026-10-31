@@ -89,7 +89,7 @@ fn build_cross_caches(
         None => RotationState::real(),
     };
     // Zero tap history so the two cache forms agree logically.
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let k = Tensor::<5>::zeros([batch, slots, mimo_rank, nheads, state_rank], &device);
     let v = Tensor::<4>::zeros([batch, slots, nheads, per_head_dim], &device);
     let c3 = Mamba3DoubleSsdCache {
@@ -153,7 +153,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         RotationKind::Real1D => RotationState::real(),
         _ => RotationState::Angle(mk3([batch, nheads, num_rotation_angles])),
     };
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let tap = slots > 0;
     Mamba3SingleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
@@ -298,8 +298,8 @@ fn run_with_grads_single_ssd(
     let (out, cache) = runner(model, input.val());
     let out_inner = out.clone().inner();
     let ssm = cache.ssm_bhpr;
-    // These tests all run a β tap; `Trapezoid::None` never reaches this pathway
-    // (`forward_single_ssd` delegates to the double-SSD form for it).
+    // These tests all run a β tap. `TapPattern::None` never reaches this
+    // pathway (`forward_single_ssd` delegates to the double-SSD form for it).
     let k = cache.k_state_bumhr.expect("a β tap keeps its tap slots");
     let v = cache.v_state_buhp.expect("a β tap keeps its tap slots");
     let angle = match cache.rotation {
@@ -701,7 +701,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
         k: Tensor::<5>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 mimo_rank,
                 nheads,
                 state_rank,
@@ -712,7 +712,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
         v: Tensor::<4>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 nheads,
                 per_head_dim,
             ],
@@ -888,7 +888,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         k: Tensor::<5>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 mimo_rank,
                 nheads,
                 state_rank,
@@ -899,7 +899,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         v: Tensor::<4>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 nheads,
                 per_head_dim,
             ],
@@ -913,7 +913,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     // Shared, fully-random initial cache fields (including the previous-token
     // K/V history) — both runs start from the exact same logical state.
     let init_ssm = Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
-    let slots = cfg.trapezoid.tap_slots(cfg.micro_steps);
+    let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let init_k =
         Tensor::<5>::random([batch, slots, mimo_rank, nheads, state_rank], normal, &device);
     let init_v = Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device);
@@ -1183,7 +1183,7 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
         k: Tensor::<5>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 mimo_rank,
                 nheads,
                 state_rank,
@@ -1194,7 +1194,7 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
         v: Tensor::<4>::random(
             [
                 batch,
-                cfg.trapezoid.tap_slots(cfg.micro_steps),
+                cfg.tap_pattern.tap_slots(cfg.micro_steps),
                 nheads,
                 per_head_dim,
             ],

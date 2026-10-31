@@ -92,7 +92,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order (see `Mamba3::in_proj`): `[z(2) | x(2) | B(1) | C(1) |
-    // Δ(2) | A(2) | a(2) | b(2)]`. There is no λ (`Trapezoid::None`), no
+    // Δ(2) | A(2) | a(2) | b(2)]`. There is no λ (`TapPattern::None`), no
     // rotation (`Real1D`) and no noise (`Gain::Projected`). The last four
     // belong to the tropical register, and the ablation arm does not have them.
     let hold = [A_HOLD_RAW; NUM_SYMBOLS];

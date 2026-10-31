@@ -542,7 +542,7 @@ fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
 
 fn mamba3(
     rotation: RotationKind,
-    trapezoid: Trapezoid,
+    tap_pattern: TapPattern,
     micro_steps: usize,
     mimo_rank: usize,
     gain: Gain,
@@ -552,7 +552,7 @@ fn mamba3(
         .with_state_rank(8)
         .with_per_head_dim(8)
         .with_rotation(rotation)
-        .with_trapezoid(trapezoid)
+        .with_tap_pattern(tap_pattern)
         .with_micro_steps(micro_steps)
         .with_mimo_rank(mimo_rank)
         .with_gain(gain)
@@ -566,7 +566,7 @@ fn mamba3(
 /// - every rotation kind, `u > 1`, MIMO, and both positive systems.
 #[test]
 fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
-    use {Gain as G, RotationKind as R, Trapezoid as T, Tropical as Tr};
+    use {Gain as G, RotationKind as R, TapPattern as T, Tropical as Tr};
     let device = test_device().autodiff();
     let configs = [
         mamba3(R::Complex2D, T::HorizontalCarryOver, 1, 1, G::Projected, Tr::None),

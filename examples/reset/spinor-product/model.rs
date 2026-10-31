@@ -54,9 +54,9 @@ pub const D_MODEL: usize = 8;
 ///   nothing with two heads: 61 / 52 / 53% with the trapezoid, 46 / 30 / 33%
 ///   without it.
 /// - The **trapezoid stays on** (the default
-///   [`Trapezoid::HorizontalCarryOver`](burn_mamba::prelude::Trapezoid)). This
+///   [`TapPattern::HorizontalCarryOver`](burn_mamba::prelude::TapPattern)). This
 ///   is the only rung that keeps it. The hand-built solution pins `λ ≈ 1` and
-///   never uses the `β` tap, so `Trapezoid::None` looks free. It does reach
+///   never uses the `β` tap, so `TapPattern::None` looks free. It does reach
 ///   100% at the trained length, but it gets only 83% on the long column (96
 ///   tokens), and this rung reports that column. The five `reset-*` rungs are
 ///   tapless.

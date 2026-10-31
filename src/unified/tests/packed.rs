@@ -169,13 +169,13 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
 }
 
 #[cfg(feature = "mamba3")]
-fn mamba3_net(micro_steps: usize, trapezoid: Trapezoid, residuals: ResidualsConfig) -> MambaVocabNet {
+fn mamba3_net(micro_steps: usize, tap_pattern: TapPattern, residuals: ResidualsConfig) -> MambaVocabNet {
     let block = Mamba3Config::new(8)
         .with_expand(2)
         .with_per_head_dim(4)
         .with_state_rank(8)
         .with_micro_steps(micro_steps)
-        .with_trapezoid(trapezoid);
+        .with_tap_pattern(tap_pattern);
     MambaVocabNetConfig::Mamba3 {
         n_real_layers: 2,
         n_virtual_layers: None,
@@ -197,7 +197,7 @@ fn mamba3_net(micro_steps: usize, trapezoid: Trapezoid, residuals: ResidualsConf
 #[cfg(feature = "mamba3")]
 #[test]
 fn packed_mamba3_u1_matches_alone() {
-    let net = mamba3_net(1, Trapezoid::default(), ResidualsConfig::Standard);
+    let net = mamba3_net(1, TapPattern::default(), ResidualsConfig::Standard);
     check(net, MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(Some(4))));
 }
 
@@ -210,14 +210,14 @@ fn packed_mamba3_u2_vertical_multigate_matches_alone() {
         init_bias_offset: 0.0,
         per_virtual_layer: false,
     };
-    let net = mamba3_net(2, Trapezoid::Vertical, residuals);
+    let net = mamba3_net(2, TapPattern::Vertical, residuals);
     check(net, MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(Some(8))));
 }
 
 #[cfg(feature = "mamba3")]
 #[test]
 fn packed_mamba3_serial_matches_alone() {
-    let net = mamba3_net(1, Trapezoid::default(), ResidualsConfig::Standard);
+    let net = mamba3_net(1, TapPattern::default(), ResidualsConfig::Standard);
     check(net, MambaSsdPath::Mamba3(Mamba3SsdPath::Serial(Some(4))));
 }
 
