@@ -44,6 +44,15 @@ finds one name for each concept.
 | "document", "story", "episode" for a sequence in a packed row | **segment** (in the tiny-stories dataset, "story" stays for the data) |
 | "DeltaProduct" for MambaProduct | **MambaProduct** (DeltaProduct stays as the name of the other mechanism) |
 | leftovers of tickets 02 and 03 ("RoPE" for the rotation, "interior/far tap") | **rotation**, **lag-1 tap**, **lag-`u` tap** |
+| "main network", "inner network", "encoder network", "decoder network", "level" in H-Net | **main stack**, **inner H-Net**, **encoder**, **decoder**, **stage** |
+| bare "boundary" for the position where an H-Net chunk starts | **chunk boundary** |
+| "start rows", "start tokens" for the learnable vectors that open an H-Net sequence | **start embedding** |
+
+burn-stack ticket 03 swept the same H-Net terms
+(`../burn-stack/.scratch/glossary-followups/issues/03-prose-sweep-hnet.md`).
+Its section "Stale lines in the consumers" lists the H-Net prose of this
+crate. Ticket 06 renames the H-Net identifiers of this crate, so this ticket
+only changes prose.
 
 ## Method
 
