@@ -48,6 +48,10 @@ decisions are in the module headers.
     in the same change.
   - A new term goes to `GLOSSARY.md` (through `/domain-modeling`). A new
     decision with a trade-off goes to an ADR.
+  - A name and its docs change in the same change. A rename of an identifier
+    updates every doc that names it or its concept: comments, messages, the
+    READMEs, `info/`, `GLOSSARY.md` and the ADRs. A change of a term in the
+    docs also renames each identifier that uses the term in that sense.
   - Delete the `tmp.md` rule and the "do not read big files at the end" rule.
 - Custom Commands: `mv` and `cp` are allowed to move and copy files. Content
   edits still use the Edit/Write tools. Keep the other rules.
