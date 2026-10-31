@@ -1,6 +1,6 @@
 # 06: Follow the H-Net renames of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -57,12 +57,23 @@ the line above) is in the scope of ticket 04. It is not part of this ticket.
 
 ## Acceptance criteria
 
-- [ ] `rg -e '\bboundary_bs' -e n_start_tokens -e N_START_TOKENS
+- [x] `rg -e '\bboundary_bs' -e n_start_tokens -e N_START_TOKENS
       -e smooth_block -e padded_slots` over `src`, `examples` (without
       `tmp/`) and the markdown files finds nothing. (The `\b` keeps the new
       name `chunk_boundary_bs` out of the hits.)
-- [ ] `cargo check`, `cargo test --lib -- --test-threads=1`,
+- [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
       `cargo test --examples -j 1 -- --test-threads=1` pass (flex).
-- [ ] `cargo doc --all --no-deps` has no warnings.
+- [x] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- Done against burn-stack rev `d39c57c`. The commit also holds the bump of
+  `Cargo.toml` (crate version 0.72.0) and of `Cargo.lock`.
+- Ticket 04 must also change these sites. Each one has an old term next to a
+  new name:
+  - The README bullet with `n_start_embeddings` also says "the last start
+    row".
+  - The doc comment of `N_START_EMBEDDINGS` (`model.rs`) says "The learnable
+    rows".
+  - The doc comment of `mamba3_padded_rows_match_each_row_alone` uses "slot"
+    for a row of the batch, and "row" for a position.

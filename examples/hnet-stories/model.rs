@@ -33,7 +33,7 @@ const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 
 /// The learnable rows that open every story (see `HNetVocabNetwork`). The
 /// output of the last one is scored against the first character.
-const N_START_TOKENS: usize = 4;
+const N_START_EMBEDDINGS: usize = 4;
 
 /// `α`, ten times the reference value. Early in training, the encoders of a
 /// model this small make adjacent rows similar, and the router starts almost
@@ -121,7 +121,7 @@ pub fn model_config(flags: &ModelFlags) -> HNetStoriesConfig {
         // one table for "which character is this" and "which comes next"
         .with_missing_lm_head(true)
         .with_head_init(Some(InitPolicy::new()))
-        .with_n_start_tokens(N_START_TOKENS);
+        .with_n_start_embeddings(N_START_EMBEDDINGS);
     let widths = &STAGE_WIDTHS[..flags.stages];
     let targets = RATIO_TARGETS[..flags.stages].to_vec();
     HNetStoriesConfig::new(

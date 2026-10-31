@@ -36,10 +36,10 @@ cargo run --release --example hnet-stories --features backend-flex -- --inferenc
   main network.
 - The embedding is tied to the LM head, and a token is the pair (character,
   case flag), as in `tiny-stories`.
-- Four learnable **start rows** open every story (`n_start_tokens`). They go
-  in front of the H-Net, so it routes them like characters. The output of the
-  last start row predicts the first character. So an unprompted sample needs
-  no seed character. The stacks of an H-Net take no class latents.
+- Four learnable **start embeddings** open every story (`n_start_embeddings`).
+  They go in front of the H-Net, so it routes them like characters. The output
+  of the last start row predicts the first character. So an unprompted sample
+  needs no seed character. The stacks of an H-Net take no class latents.
 
 ## The training recipe
 

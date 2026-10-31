@@ -196,8 +196,8 @@ pub fn show_chunks(model: &MambaHNetVocabNet, run: &Run, device: &Device, prompt
     let mut rows: Vec<usize> = (0..n_start + all.len()).collect();
     let mut depth = vec![0usize; rows.len()];
     for r in &routing {
-        let boundary: Vec<bool> = r.boundary_bs.clone().int().into_data().iter::<i64>().map(|v| v != 0).collect();
-        rows = rows.iter().zip(&boundary).filter(|(_, b)| **b).map(|(&row, _)| row).collect();
+        let chunk_boundary: Vec<bool> = r.chunk_boundary_bs.clone().int().into_data().iter::<i64>().map(|v| v != 0).collect();
+        rows = rows.iter().zip(&chunk_boundary).filter(|(_, b)| **b).map(|(&row, _)| row).collect();
         for &row in &rows {
             depth[row] += 1;
         }

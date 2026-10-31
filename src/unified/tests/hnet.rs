@@ -168,7 +168,7 @@ fn mamba3_forward_and_step_have_the_same_gradients() {
 /// a short story) leaves the other slots alone, and its caches stay finite.
 #[cfg(feature = "mamba3")]
 #[test]
-fn mamba3_padded_slots_match_each_slot_alone() {
+fn mamba3_padded_rows_match_each_row_alone() {
     let device = test_device();
     let config = config(vec![mamba3(8)], mamba3(16));
     let net = config.init(&device);
