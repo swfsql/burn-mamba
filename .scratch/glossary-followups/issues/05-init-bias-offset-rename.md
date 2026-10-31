@@ -1,6 +1,6 @@
 # 05: Rename init_bias_step to init_bias_offset
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
