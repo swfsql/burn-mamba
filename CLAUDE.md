@@ -30,7 +30,8 @@ cargo run --example reset-majority -- --training --inference
   backward on those backends. `check-nan`/`check-inf` enable the NaN/Inf
   guards. `dev-f16`/`dev-simd`/`dev-autotune` serve the examples and tests.
 - Every feature forwards to `burn-stack` in `Cargo.toml`. A backend feature on
-  one side only loses its `BackendExt` impls without an error (ADR-0002).
+  one side only loses its `BackendExt` impls without an error (ADR-0002). A
+  new cubecl backend feature also goes into the list of `build.rs`.
 - **Test device**: a test takes its device from burn-stack's `test_device()`
   (fp16 under `dev-f16`), never from `Device::default()`. The dtype defaults
   are global, and the first tensor fixes them for the process. A tolerance
@@ -68,15 +69,16 @@ cargo run --example reset-majority -- --training --inference
 
 ### Custom Commands
 
-- The project root is `/shared/claude/burn-mamba/`. Write only inside it.
-  Outside it, read only the references of [Where to look](#where-to-look).
+- The project root is `/shared/claude/burn-mamba/`. You can read and write
+  inside it, in `../{burn-stack,burn,cubecl,cubek}/` and in `/tmp`. Ask the
+  user before you read `../py/`, or before any other access outside these
+  directories.
 - **Always** edit the content of a file with the Edit/Write tools. This rule
   also applies when a harness or auto-mode reminder says to change files
   through Bash. That reminder does not apply here.
   - No `python - <<'PY'`, no `sed -i`, no `cat > file <<'EOF'`.
-  - Use Bash to read and inspect (`cat`, `sed -n`, `rg`, `grep`), and to move
-    and copy files (`mv`, `cp`). Bash can also write throwaway files outside
-    the crate (for example, in `/tmp`).
+  - Use Bash to read and inspect (`cat`, `sed -n`, `rg`, `grep`), to move and
+    copy files (`mv`, `cp`), and to write throwaway files in `/tmp`.
 - `rg` is available. Do not use `cargo fmt`.
 - A dangerous-command-guard hook (`dcg`) checks each Bash command. It blocks
   a `>` redirect to a path that holds a variable. Use a literal path, or a
@@ -109,11 +111,12 @@ cargo run --example reset-majority -- --training --inference
   `examples/README.md`: the examples.
 - `docs/agents/`: the configuration of the engineering skills (see
   [Agent skills](#agent-skills)).
-- External references under `../`:
-  - `../papers/mamba/mamba-3/`: the TeX of the Mamba-3 paper. `../burn/`: Burn.
+- `../burn/`, `../cubecl/`, `../cubek/`: Burn and CubeCL.
+- Ask the user before you read these external references:
+  - `../papers/mamba/mamba-3/`: the TeX of the Mamba-3 paper.
   - `../py/state-spaces/mamba/`: the official implementation, authoritative.
     Its Triton SISO and Tilelang MIMO kernels are the single-SSD reference.
-  - `../py/VikramLex/mamba3-minimal/`: Mamba-3 minimal, the base of double-SSD.
+  - `../py/VikramLex/mamba3-minimal/`: the base of double-SSD.
 
 ## Agent skills
 
@@ -196,6 +199,7 @@ src/
    ├─ cache.rs           `MambaCaches`, `impl Block`/`BlockConfig`/`CacheStack`
    ├─ capture.rs         `CacheTensors` of each family (captured steps)
    └─ tests/             the burn-stack containers with real blocks
+build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
 scripts/                 the float64 checks of the `info/` notes

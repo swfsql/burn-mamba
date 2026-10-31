@@ -22,7 +22,8 @@ check-nan = ["burn-stack/check-nan"]
 # an enabled backend (honouring the `BURN_DEVICE` env override). Each backend
 # also turns on the internal `_dev-test` marker so the tensor test suite compiles
 # under whichever backend is present.
-backend-ndarray = ["burn/ndarray", "_dev-test", "burn-stack/backend-ndarray"]
+# A new cubecl backend feature also goes into the list of `build.rs`.
+backend-ndarray =["burn/ndarray", "_dev-test", "burn-stack/backend-ndarray"]
 backend-ndarray-blas-accelerate = ["backend-ndarray", "burn/std", "burn/accelerate", "burn-stack/backend-ndarray-blas-accelerate"]
 backend-ndarray-blas-netlib = ["backend-ndarray", "burn/std", "burn/blas-netlib", "burn-stack/backend-ndarray-blas-netlib"]
 backend-ndarray-blas-openblas = ["backend-ndarray", "burn/std", "burn/openblas", "burn-stack/backend-ndarray-blas-openblas"]

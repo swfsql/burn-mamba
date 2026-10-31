@@ -90,9 +90,9 @@ Notes from the implementation, for the user:
   - `src/unified/mod.rs`: the model keeps its fused projections, and only the
     Muon plan splits them. The item docs of the lists hold the details.
   - `src/packing/tests.rs`: why the packed check has a tolerance.
-  - Each `#[backend_extension]` site: all sites must have the same list. A
-    `cfg` alias (as burn's `cube_backend`) could replace the copies. That is a
-    code change, so I did not make it.
+  - Each `#[backend_extension]` site: all sites must have the same list. At
+    the request of the user, `build.rs` now sets a `cube_backend` cfg (as
+    burn does), and each site gates its `Cube` arm with it.
 - **The block-agnostic rule** of ADR-0002 is now a bullet under "Rules → Code".
   The summary stays at three lines.
 - **Found in burn-stack docs, not in this repo.** I deleted these CLAUDE.md
@@ -105,9 +105,10 @@ Notes from the implementation, for the user:
   headers, the `#[config(default = …)]` lines and the header of each note hold
   them. The convention of the `scripts/` checks is now in "Where to look".
 - **A changed rule.** CLAUDE.md said "Do not read or write outside the root".
-  The "Where to look" map needs `../burn-stack/` and the references under
-  `../`. So the rule is now: write only inside the root, and read outside it
-  only the references of "Where to look". Tell me if you want another rule.
+  The user decided the new rule: read and write are free in the root and in
+  `../{burn-stack,burn,cubecl,cubek}/`. To read `../py/`, ask first. I also
+  put each other path outside these directories (for example, `../papers/`)
+  under "ask first".
 - **Kept**: the `## Agent skills` section in its `###` form, because
   `setup-matt-pocock-skills` updates it in place.
 - **Left for ticket 04**: old prose in the headers that I did not write

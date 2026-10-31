@@ -222,19 +222,9 @@ pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
 /// [`super::backward`]) that recomputes the scan instead of saving its
 /// intermediates.
 #[backend_extension(
-    // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
-    // this one backend. The device of a tensor tells which runtime it uses.
-    // The cfg mirrors burn's own `cube_backend`. Every `#[backend_extension]`
-    // site of this crate has the same list. Change them together.
-    Cube: cfg(any(
-        feature = "backend-cpu",
-        feature = "backend-cuda",
-        feature = "backend-rocm",
-        feature = "backend-metal",
-        feature = "backend-vulkan",
-        feature = "backend-wgpu",
-        feature = "backend-webgpu"
-    )),
+    // Every `#[backend_extension]` site of this crate has the same list.
+    // Change them together. `build.rs` sets `cube_backend`.
+    Cube: cfg(cube_backend),
     Flex:  cfg(feature = "backend-flex"),
     NdArray:  cfg(feature = "backend-ndarray"),
     LibTorch:  cfg(any(feature = "backend-tch-cpu", feature = "backend-tch-gpu")),
