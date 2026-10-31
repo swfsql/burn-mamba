@@ -883,12 +883,15 @@ fn scaled_axis_single_axis_matches_half_angle() {
 #[test]
 fn config_rotation_channels_and_d_in_proj() {
     use crate::mamba3::mamba3::Mamba3Config;
-    // state_rank=16, rotation_fraction=0.5 ⇒ rotation_dim=8,
-    // num_rotation_angles=4, num_quat_blocks = (16·0.5 → 8, /4) = 2.
+    // state_rank=16 and the default rotation_fraction=1.0 ⇒ rotation_dim=16,
+    // num_rotation_angles=8, num_quat_blocks = 16/4 = 4. The explicit half
+    // below gives 8, 4 and 2.
     let base = Mamba3Config::new(64)
         .with_state_rank(16)
         .with_expand(2)
         .with_per_head_dim(8);
+    assert_eq!(base.rotation_fraction, 1.0);
+    assert_eq!(base.rotation_dim(), 16);
 
     // The default is the abelian kind. Its rotation segment of `in_proj` has
     // one channel for each angle

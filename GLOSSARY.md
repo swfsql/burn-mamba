@@ -114,6 +114,12 @@ The technique that moves the accumulated rotation out of the state and into B
 and C. The SSD scan then sees only a scalar decay.
 _Avoid_: RoPE (as a name for the rotation)
 
+**Rotary position embedding**:
+The positional encoding of transformers: a fixed rotation whose angle counts
+positions. The rotation of Mamba-3 is different, because its angle depends on
+the data.
+_Avoid_: vanilla RoPE, standard RoPE, RoPE
+
 **Rotation kind**:
 The group of the rotated part of the state: `Real1D`, `Complex2D`,
 `Quaternion4D` or `Rotor4D`. `Real1D` is the trivial group, so "no rotation"
