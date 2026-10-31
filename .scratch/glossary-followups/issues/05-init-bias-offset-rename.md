@@ -59,3 +59,7 @@ needs the same change in a session of its own. It is not part of this ticket.
 
 - Done against burn-stack rev `4383373`. The commit also holds that bump of
   `Cargo.toml` (crate version 0.71.0) and of `Cargo.lock`.
+- The copy of the untied-stack test of burn-stack follows the rename of
+  burn-stack ticket 02: `src/unified/tests/untied.rs` uses
+  `…_untied_stack_equals_the_stack_of_its_application_views` and the local
+  `view_stack`. No "unshared" stays in the crate.

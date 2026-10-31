@@ -47,12 +47,15 @@ impl ModuleMapper for Jitter {
     }
 }
 
-/// An untied stack is the *unshared* stack of its application views: virtual
-/// layer `i` runs application `index[i]` of its real layer, in `forward` and in
-/// `step`. The copies are jittered apart first, so reading the wrong one — or a
-/// tiled tensor the family forgot to list — shows.
-fn assert_untied_stack_is_its_unshared_views<C>(block: C, options: <C::Block as Block>::Options)
-where
+/// An untied stack equals the stack of its application views, with no weight
+/// sharing. Virtual layer `i` runs application `index[i]` of its real layer,
+/// in `forward` and in `step`. The test first adds noise to the copies. So a
+/// read of the wrong copy shows, and so does a tiled tensor that the family
+/// does not list in `untied_params`.
+fn assert_untied_stack_equals_the_stack_of_its_application_views<C>(
+    block: C,
+    options: <C::Block as Block>::Options,
+) where
     C: BlockConfig,
     <C::Block as Block>::Options: Clone,
 {
@@ -64,7 +67,7 @@ where
         .init(&device)
         .map(&mut Jitter);
     let apps = schedule.applications(N_VIRTUAL, N_REAL);
-    let unshared = Layers {
+    let view_stack = Layers {
         n_real_layers: N_VIRTUAL,
         n_virtual_layers: None,
         real_layers: (0..N_VIRTUAL)
@@ -78,7 +81,7 @@ where
     let x = Tensor::<3>::random([BATCH, SEQ, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
 
     let (y, _) = layers.forward(x.clone(), None, options.clone(), None, None);
-    let (want, _) = unshared.forward(x.clone(), None, options.clone(), None, None);
+    let (want, _) = view_stack.forward(x.clone(), None, options.clone(), None, None);
     let diff = max_abs_diff(y.clone(), want);
     assert!(diff < dtype_tol(TOL), "forward reads the wrong copies: {diff}");
 
@@ -107,7 +110,7 @@ where
 /// kernel reads it, and `step` never does.
 #[cfg(feature = "mamba3")]
 #[test]
-fn mamba3_untied_stack_is_its_unshared_views() {
+fn mamba3_untied_stack_equals_the_stack_of_its_application_views() {
     use crate::mamba3::prelude::{Mamba3SsdPath, Mamba3Untied::*};
 
     let block = mamba3_config()
@@ -116,14 +119,17 @@ fn mamba3_untied_stack_is_its_unshared_views() {
         .with_untied(vec![
             InProjTail, DtBias, D, BNorm, CNorm, BBias, CBias, MimoX, MimoZ, MimoO, OutNorm,
         ]);
-    assert_untied_stack_is_its_unshared_views(block, Mamba3SsdPath::Minimal(Some(4)));
+    assert_untied_stack_equals_the_stack_of_its_application_views(
+        block,
+        Mamba3SsdPath::Minimal(Some(4)),
+    );
 }
 
 /// Every Mamba-2 tensor that can be untied, bar the learnable initial state (as
 /// for Mamba-3).
 #[cfg(feature = "mamba2")]
 #[test]
-fn mamba2_untied_stack_is_its_unshared_views() {
+fn mamba2_untied_stack_equals_the_stack_of_its_application_views() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath, Mamba2Untied::*};
 
     let block = Mamba2Config::new(D_MODEL)
@@ -131,19 +137,22 @@ fn mamba2_untied_stack_is_its_unshared_views() {
         .with_per_head_dim(4)
         .with_state_rank(8)
         .with_untied(vec![InProjTail, Conv1d, DtBias, ALog, D, Norm]);
-    assert_untied_stack_is_its_unshared_views(block, Mamba2SsdPath::Minimal(Some(4)));
+    assert_untied_stack_equals_the_stack_of_its_application_views(
+        block,
+        Mamba2SsdPath::Minimal(Some(4)),
+    );
 }
 
 /// Every Mamba-1 tensor that can be untied.
 #[cfg(feature = "mamba1")]
 #[test]
-fn mamba1_untied_stack_is_its_unshared_views() {
+fn mamba1_untied_stack_equals_the_stack_of_its_application_views() {
     use crate::mamba1::prelude::{Mamba1Config, Mamba1Untied::*};
 
     let block = Mamba1Config::new(D_MODEL)
         .with_state_rank(4)
         .with_untied(vec![Conv1d, XProj, DtProj, ALog, D]);
-    assert_untied_stack_is_its_unshared_views(block, ());
+    assert_untied_stack_equals_the_stack_of_its_application_views(block, ());
 }
 
 /// The layout follows the untie list alone: nothing untied is the stock block at
