@@ -85,7 +85,7 @@ pub fn model_config() -> MambaVocabNetConfig {
             // `n_stream − 1` layers append and do not mix) makes the streams
             // distinct, so they need no carry bias.
             init_bias: 0.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         },
         // No feed-forward interleave: these examples are mixer-only.

@@ -164,7 +164,7 @@ fn layers_multi_gate_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -216,7 +216,7 @@ fn layers_multi_gate_virtual_forward_step_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -268,7 +268,7 @@ fn layers_multi_gate_per_virtual_ignore_residuals_parity() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: true,
         });
     builder.ignore_first_residual = true;
@@ -344,7 +344,7 @@ fn bidi_multi_gate_forward_and_grads() {
         residuals: ResidualsConfig::MultiGate {
             n_stream: 2,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         },
         untied: Vec::new(),
@@ -445,7 +445,7 @@ fn layers_multi_gate_streams_are_distinct() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: true,
         })
         .init(&device);
@@ -503,15 +503,17 @@ fn layers_multi_gate_streams_are_distinct() {
     );
 }
 
-/// `init_bias_step` ramps the per-stream gate bias, giving the streams distinct
-/// depth-timescales from step zero (`0` keeps the paper's uniform init).
+/// `init_bias_offset` is the offset between the initial gate biases of two
+/// consecutive streams: stream `i` starts at `init_bias + i · init_bias_offset`.
+/// A nonzero offset gives the streams different depth timescales before any
+/// training. `0` keeps the uniform initial biases of the paper.
 #[test]
-fn init_bias_step_ramps_the_gates() {
+fn init_bias_offset_ramps_the_gates() {
     let device = test_device();
     let (n, d) = (4, 8);
     let m = MultiGateResidualConfig::new(d, n)
         .with_init_bias(-2.7)
-        .with_init_bias_step(0.9)
+        .with_init_bias_offset(0.9)
         .init(&device);
 
     let expected = Tensor::<1>::from_floats([-2.7, -1.8, -0.9, 0.0], &device);
@@ -585,7 +587,7 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: -0.5,
+            init_bias_offset: -0.5,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -645,7 +647,7 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 2,
             init_bias: -1.0,
-            init_bias_step: -0.5,
+            init_bias_offset: -0.5,
             per_virtual_layer: false,
         })
         .init(&adev);
@@ -767,7 +769,7 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -819,7 +821,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: -0.5,
+            init_bias_offset: -0.5,
             per_virtual_layer: false,
         })
         .init(&device);
@@ -893,7 +895,7 @@ fn bidi_multi_gate_class_latents_forward() {
         residuals: ResidualsConfig::MultiGate {
             n_stream: 3,
             init_bias: -1.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         },
         untied: Vec::new(),
@@ -941,7 +943,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
             .with_residuals(ResidualsConfig::MultiGate {
                 n_stream: 2,
                 init_bias: -1.0,
-                init_bias_step: -0.5,
+                init_bias_offset: -0.5,
                 per_virtual_layer: false,
             }),
         output_size: 2,
@@ -1030,7 +1032,7 @@ fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
         ResidualsConfig::MultiGate {
             n_stream: 2,
             init_bias: -1.0,
-            init_bias_step: -0.5,
+            init_bias_offset: -0.5,
             per_virtual_layer: false,
         },
     ] {

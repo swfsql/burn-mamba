@@ -207,7 +207,7 @@ fn packed_mamba3_u2_vertical_multigate_matches_alone() {
     let residuals = ResidualsConfig::MultiGate {
         n_stream: 2,
         init_bias: 0.0,
-        init_bias_step: 0.0,
+        init_bias_offset: 0.0,
         per_virtual_layer: false,
     };
     let net = mamba3_net(2, Trapezoid::Vertical, residuals);

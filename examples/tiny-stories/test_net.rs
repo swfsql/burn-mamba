@@ -56,7 +56,7 @@ pub fn tiny_net(device: &Device) -> MambaVocabNet {
         residuals: ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: 0.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             per_virtual_layer: false,
         },
         mlp: None,

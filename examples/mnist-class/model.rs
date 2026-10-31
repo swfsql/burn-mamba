@@ -90,7 +90,7 @@ pub fn model_config() -> MambaLatentNetConfig {
         residuals: ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: 0.0,
-            init_bias_step: 0.0,
+            init_bias_offset: 0.0,
             // one gate module per real layer, reused by its virtual passes
             per_virtual_layer: false,
         },

@@ -1004,7 +1004,7 @@ fn identity_prefix_is_exact_under_multi_gate_residuals() {
     run_identity_prefix_exactness(burn_stack::modules::ResidualsConfig::MultiGate {
         n_stream: 1,
         init_bias: -20.0,
-        init_bias_step: 0.0,
+        init_bias_offset: 0.0,
         per_virtual_layer: false,
     });
 }
@@ -1025,7 +1025,7 @@ fn multi_gate_input_keeps_its_gradient_under_a_cut() {
             .with_residuals(ResidualsConfig::MultiGate {
                 n_stream: 3,
                 init_bias: 0.0,
-                init_bias_step: 0.0,
+                init_bias_offset: 0.0,
                 per_virtual_layer: false,
             })
             .init(&device);
