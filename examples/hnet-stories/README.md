@@ -38,8 +38,9 @@ cargo run --release --example hnet-stories --features backend-flex -- --inferenc
   case flag), as in `tiny-stories`.
 - Four learnable **start embeddings** open every story (`n_start_embeddings`).
   They go in front of the H-Net, so it routes them like characters. The output
-  of the last start row predicts the first character. So an unprompted sample
-  needs no seed character. The stacks of an H-Net take no class latents.
+  of the last start embedding predicts the first character. So an unprompted
+  sample needs no seed character. The stacks of an H-Net take no class
+  latents.
 
 ## The training recipe
 
@@ -60,8 +61,8 @@ run keeps it:
   from one window to the next (see "Runs and the frontier" in the
   `tiny-stories` README). A window holds 1024 characters (`-- --seq-len`), so
   most stories fit in one window. The first window of a story opens with the
-  start rows. An H-Net takes no packed rows (`--pack`): its chunks would move the
-  resets.
+  start embeddings. An H-Net takes no packed rows (`--pack`): its chunks would
+  move the resets.
 
 ## Sampling
 

@@ -4,10 +4,10 @@
 //! [`generate`] opens a story in one of two ways:
 //!
 //! 1. With no prompt, one [`prime`](MambaHNetVocabNet::prime) steps the start
-//!    rows of the network. Their last output already gives the distribution of
-//!    the first character.
+//!    embeddings of the network. Their last output already gives the
+//!    distribution of the first character.
 //! 2. With a prompt, one [`forward_opened`](MambaHNetVocabNet::forward_opened)
-//!    runs the start rows and the prompt chunkwise (the prefill).
+//!    runs the start embeddings and the prompt chunkwise (the prefill).
 //!
 //! Each generated character then costs one [`step`](MambaHNetVocabNet::step):
 //! O(state) per character. The decode loop is the shared
@@ -35,9 +35,9 @@ use rand_chacha::ChaCha8Rng;
 
 /// Load the trained H-Net and measure its context use over the first
 /// `n_stories` validation stories, `batch` sequences per `forward` (see
-/// [`crate::common::context`]). Each sequence opens with the start rows (one
-/// `forward_opened`), as the validation scores the first window of a story.
-/// The start rows are the lead rows of the measure.
+/// [`crate::common::context`]). Each sequence opens with the start embeddings
+/// (one `forward_opened`), as the validation scores the first window of a
+/// story. The start embeddings are the lead rows of the measure.
 pub fn context_use(
     model_config: HNetStoriesConfig,
     device: Device,
@@ -56,7 +56,7 @@ pub fn context_use(
 /// Load the trained H-Net and score the long validation stories and the first
 /// `valid_stories` validation stories over their whole length, `batch`
 /// stories per `forward` (see [`crate::common::long_stories`]). Each story
-/// opens with the start rows, as in [`context_use`].
+/// opens with the start embeddings, as in [`context_use`].
 pub fn long_stories(
     model_config: HNetStoriesConfig,
     device: Device,
@@ -138,7 +138,7 @@ pub fn generate(
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let prompt_tokens = prompt.map(|p| VOCAB.encode_cased(p)).unwrap_or_default();
     let (logits, caches) = match prompt {
-        None => model.prime(1, run.step_mode).expect("the network has no start rows. Pass a prompt."),
+        None => model.prime(1, run.step_mode).expect("the network has no start embeddings. Pass a prompt."),
         Some(prompt) => {
             assert!(!prompt_tokens.is_empty(), "the prompt has no character inside the alphabet: {prompt:?}");
             let (logits, caches, _) = model.forward_opened(tokens(&prompt_tokens, device), run.paths.clone(), None);
@@ -181,9 +181,9 @@ fn tokens(tokens: &[u8], device: &Device) -> Tensor<3, Int> {
 /// character where a stage starts a chunk. The mark is `|` for stage 0, `‖`
 /// where stage 1 also starts one, and `⦀` deeper.
 ///
-/// It runs one `forward_opened` over the start rows, the prompt and the text.
-/// Stage `s + 1` routes the rows where stage `s` started a chunk. So the
-/// depth of a character is the number of stages that start a chunk at it.
+/// It runs one `forward_opened` over the start embeddings, the prompt and the
+/// text. Stage `s + 1` routes the rows where stage `s` started a chunk. So
+/// the depth of a character is the number of stages that start a chunk at it.
 pub fn show_chunks(model: &MambaHNetVocabNet, run: &Run, device: &Device, prompt_tokens: &[u8], text: &str) -> String {
     let text_tokens = VOCAB.encode_cased(text);
     let all: Vec<u8> = prompt_tokens.iter().chain(&text_tokens).copied().collect();

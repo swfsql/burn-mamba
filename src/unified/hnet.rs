@@ -248,9 +248,9 @@ macro_rules! define_hnet {
                 }
             }
 
-            /// [`Self::forward`] over a **new** sequence, with the start rows of
-            /// the network in front of it. The logits are `[batch, n_start +
-            /// sequence, padded_vocab + 1]`. See
+            /// [`Self::forward`] over a **new** sequence, with the start
+            /// embeddings of the network in front of it. The logits are
+            /// `[batch, n_start + sequence, padded_vocab + 1]`. See
             /// `HNetVocabNetwork::forward_opened` of `burn-stack`.
             pub fn forward_opened(
                 &self,
@@ -270,10 +270,10 @@ macro_rules! define_hnet {
                 }
             }
 
-            /// Step the start rows alone, from a new sequence. Returns the
-            /// logits of the last start row and the caches, or `None` when the
-            /// network has no start rows. See `HNetVocabNetwork::prime` of
-            /// `burn-stack`.
+            /// Step the start embeddings alone, from a new sequence. Returns
+            /// the logits of the last start embedding and the caches, or `None`
+            /// when the network has no start embeddings. See
+            /// `HNetVocabNetwork::prime` of `burn-stack`.
             pub fn prime(&self, batch: usize, mode: StepMode) -> Option<(Tensor<2>, MambaHNetCaches)> {
                 match self {
                     $(
@@ -283,7 +283,7 @@ macro_rules! define_hnet {
                 }
             }
 
-            /// The number of start rows.
+            /// The number of start embeddings.
             pub fn n_start(&self) -> usize {
                 match self {
                     $(

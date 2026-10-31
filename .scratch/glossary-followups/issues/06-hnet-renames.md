@@ -69,11 +69,13 @@ the line above) is in the scope of ticket 04. It is not part of this ticket.
 
 - Done against burn-stack rev `d39c57c`. The commit also holds the bump of
   `Cargo.toml` (crate version 0.72.0) and of `Cargo.lock`.
-- Ticket 04 must also change these sites. Each one has an old term next to a
-  new name:
-  - The README bullet with `n_start_embeddings` also says "the last start
-    row".
-  - The doc comment of `N_START_EMBEDDINGS` (`model.rs`) says "The learnable
-    rows".
-  - The doc comment of `mamba3_padded_rows_match_each_row_alone` uses "slot"
-    for a row of the batch, and "row" for a position.
+- The docs change with the names, in a second commit. All prose of the crate
+  says "start embedding(s)", not "start rows" (the docs, the READMEs and one
+  `expect` message). The doc comment and the messages of
+  `mamba3_padded_rows_match_each_row_alone` say "row" for a row of the batch,
+  and "real token" for a position.
+- Ticket 04 changes each "row" that means a position. These are near the
+  renames:
+  - the *lead rows* of `examples/common/context.rs`, also cited in
+    `hnet-stories/inference.rs`,
+  - the rows that a stage routes in `show_chunks`.

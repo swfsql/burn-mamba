@@ -3,7 +3,7 @@
 //! H-Net part is the [`Wrap`] type, which implements their `LmModel`:
 //!
 //! - A window runs from the carried caches. The first window of a story has
-//!   none. It opens the story with the start rows of the network
+//!   none. It opens the story with the start embeddings of the network
 //!   (`forward_opened`). `lm_output` scores the last of them against the
 //!   first character.
 //! - The loss that back-propagates is the next-character loss plus `α` times
@@ -238,8 +238,8 @@ impl LmModel for Wrap {
         Wrap(self.0.valid(), self.1.clone())
     }
 
-    /// The class cursors are not used: the start rows open the first window
-    /// of each story, which is the window with no carried cache.
+    /// The class cursors are not used: the start embeddings open the first
+    /// window of each story, which is the window with no carried cache.
     fn train_window(
         &self,
         batch: TinyStoriesBatch,

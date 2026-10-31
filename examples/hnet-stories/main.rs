@@ -13,8 +13,8 @@
 //! - Training scores every position of a window against its next character.
 //!   It also adds the ratio loss of each stage, which steers the mean chunk
 //!   length toward a target. Each stage trains at its own learning rate.
-//! - The first window of a story opens with learnable start rows, not a
-//!   separator character. So an unprompted sample needs no seed character.
+//! - The first window of a story opens with learnable start embeddings, not
+//!   a separator character. So an unprompted sample needs no seed character.
 //! - Inference prefills an optional prompt with one chunkwise `forward`, then
 //!   samples one character per `step`. `-- --show-chunks` marks where each
 //!   stage starts a chunk.

@@ -4,8 +4,8 @@
 //! The measure does not depend on the model. It reads the model through a
 //! [`LogitsFn`], so each example (`tiny-stories`, `hnet-stories`) gives its own
 //! `forward`. The *lead rows* of a model are the rows that its `forward` puts in
-//! front of the tokens (the class latents of `tiny-stories`, the start rows of
-//! `hnet-stories`).
+//! front of the tokens (the class latents of `tiny-stories`, the start
+//! embeddings of `hnet-stories`).
 //!
 //! The validation loss mixes two kinds of prediction. The local one
 //! (spelling, grammar, stock phrases) is most of it. The use of the earlier

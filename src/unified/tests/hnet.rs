@@ -163,9 +163,9 @@ fn mamba3_forward_and_step_have_the_same_gradients() {
     assert!(cmp.worst < dtype_tol(1e-3), "max rel gradient diff {}", cmp.worst);
 }
 
-/// A right-padded batch: each slot gives what it gives alone (the logits of
-/// its real rows, and its caches). A slot with no real row (a later window of
-/// a short story) leaves the other slots alone, and its caches stay finite.
+/// A right-padded batch: each row gives what it gives alone (the logits of
+/// its real tokens, and its caches). A row with no real token (a later window
+/// of a short story) leaves the other rows alone, and its caches stay finite.
 #[cfg(feature = "mamba3")]
 #[test]
 fn mamba3_padded_rows_match_each_row_alone() {
@@ -193,8 +193,8 @@ fn mamba3_padded_rows_match_each_row_alone() {
     for (b, &len) in lens.iter().enumerate().filter(|(_, len)| **len > 0) {
         let (y_b, c_b, _) = net.forward(x.clone().narrow(0, b, 1).narrow(1, 0, len), None, paths(&config), None);
         let y_real = y.clone().narrow(0, b, 1).narrow(1, 0, len);
-        assert!(max_rel_diff(y_real, y_b) < dtype_tol(TOL), "slot {b}: logits");
-        // Row `b` of the batched caches against the slot run alone.
+        assert!(max_rel_diff(y_real, y_b) < dtype_tol(TOL), "row {b}: logits");
+        // Row `b` of the batched caches against the row run alone.
         struct Row(usize, f32);
         impl TensorZip for Row {
             fn zip<const D: usize>(&mut self, a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
@@ -204,7 +204,7 @@ fn mamba3_padded_rows_match_each_row_alone() {
         }
         let mut row = Row(b, 0.0);
         caches.clone().zip_tensors(c_b, &mut row);
-        assert!(row.1 < dtype_tol(TOL), "slot {b}: caches differ by {}", row.1);
+        assert!(row.1 < dtype_tol(TOL), "row {b}: caches differ by {}", row.1);
     }
 }
 

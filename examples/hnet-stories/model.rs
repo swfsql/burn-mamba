@@ -31,8 +31,9 @@ const MAIN_STATE_RANK: usize = 64;
 /// stage 0 that is characters: about a short word.
 const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 
-/// The learnable rows that open every story (see `HNetVocabNetwork`). The
-/// output of the last one is scored against the first character.
+/// The learnable start embeddings that open every story (see
+/// `HNetVocabNetwork`). The output of the last one is scored against the
+/// first character.
 const N_START_EMBEDDINGS: usize = 4;
 
 /// `α`, ten times the reference value. Early in training, the encoders of a
