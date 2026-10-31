@@ -36,6 +36,16 @@
 //! `forward()` over a sequence equals `step()` unrolled token by token from the
 //! same initial cache. The test suites assert this parity on outputs, final
 //! cache, and gradients.
+//!
+//! ## The backend is a run-time value
+//!
+//! Burn pins the high-level `Tensor`, and so every `Module`, to its global
+//! `Dispatch` backend. So the types of this crate have no backend parameter
+//! (`Mamba2`, `Mamba2Cache`, … have no `<B>`). The `Device` of a tensor
+//! selects the backend at run time, and it also sets autodiff and the dtype.
+//! Only the internals of the custom backwards stay generic over a backend `B`.
+//! These are the primitive wrapper `F<B, D>`, the `Backward<B, _>` nodes, and
+//! the `Autodiff<B>` impls of the `…BackendExt` traits.
 
 #![warn(missing_docs)]
 #![allow(clippy::let_and_return)]

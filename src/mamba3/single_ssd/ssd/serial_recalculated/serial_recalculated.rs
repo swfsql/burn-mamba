@@ -87,7 +87,8 @@ impl Mamba3SingleSsdInput {
 #[backend_extension(
     // Every cubecl runtime (CUDA, ROCm, Metal, Vulkan, WebGPU, wgpu, CPU) is
     // this one backend. The device of a tensor tells which runtime it uses.
-    // The cfg mirrors burn's own `cube_backend`.
+    // The cfg mirrors burn's own `cube_backend`. Every `#[backend_extension]`
+    // site of this crate has the same list. Change them together.
     Cube: cfg(any(
         feature = "backend-cpu",
         feature = "backend-cuda",

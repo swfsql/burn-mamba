@@ -296,8 +296,8 @@ launches per case and writes [`kernels.md`](kernels.md).
   - **[Gate as Positive System](info/kalman/gate-as-positive-system.md)**: the
     Kalman gate and the max-plus register. One log-semiring scan, the ceiling
     and contraction of the computed decay, and what a classifier gets for free.
-- Contributors: `CLAUDE.md` and `files.md` map the structure, architecture, and
-  conventions of the repository.
+- Contributors: `CLAUDE.md` maps the structure and conventions of the
+  repository, and points to the rest of the docs.
 
 ## Scope
 

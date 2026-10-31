@@ -1,6 +1,6 @@
 # 01: Docs redo: a short CLAUDE.md, a short File Map, no files.md
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -60,15 +60,58 @@ decisions are in the module headers.
 
 ## Acceptance criteria
 
-- [ ] CLAUDE.md has about 200 lines or fewer, and its File Map has 40 lines or
+- [x] CLAUDE.md has about 200 lines or fewer, and its File Map has 40 lines or
       fewer.
-- [ ] files.md is not in the repo. Each of its non-obvious decisions is in a
+- [x] files.md is not in the repo. Each of its non-obvious decisions is in a
       module header, or is listed under `## Comments`.
-- [ ] Each deleted CLAUDE.md paragraph has its content in a glossary, an ADR or
+- [x] Each deleted CLAUDE.md paragraph has its content in a glossary, an ADR or
       a module header, or is listed under `## Comments`.
-- [ ] `rg 'files\.md'` finds no link outside `.scratch/`. No doc links to a
+- [x] `rg 'files\.md'` finds no link outside `.scratch/`. No doc links to a
       CLAUDE.md anchor that is gone.
-- [ ] `cargo check` passes, and `cargo doc --all --no-deps` has no warnings.
-- [ ] The asd-ste100 lint (`ste-lint.py`) passes on CLAUDE.md.
+- [x] `cargo check` passes, and `cargo doc --all --no-deps` has no warnings.
+- [x] The asd-ste100 lint (`ste-lint.py`) passes on CLAUDE.md.
 
 ## Comments
+
+Notes from the implementation, for the user:
+
+- **Item docs count as "found".** Most decisions of files.md and many
+  paragraphs of CLAUDE.md were already in the docs of their own file. Such a
+  doc is the module header, an item doc, or a code comment beside the code. I
+  did not copy them into the module header, to keep one source of truth.
+  Examples: the `tanh` reason of `rotation_range` and the CPU/GPU trade-off of
+  `siso_specialization_decode` are in their config docs. The order of the `A`
+  floor is in a comment in `helpers.rs`. Object if you want each of them in
+  the header.
+- **Moved into module headers or comments** (in no doc before):
+  - `src/lib.rs`: "The backend is a run-time value" (the `Dispatch` pin, no
+    `<B>` on the library types).
+  - `src/mamba1/mamba1.rs`: `A` does not depend on the input, and its init.
+  - `src/unified/mod.rs`: the model keeps its fused projections, and only the
+    Muon plan splits them. The item docs of the lists hold the details.
+  - `src/packing/tests.rs`: why the packed check has a tolerance.
+  - Each `#[backend_extension]` site: all sites must have the same list. A
+    `cfg` alias (as burn's `cube_backend`) could replace the copies. That is a
+    code change, so I did not make it.
+- **The block-agnostic rule** of ADR-0002 is now a bullet under "Rules → Code".
+  The summary stays at three lines.
+- **Found in burn-stack docs, not in this repo.** I deleted these CLAUDE.md
+  sentences: the flag logit and `missing_lm_head` (`modules/network.rs`), the
+  loader worker that breaks a capture (`examples/device.rs`), "prime then
+  step" (its glossary, `modules/hnet/network.rs`). The list of the captured
+  passes of each example is in `examples/README.md`.
+- **Not decisions.** files.md described the coverage of the test files, the
+  defaults of the configs, and the content of each `info/` note. The test
+  headers, the `#[config(default = …)]` lines and the header of each note hold
+  them. The convention of the `scripts/` checks is now in "Where to look".
+- **A changed rule.** CLAUDE.md said "Do not read or write outside the root".
+  The "Where to look" map needs `../burn-stack/` and the references under
+  `../`. So the rule is now: write only inside the root, and read outside it
+  only the references of "Where to look". Tell me if you want another rule.
+- **Kept**: the `## Agent skills` section in its `###` form, because
+  `setup-matt-pocock-skills` updates it in place.
+- **Left for ticket 04**: old prose in the headers that I did not write
+  ("Kalman gate", "SSM state", "slot" for a row, "folded axis"). The notation
+  table in the `mamba3.rs` header still says "`sequence` length, **folded**"
+  for `s`.
+- No new term and no new decision came up.

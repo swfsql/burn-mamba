@@ -14,11 +14,14 @@
 //!
 //! ## Muon: why the 3-D tensors are not "stacked matrices"
 //!
+//! The model keeps its fused projections, and only the Muon plan splits them.
 //! [`burn_stack::optim`] lets Muon own only the weights that a
 //! [`BlockConfig::muon_projections`](burn_stack::modules::BlockConfig::muon_projections)
-//! names, and the list of each family deliberately stops at rank 2. For the
-//! MIMO tensors of Mamba-3 this needs an argument, because their *shape*
-//! suggests the opposite conclusion.
+//! names. Each family lists there the weights that Muon can own, and splits
+//! each fused projection as its forward does. The item doc of each list gives
+//! what stays on the fallback optimizer, and why. The list of each family
+//! deliberately stops at rank 2. For the MIMO tensors of Mamba-3 this needs an
+//! argument, because their *shape* suggests the opposite conclusion.
 //!
 //! The *math* of MIMO does decompose along the rank: R write-channels summed
 //! into one state and read out R ways, each part a **standalone** SISO run.

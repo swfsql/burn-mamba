@@ -14,6 +14,14 @@
 //! - the gradients of a loss over both: of every parameter, of the inputs,
 //!   and of the fields of the origin. Every segment sends its gradient to the
 //!   origin, and none to the segment before it.
+//!
+//! The two sides round differently, so the comparison has a tolerance:
+//!
+//! - With resets, Mamba-2 runs its conv as one product per kernel position
+//!   (`conv_packed`). The reference runs `Conv1d`.
+//! - The blocks of `prefix_sum` depend on the length of the call.
+//! - A scan over a packed row runs more rounds than a scan over one sequence.
+//! - The quaternion rotation divides out the rotation at each segment start.
 
 use crate::mamba2::prelude::*;
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;

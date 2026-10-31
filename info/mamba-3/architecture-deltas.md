@@ -533,7 +533,7 @@ records them:
   on this.
 - The kernels that the latency tables measure are fused
   Triton/TileLang/CuTe. That is the axis that this crate intentionally gives
-  up (`CLAUDE.md` → *No optimized kernels*).
+  up (`docs/adr/0001-no-custom-kernels.md`).
 
 ### 9.6 What does not follow
 

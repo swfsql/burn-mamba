@@ -148,11 +148,12 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
   subset of SO(5) (dim 10): same generated group, smaller per-step set; enough for S₅'s
   generators. Full SO(5) per step = Cartan form `diag(q,p)·tilt(θ)·diag(q',p')`
   (13 params, redundant) or `exp` on sp(2).
-- **The "8-D ceiling" in CLAUDE.md** ("SO(4) is the ceiling for k=4; k=8 would break
-  the scan") is about the *representation*: Complex2D/Quaternion4D store one number per
-  block, which needs an associative normed division algebra (dims 1,2,4; octonions
-  are non-associative). SO(8) itself scans fine as matrices. 5-D has no division algebra
-  at all; Sp(2) is a *matrix over ℍ*, associative. The CLAUDE.md sentence could say so.
+- **The "8-D ceiling" in the `src/mamba3/rotation/mod.rs` header** (SO(4) is the ceiling
+  for k=4; at k=8 "the scan itself breaks") is about the *representation*: Complex2D/Quaternion4D
+  store one number per block, which needs an associative normed division algebra (dims
+  1,2,4; octonions are non-associative). SO(8) itself scans fine as matrices. 5-D has no
+  division algebra at all; Sp(2) is a *matrix over ℍ*, associative. That sentence could
+  say so.
 - Crate cost (if built): blocks of 5 (`state_rank` multiple of 5); +1 in-proj channel per
   (head, block); scan over 2×2 quaternion matrices (8 `quat_mul` per combine;
   recompute-backward like `quat_scan/`); unitarity renormalisation (Gram–Schmidt on two
@@ -238,13 +239,14 @@ projections. Exactness at length needed the leak removed by hand.
    per-step variant); train longer / len 384–512 or a curriculum so the leak is priced
    in; readout per head (or MIMO-style several readouts of one head's state) so one
    group head suffices. Target: exact @1024 without surgery.
-2. **Crate prototype** of Rotor4D+tilt as a `RotationKind` (see B§4–6 costs; CLAUDE.md
-   "Mamba-3: rotation" and File Map for `src/mamba3/rotation/`, `src/mamba3/quat_scan/`);
+2. **Crate prototype** of Rotor4D+tilt as a `RotationKind` (see B§4–6 costs; the module
+   headers of `src/mamba3/rotation/` and `src/mamba3/quat_scan/`);
    forward/step/gradient parity tests like the other kinds.
 3. **reset-quintic with it**: a one-layer S₅ run (would replace the two-layer story in
    the README if it trains).
 4. Docs, only if wanted: an `info/` note (reflections as dilation) with `check.py` moved
-   to `scripts/`; the CLAUDE.md 8-D sentence; README sharpenings (A open items).
+   to `scripts/`; the 8-D sentence of the `rotation/mod.rs` header; README sharpenings
+   (A open items).
 
 ---
 
@@ -255,7 +257,7 @@ projections. Exactness at length needed the leak removed by hand.
   existing dir).
 - CPU for these probes; GPU runs: `default,backend-cuda`, VRAM ≤ 3.6 GB, one big run at a
   time. The user runs benches.
-- No `src/` change yet ⇒ no File Map / `files.md` update pending. If step B2 lands,
-  prepare `tmp.md` at the end (CLAUDE.md rule), don't edit those files mid-work.
+- No `src/` change yet ⇒ no File Map update pending. If step B2 adds, deletes or renames
+  a file, update its File Map line in the same change (CLAUDE.md rule).
 - Commit messages: write the text only (title + short body + `Co-Authored-By:` trailer);
   don't run git commit.

@@ -16,6 +16,9 @@
 //!   out_proj     d_inner → d_model
 //! ```
 //!
+//! `A = −exp(a_log)` is a parameter and does not depend on the input. Its
+//! init is `A = −(1, 2, …, state_rank)` in each channel.
+//!
 //! Unlike Mamba-2/3, the recurrence is a plain **sequential selective scan**,
 //! not a chunkwise SSD. There is no pluggable SSD path. [`Mamba1::forward`]
 //! (full sequence) and [`Mamba1::step`] (single token) carry the same
