@@ -1012,7 +1012,7 @@ pub fn rotate_bc_forward(
             let raw_angles_bsha = angle_increment::<3, 4>(rot_bsa, dt_bsh, range);
             // The abelian scan is blocked (the quaternion scan below is
             // log-depth). It is *not* `Tensor::cumsum`, whose cost is
-            // quadratic in the sequence length here. The angle of the cache
+            // quadratic in the write length here. The angle of the cache
             // is the carry-in of the scan, so it joins the block offset and
             // needs no add of its own. The scan is on the circle: its carry
             // stays in `[−π, π]` for any length, so the f32 rounding does not

@@ -16,7 +16,7 @@
 //!    the decay that a cached slot carries across a call boundary, and the
 //!    positions where the tap of a tap pattern closes.
 //! 7. [`prefix_sum`]: the blocked inclusive scan that replaces
-//!    `Tensor::cumsum` for every sequence-length cumulative sum, and
+//!    `Tensor::cumsum` for every cumulative sum over the write axis, and
 //!    [`sub_periods`], its reduction on the circle.
 //! 8. The **read axis** ([`read_rows`], [`read_causal_mask`], and their
 //!    primitive twins in [`prim`]).

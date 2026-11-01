@@ -157,7 +157,7 @@ impl<B: Backend> Quat<B> {
 
     /// Prepend `ident` along the write axis and narrow again to `sequence`:
     /// the Hillis–Steele shift `shifted[t] = self[t-offset]` (identity before
-    /// the start), where `offset` is the sequence length of `ident`.
+    /// the start), where `offset` is the length of `ident` on the write axis.
     pub fn shift_prepend(self, ident: Quat<B>, sequence: usize) -> Quat<B> {
         let shift =
             |head: F<B, 4>, tail: F<B, 4>| F::cat(vec![head, tail], 1).narrow(1, 0, sequence);
