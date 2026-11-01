@@ -755,7 +755,7 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 ///
 /// A run over a split sequence, with `final_carry` passed between the parts,
 /// is exactly equal to a run over the whole sequence (asserted in the tests).
-/// This is the chunked-prefill / streaming guarantee for the rotation
+/// This is the split-prefill / streaming guarantee for the rotation
 /// accumulator.
 ///
 /// The implementation is a **Hillis–Steele** inclusive associative scan. The

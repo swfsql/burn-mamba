@@ -18,8 +18,8 @@
 //! every character on the device. After its first few steps, it replays one
 //! captured graph of the step and its draw, instead of a new launch. The
 //! prefill ([`prefill`]) also replays a graph. The prompt follows the latents
-//! in right-padded fixed-shape chunks, and one captured graph serves every
-//! chunk of every prompt across which the prefill is held. `--no-graph`
+//! in right-padded fixed-shape windows, and one captured graph serves every
+//! window of every prompt across which the prefill is held. `--no-graph`
 //! disables both captures, and the text is the same either way. [`infer`]
 //! loads the checkpoint and prints a few stories at different temperatures,
 //! and a few continuations of fixed prompts (or of the `--prompt` texts).
@@ -113,7 +113,7 @@ pub fn infer(
         _ => prompts.iter().map(String::as_str).collect(),
     };
     // One prefill for every prompt: they share the opening of the latents and
-    // (without `--no-graph`) one captured chunk.
+    // (without `--no-graph`) one captured window.
     let mut prefill = prefill(&model, run, &infer_device);
     // Each continuation has its own seed, after the seeds of the unprompted
     // stories.
@@ -161,7 +161,7 @@ pub fn infer(
 /// same cursors splice the latents in front of it, exactly as in training.
 /// `temperature` scales the logits before the softmax, and `<= 0` samples
 /// greedily (argmax). With a `prefill` (see [`prefill`]), the prompt follows
-/// the primed latents in fixed-shape chunks. Without one, one `forward` takes
+/// the primed latents in fixed-shape windows. Without one, one `forward` takes
 /// the latents and the prompt. Returns only the generated characters, not the
 /// prompt.
 #[allow(clippy::too_many_arguments)]
@@ -213,7 +213,7 @@ pub fn generate(
 ///
 /// The latents always come first:
 /// - With a `prefill` and only `Start` latents, `prime` runs the latents, and
-///   the prompt follows from that cache in fixed-shape chunks.
+///   the prompt follows from that cache in fixed-shape windows.
 /// - Otherwise, one `forward` takes the prompt, and the cursors splice the
 ///   latents in front of it, exactly as in training.
 /// - Without a prompt, `prime` runs the latents alone. They already predict
@@ -233,7 +233,7 @@ fn open(
         // Prefill. Keep the cache, and the logits of the last character of the
         // prompt (the next character is drawn from them).
         Some(tokens) => {
-            // In chunks after the latents, when they are all `Start`s.
+            // In windows after the latents, when they are all `Start`s.
             let prefilled = match prefill {
                 Some(prefill) if model.only_start_latents() => prefill.run(tokens, || {
                     let mut class = ClassCursors::stream();
@@ -272,19 +272,19 @@ fn open(
     (logits, caches.expect("the opening leaves a cache"), class)
 }
 
-/// Prompt characters per [`prefill`] chunk: one training window. A replayed
-/// chunk costs about the same at any width up to this one, so a wide chunk
+/// Prompt characters per [`prefill`] window: one training window. A replayed
+/// window costs about the same at any width up to this one, so a wide window
 /// serves most prompts in one replay.
-const PREFILL_CHUNK: usize = 256;
+const PREFILL_WINDOW: usize = 256;
 
-/// A [`Prefill`] of `model` in chunks of [`PREFILL_CHUNK`], captured unless
+/// A [`Prefill`] of `model` in windows of [`PREFILL_WINDOW`], captured unless
 /// `--no-graph`. Hold it across prompts: they share its opening and its graph.
 pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
     let ssd_path = run.ssd_path.clone();
-    // Safety: the chunk reads only its arguments, `model` (borrowed for as long
+    // Safety: the window reads only its arguments, `model` (borrowed for as long
     // as the prefill lives), and `ssd_path`, which it owns.
     unsafe {
-        Prefill::new(device, PREFILL_CHUNK, run.graphs, move |x, caches, pad, class| {
+        Prefill::new(device, PREFILL_WINDOW, run.graphs, move |x, caches, pad, class| {
             model.forward(x, Some(caches), ssd_path.clone(), Some(class), Some(pad))
         })
     }

@@ -180,14 +180,14 @@ impl Mamba3 {
         let (proj_bsd, noise_btH, tropical_btH) = self.split_positive(proj_bsd, 2);
         let bc_size = ngroups * state_rank * mimo_rank;
 
-        // `u` = micro_steps widens every per-micro-step segment, and `unfold`
-        // reads each of them as `u` consecutive sequence positions. `z`
+        // `u` = micro_steps widens every per-micro-step channel group, and
+        // `unfold` reads each of them as `u` consecutive write positions. `z`
         // (per-token gate) and `C` (per-token read) do not widen. See
         // [`crate::mamba3::product`].
-        // The optional segments come off the tail first, in reverse layout
+        // The optional channel groups come off the tail first, in reverse layout
         // order: the rotation (`Real1D` projects none), then `μ` (only a
         // two-tap pattern projects it), then `λ`. `λ` is always present here,
-        // because `TapPattern::None` delegated above. A zero-width segment would
+        // because `TapPattern::None` delegated above. A zero-width group would
         // silently vanish from the split below.
         let u = micro_steps;
         let (proj_bsd, rot_btA) =

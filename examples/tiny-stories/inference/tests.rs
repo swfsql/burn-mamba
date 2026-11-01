@@ -2,7 +2,7 @@
 //! the prompt, and the decode continues it as the model was scored. For one
 //! prompt and one continuation, [`check_decode`] asserts:
 //!
-//! - The chunked prefill path equals `prime`, then a `forward` of the prompt
+//! - The windowed prefill path equals `prime`, then a `forward` of the prompt
 //!   from the cache that `prime` leaves (the latents first).
 //! - The one-`forward` path (no prefill) equals it too: there, the cursors
 //!   splice the latents in front of the prompt, as in training.
@@ -17,7 +17,7 @@
 //! [`test_net`](crate::test_net). [`a_checkpoint_decodes_as_it_scores`] runs
 //! it on a trained checkpoint.
 
-use super::{PREFILL_CHUNK, open, prefill};
+use super::{PREFILL_WINDOW, open, prefill};
 use crate::common::cli::{load_model, load_model_config};
 use crate::dataset::{FIRST_LETTER, UPPER, VOCAB, VOCAB_SIZE, pair};
 use crate::test_net::{N_LATENTS, tiny_net};
@@ -99,7 +99,7 @@ fn bits(logits: &[Tensor<2>], targets: &[u8]) -> f64 {
     total / targets.len() as f64 / std::f64::consts::LN_2
 }
 
-/// The checks of the header for one prompt and one continuation. `chunked` is
+/// The checks of the header for one prompt and one continuation. `windowed` is
 /// held across calls, as `infer` holds it. Returns the bits per character of
 /// the continuation, through the prefill and the decode, and through one
 /// `forward`.
@@ -109,13 +109,13 @@ fn check_decode(
     shifted: &MambaVocabNet,
     run: &Run,
     device: &Device,
-    chunked: &mut Prefill<'_, MambaCaches>,
+    windowed: &mut Prefill<'_, MambaCaches>,
     tokens: &[u8],
     continuation: &[u8],
     tol: f32,
 ) -> (f64, f64) {
     let len = tokens.len();
-    let (logits, caches, class) = open(net, run, device, Some(tokens), Some(chunked));
+    let (logits, caches, class) = open(net, run, device, Some(tokens), Some(windowed));
 
     // The definition: `prime` (the latents), then the prompt from its cache.
     let mut primed_class = ClassCursors::stream();
@@ -175,18 +175,18 @@ fn the_latents_run_before_the_prompt() {
     let run = eager_run(None);
     assert!(net.only_start_latents(), "the prefill path needs Start latents only");
     // One prefill across the prompts, as `infer` holds it.
-    let mut chunked = prefill(&net, &run, &device);
+    let mut windowed = prefill(&net, &run, &device);
     // A cased token: every fourth letter is upper case.
     let cased = |i: usize, id: usize| {
         let id = id as u8;
         if i % 4 == 0 && id as usize >= FIRST_LETTER { id | UPPER } else { id }
     };
-    for len in [1, PREFILL_CHUNK - 1, PREFILL_CHUNK, PREFILL_CHUNK + 1] {
+    for len in [1, PREFILL_WINDOW - 1, PREFILL_WINDOW, PREFILL_WINDOW + 1] {
         // Different tokens for every length.
         let tokens: Vec<u8> = (0..len).map(|i| cased(i, (i * 5 + len * 3) % VOCAB_SIZE)).collect();
         let continuation: Vec<u8> =
             (0..CONTINUATION).map(|i| cased(i + 1, (i * 7 + len) % VOCAB_SIZE)).collect();
-        check_decode(&net, &shifted, &run, &device, &mut chunked, &tokens, &continuation, 1e-4);
+        check_decode(&net, &shifted, &run, &device, &mut windowed, &tokens, &continuation, 1e-4);
     }
 }
 
@@ -218,11 +218,11 @@ fn a_checkpoint_decodes_as_it_scores() {
     let net = load_model(&dir, &config, &device).expect("a model in the run");
     let shifted = shifted_latents(&net);
     let run = eager_run(Some(128));
-    let mut chunked = prefill(&net, &run, &device);
+    let mut windowed = prefill(&net, &run, &device);
     for (prompt, continuation) in CHECKPOINT_PROMPTS {
         let (tokens, continuation) = (VOCAB.encode_cased(prompt), VOCAB.encode_cased(continuation));
         let (decoded, scored) =
-            check_decode(&net, &shifted, &run, &device, &mut chunked, &tokens, &continuation, 1e-3);
+            check_decode(&net, &shifted, &run, &device, &mut windowed, &tokens, &continuation, 1e-3);
         println!("continuation bits/char: decode {decoded:.4}, forward {scored:.4} | {prompt}");
     }
 }

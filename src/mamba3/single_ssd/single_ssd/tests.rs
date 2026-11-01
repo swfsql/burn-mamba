@@ -675,7 +675,7 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
 /// forward_single_ssd continuation from a **random** initial single-ssd cache:
 /// `forward_single_ssd(full, cache) ≡ forward_single_ssd(prefix, cache)` then
 /// `forward_single_ssd(suffix, mid_cache)`. Compares outputs, the final single-ssd cache,
-/// and gradients. A random initial cache covers the chunked-prefill
+/// and gradients. A random initial cache covers the split-prefill
 /// continuity guarantee from any starting state (a zero-init split-vs-full test
 /// is a special case). The guard at the end confirms that the block uses the
 /// initial cache (and does not silently ignore it).

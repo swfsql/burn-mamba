@@ -10,7 +10,7 @@
 //!    ([`build_v_with_mimo`]).
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the state
 //!    ([`mimo_outer_sum`], SISO-branched).
-//! 5. [`split_trailing`]: removes an optional trailing segment from the
+//! 5. [`split_trailing`]: removes an optional trailing channel group from the
 //!    in-projection.
 //! 6. The lag arithmetic of the trapezoid tap: the shift, the gap transport,
 //!    the decay that a cached slot carries across a call boundary, and the
@@ -33,10 +33,10 @@ use burn_stack::modules::softplus;
 use burn::prelude::*;
 use burn::tensor::DType;
 
-/// Remove a **trailing** in-projection segment of `width` channels from
-/// `proj`. The segment is `None` when the block projects none.
+/// Remove a **trailing** in-projection channel group of `width` channels
+/// from `proj`. The group is `None` when the block projects none.
 ///
-/// It serves the segments that a block can omit: the tropical `(a, b)` and the
+/// It serves the channel groups that a block can omit: the tropical `(a, b)` and the
 /// Kalman noise ([`Mamba3::split_positive`](crate::mamba3::mamba3::Mamba3)),
 /// then the rotation channels
 /// ([`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
@@ -46,7 +46,7 @@ use burn::tensor::DType;
 ///
 /// An optional slice cannot be one more entry in the main `split_into`. Burn
 /// has no zero-width tensors, and `split_with_sizes` *drops* a zero-length
-/// segment instead of returning an empty one. The destructuring would then
+/// part instead of returning an empty one. The destructuring would then
 /// have one part too few.
 ///
 /// # Shapes

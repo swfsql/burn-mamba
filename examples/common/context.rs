@@ -447,11 +447,11 @@ pub fn context_use(logits_of: &LogitsFn, device: &Device, artifacts: &Path, n_st
          continuation {CONTINUATION} chars"
     );
     println!("  bits/char            own prompt  other (i+1)  other (i+2)   use (i+1)  use (i+2)");
-    let segments = [
+    let parts = [
         (format!("join (0..{JOIN})"), own[0].join, other[0].join, other2[0].join),
         (format!("far ({JOIN}..{CONTINUATION})"), own[0].far, other[0].far, other2[0].far),
     ];
-    for (name, own, other, other2) in segments {
+    for (name, own, other, other2) in parts {
         println!(
             "  {name:<18} {own:>12.4} {other:>12.4} {other2:>12.4}   {:>+9.4} {:>+10.4}",
             other - own,

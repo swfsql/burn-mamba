@@ -385,7 +385,7 @@ fn horizon_is_inert_without_autodiff() {
 }
 
 // ===========================================================================
-// 6. Chunked forward equals one long forward
+// 6. A split forward equals one long forward
 // ===========================================================================
 
 /// Splitting a sequence into two `forward` calls, carrying the first call's final
@@ -442,7 +442,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     };
     let grads_full = loss(y_full.clone(), &flat_full).backward();
 
-    // ---- two chunked calls, carrying the cache ----------------------------
+    // ---- two split calls, carrying the cache ------------------------------
     let head = x.clone().slice([0..BATCH, 0..head_len]);
     let tail = x.slice([0..BATCH, head_len..head_len + tail_len]);
     let (y1, mid) = layers.forward(head, None, path(), None, None);
@@ -452,12 +452,12 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
 
     assert!(
         max_rel_diff(y_split.clone(), y_full) < dtype_tol(1e-5),
-        "chunked output differs from the single call (horizon {horizon:?})",
+        "split output differs from the single call (horizon {horizon:?})",
     );
     for (i, (a, b)) in flat_full.iter().zip(&flat_split).enumerate() {
         assert!(
             max_rel_diff(b.clone(), a.clone()) < dtype_tol(1e-5),
-            "chunked final cache tensor {i} differs (horizon {horizon:?})",
+            "split final cache tensor {i} differs (horizon {horizon:?})",
         );
     }
 
@@ -468,10 +468,10 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
             vec![("block.in_proj.weight", &l.block.in_proj.weight)];
         for (name, p) in probes {
             let a = p.val().grad(&grads_full).expect("single-call grad");
-            let b = p.val().grad(&grads_split).expect("chunked grad");
+            let b = p.val().grad(&grads_split).expect("split grad");
             assert!(
                 max_rel_diff(b, a) < dtype_tol(1e-4),
-                "real layer {r}: {name} gradient differs between the chunked and \
+                "real layer {r}: {name} gradient differs between the split and \
                  the single call (horizon {horizon:?}) — the cache handed between \
                  calls is not carrying gradient the way one continuous call does",
             );
@@ -482,10 +482,10 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
             ("block.d_h", &l.block.d_h),
         ] {
             let a = p.val().grad(&grads_full).expect("single-call grad");
-            let b = p.val().grad(&grads_split).expect("chunked grad");
+            let b = p.val().grad(&grads_split).expect("split grad");
             assert!(
                 max_rel_diff(b, a) < dtype_tol(1e-4),
-                "real layer {r}: {name} gradient differs between the chunked and \
+                "real layer {r}: {name} gradient differs between the split and \
                  the single call (horizon {horizon:?})",
             );
         }

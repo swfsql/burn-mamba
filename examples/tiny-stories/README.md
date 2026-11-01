@@ -88,7 +88,7 @@ reset a cache.
 
 On CUDA, the decode `step`s replay from one captured graph (burn-stack's
 `CapturedStep`), and are not launched again. A model this small is bound by the
-host that enqueues its launches, not by the GPU. The prefill chunks of a prompt
+host that enqueues its launches, not by the GPU. The prefill windows of a prompt
 also replay, from one graph that every prompt shares. The text is the same in
 both modes. `--no-graph` runs both eagerly.
 

@@ -95,15 +95,15 @@
 //!
 //! ## How it is evaluated
 //!
-//! Not with a new kernel: the micro-steps fold into the **sequence**. The
-//! in-projection widens exactly the per-micro-step segments,
+//! Not with a new kernel: the micro-steps fold into the **write axis**. The
+//! in-projection widens exactly the per-micro-step channel groups,
 //!
 //! ```text
 //!   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]
 //! ```
 //!
-//! and [`unfold_micro_bs`] reads each `u`-wide segment as `u` consecutive
-//! sequence positions. So the SSD core, the trapezoid, the rotation scan, the
+//! and [`unfold_micro_bs`] reads each `u`-wide channel group as `u`
+//! consecutive write positions. So the SSD core, the trapezoid, the rotation scan, the
 //! chunking and the caches all run unchanged on a sequence of length
 //! `sequence · u`. Two placements make that exactly the recurrence above:
 //!
@@ -142,7 +142,8 @@
 //! every `u`. Like DeltaProduct, this buys transition expressiveness, not
 //! memory. The rotation accumulator holds the **last micro-step** of the last
 //! token, which is the position just before the first micro-step of the next
-//! call. So a chunked prefill splits at token boundaries, as at `u = 1`.
+//! call. So a prefill over several windows splits at token boundaries, as at
+//! `u = 1`.
 //!
 //! What `u > 1` does change is the taps of the trapezoid. They are now on the
 //! write axis, so they become a *choice*
@@ -163,7 +164,7 @@
 
 use burn::prelude::*;
 
-/// Fold a `u`-wide in-projection segment into the write axis.
+/// Fold a `u`-wide in-projection channel group into the write axis.
 ///
 /// The projection lays the micro-steps of a token out contiguously
 /// (`channel = j·width + c`), which is already the memory order of
@@ -179,7 +180,7 @@ pub fn unfold_micro_bs(t_bsW: Tensor<3>, micro_steps: usize) -> Tensor<3> {
     assert_eq!(
         fused % micro_steps,
         0,
-        "a per-micro-step segment is a multiple of micro_steps wide"
+        "a per-micro-step channel group is a multiple of micro_steps wide"
     );
     t_bsW.reshape([batch, sequence * micro_steps, fused / micro_steps])
 }
@@ -196,7 +197,7 @@ pub fn unfold_micro_b(t_bW: Tensor<2>, micro_steps: usize) -> Tensor<3> {
     assert_eq!(
         fused % micro_steps,
         0,
-        "a per-micro-step segment is a multiple of micro_steps wide"
+        "a per-micro-step channel group is a multiple of micro_steps wide"
     );
     t_bW.reshape([batch, micro_steps, fused / micro_steps])
 }

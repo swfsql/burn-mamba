@@ -1124,7 +1124,7 @@ fn rotor_block_forward_step_parity_mimo() {
     quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 1.0, 2);
 }
 
-/// Chunked-prefill continuity for Quaternion4D: a single `forward` over the full
+/// Split-prefill continuity for Quaternion4D: a single `forward` over the full
 /// sequence must equal a split `forward(prefix)` → `forward(suffix)` that threads
 /// the cache across the seam (exercises the cross-chunk quaternion carry at the
 /// block level).

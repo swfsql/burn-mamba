@@ -193,7 +193,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 /// float-summation-order noise.
 ///
 /// With `random_init = true` the shared initial cache is random rather than
-/// zero. Parity from an arbitrary initial state subsumes the chunked-prefill
+/// zero. Parity from an arbitrary initial state subsumes the split-prefill
 /// (split-vs-full) guarantee: if `forward` from any state matches the
 /// recurrent unrolling from that same state — outputs *and* final cache —
 /// then feeding a `forward`-produced cache back in continues correctly.
@@ -326,7 +326,7 @@ fn step_matches_forward_norm_before_gate_random_init() {
     );
 }
 
-// ── Chunked-prefill continuity (split vs full) ──────────────────────────
+// ── Split-prefill continuity (split vs full) ────────────────────────────
 
 /// One longer `forward` over the whole sequence equals two consecutive
 /// `forward` calls (prefix then suffix) that thread the returned cache (conv

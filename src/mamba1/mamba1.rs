@@ -375,7 +375,8 @@ impl Mamba1 {
     /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]. An optional `cache`
     /// supplies the initial convolution window and state (zeros when
     /// `None`). The function returns the updated cache, so a caller can process
-    /// a sequence in segments (prefill then decode, or chunked prefill).
+    /// a sequence in windows (prefill then decode, or a prefill over several
+    /// windows).
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) is right padding. A
     /// padded position is absent: it has `Δ = 0`, and each row reads its conv
@@ -421,8 +422,8 @@ impl Mamba1 {
             assert_eq!([batch, d_inner, sequence], conv_in_bis.dims());
 
             // Left-pad with the last (conv_kernel - 1) columns of the cached
-            // window so the convolution is strictly causal and continues a
-            // prior segment.
+            // window so the convolution is strictly causal and continues the
+            // previous window.
             let conv_in_padded = if conv_kernel >= 2 {
                 let tail = cache.conv_bik.clone().narrow(2, 1, conv_kernel - 1);
                 assert_eq!([batch, d_inner, conv_kernel - 1], tail.dims());

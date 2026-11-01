@@ -164,7 +164,7 @@ pub struct Run {
     /// larger than the chunk keeps the packing of a longer chunk, so a
     /// shorter chunk (less memory) trains on the same rows.
     pub pack_align: Option<usize>,
-    /// Whether decode steps and prefill chunks replay captured graphs
+    /// Whether decode steps and prefill windows replay captured graphs
     /// (`--no-graph` runs them eagerly).
     pub graphs: bool,
     /// `--max-vram`, in MiB: the cap of

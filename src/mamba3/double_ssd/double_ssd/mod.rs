@@ -139,13 +139,13 @@ impl Mamba3 {
         let bc_size = ngroups * state_rank * mimo_rank;
 
         // [batch, tokens, *] split along the channel dim. `u` = micro_steps
-        // widens every per-micro-step segment, and `unfold` reads each of them
-        // as `u` consecutive sequence positions. `z` (per-token gate) and `C`
+        // widens every per-micro-step channel group, and `unfold` reads each of
+        // them as `u` consecutive write positions. `z` (per-token gate) and `C`
         // (per-token read) do not widen.
         // b_raw_bsMGR / c_raw_btMGR have channel size `mimo_rank * ngroups * state_rank`.
-        // The three optional segments come off the tail first (`Real1D`
+        // The three optional channel groups come off the tail first (`Real1D`
         // projects no rotation, a one-tap pattern no `μ`, `TapPattern::None` no
-        // `λ`), because a zero-width segment would silently vanish from the
+        // `λ`), because a zero-width group would silently vanish from the
         // fixed-arity split below.
         let u = micro_steps;
         let (proj_bsd, rot_btA) =
@@ -678,10 +678,10 @@ mod step {
             let (proj_bd, noise_bH, tropical_bH) = self.split_positive(proj_bd, 1);
             let bc_size = ngroups * state_rank * mimo_rank;
             // [batch, *] split along the channel dim. The per-micro-step
-            // segments are `u` times as wide and go onto their own `u` axis,
-            // as the fold into the sequence does in `forward`.
+            // channel groups are `u` times as wide and go onto their own `u`
+            // axis, as the fold into the write axis does in `forward`.
             // b_raw_bMGR / c_raw_bMGR have channel size `mimo_rank * ngroups * state_rank`.
-            // See the note in `forward`: the three trailing segments are the
+            // See the note in `forward`: the three trailing channel groups are the
             // optional ones (`Real1D` projects no rotation, a one-tap pattern
             // no `μ`, `TapPattern::None` no `λ`).
             let (proj_bd, rot_bA) =
