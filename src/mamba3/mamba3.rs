@@ -328,7 +328,7 @@ pub struct Mamba3 {
     /// it.
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
-    /// `ln κₕ`, the per-head noise scale of the Kalman gate (`qₜ = κₕ·Δₜ`, see
+    /// `ln κₕ`, the per-head noise scale of the Kalman gain (`qₜ = κₕ·Δₜ`, see
     /// [`crate::mamba3::positive`]). `−∞` is the stock block.
     /// Shape: `[nheads]`. `None` under [`Gain::Projected`].
     ///
@@ -560,7 +560,7 @@ impl Mamba3 {
         (proj, noise, tropical)
     }
 
-    /// What the Kalman gate reads in addition to the discretisation. `None`
+    /// What the Kalman gain reads in addition to the discretisation. `None`
     /// under [`Gain::Projected`]. `carry_bh` is the `ln Λ` of the cache.
     /// `packed` marks the resets of a packed call, where each segment starts
     /// from the `ln Λ` of the origin.
@@ -867,7 +867,7 @@ pub enum Mamba3Untied {
     /// The learnable initial state [`Mamba3::init_state_hpr`]
     /// (`has_learnable_init_state`).
     InitState,
-    /// The `ln κ` of the Kalman gate, [`Mamba3::kalman_log_kappa_h`] (a
+    /// The `ln κ` of the Kalman gain, [`Mamba3::kalman_log_kappa_h`] (a
     /// Kalman [`Gain`]).
     KalmanKappa,
     /// The Kalman read exponent [`Mamba3::kalman_read_h`] (a Kalman [`Gain`]).
@@ -1456,7 +1456,7 @@ impl Mamba3Config {
         );
         assert!(
             self.gain.is_kalman() || !unties(Mamba3Untied::KalmanKappa),
-            "Mamba3Untied::KalmanKappa unties the Kalman gate's κ, and the gain is Gain::Projected"
+            "Mamba3Untied::KalmanKappa unties the κ of the Kalman gain, and the gain is Gain::Projected"
         );
         assert!(
             self.gain.is_kalman() || !unties(Mamba3Untied::KalmanRead),

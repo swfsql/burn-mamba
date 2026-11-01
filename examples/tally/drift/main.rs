@@ -6,7 +6,7 @@
 //! while nothing is observed.
 //!
 //! The optimal ageing is `Λ ← Λ/(1 + k·q·Λ)`: hyperbolic in the number of gap
-//! tokens, and saturating in the evidence held. A Kalman gate computes exactly
+//! tokens, and saturating in the evidence held. A Kalman gain computes exactly
 //! this, and a projected decay (`αᵏ·Λ`, a product of the two) cannot. It is the
 //! **modest** rung of the ladder, and it is reported as such on purpose. A
 //! stock block with a second head and its per-token gate gets within a few

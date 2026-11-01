@@ -1,4 +1,4 @@
-//! The Kalman gate: a per-head precision `Λ`, scanned from the inputs, and the
+//! The Kalman gain: a per-head precision `Λ`, scanned from the inputs, and the
 //! decay it computes (see the module header one level up):
 //!
 //! ```text
@@ -37,7 +37,7 @@ use burn::prelude::*;
 use burn::tensor::DType;
 use burn_stack::modules::softplus;
 
-/// What the gate reads in addition to the discretisation: the per-head `ln κ`,
+/// What the gain reads in addition to the discretisation: the per-head `ln κ`,
 /// the projected noise (if any) and the carried `ℓ`.
 pub struct GainInput {
     /// `ln κₕ`, `[nheads]`. `−∞` is the stock block.
@@ -54,7 +54,7 @@ pub struct GainInput {
     pub restart: Option<scan::Restart>,
 }
 
-/// The per-position quantities of the gate.
+/// The per-position quantities of the gain.
 pub struct GainOutput {
     /// `ln dₜ`, which replaces `Δₜ·Aₜ` wherever the block reads a log-decay.
     pub da_bsh: Tensor<3>,
@@ -186,12 +186,12 @@ fn elements(da_bsh: &Tensor<3>, ln_q_bsh: &Tensor<3>, masses: &LogMasses) -> Mob
     Mobius { m00, m01, m10, m11 }
 }
 
-/// Run the gate over a folded run of positions (the whole sequence in
+/// Run the gain over a folded run of positions (the whole sequence in
 /// `forward`, the `u` micro-steps of one token in `step`).
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, len, nheads]`, the stock `Δ·A`
-pub fn gate(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutput {
+pub fn gain(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutput {
     let [batch, len, nheads] = da_bsh.dims();
     let ln_q = input.log_kappa_h.clone().unsqueeze::<3>() + masses.dt_bsh.clone();
     let ln_q = match &input.noise_bsh {

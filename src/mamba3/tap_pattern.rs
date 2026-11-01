@@ -151,7 +151,7 @@ pub enum TapPattern {
     /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`**,
     /// this tap has no exact filter form. Its installment arrives `u` steps
     /// late, after `u − 1` predicts that a filter would have made with it. The
-    /// gate counts it as a lag-1 installment, so `Λ` over-estimates the weight
+    /// gain counts it as a lag-1 installment, so `Λ` over-estimates the weight
     /// that the plant wrote, and `η/Λ` is only approximately its weighted mean.
     /// The block still runs, and its pathways still agree. The lag-1 patterns
     /// are exact ([`crate::mamba3::positive::kalman`]).

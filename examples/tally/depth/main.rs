@@ -26,7 +26,7 @@ pub mod dataset;
 /// The example's `model_config()`.
 pub mod model;
 
-/// The hand-built solution and the stock-gate sweep.
+/// The hand-built solution and the stock-decay sweep.
 #[cfg(test)]
 pub mod tests;
 

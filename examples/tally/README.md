@@ -12,7 +12,7 @@ climbs what is **beside** it:
 | rung | what it asks for | the system it needs | measured |
 |---|---|---|---|
 | [`tally-depth`](#tally-depth) | count with a floor | a tropical register, `Tropical::MaxPlus` | needed: trained stock reaches 83% |
-| [`tally-drift`](#tally-drift) | age evidence by how much of it there is | a Kalman gate, `Gain::KalmanProjectedNoise` | needed: the best stock arm measured reaches 90.7%, trained 83.8% |
+| [`tally-drift`](#tally-drift) | age evidence by how much of it there is | a Kalman gain, `Gain::KalmanProjectedNoise` | needed: the best stock arm measured reaches 90.7%, trained 83.8% |
 | [`tally-record`](#tally-record) | hold a running maximum over a **wide** alphabet | the same register, for its range | needed at 12 values: trained stock reaches 90.1%, the register 95.4% at equal budget |
 
 The (max, +) semiring of the register buys two things, and neither is the
@@ -153,7 +153,7 @@ family* column.
 | | random | floor | deep | worst |
 |---|---|---|---|---|
 | best per-symbol lookup (no memory) | 78.6% | 74.6% | 72.4% | 72.4% |
-| best **selective gate**, register off (8 decays × 3 writes × 9 thresholds) | 91.9% | 96.1% | 98.5% | **86.5%** |
+| best **selective decay**, register off (8 decays × 3 writes × 9 thresholds) | 91.9% | 96.1% | 98.5% | **86.5%** |
 | trained, register off (`-- --stock`), 80 epochs | 95.7% | 98.5% | 83.1% | **83.1%** |
 | **hand-built** register block, no training | **100%** | **100%** | **100%** | **100%** |
 | trained, 80 epochs | **100%** | **100%** | **100%** | **100%** |
@@ -188,7 +188,7 @@ and the register is the whole model.
 
 ## tally-drift
 
-The rung of the Kalman gate. Its answer is a **measurement, not a wall**. The
+The rung of the Kalman gain. Its answer is a **measurement, not a wall**. The
 model reads 33 values (from `−2` to `+2` in steps of `1/8`) and a gap symbol
 `~`. At every value, it reports whether the value is **above the running
 estimate of the level**. The level is a random walk that moves only during
@@ -219,7 +219,7 @@ discount geometrically, `αᵏ·Λ`: a *product* of the two quantities, where th
 filter has a sum of their reciprocals. (The script's §3.7 puts the best
 geometric fit at a relative error of 0.89.)
 
-The gate computes the filter exactly, because the recurrence of the gate
+The gain computes the filter exactly, because the recurrence of the gain
 **is** the filter: `dₜ = αₜ/(1 + qₜ·αₜ·Λₜ₋₁)`. The construction uses `Δ = 1`,
 `q ≈ 0` at a value (evidence, no doubt), and `Δ ≈ 0`, `q = q_gap` at a gap
 (doubt, no evidence). `Gain::KalmanProjectedNoise` exists for this separation.
@@ -254,14 +254,14 @@ that the estimate decides.
 | best per-symbol lookup (no memory) | 78.3% | 78.1% | 79.5% | 66.0% | 66.0% |
 | the join at **`κ = 0`** (the same block and read, projected decay; 11 gap decays) | 98.9% | 99.2% | 99.2% | 90.7% | **90.7%** |
 | best **linear (sum, count) + the cross-multiplication of the gate** (f64; 11 × 11 × 5) | 98.9% | 99.0% | 99.3% | 93.0% | **93.0%** |
-| trained, gate off (`-- --stock`), 1000 batches | 95.1% | 94.6% | 95.0% | 83.8% | **83.8%** |
+| trained, gain off (`-- --stock`), 1000 batches | 95.1% | 94.6% | 95.0% | 83.8% | **83.8%** |
 | trained, 1000 batches | 98.7% | 98.2% | 98.2% | 91.8% | **91.8%** |
 | **hand-built** Kalman block, no training | **100%** | **100%** | **100%** | **100%** | **100%** |
 
 Read the `knife` column. The estimate decides its scored positions. The other
 columns show that an ordinary stream does not measure this at all. On `knife`:
 
-- the gate is exact,
+- the gain is exact,
 - the best projected decay reaches 90.7%,
 - the best linear state that cross-multiplies reaches 93.0%,
 - the two trained arms are 8 points apart at equal budget.

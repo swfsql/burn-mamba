@@ -3,8 +3,8 @@
 //! 1. A **hand-built** block solves the task exactly. Every weight is written
 //!    in closed form, nothing is fitted, and the state of the plant is unused:
 //!    one tropical register per head is the whole solution.
-//! 2. The **same block without the register** cannot, for any selective gate on
-//!    a grid. A linear recurrence has no floor. A multiplicative decrement (a
+//! 2. The **same block without the register** cannot, for any selective decay
+//!    on a grid. A linear recurrence has no floor. A multiplicative decrement (a
 //!    trick that a stock block can find) never reaches zero, so it fails
 //!    exactly where the depth comes back to zero.
 //! 3. The current symbol does not solve the task. The *unclamped* sum (what any
@@ -55,7 +55,7 @@ const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
 ];
 
 /// Which arm to build: the register, or the same block without it and with a
-/// selective gate instead.
+/// selective decay instead.
 #[derive(Clone, Copy, Debug)]
 enum Arm {
     /// The construction of the rung: one tropical register, no plant state.
@@ -212,7 +212,7 @@ fn handmade_register_solves_every_family() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. no selective gate reaches it
+// 2. no selective decay reaches it
 // ---------------------------------------------------------------------------
 
 /// The same block **without** the register (`Tropical::None`, the one changed
@@ -225,7 +225,7 @@ fn handmade_register_solves_every_family() {
 /// `deep` family defeats it. (After a deep excursion, the decayed surplus looks
 /// the same as an empty stack.)
 #[test]
-fn no_stock_gate_solves_the_task() {
+fn no_stock_decay_solves_the_task() {
     let device = test_device();
     let alphas = [1.0, 0.95, 0.9, 0.8, 0.7, 0.6, 0.5, 0.3];
     let writes = [-1.0, -0.5, 0.0];
@@ -266,7 +266,7 @@ fn no_stock_gate_solves_the_task() {
     println!("best worst-family accuracy over the whole sweep: {:.2}%", 100.0 * best_worst);
     assert!(
         best_worst < 0.95,
-        "a selective gate reached {best_worst:.4} — the task does not need the register"
+        "a selective decay reached {best_worst:.4} — the task does not need the register"
     );
 }
 

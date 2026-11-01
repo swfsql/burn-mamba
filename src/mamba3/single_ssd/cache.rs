@@ -120,7 +120,7 @@ pub struct Mamba3SingleSsdCache {
     /// move it across), so the two caches convert by field identity.
     pub rotation: RotationState,
 
-    /// **The log-precision of the Kalman gate**, `ln Λ` after the last position
+    /// **The log-precision of the Kalman gain**, `ln Λ` after the last position
     /// (the same value as
     /// [`Mamba3DoubleSsdCache::log_precision_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::log_precision_bh)).
     ///

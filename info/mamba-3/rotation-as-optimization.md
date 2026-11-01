@@ -598,8 +598,9 @@ The ridge step is per token, because the `u` corrective steps share one
 interval (§7). `β` is per micro-step, because there are `u` of them. The two
 are independent. The phase of the decay acts on every plane, and the phase of
 the erase acts only in the plane that its own key spans. So for `n ≥ 2`, no
-single decay phase with real erase gates can reproduce a token with two erase
-phases. Each phase already uses an existing gate at the correct rate, so
+single decay phase with a real erase step `β` can reproduce a token with two
+erase phases. Each phase already uses an existing step size at the correct
+rate, so
 neither needs a configuration knob.
 
 The ladder `ℝ ⊂ ℂ ⊂ ℍ` is uniform. This is worth a record, because it is why

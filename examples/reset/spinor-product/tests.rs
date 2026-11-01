@@ -1004,7 +1004,7 @@ impl ChF {
     }
     /// A channel that reads the flag alone: `hold` everywhere, plus `reset` on a
     /// token that resets.
-    fn gate(hold: f64, reset: f64) -> Self {
+    fn flag(hold: f64, reset: f64) -> Self {
         ChF {
             elem: [hold; NUM_CLASSES],
             reset,
@@ -1032,7 +1032,7 @@ fn channels_composed() -> Vec<ChF> {
     chs.extend([ChF::konst(Z_PRE); D_INNER]);
     // x: the first value channel of head h writes if the token resets
     for _h in 0..N {
-        chs.push(ChF::gate(0.0, X_WRITE));
+        chs.push(ChF::flag(0.0, X_WRITE));
         chs.push(ChF::konst(0.0));
     }
     // B: the element on which the token ends, component by component
@@ -1050,7 +1050,7 @@ fn channels_composed() -> Vec<ChF> {
         })); N],
     );
     // A: the flattest hold that the block allows. A reset wipes.
-    chs.extend([ChF::gate(A_HOLD_RAW, -A_HOLD_RAW + softplus_inv(A_WIPE)); N]);
+    chs.extend([ChF::flag(A_HOLD_RAW, -A_HOLD_RAW + softplus_inv(A_WIPE)); N]);
     // λ: as everywhere else, the block writes only the current step
     chs.extend([ChF::konst(LAMBDA_RAW); N]);
     // rotation: the generator of the product of the token, per head

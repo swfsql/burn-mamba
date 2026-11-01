@@ -1,4 +1,4 @@
-# Gate as Positive System
+# Gain as Positive System
 
 ### What a second, input-only scalar recurrence buys a Mamba-3 block, and what it does not
 
@@ -233,7 +233,7 @@ and `ν = 0`, and this is the element of §3.
 
 A **lag-`u`** tap (the `Vertical*` patterns at `u > 1`) is transported across
 its whole gap, `∏ d` over `u` steps. That product reads `u` earlier
-precisions, and no 2×2 map does that. The gate adds it like a lag-1
+precisions, and no 2×2 map does that. The gain adds it like a lag-1
 installment and over-counts by `νₜ·(dₜ − ∏ d)`. So `Λ` is an upper bound of
 the weight of the plant, not equal to it.
 

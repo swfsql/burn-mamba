@@ -1,5 +1,5 @@
 //! The model configuration for tally-drift: the plant of `reset-majority`, with
-//! a **Kalman gate** on its decay. The precision `Λ` of the block decides how
+//! a **Kalman gain** on its decay. The precision `Λ` of the block decides how
 //! much of the past survives a gap.
 //!
 //! ```ignore

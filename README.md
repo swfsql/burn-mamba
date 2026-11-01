@@ -41,7 +41,7 @@ Each generation in this crate builds on the one before:
   **complex-valued** state transition (a data-dependent rotation beside the
   scalar decay), and multi-input/multi-output (MIMO) state. This crate adds
   **MambaProduct** (`micro_steps` recurrence steps per token) and optional
-  **positive systems** beside the recurrence (a Kalman gate, a max-plus
+  **positive systems** beside the recurrence (a Kalman gain, a max-plus
   register).
 
 The paper calls the rotation of Mamba-3 *data-dependent RoPE*. Despite that
@@ -240,7 +240,7 @@ synthetic or canonical data (see [`examples/README.md`](examples/README.md)):
   hand-built exact solution and the ablations that separate it from the rung
   below.
 - **[`tally-*`](examples/tally/)**: a ladder for the positive systems beside
-  the recurrence (the max-plus register and the Kalman gate).
+  the recurrence (the max-plus register and the Kalman gain).
 - **`mnist-class`**: a Mamba-3 classifier that reads each MNIST image as a
   sequence of pixels.
 - **`mnist-ae`** (work in progress): a bidirectional Mamba-3 autoencoder over a
@@ -294,8 +294,8 @@ launches per case and writes [`kernels.md`](kernels.md).
     chunk-length schedule.
 
   And one note on what this crate adds beside the plant:
-  - **[Gate as Positive System](info/kalman/gate-as-positive-system.md)**: the
-    Kalman gate and the max-plus register. One log-semiring scan, the ceiling
+  - **[Gain as Positive System](info/kalman/gate-as-positive-system.md)**: the
+    Kalman gain and the max-plus register. One log-semiring scan, the ceiling
     and contraction of the computed decay, and what a classifier gets for free.
 - Contributors: `CLAUDE.md` maps the structure and conventions of the
   repository, and points to the rest of the docs.

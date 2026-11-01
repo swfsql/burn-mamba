@@ -3,7 +3,7 @@
 //! 1. **The scan**: `lse` is exact beside [`LOG_ZERO`] and splits a tie; the
 //!    doubling [`scan::prefix`] is the sequential [`scan::fold`], in values and
 //!    gradients; the projective read ignores a common shift.
-//! 2. **The members against their textbook recursions**, in f64: the gate is
+//! 2. **The members against their textbook recursions**, in f64: the gain is
 //!    the covariance-form Kalman filter (and `η/Λ` its mean), and under a
 //!    trapezoid the plant's own recurrence on ones; the register is the hard
 //!    max-plus recursion to within `ln(t + 1)`.
@@ -155,8 +155,8 @@ fn projective_read_ignores_a_common_shift() {
 // 2. The members against their textbook recursions
 // ---------------------------------------------------------------------------
 
-/// A random run of discretisations and gate inputs: `(Δ, ln α, ln κ, r, ℓ₀)`.
-struct GateCase {
+/// A random run of discretisations and gain inputs: `(Δ, ln α, ln κ, r, ℓ₀)`.
+struct GainCase {
     dt: Tensor<3>,
     da: Tensor<3>,
     log_kappa: Tensor<1>,
@@ -164,11 +164,11 @@ struct GateCase {
     carry: Tensor<2>,
 }
 
-fn gate_case(batch: usize, len: usize, device: &Device) -> GateCase {
+fn gain_case(batch: usize, len: usize, device: &Device) -> GainCase {
     let nheads = 3;
     let dt = uniform([batch, len, nheads], 0.05, 2.0, device);
     let da = dt.clone() * -uniform([batch, len, nheads], 0.01, 1.5, device);
-    GateCase {
+    GainCase {
         dt,
         da,
         log_kappa: Tensor::from_floats([0.05f32.ln(), 0.5f32.ln(), 3.0f32.ln()], device),
@@ -177,10 +177,10 @@ fn gate_case(batch: usize, len: usize, device: &Device) -> GateCase {
     }
 }
 
-/// The gate with no trapezoid split (`γ = Δ`, no `ν`): the textbook filter.
-fn run_gate(case: &GateCase, carry: Tensor<2>) -> kalman::GainOutput {
+/// The gain with no trapezoid split (`γ = Δ`, no `ν`): the textbook filter.
+fn run_gain(case: &GainCase, carry: Tensor<2>) -> kalman::GainOutput {
     let ln_dt = case.dt.clone().log();
-    kalman::gate(
+    kalman::gain(
         case.da.clone(),
         LogMasses {
             dt_bsh: ln_dt.clone(),
@@ -196,17 +196,17 @@ fn run_gate(case: &GateCase, carry: Tensor<2>) -> kalman::GainOutput {
     )
 }
 
-/// The gate is the scalar Kalman filter of a random walk observed through the
+/// The gain is the scalar Kalman filter of a random walk observed through the
 /// token's write, `a² = 1/α`, `q = κ·Δ·eʳ`, `r = 1/Δ`, written in covariance
 /// form in f64: `Λₜ = 1/Pₜ` and the log-decay `ln dₜ`, at every position. The
 /// same loop checks the information-form identity the plant relies on — the
 /// state `η` updated by `dₜ` divided by `Λ` is the filter's mean.
 #[test]
-fn gate_matches_the_covariance_form_filter() {
+fn gain_matches_the_covariance_form_filter() {
     let device = test_device();
     let (batch, len, nheads) = (2, 24, 3);
-    let case = gate_case(batch, len, &device);
-    let out = run_gate(&case, case.carry.clone());
+    let case = gain_case(batch, len, &device);
+    let out = run_gain(&case, case.carry.clone());
 
     let (dt, da, kappa, noise, carry) = (
         floats(case.dt.clone()),
@@ -259,7 +259,7 @@ fn gate_matches_the_covariance_form_filter() {
 
     // A fresh start holds no evidence: the first decay is stock's, and the first
     // precision is the first mass.
-    let fresh = run_gate(&case, case.carry.full_like(LOG_ZERO));
+    let fresh = run_gain(&case, case.carry.full_like(LOG_ZERO));
     let first = |t: Tensor<3>| t.narrow(1, 0, 1);
     assert_eq!(max_abs_diff(first(fresh.da_bsh), first(case.da.clone())), 0.0);
     assert!(max_abs_diff(first(fresh.log_precision_bsh), first(case.dt.clone().log())) < dtype_tol(1e-5));
@@ -390,13 +390,13 @@ fn register_tracks_max_plus_within_its_log_bound() {
 // 3. Invariants
 // ---------------------------------------------------------------------------
 
-/// `Λₜ < 1/qₜ + γₜ` (here `γ = Δ`) whatever came before, and `dₜ ≤ αₜ`: the gate can add
+/// `Λₜ < 1/qₜ + γₜ` (here `γ = Δ`) whatever came before, and `dₜ ≤ αₜ`: the gain can add
 /// forgetting, never remove it.
 #[test]
 fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
     let device = test_device();
-    let case = gate_case(3, 40, &device);
-    let out = run_gate(&case, case.carry.clone() + 5.0);
+    let case = gain_case(3, 40, &device);
+    let out = run_gain(&case, case.carry.clone() + 5.0);
     let q = case.log_kappa.clone().unsqueeze::<3>().exp() * case.dt.clone() * case.noise.clone().exp();
     let ceiling = q.recip() + case.dt.clone();
     // `Λ = exp(ℓ)`: the relative error of `Λ` is the absolute error of `ℓ`.
@@ -414,9 +414,9 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
 fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
     let device = test_device();
     let (batch, len, nheads) = (2, 30, 3);
-    let case = gate_case(batch, len, &device);
-    let a = floats(run_gate(&case, case.carry.clone()).log_precision_bsh);
-    let b = floats(run_gate(&case, case.carry.clone() - 4.0).log_precision_bsh);
+    let case = gain_case(batch, len, &device);
+    let a = floats(run_gain(&case, case.carry.clone()).log_precision_bsh);
+    let b = floats(run_gain(&case, case.carry.clone() - 4.0).log_precision_bsh);
     let (dt, kappa, noise) = (
         floats(case.dt.clone()),
         floats(case.log_kappa.clone().exp()),
@@ -442,7 +442,7 @@ fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
 
 /// A mass that underflows to `0` — `Δ` past softplus's range (≈ −104 of
 /// pre-activation in f32, ≈ −17 in f16) or a saturated `λ` — leaves the
-/// gradient finite, in both dtypes: the gate's masses are logs of
+/// gradient finite, in both dtypes: the gain's masses are logs of
 /// pre-activations, never `ln` of a zero.
 #[test]
 fn an_underflowing_mass_keeps_the_gradient_finite() {
@@ -455,7 +455,7 @@ fn an_underflowing_mass_keeps_the_gradient_finite() {
         let lift = |v: [f32; 7]| Param::from_tensor(on(Tensor::<1>::from_floats(v, &ad).reshape([1, 7, 1])));
         let (x, l) = (lift(dt_raw), lift(lambda_raw));
         let masses = LogMasses::new(x.val(), (0.0, 6.5504e4), Some(l.val()), None);
-        let out = kalman::gate(
+        let out = kalman::gain(
             on(Tensor::full([1, 7, 1], -0.5, &ad)),
             masses,
             GainInput {

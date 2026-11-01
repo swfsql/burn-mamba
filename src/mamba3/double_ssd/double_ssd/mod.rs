@@ -623,7 +623,7 @@ mod step {
         /// `Δ` `[batch, u, nheads]`.
         pub dt_buh: Tensor<3>,
         /// The log-decay `[batch, u, nheads]`: `Δ·A`, or the decay that the
-        /// Kalman gate computes (`helpers::TrapezoidCoeffs::da`). The transport
+        /// Kalman gain computes (`helpers::TrapezoidCoeffs::da`). The transport
         /// of the block (within it, and into the tap slots it leaves) is a
         /// product of `α`s, so a sum of these.
         pub da_buh: Tensor<3>,

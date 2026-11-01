@@ -111,7 +111,7 @@ def check_semiring():
 # ---------------------------------------------------------------------------
 
 
-def gate(alpha, m, q, lam0=0.0, targets=None):
+def gain(alpha, m, q, lam0=0.0, targets=None):
     """The information-form recurrence; returns (d, Lambda, eta)."""
     lam, eta = lam0, 0.0
     ds, lams, etas = [], [], []
@@ -134,7 +134,7 @@ def check_kalman():
 
     # 3.1 The information form is the covariance-form Kalman filter of a random
     # walk with process noise q/(a^2 scaling) observed with precision m.
-    d, lam, eta = gate(alpha, m, q, lam0=1.3, targets=targets)
+    d, lam, eta = gain(alpha, m, q, lam0=1.3, targets=targets)
     p, mean = 1 / 1.3, 0.0
     cov_lam, cov_mean = [], []
     for t in range(n):
@@ -164,23 +164,23 @@ def check_kalman():
     ok("3.2 the Möbius matrix generates the precision", close(by_matrix, lam, 1e-8))
 
     # 3.3 Containment: kappa = 0 is the projected decay, bit for bit.
-    d0, _, _ = gate(alpha, m, np.zeros(n), lam0=1.3)
+    d0, _, _ = gain(alpha, m, np.zeros(n), lam0=1.3)
     ok("3.3 q = 0 ⇒ d = alpha exactly", np.array_equal(d0, alpha))
 
     # 3.4 The ceiling, whatever the history.
-    _, lam_hi, _ = gate(alpha, m, q, lam0=1e6)
+    _, lam_hi, _ = gain(alpha, m, q, lam0=1e6)
     ok("3.4 Lambda[t] < 1/q[t] + m[t] from any start", bool(np.all(lam_hi < 1 / q + m)))
 
     # 3.5 Birkhoff: the contraction rate has no alpha in it.
-    _, lam_a, _ = gate(alpha, m, q, lam0=0.5)
-    _, lam_b, _ = gate(alpha, m, q, lam0=50.0)
+    _, lam_a, _ = gain(alpha, m, q, lam0=0.5)
+    _, lam_b, _ = gain(alpha, m, q, lam0=50.0)
     dist = np.abs(np.log(lam_a) - np.log(lam_b))
     bound = np.abs(np.log(0.5) - np.log(50.0)) * np.cumprod(np.tanh(0.25 * np.log1p(1 / (q * m))))
     ok("3.5 the Hilbert distance contracts at the Birkhoff rate", bool(np.all(dist <= bound + 1e-12)))
 
     # 3.6 Gain collapse is what the ceiling prevents: at q = 0 and alpha = 1 the
     # head stops writing, the gain falling like 1/t.
-    _, lam_flat, _ = gate(np.ones(n), np.ones(n), np.zeros(n))
+    _, lam_flat, _ = gain(np.ones(n), np.ones(n), np.zeros(n))
     ok("3.6 q = 0, alpha = 1 ⇒ the gain collapses like 1/t", close(1 / lam_flat, 1 / np.arange(1, n + 1)))
 
     # 3.7 Hyperbolic vs geometric ageing: no single (alpha, scale) fits the
@@ -198,8 +198,8 @@ def check_kalman():
     ok("3.7 a geometric discount cannot be the filter's", best > 0.3)
 
 
-def gate_split(alpha, gamma, nu, q, lam0=0.0):
-    """§3.9: the gate under a trapezoid split; returns (d, Lambda)."""
+def gain_split(alpha, gamma, nu, q, lam0=0.0):
+    """§3.9: the gain under a trapezoid split; returns (d, Lambda)."""
     lam = lam0
     ds, lams = [], []
     for t in range(len(alpha)):
@@ -235,19 +235,19 @@ def check_split():
     ])
     ok("3.9 shift by nu, predict, shift by gamma is one Möbius matrix", close(composed, entries))
 
-    d, lam = gate_split(alpha, gamma, nu, q, lam0=1.3)
+    d, lam = gain_split(alpha, gamma, nu, q, lam0=1.3)
     s = np.array([np.log(1.3), 0.0])
     by_matrix = []
     for t in range(n):
         s = log_apply(np.log(entries[t]), s)
         by_matrix.append(np.exp(s[0] - s[1]))
-    ok("3.9 ...and its scan is the gate's precision", close(by_matrix, lam, 1e-8))
+    ok("3.9 ...and its scan is the gain's precision", close(by_matrix, lam, 1e-8))
 
     # 3.9 The plant pays sample t-1's left installment at step t, transported by
     # d[t] (beta = nu*d); every weight then decays by d. Bookkeeping per sample
     # from a fresh start (sample -1 is the cache's tap slot) gives Lambda as the
     # total weight and eta/Lambda as the weighted mean of what was written.
-    d, lam = gate_split(alpha, gamma, nu, q)
+    d, lam = gain_split(alpha, gamma, nu, q)
     values = RNG.normal(size=n + 1)  # values[s + 1] is sample s
     weights = np.zeros(n + 1)
     eta = 0.0
@@ -265,16 +265,16 @@ def check_split():
     # 3.9 The ceiling holds with gamma in m's place; the contraction bound
     # tanh(1/4 ln(1 + 1/(q*gamma))) stays alpha-free (the exact rate uses
     # gamma + alpha*nu*(1 + q*gamma) >= gamma).
-    _, lam_hi = gate_split(alpha, gamma, nu, q, lam0=1e6)
+    _, lam_hi = gain_split(alpha, gamma, nu, q, lam0=1e6)
     ok("3.9 Lambda[t] < 1/q[t] + gamma[t] from any start", bool(np.all(lam_hi < 1 / q + gamma)))
-    _, lam_a = gate_split(alpha, gamma, nu, q, lam0=0.5)
-    _, lam_b = gate_split(alpha, gamma, nu, q, lam0=50.0)
+    _, lam_a = gain_split(alpha, gamma, nu, q, lam0=0.5)
+    _, lam_b = gain_split(alpha, gamma, nu, q, lam0=50.0)
     dist = np.abs(np.log(lam_a) - np.log(lam_b))
     bound = np.abs(np.log(0.5) - np.log(50.0)) * np.cumprod(np.tanh(0.25 * np.log1p(1 / (q * gamma))))
     ok("3.9 the contraction is at least tanh(1/4 ln(1 + 1/(q*gamma)))", bool(np.all(dist <= bound + 1e-12)))
 
     # 3.9 A lag-u tap is transported across its whole gap, which no 2x2 map can
-    # read; the gate enters it like a lag-1 one and over-counts, never under.
+    # read; the gain enters it like a lag-1 one and over-counts, never under.
     lag = 3
     w = 0.0
     over, strict = True, False
@@ -361,7 +361,7 @@ def check_ports():
     m = np.array([1.0, 1.0, 1.0, 0.0, 0.0, 1.0])
     q = np.array([0.0, 0.0, 0.0, 0.5, 0.5, 0.0])
     targets = np.array([1.0, 2.0, 0.0, 0.0, 0.0, -1.0])
-    _, lam, eta = gate(alpha, m, q, targets=targets)
+    _, lam, eta = gain(alpha, m, q, targets=targets)
     est = eta / lam
     ok("5.2 a gap leaves the estimate unchanged", close(est[2], est[4]))
     ok("5.2 …and lowers the weight behind it", bool(lam[4] < lam[2]))

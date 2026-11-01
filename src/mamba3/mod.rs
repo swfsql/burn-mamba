@@ -59,7 +59,7 @@
 //! [`positive`](crate::mamba3::positive) adds a per-head scalar system. It
 //! reads only the inputs and sets the coefficients of the plant:
 //!
-//! - a Kalman gate ([`Gain`](crate::mamba3::positive::Gain)) *computes* the
+//! - a Kalman gain ([`Gain`](crate::mamba3::positive::Gain)) *computes* the
 //!   decay from an accumulated precision,
 //! - a soft max-plus register ([`Tropical`](crate::mamba3::positive::Tropical))
 //!   adds to the readout.

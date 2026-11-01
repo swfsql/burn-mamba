@@ -128,9 +128,9 @@ pub struct Mamba3DoubleSsdCache {
     /// streaming.
     pub rotation: RotationState,
 
-    /// **The log-precision of the Kalman gate**, `ln Λ` after the last
+    /// **The log-precision of the Kalman gain**, `ln Λ` after the last
     /// position ([`crate::mamba3::positive::kalman`]): the evidence that the
-    /// head holds, from which the gate computes the decay of the next position.
+    /// head holds, from which the gain computes the decay of the next position.
     ///
     /// [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO) (`Λ = 0`) for a fresh
     /// sequence. `None` under [`Gain::Projected`].

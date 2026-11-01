@@ -24,7 +24,7 @@
 //! That discount is hyperbolic in `k` and **saturating** in `Λ`. After a long
 //! run, the past is worth `1/(k·q)` votes, however long the run was. A linear
 //! recurrence can discount only geometrically (`αᵏ·Λ`, a product of the two).
-//! That is why the Kalman gate computes this. It is also why the difference
+//! That is why the Kalman gain computes this. It is also why the difference
 //! between the arms is a few points, not a large margin: over a narrow range
 //! of `k`, the two curves are close. See `examples/tally/README.md`.
 
@@ -171,7 +171,7 @@ pub fn gen_straddle(rng: &mut Rng, len: usize) -> Vec<usize> {
 /// factor. So it changes how much the past is **worth**, but not the estimate
 /// itself: every arm agrees right after a gap. The disagreement appears when
 /// new evidence is blended in. `S = (w·S_prev + x)/(w + 1)` moves by an amount
-/// that only the weight `w` of the prior sets. The Kalman gate computes that
+/// that only the weight `w` of the prior sets. The Kalman gain computes that
 /// weight, and a projected decay only approximates it. The probes then land
 /// between the two answers.
 pub fn gen_knife(rng: &mut Rng, len: usize) -> Vec<usize> {

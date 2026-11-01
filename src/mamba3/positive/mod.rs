@@ -1,4 +1,4 @@
-//! # Positive systems that set the gate
+//! # Positive systems that set the gain
 //!
 //! A Mamba-3 head is a linear **parameter-varying** plant. Its transition,
 //! write and read are linear in the state, with coefficients `ρₜ = g(uₜ)` that
@@ -34,7 +34,7 @@
 //! the Kalman member include `1/α`, which overflows at a reset token. The
 //! growth of the tropical member (`a > 0`) overflows in any linear form.
 //!
-//! ### The Kalman gate ([`kalman`])
+//! ### The Kalman gain ([`kalman`])
 //!
 //! The Mamba update is an exponential moving average of a rank-one setpoint,
 //! with a *projected* gain `1 − α`. A Kalman filter has the same form, with
@@ -111,7 +111,7 @@
 /// The log-semiring scan that both members run on.
 pub mod scan;
 
-/// The Kalman gate: the precision recurrence and the decay it computes.
+/// The Kalman gain: the precision recurrence and the decay it computes.
 pub mod kalman;
 
 /// The tropical register.

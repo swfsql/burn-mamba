@@ -128,8 +128,8 @@
 //! recurrence one `mimo_outer_sum`. So a decode step costs the same number of
 //! kernel launches at every `u`.
 //!
-//! Everything else is per micro-step, including the decay. Mamba has no forget
-//! gate separate from its step size: `α = exp(ΔA)`, and `Δ` also weights the
+//! Everything else is per micro-step, including the decay. Mamba has no decay
+//! separate from its step size: `α = exp(ΔA)`, and `Δ` also weights the
 //! write and paces the rotation. So the "forget gate on micro-step 0" of
 //! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
 //! micro-steps would also stop the rotation. A scalar decay composes either way

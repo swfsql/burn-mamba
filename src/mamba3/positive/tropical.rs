@@ -23,7 +23,7 @@ use burn::prelude::*;
 /// maps of each token first (`u − 1` elementwise [`Affine`] composes), then a
 /// scan over tokens, would give the same reads and carry at `1/u` of the
 /// scanned length. This function scans the folded axis instead: the axis that
-/// the Kalman gate needs, because every micro-step reads its decay.
+/// the Kalman gain needs, because every micro-step reads its decay.
 ///
 /// # In a packed row
 ///

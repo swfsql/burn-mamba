@@ -564,7 +564,7 @@ pub struct TrapezoidCoeffs {
     pub dt: Tensor<3>,
     /// The log-decay: `Δₜ · Aₜ`, or, under a
     /// [`Gain::Kalman`](crate::mamba3::positive::Gain::Kalman) member, the
-    /// decay that the gate computes from it. Every consumer reads this one.
+    /// decay that the gain computes from it. Every consumer reads this one.
     pub da: Tensor<3>,
     /// `αₜ = exp(da) ∈ (0, 1]`: the decay, projected or computed (as `da`).
     pub alpha: Tensor<3>,
@@ -580,7 +580,7 @@ pub struct TrapezoidCoeffs {
     /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
     /// there is no `λ` (all of the step is paid at the right endpoint).
     pub gamma: Tensor<3>,
-    /// `ℓₜ = ln Λₜ` at every position, when the decay comes from a Kalman gate
+    /// `ℓₜ = ln Λₜ` at every position, when the decay comes from a Kalman gain
     /// ([`crate::mamba3::positive::kalman`]). Its last entry is the next carry.
     pub log_precision: Option<Tensor<3>>,
 }
@@ -642,10 +642,10 @@ impl TrapezoidCoeffs {
 ///
 /// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain).
 /// This function then computes the decay
-/// ([`crate::mamba3::positive::kalman::gate`]) **before** it forms `α`. So no
+/// ([`crate::mamba3::positive::kalman::gain`]) **before** it forms `α`. So no
 /// consumer (the tap transports, the tap slots, the single-SSD key scale) can
 /// read the projected decay by mistake. The masses keep the projected `Δ`. The
-/// gate reads them in logs, formed from the same pre-activations
+/// gain reads them in logs, formed from the same pre-activations
 /// ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).
 pub fn trapezoidal_coefficients(
     dd_dt: Tensor<3>,
@@ -674,7 +674,7 @@ pub fn trapezoidal_coefficients(
         (!crosses).then(|| token_start_gate(dt.dims()[1], spec.micro_steps, &dt.device()))
     };
     // Where the tap at `tap_lag` is closed — read by `λ` below and by the
-    // gate's masses.
+    // masses of the gain.
     let tap_open_1s1 = lambda_raw
         .as_ref()
         .and_then(|_| gate(spec.pattern.tap_crosses_tokens()));
@@ -683,7 +683,7 @@ pub fn trapezoidal_coefficients(
             use crate::mamba3::positive::kalman;
             let masses =
                 kalman::LogMasses::new(dt_raw, dt_limit, lambda_raw.clone(), tap_open_1s1.clone());
-            let out = kalman::gate(da, masses, gain);
+            let out = kalman::gain(da, masses, gain);
             (out.da_bsh, Some(out.log_precision_bsh))
         }
         None => (da, None),

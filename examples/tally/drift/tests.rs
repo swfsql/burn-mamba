@@ -1,7 +1,7 @@
 //! The three claims this rung rests on, measured. One of them makes it the
 //! modest rung of the ladder.
 //!
-//! 1. A **hand-built** block solves the task exactly. The Kalman gate *is* the
+//! 1. A **hand-built** block solves the task exactly. The Kalman gain *is* the
 //!    filter that gives the labels, so the block computes the optimal estimate,
 //!    and does not approximate it.
 //! 2. The **same block with `κ = 0`** (the scaled member, whose decay is
@@ -10,7 +10,7 @@
 //! 3. The **honest bound**: a stock block can use a second head for a count and
 //!    let its per-token gate cross-multiply. It then decides `v·n − Σ > 0`
 //!    without a division. That is a linear state with a nonlinear readout, and
-//!    it comes within a few points. The exactness of the Kalman gate is real,
+//!    it comes within a few points. The exactness of the Kalman gain is real,
 //!    but the *decision* gap that it gives on this task is small. This test
 //!    shows it.
 
@@ -29,7 +29,7 @@ type Device = burn::prelude::Device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// The `κ` of the gate, so that `q = Δ·exp(r)`, and `r` alone names the doubt.
+/// The `κ` of the gain, so that `q = Δ·exp(r)`, and `r` alone names the doubt.
 const KAPPA: f64 = 1.0;
 /// The `Δ` of the estimator on a gap: evidence worth (almost) nothing. That
 /// lets the same token carry doubt worth `Q_GAP`.
@@ -65,7 +65,7 @@ fn embeddings() -> Vec<Vec<f64>> {
 /// Which arm to build.
 #[derive(Clone, Copy, Debug)]
 enum Arm {
-    /// The construction of the rung: the gate computes the discount.
+    /// The construction of the rung: the gain computes the discount.
     Kalman,
     /// The join at `κ = 0`: the same block, the same read of `η/Λ`, but the
     /// decay is projected. The gap discounts geometrically by `alpha_gap`.
@@ -90,7 +90,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let block = &mut layer.block;
 
     // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | r(3)]`. The
-    // last three are the projected noise of the Kalman gate.
+    // last three are the projected noise of the Kalman gain.
     let hold = vec![A_HOLD_RAW; NUM_SYMBOLS];
     let off = vec![softplus_inv(DELTA_OFF); NUM_SYMBOLS];
     let mut targets: Vec<Vec<f64>> = vec![vec![Z_PRE; NUM_SYMBOLS]; 3]; // z
@@ -189,11 +189,11 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// The recurrence of the gate **is** the filter of the labels: `Δ = 1` and
+/// The recurrence of the gain **is** the filter of the labels: `Δ = 1` and
 /// `q ≈ 0` at a value, `Δ ≈ 0` and `q = Q_GAP` at a gap, read at `ω = 1`. No
 /// fitting.
 #[test]
-fn handmade_gate_solves_every_family() {
+fn handmade_gain_solves_every_family() {
     let device = test_device();
     let model = handmade(&device, Arm::Kalman);
     println!("hand-built Kalman block ({} params):", model.num_params());
@@ -227,11 +227,11 @@ fn no_projected_decay_solves_the_task() {
         best_worst = best_worst.max(worst);
     }
     println!("best worst-family accuracy over the sweep: {:.2}%", 100.0 * best_worst);
-    // ~97½%, against 100% for the gate. A projected decay gets *close* here,
+    // ~97½%, against 100% for the gain. A projected decay gets *close* here,
     // and the bound says so: the rung claims exactness, not a large margin.
     assert!(
         best_worst < 0.98,
-        "a projected decay reached {best_worst:.4} — the task does not need the gate"
+        "a projected decay reached {best_worst:.4} — the task does not need the gain"
     );
 }
 
@@ -245,8 +245,8 @@ fn no_projected_decay_solves_the_task() {
 /// sweeps both gap decays and the value decay, in f64. This is a *lower* bound
 /// on stock, because it is one family of readouts, not all of them.
 ///
-/// It lands a few points below the gate. That is the true size of the rung. The
-/// Kalman gate is exact where this is not. But a decision needs only the ratio,
+/// It lands a few points below the gain. That is the true size of the rung. The
+/// Kalman gain is exact where this is not. But a decision needs only the ratio,
 /// cross-multiplied, and a geometric discount is close to a hyperbolic one over
 /// the range of gap lengths in a 32-token sequence.
 #[test]
@@ -302,12 +302,12 @@ fn a_cross_multiplying_linear_state_comes_close() {
             knife = best.0;
         }
     }
-    // On the ordinary families, it is within a point of the gate. The `knife`
+    // On the ordinary families, it is within a point of the gain. The `knife`
     // family (where the probes are at the edge of the estimate) separates
     // them, and even there, the difference is about two points.
     assert!(
         knife < 0.99,
-        "the linear state matched the gate on knife ({knife:.4}) — this rung has no content"
+        "the linear state matched the gain on knife ({knife:.4}) — this rung has no content"
     );
 }
 
