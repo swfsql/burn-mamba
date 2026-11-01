@@ -1,6 +1,6 @@
 //! # Mamba-3 SSM Block — Exponential-Trapezoidal SSD with Data-Dependent Rotation
 //!
-//! This module implements the core **Mamba-3 layer** from the paper
+//! This module implements the **Mamba-3 block** from the paper
 //! *"Mamba-3: Improved Sequence Modeling using State Space Principles"*.
 //!
 //! Mamba-3 adds three independent extensions to the Mamba-2 SSD recurrence:

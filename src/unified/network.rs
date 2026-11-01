@@ -221,7 +221,7 @@ pub enum MambaLatentNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See
@@ -264,7 +264,7 @@ pub enum MambaLatentNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See
@@ -307,7 +307,7 @@ pub enum MambaLatentNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See
@@ -755,7 +755,7 @@ pub enum MambaVocabNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See
@@ -795,7 +795,7 @@ pub enum MambaVocabNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See
@@ -835,7 +835,7 @@ pub enum MambaVocabNetConfig {
         residuals: ResidualsConfig,
         /// Optional per-layer SwiGLU feed-forward sub-block (`d_intermediate` in
         /// the reference configs), with its own pre-norm and inner residual.
-        /// `None` ⇒ mixer-only layers. See [`Layer`].
+        /// `None` ⇒ block-only layers. See [`Layer`].
         mlp: Option<burn_stack::modules::GatedMlpConfig>,
         /// The own parameters of the layer that are held once per application
         /// instead of tied (the block has its own list, in `mamba_block`). See

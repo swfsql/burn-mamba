@@ -52,7 +52,7 @@ fn forward_step_parity() {
 #[test]
 fn init_is_convex_mean() {
     // Zero queries + zero bias ⇒ β = σ(0) = 0.5 and α uniform = 1/n, so the
-    // mixer is the midpoint of (stream, layer_output) and the pool is the mean.
+    // β gate is the midpoint of (stream, layer_output) and the pool is the mean.
     let device = test_device();
     let (b, n, d) = (2, 3, 6);
     let m = MultiGateResidualConfig::new(d, n).init(&device);
@@ -380,7 +380,7 @@ fn bidi_multi_gate_forward_and_grads() {
     );
     assert!(
         mg.layers[1].w_beta.val().grad(&grads).is_some(),
-        "grad did not reach the mixing pair's mixer query"
+        "grad did not reach the β-gate query of the mixing pair"
     );
 }
 

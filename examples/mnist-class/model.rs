@@ -94,10 +94,10 @@ pub fn model_config() -> MambaLatentNetConfig {
             // one gate module per real layer, reused by its virtual passes
             per_virtual_layer: false,
         },
-        // No feed-forward interleave: these examples are mixer-only.
+        // No feed-forward interleave: these examples are block-only.
         mlp: None,
         // The untied tensors of the layer itself (the tensors of the block are
-        // in `mamba_block`, above): the pre-norm of the mixer.
+        // in `mamba_block`, above): the pre-norm of the block.
         // `LayerUntied::Norm2` needs an `mlp`.
         untied: vec![LayerUntied::Norm],
     }

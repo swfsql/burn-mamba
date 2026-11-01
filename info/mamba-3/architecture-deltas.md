@@ -1,6 +1,6 @@
 # Architecture Deltas
 
-### What Mamba-3 changed outside the SSM core, and what each change bought
+### What Mamba-3 changed outside the plant, and what each change bought
 
 > Reference note for `burn-mamba`. It is the authority for the decisions of
 > this crate around the parts of the Mamba-3 block that are *not* the

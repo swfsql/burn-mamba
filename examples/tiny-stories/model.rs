@@ -88,7 +88,7 @@ pub fn model_config() -> MambaVocabNetConfig {
             init_bias_offset: 0.0,
             per_virtual_layer: false,
         },
-        // No feed-forward interleave: these examples are mixer-only.
+        // No feed-forward interleave: these examples are block-only.
         mlp: None,
         untied: Vec::new(),
     }

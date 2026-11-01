@@ -108,7 +108,7 @@ pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
         // the last layer's residual: dropped, so the head sees only the state
         ignore_last_residual: true,
         residuals: ResidualsConfig::Standard,
-        // No feed-forward interleave: these examples are mixer-only.
+        // No feed-forward interleave: these examples are block-only.
         mlp: None,
         untied: Vec::new(),
     }

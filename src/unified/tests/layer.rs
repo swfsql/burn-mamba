@@ -5,7 +5,7 @@
 //! separate residuals of the reference `mamba_ssm` `Block`:
 //!
 //! ```text
-//!   residual = x + mixer(norm(x))          # first residual
+//!   residual = x + block(norm(x))          # first residual
 //!   out      = residual + mlp(norm2(residual))   # second residual
 //! ```
 //!
@@ -105,12 +105,11 @@ fn mlp_layer_forward_step_parity() {
     }
 }
 
-/// Without an `mlp` the delta is the mixer output alone, so a stack built the old
-/// way is bit-for-bit what it was before the field existed. Guards the default
+/// Without an `mlp` the delta is the block output alone. Guards the default
 /// path for Mamba-1/2 and for Mamba-3 checkpoints that carry no feed-forward.
 #[cfg(feature = "mamba3")]
 #[test]
-fn mixer_only_layer_is_unchanged() {
+fn block_only_layer_is_unchanged() {
     use crate::mamba3::prelude::Mamba3SsdPath;
 
     let device = test_device();
@@ -159,7 +158,7 @@ fn mlp_without_norm2_panics() {
     );
 }
 
-/// The feed-forward's pre-norm is a distinct parameter set from the mixer's, so
+/// The feed-forward's pre-norm is a distinct parameter set from the block's, so
 /// the two must not alias — a checkpoint writes different values into each.
 #[cfg(feature = "mamba3")]
 #[test]

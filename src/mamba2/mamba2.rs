@@ -1,6 +1,6 @@
 //! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
 //!
-//! This module implements the core **SSD layer** from the paper
+//! This module implements the **Mamba-2 block** (the SSD layer) from the paper
 //! *"Transformers are SSMs: Generalized Models and Efficient Algorithms
 //! through Structured State Space Duality"* (Dao & Gu, 2024).
 //!

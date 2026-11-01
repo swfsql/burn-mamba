@@ -105,7 +105,7 @@ fn mamba3(d: usize, state_rank: usize) -> MambaBlockConfig {
 ///
 /// The layout follows the reference at a tiny size, with Mamba-3 in every
 /// stack. The reference has Mamba-2 in the stages and attention in the main
-/// network. The stacks at character resolution are short and mixer-only. The
+/// network. The stacks at character resolution are short and block-only. The
 /// main network is deeper and has a SwiGLU MLP. Every stack takes the
 /// reference init (`N(0, 0.02)`, with the residual rescale over the stacks
 /// down to it).
