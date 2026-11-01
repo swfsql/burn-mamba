@@ -17,8 +17,8 @@
 //! ```
 //!
 //! Expanding the recurrence and grouping by `(Bₛ ⊗ xₛ)` gives the coefficient
-//! `(Πᵣ₌ₛ₊₁ᵗ αᵣ) · [γₛ + (1−λₛ₊₁)·Δₛ₊₁]` for the contribution of step `s` to
-//! state `t` (for `s < t`). At `s = t` the coefficient is just `γₜ`.
+//! `(Πᵣ₌ₛ₊₁ᵗ αᵣ) · [γₛ + (1−λₛ₊₁)·Δₛ₊₁]` for the contribution of micro-step `s`
+//! to the state at `t` (for `s < t`). At `s = t` the coefficient is just `γₜ`.
 //!
 //! Define `scaleₜ = γₜ + (1−λₜ₊₁)·Δₜ₊₁ = γₜ + νₜ₊₁` (with `scaleₜ = γₜ` at the
 //! last position). The single-SSD
@@ -28,12 +28,12 @@
 //! ```
 //!
 //! gives the same outputs `yₜ = Cₜᵀ h'ₜ` as the double-ssd one, **except** at
-//! the same-step diagonal (`s = t`), where the single-ssd form has `scaleₜ`
+//! the diagonal (`s = t`), where the single-ssd form has `scaleₜ`
 //! instead of `γₜ`. The kernel compensates:
 //!
 //! 1. Using a **strict** lower-triangular mask in the intra-chunk path (the
 //!    `s = t` block is excluded from the trapezoid sum).
-//! 2. Adding a separate γ-weighted same-step term `γₜ · (Cₜᵀ Bₜ) · xₜ`.
+//! 2. Adding a separate γ-weighted diagonal term `γₜ · (Cₜᵀ Bₜ) · xₜ`.
 //!
 //! ## Algorithm (per chunk, MIMO-first)
 //!
@@ -41,7 +41,7 @@
 //!   K_scaled[t, m, h, n] = scaleₜ · B[t, m, h, n]     // K scaled inside the SSD
 //!
 //!   y_lower  = (C ⊗ K_scaledᵀ ⊙ L_strict) · PsiV     // strict lower-tri
-//!   y_diag   = γₜ · (C ⊗ Bᵀ at same step) · PsiV      // diagonal correction
+//!   y_diag   = γₜ · (C ⊗ Bᵀ at same pos.) · PsiV      // diagonal correction
 //!   y_off    = C · h'_chunk_in · exp(da_cs)           // state-to-output
 //!
 //!   y        = y_lower + y_diag + y_off
@@ -115,7 +115,7 @@ impl Mamba3SingleSsdInput {
                 .clone()
                 .reshape([batch, nchunks, fused, nheads, per_head_dim]);
 
-        // Per-time-step cumulative log-decay (used for L_strict, decay_states, y_off)
+        // Per-position cumulative log-decay (used for L_strict, decay_states, y_off)
         let a_bhnl = input.da_bnlh.permute([0, 3, 1, 2]);
         let a_cumsum_bhnl = a_bhnl.clone().cumsum(3);
 
@@ -181,11 +181,12 @@ impl Mamba3SingleSsdInput {
         };
 
         // =============================================================
-        // STEP 1b: γ-weighted same-step diagonal correction (y_diag)
+        // STEP 1b: γ-weighted diagonal correction (y_diag)
         //
         // y_diag[t, m_out, h, p] = γₜ · Σ_{m_in} (C[t, m_out, h, ·] · B[t, m_in, h, ·]) · PsiV[t, m_in, h, p]
         // =============================================================
-        // Same step means the *read* row, so V and B enter at those positions.
+        // The same position is the *read* row, so V and B enter at those
+        // positions.
         let y_diag_bntmhp = y_diag_correction(
             helpers::read_rows::<6, 7>(input.v_bnlmhp, 2, read_stride),
             helpers::read_rows::<6, 7>(input.b_bnlmhr, 2, read_stride),

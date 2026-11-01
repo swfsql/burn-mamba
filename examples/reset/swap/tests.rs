@@ -44,10 +44,10 @@ use burn_stack::utils::test_helpers::test_device;
 /// `Δ` for every head and every symbol. It is fixed at 1, so the rotation
 /// generator is exactly `range·π·tanh(ϑ)`, and `γ = Δ = 1` writes `B`
 /// unscaled. (The block runs at `TapPattern::None`, which gives the whole step
-/// to the current token.)
+/// size to the current token.)
 const DELTA: f64 = 1.0;
 /// `‖ϑ‖` for a **half-turn**: the same constant as in `reset-spinor`, for the
-/// same reason. The block bounds one step to `rotation_range · π · Δ`, and the
+/// same reason. The block bounds one micro-step to `rotation_range · π · Δ`, and the
 /// default range of 2 puts a half-turn at `tanh(‖ϑ‖) = 1/2`: in the interior,
 /// where the gradient is alive.
 ///
@@ -179,11 +179,11 @@ enum Head {
 /// The three rotations differ only in the meaning of the rotation channels:
 ///
 /// - [`RotationKind::Rotor4D`] takes six per head: a left and a right scaled
-///   axis. When they are **equal**, the step is `v ↦ q v q̄`, conjugation, that
+///   axis. When they are **equal**, the micro-step is `v ↦ q v q̄`, conjugation, that
 ///   is a true `SO(3)` rotation by `180°` about [`swap_axis`]. This is the one
 ///   that works.
 /// - [`RotationKind::Quaternion4D`] takes three: the left factor alone. So the
-///   step is `v ↦ q v`, and `q² = −1`, not `1`: the state runs in the double
+///   micro-step is `v ↦ q v`, and `q² = −1`, not `1`: the state runs in the double
 ///   cover.
 /// - [`RotationKind::Complex2D`] takes two, one angle per state pair. So `l`
 ///   and `r` become half-turns of the two pairs, which commute.
@@ -208,7 +208,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
     // The 2s are `nheads`, and the 4s are `state_rank`. `TapPattern::None`
-    // projects no λ, so the whole mass of the step is `γ = Δ`. Each entry is
+    // projects no λ, so the whole mass of the micro-step is `γ = Δ`. Each entry is
     // the value of the channel at (SWAP_L, SWAP_R, RESET), *before* its
     // activation.
     let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
@@ -911,7 +911,7 @@ fn the_lift_of_a_swap_squares_to_minus_one() {
     }
 }
 
-/// `q v q̄`: the two-sided step on which the block of this example is built.
+/// `q v q̄`: the two-sided rotation on which the block of this example is built.
 fn conjugate(q: [f64; 4], v: [f64; 4]) -> [f64; 4] {
     quat_mul(quat_mul(q, v), [q[0], -q[1], -q[2], -q[3]])
 }

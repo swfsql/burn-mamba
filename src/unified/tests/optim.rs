@@ -1,6 +1,6 @@
 //! Muon plan and `Segmented` tests. The specs describe the real weights, and
-//! the groups only ever select rank-2 tensors. A step of each sub-projection
-//! alone agrees with the stock optimizers.
+//! the groups only ever select rank-2 tensors. A training step of each
+//! sub-projection alone agrees with the stock optimizers.
 
 use crate::prelude::*;
 use burn::module::{Module, ModuleVisitor, Param, ParamId};
@@ -419,9 +419,9 @@ fn segmented_state_round_trips() {
     assert!(max_abs_diff(a, b) < 1e-6);
 }
 
-/// Under an SGD fallback the non-Muon sub-projections take plain SGD steps and
-/// hold no state: the state is the Muon sub-projections' alone, and pairs back
-/// with them.
+/// Under an SGD fallback the non-Muon sub-projections take plain SGD training
+/// steps and hold no state: the state is the Muon sub-projections' alone, and
+/// pairs back with them.
 #[test]
 fn sgd_fallback_sub_projections_are_stateless_sgd() {
     let device = test_device();
@@ -490,7 +490,7 @@ fn build_assembles_groups_without_panicking() {
     let model = config.init(&device);
     let mut optim = config.muon_plan().build(&adamw().into(), &muon());
 
-    // One real step over the whole model: every parameter goes through its
+    // One real training step over the whole model: every parameter goes through its
     // group's optimizer, so a mis-targeted group (a 1-D or 3-D tensor handed to
     // Muon) would panic here.
     let x = Tensor::<3>::random([1, 8, 2], burn::tensor::Distribution::Default, &device);
@@ -531,8 +531,8 @@ fn module_optimizer_state_round_trips_through_a_record() {
     let model = config.init(&device);
     let x = Tensor::<3>::random([1, 8, 2], burn::tensor::Distribution::Default, &device);
 
-    // The same (deterministic) gradient drives every step below.
-    let step = |model: MambaLatentNet, optim: &mut burn::optim::ModuleOptimizer| {
+    // The same (deterministic) gradient drives every training step below.
+    let train_step = |model: MambaLatentNet, optim: &mut burn::optim::ModuleOptimizer| {
         let (y, _) = model.forward(x.clone(), None, MambaSsdPath::mamba3_default(), None, None);
         let grads = burn::optim::GradientsParams::from_grads(y.sum().backward(), &model);
         optim.step(1e-3, model, grads)
@@ -543,7 +543,7 @@ fn module_optimizer_state_round_trips_through_a_record() {
     };
 
     let mut live = plan.build(&adamw().into(), &muon());
-    let model = step(model, &mut live);
+    let model = train_step(model, &mut live);
 
     let mut reloaded = plan
         .build(&adamw().into(), &muon())
@@ -551,13 +551,13 @@ fn module_optimizer_state_round_trips_through_a_record() {
         .expect("deserialize");
     let mut fresh = plan.build(&adamw().into(), &muon());
 
-    // Same second step from the reloaded state vs. from no state at all.
-    let from_record = step(model.clone(), &mut reloaded);
-    let from_scratch = step(model, &mut fresh);
+    // Same second training step from the reloaded state vs. from no state at all.
+    let from_record = train_step(model.clone(), &mut reloaded);
+    let from_scratch = train_step(model, &mut fresh);
 
-    // A second step *with* momentum differs from one without — i.e. the record
-    // really carried the sub-projection states — and the reload did not panic
-    // on a state landing in the wrong group.
+    // A second training step *with* momentum differs from one without — i.e.
+    // the record really carried the sub-projection states — and the reload did
+    // not panic on a state landing in the wrong group.
     assert!(max_abs_diff(in_proj(&from_record), in_proj(&from_scratch)) > 1e-9);
 }
 

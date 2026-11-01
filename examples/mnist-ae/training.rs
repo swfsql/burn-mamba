@@ -1,9 +1,9 @@
 //! Training loop for the MNIST autoencoder. It builds the dataloaders, runs the
 //! train and validation epochs, and saves the model and the optimizer. The
 //! objective is pixel reconstruction (binary cross-entropy on the normalized
-//! image, computed from raw logits). A `Trainer` steps it. Under plain SGD (and
+//! image, computed from raw logits). A `Trainer` trains it. Under plain SGD (and
 //! without `--no-graph`), the whole training step replays from a graph captured
-//! at the first batch. Under any other optimizer, it steps eagerly. The
+//! at the first batch. Under any other optimizer, it runs eagerly. The
 //! validation side is [`Valid`], which replays the forward from a captured
 //! graph.
 
@@ -149,14 +149,14 @@ fn sample_images(n: usize, device: &Device) -> (Tensor<4>, Vec<u8>) {
 }
 
 /// Checkpoint and run a 10-batch validation (plus the reconstruction PNGs) every
-/// 100 steps.
+/// 100 training steps.
 const CADENCE: Cadence = Cadence {
     checkpoint_every: Some(100),
     valid_every: Some(100),
     valid_batches: Some(10),
 };
 
-/// Train `trainer` for (the rest of) one epoch, one step per batch. It saves
+/// Train `trainer` for (the rest of) one epoch, one training step per batch. It saves
 /// checkpoints and validates at the cadence of the `session`. It stops early at
 /// the end of the session budget (`--max-batches` / `--max-seconds`).
 #[allow(clippy::too_many_arguments)]
@@ -227,7 +227,8 @@ pub fn epoch_train(
                 app_args.graphs(),
             );
 
-            // Save original-vs-reconstruction PNGs into a new per-step dir.
+            // Save original-vs-reconstruction PNGs into a new dir for this
+            // training step.
             let sample_dir = app_args
                 .artifacts_path
                 .join(format!("epoch-{epoch}-batch-{b}"));

@@ -134,7 +134,7 @@ pub fn train(
 /// The training-side classifier: [`MambaLatentNet`] on the autodiff backend,
 /// stepped by a `Trainer`. Under plain SGD (and without `--no-graph`), the
 /// whole training step replays from a graph captured at the first batch. Under
-/// any other optimizer, it steps eagerly.
+/// any other optimizer, it runs eagerly.
 pub struct Wrap {
     trainer: Trainer<MambaLatentNet, (Tensor<4>, Tensor<1, Int>), Tensor<2>>,
     /// Whether validation replays its forward from a graph ([`Valid`]).

@@ -14,7 +14,7 @@ pub const D_MODEL: usize = 8;
 /// A Mamba-3 block at `state_rank = 4` with [`RotationKind::Quaternion4D`]
 /// carries a cumulative **unit quaternion** per head, and an ordered product
 /// builds it. The micro-steps fold into the sequence axis (`u` = `micro_steps`
-/// steps per token, see `burn_mamba::mamba3::product`). One token runs:
+/// micro-steps per token, see `burn_mamba::mamba3::product`). One token runs:
 ///
 /// ```ignore
 /// qₜ,ⱼ = quat(2π · Δₕ · tanh(‖ϑ(uₜ,ⱼ)‖) · ϑ̂(uₜ,ⱼ))    j = 0 … u−1
@@ -36,7 +36,7 @@ pub const D_MODEL: usize = 8;
 /// **multiplies**. The alphabet has the hold symbol, so `v_i` must lie along
 /// `±x̂` and `w_j` along `±ŷ` (the axes of `i` and `j`). Then `ϑ(i, j)` lies in
 /// the `xy`-plane, and its `exp` can never be the `±k` that the token needs. At
-/// `u = 2`, the token is two steps, and its transition is exactly the product
+/// `u = 2`, the token is two micro-steps, and its transition is exactly the product
 /// `exp(w_b) ⊗ exp(v_a)`.
 ///
 /// These config choices are load-bearing:

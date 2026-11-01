@@ -27,7 +27,7 @@
 //!   (every Mamba-1/Mamba-2 state, and Mamba-3 without the rotation) can hold
 //!   only that count, not its residue. A linear readout cuts the count axis
 //!   into at most `NUM_CLASSES` intervals, but the answer alternates along it.
-//! - **The turn must be data-dependent.** A fixed per-step angle is a rotary
+//! - **The turn must be data-dependent.** A fixed per-micro-step angle is a rotary
 //!   position embedding: the phase that it accumulates between the reset and
 //!   the read measures *positions*, not turns.
 //!
@@ -93,18 +93,18 @@ pub fn turns(symbols: &[usize]) -> Vec<i64> {
 /// Positions elapsed since the last reset (`0` at the reset itself).
 ///
 /// This is everything a **fixed** (input-independent) rotation can see: its
-/// phase is `ω · steps_since_reset`. See `tests.rs`.
-pub fn steps_since_reset(symbols: &[usize]) -> Vec<i64> {
-    let mut steps: i64 = 0;
+/// phase is `ω · tokens_since_reset`. See `tests.rs`.
+pub fn tokens_since_reset(symbols: &[usize]) -> Vec<i64> {
+    let mut tokens: i64 = 0;
     symbols
         .iter()
         .map(|&s| {
             if s == RESET {
-                steps = 0;
+                tokens = 0;
             } else {
-                steps += 1;
+                tokens += 1;
             }
-            steps
+            tokens
         })
         .collect()
 }
@@ -138,7 +138,7 @@ pub enum Family {
     /// extra `+` when the tail length is odd). The count stays within `±10`
     /// while the position advances, and the order is random, so the two are
     /// decorrelated. A **positional** phase cannot follow this: a fixed
-    /// rotation, or anything else keyed to the steps since the reset.
+    /// rotation, or anything else keyed to the tokens since the reset.
     Balanced,
     /// The training mixture: half [`Self::Random`], a quarter of each
     /// adversarial family.
@@ -176,7 +176,7 @@ fn gen_drift(rng: &mut Lcg, len: usize) -> Vec<usize> {
     } else {
         (MINUS, PLUS)
     };
-    // 7/8 of the steps go the same way, so the count leaves the range that
+    // 7/8 of the turns go the same way, so the count leaves the range that
     // any three-interval readout can cover. But the sequence is not simply
     // "position since the reset" either.
     let mut out = vec![RESET];
@@ -278,7 +278,7 @@ pub struct ResetRotorBatch {
 
 impl ResetRotorBatch {
     /// Moves the batch to `device`. A dataloader worker builds the batch on the
-    /// host, and the thread that steps the model moves it (see
+    /// host, and the thread that trains the model moves it (see
     /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};

@@ -63,7 +63,7 @@ const SHAPE: (usize, usize, usize, usize, usize, usize) = (2, 3, 5, 4, 6, 8);
 #[test]
 #[cfg_attr(
     feature = "dev-f16",
-    ignore = "f32 only: an absolute 1e-5 is below one f16 step at the size of y (see each_branch_is_the_f32_result_to_rounding)"
+    ignore = "f32 only: an absolute 1e-5 is below one f16 ulp at the size of y (see each_branch_is_the_f32_result_to_rounding)"
 )]
 fn siso_matches_mimo_forward() {
     let device = test_device();
@@ -101,7 +101,7 @@ fn siso_matches_mimo_forward() {
 #[test]
 #[cfg_attr(
     feature = "dev-f16",
-    ignore = "f32 only: an absolute 1e-5 is below one f16 step at |dγ| of 16–64 (see each_branch_is_the_f32_result_to_rounding)"
+    ignore = "f32 only: an absolute 1e-5 is below one f16 ulp at |dγ| of 16–64 (see each_branch_is_the_f32_result_to_rounding)"
 )]
 fn siso_matches_mimo_backward() {
     let device = test_device();
@@ -164,16 +164,16 @@ fn siso_matches_mimo_backward() {
 }
 
 /// Each branch is the f32 result to rounding, in the dtype of the test: the
-/// forward and the four gradients of both branches are within 4 steps of that
-/// dtype of the MIMO branch on f32 casts of the same inputs. A step is the one
-/// at the largest value of the f32 result.
+/// forward and the four gradients of both branches are within 4 ulps of that
+/// dtype of the MIMO branch on f32 casts of the same inputs. An ulp is the
+/// spacing of the dtype at the largest value of the f32 result.
 ///
 /// This is the check of the two tests above that holds in f16. They compare
 /// the branches with each other at an absolute `1e-5`, which in f16 is less
-/// than one step at the size of the values. `dγ` is a product of two sums
+/// than one ulp at the size of the values. `dγ` is a product of two sums
 /// (`Σ_r c·b` over 8 and `Σ_p dy·v` over 6 normal draws), 16–64 at its
-/// largest, where one f16 step is 0.016–0.031. The branches sum in different
-/// orders, so they differ by up to 2 steps. Each is within 2.2 steps of the
+/// largest, where one f16 ulp is 0.016–0.031. The branches sum in different
+/// orders, so they differ by up to 2 ulps. Each is within 2.2 ulps of the
 /// f32 result (the worst of 50 draws in f16).
 #[test]
 fn each_branch_is_the_f32_result_to_rounding() {
@@ -253,13 +253,13 @@ fn each_branch_is_the_f32_result_to_rounding() {
     let epsilon = device.settings().float_dtype.finfo().epsilon as f32;
     for (name, want, mimo, siso) in cases {
         let largest = want.clone().abs().max().into_scalar::<f32>();
-        let step = epsilon * 2f32.powf(largest.log2().floor());
+        let ulp = epsilon * 2f32.powf(largest.log2().floor());
         for (branch, got) in [("mimo", mimo), ("siso", siso)] {
             let d = max_abs_diff(got, want.clone());
             assert!(
-                d <= 4.0 * step,
-                "{name}, {branch}: {:.2} steps from the f32 result (step {step:.2e})",
-                d / step
+                d <= 4.0 * ulp,
+                "{name}, {branch}: {:.2} ulps from the f32 result (ulp {ulp:.2e})",
+                d / ulp
             );
         }
     }

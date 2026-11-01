@@ -44,13 +44,13 @@ use burn_stack::utils::test_helpers::test_device;
 
 /// `Δ` for every head and every symbol. It is fixed at 1, so the rotation
 /// generator is exactly `2π·tanh(‖ϑ‖)`, and `γ = Δ = 1` writes `B` unscaled.
-/// (The block runs at `TapPattern::None`, which gives the whole step to the
-/// current token.)
+/// (The block runs at `TapPattern::None`, which gives the whole step size to
+/// the current token.)
 const DELTA: f64 = 1.0;
 /// `ϑ` for the axis that a symbol turns about: a half-turn, that is the unit
 /// quaternion `i` (or `j`) up to `cos(π/2) ≈ 4e-8`.
 ///
-/// The block bounds one step to `rotation_range · π · Δ`. At the default range
+/// The block bounds one micro-step to `rotation_range · π · Δ`. At the default range
 /// of 2, a half-turn is `tanh(‖ϑ‖) = 1/2`: in the interior, where `tanh` is
 /// steep and the gradient is alive. (At `range = 1`, the same half-turn is
 /// exactly on the asymptote of `tanh`, and only a saturated channel reaches it.
@@ -154,7 +154,7 @@ const EMBED: [[f64; D_MODEL]; NUM_SYMBOLS] = [
 /// The eight elements of `Q₈` are `±eᵣ`, so they land on the eight directions
 /// `45°` apart. These are distinct, equidistant, and in convex position, which
 /// is exactly what a linear eight-way head needs. The block never forms this
-/// plane as a separate step. Head `h` reads the state with [`c_axis`], the
+/// plane as a separate computation. Head `h` reads the state with [`c_axis`], the
 /// `h`-th coordinate of this map, so the `out_proj` of the block is the
 /// identity.
 fn plane(r: usize) -> [f64; D_MODEL] {

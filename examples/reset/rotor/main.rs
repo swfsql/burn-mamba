@@ -11,7 +11,7 @@
 //!
 //! - The state must *turn*. The label is periodic in a count that a real state
 //!   can hold but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)).
-//! - The turn must be data-dependent. A fixed per-step angle is a rotary
+//! - The turn must be data-dependent. A fixed per-micro-step angle is a rotary
 //!   position embedding, whose phase measures position, not turns
 //!   ([`Family::Balanced`](crate::dataset::Family::Balanced)).
 //!
@@ -63,8 +63,9 @@ pub fn launch(app_args: &AppArgs) {
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // A turning state is a basin to find, not a slope to descend. The run
-        // needs a large step to leave the memoryless solution, and then a small
-        // one to settle the angle onto an exact detent. So this schedule anneals.
+        // needs a large learning rate to leave the memoryless solution, and
+        // then a small one to settle the angle onto an exact detent. So this
+        // schedule anneals.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

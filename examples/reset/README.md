@@ -12,7 +12,7 @@ asks the question of `reset-swap` one group size up, where the answer splits:
 | [`reset-rotor`](#reset-rotor) | count modulo `k` | a **complex** transition, `RotationKind::Complex2D` | `Z₃` |
 | [`reset-spinor`](#reset-spinor) | compose in a non-abelian group | a **quaternion** transition, `Quaternion4D` | `Q₈` |
 | [`reset-swap`](#reset-swap) | hold a group with more than one involution | a **two-sided** `SO(4)` transition, `Rotor4D` | `S₃` |
-| [`spinor-product`](#spinor-product) | apply **two** group elements in one token | two recurrence steps, `micro_steps = 2` | `Q₈`, two generators per token |
+| [`spinor-product`](#spinor-product) | apply **two** group elements in one token | two micro-steps, `micro_steps = 2` | `Q₈`, two generators per token |
 | [`reset-quintic`](#reset-quintic) | hold a **non-solvable** group, and one that no single layer can hold | `Rotor4D`, and for `S₅` a **second layer** | `A₅` and `S₅` |
 
 ## The shared shape
@@ -233,7 +233,7 @@ The eval set tests these from both sides:
   predicts it.
 
 In `random` (resets at ~⅛ of positions), both shortcuts partly work: after a
-reset, "three steps in" almost gives the answer. So this family is reported
+reset, "three tokens in" almost gives the answer. So this family is reported
 separately and not averaged in.
 
 </details>
@@ -246,7 +246,7 @@ separately and not averaged in.
 | | random | drift | balanced |
 |---|---|---|---|
 | best per-symbol lookup (no memory at all) | 49.1% | 36.5% | 37.4% |
-| best predictor of (symbol, steps since the reset) | 59.0% | 46.5% | 46.0% |
+| best predictor of (symbol, tokens since the reset) | 59.0% | 46.5% | 46.0% |
 | best **fixed-rotation** block (12 angles) | 51.8% | 40.7% | 42.1% |
 | best **rotation-free** block (7 decays) | 63.8% | 37.7% | 59.3% |
 | **hand-built** rotating block, no training | **100%** | **100%** | **100%** |
@@ -260,13 +260,13 @@ in-projection channel drive it, and the same block gets 100%.
 
 - `handmade_block_solves_every_family` writes every weight in closed form.
 - `no_fixed_rotation_solves_the_task` runs that block without the data
-  dependence of `ϑ`, and sweeps the per-step angle.
+  dependence of `ϑ`, and sweeps the per-micro-step angle.
 - `no_real_state_solves_the_task` switches the rotation off fully
   (`RotationKind::Real1D`, a real transition). It sweeps the decay of a block
   that holds the turn count.
 
 The `positional` row takes the ablation idea to its limit: the best table lookup
-from `(symbol, steps since the reset)`. It needs no model at all. It bounds every
+from `(symbol, tokens since the reset)`. It needs no model at all. It bounds every
 block that writes its state at the reset and reads what has accumulated since.
 Under an input-independent rotation, the phase and the decay of what such a block
 reads are functions of exactly that number.
@@ -288,7 +288,7 @@ reads are functions of exactly that number.
   detent `+1` from detent `−1`, because their cosines are equal.
 - **The reset is inherited, not new.** Erasing on `R` is the selectivity of
   `reset-majority`. Mamba-3 gets it through the data-dependent `A`, not through
-  `Δ`. Here `Δ` stays at 1 for every symbol, so the per-step angle is
+  `Δ`. Here `Δ` stays at 1 for every symbol, so the per-micro-step angle is
   `2π·tanh(ϑ)` directly (at the default `rotation_range = 2`).
 - **Training finds it** with the cosine schedule of `reset-majority`, and with
   no seed search. The rotation can lock onto the detents late. So a run below
@@ -399,7 +399,7 @@ gives. The ceilings above it are what bound the architecture.
 <summary>Notes</summary>
 
 - **The group is the state.** Left multiplication by a unit quaternion is
-  orthogonal. So a state written at step `τ` and read at step `t` gives
+  orthogonal. So a state written at position `τ` and read at position `t` gives
   `⟨C, (Qₜ ⊗ Q_τ*) ⊗ B⟩`, and `Qₜ ⊗ Q_τ* = qₜ ⊗ ⋯ ⊗ q_{τ+1}` is the group word.
   The newest factor is on the left, as in the labels of the dataset. With
   `B = 1` (the unit of the group), the state is that element. The heads read it,
@@ -638,7 +638,7 @@ The tests:
 The coda. It is the only example that keeps the transition *group* of the block
 and changes `micro_steps` instead. It is the task of
 [`reset-spinor`](#reset-spinor), with the stream **packed two symbols per
-token**. One recurrence step cannot compose the two symbols, and two steps can.
+token**. One micro-step cannot compose the two symbols, and two micro-steps can.
 
 The alphabet adds the third unit and a hold (`i` / `j` / `k` / `.` / `R`). A
 token is an ordered *pair* of them. The target is the running product in `Q₈`
@@ -656,7 +656,7 @@ starts with an `R`.
 <details>
 <summary>Why this task</summary>
 
-The transition of a Mamba-3 step is `α·R`, with `R = exp(ϑ)`. The generator `ϑ`
+The transition of a Mamba-3 micro-step is `α·R`, with `R = exp(ϑ)`. The generator `ϑ`
 is a projection of the token: an **affine functional** of it. Here a token is
 two one-hot slots, so at `u = 1`:
 
@@ -666,14 +666,14 @@ two one-hot slots, so at `u = 1`:
 ```
 
 The two are the same only when the two symbols commute. `MambaProduct`
-(`micro_steps`, `burn_mamba::mamba3::product`) runs `u` full recurrence steps
-per token. Each step has its own `x`, `B`, `Δ`, `A`, `λ` and rotation. So at
+(`micro_steps`, `burn_mamba::mamba3::product`) runs `u` full micro-steps
+per token. Each micro-step has its own `x`, `B`, `Δ`, `A`, `λ` and rotation. So at
 `u = 2`, the transition of the token is `exp(w_b) ⊗ exp(v_a)`: the product
 itself.
 
 | shortcut | why it is closed |
 |---|---|
-| compose the two symbols of the token in **one** step | generators add where the group multiplies, and the alphabet leaves no reparameterisation that avoids it (below) |
+| compose the two symbols of the token in **one** micro-step | generators add where the group multiplies, and the alphabet leaves no reparameterisation that avoids it (below) |
 
 Two properties of the alphabet make that exact, not only likely. Both are
 necessary:
@@ -764,8 +764,8 @@ hand-built solution. They sweep the generator scale, and report both through the
 identical head and through the best table over a fine partition of the output
 space. They land *below* the order-blind ceiling, and that is the point, not a
 defect. A wrong rotation is worse than no rotation. Everything else in the
-construction (the reset, the write, the decay) folds into a single step
-correctly. Only the composition does not.
+construction (the reset, the write, the decay) folds into a single
+micro-step correctly. Only the composition does not.
 
 - `handmade_product_block_solves_every_family` writes every weight in closed
   form (there is no fitting).
@@ -774,7 +774,7 @@ correctly. Only the composition does not.
 - `one_step_generators_add_and_cannot_reach_k` is the obstruction above,
   computed over all six ordered pairs of distinct units.
 - `a_second_layer_only_helps_by_composing_the_pair` is the hand-built row for the
-  depth contrast. It is the same one-step block, and it reads the *effect* of the
+  depth contrast. It is the same `u = 1` block, and it reads the *effect* of the
   token (its group element, plus whether it resets) instead of its two symbols.
 - `counts_ceiling_is_the_order_blind_limit` needs no model at all.
 - `labels_are_the_paired_quaternion_word_problem` checks that the dataset is the
@@ -786,7 +786,7 @@ correctly. Only the composition does not.
 <summary>Notes</summary>
 
 - **The hand-built solution is the one of `reset-spinor`, folded.** Each
-  micro-step is a plain Mamba-3 step over the slot that it reads:
+  micro-step is a plain Mamba-3 update over the slot that it reads:
   - `R` writes the identity quaternion and erases the state (`A ≈ −20`).
   - `i` / `j` / `k` turn the cumulative rotation by half-turns about the three
     axes.
@@ -837,7 +837,7 @@ correctly. Only the composition does not.
   rotation to compose, so `u` widens only the write.
 - **Two symbols per token, not two tokens.** The stream has the length of
   `reset-spinor` in symbols. Only the packing changes. So this is not a harder
-  word problem. It is the same problem, at half the number of recurrence steps of
+  word problem. It is the same problem, at half the number of micro-steps of
   a stock block.
 - **This is the rung that keeps the trapezoid, and the one that cannot shrink.**
   - The five `reset-*` rungs run at `TapPattern::None` (their constructions pin
@@ -940,7 +940,7 @@ one-layer route, and a Mamba transition does not.
 **Two layers can.** Write `σ = sᵉ ∘ a`, with its sign `e` and its even part `a`.
 
 1. The first layer holds `e` (a half-turn on `s`).
-2. Then `a` steps by `a ← sᵉ'∘g∘sᵉ · a`. On `s` this is the identity. On `c`, it
+2. Then `a` updates by `a ← sᵉ'∘g∘sᵉ · a`. On `s` this is the identity. On `c`, it
    is `c` (`e = 0`) or `s∘c∘s` (`e = 1`): the `72°`/`144°` pair, selected by the
    sign from the layer below.
 3. The second layer reads that sign and holds `a` as the `A₅` block does.
@@ -1028,9 +1028,9 @@ group at all.
   double cover still collapses. This is also in `SO(4)` and not in `SU(2)`.
   `Rotor4D` holds both.
 - **Why 96 symbols.** Trained on the 32 symbols of the ladder, the same model
-  turns by the right angles and holds with `ᾱ ≈ 0.99` per step. Over 32 steps
-  that costs nothing. But the state shrinks slowly, and the head (which has
-  biases) misreads it on long words. At 96 symbols, training pays for the leak.
+  turns by the right angles and holds with `ᾱ ≈ 0.99` per micro-step. Over 32
+  micro-steps that costs nothing. But the state shrinks slowly, and the head
+  (which has biases) misreads it on long words. At 96 symbols, training pays for the leak.
   The rest (`ᾱ = 0.991` on `d`) costs half a point at 288. The hand-built head decodes *directions* with no bias, so the floor of
   the block (`ᾱ = e^(−a_floor·Δ)`) never affects it. `REF_POINT` makes the
   shadow of the orbit on the two readouts point in sixty distinct directions.
@@ -1065,7 +1065,7 @@ group at all.
 
 - **Half-turns are in the interior.** `reset-spinor` and `reset-swap` both need a
   generator of order two, a `180°` turn.
-  - The block bounds one step to `rotation_range · π · Δ`, with a default of 2.
+  - The block bounds one micro-step to `rotation_range · π · Δ`, with a default of 2.
     That is one full traverse of the rotation group per unit `Δ`. For `SU(2)`,
     that is every element: its period is `4π`, because `q` and `−q` turn the
     state differently.

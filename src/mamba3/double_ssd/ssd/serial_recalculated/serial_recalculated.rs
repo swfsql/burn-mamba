@@ -475,7 +475,7 @@ fn k5_ssd_chunk_scan<B: Backend>(
 
     // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of
     // target in time). `triu(1)` keeps the diagonal — the double-SSD sum
-    // includes the same step.
+    // includes the same position.
     let neg_inf_base_bnhtl = read_causal_mask::<B>(chunk_len, read_stride, 1, &device, dtype)
         .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111tl
         .expand([batch, nchunks, nheads, chunk_tokens, chunk_len]); // neg_inf_base_bnhtl

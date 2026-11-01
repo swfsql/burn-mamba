@@ -16,9 +16,10 @@
 //!
 //! The stream is the stream of [`reset-spinor`](../README.md#reset-spinor),
 //! with three units instead of two, and with a hold. A token now asks the
-//! recurrence for a **product of two group elements**. A Mamba-3 step applies
-//! **one** rotation, and its generator is an affine function of the token. At
-//! `micro_steps = 2`, a token is two steps, and the product is exact. At
+//! recurrence for a **product of two group elements**. A Mamba-3 micro-step
+//! applies **one** rotation, and its generator is an affine function of the
+//! token. At `micro_steps = 2`, a token is two micro-steps, and the product is
+//! exact. At
 //! `micro_steps = 1`, the two generators can only **add**, and `exp(v + w)` is
 //! not `exp(w)·exp(v)` unless they commute.
 //!
@@ -55,7 +56,7 @@ pub const TURN_J: usize = 1;
 /// do not commute, so the whole job is to compose the pair.
 pub const TURN_K: usize = 2;
 /// Input symbol: do nothing. It is the identity of the group, and the reason
-/// why a single step provably cannot compose a token (see the module docs).
+/// why a single micro-step provably cannot compose a token (see the module docs).
 pub const HOLD: usize = 3;
 /// Input symbol: reset the state to `1` (the selective-forget symbol).
 pub const RESET: usize = 4;
@@ -345,7 +346,7 @@ pub struct ProductBatch {
 
 impl ProductBatch {
     /// Moves the batch to `device`. A dataloader worker builds the batch on the
-    /// host, and the thread that steps the model moves it (see
+    /// host, and the thread that trains the model moves it (see
     /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};

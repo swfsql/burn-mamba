@@ -184,7 +184,7 @@ impl<B: Backend> Quat<B> {
 
 /// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the
 /// sequence axis, by Hillis–Steele doubling: `O(log seq)` dependency depth, all
-/// on SoA [`Quat`] components (no per-step narrow/cat).
+/// on SoA [`Quat`] components (no per-micro-step narrow/cat).
 ///
 /// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
 /// backward needs `P` alone (`G[t] = P[t] ⊗ S[t]`).
@@ -192,8 +192,8 @@ impl<B: Backend> Quat<B> {
 /// `P` is renormalised once, after the doubling. `|a ⊗ b| = |a|·|b|`, so the
 /// norm errors of the multiplies do not move the directions, and one
 /// correction at the end is as good as one per level. Without it, the norm is
-/// a random walk (≈ 2% at 512 steps in f16). The backward reads `Pₜ ⊗ P̄ₛ` as
-/// the product of the steps between `s` and `t`, which is true only for a
+/// a random walk (≈ 2% at 512 micro-steps in f16). The backward reads `Pₜ ⊗ P̄ₛ`
+/// as the product of the micro-steps between `s` and `t`, which is true only for a
 /// unit `P`.
 pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
     let [batch, sequence, nheads, blocks] = q.w.dims();
@@ -238,8 +238,8 @@ pub trait Mamba3QuatScanBackendExt: Backend {
     /// the high-level `Tensor` (see [`quat_cumprod_recalculated`]).
     ///
     /// # Shapes
-    /// - `q_bshj4`   : `[batch, sequence, nheads, blocks, 4]` — per-step **unit**
-    ///   quaternions.
+    /// - `q_bshj4`   : `[batch, sequence, nheads, blocks, 4]` — per-micro-step
+    ///   **unit** quaternions.
     /// - `init_bhj4` : `[batch, nheads, blocks, 4]` — the cross-chunk carry
     ///   (identity `(1,0,0,0)` for a fresh start).
     /// - returns `cum` : `[batch, sequence, nheads, blocks, 4]`.
@@ -276,7 +276,7 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3QuatScanBackendExt);
 /// and gradients). Only the memory profile of the backward is different.
 ///
 /// # Shapes
-/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]`, per-step **unit**
+/// - `q_bshj4` : `[batch, sequence, nheads, blocks, 4]`, per-micro-step **unit**
 ///   quaternions. The gradient identities of the recompute backward assume unit
 ///   norm, which holds for the outputs of
 ///   [`quat_from_scaled_axis`](crate::mamba3::rotation::quat_from_scaled_axis)

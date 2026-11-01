@@ -19,7 +19,7 @@ use burn_mamba::prelude::{
 ///
 /// Because the rotation is orthogonal, the readout sees only the rotation
 /// *accumulated between* the write and the read. If the state was last written
-/// at step `τ`, then `yₜ = Cₕᵀ R(θ_τ − θₜ) B · (what was written)`: a function
+/// at position `τ`, then `yₜ = Cₕᵀ R(θ_τ − θₜ) B · (what was written)`: a function
 /// of `θₜ − θ_τ` alone. The task uses exactly that:
 ///
 /// - **`R` writes the state.** `x(R) ≠ 0` and `A(R) ≈ −20` (so `ᾱ ≈ 0` erases

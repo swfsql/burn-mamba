@@ -7,7 +7,7 @@
 //!
 //! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
 
-/// The same-step γ-correction shared by all three algorithms.
+/// The diagonal γ-correction shared by all three algorithms.
 pub mod diag;
 /// Matmul/`segsum` MIMO-first SSD with plain autodiff backward.
 pub mod minimal;

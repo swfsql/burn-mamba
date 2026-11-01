@@ -1,10 +1,10 @@
 //! Training loop for the `spinor-product` example. It builds the dataloaders,
 //! runs the train and validation epochs, and saves the model and the optimizer.
 //! The objective is a cross-entropy head over **every** token (the group element
-//! after each pair of symbols, [`forward_classification`]). A `Trainer` steps
+//! after each pair of symbols, [`forward_classification`]). A `Trainer` trains
 //! it. Under plain SGD (and without `--no-graph`), the whole training step
 //! replays from a graph captured at the first batch. Under any other optimizer,
-//! it steps eagerly.
+//! it runs eagerly.
 
 pub use crate::common::{
     cli::AppArgs,
@@ -152,7 +152,7 @@ type Dataloader = std::sync::Arc<dyn DataLoader<ProductBatch> + 'static>;
 pub type ClassTrainer =
     Trainer<MambaLatentNet, (Tensor<3>, Tensor<2, Int>), (Tensor<2>, Tensor<1, Int>)>;
 
-/// Train `trainer` for (the rest of) one epoch, one step per batch. It saves
+/// Train `trainer` for (the rest of) one epoch, one training step per batch. It saves
 /// checkpoints and validates (on `valid_loaders`) at the cadence of the
 /// `session`. It stops early at the end of the session budget
 /// (`--max-batches` / `--max-seconds`).

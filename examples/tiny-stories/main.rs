@@ -21,8 +21,8 @@
 //!   distribution of the first character). It prefills an optional prompt with
 //!   chunkwise `forward`s, then samples one character per `step`.
 //!
-//! The corpus knobs, the SSD path, the step profiler and the VRAM cap ([`cli`])
-//! go after the trailing `--`. The corpus knobs are written into the `training_config.json`
+//! The corpus knobs, the SSD path, the training-step profiler and the VRAM cap
+//! ([`cli`]) go after the trailing `--`. The corpus knobs are written into the `training_config.json`
 //! of the artifacts, so a resumed run keeps them:
 //!
 //! ```bash

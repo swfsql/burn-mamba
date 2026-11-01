@@ -37,7 +37,7 @@ pub struct Mamba1Cache {
     /// **State.**
     ///
     /// The O(d_inner·state_rank) compressed summary of all earlier tokens. The
-    /// selective-scan recurrence updates it at each step.
+    /// selective-scan recurrence updates it at each token.
     ///
     /// Shape: `[batch, d_inner, state_rank]`
     pub ssm_bir: Tensor<3>,

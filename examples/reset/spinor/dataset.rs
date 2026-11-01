@@ -289,7 +289,7 @@ pub struct ResetSpinorBatch {
 
 impl ResetSpinorBatch {
     /// Moves the batch to `device`. A dataloader worker builds the batch on the
-    /// host, and the thread that steps the model moves it (see
+    /// host, and the thread that trains the model moves it (see
     /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};

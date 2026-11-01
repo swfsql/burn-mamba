@@ -6,7 +6,7 @@
 //! - a key scale `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`, where the term in
 //!   parentheses is the second installment of the two-tap members,
 //! - a strict lower-triangular intra-chunk mask,
-//! - a same-step γ correction,
+//! - a diagonal γ correction,
 //! - a boundary-β seed, folded into the initial accumulator.
 //!
 //! It is one call for every tap pattern: every tap collapses into that one

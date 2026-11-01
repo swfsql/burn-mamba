@@ -34,8 +34,8 @@
 //! [`Mamba3Config::tap_pattern`] selects *which* earlier sample the `βₜ` tap
 //! reads. At `micro_steps = 1` (below), `t−1` is the only choice. At `u > 1`:
 //!
-//! - the default [`TapPattern::HorizontalCarryOver`] reads the recurrence step
-//!   just before,
+//! - the default [`TapPattern::HorizontalCarryOver`] reads the micro-step just
+//!   before,
 //! - [`TapPattern::Vertical`] reads the same micro-step of the previous
 //!   **token**, with one lag at every tap site,
 //! - two members read **both**. A second projected scalar `μₜ = σ(μ̂ₜ)` splits
@@ -43,7 +43,7 @@
 //!   token boundaries.
 //!
 //! The tap and its mass are one choice. A closed tap gives its share back (to
-//! the other tap, or to `γ`), so the mass of the step is `Δₜ` under every
+//! the other tap, or to `γ`), so the mass of the micro-step is `Δₜ` under every
 //! member. See the header of [`TapPattern`].
 //!
 //! ## 2. Complex transition, the rotation (no trapezoid, no MIMO — paper section
@@ -58,11 +58,11 @@
 //! Equivalence*):
 //!
 //! ```text
-//!   ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-step rotation (data-dependent)
+//!   ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-micro-step rotation (data-dependent)
 //!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                   — rotational state update
 //! ```
 //!
-//! `ϱ` is [`Mamba3Config::rotation_range`], the per-step bound in half-turns
+//! `ϱ` is [`Mamba3Config::rotation_range`], the per-micro-step bound in half-turns
 //! per unit `Δ`. It is `2` here (a whole turn of the group per unit `Δ`) and
 //! `1` in the reference. It is a gradient budget, not a reach limit (see its
 //! docs).
@@ -94,16 +94,17 @@
 //! ```
 //!
 //! Because of orthogonality, the readout-vs-input similarity depends only on
-//! the rotation *accumulated between* the two steps:
+//! the rotation *accumulated between* the two micro-steps:
 //!
 //! ```text
 //!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
 //! ```
 //!
-//! `θⱼ − θᵢ` is not a position. It is `Σ Δ·ϱ·π·tanh(ϑ)` over the steps between:
+//! `θⱼ − θᵢ` is not a position. It is `Σ Δ·ϱ·π·tanh(ϑ)` over the micro-steps
+//! between:
 //! how far the transition itself rotated, driven by the inputs. It is a
 //! relative position (as in a rotary position embedding) only in the
-//! degenerate case of an input-independent, constant per-step angle
+//! degenerate case of an input-independent, constant per-micro-step angle
 //! (`θⱼ − θᵢ = (j−i)·θ`). The data dependence is the point: it gives the
 //! layer rotational state dynamics, and
 //! thus state-tracking (parity, mod-k), which a real SSM with non-negative
@@ -146,7 +147,7 @@
 //! A fourth, independent dial: the dial of DeltaProduct, not its mechanism
 //! (see [`crate::mamba3::product`] and
 //! `info/mamba-3/rotation-as-optimization.md`). There are `u` recurrence
-//! micro-steps per token. Each one is a full step of the above, with its own
+//! micro-steps per token. Each one runs the full recurrence above, with its own
 //! projected `x`, `B`, `Δ`, `A`, `λ` and rotation. The transition of one
 //! *token* is then the **product**
 //!
@@ -334,7 +335,7 @@ pub struct Mamba3 {
     ///
     /// The block holds `κ` in logs, not as `softplus` of a raw parameter. `κ`
     /// scales `q` over many decades (the doubt of a gap against that of a
-    /// value), and an AdamW step in `ln κ` is a relative change at each of
+    /// value), and an AdamW training step in `ln κ` is a relative change at each of
     /// them. The cost: the stock block is at `ln κ = −∞`, a limit that training
     /// approaches but never reaches, and `∂/∂ln κ ∝ κ` fades on the way. The
     /// join is live at the init ([`Mamba3Config::kalman_kappa_init`]). It is
@@ -410,7 +411,7 @@ pub struct Mamba3 {
     #[module(skip)]
     pub tropical: Tropical,
 
-    /// How far one step may rotate, in half-turns per unit `Δ`
+    /// How far one micro-step may rotate, in half-turns per unit `Δ`
     /// (see [`Mamba3Config::rotation_range`]).
     pub rotation_range: f64,
 
@@ -755,8 +756,9 @@ impl Mamba3 {
     }
 
     /// Everything the rotation needs, in one place: the algebra, the rotated
-    /// width, and the per-step bound. Every site that computes a per-step
-    /// rotation ([`forward`](Self::forward), [`step`](Self::step)) uses this.
+    /// width, and the per-micro-step bound. Every site that computes a
+    /// per-micro-step rotation ([`forward`](Self::forward),
+    /// [`step`](Self::step)) uses this.
     pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
         crate::mamba3::rotation::RotationSpec {
             kind: self.rotation,
@@ -928,8 +930,8 @@ pub struct Mamba3Config {
     /// **MambaProduct**: recurrence micro-steps per token — DeltaProduct's `u`.
     /// `1` (the default) is stock Mamba-3, byte for byte.
     ///
-    /// Each micro-step is a full Mamba-3 step with its own projected `x`, `B`,
-    /// `Δ`, `A`, `λ` and rotation. So the transition of one *token* is the
+    /// Each micro-step runs the full Mamba-3 recurrence with its own projected
+    /// `x`, `B`, `Δ`, `A`, `λ` and rotation. So the transition of one *token* is the
     /// **product** `(∏ⱼ αⱼ)·Rᵤ⋯R₁`, and its write is `u` staggered outer
     /// products. The read `C`, the gate `z`, the `D` skip and the output are
     /// per token. The cost is `u`× the recurrence. The state does not grow.
@@ -943,7 +945,7 @@ pub struct Mamba3Config {
     ///   also multiplies the per-token angle reach by `u`, *without* putting
     ///   any single factor on the flat region of `tanh` (see
     ///   [`Self::rotation_range`]).
-    /// - The non-abelian kinds: it composes generators that no single step can
+    /// - The non-abelian kinds: it composes generators that no single micro-step can
     ///   express.
     ///
     /// See [`crate::mamba3::product`] for the full argument and the folding.
@@ -1075,8 +1077,9 @@ pub struct Mamba3Config {
     #[config(default = "crate::mamba3::rotation::RotationKind::Complex2D")]
     pub rotation: RotationKind,
 
-    /// How far a single step may rotate the state, in **half-turns per unit
-    /// `Δ`**: the per-step angle is bounded by `rotation_range · π · Δ`.
+    /// How far a single micro-step may rotate the state, in **half-turns per
+    /// unit `Δ`**: the per-micro-step angle is bounded by
+    /// `rotation_range · π · Δ`.
     ///
     /// The default `2.0` means "one unit of `Δ` can go once around the whole
     /// rotation group". This means the same for every kind, although their
@@ -1108,7 +1111,7 @@ pub struct Mamba3Config {
     pub rotation_range: f64,
 
     /// Whether to use the specialized `mimo_rank == 1` (SISO) **chunkwise**
-    /// kernel: the same-step γ-correction
+    /// kernel: the diagonal γ-correction
     /// ([`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)),
     /// forward *and* its analytic backward.
     ///
@@ -1652,7 +1655,7 @@ impl Mamba3 {
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
     /// batch of **tokens**. A padded token is absent:
     ///
-    /// - all `u` of its micro-steps are the identity step (no decay, no mass:
+    /// - all `u` of its micro-steps are identity micro-steps (no decay, no mass:
     ///   `TrapezoidCoeffs::padded`),
     /// - each slot reads every "last samples" cache field at its own end (see
     ///   [`burn_stack::modules::Block::block_forward`]).

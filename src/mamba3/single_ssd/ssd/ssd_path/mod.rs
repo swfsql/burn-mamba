@@ -4,7 +4,7 @@
 //! pathway runs the *standard* SSD once per term (γ-term and β-terms). The
 //! [`Mamba3SingleSsdInput`] of this module runs **one** merged SSD pass that
 //! absorbs all terms: it scales `K` by `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`. The
-//! same-step diagonal contribution is different (it must use `γₜ`, not
+//! diagonal contribution is different (it must use `γₜ`, not
 //! `scaleₜ`), and an explicit correction term inside each variant patches it.
 //!
 //! Reference kernels, in `state-spaces/mamba`:
@@ -70,7 +70,7 @@ pub struct Mamba3SingleSsdInput {
 
     /// `γₜ = λₜ · Δₜ`: the per-token diagonal multiplier.
     ///
-    /// On the **read** axis, like `c_bntmhr`: γ weights only the same-step term
+    /// On the **read** axis, like `c_bntmhr`: γ weights only the diagonal term
     /// of the output of a row (the recurrence of the accumulator runs on
     /// `scale_bnlh`). So the folded positions between the reads never use it.
     ///

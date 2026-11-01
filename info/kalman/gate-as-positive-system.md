@@ -147,9 +147,9 @@ computed decay:
   ηₜ = dₜ·ηₜ₋₁ + (the block's own write)   the plant, unchanged
 ```
 
-Here `mₜ = Δₜ` is the mass of the step when it has no left endpoint
+Here `mₜ = Δₜ` is the mass of the micro-step when it has no left endpoint
 (`TapPattern::None`, §3.9 gives the split). `qₜ = κₕ·Δₜ·exp(rₜ)` is the doubt
-that the step injects. Its matrix is:
+that the micro-step injects. Its matrix is:
 
 ```text
   M = log [[α(1 + q·m),  m],
@@ -175,7 +175,7 @@ the excess.
 
 **§3.5: a contraction.** For `q, m > 0` the matrix is entrywise positive. So,
 by the theorem of Birkhoff, it contracts the Hilbert distance
-`|ln Λ − ln Λ'|` by at least `tanh(¼·ln(1 + 1/(q·m)))` per step. The rate has
+`|ln Λ − ln Λ'|` by at least `tanh(¼·ln(1 + 1/(q·m)))` per micro-step. The rate has
 **no `α`** in it: a long-memory head forgets the initialisation of its
 confidence as fast as a short one. For this reason, the initial `Λ` of a
 cache, and any rounding in it, cause no harm.
@@ -184,7 +184,7 @@ cache, and any rounding in it, cause no harm.
 recurrence is an exact precision-weighted running mean, and its gain falls
 like `1/t`: the head stops writing. Any `q > 0` prevents this.
 
-**§3.7: the shape of ageing.** After `k` uninformative steps, the prior of the
+**§3.7: the shape of ageing.** After `k` uninformative micro-steps, the prior of the
 filter is worth `Λ/(1 + k·q·Λ)`. This is hyperbolic in `k` and saturates in
 `Λ`. A projected decay gives `αᵏ·Λ`: a product of the two, where the filter
 has a sum of reciprocals. No `(α, scale)` fits the family over a spread of
@@ -197,7 +197,7 @@ value.
 - `q = κₕ·Δₜ` (the **tied** arm, `Gain::Kalman`) is the Brownian reading:
   doubt grows with the elapsed time. It costs **zero in-projection channels**,
   only one per-head `κ`. Its limit: `q` and `m` both scale with `Δ`, so it has
-  no *uninformative* token. A step that injects little doubt also carries
+  no *uninformative* token. A micro-step that injects little doubt also carries
   little evidence.
 - `Gain::KalmanProjectedNoise` multiplies `q` by a projected `exp(rₜ)`. This
   buys exactly that separation (a gap), at one channel per (head,
@@ -207,9 +207,9 @@ value.
 
 With a `β` tap, the plant pays each sample in two installments:
 
-- `γₜ = λₜ·Δₜ` at its own step,
-- `νₜ₊₁ = (1 − λₜ₊₁)·Δₜ₊₁` one step later, transported by the decay of that
-  step (`β = ν·d`).
+- `γₜ = λₜ·Δₜ` at its own micro-step,
+- `νₜ₊₁ = (1 − λₜ₊₁)·Δₜ₊₁` one micro-step later, transported by the decay of
+  that micro-step (`β = ν·d`).
 
 Count the late installment before the predict:
 
@@ -232,7 +232,7 @@ exact rate of the contraction uses `γ + αν(1 + qγ) ≥ γ`, so
 and `ν = 0`, and this is the element of §3.
 
 A **lag-`u`** tap (the `Vertical*` patterns at `u > 1`) is transported across
-its whole gap, `∏ d` over `u` steps. That product reads `u` earlier
+its whole gap, `∏ d` over `u` micro-steps. That product reads `u` earlier
 precisions, and no 2×2 map does that. The gain adds it like a lag-1
 installment and over-counts by `νₜ·(dₜ − ∏ d)`. So `Λ` is an upper bound of
 the weight of the plant, not equal to it.
@@ -291,7 +291,7 @@ read port free.** The port buys a *value*, not a decision. (For this reason,
 
 **§5.2: a gap does not move the estimate.** To scale `η` and `Λ` by the same
 factor keeps `η/Λ` and decreases only the weight behind it. So the effect of a
-discount shows one step later, when new evidence is blended in. A task that
+discount shows one micro-step later, when new evidence is blended in. A task that
 measures it must thus put fresh evidence after the gap, and probe after that.
 
 **§5.3: the size of the drift separation.** On a stream whose probes are at

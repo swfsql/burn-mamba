@@ -34,7 +34,7 @@ use burn::tensor::s;
 pub struct CombinedGrads<B: Backend> {
     /// Gradient of the input `x`.
     pub d_x_bnlhp: F<B, 5>,
-    /// Gradient of the discretised step `Δ` (`dt`).
+    /// Gradient of the step size `Δ` (`dt`).
     pub d_dt_discretized_bhnl: F<B, 4>,
     /// Gradient of the input projection `B`.
     pub d_b_bnlhr: F<B, 5>,
@@ -388,7 +388,7 @@ pub fn combined_backward<B: Backend>(
         san(&d_da_orange_bhl);
         vec_orange_d_da_bhl.push(d_da_orange_bhl);
 
-        // ── K4 backward step for chunk i ───────────────────────────────────
+        // ── K4 backward, chunk i ───────────────────────────────────────────
         //   Forward: sᵢ₊₁ = decayᵢ · sᵢ + intra_stateᵢ
         //   - d_intra_stateᵢ      = d_sᵢ₊₁  (current d_running_state)
         //   - d_decayᵢ            = d_sᵢ₊₁ · sᵢ

@@ -1,8 +1,8 @@
-//! # Same-step γ-correction (the single-SSD diagonal term)
+//! # Diagonal γ-correction (the single-SSD diagonal term)
 //!
 //! The single-SSD recurrence scales `K` by `scaleₜ` (at lag 1,
-//! `scaleₜ = γₜ + νₜ₊₁`). That is the right weight for every source step
-//! `s < t`, but *not* for the same step `s = t`, where the weight must be
+//! `scaleₜ = γₜ + νₜ₊₁`). That is the right weight for every source position
+//! `s < t`, but *not* for the same position `s = t`, where the weight must be
 //! `γₜ`. So the intra-chunk path masks the diagonal out (strict lower
 //! triangle), and this module adds it back:
 //!
@@ -11,7 +11,7 @@
 //!                                        · V[t, m_in, h, p]
 //! ```
 //!
-//! It is computed as a new small same-step product. An extraction from the
+//! It is computed as a new small same-position product. An extraction from the
 //! block diagonal of the fused `L·M` CB matrix would need a complex reshape.
 //!
 //! ## SISO fast path
@@ -35,7 +35,7 @@
 
 use burn::prelude::*;
 
-/// The γ-weighted same-step correction `y_diag`, dispatching to the SISO fast
+/// The γ-weighted diagonal correction `y_diag`, dispatching to the SISO fast
 /// path (`y_diag_correction_siso`) or the general MIMO path
 /// (`y_diag_correction_mimo`) on `mimo_rank`.
 ///

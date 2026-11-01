@@ -233,6 +233,7 @@ noise to words to sentences. The checks are spaced in optimizer steps (every
 - The tied head starts *badly*. Burn initialises an `Embedding` from `N(0, 1)`. So
   at a `d_model` of 32, the initial logits have a variance of ~32, and the first
   batches score 25–40 bits/char instead of 5.58. This is a transient: the first
-  steps shrink the embedding. But it uses the start of the LR schedule. An untied
-  head (`missing_lm_head = false`) does not have this problem. The correct fix
+  training steps shrink the embedding. But it uses the start of the LR
+  schedule. An untied head (`missing_lm_head = false`) does not have this
+  problem. The correct fix
   would be an initializer knob on the `VocabNetworkBuilder` of the library.

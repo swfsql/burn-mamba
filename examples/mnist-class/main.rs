@@ -13,7 +13,7 @@
 //!   sub-projection.
 //! - `--sgd` trains every weight with plain SGD instead. It is the one
 //!   optimizer whose training step can replay from a captured CUDA graph
-//!   (`--no-graph` steps it eagerly).
+//!   (`--no-graph` runs it eagerly).
 //!
 //! The choice goes into the `training_config.json` of the artifacts, so a
 //! resumed run keeps it. The example takes no flags of its own after `--`

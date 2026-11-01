@@ -5,17 +5,17 @@
 //! uses the K1–K4 helpers of [`crate::mamba3::double_ssd::ssd::serial`] (with a
 //! sequential loop for K4), and adds its own K5 with the single-ssd logic:
 //!
-//! - a strict lower-triangular intra-chunk path (the same-time-step block is
+//! - a strict lower-triangular intra-chunk path (the same-position block is
 //!   out of the SSM sum: the "diagonal correction" handles it),
 //! - K scaled by `scaleₜ` per source-time column,
-//! - the same-time-step block through an explicit `γₜ · (C·Bᵀ at t) · Vₜ`
+//! - the same-position block through an explicit `γₜ · (C·Bᵀ at t) · Vₜ`
 //!   correction term, which restores the right diagonal weight.
 //!
 //! K1–K4 are the same as in the double-SSD, because:
 //! - K1 (`da_cumsum`, `da_chunk_end`) depends only on `da`.
 //! - K2 (`cb = C · Bᵀ`) uses the **unscaled** B / C. The single-ssd algorithm
 //!   needs the unscaled CB to apply `scaleₜ` per column (lower triangular)
-//!   and to use the same-step block for the γ-correction.
+//!   and to use the same-position block for the γ-correction.
 //! - K3 (chunk-end state from V·decay·K) does not depend on the form: with
 //!   the scaled K (`K_scaled = scaleₜ · B`) it gives the accumulator at each
 //!   chunk end, with no other change.
@@ -48,7 +48,7 @@ impl Mamba3SingleSsdInput {
     /// 4. **K4**: sequential state passing across chunks (loop over chunks).
     /// 5. **K5** (this module's new function): single-ssd chunk scan with
     ///    strict lower-triangular masking, scale broadcasting, and the
-    ///    `γₜ`-weighted same-step diagonal correction.
+    ///    `γₜ`-weighted diagonal correction.
     ///
     /// # Returns
     /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -140,14 +140,14 @@ impl Mamba3SingleSsdInput {
 /// folded sources `t2`:
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
 ///   `(cb[i,j] · scale[t2] · exp(cumA[t1] − cumA[t2])) · V[t2]`
-/// - **Same-time-step (`t1 == t2`) γ-correction**:
+/// - **Diagonal (`t1 == t2`) γ-correction**:
 ///   `γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]`
 /// - **State-to-output (Y_off)** — same formula as the double-ssd K5:
 ///   `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
 /// `cb_bnhTMLM` is the unscaled `C · Bᵀ` matrix from K2; `b_bnlmhr` is the
 /// unscaled K/B tensor (used for the γ-correction matmul). The strict-lower
-/// MIMO mask excludes the same-step `R × R` block, leaving only `t1 > t2`
+/// MIMO mask excludes the same-position `R × R` block, leaving only `t1 > t2`
 /// contributions in the masked CB.
 ///
 /// # Shapes
@@ -190,7 +190,7 @@ pub fn k5_single_ssd_chunk_scan(
         .clone()
         .reshape([batch, nchunks, read, nheads, state_rank]);
 
-    // Per-fused-step cumulative decay (interleave-expand the base grid), on the
+    // Per-fused-position cumulative decay (interleave-expand the base grid), on the
     // source axis and — sliced to the readout's own positions — on the target.
     let da_cumsum_bhnLM = da_cumsum_bhnl
         .clone()
@@ -261,13 +261,14 @@ pub fn k5_single_ssd_chunk_scan(
     let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
     let y_lower_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-    // ── Y_diag: γ-weighted same-step correction ───────────────────────────
+    // ── Y_diag: γ-weighted diagonal correction ────────────────────────────
     //
     // y_diag[t, m_out, h, p] = γ[t] · Σ_{m_in} (Σ_n C[t,m_out,n] · B[t,m_in,n]) · V[t,m_in,p]
     //
-    // Same step means the *read* row, so V and B enter it at those positions
-    // only. Computed fresh (small same-step product) rather than extracting the
-    // block-diagonal from `cb_bnhTMLM` (which would require a fiddly reshape).
+    // The same position is the *read* row, so V and B enter it at those
+    // positions only. Computed fresh (small same-position product) rather than
+    // extracting the block-diagonal from `cb_bnhTMLM` (which would require a
+    // fiddly reshape).
     let y_diag_bntmhp = y_diag_correction(
         helpers::read_rows::<6, 7>(v_bnlmhp, 2, read_stride),
         helpers::read_rows::<6, 7>(b_bnlmhr, 2, read_stride),

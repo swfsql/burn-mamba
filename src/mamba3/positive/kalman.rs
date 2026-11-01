@@ -9,20 +9,20 @@
 //!
 //! `γ`/`ν` are the two endpoint masses of the trapezoid (`γ = Δ` and no `ν`
 //! under [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None)). The
-//! plant pays the left-endpoint installment of a sample one step late,
-//! transported by the decay of that step (`β = ν·α`, with `d` for `α`). So `Λ`
+//! plant pays the left-endpoint installment of a sample one micro-step late,
+//! transported by the decay of that micro-step (`β = ν·α`, with `d` for `α`). So `Λ`
 //! **is** the recurrence of the plant on ones: the total weight of every
 //! sample it wrote (the zero tap slot of a fresh cache included). And `η/Λ` is
-//! a weighted mean of what it wrote. Each step is still one Möbius map: shift
+//! a weighted mean of what it wrote. Each micro-step is still one Möbius map: shift
 //! by `ν`, predict, and shift by `γ` compose to
 //! `ln [[α(1+qγ), αν + γ(1+qαν)], [αq, 1+qαν]]`. So the scan is unchanged.
 //!
 //! That identity is exact for a **lag-1** tap: every pattern at `u = 1`, and
 //! the default at any `u`. A lag-`u` tap (the `Vertical*` patterns at `u > 1`)
-//! is transported across its whole gap, `∏ d` over `u` steps. That reads `u`
+//! is transported across its whole gap, `∏ d` over `u` micro-steps. That reads `u`
 //! earlier precisions, so it is not a 2×2 map. Its installment enters `L` like
 //! a lag-1 installment, transported by `dₜ` alone, and `Λ` over-counts the
-//! plant by `νₜ·(dₜ − ∏ d)` per step. `Λ` is then an upper bound on the weight
+//! plant by `νₜ·(dₜ − ∏ d)` per micro-step. `Λ` is then an upper bound on the weight
 //! of the plant, not the weight itself. Every other property (the ceiling, the
 //! contraction, the stock join) holds unchanged.
 //!
@@ -63,7 +63,7 @@ pub struct GainOutput {
     pub log_precision_bsh: Tensor<3>,
 }
 
-/// The masses of the step in log coordinates, each `[batch, len, nheads]` and
+/// The masses of the micro-step in log coordinates, each `[batch, len, nheads]` and
 /// floored at [`LOG_ZERO`].
 ///
 /// They come from the **pre-activations**, never as `ln` of the masses that

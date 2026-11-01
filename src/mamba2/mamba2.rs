@@ -114,7 +114,7 @@ pub struct Mamba2 {
     /// - `z      [batch, sequence, d_inner]`  — multiplicative gate for the output norm
     /// - `xbc    [batch, sequence, conv_dim]` — input to the causal convolution, which
     ///   is then split into (x, B, C) after activation
-    /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) discretisation step Δ
+    /// - `dt_raw [batch, sequence, nheads]`   — raw (pre-softplus) step size Δ
     ///
     /// Under [`Mamba2Untied::InProjTail`], `in_proj` stops at `xbc`, and
     /// `dt_raw` is in [`Self::in_proj_tail`]. [`Self::project_in`] reads the
@@ -149,7 +149,7 @@ pub struct Mamba2 {
     /// Hard clamp applied to Δ after softplus: `Δ ∈ [dt_limit.0, dt_limit.1]`.
     ///
     /// It prevents degenerate discretisations. At Δ → 0, Ā → 1 and the state
-    /// never decays. At Δ → ∞, Ā → 0 and each step erases the state.
+    /// never decays. At Δ → ∞, Ā → 0 and each token erases the state.
     pub dt_limit: (f64, f64),
 
     /// Per-head log-magnitude of the continuous-time decay parameter A.
@@ -323,7 +323,7 @@ pub struct Mamba2Config {
     /// State rank — the size of the `r` axis of the state.
     ///
     /// A larger `state_rank` gives a more expressive state, but more memory
-    /// and compute per step. The paper uses N ∈ {64, 128, 256} in most
+    /// and compute per token. The paper uses N ∈ {64, 128, 256} in most
     /// experiments.
     ///
     /// Paper: `N`. Python: `d_state`.
@@ -652,7 +652,7 @@ impl Mamba2 {
     /// This is the main training and prefill path. The cost is **linear in
     /// sequence**, and the work is batched matrix multiplications (GEMMs) that
     /// use GPU tensor cores. The naive sequential recurrence needs O(sequence)
-    /// serial steps.
+    /// serial updates.
     ///
     /// ## Full dataflow
     ///
@@ -671,7 +671,7 @@ impl Mamba2 {
     /// ## Sequence padding
     ///
     /// If `sequence % chunk_len ≠ 0`, the block pads the sequence with zeros
-    /// to the next multiple of `chunk_len`. A zero pad is an identity step
+    /// to the next multiple of `chunk_len`. A zero pad is an identity update
     /// (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`): the state goes through it
     /// unchanged. Thus the final state of the padded last chunk is the true
     /// final state.
@@ -679,7 +679,7 @@ impl Mamba2 {
     /// ## Right padding
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
-    /// batch. A padded row is absent. It gets `Δ = 0` (the same identity step
+    /// batch. A padded row is absent. It gets `Δ = 0` (the same identity update
     /// as the chunk padding above), and each slot reads its conv window at its
     /// own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
@@ -781,7 +781,7 @@ impl Mamba2 {
         // Projection output:  [z | xbc | dt_raw]
         //   `z      [batch, sequence, d_inner]`  — gate for the output RMSNorm
         //   `xbc    [batch, sequence, conv_dim]` — will become (x, B, C) after conv + split
-        //   `dt_raw [batch, sequence, nheads]`   — raw discretisation step (pre-softplus)
+        //   `dt_raw [batch, sequence, nheads]`   — raw step size (pre-softplus)
         let (z_gate_bsi, xbc_bsv, dt_raw_bsh) = {
             let z_xbc_dt_bsd = self.project_in(input_bsm);
             assert_eq!([batch, sequence, d_in_proj_out], z_xbc_dt_bsd.dims());
@@ -924,7 +924,7 @@ impl Mamba2 {
         assert_eq!([1, 1, nheads], dt_bias_11h.dims());
 
         let dt_bsh = softplus(dt_raw_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1);
-        // A padded row is the identity step the chunk padding below inserts.
+        // A padded row is the identity update the chunk padding below inserts.
         let dt_bsh = match &pad_bs {
             Some(pad_bs) => crate::padding::fill_padded(dt_bsh, pad_bs, 0.0),
             None => dt_bsh,

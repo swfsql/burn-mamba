@@ -187,7 +187,7 @@ src/
 │  ├─ single_ssd/        single-SSD pathway + its cache
 │  │  ├─ single_ssd/     its forward
 │  │  ├─ token_band.rs   the lag-`u` correction band
-│  │  └─ ssd/            one-pass SSD paths, `diag.rs` (the same-step γ correction)
+│  │  └─ ssd/            one-pass SSD paths, `diag.rs` (the diagonal γ correction)
 │  │     ├─ serial_recalculated/  recompute backward (+ its `diag.rs`)
 │  │     └─ ssd_path/    `Mamba3SingleSsdInput`
 │  ├─ rotation/          `RotationKind`, `rotate_bc_forward`, `rope.rs` (RoPE trick)

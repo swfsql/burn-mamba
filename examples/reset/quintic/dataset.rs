@@ -56,7 +56,7 @@ pub const ITEMS: usize = 5;
 ///
 /// This is three times the 32 of the ladder, because 32 is short enough to hide
 /// a leak. A trained block turns by exactly the right angles and still holds
-/// with `ᾱ ≈ 0.998` per step. That costs nothing in 32 steps, but it misreads a
+/// with `ᾱ ≈ 0.998` per token. That costs nothing in 32 tokens, but it misreads a
 /// long word. At 96, the leak increases the loss, and training closes it.
 pub const SEQ_LENGTH: usize = 96;
 /// The lengths that inference reports: the trained length, and three times it.
@@ -260,7 +260,7 @@ pub fn quat_conj(q: [f64; 4]) -> [f64; 4] {
     [q[0], -q[1], -q[2], -q[3]]
 }
 
-/// `q v q*`: the two-sided step with both factors tied, that is `SO(3)`.
+/// `q v q*`: the two-sided rotation with both factors tied, that is `SO(3)`.
 pub fn conjugate(q: [f64; 4], v: [f64; 4]) -> [f64; 4] {
     quat_mul(quat_mul(q, v), quat_conj(q))
 }
@@ -526,7 +526,7 @@ pub struct QuinticBatch {
 
 impl QuinticBatch {
     /// Moves the batch to `device`. A dataloader worker builds the batch on the
-    /// host, and the thread that steps the model moves it (see
+    /// host, and the thread that trains the model moves it (see
     /// `device::loader_device`).
     pub fn to_device(self, device: &Device) -> Self {
         use crate::common::device::{batch_float, batch_int};

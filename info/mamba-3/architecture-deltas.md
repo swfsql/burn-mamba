@@ -280,7 +280,7 @@ shows at least that the two are not interchangeable:
 - `b_B` enters the state. The block writes it once per token, and then it
   decays with everything else. So `b_B` alone gives every write a
   data-independent direction, with no matching probe.
-- `b_C` enters the read, and the block applies it fresh at every step to the
+- `b_C` enters the read, and the block applies it fresh at every micro-step to the
   whole accumulated state. So `b_C` alone gives every read a data-independent
   probe of the running sum.
 
@@ -309,7 +309,7 @@ convolution on three axes at the same time:
   `λ`). The conv is fixed.
 - It acts on `B_tx_t` **inside** the recurrence. The conv acts on `x_t`
   outside it.
-- It is one scalar pair per (head, step). The conv is a separate 4-tap kernel
+- It is one scalar pair per (head, micro-step). The conv is a separate 4-tap kernel
   per channel.
 
 [`trapezoid-as-integration.md`](trapezoid-as-integration.md) §§4–5 derives
@@ -444,7 +444,7 @@ holds `C/u` tokens. It is worse on both counts:
   `1×` (§8.8).
 
 The write side stays linear in `u`, and this cannot be reduced: the state
-recurrence really takes `u` steps per token. The read side is `u`-invariant in
+recurrence really takes `u` micro-steps per token. The read side is `u`-invariant in
 FLOPs and in memory: the score, the state-to-output product, and the QK-norm
 and rotation of `C`. The block evaluates it only where the readout occurs
 (`helpers::read_rows`, and the kernels take the stride as

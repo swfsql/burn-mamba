@@ -18,14 +18,15 @@ use burn_mamba::prelude::{
 /// ```
 ///
 /// Left multiplication by a unit quaternion is orthogonal, so a state written
-/// at step `τ` and read at step `t` gives
+/// at position `τ` and read at position `t` gives
 ///
 /// ```ignore
 /// yₜ⁽ʰ⁾ = ⟨Qₜ* ⊗ C⁽ʰ⁾, Q_τ* ⊗ B⟩ = ⟨C⁽ʰ⁾, (Qₜ ⊗ Q_τ*) ⊗ B⟩
 /// ```
 ///
-/// and `Qₜ ⊗ Q_τ* = qₜ ⊗ ⋯ ⊗ q_{τ+1}` is the **ordered product of the steps
-/// since the write**: the group word itself, with the newest factor on the left.
+/// and `Qₜ ⊗ Q_τ* = qₜ ⊗ ⋯ ⊗ q_{τ+1}` is the **ordered product of the
+/// micro-steps since the write**: the group word itself, with the newest
+/// factor on the left.
 /// That is the whole task, so the construction is an embedding, not an encoding:
 ///
 /// - **`R` writes the identity.** `x(R) ≠ 0` and `A(R) ≈ −20` (so `ᾱ ≈ 0` erases
@@ -46,7 +47,7 @@ use burn_mamba::prelude::{
 ///   the quaternion.
 ///
 /// A half-turn is an ordinary interior point of the parameterisation, not a
-/// limit. The block bounds one step to `rotation_range · π · Δ`, with a default
+/// limit. The block bounds one micro-step to `rotation_range · π · Δ`, with a default
 /// of `range = 2`. That is a full traverse of the rotation group per unit `Δ`.
 /// For `SU(2)` that is every element, because its period is `4π` (`q` and `−q`
 /// turn the state differently). So `i` is at `tanh(‖ϑ‖) = 1/2`, with a live

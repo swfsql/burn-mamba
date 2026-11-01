@@ -35,8 +35,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Run the full training routine. Load or initialize the model and the
 /// optimizer, then train for the configured number of epochs, with validations,
-/// samples and checkpoints on the way. With `contrast` enabled, each step also
-/// trains the shared-suffix contrast (see [`crate::contrast`]).
+/// samples and checkpoints on the way. With `contrast` enabled, each training
+/// step also trains the shared-suffix contrast (see [`crate::contrast`]).
 pub fn train(
     config: TinyStoriesConfig,
     model_config: MambaVocabNetConfig,

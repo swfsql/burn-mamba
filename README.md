@@ -24,7 +24,7 @@ easy to read, verify, and learn from.
 
 Mamba is a family of **selective state space models** for sequence modeling.
 Like an RNN, it carries a fixed-size state. But its *selective*
-parameters depend on the input, so at each step it can choose what to remember
+parameters depend on the input, so at each token it can choose what to remember
 or forget. This gives it two modes:
 
 - a **parallel** form for training and prompt prefill: linear in sequence
@@ -40,7 +40,7 @@ Each generation in this crate builds on the one before:
 - **Mamba-3**: extends SSD with trapezoidal discretisation, a
   **complex-valued** state transition (a data-dependent rotation beside the
   scalar decay), and multi-input/multi-output (MIMO) state. This crate adds
-  **MambaProduct** (`micro_steps` recurrence steps per token) and optional
+  **MambaProduct** (`micro_steps` micro-steps per token) and optional
   **positive systems** beside the recurrence (a Kalman gain, a max-plus
   register).
 
@@ -278,7 +278,7 @@ launches per case and writes [`kernels.md`](kernels.md).
   changed and why. Three classify the recurrence, and one classifies the block
   around it:
   - **[Rotation as Optimization](info/mamba-3/rotation-as-optimization.md)**:
-    the *quadratic* term. What a step optimizes, in what sense the complex
+    the *quadratic* term. What a micro-step optimizes, in what sense the complex
     transition is a learning rate (or a saddle, or momentum), and what
     `micro_steps` composes, compared with DeltaProduct.
   - **[Trapezoid as Integration](info/mamba-3/trapezoid-as-integration.md)**:

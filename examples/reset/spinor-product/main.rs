@@ -5,11 +5,11 @@
 //! must report the running product in the quaternion group `Q₈` after both
 //! symbols.
 //!
-//! A Mamba-3 step applies one rotation, and its generator is an affine
+//! A Mamba-3 micro-step applies one rotation, and its generator is an affine
 //! functional of the token. So at `micro_steps = 1`, the generators of the two
 //! symbols can only **add**, and `exp(v + w) ≠ exp(w) ⊗ exp(v)` for the
 //! non-commuting pairs. `micro_steps = 2` (`MambaProduct`,
-//! `burn_mamba::mamba3::product`) makes a token two recurrence steps, so its
+//! `burn_mamba::mamba3::product`) makes a token two micro-steps, so its
 //! transition is the product itself. That one config change is the whole
 //! example.
 //!
@@ -73,8 +73,8 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // As in the `reset-*` ladder: a large step to leave the order-blind
-        // solutions, then a small one to settle the rotation onto exact
+        // As in the `reset-*` ladder: a large learning rate to leave the
+        // order-blind solutions, then a small one to settle the rotation onto exact
         // half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);

@@ -121,7 +121,7 @@ pub struct Mamba3DoubleSsdCache {
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]): nothing for `Real1D`, the abelian rotation angle
     /// for [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D)
-    /// (each step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`), or
+    /// (each micro-step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`), or
     /// the cumulative unit quaternion(s) for the quaternion kinds.
     ///
     /// The identity for fresh sequences. It continues across calls for

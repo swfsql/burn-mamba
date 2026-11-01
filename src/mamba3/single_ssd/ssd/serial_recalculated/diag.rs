@@ -1,4 +1,4 @@
-//! # Same-step γ-correction on primitives — forward and analytic backward
+//! # Diagonal γ-correction on primitives — forward and analytic backward
 //!
 //! Primitive (`F`) port of [`super::super::diag`](crate::mamba3::single_ssd::ssd::diag), plus the analytic backward
 //! the recompute node needs.  The forward is used by
@@ -34,7 +34,7 @@ pub struct DiagGrads<B: Backend> {
     pub d_gamma_bnlh: F<B, 4>,
 }
 
-/// The γ-weighted same-step correction `y_diag`, on primitives.
+/// The γ-weighted diagonal correction `y_diag`, on primitives.
 ///
 /// Dispatches on `mimo_rank` and `siso_specialization`; see
 /// [`super::super::diag::y_diag_correction`].

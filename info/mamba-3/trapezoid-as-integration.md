@@ -29,7 +29,7 @@
 ## Abstract
 
 In one common reading, the state of a linear RNN is a fast weight that is fit
-online. In that reading, the step of Mamba-2 is one gradient step on an
+online. In that reading, a micro-step of Mamba-2 is one gradient step on an
 isotropic ridge, pulled toward a rank-one target. The exponential-trapezoidal
 discretisation of Mamba-3 is usually described as an improvement to
 second-order accuracy, or as a two-tap FIR filter on the gradient stream. After
@@ -43,17 +43,17 @@ Four results:
    inflates from rank one to **rank two**. Its second component is the write of
    the previous token, transported into the current frame. So everything that
    the companion note derives from isotropy stays true without change.
-2. **`λ` is an operator-splitting parameter.** One trapezoidal step is exactly
+2. **`λ` is an operator-splitting parameter.** One trapezoidal micro-step is exactly
    *data half-step → ridge integrated exactly → data half-step*. `λ = 1` is
    Lie–Trotter (and is Mamba-2), `λ = ½` is symmetric **Strang**, and
    `λ = σ(u_t)` is a learned interpolation. This *derives* the error condition
    of the source, `λ = ½ + O(Δ) ⟹ O(Δ³)`, and does not only quote it: Strang
    is second-order only when the split is symmetric.
-3. **The step of each sample is paid in two installments, and they
+3. **The step size of each sample is paid in two installments, and they
    collapse.** Both installments use the same transport. So sample `s` carries
    one scalar weight `Δ̃_s = λ_sΔ_s + (1−λ_{s+1})Δ_{s+1}`. That scalar is not
    only an observation about the recurrence. It is literally the single-SSD
-   composite key scale of the crate, and the same-step γ-correction is its
+   composite key scale of the crate, and the diagonal γ-correction is its
    diagonal exception.
 4. **The tap lattice generalises, and the collapse makes it cheap.** For a tap
    at any lag `d`, transported across *its own* gap, the collapse still holds:
@@ -165,7 +165,7 @@ consequences:
 
 Split the gradient flow of `L_t` into its state-dependent part (the ridge,
 linear in `S`) and its state-independent part (the data term, a translation).
-One trapezoidal step is exactly, and bit-exactly:
+One trapezoidal micro-step is exactly, and bit-exactly:
 
 ```text
   S′  = S       + (1−λ_t)Δ_t · v_{t−1}      data half-step, left endpoint
@@ -202,8 +202,8 @@ Accuracy is available, and `λ` is not used for it.
 
 ## 5. Two installments, and the single-SSD key scale
 
-Sample `s` reaches the state by two paths: `γ_s` at step `s`, and `β_{s+1}` at
-step `s+1`. Their sum:
+Sample `s` reaches the state by two paths: `γ_s` at micro-step `s`, and
+`β_{s+1}` at micro-step `s+1`. Their sum:
 
 $$h_T=\sum_{s\le T}w_s\;M_{s+1:T}\,v_s,\qquad w_s=\tilde\Delta_s:=\lambda_s\Delta_s+(1-\lambda_{s+1})\Delta_{s+1}\ (s<T),\qquad w_T=\lambda_T\Delta_T$$
 
@@ -213,7 +213,7 @@ factors out.
 
 **This is not a lookahead.** The recurrence is strictly causal. `Δ̃_s` is a
 retrospective decomposition of a state that is already computed, and it is
-*complete* only at `s+1`. The correct reading: the step of sample `s` is
+*complete* only at `s+1`. The correct reading: the step size of sample `s` is
 **paid in two installments**, and this buys a causal degree of freedom:
 
 > The trapezoid decouples what the output at time `t` sees of token `t` from
@@ -277,7 +277,7 @@ Two consequences:
 
 ## 7. MambaProduct: the unroll
 
-The `micro_steps` (`u`) of the companion note runs `u` full Mamba-3 steps per
+The `micro_steps` (`u`) of the companion note runs `u` full Mamba-3 micro-steps per
 token, folded into the sequence axis. Run the derivation of DeltaProduct on
 it, with `v_{i,0} := v_{i−1,u}` and `M_{a:b} := M_{i,b}⋯M_{i,a}`:
 
@@ -298,7 +298,7 @@ DeltaProduct, there are three structural differences:
    isotropy (companion note §7) stated as a normal form: **the trapezoid adds
    nothing to `A`.**
 2. **The partial-product shape of `B` is shared, but it tells nothing.** Any
-   `u`-step unroll of an affine recurrence gives it. It is not evidence of a
+   `u`-micro-step unroll of an affine recurrence gives it. It is not evidence of a
    shared mechanism.
 3. **`B` takes two tokens.** Exactly one term carries `x_{i−1}`, and the
    *whole* token product `A(x_i)` transports it. Verified deterministically:
@@ -350,7 +350,7 @@ verified exactly:
 
 - `λ_{i,j} = 1` for `j ≥ 2` keeps **one cross-token trapezoid tap per token,
   and plain exponential-Euler inside the token**: the `u = 1` tap semantics on
-  top of a `u`-step transition.
+  top of a `u`-micro-step transition.
 - `λ ≡ 1` is plain MambaProduct, with the trapezoid off.
 
 So the change of semantics is inside the parameterisation, and the fold does
@@ -427,7 +427,7 @@ Every degeneracy is verified:
 
 - The key scale is `γ_s + (1−λ_{s+u})Δ_{s+u}`: the lag-1 formula with the
   index shifted `s+1 → s+u`.
-- The same-step γ-correction generalises from a **diagonal** to a
+- The γ-correction generalises from a **diagonal** to a
   **`u`-wide band** (subtract the mass that is still unpaid where `t−s < u`).
   At `u = 1` the band *is* the diagonal, so `diag.rs` does not change. The
   band does not have to enter the kernel. A folded pass keeps only the reads

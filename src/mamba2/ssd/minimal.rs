@@ -387,7 +387,7 @@ impl Mamba2SsdInput {
             //   state[0..nchunks]  — the initial state entering each chunk
             //   state[nchunks]     — the final state after the last real token
             //
-            // In a padded sequence, the padding steps are identity steps
+            // In a padded sequence, the padded positions are identity updates
             // (Δ=0 ⇒ Ā=1, B̄=0). The state goes through the pad unchanged, so
             // `state[nchunks]` is the correct final state.
             let state_bhnpr = new_state_bhNpr

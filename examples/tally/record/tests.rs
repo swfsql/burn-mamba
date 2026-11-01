@@ -33,9 +33,9 @@ type Device = burn::prelude::Device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// `S`: the units of the register per value step. The soft maximum exceeds the
-/// hard maximum by at most `ln(T + 1)` (≈ 4.2 at `T = 64`), in *register*
-/// units. So a value step must be worth more than that plus the decision
+/// `S`: the units of the register per unit of value. The soft maximum exceeds
+/// the hard maximum by at most `ln(T + 1)` (≈ 4.2 at `T = 64`), in *register*
+/// units. So one unit of value must be worth more than that plus the decision
 /// margin.
 const SCALE: f64 = 12.0;
 /// The decision offset, half of `ln 2`. A record clears `−n·e^(−S)` from below,
@@ -91,7 +91,7 @@ fn by_exp() -> Vec<Vec<f64>> {
     embeddings(&|i| 2.0 * exp_write(i as f64 + 1.0, i) - 1.0)
 }
 
-/// `u(v) = exp(S·(v − v_max))`. One value step is worth `e^S ≈ 1.6·10⁵`, more
+/// `u(v) = exp(S·(v − v_max))`. One unit of value is worth `e^S ≈ 1.6·10⁵`, more
 /// than a whole sequence of smaller values (`T = 64`), so a sum of these is a
 /// maximum. It never overflows, because the largest is 1.
 fn exp_write(v: f64, symbol: usize) -> f64 {
@@ -117,7 +117,7 @@ enum Arm {
     },
     /// The ablation that **works**: no register. Head 0 holds the plain sum of
     /// `u(v) = exp(S·(v − v_max))`, read as `u(vₜ) − hₜ₋₁`. That is a running
-    /// maximum in the exponential domain, because one value step is worth more
+    /// maximum in the exponential domain, because one unit of value is worth more
     /// than a whole sequence of smaller values.
     ExpWrite,
 }

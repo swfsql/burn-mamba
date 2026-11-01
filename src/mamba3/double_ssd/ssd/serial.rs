@@ -345,7 +345,7 @@ pub fn k4_ssd_state_passing(
 /// Compute the chunk output by combining the intra-chunk (diagonal) and
 /// inter-chunk (off-diagonal) contributions.
 ///
-/// The MIMO causal mask uses interleaved time-step ordering:
+/// The MIMO causal mask uses an interleaved position ordering:
 /// `L_mimo[i,j] = exp(cumA[i//m] - cumA[j//m])` if `i//m >= j//m`, else 0.
 ///
 /// This function applies no D skip: the caller adds it.
@@ -420,7 +420,7 @@ pub fn k5_ssd_chunk_scan(
 
     // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of target in time).
     // `triu(1)` keeps the diagonal — the double-SSD sum is inclusive of the
-    // same step, unlike the single-SSD one.
+    // same position, unlike the single-SSD one.
     let neg_inf_base_bnhtl: Tensor<5> = helpers::read_causal_mask(chunk_len, read_stride, 1, &device)
         .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111tl
         .expand([batch, nchunks, nheads, chunk_tokens, chunk_len]); // neg_inf_base_bnhtl

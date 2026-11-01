@@ -281,7 +281,7 @@ impl LmModel for Wrap {
         (output, caches)
     }
 
-    /// One step at the rate `lr · λˢ` for the parameters of each stage, and
+    /// One training step at the rate `lr · λˢ` for the parameters of each stage, and
     /// `lr · λᴹ` for those of the main network. The embedding and the heads
     /// take the rate of stage 0.
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {

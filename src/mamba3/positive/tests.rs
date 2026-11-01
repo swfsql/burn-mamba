@@ -352,7 +352,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
 /// `t + 1` ways the maximum can have been reached.
 ///
 /// The margin is `dtype_tol(1e-3)`. A tie reaches the bound itself: at `t = 1`,
-/// `8 + ln 2 = 8.6931`, which f16 rounds to `8.6953` (one step is `0.0078` at 8).
+/// `8 + ln 2 = 8.6931`, which f16 rounds to `8.6953` (the spacing is `0.0078` at 8).
 #[test]
 fn register_tracks_max_plus_within_its_log_bound() {
     let device = test_device();
@@ -406,7 +406,7 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
     assert!(raise.max().into_scalar::<f32>() <= 0.0, "a decay above stock's");
 }
 
-/// For `q, m > 0` every step is an entrywise-positive matrix, so it contracts
+/// For `q, m > 0` every micro-step is an entrywise-positive matrix, so it contracts
 /// the Hilbert distance `|ln Λ − ln Λ'|` by at least
 /// `tanh(¼·ln(1 + 1/(q·γ)))` (here `γ = Δ`) — with no `α` in it — and two caches that disagree
 /// about the evidence held forget the disagreement.

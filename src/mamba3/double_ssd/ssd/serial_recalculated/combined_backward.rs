@@ -195,7 +195,7 @@ pub fn combined_backward<B: Backend>(
     san(&d_y_bnhTMp);
 
     // Reusable [chunk_tokens, chunk_len] -inf upper-triangular base mask for
-    // ORANGE (`triu(1)`: the double-SSD sum includes the same step).
+    // ORANGE (`triu(1)`: the double-SSD sum includes the same position).
     let neg_inf_base_tl: F<B, 2> = read_causal_mask::<B>(chunk_len, read_stride, 1, &device, dtype);
 
     // ═══════════════════════════════════════════════════════════════════════

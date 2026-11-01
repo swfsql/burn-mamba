@@ -5,7 +5,7 @@
 //! 1. Recompute the forward intermediates (K1–K4) from the saved leaf inputs.
 //! 2. Compute every chunk-**local** gradient batched: the K5 state-to-output
 //!    (BLUE), the strict lower-triangular intra-chunk (LOWER) and the
-//!    γ-weighted same-step (DIAG) terms. BLUE and LOWER run one chunk group at
+//!    γ-weighted diagonal (DIAG) terms. BLUE and LOWER run one chunk group at
 //!    a time
 //!    ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
 //! 3. Walk the K4 state-passing backward, the one recurrence.
@@ -47,7 +47,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
     pub d_b_bnlmhr: F<B, 6>,
     /// Gradient of the output projection `C`, on the read axis of the chunk.
     pub d_c_bntmhr: F<B, 6>,
-    /// Gradient of the same-step trapezoid weight `γ`, on the read axis.
+    /// Gradient of the diagonal trapezoid weight `γ`, on the read axis.
     pub d_gamma_bnth: F<B, 4>,
     /// Gradient of the key scale `scale` (at lag 1, `γ + (1−λ₊₁)·Δ₊₁`).
     pub d_scale_bnlh: F<B, 4>,
@@ -65,10 +65,10 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// - computes the K5 BLUE (state-to-output) and strict lower-triangular LOWER
 ///   (intra-chunk) backwards one chunk group at a time (the group size sets
 ///   the memory of the score, see [`Mamba3SsdPath::backward_chunk_group`]),
-/// - computes the γ-weighted same-step DIAG backward batched (its `m × m`
+/// - computes the γ-weighted diagonal DIAG backward batched (its `m × m`
 ///   working tensors are tiny),
 /// - walks the K4 state-passing backward (the one recurrence) over the
-///   chunk-input-state gradient from the first step.
+///   chunk-input-state gradient from the first item.
 ///
 /// K3/K2/K1 backwards then run as single batched ops.
 ///
@@ -184,7 +184,7 @@ pub fn combined_backward<B: Backend>(
     //   qk_dot[m_out, m_in] = Σ_r C[m_out, r] · B[m_in, r]
     //   y_diag[m_out, p]    = γ · Σ_{m_in} qk_dot[m_out, m_in] · V[m_in, p]
     // ═══════════════════════════════════════════════════════════════════════
-    // The same step is the *read* row, so V and B enter at those positions and
+    // The same position is the *read* row, so V and B enter at those positions and
     // their gradients are scattered back onto the folded axis.
     let DiagGrads {
         d_v_bnlmhp: d_v_diag_bntmhp,

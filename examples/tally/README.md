@@ -189,7 +189,7 @@ and the register is the whole model.
 ## tally-drift
 
 The rung of the Kalman gain. Its answer is a **measurement, not a wall**. The
-model reads 33 values (from `−2` to `+2` in steps of `1/8`) and a gap symbol
+model reads 33 values (from `−2` to `+2` in increments of `1/8`) and a gap symbol
 `~`. At every value, it reports whether the value is **above the running
 estimate of the level**. The level is a random walk that moves only during
 gaps. A gap is elapsed time: it adds doubt without evidence.
@@ -338,7 +338,7 @@ do not buy more.
 The rung closes three more shortcuts:
 
 - **A comparison against a decaying average.** The average is *below* the
-  maximum. So `edge` (every value within one step of the maximum) defeats it
+  maximum. So `edge` (every value within 1 of the maximum) defeats it
   by construction, and `plateau` defeats it (it sets the maximum early and
   never approaches it again).
 - **The exponential encoding**: range, above.
@@ -369,7 +369,7 @@ solution to converge *to*.
 
 `edge` and `bands` are the families that separate the arms:
 
-- `edge` puts every token within one step of the maximum, so an approximately
+- `edge` puts every token within 1 of the maximum, so an approximately
   right answer stops paying.
 - `bands` keeps each segment in a quarter of the alphabet, so the model needs
   resolution at the bottom as well as at the top.

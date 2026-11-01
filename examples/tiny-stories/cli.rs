@@ -1,6 +1,6 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
-//! (`Overrides`, shared with `burn-deltanet`), the SSD path, the step profiler
-//! and the VRAM cap.
+//! (`Overrides`, shared with `burn-deltanet`), the SSD path, the training-step
+//! profiler and the VRAM cap.
 
 use crate::common::cli::{AppArgs, StepFlags, finish_extra};
 use crate::common::parse_ssd_path;

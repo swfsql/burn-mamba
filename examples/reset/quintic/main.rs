@@ -15,7 +15,7 @@
 //!   `144°` rotations, and only a reflection does that. No single layer, at any
 //!   size, of any rotation kind, tracks more of `S₅` than its sign. Two layers
 //!   do: the first holds the sign, and the second holds the even part, turned by
-//!   a step that reads both.
+//!   a micro-step that reads both.
 //!
 //! The trained width ([`model::DEFAULT_WIDTH`]) is wider than the hand-built
 //! floor ([`model::floor_width`]). Training puts the group on one head at a
@@ -89,9 +89,9 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // The schedule of the ladder: a large step to leave the order-blind
-        // solutions, then a small one to settle the rotation onto the exact
-        // turns.
+        // The schedule of the ladder: a large learning rate to leave the
+        // order-blind solutions, then a small one to settle the rotation onto
+        // the exact turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

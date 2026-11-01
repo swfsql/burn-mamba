@@ -15,7 +15,7 @@
 //! tokens, the span is `e^{45.8} ≈ 8·10¹⁹`, against the seven digits of f32,
 //! and the rung separates the arms. A trained stock arm gets 90.1%, against
 //! 95.4% for the register at equal budget, and 100% for the hand-built
-//! register. The `edge` family (every value within one step of the maximum)
+//! register. The `edge` family (every value within 1 of the maximum)
 //! makes an approximately right answer stop paying.
 //!
 //! The *other* advantage of the register, growth (`a > 0`, a decay above one,

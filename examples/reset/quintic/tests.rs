@@ -41,7 +41,7 @@ use burn_stack::utils::test_helpers::test_device;
 // the constructions' constants
 // ---------------------------------------------------------------------------
 
-/// `Δ` for every head and every input, so a step turns by exactly
+/// `Δ` for every head and every input, so a micro-step turns by exactly
 /// `range·π·tanh(‖ϑ‖)`, and `γ = Δ = 1` writes `B` unscaled.
 const DELTA: f64 = 1.0;
 /// `Â` on a hold. `A = −softplus(Â)`, floored at the `a_floor` of the block.
@@ -103,7 +103,7 @@ fn solve(mut m: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Vec<f64> {
     (0..n).map(|i| rhs[i] / m[i][i]).collect()
 }
 
-/// The raw in-projection generator that makes one step turn by the rotation
+/// The raw in-projection generator that makes one micro-step turn by the rotation
 /// vector `v` (`angle · axis`). The block maps a raw `r` to
 /// `range·π·tanh(‖r‖)·r̂`, so `r = atanh(angle/(range·π))·v̂`.
 fn raw_generator(v: [f64; 3]) -> [f64; 3] {
@@ -335,12 +335,12 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
 ///
 /// These are affinely independent in `ℝ³`, which is all that its in-projection
 /// needs. They are exactly these points at every length. The sign arrives
-/// scaled by the decay of the hold of layer 1 (`ᾱ = e^(−a_floor)` per step),
+/// scaled by the decay of the hold of layer 1 (`ᾱ = e^(−a_floor)` per micro-step),
 /// and the norm removes the scale. Next to a nonzero `c` embedding, the norm
 /// cannot remove it, and the turns drift.
 ///
 /// **Layer 2: the even part, and a sign of its own.** With `σ = sᵉ ∘ a`, one
-/// step is `a ← sᵉ' ∘ g ∘ sᵉ · a` (`e`, `e'` the sign before and after `g`). It
+/// micro-step is `a ← sᵉ' ∘ g ∘ sᵉ · a` (`e`, `e'` the sign before and after `g`). It
 /// is the identity on `s`. On `c`, it is either `c` (`e = 0`) or `s∘c∘s`
 /// (`e = 1`): the `72°` and the `144°` rotations, a pair that no conjugation
 /// relates. That is why this layer must read the sign. Heads 0–1 hold `a` as
@@ -884,7 +884,7 @@ fn normal_subgroup_orders(group: &[Perm]) -> Vec<usize> {
 // ---------------------------------------------------------------------------
 
 /// Read the **first** layer of a trained `Rotor4D` model from its weights. For
-/// every symbol and head, it prints the step `Δ`, the hold `ᾱ = exp(Δ·A)`, and
+/// every symbol and head, it prints the step size `Δ`, the hold `ᾱ = exp(Δ·A)`, and
 /// the turn angles of the left and right factors. Then, per head, it prints the
 /// angle between the axes of the two turns in each factor. The icosahedral
 /// generators read `180°`/`120°`, with axes `20.9°` or `69.1°` apart (or their
@@ -930,7 +930,7 @@ fn learned_rotations() {
         cos.clamp(-1.0, 1.0).acos().to_degrees()
     };
     println!("first layer: d_model {d}, {nheads} heads, mimo_rank {mimo_rank}");
-    // gens[symbol][head][factor]: the rotation vector of one step
+    // gens[symbol][head][factor]: the rotation vector of one micro-step
     let mut gens = vec![vec![[[0.0f64; 3]; 2]; nheads]; NUM_SYMBOLS];
     for s in 0..NUM_SYMBOLS {
         let token: Vec<f64> = (0..d).map(|k| embed_w[s * d + k] + embed_b[k]).collect();

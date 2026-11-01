@@ -69,8 +69,8 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // As in `reset-spinor`: a large step to leave the order-blind solution,
-        // then a small one to settle the rotation onto exact half-turns.
+        // As in `reset-spinor`: a large learning rate to leave the order-blind
+        // solution, then a small one to settle the rotation onto exact half-turns.
         let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))

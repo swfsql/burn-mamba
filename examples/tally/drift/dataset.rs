@@ -1,5 +1,5 @@
 //! The tally-drift stream: 33 value symbols on a grid from `−2` to `+2` in
-//! steps of `1/8`, and a gap `~`. The target at each position is **whether this
+//! increments of `1/8`, and a gap `~`. The target at each position is **whether this
 //! value is above the running estimate of the level**. The estimate *ages*
 //! across gaps, and it already includes the value that it is compared to.
 //!

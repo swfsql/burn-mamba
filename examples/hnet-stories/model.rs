@@ -74,7 +74,7 @@ impl ModelConfigExt for HNetStoriesConfig {
 ///   λˢ = √( Dᴹ/Dˢ · Πᵢ₌ₛ^{S−1} Nⁱ )
 /// ```
 ///
-/// A stage sees `Πᵢ Nⁱ` times more rows per step than the main network: a
+/// A stage sees `Πᵢ Nⁱ` times more rows per training step than the main network: a
 /// larger effective batch. It is also narrower, which allows a larger rate
 /// per unit of width.
 pub fn lr_multipliers(widths: &[usize], main_width: usize, targets: &[f64]) -> Vec<f64> {

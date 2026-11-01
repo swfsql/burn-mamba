@@ -1145,7 +1145,7 @@ fn quaternion_single_matches_step_mimo() {
 /// Flipping the `siso_specialization*` flags must not change anything the caller
 /// can observe on the single-SSD forward.
 ///
-/// At `mimo_rank == 1` this path takes the specialized branches of the same-step
+/// At `mimo_rank == 1` this path takes the specialized branches of the diagonal
 /// γ-correction (`ssd::diag`, inside every SSD algorithm — including the
 /// recompute backward, which must pick the *same* branch as its forward; that is
 /// [`Mamba3Config::siso_specialization`]) and of the boundary-β seed

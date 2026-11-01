@@ -31,10 +31,10 @@ use burn_stack::utils::test_helpers::test_device;
 
 /// `Δ` for the ballot box, on every symbol. It is fixed at 1, so `ᾱ = exp(A)`
 /// exactly, and `γ = Δ = 1` writes `B·x` unscaled. (The block runs at
-/// `TapPattern::None`, which gives the whole step to the current token.) So the
+/// `TapPattern::None`, which gives the whole step size to the current token.) So the
 /// decay is `A` alone.
 const DELTA: f64 = 1.0;
-/// The per-step decay at which the ballot box holds. The block floors `|A|` at
+/// The per-micro-step decay at which the ballot box holds. The block floors `|A|` at
 /// its `a_floor` (`1e-4`), so this is the flattest hold that it allows: an
 /// (essentially) unweighted running sum over a 32-token sequence.
 const HOLD_ALPHA: f64 = 0.9999; // = exp(-1e-4)
@@ -107,7 +107,7 @@ const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
 
 /// Build the block by hand.
 ///
-/// `alpha` is the per-step decay of the ballot box on a `±` symbol. When
+/// `alpha` is the per-micro-step decay of the ballot box on a `±` symbol. When
 /// `selective` is false, the `RESET` symbol gets that same decay instead of
 /// `e⁻²⁰`. That is the **only** difference, and it turns the block into a
 /// fixed-decay (LTI) SSM. `gain` scales the `C` readout, that is the

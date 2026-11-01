@@ -146,7 +146,7 @@ pub fn gen_bands(rng: &mut Rng, len: usize) -> Vec<usize> {
     out
 }
 
-/// **The edge family.** Every token is within one step of the running maximum:
+/// **The edge family.** Every token is within 1 of the running maximum:
 /// `v ∈ {max − 1, max, max + 1}`. So a record is exactly `v = max + 1`, and
 /// only the maximum decides *every scored position*. A large value alone does
 /// not, and that is what carries the other families.

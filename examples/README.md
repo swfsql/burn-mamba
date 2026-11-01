@@ -11,9 +11,9 @@
   - `reset-swap`: the full two-sided `SO(4)` (`S₃`).
   - `spinor-product`: the *other* dial, `Mamba3Config::micro_steps`
     (MambaProduct's `u`). It reads the `Q₈` stream of `reset-spinor` **two
-    symbols per token**. The rotation generator of one step is affine in the
-    token, so the two generators of a pair can only *add* where the group
-    multiplies. `u = 2` makes the token two recurrence steps, and its
+    symbols per token**. The rotation generator of one micro-step is affine in
+    the token, so the two generators of a pair can only *add* where the group
+    multiplies. `u = 2` makes the token two micro-steps, and its
     transition the product. A second layer (`-- --layers 2 --micro-steps 1`)
     is the contrast: it turns a second state, so it has to *learn* the product.
   - `reset-quintic`: the question of `reset-swap` over five items. `A₅` (the
@@ -185,7 +185,7 @@ cargo run --example reset-majority --features "backend-flex" -- --training --art
 cargo run --example reset-majority --features "backend-flex" -- --training --max-seconds 600
 
 # Muon on the hidden matrices, plain SGD on the rest; and plain SGD alone, whose training
-# step replays from a captured CUDA graph (--no-graph steps it eagerly)
+# step replays from a captured CUDA graph (--no-graph runs it eagerly)
 cargo run --example mnist-class --features "backend-flex" -- --training --muon --sgd
 cargo run --release --example mnist-class --features "backend-cuda" -- --training --sgd
 

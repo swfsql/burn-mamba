@@ -897,7 +897,7 @@ mod step {
         /// formulas are in [`Mamba3::step`]). Both cache variants decode here:
         /// `step_single_ssd` converts its cache and calls this function.
         ///
-        /// At `micro_steps = u > 1` the token is `u` of those steps
+        /// At `micro_steps = u > 1` the token is `u` of those micro-steps
         /// ([`crate::mamba3::product`]). They are evaluated **together**, not one
         /// at a time (see the body).
         ///

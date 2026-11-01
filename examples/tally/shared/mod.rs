@@ -41,8 +41,8 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // As on the `reset` ladder: a large step to leave the memoryless basin,
-        // and a small step to reach the exact construction.
+        // As on the `reset` ladder: a large learning rate to leave the
+        // memoryless basin, and a small one to reach the exact construction.
         let total_steps = num_epochs * data::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(OptimizerKind::AdamW);
         TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))

@@ -2,7 +2,7 @@
 //!
 //! Implements [`Mamba3QuatScanBackendExt`] for `Autodiff<B>` with one Burn
 //! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward keeps
-//! only its two leaf inputs (the per-step quaternions `q` and the carry
+//! only its two leaf inputs (the per-micro-step quaternions `q` and the carry
 //! `init`). The backprop recomputes the prefix product and computes the exact
 //! quaternion VJP of the cumulative product. So the `O(log seq)` scan
 //! intermediates are never kept.

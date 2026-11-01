@@ -1,8 +1,8 @@
 //! The training loop of every rung: dataloaders over the [`Task`] of the rung,
 //! train and validation epochs, checkpoints, and a cross-entropy head over the
-//! scored positions ([`forward_classification`]). A `Trainer` steps it. Under
+//! scored positions ([`forward_classification`]). A `Trainer` trains it. Under
 //! plain SGD (and without `--no-graph`), the whole training step replays from a
-//! graph captured at the first batch. Under any other optimizer, it steps
+//! graph captured at the first batch. Under any other optimizer, it runs
 //! eagerly.
 
 use super::data::{

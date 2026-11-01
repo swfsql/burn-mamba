@@ -56,7 +56,7 @@ run keeps it:
 - **A learning rate per stage.** Each stage trains at the rate of the
   schedule times `λˢ` (`lr_multipliers`). The default is the heuristic of the
   paper, normalised to `1` at the main network. A stage sees more rows per
-  step and is narrower, so it takes a larger rate.
+  training step and is narrower, so it takes a larger rate.
 - **Runs of windows.** A story trains window by window, and the state carries
   from one window to the next (see "Runs and the frontier" in the
   `tiny-stories` README). A window holds 1024 characters (`-- --seq-len`), so

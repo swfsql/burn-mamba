@@ -106,7 +106,7 @@ _Avoid_: weight, coefficient
 
 **Rotation**:
 The orthogonal factor of the Mamba-3 state transition. It turns the state by a
-data-dependent amount at each step. It is not a positional encoding.
+data-dependent amount at each micro-step. It is not a positional encoding.
 _Avoid_: RoPE, positional encoding, complex transition
 
 **RoPE trick**:

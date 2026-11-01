@@ -18,7 +18,7 @@
 //!
 //! A pattern says which earlier samples are **admissible** at each folded
 //! position. Their *weight* is not a second decision. Two learned per-(head,
-//! micro-step) scalars split the mass `Δₚ` of the step. A tap that is not
+//! micro-step) scalars split the mass `Δₚ` of the micro-step. A tap that is not
 //! admissible gives its mass back one level. The lag-1 tap of a two-tap
 //! member gives it to the lag-`u` tap. The tap at
 //! [`tap_lag`](TapPattern::tap_lag) gives it to `γ`. Under
@@ -100,8 +100,8 @@ pub enum TapPattern {
     ///   product.
     ///
     /// The two SSD pathways are the same here. With no second pass to fuse, the
-    /// composite key scale of single-SSD is `γ`, and its same-step correction
-    /// is the whole diagonal. So
+    /// composite key scale of single-SSD is `γ`, and its γ correction is the
+    /// whole diagonal. So
     /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
     /// runs the double-SSD code, and the caches convert by field identity at
     /// *every* position, not only at boundaries.
@@ -142,17 +142,18 @@ pub enum TapPattern {
     /// - the tap is transported across its own `u`-position gap,
     /// - the tap buffer of the cache becomes a `u`-deep FIFO (exactly the
     ///   previous token),
-    /// - the single-SSD same-step correction widens from the diagonal to a
+    /// - the single-SSD γ correction widens from the diagonal to a
     ///   `u`-wide band. At the only positions whose output survives
     ///   (`j = u−1`), that band is **exactly the token**. So it is one small
     ///   intra-token contraction outside the chunked kernel, not a wider mask
     ///   (`crate::mamba3::single_ssd::token_band`).
     ///
     /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`**,
-    /// this tap has no exact filter form. Its installment arrives `u` steps
-    /// late, after `u − 1` predicts that a filter would have made with it. The
-    /// gain counts it as a lag-1 installment, so `Λ` over-estimates the weight
-    /// that the plant wrote, and `η/Λ` is only approximately its weighted mean.
+    /// this tap has no exact filter form. Its installment arrives `u`
+    /// micro-steps late, after `u − 1` predicts that a filter would have made
+    /// with it. The gain counts it as a lag-1 installment, so `Λ`
+    /// over-estimates the weight that the plant wrote, and `η/Λ` is only
+    /// approximately its weighted mean.
     /// The block still runs, and its pathways still agree. The lag-1 patterns
     /// are exact ([`crate::mamba3::positive::kalman`]).
     Vertical,
@@ -162,7 +163,7 @@ pub enum TapPattern {
     /// cross-token path, it cannot do the job that the trapezoid exists for. It
     /// is a component of a pattern, not an alternative to one.
     ///
-    /// The closed step has no admissible earlier sample, so all its mass
+    /// The closed micro-step has no admissible earlier sample, so all its mass
     /// returns to `γ` (`λ = 1` there, module header). Each token **starts** on
     /// plain exponential-Euler and is trapezoidal inside. This is exactly the
     /// limit that `info/mamba-3/trapezoid-as-integration.md` §8 shows learning
@@ -194,7 +195,7 @@ pub enum TapPattern {
     /// across its own gap (`1` and `u` positions of the same folded chain), so
     /// the collapse of §9 still applies term by term. The state stays one
     /// matrix, and sample `s` still carries **one** scalar,
-    /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later step. So single-SSD still
+    /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later micro-step. So single-SSD still
     /// needs one pass.
     ///
     /// Costs over [`Vertical`](Self::Vertical):
@@ -218,7 +219,7 @@ pub enum TapPattern {
     /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset), with
     /// the lag-1 tap unrestricted. So at `j = 0`, the lag-1 tap reads the
     /// *last* micro-step of the previous token, and the lag-`u` tap reads its
-    /// *first*. Both candidates for the left endpoint of the step are always
+    /// *first*. Both candidates for the left endpoint of the micro-step are always
     /// available, and `μ` interpolates between them everywhere.
     ///
     /// So this member **contains** the two single-tap patterns: `μ ≡ 1` is

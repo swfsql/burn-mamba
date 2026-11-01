@@ -30,7 +30,7 @@
 ## Abstract
 
 In one common reading, the state of a linear RNN is a fast weight that is fit
-online. In that reading, the step of Mamba-2 is one gradient step on an
+online. In that reading, a micro-step of Mamba-2 is one gradient step on an
 isotropic ridge, pulled toward a rank-one target. Mamba-3 introduces its MIMO
 extension for a hardware reason: decoding is memory-bound, and to widen the
 outer product to a matrix product raises the arithmetic intensity at almost no
@@ -300,7 +300,7 @@ Two readings:
 ## 7. MIMO and the rotation: one state, so one transition
 
 The `M` ranks share **one** state `S ∈ ℝ^{P×N}`, and the rotation acts on the
-`N` axis of that state. So there is exactly one rotation per step, for any
+`N` axis of that state. So there is exactly one rotation per micro-step, for any
 number of ranks that write into it. The rotation is a property of the
 *coordinates of the state*, and the rank index is a property of the
 *samples*. The two cannot meet. The implementation shows the same thing in
@@ -309,12 +309,12 @@ its operations: the cumulative angles are per (head, plane), and they are
 `Complex2D` (shared by the heads, then `Δ`-scaled per head), and per (head,
 block) at the quaternion kinds. Neither carries a rank index.
 
-The same-step read/write Gram makes this checkable. For any transition of the
+The same-position read/write Gram makes this checkable. For any transition of the
 form `α ×` isometry, `R̄^\top R̄ = I` gives:
 
 $$\tilde C_t^{(i)\top}\tilde B_t^{(m)}=C_t^{(i)\top}B_t^{(m)}\qquad\text{for all }t,\ \text{all }M^2\text{ entries}$$
 
-Verified. It is a *time-invariant*: the same-step coupling of read `i` to
+Verified. It is a *time-invariant*: the same-position coupling of read `i` to
 write `m` never moves. The cross-token Gram moves: the accumulated rotation
 is there, and this makes it a transition, not an encoding.
 
@@ -367,7 +367,7 @@ $$S_T=\sum_{s\le T}\tilde\Delta_s\;\Big(\textstyle\prod_{r=s+1}^{T}\alpha_r\Big)
 
 Verified. `Δ̃` carries **no rank index**. For this reason, the composite key
 scale of `single_ssd` is a `[b, n, l, h]` tensor with no `m` axis, and the
-same-step γ-correction does not change at any `mimo_rank`. `λ ≡ 1` gives
+diagonal γ-correction does not change at any `mimo_rank`. `λ ≡ 1` gives
 `Δ̃ = Δ` with MIMO on, exactly as without it.
 
 The two dials do not touch each other. The trapezoid extends the linear term
@@ -379,7 +379,7 @@ multiplication of target ranks in §3.
 
 ## 9. MIMO and MambaProduct: what each dial unties
 
-`micro_steps` (`u`) runs `u` full Mamba-3 steps per token, folded into the
+`micro_steps` (`u`) runs `u` full Mamba-3 micro-steps per token, folded into the
 sequence axis. Both dials widen the write. They differ in what stays tied:
 
 | dial | keys per token | values per token | step sizes | combination |
@@ -422,7 +422,7 @@ Verified over a whole trajectory:
 > submanifold, short by `(M−1)P − M² + 1`.
 
 So the two are **one dial with different things tied**. This is the content
-behind their shared cell at `Real1D`: with a real, commuting step algebra, `u`
+behind their shared cell at `Real1D`: with a real, commuting step-size algebra, `u`
 can change only the write, and the write is what `M` widens. They stop
 agreeing in two places:
 
@@ -466,7 +466,7 @@ leaves it.
 `num_rotation_channels()` has no `mimo_rank` factor in any branch. §7 shows
 that this is necessary, not only convenient. One state has one transition.
 Per-rank angles have no state-space preimage, break the time-invariance of the
-`M²` same-step Gram, and add no reachable write. Say this wherever the
+`M²` same-position Gram, and add no reachable write. Say this wherever the
 rotation is documented, because the opposite reading ("the ranks could rotate
 at different rates") is the natural first guess.
 
@@ -475,7 +475,7 @@ at different rates") is the natural first guess.
 The composite key scale of `single_ssd` is a `[b, n, l, h]` tensor because
 `γ`/`β` are per-head scalars (§8). A future change that makes the per-sample
 weight of the write depend on the rank index must carry that index into the
-scale tensor and into the same-step correction. Otherwise it must give up the
+scale tensor and into the diagonal correction. Otherwise it must give up the
 pathway.
 
 ### 10.5 `micro_steps` contains MIMO on the write
@@ -546,6 +546,6 @@ known. This note assembles:
   property of MIMO, with the two delta-rule counterexamples (§5),
 - the initialisation identity (§6),
 - the no-preimage argument for why the ranks must share the rotation, and the
-  same-step Gram invariant that detects it (§7),
+  same-position Gram invariant that detects it (§7),
 - the containment of `MIMO(M)` inside `MambaProduct(u = M)`, which turns two
   dials into one dial with different things tied (§9).

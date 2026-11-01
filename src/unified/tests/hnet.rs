@@ -1,6 +1,6 @@
 //! The H-Net of `burn-stack` over real blocks, through [`MambaHNetVocabNet`]:
 //! forward = step unrolled (logits, caches, gradients), right padding, and a
-//! Muon step over the scoped plan (each stack at its own width).
+//! Muon training step over the scoped plan (each stack at its own width).
 
 use crate::prelude::*;
 use burn::prelude::*;
@@ -208,7 +208,7 @@ fn mamba3_padded_rows_match_each_row_alone() {
     }
 }
 
-/// The scoped Muon plan fits the real weights of every stack (a Muon step
+/// The scoped Muon plan fits the real weights of every stack (a Muon training step
 /// panics on a column layout of the wrong width), and it gives the fused
 /// `in_proj` of each stack to Muon.
 #[cfg(all(feature = "mamba2", feature = "mamba3", feature = "optim"))]

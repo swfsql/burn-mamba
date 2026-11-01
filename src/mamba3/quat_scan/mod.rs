@@ -1,6 +1,6 @@
 //! # Memory-efficient quaternion cumulative-product scan (custom backward)
 //!
-//! The quaternion kinds (`Quaternion4D`, `Rotor4D`) compose their per-step
+//! The quaternion kinds (`Quaternion4D`, `Rotor4D`) compose their per-micro-step
 //! rotations with a cumulative product over the sequence
 //! ([`crate::mamba3::rotation::quat_cumprod`], a Hillis–Steele parallel scan).
 //! In plain autodiff, that scan keeps `O(log seq)` *full-sequence*
@@ -10,7 +10,7 @@
 //! `SerialRecalculated` design. The `Autodiff` impl ([`backward`]) of the
 //! [`Mamba3QuatScanBackendExt`] trait registers one custom
 //! [`Backward`](burn::backend::autodiff::ops::Backward) node. The node saves
-//! only the leaf inputs (the per-step quaternions and the carry) and
+//! only the leaf inputs (the per-micro-step quaternions and the carry) and
 //! recomputes the scan during backprop. The gradient is the exact quaternion
 //! VJP of the cumulative product, computed with parallel ops (a prefix product
 //! and a reverse cumsum). There is no token loop, so the memory saving does

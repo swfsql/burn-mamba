@@ -2,7 +2,7 @@
 //!
 //! This module owns the data-dependent rotation of the Mamba-3 transition:
 //! the four [`RotationKind`]s, their cache accumulator ([`RotationState`]),
-//! their per-step definition ([`RotationSpec`]) and the one entry point that
+//! their per-micro-step definition ([`RotationSpec`]) and the one entry point that
 //! applies them to `B`/`C` ([`rotate_bc_forward`]).
 //!
 //! The data-dependent rotation of Mamba-3 gives a **complex-valued** SSM. The
@@ -35,7 +35,7 @@
 //! so the scalar-decay SSD core (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
 //! projections `B̄ᵢ = Pᵢᵀ Bᵢ`, `C̄ₜ = Pₜᵀ Cₜ` turn. What is lost is the
 //! closed-form sum of angles. The cumulative rotation comes from an
-//! **associative scan over the per-step quaternions** ([`quat_cumprod`]). A
+//! **associative scan over the per-micro-step quaternions** ([`quat_cumprod`]). A
 //! product of unit quaternions is again a unit quaternion, so the scan needs no
 //! `wrap_angle`. Its rounding drift is small, and [`rotate_bc_forward`]
 //! renormalises the prefixes. The cross-chunk carry is one quaternion per
@@ -48,7 +48,7 @@
 //! ## Pipeline (the `k = 4` instantiation of the rotation block)
 //!
 //! ```text
-//!   per-step unit quaternion qₜ      (materialise from the in-projection; caller)
+//!   unit quaternion qₜ per micro-step  (materialise from the in-projection; caller)
 //!        │  quat_cumprod (assoc. scan, + cross-chunk carry)
 //!        ▼
 //!   cumulative rotation Qₜ
@@ -71,7 +71,7 @@
 //! ```
 //!
 //! and everything above survives it, because the factoring uses only "the
-//! per-step maps compose, and each is orthogonal". Composing,
+//! per-micro-step maps compose, and each is orthogonal". Composing,
 //!
 //! ```text
 //!   Pₜ(v) = Qₜ ⊗ v ⊗ T̄ₜ ,   Qₜ = qₜ⊗⋯⊗q₁ ,  Tₜ = pₜ⊗⋯⊗p₁
@@ -153,7 +153,7 @@ use burn::prelude::*;
 ///   state-tracking. It uses the [`RotationState::Quaternion`] accumulator.
 /// - [`Rotor4D`](RotationKind::Rotor4D) — the **whole** rotation group of a
 ///   4-block, `SO(4) ≅ (SU(2)×SU(2))/±1`: a *two-sided* quaternion product
-///   `v ↦ q ⊗ v ⊗ p̄`. Two per-step quaternions instead of one (twice the
+///   `v ↦ q ⊗ v ⊗ p̄`. Two per-micro-step quaternions instead of one (twice the
 ///   generator channels, one scan over a doubled block axis). It uses the
 ///   [`RotationState::Rotor`] accumulator.
 ///
@@ -202,11 +202,11 @@ impl RotationKind {
 }
 
 /// Everything the rotation needs from the block: which algebra, how much of
-/// `state_rank` it turns, and how far one step can turn it.
+/// `state_rank` it turns, and how far one micro-step can turn it.
 ///
 /// [`Mamba3::rotation_spec`](crate::mamba3::mamba3::Mamba3::rotation_spec)
 /// makes it, and [`rotate_bc_forward`], the one site that computes the
-/// per-step rotation, takes it. `step` calls it too (its token is a sequence of
+/// per-micro-step rotation, takes it. `step` calls it too (its token is a sequence of
 /// `micro_steps` positions), so `forward` and `step` cannot drift apart here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RotationSpec {
@@ -217,9 +217,9 @@ pub struct RotationSpec {
     /// For the quaternion kinds this is a multiple of 4. For
     /// [`RotationKind::Real1D`] it is `0`, and nothing reads it.
     pub rotation_dim: usize,
-    /// The per-step rotation bound in half-turns per unit `Δ`
+    /// The per-micro-step rotation bound in half-turns per unit `Δ`
     /// ([`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)):
-    /// one step turns by at most `range · π · Δ`.
+    /// one micro-step turns by at most `range · π · Δ`.
     pub range: f64,
 }
 
@@ -484,7 +484,7 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     //
     // The division runs on `1.5·q`. For a near-unit `q` (every use here), the
     // norm is then ≈ 1.5, in the middle of a binade. At a norm ≈ 1, the grid
-    // step above 1 is twice the step below. So in f16, `√Σq²` rounds to
+    // spacing above 1 is twice the spacing below. So in f16, `√Σq²` rounds to
     // exactly 1 for each true norm in `[1 − 1.2e-4, 1 + 4.9e-4)`, the
     // division does nothing there, and the output norm has a mean of
     // `1 + 2e-4`. A product of `L` such factors drifts by `e^(2e-4·L)`: 10% at
@@ -532,9 +532,9 @@ pub(crate) fn safe_norm<const D: usize>(t: Tensor<D>) -> Tensor<D> {
 ///
 /// With `‖g‖ = angle` and the axis `ĝ = g / angle`, it returns the unit
 /// quaternion `q = (cos(angle/2), sin(angle/2)·ĝ)`. A vanishing `g` maps to the
-/// identity `(1, 0, 0, 0)`. So when a small `Δₜ` (the discretisation step)
-/// scales `g`, the rotation is near the identity: a small step barely turns
-/// the state. The `sin(angle/2)/angle` factor is the numerically stable form
+/// identity `(1, 0, 0, 0)`. So when a small `Δₜ` (the step size) scales `g`,
+/// the rotation is near the identity: a small step size barely turns the
+/// state. The `sin(angle/2)/angle` factor is the numerically stable form
 /// of the per-component scale near `g = 0` (otherwise `0/0`).
 ///
 /// # Shapes
@@ -743,8 +743,8 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 /// by multiplication, which depends on the order, so a real scan is necessary.
 ///
 /// # Shapes
-/// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-step **unit** quaternions
-///   (block count `J = state_rank / 4`).
+/// - `q_bshj4` : `[batch, sequence, nheads, J, 4]` per-micro-step **unit**
+///   quaternions (block count `J = state_rank / 4`).
 /// - `init`    : optional carry `[batch, nheads, J, 4]` — the cumulative
 ///   rotation at the end of the previous chunk (identity `(1,0,0,0)` for a fresh
 ///   start).
@@ -760,7 +760,7 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 ///
 /// The implementation is a **Hillis–Steele** inclusive associative scan. The
 /// quaternion product is associative (but not commutative), so a log-depth
-/// scan applies if the operand order stays newest-on-left. Each doubling step
+/// scan applies if the operand order stays newest-on-left. Each doubling round
 /// is one full-tensor [`quat_mul`] plus a sequence shift. So the *sequential
 /// dependency depth* is `O(log sequence)`, not the `O(sequence)` of a
 /// token-by-token loop: the same values, from a few large batched kernels
@@ -772,7 +772,7 @@ pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, 
     let device = q_bshj4.device();
 
     // Pure prefix product Pₜ = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀ by Hillis–Steele doubling.
-    // Invariant after each step with offset `d`: a[t] holds the product of the
+    // Invariant after each round with offset `d`: a[t] holds the product of the
     // window [t .. max(t-2d+1, 0)] (newest on the left). After ⌈log₂ sequence⌉
     // doublings the window covers [t .. 0], i.e. a[t] = Pₜ.
     let mut a = q_bshj4;
@@ -865,10 +865,10 @@ pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
 }
 
 // ---------------------------------------------------------------------------
-// Per-step rotation increments (the single definition every site derives from)
+// Per-micro-step rotation increments (the single definition every site derives from)
 // ---------------------------------------------------------------------------
 
-/// The abelian per-step angle increment `θ̂ₜ = Δₜ · range·π·tanh(ϑₜ)`, one per
+/// The abelian per-micro-step angle increment `θ̂ₜ = Δₜ · range·π·tanh(ϑₜ)`, one per
 /// head and rotation pair.
 ///
 /// `DP1 = D + 1`: the head axis is inserted before the pair axis, so a
@@ -884,8 +884,8 @@ pub fn angle_increment<const D: usize, const DP1: usize>(
     dt.unsqueeze_dim::<DP1>(D) * bounded.unsqueeze_dim::<DP1>(D - 1)
 }
 
-/// The quaternion per-step rotation vector `gₜ = Δₜ · range·π·tanh(‖r‖)·r̂`, one
-/// per head and quaternion block (feed it to [`quat_from_scaled_axis`]).
+/// The quaternion per-micro-step rotation vector
+/// `gₜ = Δₜ · range·π·tanh(‖r‖)·r̂`, one per head and quaternion block (feed it to [`quat_from_scaled_axis`]).
 ///
 /// The bound is on the magnitude, not on each component, so the axis is
 /// exactly the direction of the projection (see [`bound_rotation_vector`]).
@@ -948,7 +948,7 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// - [`Complex2D`](RotationKind::Complex2D): the abelian rotation of the
 ///   reference. The cumulative angle (`helpers::prefix_sum`, continued from `prev`),
 ///   then [`apply_rope_partial`].
-/// - [`Quaternion4D`](RotationKind::Quaternion4D): the per-step unit quaternion
+/// - [`Quaternion4D`](RotationKind::Quaternion4D): the per-micro-step unit quaternion
 ///   [`quat_from_scaled_axis`] (the in-projection generators, scaled per head
 ///   by `Δ`), composed by [`quat_cumprod`] from the cached quaternion. Then
 ///   `rotate(·, conj(Qₜ))` on the first `4·blocks` state-rank entries of

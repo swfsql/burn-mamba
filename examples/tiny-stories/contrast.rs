@@ -29,9 +29,10 @@
 //!   none. So the contrast cannot win by a worse prediction after the
 //!   negative (the penalty). It is then a weighted LM loss on `C | P`, with
 //!   the weight `σ(−Δ_≤t)` on each prefix.
-//! - **The schedule of λ** ([`ContrastConfig::weight_at`]): 0 up to the step
-//!   `start`, then a linear ramp to λ over `ramp` steps. An untrained model
-//!   has no grammar yet, so it has nothing to gain from the prompt. While the
+//! - **The schedule of λ** ([`ContrastConfig::weight_at`]): 0 up to the
+//!   training step `start`, then a linear ramp to λ over `ramp` training
+//!   steps. An untrained model has no grammar yet, so it has nothing to gain
+//!   from the prompt. While the
 //!   weight is 0 (and `--contrast-lm` is off), the pass does not run.
 //!
 //! - `log p(C | P) = log p(C) + PMI(C; P)`. So the fluency of `C` cancels in
@@ -43,7 +44,7 @@
 //!   `J`, where the classifier is not sure yet. A single sum over all of `C`
 //!   saturates.
 //! - The prompts and the first `J` characters of `C` get no contrast loss.
-//!   The gradient still goes back into every step of both prompts, through
+//!   The gradient still goes back into every position of both prompts, through
 //!   the caches (they are not detached). So the loss trains what the model
 //!   writes into its state while it reads a prompt.
 //!
@@ -52,7 +53,7 @@
 //! into the passes over `C`. Then the row that predicts each character of `C`
 //! is in them, and the shapes do not depend on the cut. The prompts are
 //! right-padded to the longest prompt that the configuration allows, so no
-//! shape changes from step to step (burn#5751).
+//! shape changes from one training step to the next (burn#5751).
 //!
 //! The training runs the contrast after the backward of the LM loss, with a
 //! backward of its own. The two gradients add up into one optimizer step. So
@@ -272,7 +273,7 @@ fn split_words(tokens: &[u8]) -> impl Iterator<Item = Vec<u8>> {
 /// in the artifacts directory, so a resumed run keeps them.
 #[derive(Config, Debug)]
 pub struct ContrastConfig {
-    /// Stories per step (`--contrast K`). 0 disables the contrast. 1 is not
+    /// Stories per training step (`--contrast K`). 0 disables the contrast. 1 is not
     /// allowed: a story needs the prompt of another story.
     #[config(default = 0)]
     pub stories: usize,
@@ -304,8 +305,8 @@ pub struct ContrastConfig {
     /// Before it, the weight is 0.
     #[config(default = 1000)]
     pub start: usize,
-    /// The steps of the linear ramp from 0 to `λ` (`--contrast-ramp`). 0: the
-    /// full weight from `start` on.
+    /// The training steps of the linear ramp from 0 to `λ` (`--contrast-ramp`).
+    /// 0: the full weight from `start` on.
     #[config(default = 1000)]
     pub ramp: usize,
     /// Also train the next-character loss on the continuations of the own
@@ -327,7 +328,7 @@ impl ContrastConfig {
     }
 
     /// The weight of the contrast loss at the schedule step `step`: 0 before
-    /// `start`, then a linear ramp to `weight` over `ramp` steps.
+    /// `start`, then a linear ramp to `weight` over `ramp` training steps.
     pub fn weight_at(&self, step: usize) -> f64 {
         match (step.checked_sub(self.start), self.ramp) {
             (None, _) => 0.0,
@@ -393,15 +394,15 @@ pub struct ContrastOverrides {
 impl ContrastOverrides {
     /// The lines of `-- --help`.
     pub const HELP: &str = concat!(
-        "    --contrast <K>         Train the shared-suffix contrast on K stories per step (0: none; saved with the run)\n",
+        "    --contrast <K>         Train the shared-suffix contrast on K stories per training step (0: none; saved with the run)\n",
         "    --contrast-prompt <MIN:MAX>  The contrast prompt length, in characters (default 192:320)\n",
         "    --contrast-cut <CUT>   Where a contrast cut can fall: char (default), word or sentence\n",
         "    --contrast-negative <NEG>  The negative prompt: random (another story, default), shuffled (the own middle sentences in a new order), shuffled-all (the first sentence moves too) or nearest[:POOL] (the most similar of POOL stories, default 64)\n",
         "    --contrast-continuation <N>  The contrast continuation length, in characters (default 256)\n",
         "    --contrast-skip <J>    The first J characters of each continuation get no contrast loss (default 0)\n",
         "    --contrast-weight <λ>  The weight of the contrast loss after the ramp; 1 pushes as hard as the LM loss at chance (default 0.1)\n",
-        "    --contrast-start <S>   The step where the ramp of the contrast weight starts; 0 before it (default 1000)\n",
-        "    --contrast-ramp <R>    The steps of the linear ramp of the contrast weight (default 1000)\n",
+        "    --contrast-start <S>   The training step where the ramp of the contrast weight starts; 0 before it (default 1000)\n",
+        "    --contrast-ramp <R>    The training steps of the linear ramp of the contrast weight (default 1000)\n",
         "    --contrast-lm          Also train the next-character loss on the own continuations of the contrast\n",
         "    --contrast-one-sided   Detach the pass after the negative: the contrast only raises the own log-probabilities\n",
     );
@@ -470,7 +471,7 @@ impl ContrastOverrides {
     }
 }
 
-/// One step of the contrast: `K` rows, row `i` cut from story `i`. Every
+/// One training step of the contrast: `K` rows, row `i` cut from story `i`. Every
 /// character is a pair (id, case flag), on a trailing axis of 2.
 #[derive(Clone, Debug)]
 pub struct ContrastBatch {
@@ -581,7 +582,7 @@ impl ContrastBatch {
 }
 
 /// The contrast loss of `batch` (see the module header) at the weight
-/// `weight` (`λ` at this step). Under `--contrast-lm`, plus the LM loss of
+/// `weight` (`λ` at this training step). Under `--contrast-lm`, plus the LM loss of
 /// the own continuations. The LM term divides by `lm_positions`, the
 /// positions of the packed batch. Also returns the readouts of [`scored`].
 pub fn loss(
@@ -739,14 +740,14 @@ pub struct Feed {
     index: Option<WordIndex>,
     /// The schedule step of the next batch.
     step: usize,
-    /// `contrast.jsonl` in the artifacts directory: one line per step.
+    /// `contrast.jsonl` in the artifacts directory: one line per training step.
     log: Option<std::fs::File>,
     /// The sums of the readouts since the last printed line, and their count.
     sums: [f64; 3],
     count: usize,
 }
 
-/// Steps per printed line of the contrast readouts.
+/// Training steps per printed line of the contrast readouts.
 const PRINT_EVERY: usize = 100;
 
 impl Feed {
@@ -773,9 +774,9 @@ impl Feed {
             stories.len()
         );
         println!(
-            "contrast: {} of {train_stories} train stories, {} per step, prompt {}..={}, {:?} cut, \
-             {:?} negative, continuation {}, skip {}, weight {} (0 before step {}, then a ramp of {} \
-             steps), lm {}, one-sided {}",
+            "contrast: {} of {train_stories} train stories, {} per training step, prompt {}..={}, \
+             {:?} cut, {:?} negative, continuation {}, skip {}, weight {} (0 before training step {}, \
+             then a ramp of {} training steps), lm {}, one-sided {}",
             stories.len(),
             config.stories,
             config.prompt_min,
@@ -826,12 +827,12 @@ impl Feed {
         &self.config
     }
 
-    /// The weight of the contrast loss at the current step.
+    /// The weight of the contrast loss at the current training step.
     pub fn weight(&self) -> f64 {
         self.config.weight_at(self.step)
     }
 
-    /// Whether the pass of the contrast runs at the current step: a weight
+    /// Whether the pass of the contrast runs at the current training step: a weight
     /// above 0, or `--contrast-lm`.
     pub fn runs(&self) -> bool {
         self.weight() > 0.0 || self.config.lm
@@ -917,8 +918,9 @@ impl Feed {
         }
     }
 
-    /// End the current step: log the readouts of [`loss`] if the pass ran
-    /// (this reads them from the device), and move to the next step.
+    /// End the current training step: log the readouts of [`loss`] if the pass
+    /// ran (this reads them from the device), and move to the next training
+    /// step.
     pub fn end_step(&mut self, readouts: Option<Tensor<1>>) {
         let weight = self.weight();
         let step = self.step;
@@ -945,7 +947,7 @@ impl Feed {
             let n = self.count as f64;
             println!(
                 "contrast step={step} weight {weight:.4} loss {:.4} delta {:+.4} bits/char push {:.2e} \
-                 (mean of {} steps)",
+                 (mean of {} training steps)",
                 self.sums[0] / n,
                 self.sums[1] / n,
                 self.sums[2] / n,

@@ -754,7 +754,7 @@ mod step {
 
         /// Single-token counterpart of [`Mamba1::ssm`]: computes the
         /// selective-SSM parameters (Δ, A, B, C) for one token and advances the
-        /// recurrence by one step via [`Self::selective_scan_step`].
+        /// recurrence by one token via [`Self::selective_scan_step`].
         ///
         /// # Shapes
         ///   - Input u `[batch, d_inner]`
@@ -786,7 +786,7 @@ mod step {
             Self::selective_scan_step(delta, a, b, c, self.d.val(), u, cache)
         }
 
-        /// One step of [`Mamba1::selective_scan`]: advances `cache.ssm_bir` by
+        /// One token of [`Mamba1::selective_scan`]: advances `cache.ssm_bir` by
         /// one token and reads it out.
         ///
         /// # Shapes

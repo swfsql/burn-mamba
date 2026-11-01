@@ -431,7 +431,7 @@ fn rotor_turns_the_two_planes_independently() {
     let d = max_abs_diff(got, want);
     assert!(d < dtype_tol(VAL_TOL), "(1,i) plane angle is not a−b: {d:.6}");
 
-    // … and the (j, k) plane by a + b, in the same step.
+    // … and the (j, k) plane by a + b, in the same rotation.
     let got = apply(Tensor::<2>::from_floats([[0.0, 0.0, 1.0, 0.0]], &device));
     let want = Tensor::<2>::from_floats([[0.0, 0.0, (a + b).cos(), (a + b).sin()]], &device);
     let d = max_abs_diff(got, want);
@@ -643,7 +643,8 @@ fn single_axis_collapses_to_cumsum() {
     let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 8, 2, 2);
 
-    // Random per-step angles θₜ; per-step quaternion = (cos(θ/2), sin(θ/2), 0, 0).
+    // Random per-micro-step angles θₜ; the quaternion of each micro-step is
+    // (cos(θ/2), sin(θ/2), 0, 0).
     let theta_bsh1 = Tensor::<5>::random(
         [batch, sequence, nheads, blocks, 1],
         Distribution::Normal(0.0, 0.7),
@@ -699,7 +700,7 @@ fn k2_quaternion_matches_production_rotation() {
     let (batch, sequence, nheads, blocks) = (2, 6, 2, 2); // state_rank = 4·blocks = 8
     let state_rank = blocks * 4;
 
-    // Per-step, per-block single-axis angle increments aₜⱼ about the î axis.
+    // Per-micro-step, per-block single-axis angle increments aₜⱼ about the î axis.
     let a_bshj = Tensor::<4>::random(
         [batch, sequence, nheads, blocks],
         Distribution::Normal(0.0, 0.6),
@@ -746,7 +747,7 @@ fn k2_quaternion_matches_production_rotation() {
 // ---------------------------------------------------------------------------
 
 /// Two generic (multi-axis) quaternions do **not** commute, so swapping the
-/// order of two rotation steps changes the cumulative rotation — something no
+/// order of two rotation micro-steps changes the cumulative rotation — something no
 /// `cumsum`-of-angles (abelian `Complex2D`) can represent. This is the
 /// structural source of the extra state-tracking power.
 #[test]
@@ -1765,7 +1766,7 @@ fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mam
 
 /// [`RotationKind::Real1D`] is *the* rotation-disabled ablation, and it must be
 /// the honest one: a block whose rotation is switched off by zeroing its
-/// generator (any kind, so any per-step rotation is the identity) has to agree
+/// generator (any kind, so any per-micro-step rotation is the identity) has to agree
 /// with the `Real1D` block that never projects those channels at all.
 ///
 /// The equality is what makes `Real1D` an ablation rather than a fourth model:
@@ -1834,7 +1835,7 @@ fn real1d_projects_no_rotation_channels() {
 }
 
 // ---------------------------------------------------------------------------
-// 13. The per-step bound: axis, reachability, and the `rotation_range` knob
+// 13. The per-micro-step bound: axis, reachability, and the `rotation_range` knob
 // ---------------------------------------------------------------------------
 
 /// Read a `[1, n]` tensor back as a `Vec<f32>`.
@@ -1853,7 +1854,7 @@ fn row(t: Tensor<2>) -> Vec<f32> {
 /// diagonal, `max` about a coordinate axis) rather than a ball.
 ///
 /// f16 cannot show the monotony. At scale 2, `‖r‖ ≈ 4.58` and
-/// `1 − tanh(4.58) ≈ 2·10⁻⁴`, but the f16 step below 1 is `4.9·10⁻⁴`. So the
+/// `1 − tanh(4.58) ≈ 2·10⁻⁴`, but the f16 spacing below 1 is `4.9·10⁻⁴`. So the
 /// f16 `tanh` is already 1, the angle is already the bound, and the angle at
 /// scale 20 cannot be larger.
 #[test]
@@ -1904,19 +1905,19 @@ fn bounded_generator_keeps_its_axis() {
 /// A rotation of exactly the bound sits at `tanh`'s asymptote, where f32 gives a
 /// forward value that is exactly right and a gradient that is exactly **zero** —
 /// so at `range = 1` the half-turn, the single most useful rotation for
-/// state-tracking, is reachable only by a step the optimiser can never take. At
-/// `range = 2` the same half-turn sits at `tanh = 0.5`, in the interior, with a
-/// healthy gradient.
+/// state-tracking, is reachable only by a training step the optimiser can
+/// never take. At `range = 2` the same half-turn sits at `tanh = 0.5`, in the
+/// interior, with a healthy gradient.
 ///
 /// The dead gradient is an exact 0 in f32 only. At the asymptote, the
 /// derivative of `tanh` is 0 in f16 too, but the derivative of the direction
 /// `r/‖r‖` along `r` is a difference of two terms that are equal in exact
 /// arithmetic. In f32 they round to the same value. In f16 the division
-/// backward rounds `1/‖r‖²`, and one step at 0.1 stays: `dw = −2⁻¹³`.
+/// backward rounds `1/‖r‖²`, and one spacing at 0.1 stays: `dw = −2⁻¹³`.
 #[test]
 #[cfg_attr(
     feature = "dev-f16",
-    ignore = "f32 only: in f16, the direction derivative leaves one rounding step (dw = -2^-13), not an exact 0"
+    ignore = "f32 only: in f16, the direction derivative leaves one rounding spacing (dw = -2^-13), not an exact 0"
 )]
 fn half_turn_is_reachable_with_a_live_gradient() {
     let device = test_device();
@@ -2216,7 +2217,7 @@ fn quaternion_generators_are_per_head() {
 ///
 /// The inputs of `quat_normalize` are near-unit here (the exp map, and a
 /// second normalisation). That is the hard case: at a norm ≈ 1, the f16 grid
-/// step above 1 is twice the step below, and a division by `√Σq²` gave a mean
+/// spacing above 1 is twice the spacing below, and a division by `√Σq²` gave a mean
 /// of `+2e-4` (10% of drift over 512 factors).
 #[test]
 fn a_normalised_quaternion_has_an_unbiased_norm() {

@@ -3,11 +3,11 @@
 //! 1. A **hand-built `micro_steps = 2` block solves the task exactly.** There
 //!    is no fitting: every weight is written in closed form. It is the
 //!    construction of `reset-spinor` with one micro-step per symbol. The two
-//!    symbols of a token are two recurrence steps, so its transition is the
+//!    symbols of a token are two micro-steps, so its transition is the
 //!    group product.
 //! 2. The **same construction at `micro_steps = 1`** (the one config change)
 //!    does not, and no tuning can repair it. The rotation generator of a single
-//!    step is an affine function of the token, so the generators of the two
+//!    micro-step is an affine function of the token, so the generators of the two
 //!    symbols can only *add*. The test measures this through the identical head
 //!    and through the **best readout that its output admits**. It sweeps the
 //!    generator scale, so the number bounds the construction, not one setting
@@ -20,7 +20,7 @@
 //!    component** along the axis orthogonal to it. That axis is exactly where
 //!    the product of the pair (`ij = k`, and the five others) lives.
 //! 4. The obstruction is about **one block, not about depth**
-//!    ([`a_second_layer_only_helps_by_composing_the_pair`]). The same one-step
+//!    ([`a_second_layer_only_helps_by_composing_the_pair`]). The same `u = 1`
 //!    block is exact when its input names the product of the pair, and a second
 //!    layer reads that input instead of the token. So depth is not blocked. But
 //!    it needs the layer below to compute that product, and a run finds only an
@@ -53,7 +53,7 @@ const DELTA: f64 = 1.0;
 /// `‖ϑ‖` for a symbol that turns: a half-turn, that is the unit quaternion `i`
 /// (or `j`) up to `cos(π/2) ≈ 4e-8`.
 ///
-/// The block bounds one step to `rotation_range · π · Δ`. At the default range
+/// The block bounds one micro-step to `rotation_range · π · Δ`. At the default range
 /// of 2, a half-turn is `tanh(‖ϑ‖) = 1/2`: in the interior, where `tanh` is
 /// steep and the gradient is alive.
 const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
@@ -108,7 +108,7 @@ fn t1<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> Tensor<D
 /// symbols on a regular 4-simplex (see [`embedding`]). So every channel of the
 /// in-projection of the block realises `a_vals[a] + b_vals[b]` exactly, in
 /// closed form. That additivity is not a convenience. It is the whole
-/// constraint on a single step. It is why [`channels_single`] must fold both
+/// constraint on a single micro-step. It is why [`channels_single`] must fold both
 /// symbols into one number, and [`channels_product`] need not.
 #[derive(Clone, Copy)]
 struct Ch {
@@ -156,7 +156,7 @@ fn per_symbol(turns: [f64; 3], hold: f64, reset: f64) -> [f64; NUM_SYMBOLS] {
 }
 
 /// The `u = 2` channels: **one micro-step per symbol**, each one a plain
-/// `reset-spinor` step over the slot it reads.
+/// `reset-spinor` micro-step over the slot it reads.
 ///
 /// `x` writes only on a reset, and `A` wipes only on a reset. `B` is the unit
 /// of the group. The rotation is a half-turn about `x̂` for `i`, `ŷ` for `j`
@@ -165,7 +165,7 @@ fn per_symbol(turns: [f64; 3], hold: f64, reset: f64) -> [f64; NUM_SYMBOLS] {
 fn channels_product(u: usize) -> Vec<Ch> {
     assert_eq!(
         PAIR, u,
-        "the hand-built product solution is one step per symbol"
+        "the hand-built product solution is one micro-step per symbol"
     );
     let mut chs = Vec::new();
     // z: per token
@@ -216,8 +216,8 @@ fn channels_product(u: usize) -> Vec<Ch> {
     chs
 }
 
-/// The `u = 1` channels: the same construction with **one** step per token.
-/// Every knob that a single step still has is set as favourably as possible.
+/// The `u = 1` channels: the same construction with **one** micro-step per token.
+/// Every knob that a single micro-step still has is set as favourably as possible.
 ///
 /// Four of the five jobs survive the fold, because they need to know only
 /// *whether* a slot holds a reset, and that is additive:
@@ -706,7 +706,7 @@ fn handmade_product_block_solves_every_family() {
 ///
 /// Everything that needs to know only *whether* a slot resets survives the fold
 /// (see [`channels_single`]). The rotation does not, because the generator of a
-/// single step is affine in the token, and the group is not. The second column
+/// single micro-step is affine in the token, and the group is not. The second column
 /// gives the block the best table over a fine partition of its whole output
 /// space, fitted on a separate split. So the number bounds every readout that
 /// the head can express, not only the decoder that this head carries.
@@ -751,12 +751,12 @@ fn one_step_cannot_compose_a_token() {
         ceiling = ceiling.max(readout);
     }
     println!(
-        "best readout of the one-step state, over the families: {:.2}%",
+        "best readout of the `u = 1` state, over the families: {:.2}%",
         100.0 * ceiling
     );
     assert!(
         ceiling < 0.9,
-        "the one-step twin reached {ceiling:.4} — the task does not need micro_steps"
+        "the `u = 1` twin reached {ceiling:.4} — the task does not need micro_steps"
     );
 }
 
@@ -850,10 +850,10 @@ fn one_step_generators_add_and_cannot_reach_k() {
         }
     }
     println!(
-        "closest a single step gets to a two-turn token: |Δq| = {closest:.4} \
+        "closest a single micro-step gets to a two-turn token: |Δq| = {closest:.4} \
          (0 for micro_steps = 2)"
     );
-    assert!(closest > 1.0, "a single step got within {closest} of it");
+    assert!(closest > 1.0, "a single micro-step got within {closest} of it");
 }
 
 fn dist(p: [f64; 4], q: [f64; 4]) -> f64 {
@@ -873,7 +873,7 @@ fn dist(p: [f64; 4], q: [f64; 4]) -> f64 {
 // Depth is not blocked, but it *depends* on the layer below: that layer must
 // compute the product (a table with no additive form, see §3) and pass it on.
 //
-// This section builds the second half of that: the same one-step block, given
+// This section builds the second half of that: the same `u = 1` block, given
 // exactly the feature that such a first layer must emit. It reaches 100%, so
 // the whole difficulty is in the first layer. The trained rows in
 // `examples/reset/README.md` show what a run finds there.
@@ -886,7 +886,7 @@ const RHO_F: f64 = 2.0 * std::f64::consts::SQRT_2;
 /// renormalised to [`RHO_F`]. Any positive length works. This one shrinks the
 /// element part of a resetting token by exactly `1/√2`.
 const PHI: f64 = RHO_F;
-/// The class index of `−1`, the one element that a *single* step cannot reach
+/// The class index of `−1`, the one element that a *single* micro-step cannot reach
 /// at `Δ = 1`. It is a whole turn, that is the asymptote of `tanh` (see
 /// [`TURN_RAW`]).
 const MINUS_ONE: usize = 4;
@@ -997,8 +997,8 @@ impl ChF {
     /// deviation from the mean shrinks by [`reset_scale`], and that does not
     /// matter for any channel of this shape. `B` is QK-normed, so only its
     /// direction counts. The *rotation* of a resetting token is not observable
-    /// at all: `h` is `α R h₋₁ + γ B x`, so the turn of the step lands on the
-    /// state that the step wipes, and the write comes after it.
+    /// at all: `h` is `α R h₋₁ + γ B x`, so the turn of the micro-step lands on
+    /// the state that the micro-step wipes, and the write comes after it.
     fn elem(elem: [f64; NUM_CLASSES]) -> Self {
         ChF { elem, reset: 0.0 }
     }
@@ -1012,7 +1012,7 @@ impl ChF {
     }
 }
 
-/// The channels of the one-step block **given the product of the token**: the
+/// The channels of the `u = 1` block **given the product of the token**: the
 /// `reset-spinor` construction, with the rotation read from the element instead
 /// of summed from the two slots.
 ///
@@ -1022,7 +1022,7 @@ impl ChF {
 /// - `B` writes the element itself (it does not compensate for a turn that it
 ///   cannot sit before).
 /// - The token whose product is `−1` gets `Δ = 2`. `−1` is a **whole** turn,
-///   and the block bounds one step to `rotation_range · π · Δ`, so at `Δ = 1`
+///   and the block bounds one micro-step to `rotation_range · π · Δ`, so at `Δ = 1`
 ///   it is the asymptote of `tanh`.
 ///
 /// Nothing else about the block changes.
@@ -1051,7 +1051,7 @@ fn channels_composed() -> Vec<ChF> {
     );
     // A: the flattest hold that the block allows. A reset wipes.
     chs.extend([ChF::flag(A_HOLD_RAW, -A_HOLD_RAW + softplus_inv(A_WIPE)); N]);
-    // λ: as everywhere else, the block writes only the current step
+    // λ: as everywhere else, the block writes only the current micro-step
     chs.extend([ChF::konst(LAMBDA_RAW); N]);
     // rotation: the generator of the product of the token, per head
     for _h in 0..N {
@@ -1077,7 +1077,7 @@ fn element_generator(e: usize) -> [f64; 3] {
     g
 }
 
-/// The one-step block, hand-built to read [`feature`]: the *second* layer of a
+/// The `u = 1` block, hand-built to read [`feature`]: the *second* layer of a
 /// two-layer model whose first layer does its job perfectly.
 fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(1, 1);
@@ -1134,9 +1134,9 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
     model
 }
 
-/// The one-step block solves the task **exactly** when its input names the
+/// The `u = 1` block solves the task **exactly** when its input names the
 /// product of the pair: at every length, like the `u = 2` block, and unlike
-/// every other one-step row.
+/// every other `u = 1` row.
 ///
 /// So the two dials are not the same dial. `micro_steps = 2` gives the
 /// recurrence the two rotations, and that is enough. A second layer must get a
@@ -1152,7 +1152,7 @@ fn a_second_layer_only_helps_by_composing_the_pair() {
     let device = test_device();
     let model = handmade_composed(&device, Head::Decoder);
     println!(
-        "one-step block handed the pair's product ({} params):",
+        "`u = 1` block handed the pair's product ({} params):",
         model.num_params()
     );
     let mut worst = 1.0f64;
@@ -1167,7 +1167,7 @@ fn a_second_layer_only_helps_by_composing_the_pair() {
     }
     assert!(
         worst > 0.995,
-        "the composed feature is not enough for one step: {worst}"
+        "the composed feature is not enough for one micro-step: {worst}"
     );
 }
 

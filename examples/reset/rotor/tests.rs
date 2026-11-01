@@ -3,7 +3,7 @@
 //! 1. A **hand-built** Mamba-3 block solves the task exactly. There is no
 //!    fitting: the unrolled recurrence gives every weight in closed form.
 //! 2. The **same block with an input-independent rotation** cannot, for *any*
-//!    per-step angle. A fixed rotation measures the position since the reset,
+//!    per-micro-step angle. A fixed rotation measures the position since the reset,
 //!    not the turns.
 //! 3. **No real state can**, for any decay. Without the rotation, the block is
 //!    a selective SSM of Mamba-2 strength. The best readout that its head can
@@ -24,7 +24,7 @@
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
     Family, MINUS, MODULUS, NUM_CLASSES, NUM_SYMBOLS, PLUS, RESET, ResetRotorDataset, SEQ_LENGTH,
-    labels, one_hot, steps_since_reset, turns,
+    labels, one_hot, tokens_since_reset, turns,
 };
 use burn::data::dataset::Dataset;
 use burn::module::Param;
@@ -36,16 +36,16 @@ use burn_stack::utils::test_helpers::test_device;
 // the construction's constants
 // ---------------------------------------------------------------------------
 
-/// One detent, in radians: the per-step rotation a `±` symbol applies.
+/// One detent, in radians: the per-micro-step rotation a `±` symbol applies.
 const DETENT: f64 = 2.0 * std::f64::consts::PI / MODULUS as f64;
-/// The per-step rotation bound of the block, in radians per unit `Δ`
+/// The per-micro-step rotation bound of the block, in radians per unit `Δ`
 /// (`Mamba3Config::rotation_range · π`, at its default of 2). The construction
 /// asks for an angle `θ` as `ϑ = atanh(θ / MAX_ANGLE)`. For a detent, that is
 /// well inside the slope of `tanh`.
 const MAX_ANGLE: f64 = 2.0 * std::f64::consts::PI;
-/// `Δ` for every head and every symbol. It is fixed at 1, so the per-step
+/// `Δ` for every head and every symbol. It is fixed at 1, so the per-micro-step
 /// angle is exactly `MAX_ANGLE·tanh(ϑ)`, and `γ = Δ = 1` writes `B` unscaled
-/// (`TapPattern::None` gives the whole step to the current token).
+/// (`TapPattern::None` gives the whole step size to the current token).
 const DELTA: f64 = 1.0;
 /// `Â` on a `±` symbol. `A = −softplus(Â)`, and the block floors `|A|` at its
 /// `a_floor` (`1e-4`). So any value this negative leaves the decay at
@@ -246,7 +246,7 @@ fn build(
 fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config();
     // ϑ, shared by both heads and scaled by the Δ of each head (= 1 here): the
-    // per-step angle is MAX_ANGLE·tanh(ϑ).
+    // per-micro-step angle is MAX_ANGLE·tanh(ϑ).
     let theta = match turn {
         Turn::Selective => {
             let t = (DETENT / MAX_ANGLE).atanh();
@@ -278,7 +278,7 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
 }
 
 /// The rotation-free counter: the strongest **real** state that this block can
-/// hold. Head 0 accumulates `±V` per turn (it decays by `alpha` per step, and
+/// hold. Head 0 accumulates `±V` per turn (it decays by `alpha` per micro-step, and
 /// `R` wipes it). Head 1 is a constant reference. That is a selective SSM of
 /// Mamba-2 strength: the block of [`crate::model`] without its complex
 /// transition.
@@ -510,7 +510,7 @@ fn handmade_block_solves_every_family() {
 // 2. no fixed rotation reaches it
 // ---------------------------------------------------------------------------
 
-/// Sweep the per-step angle with the **data dependence of `ϑ` disabled** (the
+/// Sweep the per-micro-step angle with the **data dependence of `ϑ` disabled** (the
 /// one changed knob). Give each angle the best readout that its output plane
 /// admits.
 ///
@@ -519,8 +519,8 @@ fn handmade_block_solves_every_family() {
 /// `ω · (positions since the reset)`, and that tells nothing about the number
 /// of turns in those positions. `balanced` shows this directly: its turn
 /// count is decorrelated from the position. In `drift`, a fixed rotation comes
-/// closest to right, because most steps turn the same way. But it is no better
-/// once the few opposite steps move the count away from the position by more
+/// closest to right, because most symbols turn the same way. But it is no
+/// better once the few opposite symbols move the count away from the position by more
 /// than a detent.
 #[test]
 fn no_fixed_rotation_solves_the_task() {
@@ -622,7 +622,7 @@ fn no_real_state_solves_the_task() {
 ///   symbol. `R` is free (the rotor is at detent 0 each time it occurs).
 ///   Everything else is chance.
 /// - **positional**: the best result of a predictor that sees the current
-///   symbol *and the number of steps since the last reset*. That bounds every
+///   symbol *and the number of tokens since the last reset*. That bounds every
 ///   block that, like the block swept above, writes its state at the reset and
 ///   reads what accumulates after it. Under an input-independent rotation, both
 ///   the phase and the decay of what the block reads are functions of exactly
@@ -635,7 +635,7 @@ fn memoryless_and_positional_ceilings() {
         let (mut lo, mut hi) = (0i64, 0i64);
         for item in ResetRotorDataset::new(512, SEQ_LENGTH, family, 0xE7A1).iter() {
             let item = item.expect("dataset item");
-            let steps = steps_since_reset(&item.symbols);
+            let tokens = tokens_since_reset(&item.symbols);
             for c in turns(&item.symbols) {
                 lo = lo.min(c);
                 hi = hi.max(c);
@@ -643,7 +643,7 @@ fn memoryless_and_positional_ceilings() {
             for ((&s, &k), &t) in item
                 .symbols
                 .iter()
-                .zip(&steps)
+                .zip(&tokens)
                 .zip(&labels(&item.symbols))
             {
                 sym[s][t as usize] += 1;

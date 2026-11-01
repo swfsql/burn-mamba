@@ -16,7 +16,7 @@ use burn_mamba::prelude::{
 ///   needs a reflection. So the transition of a layer follows `S₅` at most as
 ///   far as its sign. **Two** layers: the first holds the sign. The second
 ///   reads the sign and holds the even part `a` of `σ = sᵉ ∘ a`. The per-token
-///   step `sᵉ'∘g∘sᵉ` of `a` depends on the token *and* on the sign below.
+///   update `sᵉ'∘g∘sᵉ` of `a` depends on the token *and* on the sign below.
 pub fn default_layers(group: Group) -> usize {
     match group {
         Group::Alternating => 1,

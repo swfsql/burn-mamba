@@ -120,7 +120,7 @@ fn reference_prefix_sum(data: &[f32], dims: &[usize], dim: usize) -> (Vec<f32>, 
 /// is a length away from flaking (`len = 2048` reaches ±60, where the observed
 /// drift is ~1e-4). The scale is the peak, not the prefix itself. A walk can
 /// come back near `0` after ±45, and the partial sums on its way (the block
-/// carries of the scan) are rounded at ±45: one f16 step there is `0.03`. A
+/// carries of the scan) are rounded at ±45: the f16 spacing there is `0.03`. A
 /// real scan defect is off by whole summands — `O(1)`, orders above either
 /// term here — so nothing is given up by scaling.
 fn prefix_tol(peak: f32) -> f32 {
@@ -178,7 +178,7 @@ fn assert_padded(len: usize) {
 
 /// The zero padding of [`prefix_sum`] takes the dtype of the input, not the
 /// default dtype of the device. The input is bf16, the default dtype of no
-/// build, at a length that pads. The steps are whole numbers, and each prefix
+/// build, at a length that pads. The increments are whole numbers, and each prefix
 /// is at most 99, so every prefix is exact in bf16.
 #[test]
 #[cfg_attr(
@@ -189,15 +189,15 @@ fn the_padding_takes_the_dtype_of_the_input() {
     let device = test_device();
     let len = 100;
     assert_padded(len);
-    let steps: Vec<f32> = (0..len).map(|i| (i % 3) as f32).collect();
-    let t = Tensor::<1>::from_floats(steps.as_slice(), &device)
+    let increments: Vec<f32> = (0..len).map(|i| (i % 3) as f32).collect();
+    let t = Tensor::<1>::from_floats(increments.as_slice(), &device)
         .reshape([1, len, 1])
         .cast(FloatDType::BF16);
     let got = prefix_sum::<3, 4>(t, 1, None, None);
     assert_eq!(got.dtype(), burn::tensor::DType::BF16, "the dtype of the output");
     let got: Vec<f32> = got.into_data().try_into_vec_as().unwrap();
     let mut want = 0.0;
-    for (i, (g, s)) in got.iter().zip(&steps).enumerate() {
+    for (i, (g, s)) in got.iter().zip(&increments).enumerate() {
         want += s;
         assert_eq!(*g, want, "position {i}");
     }
@@ -314,8 +314,8 @@ fn reduce_f64(x: f64, p: f64) -> f64 {
 /// On the circle, [`prefix_sum`] is the prefix sum **modulo the period**, and
 /// its rounding does not grow with the length.
 ///
-/// The steps drift (mean 2), so the plain prefix grows linearly and passes
-/// `2.6·10⁵` at `len = 131072`, where one f32 step is `0.03`. The reference
+/// The increments drift (mean 2), so the plain prefix grows linearly and passes
+/// `2.6·10⁵` at `len = 131072`, where the f32 spacing is `0.03`. The reference
 /// sums in f64 on the host. The period is the f32 `2π` that the scan
 /// subtracts, so the only difference left is rounding. The lengths use 0, 1, 2
 /// and 3 levels of the recursive carry.
@@ -332,16 +332,16 @@ fn reduce_f64(x: f64, p: f64) -> f64 {
 /// Each output is also at most `π` plus one in-block prefix, whatever `len` is.
 /// That bound is why the rounding stays small.
 ///
-/// In f16, "small" is not small enough for the tolerance. With a mean step of
-/// 2, the in-block prefix reaches 50–220, and the carry-level prefix reaches
-/// `17π`. There, one f16 step is 0.03–0.125, and the tolerance
-/// (`dtype_tol(5e-4) ≈ 0.037`) is about one step. The f16 checks are
+/// In f16, "small" is not small enough for the tolerance. With a mean
+/// increment of 2, the in-block prefix reaches 50–220, and the carry-level
+/// prefix reaches `17π`. There, the f16 spacing is 0.03–0.125, and the
+/// tolerance (`dtype_tol(5e-4) ≈ 0.037`) is about one spacing. The f16 checks are
 /// [`prefix_sum_on_the_circle_keeps_whole_turns_in_f16`] and
 /// [`a_decode_wrap_keeps_whole_turns_in_f16`].
 #[test]
 #[cfg_attr(
     feature = "dev-f16",
-    ignore = "f32 only: in f16, the outputs round at the size of the partial sums (up to 220), where one step is 0.03-0.125"
+    ignore = "f32 only: in f16, the outputs round at the size of the partial sums (up to 220), where the spacing is 0.03-0.125"
 )]
 fn prefix_sum_on_the_circle_matches_the_definition() {
     let device = test_device();
@@ -399,10 +399,10 @@ fn prefix_sum_on_the_circle_matches_the_definition() {
 }
 
 /// In f16, the scan on the circle loses no part of a turn per block
-/// ([`sub_periods`]): `4096` steps of `0.5` land within `0.1` of the
+/// ([`sub_periods`]): `4096` increments of `0.5` land within `0.1` of the
 /// definition, at every position.
 ///
-/// The steps and their in-block sums are exact in f16. So the error comes
+/// The increments and their in-block sums are exact in f16. So the error comes
 /// only from the reductions of the block totals (`16 = 3·2π − 2.85`) and from
 /// the carry-level prefix. With `2π` rounded to `6.28125`, each block total
 /// would keep `3·1.9·10⁻³`, and the angle would be off by `0.63`.

@@ -14,8 +14,8 @@
 //! ```
 //!
 //! The MIMO causal mask `LM_mimo[i,j] = exp(cumA[i//m] - cumA[j//m])` for
-//! `i//m >= j//m` lets all `mimo_rank` ranks at the same time step attend to
-//! each other, and keeps the causal order across time steps. (At
+//! `i//m >= j//m` lets all `mimo_rank` ranks at the same position attend to
+//! each other, and keeps the causal order across positions. (At
 //! `read_stride > 1` the Y shapes use `chunk_tokens` rows, not `chunk_len`.)
 
 use crate::mamba3::double_ssd::prelude::*;
@@ -63,7 +63,7 @@ impl Mamba3DoubleSsdInput {
             .v_bnlmhp
             .reshape([batch, nchunks, fused, nheads, per_head_dim]);
 
-        // Base per-time-step cumulative log-decay
+        // Base per-position cumulative log-decay
         let a_bhnl = input.da_bnlh.clone().permute([0, 3, 1, 2]);
         let a_cumsum_bhnl = a_bhnl.clone().cumsum(3);
 

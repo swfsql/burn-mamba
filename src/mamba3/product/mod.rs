@@ -1,8 +1,8 @@
 //! # MambaProduct — `u` micro-steps per token
 //!
-//! `u` full Mamba-3 recurrence steps per token. Each step has its own projected
-//! `x`, `B`, `Δ`, `A`, `λ` and rotation, and the block reads the token at the
-//! last step.
+//! `u` full Mamba-3 micro-steps per token. Each micro-step has its own
+//! projected `x`, `B`, `Δ`, `A`, `λ` and rotation, and the block reads the
+//! token at the last micro-step.
 //! [`Mamba3Config::micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)
 //! (`u`) selects it. `u = 1` is stock Mamba-3, byte for byte.
 //!
@@ -10,12 +10,12 @@
 //!
 //! The *dial* comes from DeltaProduct (*Improving State-Tracking in Linear
 //! RNNs via Householder Products*, Siems, Carstensen, Zela, Hutter, Pontil,
-//! Grazzi, 2025): `u` first-order steps per token. It buys transition
+//! Grazzi, 2025): `u` first-order gradient steps per token. It buys transition
 //! expressiveness for `u`× the recurrence work and **no** extra state. The
 //! *mechanism* is different, and the difference decides everything below.
 //!
-//! Write both as `u` steps of an online learner, `Mₜ = ∏ⱼ (I − ηⱼ ∇²Lⱼ)`. The
-//! two families turn different dials in it:
+//! Write both as `u` gradient steps of an online learner,
+//! `Mₜ = ∏ⱼ (I − ηⱼ ∇²Lⱼ)`. The two families turn different dials in it:
 //!
 //! - **DeltaProduct turns the curvature.** Its `∇²Lⱼ = kⱼkⱼᵀ` is rank-one and
 //!   depends on the direction. So factors with different `kⱼ` do not commute,
@@ -51,7 +51,7 @@
 //! |---|---|---|
 //! | [`Real1D`] | `I` | the write only: `u` staggered rank-1 writes per token |
 //! | [`Complex2D`] | `R(Σⱼ θⱼ)`, abelian | `u`× the per-token **angle reach**, plus the staggered write |
-//! | [`Quaternion4D`] / [`Rotor4D`] | a non-commuting product | a per-token transition that **no single step can express** |
+//! | [`Quaternion4D`] / [`Rotor4D`] | a non-commuting product | a per-token transition that **no single micro-step can express** |
 //!
 //! [`Real1D`]: crate::mamba3::rotation::RotationKind::Real1D
 //! [`Complex2D`]: crate::mamba3::rotation::RotationKind::Complex2D
@@ -75,13 +75,13 @@
 //!   (`info/mamba-3/mimo-as-batch.md` §9). What `M` gives back is cost: it is
 //!   parallel, and its state bytes stay flat.
 //! - **On the abelian rotation, it lifts a bound that the block cannot
-//!   otherwise cross.** One step turns by at most
+//!   otherwise cross.** One micro-step turns by at most
 //!   [`rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)`·π·Δ`.
 //!   A rotation *at* that bound is on the asymptote of `tanh`, where the f32
 //!   gradient is exactly zero. So at `rotation_range = 1`, descent cannot reach
 //!   the half-turn that state-tracking wants. `u` micro-rotations, each well
 //!   inside the bound, compose to `u`× the reach with live gradients at every
-//!   factor. Note the price: the token gets `u` *full-size* steps, so its
+//!   factor. Note the price: the token gets `u` *full-size* micro-steps, so its
 //!   effective interval is `u`× longer, not subdivided. The consistent
 //!   alternative (`Δⱼ = Δ/u`, the same per-token transition, only the
 //!   staggered writes and the ordering below) stays inside the reach of the
@@ -89,7 +89,7 @@
 //!   superset of it, not a substitute.
 //! - **On the non-abelian rotations, it is the argument of DeltaProduct
 //!   reached by the other dial.** The factors do not commute, so the product
-//!   is not a single bounded step. `u` is the number of generators that the
+//!   is not a single bounded micro-step. `u` is the number of generators that the
 //!   token can compose. The group is given directly, not factored into
 //!   reflections.
 //!
@@ -134,7 +134,7 @@
 //! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
 //! micro-steps would also stop the rotation. A scalar decay composes either way
 //! (`∏ⱼ αₜ,ⱼ` is one decay per token), so the uniform placement costs nothing
-//! and keeps every micro-step a plain Mamba-3 step.
+//! and keeps every micro-step the plain Mamba-3 update.
 //!
 //! ## Caches, and what does *not* change
 //!

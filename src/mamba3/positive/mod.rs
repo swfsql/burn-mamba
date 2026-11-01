@@ -49,10 +49,10 @@
 //! ```
 //!
 //! The masses of the trapezoid are the evidence. `γₜ` is the right endpoint.
-//! `νₜ` is the installment of the left endpoint, which the plant pays a step
-//! late and transports by the decay of that step (exact for a lag-1 tap, an
-//! upper bound at lag `u`, see [`kalman`]). Without a tap, `γ = Δ` and
-//! `ν = 0`. The stock `αₜ` is in the covariance (`a² = 1/α`), and
+//! `νₜ` is the installment of the left endpoint, which the plant pays one
+//! micro-step late and transports by the decay of that micro-step (exact for
+//! a lag-1 tap, an upper bound at lag `u`, see [`kalman`]). Without a tap,
+//! `γ = Δ` and `ν = 0`. The stock `αₜ` is in the covariance (`a² = 1/α`), and
 //! `qₜ = κₕ·Δₜ` is Brownian: doubt grows with elapsed time.
 //! [`Gain::KalmanProjectedNoise`] multiplies `q` by a projected `exp(rₜ)`, so a
 //! token can add doubt without evidence (a gap).
@@ -67,7 +67,8 @@
 //!   strength.
 //! - **a contraction:** for `q, γ > 0` the matrix is entrywise positive. By
 //!   Birkhoff's theorem, it contracts the Hilbert distance `|ln Λ − ln Λ'|` by
-//!   at least `tanh(¼·ln(1 + 1/(q·γ)))` per step, with no `α` in the bound. So
+//!   at least `tanh(¼·ln(1 + 1/(q·γ)))` per micro-step, with no `α` in the
+//!   bound. So
 //!   the block forgets the initial `Λ` of the cache, and any rounding in it,
 //!   geometrically.
 //!

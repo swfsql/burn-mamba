@@ -125,8 +125,8 @@ pub(crate) fn scan_block(len: usize) -> usize {
 /// rest. f32 and f64 subtract `k·period` in one part.
 ///
 /// The fix removes only the error of the period. The half dtype still rounds
-/// the angle itself at each add, and with a constant step that rounding also
-/// drifts.
+/// the angle itself at each add, and with a constant increment that rounding
+/// also drifts.
 pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f32) -> Tensor<D> {
     match x.dtype() {
         DType::F16 | DType::BF16 => {
@@ -194,13 +194,14 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 ///
 /// So each output is one in-block prefix plus a carry of at most `p/2`, for any
 /// `len`. With `None`, the carry grows with `len`, and so does its f32
-/// rounding: at `|θ| = 10⁵`, one f32 step is `0.008`. The reduction subtracts a
+/// rounding: at `|θ| = 10⁵`, the f32 spacing is `0.008`. The reduction subtracts a
 /// detached multiple of `p` ([`sub_periods`]), so the gradient is that of the
 /// plain sum.
 ///
 /// In f16, the rounding is at the size of the partial sums: an in-block prefix
-/// (`block` steps) and a carry-level prefix (up to 16 reduced totals, so up to
-/// `17π`). At the in-block size, one f16 step is already `0.03` for `|θ| ≥ 32`.
+/// (`block` terms) and a carry-level prefix (up to 16 reduced totals, so up to
+/// `17π`). At the in-block size, the f16 spacing is already `0.03` for
+/// `|θ| ≥ 32`.
 ///
 /// # Shapes
 /// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
@@ -327,7 +328,7 @@ pub fn read_rows<const D: usize, const DP1: usize>(
     assert_eq!(
         len % stride,
         0,
-        "a folded axis of {len} is not a whole number of {stride}-step tokens",
+        "a folded axis of {len} is not a whole number of {stride}-micro-step tokens",
     );
     let mut split = [0usize; DP1];
     split[..dim].copy_from_slice(&dims[..dim]);
@@ -395,7 +396,7 @@ pub mod prim {
         assert_eq!(
             len % stride,
             0,
-            "a folded axis of {len} is not a whole number of {stride}-step tokens",
+            "a folded axis of {len} is not a whole number of {stride}-micro-step tokens",
         );
         let mut split = [0usize; DP1];
         split[..dim].copy_from_slice(&dims[..dim]);
@@ -556,7 +557,8 @@ pub fn tap_open_mask(len: usize, micro_steps: usize, device: &Device) -> Tensor<
     Tensor::<1>::from_floats(open.as_slice(), device).reshape([1, len, 1])
 }
 
-/// Output of [`trapezoidal_coefficients`]: the mass `Δₜ` of the step, split.
+/// Output of [`trapezoidal_coefficients`]: the mass `Δₜ` of the micro-step,
+/// split.
 ///
 /// The masses are **untransported**: the consumer applies `α` and any wider
 /// gap decay, because the pathway decides which one a tap needs. The
@@ -580,7 +582,7 @@ pub struct TrapezoidCoeffs {
     /// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
     pub nu_interior: Option<Tensor<3>>,
     /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
-    /// there is no `λ` (all of the step is paid at the right endpoint).
+    /// there is no `λ` (all of the micro-step is paid at the right endpoint).
     pub gamma: Tensor<3>,
     /// `ℓₜ = ln Λₜ` at every position, when the decay comes from a Kalman gain
     /// ([`crate::mamba3::positive::kalman`]). Its last entry is the next carry.
@@ -589,13 +591,13 @@ pub struct TrapezoidCoeffs {
 
 impl TrapezoidCoeffs {
     /// Makes every padded position (`pad_bs`, `[batch, len]`, `true` at
-    /// padding, `None` ⇒ no padding) the identity step: no decay (`da = 0`,
+    /// padding, `None` ⇒ no padding) the identity micro-step: no decay (`da = 0`,
     /// `α = 1`) and no mass (`Δ = ν = νⁱⁿᵗ = γ = 0`). Each consumer follows:
     ///
     /// - the SSD core carries the state through unchanged,
     /// - a tap mass that a real position pays forward to a padded one is
     ///   dropped, exactly as at a call boundary,
-    /// - the rotation (which steps by `Δ`) does not move.
+    /// - the rotation (which advances by `Δ`) does not move.
     ///
     /// `log_precision` stays as is. Only causal sites read it, and each slot
     /// takes its carry at its own end.
@@ -637,7 +639,7 @@ impl TrapezoidCoeffs {
 /// A tap closes by giving its mass back, not by dropping it. `λ` is `1` where
 /// the tap at
 /// [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) is not
-/// admissible (so `γ` takes all of the step). `μ` is `0` where the lag-1 tap
+/// admissible (so `γ` takes all of the micro-step). `μ` is `0` where the lag-1 tap
 /// of a two-tap member is not admissible (so the lag-`u` tap takes all of the
 /// left endpoint). Both are exact at the ends, so the degenerate members equal
 /// their targets bit for bit.
@@ -694,10 +696,10 @@ pub fn trapezoidal_coefficients(
     let (nu, nu_interior, gamma) = match lambda_raw {
         Some(lambda_raw) => {
             let lambda = burn::tensor::activation::sigmoid(lambda_raw);
-            // A closed tap at `tap_lag` means λ = 1 there: all of the step is
-            // paid at the right endpoint. This makes the pattern whose tap
-            // closes a submodel of the pattern whose tap stays open, not a
-            // lossy version of it.
+            // A closed tap at `tap_lag` means λ = 1 there: all of the
+            // micro-step is paid at the right endpoint. This makes the pattern
+            // whose tap closes a submodel of the pattern whose tap stays open,
+            // not a lossy version of it.
             let lambda = match tap_open_1s1 {
                 Some(open_1s1) => lambda * open_1s1.clone() + (-open_1s1 + 1.0),
                 None => lambda,

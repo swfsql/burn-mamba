@@ -6,7 +6,7 @@
 //! contract in the same two ways:
 //!
 //! - **The state** goes through a padded row unchanged. The family zeroes the
-//!   decay and the writes of that step where the discretisation forms them
+//!   decay and the writes of that micro-step where the discretisation forms them
 //!   (`Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the internal
 //!   chunk padding uses). With right padding, no real row reads a padded one,
 //!   so nothing else has to know.

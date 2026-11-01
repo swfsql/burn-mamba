@@ -207,7 +207,7 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 
 // ─── Primitive forward K5 (single-ssd) ───────────────────────────────────────
 // Primitive port of [`super::super::serial::k5_single_ssd_chunk_scan`]. Combines
-// the strict-lower intra-chunk (LOWER), the γ-weighted same-step (DIAG), and the
+// the strict-lower intra-chunk (LOWER), the γ-weighted diagonal (DIAG), and the
 // state-to-output (BLUE/Y_off) contributions. Forward-only; the backward
 // computes these gradients analytically. K1–K4 are reused from the double-SSD
 // forward (mode-agnostic).
@@ -216,7 +216,7 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 ///
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
 ///   `(cb[i,j] · scale[t2] · exp(cumA[t1] − cumA[t2])) · V[t2]`
-/// - **Same-time-step (`t1 == t2`) γ-correction**:
+/// - **Diagonal (`t1 == t2`) γ-correction**:
 ///   `γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]`
 /// - **State-to-output (Y_off)**: `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
@@ -251,7 +251,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .clone()
         .reshape([batch, nchunks, read, nheads, state_rank]);
 
-    // Per-fused-step cumulative decay (interleave-expand the base grid), on the
+    // Per-fused-position cumulative decay (interleave-expand the base grid), on the
     // source axis and — sliced to the readout's own positions — on the target.
     let da_cumsum_bhnLM = da_cumsum_bhnl
         .clone()
@@ -315,7 +315,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
     let y_lower_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-    // ── Y_diag: γ-weighted same-step correction, at the read rows ───────────
+    // ── Y_diag: γ-weighted diagonal correction, at the read rows ────────────
     let y_diag_bntmhp = y_diag_correction::<B>(
         read_rows::<B, 6, 7>(v_bnlmhp, 2, read_stride),
         read_rows::<B, 6, 7>(b_bnlmhr, 2, read_stride),

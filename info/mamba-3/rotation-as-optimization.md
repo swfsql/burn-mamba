@@ -1,6 +1,6 @@
 # Rotation as Optimization
 
-### What a Mamba-3 step optimizes, and what `micro_steps` really composes
+### What a Mamba-3 micro-step optimizes, and what `micro_steps` really composes
 
 > Reference note for `burn-mamba`. It is the authority for the decisions of
 > this crate around `Mamba3Config::micro_steps` (`src/mamba3/product/`) and its
@@ -39,13 +39,13 @@ approximation:
    Harmonic functions have no minima, so this is forced, not chosen. The
    rotation is the standard cycling of gradient descent–ascent.
 3. **The method is momentum**: heavy ball on the *same* Mamba-2 objective,
-   with momentum `β = α²` and step `ηρ = |1−μ|²`, has exactly the eigenvalues
+   with momentum `β = α²` and step size `ηρ = |1−μ|²`, has exactly the eigenvalues
    `μ, μ̄`. The imaginary half of the state is the velocity buffer.
 
 A fourth escape exists, and it belongs to the delta-rule family: **compose
-several steps whose Hessians do not commute**. That is DeltaProduct, and it
+several gradient steps whose Hessians do not commute**. That is DeltaProduct, and it
 needs direction-dependent (rank-one) curvature. The curvature of Mamba is
-isotropic, so its per-step transitions commute, and *no* product of them can
+isotropic, so its per-micro-step transitions commute, and *no* product of them can
 leave the real axis. This is the precise reason why the mechanism of
 DeltaProduct has no instance in Mamba-3. It is also the precise sense in
 which the `micro_steps` of this crate is a different construction that
@@ -181,14 +181,14 @@ distinction that decides everything in §7 and §8.
 
 > **Proposition 1.** Let `L` be any real-valued, twice-differentiable loss,
 > and let `η ∈ ℝ`. Then the transition from one step of preconditioned
-> gradient descent, `I − η∇²L`, has a real spectrum. So no such step can make
-> a rotation.
+> gradient descent, `I − η∇²L`, has a real spectrum. So no such gradient step
+> can make a rotation.
 
 *Proof.* `∇²L` is symmetric, so it is orthogonally diagonalizable with real
 eigenvalues. `I − η∇²L` has the same eigenvectors. ∎
 
-Verified over 2000 random (loss, step) draws, with steps of both signs (§3 of
-the script).
+Verified over 2000 random (loss, step size) draws, with step sizes of both
+signs (§3 of the script).
 
 Two direct corollaries are worth a statement, because both are tempting
 escapes that do not work:
@@ -196,7 +196,7 @@ escapes that do not work:
 - **A complex loss, with the step size left real, does not help.** The
   Hessian of a real-valued quadratic on `ℂ^n` is Hermitian. So a "complex
   delta rule" factor `I − βkk^*` still has a real spectrum (verified). Read
-  this as a statement about the *step*, not about the loss. The same factor,
+  this as a statement about the *step size*, not about the loss. The same factor,
   with `β` on the complex disc, rotates in 100% of draws. §8(iii) calls this
   cell the interesting extrapolation.
 - **A change of metric does not help.** An SPD preconditioner `P` gives a
@@ -212,10 +212,10 @@ break. It has four premises, and the note gives one section to each.
 
 | premise | broken by | § |
 |---|---|---|
-| the step size is a real scalar | a step in `ℂ` or `ℍ` | 4 |
+| the step size is a real scalar | a step size in `ℂ` or `ℍ` | 4 |
 | the objective is minimized | descent–ascent on a saddle | 5 |
 | the update depends only on the current state | momentum: a larger state space | 6 |
-| one step per token | a composition of `u` steps | 7 |
+| one gradient step per token | a composition of `u` gradient steps | 7 |
 
 The third is the loosest fit, and §6 says so. Heavy ball does not contradict
 Proposition 1 at all: it makes its rotation by *enlarging the state space*,
@@ -299,8 +299,9 @@ The symmetric part of the multiplication by `η` is **exactly** `Re(η)·I`
 
 $$\big\langle \nabla\mathcal{L},\ \text{step}\big\rangle = -\sum_j \operatorname{Re}(\eta_{t,j})\,\lVert\nabla\mathcal{L}_{:,j}\rVert^2$$
 
-and the step is a descent direction iff `Re η > 0`, that is, `|ψ| < π/2`. This
-is the operational content of "the preconditioner must be positive definite".
+and the gradient step is a descent direction iff `Re η > 0`, that is,
+`|ψ| < π/2`. This is the operational content of "the preconditioner must be
+positive definite".
 For Mamba-3 it costs nothing:
 
 > **Proposition 2.** For `|μ| = α ≤ 1`, `Re(1−μ) = 1 − α cos φ ≥ 0` and
@@ -320,7 +321,7 @@ $$\text{descent fraction} = \cos\psi = \frac{1-\alpha\cos\varphi}{|1-\alpha e^{i
 
 ### 4.4 What the rotation buys, in optimizer coordinates
 
-`ηρ = 1 − μ`, so the reachable set of the product of step and curvature is the
+`ηρ = 1 − μ`, so the reachable set of the product of step size and curvature is the
 unit disc about `1`. A comparison of the families in that one coordinate is
 the most compressed statement in this note:
 
@@ -358,7 +359,7 @@ Two consequences sharpen the usual story about state tracking:
 
 ## 5. View II: the goal is a saddle
 
-View I relaxes the *step*. The alternative is to keep a real step and relax
+View I relaxes the *step size*. The alternative is to keep a real step size and relax
 the *goal*. Treat the two real coordinates of a complex channel as two
 players:
 
@@ -450,12 +451,13 @@ method that lands on the same transition.
 
 ---
 
-## 7. View IV: a composition of non-commuting steps
+## 7. View IV: a composition of non-commuting gradient steps
 
-The fourth escape from Proposition 1 does not touch the loss, the step or the
-method. It uses this fact: **a product of symmetric matrices is not
-necessarily symmetric**. So `u ≥ 2` ordinary steps can compose into a
-rotation, although no single step can. This is the mechanism of DeltaProduct.
+The fourth escape from Proposition 1 does not touch the loss, the step size
+or the method. It uses this fact: **a product of symmetric matrices is not
+necessarily symmetric**. So `u ≥ 2` ordinary gradient steps can compose into
+a rotation, although no single gradient step can. This is the mechanism of
+DeltaProduct.
 
 DeltaProduct takes `u` delta-rule micro-steps per token on `u` different
 `(k_j, v_j)` pairs. This gives the transition:
@@ -493,7 +495,8 @@ into a single rank-`u` write, which is MIMO.
 
 ## 8. The design space
 
-Write both families in one form. Both are `u` first-order steps per token:
+Write both families in one form. Both are `u` first-order gradient steps per
+token:
 
 $$\boxed{\;M_t=\prod_{j=1}^{u}\Big(I-\eta_{t,j}\,\nabla^2\mathcal{L}_{t,j}\Big)\;}$$
 
@@ -509,46 +512,47 @@ Three things follow directly. They are exactly the claims of the
 `micro_steps` documentation, which cites this note for their derivation.
 
 **(i) Why `micro_steps` does not exist on Mamba-2.** Proposition 4: isotropic
-curvature, a real step, commuting factors. `u` buys only the write, and the
+curvature, a real step size, commuting factors. `u` buys only the write, and the
 write is the job of MIMO.
 
 **(ii) Why the `RotationKind` split falls exactly where it does.** With
-isotropic curvature, the transition factors are elements of the step algebra.
+isotropic curvature, the transition factors are elements of the step-size
+algebra.
 So what `u` buys is a property of that algebra alone:
 
-| kind | step algebra | factors | what `u > 1` buys |
+| kind | step-size algebra | factors | what `u > 1` buys |
 |---|---|---|---|
 | `Real1D` | `ℝ` | commute, real | the write only: `u` staggered rank-1 writes, that is, the job of `mimo_rank`, read sequentially |
 | `Complex2D` | `ℂ` | commute, phases **add** | `u`× the per-token angle reach, with a live gradient at every factor |
-| `Quaternion4D`, `Rotor4D` | `ℍ`, two-sided | **do not commute** | a per-token transition that no single bounded step can express |
+| `Quaternion4D`, `Rotor4D` | `ℍ`, two-sided | **do not commute** | a per-token transition that no single bounded gradient step can express |
 
 Verified: over `ℂ`, the product depends only on the sum of the angles (it is
 order-free). Over `ℍ`, the same generators in the reverse order give a
 different product, and the product also leaves `exp(Σ generators)`.
 
 **(iii) The empty cell is real, and it is the interesting extrapolation.**
-It is rank-one curvature with a complex step: a delta rule whose transition
+It is rank-one curvature with a complex step size: a delta rule whose transition
 carries a data-dependent rotation. The rank-one erase conjugates through a
 rotational gauge, `P*(I − βkk^H)P = I − β(P*k)(P*k)^H`. This needs only a
 linear isometry `P`, so it is true without change for the non-abelian kinds.
 It has one **side** condition, which is invisible over `ℂ` but not over `ℍ`:
 
-- The gauge acts on the left (`v ↦ qv`, or `v ↦ qvp̄`). So the step must
+- The gauge acts on the left (`v ↦ qv`, or `v ↦ qvp̄`). So the step size must
   multiply on the *opposite* side of the key, `v − kβ⟨k,v⟩`. Then `β` never
   has to commute with `q`, the right factor of the two-sided kind cancels
   against its own inverse, and the identity is exact for both quaternion
   kinds.
 - If `β` is on the same side as the gauge, it comes back conjugated, `q̄βq`:
-  the same key, a different step.
+  the same key, a different step size.
 
 All three statements are verified.
 
 That is **not** sufficient to conclude "no new chunkwise algorithm". That
 conclusion is true of only one of the two orderings. The recurrence is
-affine. The gauge pins the *write* key to `P_t*k_t` for any order of the
-step, but the *erase* key follows the rotation:
+affine. The gauge pins the *write* key to `P_t*k_t` for any order within the
+micro-step, but the *erase* key follows the rotation:
 
-| order within a step | erase key | write key | |
+| order within a micro-step | erase key | write key | |
 |---|---|---|---|
 | rotate, then erase | `P_t*k_t` | `P_t*k_t` | **tied**: the existing WY/tied-key kernel applies without change |
 | erase, then rotate | `P_{t−1}*k_t` | `P_t*k_t` | **untied**: the generalized-DPLR shape, which that kernel does not compute |
@@ -566,7 +570,7 @@ The wrong order costs the kernel, not the guarantee. Mamba-3 has no erase, so
 nothing here constrains this crate. It constrains anyone who builds the cell.
 
 The cell has a second **precondition** that is easy to miss. A complex step
-rotates a rank-one curvature only if that curvature is `ℂ`-Hermitian. The
+size rotates a rank-one curvature only if that curvature is `ℂ`-Hermitian. The
 *measurement* decides that, not the type of the target: a loss that
 penalises only `Re(k^HS)` gives the real curvature, whatever it compares
 against. A penalty on both components of the residual gives `kk^H`, and that
@@ -589,13 +593,14 @@ A block in that cell also carries **two** step sizes, so two phases, at two
 different rates. This answers the question whether "the" rotation belongs
 per token or per micro-step:
 
-| term | curvature | step | phase | rate |
+| term | curvature | step size | phase | rate |
 |---|---|---|---|---|
 | ridge `(ρ/2)‖S‖²` | isotropic | `η` | `arg η`, as in Mamba-3 | once per **token** |
 | data fit `½‖kᴴS − v‖²` | rank-one over `ℂ` | `β` | `arg(1−β)` | once per **micro-step** |
 
-The ridge step is per token, because the `u` corrective steps share one
-interval (§7). `β` is per micro-step, because there are `u` of them. The two
+The ridge gradient step is per token, because the `u` corrective gradient
+steps share one interval (§7). `β` is per micro-step, because there are `u` of
+them. The two
 are independent. The phase of the decay acts on every plane, and the phase of
 the erase acts only in the plane that its own key spans. So for `n ≥ 2`, no
 single decay phase with a real erase step `β` can reproduce a token with two
@@ -667,8 +672,8 @@ because any `M` is `I − GP` for a symmetric `G` and a general `P`:
 
 ### 9.1 What `micro_steps` is, and how to describe it
 
-`Mamba3Config::micro_steps` (`u`) runs `u` full Mamba-3 recurrence steps per
-token. Each step takes its own `x`, `Δ`, `A`, `λ`, `B` and rotation from its
+`Mamba3Config::micro_steps` (`u`) runs `u` full Mamba-3 micro-steps per
+token. Each micro-step takes its own `x`, `Δ`, `A`, `λ`, `B` and rotation from its
 own slice of the input projection. The block evaluates them with the
 micro-steps folded into the sequence axis. By §7–§8, this is *not* the
 mechanism of DeltaProduct carried over (that mechanism has no instance here).
@@ -683,19 +688,19 @@ The name `micro_steps` is accurate. "Product" is also accurate (at the
 quaternion kinds, the per-token transition really is a product of `u`
 non-commuting factors), on the condition that it is not read as "product of
 Householders". Cite DeltaProduct as the source of the *dial* (`u` first-order
-steps per token, for the expressiveness of the transition, not for memory),
+gradient steps per token, for the expressiveness of the transition, not for memory),
 not of the *mechanism*.
 
 ### 9.2 The reach claim needs no external attribution
 
 At `Complex2D`, the `u` factors commute and their phases add. So `u`
-micro-rotations, each well inside the per-step bound, compose to `u`× the
+micro-rotations, each well inside the per-micro-step bound, compose to `u`× the
 reach, with a live gradient at every factor. This is the real payoff at the
 abelian kind, and it needs no external attribution. It follows from §8(ii),
 plus one fact: a single rotation *at* the `rotation_range` bound is on the
 asymptote of `tanh`, where the f32 gradient is exactly zero.
 
-State the mechanism honestly. The token gets `u` full-size steps: its
+State the mechanism honestly. The token gets `u` full-size micro-steps: its
 effective interval becomes longer, not subdivided. The consistent alternative
 (`Δ_j = Δ/u`: the same per-token transition, which buys only the staggered
 writes and the non-abelian order) is inside the reachable set of the model,
@@ -710,13 +715,13 @@ difference disappears at `Real1D`. With isotropic curvature, the transition
 factors do not depend on the key at all. So at `Real1D`, `u` can change only
 the linear term. A sequential epoch of `u` samples with decay-staggered
 weights then fills the cell that `mimo_rank` fills jointly, as a minibatch of
-`M`. `u` becomes structurally different exactly when the step algebra is
+`M`. `u` becomes structurally different exactly when the step-size algebra is
 non-trivial.
 
 ### 9.4 The trapezoid composes with all of it
 
 The trapezoidal discretisation is a *two-sample* linear term under the same
-complex step. The rotation of this step **parallel-transports the older
+complex step size. The rotation of this micro-step **parallel-transports the older
 sample into the current frame**, before the weight:
 
 $$\text{linear term} \ \propto\ \gamma_t\,x_tk_t^\top \;+\; \beta_t\,x_{t-1}\big(e^{i\varphi_t}\odot k_{t-1}\big)^\top$$
