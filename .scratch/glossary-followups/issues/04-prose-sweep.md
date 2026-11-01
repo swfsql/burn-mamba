@@ -85,6 +85,26 @@ of the `asd-ste100` skill.
 
 ## Comments
 
+- Progress (partial). Done, with one commit for each row: gain, the lag-1 tap
+  closes, state, accumulator, micro-step. Still to do: the rows from "write
+  axis" down to "chunk boundary", the "segment"/"chunk"/"graph" sites below,
+  then the full test suite, `cargo doc` and the review.
+- Kept in the done rows:
+  - `ssm_*` (`ssm_bhpr`, …): "SSM" alone is not an avoid term, and the field
+    mirrors the Python `ssm_state`.
+  - The SSD-kernel names `initial_state_bhpr`, `final_state_bhpr`, "chunk
+    state" (K3) and "state passing" (K4): the SSD paths of both pathways share
+    them.
+  - "Step" for a procedure step ("Step 7", "the four steps"), compounds
+    ("Euler step", "Newton step", "half-step", "optimizer step", "validation
+    step"), the JSONL key `"step"`, the step counters and `total_steps` of
+    the examples (the run logs and the LR schedules read them).
+  - "Frontier gate" (tiny-stories): a trainer-side gate, not the gain or a
+    tap. The β gates of MGR.
+  - The CLI help copy in `examples/README.md` matches the pinned burn-stack
+    rev `e40fcf5`. It changes when the pin moves.
+  - `examples/reset/quintic/HANDOFF.md` is a session record, so it does not
+    change.
 - `../burn-stack/GLOSSARY.md` also lists "segment" (for a sub-projection),
   "chunk" (for a window) and "graph" (for a recording) under _Avoid_. The
   Comments of ticket 08 name some sites of these words that ticket 08 did not
