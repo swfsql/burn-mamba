@@ -507,7 +507,8 @@ impl Case {
 
 /// The lattice the positive systems must commute with, covered pairwise rather
 /// than as a product: every gain, both registers, the tap patterns that change
-/// the algorithm (none, lag 1, lag `u`, two taps, a gated one), `u ∈ {1, 2, 3}`,
+/// the algorithm (none, lag 1, lag `u`, two taps, a lag-1 tap that closes at
+/// token boundaries), `u ∈ {1, 2, 3}`,
 /// all four rotation kinds, MIMO and the out-norm.
 fn lattice() -> Vec<Case> {
     use Gain::*;

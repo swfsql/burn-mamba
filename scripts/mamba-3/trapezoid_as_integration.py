@@ -526,14 +526,14 @@ ok("at u = 1 reset-horizontal degenerates to no trapezoid at all",
 #
 #   gamma = lam dt        nu = (1 - lam) dt        nu_int = nu mu,  nu_far = nu - nu_int
 #
-# so gamma + nu_int + nu_far = dt at every position, whatever is gated.
+# so gamma + nu_int + nu_far = dt at every position, whatever tap is closed.
 mu = RNG.uniform(0.0, 1.0, TF)
 nu_tot = (1 - lamp) * dtp
 # reset-horizontal: no admissible earlier sample at a token's first micro-step,
 # so the whole left-endpoint mass returns to gamma (i.e. lam = 1 there).
 gam_reset = np.where(micro == 0, dtp, gam_l)
 nu_reset = nu_tot * en_reset
-# the two-tap members: the lag-1 tap takes mu of the mass, gated or not.
+# the two-tap members: the lag-1 tap takes mu of the mass, closing or not.
 nu_int_r, nu_far_r = nu_tot * mu * en_reset, nu_tot * (1 - mu * en_reset)
 nu_int_c, nu_far_c = nu_tot * mu, nu_tot * (1 - mu)
 
@@ -558,7 +558,8 @@ ok("reset-horizontal is carry-over-horizontal with lam = 1 at each token's start
    close(run_taps(*CRATE["HorizontalReset"]),
          run_taps([(1, (1 - lam_reset) * dtp, en_all)], lam_reset * dtp)))
 
-# ...and the ungated two-tap member is the *join* of the two implemented ones:
+# ...and the always-open two-tap member is the *join* of the two implemented
+# ones:
 # mu is a per-(head, micro-step) interpolation between them, not a third model.
 taps_c, _ = CRATE["VerticalPlusHorizontalCarryOver"]
 for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),
@@ -568,7 +569,8 @@ for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),
 
 # At u = 1 the two lags coincide, so the split is a decomposition of ONE
 # coefficient and the pair folds back onto the carry-over -- whatever mu says,
-# and with the reset's gate closed everywhere (every position starts a token).
+# and with the lag-1 tap of the reset closed everywhere (every position starts
+# a token).
 en_reset_u1 = np.zeros(TF)
 for name, taps_u1 in [
     ("VerticalPlusHorizontalReset",

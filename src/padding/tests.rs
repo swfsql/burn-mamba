@@ -217,7 +217,8 @@ fn mamba3(
 }
 
 /// Both pathways over a spread of the block's dials: every tap pattern family
-/// (none, lag 1, lag `u`, two taps, the token-gated one), every rotation kind,
+/// (none, lag 1, lag `u`, two taps, a lag-1 tap that closes at token
+/// boundaries), every rotation kind,
 /// `u > 1`, MIMO, both positive systems, and chunks short enough that the real
 /// tokens span several.
 #[test]

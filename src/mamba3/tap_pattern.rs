@@ -32,7 +32,7 @@
 //!   νᶠᵃʳ = ν − νⁱⁿᵗ   at the lag-`u` tap — the same micro-step of the previous token
 //! ```
 //!
-//! So `γ + νⁱⁿᵗ + νᶠᵃʳ = Δ` at every position, for every gate. `λ` keeps the
+//! So `γ + νⁱⁿᵗ + νᶠᵃʳ = Δ` at every position, open or closed. `λ` keeps the
 //! meaning that the note gives it (the splitting parameter of §4). `μ`, the
 //! one channel that the two-tap members add, says **which earlier sample is
 //! the left endpoint**: it interpolates between the two candidates. Thus the
@@ -40,8 +40,8 @@
 //! never a rollback" reading of §5 holds for the wider tap set, and so does the
 //! collapse: sample `s` carries the one scalar `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`.
 //!
-//! Because of this fallback, the gated members are *submodels*, not different
-//! models:
+//! Because of this fallback, the members whose lag-1 tap closes at token
+//! boundaries, and the two-tap members, are *submodels*, not different models:
 //!
 //! - [`HorizontalReset`](TapPattern::HorizontalReset) is
 //!   [`HorizontalCarryOver`](TapPattern::HorizontalCarryOver) with `λ = 1` at
@@ -64,9 +64,9 @@
 /// - how many `(B, x)` tap slots the cache holds ([`tap_slots`](Self::tap_slots)).
 ///
 /// The lattice is the product of the settings of the two taps. The lag-1 tap
-/// is absent, gated to within a token, or unrestricted (the `Horizontal…` part
-/// of a name). The lag-`u` tap is absent or present (the `Vertical` part). All
-/// six cells exist:
+/// is absent, closed at token boundaries, or unrestricted (the `Horizontal…`
+/// part of a name). The lag-`u` tap is absent or present (the `Vertical`
+/// part). All six cells exist:
 ///
 /// ```text
 ///                   no lag-u tap                + lag-u tap
@@ -334,8 +334,8 @@ impl TapPattern {
 }
 
 /// Everything the discretisation needs from the block: the tap pattern, the
-/// micro-steps (the period of its gates), and the two clamps on the
-/// coefficients.
+/// micro-steps (the period of the token boundaries, where a tap can close), and
+/// the two clamps on the coefficients.
 ///
 /// [`Mamba3::tap_pattern_spec`](crate::mamba3::mamba3::Mamba3::tap_pattern_spec)
 /// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`
@@ -345,8 +345,8 @@ impl TapPattern {
 pub struct TapPatternSpec {
     /// Which earlier sample(s) the `β` tap reads ([`TapPattern`]).
     pub pattern: TapPattern,
-    /// Recurrence micro-steps per token (`u`). The gates are periodic in it,
-    /// and at `u = 1` a two-tap pattern folds
+    /// Recurrence micro-steps per token (`u`). A tap that closes at token
+    /// boundaries closes with this period. At `u = 1`, a two-tap pattern folds
     /// ([`TapPattern::has_two_taps`]).
     pub micro_steps: usize,
     /// `Δ`'s clamp
@@ -925,7 +925,7 @@ mod tests {
         }
     }
 
-    // ── The gated and two-tap members ─────────────────────────────────────
+    // ── The `…Reset` and two-tap members ──────────────────────────────────
     //
     // `HorizontalReset` (lag 1, closed at each token's first micro-step) and the
     // two members that add a lag-1 tap beside the lag-`u` one. The invariants
@@ -933,7 +933,7 @@ mod tests {
     // unrolled `step`, from a fresh cache and from a continued one — and the
     // degeneracy tests below are what pin their *semantics*.
 
-    const GATED_AND_TWO_TAP: [TapPattern; 3] = [
+    const RESET_AND_TWO_TAP: [TapPattern; 3] = [
         TapPattern::HorizontalReset,
         TapPattern::VerticalPlusHorizontalReset,
         TapPattern::VerticalPlusHorizontalCarryOver,
@@ -945,7 +945,7 @@ mod tests {
     #[test]
     fn lattice_forward_matches_step() {
         let device = test_device();
-        for pattern in GATED_AND_TWO_TAP {
+        for pattern in RESET_AND_TWO_TAP {
             for kind in [
                 RotationKind::Real1D,
                 RotationKind::Complex2D,
@@ -989,7 +989,7 @@ mod tests {
     #[test]
     fn lattice_matches_step_with_mimo() {
         let device = test_device();
-        for pattern in GATED_AND_TWO_TAP {
+        for pattern in RESET_AND_TWO_TAP {
             for mimo_rank in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, 2).with_mimo_rank(mimo_rank);
                 let model: Mamba3 = config.init(&device);
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn lattice_split_prefill_matches() {
         let device = test_device();
-        for pattern in GATED_AND_TWO_TAP {
+        for pattern in RESET_AND_TWO_TAP {
             for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
                 let config = cfg_for(pattern, kind, 3);
                 let model: Mamba3 = config.init(&device);
@@ -1052,7 +1052,7 @@ mod tests {
     #[test]
     fn lattice_forward_continues_a_stepped_cache() {
         let device = test_device();
-        for pattern in GATED_AND_TWO_TAP {
+        for pattern in RESET_AND_TWO_TAP {
             for micro_steps in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, micro_steps);
                 let model: Mamba3 = config.init(&device);
@@ -1087,12 +1087,12 @@ mod tests {
         }
     }
 
-    /// Gradients too, through the default recompute backward: the gate, the
-    /// second mass and the extra pass are all on the autodiff path.
+    /// Gradients too, through the default recompute backward: the closing tap,
+    /// the second mass and the extra pass are all on the autodiff path.
     #[test]
     fn lattice_grads_match_step() {
         let device = test_device();
-        for pattern in GATED_AND_TWO_TAP {
+        for pattern in RESET_AND_TWO_TAP {
             let config = cfg_for(pattern, RotationKind::Complex2D, 2);
             let model: Mamba3 = config.init(&device.clone().autodiff());
             let x = input(&config, 4);
@@ -1165,7 +1165,7 @@ mod tests {
     /// `HorizontalReset`'s tap is closed everywhere and its mass returns to `γ`:
     /// the pattern **is** the ablation, whatever `λ` says. Built from a `None`
     /// block plus a live-but-ignored `λ` sub-projection, so the claim is about
-    /// the gate and not about the projection.
+    /// the closed tap and not about the projection.
     #[test]
     fn horizontal_reset_is_none_at_one_micro_step() {
         let device = test_device();
@@ -1206,7 +1206,7 @@ mod tests {
         assert!(d < dtype_tol(1e-6), "single: HorizontalReset is None at u = 1: {d:.3e}");
     }
 
-    /// The semantic claim for the gate: closing a tap returns its mass to `γ`,
+    /// The semantic claim: closing a tap returns its mass to `γ`,
     /// i.e. `λ = 1` there — so `HorizontalReset` is exactly
     /// `HorizontalCarryOver` with each token's first micro-step saturated, and a
     /// *submodel* of it rather than a lossy version
@@ -1233,7 +1233,7 @@ mod tests {
             reset.forward_single_ssd(x.clone(), None, &path, None).0,
             carry.forward_single_ssd(x.clone(), None, &path, None).0,
         );
-        assert!(d > dtype_tol(1e-4), "the gate has to do something: {d:.3e}");
+        assert!(d > dtype_tol(1e-4), "the closed tap has to do something: {d:.3e}");
 
         // `Real1D` and one tap ⇒ the `λ` sub-projections are the trailing
         // columns, and their first `nheads` columns are micro-step 0's.
@@ -1332,8 +1332,8 @@ mod tests {
     /// were quietly dropped would leave both pathways agreeing with each other
     /// and with `step`, and only a comparison against the *one-tap* pattern they
     /// would then be notices. At `μ = σ(0) = ½` each two-tap member must differ
-    /// from [`Vertical`](TapPattern::Vertical) — and from the other, since their
-    /// gates part company at each token's first micro-step.
+    /// from [`Vertical`](TapPattern::Vertical) — and from the other, since only
+    /// one of them closes its lag-1 tap at each token's first micro-step.
     #[test]
     fn two_tap_patterns_actually_spend_their_second_tap() {
         let device = test_device();

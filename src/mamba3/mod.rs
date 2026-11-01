@@ -48,8 +48,8 @@
 //!   (lag 1),
 //! - [`Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical) (lag `u`),
 //!   which is equal to the default at `u = 1`,
-//! - the gated
-//!   [`HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset),
+//! - [`HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset)
+//!   (lag 1, and the tap closes at token boundaries),
 //! - the tapless [`None`](crate::mamba3::tap_pattern::TapPattern::None).
 //!
 //! The two other members have both lags. A second per-head mass mixes them.

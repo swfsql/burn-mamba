@@ -39,8 +39,8 @@
 //! - [`TapPattern::Vertical`] reads the same micro-step of the previous
 //!   **token**, with one lag at every tap site,
 //! - two members read **both**. A second projected scalar `μₜ = σ(μ̂ₜ)` splits
-//!   `(1 − λₜ)Δₜ` between them. One of the two gates its lag-1 tap to within a
-//!   token.
+//!   `(1 − λₜ)Δₜ` between them. In one of the two, the lag-1 tap closes at
+//!   token boundaries.
 //!
 //! The tap and its mass are one choice. A closed tap gives its share back (to
 //! the other tap, or to `γ`), so the mass of the step is `Δₜ` under every
@@ -741,7 +741,8 @@ impl Mamba3 {
     }
 
     /// Everything the discretisation needs, in one place: the tap pattern, the
-    /// micro-steps (the period of its gates), and the two clamps. Every site
+    /// micro-steps (the period of the token boundaries, where a tap can close),
+    /// and the two clamps. Every site
     /// that computes the masses of the trapezoid ([`forward`](Self::forward),
     /// [`step`](Self::step)) uses this.
     pub fn tap_pattern_spec(&self) -> crate::mamba3::tap_pattern::TapPatternSpec {

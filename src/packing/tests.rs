@@ -561,8 +561,8 @@ fn mamba3(
 
 /// Both pathways and both serial paths, over a spread of the block's dials:
 ///
-/// - every tap pattern family (none, lag 1, lag `u`, two taps, the token-gated
-///   one),
+/// - every tap pattern family (none, lag 1, lag `u`, two taps, a lag-1 tap that
+///   closes at token boundaries),
 /// - every rotation kind, `u > 1`, MIMO, and both positive systems.
 #[test]
 fn packed_mamba3_streams_are_the_batch_of_their_sequences() {

@@ -61,7 +61,7 @@ Four results:
    single-SSD form, and only the correction band widens to `max(d)`. So a
    wider tap set is free on the algorithm side. It defines a closed 2×3
    lattice, which exists only at `micro_steps > 1`:
-   - a lag-1 tap: absent, gated to within a token, or unrestricted,
+   - a lag-1 tap: absent, closed at token boundaries, or unrestricted,
    - times a lag-`u` tap: absent or present.
 
 With the unroll of the companion note, the token-level form of Mamba-3 is
@@ -392,7 +392,7 @@ nothing on the algorithm side, if the transport rule above is kept.
 **The six members.** The tap pattern is a choice about two taps, so the
 lattice is the product of two settings:
 
-- The lag-1 tap is absent, gated to within a token, or unrestricted (the
+- The lag-1 tap is absent, closed at token boundaries, or unrestricted (the
   `Horizontal…` part of a member name).
 - The lag-`u` tap is absent or present (the `Vertical` part).
 
@@ -406,7 +406,7 @@ degenerate cases rank them:
 | `HorizontalCarryOver` (default) | lag 1, always | `1` | *is* the baseline |
 | `Vertical` | lag `u`, always | `u` | is `HorizontalCarryOver` |
 | `VerticalPlusHorizontalReset` | both, the lag-1 tap closed | `u` | is `HorizontalCarryOver` |
-| `VerticalPlusHorizontalCarryOver` | both, ungated | `u+1` | is `HorizontalCarryOver` |
+| `VerticalPlusHorizontalCarryOver` | both, always | `u+1` | is `HorizontalCarryOver` |
 
 Every degeneracy is verified:
 
@@ -453,8 +453,8 @@ tap set that transports each tap over its own gap.
 
 How to *parameterise* the members is a separate question, and this note does
 not settle it. The header of `src/mamba3/tap_pattern.rs` does. The checks for
-that choice (mass conservation, the fallback of the gate, and the two-tap key
-scale) are under this section in the script.
+that choice (mass conservation, the fallback of a closed tap, and the two-tap
+key scale) are under this section in the script.
 
 ---
 
